@@ -15,14 +15,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text, input } = req.body;
-    const prompt = text || input;
+    const { text } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Falta el parámetro 'text' o 'input'" });
+    if (!text) {
+      return res.status(400).json({ error: "Falta el parámetro 'text'" });
     }
 
-    // Pedimos al modelo que genere directamente HTML limpio y estructurado
+    // 👉 Instruimos al modelo que genere directamente HTML estructurado
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -32,8 +31,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         input: `
-          Responde a la siguiente petición con un itinerario o plan,
-          pero genera la salida en HTML limpio, con este formato:
+          Responde a la siguiente petición generando directamente HTML limpio:
 
           - Usa <h3> para los títulos de días (Día 1, Día 2, etc).
           - Usa <ul><li> para listar actividades con horarios.
@@ -41,7 +39,7 @@ export default async function handler(req, res) {
           - Mantén el estilo tipo checklist detallado, fácil de leer.
 
           Petición del usuario:
-          ${prompt}
+          ${text}
         `,
         max_output_tokens: 1200,
       }),
