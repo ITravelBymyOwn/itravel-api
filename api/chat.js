@@ -18,38 +18,33 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-5-nano",
+        model: "gpt-5-mini", // usa mini en vez de nano (más estable)
         input: input,
       }),
     });
 
     const data = await response.json();
-
-    // 🚨 log temporal para ver qué devuelve realmente la API
     console.log("DEBUG OpenAI response:", JSON.stringify(data, null, 2));
 
-    // --- lógica mejorada ---
-    let output = "No response from model";
-
-    // 1. Ruta resumida
-    if (data.output_text) {
-      output = data.output_text;
+    // Verifica si existe output[0].content[0].text
+    let text = "No response from model";
+    if (
+      data.output &&
+      data.output[0] &&
+      data.output[0].content &&
+      data.output[0].content[0] &&
+      data.output[0].content[0].text
+    ) {
+      text = data.output[0].content[0].text;
     }
 
-    // 2. Ruta detallada
-    else if (data.output && data.output.length > 0) {
-      const firstMsg = data.output[0];
-      if (firstMsg.content && firstMsg.content.length > 0) {
-        output = firstMsg.content.map(c => c.text).join("\n");
-      }
-    }
-
-    return res.status(200).json({ text: output });
+    return res.status(200).json({ text });
   } catch (error) {
-    console.error("Server error:", error);
-    return res
-      .status(500)
-      .json({ error: "Server error", detail: error.message });
+    console.error("Handler error:", error);
+    return res.status(500).json({
+      error: "Server error",
+      detail: error.message,
+    });
   }
 }
 
