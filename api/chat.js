@@ -19,20 +19,25 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-5-nano",
-        input: input,
+        input: [
+          {
+            role: "user",
+            content: input,
+          },
+        ],
       }),
     });
 
     const data = await response.json();
 
     if (data.error) {
-      return res.status(500).json({ error: "OpenAI error", detail: data.error });
+      return res.status(500).json({ error: data.error.message });
     }
 
-    // En Responses API la salida viene en output_text
-    const text = data.output_text || "(Sin respuesta)";
-    return res.status(200).json({ text });
+    // Ajustar según la respuesta del endpoint
+    return res.status(200).json({ text: data.output_text || "No response" });
   } catch (error) {
-    return res.status(500).json({ error: "Server error", detail: error.message });
+    return res.status(500).json({ error: error.message });
   }
 }
+
