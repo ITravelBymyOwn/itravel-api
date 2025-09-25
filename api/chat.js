@@ -25,8 +25,14 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // ⚡ Usamos el campo correcto que siempre viene en la respuesta
-    const output = data.output_text || "No response from model";
+    // 📌 Ruta correcta para extraer el texto
+    let output = "No response from model";
+    if (data.output && data.output.length > 0) {
+      const firstMsg = data.output[0];
+      if (firstMsg.content && firstMsg.content.length > 0) {
+        output = firstMsg.content[0].text;
+      }
+    }
 
     return res.status(200).json({ text: output });
   } catch (error) {
