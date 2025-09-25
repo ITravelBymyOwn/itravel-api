@@ -1,7 +1,7 @@
 // /api/chat.js
 
 export default async function handler(req, res) {
-  // Habilitar CORS para que funcione desde Webflow u otros orígenes
+  // Habilitar CORS para Webflow
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -15,29 +15,31 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { text } = req.body;
+    // Soportar tanto "text" como "input" en el body
+    const { text, input } = req.body;
+    const prompt = text || input;
 
-    if (!text) {
-      return res.status(400).json({ error: "Falta el parámetro 'text'" });
+    if (!prompt) {
+      return res.status(400).json({ error: "Falta el parámetro 'text' o 'input'" });
     }
 
-    // Llamada a OpenAI
+    // Llamada al API de OpenAI
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, // asegúrate de tener esta env var en Vercel
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        input: text,
+        input: prompt,
         max_output_tokens: 1000,
       }),
     });
 
     const data = await response.json();
 
-    // Depuración: log en consola de Vercel
+    // Log en consola Vercel
     console.log("OpenAI raw response:", data);
 
     // Extraer respuesta de forma segura
