@@ -25,16 +25,15 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // ⚡ Aquí tomamos el texto correcto de la respuesta
-    const output =
-      data.output && data.output[0]?.content[0]?.text
-        ? data.output[0].content[0].text
-        : "No response";
+    // ⚡ Usamos el campo correcto que siempre viene en la respuesta
+    const output = data.output_text || "No response from model";
 
     return res.status(200).json({ text: output });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({ error: "Server error", detail: error.message });
+    console.error("Server error:", error);
+    return res
+      .status(500)
+      .json({ error: "Server error", detail: error.message });
   }
 }
 
