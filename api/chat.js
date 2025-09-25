@@ -1,79 +1,61 @@
 // /api/chat.js
-function setCORS(res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-}
 
 export default async function handler(req, res) {
-  setCORS(res);
+  // Habilitar CORS para que funcione desde Webflow u otros orígenes
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
-  // Preflight
   if (req.method === "OPTIONS") {
-    return res.status(204).end();
+    return res.status(200).end();
   }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
+    return res.status(405).json({ error: "Método no permitido" });
   }
 
   try {
-    const { input } = req.body || {};
-    if (!input || typeof input !== "string") {
-      return res.status(400).json({ error: "No input provided" });
+    const { text } = req.body;
+
+    if (!text) {
+      return res.status(400).json({ error: "Falta el parámetro 'text'" });
     }
 
+    // Llamada a OpenAI
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, // asegúrate de tener esta env var en Vercel
       },
       body: JSON.stringify({
-        model: "gpt-4.1-mini-2025-04-14",
-        input,
-        temperature: 0.7,
-        max_output_tokens: 1200, // más margen que antes
-        store: false,
+        model: "gpt-4.1-mini",
+        input: text,
+        max_output_tokens: 1000,
       }),
     });
 
     const data = await response.json();
 
-    // Text robusto: cubre tanto output_text como estructuras por "content"
-    let text = data.output_text || "";
+    // Depuración: log en consola de Vercel
+    console.log("OpenAI raw response:", data);
 
-    if (!text && Array.isArray(data.output)) {
-      for (const item of data.output) {
-        if (item?.type === "message" && Array.isArray(item.content)) {
-          const piece = item.content
-            .map(c => (typeof c.text === "string" ? c.text : ""))
-            .filter(Boolean)
-            .join("\n");
-          if (piece) { text = piece; break; }
-        }
-        if (item?.type === "output_text" && typeof item.text === "string") {
-          text = item.text; break;
-        }
-        if (item?.type === "reasoning" && Array.isArray(item.summary) && item.summary.length) {
-          text = item.summary.join("\n"); break;
-        }
+    // Extraer respuesta de forma segura
+    let reply = "(Sin respuesta del modelo)";
+    if (data?.output && Array.isArray(data.output) && data.output.length > 0) {
+      const content = data.output[0]?.content;
+      if (Array.isArray(content) && content.length > 0) {
+        reply = content[0]?.text || reply;
       }
     }
 
-    // Si el modelo se quedó corto por límite de tokens, avisa
-    if (data?.status === "incomplete" && data?.incomplete_details?.reason === "max_output_tokens") {
-      text = (text ? text + "\n\n" : "") + "⚠️ Respuesta truncada por límite de tokens.";
-    }
-
-    return res.status(200).json({
-      text: text || "(Sin respuesta del modelo)",
-      // Para depurar, comenta la línea de abajo si no quieres devolver el raw:
-      // raw: data,
+    return res.status(200).json({ text: reply, raw: data });
+  } catch (error) {
+    console.error("Error en /api/chat:", error);
+    return res.status(500).json({
+      error: "Error interno del servidor",
+      detail: error.message,
     });
-
-  } catch (err) {
-    console.error("Server error:", err);
-    return res.status(500).json({ error: "Server error", detail: String(err?.message || err) });
   }
 }
+
