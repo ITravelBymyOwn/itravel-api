@@ -19,25 +19,22 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-5-nano",
-        input: [
-          {
-            role: "user",
-            content: input,
-          },
-        ],
+        input: input,
       }),
     });
 
     const data = await response.json();
 
-    if (data.error) {
-      return res.status(500).json({ error: data.error.message });
-    }
+    // ⚡ Aquí tomamos el texto correcto de la respuesta
+    const output =
+      data.output && data.output[0]?.content[0]?.text
+        ? data.output[0].content[0].text
+        : "No response";
 
-    // Ajustar según la respuesta del endpoint
-    return res.status(200).json({ text: data.output_text || "No response" });
+    return res.status(200).json({ text: output });
   } catch (error) {
-    return res.status(500).json({ error: error.message });
+    console.error(error);
+    return res.status(500).json({ error: "Server error", detail: error.message });
   }
 }
 
