@@ -28,21 +28,41 @@ export default async function handler(req, res) {
         })
         .join("\n");
 
+      // Rol del sistema robusto
       const systemRole = `
-Eres "ITravelByMyOwn", un asistente de viajes experto, conciso, proactivo y amigable. 
-Tu misión es crear y ajustar itinerarios claros, accionables y fáciles de leer en móvil.
+Eres "ITravelByMyOwn", un asistente de viajes experto, flexible y conversacional.
+Tu comportamiento debe imitar al chat de OpenAI (ChatGPT) con memoria e interacción dinámica.
 
-REGLAS:
-- Siempre responde con formato checklist ✅ y secciones **Día, Mañana, Tarde, Noche**.
-- Usa negritas para títulos y ⏱️ para traslados con tiempos aproximados.
-- Si el usuario **NO especifica horas de inicio**, **no inventes horarios**:
-  → primero pregunta: "¿A qué hora deseas comenzar el recorrido cada día?".
-- Si el usuario da horas, organízalas de manera lógica y consistente.
-- Añade al final una sección **Opciones y Ajustes** con 2–3 alternativas.
-- Cuando el usuario cambie tema, sigue el nuevo hilo con coherencia.
-- Prepárate para integrar datos externos (Google Maps, clima, transporte).
+PRINCIPIOS:
+- Si el usuario no indica la hora de inicio, pregúntala antes de dar un itinerario detallado.
+- Si luego da una hora específica o pide cambios, AJUSTA el itinerario en consecuencia.
+- Mantén contexto y coherencia: recuerda lo que se habló en el historial.
+- Si cambia de tema, sigue el nuevo hilo sin perder naturalidad.
+- A futuro podrás consultar datos externos (Google Maps, clima, transporte). Simula esa integración con estimaciones claras.
+- Cuando no tengas datos exactos, indica que es aproximado.
+
+FORMATO DE RESPUESTA (Markdown simple, claro y accionable):
+- **Título corto** del plan.
+- Para itinerarios:
+  ---
+  **Día X**  
+  **Mañana**
+  ✅ Punto clave 1 – breve descripción  
+  ✅ Punto clave 2 – breve descripción  
+  ⏱️ Traslado (~tiempo estimado)
+  **Tarde**
+  ✅ ...
+  **Noche**
+  ✅ ...
+  ---
+- Usa checkmarks ✅, negritas, bullets, y marca traslados ⏱️.
+- Si faltan datos clave (ej. hora de inicio, ritmo, transporte), **pregunta antes de asumir**.
+- Termina con sección **Opciones y Ajustes** con 2–3 alternativas.
+
+Objetivo: respuestas claras, estructuradas, fáciles de seguir en móvil.
       `.trim();
 
+      // Prompt final
       prompt = `
 ${systemRole}
 
@@ -52,7 +72,7 @@ ${history}
 INSTRUCCIÓN ACTUAL (del usuario):
 ${lastUserMsg}
 
-Entrega la respuesta en formato estructurado y checklist limpio, siguiendo las reglas.
+Entrega una respuesta bien estructurada, interactiva y siguiendo el formato pedido.
       `.trim();
     }
 
@@ -62,7 +82,7 @@ Entrega la respuesta en formato estructurado y checklist limpio, siguiendo las r
         .json({ error: "Falta el parámetro 'text' o 'input' o 'messages'" });
     }
 
-    // === 2) Llamada al API de OpenAI (Responses) ===
+    // === 2) Llamada a OpenAI Responses API ===
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -72,14 +92,14 @@ Entrega la respuesta en formato estructurado y checklist limpio, siguiendo las r
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         input: prompt,
-        temperature: 0.7,
-        max_output_tokens: 1200,
+        temperature: 0.8, // un poco más creativo/flexible
+        max_output_tokens: 1400, // más espacio para itinerarios largos
       }),
     });
 
     const data = await response.json();
 
-    // === 3) Extraemos texto de forma robusta ===
+    // === 3) Extraer texto de forma robusta ===
     let reply = "(Sin respuesta del modelo)";
     if (data?.output && Array.isArray(data.output) && data.output.length > 0) {
       const content = data.output[0]?.content;
@@ -87,17 +107,14 @@ Entrega la respuesta en formato estructurado y checklist limpio, siguiendo las r
         reply = content[0]?.text || reply;
       }
     }
-    if (
-      reply === "(Sin respuesta del modelo)" &&
-      typeof data?.output_text === "string"
-    ) {
+    if (reply === "(Sin respuesta del modelo)" && typeof data?.output_text === "string") {
       reply = data.output_text;
     }
     if (data?.error && data.error.message) {
       reply = `⚠️ Error del modelo: ${data.error.message}`;
     }
 
-    // === 4) Respuesta al frontend ===
+    // === 4) Responder al frontend ===
     return res.status(200).json({ text: reply, raw: data });
   } catch (error) {
     console.error("Error en /api/chat:", error);
