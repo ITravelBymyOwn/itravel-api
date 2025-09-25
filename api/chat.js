@@ -1,7 +1,7 @@
 // /api/chat.js
 
 export default async function handler(req, res) {
-  // Habilitar CORS para Webflow
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -15,7 +15,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Soportar tanto "text" como "input" en el body
     const { text, input } = req.body;
     const prompt = text || input;
 
@@ -23,7 +22,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Falta el parámetro 'text' o 'input'" });
     }
 
-    // Llamada al API de OpenAI
+    // Pedimos al modelo que genere directamente HTML limpio y estructurado
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -32,17 +31,24 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        input: prompt,
-        max_output_tokens: 1000,
+        input: `
+          Responde a la siguiente petición con un itinerario o plan,
+          pero genera la salida en HTML limpio, con este formato:
+
+          - Usa <h3> para los títulos de días (Día 1, Día 2, etc).
+          - Usa <ul><li> para listar actividades con horarios.
+          - Usa <strong> para resaltar los nombres de lugares o actividades.
+          - Mantén el estilo tipo checklist detallado, fácil de leer.
+
+          Petición del usuario:
+          ${prompt}
+        `,
+        max_output_tokens: 1200,
       }),
     });
 
     const data = await response.json();
 
-    // Log en consola Vercel
-    console.log("OpenAI raw response:", data);
-
-    // Extraer respuesta de forma segura
     let reply = "(Sin respuesta del modelo)";
     if (data?.output && Array.isArray(data.output) && data.output.length > 0) {
       const content = data.output[0]?.content;
@@ -51,7 +57,7 @@ export default async function handler(req, res) {
       }
     }
 
-    return res.status(200).json({ text: reply, raw: data });
+    return res.status(200).json({ html: reply });
   } catch (error) {
     console.error("Error en /api/chat:", error);
     return res.status(500).json({
