@@ -1,25 +1,32 @@
 // /api/chat.js
-
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
   try {
-    const { input, messages, systemPrompt } = req.body || {};
+    // Acepta body como string o JSON
+    const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
+    const input =
+      typeof body.input === "string" && body.input.trim()
+        ? body.input.trim()
+        : "";
 
-    if (!input && !messages) {
+    if (!input) {
       return res.status(400).json({ error: "No input provided" });
     }
 
-    // Construimos el payload de "input": puede ser string o array de mensajes
-    const payloadInput = Array.isArray(messages) && messages.length
-      ? [
-          { role: "system", content: systemPrompt || "Eres un asistente de viajes." },
-          ...messages,
-        ]
-      : (typeof input === "string" ? input : JSON.stringify(input));
+    // Mensajes que enviamos al modelo
+    const payloadInput = [
+      {
+        role: "system",
+        content:
+          "Eres un planificador de viajes. Responde SIEMPRE en el mismo idioma del usuario. Da itinerarios claros y accionables. No expliques tu razonamiento.",
+      },
+      { role: "user", content: input },
+    ];
 
+    // Llamada a OpenAI Responses API con más tokens + modelo que devuelve texto
     const resp = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -27,74 +34,99 @@ export default async function handler(req, res) {
         Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
       },
       body: JSON.stringify({
-        model: "gpt-5-nano",
+        model: "gpt-4.1-mini",       // Mejor para texto directo
         input: payloadInput,
-        max_output_tokens: 500,
+        max_output_tokens: 2000,     // Subimos el límite
+        temperature: 0.7,
+        store: false,
       }),
     });
 
     const data = await resp.json();
 
-    // Log de diagnóstico (se ve en Vercel → Logs)
-    console.log("DEBUG OpenAI response:", JSON.stringify(data));
-
-    const text = extractText(data);
-
-    if (!text) {
-      // Devolvemos el crudo para depurar, pero con un mensaje claro
-      return res
-        .status(200)
-        .json({ text: "(Sin respuesta del modelo)", raw: data });
+    if (!resp.ok) {
+      return res.status(resp.status).json({ error: "OpenAI error", detail: data });
     }
 
-    return res.status(200).json({ text });
+    const text =
+      extractTextFromResponses(data)?.trim() ||
+      data.output_text?.trim() ||
+      "(Sin respuesta del modelo)";
+
+    // Si el modelo quedó incompleto por tokens, avisa en el texto
+    if (
+      data?.status === "incomplete" &&
+      data?.incomplete_details?.reason === "max_output_tokens"
+    ) {
+      return res.status(200).json({
+        text: `${text}\n\n(Nota: la respuesta fue truncada por límite de tokens. Si necesitas más detalle, te doy una versión extendida.)`,
+        raw: data,
+      });
+    }
+
+    return res.status(200).json({ text, raw: data });
   } catch (err) {
-    console.error("Handler error:", err);
-    return res
-      .status(500)
-      .json({ error: "Server error", detail: String(err?.message || err) });
+    return res.status(500).json({
+      error: "Server error",
+      detail: err?.message || String(err),
+    });
   }
 }
 
-/**
- * Extrae el texto de todas las formas posibles que puede devolver la Responses API.
- */
-function extractText(data) {
-  if (!data) return null;
+/** ----- Helpers para extraer texto de diferentes formas de respuesta ----- */
+function extractTextFromResponses(data) {
+  if (!data) return "";
 
-  // 1) Campo de conveniencia habitual
+  // Caso simple
   if (typeof data.output_text === "string" && data.output_text.trim()) {
-    return data.output_text.trim();
+    return data.output_text;
   }
 
-  // 2) Array "output" → items type:"message" → content[] con type:"output_text"|"text"
+  // Formatos nuevos: data.output = [...items]
   if (Array.isArray(data.output)) {
     for (const item of data.output) {
+      // Mensaje con contenido
       if (item?.type === "message" && Array.isArray(item.content)) {
-        const chunk = item.content.find(
-          (c) => (c.type === "output_text" || c.type === "text") && c.text
-        );
-        if (chunk?.text) return chunk.text;
+        for (const c of item.content) {
+          const v = deepGetText(c);
+          if (v) return v;
+        }
       }
+      // A veces reasoning o otras partes traen texto
+      const v = deepGetText(item);
+      if (v) return v;
     }
   }
 
-  // 3) Algunos payloads traen "content" en la raíz
-  if (Array.isArray(data.content)) {
-    const chunk = data.content.find(
-      (c) => (c.type === "output_text" || c.type === "text") && c.text
-    );
-    if (chunk?.text) return chunk.text;
+  // Fallback: buscar texto en cualquier parte
+  return deepGetText(data);
+}
+
+function deepGetText(node) {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+
+  // { text: "..." } o { text: { value: "..." } }
+  if (typeof node.text === "string") return node.text;
+  if (node.text && typeof node.text.value === "string") return node.text.value;
+
+  // content: [...]
+  if (Array.isArray(node.content)) {
+    for (const c of node.content) {
+      const v = deepGetText(c);
+      if (v) return v;
+    }
   }
 
-  // 4) Compatibilidad con Chat/Completions antiguos (por si acaso)
-  if (Array.isArray(data.choices)) {
-    const parts = data.choices
-      .map((c) => c.message?.content || c.text)
-      .filter(Boolean);
-    if (parts.length) return parts.join("\n");
+  // summary: [...]
+  if (Array.isArray(node.summary)) {
+    const v = node.summary.join("\n").trim();
+    if (v) return v;
   }
 
-  return null;
+  // value
+  if (typeof node.value === "string") return node.value;
+
+  return "";
 }
 
