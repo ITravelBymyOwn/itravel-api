@@ -25,12 +25,22 @@ export default async function handler(req, res) {
 
     const data = await response.json();
 
-    // 📌 Ruta correcta para extraer el texto
+    // 🚨 log temporal para ver qué devuelve realmente la API
+    console.log("DEBUG OpenAI response:", JSON.stringify(data, null, 2));
+
+    // --- lógica mejorada ---
     let output = "No response from model";
-    if (data.output && data.output.length > 0) {
+
+    // 1. Ruta resumida
+    if (data.output_text) {
+      output = data.output_text;
+    }
+
+    // 2. Ruta detallada
+    else if (data.output && data.output.length > 0) {
       const firstMsg = data.output[0];
       if (firstMsg.content && firstMsg.content.length > 0) {
-        output = firstMsg.content[0].text;
+        output = firstMsg.content.map(c => c.text).join("\n");
       }
     }
 
