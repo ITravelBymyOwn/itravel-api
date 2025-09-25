@@ -15,13 +15,33 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Soportar tanto "text" como "input" en el body
-    const { text, input } = req.body;
-    const prompt = text || input;
+    const { messages } = req.body;
 
-    if (!prompt) {
-      return res.status(400).json({ error: "Falta el parámetro 'text' o 'input'" });
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({
+        error: "Falta el parámetro 'messages' (array de historial)",
+      });
     }
+
+    // Inyectamos un system prompt robusto al inicio
+    const systemPrompt = {
+      role: "system",
+      content:
+        "Eres un asistente de viajes experto, interactivo y flexible. " +
+        "Puedes crear itinerarios personalizados con horarios, tiempos estimados, distancias y checklist de actividades. " +
+        "Respondes preguntas sobre transporte (avión, tren, metro, bus, auto), hospedaje, clima, cultura, seguridad y gastronomía. " +
+        "Te adaptas a diferentes perfiles: viajeros solos, familias con niños, adultos mayores o personas con movilidad reducida. " +
+        "Sugieres siempre opciones prácticas: baños, restaurantes, gasolineras, paradas estratégicas y rutas óptimas. " +
+        "En el futuro podrás integrar datos en vivo (Google Maps, clima, APIs de transporte). " +
+        "Responde siempre en HTML estructurado, con títulos, subtítulos, listas con ✔️ y pasos numerados. " +
+        "Evita saludos innecesarios, entrega directamente la información clara y ordenada.",
+    };
+
+    // Reemplazar/inyectar system en caso de que no venga del cliente
+    const fullMessages =
+      messages[0]?.role === "system"
+        ? messages
+        : [systemPrompt, ...messages];
 
     // Llamada al API de OpenAI
     const response = await fetch("https://api.openai.com/v1/responses", {
@@ -32,35 +52,20 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        input: `${prompt}\n\nPor favor responde en formato checklist estructurado, con viñetas claras y subtítulos (Mañana, Tarde, Noche). Usa saltos de línea para que sea fácil de leer.`,
-        max_output_tokens: 1000,
+        input: fullMessages,
+        max_output_tokens: 1500,
       }),
     });
 
     const data = await response.json();
-
-    // Log en consola Vercel
     console.log("OpenAI raw response:", data);
 
-    // Extraer respuesta de forma segura
     let reply = "(Sin respuesta del modelo)";
-    if (data?.output && Array.isArray(data.output) && data.output.length > 0) {
-      const content = data.output[0]?.content;
-      if (Array.isArray(content) && content.length > 0) {
-        reply = content[0]?.text || reply;
-      }
+    if (data?.output?.[0]?.content?.[0]?.text) {
+      reply = data.output[0].content[0].text;
     }
 
-    // Transformar respuesta a formato HTML básico (checklist bonito)
-    const formattedReply = reply
-      .replace(/^###\s*(.*$)/gim, "<h3>$1</h3>")       // Títulos
-      .replace(/^##\s*(.*$)/gim, "<h2>$1</h2>")
-      .replace(/^#\s*(.*$)/gim, "<h1>$1</h1>")
-      .replace(/^\-\s(.*$)/gim, "✅ $1")                // Viñetas tipo checklist
-      .replace(/\*\*(.*?)\*\*/gim, "<strong>$1</strong>") // Negritas
-      .replace(/\n/g, "<br>");                         // Saltos de línea
-
-    return res.status(200).json({ text: formattedReply, raw: data });
+    return res.status(200).json({ text: reply, raw: data });
   } catch (error) {
     console.error("Error en /api/chat:", error);
     return res.status(500).json({
