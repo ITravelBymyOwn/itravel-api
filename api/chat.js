@@ -15,35 +15,17 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { messages } = req.body;
+    // Soportar tanto "text" como "input" en el body
+    const { text, input } = req.body;
+    const prompt = text || input;
 
-    if (!messages || !Array.isArray(messages)) {
-      return res.status(400).json({
-        error: "Falta el parámetro 'messages' (array de historial)",
-      });
+    if (!prompt) {
+      return res
+        .status(400)
+        .json({ error: "Falta el parámetro 'text' o 'input'" });
     }
 
-    // Inyectamos un system prompt robusto al inicio
-    const systemPrompt = {
-      role: "system",
-      content:
-        "Eres un asistente de viajes experto, interactivo y flexible. " +
-        "Puedes crear itinerarios personalizados con horarios, tiempos estimados, distancias y checklist de actividades. " +
-        "Respondes preguntas sobre transporte (avión, tren, metro, bus, auto), hospedaje, clima, cultura, seguridad y gastronomía. " +
-        "Te adaptas a diferentes perfiles: viajeros solos, familias con niños, adultos mayores o personas con movilidad reducida. " +
-        "Sugieres siempre opciones prácticas: baños, restaurantes, gasolineras, paradas estratégicas y rutas óptimas. " +
-        "En el futuro podrás integrar datos en vivo (Google Maps, clima, APIs de transporte). " +
-        "Responde siempre en HTML estructurado, con títulos, subtítulos, listas con ✔️ y pasos numerados. " +
-        "Evita saludos innecesarios, entrega directamente la información clara y ordenada.",
-    };
-
-    // Reemplazar/inyectar system en caso de que no venga del cliente
-    const fullMessages =
-      messages[0]?.role === "system"
-        ? messages
-        : [systemPrompt, ...messages];
-
-    // Llamada al API de OpenAI
+    // Llamada al API de OpenAI con role robusto
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
@@ -52,17 +34,37 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "gpt-4.1-mini",
-        input: fullMessages,
-        max_output_tokens: 1500,
+        input: [
+          {
+            role: "system",
+            content:
+              "Eres un asistente de viajes experto, interactivo y flexible. " +
+              "Puedes crear itinerarios personalizados con horarios, tiempos estimados, distancias y checklist de actividades. " +
+              "Respondes preguntas sobre transporte (avión, tren, metro, bus, auto), hospedaje, clima, cultura, seguridad y gastronomía. " +
+              "Te adaptas a diferentes perfiles: viajeros solos, familias con niños, adultos mayores o personas con movilidad reducida. " +
+              "Sugieres siempre opciones prácticas: baños, restaurantes, gasolineras, paradas estratégicas y rutas óptimas. " +
+              "En el futuro podrás integrar datos en vivo (Google Maps, clima, APIs de transporte) para enriquecer tus respuestas. " +
+              "Responde SIEMPRE en HTML estructurado: títulos <h3>, subtítulos <h4>, listas con ✔️ y pasos numerados. " +
+              "Evita saludos innecesarios, entrega directamente la información clara, ordenada y visual.",
+          },
+          { role: "user", content: prompt },
+        ],
+        max_output_tokens: 1200,
       }),
     });
 
     const data = await response.json();
+
+    // Log en consola Vercel
     console.log("OpenAI raw response:", data);
 
+    // Extraer respuesta de forma segura
     let reply = "(Sin respuesta del modelo)";
-    if (data?.output?.[0]?.content?.[0]?.text) {
-      reply = data.output[0].content[0].text;
+    if (data?.output && Array.isArray(data.output) && data.output.length > 0) {
+      const content = data.output[0]?.content;
+      if (Array.isArray(content) && content.length > 0) {
+        reply = content[0]?.text || reply;
+      }
     }
 
     return res.status(200).json({ text: reply, raw: data });
@@ -74,4 +76,3 @@ export default async function handler(req, res) {
     });
   }
 }
-
