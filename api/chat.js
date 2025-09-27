@@ -1,6 +1,6 @@
 // /api/chat.js
 export default async function handler(req, res) {
-  // CORS para Webflow
+  // === CORS para Webflow ===
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    // === 1) Normalizamos entrada: text / input / messages ===
+    // === 1) Normalizamos entrada ===
     const { text, input, messages } = req.body || {};
     let prompt = text || input || "";
 
@@ -31,48 +31,44 @@ export default async function handler(req, res) {
       // Rol del sistema robusto
       const systemRole = `
 Eres "ITravelByMyOwn", un asistente de viajes experto, flexible y conversacional.
-Tu comportamiento debe imitar al chat de OpenAI (ChatGPT) con memoria e interacción dinámica.
 
 PRINCIPIOS:
-- Si el usuario no indica la hora de inicio, pregúntala antes de dar un itinerario detallado.
-- Si luego da una hora específica o pide cambios, AJUSTA el itinerario en consecuencia.
-- Mantén contexto y coherencia: recuerda lo que se habló en el historial.
-- Si cambia de tema, sigue el nuevo hilo sin perder naturalidad.
-- A futuro podrás consultar datos externos (Google Maps, clima, transporte). Simula esa integración con estimaciones claras.
+- Si el usuario no indica hora de inicio, pregúntala antes de dar un itinerario detallado.
+- Mantén contexto con el historial y ajusta si el usuario cambia condiciones.
 - Cuando no tengas datos exactos, indica que es aproximado.
+- A futuro podrás conectarte a APIs externas (Google Maps, clima, transporte); simula con estimaciones claras.
 
-FORMATO DE RESPUESTA (Markdown simple, claro y accionable):
-- **Título corto** del plan.
-- Para itinerarios:
-  ---
-  **Día X**  
-  **Mañana**
-  ✅ Punto clave 1 – breve descripción  
-  ✅ Punto clave 2 – breve descripción  
-  ⏱️ Traslado (~tiempo estimado)
-  **Tarde**
-  ✅ ...
-  **Noche**
-  ✅ ...
-  ---
-- Usa checkmarks ✅, negritas, bullets, y marca traslados ⏱️.
-- Si faltan datos clave (ej. hora de inicio, ritmo, transporte), **pregunta antes de asumir**.
-- Termina con sección **Opciones y Ajustes** con 2–3 alternativas.
-
-Objetivo: respuestas claras, estructuradas, fáciles de seguir en móvil.
+FORMATO DE RESPUESTA:
+1) Markdown conversacional (con títulos, checkmarks, bullets, traslados ⏱️).
+2) Un bloque JSON estructurado con este esquema:
+{
+  "itinerario": [
+    { "hora": "09:00", "actividad": "Visita al Louvre", "transporte": "Metro", "notas": "Comprar tickets online" }
+  ],
+  "transporte": [
+    {
+      "segmento": "París → Versalles",
+      "opciones": [
+        { "tipo": "tren", "duracion_min": 40, "precio": "€5" },
+        { "tipo": "bus", "duracion_min": 60, "precio": "€3" }
+      ],
+      "recomendacion": "tren"
+    }
+  ]
+}
+3) Una tabla en HTML simple con el itinerario.
       `.trim();
 
-      // Prompt final
       prompt = `
 ${systemRole}
 
 HISTORIAL RECIENTE:
 ${history}
 
-INSTRUCCIÓN ACTUAL (del usuario):
+INSTRUCCIÓN ACTUAL:
 ${lastUserMsg}
 
-Entrega una respuesta bien estructurada, interactiva y siguiendo el formato pedido.
+Entrega siempre Markdown + JSON + Tabla HTML.
       `.trim();
     }
 
@@ -92,14 +88,14 @@ Entrega una respuesta bien estructurada, interactiva y siguiendo el formato pedi
       body: JSON.stringify({
         model: "gpt-4.1-mini",
         input: prompt,
-        temperature: 0.8, // un poco más creativo/flexible
-        max_output_tokens: 1400, // más espacio para itinerarios largos
+        temperature: 0.7,
+        max_output_tokens: 1600,
       }),
     });
 
     const data = await response.json();
 
-    // === 3) Extraer texto de forma robusta ===
+    // === 3) Extraer texto ===
     let reply = "(Sin respuesta del modelo)";
     if (data?.output && Array.isArray(data.output) && data.output.length > 0) {
       const content = data.output[0]?.content;
@@ -114,8 +110,12 @@ Entrega una respuesta bien estructurada, interactiva y siguiendo el formato pedi
       reply = `⚠️ Error del modelo: ${data.error.message}`;
     }
 
-    // === 4) Responder al frontend ===
-    return res.status(200).json({ text: reply, raw: data });
+    // === 4) Respuesta ===
+    return res.status(200).json({
+      success: true,
+      text: reply, // Markdown + JSON + Tabla HTML
+      raw: data,   // Debug
+    });
   } catch (error) {
     console.error("Error en /api/chat:", error);
     return res.status(500).json({
