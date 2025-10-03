@@ -2,7 +2,6 @@ export default function handler(req, res) {
   if (req.method === "POST") {
     const { intake } = req.body;
 
-    // Respuesta simple para validar que funciona
     res.status(200).json({
       success: true,
       message: `Servidor activo ✅ recibí: ${intake || "ningún dato"}`,
