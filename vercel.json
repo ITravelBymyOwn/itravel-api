@@ -1,9 +1,10 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "api/**/*.js", "use": "@vercel/node@2.0.0" },
-    { "src": "public/**/*", "use": "@vercel/static" }
-  ],
+  "functions": {
+    "api/**/*.js": {
+      "runtime": "edge"
+    }
+  },
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/$1" },
     { "src": "/(.*)", "dest": "/public/$1" }
