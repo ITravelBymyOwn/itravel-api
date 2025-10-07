@@ -752,4 +752,6 @@ $send.addEventListener('click', sendChat);
 $intake.addEventListener('keydown',(e)=>{
   if(e.key==='Enter'){ e.preventDefault(); sendChat(); }
 });
+  }); // cierre del DOMContentLoaded
+})(); // cierre final del script
 
