@@ -925,17 +925,14 @@ $intake.addEventListener('keydown',(e)=>{
 });
 
 // ===== SECCIÓN 15: UX guard =====
-  /* ============ UX guard ============ */
-  $start.addEventListener('click', (e)=>{
-    if(savedDestinations.length===0){
-      e.preventDefault();
-      alert('Please add cities & days and press "Save Destinations" first.');
-    }
-  }, {capture:true});
-});
-</script>
-<!-- ====== /PLANNER SCRIPT (final, stable: sequential meta + full day tables) ====== -->
+/* ============ UX guard ============ */
+$start.addEventListener('click', (e)=>{
+  if(savedDestinations.length===0){
+    e.preventDefault();
+    alert('Please add cities & days and press "Save Destinations" first.');
+  }
+}, {capture:true});
 
+}); // 👈 cierre del document.addEventListener('DOMContentLoaded', ...)
+})(); // 👈 cierre del wrapper IIFE
 
-  }); // DOMContentLoaded
-})(); // cierre del wrapper IIFE
