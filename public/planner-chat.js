@@ -1,25 +1,52 @@
 /* ============================================================
-   planner-chat.js — SECCIÓN 14 COMPLETA Y FUNCIONAL (v6)
+   /public/planner-chat.js — Motor externo (v7, estable)
+   - Estado en vivo desde window.__planner
+   - Lógica de recopilación de meta restaurada
+   - Sin dependencias privadas del core (FORMAT, setActiveCity)
    ============================================================ */
-
 (function(){
   const PL = window.__planner;
-  if(!PL){ console.error('❌ Planner bridge not found'); return; }
+  if(!PL){
+    console.error('❌ Planner bridge not found (window.__planner). Revisa el puente en Webflow.');
+    return;
+  }
 
-  const {
+  // --- ACCESOS CÓMODOS ---
+  const ST = () => PL.state; // siempre estado en vivo
+
+  const { 
     dom: { $send, $intake },
     helpers: { normalize, extractInt, parseTimesFromText, updateSavedDays },
     api: { callAgent, parseJSON, getItineraryContext, getCityMetaContext,
            generateCityItinerary, applyParsedToState, ensureDays, upsertCityMeta },
-    ui: { renderCityTabs, renderCityItinerary, msg, askForNextCityMeta, maybeGenerateAllCities },
-    state
+    ui: { renderCityTabs, renderCityItinerary, msg, askForNextCityMeta, maybeGenerateAllCities }
   } = PL;
 
-  let {
-    savedDestinations, itineraries, cityMeta,
-    activeCity, collectingMeta, metaProgressIndex,
-    awaitingMetaReply, planningStarted, session
-  } = state;
+  // --- UTILIDADES LOCALES QUE NO ESTABAN EXPORTADAS ---
+  // Mismo esquema del core (Sección 9) para formateo de JSON
+  const FORMAT = `
+Devuelve SOLO JSON (sin texto extra) con alguno de estos formatos:
+A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
+B) {"destination":"City","rows":[{...}],"followup":"Pregunta breve"}
+C) {"rows":[{...}],"followup":"Pregunta breve"}
+D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" o ["HH:MM",...],"end":"HH:MM" o ["HH:MM",...],"hotel":"Texto"},"followup":"Pregunta breve"}
+Reglas:
+- Incluye traslados con transporte y duración (+15% colchón).
+- Si faltan datos (p.ej. hora de inicio por día), pregúntalo en "followup" y asume valores razonables.
+- Nada de markdown. Solo JSON.`.trim();
+
+  // Igual que la del core (no estaba exportada)
+  function metaIsComplete(m){
+    return !!(m && m.baseDate && m.start && m.end && typeof m.hotel === 'string');
+  }
+
+  // Puente seguro para cambiar la ciudad activa (setActiveCity no está exportada)
+  function setActiveCityBridge(name){
+    if(!name) return;
+    PL.statePatch = { activeCity: name };
+    // Normalmente renderCityTabs se encarga de clases y foco;
+    // en otros puntos ya lo llamamos explícitamente.
+  }
 
   /* ============ Chat libre (incluye fase de meta y edición) ============ */
   function userWantsReplace(text){
@@ -59,15 +86,16 @@
   }
 
   function removeActivityRows(city, dayOrNull, keyword){
-    if(!itineraries[city] || !keyword) return 0;
+    const IT = ST().itineraries;
+    if(!IT[city] || !keyword) return 0;
     const kw = normalizeActivityString(keyword);
-    const targetDays = dayOrNull ? [dayOrNull] : Object.keys(itineraries[city].byDay||{}).map(n=>parseInt(n,10));
+    const targetDays = dayOrNull ? [dayOrNull] : Object.keys(IT[city].byDay||{}).map(n=>parseInt(n,10));
     let removed = 0;
     targetDays.forEach(d=>{
-      const rows = itineraries[city].byDay?.[d] || [];
+      const rows = IT[city].byDay?.[d] || [];
       const before = rows.length;
-      itineraries[city].byDay[d] = rows.filter(r => !normalizeActivityString(r.activity||'').includes(kw));
-      removed += Math.max(0, before - (itineraries[city].byDay[d]||[]).length);
+      IT[city].byDay[d] = rows.filter(r => !normalizeActivityString(r.activity||'').includes(kw));
+      removed += Math.max(0, before - (IT[city].byDay[d]||[]).length);
     });
     ensureDays(city);
     return removed;
@@ -75,25 +103,27 @@
 
   function findCityInText(text){
     const t = normalize(text);
-    for(const {city} of savedDestinations){
+    for(const {city} of (ST().savedDestinations||[])){
       if(t.includes(normalize(city))) return city;
     }
     return null;
   }
 
   function resolveDayNumber(city, dayScope){
+    const IT = ST().itineraries;
     if(dayScope === 'LAST'){
-      const days = Object.keys(itineraries[city]?.byDay||{}).map(n=>parseInt(n,10));
+      const days = Object.keys(IT[city]?.byDay||{}).map(n=>parseInt(n,10));
       return days.length ? Math.max(...days) : 1;
     }
     return dayScope || null;
   }
 
   async function checkAndGenerateMissing(){
+    const { savedDestinations, itineraries, cityMeta } = ST();
     for(const {city} of savedDestinations){
       const m = cityMeta[city];
       const hasRows = Object.values(itineraries[city]?.byDay || {}).some(a => a.length > 0);
-      if(typeof metaIsComplete === 'function' && metaIsComplete(m) && !hasRows){
+      if(metaIsComplete(m) && !hasRows){
         await generateCityItinerary(city);
       }
     }
@@ -101,15 +131,22 @@
 
   /* ==== Chat principal ==== */
   async function sendChat(){
-    const text = ($intake.value||'').trim();
+    const { activeCity: AC0 } = ST();
+
+    const text = ($intake?.value||'').trim();
     if(!text) return;
     msg(text,'user'); 
-    $intake.value='';
+    if($intake) $intake.value='';
 
     // ======= Fase 1: recopilación secuencial de meta =======
-    if(collectingMeta){
+    if(ST().collectingMeta){
+      const { savedDestinations, metaProgressIndex } = ST();
       const city = savedDestinations[metaProgressIndex]?.city;
-      if(!city){ collectingMeta=false; await maybeGenerateAllCities(); return; }
+      if(!city){ 
+        PL.statePatch = { collectingMeta:false };
+        await maybeGenerateAllCities(); 
+        return; 
+      }
 
       const extractPrompt = `
 Extrae del texto la meta para la ciudad "${city}" en formato D del esquema:
@@ -123,13 +160,12 @@ Texto del usuario: ${text}`.trim();
 
       if(parsed?.meta){
         upsertCityMeta(parsed.meta);
-        awaitingMetaReply = false;
+        PL.statePatch = { awaitingMetaReply: false, metaProgressIndex: metaProgressIndex + 1 };
         msg(`Perfecto, tengo la información para ${city}.`);
-        metaProgressIndex++;
-        if(metaProgressIndex < savedDestinations.length){
+        if(PL.state.metaProgressIndex < ST().savedDestinations.length){
           await askForNextCityMeta();
         }else{
-          collectingMeta = false;
+          PL.statePatch = { collectingMeta: false };
           msg('Perfecto 🎉 Ya tengo toda la información. Generando itinerarios...');
           await maybeGenerateAllCities();
         }
@@ -144,9 +180,9 @@ Texto del usuario: ${text}`.trim();
     let handled = false;
 
     const cityFromText = findCityInText(text);
-    const workingCity = cityFromText || activeCity;
-    if(cityFromText && cityFromText !== activeCity){
-      setActiveCity(cityFromText);
+    const workingCity = cityFromText || AC0;
+    if(cityFromText && cityFromText !== AC0){
+      setActiveCityBridge(cityFromText);
       renderCityItinerary(cityFromText);
     }
 
@@ -157,6 +193,7 @@ Texto del usuario: ${text}`.trim();
       const activityDesc = hasActivity ? text : null;
 
       if(workingCity){
+        const { savedDestinations, itineraries } = ST();
         const current = savedDestinations.find(x=>x.city===workingCity)?.days 
           || Object.keys(itineraries[workingCity]?.byDay||{}).length || 1;
         const newDays = current + addN;
@@ -178,7 +215,7 @@ Devuelve SOLO JSON con "destination":"${workingCity}".`.trim();
         }
 
         renderCityTabs();
-        setActiveCity(workingCity);
+        setActiveCityBridge(workingCity);
         renderCityItinerary(workingCity);
         msg(`He añadido ${addN} día${addN>1?'s':''} en ${workingCity}.`);
       }
@@ -190,6 +227,7 @@ Devuelve SOLO JSON con "destination":"${workingCity}".`.trim();
       const remN = /\b\d+\b/.test(tNorm) ? extractInt(tNorm) : 1;
       const targetCity = workingCity;
       if(targetCity){
+        const { savedDestinations, itineraries } = ST();
         const current = savedDestinations.find(x=>x.city===targetCity)?.days 
           || Object.keys(itineraries[targetCity]?.byDay||{}).length || 1;
         const newDays = Math.max(1, current - remN);
@@ -198,7 +236,7 @@ Devuelve SOLO JSON con "destination":"${workingCity}".`.trim();
         keys.slice(0,remN).forEach(k=>delete itineraries[targetCity].byDay[k]);
         ensureDays(targetCity);
         renderCityTabs();
-        setActiveCity(targetCity);
+        setActiveCityBridge(targetCity);
         renderCityItinerary(targetCity);
         msg(`He quitado ${remN} día${remN>1?'s':''} en ${targetCity}.`);
       }
@@ -227,7 +265,7 @@ Devuelve SOLO JSON formato B con "destination":"${targetCity}".`.trim();
           const parsed = parseJSON(ans);
           if(parsed){ 
             applyParsedToState(parsed,false);
-            renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
+            renderCityTabs(); setActiveCityBridge(targetCity); renderCityItinerary(targetCity);
             msg(removed>0?`Sustituí "${oldK}" por "${newK}" en ${targetCity}.`:`Añadí actividades de "${newK}" en ${targetCity}.`,'ai');
           }else{
             msg(`Eliminé "${oldK}". ¿Qué tipo de actividad quieres en su lugar?`,'ai');
@@ -237,7 +275,7 @@ Devuelve SOLO JSON formato B con "destination":"${targetCity}".`.trim();
           const keyword = extractRemovalKeyword(text);
           if(keyword){
             const removed = removeActivityRows(targetCity, dayN, keyword);
-            renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
+            renderCityTabs(); setActiveCityBridge(targetCity); renderCityItinerary(targetCity);
 
             if(removed>0 && hasAskForAlternative(text)){
               const altPrompt = `
@@ -249,7 +287,7 @@ Devuelve SOLO JSON formato B con "destination":"${targetCity}".`.trim();
               const parsed = parseJSON(ans);
               if(parsed){
                 applyParsedToState(parsed,false);
-                renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
+                renderCityTabs(); setActiveCityBridge(targetCity); renderCityItinerary(targetCity);
                 msg(`He sustituido "${keyword}" por nuevas actividades en ${targetCity}.`,'ai');
               }else{
                 msg(`He eliminado "${keyword}". Puedo sugerir alternativas si me dices el tipo que prefieres.`,'ai');
@@ -278,7 +316,7 @@ Devuelve SOLO JSON formato B para "destination":"${targetCity}" ${dayN?`limitado
         const parsed = parseJSON(ans);
         if(parsed){
           applyParsedToState(parsed,false);
-          renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
+          renderCityTabs(); setActiveCityBridge(targetCity); renderCityItinerary(targetCity);
           msg(`He detallado las actividades ${dayN?`del día ${dayN} `:''}en ${targetCity}.`,'ai');
         }else{
           msg('No pude detallar actividades.','ai');
@@ -288,31 +326,32 @@ Devuelve SOLO JSON formato B para "destination":"${targetCity}" ${dayN?`limitado
     }
 
     // --- e) Ajuste de horas ---
-    if(!handled && /\b(hora|horario|inicio|fin|empieza|termina|ajusta|cambia)\b/.test(tNorm)){
+    if(!handled && /\b(hora|horario|inicio|fin|empieza|termina|ajusta|cambia)\b/.test(normalize(text))){
       const times = parseTimesFromText(text);
       const targetCity = workingCity;
       if(targetCity && times.length){
-        cityMeta[targetCity] = cityMeta[targetCity] || { baseDate:null, start:null, end:null, hotel:'' };
+        const CM = ST().cityMeta;
+        CM[targetCity] = CM[targetCity] || { baseDate:null, start:null, end:null, hotel:'' };
         if(times.length === 1){
-          if(/\b(hasta|termina|fin)\b/.test(tNorm)) cityMeta[targetCity].end = times[0];
-          else cityMeta[targetCity].start = times[0];
+          if(/\b(hasta|termina|fin)\b/.test(normalize(text))) CM[targetCity].end = times[0];
+          else CM[targetCity].start = times[0];
         }else{
-          cityMeta[targetCity].start = times[0];
-          cityMeta[targetCity].end = times[times.length-1];
+          CM[targetCity].start = times[0];
+          CM[targetCity].end = times[times.length-1];
         }
         await generateCityItinerary(targetCity);
-        renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
+        renderCityTabs(); setActiveCityBridge(targetCity); renderCityItinerary(targetCity);
         msg(`He ajustado las horas en ${targetCity}.`);
       }
       handled = true;
     }
 
     // --- f) Recalcular itinerario ---
-    if(!handled && /\b(recalcula|replanifica|recompute|replan|recalculate|actualiza|regen|optimiza)\b/.test(tNorm)){
+    if(!handled && /\b(recalcula|replanifica|recompute|replan|recalculate|actualiza|regen|optimiza)\b/.test(normalize(text))){
       const targetCity = workingCity;
       if(targetCity){
         await generateCityItinerary(targetCity);
-        renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
+        renderCityTabs(); setActiveCityBridge(targetCity); renderCityItinerary(targetCity);
         msg(`He recalculado el itinerario de ${targetCity}.`);
       }
       handled = true;
@@ -324,7 +363,10 @@ Devuelve SOLO JSON formato B para "destination":"${targetCity}" ${dayN?`limitado
     }
 
     // --- g) Edición libre general ---
-    session.push({role:'user', content:text});
+    const S = ST().session || [];
+    S.push({role:'user', content:text});
+    PL.statePatch = { session: S };
+
     const cityHint = workingCity ? `Active city: ${workingCity}` : '';
     const prompt = `
 ${FORMAT}
@@ -340,7 +382,7 @@ Solicitud: ${text}`.trim();
       const parsed = parseJSON(ans);
       if(parsed){
         applyParsedToState(parsed,false);
-        renderCityTabs(); setActiveCity(workingCity||activeCity); renderCityItinerary(workingCity||activeCity);
+        renderCityTabs(); setActiveCityBridge(workingCity||AC0); renderCityItinerary(workingCity||AC0);
         msg(parsed.followup || '¿Deseas otro ajuste?','ai');
       }else{
         msg(ans || 'Listo. ¿Otra cosa?','ai');
@@ -356,5 +398,5 @@ Solicitud: ${text}`.trim();
   $send?.addEventListener('click', sendChat);
   $intake?.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendChat(); } });
 
-  console.log('✅ planner-chat.js (v6) cargado, lógica original de meta restaurada y listeners activos.');
+  console.log('✅ planner-chat.js (v7) cargado: meta-flow restaurado, estado en vivo y listeners activos.');
 })();
