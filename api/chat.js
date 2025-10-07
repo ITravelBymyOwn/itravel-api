@@ -1,17 +1,20 @@
-// ======================================================
-// /api/chat.js — Endpoint de chat para Planner
-// JSON estricto + CORS para Webflow + compatibilidad total
-// ======================================================
+// ==========================================================
+// /api/chat.js — Motor de inteligencia principal del Planner
+// Chat libre, flexible y con deducción estilo ChatGPT
+// ==========================================================
 
 export const config = {
   runtime: 'edge',
 };
 
-// --- Ajusta si quieres whitelistar dominios:
+// ==========================================================
+// CONFIGURACIÓN CORS
+// ==========================================================
 const ALLOWED_ORIGINS = [
+  // Puedes especificar dominios si lo deseas:
   // 'https://tu-dominio.webflow.io',
   // 'https://www.tu-dominio.com',
-  '*', // abierto durante desarrollo
+  '*', // abierto mientras pruebas
 ];
 
 function corsHeaders(req) {
@@ -27,9 +30,9 @@ function corsHeaders(req) {
   };
 }
 
-// ======================================================
-// Handler principal
-// ======================================================
+// ==========================================================
+// HANDLER PRINCIPAL
+// ==========================================================
 export default async function handler(req) {
   // --- Preflight ---
   if (req.method === 'OPTIONS') {
@@ -64,23 +67,36 @@ export default async function handler(req) {
     );
   }
 
-  // ======================================================
-  // System prompt — igual al usado por Planner
-  // ======================================================
+  // ==========================================================
+  // SYSTEM PROMPT — Inteligencia central (modo GPT real)
+  // ==========================================================
   const system = [
-    'Eres un asistente EXTRACTOR y EDITOR de planes de viaje.',
-    'SIEMPRE devuelves SOLO JSON válido, sin texto adicional antes o después.',
-    'Nunca uses comillas simples para claves ni valores.',
-    'Tolera texto en cualquier idioma y expresiones naturales (incluso incompletas).',
-    'Cuando se te pida EXTRAER meta para una ciudad, analiza fechas y horas libremente:',
-    '  — Soporta formatos como “20/10/2025”, “20 de octubre”, “mañana 8am”, “8 y 9”, etc.',
-    '  — Devuelve baseDate="DD/MM/YYYY", start="HH:MM", end="HH:MM", hotel="Texto".',
-    'Cuando se te pida EDITAR o OPTIMIZAR itinerarios, usa los formatos A, B o C del esquema del prompt.',
+    'Eres un asistente de planificación de viajes altamente inteligente y flexible, equivalente a ChatGPT, que actúa dentro de una plataforma de planificación de itinerarios.',
+    'Tu rol combina empatía y precisión técnica: interpretas mensajes en cualquier idioma, entiendes fechas, horas, ubicaciones y peticiones ambiguas igual que un humano.',
+    'SIEMPRE devuelves SOLO JSON válido, sin texto adicional ni explicaciones fuera del objeto.',
+    '',
+    'Tu objetivo es interpretar instrucciones de viaje y devolver datos en los siguientes formatos JSON según corresponda:',
+    'A) Meta de ciudad → {"meta":{"city":"X","baseDate":"DD/MM/YYYY","start":"HH:MM","end":"HH:MM","hotel":"Texto"}}',
+    'B) Itinerario detallado → {"destination":"X","rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"...","from":"...","to":"...","transport":"...","duration":"...","notes":"..."}]}',
+    'C) Ajustes o reemplazos → {"replace":true,"destination":"X","rows":[...]}',
+    'D) Respuesta general de estado → {"followup":"Texto"}',
+    '',
+    'Reglas generales de interpretación:',
+    '— Acepta texto en cualquier idioma (ES, EN, FR, PT, IT).',
+    '— Interpreta fechas naturales ("20 de octubre", "lunes 5", "mañana"). Si el año no está presente, usa el actual o el siguiente según sea lógico.',
+    '— Interpreta rangos de hora como "7, 8 y 9 de la mañana" → start="07:00", end="09:00".',
+    '— Si el texto menciona "cerca de", "en el hotel", "me hospedo en", etc., coloca eso en hotel.',
+    '— Entiende órdenes del usuario como “agrega un día”, “quita la excursión”, “reemplaza el tour por el museo”, etc. y devuélvelas en formato JSON correcto.',
+    '— Puedes modificar, eliminar o añadir filas de actividades según las instrucciones del usuario.',
+    '— Cuando no estés seguro del formato, devuelve un objeto {"followup":"Pregunta o confirmación"} para continuar la conversación.',
+    '',
+    'En todas tus respuestas: nunca uses comillas simples, nunca añadas texto fuera del JSON.',
+    'Tu comportamiento debe ser tan inteligente y adaptable como ChatGPT, pero tu salida debe ser estructurada estrictamente como JSON válido.',
   ].join(' ');
 
-  // ======================================================
-  // Construir payload OpenAI
-  // ======================================================
+  // ==========================================================
+  // CONSTRUCCIÓN DE LA SOLICITUD A OPENAI
+  // ==========================================================
   const messages = [
     { role: 'system', content: system },
     ...(Array.isArray(history) ? history : []),
@@ -89,7 +105,7 @@ export default async function handler(req) {
 
   const payload = {
     model,
-    temperature: 0.2,
+    temperature: 0.3,
     top_p: 1,
     messages,
   };
@@ -115,9 +131,13 @@ export default async function handler(req) {
     const data = await r.json();
     let content = data?.choices?.[0]?.message?.content ?? '';
 
-    // Asegurar salida JSON válida
-    if (!content.trim().startsWith('{') && !content.trim().startsWith('[')) {
-      content = JSON.stringify({ followup: content });
+    // ==========================================================
+    // VALIDACIÓN FINAL DE SALIDA
+    // ==========================================================
+    // Si la respuesta no es JSON, la encapsulamos.
+    const trimmed = content.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
+      content = JSON.stringify({ followup: trimmed });
     }
 
     return new Response(content, {
