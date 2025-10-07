@@ -1,26 +1,27 @@
 /* ============================================================
-   planner-chat.js — SECCIÓN 14 COMPLETA Y FUNCIONAL (v5)
+   planner-chat.js — SECCIÓN 14 COMPLETA Y FUNCIONAL (v6)
    ============================================================ */
 
 (function(){
   const PL = window.__planner;
   if(!PL){ console.error('❌ Planner bridge not found'); return; }
 
-  // ====== 1. Extrae referencias correctas del bridge Webflow ======
   const {
     dom: { $send, $intake },
     helpers: { normalize, extractInt, parseTimesFromText, updateSavedDays },
     api: { callAgent, parseJSON, getItineraryContext, getCityMetaContext,
            generateCityItinerary, applyParsedToState, ensureDays, upsertCityMeta },
-    ui: { renderCityTabs, renderCityItinerary, msg, askForNextCityMeta, maybeGenerateAllCities }
+    ui: { renderCityTabs, renderCityItinerary, msg, askForNextCityMeta, maybeGenerateAllCities },
+    state
   } = PL;
 
-  // ====== 2. Estados del planner (referenciados) ======
-  let { savedDestinations, itineraries, cityMeta,
-        activeCity, collectingMeta, metaProgressIndex,
-        awaitingMetaReply, planningStarted, session } = PL.state;
+  let {
+    savedDestinations, itineraries, cityMeta,
+    activeCity, collectingMeta, metaProgressIndex,
+    awaitingMetaReply, planningStarted, session
+  } = state;
 
-  // ====== 3. Funciones auxiliares ======
+  /* ============ Chat libre (incluye fase de meta y edición) ============ */
   function userWantsReplace(text){
     const t=(text||'').toLowerCase();
     return /(sustituye|reemplaza|cambia todo|replace|overwrite|desde cero|todo nuevo)/i.test(t);
@@ -31,6 +32,7 @@
     return /(^|\b)(ok|listo|esta bien|perfecto|de acuerdo|vale|sounds good|looks good|c’est bon|tout bon|beleza|ta bom)\b/.test(t);
   }
 
+  /* ==== Helpers extendidos de NL ==== */
   function getDayScopeFromText(text){
     const m = text.match(/\bd[ií]a\s+(\d{1,2})\b/i);
     if (m) return Math.max(1, parseInt(m[1],10));
@@ -97,7 +99,7 @@
     }
   }
 
-  // ====== 4. Lógica principal del chat ======
+  /* ==== Chat principal ==== */
   async function sendChat(){
     const text = ($intake.value||'').trim();
     if(!text) return;
@@ -321,7 +323,7 @@ Devuelve SOLO JSON formato B para "destination":"${targetCity}" ${dayN?`limitado
       return;
     }
 
-    // --- g) Fallback de edición libre ---
+    // --- g) Edición libre general ---
     session.push({role:'user', content:text});
     const cityHint = workingCity ? `Active city: ${workingCity}` : '';
     const prompt = `
@@ -350,11 +352,9 @@ Solicitud: ${text}`.trim();
     }
   }
 
-  // ====== 5. Eventos (Enter + botón Send) ======
+  /* ==== Eventos ==== */
   $send?.addEventListener('click', sendChat);
-  $intake?.addEventListener('keydown',(e)=>{
-    if(e.key==='Enter'){ e.preventDefault(); sendChat(); }
-  });
+  $intake?.addEventListener('keydown',(e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendChat(); } });
 
-  console.log('✅ planner-chat.js (v5) cargado con recopilación funcional y listeners activos');
+  console.log('✅ planner-chat.js (v6) cargado, lógica original de meta restaurada y listeners activos.');
 })();
