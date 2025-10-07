@@ -4,7 +4,7 @@
 // ==========================================================
 
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs', // ✅ cambiamos de 'edge' a 'nodejs' para máxima compatibilidad
 };
 
 // ==========================================================
@@ -33,38 +33,47 @@ function corsHeaders(req) {
 // ==========================================================
 // HANDLER PRINCIPAL
 // ==========================================================
-export default async function handler(req) {
-  // --- Preflight ---
+export default async function handler(req, res) {
+  // --- Preflight (CORS) ---
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(req) });
+    return res.writeHead(204, corsHeaders(req)).end();
   }
 
   if (req.method !== 'POST') {
-    return new Response(
-      JSON.stringify({ error: 'Method not allowed' }),
-      { status: 405, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } }
-    );
+    res.writeHead(405, {
+      'Content-Type': 'application/json',
+      ...corsHeaders(req),
+    });
+    return res.end(JSON.stringify({ error: 'Method not allowed' }));
   }
 
   // --- Parse body ---
-  const bodyData = await req.json().catch(() => ({}));
+  let bodyData = {};
+  try {
+    bodyData = JSON.parse(req.body);
+  } catch {
+    bodyData = {};
+  }
+
   const prompt = bodyData.prompt || bodyData.input || '';
   const model = bodyData.model || 'gpt-4o-mini';
   const history = Array.isArray(bodyData.history) ? bodyData.history : [];
 
   if (!prompt || typeof prompt !== 'string') {
-    return new Response(
-      JSON.stringify({ error: 'Missing prompt/input' }),
-      { status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } }
-    );
+    res.writeHead(400, {
+      'Content-Type': 'application/json',
+      ...corsHeaders(req),
+    });
+    return res.end(JSON.stringify({ error: 'Missing prompt/input' }));
   }
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return new Response(
-      JSON.stringify({ error: 'OPENAI_API_KEY not set' }),
-      { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } }
-    );
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      ...corsHeaders(req),
+    });
+    return res.end(JSON.stringify({ error: 'OPENAI_API_KEY not set' }));
   }
 
   // ==========================================================
@@ -122,9 +131,12 @@ export default async function handler(req) {
 
     if (!r.ok) {
       const text = await r.text();
-      return new Response(
-        JSON.stringify({ error: 'Upstream error', detail: text }),
-        { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } }
+      res.writeHead(500, {
+        'Content-Type': 'application/json',
+        ...corsHeaders(req),
+      });
+      return res.end(
+        JSON.stringify({ error: 'Upstream error', detail: text })
       );
     }
 
@@ -134,20 +146,21 @@ export default async function handler(req) {
     // ==========================================================
     // VALIDACIÓN FINAL DE SALIDA
     // ==========================================================
-    // Si la respuesta no es JSON, la encapsulamos.
     const trimmed = content.trim();
     if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) {
       content = JSON.stringify({ followup: trimmed });
     }
 
-    return new Response(content, {
-      status: 200,
-      headers: { 'Content-Type': 'application/json', ...corsHeaders(req) },
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      ...corsHeaders(req),
     });
+    return res.end(content);
   } catch (err) {
-    return new Response(
-      JSON.stringify({ error: 'Fetch error', detail: String(err) }),
-      { status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders(req) } }
-    );
+    res.writeHead(500, {
+      'Content-Type': 'application/json',
+      ...corsHeaders(req),
+    });
+    return res.end(JSON.stringify({ error: 'Fetch error', detail: String(err) }));
   }
 }
