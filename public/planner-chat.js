@@ -1,60 +1,37 @@
-// ===== SECCIÓN 5: UI — Destinos (crear/validar filas) =====
-  /* ============ Save Destinations ============ */
-  function rebuildOrderOptions() {
-    const rows = qsa('.city-row', $cities);
-    const total = rows.length;
-    rows.forEach((row, idx) => {
-      const sel = qs('.city-order', row);
-      const cur = sel.value || (idx+1);
-      sel.innerHTML = '';
-      for(let i=1;i<=total;i++){
-        const opt = document.createElement('option');
-        opt.value = i; opt.textContent = `${i}º`;
-        sel.appendChild(opt);
-      }
-      sel.value = Math.min(cur, total);
-    });
-  }
+<!-- ==== SECCIÓN 5 – Estructura DOM principal (corregida) ==== -->
+<div id="planner-wrapper" class="planner-container">
+  <div id="planner-left" class="planner-left">
+    <h3>Trip Inputs</h3>
 
-  function addCityRow(data={city:'',days:'',order:null}) {
-    const row = document.createElement('div');
-    row.className = 'city-row';
-    row.innerHTML = `
-      <div>
-        <label>City</label>
-        <input class="city-name" type="text" placeholder="City or Country" value="${data.city||''}">
-      </div>
-      <div>
-        <label>Days</label>
-        <input class="city-days" type="number" min="1" placeholder="e.g. 3" value="${data.days||''}">
-      </div>
-      <div>
-        <label>Visit order</label>
-        <select class="city-order"></select>
-      </div>
-      <div style="align-self:end;">
-        <button class="remove" type="button">✖</button>
-      </div>`;
-    qs('.remove', row).addEventListener('click', () => { row.remove(); rebuildOrderOptions(); validateSave(); });
-    $cities.appendChild(row);
-    rebuildOrderOptions();
-    if(data.order) qs('.city-order', row).value = String(data.order);
-  }
+    <!-- contenedor de ciudades (el script lo necesita así) -->
+    <div id="cities-container"></div>
 
-  function validateSave(){
-    const rows = qsa('.city-row', $cities);
-    const ok = rows.length>0 && rows.every(r=>{
-      const name = qs('.city-name', r).value.trim();
-      const days = parseInt(qs('.city-days', r).value, 10);
-      return name && days>0;
-    });
-    $save.disabled = !ok;
-    $start.disabled = savedDestinations.length===0;
-  }
+    <!-- botón Add City -->
+    <button id="add-city" class="btn btn-light">+ Add City</button>
 
-  $addCity.addEventListener('click', ()=>{ addCityRow(); validateSave(); });
-  $cities.addEventListener('input', validateSave);
-  addCityRow(); // fila inicial
+    <!-- botón Save Destinations -->
+    <button id="save-destinations" class="btn btn-success">Save Destinations</button>
+  </div>
+
+  <div id="planner-right" class="planner-right">
+    <h3>Interactive Chat & Itinerary</h3>
+
+    <!-- Chat principal -->
+    <div id="chat-container" class="chat-box">
+      <div id="chat-messages" class="chat-output"></div>
+      <div class="chat-controls">
+        <input id="intake" type="text" placeholder="Type your message..." />
+        <button id="send-btn" class="btn btn-primary">Send</button>
+      </div>
+    </div>
+
+    <!-- Tabla de itinerario -->
+    <div id="itinerary-container" class="itinerary-box">
+      <div class="city-tabs" id="city-tabs"></div>
+      <div class="itinerary-table" id="itinerary-table"></div>
+    </div>
+  </div>
+</div>
 
   // ===== SECCIÓN 6: Guardar destinos / sincronizar estado =====
   $save.addEventListener('click', () => {
