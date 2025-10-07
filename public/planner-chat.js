@@ -1,16 +1,15 @@
 // ===============================================================
 // planner-chat.js – Motor completo (secciones 6–14)
-// Versión corregida v2.1 — espera al DOM y define correctamente variables
+// Versión v2.2 — Corrección de cierres y estabilidad
 // ===============================================================
 (() => {
-  console.log("🟣 planner-chat.js v2.1 — inicializando…");
+  console.log("🟣 planner-chat.js v2.2 — inicializando…");
 
-  // Espera robusta a que el puente esté listo (estado + api + dom)
   function waitForBridge(maxMs = 12000) {
     return new Promise((resolve, reject) => {
       const t0 = Date.now();
       (function poll() {
-        const P = window.__planner;
+        const P = window.__planner || window.P;
         const ok = P && P.state && P.api && P.dom && P.config;
         if (ok) return resolve(P);
         if (Date.now() - t0 > maxMs) return reject(new Error("Bridge timeout"));
@@ -19,29 +18,6 @@
     });
   }
 
-  // ============ Arranque principal ============
-  document.addEventListener('DOMContentLoaded', () => {
-    waitForBridge().then((P) => {
-      console.log("✅ Planner bridge connected");
-
-      // Referencias DOM seguras
-      const qs  = (s, ctx=document) => ctx.querySelector(s);
-      const qsa = (s, ctx=document) => Array.from(ctx.querySelectorAll(s));
-
-      const $cities = qs('#cities-container');
-      const $addCity = qs('#add-city');
-      const $save = qs('#save-destinations');
-      const $start = qs('#start-planning');
-      const $chatC = qs('#chat-container');
-      const $chatM = qs('#chat-messages');
-      const $intake = qs('#intake');
-      const $send = qs('#send-btn');
-      const $tabs = qs('#city-tabs');
-      const $itineraryWrap = qs('#itinerary-container');
-      const $intro = qs('#itinerary-intro');
-
-      // A partir de aquí comienza tu lógica original (sección 6–14)
-      // ...
 
 // ===== SECCIÓN 6: Guardar destinos / sincronizar estado =====
   $save.addEventListener('click', () => {
