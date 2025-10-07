@@ -1,12 +1,12 @@
 /* ============================================================
-   planner-chat.js — SECCIÓN 14 COMPLETA Y FUNCIONAL (v4)
+   planner-chat.js — SECCIÓN 14 COMPLETA Y FUNCIONAL (v5)
    ============================================================ */
 
 (function(){
   const PL = window.__planner;
   if(!PL){ console.error('❌ Planner bridge not found'); return; }
 
-  // ====== 1. Extrae referencias del bridge Webflow ======
+  // ====== 1. Extrae referencias correctas del bridge Webflow ======
   const {
     dom: { $send, $intake },
     helpers: { normalize, extractInt, parseTimesFromText, updateSavedDays },
@@ -15,12 +15,12 @@
     ui: { renderCityTabs, renderCityItinerary, msg, askForNextCityMeta, maybeGenerateAllCities }
   } = PL;
 
+  // ====== 2. Estados del planner (referenciados) ======
   let { savedDestinations, itineraries, cityMeta,
         activeCity, collectingMeta, metaProgressIndex,
-        awaitingMetaReply, session } = PL.state;
+        awaitingMetaReply, planningStarted, session } = PL.state;
 
-  // ===== SECCIÓN 14: Chat principal / edición interactiva =====
-  /* ============ Chat libre (incluye fase de meta y edición) ============ */
+  // ====== 3. Funciones auxiliares ======
   function userWantsReplace(text){
     const t=(text||'').toLowerCase();
     return /(sustituye|reemplaza|cambia todo|replace|overwrite|desde cero|todo nuevo)/i.test(t);
@@ -31,7 +31,6 @@
     return /(^|\b)(ok|listo|esta bien|perfecto|de acuerdo|vale|sounds good|looks good|c’est bon|tout bon|beleza|ta bom)\b/.test(t);
   }
 
-  /* ==== Helpers extendidos de NL ==== */
   function getDayScopeFromText(text){
     const m = text.match(/\bd[ií]a\s+(\d{1,2})\b/i);
     if (m) return Math.max(1, parseInt(m[1],10));
@@ -98,7 +97,7 @@
     }
   }
 
-  /* ==== Chat principal ==== */
+  // ====== 4. Lógica principal del chat ======
   async function sendChat(){
     const text = ($intake.value||'').trim();
     if(!text) return;
@@ -317,13 +316,12 @@ Devuelve SOLO JSON formato B para "destination":"${targetCity}" ${dayN?`limitado
       handled = true;
     }
 
-    // Si ya resolvimos algo, verifica si hay ciudades pendientes
     if(handled){
       await checkAndGenerateMissing();
       return;
     }
 
-    // --- g) Edición libre general ---
+    // --- g) Fallback de edición libre ---
     session.push({role:'user', content:text});
     const cityHint = workingCity ? `Active city: ${workingCity}` : '';
     const prompt = `
@@ -352,11 +350,11 @@ Solicitud: ${text}`.trim();
     }
   }
 
-  /* ==== Eventos ==== */
+  // ====== 5. Eventos (Enter + botón Send) ======
   $send?.addEventListener('click', sendChat);
   $intake?.addEventListener('keydown',(e)=>{
     if(e.key==='Enter'){ e.preventDefault(); sendChat(); }
   });
 
-  console.log('✅ planner-chat.js (v4) cargado y listeners activos');
+  console.log('✅ planner-chat.js (v5) cargado con recopilación funcional y listeners activos');
 })();
