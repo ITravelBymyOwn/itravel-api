@@ -1,38 +1,3 @@
-<!-- ==== SECCIÓN 5 – Estructura DOM principal (corregida) ==== -->
-<div id="planner-wrapper" class="planner-container">
-  <div id="planner-left" class="planner-left">
-    <h3>Trip Inputs</h3>
-
-    <!-- contenedor de ciudades (el script lo necesita así) -->
-    <div id="cities-container"></div>
-
-    <!-- botón Add City -->
-    <button id="add-city" class="btn btn-light">+ Add City</button>
-
-    <!-- botón Save Destinations -->
-    <button id="save-destinations" class="btn btn-success">Save Destinations</button>
-  </div>
-
-  <div id="planner-right" class="planner-right">
-    <h3>Interactive Chat & Itinerary</h3>
-
-    <!-- Chat principal -->
-    <div id="chat-container" class="chat-box">
-      <div id="chat-messages" class="chat-output"></div>
-      <div class="chat-controls">
-        <input id="intake" type="text" placeholder="Type your message..." />
-        <button id="send-btn" class="btn btn-primary">Send</button>
-      </div>
-    </div>
-
-    <!-- Tabla de itinerario -->
-    <div id="itinerary-container" class="itinerary-box">
-      <div class="city-tabs" id="city-tabs"></div>
-      <div class="itinerary-table" id="itinerary-table"></div>
-    </div>
-  </div>
-</div>
-
   // ===== SECCIÓN 6: Guardar destinos / sincronizar estado =====
   $save.addEventListener('click', () => {
     const rows = qsa('.city-row', $cities);
