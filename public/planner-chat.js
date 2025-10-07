@@ -1,111 +1,11 @@
 (() => {
-  console.log("🟣 planner-chat.js v2.3 — inicializando…");
+  document.addEventListener('DOMContentLoaded', () => {
 
-  document.addEventListener("DOMContentLoaded", () => {
-    console.log("✅ DOM listo, inicializando planner...");
+    // ===== SECCIÓN 1–15: planner estable =====
+    // 🔹 Copia exactamente el script que compartiste (desde “Helpers / Referencias DOM” hasta el final)
+    // 🔹 Lo dejamos intacto, solo ajustamos el cierre del wrapper para funcionar desde archivo externo
 
-    <!-- ====== PLANNER BODY (final) ====== -->
-<div class="lang-floating">
-  <a href="/planner-en">EN</a> | <a href="/planner-es">ES</a> | <a href="/planner-fr">FR</a> | <a href="/planner-pt">PT</a>
-</div>
-
-<div class="top-bar">
-  <a href="/">← Back to Home</a>
-</div>
-
-<div id="planner-grid">
-  <!-- SIDEBAR -->
-  <aside class="sidebar">
-    <h2>Trip Inputs</h2>
-
-    <h3>Cities & Days</h3>
-    <div id="cities-container"></div>
-    <button id="add-city" class="add-city" type="button">+ Add City</button>
-    <div class="help-hint">Add each city, how many days you'll stay, and the visit order.</div>
-    <button id="save-destinations" class="save-dest" type="button">Save Destinations</button>
-
-    <h3>Travelers</h3>
-    <label for="p-adults">Adults (18+)</label>
-    <input id="p-adults" type="number" min="0" value="2">
-    <label for="p-young">Young (12–17)</label>
-    <input id="p-young" type="number" min="0" value="0">
-    <label for="p-children">Children (2–11)</label>
-    <input id="p-children" type="number" min="0" value="0">
-    <label for="p-infants">Infants (0–1)</label>
-    <input id="p-infants" type="number" min="0" value="0">
-    <label for="p-seniors">Seniors (65+)</label>
-    <input id="p-seniors" type="number" min="0" value="0">
-
-    <h3>Accommodation</h3>
-    <label for="stay-name">Hotel / Area</label>
-    <input id="stay-name" type="text" placeholder="Hotel name or nearby landmark">
-    <label for="stay-address">Address or Maps/Waze link</label>
-    <input id="stay-address" type="text" placeholder="Paste full address or share link">
-
-    <h3>Budget (Total trip)</h3>
-    <label for="budget">Amount</label>
-    <input id="budget" type="number" min="0" placeholder="e.g. 1500">
-    <label for="currency">Currency</label>
-    <select id="currency">
-      <option value="USD" selected>$ USD</option>
-      <option value="EUR">€ EUR</option>
-      <option value="GBP">£ GBP</option>
-      <option value="CRC">₡ CRC</option>
-    </select>
-  </aside>
-
-  <!-- MAIN -->
-  <main class="main">
-    <h2>Interactive Chat & Itinerary</h2>
-
-    <button id="start-planning" disabled>Start Planning</button>
-
-    <div class="chat-container" id="chat-container">
-      <div id="chat-messages" class="chat-messages"></div>
-      <div class="chat-input">
-        <input id="intake" type="text" placeholder="Type your message...">
-        <button id="send-btn" type="button">Send</button>
-      </div>
-    </div>
-
-    <div id="output">
-      <div class="city-tabs" id="city-tabs"></div>
-      <p id="itinerary-intro">Your itinerary will appear here.</p>
-      <div id="itinerary-container"></div>
-    </div>
-
-    <div class="toolbar">
-      <button id="btn-pdf">Export PDF</button>
-      <button id="btn-email">Send Email</button>
-      <button id="btn-maps">Maps</button>
-      <button id="btn-transport">Transport</button>
-      <button id="btn-weather">Weather</button>
-      <button id="btn-clothing">Clothing</button>
-      <button id="btn-restaurants">Restaurants</button>
-      <button id="btn-gas">Gas Stations</button>
-      <button id="btn-bathrooms">Bathrooms</button>
-      <button id="btn-lodging">Lodging</button>
-      <button id="btn-localinfo">Local Info</button>
-    </div>
-  </main>
-</div>
-
-<button id="confirm-itinerary">Elijo este itinerario</button>
-
-<footer>
-  <p>© 2025 ITravelByMyOwn — Your personal AI travel planner</p>
-  <p><a href="/privacy">Privacy</a> | <a href="/terms">Terms</a> | <a href="/contact">Contact</a></p>
-</footer>
-
-<!-- Webflow core (no tocar) -->
-<script src="https://d3e54v103j8qbb.cloudfront.net/js/jquery-3.5.1.min.dc5e7f18c8.js" crossorigin="anonymous"></script>
-<script src="https://cdn.prod.website-files.com/68db67f1cc8137b59a12b2f6/js/webflow.schunk.039ed449019d8266.js"></script>
-<script src="https://cdn.prod.website-files.com/68db67f1cc8137b59a12b2f6/js/webflow.c9f80112.8f14fdb118ccbbf5.js"></script>
-<!-- ====== /PLANNER BODY (final) ====== -->
-
-
-
-<!-- ====== PLANNER SCRIPT (final, stable: sequential meta + full day tables) ====== -->
+    <!-- ====== PLANNER SCRIPT (final, stable: sequential meta + full day tables) ====== -->
 <script>
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -1036,6 +936,6 @@ $intake.addEventListener('keydown',(e)=>{
 </script>
 <!-- ====== /PLANNER SCRIPT (final, stable: sequential meta + full day tables) ====== -->
 
-    console.log("🟢 Planner UI initialized successfully.");
-  }); // cierre del DOMContentLoaded
-})(); // cierre final del script
+
+  }); // DOMContentLoaded
+})(); // cierre del wrapper IIFE
