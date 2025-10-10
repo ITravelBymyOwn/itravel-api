@@ -1,66 +1,120 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ITravelByMyOwn — Planner</title>
+  <meta charset="utf-8"/>
+  <title>ITravelByMyOwn Planner</title>
+  <meta content="width=device-width, initial-scale=1" name="viewport"/>
   <link rel="stylesheet" href="/planner.css">
+  <link href="https://fonts.googleapis.com" rel="preconnect"/>
+  <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
+  <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
+  <script>
+    WebFont.load({ google:{ families:["Inter:400,600,700"] }});
+  </script>
 </head>
 <body>
-  <div class="loader" id="loader"><div class="spinner"></div></div>
-  <div class="top-bar"><div class="container"><strong>ITravelByMyOwn — Planner</strong></div></div>
 
-  <div class="container" id="planner-app">
-    <div id="planner-grid">
-      <aside class="sidebar">
-        <h2>Planificación</h2>
-        <div id="cities-container"></div>
-        <button id="add-city" class="add-btn">+ Ciudad</button>
-        <button id="save-destinations" class="save-btn" disabled>Guardar destinos</button>
-
-        <h3>Viajeros</h3>
-        <label>Adultos <input id="p-adults" type="number" min="0" value="2"></label>
-        <label>Niños <input id="p-children" type="number" min="0" value="0"></label>
-
-        <h3>Presupuesto</h3>
-        <label>Monto <input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
-        <label>Moneda
-          <select id="currency">
-            <option value="USD" selected>USD</option>
-            <option value="EUR">EUR</option>
-            <option value="GBP">GBP</option>
-            <option value="CRC">CRC</option>
-          </select>
-        </label>
-      </aside>
-
-      <main class="main">
-        <h2>Chat & Itinerario</h2>
-        <button id="start-planning" class="start-btn" disabled>Iniciar</button>
-        <div id="chat" class="chat-container">
-          <div id="chat-messages" class="chat-messages"></div>
-          <div class="chat-input">
-            <input id="intake" placeholder="Escribe tu mensaje...">
-            <button id="send-btn">Enviar</button>
-          </div>
-        </div>
-        <div id="output">
-          <div id="city-tabs"></div>
-          <p id="itinerary-intro">Tu itinerario aparecerá aquí.</p>
-          <div id="itinerary-container"></div>
-        </div>
-
-        <div class="toolbar">
-          <button>PDF</button>
-          <button>Email</button>
-          <button>Mapas</button>
-          <button>Clima</button>
-          <button>Restaurantes</button>
-        </div>
-      </main>
-    </div>
+  <!-- 🌍 Language Switch -->
+  <div class="lang-floating">
+    <a href="/planner-en">EN</a> | <a href="/planner-es">ES</a> | <a href="/planner-fr">FR</a> | <a href="/planner-pt">PT</a>
   </div>
 
-  <script defer src="/planner.js"></script>
+  <!-- 🔝 Top Bar -->
+  <div class="top-bar">
+    <a href="/">← Back to Home</a>
+  </div>
+
+  <!-- 🧭 Planner Grid -->
+  <div id="planner-grid">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <h2>Trip Inputs</h2>
+
+      <h3>Cities & Days</h3>
+      <div id="cities-container"></div>
+      <button id="add-city" class="add-city" type="button">+ Add City</button>
+      <div class="help-hint">Add each city, how many days you'll stay, and the visit order.</div>
+      <button id="save-destinations" class="save-dest" type="button">Save Destinations</button>
+
+      <h3>Travelers</h3>
+      <label for="p-adults">Adults (18+)</label>
+      <input id="p-adults" type="number" min="0" value="2">
+      <label for="p-young">Young (12–17)</label>
+      <input id="p-young" type="number" min="0" value="0">
+      <label for="p-children">Children (2–11)</label>
+      <input id="p-children" type="number" min="0" value="0">
+      <label for="p-infants">Infants (0–1)</label>
+      <input id="p-infants" type="number" min="0" value="0">
+      <label for="p-seniors">Seniors (65+)</label>
+      <input id="p-seniors" type="number" min="0" value="0">
+
+      <h3>Accommodation</h3>
+      <label for="stay-name">Hotel / Area</label>
+      <input id="stay-name" type="text" placeholder="Hotel name or nearby landmark">
+      <label for="stay-address">Address or Maps/Waze link</label>
+      <input id="stay-address" type="text" placeholder="Paste full address or share link">
+
+      <h3>Budget (Total trip)</h3>
+      <label for="budget">Amount</label>
+      <input id="budget" type="number" min="0" placeholder="e.g. 1500">
+      <label for="currency">Currency</label>
+      <select id="currency">
+        <option value="USD" selected>$ USD</option>
+        <option value="EUR">€ EUR</option>
+        <option value="GBP">£ GBP</option>
+        <option value="CRC">₡ CRC</option>
+      </select>
+
+      <!-- ⚡ Monetization Upsell -->
+      <div id="monetization-upsell" class="upsell hidden">
+        <p>🚀 This feature is part of the Premium Plan.</p>
+        <button onclick="window.location.href='/pricing'">Upgrade Now</button>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <h2>Interactive Chat & Itinerary</h2>
+      <button id="start-planning" disabled>Start Planning</button>
+
+      <div class="chat-container" id="chat-container">
+        <div id="chat-messages" class="chat-messages"></div>
+        <div class="chat-input">
+          <input id="intake" type="text" placeholder="Type your message...">
+          <button id="send-btn" type="button">Send</button>
+        </div>
+      </div>
+
+      <div id="output">
+        <div class="city-tabs" id="city-tabs"></div>
+        <p id="itinerary-intro">Your itinerary will appear here.</p>
+        <div id="itinerary-container"></div>
+      </div>
+
+      <div class="toolbar">
+        <button id="btn-pdf">Export PDF</button>
+        <button id="btn-email">Send Email</button>
+        <button id="btn-maps">Maps</button>
+        <button id="btn-transport">Transport</button>
+        <button id="btn-weather">Weather</button>
+        <button id="btn-clothing">Clothing</button>
+        <button id="btn-restaurants">Restaurants</button>
+        <button id="btn-gas">Gas Stations</button>
+        <button id="btn-bathrooms">Bathrooms</button>
+        <button id="btn-lodging">Lodging</button>
+        <button id="btn-localinfo">Local Info</button>
+      </div>
+    </main>
+  </div>
+
+  <button id="confirm-itinerary">Elijo este itinerario</button>
+
+  <footer>
+    <p>© 2025 ITravelByMyOwn — Your personal AI travel planner</p>
+    <p><a href="/privacy">Privacy</a> | <a href="/terms">Terms</a> | <a href="/contact">Contact</a></p>
+  </footer>
+
+  <!-- ✅ External Script -->
+  <script src="/planner.js"></script>
 </body>
 </html>
