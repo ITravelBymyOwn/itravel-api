@@ -1,0 +1,61 @@
+:root {
+  --brand-500: #0EA47A;
+  --brand-600: #0B8664;
+  --ink: #101828;
+  --muted: #667085;
+  --surface: #F8FAFC;
+  --white: #FFF;
+  --radius: .6rem;
+  --shadow: 0 2px 8px rgba(16,24,40,.08);
+}
+
+* { box-sizing: border-box; }
+body {
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--surface);
+  margin: 0;
+}
+
+.top-bar { background:#fff; padding:1rem; box-shadow:var(--shadow); display:flex; align-items:center; }
+.container { max-width:1200px; margin:0 auto; padding:1rem; }
+#planner-grid { display:grid; grid-template-columns:1fr 2fr; gap:1rem; margin-top:1rem; }
+@media(max-width:960px) { #planner-grid { grid-template-columns:1fr; } }
+
+.sidebar, .main { background:#fff; padding:1rem; border-radius:var(--radius); box-shadow:var(--shadow); }
+.sidebar h2 { margin:.25rem 0 1rem; color:var(--brand-600); }
+
+.city-row { display:grid; grid-template-columns:2fr 1fr 1fr auto; gap:.5rem; margin-bottom:.5rem; }
+
+.add-btn, .save-btn, .start-btn {
+  background: var(--brand-600);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-weight: 700;
+  padding: .6rem .9rem;
+}
+
+.chat-container {
+  display: none;
+  flex-direction: column;
+  height: 320px;
+  border: 1px solid #d0d5dd;
+  border-radius: var(--radius);
+  background: #f6f9fc;
+  margin-bottom: 1rem;
+}
+
+.chat-messages { flex:1; overflow:auto; padding:.75rem; white-space:pre-wrap; }
+
+.chat-input { display:flex; gap:.5rem; padding:.5rem; border-top:1px solid #d0d5dd; background:#fff; }
+.chat-input input { flex:1; padding:.6rem; border:1px solid #d0d5dd; border-radius:var(--radius); }
+
+.toolbar { display:grid; grid-template-columns:repeat(5,1fr); gap:.5rem; margin-top:1rem; }
+.toolbar button { padding:.6rem; border:1px solid #d0d5dd; background:#fff; color:var(--brand-600); border-radius:var(--radius); cursor:pointer; }
+.toolbar button:hover { background:var(--brand-500); color:#fff; }
+
+.loader { display:none; position:fixed; inset:0; background:rgba(255,255,255,.7); backdrop-filter:blur(3px); align-items:center; justify-content:center; z-index:99999; }
+.loader .spinner { border:4px solid #e5e7eb; border-top:4px solid var(--brand-500); border-radius:50%; width:45px; height:45px; animation:spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
