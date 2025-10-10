@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ITravelByMyOwn — Planner</title>
+  <link rel="stylesheet" href="/planner.css">
+</head>
+<body>
+  <div class="loader" id="loader"><div class="spinner"></div></div>
+  <div class="top-bar"><div class="container"><strong>ITravelByMyOwn — Planner</strong></div></div>
+
+  <div class="container" id="planner-app">
+    <div id="planner-grid">
+      <aside class="sidebar">
+        <h2>Planificación</h2>
+        <div id="cities-container"></div>
+        <button id="add-city" class="add-btn">+ Ciudad</button>
+        <button id="save-destinations" class="save-btn" disabled>Guardar destinos</button>
+
+        <h3>Viajeros</h3>
+        <label>Adultos <input id="p-adults" type="number" min="0" value="2"></label>
+        <label>Niños <input id="p-children" type="number" min="0" value="0"></label>
+
+        <h3>Presupuesto</h3>
+        <label>Monto <input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
+        <label>Moneda
+          <select id="currency">
+            <option value="USD" selected>USD</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+            <option value="CRC">CRC</option>
+          </select>
+        </label>
+      </aside>
+
+      <main class="main">
+        <h2>Chat & Itinerario</h2>
+        <button id="start-planning" class="start-btn" disabled>Iniciar</button>
+        <div id="chat" class="chat-container">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input">
+            <input id="intake" placeholder="Escribe tu mensaje...">
+            <button id="send-btn">Enviar</button>
+          </div>
+        </div>
+        <div id="output">
+          <div id="city-tabs"></div>
+          <p id="itinerary-intro">Tu itinerario aparecerá aquí.</p>
+          <div id="itinerary-container"></div>
+        </div>
+
+        <div class="toolbar">
+          <button>PDF</button>
+          <button>Email</button>
+          <button>Mapas</button>
+          <button>Clima</button>
+          <button>Restaurantes</button>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script defer src="/planner.js"></script>
+</body>
+</html>
