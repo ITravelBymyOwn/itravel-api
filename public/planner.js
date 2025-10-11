@@ -1,10 +1,10 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v12
-   Cambios sobre v11 (manteniendo todo lo demás):
-   - GENERACIÓN: si "Existing" está vacío, fuerza crear desde cero.
-   - 4–6 filas por día (balancea tokens).
-   - Reintento estricto si no hay filas.
-   - Menú y estilos NO tocados aquí (se arreglaron en CSS).
+   ITRAVELBYMYOWN · PLANNER v13
+   - Campos ciudad/país inician VACÍOS.
+   - Itinerarios hasta 20 filas por día.
+   - Prompts flexibles (concierge internacional).
+   - Retry con TODO el contexto.
+   - Mantiene exactamente la estructura de 17 secciones.
 ========================================================= */
 
 /* ================================
@@ -16,15 +16,14 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
-// Estado principal
-let savedDestinations = []; // [{ city, country, days, baseDate }... + perDay]
+let savedDestinations = []; // [{ city, country, days, baseDate, perDay:[{day,start,end}]}]
 let itineraries = {};       // itineraries[city] = { byDay:{1:[rows],...}, currentDay:1, baseDate:'DD/MM/YYYY' }
-let cityMeta = {};          // cityMeta[city] = { baseDate, start, end, hotel:'', perDay:[{day,start,end}] }
+let cityMeta = {};          // cityMeta[city] = { baseDate, start, end, hotel, perDay:[{day,start,end}] }
 let session = [];
 let activeCity = null;
 let planningStarted = false;
-let metaProgressIndex = 0;
-let collectingHotels = false;
+let metaProgressIndex = 0;    // índice ciudad para pedir hotel
+let collectingHotels = false; // bandera de la fase de hospedaje
 let isItineraryLocked = false;
 
 /* ================================
@@ -32,9 +31,9 @@ let isItineraryLocked = false;
 =================================== */
 const tone = {
   es: {
-    hi: '¡Bienvenido! 👋 Soy tu concierge de viajes personal. Te guiaré ciudad por ciudad.',
-    askHotel: (city)=>`¿En qué hotel/zona te vas a hospedar en <strong>${city}</strong>?`,
-    smallNote: 'Si aún no lo tienes, escribe <em>pendiente</em>. Acepto nombre exacto, dirección, coordenadas o enlace de Google Maps. Más tarde te sugeriré opciones y podremos ajustar.',
+    hi: '¡Hola! 👋 Soy tu concierge de viajes internacional. Planeo como en una conversación real, al estilo ChatGPT.',
+    askHotel: (city)=>`¿En qué hotel o zona te vas a hospedar en <strong>${city}</strong>?`,
+    smallNote: 'Si aún no lo tienes, escribe <em>pendiente</em>. Acepto nombre, dirección, coordenadas o enlace de Google Maps.',
     confirmAll: '✨ Perfecto. Ya tengo lo necesario. Generando itinerarios…',
     doneAll: '🎉 Todos los itinerarios fueron generados. ¿Quieres revisarlos o ajustar alguno?',
     fail: '⚠️ No se pudo contactar con el asistente.'
@@ -129,8 +128,8 @@ function addCityRow(pref={city:'',country:'',days:1,baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
-    <label>Ciudad<input class="city" placeholder="Barcelona" value="${pref.city||''}"></label>
-    <label>País<input class="country" placeholder="España" value="${pref.country||''}"></label>
+    <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
+    <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
     <label>Días<input class="days" type="number" min="1" value="${pref.days||1}"></label>
     <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}"></label>
     <button class="remove" type="button">✕</button>
@@ -176,6 +175,7 @@ function saveDestinations(){
 
   savedDestinations = list;
 
+  // Inicializa / actualiza estructuras por ciudad
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', perDay: perDay||[] };
@@ -188,6 +188,7 @@ function saveDestinations(){
     }
   });
 
+  // Elimina ciudades borradas
   Object.keys(itineraries).forEach(c=>{
     if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c];
   });
@@ -286,6 +287,7 @@ function renderCityItinerary(city){
     sections.push(sec);
   });
 
+  // Paginador
   const pager = document.createElement('div');
   pager.className = 'pager';
   const prev = document.createElement('button'); prev.textContent = '«';
@@ -345,23 +347,23 @@ function getFrontendSnapshot(){
 }
 function buildIntake(){
   const pax = [
-    ['adults','#p-adults'],
-    ['young','#p-young'],
-    ['children','#p-children'],
-    ['infants','#p-infants'],
-    ['seniors','#p-seniors']
+    ['adultos','#p-adults'],
+    ['jóvenes','#p-young'],
+    ['niños','#p-children'],
+    ['bebés','#p-infants'],
+    ['mayores','#p-seniors']
   ].map(([k,id])=>`${k}:${qs(id).value||0}`).join(', ');
 
   const list = savedDestinations.map(x=>{
-    const dates = x.baseDate ? `, start=${x.baseDate}` : '';
+    const dates = x.baseDate ? `, inicio=${x.baseDate}` : '';
     return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
   }).join(' | ');
 
   return [
-    `Destinations: ${list}`,
-    `Travelers: ${pax}`,
-    `Special conditions: ${(qs('#special-conditions').value||'').trim()||'N/A'}`,
-    `Existing: ${getFrontendSnapshot()}`
+    `Destinos: ${list}`,
+    `Viajeros: ${pax}`,
+    `Condiciones especiales: ${(qs('#special-conditions').value||'').trim()||'N/A'}`,
+    `Snapshot existente: ${getFrontendSnapshot()}`
   ].join('\n');
 }
 
@@ -369,16 +371,14 @@ function buildIntake(){
    SECCIÓN 10 · Contrato JSON / LLM
 =================================== */
 const FORMAT = `
-Devuelve SOLO JSON válido (sin markdown) en uno de estos:
-A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
-B) {"destination":"City","rows":[{...}],"followup":"Pregunta breve"}
-C) {"rows":[{...}],"followup":"Pregunta breve"}
-D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" o ["HH:MM",...],"end":"HH:MM" o ["HH:MM",...],"hotel":"Texto"},"followup":"Pregunta breve"}
+Devuelve SOLO JSON válido, usando preferiblemente el FORMATO B:
+{"destination":"City","rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"Texto","from":"Texto","to":"Texto","transport":"Texto","duration":"Texto","notes":"Texto"}],"followup":"Texto breve"}
 Reglas:
-- Incluye traslados con transporte y duración (+15% colchón).
+- Hasta 20 filas por día.
+- Incluye traslados (transport y duration con ~15% colchón).
 - Usa start/end por día si están disponibles; si faltan, asume 08:30–18:00.
-- Si falta baseDate, devuelve itinerario sin fechas absolutas.
-- Usa "followup" SOLO cuando realmente requieras datos extra. Aquí solo pediremos hospedaje.
+- Si no hay datos extra, IGUAL GENERA un itinerario razonable (concierge internacional).
+- Nada de markdown.
 `.trim();
 
 /* ================================
@@ -411,15 +411,6 @@ function parseJSON(s){
     const cleaned = s.replace(/^[^\{]+/,'').replace(/[^\}]+$/,'');
     return JSON.parse(cleaned);
   }catch(_){ return null; }
-}
-function extractAllRows(parsed){
-  if(!parsed) return [];
-  if(Array.isArray(parsed.rows)) return parsed.rows;
-  if(parsed.destination && Array.isArray(parsed.rows)) return parsed.rows;
-  if(Array.isArray(parsed.destinations)){
-    return parsed.destinations.flatMap(d=>Array.isArray(d.rows)?d.rows:[]);
-  }
-  return [];
 }
 
 /* ================================
@@ -463,6 +454,7 @@ function upsertCityMeta(meta){
 }
 function applyParsedToState(parsed){
   if(parsed.meta) upsertCityMeta(parsed.meta);
+
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
@@ -481,21 +473,8 @@ function applyParsedToState(parsed){
 }
 
 /* ================================
-   SECCIÓN 13 · Generación por ciudad (v12)
+   SECCIÓN 13 · Generación por ciudad (robust)
 =================================== */
-function makeSkeletonRows(city){
-  const dest = savedDestinations.find(x=>x.city===city);
-  const perDay = (cityMeta[city]?.perDay && cityMeta[city].perDay.length)
-    ? cityMeta[city].perDay
-    : Array.from({length: (dest?.days||1) }, (_,i)=>({day:i+1,start:'08:30',end:'18:00'}));
-  const rows = perDay.map(p=>({
-    day:p.day, start:p.start, end:p.end,
-    activity:'(Propuesta base editable)',
-    from:'', to:'', transport:'', duration:'', notes:''
-  }));
-  pushRows(city, rows, false);
-}
-
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -506,51 +485,54 @@ async function generateCityItinerary(city){
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
+  const startDef = cityMeta[city]?.start || '08:30';
+  const endDef   = cityMeta[city]?.end   || '18:00';
 
   const instructions = `
 ${FORMAT}
-Eres un planificador experto (concierge premium).
-Tu tarea es crear el itinerario COMPLETO para "${city}".
-- Si "Existing" está vacío o sin actividades para "${city}", GENERA el plan desde cero.
-- Responde EXCLUSIVAMENTE en FORMATO B con "destination":"${city}" y "rows":[...].
-- Crea entre 4 y 6 actividades por día (visitas, traslados, paseos, comidas).
-- Incluye traslados (transport, duration con ~15% colchón).
-- Usa estas horas por día si están: ${JSON.stringify(perDay)}; si faltan, asume 08:30–18:00.
+
+Eres un concierge experto en viajes (Barcelona, Madrid, Islandia, Londres, Tromsø y Roma son referencias frecuentes).
+Genera el itinerario SOLO para "${city}" con ${dest.days} día(s).
+- Horarios por día (si faltan, asume ${startDef}–${endDef}):
+${JSON.stringify(perDay)}
 - BaseDate (día 1): ${baseDate||'N/A'}
 - Hotel/Zona: ${hotel||'pendiente'}
-- SIN markdown ni texto fuera del JSON.
 
-Contexto global:
+Contexto global (mantén y ajusta):
 ${buildIntake()}
 `.trim();
 
+  // Primer intento
   let text = await callAgent(instructions);
   let parsed = parseJSON(text);
 
-  if(!parsed || extractAllRows(parsed).length===0){
+  // Retry con contexto si no hay filas
+  const noRows = !parsed || (
+    !Array.isArray(parsed.rows) &&
+    !(parsed.destination && Array.isArray(parsed.rows)) &&
+    !(Array.isArray(parsed.destinations) && parsed.destinations.some(d=>Array.isArray(d.rows)&&d.rows.length))
+  );
+
+  if(noRows){
     const retry = `
 ${FORMAT}
-Devuelve SOLO:
-{"destination":"${city}","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"...","from":"","to":"","transport":"","duration":"","notes":""}]}
-Reglas:
-- Cubre todos los días de "${city}" con 4–6 filas por día.
-- Nada de texto adicional.
+Elabora un plan completo de actividades y traslados para "${city}" (${dest.days} día/s).
+AUNQUE FALTE INFORMACIÓN, propón un itinerario realista (máx. 20 filas por día).
+Usa este contexto para guiarte y mantener lo existente:
+${buildIntake()}
 `.trim();
     text = await callAgent(retry);
     parsed = parseJSON(text);
   }
 
-  if(parsed && extractAllRows(parsed).length>0){
+  if(parsed){
     applyParsedToState(parsed);
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
   }else{
-    console.warn('⚠️ No se generó itinerario para', city, parsed);
-    chatMsg(`⚠️ No se pudo generar automáticamente el itinerario para <strong>${city}</strong>. Puedes intentar de nuevo o indicar actividades clave.`, 'ai');
-    makeSkeletonRows(city);
+    chatMsg(`⚠️ No pude interpretar la respuesta para ${city}. Puedes intentar de nuevo o darme más pistas.`, 'ai');
   }
-
-  renderCityTabs();
-  setActiveCity(city);
-  renderCityItinerary(city);
 }
 
 /* ================================
@@ -564,7 +546,7 @@ async function startPlanning(){
   metaProgressIndex = 0;
 
   session = [
-    {role:'system', content:'Eres un concierge de viajes internacional. Respondes solo con JSON válido según el formato indicado.'},
+    {role:'system', content:'Eres un concierge de viajes internacional. Devuelves SOLO JSON de itinerarios según el formato indicado.'},
     {role:'user', content: buildIntake()}
   ];
 
@@ -608,6 +590,7 @@ async function onSend(){
     return;
   }
 
+  // Edición normal (optimiza día visible de la ciudad activa)
   const currentCity = activeCity || savedDestinations[0]?.city;
   const data = itineraries[currentCity];
   if(!currentCity || !data){
@@ -623,14 +606,14 @@ async function onSend(){
 
   const prompt = `
 ${FORMAT}
-El usuario está viendo "${currentCity}", Día ${day}.
+Ciudad activa: "${currentCity}", Día visible: ${day}.
 Actividades del día actual:
 ${dayRows}
 
 Resumen de otros días (no repitas):
 ${allDays}
 
-Interpreta su solicitud y actualiza solo el día ${day}.
+Interpreta la solicitud del usuario y actualiza SOLO el día ${day}.
 Devuelve JSON formato B ("destination":"${currentCity}").
 `.trim();
 
@@ -678,6 +661,7 @@ $chatI.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault();
 $confirmCTA.addEventListener('click', lockItinerary);
 $upsellClose.addEventListener('click', ()=> $upsell.style.display='none');
 
+// Toolbar (bloqueadas si está fijado)
 qs('#btn-pdf').addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email').addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps').addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
@@ -690,4 +674,5 @@ qs('#btn-bathrooms').addEventListener('click', ()=>window.open('https://www.goog
 qs('#btn-lodging').addEventListener('click', ()=>window.open('https://www.booking.com','_blank'));
 qs('#btn-localinfo').addEventListener('click', ()=>window.open('https://www.wikivoyage.org','_blank'));
 
+// Inicial: una fila vacía
 addCityRow();
