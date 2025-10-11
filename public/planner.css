@@ -46,12 +46,13 @@ body{
 }
 .topbar .lang a.active{color:var(--brand-600)}
 
-/* ==================== GRID ==================== */
+/* ==================== GRID (más espacio para sidebar) ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns:430px 1fr;
-  gap:1.25rem;
-  padding:1rem 1.25rem;
+  /* Sidebar flexible: mínimo 480px, crece con viewport, tope 620px */
+  grid-template-columns:clamp(480px, 30vw, 620px) 1fr;
+  gap:1.5rem;
+  padding:1rem 1.5rem;
   max-width:1600px;
   margin:0 auto;
 }
@@ -65,7 +66,7 @@ body{
   border:1px solid #e5e7eb;
   border-radius:var(--radius);
   box-shadow:var(--shadow);
-  padding:1rem;
+  padding:1.1rem;
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
@@ -85,15 +86,14 @@ body{
 
 .city-row{
   display:grid;
-  grid-template-columns:1fr 1fr .8fr 1fr auto;
-  gap:.4rem;
+  /* columnas más respiradas dentro de la sidebar más ancha */
+  grid-template-columns:1.1fr .9fr .7fr 1fr auto;
+  gap:.5rem;
   align-items:end;
   margin-bottom:.5rem;
   animation:fadeIn .4s ease;
 }
-.city-row input{
-  width:100%;
-}
+.city-row input{width:100%}
 .city-row .remove{
   background:#ef4444;
   color:#fff;
@@ -150,9 +150,7 @@ body{
   border-color:var(--brand-600);
   font-weight:700;
 }
-.btn.primary:hover{
-  filter:brightness(.95);
-}
+.btn.primary:hover{ filter:brightness(.95) }
 .btn.ghost{
   background:#f0fdf4;
   border:1px dashed var(--brand-600);
@@ -172,7 +170,7 @@ body{
   background:var(--chat-bg);
   border-radius:var(--radius);
   margin:.8rem 0 1rem 0;
-  max-width:950px;
+  max-width:1100px;
   height:380px;
   display:flex;
   flex-direction:column;
@@ -290,7 +288,7 @@ table.itinerary th{
   grid-template-columns:repeat(5,1fr);
   gap:.5rem;
   margin-top:.9rem;
-  max-width:950px;
+  max-width:1100px;
 }
 @media (max-width:960px){
   .toolbar{grid-template-columns:repeat(2,1fr)}
