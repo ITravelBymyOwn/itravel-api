@@ -2,79 +2,145 @@
 <html lang="es">
 <head>
   <meta charset="utf-8"/>
-  <title>Planner</title>
-  <meta content="Planner" property="og:title"/>
-  <meta content="Planner" property="twitter:title"/>
+  <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <meta content="Webflow" name="generator"/>
-
-  <link href="planner.css" rel="stylesheet" type="text/css"/>
+  <link href="planner.css" rel="stylesheet" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
+  <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
   <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
-  <script>
-    WebFont.load({ google:{ families:["Inter:400,600,700"] }});
-  </script>
-  <script>
-    !function(o,c){var n=c.documentElement,t=" w-mod-";
-    n.className+=t+"js",("ontouchstart"in o||o.DocumentTouch&&c instanceof DocumentTouch)&&(n.className+=t+"touch")
-    }(window,document);
-  </script>
-  <link href="https://cdn.prod.website-files.com/img/favicon.ico" rel="shortcut icon" type="image/x-icon"/>
-  <link href="https://cdn.prod.website-files.com/img/webclip.png" rel="apple-touch-icon"/>
+  <script>WebFont.load({ google:{ families:["Inter:400,600,700"] }});</script>
 </head>
 <body>
-
-<!-- ====== UI ====== -->
-<div class="lang-floating">
-  <a href="#">ES</a> | <a href="#">EN</a> | <a href="#">FR</a>
-</div>
-<div class="top-bar">
-  <a href="#">ITravelByMyOwn Planner</a>
-</div>
-
-<div id="planner-grid">
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <h2>Planificador</h2>
-    <h3>Destinos</h3>
-    <div id="city-list"></div>
-    <button class="add-city" id="add-city-btn">+ Agregar ciudad</button>
-    <button class="save-dest" id="save-destinations">Guardar destinos</button>
-  </aside>
-
-  <!-- Main -->
-  <main class="main">
-    <h2>Itinerario</h2>
-    <button id="start-planning" disabled>Iniciar planificación</button>
-
-    <div class="chat-container" id="chat-container">
-      <div class="chat-messages" id="chat-messages"></div>
-      <div class="chat-input">
-        <input id="chat-input" type="text" placeholder="Escribe tu mensaje..."/>
-        <button id="send-btn">Enviar</button>
-      </div>
+  <div class="topbar">
+    <div class="brand">ITravelByMyOwn Planner</div>
+    <div class="lang">
+      <a href="#" data-lang="es" class="active">ES</a>
+      <a href="#" data-lang="en">EN</a>
+      <a href="#" data-lang="fr">FR</a>
+      <a href="#" data-lang="pt">PT</a>
     </div>
+  </div>
 
-    <div class="city-tabs" id="city-tabs"></div>
-    <div id="output"></div>
+  <div id="planner-grid">
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar">
+      <h2>Planificador</h2>
 
-    <div class="toolbar" id="toolbar">
-      <button id="export-pdf">Exportar PDF</button>
-      <button id="export-email">Enviar por Email</button>
-      <button id="edit-itinerary">Editar</button>
-      <button id="clear-itinerary">Limpiar</button>
-      <button id="monetization-upsell" style="display:none;">Desbloquear Premium</button>
+      <section class="box">
+        <h3>Destinos</h3>
+        <div id="city-list"></div>
+        <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+        <button class="btn primary" id="save-destinations">Guardar destinos</button>
+        <button class="btn warn" id="reset-planner">Reiniciar</button>
+        <p class="hint">Agrega una o varias ciudades, días de estancia y (opcional) la fecha de inicio en formato <strong>DD/MM/AAAA</strong>.</p>
+      </section>
+
+      <section class="box">
+        <h3>Viajeros</h3>
+        <div class="grid-2">
+          <label>Adultos
+            <input id="p-adults" type="number" min="0" value="2">
+          </label>
+          <label>Jóvenes
+            <input id="p-young" type="number" min="0" value="0">
+          </label>
+          <label>Niños
+            <input id="p-children" type="number" min="0" value="0">
+          </label>
+          <label>Bebés
+            <input id="p-infants" type="number" min="0" value="0">
+          </label>
+          <label>Mayores
+            <input id="p-seniors" type="number" min="0" value="0">
+          </label>
+        </div>
+      </section>
+
+      <section class="box">
+        <h3>Presupuesto total</h3>
+        <div class="grid-2">
+          <label>Monto
+            <input id="budget" type="number" min="0" placeholder="ej. 1500">
+          </label>
+          <label>Moneda
+            <select id="currency">
+              <option value="USD" selected>$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="GBP">£ GBP</option>
+              <option value="CRC">₡ CRC</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <!-- MÓDULOS DEL MENÚ LATERAL -->
+      <section class="box">
+        <h3>Módulos rápidos</h3>
+        <div class="mods">
+          <button class="chip" id="mod-weather">Clima</button>
+          <button class="chip" id="mod-clothing">Ropa</button>
+          <button class="chip" id="mod-restaurants">Restaurantes</button>
+          <button class="chip" id="mod-gas">Gasolineras</button>
+          <button class="chip" id="mod-bathrooms">Baños</button>
+          <button class="chip" id="mod-lodging">Hospedaje</button>
+          <button class="chip" id="mod-transport">Transporte</button>
+          <button class="chip" id="mod-local">Info Local</button>
+        </div>
+        <p class="hint">Estos módulos abren información contextual (mapas/links/IA) de apoyo al itinerario.</p>
+      </section>
+    </aside>
+
+    <!-- ===== MAIN ===== -->
+    <main class="main">
+      <section class="box">
+        <h2>Itinerario</h2>
+        <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+
+        <div id="chat-container" class="chat" style="display:none;">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input">
+            <input id="chat-input" type="text" placeholder="Escribe tu mensaje...">
+            <button id="send-btn" class="btn primary">Enviar</button>
+          </div>
+        </div>
+
+        <div class="city-tabs" id="city-tabs"></div>
+        <p id="itinerary-intro" class="muted">Tu itinerario se mostrará aquí cuando esté listo.</p>
+        <div id="itinerary-container"></div>
+
+        <div class="toolbar">
+          <button class="btn" id="btn-pdf">Exportar PDF</button>
+          <button class="btn" id="btn-email">Enviar por Email</button>
+          <button class="btn" id="btn-maps">Mapas</button>
+          <button class="btn" id="btn-transport">Transporte</button>
+          <button class="btn" id="btn-weather">Clima</button>
+          <button class="btn" id="btn-clothing">Ropa</button>
+          <button class="btn" id="btn-restaurants">Restaurantes</button>
+          <button class="btn" id="btn-gas">Gasolineras</button>
+          <button class="btn" id="btn-bathrooms">Baños</button>
+          <button class="btn" id="btn-lodging">Hospedaje</button>
+          <button class="btn" id="btn-localinfo">Info Local</button>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <button id="confirm-itinerary" class="floating-cta">Elijo este itinerario</button>
+
+  <footer class="footer">
+    © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
+  </footer>
+
+  <div id="monetization-upsell" class="upsell" style="display:none;">
+    <div class="upsell-card">
+      <h3>Desbloquea edición y exportación</h3>
+      <p>Este itinerario está fijado. Para editar y usar exportaciones, mejora a <strong>Premium</strong>.</p>
+      <button class="btn primary" id="upsell-cta">Quiero Premium</button>
+      <button class="btn ghost" id="upsell-close">Cerrar</button>
     </div>
+  </div>
 
-    <button id="confirm-itinerary">Elijo este itinerario</button>
-  </main>
-</div>
-
-<footer>
-  © 2025 ITravelByMyOwn · <a href="#">Términos</a> · <a href="#">Privacidad</a>
-</footer>
-
-<script src="planner.js"></script>
+  <script src="planner.js"></script>
 </body>
 </html>
