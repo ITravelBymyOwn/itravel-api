@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v6
-   (Basado en v5: se respeta toda la lógica, solo correcciones UX y payloads)
+   ITRAVELBYMYOWN · PLANNER v7
+   (Basado en v6: mejoras de layout + mapeo robusto de ciudad para cargar tablas)
    ========================================================= */
 
 /* ================================
@@ -11,10 +11,10 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 
-// Estado principal (idéntico a v5, con pequeños campos extra)
-let savedDestinations = []; // [{ city, country, days, baseDate }]
+// Estado principal
+let savedDestinations = []; // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 let itineraries = {};       // itineraries[city] = { byDay:{1:[rows],...}, currentDay:1, baseDate:'DD/MM/YYYY' }
-let cityMeta = {};          // cityMeta[city] = { baseDate, start: 'HH:MM' | ['...'], end: 'HH:MM' | ['...'], hotel: '', perDay:[{start,end}] }
+let cityMeta = {};          // cityMeta[city] = { baseDate, start, end, hotel, perDay:[{day,start,end}] }
 let session = [];
 let activeCity = null;
 let planningStarted = false;
@@ -176,6 +176,7 @@ function saveDestinations(){
 
   // Estado global
   savedDestinations = list;
+
   // Inicializa estructuras por ciudad
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
@@ -188,7 +189,8 @@ function saveDestinations(){
       if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
     }
   });
-  // Elimina ciud. borradas
+
+  // Elimina ciudades borradas
   Object.keys(itineraries).forEach(c=>{
     if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c];
   });
@@ -198,7 +200,6 @@ function saveDestinations(){
 
   renderCityTabs();
   $start.disabled = savedDestinations.length===0;
-  // (v6) No mostramos "destinos guardados…" en chat.
 }
 
 /* ================================
@@ -400,7 +401,7 @@ async function callAgent(text){
     return data?.text || '';
   }catch(e){
     console.error(e);
-    return `{"followup":"${tone.fail}"}`
+    return `{"followup":"${tone.fail}"}`;
   }
 }
 function parseJSON(s){
@@ -418,15 +419,33 @@ function parseJSON(s){
 
 /* ================================
    SECCIÓN 12 · Apply / Merge
+   (con mapeo robusto de nombre de ciudad)
 =================================== */
+function resolveCityName(raw){
+  // Normaliza lo que venga del modelo y lo asocia a un destino guardado
+  if(!raw) return activeCity || savedDestinations[0]?.city || null;
+  const norm = String(raw).toLowerCase().split(/[,(]/)[0].trim(); // "Barcelona, Spain" -> "barcelona"
+  // 1) match exacto por ciudad
+  let found = savedDestinations.find(x=>x.city.toLowerCase()===norm);
+  if(found) return found.city;
+  // 2) contiene / incluido
+  found = savedDestinations.find(x=>norm.includes(x.city.toLowerCase()) || x.city.toLowerCase().includes(norm));
+  if(found) return found.city;
+  // 3) fallback: activa actual o primera
+  return activeCity || savedDestinations[0]?.city || raw;
+}
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
   const has = arr.find(x=>key(x)===key(row));
   if(!has) arr.push(row);
 }
-function pushRows(city, rows, replace=false){
+function pushRows(rawName, rows, replace=false){
+  const city = resolveCityName(rawName);
+  if(!city) return;
+
   if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
   if(replace) itineraries[city].byDay = {};
+
   rows.forEach(r=>{
     const d = Math.max(1, parseInt(r.day||1,10));
     if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
@@ -446,7 +465,7 @@ function pushRows(city, rows, replace=false){
   ensureDays(city);
 }
 function upsertCityMeta(meta){
-  const name = meta.city || activeCity || savedDestinations[0]?.city;
+  const name = resolveCityName(meta.city || activeCity || savedDestinations[0]?.city);
   if(!name) return;
   if(!cityMeta[name]) cityMeta[name] = { baseDate:null, start:null, end:null, hotel:'', perDay:[] };
   if(meta.baseDate) cityMeta[name].baseDate = meta.baseDate;
@@ -457,25 +476,29 @@ function upsertCityMeta(meta){
 }
 function applyParsedToState(parsed){
   if(parsed.meta) upsertCityMeta(parsed.meta);
+
+  // A) {"destinations":[{name|destination|city, rows:[]}, ...]}
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
-      const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
+      const name = d.name || d.destination || d.city || d.meta?.city || activeCity || savedDestinations[0]?.city;
       pushRows(name, d.rows||[], Boolean(d.replace));
     });
     return;
   }
-  if(parsed.destination && Array.isArray(parsed.rows)){
-    pushRows(parsed.destination, parsed.rows, Boolean(parsed.replace));
+  // B) {"destination":"City","rows":[...]}
+  if((parsed.destination || parsed.city) && Array.isArray(parsed.rows)){
+    pushRows(parsed.destination || parsed.city, parsed.rows, Boolean(parsed.replace));
     return;
   }
+  // C) {"rows":[...]}  (cae en ciudad activa)
   if(Array.isArray(parsed.rows)){
-    const city = activeCity || savedDestinations[0]?.city;
-    pushRows(city, parsed.rows, Boolean(parsed.replace));
+    const name = activeCity || savedDestinations[0]?.city;
+    pushRows(name, parsed.rows, Boolean(parsed.replace));
   }
 }
 
 /* ================================
-   SECCIÓN 13 · Generación por ciudad (v6)
+   SECCIÓN 13 · Generación por ciudad (v7)
 =================================== */
 async function generateCityItinerary(city){
   // Prepara meta a partir de sidebar; default 08:30–18:00 si falta
@@ -531,7 +554,7 @@ async function startPlanning(){
     {role:'user', content: buildIntake()}
   ];
 
-  // Mensaje de bienvenida (sin la línea redundante de v5)
+  // Bienvenida
   chatMsg(`${tone.hi}`);
 
   // Comenzamos a pedir hotel por ciudad
