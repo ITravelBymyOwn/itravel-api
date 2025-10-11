@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <link href="planner.css" rel="stylesheet" />
+  <link rel="stylesheet" href="planner.css?v=3" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
@@ -27,42 +27,40 @@
     <aside class="sidebar">
       <h2>Planificador</h2>
 
+      <!-- Destinos -->
       <section class="box">
         <h3>Destinos</h3>
         <div id="city-list"></div>
         <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
         <button class="btn primary" id="save-destinations">Guardar destinos</button>
         <button class="btn warn" id="reset-planner">Reiniciar</button>
-        <p class="hint">Agrega una o varias ciudades, días de estancia y (opcional) la fecha de inicio en formato <strong>DD/MM/AAAA</strong>.</p>
+        <p class="hint">Agrega ciudad, país, días de estancia y (opcional) la fecha de inicio. Escribe <strong>20102025</strong> para que se formatee automáticamente a 20/10/2025.</p>
       </section>
 
+      <!-- Restricciones -->
+      <section class="box special-conditions">
+        <h3>Restricciones / Condiciones especiales</h3>
+        <textarea id="special-conditions" placeholder="Ej: Movilidad reducida, dieta especial, enfermedad crónica..."></textarea>
+        <p class="hint">Esta información se enviará al agente para adaptar el itinerario a tus necesidades.</p>
+      </section>
+
+      <!-- Viajeros -->
       <section class="box">
         <h3>Viajeros</h3>
         <div class="grid-2">
-          <label>Adultos
-            <input id="p-adults" type="number" min="0" value="2">
-          </label>
-          <label>Jóvenes
-            <input id="p-young" type="number" min="0" value="0">
-          </label>
-          <label>Niños
-            <input id="p-children" type="number" min="0" value="0">
-          </label>
-          <label>Bebés
-            <input id="p-infants" type="number" min="0" value="0">
-          </label>
-          <label>Mayores
-            <input id="p-seniors" type="number" min="0" value="0">
-          </label>
+          <label>Adultos <input id="p-adults" type="number" min="0" value="2"></label>
+          <label>Jóvenes <input id="p-young" type="number" min="0" value="0"></label>
+          <label>Niños <input id="p-children" type="number" min="0" value="0"></label>
+          <label>Bebés <input id="p-infants" type="number" min="0" value="0"></label>
+          <label>Mayores <input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
 
+      <!-- Presupuesto -->
       <section class="box">
         <h3>Presupuesto total</h3>
         <div class="grid-2">
-          <label>Monto
-            <input id="budget" type="number" min="0" placeholder="ej. 1500">
-          </label>
+          <label>Monto <input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
           <label>Moneda
             <select id="currency">
               <option value="USD" selected>$ USD</option>
@@ -72,22 +70,6 @@
             </select>
           </label>
         </div>
-      </section>
-
-      <!-- MÓDULOS DEL MENÚ LATERAL -->
-      <section class="box">
-        <h3>Módulos rápidos</h3>
-        <div class="mods">
-          <button class="chip" id="mod-weather">Clima</button>
-          <button class="chip" id="mod-clothing">Ropa</button>
-          <button class="chip" id="mod-restaurants">Restaurantes</button>
-          <button class="chip" id="mod-gas">Gasolineras</button>
-          <button class="chip" id="mod-bathrooms">Baños</button>
-          <button class="chip" id="mod-lodging">Hospedaje</button>
-          <button class="chip" id="mod-transport">Transporte</button>
-          <button class="chip" id="mod-local">Info Local</button>
-        </div>
-        <p class="hint">Estos módulos abren información contextual (mapas/links/IA) de apoyo al itinerario.</p>
       </section>
     </aside>
 
@@ -141,6 +123,6 @@
     </div>
   </div>
 
-  <script src="planner.js"></script>
+  <script src="planner.js?v=3"></script>
 </body>
 </html>
