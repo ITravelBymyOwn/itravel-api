@@ -49,7 +49,6 @@ body{
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  /* v9: un poco más de ancho para la sidebar */
   grid-template-columns:clamp(560px, 36vw, 680px) 1fr;
   gap:1.5rem;
   padding:1rem 1.5rem;
@@ -66,7 +65,7 @@ body{
   border:1px solid #e5e7eb;
   border-radius:var(--radius);
   box-shadow:var(--shadow);
-  padding:1.2rem; /* v9: un pelín más de respiración */
+  padding:1.2rem;
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
@@ -84,7 +83,7 @@ body{
   margin-top:.5rem;
 }
 
-/* v9: inputs del sidebar más cómodos (sin romper estructura) */
+/* Inputs del sidebar */
 .sidebar .box label{
   display:flex;
   flex-direction:column;
@@ -103,15 +102,15 @@ body{
 /* ==================== FILAS DE CIUDADES ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .8fr 1fr auto; /* v9: un poco más de ancho para "Días" */
-  gap:.9rem;                                      /* v9: más espacio entre campos */
+  /* v10: equilibrio de anchos — Ciudad más compacta, País y Fecha con más espacio */
+  grid-template-columns:1.05fr 1.05fr .7fr 1.1fr auto;
+  gap:.9rem;
   align-items:end;
-  margin-bottom:.8rem;                            /* v9: más respiración entre filas */
+  margin-bottom:.8rem;
   animation:fadeIn .4s ease;
 }
-.city-row input{
-  width:100%;
-}
+.city-row input{ width:100%; }
+.city-row .baseDate{ min-width: 160px; } /* v10: fecha un poco más amplia */
 .city-row .remove{
   background:#ef4444;
   color:#fff;
@@ -125,13 +124,13 @@ body{
 .hours-block{
   display:flex;
   flex-direction:column;
-  gap:.5rem;               /* v9: un pelín más */
-  margin-top:.5rem;        /* v9 */
+  gap:.5rem;
+  margin-top:.5rem;
 }
 .hours-day{
   display:grid;
   grid-template-columns:.8fr 1fr 1fr;
-  gap:.5rem;               /* v9 */
+  gap:.5rem;
   align-items:center;
   font-size:.9rem;
 }
@@ -169,9 +168,7 @@ body{
   border-color:var(--brand-600);
   font-weight:700;
 }
-.btn.primary:hover{
-  filter:brightness(.95);
-}
+.btn.primary:hover{ filter:brightness(.95); }
 .btn.ghost{
   background:#f0fdf4;
   border:1px dashed var(--brand-600);
@@ -191,7 +188,7 @@ body{
   background:var(--chat-bg);
   border-radius:var(--radius);
   margin:.8rem 0 1rem 0;
-  max-width:1100px; /* v8 ya ampliado; lo mantenemos */
+  max-width:1100px;
   height:380px;
   display:flex;
   flex-direction:column;
@@ -309,18 +306,17 @@ table.itinerary th{
   grid-template-columns:repeat(5,1fr);
   gap:.5rem;
   margin-top:.9rem;
-  max-width:1100px; /* v8 */
+  max-width:1100px;
 }
 @media (max-width:960px){
   .toolbar{grid-template-columns:repeat(2,1fr)}
 }
 
-/* ==================== VIAJEROS (v9: organizado) ==================== */
-/* HTML ya trae los rangos; aquí solo alineamos y ordenamos visualmente */
+/* ==================== VIAJEROS ==================== */
 .grid-2{
   display:grid;
   grid-template-columns:1fr 1fr;
-  gap:.6rem .8rem; /* v9: mejor ritmo */
+  gap:.6rem .8rem;
 }
 .grid-2 label{
   display:flex;
