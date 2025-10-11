@@ -187,4 +187,8 @@ table.itinerary th{background:#f1f5f9}
 
 footer{background:#fff;padding:1.25rem;text-align:center;border-top:1px solid #e5e7eb;color:var(--muted);font-size:.82rem;margin-top:2rem}
 footer a{color:var(--brand-600);text-decoration:none}
-</style>
+/* ==================== ANIMACIONES ==================== */
+@keyframes fadeIn{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:translateY(0)}
+}
