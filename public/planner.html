@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <link rel="stylesheet" href="planner.css?v=4" />
+  <link rel="stylesheet" href="planner.css?v=5" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
@@ -27,38 +27,36 @@
     <aside class="sidebar">
       <h2>Planificador</h2>
 
-      <!-- Destinos -->
       <section class="box">
         <h3>Destinos</h3>
         <div id="city-list"></div>
-        <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
-        <button class="btn primary" id="save-destinations">Guardar destinos</button>
-        <button class="btn warn" id="reset-planner">Reiniciar</button>
+        <div class="row-actions">
+          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+          <button class="btn warn" id="reset-planner">Reiniciar</button>
+        </div>
+        <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
       </section>
 
-      <!-- Restricciones -->
       <section class="box special-conditions">
         <h3>Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
+        <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta (sin gluten), marcapasos, alergias..."></textarea>
       </section>
 
-      <!-- Viajeros -->
       <section class="box">
         <h3>Viajeros</h3>
         <div class="grid-2">
-          <label>Adultos <input id="p-adults" type="number" min="0" value="2"></label>
-          <label>Jóvenes <input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños <input id="p-children" type="number" min="0" value="0"></label>
-          <label>Bebés <input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores <input id="p-seniors" type="number" min="0" value="0"></label>
+          <label>Adultos<input id="p-adults" type="number" min="0" value="2"></label>
+          <label>Jóvenes<input id="p-young" type="number" min="0" value="0"></label>
+          <label>Niños<input id="p-children" type="number" min="0" value="0"></label>
+          <label>Bebés<input id="p-infants" type="number" min="0" value="0"></label>
+          <label>Mayores<input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
 
-      <!-- Presupuesto -->
       <section class="box">
         <h3>Presupuesto total</h3>
         <div class="grid-2">
-          <label>Monto <input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
+          <label>Monto<input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
           <label>Moneda
             <select id="currency">
               <option value="USD" selected>$ USD</option>
@@ -121,6 +119,6 @@
     </div>
   </div>
 
-  <script src="planner.js?v=4"></script>
+  <script src="planner.js?v=5"></script>
 </body>
 </html>
