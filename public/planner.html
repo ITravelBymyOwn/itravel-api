@@ -1,20 +1,19 @@
+<!-- v15 - trip-planner.html -->
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8" />
   <title>ITravelByMyOwn Planner</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="app-header">
-    <h1 class="brand">ITravelByMyOwn Planner</h1>
-  </header>
+  <header class="brand">ITravelByMyOwn Planner</header>
 
   <main class="layout">
-    <!-- ================= SIDEBAR ================= -->
+    <!-- Sidebar (Planner) -->
     <aside class="sidebar">
-      <section class="card">
+      <section class="panel">
         <h2>Planificador</h2>
 
         <!-- Destinos -->
@@ -22,29 +21,27 @@
           <h3>Destinos</h3>
 
           <div id="cities-container" class="cities-grid">
-            <!-- Se agregan filas dinámicamente -->
+            <!-- Filas dinámicas de ciudades -->
           </div>
 
           <div class="row gap">
-            <button id="add-city" class="btn ghost" type="button">+ Agregar ciudad</button>
-            <button id="reset-cities" class="btn ghost" type="button" onclick="location.reload()">Reiniciar</button>
+            <button id="add-city" class="btn ghost">+ Agregar ciudad</button>
+            <button id="reset-cities" class="btn ghost" type="button">Reiniciar</button>
           </div>
 
-          <div class="row">
-            <button id="save-destinations" class="btn primary" disabled>Guardar destinos</button>
-          </div>
+          <button id="save-destinations" class="btn primary wide" disabled>Guardar destinos</button>
         </div>
 
         <!-- Restricciones -->
         <div class="block">
           <h3>Restricciones / Condiciones especiales</h3>
-          <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
+          <textarea id="special-notes" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
         </div>
 
         <!-- Viajeros -->
         <div class="block">
           <h3>Viajeros</h3>
-          <div class="travelers-grid">
+          <div class="trav-grid">
             <label>Adultos (18–64)
               <input id="p-adults" type="number" min="0" value="1" />
             </label>
@@ -66,64 +63,63 @@
         <!-- Presupuesto -->
         <div class="block">
           <h3>Presupuesto total</h3>
-          <div class="row">
-            <label class="grow">Monto
-              <input id="budget" type="number" min="0" placeholder="ej. 1500" />
-            </label>
-            <label>Moneda
-              <select id="currency">
-                <option value="USD">USD</option>
-                <option value="EUR">EUR</option>
-                <option value="MXN">MXN</option>
-              </select>
-            </label>
+          <div class="grid-2">
+            <input id="budget" type="number" min="0" placeholder="ej. 1500" />
+            <select id="currency">
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+              <option value="MXN">MXN</option>
+            </select>
           </div>
         </div>
 
-        <!-- Inputs opcionales para cuando el usuario YA TIENE hospedaje -->
+        <!-- Hospedaje -->
         <div class="block">
           <h3>Hospedaje (opcional si ya lo tienes)</h3>
           <input id="stay-name" type="text" placeholder="Nombre del hotel / alojamiento" />
-          <input id="stay-address" type="text" placeholder="Dirección o enlace (Google Maps), opcional" />
-          <p class="hint">Si no lo tienes, el agente te sugerirá la mejor zona para hospedarte.</p>
+          <input id="stay-address" type="text" placeholder="Dirección o enlace (Google / Maps)" />
+          <p class="muted small">
+            Si no lo tienes, el agente te sugerirá la mejor zona para hospedarte.
+          </p>
         </div>
       </section>
     </aside>
 
-    <!-- ================= MAIN ================= -->
+    <!-- Itinerario / Chat -->
     <section class="content">
-
-      <div class="card">
-        <div class="row space-between">
-          <h2>Itinerario</h2>
-          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
-        </div>
+      <div class="panel">
+        <h2>Itinerario</h2>
 
         <!-- Chat -->
         <div id="chat-container" class="chat">
           <div id="chat-messages" class="chat-messages"></div>
 
-          <div class="chat-input">
-            <input id="intake" type="text" placeholder="Escribe tu mensaje..." />
-            <button id="send-btn" class="btn">Enviar</button>
+          <div class="chat-controls">
+            <button id="start-planning" class="btn success">Iniciar planificación</button>
+            <div class="chat-input">
+              <input id="intake" type="text" placeholder="Escribe tu mensaje..." />
+              <button id="send-btn" class="btn">Enviar</button>
+            </div>
           </div>
         </div>
 
         <!-- Tabs de ciudades -->
         <div id="city-tabs" class="tabs"></div>
 
-        <!-- Intro / contenedor itinerario -->
+        <!-- Intro vacío / contenedor de itinerario -->
         <div id="itinerary-intro" class="intro">
-          <p>Guarda tus destinos y pulsa <strong>Iniciar planificación</strong>. El asistente te pedirá el hospedaje (o te sugerirá una zona) y generará los itinerarios por día.</p>
+          Guarda tus destinos y pulsa <b>Iniciar planificación</b>. El asistente te pedirá el hospedaje
+          (o te sugerirá una zona) y generará los itinerarios por día.
         </div>
 
         <div id="itinerary-container"></div>
 
-        <!-- Barra de acciones inferior -->
-        <div class="toolbar">
+        <!-- Menú inferior (acciones) -->
+        <div class="bar-actions">
           <button class="btn ghost">Exportar PDF</button>
           <button class="btn ghost">Enviar por Email</button>
           <button class="btn ghost">Mapas</button>
+          <button class="btn ghost">Transporte</button>
           <button class="btn ghost">Ropa</button>
           <button class="btn ghost">Restaurantes</button>
           <button class="btn ghost">Gasolineras</button>
@@ -133,14 +129,11 @@
           <button class="btn ghost">Info Local</button>
         </div>
       </div>
-
     </section>
   </main>
 
-  <footer class="app-footer">
-    <small>© 2025 ITravelByMyOwn — <a href="#">Términos</a> • <a href="#">Privacidad</a></small>
-  </footer>
+  <footer class="foot">© 2025 ITravelByMyOwn — <a href="#">Términos</a> • <a href="#">Privacidad</a></footer>
 
-  <script src="app.js"></script>
+  <script src="planner.js"></script>
 </body>
 </html>
