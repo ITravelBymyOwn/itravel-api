@@ -12,19 +12,28 @@ body{margin:0;background:var(--surface);color:var(--ink);font-family:Inter,syste
 .topbar .lang a{margin-left:.6rem;text-decoration:none;color:var(--muted);font-weight:600}
 .topbar .lang a.active{color:var(--brand-600)}
 
-#planner-grid{display:grid;grid-template-columns:360px 1fr;gap:1rem;padding:1rem}
+#planner-grid{display:grid;grid-template-columns:370px 1fr;gap:1rem;padding:1rem}
 @media (max-width:960px){#planner-grid{grid-template-columns:1fr}}
 
 .sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:var(--radius);box-shadow:var(--shadow);padding:1rem;max-height:calc(100vh - 110px);overflow:auto}
 .box{background:#fff;border:1px solid #eef2f7;border-radius:var(--radius);padding:1rem;margin-bottom:1rem}
 
-.city-row{display:grid;grid-template-columns:1fr 1fr .7fr 1fr auto;gap:.4rem;align-items:end;margin-bottom:.5rem}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.w-100{width:100%}
+.row-actions{display:flex;gap:.5rem;margin:.5rem 0}
+
+.city-row{display:grid;grid-template-columns:1.2fr 1fr .7fr 1fr auto;gap:.4rem;align-items:end;margin-bottom:.45rem}
 .city-row input{width:100%}
 .city-row .remove{background:#ef4444;color:#fff;border:none;border-radius:.5rem;padding:.45rem .6rem;cursor:pointer}
 
-.special-conditions textarea{width:100%;min-height:70px;padding:.5rem;border:1px solid #d0d5dd;border-radius:.5rem;font-size:.9rem}
+.hours-block{background:#f9fafb;border:1px dashed #d7dce3;border-radius:.55rem;padding:.6rem;margin:.4rem 0 .8rem}
+.hours-block .grid-days{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
+.hours-day{display:grid;grid-template-columns:auto 1fr 1fr;gap:.35rem;align-items:center}
+.hours-day label{font-weight:600;color:var(--brand-600)}
 
-input,select{padding:.6rem;border:1px solid #d0d5dd;border-radius:.5rem;font-size:.92rem;background:#fff}
+.special-conditions textarea{width:100%;min-height:80px;padding:.6rem;border:1px solid #d0d5dd;border-radius:.55rem;font-size:.92rem}
+
+input,select{padding:.6rem;border:1px solid #d0d5dd;border-radius:.55rem;font-size:.92rem;background:#fff}
 label{font-size:.85rem;color:var(--muted);display:grid;gap:.25rem}
 
 .btn{border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:.55rem;padding:.6rem .9rem;cursor:pointer}
@@ -36,6 +45,7 @@ label{font-size:.85rem;color:var(--muted);display:grid;gap:.25rem}
 .btn.warn:hover{background:#ffd9d9}
 
 .hint{font-size:.8rem;color:var(--muted);margin-top:.5rem}
+.muted{color:var(--muted)}
 
 .chat{border:1px solid #d0d5dd;background:#f6f9fc;border-radius:.6rem;margin:.8rem 0}
 .chat-messages{max-height:280px;min-height:200px;overflow:auto;padding:.75rem}
