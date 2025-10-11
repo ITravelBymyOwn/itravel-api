@@ -46,11 +46,10 @@ body{
 }
 .topbar .lang a.active{color:var(--brand-600)}
 
-/* ==================== GRID (más espacio para sidebar) ==================== */
+/* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  /* Sidebar flexible: mínimo 480px, crece con viewport, tope 620px */
-  grid-template-columns:clamp(480px, 30vw, 620px) 1fr;
+  grid-template-columns:clamp(520px, 33vw, 650px) 1fr;
   gap:1.5rem;
   padding:1rem 1.5rem;
   max-width:1600px;
@@ -86,14 +85,15 @@ body{
 
 .city-row{
   display:grid;
-  /* columnas más respiradas dentro de la sidebar más ancha */
-  grid-template-columns:1.1fr .9fr .7fr 1fr auto;
-  gap:.5rem;
+  grid-template-columns:1.2fr 1fr .7fr 1fr auto;
+  gap:.7rem;
   align-items:end;
-  margin-bottom:.5rem;
+  margin-bottom:.6rem;
   animation:fadeIn .4s ease;
 }
-.city-row input{width:100%}
+.city-row input{
+  width:100%;
+}
 .city-row .remove{
   background:#ef4444;
   color:#fff;
