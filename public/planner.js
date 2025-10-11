@@ -1,13 +1,13 @@
 /* =========================================================
    ITRAVELBYMYOWN · PLANNER v7.1  (compat DOM v6)
-   - Mantiene EXACTAMENTE los IDs/estructura que usabas en v6:
+   - Mantiene EXACTAMENTE los IDs/estructura de v6:
      #cities-container, #add-city, #save-destinations, #start-planning,
      #chat-container, #chat-messages, #intake, #send-btn, #city-tabs,
-     #itinerary-container, #itinerary-intro, #confirm-itinerary, etc.
-   - Mejora clave: canonización de nombres de ciudad del LLM para que
-     las filas SIEMPRE caigan en la pestaña correcta (evita “Barcelona, Spain”).
-   - Sidebar: agrega país, fecha base con autoformato, y horas por día (08:30–18:00 por defecto).
-   - Flujo hotel único con nota pequeña; no preguntamos horas/fecha si faltan.
+     #itinerary-container, #itinerary-intro, #confirm-itinerary,
+     #monetization-upsell, #upsell-close, toolbar IDs...
+   - Ajustes pedidos: país, fecha con autoformato, horas por día (08:30–18:00),
+     nota de hospedaje, canonización de ciudad del LLM para pintar tablas,
+     quitar mensaje redundante post-guardar.
 ========================================================= */
 
 /* ====== SECCIÓN 1: Helpers / Estado ====== */
@@ -95,20 +95,17 @@ function normalize(s){
 }
 function canonicalCityName(nameFromLLM){
   const n = normalize(nameFromLLM);
-  // 1) exacto
   let cand = savedDestinations.find(d=>normalize(d.city)===n);
   if(cand) return cand.city;
-  // 2) inclusión (ej: "barcelona spain")
   cand = savedDestinations.find(d=>{
     const a = normalize(d.city);
     return n.includes(a) || a.includes(n);
   });
   if(cand) return cand.city;
-  // 3) fallback
   return savedDestinations[0]?.city || nameFromLLM || 'General';
 }
 
-/* ====== SECCIÓN 7: UI · Filas de ciudad (sobre #cities-container) ====== */
+/* ====== SECCIÓN 7: UI · Filas de ciudad (en #cities-container) ====== */
 function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
@@ -171,7 +168,7 @@ function addCityRow(pref={city:'',country:'',days:1,baseDate:''}){
   $cities.appendChild(row);
 }
 
-/* ====== SECCIÓN 8: Guardar destinos (manteniendo lógica v6) ====== */
+/* ====== SECCIÓN 8: Guardar destinos ====== */
 function saveDestinations(){
   const rows = qsa('.city-row', $cities);
   const list = [];
@@ -192,7 +189,6 @@ function saveDestinations(){
 
   savedDestinations = list;
 
-  // Inicializa/ajusta estructuras por ciudad
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', perDay: perDay||[] };
@@ -200,14 +196,13 @@ function saveDestinations(){
     for(let d=1; d<=days; d++){ if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[]; }
   });
 
-  // Limpia ciudades removidas
   Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
   Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
   if($intro) $intro.style.display = savedDestinations.length ? 'none' : '';
   $start.disabled = savedDestinations.length===0;
-  // v7.1: NO mostramos “Destinos guardados…” en el chat.
+  // No mostramos mensaje redundante aquí.
 }
 
 /* ====== SECCIÓN 9: Tabs + Render ====== */
@@ -581,7 +576,7 @@ $intake?.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(
 $confirmCTA?.addEventListener('click', lockItinerary);
 $upsellClose?.addEventListener('click', ()=>{ if($upsell) $upsell.style.display='none'; });
 
-// Toolbar (los IDs de tu HTML v6 siguen igual)
+// Toolbar
 qs('#btn-pdf')?.addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email')?.addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps')?.addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
