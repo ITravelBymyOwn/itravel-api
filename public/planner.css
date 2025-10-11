@@ -1,67 +1,146 @@
-:root{
-  --brand-500:#0EA47A; --brand-600:#0B8664;
-  --ink:#101828; --muted:#667085;
-  --surface:#F8FAFC; --white:#FFF;
-  --radius:.6rem; --shadow:0 2px 8px rgba(16,24,40,.08)
-}
-*{box-sizing:border-box}
-body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--surface);margin:0}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <title>ITravelByMyOwn · Planner</title>
+  <meta content="width=device-width, initial-scale=1" name="viewport"/>
+  <link href="planner.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com" rel="preconnect"/>
+  <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
+  <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
+  <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
+  <script>WebFont.load({ google:{ families:["Inter:400,600,700"] }});</script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">ITravelByMyOwn Planner</div>
+    <div class="lang">
+      <a href="#" data-lang="es" class="active">ES</a>
+      <a href="#" data-lang="en">EN</a>
+      <a href="#" data-lang="fr">FR</a>
+      <a href="#" data-lang="pt">PT</a>
+    </div>
+  </div>
 
-.lang-floating{position:fixed;top:1rem;right:1rem;background:var(--brand-500);color:#fff;padding:.4rem .7rem;border-radius:999px;font-size:.8rem;font-weight:600;box-shadow:var(--shadow);z-index:9999}
-.lang-floating a{color:#fff;text-decoration:none;margin:0 .25rem}
-.top-bar{background:#fff;padding:1rem;box-shadow:var(--shadow);display:flex;align-items:center}
-.top-bar a{color:var(--brand-600);text-decoration:none;font-weight:600}
+  <div id="planner-grid">
+    <!-- ===== SIDEBAR ===== -->
+    <aside class="sidebar">
+      <h2>Planificador</h2>
 
-#planner-grid{display:grid;grid-template-columns:1fr 3fr;gap:1rem;margin:1rem}
-@media (max-width:960px){#planner-grid{grid-template-columns:1fr}}
+      <section class="box">
+        <h3>Destinos</h3>
+        <div id="city-list"></div>
+        <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+        <button class="btn primary" id="save-destinations">Guardar destinos</button>
+        <button class="btn warn" id="reset-planner">Reiniciar</button>
+        <p class="hint">Agrega una o varias ciudades, días de estancia y (opcional) la fecha de inicio en formato <strong>DD/MM/AAAA</strong>.</p>
+      </section>
 
-.sidebar{background:#fff;padding:1rem;border-radius:var(--radius);box-shadow:var(--shadow);overflow-y:auto;max-height:calc(100vh - 6rem)}
-.sidebar h2{font-size:1.15rem;margin:.25rem 0 1rem;color:var(--brand-600)}
-.sidebar h3{font-size:.95rem;margin:1rem 0 .5rem;color:var(--ink)}
-.sidebar label{display:block;font-size:.85rem;margin:.45rem 0 .25rem;color:var(--muted)}
-.sidebar input,.sidebar select{width:100%;padding:.55rem;border:1px solid #d0d5dd;border-radius:var(--radius);font-size:.9rem;background:#fff}
-.help-hint{font-size:.75rem;color:var(--muted);margin:.25rem 0 .5rem}
+      <section class="box">
+        <h3>Viajeros</h3>
+        <div class="grid-2">
+          <label>Adultos
+            <input id="p-adults" type="number" min="0" value="2">
+          </label>
+          <label>Jóvenes
+            <input id="p-young" type="number" min="0" value="0">
+          </label>
+          <label>Niños
+            <input id="p-children" type="number" min="0" value="0">
+          </label>
+          <label>Bebés
+            <input id="p-infants" type="number" min="0" value="0">
+          </label>
+          <label>Mayores
+            <input id="p-seniors" type="number" min="0" value="0">
+          </label>
+        </div>
+      </section>
 
-.city-row{display:grid;grid-template-columns:2fr .8fr 1fr auto;gap:.5rem;align-items:end;margin-bottom:.5rem}
-.city-row .remove{background:#ef4444;border:none;color:#fff;border-radius:.45rem;padding:.5rem .65rem;cursor:pointer}
-.add-city{width:100%;padding:.6rem;border:1px dashed var(--brand-600);background:#f0fdf4;color:var(--brand-600);border-radius:var(--radius);cursor:pointer;font-weight:700}
-.save-dest{margin-top:.5rem;width:100%;padding:.8rem;border:none;border-radius:var(--radius);background:var(--brand-600);color:#fff;font-weight:700;cursor:pointer;box-shadow:var(--shadow)}
+      <section class="box">
+        <h3>Presupuesto total</h3>
+        <div class="grid-2">
+          <label>Monto
+            <input id="budget" type="number" min="0" placeholder="ej. 1500">
+          </label>
+          <label>Moneda
+            <select id="currency">
+              <option value="USD" selected>$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="GBP">£ GBP</option>
+              <option value="CRC">₡ CRC</option>
+            </select>
+          </label>
+        </div>
+      </section>
 
-.main{background:#fff;padding:1rem;border-radius:var(--radius);box-shadow:var(--shadow)}
-.main h2{font-size:1.2rem;margin-bottom:.75rem;color:var(--brand-600)}
+      <!-- MÓDULOS DEL MENÚ LATERAL -->
+      <section class="box">
+        <h3>Módulos rápidos</h3>
+        <div class="mods">
+          <button class="chip" id="mod-weather">Clima</button>
+          <button class="chip" id="mod-clothing">Ropa</button>
+          <button class="chip" id="mod-restaurants">Restaurantes</button>
+          <button class="chip" id="mod-gas">Gasolineras</button>
+          <button class="chip" id="mod-bathrooms">Baños</button>
+          <button class="chip" id="mod-lodging">Hospedaje</button>
+          <button class="chip" id="mod-transport">Transporte</button>
+          <button class="chip" id="mod-local">Info Local</button>
+        </div>
+        <p class="hint">Estos módulos abren información contextual (mapas/links/IA) de apoyo al itinerario.</p>
+      </section>
+    </aside>
 
-.chat-container{display:none;flex-direction:column;height:320px;border:1px solid #d0d5dd;border-radius:var(--radius);background:#f6f9fc;margin-bottom:1rem}
-.chat-messages{flex:1;overflow:auto;padding:.75rem;white-space:pre-wrap}
-.chat-message{font-size:.88rem;margin:.35rem 0}
-.chat-message.user{text-align:right;color:var(--brand-600)}
-.chat-message.ai{text-align:left;color:var(--ink)}
-.chat-input{display:flex;gap:.5rem;padding:.5rem;border-top:1px solid #d0d5dd;background:#fff}
-.chat-input input{flex:1;padding:.6rem;border:1px solid #d0d5dd;border-radius:var(--radius)}
-.chat-input button{background:var(--brand-500);color:#fff;border:none;border-radius:var(--radius);padding:.6rem .9rem;cursor:pointer}
+    <!-- ===== MAIN ===== -->
+    <main class="main">
+      <section class="box">
+        <h2>Itinerario</h2>
+        <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
 
-#start-planning{margin:0 0 1rem 0;padding:.8rem 1.2rem;background:var(--brand-600);color:#fff;border:none;border-radius:var(--radius);font-weight:700;cursor:pointer;box-shadow:var(--shadow)}
-#start-planning[disabled]{opacity:.5;cursor:not-allowed}
+        <div id="chat-container" class="chat" style="display:none;">
+          <div id="chat-messages" class="chat-messages"></div>
+          <div class="chat-input">
+            <input id="chat-input" type="text" placeholder="Escribe tu mensaje...">
+            <button id="send-btn" class="btn primary">Enviar</button>
+          </div>
+        </div>
 
-#output{border:1px dashed #d0d5dd;border-radius:var(--radius);padding:.75rem;background:#fbfeff;font-size:.9rem}
-.city-tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0 1rem}
-.city-tab{border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:999px;padding:.45rem .8rem;cursor:pointer}
-.city-tab.active{background:var(--brand-500);border-color:var(--brand-500);color:#fff}
+        <div class="city-tabs" id="city-tabs"></div>
+        <p id="itinerary-intro" class="muted">Tu itinerario se mostrará aquí cuando esté listo.</p>
+        <div id="itinerary-container"></div>
 
-.day-title{margin:.75rem 0 .25rem;font-weight:700;color:var(--brand-600)}
-table.itinerary{width:100%;border-collapse:collapse;margin:.25rem 0 .75rem}
-table.itinerary th,table.itinerary td{border:1px solid #e5e7eb;padding:.48rem;font-size:.82rem;text-align:center;vertical-align:middle}
-table.itinerary th{background:#f1f5f9}
-.pager{display:flex;gap:.35rem;justify-content:center;margin:.5rem 0}
-.pager button{border:1px solid #d0d5dd;background:#fff;border-radius:.4rem;padding:.35rem .6rem;cursor:pointer}
-.pager button.active{background:var(--brand-500);color:#fff;border-color:var(--brand-500)}
-.pager .ghost{opacity:.5;pointer-events:none}
+        <div class="toolbar">
+          <button class="btn" id="btn-pdf">Exportar PDF</button>
+          <button class="btn" id="btn-email">Enviar por Email</button>
+          <button class="btn" id="btn-maps">Mapas</button>
+          <button class="btn" id="btn-transport">Transporte</button>
+          <button class="btn" id="btn-weather">Clima</button>
+          <button class="btn" id="btn-clothing">Ropa</button>
+          <button class="btn" id="btn-restaurants">Restaurantes</button>
+          <button class="btn" id="btn-gas">Gasolineras</button>
+          <button class="btn" id="btn-bathrooms">Baños</button>
+          <button class="btn" id="btn-lodging">Hospedaje</button>
+          <button class="btn" id="btn-localinfo">Info Local</button>
+        </div>
+      </section>
+    </main>
+  </div>
 
-.toolbar{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-top:1rem}
-@media (max-width:960px){.toolbar{grid-template-columns:repeat(2,1fr)}}
-.toolbar button{padding:.6rem;border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:var(--radius);cursor:pointer}
-.toolbar button:hover{background:var(--brand-500);color:#fff}
+  <button id="confirm-itinerary" class="floating-cta">Elijo este itinerario</button>
 
-#confirm-itinerary{position:fixed;right:1rem;bottom:1rem;padding:1rem 1.25rem;background:var(--brand-500);color:#fff;border:none;border-radius:var(--radius);font-weight:700;box-shadow:var(--shadow);z-index:1000;cursor:pointer}
+  <footer class="footer">
+    © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
+  </footer>
 
-footer{background:#fff;padding:1.25rem;text-align:center;border-top:1px solid #e5e7eb;color:var(--muted);font-size:.82rem;margin-top:2rem}
-footer a{color:var(--brand-600);text-decoration:none}
+  <div id="monetization-upsell" class="upsell" style="display:none;">
+    <div class="upsell-card">
+      <h3>Desbloquea edición y exportación</h3>
+      <p>Este itinerario está fijado. Para editar y usar exportaciones, mejora a <strong>Premium</strong>.</p>
+      <button class="btn primary" id="upsell-cta">Quiero Premium</button>
+      <button class="btn ghost" id="upsell-close">Cerrar</button>
+    </div>
+  </div>
+
+  <script src="planner.js"></script>
+</body>
+</html>
