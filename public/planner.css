@@ -28,9 +28,6 @@ body{margin:0;background:var(--surface);color:var(--ink);font-family:Inter,syste
 
 .special-conditions textarea{width:100%;min-height:70px;padding:.5rem;border:1px solid #d0d5dd;border-radius:.5rem;font-size:.9rem;resize:vertical}
 
-input,select{padding:.6rem;border:1px solid #d0d5dd;border-radius:.5rem;font-size:.92rem;background:#fff}
-label{font-size:.85rem;color:var(--muted);display:grid;gap:.25rem}
-
 .btn{border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:.55rem;padding:.6rem .9rem;cursor:pointer;transition:.2s ease}
 .btn:hover{background:var(--brand-500);border-color:var(--brand-500);color:#fff;transform:translateY(-1px)}
 .btn.primary{background:var(--brand-600);color:#fff;border-color:var(--brand-600);font-weight:700}
@@ -39,18 +36,8 @@ label{font-size:.85rem;color:var(--muted);display:grid;gap:.25rem}
 .btn.warn{background:#fff0f0;color:#b42318;border-color:#f3b3b3}
 .btn.warn:hover{background:#ffd9d9}
 
-.chat{border:1px solid #d0d5dd;background:#f6f9fc;border-radius:.8rem;margin:.8rem 0;max-width:750px}
-.chat-messages{max-height:280px;min-height:200px;overflow:auto;padding:.75rem}
-.chat-input{display:flex;gap:.5rem;border-top:1px solid #d0d5dd;background:#fff;padding:.5rem}
-.chat-message{font-size:.9rem;margin:.3rem 0}
-.chat-message.user{text-align:right;color:var(--brand-600)}
-.chat-message.ai{text-align:left;color:#111827}
-
-.city-tabs{display:flex;flex-wrap:wrap;gap:.4rem;margin:.75rem 0}
-.city-tab{border:1px solid #d0d5dd;background:#fff;border-radius:999px;color:var(--brand-600);padding:.4rem .8rem;cursor:pointer;transition:.2s}
-.city-tab.active{background:var(--brand-500);border-color:var(--brand-500);color:#fff;transform:scale(1.05)}
-
-.toolbar{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-top:.9rem;max-width:800px}
+.chat{border:1px solid #d0d5dd;background:#f6f9fc;border-radius:.8rem;margin:.8rem 0;max-width:720px}
+.toolbar{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-top:.9rem;max-width:720px}
 @media (max-width:960px){.toolbar{grid-template-columns:repeat(2,1fr)}}
 
 .floating-cta{position:fixed;right:1rem;bottom:1rem;padding:1rem 1.1rem;background:var(--brand-500);color:#fff;border:none;border-radius:.8rem;box-shadow:var(--shadow);font-weight:700;cursor:pointer;z-index:60;transition:.25s}
