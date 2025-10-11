@@ -9,7 +9,7 @@
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
   <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
-  <script>WebFont.load({ google:{ families:["Inter:400,600,700"] }});</script>
+  <script>WebFont.load({ google:{ families:["Inter:400,500,600,700"] }});</script>
 </head>
 <body>
   <div class="topbar">
@@ -31,30 +31,26 @@
       <section class="box">
         <h3>Destinos</h3>
         <div id="city-list"></div>
-        <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
-          <button class="btn warn" id="reset-planner">Reiniciar</button>
-        </div>
-        <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
-        <p class="hint">Agrega <strong>Ciudad</strong>, <strong>País</strong>, <strong>Días</strong> y (opcional) la <strong>Fecha de inicio</strong>. Escribe <strong>20102025</strong> y se formateará a <strong>20/10/2025</strong>.</p>
+        <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+        <button class="btn primary" id="save-destinations">Guardar destinos</button>
+        <button class="btn warn" id="reset-planner">Reiniciar</button>
       </section>
 
       <!-- Restricciones -->
       <section class="box special-conditions">
         <h3>Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta (sin gluten), marcapasos, alergias, ritmo suave, evitar escaleras..."></textarea>
-        <p class="hint">Se enviará al agente para adaptar el itinerario.</p>
+        <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
       </section>
 
       <!-- Viajeros -->
       <section class="box">
         <h3>Viajeros</h3>
         <div class="grid-2">
-          <label>Adultos<input id="p-adults" type="number" min="0" value="2"></label>
-          <label>Jóvenes<input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños<input id="p-children" type="number" min="0" value="0"></label>
-          <label>Bebés<input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores<input id="p-seniors" type="number" min="0" value="0"></label>
+          <label>Adultos <input id="p-adults" type="number" min="0" value="2"></label>
+          <label>Jóvenes <input id="p-young" type="number" min="0" value="0"></label>
+          <label>Niños <input id="p-children" type="number" min="0" value="0"></label>
+          <label>Bebés <input id="p-infants" type="number" min="0" value="0"></label>
+          <label>Mayores <input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
 
@@ -62,7 +58,7 @@
       <section class="box">
         <h3>Presupuesto total</h3>
         <div class="grid-2">
-          <label>Monto<input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
+          <label>Monto <input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
           <label>Moneda
             <select id="currency">
               <option value="USD" selected>$ USD</option>
@@ -77,7 +73,7 @@
 
     <!-- ===== MAIN ===== -->
     <main class="main">
-      <section class="box">
+      <section class="box itinerary-section">
         <h2>Itinerario</h2>
         <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
 
