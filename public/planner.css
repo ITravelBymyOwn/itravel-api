@@ -1,95 +1,103 @@
-<!-- v7 · Estructura mínima: IDs esperados por planner.js -->
-<div class="topbar">
-  <div class="brand">ITravelByMyOwn Planner</div>
-  <div class="lang"><a class="active">ES</a> <a>EN</a> <a>FR</a> <a>PT</a></div>
-</div>
+:root{
+  --brand-500:#0EA47A;
+  --brand-600:#0B8664;
+  --ink:#101828;
+  --muted:#667085;
+  --surface:#F8FAFC;
+  --white:#FFF;
+  --radius:.8rem;
+  --shadow:0 4px 16px rgba(16,24,40,.08);
+  --chat-bg:#F6F9FC;
+  --chat-user:#0EA47A15;
+  --chat-ai:#FFFFFF;
+}
 
-<div id="planner-grid">
-  <!-- ==== SIDEBAR ==== -->
-  <aside class="sidebar">
-    <h2>Planificador</h2>
+*{box-sizing:border-box}
+body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--surface);margin:0}
 
-    <div class="box">
-      <h3>Destinos</h3>
-      <div id="city-list"></div>
+/* Top */
+.top-bar{background:#fff;padding:1rem;border-bottom:1px solid #e5e7eb;box-shadow:var(--shadow)}
+.top-bar a{color:var(--brand-600);text-decoration:none;font-weight:600}
 
-      <div class="row-actions">
-        <button id="add-city-btn" class="btn ghost" type="button">+ Agregar ciudad</button>
-        <button id="reset-planner" class="btn warn" type="button">Reiniciar</button>
-      </div>
+/* Grid */
+#planner-grid{display:grid;grid-template-columns:520px 1fr;gap:1rem;margin:1rem auto;max-width:1600px;padding:0 .5rem}
+@media (max-width:1280px){#planner-grid{grid-template-columns:500px 1fr}}
+@media (max-width:1100px){#planner-grid{grid-template-columns:1fr}}
 
-      <button id="save-destinations" class="btn primary w-100" type="button">Guardar destinos</button>
-    </div>
+/* Sidebar */
+.sidebar{background:#fff;padding:1rem;border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid #e5e7eb;max-height:calc(100vh - 140px);overflow:auto}
+.sidebar h2{font-size:1.15rem;margin:.25rem 0 1rem;color:var(--brand-600)}
+.sidebar h3{font-size:.95rem;margin:1rem 0 .5rem;color:var(--ink)}
+.sidebar label{display:block;font-size:.85rem;margin:.45rem 0 .25rem;color:var(--muted)}
+.sidebar input,.sidebar select,.sidebar textarea{width:100%;padding:.55rem;border:1px solid #d0d5dd;border-radius:var(--radius);font-size:.9rem;background:#fff}
 
-    <div class="box">
-      <h3>Viajeros</h3>
-      <div class="city-row" style="grid-template-columns:repeat(5,1fr);gap:.5rem">
-        <label>Adultos (18+)<input id="p-adults" type="number" min="0" value="2"></label>
-        <label>Jóvenes (12–17)<input id="p-young" type="number" min="0" value="0"></label>
-        <label>Niños (2–11)<input id="p-children" type="number" min="0" value="0"></label>
-        <label>Bebés (0–1)<input id="p-infants" type="number" min="0" value="0"></label>
-        <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
-      </div>
-    </div>
+.row-actions{display:flex;gap:.5rem;align-items:center;margin:.6rem 0 1rem}
 
-    <div class="box special-conditions">
-      <h3>Restricciones / Condiciones especiales</h3>
-      <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta (sin gluten), marcapasos, alergias, ritmo suave, evitar escaleras..."></textarea>
-    </div>
-  </aside>
+/* City rows */
+.city-row{display:grid;grid-template-columns:2fr 2fr 1fr 1.3fr auto;gap:.5rem;align-items:end;margin-bottom:.6rem}
+.city-row .remove{background:#ef4444;border:none;color:#fff;border-radius:.45rem;padding:.5rem .65rem;cursor:pointer}
 
-  <!-- ==== MAIN ==== -->
-  <main class="main">
-    <h2>Itinerario</h2>
+/* Hours per day */
+.hours-block{display:flex;flex-direction:column;gap:.4rem;margin-top:.4rem}
+.hours-day{display:grid;grid-template-columns:.7fr 1fr 1fr;gap:.4rem;align-items:center;font-size:.9rem}
+.hours-day span{color:var(--muted)}
 
-    <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+/* Travelers grid */
+.trav-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem}
+@media (max-width:1280px){.trav-grid{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:760px){.trav-grid{grid-template-columns:repeat(2,1fr)}}
 
-    <!-- Chat -->
-    <div id="chat-container" class="chat" style="display:none">
-      <div id="chat-messages" class="chat-messages"></div>
-      <div class="chat-input">
-        <input id="chat-input" type="text" placeholder="Escribe tu mensaje...">
-        <button id="send-btn" class="btn primary" type="button">Enviar</button>
-      </div>
-    </div>
+/* Buttons */
+.add-city{padding:.6rem;border:1px dashed var(--brand-600);background:#f0fdf4;color:var(--brand-600);border-radius:var(--radius);cursor:pointer;font-weight:700}
+.save-dest{padding:.8rem;border:none;border-radius:var(--radius);background:var(--brand-600);color:#fff;font-weight:700;cursor:pointer;box-shadow:var(--shadow)}
+.btn{border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:.55rem;padding:.6rem .9rem;cursor:pointer;transition:.2s ease}
+.btn:hover{background:var(--brand-500);border-color:var(--brand-500);color:#fff;transform:translateY(-1px)}
+.btn.primary{background:var(--brand-600);color:#fff;border-color:var(--brand-600);font-weight:700}
+.btn.primary:hover{filter:brightness(.95)}
 
-    <!-- Tabs + Itinerary -->
-    <div id="city-tabs" class="city-tabs"></div>
-    <div id="itinerary-container"></div>
+/* Main */
+.main{background:#fff;padding:1rem;border-radius:var(--radius);box-shadow:var(--shadow);border:1px solid #e5e7eb}
+.main h2{font-size:1.2rem;margin-bottom:.75rem;color:var(--brand-600)}
 
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <button id="btn-pdf" class="btn">Exportar PDF</button>
-      <button id="btn-email" class="btn">Enviar por Email</button>
-      <button id="btn-maps" class="btn">Mapas</button>
-      <button id="btn-transport" class="btn">Transporte</button>
-      <button id="btn-weather" class="btn">Clima</button>
+/* Chat */
+.chat-container{display:flex;flex-direction:column;height:420px;border:1px solid #d0d5dd;border-radius:var(--radius);background:var(--chat-bg);margin-bottom:1rem;box-shadow:var(--shadow)}
+.chat-messages{flex:1;overflow:auto;padding:1rem;display:flex;flex-direction:column;gap:.65rem}
+.chat-message{max-width:85%;padding:.7rem .9rem;border-radius:1rem;font-size:.92rem;line-height:1.35;box-shadow:0 1px 4px rgba(0,0,0,0.05)}
+.chat-message.user{align-self:flex-end;background:var(--chat-user);color:var(--brand-600)}
+.chat-message.ai{align-self:flex-start;background:var(--chat-ai);color:var(--ink)}
+.chat-input{display:flex;gap:.5rem;padding:.6rem;background:#fff;border-top:1px solid #d0d5dd;border-bottom-left-radius:var(--radius);border-bottom-right-radius:var(--radius)}
+.chat-input input{flex:1;padding:.6rem;border:1px solid #d0d5dd;border-radius:.5rem}
+#start-planning{margin:0 0 1rem 0;padding:.8rem 1.2rem;background:var(--brand-600);color:#fff;border:none;border-radius:var(--radius);font-weight:700;cursor:pointer;box-shadow:var(--shadow)}
+#start-planning[disabled]{opacity:.5;cursor:not-allowed}
 
-      <button id="btn-clothing" class="btn">Ropa</button>
-      <button id="btn-restaurants" class="btn">Restaurantes</button>
-      <button id="btn-gas" class="btn">Gasolineras</button>
-      <button id="btn-bathrooms" class="btn">Baños</button>
-      <button id="btn-lodging" class="btn">Hospedaje</button>
+/* Itinerary */
+#output{border:1px dashed #d0d5dd;border-radius:var(--radius);padding:.75rem;background:#fbfeff;font-size:.9rem}
+.city-tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0 1rem}
+.city-tab{border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:999px;padding:.45rem .8rem;cursor:pointer}
+.city-tab.active{background:var(--brand-500);border-color:var(--brand-500);color:#fff}
+.day-title{margin:.75rem 0 .25rem;font-weight:700;color:var(--brand-600)}
+table.itinerary{width:100%;border-collapse:collapse;margin:.25rem 0 .75rem}
+table.itinerary th,table.itinerary td{border:1px solid #e5e7eb;padding:.55rem;font-size:.86rem;text-align:center;vertical-align:middle}
+table.itinerary th{background:#f1f5f9}
+.pager{display:flex;gap:.35rem;justify-content:center;margin:.75rem 0}
+.pager button{border:1px solid #d0d5dd;background:#fff;border-radius:.4rem;padding:.35rem .6rem;cursor:pointer}
+.pager button.active{background:var(--brand-500);color:#fff;border-color:var(--brand-500)}
+.pager .ghost{opacity:.5;pointer-events:none}
 
-      <button id="btn-localinfo" class="btn">Info Local</button>
-    </div>
-  </main>
-</div>
+/* Toolbar */
+.toolbar{display:grid;grid-template-columns:repeat(5,1fr);gap:.5rem;margin-top:1rem}
+@media (max-width:960px){.toolbar{grid-template-columns:repeat(2,1fr)}}
+.toolbar button{padding:.6rem;border:1px solid #d0d5dd;background:#fff;color:var(--brand-600);border-radius:var(--radius);cursor:pointer}
+.toolbar button:hover{background:var(--brand-500);color:#fff}
 
-<button id="confirm-itinerary" class="floating-cta">Elijo este itinerario</button>
+/* CTA */
+#confirm-itinerary{position:fixed;right:1rem;bottom:1rem;padding:1rem 1.25rem;background:var(--brand-500);color:#fff;border:none;border-radius:.9rem;font-weight:700;box-shadow:var(--shadow);z-index:1000;cursor:pointer}
 
-<!-- Upsell -->
-<div id="monetization-upsell" class="upsell" style="display:none">
-  <div class="upsell-card">
-    <h3>Plan Premium</h3>
-    <p>Para editar este itinerario final y exportar, actualiza a Premium.</p>
-    <div style="display:flex;gap:.5rem;justify-content:flex-end">
-      <button id="upsell-close" class="btn">Cerrar</button>
-      <button class="btn primary">Actualizar</button>
-    </div>
-  </div>
-</div>
+/* Upsell */
+.upsell{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;z-index:120}
+.upsell-card{background:#fff;border-radius:1rem;box-shadow:var(--shadow);padding:1rem;max-width:380px;width:92%}
+.upsell-actions{display:flex;gap:.5rem;justify-content:flex-end}
 
-<footer class="footer">
-  © 2025 ITravelByMyOwn — <a href="/terms">Términos</a> · <a href="/privacy">Privacidad</a>
-</footer>
+/* Footer */
+footer{background:#fff;padding:1.25rem;text-align:center;border-top:1px solid #e5e7eb;color:var(--muted);font-size:.82rem;margin-top:2rem}
+footer a{color:var(--brand-600);text-decoration:none}
