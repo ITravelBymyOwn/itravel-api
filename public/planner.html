@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <link rel="stylesheet" href="planner.css?v=13" />
+  <link rel="stylesheet" href="planner.css?v=14" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
@@ -42,14 +42,25 @@
         <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
       </section>
 
+      <!-- VIAJEROS (grid ordenado) -->
       <section class="box">
         <h3>Viajeros</h3>
-        <div class="grid-2">
-          <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="2"></label>
-          <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños (3–12)<input id="p-children" type="number" min="0" value="0"></label>
-          <label>Bebés (0–2)<input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
+        <div id="traveler-grid">
+          <label>Adultos
+            <input id="p-adults" type="number" min="0" value="2">
+          </label>
+          <label>Jóvenes
+            <input id="p-young" type="number" min="0" value="0">
+          </label>
+          <label>Niños
+            <input id="p-children" type="number" min="0" value="0">
+          </label>
+          <label>Infantes
+            <input id="p-infants" type="number" min="0" value="0">
+          </label>
+          <label>Mayores
+            <input id="p-seniors" type="number" min="0" value="0">
+          </label>
         </div>
       </section>
 
@@ -118,6 +129,6 @@
     </div>
   </div>
 
-  <script src="planner.js?v=13"></script>
+  <script src="planner.js?v=14"></script>
 </body>
 </html>
