@@ -1,88 +1,76 @@
-<!-- ITRAVELBYMYOWN · PLANNER · v7 (compat v6 DOM) -->
+<!-- ITRAVELBYMYOWN — Trip Planner v7 (based on v6 layout) -->
 <div class="top-bar">
   <a href="/">← Back to Home</a>
 </div>
 
 <div id="planner-grid">
-  <!-- ===== SIDEBAR ===== -->
+  <!-- Sidebar -->
   <aside class="sidebar">
-    <h2>Trip Inputs</h2>
+    <h2>Planificador</h2>
 
-    <h3>Cities & Days</h3>
-    <!-- Contenedor de filas (se crean con JS) -->
+    <h3>Destinos</h3>
     <div id="cities-container"></div>
 
     <div class="row-actions">
-      <button id="add-city" class="add-city" type="button">+ Add City</button>
-      <button id="save-destinations" class="save-dest" type="button">Save Destinations</button>
+      <button id="add-city" type="button" class="add-city">+ Agregar ciudad</button>
+      <button id="save-destinations" type="button" class="save-dest">Guardar destinos</button>
     </div>
 
-    <h3>Travelers</h3>
+    <h3>Viajeros</h3>
     <div class="trav-grid">
-      <label>Adults (18+)
-        <input id="p-adults" type="number" min="0" value="2">
-      </label>
-      <label>Young (12–17)
-        <input id="p-young" type="number" min="0" value="0">
-      </label>
-      <label>Children (2–11)
-        <input id="p-children" type="number" min="0" value="0">
-      </label>
-      <label>Infants (0–1)
-        <input id="p-infants" type="number" min="0" value="0">
-      </label>
-      <label>Seniors (65+)
-        <input id="p-seniors" type="number" min="0" value="0">
-      </label>
+      <label>Adultos<input id="p-adults" type="number" min="0" value="2"></label>
+      <label>Jóvenes<input id="p-young" type="number" min="0" value="0"></label>
+      <label>Niños<input id="p-children" type="number" min="0" value="0"></label>
+      <label>Bebés<input id="p-infants" type="number" min="0" value="0"></label>
+      <label>Mayores<input id="p-seniors" type="number" min="0" value="0"></label>
     </div>
 
     <h3>Restricciones / Condiciones especiales</h3>
-    <textarea id="special-conditions" placeholder="Ej: movilidad reducida, marcapasos, alergias, ritmo suave, sin gluten, evitar escaleras…"></textarea>
+    <textarea id="special-conditions" placeholder="Ej: movilidad reducida, marcapasos, alergias, sin gluten..."></textarea>
   </aside>
 
-  <!-- ===== MAIN ===== -->
+  <!-- Main -->
   <main class="main">
-    <h2>Interactive Chat & Itinerary</h2>
+    <h2>Itinerario</h2>
+    <button id="start-planning" disabled>Iniciar planificación</button>
 
-    <button id="start-planning" disabled>Start Planning</button>
-
-    <div class="chat-container" id="chat-container" style="display:none">
+    <div id="chat-container" class="chat-container" style="display:none">
       <div id="chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <input id="intake" type="text" placeholder="Type your message...">
-        <button id="send-btn" type="button">Send</button>
+        <input id="intake" type="text" placeholder="Escribe tu mensaje...">
+        <button id="send-btn" type="button">Enviar</button>
       </div>
     </div>
 
     <div id="output">
-      <div class="city-tabs" id="city-tabs"></div>
-      <p id="itinerary-intro">Your itinerary will appear here.</p>
+      <div id="city-tabs" class="city-tabs"></div>
+      <p id="itinerary-intro">Tu itinerario se mostrará aquí cuando esté listo.</p>
       <div id="itinerary-container"></div>
     </div>
 
     <div class="toolbar">
-      <button id="btn-pdf">Export PDF</button>
-      <button id="btn-email">Send Email</button>
-      <button id="btn-maps">Maps</button>
-      <button id="btn-transport">Transport</button>
-      <button id="btn-weather">Weather</button>
-      <button id="btn-clothing">Clothing</button>
-      <button id="btn-restaurants">Restaurants</button>
-      <button id="btn-gas">Gas Stations</button>
-      <button id="btn-bathrooms">Bathrooms</button>
-      <button id="btn-lodging">Lodging</button>
-      <button id="btn-localinfo">Local Info</button>
+      <button id="btn-pdf">Exportar PDF</button>
+      <button id="btn-email">Enviar por Email</button>
+      <button id="btn-maps">Mapas</button>
+      <button id="btn-transport">Transporte</button>
+      <button id="btn-weather">Clima</button>
+      <button id="btn-clothing">Ropa</button>
+      <button id="btn-restaurants">Restaurantes</button>
+      <button id="btn-gas">Gasolineras</button>
+      <button id="btn-bathrooms">Baños</button>
+      <button id="btn-lodging">Hospedaje</button>
+      <button id="btn-localinfo">Info Local</button>
     </div>
   </main>
 </div>
 
 <button id="confirm-itinerary">Elijo este itinerario</button>
 
-<!-- Upsell (mantiene IDs de v6) -->
+<!-- Upsell -->
 <div id="monetization-upsell" class="upsell" style="display:none">
   <div class="upsell-card">
     <h3>Plan Premium</h3>
-    <p>Para editar este itinerario final y exportar, actualiza a Premium.</p>
+    <p>Para editar y exportar el itinerario final, actualiza a Premium.</p>
     <div class="upsell-actions">
       <button id="upsell-close" class="btn">Cerrar</button>
       <button class="btn primary">Actualizar</button>
