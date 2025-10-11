@@ -326,5 +326,5 @@ qs('#upsell-close')?.addEventListener('click',()=>{
   qs('#monetization-upsell').style.display='none';
 });
 
-/* ==== FILA INICIAL ==== */
+// Inicial: una fila lista
 addCityRow();
