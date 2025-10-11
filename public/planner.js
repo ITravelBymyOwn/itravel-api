@@ -1,11 +1,11 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v11
-   Partiendo de v10, cambios mínimos:
-   - Prompt de generación endurecido (Sección 13)
-   - Fallback visible si el modelo no devuelve filas
-   - Log de diagnóstico en consola
-   - Pequeñas utilidades (extractAllRows, makeSkeletonRows)
-   ========================================================= */
+   ITRAVELBYMYOWN · PLANNER v12
+   Cambios sobre v11 (manteniendo todo lo demás):
+   - GENERACIÓN: si "Existing" está vacío, fuerza crear desde cero.
+   - 4–6 filas por día (balancea tokens).
+   - Reintento estricto si no hay filas.
+   - Menú y estilos NO tocados aquí (se arreglaron en CSS).
+========================================================= */
 
 /* ================================
    SECCIÓN 1 · Helpers / Estado
@@ -14,17 +14,17 @@ const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
-const MODEL   = 'gpt-4o-mini'; // alineado con backend v10/v11
+const MODEL   = 'gpt-4o-mini';
 
 // Estado principal
-let savedDestinations = []; // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
+let savedDestinations = []; // [{ city, country, days, baseDate }... + perDay]
 let itineraries = {};       // itineraries[city] = { byDay:{1:[rows],...}, currentDay:1, baseDate:'DD/MM/YYYY' }
 let cityMeta = {};          // cityMeta[city] = { baseDate, start, end, hotel:'', perDay:[{day,start,end}] }
 let session = [];
 let activeCity = null;
 let planningStarted = false;
-let metaProgressIndex = 0;    // índice ciudad para pedir hotel
-let collectingHotels = false; // bandera de la fase de hospedaje
+let metaProgressIndex = 0;
+let collectingHotels = false;
 let isItineraryLocked = false;
 
 /* ================================
@@ -111,7 +111,6 @@ function chatMsg(text, who='ai'){
    SECCIÓN 6 · UI · Filas de ciudades
 =================================== */
 function makeHoursBlock(days){
-  // Devuelve un contenedor con inputs de horas por día
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
   for(let d=1; d<=days; d++){
@@ -139,16 +138,13 @@ function addCityRow(pref={city:'',country:'',days:1,baseDate:''}){
   const baseDateEl = qs('.baseDate', row);
   autoFormatDMYInput(baseDateEl);
 
-  // bloque de horas por día
   const hours = makeHoursBlock(pref.days||1);
   row.appendChild(hours);
 
-  // eventos
   qs('.remove',row).addEventListener('click', ()=> row.remove());
   qs('.days',row).addEventListener('change', (e)=>{
     let n = Math.max(1, parseInt(e.target.value||1,10));
     e.target.value = n;
-    // reconstruir horas
     hours.innerHTML = '';
     const rebuilt = makeHoursBlock(n).children;
     Array.from(rebuilt).forEach(c=>hours.appendChild(c));
@@ -161,7 +157,6 @@ function addCityRow(pref={city:'',country:'',days:1,baseDate:''}){
    SECCIÓN 7 · Guardar destinos
 =================================== */
 function saveDestinations(){
-  // Lee todas las filas y guarda en estado
   const rows = qsa('.city-row', $cityList);
   const list = [];
   rows.forEach(r=>{
@@ -179,9 +174,8 @@ function saveDestinations(){
     list.push({ city, country, days, baseDate, perDay });
   });
 
-  // Estado global
   savedDestinations = list;
-  // Inicializa estructuras por ciudad
+
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', perDay: perDay||[] };
@@ -193,7 +187,7 @@ function saveDestinations(){
       if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
     }
   });
-  // Elimina ciud. borradas
+
   Object.keys(itineraries).forEach(c=>{
     if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c];
   });
@@ -292,7 +286,6 @@ function renderCityItinerary(city){
     sections.push(sec);
   });
 
-  // Paginador
   const pager = document.createElement('div');
   pager.className = 'pager';
   const prev = document.createElement('button'); prev.textContent = '«';
@@ -329,7 +322,6 @@ function renderCityItinerary(city){
    SECCIÓN 9 · Serialización para el agente
 =================================== */
 function getFrontendSnapshot(){
-  // Snapshot compacto de itineraries para contexto
   return JSON.stringify(
     Object.fromEntries(
       Object.entries(itineraries).map(([city,data])=>[
@@ -390,7 +382,7 @@ Reglas:
 `.trim();
 
 /* ================================
-   SECCIÓN 11 · Llamada al agente + Parse
+   SECCIÓN 11 · Llamada al agente
 =================================== */
 async function callAgent(text){
   const payload = { model: MODEL, input:text, history: session };
@@ -470,7 +462,7 @@ function upsertCityMeta(meta){
   if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
 }
 function applyParsedToState(parsed){
-  if(parsed?.meta) upsertCityMeta(parsed.meta);
+  if(parsed.meta) upsertCityMeta(parsed.meta);
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
@@ -489,7 +481,7 @@ function applyParsedToState(parsed){
 }
 
 /* ================================
-   SECCIÓN 13 · Generación por ciudad (v11)
+   SECCIÓN 13 · Generación por ciudad (v12)
 =================================== */
 function makeSkeletonRows(city){
   const dest = savedDestinations.find(x=>x.city===city);
@@ -505,7 +497,6 @@ function makeSkeletonRows(city){
 }
 
 async function generateCityItinerary(city){
-  // Prepara meta a partir de sidebar; default 08:30–18:00 si falta
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
@@ -519,17 +510,11 @@ async function generateCityItinerary(city){
   const instructions = `
 ${FORMAT}
 Eres un planificador experto (concierge premium).
-Genera EXCLUSIVAMENTE en FORMATO B (un único objeto):
-{
-  "destination":"${city}",
-  "rows":[
-    {"day":1,"start":"HH:MM","end":"HH:MM","activity":"...","from":"","to":"","transport":"","duration":"","notes":""}
-  ],
-  "followup":"Texto breve si realmente falta un dato"
-}
-Requisitos:
-- ${dest.days} día(s), al menos 5 actividades por día (pueden ser visitas, traslados, paradas fotográficas).
-- Incluye traslados (transport, duration con colchón ~15%).
+Tu tarea es crear el itinerario COMPLETO para "${city}".
+- Si "Existing" está vacío o sin actividades para "${city}", GENERA el plan desde cero.
+- Responde EXCLUSIVAMENTE en FORMATO B con "destination":"${city}" y "rows":[...].
+- Crea entre 4 y 6 actividades por día (visitas, traslados, paseos, comidas).
+- Incluye traslados (transport, duration con ~15% colchón).
 - Usa estas horas por día si están: ${JSON.stringify(perDay)}; si faltan, asume 08:30–18:00.
 - BaseDate (día 1): ${baseDate||'N/A'}
 - Hotel/Zona: ${hotel||'pendiente'}
@@ -543,12 +528,12 @@ ${buildIntake()}
   let parsed = parseJSON(text);
 
   if(!parsed || extractAllRows(parsed).length===0){
-    // Reintento estricto
     const retry = `
 ${FORMAT}
 Devuelve SOLO:
 {"destination":"${city}","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"...","from":"","to":"","transport":"","duration":"","notes":""}]}
-- Debe incluir al menos 5 filas por día.
+Reglas:
+- Cubre todos los días de "${city}" con 4–6 filas por día.
 - Nada de texto adicional.
 `.trim();
     text = await callAgent(retry);
@@ -560,7 +545,6 @@ Devuelve SOLO:
   }else{
     console.warn('⚠️ No se generó itinerario para', city, parsed);
     chatMsg(`⚠️ No se pudo generar automáticamente el itinerario para <strong>${city}</strong>. Puedes intentar de nuevo o indicar actividades clave.`, 'ai');
-    // Mostrar algo editable para no dejar vacío
     makeSkeletonRows(city);
   }
 
@@ -584,17 +568,13 @@ async function startPlanning(){
     {role:'user', content: buildIntake()}
   ];
 
-  // Mensaje de bienvenida
   chatMsg(`${tone.hi}`);
-
-  // Comenzamos a pedir hotel por ciudad
   askNextHotel();
 }
 function askNextHotel(){
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
-    // Generar todos
     (async ()=>{
       for(const {city} of savedDestinations){
         await generateCityItinerary(city);
@@ -621,7 +601,6 @@ async function onSend(){
 
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
-    // aceptamos cualquier cosa como hotel, incluso "pendiente"
     upsertCityMeta({ city, hotel: text });
     chatMsg(`Perfecto. Hotel/Zona registrado para ${city}.`, 'ai');
     metaProgressIndex++;
@@ -629,7 +608,6 @@ async function onSend(){
     return;
   }
 
-  // Edición normal (optimiza día visible de la ciudad activa)
   const currentCity = activeCity || savedDestinations[0]?.city;
   const data = itineraries[currentCity];
   if(!currentCity || !data){
@@ -700,7 +678,6 @@ $chatI.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault();
 $confirmCTA.addEventListener('click', lockItinerary);
 $upsellClose.addEventListener('click', ()=> $upsell.style.display='none');
 
-// Toolbar (bloqueadas si está fijado)
 qs('#btn-pdf').addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email').addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps').addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
@@ -713,5 +690,4 @@ qs('#btn-bathrooms').addEventListener('click', ()=>window.open('https://www.goog
 qs('#btn-lodging').addEventListener('click', ()=>window.open('https://www.booking.com','_blank'));
 qs('#btn-localinfo').addEventListener('click', ()=>window.open('https://www.wikivoyage.org','_blank'));
 
-// Inicial: una fila lista
 addCityRow();
