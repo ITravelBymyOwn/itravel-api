@@ -1,83 +1,407 @@
-/* v15 - styles.css */
-/* ============== Reset básico ============== */
-*{box-sizing:border-box} html,body{margin:0;padding:0}
-body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1f2937;background:#f7faf9}
-
-/* ============== Branding ============== */
-.brand{padding:18px 22px;font-weight:700;font-size:20px;color:#0f5132;background:#e9f7f1;border-bottom:1px solid #d1e7dd}
-
-/* ============== Layout ============== */
-.layout{display:grid;grid-template-columns:360px 1fr;gap:18px;max-width:1200px;margin:20px auto;padding:0 16px}
-.sidebar{position:relative}
-.content{min-width:0}
-
-/* Panels */
-.panel{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.03)}
-.block{margin-top:16px}
-.block h3{margin:0 0 8px 0;font-size:15px}
-
-/* Inputs */
-input[type="text"],input[type="number"],input[type="date"],select,textarea{
-  width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:10px;background:#fff;outline:none
+:root{
+  --brand-500:#0EA47A; 
+  --brand-600:#0B8664;
+  --ink:#101828; 
+  --muted:#667085;
+  --surface:#F8FAFC; 
+  --white:#FFF;
+  --radius:.8rem; 
+  --shadow:0 4px 16px rgba(16,24,40,.08);
+  --chat-bg:#F6F9FC;
+  --chat-user:#0EA47A15;
+  --chat-ai:#FFFFFF;
 }
-textarea{min-height:70px;resize:vertical}
 
-/* Botones */
-.btn{padding:8px 12px;border:1px solid #d1d5db;border-radius:10px;background:#fff;cursor:pointer}
-.btn:hover{background:#f5f7f9}
-.btn.primary{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
-.btn.primary:hover{background:#0284c7}
-.btn.success{background:#10b981;border-color:#10b981;color:#fff}
-.btn.success:hover{background:#059669}
-.btn.ghost{background:#fff;color:#0f5132;border-color:#bcded1}
-.btn.ghost:hover{background:#f1fbf6}
-.btn.wide{width:100%}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--surface);
+  color:var(--ink);
+  font-family:Inter,system-ui,Segoe UI,Roboto,sans-serif;
+}
 
-/* Grids */
-.grid-2{display:grid;grid-template-columns:1fr 120px;gap:10px}
-.cities-grid{display:grid;gap:10px}
-.city-row{display:grid;grid-template-columns:1.6fr .9fr .9fr 1fr auto;gap:8px;align-items:end}
-.city-row small{color:#6b7280}
-.trav-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
-.trav-grid label{font-size:12px;color:#374151;display:grid;gap:4px}
-.row.gap{display:flex;gap:8px;align-items:center}
+/* ==================== TOPBAR ==================== */
+.topbar{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  background:#fff;
+  border-bottom:1px solid #e5e7eb;
+  padding:.8rem 1.25rem;
+  position:sticky;
+  top:0;
+  z-index:50;
+  box-shadow:var(--shadow);
+}
+.topbar .brand{
+  font-weight:700;
+  color:var(--brand-600);
+  font-size:1.2rem;
+}
+.topbar .lang a{
+  margin-left:.6rem;
+  text-decoration:none;
+  color:var(--muted);
+  font-weight:600;
+}
+.topbar .lang a.active{color:var(--brand-600)}
 
-/* Chat */
-.chat{display:flex;flex-direction:column;gap:10px}
-.chat-messages{height:260px;overflow:auto;border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#fbfefe}
-.chat-message{animation:fadeIn .25s ease}
-.chat-message.ai{background:#f7f7fb;border:1px solid #e5e7eb;border-radius:12px;padding:8px 10px;margin:6px 0;color:#111827}
-.chat-message.user{background:#e7f5ff;border:1px solid #bfdbfe;border-radius:12px;padding:8px 10px;margin:6px 0;color:#0c4a6e}
-.chat-controls{display:flex;gap:10px;align-items:center;justify-content:space-between}
-.chat-input{display:flex;gap:8px;flex:1}
-
-/* Tabs */
-.tabs{display:flex;gap:8px;margin:12px 0}
-.tabs .city-tab,.tabs button{padding:6px 10px;border:1px solid #d1d5db;border-radius:999px;background:#fff;cursor:pointer}
-.city-tab.active{background:#16a34a;border-color:#16a34a;color:#fff}
-
-/* Itinerary */
-.intro{padding:12px 10px;border:1px dashed #d1d5db;border-radius:10px;background:#fcfffe;color:#475569}
-.day-section{margin-top:12px}
-.day-title{font-weight:700;margin:8px 0}
-.itinerary{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden}
-.itinerary th,.itinerary td{border-bottom:1px solid #eef2f7;padding:8px;font-size:13px;text-align:left}
-.itinerary thead th{background:#f3faf7;color:#0f5132}
-.pager{display:flex;gap:6px;align-items:center;margin:8px 0}
-.pager button{border-radius:8px;padding:6px 10px;border:1px solid #d1d5db;background:#fff}
-.pager button.active{background:#0ea5e9;border-color:#0ea5e9;color:#fff}
-.pager button.ghost{opacity:.5;pointer-events:none}
-
-/* Barra inferior */
-.bar-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-
-/* Footer */
-.foot{max-width:1200px;margin:20px auto;padding:10px 16px;color:#64748b}
-
-/* Responsive */
+/* ==================== GRID ==================== */
+#planner-grid{
+  display:grid;
+  grid-template-columns:450px 1fr;
+  gap:1.25rem;
+  padding:1rem 1.25rem;
+  max-width:1600px;
+  margin:0 auto;
+}
 @media (max-width:1024px){
-  .layout{grid-template-columns:1fr}
+  #planner-grid{grid-template-columns:1fr}
 }
+
+/* ==================== SIDEBAR ==================== */
+.sidebar{
+  background:#fff;
+  border:1px solid #e5e7eb;
+  border-radius:var(--radius);
+  box-shadow:var(--shadow);
+  padding:1rem;
+  max-height:calc(100vh - 120px);
+  overflow:auto;
+}
+.box{
+  background:#fff;
+  border:1px solid #eef2f7;
+  border-radius:var(--radius);
+  padding:1rem;
+  margin-bottom:1rem;
+  box-shadow:0 1px 6px rgba(0,0,0,0.03);
+}
+.row-actions{
+  display:flex;
+  gap:.5rem;
+  margin-top:.5rem;
+}
+
+/* ==================== CITY ROW ==================== */
+.city-row{
+  display:grid;
+  grid-template-columns:1.2fr 1fr .8fr 1fr auto;
+  gap:.6rem;
+  align-items:end;
+  margin-bottom:.6rem;
+  animation:fadeIn .4s ease;
+}
+.city-row label{
+  display:flex;
+  flex-direction:column;
+  gap:.25rem;
+  font-size:.9rem;
+}
+.city-row input{
+  width:100%;
+  min-width:80px;
+  padding:.5rem .6rem;
+  border:1px solid #d0d5dd;
+  border-radius:.5rem;
+  font-size:.9rem;
+  background:#fff;
+}
+.city-row .remove{
+  background:#ef4444;
+  color:#fff;
+  border:none;
+  border-radius:.5rem;
+  padding:.55rem .7rem;
+  cursor:pointer;
+}
+
+/* ==================== HOURS ==================== */
+.hours-block{
+  display:flex;
+  flex-direction:column;
+  gap:.45rem;
+  margin-top:.6rem;
+}
+.hours-day{
+  display:grid;
+  grid-template-columns:.8fr 1fr 1fr;
+  gap:.5rem;
+  align-items:center;
+  font-size:.9rem;
+}
+.hours-day input{
+  padding:.45rem .55rem;
+  border:1px solid #d0d5dd;
+  border-radius:.5rem;
+  font-size:.9rem;
+}
+
+/* ==================== TEXTAREA ==================== */
+.special-conditions textarea{
+  width:100%;
+  min-height:70px;
+  padding:.6rem;
+  border:1px solid #d0d5dd;
+  border-radius:.5rem;
+  font-size:.9rem;
+  resize:vertical;
+}
+
+/* ==================== VIAJEROS ==================== */
+#traveler-grid{
+  display:grid;
+  grid-template-columns:repeat(2,1fr);
+  gap:.75rem;
+  margin-top:.5rem;
+}
+#traveler-grid label{
+  display:flex;
+  flex-direction:column;
+  font-size:.9rem;
+  font-weight:600;
+  color:var(--ink);
+}
+#traveler-grid input[type="number"]{
+  margin-top:.25rem;
+  padding:.5rem;
+  border:1px solid #d0d5dd;
+  border-radius:.5rem;
+  font-size:.9rem;
+  width:100%;
+}
+@media (max-width:640px){
+  #traveler-grid{grid-template-columns:1fr}
+}
+
+/* ==================== BOTONES ==================== */
+.btn{
+  border:1px solid #d0d5dd;
+  background:#fff;
+  color:var(--brand-600);
+  border-radius:.55rem;
+  padding:.6rem .9rem;
+  cursor:pointer;
+  transition:.2s ease;
+}
+.btn:hover{
+  background:var(--brand-500);
+  border-color:var(--brand-500);
+  color:#fff;
+  transform:translateY(-1px);
+}
+.btn.primary{
+  background:var(--brand-600);
+  color:#fff;
+  border-color:var(--brand-600);
+  font-weight:700;
+}
+.btn.primary:hover{ filter:brightness(.95); }
+.btn.ghost{
+  background:#f0fdf4;
+  border:1px dashed var(--brand-600);
+  color:var(--brand-600);
+}
+.btn.warn{
+  background:#fff0f0;
+  color:#b42318;
+  border-color:#f3b3b3;
+}
+.btn.warn:hover{background:#ffd9d9}
+.w-100{width:100%}
+
+/* ==================== CHAT ==================== */
+.chat{
+  border:1px solid #d0d5dd;
+  background:var(--chat-bg);
+  border-radius:var(--radius);
+  margin:.8rem 0 1rem 0;
+  max-width:950px;
+  height:380px;
+  display:flex;
+  flex-direction:column;
+  box-shadow:var(--shadow);
+}
+.chat-messages{
+  flex:1;
+  overflow:auto;
+  padding:.9rem 1rem;
+  display:flex;
+  flex-direction:column;
+  gap:.6rem;
+}
+.chat-message{
+  max-width:85%;
+  padding:.65rem .85rem;
+  border-radius:1rem;
+  font-size:.9rem;
+  line-height:1.35;
+  box-shadow:0 1px 4px rgba(0,0,0,0.05);
+  animation:fadeIn .3s ease;
+}
+.chat-message.user{
+  align-self:flex-end;
+  background:var(--chat-user);
+  color:var(--brand-600);
+}
+.chat-message.ai{
+  align-self:flex-start;
+  background:var(--chat-ai);
+  color:var(--ink);
+}
+.chat-input{
+  display:flex;
+  gap:.5rem;
+  padding:.6rem;
+  background:#fff;
+  border-top:1px solid #d0d5dd;
+  border-bottom-left-radius:var(--radius);
+  border-bottom-right-radius:var(--radius);
+}
+.chat-input input{
+  flex:1;
+  padding:.6rem;
+  border:1px solid #d0d5dd;
+  border-radius:.5rem;
+}
+
+/* ==================== ITINERARIO ==================== */
+.city-tabs{
+  display:flex;
+  gap:.5rem;
+  flex-wrap:wrap;
+  margin:.75rem 0;
+}
+.city-tab{
+  border:1px solid #d0d5dd;
+  background:#fff;
+  color:var(--brand-600);
+  border-radius:999px;
+  padding:.45rem .8rem;
+  cursor:pointer;
+  transition:.2s ease;
+}
+.city-tab.active{
+  background:var(--brand-500);
+  border-color:var(--brand-500);
+  color:#fff;
+}
+
+table.itinerary{
+  width:100%;
+  border-collapse:collapse;
+  margin:.5rem 0 1rem 0;
+  font-size:.85rem;
+}
+table.itinerary th,
+table.itinerary td{
+  border:1px solid #e5e7eb;
+  padding:.55rem;
+  text-align:center;
+  vertical-align:middle;
+}
+table.itinerary th{
+  background:#f1f5f9;
+  font-weight:600;
+}
+table.itinerary th:last-child,
+table.itinerary td:last-child{
+  background:#f9fafb;
+  font-style:italic;
+}
+
+/* ==================== PAGER ==================== */
+.pager{
+  display:flex;
+  gap:.35rem;
+  justify-content:center;
+  margin:.75rem 0;
+}
+.pager button{
+  border:1px solid #d0d5dd;
+  background:#fff;
+  border-radius:.4rem;
+  padding:.35rem .6rem;
+  cursor:pointer;
+}
+.pager button.active{
+  background:var(--brand-500);
+  color:#fff;
+  border-color:var(--brand-500);
+}
+.pager .ghost{
+  opacity:.5;
+  pointer-events:none;
+}
+
+/* ==================== TOOLBAR ==================== */
+.toolbar{
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:.5rem;
+  margin-top:.9rem;
+  max-width:950px;
+}
+@media (max-width:960px){
+  .toolbar{grid-template-columns:repeat(2,1fr)}
+}
+
+/* ==================== CTA ==================== */
+.floating-cta{
+  position:fixed;
+  right:1rem;
+  bottom:1rem;
+  padding:1rem 1.1rem;
+  background:var(--brand-500);
+  color:#fff;
+  border:none;
+  border-radius:.8rem;
+  box-shadow:var(--shadow);
+  font-weight:700;
+  cursor:pointer;
+  z-index:60;
+  transition:.25s;
+}
+.floating-cta:hover{
+  background:var(--brand-600);
+  transform:translateY(-2px);
+}
+
+/* ==================== FOOTER ==================== */
+.footer{
+  background:#fff;
+  border-top:1px solid #e5e7eb;
+  padding:1rem;
+  text-align:center;
+  color:var(--muted);
+  font-size:.85rem;
+  margin-top:1rem;
+}
+.footer a{
+  color:var(--brand-600);
+  text-decoration:none;
+  margin:0 .25rem;
+}
+
+/* ==================== UPSELL ==================== */
+.upsell{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.35);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:80;
+}
+.upsell-card{
+  background:#fff;
+  border-radius:1rem;
+  box-shadow:var(--shadow);
+  padding:1.1rem;
+  max-width:380px;
+  width:92%;
+}
+.upsell-card h3{margin:.25rem 0 .5rem}
 
 /* ==================== ANIMACIONES ==================== */
 @keyframes fadeIn{
