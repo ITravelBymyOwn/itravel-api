@@ -1,95 +1,96 @@
-<!-- v7 · Estructura mínima: IDs esperados por planner.js -->
-<div class="topbar">
-  <div class="brand">ITravelByMyOwn Planner</div>
-  <div class="lang"><a class="active">ES</a> <a>EN</a> <a>FR</a> <a>PT</a></div>
+<!-- ITRAVELBYMYOWN · PLANNER · v7 (compat v6 DOM) -->
+<div class="top-bar">
+  <a href="/">← Back to Home</a>
 </div>
 
 <div id="planner-grid">
-  <!-- ==== SIDEBAR ==== -->
+  <!-- ===== SIDEBAR ===== -->
   <aside class="sidebar">
-    <h2>Planificador</h2>
+    <h2>Trip Inputs</h2>
 
-    <div class="box">
-      <h3>Destinos</h3>
-      <div id="city-list"></div>
+    <h3>Cities & Days</h3>
+    <!-- Contenedor de filas (se crean con JS) -->
+    <div id="cities-container"></div>
 
-      <div class="row-actions">
-        <button id="add-city-btn" class="btn ghost" type="button">+ Agregar ciudad</button>
-        <button id="reset-planner" class="btn warn" type="button">Reiniciar</button>
-      </div>
-
-      <button id="save-destinations" class="btn primary w-100" type="button">Guardar destinos</button>
+    <div class="row-actions">
+      <button id="add-city" class="add-city" type="button">+ Add City</button>
+      <button id="save-destinations" class="save-dest" type="button">Save Destinations</button>
     </div>
 
-    <div class="box">
-      <h3>Viajeros</h3>
-      <div class="city-row" style="grid-template-columns:repeat(5,1fr);gap:.5rem">
-        <label>Adultos (18+)<input id="p-adults" type="number" min="0" value="2"></label>
-        <label>Jóvenes (12–17)<input id="p-young" type="number" min="0" value="0"></label>
-        <label>Niños (2–11)<input id="p-children" type="number" min="0" value="0"></label>
-        <label>Bebés (0–1)<input id="p-infants" type="number" min="0" value="0"></label>
-        <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
-      </div>
+    <h3>Travelers</h3>
+    <div class="trav-grid">
+      <label>Adults (18+)
+        <input id="p-adults" type="number" min="0" value="2">
+      </label>
+      <label>Young (12–17)
+        <input id="p-young" type="number" min="0" value="0">
+      </label>
+      <label>Children (2–11)
+        <input id="p-children" type="number" min="0" value="0">
+      </label>
+      <label>Infants (0–1)
+        <input id="p-infants" type="number" min="0" value="0">
+      </label>
+      <label>Seniors (65+)
+        <input id="p-seniors" type="number" min="0" value="0">
+      </label>
     </div>
 
-    <div class="box special-conditions">
-      <h3>Restricciones / Condiciones especiales</h3>
-      <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta (sin gluten), marcapasos, alergias, ritmo suave, evitar escaleras..."></textarea>
-    </div>
+    <h3>Restricciones / Condiciones especiales</h3>
+    <textarea id="special-conditions" placeholder="Ej: movilidad reducida, marcapasos, alergias, ritmo suave, sin gluten, evitar escaleras…"></textarea>
   </aside>
 
-  <!-- ==== MAIN ==== -->
+  <!-- ===== MAIN ===== -->
   <main class="main">
-    <h2>Itinerario</h2>
+    <h2>Interactive Chat & Itinerary</h2>
 
-    <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+    <button id="start-planning" disabled>Start Planning</button>
 
-    <!-- Chat -->
-    <div id="chat-container" class="chat" style="display:none">
+    <div class="chat-container" id="chat-container" style="display:none">
       <div id="chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <input id="chat-input" type="text" placeholder="Escribe tu mensaje...">
-        <button id="send-btn" class="btn primary" type="button">Enviar</button>
+        <input id="intake" type="text" placeholder="Type your message...">
+        <button id="send-btn" type="button">Send</button>
       </div>
     </div>
 
-    <!-- Tabs + Itinerary -->
-    <div id="city-tabs" class="city-tabs"></div>
-    <div id="itinerary-container"></div>
+    <div id="output">
+      <div class="city-tabs" id="city-tabs"></div>
+      <p id="itinerary-intro">Your itinerary will appear here.</p>
+      <div id="itinerary-container"></div>
+    </div>
 
-    <!-- Toolbar -->
     <div class="toolbar">
-      <button id="btn-pdf" class="btn">Exportar PDF</button>
-      <button id="btn-email" class="btn">Enviar por Email</button>
-      <button id="btn-maps" class="btn">Mapas</button>
-      <button id="btn-transport" class="btn">Transporte</button>
-      <button id="btn-weather" class="btn">Clima</button>
-
-      <button id="btn-clothing" class="btn">Ropa</button>
-      <button id="btn-restaurants" class="btn">Restaurantes</button>
-      <button id="btn-gas" class="btn">Gasolineras</button>
-      <button id="btn-bathrooms" class="btn">Baños</button>
-      <button id="btn-lodging" class="btn">Hospedaje</button>
-
-      <button id="btn-localinfo" class="btn">Info Local</button>
+      <button id="btn-pdf">Export PDF</button>
+      <button id="btn-email">Send Email</button>
+      <button id="btn-maps">Maps</button>
+      <button id="btn-transport">Transport</button>
+      <button id="btn-weather">Weather</button>
+      <button id="btn-clothing">Clothing</button>
+      <button id="btn-restaurants">Restaurants</button>
+      <button id="btn-gas">Gas Stations</button>
+      <button id="btn-bathrooms">Bathrooms</button>
+      <button id="btn-lodging">Lodging</button>
+      <button id="btn-localinfo">Local Info</button>
     </div>
   </main>
 </div>
 
-<button id="confirm-itinerary" class="floating-cta">Elijo este itinerario</button>
+<button id="confirm-itinerary">Elijo este itinerario</button>
 
-<!-- Upsell -->
+<!-- Upsell (mantiene IDs de v6) -->
 <div id="monetization-upsell" class="upsell" style="display:none">
   <div class="upsell-card">
     <h3>Plan Premium</h3>
     <p>Para editar este itinerario final y exportar, actualiza a Premium.</p>
-    <div style="display:flex;gap:.5rem;justify-content:flex-end">
+    <div class="upsell-actions">
       <button id="upsell-close" class="btn">Cerrar</button>
       <button class="btn primary">Actualizar</button>
     </div>
   </div>
 </div>
 
-<footer class="footer">
-  © 2025 ITravelByMyOwn — <a href="/terms">Términos</a> · <a href="/privacy">Privacidad</a>
+<footer>
+  <p>© 2025 ITravelByMyOwn — Your personal AI travel planner</p>
+  <p><a href="/privacy">Privacy</a> | <a href="/terms">Terms</a> | <a href="/contact">Contact</a></p>
 </footer>
