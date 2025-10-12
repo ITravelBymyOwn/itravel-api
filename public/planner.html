@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <link rel="stylesheet" href="planner.css?v=28" />
+  <link rel="stylesheet" href="planner.css?v=29" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
@@ -35,8 +35,7 @@
           <button class="btn warn" id="reset-planner">Reiniciar</button>
         </div>
         <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
-        <!-- ✅ Nuevo botón recalcular -->
-        <button class="btn primary w-100" id="recalc-btn" style="display:none;">Recalcular itinerario</button>
+        <!-- (v29) Se elimina el botón recalc aquí. Ahora es FAB flotante. -->
       </section>
 
       <section class="box special-conditions">
@@ -117,6 +116,9 @@
 
   <button id="confirm-itinerary" class="floating-cta">Elijo este itinerario</button>
 
+  <!-- FAB flotante (v29) -->
+  <button id="recalc-fab" style="display:none;">Recalcular itinerario</button>
+
   <footer class="footer">
     © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
   </footer>
@@ -130,7 +132,7 @@
     </div>
   </div>
 
-  <!-- ✅ Overlay de carga -->
+  <!-- Overlay de carga -->
   <div id="loading-overlay" style="display:none;">
     <div class="loader">
       <div class="hourglass"></div>
@@ -138,6 +140,6 @@
     </div>
   </div>
 
-  <script src="planner.js?v=28"></script>
+  <script src="planner.js?v=29"></script>
 </body>
 </html>
