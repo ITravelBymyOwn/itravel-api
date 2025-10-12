@@ -1,11 +1,11 @@
 :root{
-  --brand-500:#0EA47A; 
+  --brand-500:#0EA47A;
   --brand-600:#0B8664;
-  --ink:#101828; 
+  --ink:#101828;
   --muted:#667085;
-  --surface:#F8FAFC; 
+  --surface:#F8FAFC;
   --white:#FFF;
-  --radius:.8rem; 
+  --radius:.8rem;
   --shadow:0 4px 16px rgba(16,24,40,.08);
   --chat-bg:#F6F9FC;
   --chat-user:#0EA47A15;
@@ -49,8 +49,7 @@ body{
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  /* v17: dar más espacio al sidebar */
-  grid-template-columns: 35% 65%;
+  grid-template-columns:28% 72%;
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -118,14 +117,14 @@ body{
 
 /* Hours per day */
 .hours-block{
-  display:flex;
+  display:none; /* oculto por defecto */
   flex-direction:column;
   gap:.45rem;
   margin-top:.6rem;
 }
+.hours-block.active{display:flex}
 .hours-day{
   display:grid;
-  /* v17: compactar ligeramente para que quepa mejor */
   grid-template-columns:.8fr .7fr .7fr;
   gap:.5rem;
   align-items:center;
@@ -136,7 +135,7 @@ body{
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.9rem;
-  max-width:95px; /* v17 */
+  max-width:95px;
 }
 
 /* ==================== TEXTAREA ==================== */
