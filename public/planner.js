@@ -1,10 +1,12 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v21
-   Cambios (cumpliendo 3 reglas, sin tocar HTML/CSS):
-   - Horas por día NO se muestran al inicio; solo tras digitar "Días"
-   - Si el usuario NO indica horas, el agente usa 08:30–19:00 (fallback en intake)
-   - Si el usuario sí indica horas, se respetan tal cual
-   - Mantener estructura, IDs y tonos existentes (v20)
+   ITRAVELBYMYOWN · PLANNER v22 (EMERGENCIA)
+   ► Cumple 3 reglas: archivo completo, sin cambiar HTML/CSS,
+     conserva estructura/IDs y comportamiento.
+   ► Arreglos críticos:
+     - Horas por día NO aparecen al inicio; solo tras digitar "Días".
+     - Si el usuario no indica horas, fallback 08:30–19:00.
+     - Generación de itinerarios: doble intento forzado (formato B).
+     - Si el agente no devuelve rows → fallback local con tablas por día.
 ========================================================= */
 
 /* ================================
@@ -126,7 +128,7 @@ function makeHoursBlock(days){
   return wrap;
 }
 
-/* v21: NO renderizar horas hasta que el usuario digite "Días" (>0) */
+/* v22: NO renderizar horas hasta que el usuario digite "Días" (>0) */
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
@@ -148,7 +150,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   // Eliminar fila
   qs('.remove',row).addEventListener('click', ()=> row.remove());
 
-  // v21: Renderizar horas SOLO cuando hay un número válido de días
+  // Renderizar horas SOLO cuando hay un número válido de días
   qs('.days',row).addEventListener('input', (e)=>{
     const n = parseInt(e.target.value,10);
     hoursWrap.innerHTML = '';
@@ -178,7 +180,7 @@ function saveDestinations(){
 
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      // v21: usar horas digitadas; si van vacías, se rellenan después en el intake con 08:30–19:00
+      // Si el usuario no escribe, se rellenará más adelante con 08:30–19:00
       const start = qs('.start',hd).value || '';
       const end   = qs('.end',hd).value   || '';
       perDay.push({ day: idx+1, start, end });
@@ -350,7 +352,7 @@ function getFrontendSnapshot(){
   );
 }
 
-/* v21: fallback de horas 08:30–19:00 solo si el usuario NO digitó nada */
+/* v22: fallback 08:30–19:00 solo si el usuario NO digitó horas */
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -365,16 +367,13 @@ function buildIntake(){
     return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
   }).join(' | ');
 
-  // Garantizar perDay coherente por destino
   savedDestinations.forEach(dest=>{
-    // Si el usuario escribió días pero NO horas, aplicamos fallback por cada día
     const needFallback = !dest.perDay || dest.perDay.length===0 || dest.perDay.every(h=>(!h.start && !h.end));
     if(needFallback){
       dest.perDay = Array.from({length:dest.days}, (_,i)=>({
         day:i+1, start:'08:30', end:'19:00'
       }));
     }else{
-      // Normalizar: si falta start o end en alguna fila, rellenar sólo ese campo
       dest.perDay = Array.from({length:dest.days}, (_,i)=>{
         const src = (dest.perDay||[])[i] || {};
         return {
@@ -384,7 +383,6 @@ function buildIntake(){
         };
       });
     }
-    // Reflejar en cityMeta (sin forzar en inputs)
     cityMeta[dest.city] = cityMeta[dest.city] || {};
     cityMeta[dest.city].perDay = dest.perDay.slice();
   });
@@ -416,7 +414,7 @@ Reglas:
 `;
 
 /* ================================
-   SECCIÓN 12 · Llamada al agente
+   SECCIÓN 12 · Llamada al agente (genérica)
 =================================== */
 async function callAgent(text){
   const payload = { model: MODEL, input:text, history: session };
@@ -524,7 +522,7 @@ function applyParsedToState(parsed){
 }
 
 /* ================================
-   SECCIÓN 14 · Generación por ciudad
+   SECCIÓN 14 · Generación por ciudad (doble intento + fallback)
 =================================== */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -537,36 +535,69 @@ async function generateCityItinerary(city){
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
 
-  const instructions = `
-${FORMAT}
-Eres un planificador experto, cálido y empático. Genera el itinerario SOLO para "${city}" con ${dest.days} día(s).
-- Usa estas horas por día (start/end); si faltan, asume 08:30–19:00:
+  // Prompt ESTRICTO: exige formato B y al menos 1 fila por día
+  const strictPrompt = `
+Eres un planificador de viajes.
+Devuelve SOLO JSON válido en FORMATO B, sin texto extra:
+{"destination":"${city}","rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"Texto","from":"","to":"","transport":"","duration":"","notes":""}],"followup":"Texto breve"}
+
+Requisitos:
+- Debe haber AL MENOS una fila por cada uno de los ${dest.days} días.
+- Usa estas horas por día (si faltan, 08:30–19:00):
 ${JSON.stringify(perDay)}
-- BaseDate (día 1): ${baseDate||'N/A'}
-- Hotel/Zona: ${hotel||'pendiente'}
-- Limita a 20 actividades por día (consolida cercanas).
+- BaseDate (día 1): ${baseDate || 'N/A'}
+- Hotel/Zona: ${hotel || 'pendiente'}
+- Traslados realistas (transport, duration con +15% colchón).
+- Máx 20 filas por día.
 
-Contexto global:
-${buildIntake()}
-
-Devuelve formato B con "destination":"${city}". No agregues texto fuera del JSON.
+No devuelvas meta ni texto fuera del JSON.
 `.trim();
 
-  const text = await callAgent(instructions);
-  const parsed = parseJSON(text);
+  // 1er intento
+  let text = await callAgent(strictPrompt);
+  let parsed = parseJSON(text);
 
-  if(parsed){
-    applyParsedToState(parsed);
+  // 2º intento si no hay rows
+  if(!parsed || !Array.isArray(parsed.rows) || !parsed.rows.length){
+    text = await callAgent(strictPrompt);
+    parsed = parseJSON(text);
+  }
+
+  // Fallback local: crear una fila por día (para NO quedarnos sin tablas)
+  let usedFallback = false;
+  if(!parsed || !Array.isArray(parsed.rows) || !parsed.rows.length){
+    usedFallback = true;
+    const rows = [];
+    for(let d=1; d<=dest.days; d++){
+      rows.push({
+        day:d,
+        start: perDay[d-1]?.start || '08:30',
+        end:   perDay[d-1]?.end   || '19:00',
+        activity:`Día ${d} — actividad pendiente`,
+        from:'', to:'', transport:'', duration:'', notes:'(fallback local)'
+      });
+    }
+    parsed = { destination: city, rows, followup: 'Itinerario generado localmente (fallback).' };
+  }
+
+  // Aplicar al estado y render
+  if(parsed?.destination && Array.isArray(parsed.rows)){
+    pushRows(parsed.destination, parsed.rows, true);
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
+    if(usedFallback){
+      chatMsg('⚠️ No recibí actividades del agente. Generé una estructura base por día para que puedas seguir trabajando.', 'ai');
+    }else{
+      if(parsed.followup) chatMsg(parsed.followup,'ai');
+    }
   }else{
-    // Fallback: tablas vacías por día
+    // Último recurso: estructura vacía (mantener UI consistente)
     ensureDays(city);
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
-    chatMsg('⚠️ No se recibieron actividades para esta ciudad. Se generó estructura vacía.', 'ai');
+    chatMsg('⚠️ No se recibieron actividades. Generé estructura vacía por día.', 'ai');
   }
 }
 
