@@ -49,7 +49,7 @@ body{
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns:450px 1fr;
+  grid-template-columns: 30% 1fr; /* ⬅ mejora de reparto */
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -86,7 +86,7 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .8fr 1fr auto;
+  grid-template-columns:1.4fr 1fr .8fr 1fr auto;
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -97,10 +97,10 @@ body{
   flex-direction:column;
   gap:.25rem;
   font-size:.9rem;
+  min-width:120px; /* ⬅ evita compresión */
 }
 .city-row input{
   width:100%;
-  min-width:80px;
   padding:.5rem .6rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
@@ -116,13 +116,14 @@ body{
   cursor:pointer;
 }
 
-/* ==================== HOURS ==================== */
+/* Hours per day */
 .hours-block{
-  display:flex;
+  display:none;              /* ⬅ oculto por defecto */
   flex-direction:column;
   gap:.45rem;
   margin-top:.6rem;
 }
+.hours-block.visible{display:flex;} /* ⬅ se muestra cuando hay días */
 .hours-day{
   display:grid;
   grid-template-columns:.8fr 1fr 1fr;
@@ -172,6 +173,14 @@ body{
 }
 @media (max-width:640px){
   #traveler-grid{grid-template-columns:1fr}
+}
+
+/* ==================== PRESUPUESTO (alineado) ==================== */
+.budget-box .grid-2{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:.6rem;
+  align-items:end;
 }
 
 /* ==================== BOTONES ==================== */
@@ -304,13 +313,7 @@ table.itinerary th{
   background:#f1f5f9;
   font-weight:600;
 }
-table.itinerary th:last-child,
-table.itinerary td:last-child{
-  background:#f9fafb;
-  font-style:italic;
-}
 
-/* ==================== PAGER ==================== */
 .pager{
   display:flex;
   gap:.35rem;
