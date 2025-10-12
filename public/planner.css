@@ -211,12 +211,7 @@ body{
 }
 .btn.warn:hover{background:#ffd9d9}
 .w-100{width:100%}
-
-/* Estados deshabilitados */
-.btn[disabled]{
-  opacity:.6;
-  cursor:not-allowed;
-}
+.btn[disabled]{opacity:.6;cursor:not-allowed}
 
 /* ==================== CHAT ==================== */
 .chat{
@@ -294,7 +289,6 @@ body{
   border-color:var(--brand-500);
   color:#fff;
 }
-
 table.itinerary{
   width:100%;
   border-collapse:collapse;
@@ -369,6 +363,24 @@ table.itinerary th{
   transform:translateY(-2px);
 }
 
+/* ===== FAB Recalcular (v29) ===== */
+#recalc-fab{
+  position:fixed;
+  left:1rem;
+  bottom:1rem;
+  padding:.9rem 1rem;
+  background:var(--brand-600);
+  color:#fff;
+  border:none;
+  border-radius:999px;
+  box-shadow:var(--shadow);
+  font-weight:700;
+  cursor:pointer;
+  z-index:70;
+  transition:.25s;
+}
+#recalc-fab:hover{ filter:brightness(.95); }
+
 /* ==================== FOOTER ==================== */
 .footer{
   background:#fff;
@@ -417,9 +429,7 @@ table.itinerary th{
   z-index:100;
   pointer-events:all;
 }
-.loader{
-  text-align:center;
-}
+.loader{text-align:center;}
 .hourglass {
   display:inline-block;
   width:50px;
@@ -429,9 +439,7 @@ table.itinerary th{
   border-top-color:transparent;
   animation:spin 1s linear infinite;
 }
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 #loading-overlay p {
   margin-top:1rem;
   font-weight:600;
