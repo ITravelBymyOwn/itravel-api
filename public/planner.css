@@ -212,6 +212,12 @@ body{
 .btn.warn:hover{background:#ffd9d9}
 .w-100{width:100%}
 
+/* Estados deshabilitados */
+.btn[disabled]{
+  opacity:.6;
+  cursor:not-allowed;
+}
+
 /* ==================== CHAT ==================== */
 .chat{
   border:1px solid #d0d5dd;
@@ -409,6 +415,7 @@ table.itinerary th{
   justify-content:center;
   align-items:center;
   z-index:100;
+  pointer-events:all;
 }
 .loader{
   text-align:center;
