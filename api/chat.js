@@ -1,5 +1,4 @@
-// /api/chat.js — CORRECCIÓN v28 (Fuerza Máxima)
-
+// /api/chat.js — v28 (Structured Output estable con triple reintento)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -7,110 +6,152 @@ const client = new OpenAI({
 });
 
 // ==============================
-// Extrae mensajes desde body
+// Extract helpers (igual que antes)
 // ==============================
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
-
   const prev = Array.isArray(history) ? history : [];
   const userText = typeof input === "string" ? input : "";
-  // Se asegura que el mensaje del usuario sea el último (si no viene en messages)
-  if(prev.length === 0 || prev[prev.length - 1].content !== userText){
-      return [...prev, { role: "user", content: userText }];
-  }
-  return prev;
+  return [...prev, { role: "user", content: userText }];
 }
 
-// ==============================
-// Limpia y parsea JSON
-// ==============================
 function cleanToJSON(raw = "") {
-  let s = (raw || "").trim();
-  if (!s) return null;
-
-  if (/```json/i.test(s)) s = s.replace(/```json|```/gi, "").trim();
-  else if (s.startsWith("```") && s.endsWith("```")) s = s.slice(3, -3).trim();
-
-  try { return JSON.parse(s); } catch (_) {}
-
-  const m = s.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-  if (m) {
-    try { return JSON.parse(m[1]); } catch (_) {}
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
   }
-
-  return null;
 }
 
-// ==============================
-// Fallback mínimo
-// ==============================
-function fallbackJSON(message) {
+function fallbackJSON() {
   return {
-    meta: {
-      city: "Error",
-      baseDate: new Date().toLocaleDateString("es-ES"),
-      hotel: "No generado",
-    },
-    followup: message || "Error grave al generar itinerario. Revisa el log de Vercel.",
-    _no_itinerary_rows: true,
+    destination: "Desconocido",
+    rows: [
+      {
+        day: 1,
+        start: "08:30",
+        end: "19:00",
+        activity: "Itinerario base (fallback)",
+        from: "",
+        to: "",
+        transport: "",
+        duration: "",
+        notes: "",
+      },
+    ],
+    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
 // ==============================
-// Prompt de sistema BASE
+// Prompt base
 // ==============================
-const SYSTEM_PROMPT_BASE = `
+const SYSTEM_PROMPT = `
 Eres el planificador de viajes inteligente de ITravelByMyOwn.
-Tu **ÚNICA** tarea es devolver un **JSON VÁLIDO** en uno de los siguientes formatos.
-**NO incluyas NADA de texto o formato (ej. \`\`\`json) fuera del objeto JSON final.**
+Tu salida está forzada a un **JSON VÁLIDO** que incluya itinerarios.
+
+Formatos válidos:
+B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
+C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
+
+⚠️ Reglas:
+- Obligatorio: incluir al menos 1 fila en "rows".
+- Nada de texto fuera del JSON.
+- Usa horas por día si existen, o 08:30–19:00 si no.
+- 20 actividades máximo por día.
 `.trim();
 
 // ==============================
-// Formatos (para el prompt de Retry)
+// Esquema JSON estricto
 // ==============================
-const FORMAT_ROWS = `
-**FORMATO OBLIGATORIO (Para Generación/Edición):**
-B) {"destination":"City","rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"Texto","from":"","to":"","transport":"","duration":"","notes":""}],"followup":"Texto breve"}
-C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"Texto breve"}
-`.trim();
+const Row = {
+  type: "object",
+  required: ["day", "start", "end", "activity"],
+  properties: {
+    day: { type: "integer", minimum: 1 },
+    start: { type: "string" },
+    end: { type: "string" },
+    activity: { type: "string" },
+    from: { type: "string" },
+    to: { type: "string" },
+    transport: { type: "string" },
+    duration: { type: "string" },
+    notes: { type: "string" },
+  },
+  additionalProperties: false,
+};
 
-const FORMAT_META = `
-**FORMATO OPCIONAL (Solo para recopilar datos de Hotel):**
-A) {"meta":{"city":"Nombre","baseDate":"DD/MM/YYYY","start":["HH:MM"],"end":"HH:MM","hotel":"Texto"},"followup":"Texto breve"}
-`.trim();
+const SingleCity = {
+  type: "object",
+  required: ["destination", "rows"],
+  properties: {
+    destination: { type: "string" },
+    rows: { type: "array", items: Row, minItems: 1 },
+    followup: { type: "string" },
+  },
+  additionalProperties: false,
+};
+
+const MultiCity = {
+  type: "object",
+  required: ["destinations"],
+  properties: {
+    destinations: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["name", "rows"],
+        properties: {
+          name: { type: "string" },
+          rows: { type: "array", items: Row, minItems: 1 },
+        },
+      },
+      minItems: 1,
+    },
+    followup: { type: "string" },
+  },
+  additionalProperties: false,
+};
+
+const ItinerarySchema = {
+  name: "itinerary_response",
+  schema: {
+    type: "object",
+    anyOf: [SingleCity, MultiCity],
+    additionalProperties: false,
+  },
+  strict: true,
+};
 
 // ==============================
-// Petición al modelo
+// Llamada estructurada
 // ==============================
-async function completeJSON(messages, options = {}) {
-  const model = options.model || "gpt-4o-mini"; 
-  const temperature = options.temperature ?? 0.4;
-  const systemContent = options.systemContent || SYSTEM_PROMPT_BASE + "\n" + FORMAT_ROWS + "\n" + FORMAT_META;
-
-  const msgs = [
-    { role: "system", content: systemContent },
-    // Filtro para asegurar que solo haya mensajes válidos
-    ...messages.filter(m => m && m.role && m.content != null), 
-  ];
-  
-  console.log("📝 MENSAJES ENVIADOS:", JSON.stringify(msgs, null, 2));
-
-  const resp = await client.chat.completions.create({
-    model,
+async function callStructured(messages, temperature = 0.4) {
+  const resp = await client.responses.create({
+    model: "gpt-4o-mini",
     temperature,
-    top_p: 0.9,
-    messages: msgs,
-    response_format: { type: "json_object" },
-    max_tokens: 2500,
+    response_format: {
+      type: "json_schema",
+      json_schema: ItinerarySchema,
+    },
+    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    max_output_tokens: 2200,
   });
 
-  const raw = resp.choices?.[0]?.message?.content?.trim() || "";
-  return raw;
+  const text = resp?.output_text?.trim() || "";
+  console.log("🛰️ RAW STRUCTURED RESPONSE:", text);
+  return text;
 }
 
 // ==============================
-// Handler principal
+// Handler principal con triple reintento
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -121,42 +162,33 @@ export default async function handler(req, res) {
     const body = req.body;
     const clientMessages = extractMessages(body);
 
-    // 1. Primer intento
-    let raw = await completeJSON(clientMessages, { model: body?.model || "gpt-4o-mini" });
+    // 1) Primer intento normal
+    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
-    // 2. Comprobar si se obtuvo un itinerario (rows/destinations)
-    const hasItineraryRows = parsed && (parsed.rows || parsed.destinations);
-    const isInitialRequest = clientMessages.some(m => m.content.includes("INICIO DE PLANIFICACIÓN"));
-    
-    // 3. Segundo intento AGRESIVO: Si es la solicitud inicial o de edición y falló el formato B/C.
-    if (!hasItineraryRows) {
-        
-      const strictSystemPrompt = SYSTEM_PROMPT_BASE + `
-**INSTRUCCIÓN CRÍTICA:**
-DEBES devolver el itinerario en formato B o C. El usuario espera una tabla de actividades.
-NO uses el formato A ("meta"). NO DEBÉS preguntarle al usuario. 
-TU ÚNICA TAREA ES DEVOLVER EL JSON CON 'rows'.
-
-${FORMAT_ROWS}
-`.trim();
-
-      // Forzamos la baja temperatura para un output estructurado
-      raw = await completeJSON(clientMessages, { 
-          model: body?.model || "gpt-4o-mini", 
-          temperature: 0.1,
-          systemContent: strictSystemPrompt 
-      });
+    const hasRows = parsed && (parsed.rows || parsed.destinations);
+    if (!hasRows) {
+      // 2) Segundo intento
+      const strictPrompt = SYSTEM_PROMPT + `
+OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
+      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
       parsed = cleanToJSON(raw);
     }
 
-    if (!parsed) parsed = fallbackJSON("El agente no pudo generar un JSON válido de itinerario, incluso después de un reintento estricto.");
+    const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
+    if (stillNoRows) {
+      // 3) Ultra estricto con ejemplo
+      const ultraPrompt = SYSTEM_PROMPT + `
+Ejemplo válido:
+{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":""}]}`;
+      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
+      parsed = cleanToJSON(raw);
+    }
 
+    if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
-  } catch (error) {
-    console.error("❌ Error en /api/chat.js:", error);
-    return res.status(500).json({
-      error: "Error interno del servidor. Verifica la configuración del modelo o tu API Key.",
-    });
+  } catch (err) {
+    console.error("❌ /api/chat error:", err);
+    return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
