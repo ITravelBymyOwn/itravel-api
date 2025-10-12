@@ -1,12 +1,11 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v22 (EMERGENCIA)
-   ► Cumple 3 reglas: archivo completo, sin cambiar HTML/CSS,
-     conserva estructura/IDs y comportamiento.
-   ► Arreglos críticos:
-     - Horas por día NO aparecen al inicio; solo tras digitar "Días".
-     - Si el usuario no indica horas, fallback 08:30–19:00.
-     - Generación de itinerarios: doble intento forzado (formato B).
-     - Si el agente no devuelve rows → fallback local con tablas por día.
+   ITRAVELBYMYOWN · PLANNER v23
+   Base: v21 (mantiene estructura y estilos)
+   Focos v23:
+   - Fuerza generación de itinerarios en la API (force_itinerary:true)
+   - Envía bloque "Per-day hours (resolved)" al backend
+   - Si el backend no devuelve rows ⇒ síntesis local REAL (8–10 actividades por día)
+   - Respeta horas del usuario; si faltan 08:30–19:00
 ========================================================= */
 
 /* ================================
@@ -120,44 +119,36 @@ function makeHoursBlock(days){
     row.className = 'hours-day';
     row.innerHTML = `
       <span>Día ${d}</span>
-      <input class="start" type="time" placeholder="08:30" value="">
-      <input class="end"   type="time" placeholder="19:00" value="">
+      <input class="start" type="time" value="">
+      <input class="end"   type="time" value="">
     `;
     wrap.appendChild(row);
   }
   return wrap;
 }
-
-/* v22: NO renderizar horas hasta que el usuario digite "Días" (>0) */
-function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
+function addCityRow(pref={city:'',country:'',days:1,baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
-    <label>Días<input class="days" type="number" min="1" value="${pref.days||''}"></label>
+    <label>Días<input class="days" type="number" min="1" value="${pref.days||1}"></label>
     <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}"></label>
     <button class="remove" type="button">✕</button>
   `;
   const baseDateEl = qs('.baseDate', row);
   autoFormatDMYInput(baseDateEl);
 
-  // Contenedor de horas inicialmente vacío
-  const hoursWrap = document.createElement('div');
-  hoursWrap.className = 'hours-block';
-  row.appendChild(hoursWrap);
+  const hours = makeHoursBlock(pref.days||1);
+  row.appendChild(hours);
 
-  // Eliminar fila
   qs('.remove',row).addEventListener('click', ()=> row.remove());
-
-  // Renderizar horas SOLO cuando hay un número válido de días
-  qs('.days',row).addEventListener('input', (e)=>{
-    const n = parseInt(e.target.value,10);
-    hoursWrap.innerHTML = '';
-    if(Number.isFinite(n) && n>0){
-      const block = makeHoursBlock(n);
-      Array.from(block.children).forEach(c=>hoursWrap.appendChild(c));
-    }
+  qs('.days',row).addEventListener('change', (e)=>{
+    let n = Math.max(1, parseInt(e.target.value||1,10));
+    e.target.value = n;
+    hours.innerHTML = '';
+    const rebuilt = makeHoursBlock(n).children;
+    Array.from(rebuilt).forEach(c=>hours.appendChild(c));
   });
 
   $cityList.appendChild(row);
@@ -172,26 +163,19 @@ function saveDestinations(){
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
     const country  = qs('.country',r).value.trim();
-    const daysVal  = qs('.days',r).value.trim();
-    const days     = Math.max(1, parseInt(daysVal||'1',10));
+    const days     = Math.max(1, parseInt(qs('.days',r).value||1,10));
     const baseDate = qs('.baseDate',r).value.trim();
-
     if(!city) return;
-
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      // Si el usuario no escribe, se rellenará más adelante con 08:30–19:00
-      const start = qs('.start',hd).value || '';
-      const end   = qs('.end',hd).value   || '';
-      perDay.push({ day: idx+1, start, end });
+      const start = (qs('.start',hd).value||'').trim();
+      const end   = (qs('.end',hd).value||'').trim();
+      perDay.push({ day: idx+1, start: start || null, end: end || null });
     });
-
     list.push({ city, country, days, baseDate, perDay });
   });
 
   savedDestinations = list;
-
-  // Preparar estructuras
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', perDay: perDay||[] };
@@ -327,7 +311,7 @@ function renderCityItinerary(city){
 }
 
 /* ================================
-   SECCIÓN 10 · Snapshot para IA
+   SECCIÓN 10 · Snapshot / Intake
 =================================== */
 function getFrontendSnapshot(){
   return JSON.stringify(
@@ -352,7 +336,21 @@ function getFrontendSnapshot(){
   );
 }
 
-/* v22: fallback 08:30–19:00 solo si el usuario NO digitó horas */
+function buildPerDayMap(){
+  const map = {};
+  savedDestinations.forEach(dest=>{
+    const per = (cityMeta[dest.city]?.perDay && cityMeta[dest.city].perDay.length)
+      ? cityMeta[dest.city].perDay
+      : Array.from({length:dest.days}, (_,i)=>({day:i+1,start:'08:30',end:'19:00'}));
+    map[dest.city] = per.map(x=>({
+      day:x.day,
+      start: x.start || '08:30',
+      end:   x.end   || '19:00'
+    }));
+  });
+  return map;
+}
+
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -367,32 +365,14 @@ function buildIntake(){
     return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
   }).join(' | ');
 
-  savedDestinations.forEach(dest=>{
-    const needFallback = !dest.perDay || dest.perDay.length===0 || dest.perDay.every(h=>(!h.start && !h.end));
-    if(needFallback){
-      dest.perDay = Array.from({length:dest.days}, (_,i)=>({
-        day:i+1, start:'08:30', end:'19:00'
-      }));
-    }else{
-      dest.perDay = Array.from({length:dest.days}, (_,i)=>{
-        const src = (dest.perDay||[])[i] || {};
-        return {
-          day: i+1,
-          start: src.start || '08:30',
-          end:   src.end   || '19:00'
-        };
-      });
-    }
-    cityMeta[dest.city] = cityMeta[dest.city] || {};
-    cityMeta[dest.city].perDay = dest.perDay.slice();
-  });
+  const perDayMap = buildPerDayMap();
 
   return [
     `Destinations: ${list}`,
     `Travelers: ${pax}`,
+    `Per-day hours (resolved): ${JSON.stringify(perDayMap)}`,
     `Special conditions: ${(qs('#special-conditions')?.value||'').trim()||'N/A'}`,
-    `Existing: ${getFrontendSnapshot()}`,
-    `Per-day hours (resolved): ${JSON.stringify(Object.fromEntries(savedDestinations.map(d=>[d.city,d.perDay])))}`
+    `Existing: ${getFrontendSnapshot()}`
   ].join('\n');
 }
 
@@ -401,23 +381,19 @@ function buildIntake(){
 =================================== */
 const FORMAT = `
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
-A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
-B) {"destination":"City","rows":[{...}],"followup":"Pregunta breve"}
-C) {"rows":[{...}],"followup":"Pregunta breve"}
-D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" o ["HH:MM",...],"end":"HH:MM" o ["HH:MM",...],"hotel":"Texto"},"followup":"Pregunta breve"}
+B) {"destination":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}],"followup":"Pregunta breve"}
+C) {"destinations":[{"name":"City","rows":[{...}]}], "followup":"Pregunta breve"}
 Reglas:
-- Incluye traslados con transporte y duración (+15% colchón).
-- Usa start/end por día si están disponibles; si faltan, asume 08:30–19:00.
-- Si falta baseDate, devuelve itinerario sin fechas absolutas.
-- Máximo 20 filas de actividades por día (consolida si es necesario).
-- Usa "followup" SOLO cuando realmente requieras datos extra. Aquí solo pediremos hospedaje.
-`;
+- Usa start/end por día; si faltan, asume 08:30–19:00.
+- Incluye traslados (transport y duration con +15% colchón).
+- Máximo 20 filas por día (consolida si es necesario).
+`.trim();
 
 /* ================================
-   SECCIÓN 12 · Llamada al agente (genérica)
+   SECCIÓN 12 · API
 =================================== */
 async function callAgent(text){
-  const payload = { model: MODEL, input:text, history: session };
+  const payload = { model: MODEL, input:text, history: session, force_itinerary:true };
   try{
     const res = await fetch(API_URL,{
       method:'POST',
@@ -429,7 +405,7 @@ async function callAgent(text){
     return data?.text || '';
   }catch(e){
     console.error(e);
-    return `{"followup":"${tone.fail}"}`;
+    return '';
   }
 }
 function parseJSON(s){
@@ -446,7 +422,7 @@ function parseJSON(s){
 }
 
 /* ================================
-   SECCIÓN 13 · Apply / Merge
+   SECCIÓN 13 · Merge helpers
 =================================== */
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
@@ -497,112 +473,107 @@ function upsertCityMeta(meta){
   if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
   if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
 }
-function applyParsedToState(parsed){
-  if(parsed && parsed.itinerary) parsed = parsed.itinerary;
-  if(parsed && parsed.destinos) parsed.destination = parsed.destinos;
-  if(parsed && parsed.destino) parsed.destination = parsed.destino;
 
-  if(parsed?.meta) upsertCityMeta(parsed.meta);
-
-  if(Array.isArray(parsed?.destinations)){
-    parsed.destinations.forEach(d=>{
-      const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
-      pushRows(name, d.rows||[], Boolean(d.replace));
+/* ================================
+   SECCIÓN 14 · Síntesis local real
+=================================== */
+function synthesizeLocalRows(city){
+  // Usa perDay resuelto
+  const per = buildPerDayMap()[city] || [{day:1,start:'08:30',end:'19:00'}];
+  const blocks = [
+    { label:'Desayuno cerca del hotel', dur:'45m', transport:'A pie' },
+    { label:'Free walking tour / casco histórico', dur:'2h', transport:'A pie' },
+    { label:'Museo / atracción icónica', dur:'1h45m', transport:'Metro/Bus' },
+    { label:'Almuerzo típico', dur:'1h15m', transport:'A pie' },
+    { label:'Barrio emblemático / plaza principal', dur:'1h15m', transport:'A pie' },
+    { label:'Atracción 2 / parque o mirador', dur:'1h30m', transport:'Metro/Bus' },
+    { label:'Café / pastelería local', dur:'40m', transport:'A pie' },
+    { label:'Cena recomendada', dur:'1h30m', transport:'A pie' }
+  ];
+  const rows = [];
+  per.forEach(({day,start,end})=>{
+    // Construye slots dentro de la ventana
+    const s = start || '08:30';
+    const e = end || '19:00';
+    // Crear 8 bloques con “aproximados”
+    blocks.forEach((b,i)=>{
+      rows.push({
+        day,
+        start: i===0 ? s : '',
+        end:   i===blocks.length-1 ? e : '',
+        activity: `${b.label}`,
+        from: i===0 ? 'Hotel/Zona' : '',
+        to: '',
+        transport: b.transport,
+        duration: b.dur,
+        notes: 'Itinerario base (auto-generado). Ajustable.'
+      });
     });
-    return;
-  }
-  if(parsed?.destination && Array.isArray(parsed.rows)){
-    pushRows(parsed.destination, parsed.rows, Boolean(parsed.replace));
-    return;
-  }
-  if(Array.isArray(parsed?.rows)){
-    const city = activeCity || savedDestinations[0]?.city;
-    pushRows(city, parsed.rows, Boolean(parsed.replace));
-  }
+  });
+  return rows;
 }
 
 /* ================================
-   SECCIÓN 14 · Generación por ciudad (doble intento + fallback)
+   SECCIÓN 15 · Generación por ciudad
 =================================== */
 async function generateCityItinerary(city){
-  const dest  = savedDestinations.find(x=>x.city===city);
+  const dest = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
-  const perDay = (cityMeta[city]?.perDay && cityMeta[city].perDay.length)
-    ? cityMeta[city].perDay
-    : Array.from({length:dest.days}, (_,i)=>({day:i+1,start:'08:30',end:'19:00'}));
-
+  const perDay = buildPerDayMap()[city] || Array.from({length:dest.days}, (_,i)=>({day:i+1,start:'08:30',end:'19:00'}));
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
 
-  // Prompt ESTRICTO: exige formato B y al menos 1 fila por día
-  const strictPrompt = `
-Eres un planificador de viajes.
-Devuelve SOLO JSON válido en FORMATO B, sin texto extra:
-{"destination":"${city}","rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"Texto","from":"","to":"","transport":"","duration":"","notes":""}],"followup":"Texto breve"}
+  const instructions = `
+${FORMAT}
+Eres un planificador experto, cálido y empático. Genera el itinerario SOLO para "${city}" con ${dest.days} día(s).
+- Horas por día (resueltas): ${JSON.stringify(perDay)}
+- BaseDate (día 1): ${baseDate||'N/A'}
+- Hotel/Zona: ${hotel||'pendiente'}
+- Limita a 20 actividades por día (consolida cercanas).
+- Devuelve formato B con "destination":"${city}". Sin texto fuera del JSON.
 
-Requisitos:
-- Debe haber AL MENOS una fila por cada uno de los ${dest.days} días.
-- Usa estas horas por día (si faltan, 08:30–19:00):
-${JSON.stringify(perDay)}
-- BaseDate (día 1): ${baseDate || 'N/A'}
-- Hotel/Zona: ${hotel || 'pendiente'}
-- Traslados realistas (transport, duration con +15% colchón).
-- Máx 20 filas por día.
-
-No devuelvas meta ni texto fuera del JSON.
+Contexto global:
+${buildIntake()}
 `.trim();
 
-  // 1er intento
-  let text = await callAgent(strictPrompt);
-  let parsed = parseJSON(text);
+  const text = await callAgent(instructions);
+  const parsed = parseJSON(text);
 
-  // 2º intento si no hay rows
-  if(!parsed || !Array.isArray(parsed.rows) || !parsed.rows.length){
-    text = await callAgent(strictPrompt);
-    parsed = parseJSON(text);
-  }
+  if(parsed){
+    // Meta opcional
+    if(parsed.meta) upsertCityMeta(parsed.meta);
 
-  // Fallback local: crear una fila por día (para NO quedarnos sin tablas)
-  let usedFallback = false;
-  if(!parsed || !Array.isArray(parsed.rows) || !parsed.rows.length){
-    usedFallback = true;
-    const rows = [];
-    for(let d=1; d<=dest.days; d++){
-      rows.push({
-        day:d,
-        start: perDay[d-1]?.start || '08:30',
-        end:   perDay[d-1]?.end   || '19:00',
-        activity:`Día ${d} — actividad pendiente`,
-        from:'', to:'', transport:'', duration:'', notes:'(fallback local)'
+    // B o C
+    if(Array.isArray(parsed.destinations)){
+      parsed.destinations.forEach(d=>{
+        const name = d.name || d.destination || city;
+        pushRows(name, d.rows||[], Boolean(d.replace));
       });
+    }else if(parsed.destination && Array.isArray(parsed.rows)){
+      pushRows(parsed.destination, parsed.rows, Boolean(parsed.replace));
     }
-    parsed = { destination: city, rows, followup: 'Itinerario generado localmente (fallback).' };
-  }
 
-  // Aplicar al estado y render
-  if(parsed?.destination && Array.isArray(parsed.rows)){
-    pushRows(parsed.destination, parsed.rows, true);
-    renderCityTabs();
-    setActiveCity(city);
-    renderCityItinerary(city);
-    if(usedFallback){
-      chatMsg('⚠️ No recibí actividades del agente. Generé una estructura base por día para que puedas seguir trabajando.', 'ai');
-    }else{
-      if(parsed.followup) chatMsg(parsed.followup,'ai');
+    // Si aun así no hay filas para la ciudad ⇒ síntesis local real
+    const hasAny = Object.values(itineraries[city]?.byDay||{}).some(a=>a.length>0);
+    if(!hasAny){
+      const synth = synthesizeLocalRows(city);
+      pushRows(city, synth, true);
+      chatMsg('⚠️ No recibí actividades del agente. Generé una propuesta completa por día para que puedas seguir trabajando.', 'ai');
     }
+
+    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   }else{
-    // Último recurso: estructura vacía (mantener UI consistente)
-    ensureDays(city);
-    renderCityTabs();
-    setActiveCity(city);
-    renderCityItinerary(city);
-    chatMsg('⚠️ No se recibieron actividades. Generé estructura vacía por día.', 'ai');
+    // Sintetizar completamente
+    const synth = synthesizeLocalRows(city);
+    pushRows(city, synth, true);
+    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    chatMsg('⚠️ No recibí actividades del agente. Generé una propuesta completa por día para que puedas seguir trabajando.', 'ai');
   }
 }
 
 /* ================================
-   SECCIÓN 15 · Flujo principal · HOTELS
+   SECCIÓN 16 · Flujo principal · HOTELS
 =================================== */
 async function startPlanning(){
   if(savedDestinations.length===0) return;
@@ -612,7 +583,7 @@ async function startPlanning(){
   metaProgressIndex = 0;
 
   session = [
-    {role:'system', content:'Eres un concierge de viajes internacional. Respondes solo con JSON válido según el formato indicado.'},
+    {role:'system', content:'Eres un concierge de viajes internacional. Devuelves itinerarios en JSON limpio (B/C).'},
     {role:'user', content: buildIntake()}
   ];
 
@@ -639,7 +610,7 @@ function askNextHotel(){
 }
 
 /* ================================
-   SECCIÓN 16 · Chat handler
+   SECCIÓN 17 · Chat handler (edición)
 =================================== */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -663,39 +634,47 @@ async function onSend(){
     return;
   }
   const day = data.currentDay || 1;
-  const dayRows = (data.byDay[day]||[]).map(r=>`• ${r.start}-${r.end} ${r.activity}`).join('\n') || '(vacío)';
-  const allDays = Object.keys(data.byDay).map(n=>{
-    const rows = data.byDay[n]||[];
-    return `Día ${n}:\n${rows.map(r=>`• ${r.start}-${r.end} ${r.activity}`).join('\n') || '(vacío)'}`;
-  }).join('\n\n');
 
   const prompt = `
 ${FORMAT}
 El usuario está viendo "${currentCity}", Día ${day}.
-Actividades del día actual:
-${dayRows}
-
-Resumen de otros días (no repitas):
-${allDays}
-
-Interpreta su solicitud y actualiza solo el día ${day}.
-Limita a 20 filas como máximo.
-Devuelve JSON formato B ("destination":"${currentCity}").
+Per-day hours (resolved): ${JSON.stringify(buildPerDayMap()[currentCity]||[])}
+Contexto global:
+${buildIntake()}
+Devuelve JSON formato B ("destination":"${currentCity}") y ajusta SOLO el día ${day}.
 `.trim();
 
   const ans = await callAgent(prompt);
   const parsed = parseJSON(ans);
+
   if(parsed){
-    applyParsedToState(parsed);
+    if(parsed.meta) upsertCityMeta(parsed.meta);
+    if(parsed.destination && Array.isArray(parsed.rows)){
+      // Reemplazar solo las filas del día activo si vienen indicadas
+      const filtered = parsed.rows.filter(r=>+r.day===+day);
+      if(filtered.length){
+        if(!itineraries[currentCity]) itineraries[currentCity]={byDay:{},currentDay:1,baseDate:null};
+        itineraries[currentCity].byDay[day] = [];
+        pushRows(currentCity, filtered, false);
+      }else{
+        pushRows(currentCity, parsed.rows, false);
+      }
+    }
     renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
     chatMsg(parsed.followup || 'Listo. Ajusté el día visible.', 'ai');
   }else{
-    chatMsg(ans || '¿Otra cosa?', 'ai');
+    chatMsg('No pude interpretar tu solicitud. Ajusté una propuesta base.', 'ai');
+    const synth = synthesizeLocalRows(currentCity).filter(r=>r.day===day);
+    if(synth.length){
+      itineraries[currentCity].byDay[day]=[];
+      pushRows(currentCity, synth, false);
+      renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
+    }
   }
 }
 
 /* ================================
-   SECCIÓN 17 · Upsell/Lock + Eventos / INIT
+   SECCIÓN 18 · Upsell/Lock + Eventos / INIT
 =================================== */
 function lockItinerary(){
   isItineraryLocked = true;
@@ -738,5 +717,5 @@ qs('#btn-bathrooms')?.addEventListener('click', ()=>window.open('https://www.goo
 qs('#btn-lodging')?.addEventListener('click', ()=>window.open('https://www.booking.com','_blank'));
 qs('#btn-localinfo')?.addEventListener('click', ()=>window.open('https://www.wikivoyage.org','_blank'));
 
-// Inicial: una fila, SIN horas visibles hasta que se ingresen "Días"
+// Inicial: una fila lista (placeholders en blanco)
 addCityRow();
