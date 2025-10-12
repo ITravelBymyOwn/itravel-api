@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <link rel="stylesheet" href="planner.css?v=19" />
+  <link rel="stylesheet" href="planner.css?v=28" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
@@ -77,6 +77,9 @@
           </label>
         </div>
       </section>
+
+      <!-- ✅ Botón Recalcular itinerario -->
+      <button class="btn primary w-100" id="recalc-btn" style="display:none;">Recalcular itinerario</button>
     </aside>
 
     <!-- MAIN -->
@@ -128,6 +131,14 @@
     </div>
   </div>
 
-  <script src="planner.js?v=19"></script>
+  <!-- ✅ Overlay de carga -->
+  <div id="loading-overlay" style="display:none;">
+    <div class="loader">
+      <div class="hourglass"></div>
+      <p>Generando itinerario...</p>
+    </div>
+  </div>
+
+  <script src="planner.js?v=28"></script>
 </body>
 </html>
