@@ -1,4 +1,4 @@
-// /api/chat.js — v28.3 (Estable en Vercel - CommonJS compatible)
+// /api/chat.js — v28.4 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -89,9 +89,9 @@ async function callStructured(messages, temperature = 0.4) {
 }
 
 // ==============================
-// Exportación compatible con Vercel
+// Exportación ESM correcta
 // ==============================
-module.exports = async function (req, res) {
+export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
@@ -129,4 +129,4 @@ Ejemplo válido:
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
-};
+}
