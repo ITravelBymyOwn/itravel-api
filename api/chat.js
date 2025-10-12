@@ -1,4 +1,4 @@
-// /api/chat.js — v28 (Structured Output estable con triple reintento)
+// /api/chat.js — v28.1 (Structured Output estable y compatible con Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -6,7 +6,7 @@ const client = new OpenAI({
 });
 
 // ==============================
-// Extract helpers (igual que antes)
+// Helpers
 // ==============================
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
@@ -51,7 +51,7 @@ function fallbackJSON() {
 }
 
 // ==============================
-// Prompt base
+// Prompts y esquemas
 // ==============================
 const SYSTEM_PROMPT = `
 Eres el planificador de viajes inteligente de ITravelByMyOwn.
@@ -68,9 +68,6 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - 20 actividades máximo por día.
 `.trim();
 
-// ==============================
-// Esquema JSON estricto
-// ==============================
 const Row = {
   type: "object",
   required: ["day", "start", "end", "activity"],
@@ -131,7 +128,7 @@ const ItinerarySchema = {
 };
 
 // ==============================
-// Llamada estructurada
+// Llamada a OpenAI
 // ==============================
 async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
@@ -151,7 +148,7 @@ async function callStructured(messages, temperature = 0.4) {
 }
 
 // ==============================
-// Handler principal con triple reintento
+// Handler principal
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -162,7 +159,7 @@ export default async function handler(req, res) {
     const body = req.body;
     const clientMessages = extractMessages(body);
 
-    // 1) Primer intento normal
+    // 1) Primer intento
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
