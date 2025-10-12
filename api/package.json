@@ -2,10 +2,8 @@
   "name": "itravel-api",
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
+  "engines": { "node": ">=20" },
   "dependencies": {
-    "openai": "^4.56.0"
+    "openai": "^4.64.0"
   }
 }
