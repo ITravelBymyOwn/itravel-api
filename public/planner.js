@@ -14,7 +14,7 @@ const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
 // ⚠️ Verifica esta URL (tu API en Vercel)
-const API_URL = 'https://itravelapi-api.vercel.app/api/chat';
+const API_URL = 'https://itravelbymyownapi-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
 let savedDestinations = [];
