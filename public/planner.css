@@ -1,11 +1,11 @@
 :root{
-  --brand-500:#0EA47A;
+  --brand-500:#0EA47A; 
   --brand-600:#0B8664;
-  --ink:#101828;
+  --ink:#101828; 
   --muted:#667085;
-  --surface:#F8FAFC;
+  --surface:#F8FAFC; 
   --white:#FFF;
-  --radius:.8rem;
+  --radius:.8rem; 
   --shadow:0 4px 16px rgba(16,24,40,.08);
   --chat-bg:#F6F9FC;
   --chat-user:#0EA47A15;
@@ -49,7 +49,8 @@ body{
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns:28% 72%;
+  /* v19: MÁS espacio al sidebar */
+  grid-template-columns: 42% 58%;
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -84,9 +85,10 @@ body{
 }
 
 /* ==================== CITY ROW ==================== */
+/* v19: columnas fijas estables; las HORAS van en una fila aparte (no afectan anchos) */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .8fr 1fr auto;
+  grid-template-columns:1.2fr 1fr .75fr 1fr auto;
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -105,6 +107,7 @@ body{
   border-radius:.5rem;
   font-size:.9rem;
   background:#fff;
+  min-width:0; /* v19: evita que crezcan al aparecer horas */
 }
 .city-row .remove{
   background:#ef4444;
@@ -115,14 +118,14 @@ body{
   cursor:pointer;
 }
 
-/* Hours per day */
+/* v19: bloque de horas ocupa TODA la fila, sin empujar columnas */
 .hours-block{
-  display:none; /* oculto por defecto */
+  display:flex;
   flex-direction:column;
   gap:.45rem;
   margin-top:.6rem;
+  grid-column:1 / -1;
 }
-.hours-block.active{display:flex}
 .hours-day{
   display:grid;
   grid-template-columns:.8fr .7fr .7fr;
@@ -217,7 +220,8 @@ body{
   background:var(--chat-bg);
   border-radius:var(--radius);
   margin:.8rem 0 1rem 0;
-  max-width:950px;
+  /* v19: reduce ancho máximo para ceder espacio al sidebar */
+  max-width:820px;
   height:380px;
   display:flex;
   flex-direction:column;
@@ -335,7 +339,8 @@ table.itinerary th{
   grid-template-columns:repeat(5,1fr);
   gap:.5rem;
   margin-top:.9rem;
-  max-width:950px;
+  /* v19: acompasa ancho del chat */
+  max-width:820px;
 }
 @media (max-width:960px){
   .toolbar{grid-template-columns:repeat(2,1fr)}
