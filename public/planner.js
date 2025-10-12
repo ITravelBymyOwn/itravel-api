@@ -1,10 +1,9 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v19 (estricto)
-   Basado en tu v17. Cambios mínimos:
-   - Layout: sin cambios de estructura (solo CSS).
-   - Contador global de filas generadas para validar éxito real.
-   - Mensaje final “🎉 generados” solo si hubo filas.
-   - Sin romper flujo de hoteles ni el contrato actual.
+   ITRAVELBYMYOWN · PLANNER v20 (estricto)
+   Cambios vs v19:
+   - NO crea bloque de horas al iniciar; solo aparece al digitar "Días".
+   - Defaults 08:30–19:00 si el usuario no ingresa horas por día.
+   - Mantiene estructura/IDs/flujo. Mensajes de éxito solo si hay filas reales.
 ========================================================= */
 
 /* ================================
@@ -27,7 +26,7 @@ let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
-/* v19: contador global de filas nuevas para validar generación real */
+/* v20: contador global de filas nuevas para validar generación real */
 let __rowsGeneratedCounter = 0;
 
 /* ================================
@@ -122,33 +121,40 @@ function makeHoursBlock(days){
     row.innerHTML = `
       <span>Día ${d}</span>
       <input class="start" type="time" value="08:30">
-      <input class="end"   type="time" value="18:00">
+      <input class="end"   type="time" value="19:00">
     `;
     wrap.appendChild(row);
   }
   return wrap;
 }
-function addCityRow(pref={city:'',country:'',days:1,baseDate:''}){
+function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
-    <label>Días<input class="days" type="number" min="1" value="${pref.days||1}"></label>
+    <label>Días<input class="days" type="number" min="1" value="${pref.days!==undefined?pref.days:''}"></label>
     <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}"></label>
     <button class="remove" type="button">✕</button>
   `;
   const baseDateEl = qs('.baseDate', row);
   autoFormatDMYInput(baseDateEl);
 
-  const hours = makeHoursBlock(pref.days||1);
-  /* v19: las horas van como bloque de fila completa (CSS ya lo estabiliza) */
-  row.appendChild(hours);
+  // v20: NO agregamos bloque de horas por defecto.
+  let hours = null;
 
   qs('.remove',row).addEventListener('click', ()=> row.remove());
+
+  // v20: solo cuando el usuario define "Días" construimos el bloque de horas (08:30–19:00)
   qs('.days',row).addEventListener('change', (e)=>{
     let n = Math.max(1, parseInt(e.target.value||1,10));
     e.target.value = n;
+
+    if(!hours){
+      hours = document.createElement('div');
+      hours.className = 'hours-block';
+      row.appendChild(hours);
+    }
     hours.innerHTML = '';
     const rebuilt = makeHoursBlock(n).children;
     Array.from(rebuilt).forEach(c=>hours.appendChild(c));
@@ -166,13 +172,14 @@ function saveDestinations(){
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
     const country  = qs('.country',r).value.trim();
-    const days     = Math.max(1, parseInt(qs('.days',r).value||1,10));
+    const daysVal  = qs('.days',r).value;
+    const days     = Math.max(1, parseInt(daysVal||1,10));
     const baseDate = qs('.baseDate',r).value.trim();
     if(!city) return;
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
       const start = qs('.start',hd).value || '08:30';
-      const end   = qs('.end',hd).value   || '18:00';
+      const end   = qs('.end',hd).value   || '19:00';
       perDay.push({ day: idx+1, start, end });
     });
     list.push({ city, country, days, baseDate, perDay });
@@ -352,13 +359,26 @@ function buildIntake(){
     return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
   }).join(' | ');
 
-  // v17: garantizar horas default si el usuario dejó vacío
+  // v20: garantizar horas default 08:30–19:00 si el usuario dejó vacío
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city] || !cityMeta[dest.city].perDay || !cityMeta[dest.city].perDay.length){
       cityMeta[dest.city] = cityMeta[dest.city] || {};
       cityMeta[dest.city].perDay = Array.from({length:dest.days}, (_,i)=>({
-        day:i+1, start:'08:30', end:'18:00'
+        day:i+1, start:'08:30', end:'19:00'
       }));
+    }else{
+      // si existen perDay pero con huecos, completar
+      const len = Math.max(dest.days, cityMeta[dest.city].perDay.length);
+      const arr = [];
+      for(let i=0;i<len;i++){
+        const src = cityMeta[dest.city].perDay[i] || {};
+        arr.push({
+          day:i+1,
+          start: src.start || '08:30',
+          end:   src.end   || '19:00'
+        });
+      }
+      cityMeta[dest.city].perDay = arr;
     }
   });
 
@@ -381,7 +401,7 @@ C) {"rows":[{...}],"followup":"Pregunta breve"}
 D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" o ["HH:MM",...],"end":"HH:MM" o ["HH:MM",...],"hotel":"Texto"},"followup":"Pregunta breve"}
 Reglas:
 - Incluye traslados con transporte y duración (+15% colchón).
-- Usa start/end por día si están disponibles; si faltan, asume 08:30–18:00.
+- Usa start/end por día si están disponibles; si faltan, asume 08:30–19:00.
 - Si falta baseDate, devuelve itinerario sin fechas absolutas.
 - Máximo 20 filas de actividades por día (consolida si es necesario).
 - Usa "followup" SOLO cuando realmente requieras datos extra. Aquí solo pediremos hospedaje.
@@ -427,7 +447,6 @@ function dedupeInto(arr, row){
   const has = arr.find(x=>key(x)===key(row));
   if(!has){
     arr.push(row);
-    /* v19: cada vez que agregamos fila real, incrementamos contador */
     __rowsGeneratedCounter++;
   }
 }
@@ -509,7 +528,7 @@ async function generateCityItinerary(city){
 
   const perDay = (cityMeta[city]?.perDay && cityMeta[city].perDay.length)
     ? cityMeta[city].perDay
-    : Array.from({length:dest.days}, (_,i)=>({day:i+1,start:'08:30',end:'18:00'}));
+    : Array.from({length:dest.days}, (_,i)=>({day:i+1,start:'08:30',end:'19:00'}));
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
@@ -518,7 +537,7 @@ async function generateCityItinerary(city){
 ${FORMAT}
 
 Eres un planificador experto, cálido y empático. Genera el itinerario SOLO para "${city}" con ${dest.days} día(s).
-- Usa estas horas por día (start/end); si faltan, asume 08:30–18:00:
+- Usa estas horas por día (start/end); si faltan, asume 08:30–19:00:
 ${JSON.stringify(perDay)}
 - BaseDate (día 1): ${baseDate||'N/A'}
 - Hotel/Zona: ${hotel||'pendiente'}
@@ -557,7 +576,6 @@ async function startPlanning(){
   collectingHotels = true;
   metaProgressIndex = 0;
 
-  /* v19: resetea el contador de filas generadas */
   __rowsGeneratedCounter = 0;
 
   session = [
@@ -576,7 +594,6 @@ function askNextHotel(){
       for(const {city} of savedDestinations){
         await generateCityItinerary(city);
       }
-      /* v19: solo anunciar éxito si hubo filas reales */
       if(__rowsGeneratedCounter>0){
         chatMsg(tone.doneAll);
       }else{
@@ -640,7 +657,6 @@ Devuelve JSON formato B ("destination":"${currentCity}").
   const ans = await callAgent(prompt);
   const parsed = parseJSON(ans);
   if(parsed){
-    /* v19: resetea contador para medir cambios en edición si se quiere (opcional) */
     const before = __rowsGeneratedCounter;
     applyParsedToState(parsed);
     renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
@@ -695,5 +711,5 @@ qs('#btn-bathrooms')?.addEventListener('click', ()=>window.open('https://www.goo
 qs('#btn-lodging')?.addEventListener('click', ()=>window.open('https://www.booking.com','_blank'));
 qs('#btn-localinfo')?.addEventListener('click', ()=>window.open('https://www.wikivoyage.org','_blank'));
 
-// Inicial: una fila lista (placeholders en blanco)
+// Inicial: una fila lista (sin horas por defecto)
 addCityRow();
