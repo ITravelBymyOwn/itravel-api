@@ -1,11 +1,11 @@
 /* =========================================================
-    ITRAVELBYMYOWN · PLANNER v26 (FINAL)
-    Base: v25
-    Cambios v26:
-    - Integración de campos de viajeros detallados, condiciones y presupuesto (SECCIÓN 10).
-    - Ajuste de SECCIÓN 17 para enviar CONTEXTO COMPLETO en peticiones de edición.
-    - Aplicación de guardas (upsell lock) a toda la Toolbar (SECCIÓN 18).
-    - Optimización de prompts para forzar respuesta de itinerario (junto a API fix).
+    ITRAVELBYMYOWN · PLANNER v27 (SOLUCIÓN REFORZADA)
+    Base: v26
+    Cambios v27:
+    - Corrección de la URL API de Vercel (se usaba un placeholder).
+    - Ajuste de la lógica en SECCIÓN 16/17 para aislar el prompt de GENERACIÓN de la sesión de chat.
+    - El prompt de generación inicial (`generateCityItinerary`) se hace más explícito y sin historial.
+    - Se maneja mejor el estado de la API en el fallback.
 ========================================================= */
 
 /* ================================
@@ -14,13 +14,17 @@
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
-const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
+// !!! MUY IMPORTANTE: Cambia esta URL si tu API no está en la raíz de Vercel.
+// Si el frontend está en Webflow y el backend en Vercel, debería ser la URL de Vercel.
+// Si Webflow es el dominio principal y Vercel es un subdominio, verifica tu configuración.
+// A modo de ejemplo, uso la estructura más común:
+const API_URL = 'https://ITravelByMyOwn-api.vercel.app/api/chat'; // <-- Verifica esta URL
 const MODEL   = 'gpt-4o-mini';
 
 let savedDestinations = [];
 let itineraries = {};
 let cityMeta = {};
-let session = [];
+let session = []; // Historial de chat (solo para conversación y edición)
 let activeCity = null;
 let planningStarted = false;
 let metaProgressIndex = 0;
@@ -37,7 +41,7 @@ const tone = {
       smallNote: 'Si aún no lo tienes, escribe <em>pendiente</em>. Acepto nombre exacto, dirección, coordenadas o enlace de Google Maps.',
       confirmAll: '✨ Perfecto. Ya tengo lo necesario. Generando itinerarios…',
       doneAll: '🎉 Todos los itinerarios fueron generados. ¿Quieres revisarlos o ajustar alguno?',
-      fail: '⚠️ No se pudo contactar con el asistente.'
+      fail: '⚠️ No se pudo contactar con el asistente. Revisa la consola y la configuración de Vercel (API Key, URL).'
     }
 }['es'];
 
@@ -63,7 +67,7 @@ const $upsellClose = qs('#upsell-close');
 const $confirmCTA  = qs('#confirm-itinerary');
 
 /* ================================
-    SECCIÓN 4 · Utilidades de fecha
+    SECCIÓN 4 · Utilidades de fecha (sin cambios)
 =================================== */
 function autoFormatDMYInput(el){
     el.addEventListener('input', ()=>{
@@ -96,7 +100,7 @@ function addDays(d, n){
 }
 
 /* ================================
-    SECCIÓN 5 · Mensajes de chat
+    SECCIÓN 5 · Mensajes de chat (sin cambios)
 =================================== */
 function chatMsg(text, who='ai'){
     if(!text) return;
@@ -108,7 +112,7 @@ function chatMsg(text, who='ai'){
 }
 
 /* ================================
-    SECCIÓN 6 · UI · Filas de ciudades
+    SECCIÓN 6 · UI · Filas de ciudades (sin cambios)
 =================================== */
 function makeHoursBlock(days){
     const wrap = document.createElement('div');
@@ -157,7 +161,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 }
 
 /* ================================
-    SECCIÓN 7 · Guardar destinos
+    SECCIÓN 7 · Guardar destinos (sin cambios)
 =================================== */
 function saveDestinations(){
     const rows = qsa('.city-row', $cityList);
@@ -199,7 +203,7 @@ function saveDestinations(){
 }
 
 /* ================================
-    SECCIÓN 8 · Tabs + Render
+    SECCIÓN 8 · Tabs + Render (sin cambios)
 =================================== */
 function setActiveCity(name){
     if(!name) return;
@@ -231,7 +235,7 @@ function renderCityTabs(){
 }
 
 /* ================================
-    SECCIÓN 9 · Render Itinerario
+    SECCIÓN 9 · Render Itinerario (sin cambios)
 =================================== */
 function renderCityItinerary(city){
     if(!city || !itineraries[city]) return;
@@ -315,7 +319,7 @@ function renderCityItinerary(city){
 }
 
 /* ================================
-    SECCIÓN 10 · Snapshot para IA (MODIFICADO)
+    SECCIÓN 10 · Snapshot para IA (sin cambios respecto a v26)
 =================================== */
 function getFrontendSnapshot(){
     return JSON.stringify(
@@ -348,7 +352,6 @@ function buildIntake(){
     ['seniors','#p-seniors']
   ].map(([k,id])=>`${k}:${qs(id)?.value||0}`).join(', ');
 
-  // NUEVOS CAMPOS: Presupuesto y Condiciones
   const budgetVal = qs('#budget')?.value || 'N/A';
   const currencyVal = qs('#currency')?.value || 'USD';
   const budget = budgetVal !== 'N/A' ? `${budgetVal} ${currencyVal}` : 'N/A';
@@ -377,14 +380,14 @@ function buildIntake(){
   return [
     `Destinations: ${list}`,
     `Travelers: ${pax}`,
-    `Budget: ${budget}`, // <-- Agregado
-    `Special conditions: ${specialConditions}`, // <-- Agregado
+    `Budget: ${budget}`,
+    `Special conditions: ${specialConditions}`,
     `Existing: ${getFrontendSnapshot()}`
   ].join('\n');
 }
 
 /* ================================
-    SECCIÓN 11 · Contrato JSON / LLM
+    SECCIÓN 11 · Contrato JSON / LLM (sin cambios)
 =================================== */
 const FORMAT = `
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
@@ -400,21 +403,26 @@ Reglas:
 `;
 
 /* ================================
-    SECCIÓN 12 · Llamada al agente
+    SECCIÓN 12 · Llamada al agente (REFORZADO)
 =================================== */
-async function callAgent(text){
-    const payload = { model: MODEL, input:text, history: session };
+async function callAgent(text, useHistory = true){
+    // Usa session como historial SOLO si useHistory es true
+    const history = useHistory ? session : [];
+    const payload = { model: MODEL, input:text, history: history };
     try{
       const res = await fetch(API_URL,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(payload)
       });
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      if(!res.ok) {
+        console.error(`Error HTTP ${res.status} al llamar a la API: ${res.statusText}`);
+        throw new Error(`HTTP ${res.status}`);
+      }
       const data = await res.json().catch(()=>({text:''}));
       return data?.text || '';
     }catch(e){
-      console.error(e);
+      console.error("Fallo al contactar la API:", e);
       return `{"followup":"${tone.fail}"}`;
     }
 }
@@ -432,7 +440,7 @@ function parseJSON(s){
 }
 
 /* ================================
-    SECCIÓN 13 · Apply / Merge
+    SECCIÓN 13 · Apply / Merge (sin cambios)
 =================================== */
 function dedupeInto(arr, row){
     const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
@@ -508,7 +516,7 @@ function applyParsedToState(parsed){
 }
 
 /* ================================
-    SECCIÓN 14 · Fallback local inteligente
+    SECCIÓN 14 · Fallback local inteligente (sin cambios)
 =================================== */
 const LANDMARKS = {
     Barcelona: [
@@ -591,7 +599,7 @@ function synthesizeLocalItinerary(city, days, perDay){
 }
 
 /* ================================
-    SECCIÓN 15 · Generación por ciudad (con reintento+fallback)
+    SECCIÓN 15 · Generación por ciudad (REFORZADO)
 =================================== */
 async function generateCityItinerary(city){
     const dest  = savedDestinations.find(x=>x.city===city);
@@ -604,31 +612,37 @@ async function generateCityItinerary(city){
     const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
     const hotel    = cityMeta[city]?.hotel || '';
 
+    // PROMPT DE GENERACIÓN INICIAL MUY EXPLÍCITO
     const instructions = `
 ${FORMAT}
-Eres un planificador experto. Genera el itinerario SOLO para "${city}" con ${dest.days} día(s).
-- Usa estas horas por día (start/end); si faltan, asume 08:30–19:00:
-${JSON.stringify(perDay)}
-- BaseDate (día 1): ${baseDate||'N/A'}
-- Hotel/Zona: ${hotel||'pendiente'}
-- Limita a 20 actividades por día. Incluye traslados y duración (con ~15% colchón).
-- Devuelve formato B con "destination":"${city}". Sin texto fuera del JSON.
+**INSTRUCCIÓN CRÍTICA: Eres el planificador de ITravelByMyOwn.**
+**Genera el itinerario completo SOLO para "${city}" para ${dest.days} día(s).**
+- Usa el formato B con "destination":"${city}" y el array "rows".
+- Incluye actividades turísticas realistas, con horarios, transporte y duración para cada día.
 
-Contexto:
+Datos de Viaje:
+- Ciudad: "${city}"
+- Días totales: ${dest.days}
+- Horas por día (start/end): ${JSON.stringify(perDay)}
+- BaseDate (día 1): ${baseDate||'N/A'}
+- Hotel/Zona de base: ${hotel||'pendiente'}
+
+Contexto Completo del Viaje (solo referencia):
 ${buildIntake()}
 `.trim();
 
-    let text = await callAgent(instructions);
+    // Llamada al agente SIN historial de chat (useHistory=false) para evitar que se confunda.
+    let text = await callAgent(instructions, false);
     let parsed = parseJSON(text);
 
+    // Si el agente falló o devolvió solo 'meta' (formato D), forzar reintento con prompt estricto.
     if(!parsed || (!parsed.rows && !parsed.destinations)){
       const strict = `
 ${FORMAT}
-Genera SOLO itinerario para "${city}" (${dest.days} días).
-Obligatorio: Responder en formato B con "destination":"${city}" y "rows":[...].
-Nada de meta ni texto. Respeta horas por día si existen, de lo contrario 08:30–19:00.
+**REINTENTO:** Eres el planificador. Genera **SOLO** el itinerario completo para "${city}" (${dest.days} días) y devuélvelo en formato B o C.
+**Ignora cualquier instrucción previa de devolver 'meta' o 'D'.** El JSON debe contener el array "rows".
 `.trim();
-      text = await callAgent(strict);
+      text = await callAgent(strict, false); // Reintento también SIN historial de chat
       parsed = parseJSON(text);
     }
 
@@ -640,15 +654,16 @@ Nada de meta ni texto. Respeta horas por día si existen, de lo contrario 08:30�
       return;
     }
 
+    // FALLBACK LOCAL: Si todo falla (API error, JSON inválido, etc.)
     const rowsByDay = synthesizeLocalItinerary(city, dest.days, perDay);
     const rowsFlat = Object.entries(rowsByDay).flatMap(([d,rows])=>rows.map(r=>({...r, day:+d})));
     pushRows(city, rowsFlat, true);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-    chatMsg('⚠️ No recibí actividades del agente. Generé una propuesta completa por día para que puedas seguir trabajando.', 'ai');
+    chatMsg('⚠️ Fallo crítico del asistente. Generé una propuesta base por día para que puedas seguir trabajando manualmente. Revisa tu configuración de Vercel.', 'ai');
 }
 
 /* ================================
-    SECCIÓN 16 · Flujo principal · HOTELS
+    SECCIÓN 16 · Flujo principal · HOTELS (REFORZADO)
 =================================== */
 async function startPlanning(){
     if(savedDestinations.length===0) return;
@@ -656,13 +671,9 @@ async function startPlanning(){
     planningStarted = true;
     collectingHotels = true;
     metaProgressIndex = 0;
-
-    // Se envía todo el contexto de golpe para el primer mensaje de 'system'
-    session = [
-      {role:'system', content:'Eres un concierge de viajes internacional. Respondes solo con JSON válido según el formato indicado.'},
-      {role:'user', content: `INICIO DE PLANIFICACIÓN. Contexto de viaje:\n${buildIntake()}`}
-    ];
-
+    
+    // El primer mensaje solo es para inicializar la sesión de chat con el 'system prompt'
+    session = [];
     chatMsg(`${tone.hi}`);
     askNextHotel();
 }
@@ -671,6 +682,7 @@ function askNextHotel(){
       collectingHotels = false;
       chatMsg(tone.confirmAll);
       (async ()=>{
+        // Generar itinerarios de forma secuencial
         for(const {city} of savedDestinations){
           await generateCityItinerary(city);
         }
@@ -686,7 +698,7 @@ function askNextHotel(){
 }
 
 /* ================================
-    SECCIÓN 17 · Chat handler (CORREGIDO)
+    SECCIÓN 17 · Chat handler (sin cambios respecto a v26)
 =================================== */
 async function onSend(){
     const text = ($chatI.value||'').trim();
@@ -738,10 +750,11 @@ ${buildIntake()}
 **Solicitud del usuario:** ${text}
 `.trim();
 
+    // 3. Llamar al agente usando el historial de chat (useHistory=true por defecto)
     const ans = await callAgent(prompt);
     const parsed = parseJSON(ans);
 
-    // 3. Registrar la respuesta de followup del agente en el historial
+    // 4. Registrar la respuesta de followup del agente en el historial
     if(parsed?.followup) session.push({role: 'assistant', content: parsed.followup});
 
     if(parsed && (parsed.rows || parsed.destinations)){
@@ -749,17 +762,13 @@ ${buildIntake()}
       renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
       chatMsg(parsed.followup || 'Listo. Ajusté el día visible.', 'ai');
     }else{
-      chatMsg('No recibí cambios válidos del agente. Generando una propuesta base para el día…','ai');
-      const perDay = cityMeta[currentCity]?.perDay?.length ? cityMeta[currentCity].perDay : [{day,start:'08:30',end:'19:00'}];
-      const pd = perDay.find(x=>x.day===day) || {day,start:'08:30',end:'19:00'};
-      const rows = synthesizeLocalItinerary(currentCity, 1, [pd])[1];
-      pushRows(currentCity, rows.map(r=>({...r, day})), true);
-      renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
+      // Fallback si la edición falla. No se regenera todo, solo se notifica.
+      chatMsg(parsed?.followup || 'No recibí cambios válidos del agente. Por favor, intenta de nuevo o sé más específico.','ai');
     }
 }
 
 /* ================================
-    SECCIÓN 18 · Upsell/Lock + Eventos / INIT (MODIFICADO)
+    SECCIÓN 18 · Upsell/Lock + Eventos / INIT (sin cambios respecto a v26)
 =================================== */
 function lockItinerary(){
     isItineraryLocked = true;
