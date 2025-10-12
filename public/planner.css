@@ -399,6 +399,38 @@ table.itinerary th{
 }
 .upsell-card h3{margin:.25rem 0 .5rem}
 
+/* ==================== LOADER ==================== */
+#loading-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(255,255,255,0.8);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  z-index:100;
+}
+.loader{
+  text-align:center;
+}
+.hourglass {
+  display:inline-block;
+  width:50px;
+  height:50px;
+  border:5px solid var(--brand-500);
+  border-radius:50%;
+  border-top-color:transparent;
+  animation:spin 1s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+#loading-overlay p {
+  margin-top:1rem;
+  font-weight:600;
+  color:var(--brand-600);
+}
+
 /* ==================== ANIMACIONES ==================== */
 @keyframes fadeIn{
   from{opacity:0;transform:translateY(6px)}
