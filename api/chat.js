@@ -1,21 +1,25 @@
-// /api/chat.js — v5 (Itinerarios forzados en formato B/C — sin opción meta)
+// /api/chat.js — versión v25 con logging, prompt simplificado y reintento agresivo
 import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/* ==============================
-   Utilidades de request
-============================== */
+// ==============================
+// Extrae mensajes desde body
+// ==============================
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
+
   const prev = Array.isArray(history) ? history : [];
   const userText = typeof input === "string" ? input : "";
   return [...prev, { role: "user", content: userText }];
 }
 
+// ==============================
+// Limpia y parsea JSON
+// ==============================
 function cleanToJSON(raw = "") {
   let s = (raw || "").trim();
   if (!s) return null;
@@ -29,185 +33,135 @@ function cleanToJSON(raw = "") {
   if (m) {
     try { return JSON.parse(m[1]); } catch (_) {}
   }
+
   return null;
 }
 
-/* ==============================
-   Parseo auxiliar desde mensajes
-============================== */
-function parsePerDayMapFromMessages(msgs = []) {
-  const joined = msgs.map(m => m?.content || "").join("\n");
-  const tag = "Per-day hours (resolved):";
-  const idx = joined.indexOf(tag);
-  if (idx === -1) return {};
-  const after = joined.slice(idx + tag.length).trim();
-  const m = after.match(/(\{[\s\S]*\})/);
-  if (!m) return {};
-  try { return JSON.parse(m[1]); } catch (_) { return {}; }
+// ==============================
+// Fallback mínimo
+// ==============================
+function fallbackJSON() {
+  return {
+    meta: {
+      city: "Desconocido",
+      baseDate: new Date().toLocaleDateString("es-ES"),
+      start: ["08:30"],
+      end: "19:00",
+      hotel: "",
+    },
+    followup:
+      "No se recibió información de itinerario, se devolvió estructura base (meta).",
+    _no_itinerary_rows: true,
+  };
 }
 
-function parseCityDaysMapFromMessages(msgs = []) {
-  const joined = msgs.map(m => m?.content || "").join("\n");
-  const map = {};
-  const lines = joined.split("\n");
-  for (const line of lines) {
-    const mCity = line.match(/([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s'’-]+)\s*\(/);
-    const mDays = line.match(/\(\s*[^)]*?·\s*(\d+)\s*días/);
-    if (mCity && mDays) {
-      const city = mCity[1].trim();
-      const days = parseInt(mDays[1], 10);
-      if (city && Number.isFinite(days)) map[city] = days;
-    }
-  }
-  return map;
-}
-
-function parseTargetCityFromMessages(msgs = []) {
-  const joined = msgs.map(m => m?.content || "").join("\n");
-  let m = joined.match(/"destination":"([^"]+)"/);
-  if (m && m[1]) return m[1].trim();
-  m = joined.match(/Genera (?:el )?itinerario .*? para "([^"]+)"/i);
-  if (m && m[1]) return m[1].trim();
-  return null;
-}
-
-/* ==============================
-   Prompt ÚNICO (sin opción A)
-============================== */
-const SYSTEM_PROMPT_STRICT = `
+// ==============================
+// Prompt de sistema simplificado
+// ==============================
+const SYSTEM_PROMPT = `
 Eres el planificador de viajes inteligente de ITravelByMyOwn (nivel concierge premium),
-con la misma capacidad de razonamiento que ChatGPT.
+con la misma capacidad que ChatGPT para generar itinerarios reales.
 
-Tu única misión es devolver **únicamente JSON válido** en uno de estos dos formatos:
+Siempre responde con **JSON válido** en uno de estos formatos:
 
 B) {"destination":"City","rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"Texto","from":"","to":"","transport":"","duration":"","notes":""}],"followup":"Texto breve"}
 C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"Texto breve"}
+A) {"meta":{"city":"Nombre","baseDate":"DD/MM/YYYY","start":["HH:MM"],"end":"HH:MM","hotel":"Texto"},"followup":"Texto breve"}
 
-❌ No está permitido devolver ningún otro formato (ni texto libre, ni meta).
-✅ Siempre debes generar un itinerario completo con actividades y horarios.
+⚠️ Prioriza SIEMPRE B o C si el usuario ha indicado destino(s), fechas u horarios.
+Usa A solo si no hay información suficiente.
 
-Reglas estrictas:
-- Si se dan horarios start/end → úsalos exactamente.
+Reglas:
+- Si hay horarios → respétalos exactamente.
 - Si no hay horarios → usa 08:30–19:00.
-- Genera itinerarios por cada día indicado.
-- Incluye traslados realistas (transport, duration con ~15% de buffer).
-- Prioriza actividades imperdibles, emblemáticas, históricas y naturales.
-- No uses markdown ni explicación fuera del JSON.
-- Si la información del usuario es limitada, **inventa actividades realistas** para completar el itinerario.
+- Genera itinerarios consecutivos desde baseDate.
+- Incluye transporte y duración aproximada (+15% buffer).
+- Nada de markdown, ni texto fuera del JSON.
 `.trim();
 
-/* ==============================
-   Intención de itinerario
-============================== */
+// ==============================
+// Detecta si debe generar itinerario
+// ==============================
 function isItineraryRequest(messages = []) {
   if (!messages.length) return false;
-  const last = (messages[messages.length - 1].content || "").toLowerCase();
+  const last = messages[messages.length - 1].content?.toLowerCase() || "";
   return (
-    last.includes("destination") ||
-    last.includes("perday") ||
     last.includes("itinerario") ||
     last.includes("rows") ||
+    last.includes("destination") ||
     last.includes("generar") ||
-    last.includes("planificar")
+    last.includes("plan")
   );
 }
 
-/* ==============================
-   Llamada al modelo
-============================== */
+// ==============================
+// Petición al modelo
+// ==============================
 async function completeJSON(messages, options = {}) {
-  const model = options.model || "gpt-4o-mini";
-  const temperature = options.temperature ?? 0.6;
+  const model = options.model || "gpt-4o"; // se puede volver a gpt-4o-mini
+  const temperature = options.temperature ?? 0.4;
+
   const msgs = [
-    { role: "system", content: SYSTEM_PROMPT_STRICT },
+    { role: "system", content: SYSTEM_PROMPT },
     ...messages.filter(m => m && m.role && m.content != null),
   ];
+
   const resp = await client.chat.completions.create({
     model,
     temperature,
     top_p: 0.9,
     messages: msgs,
     response_format: { type: "json_object" },
-    max_tokens: 3000,
+    max_tokens: 2500,
   });
-  return resp.choices?.[0]?.message?.content?.trim() || "";
+
+  const raw = resp.choices?.[0]?.message?.content?.trim() || "";
+  console.log("🛰️ RAW MODEL RESPONSE:", raw);  // <-- LOG para inspeccionar
+  return raw;
 }
 
-/* ==============================
-   Fallback servidor si el modelo falla
-============================== */
-function synthesizeB(messages) {
-  const perDayMap = parsePerDayMapFromMessages(messages);
-  const daysMap = parseCityDaysMapFromMessages(messages);
-  const target =
-    parseTargetCityFromMessages(messages) ||
-    Object.keys(perDayMap)[0] ||
-    Object.keys(daysMap)[0] ||
-    "General";
-
-  const perDay = Array.isArray(perDayMap[target]) ? perDayMap[target] : [];
-  const days = daysMap[target] || (perDay.length || 1);
-
-  const rows = [];
-  for (let d = 1; d <= days; d++) {
-    const start = perDay[d - 1]?.start || "08:30";
-    const end = perDay[d - 1]?.end || "19:00";
-    rows.push({
-      day: d,
-      start,
-      end,
-      activity: `Día ${d} — actividad sugerida`,
-      from: "",
-      to: "",
-      transport: "",
-      duration: "",
-      notes: "(generado por servidor — mínimo viable)",
-    });
-  }
-
-  return {
-    destination: target,
-    rows,
-    followup: "Itinerario mínimo generado en el servidor por ausencia de filas del modelo.",
-  };
-}
-
-/* ==============================
-   Handler principal
-============================== */
+// ==============================
+// Handler principal
+// ==============================
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body || {};
+    const body = req.body;
     const clientMessages = extractMessages(body);
-    const itineraryMode = body.force_itinerary === true
-      ? true
-      : isItineraryRequest(clientMessages);
+    const itineraryMode = isItineraryRequest(clientMessages);
 
-    // Primer intento — ya estricto
-    let raw = await completeJSON(clientMessages, {
-      model: body?.model || "gpt-4o-mini",
-    });
+    // Primer intento
+    let raw = await completeJSON(clientMessages, { model: body?.model || "gpt-4o" });
     let parsed = cleanToJSON(raw);
 
-    // Si no hay filas → fallback server
-    if (itineraryMode && (!parsed || (!parsed.rows && !parsed.destinations))) {
-      parsed = synthesizeB(clientMessages);
+    // Segundo intento agresivo si no hay itinerario
+    if (
+      itineraryMode &&
+      (!parsed || (!parsed.rows && !parsed.destinations))
+    ) {
+      const strictPrompt = `
+Devuelve SOLO un objeto JSON válido en formato B o C con itinerario. 
+Nada de meta ni texto adicional. Incluye actividades realistas para cada día.
+`;
+      const strictMsgs = [
+        { role: "system", content: SYSTEM_PROMPT + "\n" + strictPrompt },
+        ...clientMessages,
+      ];
+      raw = await completeJSON(strictMsgs, { model: body?.model || "gpt-4o", temperature: 0.3 });
+      parsed = cleanToJSON(raw);
     }
 
-    // Último recurso si todo falla
-    if (!parsed) {
-      parsed = synthesizeB(clientMessages);
-    }
+    if (!parsed) parsed = fallbackJSON();
 
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (error) {
     console.error("❌ Error en /api/chat.js:", error);
     return res.status(500).json({
-      error: "Error interno del servidor. Verifica la configuración del modelo o tu API Key.",
+      error:
+        "Error interno del servidor. Verifica la configuración del modelo o tu API Key.",
     });
   }
 }
