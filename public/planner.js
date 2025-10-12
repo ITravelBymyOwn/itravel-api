@@ -1,16 +1,11 @@
 /* =========================================================
-    ITRAVELBYMYOWN · PLANNER v28 (COMPATIBLE & ROBUSTO)
+    ITRAVELBYMYOWN · PLANNER v29 (COMPATIBLE & ROBUSTO)
     Base: v27
-    Cambios v28:
-    1) Completar horarios faltantes por día con 08:30–19:00 (antes de llamar al agente) y
-       asegurar cobertura de TODOS los días tras aplicar la respuesta (síntesis de faltantes).
-    2) Botón "Recalcular itinerario":
-       - Se activa cuando hay cambios en la barra lateral.
-       - Recalcula SOLO las ciudades que cambiaron (dif por ciudad). Si solo hay cambios globales,
-         recalcula todas.
-    3) Overlay WOW (#loading-overlay):
-       - Bloquea la UI mientras el agente genera/recalcula.
-       - Se oculta al finalizar.
+    Cambios v29:
+    - FAB Recalcular: solo aparece tras guardar y luego modificar algo. Recalcula solo lo cambiado.
+    - Flujo correcto: Guardar → habilita Iniciar; Iniciar → pide hoteles; luego reloj y generación.
+    - Horarios por defecto si el usuario no los da para todos los días (antes y después del agente).
+    - Overlay WOW solo cuando el agente modifica itinerarios (generación y recálculos, y chat-ediciones).
 ========================================================= */
 
 /* ================================
@@ -19,7 +14,7 @@
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
-// ⚠️ Verifica esta URL (tu API en Vercel)
+// ⚠️ Tu API en Vercel
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
@@ -33,12 +28,13 @@ let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
-// v28: control de overlay WOW y difs para recálculo
 const DEFAULT_START = '08:30';
 const DEFAULT_END   = '19:00';
-let previousSnapshot = null;              // snapshot para detectar cambios
-const changedCities = new Set();          // ciudades con cambios en sidebar desde último guardado/recalc
-let globalChanged = false;                // cambios globales (viajeros, presupuesto, condiciones)
+
+// (v29) Control FAB y cambios
+let hasSavedOnce = false;
+const changedCities = new Set();
+let globalChanged = false;
 
 /* ================================
     SECCIÓN 2 · Tono / Mensajería
@@ -69,14 +65,14 @@ const $chatI    = qs('#chat-input');
 const $send     = qs('#send-btn');
 
 const $tabs     = qs('#city-tabs');
-const $itineraryWrap   = qs('#itinerary-container');
+const $itWrap   = qs('#itinerary-container');
 
 const $upsell     = qs('#monetization-upsell');
 const $upsellClose = qs('#upsell-close');
-const $confirmBtn  = qs('#confirm-itinerary');
+const $confirmCTA  = qs('#confirm-itinerary');
 
-const $recalc      = qs('#recalc-btn');         // v28
-const $overlayWOW  = qs('#loading-overlay');    // v28
+const $overlayWOW  = qs('#loading-overlay');  // Overlay
+const $recalcFab   = qs('#recalc-fab');       // FAB flotante (v29)
 
 /* ================================
     SECCIÓN 4 · Utilidades de fecha
@@ -166,23 +162,25 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
       const tmp = makeHoursBlock(n).children;
       Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
     }
-    // v28: marcar ciudad cambiada
-    const c = qs('.city',row).value.trim();
-    if(c) changedCities.add(c);
-    $recalc?.style && ($recalc.style.display='block');
+    if(hasSavedOnce){
+      const c = qs('.city',row).value.trim();
+      if(c) changedCities.add(c);
+      showRecalcFab();
+    }
   });
 
   qs('.remove',row).addEventListener('click', ()=>{
     row.remove();
-    // v28: posible cambio en ciudades -> recalc habilitado
-    $recalc?.style && ($recalc.style.display='block');
+    if(hasSavedOnce) showRecalcFab();
   });
 
-  // v28: cualquier cambio en inputs de la fila -> habilitar recalc y marcar ciudad
+  // (v29) Solo activar FAB si ya se guardó una vez
   row.addEventListener('input', ()=>{
-    const c = qs('.city',row).value.trim();
-    if(c) changedCities.add(c);
-    $recalc?.style && ($recalc.style.display='block');
+    if(hasSavedOnce){
+      const c = qs('.city',row).value.trim();
+      if(c) changedCities.add(c);
+      showRecalcFab();
+    }
   });
 
   $cityList.appendChild(row);
@@ -204,11 +202,15 @@ function saveDestinations(){
     if(!city) return;
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      // v28: normalizar por defecto si se omite
+      // (v29) default por día si falta
       const start = qs('.start',hd).value || DEFAULT_START;
       const end   = qs('.end',hd).value   || DEFAULT_END;
       perDay.push({ day: idx+1, start, end });
     });
+    // si el usuario no desplegó horas, completar igual
+    if(perDay.length===0){
+      for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
+    }
 
     list.push({ city, country, days, baseDate, perDay });
   });
@@ -231,8 +233,11 @@ function saveDestinations(){
   renderCityTabs();
   $start.disabled = savedDestinations.length===0;
 
-  // v28: snapshot para difs de recálculo
-  previousSnapshot = getPlannerSnapshot();
+  // (v29) A partir de aquí, si se modifica algo -> aparece FAB
+  hasSavedOnce = true;
+  changedCities.clear();
+  globalChanged = false;
+  hideRecalcFab();
 }
 
 /* ================================
@@ -263,7 +268,7 @@ function renderCityTabs(){
     renderCityItinerary(valid);
   }else{
     activeCity = null;
-    $itineraryWrap.innerHTML = '';
+    $itWrap.innerHTML = '';
   }
 }
 
@@ -275,9 +280,9 @@ function renderCityItinerary(city){
   const data = itineraries[city];
   const days = Object.keys(data.byDay||{}).map(n=>+n).sort((a,b)=>a-b);
 
-  $itineraryWrap.innerHTML = '';
+  $itWrap.innerHTML = '';
   if(!days.length){
-    $itineraryWrap.innerHTML = '<p>No hay actividades aún. El asistente las generará aquí.</p>';
+    $itWrap.innerHTML = '<p>No hay actividades aún. El asistente las generará aquí.</p>';
     return;
   }
 
@@ -315,7 +320,7 @@ function renderCityItinerary(city){
       `;
       tb.appendChild(tr);
     });
-    $itineraryWrap.appendChild(sec);
+    $itWrap.appendChild(sec);
     sections.push(sec);
   });
 
@@ -331,7 +336,7 @@ function renderCityItinerary(city){
     pager.appendChild(b);
   });
   pager.appendChild(next);
-  $itineraryWrap.appendChild(pager);
+  $itWrap.appendChild(pager);
 
   function show(n){
     sections.forEach((sec,i)=>sec.style.display = (days[i]===n?'block':'none'));
@@ -376,28 +381,6 @@ function getFrontendSnapshot(){
     )
   );
 }
-function getPlannerSnapshot(){
-  // v28: snapshot de inputs clave para comparar cambios (por ciudad + globales)
-  const inputs = {
-    destinations: savedDestinations.map(d=>({
-      city: d.city, days: d.days, baseDate: d.baseDate,
-      perDay: (d.perDay||[]).map(x=>({day:x.day,start:x.start,end:x.end}))
-    })),
-    globals: {
-      budget: qs('#budget')?.value||'',
-      currency: qs('#currency')?.value||'USD',
-      special: (qs('#special-conditions')?.value||'').trim(),
-      pax: {
-        a: qs('#p-adults')?.value||'0',
-        y: qs('#p-young')?.value||'0',
-        c: qs('#p-children')?.value||'0',
-        i: qs('#p-infants')?.value||'0',
-        s: qs('#p-seniors')?.value||'0',
-      }
-    }
-  };
-  return JSON.stringify(inputs);
-}
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -412,7 +395,7 @@ function buildIntake(){
   const budget = budgetVal !== 'N/A' ? `${budgetVal} ${currencyVal}` : 'N/A';
   const specialConditions = (qs('#special-conditions')?.value||'').trim()||'N/A';
 
-  // v28: asegurar perDay completo por ciudad/día con defaults
+  // (v29) Asegurar perDay completo por ciudad/día con defaults
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
     if(!cityMeta[dest.city].perDay) cityMeta[dest.city].perDay = [];
@@ -493,7 +476,7 @@ function parseJSON(s){
 }
 
 /* ================================
-    SECCIÓN 13 · Apply / Merge (MEJORADA v27 + v28)
+    SECCIÓN 13 · Apply / Merge
 =================================== */
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
@@ -512,41 +495,24 @@ function ensureDays(city){
   }
   itineraries[city].byDay = byDay;
 }
-
-// Normaliza una fila cualquiera del agente a nuestro contrato
 function normalizeRow(r = {}, fallbackDay = 1){
-  const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
-  const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
+  const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? DEFAULT_START;
+  const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? DEFAULT_END;
   const act     = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
   const from    = r.from ?? r.origin ?? r.origen ?? '';
   const to      = r.to   ?? r.destination ?? r.destino ?? '';
   const trans   = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
   const durRaw  = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes   = r.notes ?? r.nota ?? r.comentarios ?? '';
-
-  // durationMinutes -> "XXm"
   const duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
-
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
-
-  return {
-    day: d,
-    start: start || '',
-    end: end || '',
-    activity: act || '',
-    from: from || '',
-    to: to || '',
-    transport: trans || '',
-    duration: duration || '',
-    notes: notes || ''
-  };
+  return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
 }
-
 function pushRows(city, rows, replace=false){
   if(!city || !rows) return;
   if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
   if(replace) itineraries[city].byDay = {};
-  rows.forEach((raw, idx)=>{
+  rows.forEach(raw=>{
     const obj = normalizeRow(raw, 1);
     const d = obj.day;
     if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
@@ -555,7 +521,6 @@ function pushRows(city, rows, replace=false){
   });
   ensureDays(city);
 }
-
 function upsertCityMeta(meta){
   const name = meta.city || activeCity || savedDestinations[0]?.city;
   if(!name) return;
@@ -566,24 +531,18 @@ function upsertCityMeta(meta){
   if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
   if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
 }
-
 function applyParsedToState(parsed){
   if(!parsed) return;
-
-  // Acepta envoltorios alternativos
   if(parsed.itinerary) parsed = parsed.itinerary;
   if(parsed.destinos)  parsed.destinations = parsed.destinos;
   if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
 
   if(parsed.meta) upsertCityMeta(parsed.meta);
 
-  // 1) destinations: [{ name|destination, rows|rowsByDay }]
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
       if(!name) return;
-
-      // rowsByDay { "1":[...], "2":[...] }
       if(d.rowsByDay && typeof d.rowsByDay === 'object'){
         Object.entries(d.rowsByDay).forEach(([k,rows])=>{
           const mapped = (rows||[]).map(r=>normalizeRow({...r, day:+k}, +k));
@@ -591,30 +550,23 @@ function applyParsedToState(parsed){
         });
         return;
       }
-
-      // rows []
       if(Array.isArray(d.rows)){
-        const mapped = d.rows.map((r,i)=>normalizeRow(r, 1));
+        const mapped = d.rows.map(r=>normalizeRow(r, 1));
         pushRows(name, mapped, Boolean(d.replace));
       }
     });
     return;
   }
-
-  // 2) destination + rows
   if(parsed.destination && Array.isArray(parsed.rows)){
     const name = parsed.destination;
-    const mapped = parsed.rows.map((r,i)=>normalizeRow(r, 1));
+    const mapped = parsed.rows.map(r=>normalizeRow(r, 1));
     pushRows(name, mapped, Boolean(parsed.replace));
     return;
   }
-
-  // 3) itineraries: [{ city|name|destination, rows|rowsByDay }]
   if(Array.isArray(parsed.itineraries)){
     parsed.itineraries.forEach(x=>{
       const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
       if(!name) return;
-
       if(x.rowsByDay && typeof x.rowsByDay==='object'){
         Object.entries(x.rowsByDay).forEach(([k,rows])=>{
           const mapped = (rows||[]).map(r=>normalizeRow({...r, day:+k}, +k));
@@ -627,16 +579,13 @@ function applyParsedToState(parsed){
     });
     return;
   }
-
-  // 4) rows solo -> sobre ciudad activa
   if(Array.isArray(parsed.rows)){
     const city = activeCity || savedDestinations[0]?.city;
     const mapped = parsed.rows.map(r=>normalizeRow(r, 1));
     pushRows(city, mapped, Boolean(parsed.replace));
   }
 }
-
-// v28: asegurar que todos los días 1..N tengan filas; si faltan, sintetizar con perDay/defaults
+// (v29) cubrir días sin filas con bloque base
 function ensureFullCoverage(city){
   const dest = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -648,12 +597,10 @@ function ensureFullCoverage(city){
   for(let d=1; d<=days; d++){
     const rows = itineraries[city]?.byDay?.[d] || [];
     if(!rows.length){
-      // sintetizar una actividad simple para el día faltante
-      const s = perDay[d-1]?.start || DEFAULT_START;
-      const e = perDay[d-1]?.end   || DEFAULT_END;
       pushRows(city, [{
-        day:d, start:s, end:e, activity:'Bloque base (auto-completado)',
-        from:'Hotel/Zona', to:'Recorrido', transport:'A pie', duration:'120m', notes:'Generado por regla de horarios por defecto'
+        day:d, start:(perDay[d-1]?.start||DEFAULT_START), end:(perDay[d-1]?.end||DEFAULT_END),
+        activity:'Bloque base (auto-completado)', from:'Hotel/Zona', to:'Recorrido',
+        transport:'A pie', duration:'120m', notes:'Generado por regla de horarios por defecto'
       }], false);
     }
   }
@@ -663,30 +610,12 @@ function ensureFullCoverage(city){
     SECCIÓN 14 · Fallback local inteligente
 =================================== */
 const LANDMARKS = {
-  Barcelona: [
-    'Sagrada Familia','Barrio Gótico','Casa Batlló','La Pedrera','Parc Güell',
-    'La Rambla y Boquería','Montjuïc','Playa Barceloneta','Catedral de Barcelona',
-    'Camp Nou / Barça Immersive','Parc de la Ciutadella','Tibidabo / mirador'
-  ],
-  Madrid: [
-    'Museo del Prado','Parque del Retiro','Palacio Real','Plaza Mayor y San Miguel',
-    'Gran Vía','Templo de Debod','Barrio de Las Letras','Museo Reina Sofía',
-    'Puerta del Sol','Chueca / Malasaña','Estadio Bernabéu (exterior)','Matadero Madrid / Madrid Río'
-  ],
-  Paris: [
-    'Torre Eiffel','Louvre','Notre-Dame (exterior)','Sainte-Chapelle','Barrio Latino & Sorbona',
-    'Le Marais','Montmartre & Sacré-Cœur','Museo d’Orsay','Campos Elíseos & Arco del Triunfo',
-    'Ópera Garnier','Jardines de Luxemburgo','Río Sena (orillas)'
-  ],
-  _generic: [
-    'Casco histórico','Catedral/Basílica','Museo principal','Mercado central',
-    'Mirador/colina','Parque urbano','Paseo por barrio emblemático','Plaza principal',
-    'Museo alternativo','Café/pastelería típica','Cena recomendada'
-  ]
+  Barcelona: ['Sagrada Familia','Barrio Gótico','Casa Batlló','La Pedrera','Parc Güell','La Rambla y Boquería','Montjuïc','Playa Barceloneta','Catedral de Barcelona','Camp Nou / Barça Immersive','Parc de la Ciutadella','Tibidabo / mirador'],
+  Madrid: ['Museo del Prado','Parque del Retiro','Palacio Real','Plaza Mayor y San Miguel','Gran Vía','Templo de Debod','Barrio de Las Letras','Museo Reina Sofía','Puerta del Sol','Chueca / Malasaña','Estadio Bernabéu (exterior)','Matadero Madrid / Madrid Río'],
+  Paris: ['Torre Eiffel','Louvre','Notre-Dame (exterior)','Sainte-Chapelle','Barrio Latino & Sorbona','Le Marais','Montmartre & Sacré-Cœur','Museo d’Orsay','Campos Elíseos & Arco del Triunfo','Ópera Garnier','Jardines de Luxemburgo','Río Sena (orillas)'],
+  _generic: ['Casco histórico','Catedral/Basílica','Museo principal','Mercado central','Mirador/colina','Parque urbano','Paseo por barrio emblemático','Plaza principal','Museo alternativo','Café/pastelería típica','Cena recomendada']
 };
-function getLandmarksFor(city){
-  return LANDMARKS[city] || LANDMARKS._generic;
-}
+function getLandmarksFor(city){ return LANDMARKS[city] || LANDMARKS._generic; }
 function addMinutes(hhmm, min){
   const [H,M] = hhmm.split(':').map(n=>parseInt(n||'0',10));
   const d = new Date(2000,0,1,H||0,M||0,0);
@@ -713,11 +642,7 @@ function synthesizeDayRows(start, end, picks){
     let e = addMinutes(cur, b.dur);
     if(e>end) e=end;
     const transport = (b.type==='metro'?'Metro/Bus':'A pie');
-    rows.push({
-      day:1, start:s, end:e, activity:b.label,
-      from: i===0?'Hotel/Zona':'', to:'', transport,
-      duration: (b.dur+'m'), notes:'Itinerario base (auto-generado). Ajustable.'
-    });
+    rows.push({ day:1, start:s, end:e, activity:b.label, from: i===0?'Hotel/Zona':'', to:'', transport, duration: (b.dur+'m'), notes:'Itinerario base (auto-generado). Ajustable.' });
     cur = addMinutes(e, 10);
     if(cur>=end) return;
   });
@@ -732,10 +657,7 @@ function synthesizeLocalItinerary(city, days, perDay){
     const s = pd.start || DEFAULT_START;
     const e = pd.end   || DEFAULT_END;
     const picks=[];
-    for(let i=0;i<4;i++){
-      const item = pool[(d*3+i) % pool.length];
-      picks.push(item);
-    }
+    for(let i=0;i<4;i++) picks.push(pool[(d*3+i) % pool.length]);
     const dayRows = synthesizeDayRows(s,e,picks).map(r=>({...r, day:d}));
     rowsByDay[d]=dayRows;
   }
@@ -749,14 +671,10 @@ async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
-  // v28: normalizar perDay con defaults para TODOS los días
+  // perDay completo con defaults
   const perDay = Array.from({length:dest.days}, (_,i)=>{
     const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-    return {
-      day: i+1,
-      start: src.start || DEFAULT_START,
-      end:   src.end   || DEFAULT_END
-    };
+    return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
   });
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
@@ -795,15 +713,12 @@ Ignora 'meta'. El JSON debe contener un array "rows" utilizable.
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     applyParsedToState(parsed);
-
-    // v28: garantizar cobertura de TODOS los días (síntesis si faltan)
-    ensureFullCoverage(city);
-
+    ensureFullCoverage(city);  // cubrir días faltantes
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     return;
   }
 
-  // Fallback local (si el agente falló)
+  // Fallback local
   const rowsByDay = synthesizeLocalItinerary(city, dest.days, perDay);
   const rowsFlat = Object.entries(rowsByDay).flatMap(([d,rows])=>rows.map(r=>({...r, day:+d})));
   pushRows(city, rowsFlat, true);
@@ -823,24 +738,21 @@ async function startPlanning(){
 
   session = []; // solo se usa para edición
   chatMsg(`${tone.hi}`);
-
-  // v28: bloquear UI
-  showWOW(true);
-
   askNextHotel();
 }
 function askNextHotel(){
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
+
     (async ()=>{
+      // Aquí sí mostramos el overlay (efecto WOW) durante la generación
+      showWOW(true);
       for(const {city} of savedDestinations){
         await generateCityItinerary(city);
       }
-      chatMsg(tone.doneAll);
-
-      // v28: desbloquear UI al terminar toda la generación
       showWOW(false);
+      chatMsg(tone.doneAll);
     })();
     return;
   }
@@ -901,9 +813,7 @@ ${buildIntake()}
 **Solicitud del usuario:** ${text}
 `.trim();
 
-  // v28: bloqueo mientras el agente edita por chat
-  showWOW(true);
-
+  showWOW(true); // (v29) bloquear mientras el agente edita
   const ans = await callAgent(prompt); // con historial
   const parsed = parseJSON(ans);
 
@@ -911,14 +821,12 @@ ${buildIntake()}
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     applyParsedToState(parsed);
-    ensureFullCoverage(currentCity); // v28: cubrir días faltantes si el agente devolvió parcial
+    ensureFullCoverage(currentCity);
     renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
     chatMsg(parsed.followup || 'Listo. Ajusté el día visible.', 'ai');
   }else{
     chatMsg(parsed?.followup || 'No recibí cambios válidos del asistente. Por favor, intenta de nuevo o sé más específico.','ai');
   }
-
-  // v28: desbloqueo
   showWOW(false);
 }
 
@@ -935,21 +843,18 @@ function guardFeature(fn){
     fn(...args);
   };
 }
-
-// v28: overlay WOW (bloqueo/desbloqueo)
 function showWOW(on){
   if(!$overlayWOW) return;
   $overlayWOW.style.display = on ? 'flex' : 'none';
-  // bloqueamos inputs básicos para evitar interacción
-  const allBtns = qsa('button, input, select, textarea');
-  allBtns.forEach(el=>{
+  const all = qsa('button, input, select, textarea');
+  all.forEach(el=>{
     if(on){
-      el._disabled_bak = el.disabled;
+      el._prevDisabled = el.disabled;
       el.disabled = true;
     }else{
-      if(typeof el._disabled_bak !== 'undefined'){
-        el.disabled = el._disabled_bak;
-        delete el._disabled_bak;
+      if(typeof el._prevDisabled !== 'undefined'){
+        el.disabled = el._prevDisabled;
+        delete el._prevDisabled;
       }else{
         el.disabled = false;
       }
@@ -957,27 +862,27 @@ function showWOW(on){
   });
 }
 
-// ===== Eventos existentes =====
+/* Eventos base */
 $addCity.addEventListener('click', ()=>addCityRow());
 $reset.addEventListener('click', ()=>{
   $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
   addCityRow();
   $start.disabled = true;
-  $tabs.innerHTML=''; $itineraryWrap.innerHTML='';
+  $tabs.innerHTML=''; $itWrap.innerHTML='';
   $chatBox.style.display='none'; $chatM.innerHTML='';
   session = [];
-  changedCities.clear();
-  globalChanged = false;
+  hasSavedOnce = false; changedCities.clear(); globalChanged=false;
+  hideRecalcFab();
 });
 $save.addEventListener('click', saveDestinations);
 $start.addEventListener('click', startPlanning);
 $send.addEventListener('click', onSend);
 $chatI.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); onSend(); } });
 
-$confirmBtn.addEventListener('click', lockItinerary);
+$confirmCTA.addEventListener('click', lockItinerary);
 $upsellClose.addEventListener('click', ()=> $upsell.style.display='none');
 
-// Toolbar (igual que v26)
+/* Toolbar */
 qs('#btn-pdf')?.addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email')?.addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps')?.addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
@@ -990,46 +895,41 @@ qs('#btn-bathrooms')?.addEventListener('click', guardFeature(()=>window.open('ht
 qs('#btn-lodging')?.addEventListener('click', guardFeature(()=>window.open('https://www.booking.com','_blank')));
 qs('#btn-localinfo')?.addEventListener('click', guardFeature(()=>window.open('https://www.wikivoyage.org','_blank')));
 
-// v28: escuchar cambios GLOBALes en sidebar para habilitar "Recalcular"
+/* (v29) Cambios globales → FAB si ya se guardó */
 ['#budget','#currency','#special-conditions','#p-adults','#p-young','#p-children','#p-infants','#p-seniors']
   .forEach(sel=>{
     qs(sel)?.addEventListener('input', ()=>{
+      if(!hasSavedOnce) return;
       globalChanged = true;
-      $recalc?.style && ($recalc.style.display='block');
+      showRecalcFab();
     });
   });
 
-// v28: manejar clic en Recalcular
-$recalc?.addEventListener('click', async ()=>{
-  // Tomar valores actualizados del DOM
-  saveDestinations();
+/* FAB Recalcular (v29) */
+function showRecalcFab(){ if($recalcFab) $recalcFab.style.display='inline-flex'; }
+function hideRecalcFab(){ if($recalcFab) $recalcFab.style.display='none'; }
 
-  // Definir qué ciudades recalcular
+$recalcFab?.addEventListener('click', async ()=>{
+  if(!$recalcFab) return;
+  hideRecalcFab(); // se oculta al hacer click hasta que haya nuevos cambios
+  saveDestinations(); // tomar los datos actuales (con defaults)
+
+  // decidir qué ciudades recalcular
   let list = Array.from(changedCities);
   if(!list.length && globalChanged){
-    list = savedDestinations.map(d=>d.city); // cambios globales => recalcular todas
+    list = savedDestinations.map(d=>d.city); // cambios globales => todas
   }
-  if(!list.length){
-    // nada por recalcular
-    $recalc.style.display='none';
-    return;
-  }
+  if(!list.length) return;
 
   showWOW(true);
-
-  // Generar solo para las ciudades con cambios
   for(const city of list){
     await generateCityItinerary(city);
   }
+  showWOW(false);
 
-  // Limpiar flags
   changedCities.clear();
   globalChanged = false;
-  previousSnapshot = getPlannerSnapshot();
-
-  showWOW(false);
-  $recalc.style.display='none';
 });
 
-// Inicial
+/* Inicial */
 addCityRow();
