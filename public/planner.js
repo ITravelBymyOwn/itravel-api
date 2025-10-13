@@ -1,16 +1,13 @@
 /* =========================================================
-    ITRAVELBYMYOWN · PLANNER v31.1
-    Base: v27 (se respetan secciones y estructura)
-    Cambios relevantes desde v27→v31.1:
-    - Botón "Guardar destinos" detecta diffs y alimenta al agente solo con cambios.
-    - Flujo correcto: guardar → habilita iniciar; el chat pide hotel+transporte; loader solo al generar/ajustar.
-    - Prompt instructivo para conversación natural y confirmación antes de tocar itinerarios.
-    - Manejo de horarios parciales (completa defaults día a día).
-    - Edición por chat reemplaza el día visible (no duplica filas).
-    - Inserción de notas inspiradoras si faltan.
-    - Excursiones 1 día (instrucciones al agente para proponer/optimizar).
-    - Shift+Enter en el chat (no enviar).
-    - Fallback de lugares genérico (sin listas por ciudad).
+    ITRAVELBYMYOWN · PLANNER v31.1 (BASE v30)
+    - Preguntas agrupadas por ciudad: Hotel/Zona → Transporte → Actividades especiales (con "recomiéndame").
+    - Sin loops de preguntas; flujo natural.
+    - Prompt instructivo "estilo ChatGPT".
+    - Guardar destinos: diffs → actualiza solo lo cambiado; si hay nuevas ciudades, pregunta solo esas.
+    - Loader al generar/ajustar; notas motivadoras; excursiones de 1 día optimizadas.
+    - Shift+Enter para saltos de línea.
+    - Sidebar: encabezados "Hora inicio"/"Hora final".
+    - Sin "Reiniciar" ni "Recalcular".
 ========================================================= */
 
 /* ================================
@@ -29,8 +26,10 @@ let cityMeta = {};
 let session = [];             // historial contextual para ediciones conversacionales
 let activeCity = null;
 let planningStarted = false;
-let metaProgressIndex = 0;
-let collectingCityMeta = false;  // ahora recolecta hotel + transporte
+
+// Estado de recolección por ciudad (hotel→transporte→actividades)
+let collecting = null; // { mode:'initial'|'added', cities:[...], index:0, step:'hotel'|'transport'|'activities' }
+
 let isItineraryLocked = false;
 
 // Estado para detectar cambios del sidebar
@@ -40,9 +39,19 @@ let hasEverSaved = false;       // primera guardada vs subsiguientes
 /* ================================
     SECCIÓN 2 · Tono / Mensajería
 =================================== */
-// Reemplazamos frases fijas por un prompt instructivo (el agente genera lenguaje natural).
+// Prompt instructivo global (el agente genera lenguaje natural, sin respuestas fijas)
+const BEHAVIOR = `
+Eres el concierge IA de ITravelByMyOwn. Hablas en español, tono cálido, variado, motivador y humano.
+- Evita repeticiones; usa frases naturales y empáticas.
+- Responde consultas (clima, transporte, lugares, consejos) de forma útil y proactiva.
+- Cuando la info del usuario podría mejorar itinerarios, pregunta primero: "¿Deseas que lo actualice?" y solo si confirma, regresa JSON del contrato para los días/ciudades implicados.
+- Cambios de horarios: si solo se indica inicio, conserva fin previo (y viceversa) usando la regla del día. Optimiza el orden para aprovechar tiempo y recursos.
+- Excursiones 1 día: si el destino amerita varios puntos (p.ej. Segovia), distribúyelos; si es un único sitio (Versalles), actividad principal detallada.
+`;
+
+// Mensaje de bienvenida (texto simple)
 const tone = {
-  hi: '¡Bienvenido! 👋 Soy tu concierge de viajes personal. Te haré unas preguntas rápidas por ciudad (hotel/zona y medio de transporte preferido) y luego generaré itinerarios optimizados. ¡Comencemos!'
+  hi: '¡Bienvenido! 👋 Te haré unas preguntas rápidas por ciudad (hotel/zona, transporte y actividades especiales) y luego generaré itinerarios optimizados. ¡Vamos!'
 };
 
 /* ================================
@@ -50,8 +59,7 @@ const tone = {
 =================================== */
 const $cityList = qs('#city-list');
 const $addCity  = qs('#add-city-btn');
-// (HTML v31.1 ya no incluye reset; hacemos guardia)
-const $reset    = qs('#reset-planner');
+const $reset    = qs('#reset-planner');      // puede existir en HTML v29 — lo ocultamos por JS
 const $save     = qs('#save-destinations');
 
 const $start    = qs('#start-planning');
@@ -63,7 +71,6 @@ const $send     = qs('#send-btn');
 const $tabs     = qs('#city-tabs');
 const $itWrap   = qs('#itinerary-container');
 
-// Upsell & confirm
 const $upsell     = qs('#monetization-upsell');
 const $upsellClose = qs('#upsell-close');
 const $confirmCTA  = qs('#confirm-itinerary');
@@ -122,6 +129,17 @@ function chatMsg(text, who='ai'){
 function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
+
+  // Encabezados solicitados
+  const head = document.createElement('div');
+  head.className = 'hours-day';
+  head.innerHTML = `
+    <span style="font-weight:700">Día</span>
+    <span style="font-weight:700">Hora inicio</span>
+    <span style="font-weight:700">Hora final</span>
+  `;
+  wrap.appendChild(head);
+
   for(let d=1; d<=days; d++){
     const row = document.createElement('div');
     row.className = 'hours-day';
@@ -166,10 +184,9 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 }
 
 /* ================================
-    SECCIÓN 7 · Guardar destinos (differences)
+    SECCIÓN 7 · Guardar destinos (diffs)
 =================================== */
 function snapshotSidebar(){
-  // Construye un snapshot limpio del sidebar para comparar cambios
   const rows = qsa('.city-row', $cityList);
   const cities = [];
   rows.forEach(r=>{
@@ -182,9 +199,10 @@ function snapshotSidebar(){
 
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = qs('.start',hd).value || ''; // puede venir vacío (parcial)
-      const end   = qs('.end',hd).value   || '';
-      perDay.push({ day: idx+1, start, end });
+      if(idx===0) return; // salta encabezado
+      const start = qs('.start',hd)?.value || ''; // puede venir vacío
+      const end   = qs('.end',hd)?.value   || '';
+      perDay.push({ day: idx, start, end }); // idx ya corresponde al número de día
     });
 
     cities.push({ city, country, days, baseDate, perDay });
@@ -208,35 +226,27 @@ function snapshotSidebar(){
     budget: budgetVal ? { amount: Number(budgetVal), currency: currencyVal } : null
   };
 }
-
 function computeDiff(prevSnap, nextSnap){
-  // Detecta cambios entre snapshots (ciudades, días, fechas, horas por día, pax, presupuesto, etc.)
   const changes = { cities: [], added: [], removed: [], globals: [] };
 
   const mapPrev = new Map((prevSnap?.destinations||[]).map(d=>[d.city, d]));
   const mapNext = new Map((nextSnap.destinations||[]).map(d=>[d.city, d]));
 
-  // Ciudades removidas y cambiadas
   (prevSnap?.destinations||[]).forEach(pd=>{
     const nd = mapNext.get(pd.city);
-    if(!nd){
-      changes.removed.push(pd.city);
-      return;
-    }
-    // Compara atributos
+    if(!nd){ changes.removed.push(pd.city); return; }
     const diffs = [];
     if(pd.country !== nd.country) diffs.push({field:'country', from:pd.country, to:nd.country});
     if(pd.days !== nd.days)       diffs.push({field:'days', from:pd.days, to:nd.days});
     if(pd.baseDate !== nd.baseDate) diffs.push({field:'baseDate', from:pd.baseDate, to:nd.baseDate});
 
-    // Horas por día (permite parciales, completa luego)
     const maxDays = Math.max(pd.days||0, nd.days||0);
     const perDayDiff = [];
     for(let i=1;i<=maxDays;i++){
       const p = (pd.perDay||[]).find(x=>x.day===i) || {day:i, start:'', end:''};
       const n = (nd.perDay||[]).find(x=>x.day===i) || {day:i, start:'', end:''};
       if((p.start||'')!==(n.start||'') || (p.end||'')!==(n.end||'')){
-        perDayDiff.push({ day:i, from:{start:p.start||'',end:p.end||''}, to:{start:n.start||'',end:n.end||''} });
+        perDayDiff.push({ day:i, from:{start:p.start||'08:30',end:p.end||'19:00'}, to:{start:n.start||'(def)',end:n.end||'(def)'} });
       }
     }
     if(diffs.length || perDayDiff.length){
@@ -244,13 +254,11 @@ function computeDiff(prevSnap, nextSnap){
     }
   });
 
-  // Ciudades nuevas
   (nextSnap.destinations||[]).forEach(nd=>{
     const pd = mapPrev.get(nd.city);
     if(!pd) changes.added.push(nd.city);
   });
 
-  // Globals
   if(JSON.stringify(prevSnap?.pax||{}) !== JSON.stringify(nextSnap.pax||{})){
     changes.globals.push({ field:'pax', to: nextSnap.pax });
   }
@@ -262,87 +270,60 @@ function computeDiff(prevSnap, nextSnap){
   if((prevSnap?.specialConditions||'') !== (nextSnap?.specialConditions||'')){
     changes.globals.push({ field:'specialConditions', to: nextSnap.specialConditions });
   }
-
   return changes;
 }
-
 function saveDestinations(){
   const snap = snapshotSidebar();
-
-  // Normaliza perDay faltantes con defaults (08:30–19:00)
+  // Completa horas faltantes por día (08:30–19:00)
   snap.destinations = snap.destinations.map(d=>{
-    const filled = Array.from({length:d.days}, (_,i)=>{
-      const pd = (d.perDay||[]).find(x=>x.day===i+1) || {day:i+1,start:'',end:''};
-      return { day:i+1, start: pd.start||'08:30', end: pd.end||'19:00' };
+    const perDay = Array.from({length:d.days}, (_,i)=>{
+      const found = (d.perDay||[]).find(x=>x.day===i+1) || {day:i+1,start:'',end:''};
+      return { day:i+1, start: found.start||'08:30', end: found.end||'19:00' };
     });
-    return { ...d, perDay: filled };
+    return { ...d, perDay };
   });
 
-  // Actualiza estados locales (savedDestinations, itineraries bases, cityMeta)
+  // Actualiza estados base
   savedDestinations = snap.destinations;
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
-    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
+    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, hotel:'', transport:'', activitiesPref:'', perDay };
     else {
       cityMeta[city].baseDate = baseDate||null;
-      cityMeta[city].perDay   = perDay||[];
+      cityMeta[city].perDay   = perDay;
     }
-    for(let d=1; d<=days; d++){
-      if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
-    }
+    for(let d=1; d<=days; d++){ if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[]; }
   });
-  // Limpia ciudades removidas a nivel de estado
   Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
   Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
-  // Habilita "Iniciar planificación" si hay al menos 1 destino
   $start.disabled = savedDestinations.length===0;
 
-  // Detección de cambios vs último snapshot guardado
   const diff = lastSavedSnapshot ? computeDiff(lastSavedSnapshot, snap) : null;
-
-  if(!hasEverSaved){
-    // Primer guardado: solo preparamos; NO llamamos al agente aún.
-    lastSavedSnapshot = snap;
-    hasEverSaved = true;
-    chatMsg('Datos guardados. Cuando quieras, presiona "Iniciar planificación".', 'ai');
-    return;
-  }
-
-  // Guardado tras modificaciones
   lastSavedSnapshot = snap;
 
-  // Si hay ciudades nuevas → entramos al flujo de preguntas solo para esas ciudades.
-  if(diff && diff.added && diff.added.length){
-    if(!$chatBox.style.display || $chatBox.style.display==='none'){
-      $chatBox.style.display='flex';
-    }
-    planningStarted = true;
-    collectingCityMeta = true;
-    metaProgressIndex = 0;
-
-    // reordena savedDestinations para iniciar preguntas desde las nuevas primero
-    const nameSet = new Set(diff.added);
-    const reordered = [
-      ...savedDestinations.filter(d=>nameSet.has(d.city)),
-      ...savedDestinations.filter(d=>!nameSet.has(d.city))
-    ];
-    savedDestinations = reordered;
-
-    chatMsg('¡Perfecto! Veo nuevas ciudades. Te preguntaré hotel/zona y transporte para integrarlas al plan. 🧭', 'ai');
-    askNextCityMeta();
+  if(!hasEverSaved){
+    hasEverSaved = true;
+    chatMsg('Datos guardados. Presiona “Iniciar planificación” para comenzar la conversación.', 'ai');
     return;
   }
 
-  // Si son cambios en ciudades existentes o globals → alimentar al agente para ajustes.
+  // Guardado después de tener itinerarios o tras primer guardado:
+  if(diff && diff.added.length){
+    // Preguntar solo por las nuevas ciudades
+    if(!$chatBox.style.display || $chatBox.style.display==='none'){ $chatBox.style.display='flex'; }
+    collecting = { mode:'added', cities:[...diff.added], index:0, step:'hotel' };
+    chatMsg('¡Perfecto! Veo ciudades nuevas. Te pediré hotel/zona, transporte y actividades para integrarlas al plan. 🧭', 'ai');
+    askCurrentCityQuestion();
+    return;
+  }
+
   if(diff && (diff.cities.length || diff.globals.length || diff.removed.length)){
-    if(!$chatBox.style.display || $chatBox.style.display==='none'){
-      $chatBox.style.display='flex';
-    }
+    if(!$chatBox.style.display || $chatBox.style.display==='none'){ $chatBox.style.display='flex'; }
     applySidebarChangesViaAgent(diff);
   }else{
-    chatMsg('Cambios guardados (sin impacto en itinerarios).', 'ai');
+    chatMsg('Cambios guardados (sin impacto en los itinerarios).', 'ai');
   }
 }
 
@@ -542,21 +523,6 @@ Reglas:
 - Nada de texto fuera del JSON.
 `;
 
-// Prompt instructivo global para estilo "ChatGPT" y decisiones
-const BEHAVIOR = `
-Eres el concierge IA de ITravelByMyOwn. Hablas en español, tono cálido, motivador y natural.
-- Responde con variedad, evitando frases repetitivas.
-- Si el usuario pide info (clima, ropa, recomendaciones, etc.) y no requiere cambios de itinerario, responde normalmente y luego pregunta:
-  "¿Quieres que actualice tu itinerario con esto?"
-- Si el usuario confirma, produce JSON según el contrato para los días/ciudades impactados.
-- Si el usuario pide cambios (horarios, mover actividades, agregar días o excursiones 1 día), optimiza el día/los días implicados:
-  * Mantén actividades salvo que pidan cambiarlas; reordena para aprovechar tiempo y recursos.
-  * Si cambia hora de inicio o fin y solo recibes una de las dos, conserva la otra según la regla vigente.
-  * Cuando se pida excursión 1 día (p.ej., Segovia desde Madrid), incluye varios puntos clave si el destino lo amerita; si es un único sitio (Versalles), genera actividad única con tiempos detallados.
-- Considera temporada y clima cuando sea relevante a sugerencias.
-- Antes de devolver JSON que modifique itinerario, incluye "replace": true para sobreescribir el día visible (evitar duplicados).
-`;
-
 /* ================================
     SECCIÓN 12 · Llamada al agente
 =================================== */
@@ -569,15 +535,12 @@ async function callAgent(input, useHistory = true){
       headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)
     });
-    if(!res.ok) {
-      console.error(`Error HTTP ${res.status} al llamar a la API: ${res.statusText}`);
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json().catch(()=>({text:''}));
     return data?.text || '';
   }catch(e){
     console.error("Fallo al contactar la API:", e);
-    return `{"followup":"No pude contactar al asistente. Verifica configuración de API."}`;
+    return `{"followup":"No pude contactar al asistente. Verifica tu configuración de API/URL."}`;
   }
 }
 function parseJSON(s){
@@ -594,7 +557,7 @@ function parseJSON(s){
 }
 
 /* ================================
-    SECCIÓN 13 · Apply / Merge (MEJORADA)
+    SECCIÓN 13 · Apply / Merge
 =================================== */
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
@@ -608,21 +571,18 @@ function ensureDays(city){
   const maxPresent = present.length?Math.max(...present):0;
   const saved = savedDestinations.find(x=>x.city===city)?.days || 0;
   const want = Math.max(saved, maxPresent) || 1;
-  for(let d=1; d<=want; d++){
-    if(!byDay[d]) byDay[d]=[];
-  }
+  for(let d=1; d<=want; d++){ if(!byDay[d]) byDay[d]=[]; }
   itineraries[city].byDay = byDay;
 }
 
-// Inserta nota humana si no viene
 const NOTE_POOL = [
-  "✨ Disfruta cada rincón: ¡es un lugar que enamora!",
-  "📸 Momento perfecto para fotos inolvidables.",
-  "☕ Tómate un respiro y saborea lo local.",
-  "🌿 Ritmo tranquilo para absorber la atmósfera.",
-  "🚶‍♀️ Paseo ideal si el clima acompaña.",
-  "🍽️ Excelente oportunidad para probar sabores típicos.",
-  "🌇 Atento a la luz dorada cerca del atardecer."
+  "✨ Disfruta esta joya local: ¡te va a encantar!",
+  "📸 Momento perfecto para una foto inolvidable.",
+  "☕ Haz una pausa y saborea algo típico.",
+  "🌿 Toma el ritmo y disfruta la atmósfera.",
+  "🚶 Paseo ideal si el clima acompaña.",
+  "🍽️ Excelente opción para probar sabores locales.",
+  "🌇 Ojo con la luz dorada del atardecer."
 ];
 function enrichNotes(row){
   if((row.notes||'').trim()) return row;
@@ -630,7 +590,6 @@ function enrichNotes(row){
   return { ...row, notes: pick };
 }
 
-// Normaliza una fila del agente a nuestro contrato
 function normalizeRow(r = {}, fallbackDay = 1){
   const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
   const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
@@ -645,15 +604,9 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
 
   return enrichNotes({
-    day: d,
-    start: start || '',
-    end: end || '',
-    activity: act || '',
-    from: from || '',
-    to: to || '',
-    transport: trans || '',
-    duration: duration || '',
-    notes: notes || ''
+    day: d, start: start||'', end: end||'',
+    activity: act||'', from: from||'', to: to||'',
+    transport: trans||'', duration: duration||'', notes: notes||''
   });
 }
 
@@ -661,7 +614,7 @@ function pushRows(city, rows, replace=false){
   if(!city || !rows) return;
   if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
   if(replace) itineraries[city].byDay = {};
-  rows.forEach((raw)=>{
+  rows.forEach(raw=>{
     const obj = normalizeRow(raw, 1);
     const d = obj.day;
     if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
@@ -674,28 +627,23 @@ function pushRows(city, rows, replace=false){
 function upsertCityMeta(meta){
   const name = meta.city || activeCity || savedDestinations[0]?.city;
   if(!name) return;
-  if(!cityMeta[name]) cityMeta[name] = { baseDate:null, start:null, end:null, hotel:'', transport:'', perDay:[] };
-  if(meta.baseDate) cityMeta[name].baseDate = meta.baseDate;
-  if(meta.start)    cityMeta[name].start    = meta.start;
-  if(meta.end)      cityMeta[name].end      = meta.end;
-  if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
-  if(typeof meta.transport==='string') cityMeta[name].transport = meta.transport;
+  if(!cityMeta[name]) cityMeta[name] = { baseDate:null, hotel:'', transport:'', activitiesPref:'', perDay:[] };
+  if(meta.baseDate)    cityMeta[name].baseDate = meta.baseDate;
+  if(typeof meta.hotel==='string')      cityMeta[name].hotel = meta.hotel;
+  if(typeof meta.transport==='string')  cityMeta[name].transport = meta.transport;
+  if(typeof meta.activitiesPref==='string') cityMeta[name].activitiesPref = meta.activitiesPref;
   if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
 }
 
 function applyParsedToState(parsed, forceReplaceDay=null){
   if(!parsed) return;
-
-  // Acepta envoltorios alternativos
   if(parsed.itinerary) parsed = parsed.itinerary;
   if(parsed.destinos)  parsed.destinations = parsed.destinos;
   if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
-
   if(parsed.meta) upsertCityMeta(parsed.meta);
 
   const wantsReplace = Boolean(parsed.replace);
 
-  // 1) destinations: [{ name|destination, rows|rowsByDay }]
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
@@ -704,8 +652,7 @@ function applyParsedToState(parsed, forceReplaceDay=null){
       if(d.rowsByDay && typeof d.rowsByDay === 'object'){
         Object.entries(d.rowsByDay).forEach(([k,rows])=>{
           const mapped = (rows||[]).map(r=>normalizeRow({...r, day:+k}, +k));
-          if(wantsReplace || forceReplaceDay) {
-            // reemplazo por día si corresponde
+          if(wantsReplace || forceReplaceDay){
             itineraries[name] = itineraries[name] || {byDay:{},currentDay:1,baseDate:cityMeta[name]?.baseDate||null};
             itineraries[name].byDay[+k] = [];
           }
@@ -713,11 +660,9 @@ function applyParsedToState(parsed, forceReplaceDay=null){
         });
         return;
       }
-
       if(Array.isArray(d.rows)){
         const mapped = d.rows.map(r=>normalizeRow(r, 1));
         if(forceReplaceDay){
-          // Reemplaza solo el día visible
           const dnum = itineraries[name]?.currentDay || 1;
           itineraries[name] = itineraries[name] || {byDay:{},currentDay:dnum,baseDate:cityMeta[name]?.baseDate||null};
           itineraries[name].byDay[dnum] = [];
@@ -730,10 +675,9 @@ function applyParsedToState(parsed, forceReplaceDay=null){
     return;
   }
 
-  // 2) destination + rows
   if(parsed.destination && Array.isArray(parsed.rows)){
     const name = parsed.destination;
-    const mapped = parsed.rows.map((r)=>normalizeRow(r, 1));
+    const mapped = parsed.rows.map(r=>normalizeRow(r, 1));
     if(forceReplaceDay){
       const dnum = itineraries[name]?.currentDay || 1;
       itineraries[name] = itineraries[name] || {byDay:{},currentDay:dnum,baseDate:cityMeta[name]?.baseDate||null};
@@ -745,7 +689,6 @@ function applyParsedToState(parsed, forceReplaceDay=null){
     return;
   }
 
-  // 3) itineraries: [{ city|name|destination, rows|rowsByDay }]
   if(Array.isArray(parsed.itineraries)){
     parsed.itineraries.forEach(x=>{
       const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
@@ -754,7 +697,7 @@ function applyParsedToState(parsed, forceReplaceDay=null){
       if(x.rowsByDay && typeof x.rowsByDay==='object'){
         Object.entries(x.rowsByDay).forEach(([k,rows])=>{
           const mapped = (rows||[]).map(r=>normalizeRow({...r, day:+k}, +k));
-          if(wantsReplace || forceReplaceDay) {
+          if(wantsReplace || forceReplaceDay){
             itineraries[name] = itineraries[name] || {byDay:{},currentDay:1,baseDate:cityMeta[name]?.baseDate||null};
             itineraries[name].byDay[+k] = [];
           }
@@ -775,7 +718,6 @@ function applyParsedToState(parsed, forceReplaceDay=null){
     return;
   }
 
-  // 4) rows solo -> sobre ciudad activa
   if(Array.isArray(parsed.rows)){
     const city = activeCity || savedDestinations[0]?.city;
     const mapped = parsed.rows.map(r=>normalizeRow(r, 1));
@@ -791,25 +733,19 @@ function applyParsedToState(parsed, forceReplaceDay=null){
 }
 
 /* ================================
-    SECCIÓN 14 · Fallback local inteligente (GENÉRICO)
+    SECCIÓN 14 · Fallback local (genérico)
 =================================== */
-const LANDMARKS = {
-  _generic: [
-    'Casco histórico','Catedral/Basílica','Museo principal','Mercado central',
-    'Mirador/colina','Parque urbano','Barrio emblemático','Plaza principal',
-    'Museo alternativo','Café/pastelería típica','Cena recomendada'
-  ]
-};
-function getLandmarksFor(city){
-  return LANDMARKS._generic;
-}
-function addMinutes(hhmm, min){
-  const [H,M] = (hhmm||'08:30').split(':').map(n=>parseInt(n||'0',10));
+const LANDMARKS = { _generic: [
+  'Casco histórico','Catedral/Basílica','Museo principal','Mercado central',
+  'Mirador/colina','Parque urbano','Barrio emblemático','Plaza principal',
+  'Museo alternativo','Café/pastelería típica','Cena recomendada'
+] };
+function getLandmarksFor(){ return LANDMARKS._generic; }
+function addMinutes(hhmm='08:30', min=0){
+  const [H,M] = hhmm.split(':').map(n=>parseInt(n||'0',10));
   const d = new Date(2000,0,1,H||0,M||0,0);
   d.setMinutes(d.getMinutes()+min);
-  const HH = String(d.getHours()).padStart(2,'0');
-  const MM = String(d.getMinutes()).padStart(2,'0');
-  return `${HH}:${MM}`;
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 function synthesizeDayRows(start, end, picks){
   const blocks = [
@@ -825,17 +761,9 @@ function synthesizeDayRows(start, end, picks){
   let cur = start||'08:30';
   const rows=[];
   blocks.forEach((b,i)=>{
-    const s = cur;
-    let e = addMinutes(cur, b.dur);
-    if(e>end) e=end;
-    const transport = (b.type==='metro'?'Metro/Bus':'A pie');
-    rows.push(enrichNotes({
-      day:1, start:s, end:e, activity:b.label,
-      from: i===0?'Hotel/Zona':'', to:'', transport,
-      duration: (b.dur+'m'), notes:''
-    }));
-    cur = addMinutes(e, 10);
-    if(cur>=end) return;
+    const s = cur; let e = addMinutes(cur, b.dur); if(e>end) e=end;
+    rows.push(enrichNotes({ day:1, start:s, end:e, activity:b.label, from:i===0?'Hotel/Zona':'', to:'', transport:(b.type==='metro'?'Metro/Bus':'A pie'), duration:(b.dur+'m'), notes:'' }));
+    cur = addMinutes(e, 10); if(cur>=end) return;
   });
   if(rows.length) rows[rows.length-1].end = end;
   return rows;
@@ -845,15 +773,8 @@ function synthesizeLocalItinerary(city, days, perDay){
   const pool = getLandmarksFor(city).slice();
   for(let d=1; d<=days; d++){
     const pd = perDay.find(x=>x.day===d) || {start:'08:30', end:'19:00'};
-    const s = pd.start || '08:30';
-    const e = pd.end   || '19:00';
-    const picks=[];
-    for(let i=0;i<4;i++){
-      const item = pool[(d*3+i) % pool.length];
-      picks.push(item);
-    }
-    const dayRows = synthesizeDayRows(s,e,picks).map(r=>({...r, day:d}));
-    rowsByDay[d]=dayRows;
+    const picks=[]; for(let i=0;i<4;i++){ picks.push(pool[(d*3+i) % pool.length]); }
+    rowsByDay[d]=synthesizeDayRows(pd.start||'08:30', pd.end||'19:00', picks).map(r=>({...r, day:d}));
   }
   return rowsByDay;
 }
@@ -864,7 +785,7 @@ function synthesizeLocalItinerary(city, days, perDay){
 function showLoader(on=true){
   if(!$loading) return;
   $loading.style.display = on ? 'flex' : 'none';
-  document.body.style.pointerEvents = on ? 'none':'auto';
+  document.body.style.pointerEvents = on ? 'none' : 'auto';
 }
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -874,46 +795,43 @@ async function generateCityItinerary(city){
     ? cityMeta[city].perDay
     : Array.from({length:dest.days}, (_,i)=>({day:i+1,start:'08:30',end:'19:00'}));
 
-  const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-  const hotel    = cityMeta[city]?.hotel || '';
+  const baseDate  = cityMeta[city]?.baseDate || dest.baseDate || '';
+  const hotel     = cityMeta[city]?.hotel || '';
   const transport = cityMeta[city]?.transport || '';
+  const actsPref  = cityMeta[city]?.activitiesPref || '';
 
   const instructions = `
 ${BEHAVIOR}
 ${FORMAT}
-**Genera SOLO el itinerario para "${city}" (${dest.days} día/s) en formato B con "destination":"${city}", "rows" y "replace":true.**
-- Usa las horas por día (start/end) provistas; donde falten, asume 08:30–19:00.
+Genera SOLO el itinerario para "${city}" (${dest.days} día/s) en formato B con "destination":"${city}", "rows" y "replace":true.
+- Usa horas por día; si faltan, 08:30–19:00.
 - Optimiza tiempos y orden. Incluye transporte y duración.
-- Si se detecta oportunidad de excursión 1 día (según contexto), proponla dentro del plan del día adecuado.
+- Considera preferencias: actividades="${actsPref||'recomiéndame'}".
+Datos:
+- Hotel/Zona: ${hotel||'pendiente'}
+- Transporte: ${transport||'recomiéndame'}
+- Horas por día: ${JSON.stringify(perDay)}
+- BaseDate: ${baseDate||'N/A'}
 
-Datos de Viaje:
-- Ciudad: "${city}"
-- Días totales: ${dest.days}
-- Horas por día (start/end): ${JSON.stringify(perDay)}
-- BaseDate (día 1): ${baseDate||'N/A'}
-- Hotel/Zona de base: ${hotel||'pendiente'}
-- Transporte preferido: ${transport||'pendiente'}
-
-Contexto del viaje (referencia):
+Contexto:
 ${buildIntake()}
 `.trim();
 
-  let text = await callAgent(instructions, false); // sin historial para generación completa por ciudad
+  let text = await callAgent(instructions, false);
   let parsed = parseJSON(text);
 
   if(!parsed || (!parsed.rows && !parsed.destinations && !parsed.itineraries)){
     const strict = `
 ${BEHAVIOR}
 ${FORMAT}
-**REINTENTO:** Genera SOLO el itinerario para "${city}" (${dest.days} días) en formato B con "destination":"${city}", "rows" y "replace":true.
-Ignora 'meta'. El JSON debe contener un array "rows" utilizable.
+REINTENTO: Devuelve formato B para "${city}" con "replace":true y "rows" utilizable.
 `.trim();
     text = await callAgent(strict, false);
     parsed = parseJSON(text);
   }
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-    applyParsedToState(parsed, /*forceReplaceDay*/ null);
+    applyParsedToState(parsed, null);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     return;
   }
@@ -923,81 +841,104 @@ Ignora 'meta'. El JSON debe contener un array "rows" utilizable.
   const rowsFlat = Object.entries(rowsByDay).flatMap(([d,rows])=>rows.map(r=>({...r, day:+d})));
   pushRows(city, rowsFlat, true);
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-  chatMsg('⚠️ No recibí un JSON válido. Generé un itinerario base para seguir trabajando.', 'ai');
+  chatMsg('⚠️ No recibí JSON válido. Generé una base para que sigas trabajando.', 'ai');
 }
 
 /* ================================
-    SECCIÓN 16 · Flujo principal · City Meta (Hotel + Transporte)
+    SECCIÓN 16 · Flujo principal · City Meta (Hotel → Transporte → Actividades)
 =================================== */
-async function startPlanning(){
+function startPlanning(){
   if(savedDestinations.length===0) return;
   $chatBox.style.display='flex';
   planningStarted = true;
-  collectingCityMeta = true;
-  metaProgressIndex = 0;
-
-  session = []; // historial para edición posterior
+  session = [];
   chatMsg(`${tone.hi}`);
-
-  askNextCityMeta();
+  collecting = { mode:'initial', cities: savedDestinations.map(d=>d.city), index:0, step:'hotel' };
+  askCurrentCityQuestion();
 }
-function askNextCityMeta(){
-  if(metaProgressIndex >= savedDestinations.length){
-    collectingCityMeta = false;
-    chatMsg('✨ ¡Perfecto! Ya tengo hotel/zona y transporte para todas las ciudades. Comienzo a generar tus itinerarios optimizados.', 'ai');
+function currentCityInCollect(){
+  if(!collecting) return null;
+  return collecting.cities[collecting.index] || null;
+}
+function askCurrentCityQuestion(){
+  const city = currentCityInCollect();
+  if(!city){
+    // Terminado → generar
+    const mode = collecting?.mode || 'initial';
+    const citiesToGen = (mode==='added') ? collecting.cities : savedDestinations.map(d=>d.city);
+    collecting = null;
+    chatMsg('✨ ¡Listo! Ya tengo toda la información. Comienzo a generar tus itinerarios.', 'ai');
     (async ()=>{
       showLoader(true);
-      for(const {city} of savedDestinations){
-        await generateCityItinerary(city);
-      }
+      for(const c of citiesToGen){ await generateCityItinerary(c); }
       showLoader(false);
-      chatMsg('🎉 Todos los itinerarios fueron generados. ¿Quieres revisarlos o ajustar alguno?', 'ai');
+      chatMsg('🎉 Itinerarios generados. ¿Quieres ajustarlos o añadir algo especial?', 'ai');
     })();
     return;
   }
-  const city = savedDestinations[metaProgressIndex].city;
+
   setActiveCity(city); renderCityItinerary(city);
 
-  const msg = `
-Para <strong>${city}</strong>, cuéntame por favor:
-1) <b>Hotel o zona base</b> (nombre, dirección o enlace).
-2) <b>Medio de transporte</b> (alquiler, público, taxi/uber, combinación, o “recomiéndame”).
-`.trim();
-  chatMsg(msg,'ai');
+  if(collecting.step==='hotel'){
+    chatMsg(`Para <strong>${city}</strong>, ¿en qué <b>hotel o zona</b> te hospedarás? (nombre, dirección o enlace)`, 'ai');
+    return;
+  }
+  if(collecting.step==='transport'){
+    chatMsg(`¿Qué <b>medio de transporte</b> usarás en <strong>${city}</strong>? (alquiler, público, taxi/uber, combinación o "<i>recomiéndame</i>")`, 'ai');
+    return;
+  }
+  if(collecting.step==='activities'){
+    chatMsg(`¿Tienes <b>actividades especiales</b> en mente para <strong>${city}</strong> (p. ej., auroras, termales, tour gastronómico) o "<i>recomiéndame</i>"?`, 'ai');
+    return;
+  }
+}
+function saveCollectAnswer(text){
+  const city = currentCityInCollect(); if(!city) return;
+
+  if(collecting.step==='hotel'){
+    upsertCityMeta({ city, hotel: text });
+    collecting.step = 'transport';
+    askCurrentCityQuestion(); return;
+  }
+  if(collecting.step==='transport'){
+    let transport = (text||'').toLowerCase();
+    if(/alquiler|rent/i.test(transport)) transport = 'alquiler';
+    else if(/públic|metro|bus|tren/i.test(transport)) transport = 'público';
+    else if(/taxi|uber|cabify/i.test(transport)) transport = 'taxi/uber';
+    else if(/combinación|combination/i.test(transport)) transport = 'combinación';
+    else transport = 'recomiéndame';
+    upsertCityMeta({ city, transport });
+    collecting.step = 'activities';
+    askCurrentCityQuestion(); return;
+  }
+  if(collecting.step==='activities'){
+    const val = (text||'').trim() || 'recomiéndame';
+    upsertCityMeta({ city, activitiesPref: val });
+    // siguiente ciudad
+    collecting.index += 1;
+    collecting.step = 'hotel';
+    askCurrentCityQuestion(); return;
+  }
 }
 
 /* ================================
-    SECCIÓN 17 · Chat handler (edición natural + confirmación)
+    SECCIÓN 17 · Chat handler (conversación natural + confirmación)
 =================================== */
 function buildChangePromptFromDiff(diff){
-  // Resume los cambios en lenguaje para el agente
   const parts = [];
   if(diff.added.length) parts.push(`Ciudades nuevas: ${diff.added.join(', ')}`);
   if(diff.removed.length) parts.push(`Ciudades removidas: ${diff.removed.join(', ')}`);
   diff.cities.forEach(c=>{
     const d1 = c.diffs.map(d=>`${d.field}: ${d.from||'—'} → ${d.to||'—'}`).join(' | ');
-    const d2 = c.perDayDiff.map(p=>`Día ${p.day} horas: ${p.from.start||'08:30'}–${p.from.end||'19:00'} → ${p.to.start||'(def)'}–${p.to.end||'(def)'}`).join(' | ');
+    const d2 = c.perDayDiff.map(p=>`Día ${p.day} horas: ${p.from.start}–${p.from.end} → ${p.to.start}–${p.to.end}`).join(' | ');
     const b = [d1,d2].filter(Boolean).join(' || ');
     parts.push(`${c.city}: ${b}`);
   });
-  diff.globals.forEach(g=>{
-    parts.push(`Global ${g.field}: ${JSON.stringify(g.to)}`);
-  });
+  diff.globals.forEach(g=>parts.push(`Global ${g.field}: ${JSON.stringify(g.to)}`));
   return parts.join('\n');
 }
-
 async function applySidebarChangesViaAgent(diff){
   const summary = buildChangePromptFromDiff(diff);
-  const impactedCities = new Set([
-    ...diff.cities.map(c=>c.city),
-    ...diff.added,
-    ...diff.removed
-  ]);
-  // Si hay ciudades removidas, simplemente las quitamos del estado (ya hecho antes).
-  if(diff.removed.length){
-    chatMsg(`Se removieron: ${diff.removed.join(', ')}.`, 'ai');
-  }
-
   const prompt = `
 ${BEHAVIOR}
 ${FORMAT}
@@ -1006,31 +947,28 @@ El usuario actualizó datos desde el panel lateral. Aplica SOLO los cambios nece
 Cambios detectados:
 ${summary}
 
-Contexto (importante):
+Contexto:
 ${buildIntake()}
 
 Instrucciones:
-- Si solo cambian horas de un día, ajusta SOLO ese día y devuelve "replace":true.
-- Si aumentan días de una ciudad (p.ej., +1 día en Madrid), añade un día y sugiere excursión 1 día si es razonable (p.ej., Segovia/Toledo).
-- Si hay ciudades nuevas, espera a tener hotel/transporte para ellas (se preguntará aparte).
-- Devuelve formato B o A/C con "replace":true cuando modifiques el día visible.
+- Si cambian horas de un día, ajusta SOLO ese día con "replace":true.
+- Si aumentan días, agrega nuevos días (sugerir excursión 1 día si razonable).
+- Para ciudades nuevas, esperar a preguntas (hotel/transporte/actividades) — no generar aún.
 `.trim();
 
   showLoader(true);
-  const ans = await callAgent(prompt); // con historial actual
+  const ans = await callAgent(prompt);
   showLoader(false);
 
   const parsed = parseJSON(ans);
-  if(parsed?.followup) session.push({role: 'assistant', content: parsed.followup});
+  if(parsed?.followup) session.push({role:'assistant', content: parsed.followup});
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-    // Forzamos reemplazar el día visible cuando venga de cambios puntuales
-    applyParsedToState(parsed, /*forceReplaceDay*/ true);
+    applyParsedToState(parsed, true); // reemplaza día visible para evitar duplicados
     renderCityTabs(); renderCityItinerary(activeCity);
-    chatMsg(parsed.followup || 'Listo. Ajusté lo necesario en tu itinerario.', 'ai');
+    chatMsg(parsed.followup || 'Listo. Ajusté lo necesario en tu itinerario. ✨', 'ai');
   }else{
-    // Puede ser una respuesta textual (p.ej., explicación). Muestra y pregunta por confirmación si aplica.
-    chatMsg((parsed?.followup)||'He registrado tus cambios. Si quieres, dime qué parte del itinerario deseas actualizar.', 'ai');
+    chatMsg(parsed?.followup || 'Cambios registrados. Dime si quieres actualizar algún día en específico.','ai');
   }
 }
 
@@ -1040,57 +978,15 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // Shift+Enter para saltos de línea (gestión en keydown abajo)
-
-  // 1) Recolección de hotel + transporte
-  if(collectingCityMeta){
-    const city = savedDestinations[metaProgressIndex].city;
-    // Guardamos tal cual (el agente tendrá libertad semántica)
-    // Heurística simple: si el texto contiene palabras de transporte, lo asignamos también.
-    upsertCityMeta({ city, hotel: text });
-    if(!/alquiler|rent|públic|metro|bus|tren|taxi|uber|cabify|combinación|combination|recomiéndame/i.test(text)){
-      chatMsg('¿Qué medio de transporte usarás (alquiler, público, taxi/uber, combinación) o prefieres que te recomiende?', 'ai');
-      // Esperamos siguiente input
-      collectingCityMeta = 'await-transport';
-      return;
-    }else{
-      // Intenta extraer transporte simple
-      const m = text.toLowerCase();
-      let transport = 'recomiéndame';
-      if(/alquiler|rent/i.test(m)) transport = 'alquiler';
-      else if(/públic|metro|bus|tren/i.test(m)) transport = 'público';
-      else if(/taxi|uber|cabify/i.test(m)) transport = 'taxi/uber';
-      else if(/combinación|combination/i.test(m)) transport = 'combinación';
-      upsertCityMeta({ city, transport });
-    }
-    chatMsg(`¡Perfecto! Hotel/zona y transporte registrados para ${city}.`, 'ai');
-    metaProgressIndex++;
-    collectingCityMeta = true;
-    askNextCityMeta();
-    return;
-  }
-  if(collectingCityMeta==='await-transport'){
-    const city = savedDestinations[metaProgressIndex].city;
-    let transport = (text||'').toLowerCase();
-    if(/alquiler|rent/i.test(transport)) transport = 'alquiler';
-    else if(/públic|metro|bus|tren/i.test(transport)) transport = 'público';
-    else if(/taxi|uber|cabify/i.test(transport)) transport = 'taxi/uber';
-    else if(/combinación|combination/i.test(transport)) transport = 'combinación';
-    else transport = 'recomiéndame';
-    upsertCityMeta({ city, transport });
-    chatMsg(`¡Listo! Transporte registrado para ${city}.`, 'ai');
-    metaProgressIndex++;
-    collectingCityMeta = true;
-    askNextCityMeta();
+  // Si estamos en recolección secuencial → manejar y salir
+  if(collecting){
+    saveCollectAnswer(text);
     return;
   }
 
-  // 2) Conversación libre / Edición de itinerario
+  // Conversación libre / Edición
   const currentCity = activeCity || savedDestinations[0]?.city;
   const data = currentCity ? itineraries[currentCity] : null;
-
-  // Conversación sin tocar itinerario (clima, recomendaciones, etc.)
-  // Estrategia: solicitamos al agente que responda en texto humano y SOLO si el usuario acepta, generamos JSON.
   const day = data?.currentDay || 1;
   const dayRows = data ? ((data.byDay[day]||[]).map(r=>`• ${r.start}-${r.end} ${r.activity}`).join('\n') || '(vacío)') : '';
   const allDays = data ? (Object.keys(data.byDay).map(n=>{
@@ -1104,87 +1000,67 @@ async function onSend(){
 ${BEHAVIOR}
 ${FORMAT}
 
-Contexto de viaje:
+Contexto:
 ${buildIntake()}
 
-Vista actual del usuario:
-- Ciudad en pantalla: "${currentCity||'N/A'}", Día ${day}
-- Actividades del día actual: 
+Vista actual:
+- Ciudad: "${currentCity||'N/A'}", Día ${day}
+- Día actual:
 ${dayRows}
 
-Resumen de otros días (solo referencia):
+Otros días (referencia):
 ${allDays}
 
 Instrucción:
-1) Si el mensaje del usuario es INFORMATIVO/CONSULTA (clima, sugerencias, etc.), responde SOLO en texto natural (sin JSON) y al final pregunta si desea actualizar el itinerario con eso.
-2) Si el mensaje implica CAMBIO (p.ej., "agrega un día", "mueve X a día 3", "cambia inicio a las 10"), devuelve JSON en formato B con "destination":"${currentCity||''}", "rows":[...] y "replace":true, tocando SOLO el día visible u otros días explícitamente mencionados. Respeta la regla: si cambia solo inicio, conserva fin previo; si cambia solo fin, conserva inicio previo.
-3) Para excursiones 1 día (p.ej., Segovia desde Madrid) agrega el nuevo día con itinerario de múltiples puntos si corresponde; si es un único sitio (Versalles), una actividad principal detallada.
-
-Mensaje del usuario:
-${text}
+1) Si el mensaje es informativo/consulta, responde SOLO en texto natural (sin JSON) y pregunta si desea actualizar itinerario con eso.
+2) Si el mensaje implica CAMBIO (agregar/mover días, modificar horarios, excursiones), devuelve JSON en formato B con "destination":"${currentCity||''}", "rows":[...] y "replace":true, tocando SOLO los días relevantes.
 `.trim();
 
   showLoader(true);
-  const ans = await callAgent(prompt); // con historial
+  const ans = await callAgent(prompt);
   showLoader(false);
 
   const parsed = parseJSON(ans);
-
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-    // Edición: reemplazar día visible para evitar duplicados
-    applyParsedToState(parsed, /*forceReplaceDay*/ true);
+    applyParsedToState(parsed, true);
     renderCityTabs(); setActiveCity(currentCity); renderCityItinerary(currentCity);
-    chatMsg(parsed.followup || '¡Ajustado! ¿Quieres seguir puliendo algún detalle?', 'ai');
+    chatMsg(parsed.followup || '¡Perfecto! Ajusté tu itinerario. ¿Quieres seguir puliendo algo?', 'ai');
     return;
   }
 
-  // Si no es JSON válido, lo tratamos como respuesta conversacional
   const textAnswer = ans && typeof ans === 'string' ? ans : (parsed?.followup||'');
   if(textAnswer) chatMsg(textAnswer, 'ai');
 }
 
 /* ================================
-    SECCIÓN 18 · Upsell/Lock + Eventos / INIT
+    SECCIÓN 18 · Upsell/Init/Toolbar
 =================================== */
 function lockItinerary(){
   isItineraryLocked = true;
   $upsell.style.display='flex';
 }
 function guardFeature(fn){
-  return (...args)=>{
-    if(isItineraryLocked){ $upsell.style.display='flex'; return; }
-    fn(...args);
-  };
+  return (...args)=>{ if(isItineraryLocked){ $upsell.style.display='flex'; return; } fn(...args); };
 }
 
 $addCity?.addEventListener('click', ()=>addCityRow());
-// (reset ya no existe; guardia)
-$reset?.addEventListener('click', ()=>{
-  $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
-  addCityRow();
-  $start.disabled = true;
-  $tabs.innerHTML=''; $itWrap.innerHTML='';
-  $chatBox.style.display='none'; $chatM.innerHTML='';
-  session = [];
-  hasEverSaved = false; lastSavedSnapshot = null;
-});
+
+// Oculta el botón de “Reiniciar” si existiera en HTML v29
+if($reset){ $reset.style.display='none'; $reset.setAttribute('disabled','true'); }
+
 $save?.addEventListener('click', saveDestinations);
 $start?.addEventListener('click', startPlanning);
 $send?.addEventListener('click', onSend);
 
-// Shift+Enter para salto de línea; Enter para enviar
+// Shift+Enter = nueva línea; Enter = enviar
 $chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){
-    e.preventDefault();
-    onSend();
-  }
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onSend(); }
 });
 
-// CTA “Elijo este itinerario”
 $confirmCTA?.addEventListener('click', lockItinerary);
 $upsellClose?.addEventListener('click', ()=> $upsell.style.display='none');
 
-// Toolbar
+// Toolbar (guardadas)
 qs('#btn-pdf')?.addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email')?.addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps')?.addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
