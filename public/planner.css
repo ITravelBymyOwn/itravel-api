@@ -343,43 +343,24 @@ table.itinerary th{
 }
 
 /* ==================== CTA ==================== */
-.floating-cta{
-  position:fixed;
-  right:1rem;
-  bottom:1rem;
-  padding:1rem 1.1rem;
-  background:var(--brand-500);
+#confirm-itinerary{
+  display:block;
+  width:100%;
+  margin-top:1rem;
+  background:var(--brand-600);
   color:#fff;
   border:none;
-  border-radius:.8rem;
-  box-shadow:var(--shadow);
+  border-radius:.55rem;
+  padding:1rem;
   font-weight:700;
+  text-align:center;
   cursor:pointer;
-  z-index:60;
   transition:.25s;
 }
-.floating-cta:hover{
-  background:var(--brand-600);
+#confirm-itinerary:hover{
+  background:var(--brand-500);
   transform:translateY(-2px);
 }
-
-/* ===== FAB Recalcular (v29) ===== */
-#recalc-fab{
-  position:fixed;
-  left:1rem;
-  bottom:1rem;
-  padding:.9rem 1rem;
-  background:var(--brand-600);
-  color:#fff;
-  border:none;
-  border-radius:999px;
-  box-shadow:var(--shadow);
-  font-weight:700;
-  cursor:pointer;
-  z-index:70;
-  transition:.25s;
-}
-#recalc-fab:hover{ filter:brightness(.95); }
 
 /* ==================== FOOTER ==================== */
 .footer{
