@@ -1,24 +1,13 @@
 /* =========================================================
     ITRAVELBYMYOWN · PLANNER v34
-    Base: v33 (manteniendo estructura y secciones originales)
-    Reglas cumplidas:
-    1) Partir exactamente de v33      2) Mantener coherencia integral HTML/CSS/JS
-    3) Entregar el código completo, listo para copiar/pegar
-
-    Cambios v34 (localizados y robustos, sin romper lo estable):
-    - 🪄 Fuzzy matching / normalización de nombres de ciudades:
-      · Aplica en Sidebar (Sección 7) y Chat (Sección 17)
-      · Normaliza variantes (“Reikjavik”→“Reykjavik”, “Tromso”→“Tromsø”, etc.)
-      · Sugerencias naturales cuando no reconoce bien una ciudad
-    - 🌟 Detección de imperdibles faltantes (Secciones 14 y 15):
-      · Tras generar/reoptimizar: si faltan “imperdibles” típicos, propone agregarlos
-      · Si el usuario dice “sí”, los inserta sin borrar otras actividades
-    - 💬 Mensajes naturales si no se reconoce ciudad (Secciones 15 y 17)
-    - 🧭 NLU ampliado (Sección 17):
-      · “todos los días, dame actividades”
-      · “quita solo las auroras del día 2”
-      · “agrega la actividad que falta”
-    - ✨ Nueva Sección 19: utilidades de fuzzy y similitud (aisladas)
+    Base: v33 (manteniendo estructura y secciones)
+    Cambios v34:
+    - 🪄 Fuzzy matching / normalización de nombres de ciudades (sidebar + chat)
+    - 🌟 Detección de imperdibles faltantes (post generación y reoptimización)
+    - 💬 Respuestas más naturales cuando no reconoce ciudad (sugerencia + confirmación)
+    - 🧭 NLU ampliado (agrega/quita/sustituye; horas con “y media/cuarto” ya de v33)
+    - ⚡ Estabilidad: preserva 18 secciones de v33 + agrega SECCIÓN 19 (auxiliares)
+    - ❌ No se toca render/guardado/UI/toolbar fuera de lo estrictamente necesario
 ========================================================= */
 
 /* ================================
@@ -46,7 +35,7 @@ const DEFAULT_START = '08:30';
 const DEFAULT_END   = '19:00';
 
 // v32→v33: confirmación previa a cambios
-let pendingChange = null; // { city, prompt, summary, ... }
+let pendingChange = null; // { type?, city, prompt, summary, ... }
 let hasSavedOnce = false;
 
 /* ================================
@@ -60,12 +49,13 @@ const tone = {
     confirmAll: '✨ Genial. Ya tengo lo necesario. Comienzo a generar tus itinerarios…',
     doneAll: '🎉 ¡Listo! Itinerarios generados. ¿Quieres ajustarlos o añadir algo especial?',
     fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
-    askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
+    // v34: confirmaciones más humanas (sin paréntesis ni texto técnico)
+    askConfirm: (summary)=>`¿Te parece si lo aplico? ${summary}<br><small>Responde “sí” para aplicar o “no” para dejarlo como está.</small>`,
     humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
     humanCancelled: 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂',
-    // v34
-    fuzzySuggest: (suggested)=>`¿Querías decir <strong>${suggested}</strong>? 🌍`,
-    fuzzyError: 'No reconozco esa ciudad. ¿Puedes revisarla o escribirla de nuevo?'
+    // v34 nuevas
+    fuzzySuggest: (suggested)=>`¿Querías decir <strong>${suggested}</strong>? 🌍 Puedo armar el itinerario si me confirmas.`,
+    fuzzyNotFound: 'No pude reconocer esa ciudad. ¿Puedes revisarla o escribirla de nuevo?'
   }
 }['es'];
 
@@ -194,13 +184,12 @@ function saveDestinations(){
   const list = [];
   rows.forEach(r=>{
     let city     = qs('.city',r).value.trim();
+    // v34: fuzzy matching al guardar
+    city = normalizeCityName(city);
     const country  = qs('.country',r).value.trim();
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
     const baseDate = qs('.baseDate',r).value.trim();
-
-    // v34: aplicar fuzzy matching en sidebar (normaliza de inmediato)
-    city = normalizeCityName(city);
 
     if(!city) return;
     const perDay = [];
@@ -379,7 +368,6 @@ function getFrontendSnapshot(){
     )
   );
 }
-function addDaysUtil(len){ return Array.from({length:len}, (_,i)=>i+1); }
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -443,7 +431,7 @@ Reglas:
 =================================== */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
-  // Prompt global para estilo natural y capacidad “investigación” si el modelo lo soporta.
+  // Prompt global natural
   const globalStyle = `
 Eres "Astra", agente de viajes con 40 años de experiencia. Responde con calidez, variedad y emoción.
 Investiga mentalmente o con tus herramientas si las tienes (web, conocimiento reciente) para sugerir
@@ -504,7 +492,6 @@ function ensureDays(city){
   }
   itineraries[city].byDay = byDay;
 }
-// Normaliza fila
 function normalizeRow(r = {}, fallbackDay = 1){
   const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? DEFAULT_START;
   const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? DEFAULT_END;
@@ -518,7 +505,6 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
   return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
 }
-// v33: replace ahora sustituye SOLO días presentes en rows
 function pushRows(city, rows, replace=false){
   if(!city || !rows) return;
   if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
@@ -688,7 +674,7 @@ function synthesizeLocalItinerary(city, days, perDay){
   return rowsByDay;
 }
 
-// Sugerencias específicas por ciudad (imperdibles + day-trips)
+// Sugerencias específicas por ciudad (imperdibles + day-trips simples)
 const DAYTRIP_SUGGEST = {
   'Madrid': ['Segovia (Alcázar, acueducto)','Toledo (casco histórico)','Ávila (murallas)','El Escorial'],
   'Paris': ['Versalles','Giverny','Fontainebleau'],
@@ -713,66 +699,51 @@ function suggestedActivitiesFor(city, days){
   return [...new Set(picks)].slice(0,5);
 }
 
-// v34: imperdibles por ciudad (para verificar faltantes post-generación)
+/* ================================
+    SECCIÓN 15 · Generación por ciudad (v34: fuzzy + imperdibles faltantes)
+=================================== */
 const MUST_SEE = {
-  'Reykjavik': ['Caza de auroras', 'Blue Lagoon', 'Círculo Dorado'],
-  'Tromsø': ['Caza de auroras', 'Fiordos', 'Avistamiento de ballenas'],
-  'Tromso': ['Caza de auroras', 'Fiordos', 'Avistamiento de ballenas'] // alias
+  'Reykjavik': ['Caza de auroras','Blue Lagoon','Círculo Dorado'],
+  'Tromsø': ['Caza de auroras','Fiordos','Museo Polar'],
+  'Tromso': ['Caza de auroras','Fiordos','Museo Polar'],
+  'Madrid': ['Palacio Real','Plaza Mayor','Parque del Retiro']
 };
 function detectMissingImperdibles(city){
-  const checklist = MUST_SEE[city] || MUST_SEE[normalizeCityName(city)] || [];
-  const existing = (itineraries[city]?.byDay && Object.values(itineraries[city].byDay).flat().map(r=>r.activity)) || [];
-  const missing = checklist.filter(x=>!existing.some(a=>String(a||'').toLowerCase().includes(x.toLowerCase())));
-  return missing;
+  const list = MUST_SEE[city] || MUST_SEE[normalizeCityName(city)] || [];
+  if(!list.length) return [];
+  const existing = (itineraries[city]?.byDay && Object.values(itineraries[city].byDay).flat().map(r=>String(r.activity||'').toLowerCase())) || [];
+  return list.filter(x=>!existing.some(a=>a.includes(x.toLowerCase())));
 }
-
-/* ================================
-    SECCIÓN 15 · Generación por ciudad
-=================================== */
 async function generateCityItinerary(city){
-  // v34: fuzzy matching al generar
-  const normalizedCity = normalizeCityName(city);
-  if(normalizedCity !== city){
-    chatMsg(`${tone.fuzzySuggest(normalizedCity)}`, 'ai');
-    city = normalizedCity;
-  }
-
-  const dest  = savedDestinations.find(x=>x.city===city);
+  // v34: normaliza nombre
+  const norm = normalizeCityName(city);
+  const dest  = savedDestinations.find(x=>x.city===norm);
   if(!dest){
-    chatMsg(`${tone.fuzzyError}`,'ai');
+    // Sugerir si hay parecido
+    const sug = fuzzyBestCity(city);
+    if(sug) { chatMsg(tone.fuzzySuggest(sug),'ai'); pendingChange = { type:'confirm_fuzzy_add', city:sug }; }
+    else chatMsg(tone.fuzzyNotFound,'ai');
     return;
   }
 
   const perDay = Array.from({length:dest.days}, (_,i)=>{
-    const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
+    const src  = (cityMeta[norm]?.perDay||[])[i] || dest.perDay?.[i] || {};
     return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
   });
 
-  const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-  const hotel    = cityMeta[city]?.hotel || '';
-  const transport= cityMeta[city]?.transport || 'recomiéndame';
-  const interests= cityMeta[city]?.interests || [];
+  const baseDate = cityMeta[norm]?.baseDate || dest.baseDate || '';
+  const hotel    = cityMeta[norm]?.hotel || '';
+  const transport= cityMeta[norm]?.transport || 'recomiéndame';
+  const interests= cityMeta[norm]?.interests || [];
 
   const instructions = `
 ${FORMAT}
-**ROL:** Eres el planificador “Astra” (40 años de experiencia). Si tu modelo puede, apóyate en web/buscadores para validar imperdibles y tiempos típicos.
-**TAREA:** Genera el itinerario completo SOLO para "${city}" para ${dest.days} día(s), optimizando tiempos/recursos.
-- Usa el formato B {"destination":"${city}","rows":[...],"replace": true}.
-- No dupliques actividades; conserva y mejora si hace falta.
+**ROL:** Eres el planificador “Astra” (40 años de experiencia).
+**TAREA:** Genera el itinerario completo SOLO para "${norm}" para ${dest.days} día(s), optimizando tiempos/recursos.
+- Usa el formato B {"destination":"${norm}","rows":[...],"replace": true}.
+- No dupliques; conserva y mejora si hace falta.
 - Respeta ventanas por día (si faltan, 08:30–19:00).
 - Incluye notas humanas y motivadoras (breves).
-
-Datos:
-- Ciudad: "${city}"
-- Días: ${dest.days}
-- Horas/día: ${JSON.stringify(perDay)}
-- BaseDate (día 1): ${baseDate||'N/A'}
-- Hotel/Zona: ${hotel||'pendiente'}
-- Transporte: ${transport}
-- Intereses: ${JSON.stringify(interests)}
-
-Contexto:
-${buildIntake()}
 `.trim();
 
   let text = await callAgent(instructions, false);
@@ -781,7 +752,7 @@ ${buildIntake()}
   if(!parsed || (!parsed.rows && !parsed.destinations && !parsed.itineraries)){
     const strict = `
 ${FORMAT}
-**REINTENTO:** Devuelve solo para "${city}" (${dest.days} días) en formato B con "replace": true. Nada de 'meta'.
+**REINTENTO:** Devuelve solo para "${norm}" (${dest.days} días) en formato B con "replace": true. Nada de 'meta'.
 `.trim();
     text = await callAgent(strict, false);
     parsed = parseJSON(text);
@@ -789,23 +760,23 @@ ${FORMAT}
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     applyParsedToState(parsed);
-    ensureFullCoverage(city);
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    ensureFullCoverage(norm);
+    renderCityTabs(); setActiveCity(norm); renderCityItinerary(norm);
 
-    // v34: detección de imperdibles faltantes post-generación
-    const missing = detectMissingImperdibles(city);
+    // v34: detección de imperdibles faltantes
+    const missing = detectMissingImperdibles(norm);
     if(missing.length){
-      chatMsg(`✨ Veo que aún no hemos incluido ${missing.join(', ')} — es una experiencia imperdible. ¿Quieres que la agregue?`,'ai');
-      pendingChange = { type:'imperdibles_add', city, missing };
+      chatMsg(`✨ Veo que aún no hemos incluido <strong>${missing.join(', ')}</strong> — es una experiencia imperdible. ¿Quieres que la agregue?`,'ai');
+      pendingChange = { type:'imperdibles_add', city:norm, missing };
     }
     return;
   }
 
-  // Fallback local si la API falla
-  const rowsByDay = synthesizeLocalItinerary(city, dest.days, perDay);
+  // Fallback local
+  const rowsByDay = synthesizeLocalItinerary(norm, dest.days, perDay);
   const rowsFlat = Object.entries(rowsByDay).flatMap(([d,rows])=>rows.map(r=>({...r, day:+d})));
-  pushRows(city, rowsFlat, true);
-  renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+  pushRows(norm, rowsFlat, true);
+  renderCityTabs(); setActiveCity(norm); renderCityItinerary(norm);
   chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
 }
 
@@ -859,7 +830,7 @@ function askNextInterests(){
 }
 
 /* ================================
-    SECCIÓN 17 · Chat handler / NLU + Confirmación
+    SECCIÓN 17 · Chat handler / NLU + Confirmación (v34 mejorado)
 =================================== */
 // Números en palabras básicas
 const WORD_NUM = {
@@ -945,18 +916,6 @@ function intentFromText(text, city){
     return {type:'change_hours', range};
   }
 
-  // v34: NLU ampliado
-  if(/todos\s+los\s+d[ií]as.*actividades/.test(t)){
-    return {type:'fill_all_days'};
-  }
-  const rmAct = t.match(/quita\s+solo\s+las\s+(\w+(?:\s+\w+)*)\s+del\s+d[ií]a\s*(\d+)/i);
-  if(rmAct){
-    return {type:'remove_activity_day', keyword: rmAct[1], day: parseInt(rmAct[2],10)};
-  }
-  if(/agrega\s+la\s+actividad\s+que\s+falta/.test(t)){
-    return {type:'add_missing_activity'};
-  }
-
   // Cambiar actividad puntual (heurística simple)
   if(/no quiero|sustituye|reemplaza|cambia esta actividad|dame otra opci[oó]n/.test(t)){
     return {type:'swap_activity', details:text};
@@ -977,7 +936,7 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // v34: flujo para imperdibles pendientes
+  // v34: flujo para agregar imperdibles faltantes tras confirmación
   if(pendingChange?.type === 'imperdibles_add'){
     if(/^sí|si|ok|dale|confirmo/i.test(text)){
       const {city, missing} = pendingChange;
@@ -997,6 +956,23 @@ async function onSend(){
       pushRows(city, imperdibleRows, false);
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       chatMsg(tone.humanOk,'ai');
+      return;
+    }
+    if(/^no|cancela/i.test(text)){
+      pendingChange = null;
+      chatMsg(tone.humanCancelled,'ai');
+      return;
+    }
+  }
+
+  // v34: confirmación de ciudad sugerida por fuzzy en generación directa
+  if(pendingChange?.type === 'confirm_fuzzy_add'){
+    if(/^sí|si|ok|dale|confirmo/i.test(text)){
+      const city = pendingChange.city;
+      pendingChange = null;
+      addCityRow({city});
+      saveDestinations();
+      chatMsg(`✅ ${city} agregada a tu itinerario.`, 'ai');
       return;
     }
     if(/^no|cancela/i.test(text)){
@@ -1032,38 +1008,16 @@ async function onSend(){
   }
 
   // A partir de aquí: edición / conversación
-  let currentCity = activeCity || savedDestinations[0]?.city;
-
-  // v34: si el usuario menciona ciudad en el texto y hay sugerencia fuzzy
-  const extracted = fuzzyExtractCityFromText(text);
-  if(extracted && (!currentCity || extracted.suggestion.toLowerCase() !== String(currentCity).toLowerCase())){
-    chatMsg(tone.fuzzySuggest(extracted.suggestion),'ai');
-    pendingChange = { type:'confirm_fuzzy_add_or_switch', city: extracted.suggestion };
-    return;
-  }
-  if(pendingChange?.type === 'confirm_fuzzy_add_or_switch'){
-    if(/^sí|si|ok|dale|confirmo/i.test(text)){
-      const {city} = pendingChange;
-      pendingChange = null;
-      // Si ya existe, solo activar; si no, agregar
-      if(!savedDestinations.find(d=>d.city===city)){
-        addCityRow({city});
-        saveDestinations();
-      }
-      setActiveCity(city);
-      renderCityItinerary(city);
-      chatMsg(`✅ ${city} listo. ¿Deseas que genere o ajuste su itinerario?`,'ai');
-      return;
-    }
-    if(/^no|cancela/i.test(text)){
-      pendingChange = null;
-      chatMsg(tone.humanCancelled,'ai');
-      return;
-    }
-  }
-
+  const currentCity = activeCity || savedDestinations[0]?.city;
   const data = itineraries[currentCity];
   if(!currentCity || !data){
+    // v34: fuzzy de ciudad desde chat (ej. "agrega Reikjavik")
+    const guess = fuzzyBestCity(text);
+    if(guess){
+      chatMsg(tone.fuzzySuggest(guess),'ai');
+      pendingChange = { type:'confirm_fuzzy_add', city: guess };
+      return;
+    }
     chatMsg('Aún no hay itinerario en pantalla. Por favor, inicia la planificación primero.');
     return;
   }
@@ -1128,10 +1082,10 @@ async function onSend(){
 
   // Añadir un día (posible day-trip)
   if(intent.type==='add_day'){
-    const summary = `Añadir un <strong>día extra</strong> en ${currentCity} (si el texto menciona un destino como Segovia/Versalles, enfoca ese day-trip).`;
+    const summary = `Añadir un <strong>día extra</strong> en ${currentCity}. Si mencionaste un lugar cercano (p.ej., Segovia), lo enfoco como excursión de un día.`;
     const prompt = buildEditPrompt(currentCity,
-      `Añade un día extra al final. Si el texto menciona un destino (ej. Segovia, Versalles), crea un day-trip optimizado a ese lugar con sus puntos clave.`,
-      { addOneDay:true }
+      `Añade un día extra al final. Si el texto menciona un destino (ej. Segovia, Versalles), crea un day-trip optimizado a ese lugar (ida/vuelta) con sus puntos clave.`,
+      { addOneDay:true, userText:text }
     );
     pendingChange = { city: currentCity, prompt, summary };
     chatMsg(tone.askConfirm(pendingChange.summary),'ai');
@@ -1148,44 +1102,6 @@ async function onSend(){
     pendingChange = { city: currentCity, prompt, summary };
     chatMsg(tone.askConfirm(pendingChange.summary),'ai');
     return;
-  }
-
-  // v34: NLU ampliado — llenar todos los días con actividades base
-  if(intent.type==='fill_all_days'){
-    const summary = `Completar actividades en <strong>todos los días</strong> de ${currentCity}, respetando ventanas por día.`;
-    const prompt = buildEditPrompt(currentCity,
-      `Rellena actividades razonables para todos los días sin duplicar, respetando ventanas y manteniendo lo ya bueno.`,
-      { daysStrict: Object.keys(itineraries[currentCity]?.byDay||{}).map(n=>+n) }
-    );
-    pendingChange = { city: currentCity, prompt, summary };
-    chatMsg(tone.askConfirm(pendingChange.summary),'ai');
-    return;
-  }
-
-  // v34: NLU — quitar solo “keyword” del día N
-  if(intent.type==='remove_activity_day'){
-    const {keyword, day} = intent;
-    const summary = `Quitar actividades que contengan "<strong>${keyword}</strong>" del <strong>día ${day}</strong> en ${currentCity}.`;
-    const prompt = buildEditPrompt(currentCity,
-      `Elimina actividades cuyo nombre contenga "${keyword}" del día ${day}". Reoptimiza el día sin duplicar.`,
-      { daysStrict:[day], userText:`quitar ${keyword} del día ${day}` }
-    );
-    pendingChange = { city: currentCity, prompt, summary };
-    chatMsg(tone.askConfirm(pendingChange.summary),'ai');
-    return;
-  }
-
-  // v34: NLU — agregar la actividad que falta (imperdibles)
-  if(intent.type==='add_missing_activity'){
-    const missing = detectMissingImperdibles(currentCity);
-    if(missing.length){
-      chatMsg(`Puedo agregar: ${missing.join(', ')}. ¿Quieres que los inserte?`,'ai');
-      pendingChange = { type:'imperdibles_add', city: currentCity, missing };
-      return;
-    }else{
-      chatMsg('No veo imperdibles faltantes evidentes ahora mismo.','ai');
-      return;
-    }
   }
 
   // Consulta informativa: responde y ofrece actualizar
@@ -1262,7 +1178,15 @@ async function applyAgentEdit(city, prompt){
     applyParsedToState(parsed);
     ensureFullCoverage(city);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-    chatMsg(tone.humanOk,'ai');
+
+    // v34: chequea imperdibles tras reoptimización
+    const missing = detectMissingImperdibles(city);
+    if(missing.length){
+      chatMsg(`✨ Veo que aún no hemos incluido <strong>${missing.join(', ')}</strong>. ¿Quieres que los agregue ahora?`,'ai');
+      pendingChange = { type:'imperdibles_add', city, missing };
+    }else{
+      chatMsg(tone.humanOk,'ai');
+    }
   }else{
     chatMsg(parsed?.followup || 'No recibí cambios válidos. ¿Me das un poco más de contexto?','ai');
   }
@@ -1345,82 +1269,76 @@ addCityRow();
 /* ================================
     SECCIÓN 19 · Fuzzy Matching + Similitud (NUEVA v34)
 =================================== */
-// Lista base local (extensible). Para MVP garantiza robustez y velocidad.
-// Puedes ampliarla sin romper nada (o pasar a fuente externa en v35+).
+// Lista base local (extensible)
 const KNOWN_CITIES = [
-  'Reykjavik','Tromsø','Tromso','Paris','Madrid','Barcelona','Luxor',
-  'Florence','Rome','Oslo','London','Reikiavik','Reikjavik','Tromsoee',
-  'Saint Petersburg','San Petersburgo','Rovaniemi','Abisko','Kiruna',
-  'Fairbanks','Yellowknife','Grindavik','Hveragerdi','Flúðir','Fludir','Selfoss'
+  'Reykjavik','Reikiavik','Reikjavik','Tromsø','Tromso','Paris','Madrid','Barcelona',
+  'Luxor','Florence','Rome','Oslo','London','Saint Petersburg','San Petersburgo',
+  'Rovaniemi','Abisko','Kiruna','Fairbanks','Yellowknife','Grindavik','Hveragerdi','Flúðir','Fludir','Selfoss'
 ];
 
-// Normaliza un nombre de ciudad: quita acentos/espacios, compara con base y devuelve mejor match si supera umbral.
-function normalizeCityName(input){
-  if(!input) return '';
-  const clean = input.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
-  let bestMatch = '';
-  let bestScore = 0;
-  for(const city of KNOWN_CITIES){
-    const score = stringSimilarity(clean, city.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase());
-    if(score > bestScore){ bestScore = score; bestMatch = city; }
-  }
-  // Mapeos de alias comunes → nombre preferido
-  const preferred = {
-    'reikjavik':'Reykjavik','reikiavik':'Reykjavik','reykjavik':'Reykjavik',
-    'tromso':'Tromsø','tromsoee':'Tromsø',
-    'san petersburgo':'Saint Petersburg'
-  };
-  const bestKey = bestMatch.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  const preferredName = preferred[bestKey] || bestMatch;
-
-  return bestScore > 0.8 ? preferredName : input;
+function stripAccentsLower(s){
+  return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 }
-
-// Intenta extraer/identificar una ciudad mencionada en texto libre y sugiere la más cercana.
-function fuzzyExtractCityFromText(text){
-  const lower = text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-  let bestMatch = '';
-  let bestScore = 0;
-
-  // prueba por tokens (palabras) y por string completo
-  const tokens = lower.split(/[^a-zA-Záéíóúñü]+/).filter(Boolean);
-  const candidates = new Set(tokens.concat([lower]));
-  for(const cand of candidates){
-    for(const city of KNOWN_CITIES){
-      const score = stringSimilarity(cand, city.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase());
-      if(score > bestScore){ bestScore = score; bestMatch = city; }
+function levenshteinDistance(a,b){
+  const matrix = [];
+  for(let i=0;i<=b.length;i++){ matrix[i]=[i]; }
+  for(let j=0;j<=a.length;j++){ matrix[0][j]=j; }
+  for(let i=1;i<=b.length;i++){
+    for(let j=1;j<=a.length;j++){
+      if(b.charAt(i-1)==a.charAt(j-1)){
+        matrix[i][j]=matrix[i-1][j-1];
+      }else{
+        matrix[i][j]=Math.min(
+          matrix[i-1][j-1]+1,
+          Math.min(matrix[i][j-1]+1,matrix[i-1][j]+1)
+        );
+      }
     }
   }
-  if(bestScore > 0.8){
-    // normaliza al nombre preferido
-    return {suggestion: normalizeCityName(bestMatch), score: bestScore};
-  }
-  return null;
+  return matrix[b.length][a.length];
 }
-
-// Similitud basada en distancia de Levenshtein normalizada
 function stringSimilarity(a,b){
-  const longer = a.length > b.length ? a : b;
-  const shorter = a.length > b.length ? b : a;
+  const A = stripAccentsLower(a), B = stripAccentsLower(b);
+  const longer = A.length > B.length ? A : B;
+  const shorter = A.length > B.length ? B : A;
   const longerLength = longer.length;
   if(longerLength === 0) return 1.0;
   const editDistance = levenshteinDistance(longer, shorter);
   return (longerLength - editDistance) / parseFloat(longerLength);
 }
-function levenshteinDistance(a,b){
-  const matrix = [];
-  let i;
-  for(i=0;i<=b.length;i++){ matrix[i]=[i]; }
-  let j;
-  for(j=0;j<=a.length;j++){ matrix[0][j]=j; }
-  for(i=1;i<=b.length;i++){
-    for(j=1;j<=a.length;j++){
-      if(b.charAt(i-1)==a.charAt(j-1)){
-        matrix[i][j]=matrix[i-1][j-1];
-      }else{
-        matrix[i][j]=Math.min(matrix[i-1][j-1]+1,Math.min(matrix[i][j-1]+1,matrix[i-1][j]+1));
-      }
+
+// Normaliza un nombre de ciudad: devuelve mejor match si supera umbral y aplica alias preferidos
+function normalizeCityName(input){
+  if(!input) return '';
+  const clean = stripAccentsLower(input);
+  let bestMatch = '';
+  let bestScore = 0;
+  for(const city of KNOWN_CITIES){
+    const score = stringSimilarity(clean, city);
+    if(score > bestScore){ bestScore = score; bestMatch = city; }
+  }
+  const preferred = {
+    'reikjavik':'Reykjavik','reikiavik':'Reykjavik','reykjavik':'Reykjavik',
+    'tromso':'Tromsø','san petersburgo':'Saint Petersburg'
+  };
+  const bestKey = stripAccentsLower(bestMatch);
+  const preferredName = preferred[bestKey] || bestMatch;
+  return bestScore > 0.8 ? preferredName : input;
+}
+
+// Devuelve la mejor sugerencia fuzzy para una frase libre
+function fuzzyBestCity(text){
+  const base = stripAccentsLower(text);
+  let bestMatch = '';
+  let bestScore = 0;
+  const tokens = base.split(/[^a-z0-9]+/).filter(Boolean);
+  const candidates = new Set(tokens.concat([base]));
+  for(const cand of candidates){
+    for(const city of KNOWN_CITIES){
+      const score = stringSimilarity(cand, city);
+      if(score > bestScore){ bestScore = score; bestMatch = city; }
     }
   }
-  return matrix[b.length][a.length];
+  const preferred = normalizeCityName(bestMatch);
+  return bestScore>0.8 ? preferred : null;
 }
