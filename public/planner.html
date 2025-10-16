@@ -4,7 +4,7 @@
   <meta charset="utf-8"/>
   <title>ITravelByMyOwn · Planner</title>
   <meta content="width=device-width, initial-scale=1" name="viewport"/>
-  <link rel="stylesheet" href="planner.css?v=31.1" />
+  <link rel="stylesheet" href="planner.css?v=42" />
   <link href="https://fonts.googleapis.com" rel="preconnect"/>
   <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous"/>
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico"/>
@@ -32,7 +32,6 @@
         <div id="city-list"></div>
         <div class="row-actions">
           <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
-          <!-- Eliminado botón de reiniciar -->
         </div>
         <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
       </section>
@@ -110,7 +109,6 @@
           <button class="btn" id="btn-localinfo">Info Local</button>
         </div>
 
-        <!-- Botón reubicado aquí -->
         <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button>
       </section>
     </main>
@@ -137,6 +135,11 @@
     </div>
   </div>
 
-  <script src="planner.js?v=31.1"></script>
+  <!-- 🧠 Indicador estilo ChatGPT -->
+  <div id="thinking-indicator">
+    <span></span><span></span><span></span>
+  </div>
+
+  <script src="planner.js?v=42"></script>
 </body>
 </html>
