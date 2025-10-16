@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ITravelByMyOwn — Planifica viajes con IA</title>
+  <meta name="description" content="Plataforma de viajes con IA: crea itinerarios inteligentes, optimiza rutas y guarda tus trips.">
+
+  <!-- Referencias a estilos y scripts -->
+  <link rel="stylesheet" href="assets/css/main.css" />
+  <script defer src="assets/js/ui.js"></script>
+
+  <!-- Fuente e ícono -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗺️</text></svg>">
+</head>
+
+<body>
+  <!-- Aquí va la UI de la landing -->
+  <header class="site-header" data-sticky>
+    <div class="container header-inner">
+      <a class="brand" href="index.html">
+        <svg width="28" height="28" viewBox="0 0 24 24">
+          <path d="M12 2l3 6 6 .9-4.5 4.3 1 6-5.5-3-5.5 3 1-6L3 8.9 9 8z" fill="currentColor" opacity="0.9"/>
+        </svg>
+        <span class="brand-text">ITravelByMyOwn</span>
+      </a>
+      <nav class="nav" aria-label="Principal">
+        <ul id="nav-menu" class="nav-menu">
+          <li><a href="index.html" class="is-active">Home</a></li>
+          <li><a href="planner.html">Planner</a></li>
+          <li><a href="pricing.html">Pricing</a></li>
+          <li><a href="dashboard.html">Dashboard</a></li>
+          <li class="nav-cta"><a href="auth.html">Login</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero block-padding">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <h1 class="h1">Planifica tu viaje en minutos con IA</h1>
+          <p class="lede">Genera itinerarios inteligentes, optimiza rutas y guarda tus trips en un solo lugar.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="planner.html">Comienza tu itinerario</a>
+            <a class="btn btn-ghost" href="pricing.html">Ver planes</a>
+          </div>
+        </div>
+        <div class="hero-art">
+          <div class="img-placeholder" aria-label="Imagen de viaje"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="index.html">
+          <svg width="22" height="22" viewBox="0 0 24 24">
+            <path d="M12 2l3 6 6 .9-4.5 4.3 1 6-5.5-3-5.5 3 1-6L3 8.9 9 8z" fill="currentColor" opacity="0.9"/>
+          </svg>
+          <span class="brand-text">ITravelByMyOwn</span>
+        </a>
+        <p class="muted small">© <span id="y"></span> ITravelByMyOwn. Todos los derechos reservados.</p>
+      </div>
+      <nav class="footer-nav">
+        <a href="pricing.html">Pricing</a>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="auth.html">Login</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>
