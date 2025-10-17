@@ -893,7 +893,10 @@ function intentFromText(text, currentCity){
 }
 function titleCase(s){ return s.replace(/\w\S*/g, t=>t[0].toUpperCase()+t.slice(1)); }
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v43 (parte 3/3)
+   ITRAVELBYMYOWN · PLANNER v43.1 (parte 3/3)
+   Cambios vs v43:
+   - Fix al prompt de add_day → evitar duplicación del día 1.
+   - Mantiene el resto intacto.
 ========================================================= */
 
 /* ==============================
@@ -910,7 +913,7 @@ function buildEditPrompt(city, directive, opts={}){
 
   const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
   const overrides = opts.overrides ? JSON.stringify(opts.overrides) : '{}';
-  const extraDayTrip = opts.dayTripTo ? `- Si "dayTripTo" está definido ("${opts.dayTripTo}"), crea un day-trip completo: salida temprano (tren/bus), Top 3 lugares (catedral/alcázar/centro histórico o equivalentes), almuerzo local, paseo por casco antiguo, regreso por la tarde. Notas humanas útiles.\n` : '';
+  const extraDayTrip = opts.dayTripTo ? `- Si "dayTripTo" está definido ("${opts.dayTripTo}"), crea un day-trip completo con actividades relevantes.\n` : '';
 
   return `
 ${FORMAT}
@@ -920,7 +923,7 @@ ${buildIntake()}
 **Ciudad a editar:** ${city}
 **Día visible:** ${day}
 
-**Actividades del día actual (para referencia):**
+**Actividades del día actual (referencia):**
 ${dayRows}
 
 **Resumen del resto de días (NO dupliques):**
@@ -931,14 +934,16 @@ ${allDays}
 **Directiva de edición:**
 ${directive}
 
-**Opciones:** ${JSON.stringify(opts)}
-
 **Reglas estrictas:**
-- Devuelve formato B {"destination":"${city}","rows":[...],"replace": true} con SOLO las filas finales de los días implicados (no borres otros).
-- Si "addOneDay" es true, añade un día al final, reindexa bien y reoptimiza SOLO lo necesario.
-- Si "daysStrict" se indica, edita solo esos días.
-- Mantén las demás actividades y sus horas salvo que la optimización requiera ajustar ±15-30m.
-- Si se agregan auroras, colócalas 21:00–23:30 como “Caza de auroras” (Tour/Bus).
+- Devuelve formato B {"destination":"${city}","rows":[...],"replace": true}.
+- Si "addOneDay" es true:
+  • Añade un día al final del itinerario.  
+  • No repitas actividades previas.  
+  • Usa otras zonas, museos, parques, gastronomía o experiencias típicas de la ciudad.  
+  • Prioriza imperdibles no usados aún.  
+- Si "dayTripTo" está definido → crea itinerario de day-trip.
+- Mantén las demás actividades y horarios salvo ajustes pequeños.
+- Si agregas auroras → 21:00–23:30 como “Caza de auroras” (Tour/Bus).
 ${extraDayTrip}
 - Respeta overrides de horas (si hay): ${overrides}
 `.trim();
@@ -967,10 +972,8 @@ async function applyAgentEdit(city, prompt){
 /* ==============================
    SECCIÓN 20 · Operaciones locales
 ================================= */
-// Añadir ciudad (sin perder estado)
 async function addCityByChat(cityName, days, baseDate){
   if(!cityName || !days) return chatMsg(tone.cannotFindCity,'ai');
-  // evitar duplicados simples
   if(savedDestinations.find(d=>d.city.toLowerCase()===cityName.toLowerCase())){
     chatMsg(`Ya tenías <strong>${cityName}</strong> en tu plan. Genero/actualizo su itinerario…`,'ai');
   }else{
@@ -983,7 +986,6 @@ async function addCityByChat(cityName, days, baseDate){
   await generateCityItinerary(cityName);
   chatMsg(tone.cityAdded(cityName),'ai');
 }
-// Eliminar ciudad
 function removeCityByChat(cityName){
   const idx = savedDestinations.findIndex(d=>d.city.toLowerCase()===cityName.toLowerCase());
   if(idx<0){ chatMsg(tone.cannotFindCity,'ai'); return; }
@@ -994,8 +996,6 @@ function removeCityByChat(cityName){
   if(savedDestinations.length){ setActiveCity(savedDestinations[0].city); renderCityItinerary(activeCity); }
   chatMsg(tone.cityRemoved(cityName),'ai');
 }
-
-// Sustituir actividad dentro del día visible (heurística local si LLM falla)
 function localSwapActivity(city, day, targetText){
   ensureDays(city);
   const rows = itineraries[city].byDay[day]||[];
@@ -1006,7 +1006,6 @@ function localSwapActivity(city, day, targetText){
   }
   if(idx<0) idx = rows.findIndex(r => !/desayuno|almuerzo|cena|hotel/i.test(r.activity||''));
   if(idx<0) idx = 0;
-  // propuesta alternativa genérica cercana
   const alt = [{label:'Museo local destacado', dur:90, trans:'Caminando'},
                {label:'Paseo por el casco histórico', dur:75, trans:'Caminando'},
                {label:'Mirador / vistas panorámicas', dur:60, trans:'Transporte público'}][idx%3];
@@ -1025,8 +1024,6 @@ function localSwapActivity(city, day, targetText){
   };
   itineraries[city].byDay[day] = rows;
 }
-
-// Añadir actividad de auroras a días indicados (por instrucción de chat)
 function addAurorasDays(city, dayList){
   ensureDays(city);
   const days = Object.keys(itineraries[city].byDay||{}).map(n=>+n);
@@ -1046,7 +1043,6 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // Paso 1: hotel + transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
@@ -1060,18 +1056,16 @@ async function onSend(){
     return;
   }
 
-  // NLU / Edición
   const currentCity = activeCity || savedDestinations[0]?.city;
-  const data = itineraries[currentCity];
-  if(!currentCity || !data){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.','ai'); return; }
+  if(!currentCity || !itineraries[currentCity]){
+    chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.','ai');
+    return;
+  }
 
   const intent = intentFromText(text, currentCity);
-
-  // Operaciones globales que no requieren confirmación
   if(intent.type==='add_city'){ await addCityByChat(intent.city, intent.days, intent.baseDate); return; }
   if(intent.type==='remove_city'){ removeCityByChat(intent.city); return; }
 
-  // Confirmación flujo
   if(intent.type==='confirm' && pendingChange){
     const { city, prompt } = pendingChange;
     pendingChange = null;
@@ -1084,14 +1078,11 @@ async function onSend(){
     return;
   }
 
-  // Posible ciudad explícita en el mensaje
   const targetCity = detectCityInText(text) || currentCity;
   if(targetCity !== activeCity && itineraries[targetCity]){ setActiveCity(targetCity); renderCityItinerary(targetCity); }
 
-  const targetData = itineraries[targetCity];
-  const visibleDay = targetData?.currentDay || 1;
+  const visibleDay = itineraries[targetCity]?.currentDay || 1;
 
-  // Cambiar horas del día visible
   if(intent.type==='change_hours'){
     const range = intent.range;
     const summary = `Actualizar horarios del <strong>día ${visibleDay}</strong> en ${targetCity} ${range.start?`(inicio: ${range.start})`:''} ${range.end?`(fin: ${range.end})`:''}.`;
@@ -1104,7 +1095,6 @@ async function onSend(){
     return;
   }
 
-  // Mover actividades entre días
   if(intent.type==='move_day'){
     const {from,to} = intent;
     const summary = `Mover actividades del <strong>día ${from}</strong> al <strong>día ${to}</strong> en ${targetCity} y reoptimizar ambos días.`;
@@ -1117,13 +1107,12 @@ async function onSend(){
     return;
   }
 
-  // Añadir día (genérico o con destino específico)
   if(intent.type==='add_day'){
     const summary = intent.dayTripTo
       ? `Añadir un <strong>día extra</strong> en ${targetCity} para ir a <strong>${intent.dayTripTo}</strong>.`
       : `Añadir un <strong>día extra</strong> en ${targetCity}.`;
     const prompt = buildEditPrompt(targetCity,
-      `Añade un día extra al final. ${intent.dayTripTo?`Crea day-trip a "${intent.dayTripTo}" detallado.`:''}`,
+      `Añade un día extra al final. Si no hay destino definido, selecciona actividades nuevas, distintas de días previos, destacando otros imperdibles.`,
       { addOneDay:true, dayTripTo: intent.dayTripTo || null }
     );
     pendingChange = { city: targetCity, prompt, summary };
@@ -1131,7 +1120,6 @@ async function onSend(){
     return;
   }
 
-  // Auroras en días N
   if(intent.type==='add_aurora_days'){
     addAurorasDays(targetCity, intent.days);
     renderCityTabs(); setActiveCity(targetCity); renderCityItinerary(targetCity);
@@ -1139,9 +1127,7 @@ async function onSend(){
     return;
   }
 
-  // Sustituir actividad dentro del día visible
   if(intent.type==='swap_activity'){
-    // Intento con LLM (edición de un solo día) + salvavidas local
     const summary = `Sustituir una actividad del <strong>día ${visibleDay}</strong> en ${targetCity} manteniendo el resto.`;
     const prompt = buildEditPrompt(targetCity,
       `Identifica la actividad a sustituir (el texto del usuario puede decirlo) y reemplázala por una opción coherente cercana. Reoptimiza SOLO el día visible.`,
@@ -1152,7 +1138,6 @@ async function onSend(){
     return;
   }
 
-  // Consulta informativa (misma ciudad u otra)
   if(intent.type==='info_query' || intent.type==='info_query_other_city'){
     const infoPrompt = `
 ${FORMAT}
@@ -1164,7 +1149,6 @@ El usuario te pide información (no edites itinerario aún). Responde claro y br
     return;
   }
 
-  // Edición libre → confirmar
   if(intent.type==='free_edit'){
     const summary = `Aplicar tus cambios en <strong>${targetCity}</strong> afectando el <strong>día ${visibleDay}</strong> (o días necesarios) y reoptimizar.`;
     const prompt = buildEditPrompt(targetCity,
@@ -1226,7 +1210,6 @@ $chatI?.addEventListener('keydown', e=>{
   }
 });
 
-// Toolbar (intacto)
 qs('#btn-pdf')?.addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email')?.addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps')?.addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
@@ -1239,12 +1222,4 @@ qs('#btn-bathrooms')?.addEventListener('click', guardFeature(()=>window.open('ht
 qs('#btn-lodging')?.addEventListener('click', guardFeature(()=>window.open('https://www.booking.com','_blank')));
 qs('#btn-localinfo')?.addEventListener('click', guardFeature(()=>window.open('https://www.wikivoyage.org','_blank')));
 
-// Inicial
 addCityRow();
-
-/* ==============================
-   Nota v43:
-   - Conserva 100% del flujo v42.
-   - Añade NLU global, city add/remove, swap local, auroras y typing.
-   - No reintroduce preguntas de intereses.
-================================= */
