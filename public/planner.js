@@ -893,11 +893,10 @@ function intentFromText(text, currentCity){
 }
 function titleCase(s){ return s.replace(/\w\S*/g, t=>t[0].toUpperCase()+t.slice(1)); }
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v43.2 (parte 3/3)
-   Cambios vs v43.1:
-   - Agregar día en posición específica.
-   - Detectar ciudad distinta a la activa.
-   - Reacomodar itinerario y tabs.
+   ITRAVELBYMYOWN · PLANNER v43.3 (parte 3/3)
+   Cambios vs v43.2:
+   - Validación campo país (solo letras)
+   - Campo días convertido en lista desplegable (1 a 30)
 ========================================================= */
 
 /* ==============================
@@ -1095,7 +1094,7 @@ async function onSend(){
 
   const visibleDay = itineraries[targetCity]?.currentDay || 1;
 
-  /* === CAMBIO CLAVE: ADD DAY CON POSICIÓN OPCIONAL === */
+  /* === ADD DAY CON POSICIÓN OPCIONAL === */
   if(intent.type==='add_day'){
     const insertPos = intent.insertDay 
       ? Math.max(1, Math.min(intent.insertDay, Object.keys(itineraries[targetCity].byDay).length + 1))
@@ -1184,36 +1183,32 @@ El usuario te pide información (no edites itinerario aún). Responde claro y br
 }
 
 /* ==============================
-   SECCIÓN 22 · Monetización + Util
+   SECCIÓN 22 · Validaciones UI extra
 ================================= */
-function lockItinerary(){
-  isItineraryLocked = true;
-  $upsell.style.display='flex';
-}
-function guardFeature(fn){
-  return (...args)=>{
-    if(isItineraryLocked){ $upsell.style.display='flex'; return; }
-    fn(...args);
-  };
-}
-function showWOW(on){
-  if(!$overlayWOW) return;
-  $overlayWOW.style.display = on ? 'flex' : 'none';
-  const all = qsa('button, input, select, textarea');
-  all.forEach(el=>{
-    if(on){
-      el._prevDisabled = el.disabled;
-      el.disabled = true;
-    }else{
-      if(typeof el._prevDisabled !== 'undefined'){
-        el.disabled = el._prevDisabled;
-        delete el._prevDisabled;
-      }else{
-        el.disabled = false;
-      }
+// Validar país → solo letras y espacios
+document.addEventListener('input', e=>{
+  if(e.target && e.target.classList.contains('input-country')){
+    e.target.value = e.target.value.replace(/[^A-Za-zÁÉÍÓÚáéíóúñÑ\s]/g,'');
+  }
+});
+
+// Reemplazar input días por select dinámico
+document.addEventListener('DOMContentLoaded', ()=>{
+  const dayInputs = document.querySelectorAll('.input-days');
+  dayInputs.forEach(input=>{
+    const select = document.createElement('select');
+    select.className = 'input-days';
+    for(let i=1;i<=30;i++){
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = i;
+      select.appendChild(opt);
+    }
+    if(input.parentNode){
+      input.parentNode.replaceChild(select, input);
     }
   });
-}
+});
 
 /* ==============================
    SECCIÓN 23 · Eventos / INIT
