@@ -893,10 +893,11 @@ function intentFromText(text, currentCity){
 }
 function titleCase(s){ return s.replace(/\w\S*/g, t=>t[0].toUpperCase()+t.slice(1)); }
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v43.1 (parte 3/3)
-   Cambios vs v43:
-   - Fix al prompt de add_day → evitar duplicación del día 1.
-   - Mantiene el resto intacto.
+   ITRAVELBYMYOWN · PLANNER v43.2 (parte 3/3)
+   Cambios vs v43.1:
+   - Agregar día en posición específica.
+   - Detectar ciudad distinta a la activa.
+   - Reacomodar itinerario y tabs.
 ========================================================= */
 
 /* ==============================
@@ -905,7 +906,6 @@ function titleCase(s){ return s.replace(/\w\S*/g, t=>t[0].toUpperCase()+t.slice(
 function buildEditPrompt(city, directive, opts={}){
   const data = itineraries[city];
   const day = data?.currentDay || 1;
-  const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start}-${r.end} ${r.activity}`).join('\n') || '(vacío)';
   const allDays = Object.keys(data?.byDay||{}).map(n=>{
     const rows = data.byDay[n]||[];
     return `Día ${n}:\n${rows.map(r=>`• ${r.start}-${r.end} ${r.activity}`).join('\n') || '(vacío)'}`;
@@ -913,7 +913,7 @@ function buildEditPrompt(city, directive, opts={}){
 
   const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
   const overrides = opts.overrides ? JSON.stringify(opts.overrides) : '{}';
-  const extraDayTrip = opts.dayTripTo ? `- Si "dayTripTo" está definido ("${opts.dayTripTo}"), crea un day-trip completo con actividades relevantes.\n` : '';
+  const extraDayTrip = opts.dayTripTo ? `- Si "dayTripTo" está definido ("${opts.dayTripTo}"), crea un day-trip completo.\n` : '';
 
   return `
 ${FORMAT}
@@ -921,12 +921,8 @@ ${FORMAT}
 ${buildIntake()}
 
 **Ciudad a editar:** ${city}
-**Día visible:** ${day}
 
-**Actividades del día actual (referencia):**
-${dayRows}
-
-**Resumen del resto de días (NO dupliques):**
+**Resumen del itinerario actual:**
 ${allDays}
 
 **Ventanas por día:** ${JSON.stringify(perDay)}
@@ -937,15 +933,14 @@ ${directive}
 **Reglas estrictas:**
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": true}.
 - Si "addOneDay" es true:
-  • Añade un día al final del itinerario.  
+  • Si "insertDay" está definido, inserta el día en esa posición y desplaza el resto hacia adelante.  
+  • Si no, añade al final.  
   • No repitas actividades previas.  
-  • Usa otras zonas, museos, parques, gastronomía o experiencias típicas de la ciudad.  
-  • Prioriza imperdibles no usados aún.  
-- Si "dayTripTo" está definido → crea itinerario de day-trip.
-- Mantén las demás actividades y horarios salvo ajustes pequeños.
-- Si agregas auroras → 21:00–23:30 como “Caza de auroras” (Tour/Bus).
-${extraDayTrip}
+  • Usa imperdibles nuevos o experiencias complementarias.
+  • Si "dayTripTo" está definido → crea itinerario de day-trip.
+- Mantén coherencia en horarios y transporte.
 - Respeta overrides de horas (si hay): ${overrides}
+${extraDayTrip}
 `.trim();
 }
 
@@ -986,6 +981,7 @@ async function addCityByChat(cityName, days, baseDate){
   await generateCityItinerary(cityName);
   chatMsg(tone.cityAdded(cityName),'ai');
 }
+
 function removeCityByChat(cityName){
   const idx = savedDestinations.findIndex(d=>d.city.toLowerCase()===cityName.toLowerCase());
   if(idx<0){ chatMsg(tone.cannotFindCity,'ai'); return; }
@@ -996,6 +992,21 @@ function removeCityByChat(cityName){
   if(savedDestinations.length){ setActiveCity(savedDestinations[0].city); renderCityItinerary(activeCity); }
   chatMsg(tone.cityRemoved(cityName),'ai');
 }
+
+function reindexDays(city, insertPos){
+  const it = itineraries[city];
+  if(!it || !it.byDay) return;
+  const old = Object.entries(it.byDay).sort((a,b)=>+a[0]-+b[0]);
+  const newByDay = {};
+  let offset = 0;
+  for(const [day, rows] of old){
+    const num = +day;
+    if(num >= insertPos) offset++;
+    newByDay[num+offset] = rows.map(r=>({...r, day:num+offset}));
+  }
+  it.byDay = newByDay;
+}
+
 function localSwapActivity(city, day, targetText){
   ensureDays(city);
   const rows = itineraries[city].byDay[day]||[];
@@ -1024,6 +1035,7 @@ function localSwapActivity(city, day, targetText){
   };
   itineraries[city].byDay[day] = rows;
 }
+
 function addAurorasDays(city, dayList){
   ensureDays(city);
   const days = Object.keys(itineraries[city].byDay||{}).map(n=>+n);
@@ -1056,13 +1068,16 @@ async function onSend(){
     return;
   }
 
-  const currentCity = activeCity || savedDestinations[0]?.city;
-  if(!currentCity || !itineraries[currentCity]){
+  const detectedCity = detectCityInText(text);
+  const targetCity = detectedCity || activeCity || savedDestinations[0]?.city;
+  if(!targetCity || !itineraries[targetCity]){
     chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.','ai');
     return;
   }
+  if(targetCity !== activeCity && itineraries[targetCity]){ setActiveCity(targetCity); renderCityItinerary(targetCity); }
 
-  const intent = intentFromText(text, currentCity);
+  const intent = intentFromText(text, targetCity);
+
   if(intent.type==='add_city'){ await addCityByChat(intent.city, intent.days, intent.baseDate); return; }
   if(intent.type==='remove_city'){ removeCityByChat(intent.city); return; }
 
@@ -1078,14 +1093,34 @@ async function onSend(){
     return;
   }
 
-  const targetCity = detectCityInText(text) || currentCity;
-  if(targetCity !== activeCity && itineraries[targetCity]){ setActiveCity(targetCity); renderCityItinerary(targetCity); }
-
   const visibleDay = itineraries[targetCity]?.currentDay || 1;
+
+  /* === CAMBIO CLAVE: ADD DAY CON POSICIÓN OPCIONAL === */
+  if(intent.type==='add_day'){
+    const insertPos = intent.insertDay 
+      ? Math.max(1, Math.min(intent.insertDay, Object.keys(itineraries[targetCity].byDay).length + 1))
+      : Math.max(...Object.keys(itineraries[targetCity].byDay || {1:[]}).map(n=>+n), 0) + 1;
+
+    if(intent.insertDay) reindexDays(targetCity, insertPos);
+
+    const summary = intent.dayTripTo
+      ? `Añadir un <strong>día ${insertPos}</strong> en ${targetCity} para ir a <strong>${intent.dayTripTo}</strong>.`
+      : `Añadir un <strong>día ${insertPos}</strong> en ${targetCity} con actividades nuevas.`;
+
+    const prompt = buildEditPrompt(
+      targetCity,
+      `Añade un día extra en la posición ${insertPos}. Si insertas en medio, reacomoda el resto. No repitas actividades previas.`,
+      { addOneDay:true, insertDay:insertPos, dayTripTo: intent.dayTripTo || null }
+    );
+
+    pendingChange = { city: targetCity, prompt, summary };
+    chatMsg(tone.askConfirm(pendingChange.summary),'ai');
+    return;
+  }
 
   if(intent.type==='change_hours'){
     const range = intent.range;
-    const summary = `Actualizar horarios del <strong>día ${visibleDay}</strong> en ${targetCity} ${range.start?`(inicio: ${range.start})`:''} ${range.end?`(fin: ${range.end})`:''}.`;
+    const summary = `Actualizar horarios del <strong>día ${visibleDay}</strong> en ${targetCity}.`;
     const prompt = buildEditPrompt(targetCity,
       `Ajusta horarios del día ${visibleDay} con overrides: ${JSON.stringify(range)}. Reoptimiza sin duplicar.`,
       { daysStrict:[visibleDay], overrides:range }
@@ -1097,23 +1132,10 @@ async function onSend(){
 
   if(intent.type==='move_day'){
     const {from,to} = intent;
-    const summary = `Mover actividades del <strong>día ${from}</strong> al <strong>día ${to}</strong> en ${targetCity} y reoptimizar ambos días.`;
+    const summary = `Mover actividades del <strong>día ${from}</strong> al <strong>día ${to}</strong> en ${targetCity}.`;
     const prompt = buildEditPrompt(targetCity,
       `Mueve actividades del día ${from} al día ${to}. Reoptimiza ambos días. No dupliques.`,
       { daysStrict:[from,to] }
-    );
-    pendingChange = { city: targetCity, prompt, summary };
-    chatMsg(tone.askConfirm(pendingChange.summary),'ai');
-    return;
-  }
-
-  if(intent.type==='add_day'){
-    const summary = intent.dayTripTo
-      ? `Añadir un <strong>día extra</strong> en ${targetCity} para ir a <strong>${intent.dayTripTo}</strong>.`
-      : `Añadir un <strong>día extra</strong> en ${targetCity}.`;
-    const prompt = buildEditPrompt(targetCity,
-      `Añade un día extra al final. Si no hay destino definido, selecciona actividades nuevas, distintas de días previos, destacando otros imperdibles.`,
-      { addOneDay:true, dayTripTo: intent.dayTripTo || null }
     );
     pendingChange = { city: targetCity, prompt, summary };
     chatMsg(tone.askConfirm(pendingChange.summary),'ai');
@@ -1128,9 +1150,9 @@ async function onSend(){
   }
 
   if(intent.type==='swap_activity'){
-    const summary = `Sustituir una actividad del <strong>día ${visibleDay}</strong> en ${targetCity} manteniendo el resto.`;
+    const summary = `Sustituir una actividad del <strong>día ${visibleDay}</strong> en ${targetCity}.`;
     const prompt = buildEditPrompt(targetCity,
-      `Identifica la actividad a sustituir (el texto del usuario puede decirlo) y reemplázala por una opción coherente cercana. Reoptimiza SOLO el día visible.`,
+      `Identifica la actividad a sustituir y reemplázala por una opción coherente cercana. Reoptimiza SOLO el día visible.`,
       { daysStrict:[visibleDay], userText:intent.details }
     );
     pendingChange = { city: targetCity, prompt, summary, type:'swap' };
@@ -1150,7 +1172,7 @@ El usuario te pide información (no edites itinerario aún). Responde claro y br
   }
 
   if(intent.type==='free_edit'){
-    const summary = `Aplicar tus cambios en <strong>${targetCity}</strong> afectando el <strong>día ${visibleDay}</strong> (o días necesarios) y reoptimizar.`;
+    const summary = `Aplicar tus cambios en <strong>${targetCity}</strong> afectando el <strong>día ${visibleDay}</strong>.`;
     const prompt = buildEditPrompt(targetCity,
       `Interpreta con precisión el deseo del usuario y actualiza los días implicados (prioriza el día visible ${visibleDay}). Reoptimiza sin duplicar.`,
       { daysStrict:[visibleDay], userText:text }
