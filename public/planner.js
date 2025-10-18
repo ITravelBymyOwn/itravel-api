@@ -893,15 +893,12 @@ function intentFromText(text, currentCity){
 }
 function titleCase(s){ return s.replace(/\w\S*/g, t=>t[0].toUpperCase()+t.slice(1)); }
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v43.1-fix (parte 3/3 COMPLETO)
-   Partiendo de v43.1 (intacto) y corrigiendo solo lo necesario:
-   - País: solo letras y espacios (validación de entrada).
-   - Días: convertir input numérico a <select> (1–30) de forma segura,
-           sin sobrescribir addCityRow() ni otras funciones base.
-   - “Agregar un día más”: no usa el día visible; inserta al final,
-     o en la posición dada por el usuario. Si el texto menciona otra
-     ciudad, se cambia al tab de esa ciudad antes de aplicar.
-   - Mantener comportamiento v42 (no duplicar, reindexar cuando corresponde).
+   ITRAVELBYMYOWN · PLANNER v43.1-fix2 (parte 3/3 COMPLETO)
+   Basado en v43.1. Cambios mínimos:
+   - Restaura fila inicial de ciudad si no existe (addCityRow()).
+   - Mantiene validación de País (solo letras/espacios).
+   - Mantiene Días como <select> 1–30 sin tocar addCityRow().
+   - Mantiene mejoras de "agregar día" (insertar en posición / otra ciudad).
 ========================================================= */
 
 /* ==============================
@@ -1053,7 +1050,6 @@ function insertNightActivity(city, day, label, note){
   const rows = itineraries[city].byDay[day] || [];
   const exists = rows.some(r => (r.activity||'').toLowerCase().includes(label.toLowerCase()));
   if(exists) return;
-  // bloque nocturno 21:00–23:30 si no choca
   const start = '21:00';
   const end   = '23:30';
   rows.push({
@@ -1065,7 +1061,6 @@ function insertNightActivity(city, day, label, note){
     duration: '150m',
     notes: note || 'Se recomienda tour guiado y vestimenta térmica.'
   });
-  // ordenar por hora
   rows.sort((a,b)=>(a.start||'00:00').localeCompare(b.start||'00:00'));
   itineraries[city].byDay[day] = rows;
 }
@@ -1089,7 +1084,6 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // Detectar si el usuario menciona una ciudad específica distinta al tab activo
   const detectedCity = detectCityInText(text);
   const targetCity = detectedCity || activeCity || savedDestinations[0]?.city;
 
@@ -1105,7 +1099,6 @@ async function onSend(){
 
   const intent = intentFromText(text, targetCity);
 
-  // Alta/Baja de ciudades por chat (global)
   if(intent.type==='add_city'){
     await addCityByChat(intent.city, intent.days || 2, intent.baseDate || '');
     return;
@@ -1115,7 +1108,6 @@ async function onSend(){
     return;
   }
 
-  // Confirmaciones
   if(intent.type==='confirm' && pendingChange){
     const { city, prompt } = pendingChange;
     pendingChange = null;
@@ -1128,7 +1120,6 @@ async function onSend(){
     return;
   }
 
-  // Horarios de día visible (sin cambios)
   if(intent.type==='change_hours'){
     const range = intent.range;
     const cd = itineraries[targetCity]?.currentDay || 1;
@@ -1142,7 +1133,6 @@ async function onSend(){
     return;
   }
 
-  // Mover actividades día X → Y (sin cambios)
   if(intent.type==='move_day'){
     const {from,to} = intent;
     const summary = `Mover actividades del <strong>día ${from}</strong> al <strong>día ${to}</strong> en ${targetCity} y reoptimizar ambos.`;
@@ -1155,16 +1145,13 @@ async function onSend(){
     return;
   }
 
-  // Añadir un día (con o sin day-trip, con o sin posición específica)
   if(intent.type==='add_day'){
-    // Por defecto: insertar al final. Si el usuario dijo "en la posición X", la usamos.
     const byDay = itineraries[targetCity]?.byDay || {};
     const last = Math.max(0, ...Object.keys(byDay).map(n=>+n));
     const insertPos = intent.insertDay
       ? Math.max(1, Math.min(intent.insertDay, last + 1))
       : (last + 1);
 
-    // Si se inserta en medio, reindexar localmente para desplazar días existentes.
     if(intent.insertDay) reindexDays(targetCity, insertPos);
 
     const summary = intent.dayTripTo
@@ -1182,10 +1169,8 @@ async function onSend(){
     return;
   }
 
-  // Sustitución de actividad (local + confirmable por LLM si hace falta)
   if(intent.type==='swap_activity'){
     const cd = itineraries[targetCity]?.currentDay || 1;
-    // Intento local inmediato para mejor UX
     localSwapActivity(targetCity, cd, intent.details || '');
     renderCityItinerary(targetCity);
 
@@ -1200,7 +1185,6 @@ async function onSend(){
     return;
   }
 
-  // Auroras en días concretos (ej.: “agrega caza de auroras en días 2 y 4”)
   if(intent.type==='add_auroras'){
     const days = intent.daysArray?.length ? intent.daysArray : [(itineraries[targetCity]?.currentDay||1)];
     addAurorasDays(targetCity, days);
@@ -1216,7 +1200,6 @@ async function onSend(){
     return;
   }
 
-  // Consultas informativas (no alteran itinerario salvo confirmación)
   if(intent.type==='info_query'){
     const infoPrompt = `
 ${FORMAT}
@@ -1230,7 +1213,6 @@ Luego sugiere si desea actualizar itinerario con lo aprendido y devuelve:
     return;
   }
 
-  // Edición libre (por defecto, afectar el día actual solo si el texto lo sugiere)
   if(intent.type==='free_edit'){
     const cd = itineraries[targetCity]?.currentDay || 1;
     const summary = `Aplicar tus cambios en <strong>${targetCity}</strong> afectando el <strong>día ${cd}</strong> (o días necesarios) y reoptimizar.`;
@@ -1248,8 +1230,7 @@ Luego sugiere si desea actualizar itinerario con lo aprendido y devuelve:
    SECCIÓN 22 · Validaciones y helpers UI
 ================================= */
 
-/* País: solo letras y espacios.
-   Nota: mantenemos acentos y Ñ/ñ. */
+/* País: solo letras y espacios (incluye acentos y ñ). */
 document.addEventListener('input', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('country')){
     const original = e.target.value;
@@ -1257,14 +1238,20 @@ document.addEventListener('input', (e)=>{
     if(filtered !== original){
       const pos = e.target.selectionStart;
       e.target.value = filtered;
-      // intentar conservar la posición del cursor
-      if(typeof pos === 'number'){ e.target.setSelectionRange(pos-1, pos-1); }
+      if(typeof pos === 'number'){ e.target.setSelectionRange(Math.max(0,pos-1), Math.max(0,pos-1)); }
     }
   }
 });
 
-/* Transformar inputs de "Días" a <select> (1–30) de forma segura,
-   sin tocar addCityRow() ni otras funciones base. */
+/* Asigna atributos semánticos a País (pattern/inputmode) cuando existan */
+function decorateCountryInputs(scope=document){
+  scope.querySelectorAll('.city-row .country').forEach(inp=>{
+    inp.setAttribute('pattern','[A-Za-zÁÉÍÓÚáéíóúÑñ\\s]+');
+    inp.setAttribute('inputmode','text');
+  });
+}
+
+/* Transformar inputs de "Días" a <select> (1–30) sin tocar addCityRow() */
 function transformDaysInputs(scope=document){
   const dayInputs = scope.querySelectorAll('.city-row .days');
   dayInputs.forEach(input=>{
@@ -1273,7 +1260,6 @@ function transformDaysInputs(scope=document){
       const select = document.createElement('select');
       select.className = input.className; // conserva "days"
       select.setAttribute('aria-label', input.getAttribute('aria-label')||'Días');
-      // copiar estilos inline si existieran
       if(input.style.cssText) select.style.cssText = input.style.cssText;
 
       for(let i=1;i<=30;i++){
@@ -1283,24 +1269,25 @@ function transformDaysInputs(scope=document){
         if(i===currentVal) opt.selected = true;
         select.appendChild(opt);
       }
-
-      // Reemplazo
       input.parentNode.replaceChild(select, input);
     }
   });
 }
 
-/* Observer para transformar automáticamente cuando se añaden filas de ciudades */
+/* Observer para transformar y decorar cuando se añaden filas */
 const rowsObserver = new MutationObserver(mutations=>{
   for(const m of mutations){
     m.addedNodes && m.addedNodes.forEach(node=>{
       if(node.nodeType===1){
         if(node.classList.contains('city-row')){
           transformDaysInputs(node);
+          decorateCountryInputs(node);
         }else{
-          // por si la fila viene envuelta en otra estructura
           const cr = node.querySelector?.('.city-row');
-          if(cr) transformDaysInputs(cr);
+          if(cr){
+            transformDaysInputs(cr);
+            decorateCountryInputs(cr);
+          }
         }
       }
     });
@@ -1329,6 +1316,13 @@ $chatI?.addEventListener('keydown', e=>{
   }
 });
 
-// Transformación inicial (para la primera fila creada al cargar)
-transformDaysInputs(document);
-
+/* --- Inicialización segura ---
+   1) Si no hay filas, crea UNA (comportamiento de v41/v43.1).
+   2) Aplica transformación de Días y atributos de País.
+*/
+(function initSafe(){
+  const hasRows = document.querySelectorAll('#city-list .city-row').length > 0;
+  if(!hasRows){ addCityRow(); }
+  transformDaysInputs(document);
+  decorateCountryInputs(document);
+})();
