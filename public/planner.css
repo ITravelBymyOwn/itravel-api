@@ -86,7 +86,7 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .75fr 1fr auto;
+  grid-template-columns:1.2fr 1fr .6fr 1fr auto;
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -98,7 +98,8 @@ body{
   gap:.25rem;
   font-size:.9rem;
 }
-.city-row input{
+.city-row input,
+.city-row select{
   width:100%;
   padding:.5rem .6rem;
   border:1px solid #d0d5dd;
@@ -106,6 +107,11 @@ body{
   font-size:.9rem;
   background:#fff;
   min-width:0;
+}
+.city-row select{
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
 }
 .city-row .remove{
   background:#ef4444;
