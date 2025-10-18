@@ -1,14 +1,7 @@
 /* =========================================================
     ITRAVELBYMYOWN · PLANNER v44 (parte 1/3)
     Base: v36 + mejoras v43.x integradas
-    Cambios clave v44:
-    - País solo letras/espacios (validación y pattern).
-    - Campo Días convertido a <select> (1–30) en todas las filas.
-    - Agregar día: respeta posición exacta y permite ciudad explícita (aunque no sea la tab activa).
-    - Day-trip si se indica “agrega un día para ir a X”.
-    - NLU ampliada (ciudad objetivo en texto) + confirmaciones breves.
-    - Bloqueo UI + “pensando…” en operaciones de cambio (se mantiene).
-    - Imperdibles por ciudad/temporada (se mantiene).
+    (fix) Restaura despliegue auto de días (input/select)
 ========================================================= */
 
 /* ================================
@@ -143,6 +136,32 @@ function makeHoursBlock(days){
   }
   return wrap;
 }
+
+// (NUEVO) Renderiza las filas de horas según el valor de Días en una fila concreta
+function renderHoursForRow(row){
+  const control = qs('.days', row);
+  const hoursWrap = qs('.hours-block', row);
+  if(!control || !hoursWrap) return;
+  const n = Math.max(0, parseInt(control.value||0,10));
+  hoursWrap.innerHTML = '';
+  if(n>0){
+    const tmp = makeHoursBlock(n).children;
+    Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
+  }
+}
+
+// (NUEVO) Ata eventos a input/select .days y hace render inicial
+function attachDaysListener(row){
+  const control = qs('.days', row);
+  if(!control) return;
+  const handler = ()=> renderHoursForRow(row);
+  // Soporta tanto <input> como <select>
+  control.addEventListener('input', handler);
+  control.addEventListener('change', handler);
+  // primera pasada
+  handler();
+}
+
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
@@ -160,15 +179,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   hoursWrap.className = 'hours-block';
   row.appendChild(hoursWrap);
 
-  const daysInput = qs('.days', row);
-  daysInput.addEventListener('input', ()=>{
-    const n = Math.max(0, parseInt(daysInput.value||0,10));
-    hoursWrap.innerHTML='';
-    if(n>0){
-      const tmp = makeHoursBlock(n).children;
-      Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
-    }
-  });
+  // (CAMBIO) Listener desacoplado del tipo de control
+  attachDaysListener(row);
 
   qs('.remove',row).addEventListener('click', ()=> row.remove());
   $cityList.appendChild(row);
@@ -800,7 +812,6 @@ ${FORMAT}
       parsed = parseJSON(text);
     }
 
-    // Validación: debe cubrir todos los días
     const coversAllDays = (p)=>{
       try{
         const tmp = {};
@@ -863,7 +874,7 @@ function askNextHotelTransport(){
 }
 
 /* ================================
-    SECCIÓN 17 · NLU: horas, ordinales, ciudad target
+    SECCIÓN 17 · NLU / Intents
 =================================== */
 const WORD_NUM = {'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,'seis':6,'siete':7,'ocho':8,'nueve':9,'diez':10};
 function normalizeHourToken(tok){
@@ -928,7 +939,6 @@ function intentFromText(text, currentCity){
   if(/^(sí|si|ok|dale|hazlo|confirmo|de una)\b/.test(t)) return {type:'confirm'};
   if(/^(no|mejor no|cancela|cancelar|cancelá)\b/.test(t)) return {type:'cancel'};
 
-  // Agregar día (posición + posible ciudad explícita)
   if(/(agrega|añade|suma)\s+un?\s+d[ií]a/.test(t)){
     let pos = null;
     if(/\binicio\b/.test(t)) pos = 'start';
@@ -945,27 +955,23 @@ function intentFromText(text, currentCity){
     return {type:'add_day', position:pos, place, night, city: cityTarget};
   }
 
-  // Quitar día
   if(/(quita|elimina|borra)\s+un?\s+d[ií]a/.test(t) || /(quita|elimina|borra)\s+el\s+d[ií]a/.test(t)){
     const d = parseOrdinalDay(t);
     const cityTarget = detectCityInText(t) || currentCity;
     return d ? {type:'remove_day', day:d, city:cityTarget} : {type:'ask_remove_day_direct', city:cityTarget};
   }
 
-  // Swap de días (pasa el día 3 al 2)
   const swap = t.match(/(?:pasa|mueve|cambia)\s+el\s+d[ií]a\s+(\d+)\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
   if(swap && !/actividad|museo|visita|tour|cena|almuerzo|desayuno/i.test(t)){
     const cityTarget = detectCityInText(t) || currentCity;
     return {type:'swap_day', from: parseInt(swap[1],10), to: parseInt(swap[2],10), city:cityTarget};
   }
 
-  // Quitar actividad
   if(/\b(no\s+quiero|quita|elimina|borra)\b.+/.test(t)){
     const query = t.replace(/^(no\s+quiero|quita|elimina|borra)\s*/i,'').trim();
     if(query){ return {type:'remove_activity', query}; }
   }
 
-  // Mover actividad día X→Y
   const mv = t.match(/(?:mueve|pasa|cambia)\s+(.*?)(?:\s+del\s+d[ií]a\s+(\d+)|\s+del\s+(\d+))\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
   if(mv){
     const query = (mv[1]||'').trim();
@@ -974,23 +980,19 @@ function intentFromText(text, currentCity){
     if(query) return {type:'move_activity', query, fromDay:from, toDay:to};
   }
 
-  // Cambiar horas
   const range = parseTimeRangeFromText(text);
   if(range.start || range.end){ return {type:'change_hours', range}; }
 
-  // Agregar ciudad
   if(/(agrega|añade)\s+(una\s+)?ciudad\b|\bagrega\s+[a-záéíóúüñ\s]+(\s+\d+\s+d[ií]as)?$/i.test(t) || /agrega\s+[a-záéíóúüñ]+(\s+\d+\s+d[ií]as)?/i.test(t)){
     const m = t.match(/agrega\s+([a-záéíóúüñ\s]+?)(?:\s+(\d+)\s+d[ií]as?)?$/i);
     if(m){ return {type:'add_city', name: m[1].trim(), days: m[2]?parseInt(m[2],10):null}; }
   }
 
-  // Quitar ciudad
   if(/(quita|elimina|borra)\s+[a-záéíóúüñ\s]+$/i.test(t)){
     const m = t.match(/(quita|elimina|borra)\s+([a-záéíóúüñ\s]+)$/i);
     if(m){ return {type:'remove_city', name: m[2].trim()}; }
   }
 
-  // Info query
   if(/clima|tiempo|temperatura|lluvia|horas de luz|alquiler de auto|aerol[ií]neas|vuelos|ropa|equipaje|visado|visa|estaci[oó]n|temporada/.test(t)){
     return {type:'info_query', details:text};
   }
@@ -1004,7 +1006,6 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // Confirm fuzzy add
   if(pendingChange?.type === 'confirm_fuzzy_add'){
     if(/^sí|si|ok|dale|confirmo/i.test(text)){
       const city = pendingChange.city;
@@ -1021,7 +1022,6 @@ async function onSend(){
     }
   }
 
-  // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
@@ -1062,7 +1062,6 @@ async function onSend(){
     return;
   }
 
-  // 1) Agregar día (acepta ciudad explícita; por defecto al final)
   if(intent.type==='add_day'){
     await runWithLock(async ()=>{
       const city = intent.city || currentCity;
@@ -1087,7 +1086,6 @@ async function onSend(){
     return;
   }
 
-  // 2) Quitar día
   if(intent.type==='ask_remove_day_direct'){
     pendingChange = {type:'remove_day_wait', city:intent.city||currentCity};
     chatMsg(tone.askWhichDayToRemove,'ai');
@@ -1109,7 +1107,6 @@ async function onSend(){
     return;
   }
 
-  // 3) Quitar actividad (día visible en ciudad actual)
   if(intent.type==='remove_activity'){
     await runWithLock(async ()=>{
       const q = intent.query || '';
@@ -1122,7 +1119,6 @@ async function onSend(){
     return;
   }
 
-  // 4) Mover actividad
   if(intent.type==='move_activity'){
     await runWithLock(async ()=>{
       moveActivities(currentCity, intent.fromDay, intent.toDay, intent.query||'');
@@ -1133,7 +1129,6 @@ async function onSend(){
     return;
   }
 
-  // 4b) Swap de días (posiblemente para otra ciudad)
   if(intent.type==='swap_day'){
     await runWithLock(async ()=>{
       const city = intent.city || currentCity;
@@ -1145,7 +1140,6 @@ async function onSend(){
     return;
   }
 
-  // 5) Cambiar horas del día visible (ciudad actual)
   if(intent.type==='change_hours'){
     await runWithLock(async ()=>{
       const range = intent.range;
@@ -1162,7 +1156,6 @@ async function onSend(){
     return;
   }
 
-  // 6) Agregar ciudad
   if(intent.type==='add_city'){
     const name = normalizeCityName(intent.name||'').trim();
     if(!name){ chatMsg('Necesito el nombre de la ciudad.','ai'); return; }
@@ -1173,7 +1166,6 @@ async function onSend(){
     return;
   }
 
-  // 7) Quitar ciudad
   if(intent.type==='remove_city'){
     const name = normalizeCityName(intent.name||'').trim();
     if(!name){ chatMsg('Necesito el nombre de la ciudad a quitar.','ai'); return; }
@@ -1185,7 +1177,6 @@ async function onSend(){
     return;
   }
 
-  // 8) Info query
   if(intent.type==='info_query'){
     const ans = await callAgent(`
 ${FORMAT}
@@ -1197,7 +1188,6 @@ Si crees que esta info afectaría el plan (clima/temporada/transporte), pregunta
     return;
   }
 
-  // 9) Edición libre → confirmación breve
   if(intent.type==='free_edit'){
     const day = data.currentDay || 1;
     const summary = `Aplicar tus cambios en <strong>${currentCity}</strong> afectando el <strong>día ${day}</strong> (o días necesarios) y reoptimizar.`;
@@ -1211,7 +1201,6 @@ Si crees que esta info afectaría el plan (clima/temporada/transporte), pregunta
   }
 }
 
-/* Construcción de prompt de edición */
 function buildEditPrompt(city, directive, opts={}){
   const data = itineraries[city];
   const day = data?.currentDay || 1;
@@ -1284,7 +1273,6 @@ $addCityBtn?.addEventListener('click', ()=>addCityRow());
 $reset?.addEventListener('click', ()=>{
   $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
   addCityRow();
-  // Se re-transforman días/país con init (parte 21)
   $start.disabled = true;
   $tabs.innerHTML=''; $itWrap.innerHTML='';
   $chatBox.style.display='none'; $chatM.innerHTML='';
@@ -1294,7 +1282,6 @@ $save?.addEventListener('click', saveDestinations);
 $start?.addEventListener('click', startPlanning);
 $send?.addEventListener('click', onSend);
 
-// Chat: Enter envía, Shift+Enter = nueva línea
 $chatI?.addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey){
     e.preventDefault();
@@ -1305,7 +1292,6 @@ $chatI?.addEventListener('keydown', e=>{
 $confirmCTA?.addEventListener('click', lockItinerary);
 $upsellClose?.addEventListener('click', ()=> $upsell.style.display='none');
 
-/* Toolbar (igual que versiones previas) */
 qs('#btn-pdf')?.addEventListener('click', guardFeature(()=>alert('Exportar PDF (demo)')));
 qs('#btn-email')?.addEventListener('click', guardFeature(()=>alert('Enviar por email (demo)')));
 qs('#btn-maps')?.addEventListener('click', ()=>window.open('https://maps.google.com','_blank'));
@@ -1391,7 +1377,6 @@ function fuzzyBestCity(text){
 /* ================================
     SECCIÓN 20 · Validaciones UI (País + Días <select>)
 =================================== */
-// País: solo letras y espacios (incluye acentos y ñ)
 document.addEventListener('input', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('country')){
     const original = e.target.value;
@@ -1404,7 +1389,6 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-// Convierte los inputs de días a <select> con 1 a 30 opciones
 function transformDaysInputs(scope=document){
   const dayInputs = scope.querySelectorAll('.city-row .days');
   dayInputs.forEach(input=>{
@@ -1421,12 +1405,14 @@ function transformDaysInputs(scope=document){
         if(i===currentVal) opt.selected = true;
         select.appendChild(opt);
       }
+      const row = input.closest('.city-row');
       input.parentNode.replaceChild(select, input);
+      // (NUEVO) enganchar eventos y render inicial
+      if(row){ attachDaysListener(row); }
     }
   });
 }
 
-// Decora campos país (pattern/inputmode)
 function decorateCountryInputs(scope=document){
   scope.querySelectorAll('.city-row .country').forEach(inp=>{
     inp.setAttribute('pattern','[A-Za-zÁÉÍÓÚáéíóúÑñ\\s]+');
@@ -1434,7 +1420,7 @@ function decorateCountryInputs(scope=document){
   });
 }
 
-// Observer para aplicar en filas nuevas
+// Observer -> también ata listener/render a filas nuevas
 const rowsObserver = new MutationObserver(mutations=>{
   for(const m of mutations){
     m.addedNodes && m.addedNodes.forEach(node=>{
@@ -1442,11 +1428,13 @@ const rowsObserver = new MutationObserver(mutations=>{
         if(node.classList.contains('city-row')){
           transformDaysInputs(node);
           decorateCountryInputs(node);
+          attachDaysListener(node); // asegura render inicial
         }else{
           const cr = node.querySelector?.('.city-row');
           if(cr){
             transformDaysInputs(cr);
             decorateCountryInputs(cr);
+            attachDaysListener(cr);
           }
         }
       }
@@ -1465,4 +1453,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!hasRows){ addCityRow(); }
   transformDaysInputs(document);
   decorateCountryInputs(document);
+  // (NUEVO) render inicial para filas existentes
+  qsa('#city-list .city-row').forEach(row=>attachDaysListener(row));
 });
