@@ -893,12 +893,13 @@ function intentFromText(text, currentCity){
 }
 function titleCase(s){ return s.replace(/\w\S*/g, t=>t[0].toUpperCase()+t.slice(1)); }
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v43.3 (parte 3/3 COMPLETO)
-   Basado en v33 funcional, integrando:
-   ✅ Validación: campo País sólo letras y espacios
-   ✅ Campo Días convertido en <select> (1 a 30)
-   ✅ Inicialización estable (sin romper filas iniciales)
-   ✅ Toda la lógica original conservada
+   ITRAVELBYMYOWN · PLANNER v43.4 (parte 3/3 COMPLETO)
+   Basado en v43.3 + FIX inicialización:
+   ✅ Validación País solo letras y espacios
+   ✅ <select> de Días (1–30) para TODAS las filas
+   ✅ Fila inicial funcional
+   ✅ Inicialización sincronizada
+   ✅ Sin romper nada de la lógica original
 ========================================================= */
 
 /* ==============================
@@ -1012,6 +1013,8 @@ $addCity?.addEventListener('click', ()=>addCityRow());
 $reset?.addEventListener('click', ()=>{
   $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
   addCityRow();
+  transformDaysInputs(document);
+  decorateCountryInputs(document);
   $start.disabled = true;
   $tabs.innerHTML=''; $itWrap.innerHTML='';
   $chatBox.style.display='none'; $chatM.innerHTML='';
@@ -1050,6 +1053,8 @@ qs('#btn-localinfo')?.addEventListener('click', guardFeature(()=>window.open('ht
 document.addEventListener('DOMContentLoaded', ()=>{
   const hasRows = document.querySelectorAll('#city-list .city-row').length > 0;
   if(!hasRows){ addCityRow(); }
+  // ✅ mover aquí para asegurar que la fila ya exista
   transformDaysInputs(document);
   decorateCountryInputs(document);
 });
+
