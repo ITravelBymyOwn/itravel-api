@@ -1,11 +1,8 @@
 /* =========================================================
-    ITRAVELBYMYOWN · PLANNER v46
-    Base: v45 (manteniendo estructura y secciones)
-    Cambios v46 (resumen):
-    - UI/UX: ciudad/país sólo letras (validación en input).
-    - Días como lista desplegable (0–30) con opción inicial vacía.
-    - Ventanas por ciudad: “Hora inicio” y “Hora fin” (aplica como default).
-    - Mantiene overlay y compatibilidad con estructura v36/v45.
+    ITRAVELBYMYOWN · PLANNER v46 (Bloque 1/3 · FIX cabecera)
+    Base: v45  · Corrección: primera fila = Ciudad, País,
+    Número de días, Orden de visita, Fecha de inicio de los Recorridos
+    + Se mantiene expansión de horas por día.
 ========================================================= */
 
 /* ================================
@@ -20,11 +17,11 @@ const MODEL   = 'gpt-4o-mini';
 let savedDestinations = [];
 let itineraries = {};
 let cityMeta = {};
-let session = []; // historial solo para edición via chat
+let session = [];
 let activeCity = null;
 let planningStarted = false;
 let metaProgressIndex = 0;
-let collectingHotels = false; // sólo hotel+transporte en intake
+let collectingHotels = false;
 let isItineraryLocked = false;
 
 const DEFAULT_START = '08:30';
@@ -75,7 +72,7 @@ const $upsell      = qs('#monetization-upsell');
 const $upsellClose = qs('#upsell-close');
 const $confirmCTA  = qs('#confirm-itinerary');
 
-const $overlayWOW  = qs('#loading-overlay'); // overlay bloqueante “Astra está generando itinerarios…”
+const $overlayWOW  = qs('#loading-overlay');
 
 /* ================================
     SECCIÓN 4 · Utilidades de fecha
@@ -124,11 +121,10 @@ function chatMsg(text, who='ai'){
 }
 
 /* ================================
-    SECCIÓN 6 · UI · Filas de ciudades (v46)
-    - Ciudad/País: sólo letras (validación en input).
-    - Días: <select> 0..30 con opción vacía inicial.
-    - Ventanas por ciudad: Hora inicio / Hora fin.
-    - Horarios por día: se generan al seleccionar días > 0.
+    SECCIÓN 6 · UI · Filas de ciudades (cabecera restaurada)
+    Cabecera: Ciudad, País, Número de días, Orden de visita,
+              Fecha de inicio de los Recorridos
+    — Al seleccionar "días", se despliegan horas inicio/fin por día.
 =================================== */
 function lettersOnly(el){
   if(!el) return;
@@ -139,7 +135,6 @@ function lettersOnly(el){
 function buildDaysSelect(selected=''){
   const sel = document.createElement('select');
   sel.className = 'days';
-  // opción vacía
   const empty = document.createElement('option');
   empty.value = ''; empty.textContent = '';
   sel.appendChild(empty);
@@ -151,7 +146,7 @@ function buildDaysSelect(selected=''){
   }
   return sel;
 }
-function makeHoursBlock(days, defaultStart='', defaultEnd=''){
+function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
   for(let d=1; d<=days; d++){
@@ -159,37 +154,38 @@ function makeHoursBlock(days, defaultStart='', defaultEnd=''){
     row.className = 'hours-day';
     row.innerHTML = `
       <span>Día ${d}</span>
-      <input class="start" type="time" aria-label="Hora inicio" value="${defaultStart}">
-      <input class="end"  type="time" aria-label="Hora final"  value="${defaultEnd}">
+      <input class="start" type="time" aria-label="Hora inicio" value="">
+      <input class="end"  type="time" aria-label="Hora final"  value="">
     `;
     wrap.appendChild(row);
   }
   return wrap;
 }
-function addCityRow(pref={city:'',country:'',days:'',baseDate:'',startCity:'',endCity:''}){
+function addCityRow(pref={city:'',country:'',days:'',order:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
 
-  // Campos base
+  // Ciudad
   const cityLabel = document.createElement('label');
   cityLabel.innerHTML = `Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}">`;
 
+  // País
   const countryLabel = document.createElement('label');
   countryLabel.innerHTML = `País<input class="country" placeholder="País" value="${pref.country||''}">`;
 
+  // Número de días
   const daysLabel = document.createElement('label');
   daysLabel.textContent = 'Días';
   const daysSelect = buildDaysSelect(pref.days||'');
   daysLabel.appendChild(daysSelect);
 
-  const baseDateLabel = document.createElement('label');
-  baseDateLabel.innerHTML = `Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}">`;
+  // Orden de visita
+  const orderLabel = document.createElement('label');
+  orderLabel.innerHTML = `Orden de visita<input class="order" type="number" min="1" placeholder="" value="${pref.order||''}">`;
 
-  // Ventanas globales por ciudad (v46)
-  const startCityLabel = document.createElement('label');
-  startCityLabel.innerHTML = `Hora inicio (ciudad)<input class="cityStart" type="time" value="${pref.startCity||''}">`;
-  const endCityLabel = document.createElement('label');
-  endCityLabel.innerHTML = `Hora fin (ciudad)<input class="cityEnd" type="time" value="${pref.endCity||''}">`;
+  // Fecha de inicio de los Recorridos
+  const baseDateLabel = document.createElement('label');
+  baseDateLabel.innerHTML = `Fecha de inicio de los Recorridos<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}">`;
 
   const removeBtn = document.createElement('button');
   removeBtn.className = 'remove';
@@ -199,101 +195,82 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:'',startCity:'',en
   row.appendChild(cityLabel);
   row.appendChild(countryLabel);
   row.appendChild(daysLabel);
+  row.appendChild(orderLabel);
   row.appendChild(baseDateLabel);
-  row.appendChild(startCityLabel);
-  row.appendChild(endCityLabel);
   row.appendChild(removeBtn);
 
-  // formateo de fecha
-  const baseDateEl = qs('.baseDate', row);
-  autoFormatDMYInput(baseDateEl);
+  autoFormatDMYInput(qs('.baseDate', row));
+  lettersOnly(qs('.city', row));
+  lettersOnly(qs('.country', row));
 
-  // bloque de horas por día (dinámico)
+  // Bloque de horas por día (se genera al elegir días)
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
   row.appendChild(hoursWrap);
 
-  // validaciones sólo letras
-  lettersOnly(qs('.city', row));
-  lettersOnly(qs('.country', row));
-
-  // listener de días → genera filas por día
   daysSelect.addEventListener('change', ()=>{
     const n = Math.max(0, parseInt(daysSelect.value||'0',10));
     hoursWrap.innerHTML = '';
     if(n>0){
-      const defStart = qs('.cityStart', row)?.value || '';
-      const defEnd   = qs('.cityEnd', row)?.value || '';
-      const tmp = makeHoursBlock(n, defStart, defEnd).children;
+      const tmp = makeHoursBlock(n).children;
       Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
     }
   });
 
-  // si pref.days ya viene seteado
   if(pref.days && String(pref.days) !== ''){
     daysSelect.dispatchEvent(new Event('change'));
   }
 
-  // eliminar fila
   removeBtn.addEventListener('click', ()=> row.remove());
-
-  // montar
   $cityList.appendChild(row);
 }
 
 /* ================================
-    SECCIÓN 7 · Guardar destinos
-    - Lee ciudad/país (sólo letras garantizado por input).
-    - Días desde <select> (0–30, permite vacío).
-    - BaseDate y ventanas por ciudad (start/end) -> cityMeta.
-    - Horas por día (si no hay, se presembran vacías).
+    SECCIÓN 7 · Guardar destinos (soporta "orden de visita")
 =================================== */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const list = [];
-  rows.forEach(r=>{
+  rows.forEach((r, idx)=>{
     let city     = qs('.city',r).value.trim();
     city = normalizeCityName(city);
-    const country    = qs('.country',r).value.trim();
-    const daysSelect = qs('.days',r);
-    const daysVal    = daysSelect ? (daysSelect.value||'') : '';
-    const days       = Math.max(0, parseInt(daysVal||'0',10)||0); // permite 0 días (placeholder)
-    const baseDate   = qs('.baseDate',r).value.trim();
-
-    const startCity  = qs('.cityStart',r)?.value || '';
-    const endCity    = qs('.cityEnd',r)?.value || '';
+    const country  = qs('.country',r).value.trim();
+    const daysSel  = qs('.days',r);
+    const daysVal  = daysSel ? (daysSel.value||'') : '';
+    const days     = Math.max(0, parseInt(daysVal||'0',10)||0);
+    const baseDate = qs('.baseDate',r).value.trim();
+    const orderRaw = qs('.order',r)?.value.trim();
+    const order    = orderRaw === '' ? (idx+1) : Math.max(1, parseInt(orderRaw,10)|| (idx+1));
 
     if(!city) return;
 
-    // perDay
+    // Horas por día
     const perDay = [];
-    qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = qs('.start',hd).value || ''; // flexible si vacío
+    qsa('.hours-day', r).forEach((hd, i)=>{
+      const start = qs('.start',hd).value || '';
       const end   = qs('.end',hd).value   || '';
-      perDay.push({ day: idx+1, start, end });
+      perDay.push({ day: i+1, start, end });
     });
     if(perDay.length===0 && days>0){
-      for(let d=1; d<=days; d++) perDay.push({day:d,start:startCity||'',end:endCity||''});
+      for(let d=1; d<=days; d++) perDay.push({day:d,start:'',end:''});
     }
 
-    list.push({ city, country, days, baseDate, perDay, startCity, endCity });
+    list.push({ city, country, days, baseDate, perDay, order });
   });
 
+  // ordena por "orden de visita"
+  list.sort((a,b)=> (a.order||9999) - (b.order||9999));
   savedDestinations = list;
 
-  // Sincronizar estructuras
-  savedDestinations.forEach(({city,days,baseDate,perDay,startCity,endCity})=>{
+  // sincroniza estructuras
+  savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
-    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:startCity||'', end:endCity||'', hotel:'', transport:'', interests:[], perDay: perDay||[] };
+    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', interests:[], perDay: perDay||[] };
     else {
       cityMeta[city].baseDate = baseDate||null;
-      cityMeta[city].start    = startCity||'';
-      cityMeta[city].end      = endCity||'';
       cityMeta[city].perDay   = perDay||[];
     }
-    // preparar días en itineraries
     const byDay = itineraries[city].byDay || {};
-    // mantener existentes si ya estaban; crear hasta "days"
     if(days>0){
       for(let d=1; d<=days; d++){
         if(!byDay[d]) byDay[d]=[];
@@ -302,13 +279,9 @@ function saveDestinations(){
     }
   });
 
-  // limpiar lo que ya no esté
-  Object.keys(itineraries).forEach(c=>{
-    if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c];
-  });
-  Object.keys(cityMeta).forEach(c=>{
-    if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c];
-  });
+  // limpia removidos
+  Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
+  Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
   $start.disabled = savedDestinations.length===0;
@@ -316,9 +289,7 @@ function saveDestinations(){
 }
 
 /* ================================
-    SECCIÓN 8 · Tabs + Render (envolvente)
-    - Render de tabs y activación de ciudad.
-    - El render de itinerario por ciudad se define en Sección 9.
+    SECCIÓN 8 · Tabs + Render
 =================================== */
 function setActiveCity(name){
   if(!name) return;
@@ -328,6 +299,8 @@ function setActiveCity(name){
 function renderCityTabs(){
   const prev = activeCity;
   $tabs.innerHTML = '';
+
+  // usa savedDestinations ya ordenado por "orden de visita"
   savedDestinations.forEach(({city})=>{
     const b = document.createElement('button');
     b.className = 'city-tab' + (city===prev?' active':'');
@@ -335,14 +308,15 @@ function renderCityTabs(){
     b.dataset.city = city;
     b.addEventListener('click', ()=>{
       setActiveCity(city);
-      renderCityItinerary(city); // Sección 9 (Bloque 2/3)
+      renderCityItinerary(city); // Sección 9
     });
     $tabs.appendChild(b);
   });
+
   if(savedDestinations.length){
     const valid = prev && savedDestinations.some(x=>x.city===prev) ? prev : savedDestinations[0].city;
     setActiveCity(valid);
-    renderCityItinerary(valid); // Sección 9 (Bloque 2/3)
+    renderCityItinerary(valid); // Sección 9
   }else{
     activeCity = null;
     $itWrap.innerHTML = '';
