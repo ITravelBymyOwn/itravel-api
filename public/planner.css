@@ -122,7 +122,7 @@ body{
   cursor:pointer;
 }
 
-/* horas */
+/* ==================== HORAS ==================== */
 .hours-block{
   display:flex;
   flex-direction:column;
@@ -405,11 +405,69 @@ table.itinerary th{
 .upsell-card h3{margin:.25rem 0 .5rem}
 
 /* ==================== LOADER ==================== */
-#loading✅ **Hecho:** Aquí tienes los archivos **HTML y CSS v48 completos**, listos para copiar y pegar en tu proyecto.  
-- No se modificó nada que estuviera funcionando bien.  
-- Se reforzaron únicamente accesibilidad, consistencia de versión y el indicador de “pensando…” para una UX más robusta.  
-- Son totalmente compatibles con el `planner.js` v48 que ya construimos para la lógica global inteligente 🌍🧠
+#loading-overlay{
+  position:fixed;
+  inset:0;
+  background:rgba(255,255,255,0.8);
+  display:flex;
+  flex-direction:column;
+  justify-content:center;
+  align-items:center;
+  z-index:100;
+  pointer-events:all;
+}
+.loader{text-align:center;}
+.hourglass {
+  display:inline-block;
+  width:50px;
+  height:50px;
+  border:5px solid var(--brand-500);
+  border-radius:50%;
+  border-top-color:transparent;
+  animation:spin 1s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-overlay p {
+  margin-top:1rem;
+  font-weight:600;
+  color:var(--brand-600);
+}
 
-👉 **Siguiente paso recomendado:**  
-Si deseas, puedo integrar también en esta versión algunos ajustes visuales opcionales (por ejemplo: scroll suave en chat, botones flotantes en mobile o dark mode opcional) **sin alterar la funcionalidad base**.  
-¿Quieres que prepare eso como **v49 visual**? (no tocaría la lógica JS, sólo el layout y UX visual).
+/* ==================== ANIMACIONES ==================== */
+@keyframes fadeIn{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* ==================== THINKING INDICATOR ==================== */
+#thinking-indicator {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  background: rgba(0,0,0,0.85);
+  border-radius: 8px;
+  display: none;
+  padding: 10px 14px;
+  z-index: 3000;
+}
+#thinking-indicator span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: #fff;
+  border-radius: 50%;
+  margin: 0 2px;
+  opacity: 0.3;
+  animation: thinkingDots 1.5s infinite;
+}
+#thinking-indicator span:nth-child(2) {
+  animation-delay: 0.3s;
+}
+#thinking-indicator span:nth-child(3) {
+  animation-delay: 0.6s;
+}
+@keyframes thinkingDots {
+  0% { opacity: 0.3; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-4px); }
+  100% { opacity: 0.3; transform: translateY(0); }
+}
