@@ -1,4 +1,4 @@
-// /api/chat.js — v28.4 (ESM compatible en Vercel)
+// /api/chat.js — v29.0 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -69,7 +69,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 `.trim();
 
 // ==============================
-// Llamada sin response_format
+// Llamada al modelo
 // ==============================
 async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
@@ -98,15 +98,22 @@ export default async function handler(req, res) {
     }
 
     const body = req.body;
+    const mode = body.mode || "planner"; // 👈 nuevo parámetro
     const clientMessages = extractMessages(body);
 
-    // 1) Primer intento
+    // 🧭 MODO INFO CHAT — sin JSON, texto libre
+    if (mode === "info") {
+      const raw = await callStructured(clientMessages);
+      const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
+      return res.status(200).json({ text });
+    }
+
+    // 🧭 MODO PLANNER — comportamiento original
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
-      // 2) Segundo intento estricto
       const strictPrompt = SYSTEM_PROMPT + `
 OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
@@ -115,7 +122,6 @@ OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
 
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
-      // 3) Ultra estricto con ejemplo
       const ultraPrompt = SYSTEM_PROMPT + `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":""}]}`;
@@ -125,6 +131,7 @@ Ejemplo válido:
 
     if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
+
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
