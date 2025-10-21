@@ -1,10 +1,10 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v51 (parte 1/3)
-   Base: v50
-   Cambios clave v51:
+   ITRAVELBYMYOWN · PLANNER v52 (parte 1/3)
+   Base: v51
+   Cambios clave v52:
    - Se agregó Chat Adicional (Info Chat).
    - Eliminación de "rev:" al renderizar tabla.
-   - Conserva toda la lógica de v50 (21 secciones).
+   - Conserva toda la lógica de v51 (21 secciones).
 ========================================================= */
 
 /* ==============================
