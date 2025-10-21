@@ -1204,41 +1204,65 @@ ${allDays}
 }
 
 /* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos
+   SECCIÓN 20 · Orden de ciudades + Eventos (corregida)
 ================================= */
 function addRowReorderControls(row){
   const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display='flex';
-  ctrlWrap.style.gap='.35rem';
-  ctrlWrap.style.alignItems='center';
-  const up = document.createElement('button'); up.textContent='↑'; up.className='btn ghost';
-  const down = document.createElement('button'); down.textContent='↓'; down.className='btn ghost';
-  ctrlWrap.appendChild(up); ctrlWrap.appendChild(down);
+  ctrlWrap.style.display = 'flex';
+  ctrlWrap.style.gap = '.35rem';
+  ctrlWrap.style.alignItems = 'center';
+
+  const up = document.createElement('button');
+  up.textContent = '↑';
+  up.className = 'btn ghost';
+
+  const down = document.createElement('button');
+  down.textContent = '↓';
+  down.className = 'btn ghost';
+
+  ctrlWrap.appendChild(up);
+  ctrlWrap.appendChild(down);
   row.appendChild(ctrlWrap);
 
   up.addEventListener('click', ()=>{
-    if(row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
+    if (row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
   });
+
   down.addEventListener('click', ()=>{
-    if(row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
+    if (row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
   });
 }
-const origAddCityRow = addCityRow;
-addCityRow = function(pref){
-  origAddCityRow(pref);
-  const row = $cityList.lastElementChild;
-  if(row) addRowReorderControls(row);
-};
+
+// ✅ Solución robusta: envolver addCityRow de forma segura sin romper ejecución
+(function safeWrapAddCityRow(){
+  function tryWrap(){
+    if (typeof window.addCityRow === 'function' && !window.__wrappedAddCityRow) {
+      const orig = window.addCityRow;
+      window.addCityRow = function(pref){
+        orig(pref);
+        const row = $cityList?.lastElementChild;
+        if (row) addRowReorderControls(row);
+      };
+      window.__wrappedAddCityRow = true;
+    }
+  }
+  // Intentar envolver inmediatamente si ya existe
+  tryWrap();
+  // Y volver a intentarlo cuando el DOM esté listo
+  document.addEventListener('DOMContentLoaded', tryWrap);
+})();
 
 // País: solo letras y espacios (protección suave en input)
 document.addEventListener('input', (e)=>{
-  if(e.target && e.target.classList && e.target.classList.contains('country')){
+  if (e.target && e.target.classList && e.target.classList.contains('country')) {
     const original = e.target.value;
-    const filtered = original.replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
-    if(filtered !== original){
+    const filtered = original.replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g, '');
+    if (filtered !== original) {
       const pos = e.target.selectionStart;
       e.target.value = filtered;
-      if(typeof pos === 'number'){ e.target.setSelectionRange(Math.max(0,pos-1), Math.max(0,pos-1)); }
+      if (typeof pos === 'number') {
+        e.target.setSelectionRange(Math.max(0, pos - 1), Math.max(0, pos - 1));
+      }
     }
   }
 });
