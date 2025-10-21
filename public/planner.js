@@ -1205,17 +1205,17 @@ ${allDays}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos (corregida)
-================================= */
+============================== */
 function addRowReorderControls(row){
   if (!row) return;
 
-  // Evitar duplicados
+  // Evitar duplicados si ya existen controles
   if (row.querySelector('.reorder-controls')) return;
 
-  // Buscar el botón de eliminar que ya ocupa la 5ª columna del grid
+  // Contenedor que reemplazará el botón Remove pero sin alterar el grid
   const removeBtn = row.querySelector('.remove');
+  if (!removeBtn) return; // Si por alguna razón no existe, salimos
 
-  // Contenedor de acciones (reordenar + eliminar) que ocupará la MISMA celda
   const wrap = document.createElement('div');
   wrap.className = 'reorder-controls';
   wrap.style.display = 'flex';
@@ -1232,30 +1232,26 @@ function addRowReorderControls(row){
   down.className = 'btn ghost';
   down.title = 'Bajar ciudad';
 
-  // Inserta el contenedor en la MISMA posición de la celda de "remove"
-  if (removeBtn) {
-    const parent = removeBtn.parentNode;
-    parent.insertBefore(wrap, removeBtn);   // wrap ocupa la celda
-    wrap.appendChild(up);
-    wrap.appendChild(down);
-    wrap.appendChild(removeBtn);            // y el botón Eliminar queda al lado
-  } else {
-    // Fallback: si no hay .remove, no añadimos una columna extra que rompa el grid
-    // Creamos una celda "fantasma" que no altera el layout (por si el markup cambia)
-    row.appendChild(wrap);
-  }
+  // Insertamos el contenedor en el MISMO lugar que estaba el botón remove
+  const parent = removeBtn.parentNode;
+  parent.replaceChild(wrap, removeBtn);
+  wrap.appendChild(up);
+  wrap.appendChild(down);
+  wrap.appendChild(removeBtn);
 
-  // Handlers
+  // Handlers de movimiento
   up.addEventListener('click', ()=>{
-    if (row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
+    const prev = row.previousElementSibling;
+    if (prev) $cityList.insertBefore(row, prev);
   });
 
   down.addEventListener('click', ()=>{
-    if (row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
+    const next = row.nextElementSibling;
+    if (next) $cityList.insertBefore(next, row);
   });
 }
 
-// ✅ Envolver addCityRow sin romper el flujo ni duplicar controles
+// ✅ Envolver addCityRow sin romper la grilla
 (function robustWrapAddCityRow(){
   function wrapOnce(){
     if (typeof window.addCityRow === 'function' && !window.__wrappedAddCityRow) {
@@ -1268,6 +1264,7 @@ function addRowReorderControls(row){
       window.__wrappedAddCityRow = true;
     }
   }
+
   // Intento inmediato y al cargar el DOM
   wrapOnce();
   document.addEventListener('DOMContentLoaded', wrapOnce);
@@ -1281,7 +1278,7 @@ function addRowReorderControls(row){
   }, 150);
 })();
 
-// País: solo letras y espacios (protección suave en input)
+// Protección de inputs de país
 document.addEventListener('input', (e)=>{
   if (e.target && e.target.classList && e.target.classList.contains('country')) {
     const original = e.target.value;
