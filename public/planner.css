@@ -46,6 +46,22 @@ body{
 }
 .topbar .lang a.active{color:var(--brand-600)}
 
+/* 🆕 Botón Info Chat en topbar */
+.info-chat-btn{
+  background:var(--brand-600);
+  color:#fff;
+  border:none;
+  border-radius:var(--radius);
+  padding:.5rem .9rem;
+  font-weight:600;
+  cursor:pointer;
+  transition:.2s ease;
+  margin-left:1rem;
+}
+.info-chat-btn:hover{
+  background:var(--brand-500);
+}
+
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
@@ -440,7 +456,8 @@ table.itinerary th{
 }
 
 /* ==================== THINKING INDICATOR ==================== */
-#thinking-indicator {
+#thinking-indicator,
+#thinking-indicator-info{
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -450,7 +467,8 @@ table.itinerary th{
   padding: 10px 14px;
   z-index: 3000;
 }
-#thinking-indicator span {
+#thinking-indicator span,
+#thinking-indicator-info span{
   display: inline-block;
   width: 6px;
   height: 6px;
@@ -460,14 +478,74 @@ table.itinerary th{
   opacity: 0.3;
   animation: thinkingDots 1.5s infinite;
 }
-#thinking-indicator span:nth-child(2) {
+#thinking-indicator span:nth-child(2),
+#thinking-indicator-info span:nth-child(2){
   animation-delay: 0.3s;
 }
-#thinking-indicator span:nth-child(3) {
+#thinking-indicator span:nth-child(3),
+#thinking-indicator-info span:nth-child(3){
   animation-delay: 0.6s;
 }
 @keyframes thinkingDots {
   0% { opacity: 0.3; transform: translateY(0); }
   50% { opacity: 1; transform: translateY(-4px); }
   100% { opacity: 0.3; transform: translateY(0); }
+}
+
+/* 🆕 ==================== INFO CHAT MODAL ==================== */
+.info-chat-modal{
+  position:fixed;
+  top:0;
+  right:0;
+  height:100vh;
+  width:420px;
+  max-width:100%;
+  background:#fff;
+  box-shadow:-3px 0 8px rgba(0,0,0,0.15);
+  z-index:9999;
+  display:flex;
+  flex-direction:column;
+}
+.info-chat-panel{
+  display:flex;
+  flex-direction:column;
+  height:100%;
+}
+.info-chat-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:1rem;
+  background:var(--brand-600);
+  color:#fff;
+}
+.info-chat-header h3{
+  margin:0;
+  font-weight:600;
+}
+.info-chat-modal .chat-messages{
+  flex:1;
+  overflow-y:auto;
+  padding:1rem;
+}
+.info-chat-modal .chat-input{
+  border-top:1px solid #d0d5dd;
+  padding:.75rem;
+  display:flex;
+  gap:.5rem;
+}
+.info-chat-modal .chat-input input{
+  flex:1;
+  padding:.5rem;
+  border-radius:var(--radius);
+  border:1px solid #d0d5dd;
+}
+.info-chat-modal .btn.primary{
+  white-space:nowrap;
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 900px){
+  #planner-grid{grid-template-columns:1fr}
+  .info-chat-modal{width:100%}
 }
