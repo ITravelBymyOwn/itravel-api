@@ -1,12 +1,10 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v48 (parte 1/3)
-   Base: v47
-   Cambios clave v48 (solo lo necesario):
-   - Lógica GLOBAL (sin listas predefinidas): toda plausibilidad se valida vía LLM.
-   - Doble-paso de IA: generación/edición + validación semántica independiente.
-   - Reglas del contrato reforzadas: actividades estacionales requieren "notes: valid: <justificación>".
-   - Chat verdaderamente global (cualquier tema de viajes), con indicador de “pensando…” (tres puntos).
-   - Mantengo intacta la UI y funciones previas salvo mínimos ajustes necesarios.
+   ITRAVELBYMYOWN · PLANNER v49 (parte 1/3)
+   Base: v48
+   Cambios clave v49 (mínimos y focalizados):
+   - Chat global: bloqueo SOLO del input del chat durante razonamiento (tres puntitos).
+   - Preparativos para fusión sin borrado (mantener lo existente por defecto).
+   - Sin tocar UI ni estructuras fuera de lo necesario.
 ========================================================= */
 
 /* ==============================
@@ -106,6 +104,13 @@ function showThinking(on){
     clearInterval(thinkingTimer);
     $thinkingIndicator.style.display = 'none';
   }
+}
+
+// 🔒 Bloquear SOLO el input del chat durante el razonamiento informativo
+function setChatBusy(on){
+  if($chatI) $chatI.disabled = on;
+  if($send)  $send.disabled  = on;
+  showThinking(on);
 }
 
 /* ==============================
@@ -243,11 +248,12 @@ function saveDestinations(){
   hasSavedOnce = true;
 }
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v48 (parte 2/3)
-   - Snapshot + Intake
-   - Contrato JSON (A/B/C/D) reforzado con plausibilidad global
-   - Llamada a Astra + parseo de JSON
-   - Merge / dedupe + Post-procesamiento GLOBAL (sin listas)
+   ITRAVELBYMYOWN · PLANNER v49 (parte 2/3)
+   Base: v48
+   Cambios clave v49 (mínimos):
+   - Contrato y estilo global reforzados para: imperdibles día/noche,
+     1 tour caro + alternativas cercanas para auroras, horas nocturnas aproximadas.
+   - Fusión por defecto (no borrar) salvo instrucción explícita.
 ========================================================= */
 
 /* ==============================
@@ -435,23 +441,23 @@ function buildIntake(){
 }
 
 /* ==============================
-   SECCIÓN 11 · Contrato JSON / LLM (reforzado v48)
+   SECCIÓN 11 · Contrato JSON / LLM (reforzado v49)
 ================================= */
 const FORMAT = `
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
 A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
-B) {"destination":"City","rows":[{...}],"replace":true,"followup":"Pregunta breve"}
-C) {"rows":[{...}],"replace":true,"followup":"Pregunta breve"}
+B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+C) {"rows":[{...}],"replace":false,"followup":"Pregunta breve"}
 D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Texto","transport":"Texto"},"followup":"Pregunta breve"}
 Reglas:
 - Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
 - Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre).
 - Valida plausibilidad GLOBAL (geografía, temporada, clima aproximado, tipo de actividad).
-- Para actividades estacionales/especiales:
+- Para actividades estacionales/nocturnas (p. ej. auroras):
   • Inclúyelas SOLO si son plausibles para esa ciudad y fechas aproximadas.
-  • Añade en "notes" un marcador "valid: <justificación breve>".
-  • Si no puedes justificar con seguridad, NO las incluyas.
-- No dupliques; conserva lo existente salvo instrucción explícita.
+  • Añade en "notes" un marcador "valid: <justificación breve>" y el HORARIO aproximado de inicio local.
+  • Propón un (1) tour recomendado si tiene sentido y alternativas cercanas de bajo costo (p.ej. miradores o auto).
+- Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita del usuario (replace=true).
 - Máximo 20 filas por día.
 - Nada de texto fuera del JSON.
 `;
@@ -464,8 +470,10 @@ async function callAgent(text, useHistory = true){
   const globalStyle = `
 Eres "Astra", agente de viajes internacional.
 - RAZONA con sentido común global: geografía, temporadas, ventanas horarias, distancias y logística básica.
-- Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; no sugieras cambios salvo que te lo pidan.
-- Para EDICIONES: entrega directamente el JSON final según contrato.
+- Identifica IMPERDIBLES diurnos y nocturnos; si el tiempo es limitado, prioriza lo esencial.
+- Para fenómenos estacionales (ej. auroras): sugiere 1 tour (si procede) y alternativas cercanas económicas; indica hora de inicio aproximada típica de la ciudad.
+- Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
+- Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
 - Actividades especiales SOLO si son plausibles; añade en notes "valid: ..." con la justificación. Si hay duda, excluye.
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
@@ -498,13 +506,6 @@ function parseJSON(s){
     return JSON.parse(cleaned);
   }catch(_){ return null; }
 }
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v48 (parte 3/3)
-   - Merge / edición / validación global con doble-paso IA
-   - Generación por ciudad + overlay
-   - NLU robusta + intents
-   - Handlers de chat + orden de ciudades + init
-========================================================= */
 
 /* ==============================
    SECCIÓN 13 · Merge / utilidades
@@ -631,6 +632,7 @@ Devuelve SOLO JSON válido:
 Criterios:
 - Verifica PLAUSIBILIDAD GLOBAL de cada actividad para "${city}" dadas fechas aproximadas (${baseDate||'N/A'}), clima y geografía.
 - Rechaza actividades estacionales o geográficamente imposibles para esa ciudad/época.
+- Para actividades NOCTURNAS (p.ej. auroras), usa rangos típicos locales (aprox. 17:00–01:00 si aplica) y añade "valid:" con justificación.
 - Si mantienes una actividad especial, asegúrate de que "notes" incluya "valid:" con una justificación breve.
 - Ajusta horas si ves solapamientos obvios o huecos irrazonables; si no puedes, mantén las horas y márcalo en notes.
 Filas:
@@ -644,6 +646,15 @@ ${JSON.stringify(rows)}
   // Si falla, permitimos todo (fail-open) para no bloquear UX
   return { allowed: rows, removed: [] };
 }
+/* =========================================================
+   ITRAVELBYMYOWN · PLANNER v49 (parte 3/3)
+   Base: v48
+   Cambios clave v49 (mínimos):
+   - Generación por ciudad: imperdibles día/noche y auroras (1 tour + alternativas).
+   - Al agregar un día, evaluar y reoptimizar TODA la ciudad.
+   - Chat informativo: bloquear SOLO el chat (no la pantalla), tres puntitos y sin editar plan.
+   - Edición libre: FUSIÓN por defecto (no borrar). 
+========================================================= */
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
@@ -688,8 +699,12 @@ async function generateCityItinerary(city){
   const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
-- Formato B {"destination":"${city}","rows":[...],"replace": true}.
-- Respeta ventanas por día ${JSON.stringify(perDay)} (si faltan, 08:30–19:00 o antes si aplica).
+- Formato B {"destination":"${city}","rows":[...],"replace": false}.  // << fusión por defecto
+- Revisa IMPERDIBLES de día y de noche. Si aplica temporada de auroras u otras nocturnas, incluye:
+   • 1 tour recomendado (sin inflar presupuesto) + alternativas cercanas (miradores, orillas, etc.).
+   • Sugerencia de alquiler de vehículo si es razonable.
+   • Hora aproximada local de inicio del tour (p.ej. Tromsø ~17–18h como referencia).
+- Respeta ventanas por día ${JSON.stringify(perDay)} (si faltan, 08:30–19:00 para diurnas; nocturnas pueden extenderse).
 - Verifica plausibilidad global (NO listas locales). Si actividad especial es plausible, añade "notes" con "valid: <justificación>".
 - Agrupa por zonas, evita solapamientos, rellena huecos inteligentemente.
 - Nada de texto fuera del JSON.
@@ -724,7 +739,8 @@ ${buildIntake()}
     // Validación semántica global (2º paso)
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     if(Array.isArray(val.allowed) && val.allowed.length){
-      pushRows(tmpCity, val.allowed, true);
+      // ⚠️ FUSIÓN por defecto (NO borrar)
+      pushRows(tmpCity, val.allowed, false);
       renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
       showWOW(false);
       return;
@@ -944,8 +960,9 @@ ${JSON.stringify(rows)}
 Instrucción:
 - Reordena y optimiza (min traslados; agrupa por zonas).
 - Sustituye huecos por opciones realistas (sin duplicar otros días).
+- Para nocturnas (p.ej. auroras), usa horarios aproximados locales y añade alternativas cercanas si procede.
 - Valida plausibilidad global y, si mantienes actividad especial, añade "notes: valid: ...".
-- Devuelve C {"rows":[...],"replace":true}.
+- Devuelve C {"rows":[...],"replace":false}.   // fusión, NO borrar
 Contexto:
 ${buildIntake()}
 `.trim();
@@ -956,7 +973,8 @@ ${buildIntake()}
     const normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
     // Validación global del día
     const val = await validateRowsWithAgent(city, normalized, baseDate);
-    pushRows(city, val.allowed, true);
+    // Fusión por defecto
+    pushRows(city, val.allowed, false);
   }
 }
 
@@ -1005,13 +1023,16 @@ async function onSend(){
         {day:numericPos,start:addMinutes(start,300), end:addMinutes(start,420), activity:`Recorrido por ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie/Bus', duration:'120m', notes:'seed'},
         {day:numericPos,start:addMinutes(start,430), end, activity:`Regreso a ${city}`, from:intent.dayTripTo, to:city, transport:'Tren/Bus', duration:'', notes:'seed'}
       ];
-      pushRows(city, rowsSeed, true);
+      pushRows(city, rowsSeed, false);
     }
 
-    await optimizeDay(city, numericPos);
+    // 🔁 Reoptimizar TODOS los días tras agregar uno (mejor aprovechamiento global)
+    const totalDays = Object.keys(itineraries[city].byDay||{}).length;
+    for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
+
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Día agregado y optimizado.','ai');
+    chatMsg('✅ Día agregado y plan reoptimizado globalmente.','ai');
     return;
   }
 
@@ -1019,7 +1040,9 @@ async function onSend(){
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
     showWOW(true,'Eliminando día…');
     removeDayAt(intent.city, intent.day);
-    await optimizeDay(intent.city, Math.max(1, intent.day-1));
+    // Reoptimiza globalmente la ciudad
+    const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
+    for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Día eliminado y plan reequilibrado.','ai');
@@ -1109,20 +1132,23 @@ async function onSend(){
     return;
   }
 
-  // 9) Preguntas informativas (GLOBAL, sin editar plan)
+  // 9) Preguntas informativas (GLOBAL, sin editar plan) —— bloquea SOLO el chat
   if(intent.type==='info_query'){
-    const ans = await callAgent(`
-${FORMAT}
-El usuario pide información de viajes (tema global). Responde útil, breve y accionable.
-No propongas editar el itinerario salvo que el usuario lo pida explícitamente.
-{"followup":"mensaje breve para continuar"}
-`, true);
-    const parsed = parseJSON(ans);
-    chatMsg(parsed?.followup || '¿Algo más que quieras saber?','ai');
+    try{
+      setChatBusy(true); // 🔒 solo input de chat
+      const ans = await callAgent(
+`Responde en texto claro y conciso a la pregunta del usuario (sin JSON, sin proponer ediciones de itinerario):
+"${text}"`, 
+      true);
+      // Si por error llega JSON, lo ignoramos y mostramos el texto "tal cual".
+      chatMsg(ans || '¿Algo más que quieras saber?');
+    } finally {
+      setChatBusy(false);
+    }
     return;
   }
 
-  // 10) Edición libre (día visible de la ciudad activa) + validación
+  // 10) Edición libre (día visible de la ciudad activa) + validación (FUSIÓN, no borrar)
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
     if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.'); return; }
@@ -1153,7 +1179,9 @@ ${allDays}
 **Ventanas por día:** ${JSON.stringify(perDay)}
 **Instrucción del usuario (libre):** ${text}
 
-- Devuelve formato B {"destination":"${city}","rows":[...],"replace": true} solo para los días afectados.
+- Integra lo pedido SIN borrar lo existente (fusión). 
+- Para nocturnas (p.ej. auroras), añade un tour (si procede) + alternativas cercanas y hora aproximada local de inicio.
+- Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 - Valida plausibilidad global y, si mantienes actividad especial, añade "notes: valid: ...".
 `.trim();
 
@@ -1173,10 +1201,11 @@ ${allDays}
       }
       const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
       const val = await validateRowsWithAgent(city, rows, baseDate);
-      pushRows(city, val.allowed, true);
+      // 🔗 Fusión (no borrar lo que ya había)
+      pushRows(city, val.allowed, false);
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Apliqué el cambio y optimicé el día.','ai');
+      chatMsg('✅ Apliqué el cambio sin borrar tu plan y reoptimicé el día.','ai');
     }else{
       showWOW(false);
       chatMsg(parsed?.followup || 'No recibí cambios válidos. ¿Intentamos de otra forma?','ai');
