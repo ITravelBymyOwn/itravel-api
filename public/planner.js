@@ -1271,8 +1271,8 @@ document.addEventListener('input', (e)=>{
 });
 
 /* ==============================
-   SECCIÓN 21 · INIT y listeners
-================================= */
+   SECCIÓN 21 - INIT y listeners
+============================== */
 $addCity?.addEventListener('click', ()=>addCityRow());
 qs('#reset-planner')?.addEventListener('click', ()=>{
   $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
@@ -1295,10 +1295,17 @@ $chatI?.addEventListener('keydown', e=>{
 });
 
 // CTA y upsell
-$confirmCTA?.addEventListener('click', ()=>{ isItineraryLocked = true; qs('#monetization-upsell').style.display='flex'; });
+$confirmCTA?.addEventListener('click', ()=>{
+  isItineraryLocked = true;
+  qs('#monetization-upsell').style.display='flex';
+});
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
+  // ⚡ Asegurar que siempre haya al menos una fila de ciudad al iniciar
   if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+  // ✅ FIX: forzar que la Info Chat modal esté cerrada al cargar
+  if($infoChatModal) $infoChatModal.style.display = 'none';
 });
