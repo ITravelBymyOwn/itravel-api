@@ -107,6 +107,7 @@ body{
   align-items:end;
   margin-bottom:.6rem;
   animation:fadeIn .4s ease;
+  position:relative;
 }
 .city-row label{
   display:flex;
@@ -503,8 +504,14 @@ table.itinerary th{
   background:#fff;
   box-shadow:-3px 0 8px rgba(0,0,0,0.15);
   z-index:9999;
-  display:none; /* ✅ corregido */
+  display:flex;
   flex-direction:column;
+  visibility:hidden;
+  pointer-events:none;
+}
+.info-chat-modal.active{
+  visibility:visible;
+  pointer-events:auto;
 }
 .info-chat-panel{
   display:flex;
