@@ -1273,24 +1273,28 @@ document.addEventListener('input', (e)=>{
 /* ==============================
    SECCIÓN 21 · INIT y listeners (v50 corregida)
 ================================= */
+
+// Botón agregar ciudad
 $addCity?.addEventListener('click', ()=>addCityRow());
 
+// Botón reset
 qs('#reset-planner')?.addEventListener('click', ()=>{
-  $cityList.innerHTML='';
-  savedDestinations=[];
-  itineraries={};
-  cityMeta={};
+  $cityList.innerHTML = '';
+  savedDestinations = [];
+  itineraries = {};
+  cityMeta = {};
   addCityRow();
   $start.disabled = true;
-  $tabs.innerHTML='';
-  $itWrap.innerHTML='';
-  $chatBox.style.display='none';
-  $chatM.innerHTML='';
+  $tabs.innerHTML = '';
+  $itWrap.innerHTML = '';
+  $chatBox.style.display = 'none';
+  $chatM.innerHTML = '';
   session = [];
-  hasSavedOnce=false;
-  pendingChange=null;
+  hasSavedOnce = false;
+  pendingChange = null;
 });
 
+// Guardar destinos y planificar
 $save?.addEventListener('click', saveDestinations);
 $start?.addEventListener('click', startPlanning);
 $send?.addEventListener('click', onSend);
@@ -1306,16 +1310,21 @@ $chatI?.addEventListener('keydown', e=>{
 // CTA y upsell
 $confirmCTA?.addEventListener('click', ()=>{
   isItineraryLocked = true;
-  qs('#monetization-upsell').style.display='flex';
+  qs('#monetization-upsell').style.display = 'flex';
 });
 $upsellClose?.addEventListener('click', ()=>{
-  qs('#monetization-upsell').style.display='none';
+  qs('#monetization-upsell').style.display = 'none';
 });
 
-// ✅ Garantiza que siempre haya al menos una fila al cargar
-document.addEventListener('DOMContentLoaded', ()=>{
+// ✅ Espera activa hasta que #city-list esté disponible y luego crea la fila inicial
+(function waitForCityList() {
   const cityList = document.querySelector('#city-list');
-  if(cityList && !cityList.querySelector('.city-row')) {
-    addCityRow();
+  if (cityList) {
+    if (!cityList.querySelector('.city-row')) {
+      addCityRow();
+    }
+  } else {
+    // Reintenta cada 100 ms hasta que Webflow inyecte el contenedor
+    setTimeout(waitForCityList, 100);
   }
-});
+})();
