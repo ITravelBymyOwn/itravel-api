@@ -1293,42 +1293,53 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-/* ==============================
-   SECCIÓN 21 - INIT y listeners
-============================== */
-$addCity?.addEventListener('click', ()=>addCityRow());
-qs('#reset-planner')?.addEventListener('click', ()=>{
-  $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+/* ===============================
+   SECCIÓN 21 · INIT y listeners (corregida)
+=============================== */
+
+$addCity?.addEventListener('click', () => addCityRow());
+
+qs('#reset-planner')?.addEventListener('click', () => {
+  $cityList.innerHTML = '';
+  savedDestinations = [];
+  itineraries = [];
+  cityMeta = {};
   addCityRow();
   $start.disabled = true;
-  $tabs.innerHTML=''; $itWrap.innerHTML='';
-  $chatBox.style.display='none'; $chatM.innerHTML='';
-  session = []; hasSavedOnce=false; pendingChange=null;
+  $tabs.innerHTML = '';
+  $itWrap.innerHTML = '';
+  $chatBox.style.display = 'none';
+  $chatM.innerHTML = '';
+  session = [];
+  hasSavedOnce = false;
+  pendingChange = null;
 });
+
 $save?.addEventListener('click', saveDestinations);
 $start?.addEventListener('click', startPlanning);
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
-$chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){
+$chatIP?.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     onSend();
   }
 });
 
 // CTA y upsell
-$confirmCTA?.addEventListener('click', ()=>{
+$confirmCTA?.addEventListener('click', () => {
   isItineraryLocked = true;
-  qs('#monetization-upsell').style.display='flex';
+  qs('#monetization-upsell').style.display = 'flex';
 });
-$upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
+$upsellClose?.addEventListener('click', () => {
+  qs('#monetization-upsell').style.display = 'none';
+});
 
 // Inicialización
-document.addEventListener('DOMContentLoaded', ()=>{
-  // ⚡ Asegurar que siempre haya al menos una fila de ciudad al iniciar
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
-
-  // ✅ FIX: forzar que la Info Chat modal esté cerrada al cargar
-  if($infoChatModal) $infoChatModal.style.display = 'none';
+document.addEventListener('DOMContentLoaded', () => {
+  // 👇 Si no hay filas al cargar, agregamos una por defecto
+  if (!$cityList.querySelector('.city-row')) {
+    addCityRow();
+  }
 });
