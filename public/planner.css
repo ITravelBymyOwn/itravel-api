@@ -503,7 +503,7 @@ table.itinerary th{
   background:#fff;
   box-shadow:-3px 0 8px rgba(0,0,0,0.15);
   z-index:9999;
-  display:flex;
+  display:none; /* ✅ corregido */
   flex-direction:column;
 }
 .info-chat-panel{
