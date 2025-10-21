@@ -1233,23 +1233,26 @@ function addRowReorderControls(row){
   });
 }
 
-// ✅ Solución robusta: envolver addCityRow de forma segura sin romper ejecución
-(function safeWrapAddCityRow(){
-  function tryWrap(){
-    if (typeof window.addCityRow === 'function' && !window.__wrappedAddCityRow) {
-      const orig = window.addCityRow;
-      window.addCityRow = function(pref){
-        orig(pref);
-        const row = $cityList?.lastElementChild;
-        if (row) addRowReorderControls(row);
-      };
-      window.__wrappedAddCityRow = true;
+// ✅ Solución robusta para restaurar la fila inicial correctamente
+(function robustWrapAddCityRow(){
+  const maxTries = 20;
+  let tries = 0;
+  const interval = setInterval(()=>{
+    if (typeof window.addCityRow === 'function') {
+      if (!window.__wrappedAddCityRow) {
+        const orig = window.addCityRow;
+        window.addCityRow = function(pref){
+          orig(pref);
+          const row = $cityList?.lastElementChild;
+          if (row) addRowReorderControls(row);
+        };
+        window.__wrappedAddCityRow = true;
+      }
+      clearInterval(interval);
     }
-  }
-  // Intentar envolver inmediatamente si ya existe
-  tryWrap();
-  // Y volver a intentarlo cuando el DOM esté listo
-  document.addEventListener('DOMContentLoaded', tryWrap);
+    tries++;
+    if (tries > maxTries) clearInterval(interval);
+  }, 150);
 })();
 
 // País: solo letras y espacios (protección suave en input)
