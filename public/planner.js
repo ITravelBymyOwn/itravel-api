@@ -350,9 +350,11 @@ function renderCityItinerary(city){
     `;
     const tb = qs('tbody', sec);
     (data.byDay[dayNum]||[]).forEach(r=>{
-      // 🧽 Limpieza de prefijos técnicos al mostrar
+      // 🧽 v50: quitar “rev:” al mostrar la Actividad
       const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i, '');
-      const cleanNotes = String(r.notes||'').replace(/valid:\s*/gi, '').trim();
+      // 🧽 v51: ocultar el marcador “valid:” en Notas, pero conservar el resto del texto
+      const cleanNotes = String(r.notes||'').replace(/\bvalid:\s*/i, '').trim();
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${r.start||''}</td>
