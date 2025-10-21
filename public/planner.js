@@ -1,10 +1,10 @@
-=========================================================
-   ITRAVELBYMYOWN · PLANNER v50 (parte 1/3)
-   Base: v49
-   Cambios v50:
-   - Agregado Info Chat modal independiente (historial, input, output propios).
-   - Eliminación visual de “valid:” en notas renderizadas.
-   - Mismo estilo de tres puntitos que chat principal.
+/* =========================================================
+   ITRAVELBYMYOWN · PLANNER v49 (parte 1/3)
+   Base: v48
+   Cambios clave v49 (mínimos y focalizados):
+   - Chat global: bloqueo SOLO del input del chat durante razonamiento (tres puntitos).
+   - Preparativos para fusión sin borrado (mantener lo existente por defecto).
+   - Sin tocar UI ni estructuras fuera de lo necesario.
 ========================================================= */
 
 /* ==============================
@@ -16,10 +16,10 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
-let savedDestinations = [];
-let itineraries = {};
-let cityMeta = {};
-let session = [];
+let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
+let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate } }
+let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
+let session = [];                // historial para el agente
 let activeCity = null;
 
 let planningStarted = false;
@@ -75,20 +75,6 @@ const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
 
 /* ==============================
-   SECCIÓN 3b · Info Chat DOM
-================================= */
-const $infoChatModal  = qs('#info-chat-modal');
-const $infoChatBtn    = qs('#info-chat-toggle');
-const $infoChatClose  = qs('#info-chat-close');
-const $infoChatM      = qs('#info-chat-messages');
-const $infoChatI      = qs('#info-chat-input');
-const $infoChatSend   = qs('#info-chat-send');
-const $infoThinking   = qs('#info-thinking-indicator');
-
-let infoSession = [];  // Historial independiente del Info Chat
-let infoThinkingTimer = null;
-
-/* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
 ================================= */
 function chatMsg(html, who='ai'){
@@ -101,17 +87,7 @@ function chatMsg(html, who='ai'){
   return div;
 }
 
-// Info Chat equivalente
-function infoChatMsg(html, who='ai'){
-  if(!html) return;
-  const div = document.createElement('div');
-  div.className = `chat-message ${who==='user'?'user':'ai'}`;
-  div.innerHTML = String(html).replace(/\n/g,'<br>');
-  $infoChatM.appendChild(div);
-  $infoChatM.scrollTop = $infoChatM.scrollHeight;
-  return div;
-}
-
+// Indicador “pensando” (esquina inferior derecha con tres puntos)
 let thinkingTimer = null;
 function showThinking(on){
   if(!$thinkingIndicator) return;
@@ -130,115 +106,154 @@ function showThinking(on){
   }
 }
 
-// 🔒 Bloquear SOLO el input del chat durante razonamiento
+// 🔒 Bloquear SOLO el input del chat durante el razonamiento informativo
 function setChatBusy(on){
   if($chatI) $chatI.disabled = on;
   if($send)  $send.disabled  = on;
   showThinking(on);
 }
 
-// Info Chat “pensando”
-function showInfoThinking(on){
-  if(!$infoThinking) return;
-  if(on){
-    if($infoThinking.style.display==='flex') return;
-    $infoThinking.style.display = 'flex';
-    let dots = $infoThinking.querySelectorAll('span');
-    let idx = 0;
-    infoThinkingTimer = setInterval(()=>{
-      dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
-      idx = (idx+1)%3;
-    }, 400);
-  } else {
-    clearInterval(infoThinkingTimer);
-    $infoThinking.style.display = 'none';
+/* ==============================
+   SECCIÓN 5 · Fechas / horas
+================================= */
+function autoFormatDMYInput(el){
+  el.addEventListener('input', ()=>{
+    const v = el.value.replace(/\D/g,'').slice(0,8);
+    if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
+    else el.value = v;
+  });
+}
+function parseDMY(str){
+  if(!str) return null;
+  const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(str.trim());
+  if(!m) return null;
+  const d = new Date(+m[3], (+m[2]-1), +m[1]);
+  if(d.getFullYear()!=+m[3] || d.getMonth()!=+m[2]-1 || d.getDate()!=+m[1]) return null;
+  return d;
+}
+function formatDMY(d){
+  const dd = String(d.getDate()).padStart(2,'0');
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const yy = d.getFullYear();
+  return `${dd}/${mm}/${yy}`;
+}
+function addDays(d, n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+function addMinutes(hhmm, min){
+  const [H,M] = (hhmm||DEFAULT_START).split(':').map(n=>parseInt(n||'0',10));
+  const d = new Date(2000,0,1,H||0,M||0,0);
+  d.setMinutes(d.getMinutes()+min);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+/* ==============================
+   SECCIÓN 6 · UI ciudades (sidebar)
+================================= */
+function makeHoursBlock(days){
+  const wrap = document.createElement('div');
+  wrap.className = 'hours-block';
+  for(let d=1; d<=days; d++){
+    const row = document.createElement('div');
+    row.className = 'hours-day';
+    row.innerHTML = `
+      <span>Día ${d}</span>
+      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM">
+      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM">
+    `;
+    wrap.appendChild(row);
   }
+  return wrap;
 }
 
-function setInfoChatBusy(on){
-  if($infoChatI) $infoChatI.disabled = on;
-  if($infoChatSend) $infoChatSend.disabled = on;
-  showInfoThinking(on);
+function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
+  const row = document.createElement('div');
+  row.className = 'city-row';
+  row.innerHTML = `
+    <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
+    <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
+    <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+    <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}"></label>
+    <button class="remove" type="button">✕</button>
+  `;
+  const baseDateEl = qs('.baseDate', row);
+  autoFormatDMYInput(baseDateEl);
+
+  const hoursWrap = document.createElement('div');
+  hoursWrap.className = 'hours-block';
+  row.appendChild(hoursWrap);
+
+  const daysSelect = qs('.days', row);
+  if(pref.days){
+    daysSelect.value = String(pref.days);
+    const tmp = makeHoursBlock(pref.days).children;
+    Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
+  }
+  daysSelect.addEventListener('change', ()=>{
+    const n = Math.max(0, parseInt(daysSelect.value||0,10));
+    hoursWrap.innerHTML='';
+    if(n>0){
+      const tmp = makeHoursBlock(n).children;
+      Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
+    }
+  });
+
+  qs('.remove',row).addEventListener('click', ()=> row.remove());
+  $cityList.appendChild(row);
 }
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v50 (parte 2/3)
-   Cambios v50:
-   - Lógica funcional del Info Chat modal (abrir, cerrar, enviar, recibir).
-   - Indicador “tres puntitos” durante razonamiento.
-   - Historial independiente (infoSession).
-========================================================= */
 
 /* ==============================
-   SECCIÓN 4b · Apertura / Cierre Info Chat
+   SECCIÓN 7 · Guardar destinos
 ================================= */
-function openInfoChat(){
-  if($infoChatModal) $infoChatModal.style.display = 'flex';
-  if($infoChatI) $infoChatI.focus();
-}
-function closeInfoChat(){
-  if($infoChatModal) $infoChatModal.style.display = 'none';
-}
+function saveDestinations(){
+  const rows = qsa('.city-row', $cityList);
+  const list = [];
+  rows.forEach(r=>{
+    const city     = qs('.city',r).value.trim();
+    const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
+    const daysVal  = qs('.days',r).value;
+    const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
+    const baseDate = qs('.baseDate',r).value.trim();
 
-$infoChatBtn?.addEventListener('click', openInfoChat);
-$infoChatClose?.addEventListener('click', closeInfoChat);
-
-/* ==============================
-   SECCIÓN 4c · Info Chat - Envío y respuesta
-================================= */
-async function onSendInfo(){
-  const text = ($infoChatI.value||'').trim();
-  if(!text) return;
-  infoChatMsg(text,'user');
-  $infoChatI.value='';
-
-  setInfoChatBusy(true);
-
-  try {
-    const style = `
-Eres "Astra", agente de viajes internacional.
-Responde a la pregunta informativa del usuario de forma cálida, concreta y útil.
-NO entregues JSON, no propongas cambios de itinerario.
-`.trim();
-
-    const res = await fetch(API_URL,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ model: MODEL, input: `${style}\n\n${text}`, history: infoSession })
+    if(!city) return;
+    const perDay = [];
+    qsa('.hours-day', r).forEach((hd, idx)=>{
+      const start = qs('.start',hd).value || DEFAULT_START;
+      const end   = qs('.end',hd).value   || DEFAULT_END;
+      perDay.push({ day: idx+1, start, end });
     });
+    if(perDay.length===0){
+      for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
+    }
+    list.push({ city, country, days, baseDate, perDay });
+  });
 
-    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
-    const ans = data?.text || '⚠️ No se pudo obtener respuesta.';
+  savedDestinations = list;
+  savedDestinations.forEach(({city,days,baseDate,perDay})=>{
+    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
+    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
+    else {
+      cityMeta[city].baseDate = baseDate||null;
+      cityMeta[city].perDay   = perDay||[];
+    }
+    for(let d=1; d<=days; d++){
+      if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
+    }
+  });
 
-    infoChatMsg(ans, 'ai');
+  // Limpia ciudades eliminadas
+  Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
+  Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
-    // Guardar historial
-    infoSession.push({role:'user',content:text});
-    infoSession.push({role:'assistant',content:ans});
-
-  } catch (e) {
-    console.error('Info Chat error:', e);
-    infoChatMsg('⚠️ Ocurrió un error al contactar al asistente.','ai');
-  } finally {
-    setInfoChatBusy(false);
-  }
+  renderCityTabs();
+  $start.disabled = savedDestinations.length===0;
+  hasSavedOnce = true;
 }
-
-/* ==============================
-   SECCIÓN 4d · Listeners Info Chat
-================================= */
-$infoChatSend?.addEventListener('click', onSendInfo);
-$infoChatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){
-    e.preventDefault();
-    onSendInfo();
-  }
-});
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v50 (parte 3/3)
-   Base: v49
-   Cambios v50:
-   - Se oculta “valid:” en las notas renderizadas (pero se conserva internamente).
-   - Todo el resto del código se mantiene idéntico.
+   ITRAVELBYMYOWN · PLANNER v49 (parte 2/3)
+   Base: v48
+   Cambios clave v49 (mínimos):
+   - Contrato y estilo global reforzados para: imperdibles día/noche,
+     1 tour caro + alternativas cercanas para auroras, horas nocturnas aproximadas.
+   - Fusión por defecto (no borrar) salvo instrucción explícita.
 ========================================================= */
 
 /* ==============================
@@ -310,10 +325,6 @@ function renderCityItinerary(city){
     const tb = qs('tbody', sec);
     (data.byDay[dayNum]||[]).forEach(r=>{
       const tr = document.createElement('tr');
-
-      // 👇 Aquí limpiamos “valid:” de las notas visuales
-      const cleanNotes = (r.notes || '').replace(/\bvalid:\s*/i,'');
-
       tr.innerHTML = `
         <td>${r.start||''}</td>
         <td>${r.end||''}</td>
@@ -322,7 +333,7 @@ function renderCityItinerary(city){
         <td>${r.to||''}</td>
         <td>${r.transport||''}</td>
         <td>${r.duration||''}</td>
-        <td>${cleanNotes}</td>
+        <td>${r.notes||''}</td>
       `;
       tb.appendChild(tr);
     });
@@ -1204,142 +1215,74 @@ ${allDays}
 }
 
 /* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos (corregida)
-============================== */
+   SECCIÓN 20 · Orden de ciudades + Eventos
+================================= */
 function addRowReorderControls(row){
-  if (!row) return;
+  const ctrlWrap = document.createElement('div');
+  ctrlWrap.style.display='flex';
+  ctrlWrap.style.gap='.35rem';
+  ctrlWrap.style.alignItems='center';
+  const up = document.createElement('button'); up.textContent='↑'; up.className='btn ghost';
+  const down = document.createElement('button'); down.textContent='↓'; down.className='btn ghost';
+  ctrlWrap.appendChild(up); ctrlWrap.appendChild(down);
+  row.appendChild(ctrlWrap);
 
-  // Evitar duplicados si ya existen controles
-  if (row.querySelector('.reorder-controls')) return;
-
-  // Contenedor que reemplazará el botón Remove pero sin alterar el grid
-  const removeBtn = row.querySelector('.remove');
-  if (!removeBtn) return; // Si por alguna razón no existe, salimos
-
-  const wrap = document.createElement('div');
-  wrap.className = 'reorder-controls';
-  wrap.style.display = 'flex';
-  wrap.style.gap = '.35rem';
-  wrap.style.alignItems = 'center';
-
-  const up = document.createElement('button');
-  up.textContent = '↑';
-  up.className = 'btn ghost';
-  up.title = 'Subir ciudad';
-
-  const down = document.createElement('button');
-  down.textContent = '↓';
-  down.className = 'btn ghost';
-  down.title = 'Bajar ciudad';
-
-  // Insertamos el contenedor en el MISMO lugar que estaba el botón remove
-  const parent = removeBtn.parentNode;
-  parent.replaceChild(wrap, removeBtn);
-  wrap.appendChild(up);
-  wrap.appendChild(down);
-  wrap.appendChild(removeBtn);
-
-  // Handlers de movimiento
   up.addEventListener('click', ()=>{
-    const prev = row.previousElementSibling;
-    if (prev) $cityList.insertBefore(row, prev);
+    if(row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
   });
-
   down.addEventListener('click', ()=>{
-    const next = row.nextElementSibling;
-    if (next) $cityList.insertBefore(next, row);
+    if(row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
   });
 }
+const origAddCityRow = addCityRow;
+addCityRow = function(pref){
+  origAddCityRow(pref);
+  const row = $cityList.lastElementChild;
+  if(row) addRowReorderControls(row);
+};
 
-// ✅ Envolver addCityRow sin romper la grilla
-(function robustWrapAddCityRow(){
-  function wrapOnce(){
-    if (typeof window.addCityRow === 'function' && !window.__wrappedAddCityRow) {
-      const orig = window.addCityRow;
-      window.addCityRow = function(pref){
-        orig(pref);
-        const row = $cityList?.lastElementChild;
-        if (row) addRowReorderControls(row);
-      };
-      window.__wrappedAddCityRow = true;
-    }
-  }
-
-  // Intento inmediato y al cargar el DOM
-  wrapOnce();
-  document.addEventListener('DOMContentLoaded', wrapOnce);
-
-  // Reintentos por si addCityRow llega más tarde
-  let tries = 0;
-  const maxTries = 20;
-  const interval = setInterval(()=>{
-    wrapOnce();
-    if (window.__wrappedAddCityRow || ++tries > maxTries) clearInterval(interval);
-  }, 150);
-})();
-
-// Protección de inputs de país
+// País: solo letras y espacios (protección suave en input)
 document.addEventListener('input', (e)=>{
-  if (e.target && e.target.classList && e.target.classList.contains('country')) {
+  if(e.target && e.target.classList && e.target.classList.contains('country')){
     const original = e.target.value;
-    const filtered = original.replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g, '');
-    if (filtered !== original) {
+    const filtered = original.replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
+    if(filtered !== original){
       const pos = e.target.selectionStart;
       e.target.value = filtered;
-      if (typeof pos === 'number') {
-        e.target.setSelectionRange(Math.max(0, pos - 1), Math.max(0, pos - 1));
-      }
+      if(typeof pos === 'number'){ e.target.setSelectionRange(Math.max(0,pos-1), Math.max(0,pos-1)); }
     }
   }
 });
 
-/* ===============================
-   SECCIÓN 21 · INIT y listeners (corregida)
-=============================== */
-
-$addCity?.addEventListener('click', () => addCityRow());
-
-qs('#reset-planner')?.addEventListener('click', () => {
-  $cityList.innerHTML = '';
-  savedDestinations = [];
-  itineraries = [];
-  cityMeta = {};
+/* ==============================
+   SECCIÓN 21 · INIT y listeners
+================================= */
+$addCity?.addEventListener('click', ()=>addCityRow());
+qs('#reset-planner')?.addEventListener('click', ()=>{
+  $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
   addCityRow();
   $start.disabled = true;
-  $tabs.innerHTML = '';
-  $itWrap.innerHTML = '';
-  $chatBox.style.display = 'none';
-  $chatM.innerHTML = '';
-  session = [];
-  hasSavedOnce = false;
-  pendingChange = null;
+  $tabs.innerHTML=''; $itWrap.innerHTML='';
+  $chatBox.style.display='none'; $chatM.innerHTML='';
+  session = []; hasSavedOnce=false; pendingChange=null;
 });
-
 $save?.addEventListener('click', saveDestinations);
 $start?.addEventListener('click', startPlanning);
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
-$chatIP?.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+$chatI?.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){
     e.preventDefault();
     onSend();
   }
 });
 
 // CTA y upsell
-$confirmCTA?.addEventListener('click', () => {
-  isItineraryLocked = true;
-  qs('#monetization-upsell').style.display = 'flex';
-});
-$upsellClose?.addEventListener('click', () => {
-  qs('#monetization-upsell').style.display = 'none';
-});
+$confirmCTA?.addEventListener('click', ()=>{ isItineraryLocked = true; qs('#monetization-upsell').style.display='flex'; });
+$upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
 // Inicialización
-document.addEventListener('DOMContentLoaded', () => {
-  // 👇 Si no hay filas al cargar, agregamos una por defecto
-  if (!$cityList.querySelector('.city-row')) {
-    addCityRow();
-  }
+document.addEventListener('DOMContentLoaded', ()=>{
+  if(!document.querySelector('#city-list .city-row')) addCityRow();
 });
