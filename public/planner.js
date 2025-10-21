@@ -78,7 +78,7 @@ const $thinkingIndicator = qs('#thinking-indicator');
    SECCIÓN 3b · Info Chat DOM
 ================================= */
 const $infoChatModal  = qs('#info-chat-modal');
-const $infoChatBtn    = qs('#info-chat-open');
+const $infoChatBtn    = qs('#info-chat-toggle');
 const $infoChatClose  = qs('#info-chat-close');
 const $infoChatM      = qs('#info-chat-messages');
 const $infoChatI      = qs('#info-chat-input');
