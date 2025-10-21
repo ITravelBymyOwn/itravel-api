@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=48" />
+  <link rel="stylesheet" href="./planner.css?v=50" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -16,6 +16,7 @@
   </script>
 </head>
 <body>
+  <!-- TOPBAR -->
   <div class="topbar">
     <div class="brand">ITravelByMyOwn Planner</div>
     <div class="lang">
@@ -24,6 +25,8 @@
       <a href="#">FR</a>
       <a href="#">PT</a>
     </div>
+    <!-- Botón Info Chat -->
+    <button id="info-chat-toggle" class="btn info-chat-btn" title="Abrir Info Chat">💬 Info Chat</button>
   </div>
 
   <div id="planner-grid">
@@ -112,12 +115,18 @@
     © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
   </footer>
 
-  <div id="monetization-upsell" class="upsell" style="display:none;">
-    <div class="upsell-card">
-      <h3>Desbloquea edición y exportación</h3>
-      <p>Este itinerario está fijado. Para editar y usar exportaciones, mejora a <strong>Premium</strong>.</p>
-      <button class="btn primary" id="upsell-cta">Quiero Premium</button>
-      <button class="btn ghost" id="upsell-close">Cerrar</button>
+  <!-- Modal Info Chat -->
+  <div id="info-chat-modal" class="info-chat-modal" style="display:none;">
+    <div class="info-chat-panel">
+      <div class="info-chat-header">
+        <h3>Info Chat · Astra 🌍</h3>
+        <button id="info-chat-close" class="btn ghost">✖</button>
+      </div>
+      <div id="info-chat-messages" class="chat-messages"></div>
+      <div class="chat-input">
+        <input id="info-chat-input" type="text" placeholder="Hazme cualquier pregunta sobre viajes..." />
+        <button id="info-chat-send" class="btn primary">Enviar</button>
+      </div>
     </div>
   </div>
 
@@ -129,11 +138,16 @@
     </div>
   </div>
 
-  <!-- 🧠 Indicador estilo ChatGPT -->
+  <!-- 🧠 Indicador estilo ChatGPT (Planner) -->
   <div id="thinking-indicator">
     <span></span><span></span><span></span>
   </div>
 
-  <script src="./planner.js?v=48"></script>
+  <!-- 🧠 Indicador estilo ChatGPT (Info Chat) -->
+  <div id="thinking-indicator-info">
+    <span></span><span></span><span></span>
+  </div>
+
+  <script src="./planner.js?v=50"></script>
 </body>
 </html>
