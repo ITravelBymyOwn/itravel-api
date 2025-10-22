@@ -1409,29 +1409,74 @@ $chatI?.addEventListener('keydown', e=>{
 $confirmCTA?.addEventListener('click', ()=>{ isItineraryLocked = true; qs('#monetization-upsell').style.display='flex'; });
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
-// 🆕 Info Chat: abrir/cerrar/enviar
-$infoToggle?.addEventListener('click', ()=>{
-  if($infoModal) $infoModal.style.display = 'flex';
-});
-$infoClose?.addEventListener('click', ()=>{
-  if($infoModal) $infoModal.style.display = 'none';
-});
-$infoSend?.addEventListener('click', async ()=>{
-  const txt = ($infoInput?.value||'').trim();
+/* ====== 🆕 Info Chat: vinculación robusta (reconsulta tras DOMContentLoaded) ====== */
+function openInfoModal(){
+  const modal = qs('#info-modal');
+  if(!modal) return;
+  modal.style.display = 'flex';
+  modal.classList?.remove('hidden');
+  modal.setAttribute?.('aria-hidden','false');
+  const input = qs('#info-input');
+  if(input){ input.focus(); }
+}
+function closeInfoModal(){
+  const modal = qs('#info-modal');
+  if(!modal) return;
+  modal.style.display = 'none';
+  modal.classList?.add('hidden');
+  modal.setAttribute?.('aria-hidden','true');
+}
+async function sendInfoMessage(){
+  const input = qs('#info-input');
+  const btn   = qs('#info-send');
+  if(!input || !btn) return;
+  const txt = (input.value||'').trim();
   if(!txt) return;
   infoChatMsg(txt,'user');
-  $infoInput.value='';
+  input.value='';
   const ans = await callInfoAgent(txt);
   infoChatMsg(ans||'');
-});
-$infoInput?.addEventListener('keydown', async (e)=>{
-  if(e.key==='Enter' && !e.shiftKey){
-    e.preventDefault();
-    $infoSend?.click();
-  }
-});
+}
+function bindInfoChatListeners(){
+  const toggle = qs('#info-toggle');
+  const close  = qs('#info-close');
+  const send   = qs('#info-send');
+  const input  = qs('#info-input');
+
+  // Limpieza previa por si se re-vincula
+  toggle?.replaceWith(toggle.cloneNode(true)); // evita listeners duplicados si existían
+  close?.replaceWith(close.cloneNode(true));
+  send?.replaceWith(send.cloneNode(true));
+
+  const t2 = qs('#info-toggle');
+  const c2 = qs('#info-close');
+  const s2 = qs('#info-send');
+  const i2 = qs('#info-input');
+
+  t2?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
+  s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+  i2?.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' && !e.shiftKey){
+      e.preventDefault();
+      sendInfoMessage();
+    }
+  });
+
+  // Delegación de respaldo (por si el toggle es un <a> o cambia internamente)
+  document.addEventListener('click', (e)=>{
+    const el = e.target.closest('#info-toggle');
+    if(el){
+      e.preventDefault();
+      openInfoModal();
+    }
+  });
+}
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
+  // 🆕 Vincula Info Chat cuando el DOM ya está cargado
+  bindInfoChatListeners();
 });
+
