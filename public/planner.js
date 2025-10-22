@@ -336,14 +336,11 @@ function renderCityItinerary(city){
   function formatDurationForDisplay(val){
     if(!val) return '';
     const s = String(val).trim();
-    // "90m", "60m", "120m"
     const m = s.match(/^(\d+(?:\.\d+)?)\s*m$/i);
     if(m){
       const minutes = parseFloat(m[1]);
       const hours = minutes / 60;
-      // 🆕 v53: redondeo a 1 decimal fijo si no es entero
-      const rounded = Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
-      return rounded;
+      return (Number.isInteger(hours) ? `${hours}h` : `${hours}h`);
     }
     return s;
   }
@@ -366,10 +363,10 @@ function renderCityItinerary(city){
     `;
     const tb = qs('tbody', sec);
     (data.byDay[dayNum]||[]).forEach(r=>{
-      // 🧽 v50: quitar “rev:” al mostrar la Actividad
+      // 🧽 Limpiar “rev:” en Actividad
       const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i, '');
-      // 🧽 v51: ocultar “valid:” en Notas
-      const cleanNotes = String(r.notes||'').replace(/\bvalid:\s*/i, '').trim();
+      // 🧽 Mostrar notas ocultando “valid:” al inicio si existe
+      const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i, '').trim();
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${r.start||''}</td>
@@ -1452,7 +1449,7 @@ $confirmCTA?.addEventListener('click', ()=>{
 });
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
-/* ====== 🆕 Info Chat: vinculación robusta (corregida) ====== */
+/* ====== 🆕 Info Chat: IDs actualizados y listeners robustos ====== */
 function openInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
@@ -1500,7 +1497,7 @@ function bindInfoChatListeners(){
     }
   });
 
-  // Delegación de respaldo (por si el toggle es un <a> o cambia internamente)
+  // Delegación de respaldo
   document.addEventListener('click', (e)=>{
     const el = e.target.closest('#info-chat-toggle');
     if(el){
@@ -1513,7 +1510,5 @@ function bindInfoChatListeners(){
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
-  // 🆕 Vincula Info Chat cuando el DOM ya está cargado
   bindInfoChatListeners();
 });
-
