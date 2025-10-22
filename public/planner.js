@@ -332,6 +332,21 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
+  // 🔁 Conversor local para mostrar duración en horas si viene en minutos
+  function formatDurationForDisplay(val){
+    if(!val) return '';
+    const s = String(val).trim();
+    // "90m", "60m", "120m"
+    const m = s.match(/^(\d+(?:\.\d+)?)\s*m$/i);
+    if(m){
+      const minutes = parseFloat(m[1]);
+      const hours = minutes / 60;
+      // 1.5 → "1.5h", 2 → "2h"
+      return (Number.isInteger(hours) ? `${hours}h` : `${hours}h`);
+    }
+    return s;
+  }
+
   days.forEach(dayNum=>{
     const sec = document.createElement('div');
     sec.className = 'day-section';
@@ -352,9 +367,8 @@ function renderCityItinerary(city){
     (data.byDay[dayNum]||[]).forEach(r=>{
       // 🧽 v50: quitar “rev:” al mostrar la Actividad
       const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i, '');
-      // 🧽 v51: ocultar el marcador “valid:” en Notas, pero conservar el resto del texto
+      // 🧽 v51: ocultar “valid:” en Notas
       const cleanNotes = String(r.notes||'').replace(/\bvalid:\s*/i, '').trim();
-
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${r.start||''}</td>
@@ -363,7 +377,7 @@ function renderCityItinerary(city){
         <td>${r.from||''}</td>
         <td>${r.to||''}</td>
         <td>${r.transport||''}</td>
-        <td>${r.duration||''}</td>
+        <td>${formatDurationForDisplay(r.duration||'')}</td>
         <td>${cleanNotes}</td>
       `;
       tb.appendChild(tr);
@@ -505,6 +519,7 @@ Eres "Astra", agente de viajes internacional.
 - Para fenómenos estacionales (ej. auroras): sugiere 1 tour (si procede) y alternativas cercanas económicas; indica hora de inicio aproximada típica de la ciudad.
 - Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
 - Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
+- Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
 - Actividades especiales SOLO si son plausibles; añade en notes "valid: ..." con la justificación. Si hay duda, excluye.
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
@@ -538,6 +553,31 @@ function parseJSON(s){
   }catch(_){ return null; }
 }
 
+/* 🆕 Info Chat: misma API, historial independiente */
+async function callInfoAgent(text){
+  const history = infoSession;
+  const globalStyle = `
+Eres "Astra", asistente informativo de viajes.
+- SOLO respondes preguntas informativas (clima, visados, movilidad, etc.) de forma breve y clara.
+- NO propones ediciones de itinerario ni devuelves JSON.
+`.trim();
+  try{
+    setInfoChatBusy(true);
+    const res = await fetch(API_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history })
+    });
+    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
+    return data?.text || '';
+  }catch(e){
+    console.error("Fallo Info Chat:", e);
+    return tone.fail;
+  }finally{
+    setInfoChatBusy(false);
+  }
+}
+
 /* ==============================
    SECCIÓN 13 · Merge / utilidades
 ================================= */
@@ -558,22 +598,6 @@ function ensureDays(city){
   }
   itineraries[city].byDay = byDay;
 }
-
-// 🆕 Conversión mínima: minutos → horas si corresponde
-function convertDurationFormat(dur){
-  const m = String(dur||'').trim();
-  const min = m.match(/^(\d+)m$/i);
-  if(min){
-    const num = parseInt(min[1],10);
-    if(!isNaN(num) && num >= 60){
-      const h = Math.floor(num/60);
-      const r = num % 60;
-      return r===0 ? `${h}h` : `${h}h ${r}m`;
-    }
-  }
-  return m;
-}
-
 function normalizeRow(r = {}, fallbackDay = 1){
   const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? DEFAULT_START;
   const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? DEFAULT_END;
@@ -583,9 +607,22 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const trans   = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
   const durRaw  = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes   = r.notes ?? r.nota ?? r.comentarios ?? '';
-  const duration = convertDurationFormat((typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||''));
+  const duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
   return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
+}
+
+/* 🔎 blando: evita duplicados de misma actividad en el MISMO día (aunque cambien horas) */
+function dedupeSoftSameDay(rows){
+  const seen = new Set();
+  const out = [];
+  for(const r of rows.sort((a,b)=> (a.start||'') < (b.start||'') ? -1 : 1)){
+    const k = [String(r.activity||'').toLowerCase().trim(), (r.from||'').toLowerCase().trim(), (r.to||'').toLowerCase().trim()].join('|');
+    if(seen.has(k)) continue;
+    seen.add(k);
+    out.push(r);
+  }
+  return out;
 }
 
 function pushRows(city, rows, replace=false){
@@ -605,13 +642,14 @@ function pushRows(city, rows, replace=false){
     const d = obj.day;
     if(!byDay[d]) byDay[d]=[];
     dedupeInto(byDay[d], obj);
+    // 🧽 además, duplicados blandos por actividad en el mismo día
+    byDay[d] = dedupeSoftSameDay(byDay[d]);
     if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
   });
 
   itineraries[city].byDay = byDay;
   ensureDays(city);
 }
-
 function upsertCityMeta(meta){
   const name = meta.city || activeCity || savedDestinations[0]?.city;
   if(!name) return;
@@ -1232,7 +1270,7 @@ async function onSend(){
     return;
   }
 
-  // 10) Edición libre
+  // 10) Edición libre —— si NO se especifica día, reoptimiza TODA la ciudad
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
     if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.'); return; }
@@ -1264,7 +1302,8 @@ ${allDays}
 **Instrucción del usuario (libre):** ${text}
 
 - Integra lo pedido SIN borrar lo existente (fusión). 
-- Para nocturnas (p.ej. auroras), añade un tour (si procede) + alternativas cercanas y hora aproximada local de inicio.
+- Si el usuario no especifica un día concreto, revisa y reacomoda TODA la ciudad evitando duplicados.
+- Para nocturnas (p.ej. auroras), incluye 1 tour (mandatorio si procede) + varias noches alternativas cercanas (≤1h desde el centro cuando aplique), con hora aproximada local de inicio.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 - Valida plausibilidad global y, si mantienes actividad especial, añade "notes: valid: ...".
 `.trim();
@@ -1286,9 +1325,14 @@ ${allDays}
       const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
       const val = await validateRowsWithAgent(city, rows, baseDate);
       pushRows(city, val.allowed, false);
+
+      // 🔁 Reoptimiza TODOS los días para garantizar coherencia global y evitar duplicados
+      const totalDays = Object.keys(itineraries[city].byDay||{}).length;
+      for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
+
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Apliqué el cambio sin borrar tu plan y reoptimicé el día.','ai');
+      chatMsg('✅ Apliqué el cambio, revisé toda la ciudad y reoptimicé el itinerario completo.','ai');
     }else{
       showWOW(false);
       chatMsg(parsed?.followup || 'No recibí cambios válidos. ¿Intentamos de otra forma?','ai');
@@ -1365,37 +1409,29 @@ $chatI?.addEventListener('keydown', e=>{
 $confirmCTA?.addEventListener('click', ()=>{ isItineraryLocked = true; qs('#monetization-upsell').style.display='flex'; });
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
-// 🆕 Info Chat Toggle (bug fix)
+// 🆕 Info Chat: abrir/cerrar/enviar
 $infoToggle?.addEventListener('click', ()=>{
-  if($infoModal.style.display==='flex'){
-    $infoModal.style.display='none';
-  }else{
-    $infoModal.style.display='flex';
-    $infoInputSí ✅ — lo que notaste es correcto:  
-
-👉 La **sección 13 que te di antes era más pequeña** porque **ya incluía solo la modificación necesaria** para **convertir minutos a horas** sin tocar nada más de la lógica original de v51.  
-
-Pero **no eliminé ninguna funcionalidad existente**:  
-- La deduplicación,  
-- la fusión de itinerarios,  
-- la actualización de `cityMeta` y  
-- la función `applyParsedToState`  
-están **exactamente igual que en tu v51 original** ✅.  
-
-📌 La **única diferencia** real respecto a v51 está aquí:
-
-```javascript
-// 🆕 Conversión mínima: minutos → horas si corresponde
-function convertDurationFormat(dur){
-  const m = String(dur||'').trim();
-  const min = m.match(/^(\d+)m$/i);
-  if(min){
-    const num = parseInt(min[1],10);
-    if(!isNaN(num) && num >= 60){
-      const h = Math.floor(num/60);
-      const r = num % 60;
-      return r===0 ? `${h}h` : `${h}h ${r}m`;
-    }
+  if($infoModal) $infoModal.style.display = 'flex';
+});
+$infoClose?.addEventListener('click', ()=>{
+  if($infoModal) $infoModal.style.display = 'none';
+});
+$infoSend?.addEventListener('click', async ()=>{
+  const txt = ($infoInput?.value||'').trim();
+  if(!txt) return;
+  infoChatMsg(txt,'user');
+  $infoInput.value='';
+  const ans = await callInfoAgent(txt);
+  infoChatMsg(ans||'');
+});
+$infoInput?.addEventListener('keydown', async (e)=>{
+  if(e.key==='Enter' && !e.shiftKey){
+    e.preventDefault();
+    $infoSend?.click();
   }
-  return m;
-}
+});
+
+// Inicialización
+document.addEventListener('DOMContentLoaded', ()=>{
+  if(!document.querySelector('#city-list .city-row')) addCityRow();
+});
