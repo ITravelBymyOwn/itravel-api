@@ -123,30 +123,67 @@ function setChatBusy(on){
 }
 
 /* ==============================
-   SECCIÓN 4B · Info Chat UI
+   SECCIÓN 4B · Info Chat UI (mejorada estilo ChatGPT)
 ================================= */
 function infoChatMsg(html, who='ai'){
   if(!html) return;
   const div = document.createElement('div');
   div.className = `chat-message ${who==='user'?'user':'ai'}`;
   div.innerHTML = String(html).replace(/\n/g,'<br>');
-
-  // Usa la referencia y, si no existe aún, busca por ID (robusto)
   const container = $infoMessages || qs('#info-chat-messages');
-  if(!container) return; // si no hay contenedor, evita errores
+  if(!container) return;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
 }
 
-let infoThinkingTimer = null;
+// ✨ Indicador "escribiendo..."
+let infoTypingTimer = null;
+const $infoTyping = document.createElement('div');
+$infoTyping.className = 'chat-message ai typing';
+$infoTyping.innerHTML = `<span>.</span><span>.</span><span>.</span>`;
+
 function setInfoChatBusy(on){
   const input = $infoInput || qs('#info-chat-input');
   const send  = $infoSend  || qs('#info-chat-send');
   if(input) input.disabled = on;
   if(send)  send.disabled  = on;
+
+  const container = $infoMessages || qs('#info-chat-messages');
+  if(container){
+    if(on){
+      if(!container.contains($infoTyping)){
+        container.appendChild($infoTyping);
+        container.scrollTop = container.scrollHeight;
+      }
+      let dots = $infoTyping.querySelectorAll('span');
+      let idx = 0;
+      infoTypingTimer = setInterval(()=>{
+        dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
+        idx = (idx+1)%3;
+      }, 400);
+    } else {
+      clearInterval(infoTypingTimer);
+      if(container.contains($infoTyping)){
+        container.removeChild($infoTyping);
+      }
+    }
+  }
 }
 
+// 📝 Textarea auto-ajustable estilo ChatGPT
+if($infoInput){
+  $infoInput.setAttribute('rows','1');
+  $infoInput.style.overflowY = 'hidden';
+  const maxRows = 10;
+  $infoInput.addEventListener('input', ()=>{
+    $infoInput.style.height = 'auto';
+    const lineHeight = parseFloat(window.getComputedStyle($infoInput).lineHeight) || 20;
+    const lines = Math.min($infoInput.value.split('\n').length, maxRows);
+    $infoInput.style.height = `${lineHeight * lines + 8}px`;
+    $infoInput.scrollTop = $infoInput.scrollHeight;
+  });
+}
 
 /* ==============================
    SECCIÓN 5 · Fechas / horas
@@ -560,7 +597,11 @@ function parseJSON(s){
   }catch(_){ return null; }
 }
 
-/* 🆕 Info Chat: misma API, historial independiente (MODO=info) */
+/* 🆕 Info Chat: misma API, historial independiente (MODO=info)
+   - Usa mode: "info" para evitar que se aplique el contrato JSON del planner
+   - Responde en texto plano, cálido, conciso.
+   - Si llega JSON por error, devuelve mensaje humano claro.
+*/
 async function callInfoAgent(text){
   const history = infoSession;
   const globalStyle = `
@@ -572,7 +613,6 @@ Eres "Astra", asistente informativo de viajes.
   try{
     setInfoChatBusy(true);
 
-    // ⬇️ Corrección clave: enviamos mode:"info" para que la API no aplique el contrato JSON del planner
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -580,18 +620,18 @@ Eres "Astra", asistente informativo de viajes.
         model: MODEL,
         input: `${globalStyle}\n\n${text}`,
         history,
-        mode: 'info'
+        mode: 'info' // 👈 clave: evita aplicar el contrato del planner
       })
     });
 
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     const answer = (data?.text || '').trim();
 
-    // Persistimos historial ligero para mantener el contexto entre turnos
+    // 🧠 Persistimos historial para contexto conversacional
     infoSession.push({ role:'user',      content: text });
     infoSession.push({ role:'assistant', content: answer });
 
-    // Si por algún motivo llegara JSON (fallback del planner), mostramos un mensaje humano
+    // ⚠️ Si por error llega JSON, mostramos un fallback humano
     if (/^\s*\{/.test(answer)) {
       try {
         const j = JSON.parse(answer);
@@ -1487,7 +1527,6 @@ $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.di
 function openInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
-  // Forzar visibilidad aunque el HTML tenga display:none inline
   modal.style.display = 'flex';
   modal.classList.add('active');
 }
@@ -1505,6 +1544,7 @@ async function sendInfoMessage(){
   if(!txt) return;
   infoChatMsg(txt,'user');
   input.value='';
+  input.style.height = 'auto'; // 🔁 reset altura tras envío
   const ans = await callInfoAgent(txt);
   infoChatMsg(ans||'');
 }
@@ -1527,12 +1567,28 @@ function bindInfoChatListeners(){
   t2?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
   s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+
+  // ✅ Chat estilo GPT: Enter = enviar / Shift+Enter = salto de línea
   i2?.addEventListener('keydown', (e)=>{
     if(e.key==='Enter' && !e.shiftKey){
       e.preventDefault();
       sendInfoMessage();
     }
   });
+
+  // 📝 Textarea auto-ajustable
+  if(i2){
+    i2.setAttribute('rows','1');
+    i2.style.overflowY = 'hidden';
+    const maxRows = 10;
+    i2.addEventListener('input', ()=>{
+      i2.style.height = 'auto';
+      const lineHeight = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
+      const lines = Math.min(i2.value.split('\n').length, maxRows);
+      i2.style.height = `${lineHeight * lines + 8}px`;
+      i2.scrollTop = i2.scrollHeight;
+    });
+  }
 
   // Delegación de respaldo por si el toggle cambia internamente
   document.addEventListener('click', (e)=>{
