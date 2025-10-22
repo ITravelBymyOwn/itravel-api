@@ -341,8 +341,9 @@ function renderCityItinerary(city){
     if(m){
       const minutes = parseFloat(m[1]);
       const hours = minutes / 60;
-      // 1.5 → "1.5h", 2 → "2h"
-      return (Number.isInteger(hours) ? `${hours}h` : `${hours}h`);
+      // 🆕 v53: redondeo a 1 decimal fijo si no es entero
+      const rounded = Number.isInteger(hours) ? `${hours}h` : `${hours.toFixed(1)}h`;
+      return rounded;
     }
     return s;
   }
@@ -815,6 +816,10 @@ ${FORMAT}
 - Respetar ventanas horarias por día: ${JSON.stringify(perDay)}.
 - Agrupar por zonas, evitar solapamientos.
 - Validar plausibilidad global. Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
+- 🆕 Si hay días adicionales sin actividades, distribuye actividades plausibles en esos días:
+  • Considera sitios y tours hasta 2.5 h de distancia (5 h ida y vuelta) desde el centro de la ciudad.
+  • Evita dejar días completamente en blanco.
+  • Para actividades nocturnas especiales (ej. auroras), usa 1 tour y sugiere opciones locales alternativas en otros días, sin duplicar tours cada noche.
 - Nada de texto fuera del JSON.
 `.trim();
 
@@ -930,7 +935,28 @@ function detectCityInText(text){
   for(const c of list){
     if(lowered.includes(c.toLowerCase())) return c;
   }
+  // 🆕 Fuzzy match adicional sin eliminar la lógica original
+  for(const c of list){
+    const clean = c.toLowerCase();
+    if(clean.startsWith(lowered) || lowered.startsWith(clean)) return c;
+    if(levenshteinDistance(lowered, clean) <= 2) return c;
+  }
   return null;
+}
+
+// 🆕 Reutilizamos Levenshtein (sin alterar otras funciones)
+function levenshteinDistance(a,b){
+  const m = [];
+  for(let i=0;i<=b.length;i++){ m[i]=[i]; }
+  for(let j=0;j<=a.length;j++){ m[0][j]=j; }
+  for(let i=1;i<=b.length;i++){
+    for(let j=1;j<=a.length;j++){
+      m[i][j] = b.charAt(i-1)==a.charAt(j-1)
+        ? m[i-1][j-1]
+        : Math.min(m[i-1][j-1]+1, Math.min(m[i][j-1]+1, m[i-1][j]+1));
+    }
+  }
+  return m[b.length][a.length];
 }
 
 function intentFromText(text){
@@ -939,19 +965,19 @@ function intentFromText(text){
   if(/^(sí|si|ok|dale|hazlo|confirmo|de una|aplica)\b/.test(t)) return {type:'confirm'};
   if(/^(no|mejor no|cancela|cancelar|cancelá)\b/.test(t)) return {type:'cancel'};
 
-  // 🆕 Agregar varios días
+  // 🆕 Agregar un día al final (prioridad sobre varios días)
+  if(/\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b/.test(t) || /\b(un\s+d[ií]a\s+m[aá]s)\b/.test(t) || /(agrega|añade|suma)\s+un\s+d[ií]a/.test(t)){
+    const city = detectCityInText(t) || activeCity;
+    const placeM = t.match(/para\s+ir\s+a\s+([a-záéíóúüñ\s]+)$/i);
+    return {type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null};
+  }
+
+  // 🆕 Agregar varios días (después de add_day_end para dar prioridad)
   const addMulti = t.match(/(agrega|añade|suma)\s+(\d+|\w+)\s+d[ií]as?/i);
   if(addMulti){
     const n = WORD_NUM[addMulti[2]] || parseInt(addMulti[2],10);
     const city = detectCityInText(t) || activeCity;
     return {type:'add_days', city, extraDays:n};
-  }
-
-  // Agregar un día al final
-  if(/\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b/.test(t) || /\b(un\s+d[ií]a\s+m[aá]s)\b/.test(t) || /(agrega|añade|suma)\s+un\s+d[ií]a/.test(t)){
-    const city = detectCityInText(t) || activeCity;
-    const placeM = t.match(/para\s+ir\s+a\s+([a-záéíóúüñ\s]+)$/i);
-    return {type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null};
   }
 
   const rem = t.match(/(quita|elimina|borra)\s+el\s+d[ií]a\s+(\d+)/i);
@@ -1114,6 +1140,20 @@ async function onSend(){
   }
 
   const intent = intentFromText(text);
+
+  /* ✅ Ajuste mínimo: si el texto dice “un día más” (o “me quedo un día más”),
+     y el intent vino como add_days, lo convertimos a add_day_end.
+     Además, si hay “para ir a ___”, pasamos ese destino a dayTripTo. */
+  if(intent && intent.type==='add_days'){
+    const t = text.toLowerCase();
+    const isOneMoreDay = /\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b|\bun\s+d[ií]a\s+m[aá]s\b/.test(t);
+    const tripMatch = t.match(/para\s+ir\s+a\s+([a-záéíóúüñ\s]+)$/i);
+    if(isOneMoreDay || tripMatch){
+      intent.type = 'add_day_end';
+      intent.city = intent.city || activeCity;
+      if(tripMatch) intent.dayTripTo = (tripMatch[1]||'').trim();
+    }
+  }
 
   // 🆕 Agregar varios días de golpe
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
@@ -1406,29 +1446,26 @@ $chatI?.addEventListener('keydown', e=>{
 });
 
 // CTA y upsell
-$confirmCTA?.addEventListener('click', ()=>{ isItineraryLocked = true; qs('#monetization-upsell').style.display='flex'; });
+$confirmCTA?.addEventListener('click', ()=>{ 
+  isItineraryLocked = true; 
+  qs('#monetization-upsell').style.display='flex'; 
+});
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
-/* ====== 🆕 Info Chat: vinculación robusta (reconsulta tras DOMContentLoaded) ====== */
+/* ====== 🆕 Info Chat: vinculación robusta (corregida) ====== */
 function openInfoModal(){
-  const modal = qs('#info-modal');
+  const modal = qs('#info-chat-modal');
   if(!modal) return;
-  modal.style.display = 'flex';
-  modal.classList?.remove('hidden');
-  modal.setAttribute?.('aria-hidden','false');
-  const input = qs('#info-input');
-  if(input){ input.focus(); }
+  modal.classList.add('active');
 }
 function closeInfoModal(){
-  const modal = qs('#info-modal');
+  const modal = qs('#info-chat-modal');
   if(!modal) return;
-  modal.style.display = 'none';
-  modal.classList?.add('hidden');
-  modal.setAttribute?.('aria-hidden','true');
+  modal.classList.remove('active');
 }
 async function sendInfoMessage(){
-  const input = qs('#info-input');
-  const btn   = qs('#info-send');
+  const input = qs('#info-chat-input');
+  const btn   = qs('#info-chat-send');
   if(!input || !btn) return;
   const txt = (input.value||'').trim();
   if(!txt) return;
@@ -1438,20 +1475,20 @@ async function sendInfoMessage(){
   infoChatMsg(ans||'');
 }
 function bindInfoChatListeners(){
-  const toggle = qs('#info-toggle');
-  const close  = qs('#info-close');
-  const send   = qs('#info-send');
-  const input  = qs('#info-input');
+  const toggle = qs('#info-chat-toggle');
+  const close  = qs('#info-chat-close');
+  const send   = qs('#info-chat-send');
+  const input  = qs('#info-chat-input');
 
   // Limpieza previa por si se re-vincula
-  toggle?.replaceWith(toggle.cloneNode(true)); // evita listeners duplicados si existían
+  toggle?.replaceWith(toggle.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
   send?.replaceWith(send.cloneNode(true));
 
-  const t2 = qs('#info-toggle');
-  const c2 = qs('#info-close');
-  const s2 = qs('#info-send');
-  const i2 = qs('#info-input');
+  const t2 = qs('#info-chat-toggle');
+  const c2 = qs('#info-chat-close');
+  const s2 = qs('#info-chat-send');
+  const i2 = qs('#info-chat-input');
 
   t2?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
@@ -1465,7 +1502,7 @@ function bindInfoChatListeners(){
 
   // Delegación de respaldo (por si el toggle es un <a> o cambia internamente)
   document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#info-toggle');
+    const el = e.target.closest('#info-chat-toggle');
     if(el){
       e.preventDefault();
       openInfoModal();
