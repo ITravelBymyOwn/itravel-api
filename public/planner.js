@@ -41,7 +41,7 @@ const tone = {
   hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
   askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
   confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
-  doneAll: '🎉 Itinerarios generados. Puedes modificarlos o preguntar lo que quieras de tus destinos 🗺️',
+  doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
   fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
   askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
   humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
@@ -546,6 +546,7 @@ Eres "Astra", agente de viajes internacional.
     showThinking(false);
   }
 }
+
 function parseJSON(s){
   if(!s) return null;
   try{ return JSON.parse(s); }catch(_){}
@@ -559,23 +560,48 @@ function parseJSON(s){
   }catch(_){ return null; }
 }
 
-/* 🆕 Info Chat: misma API, historial independiente */
+/* 🆕 Info Chat: misma API, historial independiente (MODO=info) */
 async function callInfoAgent(text){
   const history = infoSession;
   const globalStyle = `
 Eres "Astra", asistente informativo de viajes.
-- SOLO respondes preguntas informativas (clima, visados, movilidad, etc.) de forma breve y clara.
-- NO propones ediciones de itinerario ni devuelves JSON.
+- SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
+- NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
 `.trim();
+
   try{
     setInfoChatBusy(true);
+
+    // ⬇️ Corrección clave: enviamos mode:"info" para que la API no aplique el contrato JSON del planner
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history })
+      body: JSON.stringify({
+        model: MODEL,
+        input: `${globalStyle}\n\n${text}`,
+        history,
+        mode: 'info'
+      })
     });
+
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
-    return data?.text || '';
+    const answer = (data?.text || '').trim();
+
+    // Persistimos historial ligero para mantener el contexto entre turnos
+    infoSession.push({ role:'user',      content: text });
+    infoSession.push({ role:'assistant', content: answer });
+
+    // Si por algún motivo llegara JSON (fallback del planner), mostramos un mensaje humano
+    if (/^\s*\{/.test(answer)) {
+      try {
+        const j = JSON.parse(answer);
+        if (j?.destination || j?.rows || j?.followup) {
+          return 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
+        }
+      } catch { /* no-op */ }
+    }
+
+    return answer || '¿Algo más que quieras saber?';
   }catch(e){
     console.error("Fallo Info Chat:", e);
     return tone.fail;
