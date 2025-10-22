@@ -75,13 +75,13 @@ const $confirmCTA  = qs('#confirm-itinerary');
 const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
 
-// 📌 Info Chat (Nuevo)
-const $infoToggle  = qs('#info-toggle');
-const $infoModal   = qs('#info-modal');
-const $infoInput   = qs('#info-input');
-const $infoSend    = qs('#info-send');
-const $infoClose   = qs('#info-close');
-const $infoMessages= qs('#info-messages');
+// 📌 Info Chat (IDs según tu HTML)
+const $infoToggle   = qs('#info-chat-toggle');
+const $infoModal    = qs('#info-chat-modal');
+const $infoInput    = qs('#info-chat-input');
+const $infoSend     = qs('#info-chat-send');
+const $infoClose    = qs('#info-chat-close');
+const $infoMessages = qs('#info-chat-messages');
 
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
@@ -130,15 +130,23 @@ function infoChatMsg(html, who='ai'){
   const div = document.createElement('div');
   div.className = `chat-message ${who==='user'?'user':'ai'}`;
   div.innerHTML = String(html).replace(/\n/g,'<br>');
-  $infoMessages.appendChild(div);
-  $infoMessages.scrollTop = $infoMessages.scrollHeight;
+
+  // Usa la referencia y, si no existe aún, busca por ID (robusto)
+  const container = $infoMessages || qs('#info-chat-messages');
+  if(!container) return; // si no hay contenedor, evita errores
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
   return div;
 }
+
 let infoThinkingTimer = null;
 function setInfoChatBusy(on){
-  if($infoInput) $infoInput.disabled = on;
-  if($infoSend)  $infoSend.disabled = on;
+  const input = $infoInput || qs('#info-chat-input');
+  const send  = $infoSend  || qs('#info-chat-send');
+  if(input) input.disabled = on;
+  if(send)  send.disabled  = on;
 }
+
 
 /* ==============================
    SECCIÓN 5 · Fechas / horas
@@ -1449,16 +1457,19 @@ $confirmCTA?.addEventListener('click', ()=>{
 });
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
-/* ====== 🆕 Info Chat: IDs actualizados y listeners robustos ====== */
+/* ====== Info Chat: IDs #info-chat-* + control de display ====== */
 function openInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
+  // Forzar visibilidad aunque el HTML tenga display:none inline
+  modal.style.display = 'flex';
   modal.classList.add('active');
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
   modal.classList.remove('active');
+  modal.style.display = 'none';
 }
 async function sendInfoMessage(){
   const input = qs('#info-chat-input');
@@ -1497,7 +1508,7 @@ function bindInfoChatListeners(){
     }
   });
 
-  // Delegación de respaldo
+  // Delegación de respaldo por si el toggle cambia internamente
   document.addEventListener('click', (e)=>{
     const el = e.target.closest('#info-chat-toggle');
     if(el){
