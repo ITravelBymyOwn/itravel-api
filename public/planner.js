@@ -871,17 +871,23 @@ Contexto:
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
+   (✅ ajustada para no desactivar el botón reset)
 ================================= */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
   if(p) p.textContent = msg;
 }
+
 function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
   $overlayWOW.style.display = on ? 'flex' : 'none';
+
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
+    // 👇 Evitar desactivar el botón de reinicio
+    if (el.id === 'reset-planner') return;
+
     if(on){
       el._prevDisabled = el.disabled;
       el.disabled = true;
@@ -1006,6 +1012,7 @@ ${buildIntake()}
     chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
   }
 }
+
 /* =========================================================
    ITRAVELBYMYOWN · PLANNER v55.1 (parte 3/3)
    Base: v54  ✅
