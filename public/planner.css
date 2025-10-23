@@ -46,20 +46,36 @@ body{
 }
 .topbar .lang a.active{color:var(--brand-600)}
 
-/* 🆕 Botón Info Chat en topbar */
+/* 🆕 Botón Info Chat en topbar (v55) */
 .info-chat-btn{
   background:var(--brand-600);
   color:#fff;
   border:none;
-  border-radius:var(--radius);
-  padding:.5rem .9rem;
-  font-weight:600;
+  border-radius:999px;
+  padding:.8rem 1.4rem;
+  font-weight:700;
+  font-size:1rem;
   cursor:pointer;
-  transition:.2s ease;
+  transition:all .25s ease;
   margin-left:1rem;
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  box-shadow:0 4px 14px rgba(0,0,0,0.15);
 }
 .info-chat-btn:hover{
   background:var(--brand-500);
+  transform:scale(1.08);
+  box-shadow:0 6px 20px rgba(0,0,0,0.25);
+}
+.info-chat-btn:active{
+  transform:scale(.96);
+}
+@media(max-width:768px){
+  .info-chat-btn{
+    padding:.7rem 1.2rem;
+    font-size:.9rem;
+  }
 }
 
 /* ==================== GRID ==================== */
