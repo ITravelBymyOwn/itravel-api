@@ -1,14 +1,10 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v55.1 (parte 1/3)
-   Base: v54  ✅
-   Fusión: incorpora mejoras de v55 SIN perder funcionalidad v54
-   Cambios integrados clave:
-   - Info Chat: soporte botón flotante (#info-chat-floating) manteniendo UI v54.
-   - Indicadores “pensando”/typing del Info Chat (se conserva lógica v54).
-   - NLU mejorada (más vocablos y regex robustos) manteniendo intents v54.
-   - Validación previa de fechas (adaptada a inputs DD/MM/AAAA de v54).
-   - Validador semántico global reforzado (criterios v55).
-   - Reset con modal de confirmación.
+   ITRAVELBYMYOWN · PLANNER v56 (parte 1/3)
+   Base: v55.1
+   Cambios mínimos:
+   - Bloqueo sidebar y botón reset al guardar destinos.
+   - Overlay bloquea botón flotante Info Chat.
+   - Placeholder visible y tooltip para inputs de fecha.
 ========================================================= */
 
 /* ==============================
@@ -90,6 +86,10 @@ const $infoMessages = qs('#info-chat-messages');
 // 🆕 Botón flotante adicional (v55)
 const $infoFloating = qs('#info-chat-floating');
 
+// 🆕 Sidebar y botón reset
+const $sidebar = qs('.sidebar');
+const $resetBtn = qs('#reset-planner');
+
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
 ================================= */
@@ -103,7 +103,6 @@ function chatMsg(html, who='ai'){
   return div;
 }
 
-// Indicador “pensando” (esquina inferior derecha con tres puntos)
 let thinkingTimer = null;
 function showThinking(on){
   if(!$thinkingIndicator) return;
@@ -122,7 +121,6 @@ function showThinking(on){
   }
 }
 
-// 🔒 Bloquear SOLO el input del chat durante el razonamiento informativo
 function setChatBusy(on){
   if($chatI) $chatI.disabled = on;
   if($send)  $send.disabled  = on;
@@ -131,7 +129,6 @@ function setChatBusy(on){
 
 /* ==============================
    SECCIÓN 4B · Info Chat UI (mejorada estilo ChatGPT)
-   (mantiene lógica v54 y añade compat con botón flotante)
 ================================= */
 function infoChatMsg(html, who='ai'){
   if(!html) return;
@@ -145,7 +142,6 @@ function infoChatMsg(html, who='ai'){
   return div;
 }
 
-// ✨ Indicador "escribiendo..." (v54)
 let infoTypingTimer = null;
 const $infoTyping = document.createElement('div');
 $infoTyping.className = 'chat-message ai typing';
@@ -179,7 +175,6 @@ function setInfoChatBusy(on){
   }
 }
 
-// 📝 Textarea auto-ajustable estilo ChatGPT (v54)
 if($infoInput){
   $infoInput.setAttribute('rows','1');
   $infoInput.style.overflowY = 'hidden';
@@ -197,6 +192,9 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
+  // 🆕 Placeholder visible + tooltip
+  el.placeholder = 'MM/DD/AAAA';
+  el.title = 'Formato: MM/DD/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
     if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
@@ -251,7 +249,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
     <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-    <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}"></label>
+    <label>Inicio<input class="baseDate" placeholder="MM/DD/AAAA" value="${pref.baseDate||''}"></label>
     <button class="remove" type="button">✕</button>
   `;
   const baseDateEl = qs('.baseDate', row);
@@ -279,9 +277,13 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   qs('.remove',row).addEventListener('click', ()=> row.remove());
   $cityList.appendChild(row);
 }
+
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v55.1 (parte 2/3)
-   Base: v54  ✅
+   ITRAVELBYMYOWN · PLANNER v56 (parte 2/3)
+   Base: v55.1
+   Cambios mínimos:
+   - Bloqueo sidebar y botón reset al guardar destinos.
+   - Bloqueo del botón flotante Info Chat.
 ========================================================= */
 
 /* ==============================
@@ -330,6 +332,14 @@ function saveDestinations(){
   renderCityTabs();
   $start.disabled = savedDestinations.length===0;
   hasSavedOnce = true;
+
+  // 🆕 Bloqueo visual tras guardar destinos
+  if($sidebar) $sidebar.classList.add('disabled');
+  if($resetBtn) $resetBtn.setAttribute('disabled','true');
+  if($infoFloating){
+    $infoFloating.style.pointerEvents = 'none';
+    $infoFloating.style.opacity = '0.6';
+  }
 }
 
 /* ==============================
@@ -382,7 +392,6 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
-  // 🔁 Conversor local para mostrar duración en horas si viene en minutos
   function formatDurationForDisplay(val){
     if(!val) return '';
     const s = String(val).trim();
@@ -413,9 +422,7 @@ function renderCityItinerary(city){
     `;
     const tb = qs('tbody', sec);
     (data.byDay[dayNum]||[]).forEach(r=>{
-      // 🧽 Limpiar “rev:” en Actividad (mejora v55 incluida)
       const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i, '');
-      // 🧽 Mostrar notas ocultando “valid:” al inicio si existe
       const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i, '').trim();
       const tr = document.createElement('tr');
       tr.innerHTML = `
@@ -608,9 +615,6 @@ function parseJSON(s){
   }catch(_){ return null; }
 }
 
-/* 🆕 Info Chat: misma API, historial independiente (MODO=info)
-   (se mantiene la integración v54 y la protección anti-JSON)
-*/
 async function callInfoAgent(text){
   const history = infoSession;
   const globalStyle = `
@@ -629,18 +633,16 @@ Eres "Astra", asistente informativo de viajes.
         model: MODEL,
         input: `${globalStyle}\n\n${text}`,
         history,
-        mode: 'info' // 👈 clave: evita aplicar el contrato del planner
+        mode: 'info'
       })
     });
 
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     const answer = (data?.text || '').trim();
 
-    // 🧠 Persistimos historial para contexto conversacional
     infoSession.push({ role:'user',      content: text });
     infoSession.push({ role:'assistant', content: answer });
 
-    // ⚠️ Si por error llega JSON, mostramos un fallback humano
     if (/^\s*\{/.test(answer)) {
       try {
         const j = JSON.parse(answer);
@@ -693,7 +695,6 @@ function normalizeRow(r = {}, fallbackDay = 1){
   return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
 }
 
-/* 🔎 blando: evita duplicados de misma actividad en el MISMO día (aunque cambien horas) */
 function dedupeSoftSameDay(rows){
   const seen = new Set();
   const out = [];
@@ -723,7 +724,6 @@ function pushRows(city, rows, replace=false){
     const d = obj.day;
     if(!byDay[d]) byDay[d]=[];
     dedupeInto(byDay[d], obj);
-    // 🧽 además, duplicados blandos por actividad en el mismo día
     byDay[d] = dedupeSoftSameDay(byDay[d]);
     if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
   });
@@ -810,7 +810,6 @@ function addMultipleDaysToCity(city, extraDays){
     }
   }
 
-  // Actualizar savedDestinations para reflejar el cambio
   const dest = savedDestinations.find(x=>x.city===city);
   if(dest) dest.days = (dest.days || currentMax) + extraDays;
 }
@@ -887,7 +886,7 @@ function showWOW(on, msg){
     // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
 
-    // 🧠 Bloquear también el botón flotante de Info Chat
+    // 🆕 Bloquear también el botón flotante de Info Chat
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
       return;
