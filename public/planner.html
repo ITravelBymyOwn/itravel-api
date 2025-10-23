@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=55" />
+  <link rel="stylesheet" href="./planner.css?v=56" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -25,8 +25,8 @@
       <a href="#">FR</a>
       <a href="#">PT</a>
     </div>
-    <!-- Botón Info Chat actualizado ✨ -->
-    <button id="info-chat-toggle" class="btn info-chat-btn" title="Abrir Info Chat">💬 Info Chat</button>
+    <!-- Botón Info Chat WOW ✨ -->
+    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Abrir Info Chat">💬 Info Chat</button>
   </div>
 
   <div id="planner-grid">
@@ -79,7 +79,12 @@
     <main class="main">
       <section class="box itinerary-section">
         <h2>Itinerario</h2>
-        <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+
+        <!-- 🆕 Contenedor para iniciar / reiniciar planificación -->
+        <div class="itinerary-actions">
+          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+          <button id="reset-planning" class="btn warn">Reiniciar</button>
+        </div>
 
         <div id="chat-container" class="chat" style="display:none;">
           <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
@@ -148,6 +153,6 @@
     <span></span><span></span><span></span>
   </div>
 
-  <script src="./planner.js?v=55"></script>
+  <script src="./planner.js?v=56"></script>
 </body>
 </html>
