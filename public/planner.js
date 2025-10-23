@@ -1,10 +1,10 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v53 (parte 1/3)
-   Base: v52
-   Cambios clave v53:
+   ITRAVELBYMYOWN · PLANNER v54 (parte 1/3)
+   Base: v53
+   Cambios clave v54:
    - Se agregó Chat Adicional (Info Chat).
    - Eliminación de "rev:" al renderizar tabla.
-   - Conserva toda la lógica de v52 (21 secciones).
+   - Conserva toda la lógica de v53 (21 secciones).
 ========================================================= */
 
 /* ==============================
@@ -540,14 +540,18 @@ D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...
 Reglas:
 - Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
 - Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre).
-- Valida plausibilidad GLOBAL (geografía, temporada, clima aproximado, tipo de actividad).
+- Valida PLAUSIBILIDAD GLOBAL (geografía, temporada, clima aproximado, logística).
+- Seguridad y restricciones:
+  • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
+  • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o, si es improcedente, exclúyelo.
+- Day trips: cuando se agregan días, evalúa imperdibles cercanos (≤2.5 h por trayecto, regreso mismo día) y proponlos 1 día si encajan.
+- Notas: NUNCA dejes "notes" vacío ni "seed"; escribe una nota breve y útil (p. ej., por qué es especial, tip de entrada, reserva sugerida).
 - Para actividades estacionales/nocturnas (p. ej. auroras):
-  • Inclúyelas SOLO si son plausibles para esa ciudad y fechas aproximadas.
-  • Añade en "notes" un marcador "valid: <justificación breve>" y el HORARIO aproximado de inicio local.
-  • Propón un (1) tour recomendado si tiene sentido y alternativas cercanas de bajo costo (p.ej. miradores o auto).
-- Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita del usuario (replace=true).
-- Máximo 20 filas por día.
-- Nada de texto fuera del JSON.
+  • Inclúyelas SOLO si plausibles para ciudad/fechas aproximadas.
+  • Añade en "notes" marcador "valid: <justificación breve>" y hora aproximada típica de inicio local.
+  • Propón 1 tour recomendado si tiene sentido y alternativas locales de bajo costo.
+- Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
+- Máximo 20 filas por día. Nada de texto fuera del JSON.
 `;
 
 /* ==============================
@@ -563,7 +567,9 @@ Eres "Astra", agente de viajes internacional.
 - Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
 - Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
 - Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
-- Actividades especiales SOLO si son plausibles; añade en notes "valid: ..." con la justificación. Si hay duda, excluye.
+- Day trips inteligentes: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2.5 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
+- Seguridad: evita proponer zonas/restricciones problemáticas; si hay alerta razonable, cambia por alternativa más segura o explica brevemente en "notes".
+- Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
 
@@ -813,13 +819,14 @@ function addMultipleDaysToCity(city, extraDays){
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
 Devuelve SOLO JSON válido:
-{"allowed":[{"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}],"removed":[{"reason":"..","row":{"day":..,"activity":".."}}]}
+{"allowed":[{"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}],
+ "removed":[{"reason":"..","row":{"day":..,"activity":".."}}]}
 Criterios:
 - Verifica PLAUSIBILIDAD GLOBAL de cada actividad para "${city}" dadas fechas aproximadas (${baseDate||'N/A'}), clima y geografía.
-- Rechaza actividades estacionales o geográficamente imposibles para esa ciudad/época.
-- Para actividades NOCTURNAS (p.ej. auroras), usa rangos típicos locales (aprox. 17:00–01:00 si aplica) y añade "valid:" con justificación.
-- Si mantienes una actividad especial, asegúrate de que "notes" incluya "valid:" con una justificación breve.
-- Ajusta horas si ves solapamientos obvios o huecos irrazonables; si no puedes, mantén las horas y márkalo en notes.
+- Elimina actividades estacionales o geográficamente imposibles.
+- Seguridad: si detectas riesgo/restricción sensible, NO la permitas; muévela a "removed" con reason iniciando por "risk:" y sugiere alternativa segura si procede.
+- Notas: NUNCA dejes notes vacío ni con "seed"; si falta, escribe una breve nota útil.
+- Ajusta horas si ves solapamientos razonables; si no puedes, mantén y explícalo brevemente en notes.
 Filas:
 ${JSON.stringify(rows)}
 `.trim();
@@ -887,10 +894,7 @@ ${FORMAT}
 - Respetar ventanas horarias por día: ${JSON.stringify(perDay)}.
 - Agrupar por zonas, evitar solapamientos.
 - Validar plausibilidad global. Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
-- 🆕 Si hay días adicionales sin actividades, distribuye actividades plausibles en esos días:
-  • Considera sitios y tours hasta 2.5 h de distancia (5 h ida y vuelta) desde el centro de la ciudad.
-  • Evita dejar días completamente en blanco.
-  • Para actividades nocturnas especiales (ej. auroras), usa 1 tour y sugiere opciones locales alternativas en otros días, sin duplicar tours cada noche.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2.5 h por trayecto, regreso mismo día) sin duplicar otras noches.
 - Nada de texto fuera del JSON.
 `.trim();
 
@@ -924,6 +928,59 @@ ${FORMAT}
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   showWOW(false);
   chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
+}
+
+/* 🆕 Rebalanceo masivo tras cambios (agregar días / day trip pedido) */
+async function rebalanceWholeCity(city, opts={}){
+  const data = itineraries[city];
+  const totalDays = Object.keys(data.byDay||{}).length;
+  const perDay = Array.from({length: totalDays}, (_,i)=>{
+    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:DEFAULT_START,end:DEFAULT_END};
+    return { day:i+1, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END };
+  });
+  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
+  const wantedTrip = (opts.dayTripTo||'').trim();
+
+  const prompt = `
+${FORMAT}
+**ROL:** Reequilibra COMPLETAMENTE la ciudad "${city}" (${totalDays} día/s) manteniendo lo ya plausible y completando huecos.
+- Formato B {"destination":"${city}","rows":[...],"replace": false}.
+- Respeta ventanas: ${JSON.stringify(perDay)}.
+- Considera IMPERDIBLES y actividades distribuidas sin duplicar.
+- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2.5 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
+${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
+- Valida plausibilidad y seguridad, anota "notes" SIEMPRE útiles (nunca vacías ni "seed").
+Contexto actual (para fusionar sin borrar): 
+${buildIntake()}
+`.trim();
+
+  showWOW(true,'Reequilibrando la ciudad…');
+  const ans = await callAgent(prompt, true);
+  const parsed = parseJSON(ans);
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
+    let rows = [];
+    if(parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
+    else if(parsed.destination===city && parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
+    else if(Array.isArray(parsed.destinations)){
+      const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
+      rows = (dd?.rows||[]).map(r=>normalizeRow(r));
+    }else if(Array.isArray(parsed.itineraries)){
+      const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+      rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+    }
+
+    const val = await validateRowsWithAgent(city, rows, baseDate);
+    pushRows(city, val.allowed, false);
+
+    // Reoptimiza TODOS los días para coherencia fina
+    for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
+
+    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    showWOW(false);
+  }else{
+    showWOW(false);
+    chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
+  }
 }
 
 /* ==============================
@@ -1015,6 +1072,32 @@ function detectCityInText(text){
   return null;
 }
 
+// 🆕 Nueva función: detectar ciudad base a partir de país
+function detectCityFromCountryInText(text){
+  const lowered = text.toLowerCase();
+  // Mapeo simple país -> ciudad base más común
+  const countryMap = {
+    'islandia':'reykjavik',
+    'españa':'madrid',
+    'francia':'parís',
+    'italia':'roma',
+    'inglaterra':'londres',
+    'reino unido':'londres',
+    'japón':'tokio',
+    'eeuu':'nueva york','estados unidos':'nueva york',
+    'alemania':'berlín',
+    'portugal':'lisboa',
+    'brasil':'rio de janeiro',
+    'argentina':'buenos aires',
+    'chile':'santiago',
+    'méxico':'ciudad de méxico'
+  };
+  for(const k in countryMap){
+    if(lowered.includes(k)) return countryMap[k];
+  }
+  return null;
+}
+
 // 🆕 Reutilizamos Levenshtein (sin alterar otras funciones)
 function levenshteinDistance(a,b){
   const m = [];
@@ -1038,7 +1121,7 @@ function intentFromText(text){
 
   // 🆕 Agregar un día al final (prioridad sobre varios días)
   if(/\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b/.test(t) || /\b(un\s+d[ií]a\s+m[aá]s)\b/.test(t) || /(agrega|añade|suma)\s+un\s+d[ií]a/.test(t)){
-    const city = detectCityInText(t) || activeCity;
+    const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const placeM = t.match(/para\s+ir\s+a\s+([a-záéíóúüñ\s]+)$/i);
     return {type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null};
   }
@@ -1047,30 +1130,30 @@ function intentFromText(text){
   const addMulti = t.match(/(agrega|añade|suma)\s+(\d+|\w+)\s+d[ií]as?/i);
   if(addMulti){
     const n = WORD_NUM[addMulti[2]] || parseInt(addMulti[2],10);
-    const city = detectCityInText(t) || activeCity;
+    const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     return {type:'add_days', city, extraDays:n};
   }
 
   const rem = t.match(/(quita|elimina|borra)\s+el\s+d[ií]a\s+(\d+)/i);
-  if(rem){ return {type:'remove_day', city: detectCityInText(t) || activeCity, day: parseInt(rem[2],10)}; }
+  if(rem){ return {type:'remove_day', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, day: parseInt(rem[2],10)}; }
 
   const swap = t.match(/(?:pasa|mueve|cambia)\s+el\s+d[ií]a\s+(\d+)\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
   if(swap && !/actividad|museo|visita|tour|cena|almuerzo|desayuno/i.test(t)){
-    const city = detectCityInText(t) || activeCity;
+    const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     return {type:'swap_day', city, from: parseInt(swap[1],10), to: parseInt(swap[2],10)};
   }
 
   const mv = t.match(/(?:mueve|pasa|cambia)\s+(.*?)(?:\s+del\s+d[ií]a\s+(\d+)|\s+del\s+(\d+))\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
-  if(mv){ return {type:'move_activity', city: detectCityInText(t) || activeCity, query:(mv[1]||'').trim(), fromDay:parseInt(mv[2]||mv[3],10), toDay:parseInt(mv[4],10)}; }
+  if(mv){ return {type:'move_activity', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, query:(mv[1]||'').trim(), fromDay:parseInt(mv[2]||mv[3],10), toDay:parseInt(mv[4],10)}; }
 
   if(/\b(no\s+quiero|sustituye|reemplaza|quita|elimina|borra)\b/.test(t)){
-    const city = detectCityInText(t) || activeCity;
+    const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const m = t.match(/no\s+quiero\s+ir\s+a\s+(.+?)(?:,|\.)?$/i);
     return {type:'swap_activity', city, target: m ? m[1].trim() : null, details:text};
   }
 
   const range = parseTimeRangeFromText(text);
-  if(range.start || range.end) return {type:'change_hours', city: detectCityInText(t) || activeCity, range};
+  if(range.start || range.end) return {type:'change_hours', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, range};
 
   const addCity = t.match(/(?:agrega|añade|suma)\s+([a-záéíóúüñ\s]+?)\s+(?:con\s+)?(\d+)\s*d[ií]as?(?:\s+(?:desde|iniciando)\s+(\d{1,2}\/\d{1,2}\/\d{4}))?/i);
   if(addCity){
@@ -1226,20 +1309,21 @@ async function onSend(){
     }
   }
 
-  // 🆕 Agregar varios días de golpe
+  // 🆕 Agregar varios días de golpe (con rebalanceo global y day trip opcional)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
     showWOW(true,'Agregando días y reoptimizando…');
     addMultipleDaysToCity(city, intent.extraDays);
-    const totalDays = Object.keys(itineraries[city].byDay||{}).length;
-    for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+
+    // 🔁 Rebalancea toda la ciudad y, si el usuario pidió un destino, úsalo 1 día
+    await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
+
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé todo el itinerario.`, 'ai');
+    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city}, incorporé actividades plausibles y reoptimicé todo el itinerario.`, 'ai');
     return;
   }
 
-  // 1) Agregar día al FINAL
+  // 1) Agregar día al FINAL (con posibilidad de day trip)
   if(intent.type==='add_day_end' && intent.city){
     const city = intent.city;
     showWOW(true,'Insertando día y optimizando…');
@@ -1252,18 +1336,19 @@ async function onSend(){
     if(intent.dayTripTo){
       const start = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.start || DEFAULT_START;
       const end   = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.end   || DEFAULT_END;
+      // Semilla con notas útiles (no "seed")
       const rowsSeed = [
-        {day:numericPos,start, end:addMinutes(start,60), activity:`Traslado a ${intent.dayTripTo}`, from: city, to: intent.dayTripTo, transport:'Tren/Bus', duration:'60m', notes:'seed'},
-        {day:numericPos,start:addMinutes(start,70), end:addMinutes(start,190), activity:`Visita principal en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'120m', notes:'seed'},
-        {day:numericPos,start:addMinutes(start,200), end:addMinutes(start,290), activity:`Almuerzo en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'90m', notes:'seed'},
-        {day:numericPos,start:addMinutes(start,300), end:addMinutes(start,420), activity:`Recorrido por ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie/Bus', duration:'120m', notes:'seed'},
-        {day:numericPos,start:addMinutes(start,430), end, activity:`Regreso a ${city}`, from:intent.dayTripTo, to:city, transport:'Tren/Bus', duration:'', notes:'seed'}
+        {day:numericPos,start, end:addMinutes(start,60), activity:`Traslado a ${intent.dayTripTo}`, from: city, to: intent.dayTripTo, transport:'Tren/Bus', duration:'60m', notes:`Traslado de ida para excursión de 1 día (aprox.).`},
+        {day:numericPos,start:addMinutes(start,70), end:addMinutes(start,190), activity:`Visita principal en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'120m', notes:`Tiempo sugerido para lo esencial y fotos.`},
+        {day:numericPos,start:addMinutes(start,200), end:addMinutes(start,290), activity:`Almuerzo en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'90m', notes:`Sugerencia de pausa para comer.`},
+        {day:numericPos,start:addMinutes(start,300), end:addMinutes(start,420), activity:`Recorrido por ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie/Bus', duration:'120m', notes:`Paseo por puntos cercanos antes del regreso.`},
+        {day:numericPos,start:addMinutes(start,430), end, activity:`Regreso a ${city}`, from:intent.dayTripTo, to:city, transport:'Tren/Bus', duration:'', notes:`Regreso a la ciudad base el mismo día.`}
       ];
       pushRows(city, rowsSeed, false);
     }
 
-    const totalDays = Object.keys(itineraries[city].byDay||{}).length;
-    for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
+    // 🔁 Rebalancea todo para integrarlo como en la generación inicial
+    await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
