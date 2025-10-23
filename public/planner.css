@@ -247,12 +247,18 @@ body{
 /* ==================== TEXTAREA ==================== */
 .special-conditions textarea{
   width:100%;
-  min-height:70px;
-  padding:.6rem;
+  min-height:340px; /* ⬆️ antes: 70px — más espacio vertical */
+  padding:.8rem; /* un poco más de aire */
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.9rem;
   resize:vertical;
+  white-space:pre-wrap; /* para respetar saltos de línea del placeholder */
+}
+@media (max-width:768px){
+  .special-conditions textarea{
+    min-height:380px; /* más alto aún en pantallas pequeñas */
+  }
 }
 
 /* ==================== VIAJEROS ==================== */
