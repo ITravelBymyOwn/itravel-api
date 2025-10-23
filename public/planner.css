@@ -81,28 +81,38 @@ body{
 
 /* 🫧 Animación pulse */
 .pulse{
-  position:relative;
-  overflow:hidden; /* ✅ evita que ::after sobresalga y cause scroll */
+  position: relative;
+  overflow: visible; /* ✅ permitimos que la animación se vea completa */
 }
 .pulse::after{
-  content:"";
-  position:absolute;
-  top:50%;
-  left:50%;
-  transform:translate(-50%,-50%);
-  width:100%;
-  height:100%;
-  border-radius:999px;
-  background:var(--brand-600);
-  opacity:0.5;
-  animation:pulseAnim 1.8s ease-out infinite;
-  z-index:-1;
-  pointer-events:none; /* ✅ evita interferencia con clics */
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--brand-600);
+  opacity: 0.45;
+  animation: pulseAnim 1.8s ease-out infinite;
+  z-index: -1;
+  pointer-events: none;
+  will-change: transform, opacity;
 }
 @keyframes pulseAnim {
-  0% {transform:translate(-50%,-50%) scale(1); opacity:0.4;}
-  50% {transform:translate(-50%,-50%) scale(1.2); opacity:0;} /* ✅ reducida de 1.4 a 1.2 */
-  100% {transform:translate(-50%,-50%) scale(1); opacity:0;}
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.25); /* ✅ escala más visible pero estable */
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
 }
 
 /* 💬 Botón Info Chat flotante */
