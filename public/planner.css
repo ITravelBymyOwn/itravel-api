@@ -336,6 +336,24 @@ body{
 .w-100{width:100%}
 .btn[disabled]{opacity:.6;cursor:not-allowed}
 
+/* 🆕 Estilo específico botón de reinicio */
+#reset-planner{
+  display:block;
+  width:100%;
+  margin-top:.5rem;
+  background:#fff0f0;
+  color:#b42318;
+  border:1px solid #f3b3b3;
+  border-radius:.55rem;
+  padding:.6rem .9rem;
+  font-weight:600;
+  cursor:pointer;
+  transition:.2s ease;
+}
+#reset-planner:hover{
+  background:#ffd9d9;
+}
+
 /* ==================== CHAT ==================== */
 .chat{
   border:1px solid #d0d5dd;
