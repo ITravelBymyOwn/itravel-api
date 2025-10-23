@@ -560,17 +560,25 @@ Reglas:
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
   const globalStyle = `
-Eres "Astra", agente de viajes internacional.
-- RAZONA con sentido común global: geografía, temporadas, ventanas horarias, distancias y logística básica.
-- Identifica IMPERDIBLES diurnos y nocturnos; si el tiempo es limitado, prioriza lo esencial.
-- Para fenómenos estacionales (ej. auroras): sugiere 1 tour (si procede) y alternativas cercanas económicas; indica hora de inicio aproximada típica de la ciudad.
-- Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
-- Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
-- Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
-- Day trips inteligentes: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2.5 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
-- Seguridad: evita proponer zonas/restricciones problemáticas; si hay alerta razonable, cambia por alternativa más segura o explica brevemente en "notes".
-- Notas SIEMPRE informativas (nunca vacías ni "seed").
-- Evita listas locales o sesgos regionales; actúa como experto global.
+Eres "Astra", agente de viajes internacional y experto global en turismo.
+- Considera destinos de TODO el mundo sin depender de listas predefinidas.
+- Analiza geografía, temporadas, clima, distancias, logística básica y cultura local.
+- Identifica automáticamente IMPERDIBLES (actividades o tours icónicos) según la ciudad o país indicado, sin necesidad de que el usuario lo nombre literalmente.
+- Si hay ciudades cercanas que califiquen como imperdibles y se pueda hacer un viaje de un día (day trip), sugiere y organiza esa excursión (ida y regreso).
+- Ajusta horarios de forma realista:
+  • Tours y excursiones típicas a horas razonables.
+  • Avistamiento de auroras: tours nocturnos.
+  • Whale watching / tours en barco: salidas desde puertos en horas matutinas.
+  • Museos, parques y atracciones: horas diurnas.
+  • Vida nocturna, shows, cenas: horarios vespertinos/nocturnos.
+- Si detectas zonas peligrosas, restricciones locales o riesgos (horarios inseguros, transporte limitado, clima extremo, alertas), debes advertir al usuario y pedir confirmación antes de proceder.
+- Para fenómenos estacionales (auroras, flores de cerezo, etc.): sugiere tours típicos con hora aproximada local de inicio.
+- Las notas de cada actividad deben ser motivacionales y contextuales, resaltando la experiencia y lo que el viajero vivirá (no dejar notas vacías).
+- No uses plantillas fijas, razona dinámicamente para cada destino.
+- Para ediciones: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
+- Si el usuario NO especifica un día concreto, revisa y reacomoda el itinerario completo de la ciudad evitando duplicados y actividades imposibles.
+- Si hay mención a un país sin ciudad, identifica la ciudad base más lógica.
+- Responde siempre en formato JSON válido, limpio, sin texto adicional fuera del JSON.
 `.trim();
 
   try{
@@ -603,11 +611,7 @@ function parseJSON(s){
   }catch(_){ return null; }
 }
 
-/* 🆕 Info Chat: misma API, historial independiente (MODO=info)
-   - Usa mode: "info" para evitar que se aplique el contrato JSON del planner
-   - Responde en texto plano, cálido, conciso.
-   - Si llega JSON por error, devuelve mensaje humano claro.
-*/
+/* 🆕 Info Chat: misma API, historial independiente (MODO=info) */
 async function callInfoAgent(text){
   const history = infoSession;
   const globalStyle = `
@@ -626,18 +630,16 @@ Eres "Astra", asistente informativo de viajes.
         model: MODEL,
         input: `${globalStyle}\n\n${text}`,
         history,
-        mode: 'info' // 👈 clave: evita aplicar el contrato del planner
+        mode: 'info'
       })
     });
 
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     const answer = (data?.text || '').trim();
 
-    // 🧠 Persistimos historial para contexto conversacional
     infoSession.push({ role:'user',      content: text });
     infoSession.push({ role:'assistant', content: answer });
 
-    // ⚠️ Si por error llega JSON, mostramos un fallback humano
     if (/^\s*\{/.test(answer)) {
       try {
         const j = JSON.parse(answer);
@@ -812,38 +814,88 @@ function addMultipleDaysToCity(city, extraDays){
   if(dest) dest.days = (dest.days || currentMax) + extraDays;
 }
 /* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA)
+   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — v54.1
+   - Reglas fuertes para plausibilidad, seguridad y transporte lógico
+   - Horarios realistas (ajusta si es necesario)
+   - Day trips ≤ 2.5 h por trayecto (ida/vuelta mismo día)
+   - Casos especiales: whale watching, auroras, rutas icónicas en coche
+   - "notes" NUNCA vacío ni "seed"
 ================================= */
 // Validador semántico independiente: NO usa listas predefinidas;
 // pide a la IA marcar filas implausibles y devuelve solo válidas.
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
 Devuelve SOLO JSON válido:
-{"allowed":[{"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}],
- "removed":[{"reason":"..","row":{"day":..,"activity":".."}}]}
-Criterios:
-- Verifica PLAUSIBILIDAD GLOBAL de cada actividad para "${city}" dadas fechas aproximadas (${baseDate||'N/A'}), clima y geografía.
-- Elimina actividades estacionales o geográficamente imposibles.
-- Seguridad: si detectas riesgo/restricción sensible, NO la permitas; muévela a "removed" con reason iniciando por "risk:" y sugiere alternativa segura si procede.
-- Notas: NUNCA dejes notes vacío ni con "seed"; si falta, escribe una breve nota útil.
-- Ajusta horas si ves solapamientos razonables; si no puedes, mantén y explícalo brevemente en notes.
-Filas:
-${JSON.stringify(rows)}
+{
+  "allowed":[
+    {"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}
+  ],
+  "removed":[
+    {"reason":"..","row":{"day":..,"activity":".."}}
+  ]
+}
+
+CRITERIOS GLOBALES (aplican a cualquier ciudad del mundo):
+- Corrige horas para que sean plausibles y no se solapen: start < end. Si ajustas, refleja el cambio.
+- Usa modalidad de transporte lógica para cada actividad:
+  • Whale watching / tours en mar: "Barco" (nunca "Auto"). Salida desde puerto.
+  • Excursiones organizadas (auroras, círculo dorado, cataratas): "Tour" o "Bus/Van tour"; si el usuario tiene coche y es ruta escénica, "Auto" con paradas.
+  • Traslados interurbanos: "Tren/Bus" o "Auto" según corresponda.
+  • Visitas dentro de la misma zona: "A pie" (y eventualmente "Metro/Bus" si conviene).
+- Day trips: si la actividad implica ir a otra ciudad y regresar el mismo día, considera un tiempo máximo aproximado de 2.5 h por trayecto (5 h en total ida/vuelta). Si excede de manera irrazonable para un day trip típico, mueve a "removed" con reason comenzando por "distance:" y sugiere una alternativa más cercana.
+- Seguridad y restricciones: si una fila sugiere pasar por zonas con riesgo/alertas evidentes, horarios inseguros (madrugada sin transporte), clima extremo, cierres habituales, o accesos restringidos:
+  • NO la permitas. Muévela a "removed" con reason comenzando por "risk:" y sugiere alternativa segura en la razón.
+- Notas: NUNCA dejes "notes" vacío ni "seed". Debe ser un tip breve y útil (reserva, mejor hora, mirador, dificultad, etc.). Si faltan, redacta una nota útil.
+- Duración: si viene en minutos, puedes mantener "90m" o convertir a "1.5h"; evita dejar vacío.
+- Mantén máx. 20 filas por día; si hay más, conserva las mejores (icónicas y no redundantes).
+
+CASOS ESPECIALES (aplican si detectas el patrón, sin forzar si no corresponde a la ciudad/época):
+1) Avistamiento de ballenas (whale watching):
+   - Transporte: "Barco" (nunca Auto).
+   - Lugar de salida: puerto local (p. ej., "Puerto de Reykjavik").
+   - Horario típico: salidas de mañana o mediodía (ajústalo a 3–4h totales si fuera necesario).
+   - Notas: incluir "valid:" si aplica por temporada/avistamientos, y tip de reserva con antelación.
+
+2) Auroras boreales / fenómenos nocturnos:
+   - Horario nocturno (aprox. 20:00–02:00; ajusta según época/localidad).
+   - Transporte: "Tour" o "Bus/Van tour"; si la ruta local es viable en coche y el usuario alquila, "Auto".
+   - Notas: incluir "valid:" con justificación de temporada y condición (cielos despejados, fuera de contaminación lumínica).
+
+3) Rutas icónicas en coche (círculo dorado, costa sur y similares):
+   - Permite 3–6 h de conducción total y añade paradas clave (geiseres, cascadas, cráteres, playas, etc.) como subtareas/segmentos separados en el mismo día.
+   - Si el usuario no indicó coche y no hay tour viable, marca "removed" con "risk:" o "logistics:" y sugiere la modalidad correcta (tour).
+
+4) Museos/monumentos:
+   - Horario diurno coherente. Evita ponerlos de noche salvo eventos especiales.
+
+5) Cenas y vida nocturna:
+   - Horarios vespertinos/nocturnos razonables (19:00–23:30 aprox.). Si encaja, sugiere vistas/terraza o zona emblemática.
+
+REGLAS DE FUSIÓN:
+- Devuelve las filas plausibles en "allowed" tal como deben quedar (con horas/transportes/notes corregidos).
+- Pasa a "removed" SOLO lo incompatible con la lógica anterior.
+- Nada de texto fuera del JSON.
+
+Contexto:
+- Ciudad: "${city}"
+- Fecha base aproximada del viaje (Día 1): ${baseDate || 'N/A'}
+- Filas a validar: ${JSON.stringify(rows)}
 `.trim();
+
   try{
     const res = await callAgent(payload, true);
     const parsed = parseJSON(res);
     if(parsed?.allowed) return parsed;
   }catch(e){ console.warn('Validator error', e); }
-  // Si falla, permitimos todo (fail-open) para no bloquear UX
-  return { allowed: rows, removed: [] };
+
+  // Si falla, permitimos todo (fail-open) para no bloquear UX,
+  // pero sanitizamos mínimamente "notes" vacías.
+  const sanitized = (rows||[]).map(r => {
+    const notes = (r.notes||'').trim();
+    return { ...r, notes: notes && notes.toLowerCase()!=='seed' ? notes : 'Sugerencia: verifica horarios y reserva con antelación.' };
+  });
+  return { allowed: sanitized, removed: [] };
 }
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v50 (parte 3/3)
-   Base: v49
-   Cambios clave v50:
-   - Sin cambios a la generación/edición; solo compat con limpieza “rev:” (render en Sección 9).
-========================================================= */
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
@@ -1018,9 +1070,13 @@ function askNextHotelTransport(){
 }
 
 /* ==============================
-   SECCIÓN 17 · NLU robusta + Intents
+   SECCIÓN 17 · NLU robusta + Intents (v54.2 — fusión mejorada)
 ================================= */
-const WORD_NUM = {'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,'seis':6,'siete':7,'ocho':8,'nueve':9,'diez':10};
+const WORD_NUM = {
+  'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,
+  'seis':6,'siete':7,'ocho':8,'nueve':9,'diez':10,
+  'once':11,'doce':12,'trece':13,'catorce':14,'quince':15
+};
 
 function normalizeHourToken(tok){
   tok = tok.toLowerCase().trim();
@@ -1072,25 +1128,15 @@ function detectCityInText(text){
   return null;
 }
 
-// 🆕 Nueva función: detectar ciudad base a partir de país
+// 🆕 Detectar ciudad base a partir de país
 function detectCityFromCountryInText(text){
   const lowered = text.toLowerCase();
-  // Mapeo simple país -> ciudad base más común
   const countryMap = {
-    'islandia':'reykjavik',
-    'españa':'madrid',
-    'francia':'parís',
-    'italia':'roma',
-    'inglaterra':'londres',
-    'reino unido':'londres',
-    'japón':'tokio',
-    'eeuu':'nueva york','estados unidos':'nueva york',
-    'alemania':'berlín',
-    'portugal':'lisboa',
-    'brasil':'rio de janeiro',
-    'argentina':'buenos aires',
-    'chile':'santiago',
-    'méxico':'ciudad de méxico'
+    'islandia':'reykjavik','españa':'madrid','francia':'parís','italia':'roma',
+    'inglaterra':'londres','reino unido':'londres','japón':'tokio',
+    'eeuu':'nueva york','estados unidos':'nueva york','alemania':'berlín',
+    'portugal':'lisboa','brasil':'rio de janeiro','argentina':'buenos aires',
+    'chile':'santiago','méxico':'ciudad de méxico'
   };
   for(const k in countryMap){
     if(lowered.includes(k)) return countryMap[k];
@@ -1098,7 +1144,6 @@ function detectCityFromCountryInText(text){
   return null;
 }
 
-// 🆕 Reutilizamos Levenshtein (sin alterar otras funciones)
 function levenshteinDistance(a,b){
   const m = [];
   for(let i=0;i<=b.length;i++){ m[i]=[i]; }
@@ -1126,10 +1171,10 @@ function intentFromText(text){
     return {type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null};
   }
 
-  // 🆕 Agregar varios días (después de add_day_end para dar prioridad)
-  const addMulti = t.match(/(agrega|añade|suma)\s+(\d+|\w+)\s+d[ií]as?/i);
+  // 🆕 Agregar varios días / noches — robusto
+  const addMulti = t.match(/(agrega|añade|suma|extiende|prolonga|quedarme|me\s+quedo|me\s+voy\s+a\s+quedar)\s+(\d+|\w+)\s+(d[ií]as?|noches?)/i);
   if(addMulti){
-    const n = WORD_NUM[addMulti[2]] || parseInt(addMulti[2],10);
+    const n = WORD_NUM[addMulti[2]] || parseInt(addMulti[2],10) || 1;
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     return {type:'add_days', city, extraDays:n};
   }
@@ -1159,6 +1204,7 @@ function intentFromText(text){
   if(addCity){
     return {type:'add_city', city: addCity[1].trim(), days:parseInt(addCity[2],10), baseDate:addCity[3]||''};
   }
+
   const delCity = t.match(/(?:elimina|borra|quita)\s+(?:la\s+ciudad\s+)?([a-záéíóúüñ\s]+)/i);
   if(delCity){ return {type:'remove_city', city: delCity[1].trim()}; }
 
@@ -1271,7 +1317,7 @@ ${buildIntake()}
 }
 
 /* ==============================
-   SECCIÓN 19 · Chat handler (global)
+   SECCIÓN 19 · Chat handler (global) — v54.2
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -1313,9 +1359,9 @@ async function onSend(){
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
     showWOW(true,'Agregando días y reoptimizando…');
-    addMultipleDaysToCity(city, intent.extraDays);
 
-    // 🔁 Rebalancea toda la ciudad y, si el usuario pidió un destino, úsalo 1 día
+    // Añadir días y balancear
+    addMultipleDaysToCity(city, intent.extraDays);
     await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
 
     showWOW(false);
@@ -1336,13 +1382,13 @@ async function onSend(){
     if(intent.dayTripTo){
       const start = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.start || DEFAULT_START;
       const end   = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.end   || DEFAULT_END;
-      // Semilla con notas útiles (no "seed")
+      // 🆕 Notas detalladas obligatorias (nunca vacías)
       const rowsSeed = [
-        {day:numericPos,start, end:addMinutes(start,60), activity:`Traslado a ${intent.dayTripTo}`, from: city, to: intent.dayTripTo, transport:'Tren/Bus', duration:'60m', notes:`Traslado de ida para excursión de 1 día (aprox.).`},
-        {day:numericPos,start:addMinutes(start,70), end:addMinutes(start,190), activity:`Visita principal en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'120m', notes:`Tiempo sugerido para lo esencial y fotos.`},
-        {day:numericPos,start:addMinutes(start,200), end:addMinutes(start,290), activity:`Almuerzo en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'90m', notes:`Sugerencia de pausa para comer.`},
-        {day:numericPos,start:addMinutes(start,300), end:addMinutes(start,420), activity:`Recorrido por ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie/Bus', duration:'120m', notes:`Paseo por puntos cercanos antes del regreso.`},
-        {day:numericPos,start:addMinutes(start,430), end, activity:`Regreso a ${city}`, from:intent.dayTripTo, to:city, transport:'Tren/Bus', duration:'', notes:`Regreso a la ciudad base el mismo día.`}
+        {day:numericPos,start, end:addMinutes(start,60), activity:`Traslado a ${intent.dayTripTo}`, from: city, to: intent.dayTripTo, transport:'Tren/Bus', duration:'60m', notes:`🚆 Traslado de ida para excursión de 1 día desde ${city}.`},
+        {day:numericPos,start:addMinutes(start,70), end:addMinutes(start,190), activity:`Visita principal en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'120m', notes:`🌟 Recorre los puntos imperdibles y disfruta de vistas panorámicas.`},
+        {day:numericPos,start:addMinutes(start,200), end:addMinutes(start,290), activity:`Almuerzo en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'90m', notes:`🍽️ Pausa para almorzar en la zona principal.`},
+        {day:numericPos,start:addMinutes(start,300), end:addMinutes(start,420), activity:`Recorrido por ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie/Bus', duration:'120m', notes:`🗺️ Paseo por puntos cercanos antes del regreso.`},
+        {day:numericPos,start:addMinutes(start,430), end, activity:`Regreso a ${city}`, from:intent.dayTripTo, to:city, transport:'Tren/Bus', duration:'', notes:`🚆 Regreso a la ciudad base el mismo día.`}
       ];
       pushRows(city, rowsSeed, false);
     }
