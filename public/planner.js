@@ -103,12 +103,19 @@ function showThinking(on){
   if(on){
     if($thinkingIndicator.style.display==='flex') return;
     $thinkingIndicator.style.display = 'flex';
+    $thinkingIndicator.style.gap = '4px';
     let dots = $thinkingIndicator.querySelectorAll('span');
+    dots.forEach(d=>{
+      d.style.width = '10px';
+      d.style.height = '10px';
+      d.style.opacity = '0.3';
+      d.style.background = '#fff';
+    });
     let idx = 0;
     thinkingTimer = setInterval(()=>{
       dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
       idx = (idx+1)%3;
-    }, 400);
+    }, 300);
   } else {
     clearInterval(thinkingTimer);
     $thinkingIndicator.style.display = 'none';
@@ -137,11 +144,19 @@ function infoChatMsg(html, who='ai'){
   return div;
 }
 
-// ✨ Indicador "escribiendo..."
+// ✨ Indicador "escribiendo..." más llamativo
 let infoTypingTimer = null;
 const $infoTyping = document.createElement('div');
 $infoTyping.className = 'chat-message ai typing';
-$infoTyping.innerHTML = `<span>.</span><span>.</span><span>.</span>`;
+$infoTyping.innerHTML = `<span></span><span></span><span></span>`;
+$infoTyping.querySelectorAll('span').forEach(s=>{
+  s.style.width = '10px';
+  s.style.height = '10px';
+  s.style.margin = '0 3px';
+  s.style.background = '#0EA47A';
+  s.style.borderRadius = '50%';
+  s.style.opacity = '0.3';
+});
 
 function setInfoChatBusy(on){
   const input = $infoInput || qs('#info-chat-input');
@@ -161,7 +176,7 @@ function setInfoChatBusy(on){
       infoTypingTimer = setInterval(()=>{
         dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
         idx = (idx+1)%3;
-      }, 400);
+      }, 300);
     } else {
       clearInterval(infoTypingTimer);
       if(container.contains($infoTyping)){
@@ -243,7 +258,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
     <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-    <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" value="${pref.baseDate||''}"></label>
+    <label>Inicio<input class="baseDate" placeholder="DD/MM/AAAA" pattern="\\d{2}/\\d{2}/\\d{4}" title="Formato DD/MM/AAAA" value="${pref.baseDate||''}"></label>
     <button class="remove" type="button">✕</button>
   `;
   const baseDateEl = qs('.baseDate', row);
@@ -271,6 +286,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   qs('.remove',row).addEventListener('click', ()=> row.remove());
   $cityList.appendChild(row);
 }
+
 /* =========================================================
    ITRAVELBYMYOWN · PLANNER v50 (parte 2/3)
    Base: v49
