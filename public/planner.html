@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=56" />
+  <link rel="stylesheet" href="./planner.css?v=57" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -42,7 +42,7 @@
         </div>
         <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
         <!-- 🆕 Botón de reinicio reubicado -->
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;">Reiniciar planificación</button>
+        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>Reiniciar planificación</button>
       </section>
 
       <section class="box special-conditions">
@@ -91,8 +91,6 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <main class="main">
       <section class="box itinerary-section">
         <h2>Itinerario</h2>
-
-        <!-- 🧭 Se eliminó el botón de reinicio de aquí -->
 
         <div class="itinerary-actions">
           <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
@@ -180,6 +178,6 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     </div>
   </div>
 
-  <script src="./planner.js?v=56"></script>
+  <script src="./planner.js?v=57"></script>
 </body>
 </html>
