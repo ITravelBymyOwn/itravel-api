@@ -179,6 +179,13 @@ body{
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
+/* 🆕 Bloqueo visual del sidebar cuando está deshabilitado */
+.sidebar.disabled{
+  opacity:.55;
+  filter:grayscale(.05);
+  pointer-events:none;
+}
+
 .box{
   background:#fff;
   border:1px solid #eef2f7;
@@ -208,6 +215,7 @@ body{
   flex-direction:column;
   gap:.25rem;
   font-size:.9rem;
+  position:relative; /* 🆕 para hint de fecha */
 }
 .city-row input,
 .city-row select{
@@ -231,6 +239,20 @@ body{
   border-radius:.5rem;
   padding:.55rem .7rem;
   cursor:pointer;
+}
+
+/* 🆕 Hint de formato para la fecha (sin cambiar HTML) */
+.city-row label:has(> .baseDate){
+  padding-bottom:1rem; /* espacio para el hint */
+}
+.city-row label:has(> .baseDate)::after{
+  content:"Formato: DD/MM/AAAA";
+  position:absolute;
+  left:0;
+  bottom:-.1rem;
+  transform:translateY(100%);
+  font-size:.75rem;
+  color:#98A2B3;
 }
 
 /* ==================== HORAS ==================== */
@@ -259,7 +281,7 @@ body{
 /* ==================== TEXTAREA ==================== */
 .special-conditions textarea{
   width:100%;
-  min-height:340px; /* ⬆️ antes: 70px — más espacio vertical */
+  min-height:380px; /* ⬆️ un poco más alto para ver todo el placeholder */
   padding:.8rem; /* un poco más de aire */
   border:1px solid #d0d5dd;
   border-radius:.5rem;
@@ -269,7 +291,7 @@ body{
 }
 @media (max-width:768px){
   .special-conditions textarea{
-    min-height:380px; /* más alto aún en pantallas pequeñas */
+    min-height:420px; /* ⬆️ más alto aún en pantallas pequeñas */
   }
 }
 
@@ -548,7 +570,7 @@ table.itinerary th{
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:100;
+  z-index:1300; /* 🆕 por encima del botón flotante (1200) para bloquear toda la página */
   pointer-events:all;
 }
 .loader{text-align:center;}
