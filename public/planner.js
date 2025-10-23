@@ -53,7 +53,9 @@ const tone = {
 };
 
 /* ==================== SECCIÓN 3: TOGGLE INFO CHAT ==================== */
-const infoChatToggle = document.getElementById('info-chat-toggle');
+// 🆕 Soporte para botón superior + botón flotante
+const infoChatToggleTop = document.getElementById('info-chat-toggle');
+const infoChatToggleFloating = document.getElementById('info-chat-floating'); // 👈 nuevo
 const infoChatModal = document.getElementById('info-chat-modal');
 const infoChatClose = document.getElementById('info-chat-close');
 const infoChatMessages = document.getElementById('info-chat-messages');
@@ -78,9 +80,11 @@ function toggleInfoChat(open = !infoChatOpen) {
   }
 }
 
-// Abrir / cerrar desde botón superior
-infoChatToggle.addEventListener('click', () => {
-  toggleInfoChat(!infoChatOpen);
+// 🆕 Abrir / cerrar desde botón superior y botón flotante
+[infoChatToggleTop, infoChatToggleFloating].forEach(btn=>{
+  btn?.addEventListener('click', () => {
+    toggleInfoChat(!infoChatOpen);
+  });
 });
 
 // Cerrar con botón ✖
@@ -1784,22 +1788,27 @@ async function sendInfoMessage(){
   infoChatMsg(ans||'');
 }
 function bindInfoChatListeners(){
-  const toggle = qs('#info-chat-toggle');
+  const toggleTop = qs('#info-chat-toggle');
+  const toggleFloating = qs('#info-chat-floating'); // 🆕
   const close  = qs('#info-chat-close');
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
   // Limpieza previa por si se re-vincula
-  toggle?.replaceWith(toggle.cloneNode(true));
+  toggleTop?.replaceWith(toggleTop.cloneNode(true));
+  toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
   send?.replaceWith(send.cloneNode(true));
 
-  const t2 = qs('#info-chat-toggle');
+  const tTop = qs('#info-chat-toggle');
+  const tFloat = qs('#info-chat-floating');
   const c2 = qs('#info-chat-close');
   const s2 = qs('#info-chat-send');
   const i2 = qs('#info-chat-input');
 
-  t2?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  [tTop, tFloat].forEach(btn=>{
+    btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  });
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
   s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
 
@@ -1827,7 +1836,7 @@ function bindInfoChatListeners(){
 
   // Delegación de respaldo por si el toggle cambia internamente
   document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#info-chat-toggle');
+    const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
     if(el){
       e.preventDefault();
       openInfoModal();
@@ -1840,3 +1849,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
+
