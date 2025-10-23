@@ -46,13 +46,13 @@ body{
 }
 .topbar .lang a.active{color:var(--brand-600)}
 
-/* 🆕 Botón Info Chat en topbar (v55) */
+/* ✨ Botón Info Chat mejorado (v56) */
 .info-chat-btn{
   background:var(--brand-600);
   color:#fff;
   border:none;
   border-radius:999px;
-  padding:.8rem 1.4rem;
+  padding:.85rem 1.6rem;
   font-weight:700;
   font-size:1rem;
   cursor:pointer;
@@ -76,6 +76,30 @@ body{
     padding:.7rem 1.2rem;
     font-size:.9rem;
   }
+}
+
+/* 🫧 Animación pulse para destacar el Info Chat */
+.pulse{
+  position:relative;
+}
+.pulse::after{
+  content:"";
+  position:absolute;
+  top:50%;
+  left:50%;
+  transform:translate(-50%,-50%);
+  width:100%;
+  height:100%;
+  border-radius:999px;
+  background:var(--brand-600);
+  opacity:0.5;
+  animation:pulseAnim 1.8s ease-out infinite;
+  z-index:-1;
+}
+@keyframes pulseAnim {
+  0% {transform:translate(-50%,-50%) scale(1); opacity:0.4;}
+  50% {transform:translate(-50%,-50%) scale(1.4); opacity:0;}
+  100% {transform:translate(-50%,-50%) scale(1); opacity:0;}
 }
 
 /* ==================== GRID ==================== */
@@ -369,6 +393,14 @@ table.itinerary th{
   pointer-events:none;
 }
 
+/* 🆕 Alineación botones de itinerario (v56) */
+.itinerary-actions{
+  display:flex;
+  gap:.5rem;
+  flex-wrap:wrap;
+  margin-bottom:1rem;
+}
+
 /* ==================== TOOLBAR ==================== */
 .toolbar{
   display:grid;
@@ -509,7 +541,7 @@ table.itinerary th{
   100% { opacity: 0.3; transform: translateY(0); }
 }
 
-/* 🆕 ==================== INFO CHAT MODAL ==================== */
+/* ==================== INFO CHAT MODAL ==================== */
 .info-chat-modal{
   position:fixed;
   top:0;
