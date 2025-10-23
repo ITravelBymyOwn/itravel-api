@@ -871,7 +871,6 @@ Contexto:
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
-   (✅ ajustada para no desactivar el botón reset)
 ================================= */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -885,8 +884,14 @@ function showWOW(on, msg){
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
-    // 👇 Evitar desactivar el botón de reinicio
+    // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
+
+    // 🧠 Bloquear también el botón flotante de Info Chat
+    if (el.id === 'info-chat-floating') {
+      el.disabled = on;
+      return;
+    }
 
     if(on){
       el._prevDisabled = el.disabled;
