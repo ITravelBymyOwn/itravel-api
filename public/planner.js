@@ -52,36 +52,55 @@ const tone = {
   thinking: 'Astra está pensando…'
 };
 
-/* ==============================
-   SECCIÓN 3 · Referencias DOM
-================================= */
-const $cityList = qs('#city-list');
-const $addCity  = qs('#add-city-btn');
-const $save     = qs('#save-destinations');
-const $start    = qs('#start-planning');
+/* ==================== SECCIÓN 3: TOGGLE INFO CHAT ==================== */
+const infoChatToggle = document.getElementById('info-chat-toggle');
+const infoChatModal = document.getElementById('info-chat-modal');
+const infoChatClose = document.getElementById('info-chat-close');
+const infoChatMessages = document.getElementById('info-chat-messages');
 
-const $chatBox  = qs('#chat-container');
-const $chatM    = qs('#chat-messages');
-const $chatI    = qs('#chat-input');
-const $send     = qs('#send-btn');
+let infoChatOpen = false;
 
-const $tabs     = qs('#city-tabs');
-const $itWrap   = qs('#itinerary-container');
+function toggleInfoChat(open = !infoChatOpen) {
+  infoChatOpen = open;
+  if (infoChatOpen) {
+    infoChatModal.style.display = 'flex';
+    infoChatModal.classList.add('active');
+    infoChatModal.style.opacity = '0';
+    infoChatModal.style.transition = 'opacity 0.35s ease';
+    setTimeout(() => (infoChatModal.style.opacity = '1'), 10);
+    infoChatMessages.scrollTop = infoChatMessages.scrollHeight;
+  } else {
+    infoChatModal.style.opacity = '0';
+    setTimeout(() => {
+      infoChatModal.style.display = 'none';
+      infoChatModal.classList.remove('active');
+    }, 300);
+  }
+}
 
-const $upsell      = qs('#monetization-upsell');
-const $upsellClose = qs('#upsell-close');
-const $confirmCTA  = qs('#confirm-itinerary');
+// Abrir / cerrar desde botón superior
+infoChatToggle.addEventListener('click', () => {
+  toggleInfoChat(!infoChatOpen);
+});
 
-const $overlayWOW  = qs('#loading-overlay');
-const $thinkingIndicator = qs('#thinking-indicator');
+// Cerrar con botón ✖
+infoChatClose.addEventListener('click', () => {
+  toggleInfoChat(false);
+});
 
-// 📌 Info Chat (IDs según tu HTML)
-const $infoToggle   = qs('#info-chat-toggle');
-const $infoModal    = qs('#info-chat-modal');
-const $infoInput    = qs('#info-chat-input');
-const $infoSend     = qs('#info-chat-send');
-const $infoClose    = qs('#info-chat-close');
-const $infoMessages = qs('#info-chat-messages');
+// Cerrar con tecla ESC
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && infoChatOpen) {
+    toggleInfoChat(false);
+  }
+});
+
+// Cerrar si hace clic fuera del modal (solo mobile flotante)
+infoChatModal.addEventListener('click', (e) => {
+  if (e.target === infoChatModal && window.innerWidth <= 768) {
+    toggleInfoChat(false);
+  }
+});
 
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
@@ -129,108 +148,130 @@ function setChatBusy(on){
   showThinking(on);
 }
 
-/* ==============================
-   SECCIÓN 4B · Info Chat UI (mejorada estilo ChatGPT)
-================================= */
-function infoChatMsg(html, who='ai'){
-  if(!html) return;
-  const div = document.createElement('div');
-  div.className = `chat-message ${who==='user'?'user':'ai'}`;
-  div.innerHTML = String(html).replace(/\n/g,'<br>');
-  const container = $infoMessages || qs('#info-chat-messages');
-  if(!container) return;
-  container.appendChild(div);
-  container.scrollTop = container.scrollHeight;
-  return div;
-}
+/* ==================== SECCIÓN 4B: INFO CHAT — INDICADOR DE ESCRITURA + INPUT MULTILINE ==================== */
+const infoChatInput = document.getElementById('info-chat-input');
+const infoChatSend = document.getElementById('info-chat-send');
+const thinkingIndicatorInfo = document.getElementById('thinking-indicator-info');
 
-// ✨ Indicador "escribiendo..." más llamativo
-let infoTypingTimer = null;
-const $infoTyping = document.createElement('div');
-$infoTyping.className = 'chat-message ai typing';
-$infoTyping.innerHTML = `<span></span><span></span><span></span>`;
-$infoTyping.querySelectorAll('span').forEach(s=>{
-  s.style.width = '10px';
-  s.style.height = '10px';
-  s.style.margin = '0 3px';
-  s.style.background = '#0EA47A';
-  s.style.borderRadius = '50%';
-  s.style.opacity = '0.3';
-});
+let typingTimeoutInfo = null;
+let isThinkingInfo = false;
 
-function setInfoChatBusy(on){
-  const input = $infoInput || qs('#info-chat-input');
-  const send  = $infoSend  || qs('#info-chat-send');
-  if(input) input.disabled = on;
-  if(send)  send.disabled  = on;
-
-  const container = $infoMessages || qs('#info-chat-messages');
-  if(container){
-    if(on){
-      if(!container.contains($infoTyping)){
-        container.appendChild($infoTyping);
-        container.scrollTop = container.scrollHeight;
-      }
-      let dots = $infoTyping.querySelectorAll('span');
-      let idx = 0;
-      infoTypingTimer = setInterval(()=>{
-        dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
-        idx = (idx+1)%3;
-      }, 300);
-    } else {
-      clearInterval(infoTypingTimer);
-      if(container.contains($infoTyping)){
-        container.removeChild($infoTyping);
-      }
-    }
+// ✨ Función para mostrar indicador de escritura
+function showThinkingIndicatorInfo() {
+  if (!isThinkingInfo) {
+    isThinkingInfo = true;
+    thinkingIndicatorInfo.style.display = 'flex';
   }
 }
 
-// 📝 Textarea auto-ajustable estilo ChatGPT
-if($infoInput){
-  $infoInput.setAttribute('rows','1');
-  $infoInput.style.overflowY = 'hidden';
-  const maxRows = 10;
-  $infoInput.addEventListener('input', ()=>{
-    $infoInput.style.height = 'auto';
-    const lineHeight = parseFloat(window.getComputedStyle($infoInput).lineHeight) || 20;
-    const lines = Math.min($infoInput.value.split('\n').length, maxRows);
-    $infoInput.style.height = `${lineHeight * lines + 8}px`;
-    $infoInput.scrollTop = $infoInput.scrollHeight;
-  });
+// ✨ Función para ocultar indicador de escritura
+function hideThinkingIndicatorInfo() {
+  isThinkingInfo = false;
+  thinkingIndicatorInfo.style.display = 'none';
 }
 
-/* ==============================
-   SECCIÓN 5 · Fechas / horas
-================================= */
-function autoFormatDMYInput(el){
-  el.addEventListener('input', ()=>{
-    const v = el.value.replace(/\D/g,'').slice(0,8);
-    if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
-    else el.value = v;
+// 🧠 Función para simular “escribiendo” antes de respuesta
+function simulateThinkingInfo(duration = 1200) {
+  showThinkingIndicatorInfo();
+  clearTimeout(typingTimeoutInfo);
+  typingTimeoutInfo = setTimeout(() => {
+    hideThinkingIndicatorInfo();
+  }, duration);
+}
+
+// 📏 Ajuste automático del tamaño del input al escribir
+infoChatInput.addEventListener('input', () => {
+  infoChatInput.style.height = 'auto';
+  infoChatInput.style.height = infoChatInput.scrollHeight + 'px';
+});
+
+// 🧭 Manejo de Enter vs Shift+Enter
+infoChatInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    infoChatSend.click();
+  }
+});
+
+// 📤 Envío de mensaje desde botón
+infoChatSend.addEventListener('click', () => {
+  const text = infoChatInput.value.trim();
+  if (!text) return;
+
+  // Crear burbuja de mensaje del usuario
+  const userMsg = document.createElement('div');
+  userMsg.className = 'chat-message user';
+  userMsg.textContent = text;
+  infoChatMessages.appendChild(userMsg);
+  infoChatMessages.scrollTop = infoChatMessages.scrollHeight;
+
+  // Limpiar input
+  infoChatInput.value = '';
+  infoChatInput.style.height = 'auto';
+
+  // Mostrar indicador “escribiendo” de Astra
+  simulateThinkingInfo();
+
+  // 🔥 Aquí se conecta tu lógica actual de respuesta IA del Info Chat
+  // (mantén la integración existente)
+  handleInfoChatResponse(text);
+});
+
+// 🧹 Si se borra todo el texto, restaurar altura mínima
+infoChatInput.addEventListener('blur', () => {
+  if (infoChatInput.value.trim() === '') {
+    infoChatInput.style.height = 'auto';
+  }
+});
+
+/* ==================== SECCIÓN 5: VALIDACIÓN Y GUÍA DE FECHA ==================== */
+const startPlanningBtn = document.getElementById('start-planning');
+
+function validateStartDate() {
+  const cities = document.querySelectorAll('.city-row');
+  let isValid = true;
+  let firstInvalidField = null;
+
+  cities.forEach(row => {
+    const dateInput = row.querySelector('input[type="date"]');
+    if (dateInput && !dateInput.value) {
+      isValid = false;
+      firstInvalidField = dateInput;
+      // ✨ microanimación para captar atención
+      dateInput.classList.add('shake-highlight');
+      setTimeout(() => dateInput.classList.remove('shake-highlight'), 800);
+    }
   });
+
+  return { isValid, firstInvalidField };
 }
-function parseDMY(str){
-  if(!str) return null;
-  const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(str.trim());
-  if(!m) return null;
-  const d = new Date(+m[3], (+m[2]-1), +m[1]);
-  if(d.getFullYear()!=+m[3] || d.getMonth()!=+m[2]-1 || d.getDate()!=+m[1]) return null;
-  return d;
-}
-function formatDMY(d){
-  const dd = String(d.getDate()).padStart(2,'0');
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const yy = d.getFullYear();
-  return `${dd}/${mm}/${yy}`;
-}
-function addDays(d, n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
-function addMinutes(hhmm, min){
-  const [H,M] = (hhmm||DEFAULT_START).split(':').map(n=>parseInt(n||'0',10));
-  const d = new Date(2000,0,1,H||0,M||0,0);
-  d.setMinutes(d.getMinutes()+min);
-  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
+
+startPlanningBtn.addEventListener('click', () => {
+  const { isValid, firstInvalidField } = validateStartDate();
+  if (!isValid) {
+    // ⚠️ Mensaje guía visual si no hay fecha
+    const tooltip = document.createElement('div');
+    tooltip.className = 'date-tooltip';
+    tooltip.textContent = 'Por favor selecciona una fecha de inicio para cada ciudad 🗓️';
+    document.body.appendChild(tooltip);
+
+    const rect = firstInvalidField.getBoundingClientRect();
+    tooltip.style.left = rect.left + window.scrollX + 'px';
+    tooltip.style.top = rect.bottom + window.scrollY + 6 + 'px';
+
+    setTimeout(() => tooltip.classList.add('visible'), 20);
+    setTimeout(() => {
+      tooltip.classList.remove('visible');
+      setTimeout(() => tooltip.remove(), 300);
+    }, 3500);
+
+    firstInvalidField.focus();
+    return;
+  }
+
+  // 👉 si es válido, continúa tu lógica existente
+  iniciarPlanificacion(); // ⚠️ aquí se mantiene tu función actual
+});
 
 /* ==============================
    SECCIÓN 6 · UI ciudades (sidebar)
@@ -1643,14 +1684,61 @@ document.addEventListener('input', (e)=>{
    SECCIÓN 21 · INIT y listeners
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
+
+// 🆕 Reinicio con confirmación modal
 qs('#reset-planner')?.addEventListener('click', ()=>{
-  $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
-  addCityRow();
-  $start.disabled = true;
-  $tabs.innerHTML=''; $itWrap.innerHTML='';
-  $chatBox.style.display='none'; $chatM.innerHTML='';
-  session = []; hasSavedOnce=false; pendingChange=null;
+  // Crear overlay de confirmación
+  const overlay = document.createElement('div');
+  overlay.className = 'reset-overlay';
+
+  const modal = document.createElement('div');
+  modal.className = 'reset-modal';
+  modal.innerHTML = `
+    <h3>¿Reiniciar planificación? 🧭</h3>
+    <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
+    <div class="reset-actions">
+      <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
+      <button id="cancel-reset" class="btn ghost">Cancelar</button>
+    </div>
+  `;
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  // Animación de entrada
+  setTimeout(()=>overlay.classList.add('visible'), 10);
+
+  // Botones
+  const confirmReset = overlay.querySelector('#confirm-reset');
+  const cancelReset  = overlay.querySelector('#cancel-reset');
+
+  confirmReset.addEventListener('click', ()=>{
+    // 🧭 Lógica original de reinicio (intacta)
+    $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+    addCityRow();
+    $start.disabled = true;
+    $tabs.innerHTML=''; $itWrap.innerHTML='';
+    $chatBox.style.display='none'; $chatM.innerHTML='';
+    session = []; hasSavedOnce=false; pendingChange=null;
+
+    overlay.classList.remove('visible');
+    setTimeout(()=>overlay.remove(), 300);
+  });
+
+  cancelReset.addEventListener('click', ()=>{
+    overlay.classList.remove('visible');
+    setTimeout(()=>overlay.remove(), 300);
+  });
+
+  // Cerrar con tecla ESC
+  document.addEventListener('keydown', function escHandler(e){
+    if(e.key === 'Escape'){
+      overlay.classList.remove('visible');
+      setTimeout(()=>overlay.remove(), 300);
+      document.removeEventListener('keydown', escHandler);
+    }
+  });
 });
+
 $save?.addEventListener('click', saveDestinations);
 $start?.addEventListener('click', startPlanning);
 $send?.addEventListener('click', onSend);
