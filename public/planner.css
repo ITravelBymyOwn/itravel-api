@@ -175,6 +175,11 @@ body{
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:1rem;
+
+  /* 🆕 Ajuste de ancho para acomodar mejor los campos de fecha */
+  min-width:400px;       /* antes no estaba definido — ahora da más espacio */
+  max-width:440px;       /* evita que se expanda demasiado */
+
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
@@ -236,8 +241,9 @@ body{
   background:#ef4444;
   color:#fff;
   border:none;
-  border-radius:.5rem;
-  padding:.55rem .7rem;
+  border-radius:.4rem;      /* 🔸 más compacto */
+  padding:.4rem .55rem;     /* 🔸 reducido */
+  font-size:.85rem;         /* 🔸 más pequeño */
   cursor:pointer;
 }
 
@@ -246,7 +252,7 @@ body{
   display:flex;
   align-items:center;
   gap:0.35rem;
-  min-width:200px;         /* reducido para compactar la fila */
+  min-width:200px;          /* 🔸 mantiene la fila compacta */
 }
 .city-row .date-label{
   display:flex;
@@ -256,14 +262,14 @@ body{
 
 /* Estilo para selects de día y mes */
 .city-row .date-wrapper select.baseDay{
-  width:55px;              /* más pequeño */
+  width:55px;
   padding:.45rem .4rem;
   font-size:.85rem;
 }
 .city-row .date-wrapper select.baseMonth{
-  width:110px;             /* compacto pero legible */
-  padding:.45rem .4rem;
-  font-size:.85rem;
+  width:90px;               /* 🔸 reducido aún más */
+  padding:.4rem .35rem;     /* 🔸 más compacto */
+  font-size:.8rem;          /* 🔸 texto más pequeño */
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   background:#fff;
@@ -271,9 +277,9 @@ body{
 
 /* Estilo para input de año */
 .city-row .date-wrapper input.baseYear{
-  width:65px;              /* reducido para ahorrar espacio */
+  width:60px;               /* 🔸 ligeramente más pequeño */
   text-align:center;
-  padding:.45rem .4rem;
+  padding:.45rem .35rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.85rem;
