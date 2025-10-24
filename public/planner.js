@@ -1762,7 +1762,7 @@ document.addEventListener('input', (e)=>{
 $addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
-  // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
+  // 🆕 Valida selects .baseDay, .baseMonth y input .baseYear
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
 
@@ -1771,13 +1771,21 @@ function validateBaseDatesDMY(){
   if (prevTooltip) prevTooltip.remove();
 
   for(const r of rows){
-    const el = qs('.baseDate', r);
-    const v = (el?.value||'').trim();
-    if(!v || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(v) || !parseDMY(v)){
-      firstInvalid = el;
-      // microanimación
-      el?.classList.add('shake-highlight');
-      setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
+    const dayEl = qs('.baseDay', r);
+    const monthEl = qs('.baseMonth', r);
+    const yearEl = qs('.baseYear', r);
+
+    const day = dayEl?.value || '';
+    const month = monthEl?.value || '';
+    const year = yearEl?.value.trim() || '';
+
+    // Validación básica: todos deben tener valor y año debe tener 4 dígitos
+    if(!day || !month || !/^\d{4}$/.test(year)){
+      firstInvalid = dayEl || monthEl || yearEl;
+      [dayEl, monthEl, yearEl].forEach(el=>{
+        el?.classList.add('shake-highlight');
+        setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
+      });
       break;
     }
   }
@@ -1785,7 +1793,7 @@ function validateBaseDatesDMY(){
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
-    tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
+    tooltip.textContent = 'Por favor selecciona el día, mes y año de inicio para cada ciudad 🗓️';
     document.body.appendChild(tooltip);
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
@@ -1964,4 +1972,3 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
-
