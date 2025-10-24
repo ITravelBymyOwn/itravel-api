@@ -286,6 +286,16 @@ function makeHoursBlock(days){
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
+
+  // 🆕 Bloque de selects para fecha (día + mes + año)
+  const dayOptions = Array.from({length:31},(_,i)=>
+    `<option value="${String(i+1).padStart(2,'0')}">${String(i+1).padStart(2,'0')}</option>`
+  ).join('');
+  const monthOptions = [
+    'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+    'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
+  ].map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('');
+
   row.innerHTML = `
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
@@ -293,15 +303,23 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label class="date-label">
       Inicio
       <div class="date-wrapper">
-        <input class="baseDate" placeholder="__/__/____" value="${pref.baseDate||''}">
-        <small class="date-format">DD/MM/AAAA</small>
+        <select class="baseDay">${dayOptions}</select>
+        <select class="baseMonth">${monthOptions}</select>
+        <input class="baseYear" type="text" maxlength="4" placeholder="____" inputmode="numeric">
       </div>
     </label>
     <button class="remove" type="button">✕</button>
   `;
-  const baseDateEl = qs('.baseDate', row);
-  autoFormatDMYInput(baseDateEl);
 
+  // 🧩 Cargar fecha previa si existe (pref.baseDate en formato DD/MM/AAAA)
+  if(pref.baseDate){
+    const [d,m,y] = pref.baseDate.split('/');
+    qs('.baseDay',row).value = d||'';
+    qs('.baseMonth',row).value = m||'';
+    qs('.baseYear',row).value = y||'';
+  }
+
+  // 🕐 Horas
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
   row.appendChild(hoursWrap);
