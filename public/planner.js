@@ -370,7 +370,12 @@ function saveDestinations(){
     const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
-    const baseDate = qs('.baseDate',r).value.trim();
+
+    // 🆕 Construcción correcta de baseDate desde selects e input
+    const d = qs('.baseDay', r)?.value || '';
+    const m = qs('.baseMonth', r)?.value || '';
+    const y = qs('.baseYear', r)?.value || '';
+    const baseDate = (d && m && y) ? `${d}/${m}/${y}` : '';
 
     if(!city) return;
     const perDay = [];
