@@ -82,7 +82,7 @@ body{
 /* 🫧 Animación pulse */
 .pulse{
   position: relative;
-  overflow: visible; /* ✅ permitimos que la animación se vea completa */
+  overflow: visible;
 }
 .pulse::after{
   content: "";
@@ -106,7 +106,7 @@ body{
     opacity: 0.45;
   }
   50% {
-    transform: translate(-50%, -50%) scale(1.25); /* ✅ escala más visible pero estable */
+    transform: translate(-50%, -50%) scale(1.25);
     opacity: 0;
   }
   100% {
@@ -146,7 +146,6 @@ body{
 .info-chat-floating.pulse::after{
   background:var(--brand-500);
 }
-
 @media(max-width:768px){
   .info-chat-floating{
     padding:.8rem 1.2rem;
@@ -179,7 +178,6 @@ body{
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
-/* 🆕 Bloqueo visual del sidebar cuando está deshabilitado */
 .sidebar.disabled{
   opacity:.55;
   filter:grayscale(.05);
@@ -215,7 +213,7 @@ body{
   flex-direction:column;
   gap:.25rem;
   font-size:.9rem;
-  position:relative; /* 🆕 para hint de fecha */
+  position:relative;
 }
 .city-row input,
 .city-row select{
@@ -241,18 +239,19 @@ body{
   cursor:pointer;
 }
 
-/* 🆕 Hint de formato para la fecha (sin cambiar HTML) */
+/* 🆕 Hint de formato para la fecha */
 .city-row label:has(> .baseDate){
-  padding-bottom:1rem; /* espacio para el hint */
+  padding-bottom:1.2rem;
 }
 .city-row label:has(> .baseDate)::after{
   content:"Formato: DD/MM/AAAA";
   position:absolute;
   left:0;
-  bottom:-.1rem;
+  bottom:-.2rem;
   transform:translateY(100%);
   font-size:.75rem;
   color:#98A2B3;
+  pointer-events:none;
 }
 
 /* ==================== HORAS ==================== */
@@ -262,6 +261,16 @@ body{
   gap:.45rem;
   margin-top:.6rem;
   grid-column:1 / -1;
+}
+/* 🆕 Encabezado global de horas */
+.hours-header{
+  display:grid;
+  grid-template-columns:.8fr .7fr .7fr;
+  gap:.5rem;
+  font-size:.85rem;
+  font-weight:600;
+  color:#475467;
+  padding-bottom:.2rem;
 }
 .hours-day{
   display:grid;
@@ -281,17 +290,17 @@ body{
 /* ==================== TEXTAREA ==================== */
 .special-conditions textarea{
   width:100%;
-  min-height:380px; /* ⬆️ un poco más alto para ver todo el placeholder */
-  padding:.8rem; /* un poco más de aire */
+  min-height:380px;
+  padding:.8rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.9rem;
   resize:vertical;
-  white-space:pre-wrap; /* para respetar saltos de línea del placeholder */
+  white-space:pre-wrap;
 }
 @media (max-width:768px){
   .special-conditions textarea{
-    min-height:420px; /* ⬆️ más alto aún en pantallas pequeñas */
+    min-height:420px;
   }
 }
 
@@ -358,7 +367,6 @@ body{
 .w-100{width:100%}
 .btn[disabled]{opacity:.6;cursor:not-allowed}
 
-/* 🆕 Estilo específico botón de reinicio */
 #reset-planner{
   display:block;
   width:100%;
@@ -570,7 +578,7 @@ table.itinerary th{
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:1300; /* 🆕 por encima del botón flotante (1200) para bloquear toda la página */
+  z-index:1300;
   pointer-events:all;
 }
 .loader{text-align:center;}
@@ -681,14 +689,35 @@ table.itinerary th{
   display:flex;
   gap:.5rem;
 }
-.info-chat-modal .chat-input input{
+/* 🆕 Multilínea: reemplaza input por textarea en info chat */
+.info-chat-modal .chat-input textarea{
   flex:1;
   padding:.5rem;
   border-radius:var(--radius);
   border:1px solid #d0d5dd;
+  resize:none;
+  font-family:inherit;
+  line-height:1.4;
+  min-height:42px;
+  max-height:180px;
+  overflow-y:auto;
 }
-.info-chat-modal .btn.primary{
-  white-space:nowrap;
+
+/* 🆕 Typing dots más grandes en Info Chat */
+.chat-message.ai.typing .dot{
+  display:inline-block;
+  font-size:2rem;
+  line-height:1;
+  margin:0 3px;
+  color:#999;
+  opacity:0.3;
+  transition:opacity .2s ease;
+}
+.chat-message.ai.typing .dot:nth-child(2){
+  animation-delay:0.3s;
+}
+.chat-message.ai.typing .dot:nth-child(3){
+  animation-delay:0.6s;
 }
 
 /* ==================== MODAL REINICIO ==================== */
@@ -702,7 +731,7 @@ table.itinerary th{
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.3s ease;
-  z-index: 10000; /* 👈 más alto que el loader e info chat */
+  z-index: 10000;
 }
 
 .reset-overlay.active {
