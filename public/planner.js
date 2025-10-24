@@ -255,13 +255,28 @@ function makeHoursBlock(days){
   `;
   wrap.appendChild(header);
 
+  // 🆕 Dropdown de horas y minutos
+  const hourOptions = Array.from({length:24},(_,i)=>
+    `<option value="${String(i).padStart(2,'0')}">${String(i).padStart(2,'0')}</option>`
+  ).join('');
+  const minuteOptions = Array.from({length:12},(_,i)=>{
+    const m = String(i*5).padStart(2,'0');
+    return `<option value="${m}">${m}</option>`;
+  }).join('');
+
   for(let d=1; d<=days; d++){
     const row = document.createElement('div');
     row.className = 'hours-day';
     row.innerHTML = `
       <span>Día ${d}</span>
-      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM">
-      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM">
+      <div class="time-select start">
+        <select class="hour-select start-hour" aria-label="Hora inicio (horas)">${hourOptions}</select> :
+        <select class="minute-select start-minute" aria-label="Hora inicio (minutos)">${minuteOptions}</select>
+      </div>
+      <div class="time-select end">
+        <select class="hour-select end-hour" aria-label="Hora final (horas)">${hourOptions}</select> :
+        <select class="minute-select end-minute" aria-label="Hora final (minutos)">${minuteOptions}</select>
+      </div>
     `;
     wrap.appendChild(row);
   }
@@ -616,7 +631,8 @@ Eres "Astra", agente de viajes internacional.
 - Seguridad:
   • No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
   • Prioriza siempre rutas y experiencias seguras y razonables.
-  • Si hay una alerta razonable, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
+  • Si hay una alerta razonable o restricción, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
+  • Si la hora indicada por el usuario es inviable (por cierre, clima o seguridad), ajústala de forma lógica y documenta en "notes".
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
@@ -656,7 +672,7 @@ async function callInfoAgent(text){
   const globalStyle = `
 Eres "Astra", asistente informativo de viajes.
 - SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
-- Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes o restricciones evidentes.
+- Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes, restricciones o condiciones que puedan afectar la experiencia.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
 `.trim();
 
@@ -836,10 +852,10 @@ function addMultipleDaysToCity(city, extraDays){
   const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   let currentMax = days.length ? Math.max(...days) : 0;
 
-  // Corregido: solo agregar los días realmente nuevos
+  // 🧼 Corregido: solo agregar días realmente nuevos y evitar duplicados
   for(let i=1; i<=extraDays; i++){
     const newDay = currentMax + i;
-    if(!byDay[newDay]){  // evita duplicados
+    if(!byDay[newDay]){  
       insertDayAt(city, newDay);
 
       const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || DEFAULT_START;
@@ -852,7 +868,7 @@ function addMultipleDaysToCity(city, extraDays){
     }
   }
 
-  // Corregido: dest.days refleja el total correcto
+  // ✅ Actualiza dest.days correctamente
   const dest = savedDestinations.find(x=>x.city===city);
   if(dest){
     const totalExisting = currentMax;
@@ -860,10 +876,18 @@ function addMultipleDaysToCity(city, extraDays){
     dest.days = totalExisting + totalAdded;
   }
 
-  // 🧠 Rebalanceo automático tras agregar días (con reglas globales y seguridad)
+  // 🧠 Rebalanceo automático tras agregar días
   showWOW(true, 'Astra está reequilibrando la ciudad…');
   rebalanceWholeCity(city)
-    .catch(err => console.error('Error en rebalance automático:', err))
+    .then(() => {
+      renderCityTabs();
+      setActiveCity(city);
+      renderCityItinerary(city);
+    })
+    .catch(err => {
+      console.error('Error en rebalance automático:', err);
+      chatMsg('⚠️ No se pudo completar el rebalanceo automáticamente. Intenta manualmente.', 'ai');
+    })
     .finally(() => showWOW(false));
 }
 
@@ -936,16 +960,11 @@ function showWOW(on, msg){
   if(msg) setOverlayMessage(msg);
   $overlayWOW.style.display = on ? 'flex' : 'none';
 
-  const all = qsa('button, input, select, textarea');
-  all.forEach(el=>{
+  // 🆕 Ahora bloqueamos solo inputs y controles dentro del sidebar
+  const sidebarEls = qsa('.sidebar button, .sidebar input, .sidebar select, .sidebar textarea');
+  sidebarEls.forEach(el=>{
     // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
-
-    // 🆕 Bloquear también el botón flotante de Info Chat
-    if (el.id === 'info-chat-floating') {
-      el.disabled = on;
-      return;
-    }
 
     if(on){
       el._prevDisabled = el.disabled;
@@ -959,6 +978,22 @@ function showWOW(on, msg){
       }
     }
   });
+
+  // 🆕 Bloquear también el botón flotante de Info Chat
+  const infoFloating = qs('#info-chat-floating');
+  if (infoFloating) {
+    if(on){
+      infoFloating._prevDisabled = infoFloating.disabled;
+      infoFloating.disabled = true;
+    }else{
+      if(typeof infoFloating._prevDisabled !== 'undefined'){
+        infoFloating.disabled = infoFloating._prevDisabled;
+        delete infoFloating._prevDisabled;
+      }else{
+        infoFloating.disabled = false;
+      }
+    }
+  }
 }
 
 async function generateCityItinerary(city){
@@ -980,12 +1015,12 @@ ${FORMAT}
 - Formato B {"destination":"${city}","rows":[...],"replace": false}.
 - Revisa IMPERDIBLES diurnos y nocturnos.
 - ⚡ Para fenómenos como auroras (Reykjavik / Tromsø), sugiere 1 tour en un día + alternativas locales en otros días.
-- Respetar ventanas horarias por día: ${JSON.stringify(perDay)}.
-- Agrupar por zonas, evitar solapamientos.
-- Validar plausibilidad global y seguridad.
-  • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
-  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
-  • Sustituir por alternativas seguras cuando aplique.
+- Respeta estrictamente ventanas horarias por día: ${JSON.stringify(perDay)}.
+- Agrupar por zonas, evitar solapamientos y horas inviables.
+- Valida plausibilidad global y seguridad:
+  • No propongas actividades en zonas con riesgos relevantes, horarios inseguros o restricciones evidentes.
+  • Si hay alerta razonable, sustituye por alternativa más segura o indícalo brevemente en “notes”.
+  • Para actividades especiales, añade "notes" con "valid: <justificación>".
 - Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto, regreso mismo día) sin duplicar otras noches.
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Nada de texto fuera del JSON.
@@ -1008,13 +1043,12 @@ ${FORMAT}
       tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
-    // Validación semántica global
+    // ✅ Validación semántica global
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     if(Array.isArray(val.allowed) && val.allowed.length){
       pushRows(tmpCity, val.allowed, false);
       renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
       showWOW(false);
-
       // 🛠 Habilita el botón de reset tras generar al menos un itinerario
       $resetBtn?.removeAttribute('disabled');
       return;
@@ -1043,13 +1077,13 @@ async function rebalanceWholeCity(city, opts={}){
 ${FORMAT}
 **ROL:** Reequilibra COMPLETAMENTE la ciudad "${city}" (${totalDays} día/s) manteniendo lo ya plausible y completando huecos.
 - Formato B {"destination":"${city}","rows":[...],"replace": false}.
-- Respeta ventanas: ${JSON.stringify(perDay)}.
+- Respeta ventanas horarias: ${JSON.stringify(perDay)}.
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
 - Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
 ${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
 - Valida plausibilidad y seguridad global:
   • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
-  • Si hay alerta razonable, sustitúyelo por alternativa más segura o indica brevemente en notes.
+  • Si hay alerta razonable, sustituye por alternativa más segura o indica brevemente en notes.
 - Notas SIEMPRE útiles (nunca vacías ni "seed").
 Contexto actual (para fusionar sin borrar): 
 ${buildIntake()}
@@ -1073,7 +1107,7 @@ ${buildIntake()}
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, false);
 
-    // Reoptimiza TODOS los días para coherencia fina
+    // 🔁 Reoptimiza TODOS los días para coherencia fina
     for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -1691,6 +1725,11 @@ function validateBaseDatesDMY(){
   // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
+
+  // 🧼 Limpia tooltips previos si existieran
+  const prevTooltip = document.querySelector('.date-tooltip');
+  if (prevTooltip) prevTooltip.remove();
+
   for(const r of rows){
     const el = qs('.baseDate', r);
     const v = (el?.value||'').trim();
@@ -1702,6 +1741,7 @@ function validateBaseDatesDMY(){
       break;
     }
   }
+
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
@@ -1723,7 +1763,7 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', saveDestinations);
 
-// ⛔ Reset con confirmación modal (fusión v55)
+// ⛔ Reset con confirmación modal
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
   overlay.className = 'reset-overlay';
@@ -1770,7 +1810,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   });
 });
 
-// ▶️ Start: valida fechas (formato v54) y luego ejecuta startPlanning()
+// ▶️ Start: valida fechas y luego ejecuta startPlanning()
 $start?.addEventListener('click', ()=>{
   if(!validateBaseDatesDMY()) return;
   startPlanning();
@@ -1824,7 +1864,7 @@ function bindInfoChatListeners(){
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
-  // Limpieza previa por si se re-vincula
+  // 🧼 Limpieza previa por si se re-vincula
   toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
