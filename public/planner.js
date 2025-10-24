@@ -589,7 +589,7 @@ Reglas:
 - Seguridad y restricciones:
   • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
   • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o, si es improcedente, exclúyelo.
-- Day trips: cuando se agregan días, evalúa imperdibles cercanos (≤2.5 h por trayecto, regreso mismo día) y proponlos 1 día si encajan.
+- Day trips: cuando se agregan días, evalúa imperdibles cercanos (≤2 h por trayecto, regreso mismo día) y proponlos 1 día si encajan.
 - Notas: NUNCA dejes "notes" vacío ni "seed"; escribe una nota breve y útil (p. ej., por qué es especial, tip de entrada, reserva sugerida).
 - Para actividades estacionales/nocturnas (p. ej. auroras):
   • Inclúyelas SOLO si plausibles para ciudad/fechas aproximadas.
@@ -612,8 +612,11 @@ Eres "Astra", agente de viajes internacional.
 - Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
 - Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
 - Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
-- Day trips inteligentes: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2.5 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
-- Seguridad: evita proponer zonas/restricciones problemáticas; si hay alerta razonable, cambia por alternativa más segura o explica brevemente en "notes".
+- Day trips inteligentes: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
+- Seguridad:
+  • No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
+  • Prioriza siempre rutas y experiencias seguras y razonables.
+  • Si hay una alerta razonable, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
@@ -653,6 +656,7 @@ async function callInfoAgent(text){
   const globalStyle = `
 Eres "Astra", asistente informativo de viajes.
 - SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
+- Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes o restricciones evidentes.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
 `.trim();
 
@@ -822,7 +826,7 @@ function applyParsedToState(parsed){
 }
 
 /* ==============================
-   SECCIÓN 13B · Add Multiple Days
+   SECCIÓN 13B · Add Multiple Days (mejorada con rebalanceo automático)
 ================================= */
 function addMultipleDaysToCity(city, extraDays){
   if(!city || extraDays <= 0) return;
@@ -855,6 +859,12 @@ function addMultipleDaysToCity(city, extraDays){
     const totalAdded = extraDays;
     dest.days = totalExisting + totalAdded;
   }
+
+  // 🧠 Rebalanceo automático tras agregar días (con reglas globales y seguridad)
+  showWOW(true, 'Astra está reequilibrando la ciudad…');
+  rebalanceWholeCity(city)
+    .catch(err => console.error('Error en rebalance automático:', err))
+    .finally(() => showWOW(false));
 }
 
 /* ==============================
@@ -876,8 +886,10 @@ Devuelve SOLO JSON válido:
 CRITERIOS GLOBALES:
 - Corrige horas plausibles (sin solapes).
 - Transporte lógico según actividad (barco para whale watching; tour/bus para excursiones; tren/bus/auto interurbano; a pie/metro en zona).
-- Day trips ≤ 2.5 h por trayecto; si no, "removed" con reason "distance:" + alternativa.
-- Seguridad/restricciones: si hay riesgo evidente u horario inviable, "removed" con reason "risk:" + sugerencia segura.
+- Day trips ≤ 2 h por trayecto; si no, "removed" con reason "distance:" + alternativa.
+- Seguridad/restricciones:
+  • Si hay riesgo evidente, restricción oficial, alerta razonable o ventana horaria insegura, "removed" con reason "risk:" + sugerencia segura o reubicación alternativa.
+  • Prioriza siempre opciones plausibles, seguras y razonables.
 - Notas NUNCA vacías ni "seed"; añade tip breve útil.
 - Si duración en minutos, permite "90m" o "1.5h".
 - Máx. 20 filas/día; prioriza icónicas y no redundantes.
@@ -906,7 +918,7 @@ Contexto:
   // Fail-open con sanitización mínima de notes
   const sanitized = (rows||[]).map(r => {
     const notes = (r.notes||'').trim();
-    return { ...r, notes: notes && notes.toLowerCase()!=='seed' ? notes : 'Sugerencia: verifica horarios y reserva con antelación.' };
+    return { ...r, notes: notes && notes.toLowerCase()!=='seed' ? notes : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.' };
   });
   return { allowed: sanitized, removed: [] };
 }
@@ -966,12 +978,16 @@ async function generateCityItinerary(city){
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
 - Formato B {"destination":"${city}","rows":[...],"replace": false}.
-- Revisa IMPERDIBLES diurnos y nocturnos. 
+- Revisa IMPERDIBLES diurnos y nocturnos.
 - ⚡ Para fenómenos como auroras (Reykjavik / Tromsø), sugiere 1 tour en un día + alternativas locales en otros días.
 - Respetar ventanas horarias por día: ${JSON.stringify(perDay)}.
 - Agrupar por zonas, evitar solapamientos.
-- Validar plausibilidad global. Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
-- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2.5 h por trayecto, regreso mismo día) sin duplicar otras noches.
+- Validar plausibilidad global y seguridad.
+  • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
+  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
+  • Sustituir por alternativas seguras cuando aplique.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto, regreso mismo día) sin duplicar otras noches.
+- Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Nada de texto fuera del JSON.
 `.trim();
 
@@ -1029,9 +1045,12 @@ ${FORMAT}
 - Formato B {"destination":"${city}","rows":[...],"replace": false}.
 - Respeta ventanas: ${JSON.stringify(perDay)}.
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
-- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2.5 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
+- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
 ${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
-- Valida plausibilidad y seguridad, anota "notes" SIEMPRE útiles (nunca vacías ni "seed").
+- Valida plausibilidad y seguridad global:
+  • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
+  • Si hay alerta razonable, sustitúyelo por alternativa más segura o indica brevemente en notes.
+- Notas SIEMPRE útiles (nunca vacías ni "seed").
 Contexto actual (para fusionar sin borrar): 
 ${buildIntake()}
 `.trim();
@@ -1342,7 +1361,11 @@ Instrucción:
 - Reordena y optimiza (min traslados; agrupa por zonas).
 - Sustituye huecos por opciones realistas (sin duplicar otros días).
 - Para nocturnas (p.ej. auroras), usa horarios aproximados locales y añade alternativas cercanas si procede.
-- Valida plausibilidad global y, si mantienes actividad especial, añade "notes: valid: ...".
+- Day trips ≤ 2 h por trayecto (ida), solo si hay tiempo disponible y sin interferir actividades icónicas.
+- Valida PLAUSIBILIDAD GLOBAL y SEGURIDAD: 
+  • No propongas actividades en zonas con riesgos o restricciones evidentes. 
+  • Sustituye por alternativas seguras si aplica.
+  • Añade siempre notas útiles (nunca vacías ni “seed”).
 - Devuelve C {"rows":[...],"replace":false}.
 Contexto:
 ${buildIntake()}
