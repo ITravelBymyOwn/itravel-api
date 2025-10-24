@@ -246,7 +246,7 @@ body{
   display:flex;
   align-items:center;
   gap:0.35rem;
-  min-width:220px;         /* 🆕 más espacio para los 3 campos */
+  min-width:220px;         /* más espacio para los 3 campos */
 }
 .city-row .date-label{
   display:flex;
