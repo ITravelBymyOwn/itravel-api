@@ -176,9 +176,9 @@ body{
   box-shadow:var(--shadow);
   padding:1rem;
 
-  /* 🆕 Ajuste de ancho para acomodar mejor los campos de fecha */
-  min-width:400px;       /* antes no estaba definido — ahora da más espacio */
-  max-width:440px;       /* evita que se expanda demasiado */
+  /* ❌ Restablecido: quitamos min/max-width para no estrechar el sidebar */
+  /* min-width:400px; */
+  /* max-width:440px; */
 
   max-height:calc(100vh - 120px);
   overflow:auto;
@@ -241,9 +241,12 @@ body{
   background:#ef4444;
   color:#fff;
   border:none;
-  border-radius:.4rem;      /* 🔸 más compacto */
-  padding:.4rem .55rem;     /* 🔸 reducido */
-  font-size:.85rem;         /* 🔸 más pequeño */
+
+  /* ✅ Restablecido a los valores originales */
+  border-radius:.5rem;
+  padding:.55rem .7rem;
+  /* font-size: inherit;  (no hace falta declarar) */
+
   cursor:pointer;
 }
 
@@ -252,7 +255,7 @@ body{
   display:flex;
   align-items:center;
   gap:0.35rem;
-  min-width:200px;          /* 🔸 mantiene la fila compacta */
+  min-width:200px;          /* mantiene la fila compacta */
 }
 .city-row .date-label{
   display:flex;
@@ -267,9 +270,9 @@ body{
   font-size:.85rem;
 }
 .city-row .date-wrapper select.baseMonth{
-  width:90px;               /* 🔸 reducido aún más */
-  padding:.4rem .35rem;     /* 🔸 más compacto */
-  font-size:.8rem;          /* 🔸 texto más pequeño */
+  width:90px;               /* compacto para que todo quepa en una línea */
+  padding:.4rem .35rem;
+  font-size:.8rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   background:#fff;
@@ -277,7 +280,7 @@ body{
 
 /* Estilo para input de año */
 .city-row .date-wrapper input.baseYear{
-  width:60px;               /* 🔸 ligeramente más pequeño */
+  width:60px;
   text-align:center;
   padding:.45rem .35rem;
   border:1px solid #d0d5dd;
