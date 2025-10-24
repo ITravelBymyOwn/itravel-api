@@ -178,10 +178,12 @@ body{
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
+/* 🆕 Permitir scroll global aunque sidebar esté bloqueado */
 .sidebar.disabled{
   opacity:.55;
   filter:grayscale(.05);
   pointer-events:none;
+  overflow:auto;
 }
 
 .box{
@@ -239,6 +241,18 @@ body{
   cursor:pointer;
 }
 
+/* 🆕 Alineación y min-width del input de fecha */
+.city-row .date-wrapper{
+  display:flex;
+  align-items:center;
+  min-width:140px;
+}
+.city-row .date-label{
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+}
+
 /* 🆕 Hint de formato para la fecha */
 .city-row label:has(> .baseDate){
   padding-bottom:1.2rem;
@@ -279,21 +293,31 @@ body{
   align-items:center;
   font-size:.9rem;
 }
-.hours-day input{
+
+/* 🆕 Estilo para dropdowns de hora/minuto */
+.time-select{
+  display:inline-flex;
+  align-items:center;
+  gap:2px;
+}
+.hour-select,
+.minute-select{
   padding:.45rem .55rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.9rem;
-  max-width:95px;
+  background:#fff;
 }
+
 /* 🆕 Responsive horas */
 @media(max-width:640px){
   .hours-header,
   .hours-day{
     grid-template-columns:1fr 1fr;
   }
-  .hours-day input{
-    max-width:100%;
+  .hour-select,
+  .minute-select{
+    width:100%;
   }
 }
 
@@ -709,7 +733,7 @@ table.itinerary th{
   font-family:inherit;
   line-height:1.4;
   min-height:42px;
-  max-height:180px;
+  max-height:220px; /* 🆕 aumentada para interacción más fluida */
   overflow-y:auto;
 }
 
