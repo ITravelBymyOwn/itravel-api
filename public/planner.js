@@ -383,7 +383,10 @@ function saveDestinations(){
 
   // 🆕 Bloqueo visual tras guardar destinos
   if($sidebar) $sidebar.classList.add('disabled');
-  if($resetBtn) $resetBtn.setAttribute('disabled','true');
+
+  // 🆕 Activar botón de reinicio al guardar destinos
+  if($resetBtn) $resetBtn.removeAttribute('disabled');
+
   if($infoFloating){
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
@@ -628,11 +631,26 @@ Eres "Astra", agente de viajes internacional.
 - Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
 - Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
 - Day trips inteligentes: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
-- Seguridad:
-  • No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
-  • Prioriza siempre rutas y experiencias seguras y razonables.
-  • Si hay una alerta razonable o restricción, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
-  • Si la hora indicada por el usuario es inviable (por cierre, clima o seguridad), ajústala de forma lógica y documenta en "notes".
+
+🕓 **Ventanas horarias y planificación**:
+- RESPETA estrictamente las horas de inicio y final indicadas por el usuario para cada día. Estas horas definen la ventana operativa del itinerario.
+- NO propongas actividades fuera de esta ventana. Si alguna atracción no calza, descártala o reemplázala por otra razonable dentro de la ventana.
+- Usa horarios típicos de apertura/cierre reales como referencia adicional para evitar sugerir horas inviables.
+- Si ajustas horas por razones logísticas, documenta claramente en "notes" el motivo.
+
+🧭 **Atracciones y distribución inteligente**:
+- Selecciona y distribuye actividades de forma lógica y geográficamente coherente.
+- Da prioridad a grandes atracciones turísticas cercanas (dentro de la misma zona o a ≤30 min de traslado) para optimizar tiempos y evitar solapamientos.
+- Maximiza el aprovechamiento de cada día sin sobrecargarlo.
+- Para lugares mundialmente reconocidos, propon actividades bien distribuidas a lo largo de la ventana horaria disponible.
+
+🛡️ **Seguridad y plausibilidad**:
+- No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
+- Prioriza siempre rutas y experiencias seguras y razonables.
+- Si hay una alerta razonable o restricción, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
+- Si la hora indicada por el usuario es inviable (por cierre, clima o seguridad), ajústala de forma lógica y documenta en "notes".
+
+📝 **Notas y estilo de salida**:
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
@@ -875,6 +893,11 @@ function addMultipleDaysToCity(city, extraDays){
     const totalAdded = extraDays;
     dest.days = totalExisting + totalAdded;
   }
+
+  // 🧽 🆕 Limpieza antes de rebalancear — evita duplicados
+  Object.keys(byDay).forEach(d => { 
+    byDay[d] = []; 
+  });
 
   // 🧠 Rebalanceo automático tras agregar días
   showWOW(true, 'Astra está reequilibrando la ciudad…');
@@ -1716,8 +1739,7 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (v55.1 añade: validación previa de fechas, botón flotante Info Chat
-    y reset con modal; mantiene startPlanning de v54)
+   (v55.2 ajusta: ciclo completo del botón Reset y desbloqueo sidebar)
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -1792,6 +1814,11 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     $tabs.innerHTML=''; $itWrap.innerHTML='';
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
+
+    // 🆕 Desactivar botón de reinicio y desbloquear sidebar tras reinicio
+    if($resetBtn) $resetBtn.setAttribute('disabled','true');
+    if($sidebar)  $sidebar.classList.remove('disabled');
+
     overlay.classList.remove('visible');
     setTimeout(()=>overlay.remove(), 300);
   });
@@ -1919,3 +1946,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
+
