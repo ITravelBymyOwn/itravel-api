@@ -134,6 +134,7 @@ function infoChatMsg(html, who='ai'){
   if(!html) return;
   const div = document.createElement('div');
   div.className = `chat-message ${who==='user'?'user':'ai'}`;
+  // ✅ Soporte visual para saltos de línea en el mensaje
   div.innerHTML = String(html).replace(/\n/g,'<br>');
   const container = $infoMessages || qs('#info-chat-messages');
   if(!container) return;
@@ -145,7 +146,8 @@ function infoChatMsg(html, who='ai'){
 let infoTypingTimer = null;
 const $infoTyping = document.createElement('div');
 $infoTyping.className = 'chat-message ai typing';
-$infoTyping.innerHTML = `<span>.</span><span>.</span><span>.</span>`;
+// ✅ Puntos más grandes y llamativos
+$infoTyping.innerHTML = `<span class="dot">•</span><span class="dot">•</span><span class="dot">•</span>`;
 
 function setInfoChatBusy(on){
   const input = $infoInput || qs('#info-chat-input');
@@ -160,7 +162,7 @@ function setInfoChatBusy(on){
         container.appendChild($infoTyping);
         container.scrollTop = container.scrollHeight;
       }
-      let dots = $infoTyping.querySelectorAll('span');
+      let dots = $infoTyping.querySelectorAll('span.dot');
       let idx = 0;
       infoTypingTimer = setInterval(()=>{
         dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
@@ -175,16 +177,29 @@ function setInfoChatBusy(on){
   }
 }
 
+// ✅ Mejora UX del textarea
 if($infoInput){
   $infoInput.setAttribute('rows','1');
   $infoInput.style.overflowY = 'hidden';
   const maxRows = 10;
+
+  // Autoajuste de altura dinámico
   $infoInput.addEventListener('input', ()=>{
     $infoInput.style.height = 'auto';
     const lineHeight = parseFloat(window.getComputedStyle($infoInput).lineHeight) || 20;
     const lines = Math.min($infoInput.value.split('\n').length, maxRows);
     $infoInput.style.height = `${lineHeight * lines + 8}px`;
     $infoInput.scrollTop = $infoInput.scrollHeight;
+  });
+
+  // ✅ Shift+Enter → salto de línea | Enter → enviar
+  $infoInput.addEventListener('keydown', e=>{
+    if(e.key === 'Enter' && !e.shiftKey){
+      e.preventDefault();
+      const btn = $infoSend || qs('#info-chat-send');
+      if(btn) btn.click();
+    }
+    // Shift+Enter deja pasar para crear nueva línea
   });
 }
 
@@ -229,6 +244,17 @@ function addMinutes(hhmm, min){
 function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
+
+  // Agregar encabezado único de horas
+  const header = document.createElement('div');
+  header.className = 'hours-header';
+  header.innerHTML = `
+    <span></span>
+    <span class="header-start">Hora Inicio</span>
+    <span class="header-end">Hora Final</span>
+  `;
+  wrap.appendChild(header);
+
   for(let d=1; d<=days; d++){
     const row = document.createElement('div');
     row.className = 'hours-day';
@@ -249,7 +275,13 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
     <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-    <label>Inicio<input class="baseDate" placeholder="MM/DD/AAAA" value="${pref.baseDate||''}"></label>
+    <label class="date-label">
+      Inicio
+      <div class="date-wrapper">
+        <input class="baseDate" placeholder="__/__/____" value="${pref.baseDate||''}">
+        <small class="date-format">DD/MM/AAAA</small>
+      </div>
+    </label>
     <button class="remove" type="button">✕</button>
   `;
   const baseDateEl = qs('.baseDate', row);
@@ -265,6 +297,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     const tmp = makeHoursBlock(pref.days).children;
     Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
   }
+
   daysSelect.addEventListener('change', ()=>{
     const n = Math.max(0, parseInt(daysSelect.value||0,10));
     hoursWrap.innerHTML='';
@@ -799,19 +832,29 @@ function addMultipleDaysToCity(city, extraDays){
   const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   let currentMax = days.length ? Math.max(...days) : 0;
 
+  // Corregido: solo agregar los días realmente nuevos
   for(let i=1; i<=extraDays; i++){
     const newDay = currentMax + i;
-    insertDayAt(city, newDay);
-    const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || DEFAULT_START;
-    const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || DEFAULT_END;
-    if(!cityMeta[city]) cityMeta[city] = {perDay:[]};
-    if(!cityMeta[city].perDay.find(x=>x.day===newDay)){
-      cityMeta[city].perDay.push({day:newDay, start, end});
+    if(!byDay[newDay]){  // evita duplicados
+      insertDayAt(city, newDay);
+
+      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || DEFAULT_START;
+      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || DEFAULT_END;
+      
+      if(!cityMeta[city]) cityMeta[city] = { perDay: [] };
+      if(!cityMeta[city].perDay.find(x=>x.day===newDay)){
+        cityMeta[city].perDay.push({ day:newDay, start, end });
+      }
     }
   }
 
+  // Corregido: dest.days refleja el total correcto
   const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = (dest.days || currentMax) + extraDays;
+  if(dest){
+    const totalExisting = currentMax;
+    const totalAdded = extraDays;
+    dest.days = totalExisting + totalAdded;
+  }
 }
 
 /* ==============================
@@ -955,12 +998,17 @@ ${FORMAT}
       pushRows(tmpCity, val.allowed, false);
       renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
       showWOW(false);
+
+      // 🛠 Habilita el botón de reset tras generar al menos un itinerario
+      $resetBtn?.removeAttribute('disabled');
       return;
     }
   }
 
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   showWOW(false);
+  // 🛠 Asegura habilitar el reset también en fallback
+  $resetBtn?.removeAttribute('disabled');
   chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
 }
 
@@ -1011,8 +1059,13 @@ ${buildIntake()}
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
+
+    // 🛠 Asegura habilitar el reset tras cualquier rebalanceo
+    $resetBtn?.removeAttribute('disabled');
   }else{
     showWOW(false);
+    // 🛠 También habilita reset en caso de no cambios válidos
+    $resetBtn?.removeAttribute('disabled');
     chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
   }
 }
