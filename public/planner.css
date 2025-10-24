@@ -124,7 +124,7 @@ body{
   color:#fff;
   border:none;
   border-radius:999px;
-  padding:.9rem 1.6rem;
+  padding:1rem 1.8rem; /* 🆕 área clic ligeramente más amplia */
   font-weight:700;
   font-size:1rem;
   display:flex;
@@ -285,6 +285,16 @@ body{
   border-radius:.5rem;
   font-size:.9rem;
   max-width:95px;
+}
+/* 🆕 Responsive horas */
+@media(max-width:640px){
+  .hours-header,
+  .hours-day{
+    grid-template-columns:1fr 1fr;
+  }
+  .hours-day input{
+    max-width:100%;
+  }
 }
 
 /* ==================== TEXTAREA ==================== */
@@ -709,8 +719,9 @@ table.itinerary th{
   font-size:2rem;
   line-height:1;
   margin:0 3px;
-  color:#999;
+  color:#777;
   opacity:0.3;
+  animation: thinkingDots 1.5s infinite;
   transition:opacity .2s ease;
 }
 .chat-message.ai.typing .dot:nth-child(2){
