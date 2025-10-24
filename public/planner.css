@@ -158,7 +158,7 @@ body{
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns: 42% 58%;
+  grid-template-columns: 50% 50%;   /* ⬅️ Sidebar más ancho para que quepa la fecha */
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -175,10 +175,6 @@ body{
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:1rem;
-
-  /* ❌ Restablecido: quitamos min/max-width para no estrechar el sidebar */
-  /* min-width:400px; */
-  /* max-width:440px; */
 
   max-height:calc(100vh - 120px);
   overflow:auto;
@@ -208,7 +204,7 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .6fr 1fr auto;
+  grid-template-columns:1.2fr 1fr .55fr 1.5fr auto; /* ⬅️ más espacio para fecha */
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -242,10 +238,10 @@ body{
   color:#fff;
   border:none;
 
-  /* ✅ Restablecido a los valores originales */
-  border-radius:.5rem;
-  padding:.55rem .7rem;
-  /* font-size: inherit;  (no hace falta declarar) */
+  /* ✕ más compacta */
+  border-radius:.4rem;
+  padding:.35rem .5rem;
+  font-size:.75rem;
 
   cursor:pointer;
 }
@@ -254,8 +250,8 @@ body{
 .city-row .date-wrapper{
   display:flex;
   align-items:center;
-  gap:0.35rem;
-  min-width:200px;          /* mantiene la fila compacta */
+  gap:0.3rem;
+  min-width:180px;          /* ⬇️ más compacto */
 }
 .city-row .date-label{
   display:flex;
@@ -263,29 +259,31 @@ body{
   align-items:flex-start;
 }
 
-/* Estilo para selects de día y mes */
+/* Día */
 .city-row .date-wrapper select.baseDay{
-  width:55px;
-  padding:.45rem .4rem;
-  font-size:.85rem;
+  width:48px;              /* ⬇️ más pequeño */
+  padding:.38rem .3rem;
+  font-size:.8rem;
 }
+
+/* Mes */
 .city-row .date-wrapper select.baseMonth{
-  width:90px;               /* compacto para que todo quepa en una línea */
-  padding:.4rem .35rem;
+  width:80px;              /* ⬇️ reducido */
+  padding:.38rem .3rem;
   font-size:.8rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   background:#fff;
 }
 
-/* Estilo para input de año */
+/* Año */
 .city-row .date-wrapper input.baseYear{
-  width:60px;
+  width:55px;              /* ⬇️ reducido */
   text-align:center;
-  padding:.45rem .35rem;
+  padding:.38rem .3rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
-  font-size:.85rem;
+  font-size:.8rem;
   background:#fff;
 }
 
@@ -308,8 +306,8 @@ body{
 /* 🆕 Encabezado global de horas */
 .hours-header{
   display:grid;
-  grid-template-columns:.8fr .7fr .7fr;
-  gap:.8rem;                    /* ⬆️ más separación entre columnas */
+  grid-template-columns:.8fr .6fr .6fr;  /* ⬇️ menos ancho para horas */
+  gap:.5rem;                             /* ⬇️ menos separación */
   font-size:.85rem;
   font-weight:600;
   color:#475467;
@@ -317,8 +315,8 @@ body{
 }
 .hours-day{
   display:grid;
-  grid-template-columns:.8fr .7fr .7fr;
-  gap:.8rem;                    /* ⬆️ igual separación que en encabezado */
+  grid-template-columns:.8fr .6fr .6fr;
+  gap:.5rem;
   align-items:center;
   font-size:.9rem;
 }
@@ -331,11 +329,11 @@ body{
 }
 .hour-select,
 .minute-select{
-  padding:.35rem .45rem;        /* ⬇️ más compacto */
-  width:55px;                  /* ⬇️ más pequeño para ganar espacio */
+  padding:.3rem .4rem;        /* ⬇️ más compacto */
+  width:48px;                /* ⬇️ reducido */
   border:1px solid #d0d5dd;
   border-radius:.5rem;
-  font-size:.85rem;            /* ⬇️ ajuste visual */
+  font-size:.8rem;           /* ⬇️ ajuste visual */
   background:#fff;
 }
 
