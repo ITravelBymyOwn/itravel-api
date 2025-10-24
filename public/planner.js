@@ -287,14 +287,17 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
 
-  // 🆕 Bloque de selects para fecha (día + mes + año)
-  const dayOptions = Array.from({length:31},(_,i)=>
-    `<option value="${String(i+1).padStart(2,'0')}">${String(i+1).padStart(2,'0')}</option>`
-  ).join('');
-  const monthOptions = [
-    'Enero','Febrero','Marzo','Abril','Mayo','Junio',
-    'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
-  ].map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('');
+  // 🆕 Bloque de selects para fecha en formato dd/mm/aaaa
+  const dayOptions = `<option value="" disabled selected>dd</option>` +
+    Array.from({length:31},(_,i)=>
+      `<option value="${String(i+1).padStart(2,'0')}">${String(i+1).padStart(2,'0')}</option>`
+    ).join('');
+
+  const monthOptions = `<option value="" disabled selected>mm</option>` +
+    [
+      'Enero','Febrero','Marzo','Abril','Mayo','Junio',
+      'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'
+    ].map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('');
 
   row.innerHTML = `
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
@@ -303,9 +306,13 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label class="date-label">
       Inicio
       <div class="date-wrapper">
-        <select class="baseDay">${dayOptions}</select>
-        <select class="baseMonth">${monthOptions}</select>
-        <input class="baseYear" type="text" maxlength="4" placeholder="____" inputmode="numeric">
+        <div class="date-input-group">
+          <select class="baseDay">${dayOptions}</select>
+          <span class="date-separator">/</span>
+          <select class="baseMonth">${monthOptions}</select>
+          <span class="date-separator">/</span>
+          <input class="baseYear" type="text" maxlength="4" placeholder="aaaa" inputmode="numeric">
+        </div>
       </div>
     </label>
     <button class="remove" type="button">✕</button>
@@ -1757,7 +1764,7 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (v55.2 ajusta: ciclo completo del botón Reset y desbloqueo sidebar)
+   (v55.3 ajusta validación dd/mm/aaaa + ciclo completo botón Reset y desbloqueo sidebar)
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -1972,3 +1979,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
+
