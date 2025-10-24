@@ -204,7 +204,7 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .55fr 1.5fr auto; /* ⬅️ más espacio para fecha */
+  grid-template-columns:1.2fr 1fr .5fr 1.6fr auto; /* ⬅️ Ajuste fino para dar más espacio a la fecha */
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -238,10 +238,10 @@ body{
   color:#fff;
   border:none;
 
-  /* ✕ más compacta */
-  border-radius:.4rem;
-  padding:.35rem .5rem;
-  font-size:.75rem;
+  /* ✕ aún más compacta */
+  border-radius:.35rem;
+  padding:.3rem .45rem;
+  font-size:.7rem;
 
   cursor:pointer;
 }
@@ -250,8 +250,8 @@ body{
 .city-row .date-wrapper{
   display:flex;
   align-items:center;
-  gap:0.3rem;
-  min-width:180px;          /* ⬇️ más compacto */
+  gap:0.25rem;         /* ⬇️ más compacto aún */
+  min-width:165px;     /* ⬇️ más estrecho */
 }
 .city-row .date-label{
   display:flex;
@@ -261,16 +261,16 @@ body{
 
 /* Día */
 .city-row .date-wrapper select.baseDay{
-  width:48px;              /* ⬇️ más pequeño */
-  padding:.38rem .3rem;
-  font-size:.8rem;
+  width:45px;               /* ⬇️ reducido */
+  padding:.35rem .28rem;
+  font-size:.78rem;
 }
 
 /* Mes */
 .city-row .date-wrapper select.baseMonth{
-  width:80px;              /* ⬇️ reducido */
-  padding:.38rem .3rem;
-  font-size:.8rem;
+  width:75px;               /* ⬇️ reducido */
+  padding:.35rem .28rem;
+  font-size:.78rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   background:#fff;
@@ -278,12 +278,12 @@ body{
 
 /* Año */
 .city-row .date-wrapper input.baseYear{
-  width:55px;              /* ⬇️ reducido */
+  width:50px;               /* ⬇️ reducido */
   text-align:center;
-  padding:.38rem .3rem;
+  padding:.35rem .28rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
-  font-size:.8rem;
+  font-size:.78rem;
   background:#fff;
 }
 
@@ -294,6 +294,7 @@ body{
 .city-row label:has(> .baseDate)::after{
   display:none;
 }
+
 
 /* ==================== HORAS ==================== */
 .hours-block{
