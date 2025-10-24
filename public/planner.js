@@ -1769,7 +1769,7 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (v55.3 ajusta validación dd/mm/aaaa + ciclo completo botón Reset y desbloqueo sidebar)
+   (v55.4 ajusta validación dd/mm/aaaa + ciclo completo botón Reset y desbloqueo sidebar)
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -1821,7 +1821,13 @@ function validateBaseDatesDMY(){
   return true;
 }
 
-$save?.addEventListener('click', saveDestinations);
+$save?.addEventListener('click', ()=>{
+  saveDestinations();
+  // 🆕 Activar botón de reinicio cuando hay destinos guardados
+  if ($resetBtn && savedDestinations.length > 0) {
+    $resetBtn.removeAttribute('disabled');
+  }
+});
 
 // ⛔ Reset con confirmación modal
 qs('#reset-planner')?.addEventListener('click', ()=>{
@@ -1846,16 +1852,32 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const cancelReset  = overlay.querySelector('#cancel-reset');
 
   confirmReset.addEventListener('click', ()=>{
-    $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+    // 🧹 Limpieza total de variables y UI
+    $cityList.innerHTML = '';
+    savedDestinations = [];
+    itineraries = {};
+    cityMeta = {};
+    session = [];
+    hasSavedOnce = false;
+    pendingChange = null;
+
+    // 🧹 Limpieza visual
     addCityRow();
     $start.disabled = true;
-    $tabs.innerHTML=''; $itWrap.innerHTML='';
-    $chatBox.style.display='none'; $chatM.innerHTML='';
-    session = []; hasSavedOnce=false; pendingChange=null;
+    $tabs.innerHTML = '';
+    $itWrap.innerHTML = '';
+    $chatBox.style.display = 'none';
+    $chatM.innerHTML = '';
 
-    // 🆕 Desactivar botón de reinicio y desbloquear sidebar tras reinicio
-    if($resetBtn) $resetBtn.setAttribute('disabled','true');
-    if($sidebar)  $sidebar.classList.remove('disabled');
+    // 🧹 Desactivar botón de reinicio y desbloquear sidebar tras reinicio
+    if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+    if ($sidebar)  $sidebar.classList.remove('disabled');
+
+    // 🧹 Restaurar info floating si aplica
+    if($infoFloating){
+      $infoFloating.style.pointerEvents = 'auto';
+      $infoFloating.style.opacity = '1';
+    }
 
     overlay.classList.remove('visible');
     setTimeout(()=>overlay.remove(), 300);
@@ -1984,4 +2006,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
+
 
