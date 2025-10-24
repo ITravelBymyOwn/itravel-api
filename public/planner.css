@@ -244,13 +244,24 @@ body{
 /* 🆕 Alineación y min-width del input de fecha */
 .city-row .date-wrapper{
   display:flex;
-  align-items:center;
-  min-width:140px;
+  align-items:center;     /* ✅ centra verticalmente el input con el hint */
+  gap:0.35rem;            /* 🧭 espacio consistente entre input y texto */
+  min-width:140px;        /* ✅ mantiene ancho uniforme */
 }
 .city-row .date-label{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
+}
+.city-row .date-wrapper input.baseDate{
+  height: 38px;           /* 🆕 iguala altura con otros inputs */
+}
+.city-row .date-wrapper .date-format{
+  font-size:0.8rem;
+  color:#98A2B3;
+  white-space:nowrap;     /* ✅ evita salto de línea */
+  position:relative;
+  top:0;                  /* neutraliza desplazamientos verticales */
 }
 
 /* 🆕 Hint de formato para la fecha */
