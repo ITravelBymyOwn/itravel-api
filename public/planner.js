@@ -363,12 +363,20 @@ function saveDestinations(){
   Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
-  $start.disabled = savedDestinations.length===0;
+  $start.disabled = savedDestinations.length===0 ? true : false;
   hasSavedOnce = true;
 
-  // 🆕 Bloqueo visual tras guardar destinos
+  // 🆕 Ajuste solicitado:
+  // 1) Habilitar botón "Iniciar planificación"
+  if($start) $start.disabled = savedDestinations.length === 0;
+
+  // 2) Habilitar botón "Reiniciar"
+  if($resetBtn) $resetBtn.removeAttribute('disabled');
+
+  // 3) Bloquear sidebar
   if($sidebar) $sidebar.classList.add('disabled');
-  if($resetBtn) $resetBtn.setAttribute('disabled','true');
+
+  // 4) Bloquear botón flotante Info Chat
   if($infoFloating){
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
