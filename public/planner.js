@@ -230,26 +230,34 @@ function addMinutes(hhmm, min){
 function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
+
   const header = document.createElement('div');
   header.className = 'hours-header';
   header.innerHTML = `<span></span> <span class="header-start">Hora Inicio</span> <span class="header-end">Hora Final</span>`;
   wrap.appendChild(header);
-  const hourOptions = Array.from({length:24},(_,i)=> `<option value="${String(i).padStart(2,'0')}">${String(i).padStart(2,'0')}</option>` ).join('');
+
+  const hourOptions = Array.from({length:24},(_,i)=> {
+    const hh = String(i).padStart(2,'0');
+    return `<option value="${hh}">${hh}</option>`;
+  }).join('');
+
   const minuteOptions = Array.from({length:12},(_,i)=>{
     const m = String(i*5).padStart(2,'0');
     return `<option value="${m}">${m}</option>`;
   }).join('');
+
   for(let d=1; d<=days; d++){
     const row = document.createElement('div');
     row.className = 'hours-day';
-    row.innerHTML = `<span>Día ${d}</span>
+    row.innerHTML = `
+      <span>Día ${d}</span>
       <div class="time-select start">
-        <select class="hour-select start-hour" aria-label="Hora inicio (horas)">${hourOptions}</select> :
-        <select class="minute-select start-minute" aria-label="Hora inicio (minutos)">${minuteOptions}</select>
+        <select class="hour-select start-hour" data-type="start" aria-label="Hora inicio (horas)">${hourOptions}</select> :
+        <select class="minute-select start-minute" data-type="start" aria-label="Hora inicio (minutos)">${minuteOptions}</select>
       </div>
       <div class="time-select end">
-        <select class="hour-select end-hour" aria-label="Hora final (horas)">${hourOptions}</select> :
-        <select class="minute-select end-minute" aria-label="Hora final (minutos)">${minuteOptions}</select>
+        <select class="hour-select end-hour" data-type="end" aria-label="Hora final (horas)">${hourOptions}</select> :
+        <select class="minute-select end-minute" data-type="end" aria-label="Hora final (minutos)">${minuteOptions}</select>
       </div>`;
     wrap.appendChild(row);
   }
@@ -259,12 +267,16 @@ function makeHoursBlock(days){
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
-  const dayOptions = `<option value="" disabled selected>dd</option>` +
+
+  const dayOptions =
+    `<option value="" disabled selected>dd</option>` +
     Array.from({length:31},(_,i)=> `<option value="${String(i+1).padStart(2,'0')}">${String(i+1).padStart(2,'0')}</option>`).join('');
-  const monthOptions = `<option value="" disabled selected>mm</option>` +
-    [ 'Enero','Febrero','Marzo','Abril','Mayo','Junio',
-      'Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre' ]
-    .map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('');
+
+  const monthOptions =
+    `<option value="" disabled selected>mm</option>` +
+    ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
+      .map((m,i)=>`<option value="${String(i+1).padStart(2,'0')}">${m}</option>`).join('');
+
   row.innerHTML = `
     <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
     <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
@@ -283,21 +295,25 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     </label>
     <button class="remove" type="button">✕</button>
   `;
+
   if(pref.baseDate){
     const [d,m,y] = pref.baseDate.split('/');
     qs('.baseDay',row).value = d||'';
     qs('.baseMonth',row).value = m||'';
     qs('.baseYear',row).value = y||'';
   }
+
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
   row.appendChild(hoursWrap);
+
   const daysSelect = qs('.days', row);
   if(pref.days){
     daysSelect.value = String(pref.days);
     const tmp = makeHoursBlock(pref.days).children;
     Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
   }
+
   daysSelect.addEventListener('change', ()=>{
     const n = Math.max(0, parseInt(daysSelect.value||0,10));
     hoursWrap.innerHTML='';
@@ -306,50 +322,72 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
       Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
     }
   });
+
   qs('.remove',row).addEventListener('click', ()=> row.remove());
   $cityList.appendChild(row);
 }
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v57 (parte 2/3)
-   Base: v56
-   Cambios mínimos:
-   - Bloqueo sidebar y botón reset al guardar destinos.
-   - Overlay bloquea botón flotante Info Chat.
-   - Placeholder visible y tooltip para inputs de fecha.
-========================================================= */
 
 /* ==============================
-   SECCIÓN 7 · Guardar destinos ✅ FLEXIBLE (versión previa estable)
+   SECCIÓN 7 · Guardar destinos ✅ FLEXIBLE
 ================================= */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const list = [];
+
+  // helper para HH:MM desde selects (o fallback)
+  const readTimeFromSelects = (hd, type, fallback) => {
+    const hh = qs(`.${type}-hour`, hd)?.value ?? '';
+    const mm = qs(`.${type}-minute`, hd)?.value ?? '';
+    if(hh !== '' && mm !== '') return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+    return fallback; // DEFAULT_START / DEFAULT_END
+  };
+
   rows.forEach(r=>{
     const city = qs('.city',r).value.trim();
     const country = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
     const daysVal = qs('.days',r).value;
     const days = Math.max(1, parseInt(daysVal||'0',10)||1);
+
+    // 🗓️ baseDate desde selects día/mes/año
     const daySel = qs('.baseDay', r)?.value || '';
     const monthSel = qs('.baseMonth', r)?.value || '';
     const yearSel = qs('.baseYear', r)?.value || '';
     const baseDate = (daySel && monthSel && yearSel) ? `${daySel}/${monthSel}/${yearSel}` : '';
+
     if(!city) {
       console.warn('Fila sin ciudad ignorada');
       return;
     }
+
+    // ⏰ Horarios por día (compat: inputs v56 o selects v57)
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = qs('.start',hd)?.value || DEFAULT_START;
-      const end = qs('.end',hd)?.value || DEFAULT_END;
+      // v56: <input class="start"> / <input class="end">
+      const startInput = qs('.start',hd)?.value;
+      const endInput   = qs('.end',hd)?.value;
+
+      // v57: selects .start-hour/.start-minute, .end-hour/.end-minute
+      const start = (startInput && startInput.length>=4)
+        ? startInput
+        : readTimeFromSelects(hd, 'start', DEFAULT_START);
+
+      const end = (endInput && endInput.length>=4)
+        ? endInput
+        : readTimeFromSelects(hd, 'end', DEFAULT_END);
+
       perDay.push({ day: idx+1, start, end });
     });
+
     if(perDay.length === 0){
       for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
     }
+
     list.push({ city, country, days, baseDate, perDay });
   });
+
   savedDestinations = list;
 
+  // 🧭 Actualiza itinerarios y metadatos
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate || null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate || null, start:null, end:null, hotel:'', transport:'', perDay: perDay || [] };
@@ -362,6 +400,7 @@ function saveDestinations(){
     }
   });
 
+  // 🧹 Limpia ciudades eliminadas
   Object.keys(itineraries).forEach(c=>{
     if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c];
   });
@@ -371,6 +410,7 @@ function saveDestinations(){
 
   renderCityTabs();
 
+  // 🧠 plannerState (se mantiene v57)
   plannerState = {
     destinations: savedDestinations,
     specialConditions: $specialConditions?.value.trim() || '',
@@ -387,7 +427,7 @@ function saveDestinations(){
     }
   };
 
-  // ✅ Activar / desactivar botones según haya destinos
+  // ✅ Activar / desactivar botones según haya destinos (mantiene lógica v57)
   if (savedDestinations.length > 0) {
     $start.disabled = false;
     if ($resetBtn) $resetBtn.removeAttribute('disabled');
