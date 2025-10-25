@@ -332,20 +332,32 @@ body{
   font-size:.9rem;
 }
 
-/* 🆕 Estilo para dropdowns de hora/minuto */
-.time-select{
-  display:inline-flex;
-  align-items:center;
-  gap:2px;
-}
-.hour-select,
-.minute-select{
-  padding:.3rem .4rem;        /* ⬇️ más compacto */
-  width:48px;                /* ⬇️ reducido */
+/* 🆕 Inputs de hora manual (reemplazan dropdowns) */
+input.start,
+input.end {
+  text-align:center;
+  padding:.5rem .6rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
-  font-size:.8rem;           /* ⬇️ ajuste visual */
+  font-size:.9rem;
   background:#fff;
+  width:100%;
+}
+
+input.start.invalid,
+input.end.invalid {
+  border-color:#e63946;
+  background:#ffe5e5;
+}
+
+/* 🆕 Guía visual para el formato 24 h */
+.time-hint {
+  font-size: 0.85rem;
+  color: #555;
+  margin: 0.25rem 0 0.5rem 0;
+}
+.time-hint strong {
+  color: var(--brand-600);
 }
 
 /* 🆕 Responsive horas */
@@ -354,8 +366,8 @@ body{
   .hours-day{
     grid-template-columns:1fr 1fr;
   }
-  .hour-select,
-  .minute-select{
+  input.start,
+  input.end{
     width:100%;
   }
 }
