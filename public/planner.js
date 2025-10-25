@@ -1739,7 +1739,7 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', saveDestinations);
 
-// ⛔ Reset con confirmación modal (fusión v55)
+// ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
   overlay.className = 'reset-overlay';
@@ -1756,7 +1756,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   `;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-  setTimeout(()=>overlay.classList.add('visible'), 10);
+  setTimeout(()=>overlay.classList.add('active'), 10);
 
   const confirmReset = overlay.querySelector('#confirm-reset');
   const cancelReset  = overlay.querySelector('#cancel-reset');
@@ -1768,18 +1768,30 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     $tabs.innerHTML=''; $itWrap.innerHTML='';
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
-    overlay.classList.remove('visible');
+    overlay.classList.remove('active');
     setTimeout(()=>overlay.remove(), 300);
+
+    // 🧹 Desbloquear sidebar tras reinicio
+    if ($sidebar) $sidebar.classList.remove('disabled');
+
+    // 🧹 Restaurar Info Floating si aplica
+    if ($infoFloating){
+      $infoFloating.style.pointerEvents = 'auto';
+      $infoFloating.style.opacity = '1';
+    }
+
+    // 🧹 Desactivar botón de reinicio
+    if ($resetBtn) $resetBtn.setAttribute('disabled','true');
   });
 
   cancelReset.addEventListener('click', ()=>{
-    overlay.classList.remove('visible');
+    overlay.classList.remove('active');
     setTimeout(()=>overlay.remove(), 300);
   });
 
   document.addEventListener('keydown', function escHandler(e){
     if(e.key === 'Escape'){
-      overlay.classList.remove('visible');
+      overlay.classList.remove('active');
       setTimeout(()=>overlay.remove(), 300);
       document.removeEventListener('keydown', escHandler);
     }
