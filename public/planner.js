@@ -370,13 +370,18 @@ function saveDestinations(){
     const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
-    const baseDate = qs('.baseDate',r).value.trim();
+
+    // 🗓️ Construcción de baseDate
+    const daySel = qs('.baseDay', r)?.value || '';
+    const monthSel = qs('.baseMonth', r)?.value || '';
+    const yearSel = qs('.baseYear', r)?.value || '';
+    const baseDate = (daySel && monthSel && yearSel) ? `${daySel}/${monthSel}/${yearSel}` : '';
 
     if(!city) return;
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = qs('.start',hd).value || DEFAULT_START;
-      const end   = qs('.end',hd).value   || DEFAULT_END;
+      const start = qs('.start',hd)?.value || DEFAULT_START;
+      const end   = qs('.end',hd)?.value   || DEFAULT_END;
       perDay.push({ day: idx+1, start, end });
     });
     if(perDay.length===0){
@@ -386,6 +391,7 @@ function saveDestinations(){
   });
 
   savedDestinations = list;
+
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
@@ -398,13 +404,22 @@ function saveDestinations(){
     }
   });
 
-  // Limpia ciudades eliminadas
   Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
   Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
-  $start.disabled = savedDestinations.length===0;
+
+  // ✅ Activar botones
+  $start.disabled = savedDestinations.length === 0;
+  if ($resetBtn) $resetBtn.removeAttribute('disabled');
   hasSavedOnce = true;
+
+  // 🧱 Bloquear sidebar y desactivar Info Chat flotante
+  if ($sidebar) $sidebar.classList.add('disabled');
+  if ($infoFloating) {
+    $infoFloating.style.pointerEvents = 'none';
+    $infoFloating.style.opacity = '0.6';
+  }
 }
 
 /* ==============================
