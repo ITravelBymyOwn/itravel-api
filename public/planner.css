@@ -179,12 +179,20 @@ body{
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
+
 /* 🆕 Permitir scroll global aunque sidebar esté bloqueado */
 .sidebar.disabled{
   opacity:.55;
   filter:grayscale(.05);
   pointer-events:none;
   overflow:auto;
+}
+
+/* ✅ Excepción: permitir interacción con el botón Reset incluso si sidebar está bloqueado */
+.sidebar.disabled #reset-planner {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  cursor: pointer;
 }
 
 .box{
@@ -195,6 +203,7 @@ body{
   margin-bottom:1rem;
   box-shadow:0 1px 6px rgba(0,0,0,0.03);
 }
+
 .row-actions{
   display:flex;
   gap:.5rem;
