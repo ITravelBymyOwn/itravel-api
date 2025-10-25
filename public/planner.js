@@ -411,8 +411,22 @@ function saveDestinations(){
   $start.disabled = savedDestinations.length===0;
   hasSavedOnce = true;
 
-  // 🆕 Bloqueo visual tras guardar destinos
-  if($sidebar) $sidebar.classList.add('disabled');
+  // 🆕 Bloqueo visual tras guardar destinos (sidebar)
+  if($sidebar){
+    $sidebar.classList.add('disabled');
+
+    // ✅ Rehabilitar manualmente los botones clave tras bloqueo visual
+    if($start){
+      $start.disabled = savedDestinations.length === 0;
+      $start.style.pointerEvents = savedDestinations.length === 0 ? 'none' : 'auto';
+      $start.style.opacity = savedDestinations.length === 0 ? '0.6' : '1';
+    }
+    if($resetBtn){
+      $resetBtn.disabled = false;
+      $resetBtn.style.pointerEvents = 'auto';
+      $resetBtn.style.opacity = '1';
+    }
+  }
 
   // 🆕 Activar botón de reinicio al guardar destinos
   if($resetBtn) $resetBtn.removeAttribute('disabled');
