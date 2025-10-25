@@ -360,11 +360,12 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 ========================================================= */
 
 /* ==============================
-   SECCIÓN 7 · Guardar destinos
+   SECCIÓN 7 · Guardar destinos ✅ FLEXIBLE
 ================================= */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const list = [];
+
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
     const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
@@ -382,36 +383,61 @@ function saveDestinations(){
       return;
     }
 
+    // ⏰ Horarios por día
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
       const start = qs('.start',hd)?.value || DEFAULT_START;
       const end   = qs('.end',hd)?.value   || DEFAULT_END;
       perDay.push({ day: idx+1, start, end });
     });
-    if(perDay.length===0){
+    if(perDay.length === 0){
       for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
     }
+
     list.push({ city, country, days, baseDate, perDay });
   });
 
   savedDestinations = list;
 
+  // 🧭 Actualiza itinerarios y metadatos de ciudades
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
-    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
-    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
+    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate || null };
+    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate || null, start:null, end:null, hotel:'', transport:'', perDay: perDay || [] };
     else {
-      cityMeta[city].baseDate = baseDate||null;
-      cityMeta[city].perDay   = perDay||[];
+      cityMeta[city].baseDate = baseDate || null;
+      cityMeta[city].perDay   = perDay || [];
     }
     for(let d=1; d<=days; d++){
-      if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
+      if(!itineraries[city].byDay[d]) itineraries[city].byDay[d] = [];
     }
   });
 
-  Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
-  Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
+  // 🧹 Limpia ciudades eliminadas
+  Object.keys(itineraries).forEach(c=>{
+    if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c];
+  });
+  Object.keys(cityMeta).forEach(c=>{
+    if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c];
+  });
 
   renderCityTabs();
+
+  // 🧠 Construir plannerState con información opcional
+  plannerState = {
+    destinations: savedDestinations,
+    specialConditions: $specialConditions?.value.trim() || '',
+    travelers: {
+      adults: parseInt($pAdults?.value || 0),
+      young: parseInt($pYoung?.value || 0),
+      children: parseInt($pChildren?.value || 0),
+      infants: parseInt($pInfants?.value || 0),
+      seniors: parseInt($pSeniors?.value || 0),
+    },
+    budget: {
+      amount: parseFloat($budget?.value || 0),
+      currency: $currency?.value || 'USD'
+    }
+  };
 
   // ✅ Activar / desactivar botones según haya destinos
   if (savedDestinations.length > 0) {
