@@ -261,7 +261,13 @@ function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
 
-  // Agregar encabezado único de horas
+  // 🆕 Guía de horarios
+  const guide = document.createElement('p');
+  guide.className = 'time-hint';
+  guide.textContent = '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)';
+  wrap.appendChild(guide);
+
+  // Encabezado único de horas
   const header = document.createElement('div');
   header.className = 'hours-header';
   header.innerHTML = `
