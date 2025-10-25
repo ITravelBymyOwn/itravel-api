@@ -359,25 +359,33 @@ function saveDestinations(){
   });
 
   // Limpia ciudades eliminadas
-  Object.keys(itineraries).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; });
-  Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
+  Object.keys(itineraries).forEach(c=>{ 
+    if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; 
+  });
+  Object.keys(cityMeta).forEach(c=>{ 
+    if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; 
+  });
 
   renderCityTabs();
-  $start.disabled = savedDestinations.length===0 ? true : false;
+
+  // ✅ Activar/desactivar botón de iniciar planificación
+  $start.disabled = savedDestinations.length === 0;
   hasSavedOnce = true;
 
-  // 🆕 Ajuste solicitado:
-  // 1) Habilitar botón "Iniciar planificación"
-  if($start) $start.disabled = savedDestinations.length === 0;
+  // ✅ Habilitar botón "Reiniciar" solo si hay destinos guardados
+  if ($resetBtn) {
+    if (savedDestinations.length > 0) {
+      $resetBtn.removeAttribute('disabled');
+    } else {
+      $resetBtn.setAttribute('disabled', 'true');
+    }
+  }
 
-  // 2) Habilitar botón "Reiniciar"
-  if($resetBtn) $resetBtn.removeAttribute('disabled');
+  // ✅ Bloquear sidebar
+  if ($sidebar) $sidebar.classList.add('disabled');
 
-  // 3) Bloquear sidebar
-  if($sidebar) $sidebar.classList.add('disabled');
-
-  // 4) Bloquear botón flotante Info Chat
-  if($infoFloating){
+  // ✅ Bloquear botón flotante Info Chat
+  if ($infoFloating) {
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
   }
