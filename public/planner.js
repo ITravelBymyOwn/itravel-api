@@ -360,7 +360,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 ========================================================= */
 
 /* ==============================
-   SECCIÓN 7 · Guardar destinos
+   SECCIÓN 7 · Guardar destinos  ✅ CORREGIDA Y COMPLETA
 ================================= */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
@@ -370,12 +370,7 @@ function saveDestinations(){
     const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
-
-    // 🆕 Construcción correcta de baseDate desde selects e input
-    const d = qs('.baseDay', r)?.value || '';
-    const m = qs('.baseMonth', r)?.value || '';
-    const y = qs('.baseYear', r)?.value || '';
-    const baseDate = (d && m && y) ? `${d}/${m}/${y}` : '';
+    const baseDate = qs('.baseDate',r).value.trim();
 
     if(!city) return;
     const perDay = [];
@@ -408,29 +403,22 @@ function saveDestinations(){
   Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
+
+  // ✅ IMPORTANTE: activar/desactivar botón antes de bloquear sidebar
   $start.disabled = savedDestinations.length===0;
   hasSavedOnce = true;
 
-  // 🆕 Bloqueo visual tras guardar destinos (sidebar)
-  if($sidebar){
-    $sidebar.classList.add('disabled');
-
-    // ✅ Rehabilitar manualmente los botones clave tras bloqueo visual
-    if($start){
-      $start.disabled = savedDestinations.length === 0;
-      $start.style.pointerEvents = savedDestinations.length === 0 ? 'none' : 'auto';
-      $start.style.opacity = savedDestinations.length === 0 ? '0.6' : '1';
-    }
-    if($resetBtn){
-      $resetBtn.disabled = false;
-      $resetBtn.style.pointerEvents = 'auto';
-      $resetBtn.style.opacity = '1';
+  // ✅ Activar/desactivar botón de reset según haya destinos guardados
+  if ($resetBtn) {
+    if (savedDestinations.length > 0) {
+      $resetBtn.removeAttribute('disabled');
+    } else {
+      $resetBtn.setAttribute('disabled', 'true');
     }
   }
 
-  // 🆕 Activar botón de reinicio al guardar destinos
-  if($resetBtn) $resetBtn.removeAttribute('disabled');
-
+  // 🆕 Bloqueo visual tras guardar destinos (no afecta botones habilitados manualmente)
+  if($sidebar) $sidebar.classList.add('disabled');
   if($infoFloating){
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
