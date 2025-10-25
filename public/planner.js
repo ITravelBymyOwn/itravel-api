@@ -1653,8 +1653,20 @@ function bindInfoChatListeners(){
   });
 }
 
-// Inicialización
-document.addEventListener('DOMContentLoaded', ()=>{
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
+/* ---------- INIT ROBUSTA (clave para que aparezca la "línea 1") ---------- */
+function initPlannerUI(){
+  // Crea la primera fila si no existe
+  if(!document.querySelector('#city-list .city-row')){
+    addCityRow();
+  }
+  // Enlaza Info Chat
   bindInfoChatListeners();
-});
+}
+
+// Ejecuta ya si el DOM está listo, y además suscríbete a DOMContentLoaded como respaldo
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initPlannerUI, { once:true });
+} else {
+  // DOM ya cargado
+  initPlannerUI();
+}
