@@ -439,19 +439,27 @@ function saveDestinations(){
     }
   };
 
-  // ✅ Activar / desactivar botones según haya destinos
-  if (savedDestinations.length > 0) {
-    $start.disabled = false;
-    if ($resetBtn) $resetBtn.removeAttribute('disabled');
-    if ($sidebar) $sidebar.classList.add('disabled');
-    if ($infoFloating) {
-      $infoFloating.style.pointerEvents = 'none';
-      $infoFloating.style.opacity = '0.6';
-    }
-  } else {
-    $start.disabled = true;
-    if ($resetBtn) $resetBtn.setAttribute('disabled', 'true');
+ // ✅ Activar / desactivar botones según haya destinos
+if (savedDestinations.length > 0) {
+  // 1. Bloquea sidebar primero
+  if ($sidebar) $sidebar.classList.add('disabled');
+  if ($infoFloating) {
+    $infoFloating.style.pointerEvents = 'none';
+    $infoFloating.style.opacity = '0.6';
   }
+
+  // 2. 🔥 Reforzar activación después del bloqueo visual
+  if ($start) {
+    $start.disabled = false;
+    $start.removeAttribute('disabled');
+  }
+  if ($resetBtn) {
+    $resetBtn.disabled = false;
+    $resetBtn.removeAttribute('disabled');
+  }
+} else {
+  if ($start) $start.disabled = true;
+  if ($resetBtn) $resetBtn.setAttribute('disabled', 'true');
 }
 
 /* ==============================
