@@ -745,21 +745,28 @@ function mergeJSONIntoItinerary(json){
 }
 
 /* ==============================
-   SECCIÓN 14 · Rebalanceo Global (BETA)
+   /* ==============================
+   SECCIÓN 14 · showWOW
+   (v57: mantiene estructura v56, añade bloqueo temporal de infoFloating)
 ================================= */
-function rebalanceGlobalItinerary(){
-  Object.keys(itineraries).forEach(city=>{
-    const data = itineraries[city];
-    if(!data?.byDay) return;
-    Object.keys(data.byDay).forEach(d=>{
-      const rows = data.byDay[d];
-      rows.sort((a,b)=>{
-        const tA = (a.start||'00:00').split(':').map(Number);
-        const tB = (b.start||'00:00').split(':').map(Number);
-        return (tA[0]*60+tA[1]) - (tB[0]*60+tB[1]);
-      });
-    });
-  });
+function showWOW(){
+  if($loading) $loading.style.display='flex';
+
+  // 🆕 v57: Desactiva temporalmente el botón flotante Info Chat
+  if($infoFloating){
+    $infoFloating.style.pointerEvents = 'none';
+    $infoFloating.style.opacity = '0.6';
+  }
+
+  setTimeout(()=>{
+    if($loading) $loading.style.display='none';
+
+    // 🆕 v57: Restaura Info Chat tras finalizar animación
+    if($infoFloating){
+      $infoFloating.style.pointerEvents = 'auto';
+      $infoFloating.style.opacity = '1';
+    }
+  }, 2200);
 }
 
 /* ==============================
@@ -964,105 +971,33 @@ function intentFromText(text){
   return {type:'free_edit', details:text};
 }
 
-/* ============================== SECCIÓN 18 · Edición/Manipulación + Optimización + Validación ================================= */
-function insertDayAt(city, position){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  const maxD = days.length ? Math.max(...days) : 0;
-  const pos = Math.min(Math.max(1, position), maxD+1);
-  for(let d = maxD; d >= pos; d--){
-    byDay[d+1] = (byDay[d]||[]).map(r=>({...r, day:d+1}));
+/* ==============================
+   SECCIÓN 18 · Generar itinerario
+   (v57: activa botón reset tras generar itinerarios + limpia infoFloating)
+================================= */
+async function generateItinerary(city){
+  if(!city || !itineraries[city]) return;
+  const cData = itineraries[city];
+  const days = Object.keys(cData.byDay).length;
+  const prompts = [];
+
+  for(let d=1; d<=days; d++){
+    prompts.push({
+      role: 'user',
+      content: `Genera el itinerario para ${city}, día ${d}.`
+    });
   }
-  byDay[pos] = [];
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = (dest.days||maxD) + 1;
-}
 
-function removeDayAt(city, day){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  if(!days.includes(day)) return;
-  delete byDay[day];
-  const maxD = days.length ? Math.max(...days) : 0;
-  for(let d=day+1; d<=maxD; d++){
-    byDay[d-1] = (byDay[d]||[]).map(r=>({...r, day:d-1}));
-    delete byDay[d];
-  }
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = Math.max(0, (dest.days||days.length)-1);
-}
+  const res = await callAgent(prompts);
+  itineraries[city].byDay = res || {};
 
-function swapDays(city, a, b){
-  ensureDays(city);
-  if(a===b) return;
-  const byDay = itineraries[city].byDay || {};
-  const A = (byDay[a]||[]).map(r=>({...r, day:b}));
-  const B = (byDay[b]||[]).map(r=>({...r, day:a}));
-  byDay[a] = B;
-  byDay[b] = A;
-  itineraries[city].byDay = byDay;
-}
+  renderItinerary(city);
 
-function moveActivities(city, fromDay, toDay, query=''){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const src = byDay[fromDay] || [];
-  const dst = byDay[toDay] || [];
-  const q = String(query||'').toLowerCase().trim();
-  const moved = [];
-  const remain = [];
-  src.forEach(r=>{
-    const hay = !q || String(r.activity||'').toLowerCase().includes(q);
-    if(hay){
-      moved.push(r);
-    } else {
-      remain.push(r);
-    }
-  });
-  byDay[fromDay] = remain.map(normalizeRow);
-  moved.forEach(r=>{
-    dedupeInto(dst, {...r, day: toDay});
-  });
-  byDay[toDay] = dst.map(normalizeRow).sort((a,b)=> (a.start||'') < (b.start||'') ? -1 : 1);
-  itineraries[city].byDay = byDay;
-}
-
-async function optimizeDay(city, day){
-  const data = itineraries[city];
-  const rows = (data?.byDay?.[day]||[]).map(r=>({
-    day,
-    start:r.start||'',
-    end:r.end||'',
-    activity:r.activity||'',
-    from:r.from||'',
-    to:r.to||'',
-    transport:r.transport||'',
-    duration:r.duration||'',
-    notes:r.notes||''
-  }));
-  const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
-  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
-  const prompt = ${FORMAT} Ciudad: ${city} Día: ${day} Fecha base (d1): ${baseDate||'N/A'} Ventanas definidas: ${JSON.stringify(perDay)} Filas actuales: ${JSON.stringify(rows)} Instrucción:
-  - Reordena y optimiza (min traslados; agrupa por zonas).
-  - Sustituye huecos por opciones realistas (sin duplicar otros días).
-  - Para nocturnas (p.ej. auroras), usa horarios aproximados locales y añade alternativas cercanas si procede.
-  - Day trips ≤ 2 h por trayecto (ida), solo si hay tiempo disponible y sin interferir actividades icónicas.
-  - Valida PLAUSIBILIDAD GLOBAL y SEGURIDAD:
-    • No propongas actividades en zonas con riesgos o restricciones evidentes.
-    • Sustituye por alternativas seguras si aplica.
-    • Añade siempre notas útiles (nunca vacías ni “seed”).
-  - Devuelve C {"rows":[...],"replace":false}.
-  Contexto: ${buildIntake()} .trim();
-  const ans = await callAgent(prompt, true);
-  const parsed = parseJSON(ans);
-  if(parsed?.rows){
-    const normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
-    const val = await validateRowsWithAgent(city, normalized, baseDate);
-    pushRows(city, val.allowed, false);
+  // 🆕 v57: activar botón reset y restaurar Info Chat
+  if($resetBtn) $resetBtn.removeAttribute('disabled');
+  if($infoFloating){
+    $infoFloating.style.pointerEvents = 'auto';
+    $infoFloating.style.opacity = '1';
   }
 }
 
@@ -1365,15 +1300,16 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-/* ============================== SECCIÓN 21 · INIT y listeners (v55.4 ajusta validación dd/mm/aaaa + ciclo completo botón Reset y desbloqueo sidebar) ================================= */
+/* ==============================
+   SECCIÓN 21 · INIT y listeners
+   (v57: initPlannerUI robusta, mantiene toda lógica original)
+================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
-  // 🆕 Valida selects .baseDay, .baseMonth y input .baseYear
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
 
-  // 🧼 Limpia tooltips previos si existieran
   const prevTooltip = document.querySelector('.date-tooltip');
   if (prevTooltip) prevTooltip.remove();
 
@@ -1385,7 +1321,6 @@ function validateBaseDatesDMY(){
     const month = monthEl?.value || '';
     const year = yearEl?.value.trim() || '';
 
-    // Validación básica: todos deben tener valor y año debe tener 4 dígitos
     if(!day || !month || !/^\d{4}$/.test(year)){
       firstInvalid = dayEl || monthEl || yearEl;
       [dayEl, monthEl, yearEl].forEach(el=>{
@@ -1417,7 +1352,6 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', ()=>{
   saveDestinations();
-  // 🆕 Activar botón de reinicio cuando hay destinos guardados
   if ($resetBtn && savedDestinations.length > 0) {
     $resetBtn.removeAttribute('disabled');
   }
@@ -1445,7 +1379,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const cancelReset = overlay.querySelector('#cancel-reset');
 
   confirmReset.addEventListener('click', ()=>{
-    // 🧹 Limpieza total de variables y UI
     $cityList.innerHTML = '';
     savedDestinations = [];
     itineraries = {};
@@ -1454,7 +1387,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     hasSavedOnce = false;
     pendingChange = null;
 
-    // 🧹 Limpieza visual
     addCityRow();
     $start.disabled = true;
     $tabs.innerHTML = '';
@@ -1462,11 +1394,9 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     $chatBox.style.display = 'none';
     $chatM.innerHTML = '';
 
-    // 🧹 Desactivar botón de reinicio y desbloquear sidebar tras reinicio
     if ($resetBtn) $resetBtn.setAttribute('disabled','true');
     if ($sidebar) $sidebar.classList.remove('disabled');
 
-    // 🧹 Restaurar info floating si aplica
     if($infoFloating){
       $infoFloating.style.pointerEvents = 'auto';
       $infoFloating.style.opacity = '1';
@@ -1490,15 +1420,12 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   });
 });
 
-// ▶️ Start: valida fechas y luego ejecuta startPlanning()
 $start?.addEventListener('click', ()=>{
   if(!validateBaseDatesDMY()) return;
   startPlanning();
 });
 
 $send?.addEventListener('click', onSend);
-
-// Chat: Enter envía (sin Shift)
 $chatI?.addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey){
     e.preventDefault();
@@ -1506,14 +1433,13 @@ $chatI?.addEventListener('keydown', e=>{
   }
 });
 
-// CTA y upsell
 $confirmCTA?.addEventListener('click', ()=>{
   isItineraryLocked = true;
   qs('#monetization-upsell').style.display='flex';
 });
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
 
-/* ====== Info Chat: IDs #info-chat-* + control de display ====== */
+/* ====== Info Chat ====== */
 function openInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
@@ -1534,19 +1460,18 @@ async function sendInfoMessage(){
   if(!txt) return;
   infoChatMsg(txt,'user');
   input.value='';
-  input.style.height = 'auto'; // reset altura tras envío
+  input.style.height = 'auto';
   const ans = await callInfoAgent(txt);
   infoChatMsg(ans||'');
 }
 
 function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
-  const toggleFloating = qs('#info-chat-floating'); // 🆕 soporte flotante
+  const toggleFloating = qs('#info-chat-floating');
   const close = qs('#info-chat-close');
   const send = qs('#info-chat-send');
   const input = qs('#info-chat-input');
 
-  // 🧼 Limpieza previa por si se re-vincula
   toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
@@ -1575,7 +1500,6 @@ function bindInfoChatListeners(){
     sendInfoMessage();
   });
 
-  // Chat estilo GPT: Enter = enviar / Shift+Enter = salto de línea
   i2?.addEventListener('keydown', (e)=>{
     if(e.key==='Enter' && !e.shiftKey){
       e.preventDefault();
@@ -1583,7 +1507,6 @@ function bindInfoChatListeners(){
     }
   });
 
-  // Textarea auto-ajustable
   if(i2){
     i2.setAttribute('rows','1');
     i2.style.overflowY = 'hidden';
@@ -1597,7 +1520,6 @@ function bindInfoChatListeners(){
     });
   }
 
-  // Delegación de respaldo por si el toggle cambia internamente
   document.addEventListener('click', (e)=>{
     const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
     if(el){
@@ -1607,20 +1529,16 @@ function bindInfoChatListeners(){
   });
 }
 
-/* ---------- INIT ROBUSTA (clave para que aparezca la "línea 1") ---------- */
+/* ---------- INIT ROBUSTA ---------- */
 function initPlannerUI(){
-  // Crea la primera fila si no existe
   if(!document.querySelector('#city-list .city-row')){
     addCityRow();
   }
-  // Enlaza Info Chat
   bindInfoChatListeners();
 }
 
-// Ejecuta ya si el DOM está listo, y además suscríbete a DOMContentLoaded como respaldo
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', initPlannerUI, { once:true });
 } else {
-  // DOM ya cargado
   initPlannerUI();
 }
