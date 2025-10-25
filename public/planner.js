@@ -424,7 +424,7 @@ function saveDestinations(){
 }
 
 /* ==============================
-   SECCIÓN 8 · Tabs + Render
+   SECCIÓN 8 · Tabs + Render + Actualización plannerState
 ================================= */
 function setActiveCity(name){
   if(!name) return;
@@ -454,6 +454,61 @@ function renderCityTabs(){
     activeCity = null;
     $itWrap.innerHTML = '';
   }
+
+  // 🧠 Actualiza plannerState con toda la información del sidebar
+  updatePlannerStateFromSidebar();
+}
+
+/* ==============================
+   🧠 Función auxiliar: Actualizar plannerState desde Sidebar
+================================= */
+function updatePlannerStateFromSidebar(){
+  // 🗺️ Destinos
+  const cities = [...document.querySelectorAll('.city-row')].map(row => {
+    const cityName = row.querySelector('.city')?.value?.trim();
+    const country = row.querySelector('.country')?.value?.trim();
+    const day = row.querySelector('.baseDay')?.value;
+    const month = row.querySelector('.baseMonth')?.value;
+    const year = row.querySelector('.baseYear')?.value;
+    const daysVal = row.querySelector('.days')?.value || '1';
+
+    const startHour = row.querySelector('.hour-select[data-type="start"]')?.value;
+    const startMinute = row.querySelector('.minute-select[data-type="start"]')?.value;
+    const endHour = row.querySelector('.hour-select[data-type="end"]')?.value;
+    const endMinute = row.querySelector('.minute-select[data-type="end"]')?.value;
+
+    return {
+      name: cityName || '',
+      country: country || '',
+      date: `${day}-${month}-${year}`,
+      startTime: (startHour && startMinute) ? `${startHour}:${startMinute}` : null,
+      endTime: (endHour && endMinute) ? `${endHour}:${endMinute}` : null,
+      days: Math.max(1, parseInt(daysVal, 10) || 1)
+    };
+  }).filter(c => c.name);
+
+  // ✨ Preferencias
+  const preferences = document.getElementById('special-conditions')?.value?.trim() || '';
+
+  // 👥 Viajeros
+  const travelers = {
+    adults: parseInt(document.getElementById('p-adults')?.value || '0', 10),
+    young: parseInt(document.getElementById('p-young')?.value || '0', 10),
+    children: parseInt(document.getElementById('p-children')?.value || '0', 10),
+    infants: parseInt(document.getElementById('p-infants')?.value || '0', 10),
+    seniors: parseInt(document.getElementById('p-seniors')?.value || '0', 10)
+  };
+
+  // 💰 Presupuesto
+  const budgetValue = parseFloat(document.getElementById('budget')?.value || '0');
+  const currency = document.getElementById('currency')?.value || 'USD';
+  const budget = { amount: budgetValue, currency };
+
+  // 🧠 Guardar en plannerState global
+  plannerState.cities = cities;
+  plannerState.preferences = preferences;
+  plannerState.travelers = travelers;
+  plannerState.budget = budget;
 }
 
 /* ==============================
@@ -949,6 +1004,32 @@ function addMultipleDaysToCity(city, extraDays){
    (fusión de criterios fuertes v55)
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
+  // 🧠 Información adicional desde plannerState
+  const citiesGuide = (plannerState?.cities || []).map(c => `
+📍 Ciudad: ${c.name} (${c.country})
+📅 Fecha: ${c.date}
+🕓 Inicio sugerido: ${c.startTime || 'No especificado'}
+🕗 Fin preferido: ${c.endTime || 'No especificado'}
+🗓️ Días: ${c.days}
+`).join('\n');
+
+  const preferencesGuide = plannerState?.preferences
+    ? `✨ Preferencias y restricciones:\n${plannerState.preferences}\n`
+    : '';
+
+  const travelersGuide = plannerState?.travelers ? `
+👥 Composición del grupo:
+- Adultos: ${plannerState.travelers.adults}
+- Jóvenes: ${plannerState.travelers.young}
+- Niños: ${plannerState.travelers.children}
+- Infantes: ${plannerState.travelers.infants}
+- Mayores: ${plannerState.travelers.seniors}
+` : '';
+
+  const budgetGuide = plannerState?.budget
+    ? `💰 Presupuesto total: ${plannerState.budget.amount} ${plannerState.budget.currency}\n`
+    : '';
+
   const payload = `
 Devuelve SOLO JSON válido:
 {
@@ -981,11 +1062,16 @@ CASOS ESPECIALES:
 REGLAS DE FUSIÓN:
 - Devuelve "allowed" ya corregidas; solo pasa a "removed" lo incompatible.
 
+Información del usuario (sidebar):
+${citiesGuide}
+${preferencesGuide}${travelersGuide}${budgetGuide}
+
 Contexto:
 - Ciudad: "${city}"
 - Fecha base (Día 1): ${baseDate || 'N/A'}
 - Filas a validar: ${JSON.stringify(rows)}
 `.trim();
+
   try{
     const res = await callAgent(payload, true);
     const parsed = parseJSON(res);
