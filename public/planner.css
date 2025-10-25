@@ -188,8 +188,9 @@ body{
   overflow:auto;
 }
 
-/* ✅ Excepción: permitir interacción con el botón Reset incluso si sidebar está bloqueado */
-.sidebar.disabled #reset-planner {
+/* ✅ Excepciones: permitir interacción con botones clave incluso si sidebar está bloqueado */
+.sidebar.disabled #reset-planner,
+.sidebar.disabled #start-planning {
   opacity: 1 !important;
   pointer-events: auto !important;
   cursor: pointer;
