@@ -34,6 +34,21 @@ const DEFAULT_END   = '19:00';
 let pendingChange = null;
 let hasSavedOnce = false;
 
+// 🧠 Estado global para persistir configuración del planner
+let plannerState = {
+  destinations: [],
+  specialConditions: '',
+  travelers: {
+    adults: 0,
+    young: 0,
+    children: 0,
+    infants: 0,
+    seniors: 0
+  },
+  budget: '',
+  currency: 'USD'
+};
+
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
@@ -388,6 +403,21 @@ function saveDestinations(){
   if ($infoFloating) {
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
+  }
+
+  // 🧠 ACTUALIZAR PLANNERSTATE — Bloque quirúrgico añadido
+  if (typeof plannerState !== 'undefined') {
+    plannerState.destinations = [...savedDestinations];
+    plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
+    plannerState.travelers = {
+      adults: Number(qs('#p-adults')?.value || 0),
+      young: Number(qs('#p-young')?.value || 0),
+      children: Number(qs('#p-children')?.value || 0),
+      infants: Number(qs('#p-infants')?.value || 0),
+      seniors: Number(qs('#p-seniors')?.value || 0),
+    };
+    plannerState.budget = qs('#budget')?.value || '';
+    plannerState.currency = qs('#currency')?.value || 'USD';
   }
 }
 
@@ -1762,12 +1792,44 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const cancelReset  = overlay.querySelector('#cancel-reset');
 
   confirmReset.addEventListener('click', ()=>{
+    // 🔄 Estado principal
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
     addCityRow();
     $start.disabled = true;
     $tabs.innerHTML=''; $itWrap.innerHTML='';
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
+
+    // 🔄 Flags de planificación
+    planningStarted = false;
+    metaProgressIndex = 0;
+    collectingHotels = false;
+    isItineraryLocked = false;
+    activeCity = null;
+
+    // 🔄 Limpiar overlays/tooltips si están activos
+    try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
+    qsa('.date-tooltip').forEach(t => t.remove());
+
+    // 🔄 Restaurar formulario lateral a valores por defecto
+    const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
+    const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
+    const $yo = qs('#p-young');    if($yo) $yo.value = '0';
+    const $ch = qs('#p-children'); if($ch) $ch.value = '0';
+    const $in = qs('#p-infants');  if($in) $in.value = '0';
+    const $se = qs('#p-seniors');  if($se) $se.value = '0';
+    const $bu = qs('#budget');     if($bu) $bu.value = '';
+    const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
+
+    // 🔄 Sincronizar plannerState (definido en Sección 1)
+    if (typeof plannerState !== 'undefined') {
+      plannerState.destinations = [];
+      plannerState.specialConditions = '';
+      plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+      plannerState.budget = '';
+      plannerState.currency = 'USD';
+    }
+
     overlay.classList.remove('active');
     setTimeout(()=>overlay.remove(), 300);
 
@@ -1778,10 +1840,15 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     if ($infoFloating){
       $infoFloating.style.pointerEvents = 'auto';
       $infoFloating.style.opacity = '1';
+      $infoFloating.disabled = false;
     }
 
     // 🧹 Desactivar botón de reinicio
     if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+
+    // UX: enfocar primer input de ciudad
+    const firstCity = qs('.city-row .city');
+    if (firstCity) firstCity.focus();
   });
 
   cancelReset.addEventListener('click', ()=>{
