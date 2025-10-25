@@ -377,7 +377,11 @@ function saveDestinations(){
     const yearSel = qs('.baseYear', r)?.value || '';
     const baseDate = (daySel && monthSel && yearSel) ? `${daySel}/${monthSel}/${yearSel}` : '';
 
-    if(!city) return;
+    if(!city) {
+      console.warn('Fila sin ciudad ignorada');
+      return;
+    }
+
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
       const start = qs('.start',hd)?.value || DEFAULT_START;
@@ -409,16 +413,18 @@ function saveDestinations(){
 
   renderCityTabs();
 
-  // ✅ Activar botones
-  $start.disabled = savedDestinations.length === 0;
-  if ($resetBtn) $resetBtn.removeAttribute('disabled');
-  hasSavedOnce = true;
-
-  // 🧱 Bloquear sidebar y desactivar Info Chat flotante
-  if ($sidebar) $sidebar.classList.add('disabled');
-  if ($infoFloating) {
-    $infoFloating.style.pointerEvents = 'none';
-    $infoFloating.style.opacity = '0.6';
+  // ✅ Activar / desactivar botones según haya destinos
+  if (savedDestinations.length > 0) {
+    $start.disabled = false;
+    if ($resetBtn) $resetBtn.removeAttribute('disabled');
+    if ($sidebar) $sidebar.classList.add('disabled');
+    if ($infoFloating) {
+      $infoFloating.style.pointerEvents = 'none';
+      $infoFloating.style.opacity = '0.6';
+    }
+  } else {
+    $start.disabled = true;
+    if ($resetBtn) $resetBtn.setAttribute('disabled', 'true');
   }
 }
 
