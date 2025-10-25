@@ -350,14 +350,26 @@ input.end.invalid {
   background:#ffe5e5;
 }
 
-/* 🆕 Guía visual para el formato 24 h */
+/* 🆕 Guía visual para el formato 24 h (con fade-in) */
 .time-hint {
+  display: block;
   font-size: 0.85rem;
   color: #555;
   margin: 0.25rem 0 0.5rem 0;
+  font-style: italic;
+  opacity: 0;
+  transform: translateY(-4px);
+  animation: fadeInHint 0.4s ease forwards;
 }
 .time-hint strong {
   color: var(--brand-600);
+}
+
+@keyframes fadeInHint {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 🆕 Responsive horas */
