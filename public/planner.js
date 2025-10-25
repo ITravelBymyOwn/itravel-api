@@ -360,7 +360,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 ========================================================= */
 
 /* ==============================
-   SECCIÓN 7 · Guardar destinos  ✅ CORREGIDA Y COMPLETA
+   SECCIÓN 7 · Guardar destinos
 ================================= */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
@@ -403,26 +403,8 @@ function saveDestinations(){
   Object.keys(cityMeta).forEach(c=>{ if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; });
 
   renderCityTabs();
-
-  // ✅ IMPORTANTE: activar/desactivar botón antes de bloquear sidebar
   $start.disabled = savedDestinations.length===0;
   hasSavedOnce = true;
-
-  // ✅ Activar/desactivar botón de reset según haya destinos guardados
-  if ($resetBtn) {
-    if (savedDestinations.length > 0) {
-      $resetBtn.removeAttribute('disabled');
-    } else {
-      $resetBtn.setAttribute('disabled', 'true');
-    }
-  }
-
-  // 🆕 Bloqueo visual tras guardar destinos (no afecta botones habilitados manualmente)
-  if($sidebar) $sidebar.classList.add('disabled');
-  if($infoFloating){
-    $infoFloating.style.pointerEvents = 'none';
-    $infoFloating.style.opacity = '0.6';
-  }
 }
 
 /* ==============================
