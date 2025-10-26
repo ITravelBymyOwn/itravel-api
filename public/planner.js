@@ -1785,20 +1785,23 @@ async function onSend(){
     return;
   }
 
-  // ============================================================
-  // 9) Agregar ciudad
-  // ============================================================
-  if(intent.type==='add_city' && intent.city){
-    const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
-    const days = intent.days || 2;
-    addCityRow({city:name, days:'', baseDate:intent.baseDate||''});
-    const lastRow = $cityList.lastElementChild;
-    const sel = lastRow?.querySelector('.days');
-    if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
-    saveDestinations();
-    chatMsg(`✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`, 'ai');
-    return;
-  }
+ // ============================================================
+// 9) Agregar ciudad
+// ============================================================
+if(intent.type==='add_city' && intent.city){
+  const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
+  const days = intent.days || 2;
+  addCityRow({city:name, days:'', baseDate:intent.baseDate||''});
+  const lastRow = $cityList.lastElementChild;
+  const sel = lastRow?.querySelector('.days');
+  if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
+  saveDestinations();
+  chatMsg(
+    `✅ Añadí <strong>${name}</strong>. Dime tu <strong>hotel/zona</strong> (puedes dar zona aproximada, dirección exacta, nombre de hotel o incluso pegar coordenadas o link de Google Maps) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
+    'ai'
+  );
+  return;
+}
 
   // ============================================================
   // 10) Eliminar ciudad
