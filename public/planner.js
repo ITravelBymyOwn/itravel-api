@@ -387,16 +387,17 @@ function saveDestinations(){
     list.push({ city, country, days, baseDate, perDay });
   });
 
-  // 🧠 Detección de aumento de días y limpieza itinerario
+  // 🧠 Reconstrucción exacta de días + marca de replanificación cuando cambie el total (↑ o ↓)
   list.forEach(({city, days})=>{
-    const prevDays = itineraries[city] ? Object.keys(itineraries[city].byDay).length : 0;
-    if(prevDays && days > prevDays){
-      // Limpiar estructura existente para evitar duplicados
+    const prevDays = itineraries[city] ? Object.keys(itineraries[city].byDay||{}).length : 0;
+    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate:null };
+
+    if(prevDays !== days){
+      // Reconstruir la matriz por día para que coincida EXACTAMENTE con "days"
       itineraries[city].byDay = {};
-      for(let d=1; d<=days; d++){
-        itineraries[city].byDay[d] = [];
-      }
-      // Marcar para regenerar en startPlanning
+      for(let d=1; d<=days; d++){ itineraries[city].byDay[d] = []; }
+
+      // Marcar para que el agente regenere con el nuevo total de días
       if (typeof plannerState !== 'undefined') {
         if (!plannerState.forceReplan) plannerState.forceReplan = {};
         plannerState.forceReplan[city] = true;
@@ -405,16 +406,34 @@ function saveDestinations(){
   });
 
   savedDestinations = list;
+
+  // 🔄 Sincronizar meta + byDay con el sidebar (siempre coherentes)
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
-    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
-    if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
-    else {
+    // cityMeta
+    if(!cityMeta[city]){
+      cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay:[...perDay] };
+    }else{
       cityMeta[city].baseDate = baseDate||null;
-      cityMeta[city].perDay   = perDay||[];
+      // Alinear perDay al número de días (rellenar o truncar)
+      const aligned = [];
+      for(let d=1; d<=days; d++){
+        const src = perDay[d-1] || cityMeta[city].perDay?.find(x=>x.day===d) || { day:d, start:DEFAULT_START, end:DEFAULT_END };
+        aligned.push({ day:d, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END });
+      }
+      cityMeta[city].perDay = aligned;
     }
+
+    // itineraries
+    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
+    itineraries[city].baseDate = baseDate || null;
     for(let d=1; d<=days; d++){
       if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
     }
+    // Eliminar días sobrantes si el usuario redujo el total
+    Object.keys(itineraries[city].byDay).forEach(k=>{
+      const n = +k;
+      if(n>days) delete itineraries[city].byDay[n];
+    });
   });
 
   // Limpia ciudades eliminadas
@@ -1352,6 +1371,7 @@ async function startPlanning(){
 }
 
 function askNextHotelTransport(){
+  // ✅ Si ya se procesaron todos los destinos
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
@@ -1370,9 +1390,25 @@ function askNextHotelTransport(){
     })();
     return;
   }
+
+  // 🧠 Validación y persistencia del destino actual
   const city = savedDestinations[metaProgressIndex].city;
-  setActiveCity(city); renderCityItinerary(city);
-  chatMsg(tone.askHotelTransport(city),'ai');
+  if(!cityMeta[city]){
+    cityMeta[city] = { baseDate: null, hotel:'', transport:'', perDay: [] };
+  }
+
+  // ✅ Si no hay hotel definido, no avanzar hasta que el usuario lo indique
+  const currentHotel = cityMeta[city].hotel || '';
+  if(!currentHotel.trim()){
+    setActiveCity(city);
+    renderCityItinerary(city);
+    chatMsg(tone.askHotelTransport(city), 'ai');
+    return;
+  }
+
+  // 🧭 Avanzar al siguiente destino si ya hay hotel guardado
+  metaProgressIndex++;
+  askNextHotelTransport();
 }
 
 /* ==============================
@@ -1698,9 +1734,33 @@ async function onSend(){
       : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
+
+    // 🧠 Guardar hotel y transporte aunque sea texto libre (zona, dirección, coordenadas o link)
     upsertCityMeta({ city, hotel: text, transport });
     metaProgressIndex++;
     askNextHotelTransport();
+    return;
+  }
+
+  // 🆕 Detectar cambio de hotel después de haber generado itinerario
+  const hotelChangeMatch = text.match(/^(?:hotel|zona|direcci[oó]n):?\s*(.+)$/i);
+  if(hotelChangeMatch && activeCity){
+    const newHotel = hotelChangeMatch[1].trim();
+    const city = activeCity;
+    if(!cityMeta[city]) cityMeta[city] = { baseDate:null, hotel:'', transport:'', perDay:[] };
+    const prevHotel = cityMeta[city].hotel || '';
+
+    // ✅ Solo si el hotel cambió realmente
+    if(newHotel && newHotel !== prevHotel){
+      cityMeta[city].hotel = newHotel;
+      chatMsg(`🏨 Actualicé el hotel/zona de <strong>${city}</strong>. Reajustando itinerario…`, 'ai');
+      showWOW(true,'Reequilibrando tras cambio de hotel…');
+      await rebalanceWholeCity(city);
+      showWOW(false);
+      chatMsg('✅ Itinerario reequilibrado tras el cambio de hotel.','ai');
+    } else {
+      chatMsg('ℹ️ El hotel ya estaba configurado con esa información.','ai');
+    }
     return;
   }
 
@@ -1847,22 +1907,22 @@ async function onSend(){
   }
 
  // ============================================================
-// 9) Agregar ciudad
-// ============================================================
-if(intent.type==='add_city' && intent.city){
-  const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
-  const days = intent.days || 2;
-  addCityRow({city:name, days:'', baseDate:intent.baseDate||''});
-  const lastRow = $cityList.lastElementChild;
-  const sel = lastRow?.querySelector('.days');
-  if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
-  saveDestinations();
-  chatMsg(
-    `✅ Añadí <strong>${name}</strong>. Dime tu <strong>hotel/zona</strong> (puedes dar zona aproximada, dirección exacta, nombre de hotel o incluso pegar coordenadas o link de Google Maps) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
-    'ai'
-  );
-  return;
-}
+ // 9) Agregar ciudad
+ // ============================================================
+ if(intent.type==='add_city' && intent.city){
+   const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
+   const days = intent.days || 2;
+   addCityRow({city:name, days:'', baseDate:intent.baseDate||''});
+   const lastRow = $cityList.lastElementChild;
+   const sel = lastRow?.querySelector('.days');
+   if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
+   saveDestinations();
+   chatMsg(
+     `✅ Añadí <strong>${name}</strong>. Dime tu <strong>hotel/zona</strong> (puedes dar zona aproximada, dirección exacta, nombre de hotel o incluso pegar coordenadas o link de Google Maps) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
+     'ai'
+   );
+   return;
+ }
 
   // ============================================================
   // 10) Eliminar ciudad
