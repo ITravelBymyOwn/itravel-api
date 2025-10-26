@@ -1224,8 +1224,14 @@ ${buildIntake()}
       tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
+    // 🧼 FILTRO LOCAL · Eliminar duplicados si existieran en la generación inicial
+    const existingActs = Object.values(itineraries[city]?.byDay || {})
+      .flat()
+      .map(r => String(r.activity || '').trim().toLowerCase());
+    tmpRows = tmpRows.filter(r => !existingActs.includes(String(r.activity || '').trim().toLowerCase()));
+
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 si hay replanificación → replace=true
+    pushRows(tmpCity, val.allowed, forceReplan);
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
 
@@ -1296,6 +1302,15 @@ ${buildIntake()}
       const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
       rows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
+
+    // 🧼 FILTRO LOCAL · Eliminar duplicados usando plannerState.existingActs si está disponible
+    let existingActs = Object.values(itineraries[city]?.byDay || {})
+      .flat()
+      .map(r => String(r.activity || '').trim().toLowerCase());
+    if(plannerState.existingActs && plannerState.existingActs[city]){
+      existingActs = [...new Set([...existingActs, ...Array.from(plannerState.existingActs[city])])];
+    }
+    rows = rows.filter(r => !existingActs.includes(String(r.activity || '').trim().toLowerCase()));
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
