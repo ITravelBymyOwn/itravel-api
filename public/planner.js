@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v59 (parte 1/3)
-   Base: v58
+   ITRAVELBYMYOWN · PLANNER v60 (parte 1/3)
+   Base: v59
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -740,7 +740,17 @@ Eres "Astra", agente de viajes internacional.
 - Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
 - Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
 - Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
-- Day trips inteligentes: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
+
+🆕 **Reglas mejoradas:**
+- 🧭 Day trips inteligentes:
+  • Cuando se agregan días o se planifica una estadía de 4 días o más, evalúa excursiones de 1 día a imperdibles cercanos (≤ 2 h por trayecto) y propón automáticamente UNA (1) si encaja de forma lógica.
+- ❌ Duplicados:
+  • NO repitas ninguna actividad que ya exista en el itinerario de la ciudad.
+  • Antes de proponer cualquier actividad, revisa el contexto y sustituye por una alternativa diferente si es similar.
+- ⏰ Horarios:
+  • Respeta las ventanas horarias definidas, pero puedes proponer horarios diferentes cuando tenga sentido logístico (tours nocturnos, cenas, auroras, eventos especiales, etc.).
+  • Evita horarios absurdos o riesgosos.
+
 - Seguridad:
   • No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
   • Prioriza siempre rutas y experiencias seguras y razonables.
@@ -1013,7 +1023,7 @@ function addMultipleDaysToCity(city, extraDays){
   // 🆕 Agregar solo los días realmente nuevos
   for(let i=1; i<=extraDays; i++){
     const newDay = currentMax + i;
-    if(!byDay[newDay]){  // evita duplicados
+    if(!byDay[newDay]){  // evita duplicados de días
       insertDayAt(city, newDay);
 
       const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || DEFAULT_START;
@@ -1043,9 +1053,23 @@ function addMultipleDaysToCity(city, extraDays){
     plannerState.forceReplan[city] = true;
   }
 
-  // 🧠 Rebalanceo automático sólo en el rango afectado
+  // 🧼 Recolección previa de actividades existentes para evitar duplicados
+  const allExistingActs = Object.values(byDay)
+    .flat()
+    .map(r => String(r.activity || '').trim().toLowerCase())
+    .filter(Boolean);
+  if(!plannerState.existingActs) plannerState.existingActs = {};
+  plannerState.existingActs[city] = new Set(allExistingActs);
+
+  // 🧠 Rebalanceo automático sólo en el rango afectado, con instrucción de evitar duplicados
   showWOW(true, 'Astra está reequilibrando la ciudad…');
-  rebalanceWholeCity(city, { start: rebalanceStart, end: rebalanceEnd })
+  const customOpts = { 
+    start: rebalanceStart, 
+    end: rebalanceEnd, 
+    avoidDuplicates: true 
+  };
+
+  rebalanceWholeCity(city, customOpts)
     .catch(err => console.error('Error en rebalance automático:', err))
     .finally(() => showWOW(false));
 }
@@ -1166,8 +1190,12 @@ ${FORMAT}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 - Revisa IMPERDIBLES diurnos y nocturnos.
 - ⚡ Para fenómenos como auroras (Reykjavik / Tromsø), sugiere 1 tour en un día + alternativas locales en otros días.
-- Respetar ventanas horarias por día: ${JSON.stringify(perDay)}.
+- Si el número total de días es ≥ 4, sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día).
+- Respeta ventanas horarias por día: ${JSON.stringify(perDay)}, pero puedes proponer horarios diferentes si tienen sentido logístico (por ejemplo, cenas, tours nocturnos, auroras, etc.).
 - Agrupar por zonas, evitar solapamientos.
+- ❌ NO DUPLICAR actividades ya existentes en ningún día.
+  • Siempre verifica todas las actividades de la ciudad antes de proponer nuevas.
+  • Si ya existe, sustituye por alternativa distinta.
 - Validar plausibilidad global y seguridad.
   • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
   • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
@@ -1175,6 +1203,8 @@ ${FORMAT}
 - Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto, regreso mismo día) sin duplicar otras noches.
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 - Nada de texto fuera del JSON.
+Contexto actual:
+${buildIntake()}
 `.trim();
 
   showWOW(true, 'Astra está generando itinerarios…');
@@ -1237,10 +1267,12 @@ ${FORMAT}
 **ROL:** Reequilibra la ciudad "${city}" entre los días ${startDay} y ${endDay}, manteniendo lo ya plausible y completando huecos.
 ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-- Respeta ventanas: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Respeta ventanas: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}, pero puedes proponer horarios diferentes si tienen sentido logístico.
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
 - Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
-${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
+${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : `- Si el número total de días es ≥ 4 y no se indicó destino, sugiere automáticamente un imperdible cercano.`}
+- ❌ NO DUPLICAR actividades existentes en ningún día.
+  • Si ya existe, sustituye por alternativa distinta.
 - El último día debe ser más liviano, respetando lógica de preparación de regreso.
 - Valida plausibilidad y seguridad global:
   • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
@@ -1596,6 +1628,8 @@ Instrucción:
   • No propongas actividades en zonas con riesgos o restricciones evidentes. 
   • Sustituye por alternativas seguras si aplica.
   • Añade siempre notas útiles (nunca vacías ni “seed”).
+- ❌ NO DUPLICAR actividades ya existentes en otros días de la ciudad.
+  • Si ya existe una actividad similar, sustitúyela por una alternativa distinta.
 - Devuelve C {"rows":[...],"replace":false}.
 Contexto:
 ${intakeData}
@@ -1604,7 +1638,19 @@ ${intakeData}
   const ans = await callAgent(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed?.rows){
-    const normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
+    let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
+
+    // 🧼 FILTRO LOCAL · Eliminar duplicados ya existentes
+    const allExisting = Object.values(itineraries[city].byDay || {})
+      .flat()
+      .filter(r => r.day !== day)
+      .map(r => String(r.activity||'').trim().toLowerCase());
+
+    normalized = normalized.filter(r=>{
+      const act = String(r.activity||'').trim().toLowerCase();
+      return act && !allExisting.includes(act);
+    });
+
     const val = await validateRowsWithAgent(city, normalized, baseDate);
     pushRows(city, val.allowed, false);
   }
