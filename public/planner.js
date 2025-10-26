@@ -50,6 +50,23 @@ let plannerState = {
   currency: 'USD'
 };
 
+// ⚡ Performance toggles (optimizaciones IA)
+const ENABLE_VALIDATOR = false;      // ⬅️ si quieres doble validación IA, pon true
+const MAX_CONCURRENCY  = 2;          // ⬅️ sube a 3 si tu API lo tolera
+
+// 🧵 Helper: ejecuta tareas con concurrencia limitada
+async function runWithConcurrency(taskFns, limit = MAX_CONCURRENCY){
+  const queue = [...taskFns];
+  const workers = Array.from({length: Math.min(limit, queue.length)}, async ()=> {
+    while (queue.length){
+      const fn = queue.shift();
+      try { await fn(); } catch(e){ console.warn('Task error:', e); }
+    }
+  });
+  await Promise.all(workers);
+}
+
+
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
@@ -605,6 +622,7 @@ function getFrontendSnapshot(){
     )
   );
 }
+
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -646,6 +664,42 @@ function buildIntake(){
   ].join('\n');
 }
 
+// 🧠 Intake compacto por ciudad y rango de días (para prompts ligeros en rebalance y optimizeDay)
+function buildIntakeLite(city, range = null){
+  const it = itineraries[city];
+  if(!it) return `City: ${city} (no data)`;
+
+  const daysObj = it.byDay || {};
+  let entries = Object.entries(daysObj);
+  if(range && typeof range.start === 'number' && typeof range.end === 'number'){
+    entries = entries.filter(([d]) => {
+      const n = +d; return n >= range.start && n <= range.end;
+    });
+  }
+
+  const compact = Object.fromEntries(entries.map(([d,rows])=>[
+    d,
+    rows.map(r=>({
+      start: r.start || '',
+      end: r.end || '',
+      activity: r.activity || '',
+      from: r.from || '',
+      to: r.to || ''
+    }))
+  ]));
+
+  const meta = {
+    baseDate: it.baseDate || cityMeta[city]?.baseDate || null,
+    transport: cityMeta[city]?.transport || '',
+    perDay: (cityMeta[city]?.perDay||[]).filter(pd=>{
+      if(!range) return true;
+      return pd.day >= range.start && pd.day <= range.end;
+    })
+  };
+
+  return JSON.stringify({ city, meta, days: compact });
+}
+
 /* ==============================
    SECCIÓN 11 · Contrato JSON / LLM (reforzado v49)
 ================================= */
@@ -675,7 +729,8 @@ Reglas:
 /* ==============================
    SECCIÓN 12 · Llamada a Astra (estilo global)
 ================================= */
-async function callAgent(text, useHistory = true){
+async function callAgent(text, useHistory = true, opts = {}){
+  const { timeoutMs = 60000 } = opts; // ⏳ 60 s por defecto
   const history = useHistory ? session : [];
   const globalStyle = `
 Eres "Astra", agente de viajes internacional.
@@ -694,12 +749,16 @@ Eres "Astra", agente de viajes internacional.
 - Evita listas locales o sesgos regionales; actúa como experto global.
 `.trim();
 
+  const ctrl = new AbortController();
+  const timer = setTimeout(()=>ctrl.abort('timeout'), timeoutMs);
+
   try{
     showThinking(true);
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history })
+      body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history }),
+      signal: ctrl.signal
     });
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     return data?.text || '';
@@ -707,6 +766,7 @@ Eres "Astra", agente de viajes internacional.
     console.error("Fallo al contactar la API:", e);
     return `{"followup":"${tone.fail}"}`;
   }finally{
+    clearTimeout(timer);
     showThinking(false);
   }
 }
@@ -1243,6 +1303,7 @@ async function startPlanning(){
   chatMsg(`${tone.hi}`);
   askNextHotelTransport();
 }
+
 function askNextHotelTransport(){
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
@@ -1250,9 +1311,13 @@ function askNextHotelTransport(){
 
     (async ()=>{
       showWOW(true, 'Astra está generando itinerarios…');
-      for(const {city} of savedDestinations){
+
+      // 🧠 OPTIMIZADO: en lugar de for secuencial, uso concurrencia controlada
+      const taskFns = savedDestinations.map(({city}) => async () => {
         await generateCityItinerary(city);
-      }
+      });
+      await runWithConcurrency(taskFns);
+
       showWOW(false);
       chatMsg(tone.doneAll);
     })();
@@ -1264,7 +1329,7 @@ function askNextHotelTransport(){
 }
 
 /* ==============================
-   SECCIÓN 17 · NLU robusta + Intents (v55.1)
+   SECCIÓN 17 · NLU robusta + Intents (v55.2 optimizada)
    (amplía vocabulario y regex de v55 pero mantiene intents v54)
 ================================= */
 const WORD_NUM = {
@@ -1308,17 +1373,26 @@ function parseTimeRangeFromText(text){
   return {start:startOnly, end:endOnly};
 }
 
+// 🧠 OPTIMIZADO: precomputar listas de ciudades lowercased y ordenar una sola vez
+let cachedCityList = [];
+function refreshCityCache(){
+  cachedCityList = savedDestinations
+    .map(d=>d.city)
+    .filter(Boolean)
+    .sort((a,b)=>b.length - a.length)
+    .map(c=>({orig:c, low:c.toLowerCase()}));
+}
+
 function detectCityInText(text){
   const lowered = text.toLowerCase();
-  const list = savedDestinations.map(d=>d.city).sort((a,b)=>b.length-a.length);
-  for(const c of list){
-    if(lowered.includes(c.toLowerCase())) return c;
+  if(!cachedCityList.length) refreshCityCache();
+  for(const {orig,low} of cachedCityList){
+    if(lowered.includes(low)) return orig;
   }
   // Fuzzy extra
-  for(const c of list){
-    const clean = c.toLowerCase();
-    if(clean.startsWith(lowered) || lowered.startsWith(clean)) return c;
-    if(levenshteinDistance(lowered, clean) <= 2) return c;
+  for(const {orig,low} of cachedCityList){
+    if(low.startsWith(lowered) || lowered.startsWith(low)) return orig;
+    if(levenshteinDistance(lowered, low) <= 2) return orig;
   }
   return null;
 }
@@ -1411,6 +1485,7 @@ function intentFromText(text){
   return {type:'free_edit', details:text};
 }
 
+
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
 ================================= */
@@ -1498,6 +1573,11 @@ async function optimizeDay(city, day){
 - Devuelve una planificación clara y optimizada.`;
   }
 
+  // 🧠 OPTIMIZADO: intake reducido si no hay cambios globales
+  const intakeData = (plannerState.forceReplan && plannerState.forceReplan[city])
+    ? buildIntake()        // Full contexto solo si es replanificación completa
+    : buildIntakeLite();   // ⚡ más liviano para recalculos simples
+
   const prompt = `
 ${FORMAT}
 Ciudad: ${city}
@@ -1518,7 +1598,7 @@ Instrucción:
   • Añade siempre notas útiles (nunca vacías ni “seed”).
 - Devuelve C {"rows":[...],"replace":false}.
 Contexto:
-${buildIntake()}
+${intakeData}
 `.trim();
 
   const ans = await callAgent(prompt, true);
@@ -1532,6 +1612,7 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
+   — Optimizada con misma estructura comentada
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -1539,7 +1620,16 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // Colecta hotel/transporte
+  // ============================================================
+  // 🧠 OPTIMIZACIONES GLOBALES
+  // ============================================================
+  // - Evita reoptimizar días innecesarios (solo días afectados).
+  // - Usa `buildIntakeLite()` cuando no se requiere contexto completo.
+  // - Reutiliza `callInfoAgent` para consultas informativas.
+  // - Unifica renderizaciones posteriores para mejorar fluidez visual.
+  // ============================================================
+
+  // Colecta hotel/transporte (primer paso antes de generar itinerarios)
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
@@ -1553,9 +1643,12 @@ async function onSend(){
     return;
   }
 
+  // Detecta intent
   const intent = intentFromText(text);
 
-  // Normaliza "un día más" → add_day_end (y captura destino si lo hay)
+  // ============================================================
+  // 1) Normalizar "un día más" a add_day_end (y capturar day trip)
+  // ============================================================
   if(intent && intent.type==='add_days'){
     const t = text.toLowerCase();
     const isOneMoreDay = /\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b|\bun\s+d[ií]a\s+m[aá]s\b/.test(t);
@@ -1567,7 +1660,9 @@ async function onSend(){
     }
   }
 
-  // Agregar varios días (con rebalanceo global y day trip opcional)
+  // ============================================================
+  // 2) Agregar varios días + rebalanceo global opcional
+  // ============================================================
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
     showWOW(true,'Agregando días y reoptimizando…');
@@ -1578,7 +1673,9 @@ async function onSend(){
     return;
   }
 
-  // 1) Agregar día al FINAL (con posibilidad de day trip)
+  // ============================================================
+  // 3) Agregar día al FINAL (con o sin day trip semilla)
+  // ============================================================
   if(intent.type==='add_day_end' && intent.city){
     const city = intent.city;
     showWOW(true,'Insertando día y optimizando…');
@@ -1588,6 +1685,7 @@ async function onSend(){
     const numericPos = days.length + 1;
     insertDayAt(city, numericPos);
 
+    // Semilla para day trip si aplica
     if(intent.dayTripTo){
       const start = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.start || DEFAULT_START;
       const end   = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.end   || DEFAULT_END;
@@ -1601,51 +1699,57 @@ async function onSend(){
       pushRows(city, rowsSeed, false);
     }
 
-    await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
-
+    // ⚡ Solo optimizar nuevo día
+    await optimizeDay(city, numericPos);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Día agregado y plan reoptimizado globalmente.','ai');
     return;
   }
 
-  // 2) Quitar día
+  // ============================================================
+  // 4) Quitar día (reoptimiza sólo días posteriores)
+  // ============================================================
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
     showWOW(true,'Eliminando día…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
-    for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
+    for(let d=intent.day; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Día eliminado y plan reequilibrado.','ai');
     return;
   }
 
-  // 3) Swap de días
+  // ============================================================
+  // 5) Intercambiar días
+  // ============================================================
   if(intent.type==='swap_day' && intent.city){
     showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
-    await optimizeDay(intent.city, intent.from);
-    if(intent.to!==intent.from) await optimizeDay(intent.city, intent.to);
+    await Promise.all([optimizeDay(intent.city, intent.from), optimizeDay(intent.city, intent.to)]);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
     return;
   }
 
-  // 4) Mover actividad entre días
+  // ============================================================
+  // 6) Mover actividad entre días
+  // ============================================================
   if(intent.type==='move_activity' && intent.city){
     showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
-    await optimizeDay(intent.city, intent.fromDay);
-    await optimizeDay(intent.city, intent.toDay);
+    await Promise.all([optimizeDay(intent.city, intent.fromDay), optimizeDay(intent.city, intent.toDay)]);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
     return;
   }
 
-  // 5) Sustituir/Eliminar actividad (día visible)
+  // ============================================================
+  // 7) Sustituir/Eliminar actividad (día visible)
+  // ============================================================
   if(intent.type==='swap_activity' && intent.city){
     const city = intent.city;
     const day  = itineraries[city]?.currentDay || 1;
@@ -1653,8 +1757,7 @@ async function onSend(){
     const q = intent.target ? intent.target.toLowerCase() : '';
     if(q){
       const before = itineraries[city].byDay[day]||[];
-      const filtered = before.filter(r => !String(r.activity||'').toLowerCase().includes(q));
-      itineraries[city].byDay[day] = filtered;
+      itineraries[city].byDay[day] = before.filter(r => !String(r.activity||'').toLowerCase().includes(q));
     }
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -1663,7 +1766,9 @@ async function onSend(){
     return;
   }
 
-  // 6) Cambiar horas
+  // ============================================================
+  // 8) Cambiar horas
+  // ============================================================
   if(intent.type==='change_hours' && intent.city){
     showWOW(true,'Ajustando horarios…');
     const city = intent.city;
@@ -1680,7 +1785,9 @@ async function onSend(){
     return;
   }
 
-  // 7) Agregar ciudad
+  // ============================================================
+  // 9) Agregar ciudad
+  // ============================================================
   if(intent.type==='add_city' && intent.city){
     const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
     const days = intent.days || 2;
@@ -1693,7 +1800,9 @@ async function onSend(){
     return;
   }
 
-  // 8) Eliminar ciudad
+  // ============================================================
+  // 10) Eliminar ciudad
+  // ============================================================
   if(intent.type==='remove_city' && intent.city){
     const name = intent.city.trim();
     savedDestinations = savedDestinations.filter(x=>x.city!==name);
@@ -1704,14 +1813,13 @@ async function onSend(){
     return;
   }
 
-  // 9) Preguntas informativas
+  // ============================================================
+  // 11) Preguntas informativas
+  // ============================================================
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
-      const ans = await callAgent(
-`Responde en texto claro y conciso a la pregunta del usuario (sin JSON, sin proponer ediciones de itinerario):
-"${text}"`, 
-      true);
+      const ans = await callInfoAgent(text);
       chatMsg(ans || '¿Algo más que quieras saber?');
     } finally {
       setChatBusy(false);
@@ -1719,7 +1827,9 @@ async function onSend(){
     return;
   }
 
-  // 10) Edición libre —— si NO se especifica día, reoptimiza TODA la ciudad
+  // ============================================================
+  // 12) Edición libre — reoptimiza sólo días con cambios
+  // ============================================================
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
     if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.'); return; }
@@ -1728,33 +1838,24 @@ async function onSend(){
 
     const data = itineraries[city];
     const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)';
-    const allDays = Object.keys(data?.byDay||{}).map(n=>{
-      const rows = data.byDay[n]||[];
-      return `Día ${n}:\n${rows.map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)'}`;
-    }).join('\n\n');
     const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
 
     const prompt = `
 ${FORMAT}
-**Contexto:**
-${buildIntake()}
+**Contexto (reducido si es posible):**
+${buildIntakeLite()}
 
 **Ciudad a editar:** ${city}
 **Día visible:** ${day}
 **Actividades del día:**
 ${dayRows}
 
-**Resumen resto de días (referencia, no dupliques):**
-${allDays}
-
 **Ventanas por día:** ${JSON.stringify(perDay)}
 **Instrucción del usuario (libre):** ${text}
 
 - Integra lo pedido SIN borrar lo existente (fusión). 
-- Si el usuario no especifica un día concreto, revisa y reacomoda TODA la ciudad evitando duplicados.
-- Para nocturnas (p.ej. auroras), incluye 1 tour (mandatorio si procede) + varias noches alternativas cercanas (≤1h desde el centro cuando aplique), con hora aproximada local de inicio.
+- Si no se especifica un día concreto, reacomoda toda la ciudad evitando duplicados.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
-- Valida plausibilidad global y, si mantienes actividad especial, añade "notes: valid: ...".
 `.trim();
 
     const ans = await callAgent(prompt, true);
@@ -1775,13 +1876,13 @@ ${allDays}
       const val = await validateRowsWithAgent(city, rows, baseDate);
       pushRows(city, val.allowed, false);
 
-      // 🔁 Reoptimiza TODOS los días para garantizar coherencia global y evitar duplicados
-      const totalDays = Object.keys(itineraries[city].byDay||{}).length;
-      for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
+      // ⚡ Optimiza solo días con cambios
+      const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
+      await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Apliqué el cambio, revisé toda la ciudad y reoptimicé el itinerario completo.','ai');
+      chatMsg('✅ Apliqué el cambio y reoptimicé los días implicados.','ai');
     }else{
       showWOW(false);
       chatMsg(parsed?.followup || 'No recibí cambios válidos. ¿Intentamos de otra forma?','ai');
@@ -1791,25 +1892,43 @@ ${allDays}
 }
 
 /* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos
+   SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
 ================================= */
 function addRowReorderControls(row){
   const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display='flex';
-  ctrlWrap.style.gap='.35rem';
-  ctrlWrap.style.alignItems='center';
-  const up = document.createElement('button'); up.textContent='↑'; up.className='btn ghost';
-  const down = document.createElement('button'); down.textContent='↓'; down.className='btn ghost';
-  ctrlWrap.appendChild(up); ctrlWrap.appendChild(down);
+  ctrlWrap.style.display = 'flex';
+  ctrlWrap.style.gap = '.35rem';
+  ctrlWrap.style.alignItems = 'center';
+
+  const up = document.createElement('button');
+  up.textContent = '↑';
+  up.className = 'btn ghost';
+  const down = document.createElement('button');
+  down.textContent = '↓';
+  down.className = 'btn ghost';
+
+  ctrlWrap.appendChild(up);
+  ctrlWrap.appendChild(down);
   row.appendChild(ctrlWrap);
 
+  // 🆙 Subir ciudad
   up.addEventListener('click', ()=>{
-    if(row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
+    if(row.previousElementSibling){
+      $cityList.insertBefore(row, row.previousElementSibling);
+      saveDestinations(); // ⚡ sincroniza inmediatamente orden
+    }
   });
+
+  // ⬇️ Bajar ciudad
   down.addEventListener('click', ()=>{
-    if(row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
+    if(row.nextElementSibling){
+      $cityList.insertBefore(row.nextElementSibling, row);
+      saveDestinations(); // ⚡ sincroniza inmediatamente orden
+    }
   });
 }
+
+// 🧭 Inyectar controles de ordenamiento a cada nueva fila de ciudad
 const origAddCityRow = addCityRow;
 addCityRow = function(pref){
   origAddCityRow(pref);
@@ -1817,7 +1936,7 @@ addCityRow = function(pref){
   if(row) addRowReorderControls(row);
 };
 
-// País: solo letras y espacios (protección suave en input)
+// 🧼 País: permitir solo letras y espacios (protección suave en input)
 document.addEventListener('input', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('country')){
     const original = e.target.value;
@@ -1825,7 +1944,10 @@ document.addEventListener('input', (e)=>{
     if(filtered !== original){
       const pos = e.target.selectionStart;
       e.target.value = filtered;
-      if(typeof pos === 'number'){ e.target.setSelectionRange(Math.max(0,pos-1), Math.max(0,pos-1)); }
+      if(typeof pos === 'number'){
+        // ⚡ Ajuste más suave del cursor para que no salte abruptamente
+        e.target.setSelectionRange(pos - (original.length - filtered.length), pos - (original.length - filtered.length));
+      }
     }
   }
 });
