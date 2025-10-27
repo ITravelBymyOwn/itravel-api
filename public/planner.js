@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v60 (parte 1/3)
-   Base: v59
+   ITRAVELBYMYOWN · PLANNER v61 (parte 1/3)
+   Base: v60
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -720,7 +720,7 @@ function buildIntakeLite(city, range = null){
 }
 
 /* ==============================
-   SECCIÓN 11 · Contrato JSON / LLM (reforzado v49)
+   SECCIÓN 11 · Contrato JSON / LLM (reforzado v61)
 ================================= */
 const FORMAT = `
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
@@ -728,6 +728,28 @@ A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00
 B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Pregunta breve"}
 C) {"rows":[{...}],"replace":false,"followup":"Pregunta breve"}
 D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Texto","transport":"Texto"},"followup":"Pregunta breve"}
+
+🧭 Campos adicionales opcionales:
+- "preferences": {
+    "pace": "relax" | "balanced" | "adventure",
+    "transport": "public" | "car" | "taxi" | "mixed",
+    "kids": true | false,
+    "lowWalking": true | false,
+    "accessibility": true | false,
+    "diet": ["gluten-free","vegan","vegetarian","none"],
+    "avoidMuseums": true | false,
+    "preferNature": true | false,
+    "preferDayTrip": true | false,
+    "avoidQueues": true | false,
+    "preferTransit": "metro" | "bus" | "walk" | "car",
+    "budget": "$" | "$$" | "$$$"
+  }
+- "dayTripTo": "Nombre del destino para tour de 1 día" (si aplica)
+- "locks": {"days":[2,3], "mode":"hard|soft"}
+- "constraints": {"replaceRange":{"start":2,"end":4}}
+- "remove":[{"day":2,"query":"Museo del Prado"}]
+- "planBWeather": true | false
+
 Reglas:
 - Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
 - Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre).
@@ -735,47 +757,81 @@ Reglas:
 - Seguridad y restricciones:
   • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
   • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o, si es improcedente, exclúyelo.
-- Day trips: cuando se agregan días, evalúa imperdibles cercanos (≤2 h por trayecto, regreso mismo día) y proponlos 1 día si encajan.
-- Notas: NUNCA dejes "notes" vacío ni "seed"; escribe una nota breve y útil (p. ej., por qué es especial, tip de entrada, reserva sugerida).
+
+🧭 Day trips inteligentes:
+- Siempre evalúa imperdibles cercanos (≤ 2 h por trayecto, regreso mismo día) independientemente del número de días.
+- Antes de proponer actividades locales adicionales, determina si ya cubriste los principales imperdibles de la ciudad.
+- Si quedan días disponibles o el usuario agregó días extra, determina si es mejor:
+   • Agregar más actividades locales, o
+   • Proponer un tour de 1 día a un destino icónico cercano.
+- Si la ciudad tiene pocos imperdibles, prioriza excursiones cercanas aunque el viaje sea corto.
+- Si el usuario menciona un destino directamente (“dayTripTo”), prográmalo automáticamente como day trip.
+- Proporciona alternativas razonables si hay más de un destino viable.
+- Evita duplicar actividades. Si algo ya está cubierto, ofrece opciones diferentes.
+- Respeta preferencias del viajero (p.ej., ritmo relajado, movilidad reducida, viajar con niños).
+
+📝 Notas:
+- NUNCA dejes "notes" vacío ni "seed"; escribe siempre un tip breve, utilidad práctica, o contexto turístico.
+- Indica si es necesario reservar con antelación (“Reserva recomendada”).
 - Para actividades estacionales/nocturnas (p. ej. auroras):
   • Inclúyelas SOLO si plausibles para ciudad/fechas aproximadas.
   • Añade en "notes" marcador "valid: <justificación breve>" y hora aproximada típica de inicio local.
   • Propón 1 tour recomendado si tiene sentido y alternativas locales de bajo costo.
-- Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
+
+📌 Fusión de datos:
+- Conserva lo existente por defecto (merge); NO borres lo actual salvo instrucción explícita (replace=true o replaceRange definido).
 - Máximo 20 filas por día. Nada de texto fuera del JSON.
 `;
 
 /* ==============================
-   SECCIÓN 12 · Llamada a Astra (estilo global)
+   SECCIÓN 12 · Llamada a Astra (estilo global, reforzado v61)
 ================================= */
 async function callAgent(text, useHistory = true, opts = {}){
   const { timeoutMs = 60000 } = opts; // ⏳ 60 s por defecto
   const history = useHistory ? session : [];
+
   const globalStyle = `
 Eres "Astra", agente de viajes internacional.
-- RAZONA con sentido común global: geografía, temporadas, ventanas horarias, distancias y logística básica.
-- Identifica IMPERDIBLES diurnos y nocturnos; si el tiempo es limitado, prioriza lo esencial.
-- Para fenómenos estacionales (ej. auroras): sugiere 1 tour (si procede) y alternativas cercanas económicas; indica hora de inicio aproximada típica de la ciudad.
-- Para PREGUNTAS INFORMATIVAS: responde útil, cálido y concreto; NO sugieras cambios salvo que te lo pidan.
-- Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
-- Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
+Tu misión es razonar como un experto global en planificación de itinerarios:
+- Aplica conocimiento realista de geografía, temporadas, ventanas horarias, distancias y logística.
+- Detecta imperdibles y optimiza cada día evitando duplicaciones o itinerarios absurdos.
 
-🆕 **Reglas mejoradas:**
-- 🧭 Day trips inteligentes:
-  • Cuando se agregan días o se planifica una estadía de 4 días o más, evalúa excursiones de 1 día a imperdibles cercanos (≤ 2 h por trayecto) y propón automáticamente UNA (1) si encaja de forma lógica.
-- ❌ Duplicados:
-  • NO repitas ninguna actividad que ya exista en el itinerario de la ciudad.
-  • Antes de proponer cualquier actividad, revisa el contexto y sustituye por una alternativa diferente si es similar.
-- ⏰ Horarios:
-  • Respeta las ventanas horarias definidas, pero puedes proponer horarios diferentes cuando tenga sentido logístico (tours nocturnos, cenas, auroras, eventos especiales, etc.).
-  • Evita horarios absurdos o riesgosos.
+🌍 **Lógica global reforzada**:
+- Siempre evalúa imperdibles cercanos (≤ 2 h por trayecto) para proponer excursiones de 1 día si encajan, sin depender del número de días.
+- Si los imperdibles locales principales ya fueron cubiertos y queda tiempo disponible, prioriza sugerir un tour de 1 día a un destino cercano icónico y plausible.
+- Si la ciudad tiene pocos imperdibles, prioriza excursiones cercanas incluso si la estancia es corta.
+- Si el usuario menciona directamente un destino (dayTripTo), programa automáticamente ese day trip.
+- Si hay varias opciones razonables, sugiere la mejor y una alternativa.
+- Integra siempre las preferencias del usuario (ritmo, transporte, movilidad, niños, dieta, etc.) que provengan del sidebar o del chat.
 
-- Seguridad:
-  • No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
-  • Prioriza siempre rutas y experiencias seguras y razonables.
-  • Si hay una alerta razonable, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
-- Notas SIEMPRE informativas (nunca vacías ni "seed").
-- Evita listas locales o sesgos regionales; actúa como experto global.
+🚫 **Duplicados**:
+- No repitas actividades que ya existan en el itinerario de la ciudad.
+- Antes de proponer cualquier actividad, revisa el contexto y sustituye por alternativas diferentes si son similares.
+
+🕒 **Horarios**:
+- Respeta las ventanas horarias definidas, pero puedes proponer horarios realistas cuando tenga sentido logístico (tours nocturnos, cenas, auroras, eventos especiales, etc.).
+- Evita horarios absurdos, traslados imposibles o secuencias logísticas incoherentes.
+- Añade buffers mínimos entre actividades (15 min por defecto; más si hay movilidad reducida o niños).
+
+🧭 **Seguridad y restricciones**:
+- No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
+- Prioriza siempre rutas y experiencias seguras y razonables.
+- Si hay una alerta razonable, sustituye por una alternativa segura o indícalo brevemente en “notes” (sin alarmismo).
+
+📝 **Notas**:
+- NUNCA dejes “notes” vacío ni “seed”.
+- Incluye siempre una nota breve y útil: tips, reservas sugeridas, información práctica o contexto turístico.
+- Para actividades estacionales (ej. auroras): indica hora aproximada, validez y un tour recomendado si aplica.
+
+🧠 **Ediciones e instrucciones naturales**:
+- Si el usuario no especifica un día concreto, revisa y reacomoda el itinerario completo de la ciudad evitando duplicados y manteniendo lógica.
+- Si el usuario cambia preferencias (ej. ritmo, transporte, restricciones), adapta todo el itinerario a las nuevas condiciones.
+
+- Para preguntas informativas (no ediciones), responde útil, cálido y concreto sin generar JSON ni sugerir cambios.
+
+Recuerda:
+- Devuelve siempre JSON válido según contrato si se trata de una edición.
+- Por defecto, fusiona cambios (replace=false) salvo instrucción contraria.
 `.trim();
 
   const ctrl = new AbortController();
@@ -1412,8 +1468,8 @@ function askNextHotelTransport(){
 }
 
 /* ==============================
-   SECCIÓN 17 · NLU robusta + Intents (v55.2 optimizada)
-   (amplía vocabulario y regex de v55 pero mantiene intents v54)
+   SECCIÓN 17 · NLU robusta + Intents (v61 extendida)
+   (expande regex e intents para day trips y preferencias dinámicas)
 ================================= */
 const WORD_NUM = {
   'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,
@@ -1513,64 +1569,85 @@ function levenshteinDistance(a,b){
 function intentFromText(text){
   const t = text.toLowerCase().trim();
 
+  // ✅ Confirmaciones y cancelaciones
   if(/^(sí|si|ok|dale|hazlo|confirmo|de una|aplica)\b/.test(t)) return {type:'confirm'};
   if(/^(no|mejor no|cancela|cancelar|cancelá)\b/.test(t)) return {type:'cancel'};
 
-  // Agregar un día al FINAL (prioridad sobre varios días)
+  // ✅ Agregar un día al FINAL (prioridad sobre varios días)
   if(/\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b/.test(t) || /\b(un\s+d[ií]a\s+m[aá]s)\b/.test(t) || /(agrega|añade|suma)\s+un\s+d[ií]a/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const placeM = t.match(/para\s+ir\s+a\s+([a-záéíóúüñ\s]+)$/i);
     return {type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null};
   }
 
-  // Agregar varios días / noches — robusto
-  const addMulti = t.match(/(agrega|añade|suma|extiende|prolonga|quedarme|me\s+quedo|me\s+voy\s+a\s+quedar)\s+(\d+|\w+)\s+(d[ií]as?|noches?)/i);
+  // ✅ Agregar varios días — robusto + soporte para "y uno para ir a Segovia"
+  const addMulti = t.match(/(agrega|añade|suma|extiende|prolonga|quedarme|me\s+quedo|me\s+voy\s+a\s+quedar)\s+(\d+|\w+)\s+(d[ií]as?|noches?)(?:.*?y\s+uno\s+para\s+ir\s+a\s+([a-záéíóúüñ\s]+))?/i);
   if(addMulti){
     const n = WORD_NUM[addMulti[2]] || parseInt(addMulti[2],10) || 1;
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
-    return {type:'add_days', city, extraDays:n};
+    const dayTripTo = addMulti[4] ? addMulti[4].trim() : null;
+    return {type:'add_days', city, extraDays:n, dayTripTo};
   }
 
+  // ✅ “Quiero un tour de un día / preferDayTrip” aunque no se agreguen días
+  if(/\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|algo fuera de la ciudad|un viaje de un d[ií]a)\b/.test(t)){
+    const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
+    const placeM = t.match(/a\s+([a-záéíóúüñ\s]+)$/i);
+    return {type:'prefer_day_trip', city, dayTripTo: placeM ? placeM[1].trim() : null};
+  }
+
+  // ✅ Eliminar día
   const rem = t.match(/(quita|elimina|borra)\s+el\s+d[ií]a\s+(\d+)/i);
   if(rem){ return {type:'remove_day', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, day: parseInt(rem[2],10)}; }
 
+  // ✅ Intercambiar días
   const swap = t.match(/(?:pasa|mueve|cambia)\s+el\s+d[ií]a\s+(\d+)\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
   if(swap && !/actividad|museo|visita|tour|cena|almuerzo|desayuno/i.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     return {type:'swap_day', city, from: parseInt(swap[1],10), to: parseInt(swap[2],10)};
   }
 
+  // ✅ Mover actividad
   const mv = t.match(/(?:mueve|pasa|cambia)\s+(.*?)(?:\s+del\s+d[ií]a\s+(\d+)|\s+del\s+(\d+))\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
   if(mv){ return {type:'move_activity', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, query:(mv[1]||'').trim(), fromDay:parseInt(mv[2]||mv[3],10), toDay:parseInt(mv[4],10)}; }
 
+  // ✅ Swap activity por texto natural
   if(/\b(no\s+quiero|sustituye|reemplaza|quita|elimina|borra)\b/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const m = t.match(/no\s+quiero\s+ir\s+a\s+(.+?)(?:,|\.)?$/i);
     return {type:'swap_activity', city, target: m ? m[1].trim() : null, details:text};
   }
 
+  // ✅ Horarios personalizados
   const range = parseTimeRangeFromText(text);
   if(range.start || range.end) return {type:'change_hours', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, range};
 
+  // ✅ Añadir ciudad nueva
   const addCity = t.match(/(?:agrega|añade|suma)\s+([a-záéíóúüñ\s]+?)\s+(?:con\s+)?(\d+)\s*d[ií]as?(?:\s+(?:desde|iniciando)\s+(\d{1,2}\/\d{1,2}\/\d{4}))?/i);
   if(addCity){
     return {type:'add_city', city: addCity[1].trim(), days:parseInt(addCity[2],10), baseDate:addCity[3]||''};
   }
 
+  // ✅ Eliminar ciudad
   const delCity = t.match(/(?:elimina|borra|quita)\s+(?:la\s+ciudad\s+)?([a-záéíóúüñ\s]+)/i);
   if(delCity){ return {type:'remove_city', city: delCity[1].trim()}; }
 
-  // Preguntas informativas (clima, seguridad, etc.)
+  // ✅ Actualizar perfil de preferencias (pace, transporte, movilidad, niños, dieta, etc.)
+  if(/\b(ritmo|relax|tranquilo|aventura|rápido|balanceado|niños|movilidad|caminar poco|transporte|uber|metro|autob[uú]s|bus|auto|veh[ií]culo|dieta|vegetariano|vegano|gluten|cel[ií]aco|preferencia|preferencias)\b/.test(t)){
+    return {type:'set_profile', details:text};
+  }
+
+  // ✅ Preguntas informativas (clima, seguridad, etc.)
   if(/\b(clima|tiempo|temperatura|lluvia|horas de luz|moneda|cambio|propina|seguridad|visado|visa|fronteras|aduana|vuelos|aerol[ií]neas|equipaje|salud|vacunas|enchufes|taxis|alquiler|conducci[oó]n|peatonal|festivos|temporada|mejor época|gastronom[ií]a|restaurantes|precios|presupuesto|wifi|sim|roaming)\b/.test(t)){
     return {type:'info_query', details:text};
   }
 
+  // 🆓 Edición libre (fallback)
   return {type:'free_edit', details:text};
 }
 
-
 /* ==============================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
+   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v61 extendida)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -1642,23 +1719,29 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧠 Bloque adicional si la ciudad está marcada para replanificación
+  // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip pendiente
   let forceReplanBlock = '';
-  if (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) {
+  const hasForceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
+  const hasDayTripPending = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
+  const hasPreferDayTrip = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
+
+  if (hasForceReplan || hasDayTripPending || hasPreferDayTrip) {
     forceReplanBlock = `
-👉 IMPORTANTE: El usuario ha extendido su estadía en ${city}.
-- Debes RECONSTRUIR COMPLETAMENTE el itinerario de ${city}.
-- Considera el NUEVO total de días y redistribuye las actividades.
-- Evalúa la posibilidad de realizar excursiones de 1 día a ciudades cercanas (máx. 2h de trayecto por sentido).
+👉 IMPORTANTE:
+- El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
+- REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
+- Evalúa siempre la posibilidad de realizar excursiones de 1 día a ciudades cercanas (máx. 2 h de trayecto por sentido).
 - Si las excursiones aportan más valor turístico que actividades locales adicionales, inclúyelas en el itinerario.
-- Prioriza imperdibles y balancea las actividades entre los días.
-- Evita duplicar cualquier actividad ya existente.
-- Devuelve una planificación clara y optimizada.`;
+- Si el usuario especificó un destino concreto (dayTripTo), programa ese tour automáticamente.
+- Prioriza imperdibles locales primero y evita duplicar cualquier actividad ya existente.
+- Respeta ritmo, movilidad y preferencias de viaje (perfil usuario).
+- Devuelve una planificación clara y optimizada.
+    `;
   }
 
   // 🧠 OPTIMIZADO: intake reducido si no hay cambios globales
-  const intakeData = (plannerState.forceReplan && plannerState.forceReplan[city])
-    ? buildIntake()        // Full contexto solo si es replanificación completa
+  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
+    ? buildIntake()        // Full contexto solo si es replanificación completa o hay day trip pendiente
     : buildIntakeLite();   // ⚡ más liviano para recalculos simples
 
   const prompt = `
@@ -1674,7 +1757,8 @@ Instrucción:
 - Reordena y optimiza (min traslados; agrupa por zonas).
 - Sustituye huecos por opciones realistas (sin duplicar otros días).
 - Para nocturnas (p.ej. auroras), usa horarios aproximados locales y añade alternativas cercanas si procede.
-- Day trips ≤ 2 h por trayecto (ida), solo si hay tiempo disponible y sin interferir actividades icónicas.
+- Day trips ≤ 2 h por trayecto (ida), si hay tiempo disponible y aportan valor turístico.
+- Prioriza imperdibles locales y considera perfil del viajero (ritmo, movilidad reducida, niños, transporte preferido, etc.).
 - Valida PLAUSIBILIDAD GLOBAL y SEGURIDAD: 
   • No propongas actividades en zonas con riesgos o restricciones evidentes. 
   • Sustituye por alternativas seguras si aplica.
@@ -1709,7 +1793,7 @@ ${intakeData}
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
-   — Optimizada con misma estructura comentada
+   — Optimizada con misma estructura comentada + day trip preference
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -1735,7 +1819,6 @@ async function onSend(){
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
 
-    // 🧠 Guardar hotel y transporte aunque sea texto libre (zona, dirección, coordenadas o link)
     upsertCityMeta({ city, hotel: text, transport });
     metaProgressIndex++;
     askNextHotelTransport();
@@ -1750,7 +1833,6 @@ async function onSend(){
     if(!cityMeta[city]) cityMeta[city] = { baseDate:null, hotel:'', transport:'', perDay:[] };
     const prevHotel = cityMeta[city].hotel || '';
 
-    // ✅ Solo si el hotel cambió realmente
     if(newHotel && newHotel !== prevHotel){
       cityMeta[city].hotel = newHotel;
       chatMsg(`🏨 Actualicé el hotel/zona de <strong>${city}</strong>. Reajustando itinerario…`, 'ai');
@@ -1766,6 +1848,20 @@ async function onSend(){
 
   // Detecta intent
   const intent = intentFromText(text);
+
+  // ============================================================
+  // 🆕 0) Preferencia general de day trip sin agregar días
+  // ============================================================
+  if(intent.type === 'free_edit' && /\b(tour|excursi[oó]n|day\s*trip|un\s*d[ií]a\s+fuera|quiero\s+ir\s+a\s+un\s+lugar\s+cercano)\b/i.test(text)){
+    const city = activeCity || savedDestinations[0]?.city;
+    if(city){
+      if(!plannerState.preferences) plannerState.preferences = {};
+      plannerState.preferences.preferDayTrip = true;
+      chatMsg(`🧭 Perfecto — tendré en cuenta incluir una <strong>excursión de 1 día</strong> cerca de <strong>${city}</strong> cuando sea viable.`, 'ai');
+      await rebalanceWholeCity(city);
+      return;
+    }
+  }
 
   // ============================================================
   // 1) Normalizar "un día más" a add_day_end (y capturar day trip)
@@ -1820,7 +1916,6 @@ async function onSend(){
       pushRows(city, rowsSeed, false);
     }
 
-    // ⚡ Solo optimizar nuevo día
     await optimizeDay(city, numericPos);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
@@ -2000,7 +2095,6 @@ ${dayRows}
       const val = await validateRowsWithAgent(city, rows, baseDate);
       pushRows(city, val.allowed, false);
 
-      // ⚡ Optimiza solo días con cambios
       const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
       await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
 
