@@ -272,6 +272,32 @@ function addMinutes(hhmm, min){
 }
 
 /* ==============================
+   🧭 Helper global para ventanas horarias por día
+   - Si el usuario definió horario para un día → usarlo.
+   - Si no definió → usar 08:30–19:00 como base.
+   - No hereda horarios entre días.
+   - Devuelve siempre una lista completa para todos los días.
+================================= */
+function getEffectivePerDay(city, totalDays){
+  const baseStart = '08:30';
+  const baseEnd   = '19:00';
+  const meta = cityMeta[city] || {};
+  const perDay = Array.isArray(meta.perDay) ? meta.perDay.slice() : [];
+  const map = new Map(perDay.map(x=>[x.day, {start:x.start||baseStart, end:x.end||baseEnd}]));
+
+  const result = [];
+  for(let d=1; d<=totalDays; d++){
+    if(map.has(d)){
+      const val = map.get(d);
+      result.push({day:d, start:val.start||baseStart, end:val.end||baseEnd});
+    } else {
+      result.push({day:d, start:baseStart, end:baseEnd});
+    }
+  }
+  return result;
+}
+
+/* ==============================
    SECCIÓN 6 · UI ciudades (sidebar)
 ================================= */
 function makeHoursBlock(days){
@@ -656,17 +682,10 @@ function buildIntake(){
   const budget = budgetVal !== 'N/A' ? `${budgetVal} ${currencyVal}` : 'N/A';
   const specialConditions = (qs('#special-conditions')?.value||'').trim()||'N/A';
 
+  // 🧭 NUEVO: usar getEffectivePerDay en lugar de rellenar manualmente perDay
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
-    if(!cityMeta[dest.city].perDay) cityMeta[dest.city].perDay = [];
-    cityMeta[dest.city].perDay = Array.from({length:dest.days}, (_,i)=>{
-      const prev = (cityMeta[dest.city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i];
-      return {
-        day: i+1,
-        start: (prev && prev.start) ? prev.start : DEFAULT_START,
-        end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
-      };
-    });
+    cityMeta[dest.city].perDay = getEffectivePerDay(dest.city, dest.days);
   });
 
   const list = savedDestinations.map(x=>{
@@ -707,13 +726,17 @@ function buildIntakeLite(city, range = null){
     }))
   ]));
 
+  // 🧭 NUEVO: usar ventanas efectivas para el rango solicitado
+  const totalDays = savedDestinations.find(x=>x.city===city)?.days || 0;
+  let perDayFull = getEffectivePerDay(city, totalDays);
+  if(range){
+    perDayFull = perDayFull.filter(pd => pd.day >= range.start && pd.day <= range.end);
+  }
+
   const meta = {
     baseDate: it.baseDate || cityMeta[city]?.baseDate || null,
     transport: cityMeta[city]?.transport || '',
-    perDay: (cityMeta[city]?.perDay||[]).filter(pd=>{
-      if(!range) return true;
-      return pd.day >= range.start && pd.day <= range.end;
-    })
+    perDay: perDayFull
   };
 
   return JSON.stringify({ city, meta, days: compact });
@@ -808,8 +831,12 @@ Tu misión es razonar como un experto global en planificación de itinerarios:
 - No repitas actividades que ya existan en el itinerario de la ciudad.
 - Antes de proponer cualquier actividad, revisa el contexto y sustituye por alternativas diferentes si son similares.
 
-🕒 **Horarios**:
-- Respeta las ventanas horarias definidas, pero puedes proponer horarios realistas cuando tenga sentido logístico (tours nocturnos, cenas, auroras, eventos especiales, etc.).
+🕒 **Horarios (⚡ nuevo comportamiento robusto)**:
+- Si el usuario definió horarios para un día, respétalos y razona a partir de ellos.
+- Si NO definió horarios, asume por defecto una ventana base de **08:30 a 19:00** como guía inicial.
+- Puedes extender horarios cuando sea razonable (eventos nocturnos, auroras, cenas, tours especiales, etc.).
+- Si extiendes mucho el final de un día (ej. tras una actividad nocturna), **ajusta inteligentemente** el inicio del día siguiente (ej. empieza más tarde).
+- ❌ No heredes horarios de un día al otro: cada día sin input debe partir de la base estándar.
 - Evita horarios absurdos, traslados imposibles o secuencias logísticas incoherentes.
 - Añade buffers mínimos entre actividades (15 min por defecto; más si hay movilidad reducida o niños).
 
@@ -827,7 +854,8 @@ Tu misión es razonar como un experto global en planificación de itinerarios:
 - Si el usuario no especifica un día concreto, revisa y reacomoda el itinerario completo de la ciudad evitando duplicados y manteniendo lógica.
 - Si el usuario cambia preferencias (ej. ritmo, transporte, restricciones), adapta todo el itinerario a las nuevas condiciones.
 
-- Para preguntas informativas (no ediciones), responde útil, cálido y concreto sin generar JSON ni sugerir cambios.
+ℹ️ **Consultas informativas**:
+- Si se trata de una pregunta informativa y no de una edición, responde útil y claro, sin generar JSON.
 
 Recuerda:
 - Devuelve siempre JSON válido según contrato si se trata de una edición.
@@ -1177,6 +1205,14 @@ CRITERIOS GLOBALES:
 - Si duración en minutos, permite "90m" o "1.5h".
 - Máx. 20 filas/día; prioriza icónicas y no redundantes.
 
+🕒 **Horarios y plausibilidad reforzada**:
+- Si no hay horario definido para el día, usa como ventana base 08:30–19:00.
+- Se permite extender horarios cuando tenga sentido logístico (ej. cenas, auroras, tours nocturnos), pero debe ser plausible.
+- Si extiendes el horario de finalización de un día de forma importante (p. ej. por actividad nocturna), considera compensar en el inicio del día siguiente (inicio más tarde).
+- No heredes horarios directamente de un día al otro.
+- Añade buffers realistas entre actividades (≥15 min por defecto).
+- Evita solapamientos, horarios absurdos (ej. tours a las 03:00 sin justificación) o secuencias logísticas incoherentes.
+
 CASOS ESPECIALES:
 1) Whale watching: "Barco", salida desde puerto local, 3–4h aprox., incluir "valid:" por temporada si aplica.
 2) Auroras: nocturno (20:00–02:00 aprox.), "Tour"/"Bus/Van tour" o "Auto" si procede; "valid:" con justificación.
@@ -1192,6 +1228,7 @@ Contexto:
 - Fecha base (Día 1): ${baseDate || 'N/A'}
 - Filas a validar: ${JSON.stringify(rows)}
 `.trim();
+
   try{
     const res = await callAgent(payload, true);
     const parsed = parseJSON(res);
