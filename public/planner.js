@@ -1171,9 +1171,11 @@ function addMultipleDaysToCity(city, extraDays){
       insertDayAt(city, newDay);
 
       // 🕒 🆕 Horario inteligente base si no hay horario definido
-      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || '08:30';
-      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || '19:00';
-      
+      const baseStart = '08:30';
+      const baseEnd = '19:00';
+      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || baseStart;
+      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || baseEnd;
+
       if(!cityMeta[city]) cityMeta[city] = { perDay: [] };
       if(!cityMeta[city].perDay.find(x=>x.day===newDay)){
         cityMeta[city].perDay.push({ day:newDay, start, end });
@@ -1792,7 +1794,7 @@ function intentFromText(text){
 }
 
 /* ==============================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v61 extendida)
+   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v63 reforzada)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -1898,26 +1900,31 @@ Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales:
 ${JSON.stringify(rows)}
 ${forceReplanBlock}
-🕒 **Horarios inteligentes**:
+
+🕒 **Horarios inteligentes y plausibles**:
 - Si no hay horario definido, usa 08:30–19:00 como base.
-- Puedes extender horarios cuando sea razonable (cenas, auroras, tours especiales).
+- Extiende horarios solo cuando sea razonable:
+  • Auroras: 20:00–02:30 aprox. (nunca en horario diurno).
+  • Cenas/vida nocturna: 19:00–23:30 aprox.
 - Si extiendes el horario de un día, ajusta inteligentemente el inicio del día siguiente.
 - ❌ No heredes horarios directamente entre días.
 - Añade buffers realistas entre actividades (≥15 min).
+- Ajusta horarios absurdos automáticamente (ej. tours nocturnos a las 06:00 AM → corregir o eliminar).
 
-Instrucción:
-- Reordena y optimiza (min traslados; agrupa por zonas).
+🌍 **Instrucción de optimización**:
+- Reordena y optimiza para minimizar traslados y agrupar por zonas.
 - Sustituye huecos por opciones realistas (sin duplicar otros días).
-- Para nocturnas (p.ej. auroras), usa horarios aproximados locales y añade alternativas cercanas si procede.
+- Para actividades nocturnas (ej. auroras), usa horarios plausibles y añade alternativas si aplica.
 - Day trips ≤ 2 h por trayecto (ida), si hay tiempo disponible y aportan valor turístico.
 - Prioriza imperdibles locales y considera perfil del viajero (ritmo, movilidad reducida, niños, transporte preferido, etc.).
-- Valida PLAUSIBILIDAD GLOBAL y SEGURIDAD: 
-  • No propongas actividades en zonas con riesgos o restricciones evidentes. 
+- Valida PLAUSIBILIDAD GLOBAL y SEGURIDAD:
+  • No propongas actividades en zonas con riesgos o restricciones evidentes.
   • Sustituye por alternativas seguras si aplica.
   • Añade siempre notas útiles (nunca vacías ni “seed”).
 - ❌ NO DUPLICAR actividades ya existentes en otros días de la ciudad.
   • Si ya existe una actividad similar, sustitúyela por una alternativa distinta.
 - Devuelve C {"rows":[...],"replace":false}.
+
 Contexto:
 ${intakeData}
 `.trim();
