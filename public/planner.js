@@ -807,7 +807,7 @@ Reglas:
 `;
 
 /* ==============================
-   SECCIÓN 12 · Llamada a Astra (estilo global, reforzado v61)
+   SECCIÓN 12 · Llamada a Astra (estilo global, reforzado v62)
 ================================= */
 async function callAgent(text, useHistory = true, opts = {}){
   const { timeoutMs = 60000 } = opts; // ⏳ 60 s por defecto
@@ -831,12 +831,13 @@ Tu misión es razonar como un experto global en planificación de itinerarios:
 - No repitas actividades que ya existan en el itinerario de la ciudad.
 - Antes de proponer cualquier actividad, revisa el contexto y sustituye por alternativas diferentes si son similares.
 
-🕒 **Horarios (⚡ nuevo comportamiento robusto)**:
+🕒 **Horarios (⚡ comportamiento robusto)**:
 - Si el usuario definió horarios para un día, respétalos y razona a partir de ellos.
-- Si NO definió horarios, asume por defecto una ventana base de **08:30 a 19:00** como guía inicial.
-- Puedes extender horarios cuando sea razonable (eventos nocturnos, auroras, cenas, tours especiales, etc.).
+- Si NO definió horarios, **usa por defecto la ventana base 08:30–19:00** para TODOS los días sin información.
+- Extiende horarios solo cuando sea razonable (eventos nocturnos, auroras, cenas, tours especiales, etc.).
 - Si extiendes mucho el final de un día (ej. tras una actividad nocturna), **ajusta inteligentemente** el inicio del día siguiente (ej. empieza más tarde).
 - ❌ No heredes horarios de un día al otro: cada día sin input debe partir de la base estándar.
+- Si no hay información de horarios para una ciudad, **igualmente debes generar actividades completas para cada día**.
 - Evita horarios absurdos, traslados imposibles o secuencias logísticas incoherentes.
 - Añade buffers mínimos entre actividades (15 min por defecto; más si hay movilidad reducida o niños).
 
@@ -853,6 +854,7 @@ Tu misión es razonar como un experto global en planificación de itinerarios:
 🧠 **Ediciones e instrucciones naturales**:
 - Si el usuario no especifica un día concreto, revisa y reacomoda el itinerario completo de la ciudad evitando duplicados y manteniendo lógica.
 - Si el usuario cambia preferencias (ej. ritmo, transporte, restricciones), adapta todo el itinerario a las nuevas condiciones.
+- Si no se proporcionó ninguna información horaria, debes **asumir la ventana base para todos los días y devolver itinerarios completos**.
 
 ℹ️ **Consultas informativas**:
 - Si se trata de una pregunta informativa y no de una edición, responde útil y claro, sin generar JSON.
@@ -1244,7 +1246,7 @@ Contexto:
 }
 
 /* ==============================
-   SECCIÓN 15 · Generación por ciudad
+   SECCIÓN 15 · Generación por ciudad (modificada vX)
 ================================= */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -1297,19 +1299,29 @@ async function generateCityItinerary(city){
   // 🧭 Detectar si se debe forzar replanificación
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
+  // ⚠️ Limpieza de historial para evitar sesgos entre ciudades
+  if (typeof session !== 'undefined' && Array.isArray(session)) {
+    session.length = 0;
+  }
+
   const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-- Revisa IMPERDIBLES diurnos y nocturnos.
-- ⚡ Para fenómenos como auroras (Reykjavik / Tromsø), sugiere 1 tour en un día + alternativas locales en otros días.
+
+🚨 **COBERTURA OBLIGATORIA:**
+- Devuelve actividades para TODOS los días 1 a ${dest.days}.
+- Si el usuario no proporcionó horarios para algunos días, usa como base 08:30–19:00 (y amplía si hay actividades nocturnas).
+- NO dejes ningún día sin actividades.
+- Cada fila debe incluir el campo "day" correcto.
+- Incluye imperdibles diurnos y nocturnos.
 - Si el número total de días es ≥ 4, sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día).
 
 🕒 **Horarios inteligentes:**
 - Si el usuario definió horario, respétalo.
 - Si no hay horario definido, usa como base 08:30–19:00.
 - Puedes extender horarios cuando tenga sentido logístico (cenas, auroras, tours especiales).
-- Si extiendes el horario de un día (por ejemplo, actividad nocturna), ajusta de forma inteligente el inicio del día siguiente.
+- Si extiendes el horario de un día, ajusta de forma inteligente el inicio del día siguiente.
 - ❌ No heredes horarios directamente entre días.
 - Añade buffers realistas entre actividades (≥15 min).
 
@@ -1353,6 +1365,15 @@ ${buildIntake()}
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan);
+
+    // 🧭 PASADA FINAL · Rellenar días vacíos si el modelo no los devolvió
+    ensureDays(tmpCity);
+    for (let d = 1; d <= dest.days; d++) {
+      if (!(itineraries[tmpCity].byDay?.[d] || []).length) {
+        await optimizeDay(tmpCity, d);
+      }
+    }
+
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
 
