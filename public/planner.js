@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v61 (parte 1/3)
-   Base: v60
+   ITRAVELBYMYOWN · PLANNER v62 (parte 1/3)
+   Base: v61
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
