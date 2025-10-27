@@ -1101,8 +1101,9 @@ function addMultipleDaysToCity(city, extraDays){
     if(!byDay[newDay]){  // evita duplicados de días
       insertDayAt(city, newDay);
 
-      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || DEFAULT_START;
-      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || DEFAULT_END;
+      // 🕒 🆕 Horario inteligente base si no hay horario definido
+      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || '08:30';
+      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || '19:00';
       
       if(!cityMeta[city]) cityMeta[city] = { perDay: [] };
       if(!cityMeta[city].perDay.find(x=>x.day===newDay)){
@@ -1266,7 +1267,15 @@ ${FORMAT}
 - Revisa IMPERDIBLES diurnos y nocturnos.
 - ⚡ Para fenómenos como auroras (Reykjavik / Tromsø), sugiere 1 tour en un día + alternativas locales en otros días.
 - Si el número total de días es ≥ 4, sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día).
-- Respeta ventanas horarias por día: ${JSON.stringify(perDay)}, pero puedes proponer horarios diferentes si tienen sentido logístico (por ejemplo, cenas, tours nocturnos, auroras, etc.).
+
+🕒 **Horarios inteligentes:**
+- Si el usuario definió horario, respétalo.
+- Si no hay horario definido, usa como base 08:30–19:00.
+- Puedes extender horarios cuando tenga sentido logístico (cenas, auroras, tours especiales).
+- Si extiendes el horario de un día (por ejemplo, actividad nocturna), ajusta de forma inteligente el inicio del día siguiente.
+- ❌ No heredes horarios directamente entre días.
+- Añade buffers realistas entre actividades (≥15 min).
+
 - Agrupar por zonas, evitar solapamientos.
 - ❌ NO DUPLICAR actividades ya existentes en ningún día.
   • Siempre verifica todas las actividades de la ciudad antes de proponer nuevas.
@@ -1349,6 +1358,13 @@ ${FORMAT}
 ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 - Respeta ventanas: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}, pero puedes proponer horarios diferentes si tienen sentido logístico.
+
+🕒 **Horarios inteligentes:**
+- Usa 08:30–19:00 como base cuando no haya horarios definidos.
+- Puedes extender horarios cuando sea razonable (auroras, cenas, tours).
+- Si extiendes fuertemente un día, ajusta de forma inteligente el inicio del siguiente.
+- No heredes horarios entre días.
+
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
 - Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
 ${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : `- Si el número total de días es ≥ 4 y no se indicó destino, sugiere automáticamente un imperdible cercano.`}
@@ -1753,6 +1769,13 @@ Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales:
 ${JSON.stringify(rows)}
 ${forceReplanBlock}
+🕒 **Horarios inteligentes**:
+- Si no hay horario definido, usa 08:30–19:00 como base.
+- Puedes extender horarios cuando sea razonable (cenas, auroras, tours especiales).
+- Si extiendes el horario de un día, ajusta inteligentemente el inicio del día siguiente.
+- ❌ No heredes horarios directamente entre días.
+- Añade buffers realistas entre actividades (≥15 min).
+
 Instrucción:
 - Reordena y optimiza (min traslados; agrupa por zonas).
 - Sustituye huecos por opciones realistas (sin duplicar otros días).
@@ -2071,6 +2094,13 @@ ${dayRows}
 
 **Ventanas por día:** ${JSON.stringify(perDay)}
 **Instrucción del usuario (libre):** ${text}
+
+🕒 **Horarios inteligentes**:
+- Si no hay horario definido, usa 08:30–19:00 como base.
+- Puedes extender horarios cuando sea razonable (auroras, cenas, tours especiales).
+- Si extiendes el horario de un día, ajusta inteligentemente el inicio del día siguiente.
+- ❌ No heredes horarios directamente entre días.
+- Añade buffers realistas entre actividades (≥15 min).
 
 - Integra lo pedido SIN borrar lo existente (fusión). 
 - Si no se especifica un día concreto, reacomoda toda la ciudad evitando duplicados.
