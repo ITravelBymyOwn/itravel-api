@@ -1220,8 +1220,8 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
-   (fusión de criterios fuertes v55)
+   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado v63
+   (fusión de criterios fuertes)
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
@@ -1236,33 +1236,62 @@ Devuelve SOLO JSON válido:
 }
 
 CRITERIOS GLOBALES:
-- Corrige horas plausibles (sin solapes).
-- Transporte lógico según actividad (barco para whale watching; tour/bus para excursiones; tren/bus/auto interurbano; a pie/metro en zona).
-- Day trips ≤ 2 h por trayecto; si no, "removed" con reason "distance:" + alternativa.
-- Seguridad/restricciones:
+- Corrige horas plausibles (sin solapes ni secuencias ilógicas).
+- Transporte lógico según actividad:
+  • Barco para whale watching.  
+  • Tour/bus para excursiones interurbanas.  
+  • Tren/bus/auto para traslados razonables.  
+  • A pie/metro en zonas urbanas compactas.
+- Day trips ≤ 2 h por trayecto; si no es posible, "removed" con reason "distance:" + sugerencia alternativa.
+- Seguridad y restricciones:
   • Si hay riesgo evidente, restricción oficial, alerta razonable o ventana horaria insegura, "removed" con reason "risk:" + sugerencia segura o reubicación alternativa.
   • Prioriza siempre opciones plausibles, seguras y razonables.
-- Notas NUNCA vacías ni "seed"; añade tip breve útil.
+- Notas NUNCA vacías ni "seed"; añade tip breve útil y contextual.
 - Si duración en minutos, permite "90m" o "1.5h".
-- Máx. 20 filas/día; prioriza icónicas y no redundantes.
+- Máx. 20 filas/día; prioriza actividades icónicas y no redundantes.
+- Respetar la lógica contextual de la ciudad y temporada.
 
 🕒 **Horarios y plausibilidad reforzada**:
-- Si no hay horario definido para el día, usa como ventana base 08:30–19:00.
-- Se permite extender horarios cuando tenga sentido logístico (ej. cenas, auroras, tours nocturnos), pero debe ser plausible.
-- Si extiendes el horario de finalización de un día de forma importante (p. ej. por actividad nocturna), considera compensar en el inicio del día siguiente (inicio más tarde).
+- Si no hay horario definido para el día, usa ventana base 08:30–19:00.
+- Extiende horarios solo cuando tenga sentido logístico o turístico (cenas, auroras, tours nocturnos).
+- Si extiendes un día por actividad nocturna, considera compensar el inicio del siguiente día (inicio más tarde).
 - No heredes horarios directamente de un día al otro.
 - Añade buffers realistas entre actividades (≥15 min por defecto).
 - Evita solapamientos, horarios absurdos (ej. tours a las 03:00 sin justificación) o secuencias logísticas incoherentes.
+- Si detectas horarios irreales, corrígelos proactivamente y añade una nota clara al respecto.
 
 CASOS ESPECIALES:
-1) Whale watching: "Barco", salida desde puerto local, 3–4h aprox., incluir "valid:" por temporada si aplica.
-2) Auroras: nocturno (20:00–02:00 aprox.), "Tour"/"Bus/Van tour" o "Auto" si procede; "valid:" con justificación.
-3) Rutas en coche (círculo dorado/costas): 3–6h conducción total con paradas clave; si sin coche ni tour viable, marca "logistics" o "risk" y sugiere tour.
-4) Museos/monumentos: horario diurno.
-5) Cenas/vida nocturna: 19:00–23:30 aprox.
+1) Whale watching:
+   - Transporte: "Barco".
+   - Salida desde puerto local.
+   - Duración: 3–4h aprox.
+   - Incluir "valid:" por temporada si aplica.
+   - Horario típico: diurno (09:00–15:00 aprox.).
+
+2) Auroras boreales:
+   - Siempre en horario nocturno (20:00–02:30 aprox.).
+   - Transporte: "Tour", "Bus/Van tour" o "Auto" si procede.
+   - Incluir "valid:" con justificación (temporada/latitud).
+   - Si aparece fuera de este rango → corregir horario automáticamente o "removed" con reason "valid:season".
+   - Si no es temporada o no es plausible en el destino → "removed" con sugerencia alternativa.
+   - Si la actividad extiende mucho la jornada, **ajusta el inicio del día siguiente**.
+
+3) Rutas en coche (círculo dorado/costas u otras escénicas):
+   - Duración total: 3–6h con paradas clave.
+   - Si no hay coche ni tour viable, marcar "logistics" o "risk" y sugerir tour alternativo.
+   - Horario plausible: diurno.
+
+4) Museos/monumentos:
+   - Horario diurno (aprox. 09:00–18:00).
+   - No programar en horarios absurdos o nocturnos.
+
+5) Cenas/vida nocturna:
+   - Horario plausible: 19:00–23:30 aprox.
+   - Considerar buffers con actividades previas y traslados realistas.
 
 REGLAS DE FUSIÓN:
 - Devuelve "allowed" ya corregidas; solo pasa a "removed" lo incompatible.
+- Ajusta actividades de manera inteligente antes de removerlas, cuando sea posible.
 
 Contexto:
 - Ciudad: "${city}"
@@ -1285,7 +1314,7 @@ Contexto:
 }
 
 /* ==============================
-   SECCIÓN 15 · Generación por ciudad (modificada vX)
+   SECCIÓN 15 · Generación por ciudad (modificada v63)
 ================================= */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -1350,31 +1379,34 @@ ${FORMAT}
 
 🚨 **COBERTURA OBLIGATORIA:**
 - Devuelve actividades para TODOS los días 1 a ${dest.days}.
-- Si el usuario no proporcionó horarios para algunos días, usa como base 08:30–19:00 (y amplía si hay actividades nocturnas).
+- Si el usuario no proporcionó horarios para algunos días, usa como base 08:30–19:00 y amplía inteligentemente si hay actividades nocturnas (auroras, cenas, tours especiales).
 - NO dejes ningún día sin actividades.
 - Cada fila debe incluir el campo "day" correcto.
 - Incluye imperdibles diurnos y nocturnos.
 - Si el número total de días es ≥ 4, sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día).
 
-🕒 **Horarios inteligentes:**
+🕒 **Horarios inteligentes y plausibles:**
 - Si el usuario definió horario, respétalo.
-- Si no hay horario definido, usa como base 08:30–19:00.
-- Puedes extender horarios cuando tenga sentido logístico (cenas, auroras, tours especiales).
-- Si extiendes el horario de un día, ajusta de forma inteligente el inicio del día siguiente.
+- Si no hay horario definido, usa 08:30–19:00 como base diaria.
+- Extiende horarios sólo cuando sea razonable:
+  • Auroras: 20:00–02:30 aprox. (nunca en horario diurno).  
+  • Cenas y vida nocturna: 19:00–23:30 aprox.
+- Si extiendes el horario de un día, ajusta de forma inteligente el inicio del siguiente.
 - ❌ No heredes horarios directamente entre días.
 - Añade buffers realistas entre actividades (≥15 min).
 
+🌍 **Lógica de actividades y seguridad:**
 - Agrupar por zonas, evitar solapamientos.
-- ❌ NO DUPLICAR actividades ya existentes en ningún día.
+- ❌ NO DUPLICAR actividades ya existentes en ningún día:
   • Siempre verifica todas las actividades de la ciudad antes de proponer nuevas.
   • Si ya existe, sustituye por alternativa distinta.
-- Validar plausibilidad global y seguridad.
+- Validar plausibilidad global y seguridad:
   • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
   • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
   • Sustituir por alternativas seguras cuando aplique.
-- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto, regreso mismo día) sin duplicar otras noches.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto) sin duplicar otras noches.
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
-- Nada de texto fuera del JSON.
+
 Contexto actual:
 ${buildIntake()}
 `.trim();
@@ -1458,7 +1490,7 @@ ${lockedDaysText}
 
 🕒 **Horarios inteligentes:**
 - Usa 08:30–19:00 como base cuando no haya horarios definidos.
-- Puedes extender horarios cuando sea razonable (auroras, cenas, tours).
+- Puedes extender horarios cuando sea razonable (auroras: 20:00–02:30, cenas: 19:00–23:30).
 - Si extiendes fuertemente un día, ajusta de forma inteligente el inicio del siguiente.
 - No heredes horarios entre días.
 
