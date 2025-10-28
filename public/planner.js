@@ -1498,7 +1498,9 @@ function showWOW(on, msg){
          (evita la doble línea "Traslado a X" y actividades repetidas
          el mismo día). NO toca el resto de la lógica.
    - (Q3) Limpieza de preferencias de uso único (ya estaba) se mantiene.
-   - (Q4) **Forzar JSON del agente + reintento degradado** para evitar fallback local.
+   - (Q4) Forzar JSON + reintento degradado (evitar fallback).
+   - (Q5) **Garantía dura de días completos**: si quedan días vacíos,
+          lanzar rebalanceo selectivo para completarlos.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -1575,7 +1577,12 @@ ${FORMAT}
 - ❌ No heredes horarios directamente entre días.
 - Añade buffers realistas entre actividades (≥15 min).
 
-🌍 **Lógica de actividades y seguridad:**
+🌍 **Lógica de actividades y seguridad (transporte coherente)**:
+- Transporte coherente por tipo de actividad:
+  • **Barco** para whale watching, islas, cruceros fluviales, traslados a islas/parques marinos.  
+  • **Bus/Van tour** para excursiones interurbanas y day trips organizados.  
+  • **Tren/Bus/Auto** para traslados terrestres entre ciudades o atracciones.  
+  • **A pie/Metro** en zonas urbanas compactas y visitas peatonales.
 - Agrupar por zonas, evitar solapamientos.
 - ❌ NO DUPLICAR actividades ya existentes en ningún día:
   • Siempre verifica todas las actividades de la ciudad antes de proponer nuevas.
@@ -1584,7 +1591,7 @@ ${FORMAT}
   • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
   • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
   • Sustituir por alternativas seguras cuando aplique.
-- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto) sin duplicar otras noches.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤ 2 h por trayecto) sin duplicar otras noches.
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 
 ${heuristicsContext}
@@ -1593,19 +1600,18 @@ Contexto actual:
 ${lite ? buildIntakeLite() : buildIntake()}
 `.trim();
 
-  // 🔒 Llamada en **modo JSON estricto** y con reintento degradado
+  // 🔒 Llamada en modo JSON estricto + reintento degradado
   showWOW(true, 'Astra está generando itinerarios…');
 
   let text, parsed;
   try{
-    text = await callAgent(buildInstructions(false), true);   // << Forzamos JSON
+    text = await callAgent(buildInstructions(false), true);
     parsed = parseJSON(text);
   }catch(e){
     console.warn('Primer intento fallido en generateCityItinerary:', e);
   }
 
   if(!parsed || !(parsed.rows || parsed.destinations || parsed.itineraries)){
-    // Reintento con prompt más corto (lite)
     try{
       console.warn('Reintento degradado con intake lite…');
       const text2 = await callAgent(buildInstructions(true), true);
@@ -1637,15 +1643,13 @@ ${lite ? buildIntakeLite() : buildIntake()}
       const to   = norm(r.to);
       if(GENERIC_ACT.test(act)){
         return scope==='day' ? `GEN|${act}|${r.day||0}` : `GEN|${act}`;
-        }
+      }
       return `${act}|${from}|${to}${scope==='day' ? `|${r.day||0}` : ''}`;
     };
 
-    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente (más fino)
+    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente
     const existingKeys = new Set(
-      Object.values(itineraries[city]?.byDay || {})
-        .flat()
-        .map(r => makeKey(r, 'city'))
+      Object.values(itineraries[city]?.byDay || {}).flat().map(r => makeKey(r, 'city'))
     );
     tmpRows = tmpRows.filter(r => !existingKeys.has(makeKey(r, 'city')));
 
@@ -1671,6 +1675,18 @@ ${lite ? buildIntakeLite() : buildIntake()}
       if (!dayRows.length || dayRows.length < MIN_ROWS_PER_DAY) {
         await optimizeDay(tmpCity, d);
       }
+    }
+
+    // 🔒 **Garantía dura**: si aún hay días vacíos, rebalanceo selectivo
+    const missing = [];
+    for (let d = 1; d <= dest.days; d++){
+      const len = (itineraries[tmpCity].byDay?.[d] || []).length;
+      if(!len){ missing.push(d); }
+    }
+    if(missing.length){
+      const firstMissing = Math.min(...missing);
+      console.warn(`[Hard-Fill] ${tmpCity}: faltan días ${missing.join(', ')} → rebalanceo ${firstMissing}-${dest.days}`);
+      await rebalanceWholeCity(tmpCity, { start: firstMissing, end: dest.days });
     }
 
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
