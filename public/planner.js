@@ -1491,14 +1491,14 @@ function showWOW(on, msg){
 
 /* ─────────────────────────────────────────────────────────────
    [15.2] Generación principal por ciudad
-   Cambios aplicados:
-   - ✅ Q1: Prompt day trip claro y completo (ya estaba).
-   - ✅ Q2: Filtro duplicados más robusto con “makeKey” para traslados y comidas genéricas.
-   - ✅ Q3: Limpieza de preferencias de uso único (sin cambios).
-   - 🆕 P01: Integración de helper applyTransportSmartFixes (actividades acuáticas/islas).
-   - 🆕 P02: Integración de helper applyThermalSpaMinDuration (Blue Lagoon ≥ 3h).
-   - 🆕 P11 / P17: sanitizeNotes(rows) para limpiar “seed”.
-   - 🆕 P03: Relleno mínimo cuando el modelo no devuelve suficientes actividades por día.
+   Cambios quirúrgicos:
+   - (Q1) Prompt: aclarar que el day trip AUTOMÁTICO debe venir con
+         itinerario completo (traslados+visitas+comidas+regreso).
+   - (Q2) Filtro interno anti-duplicados dentro de la propia generación
+         (evita la doble línea "Traslado a X" y actividades repetidas
+         el mismo día). NO toca el resto de la lógica.
+   - (Q3) Limpieza de preferencias de uso único (ya estaba) se mantiene.
+   - (Q4) **Forzar JSON del agente + reintento degradado** para evitar fallback local.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -1544,7 +1544,7 @@ async function generateCityItinerary(city){
     console.warn('Heurística no disponible para generación:', city, err);
   }
 
-  const instructions = `
+  const buildInstructions = (lite=false) => `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
@@ -1561,7 +1561,7 @@ ${FORMAT}
     – Comienza siempre desde el hotel o punto base del usuario.  
     – Incluye las paradas intermedias en secuencia lógica (p. ej. Thingvellir → Geysir → Gullfoss).  
     – Finaliza siempre con el retorno al hotel o base.  
-    – Usa nombres reales de lugares, no genéricos.  
+    – Usa nombres reales de lugares, no genéricos (“Excursión al…” debe ser “Hotel → Parque Thingvellir”, etc.).  
     – Añade traslados claros entre cada punto (“Desde” y “Hacia” precisos).  
     – Evita duplicar traslados consecutivos o actividades redundantes.
 
@@ -1590,12 +1590,30 @@ ${FORMAT}
 ${heuristicsContext}
 
 Contexto actual:
-${buildIntake()}
+${lite ? buildIntakeLite() : buildIntake()}
 `.trim();
 
+  // 🔒 Llamada en **modo JSON estricto** y con reintento degradado
   showWOW(true, 'Astra está generando itinerarios…');
-  const text = await callAgent(instructions, false);
-  const parsed = parseJSON(text);
+
+  let text, parsed;
+  try{
+    text = await callAgent(buildInstructions(false), true);   // << Forzamos JSON
+    parsed = parseJSON(text);
+  }catch(e){
+    console.warn('Primer intento fallido en generateCityItinerary:', e);
+  }
+
+  if(!parsed || !(parsed.rows || parsed.destinations || parsed.itineraries)){
+    // Reintento con prompt más corto (lite)
+    try{
+      console.warn('Reintento degradado con intake lite…');
+      const text2 = await callAgent(buildInstructions(true), true);
+      parsed = parseJSON(text2);
+    }catch(e2){
+      console.warn('Segundo intento fallido en generateCityItinerary:', e2);
+    }
+  }
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     let tmpCity = city;
@@ -1619,11 +1637,11 @@ ${buildIntake()}
       const to   = norm(r.to);
       if(GENERIC_ACT.test(act)){
         return scope==='day' ? `GEN|${act}|${r.day||0}` : `GEN|${act}`;
-      }
+        }
       return `${act}|${from}|${to}${scope==='day' ? `|${r.day||0}` : ''}`;
     };
 
-    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente
+    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente (más fino)
     const existingKeys = new Set(
       Object.values(itineraries[city]?.byDay || {})
         .flat()
@@ -1631,7 +1649,7 @@ ${buildIntake()}
     );
     tmpRows = tmpRows.filter(r => !existingKeys.has(makeKey(r, 'city')));
 
-    // 🧼 FILTRO LOCAL (B): anti-duplicados internos dentro de la misma generación
+    // 🧼 FILTRO LOCAL (B): anti-duplicados internos por día
     (function removeIntraBatchDuplicates(){
       const seenDay = new Set();
       tmpRows = tmpRows.filter(r=>{
@@ -1642,12 +1660,7 @@ ${buildIntake()}
       });
     })();
 
-    // 🧭 Helpers de post-proceso: transporte, termales, notas
-    let fixed = applyTransportSmartFixes(tmpRows);
-    fixed = applyThermalSpaMinDuration(fixed);
-    fixed = sanitizeNotes(fixed);
-
-    const val = await validateRowsWithAgent(tmpCity, fixed, baseDate);
+    const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan);
 
     // 🧭 PASADA FINAL · Rellenar días vacíos o pobres
@@ -1671,7 +1684,6 @@ ${buildIntake()}
       delete plannerState.preferences.preferDayTrip;
       delete plannerState.preferences.preferAurora;
     }
-
     return;
   }
 
