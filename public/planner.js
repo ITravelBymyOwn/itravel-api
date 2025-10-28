@@ -2212,35 +2212,97 @@ async function onSend(){
   }
 
   // ============================================================
-  // 3) Agregar día al FINAL (con o sin day trip semilla)
+  // 3) Agregar día al FINAL (con o sin day trip semilla + itinerario detallado)
   // ============================================================
-  if(intent.type==='add_day_end' && intent.city){
+  if (intent.type === 'add_day_end' && intent.city) {
     const city = intent.city;
-    showWOW(true,'Insertando día y optimizando…');
+    showWOW(true, 'Insertando día y optimizando…');
     ensureDays(city);
     const byDay = itineraries[city].byDay || {};
-    const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+    const days = Object.keys(byDay).map(n => +n).sort((a, b) => a - b);
     const numericPos = days.length + 1;
     insertDayAt(city, numericPos);
 
-    // Semilla para day trip si aplica
-    if(intent.dayTripTo){
-      const start = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.start || DEFAULT_START;
-      const end   = cityMeta[city]?.perDay?.find(x=>x.day===numericPos)?.end   || DEFAULT_END;
+    // =============================
+    // 🧠 NUEVA LÓGICA PARA DAY TRIP DETALLADO
+    // =============================
+    if (intent.dayTripTo) {
+      const destTrip = intent.dayTripTo;
+      const start =
+        cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start ||
+        DEFAULT_START;
+      const end =
+        cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.end ||
+        DEFAULT_END;
+
+      // Semilla mínima
       const rowsSeed = [
-        {day:numericPos,start, end:addMinutes(start,60), activity:`Traslado a ${intent.dayTripTo}`, from: city, to: intent.dayTripTo, transport:'Tren/Bus', duration:'60m', notes:`Traslado de ida para excursión de 1 día (aprox.).`},
-        {day:numericPos,start:addMinutes(start,70), end:addMinutes(start,190), activity:`Visita principal en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'120m', notes:`Tiempo sugerido para lo esencial y fotos.`},
-        {day:numericPos,start:addMinutes(start,200), end:addMinutes(start,290), activity:`Almuerzo en ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie', duration:'90m', notes:`Pausa para comer.`},
-        {day:numericPos,start:addMinutes(start,300), end:addMinutes(start,420), activity:`Recorrido por ${intent.dayTripTo}`, from:intent.dayTripTo, to:'', transport:'A pie/Bus', duration:'120m', notes:`Paseo por puntos cercanos antes del regreso.`},
-        {day:numericPos,start:addMinutes(start,430), end, activity:`Regreso a ${city}`, from:intent.dayTripTo, to:city, transport:'Tren/Bus', duration:'', notes:`Regreso a la ciudad base el mismo día.`}
+        {
+          day: numericPos,
+          start,
+          end: addMinutes(start, 60),
+          activity: `Traslado a ${destTrip}`,
+          from: city,
+          to: destTrip,
+          transport: 'Tren/Bus',
+          duration: '60m',
+          notes: `Traslado de ida para excursión de 1 día (aprox.).`,
+        },
       ];
       pushRows(city, rowsSeed, false);
+
+      // =============================
+      // 🧠 Nuevo bloque: generar itinerario completo del day trip
+      // =============================
+      const promptDayTrip = `
+${FORMAT}
+Genera un itinerario completo y realista de 1 día para visitar **${destTrip}** saliendo desde **${city}** y regresando el mismo día.
+
+Parámetros:
+- Duración total entre 8 y 11 h.
+- Incluye visitas principales, pausas y traslados.
+- Usa horarios plausibles según distancia (ida y regreso ≈ 1 h cada uno, o ajusta según contexto).
+- Evita duplicar actividades ya existentes en ${city}.
+- Devuelve formato JSON: {"rows":[...]} con campos (day,start,end,activity,from,to,transport,duration,notes).
+- Mantén notas útiles (nada vacío).
+`.trim();
+
+      try {
+        const ansTrip = await callAgent(promptDayTrip, true);
+        const parsedTrip = parseJSON(ansTrip);
+        if (parsedTrip?.rows?.length) {
+          const detailedRows = parsedTrip.rows.map(r =>
+            normalizeRow({ ...r, day: numericPos })
+          );
+          pushRows(city, detailedRows, false);
+          chatMsg(
+            `🧭 Generé un itinerario completo de excursión a <strong>${destTrip}</strong>.`,
+            'ai'
+          );
+        } else {
+          chatMsg(
+            `⚠️ No logré generar un itinerario detallado para <strong>${destTrip}</strong>; se mantiene la estructura básica.`,
+            'ai'
+          );
+        }
+      } catch (err) {
+        console.error('Error generando day trip:', err);
+        chatMsg(
+          `⚠️ Ocurrió un error al generar el itinerario detallado para ${destTrip}.`,
+          'ai'
+        );
+      }
     }
 
+    // =============================
+    // Optimización del nuevo día
+    // =============================
     await optimizeDay(city, numericPos);
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Día agregado y plan reoptimizado globalmente.','ai');
+    chatMsg('✅ Día agregado y plan reoptimizado globalmente.', 'ai');
     return;
   }
 
