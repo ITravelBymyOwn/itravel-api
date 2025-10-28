@@ -1680,21 +1680,27 @@ ${lite ? buildIntakeLite() : buildIntake()}
       }
     }
 
-    // 🔒 Garantía dura: si aún hay días vacíos, rebalanceo selectivo/total
+        // 🔒 Garantía dura: si aún hay días vacíos, rebalanceo selectivo/total
+    const totalDays = dest.days;
     const missing = [];
-    for (let d = 1; d <= dest.days; d++){
+    for (let d = 1; d <= totalDays; d++){
       const len = (itineraries[tmpCity].byDay?.[d] || []).length;
       if(!len){ missing.push(d); }
     }
+
+    const generatedDays = totalDays - missing.length;
+    const generationRatio = generatedDays / totalDays;
+    console.warn(`[Hard-Fill] ${tmpCity}: generados ${generatedDays}/${totalDays} días (${Math.round(generationRatio*100)}%)`);
+
     if(missing.length){
-      const missingRatio = missing.length / dest.days;
-      if(missingRatio >= 0.4){
-        console.warn(`[Hard-Fill] ${tmpCity}: falta ${Math.round(missingRatio*100)}% de días → rebalanceo total`);
-        await rebalanceWholeCity(tmpCity, { start: 1, end: dest.days });
-      }else{
+      if (generationRatio < 0.7) {
+        // ⚠️ Si la generación es muy incompleta (como Tromsø), rebalanceo total
+        console.warn(`[Hard-Fill] ${tmpCity}: generación parcial → rebalanceo total`);
+        await rebalanceWholeCity(tmpCity, { start: 1, end: totalDays });
+      } else if (missing.length){
         const firstMissing = Math.min(...missing);
-        console.warn(`[Hard-Fill] ${tmpCity}: faltan días ${missing.join(', ')} → rebalanceo ${firstMissing}-${dest.days}`);
-        await rebalanceWholeCity(tmpCity, { start: firstMissing, end: dest.days });
+        console.warn(`[Hard-Fill] ${tmpCity}: faltan días ${missing.join(', ')} → rebalanceo ${firstMissing}-${totalDays}`);
+        await rebalanceWholeCity(tmpCity, { start: firstMissing, end: totalDays });
       }
     }
 
