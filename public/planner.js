@@ -1515,7 +1515,7 @@ async function generateCityItinerary(city){
     console.warn('Heurística no disponible para generación:', city, err);
   }
 
-  const instructions = `
+    const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
@@ -1528,7 +1528,13 @@ ${FORMAT}
 - Incluye imperdibles diurnos y nocturnos.
 - Si la ciudad es auroral y la temporada es adecuada, **propón al menos 1 noche de auroras** con horario realista y nota “valid”.
 - Sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día) cuando sea plausible y turístico.
-  • **Si incluyes day trip, entrega un ITINERARIO COMPLETO del día**: traslados de ida y vuelta + visitas clave + pausas (comida) + regreso con horarios plausibles. **Evita duplicar traslados** consecutivos o actividades redundantes.
+  • **Si incluyes day trip, entrega un ITINERARIO COMPLETO y CLARO del día**:
+    – Comienza siempre desde el hotel o punto base del usuario.  
+    – Incluye las paradas intermedias en secuencia lógica (p. ej. Thingvellir → Geysir → Gullfoss).  
+    – Finaliza siempre con el retorno al hotel o base.  
+    – Usa nombres reales de lugares, no genéricos (“Excursión al…” debe ser “Hotel → Parque Thingvellir”, etc.).  
+    – Añade traslados claros entre cada punto (“Desde” y “Hacia” precisos).  
+    – Evita duplicar traslados consecutivos o actividades redundantes.
 
 🕒 **Horarios inteligentes y plausibles:**
 - Si el usuario definió horario, respétalo.
@@ -2255,8 +2261,8 @@ async function onSend(){
     const numericPos = days.length + 1;
     insertDayAt(city, numericPos);
 
-    // =============================
-    // 🧠 NUEVA LÓGICA PARA DAY TRIP DETALLADO
+        // =============================
+    // 🧠 NUEVA LÓGICA PARA DAY TRIP DETALLADO (ajustada)
     // =============================
     if (intent.dayTripTo) {
       const destTrip = intent.dayTripTo;
@@ -2267,36 +2273,38 @@ async function onSend(){
         cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.end ||
         DEFAULT_END;
 
-      // Semilla mínima inicial
+      // 📌 Semilla inicial clara y específica
       const rowsSeed = [
         {
           day: numericPos,
           start,
           end: addMinutes(start, 60),
           activity: `Traslado a ${destTrip}`,
-          from: city,
+          from: `Hotel (${city})`,
           to: destTrip,
           transport: 'Tren/Bus',
-          duration: '60m',
-          notes: `Traslado de ida para excursión de 1 día (aprox.).`,
+          duration: '≈ 1h',
+          notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`,
         },
       ];
       pushRows(city, rowsSeed, false);
 
-      // =============================
-      // 🧠 Generar itinerario completo del day trip
-      // =============================
+      // 🧭 Prompt reforzado para secuencia clara
       const promptDayTrip = `
 ${FORMAT}
-Genera un itinerario completo y realista de 1 día para visitar **${destTrip}** saliendo desde **${city}** y regresando el mismo día.
+Genera un itinerario completo y secuencial de 1 día para visitar **${destTrip}** saliendo desde **${city}** y regresando el mismo día.
 
-Parámetros:
-- Duración total entre 8 y 11 h.
-- Incluye visitas principales, pausas y traslados.
-- Usa horarios plausibles según distancia (ida y regreso ≈ 1 h cada uno, o ajusta según contexto).
-- Evita duplicar actividades ya existentes en ${city}.
+🚆 Instrucciones:
+- El trayecto debe iniciar siempre en "Hotel (${city})" y finalizar en "Hotel (${city})".
+- Incluye traslados claramente rotulados con “Desde” y “Hacia”:
+  • Hotel (${city}) → ${destTrip}
+  • Lugares intermedios en orden lógico
+  • ${destTrip} → Hotel (${city})
+- No uses nombres genéricos como “Excursión a…”.
+- Incluye visitas clave, pausas (almuerzo/café) y tiempos de traslado realistas.
+- Evita duplicar traslados (si ya hay un traslado inicial, no lo repitas).
 - Devuelve formato JSON: {"rows":[...]} con campos (day,start,end,activity,from,to,transport,duration,notes).
-- Mantén notas útiles (nada vacío).
+- Mantén notas útiles, no vacías.
 `.trim();
 
       try {
@@ -2307,10 +2315,10 @@ Parámetros:
             normalizeRow({ ...r, day: numericPos })
           );
 
-          // 🧹 NUEVO: eliminar semilla inicial duplicada si el agente ya incluye traslado
+          // 🧹 NUEVO: eliminar semilla inicial si el agente ya incluye traslado de ida
           const hasTransfer = detailedRows.some(
             r =>
-              String(r.from).toLowerCase() === city.toLowerCase() &&
+              String(r.from).toLowerCase() === `hotel (${city})`.toLowerCase() &&
               String(r.to).toLowerCase() === destTrip.toLowerCase() &&
               /traslado|viaje/i.test(r.activity)
           );
@@ -2318,7 +2326,7 @@ Parámetros:
             itineraries[city].byDay[numericPos] = (itineraries[city].byDay[numericPos] || [])
               .filter(r =>
                 !(
-                  String(r.from).toLowerCase() === city.toLowerCase() &&
+                  String(r.from).toLowerCase() === `hotel (${city})`.toLowerCase() &&
                   String(r.to).toLowerCase() === destTrip.toLowerCase() &&
                   /traslado/i.test(r.activity)
                 )
@@ -2327,7 +2335,7 @@ Parámetros:
 
           pushRows(city, detailedRows, false);
           chatMsg(
-            `🧭 Generé un itinerario completo de excursión a <strong>${destTrip}</strong>.`,
+            `🧭 Generé un itinerario completo y secuencial de excursión a <strong>${destTrip}</strong>.`,
             'ai'
           );
         } else {
