@@ -1581,21 +1581,38 @@ ${buildIntake()}
       tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
-    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente (idéntico a tu versión)
-    const existingActs = Object.values(itineraries[city]?.byDay || {})
-      .flat()
-      .map(r => String(r.activity || '').trim().toLowerCase());
-    tmpRows = tmpRows.filter(r => !existingActs.includes(String(r.activity || '').trim().toLowerCase()));
+    // 🔑 Helpers de normalización para claves de duplicidad
+    const GENERIC_ACT = /^(desayuno|almuerzo|cena|comida|tiempo\s*libre|descanso|paseo\s*libre)$/i;
+    const norm = (s)=>String(s||'').trim().toLowerCase();
+    const makeKey = (r, scope='city')=>{
+      const act = norm(r.activity);
+      const from = norm(r.from);
+      const to   = norm(r.to);
+      // Para actos genéricos (comidas/tiempo libre), permitir repetición en distintos días.
+      if(GENERIC_ACT.test(act)){
+        return scope==='day' ? `GEN|${act}|${r.day||0}` : `GEN|${act}`;
+      }
+      // Para traslados/visitas, clave por actividad + dirección (from→to)
+      return `${act}|${from}|${to}${scope==='day' ? `|${r.day||0}` : ''}`;
+    };
 
-    // 🧼 FILTRO LOCAL (B): **NUEVO** anti-duplicados internos dentro de la misma generación
-    // Evita líneas repetidas como doble "Traslado a Segovia" en el mismo día.
+    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente (más fino)
+    const existingKeys = new Set(
+      Object.values(itineraries[city]?.byDay || {})
+        .flat()
+        .map(r => makeKey(r, 'city'))
+    );
+    tmpRows = tmpRows.filter(r => !existingKeys.has(makeKey(r, 'city')));
+
+    // 🧼 FILTRO LOCAL (B): **NUEVO** anti-duplicados internos dentro de la misma generación (por día)
+    // Evita líneas repetidas como doble "Traslado a Segovia" en el mismo día, 
+    // pero permite el regreso porque la dirección from→to difiere.
     (function removeIntraBatchDuplicates(){
-      const seen = new Set();
+      const seenDay = new Set();
       tmpRows = tmpRows.filter(r=>{
-        const act = String(r.activity||'').trim().toLowerCase();
-        const key = `${r.day||0}|${act}`;
-        if(seen.has(key)) return false;
-        seen.add(key);
+        const key = makeKey(r, 'day');
+        if(seenDay.has(key)) return false;
+        seenDay.add(key);
         return true;
       });
     })();
@@ -1603,10 +1620,12 @@ ${buildIntake()}
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan);
 
-    // 🧭 PASADA FINAL · Rellenar días vacíos si el modelo no los devolvió
+    // 🧭 PASADA FINAL · Rellenar días vacíos o pobres
+    const MIN_ROWS_PER_DAY = 2; // si queda <2, se fuerza optimización focal
     ensureDays(tmpCity);
     for (let d = 1; d <= dest.days; d++) {
-      if (!(itineraries[tmpCity].byDay?.[d] || []).length) {
+      const dayRows = (itineraries[tmpCity].byDay?.[d] || []);
+      if (!dayRows.length || dayRows.length < MIN_ROWS_PER_DAY) {
         await optimizeDay(tmpCity, d);
       }
     }
@@ -1678,7 +1697,7 @@ ${lockedDaysText}
 - No heredes horarios entre días.
 
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
-- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
+- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤ 2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
 ${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : `- Si no se indicó destino, sugiere automáticamente un imperdible cercano cuando sea plausible y turístico.`}
 - ❌ NO DUPLICAR actividades existentes en ningún día.
   • Si ya existe, sustituye por alternativa distinta.
