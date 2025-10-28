@@ -2211,7 +2211,7 @@ async function onSend(){
     return;
   }
 
-  // ============================================================
+    // ============================================================
   // 3) Agregar día al FINAL (con o sin day trip semilla + itinerario detallado)
   // ============================================================
   if (intent.type === 'add_day_end' && intent.city) {
@@ -2235,7 +2235,7 @@ async function onSend(){
         cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.end ||
         DEFAULT_END;
 
-      // Semilla mínima
+      // Semilla mínima inicial
       const rowsSeed = [
         {
           day: numericPos,
@@ -2252,7 +2252,7 @@ async function onSend(){
       pushRows(city, rowsSeed, false);
 
       // =============================
-      // 🧠 Nuevo bloque: generar itinerario completo del day trip
+      // 🧠 Generar itinerario completo del day trip
       // =============================
       const promptDayTrip = `
 ${FORMAT}
@@ -2274,6 +2274,25 @@ Parámetros:
           const detailedRows = parsedTrip.rows.map(r =>
             normalizeRow({ ...r, day: numericPos })
           );
+
+          // 🧹 NUEVO: eliminar semilla inicial duplicada si el agente ya incluye traslado
+          const hasTransfer = detailedRows.some(
+            r =>
+              String(r.from).toLowerCase() === city.toLowerCase() &&
+              String(r.to).toLowerCase() === destTrip.toLowerCase() &&
+              /traslado|viaje/i.test(r.activity)
+          );
+          if (hasTransfer) {
+            itineraries[city].byDay[numericPos] = (itineraries[city].byDay[numericPos] || [])
+              .filter(r =>
+                !(
+                  String(r.from).toLowerCase() === city.toLowerCase() &&
+                  String(r.to).toLowerCase() === destTrip.toLowerCase() &&
+                  /traslado/i.test(r.activity)
+                )
+              );
+          }
+
           pushRows(city, detailedRows, false);
           chatMsg(
             `🧭 Generé un itinerario completo de excursión a <strong>${destTrip}</strong>.`,
