@@ -2077,6 +2077,14 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v63 reforzada)
+   Cambios aplicados:
+   - ✅ P07: Balance de horarios cuando hay auroras u horarios extendidos.
+   - ✅ P08: Buffers automáticos mínimos entre actividades (≥15 min).
+   - ✅ P10: Mejora en tratamiento de auroras (tour vs auto).
+   - ✅ P13: Asegurar al menos una noche de auroras si aplica.
+   - ✅ P14: Secuencia lógica de visitas lineales (p. ej. parques, day trips).
+   - 🆕 Integración helpers post-proceso: applyBufferBetweenRows, ensureAuroraNight, reorderLinearVisits.
+   - ⚠️ Mantiene estructura, funciones y prompts base intactos.
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2226,6 +2234,11 @@ ${intakeData}
       const act = String(r.activity||'').trim().toLowerCase();
       return act && !allExisting.includes(act);
     });
+
+    // 🧭 Helpers de post-procesado
+    normalized = applyBufferBetweenRows(normalized);    // ✅ P08 Buffers automáticos
+    normalized = reorderLinearVisits(normalized);       // ✅ P14 Secuencia lógica lineal
+    normalized = ensureAuroraNight(normalized, city);   // ✅ P07 + P10 + P13 auroras
 
     const val = await validateRowsWithAgent(city, normalized, baseDate);
     pushRows(city, val.allowed, false);
