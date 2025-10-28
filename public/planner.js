@@ -124,6 +124,47 @@ const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
 
 /* ==============================
+   SECCIÓN 3H · Heurística de destinos (auroras + day trips canónicos)
+================================= */
+const CITY_HEURISTICS = {
+  auroras: {
+    cities: ['Tromsø','Reykjavik','Reykjavík'],
+    // Meses 1–12 en número. Temporada fuerte: sep–mar; tolerancia: fin de ago y principios de abr
+    seasonMonths: [8,9,10,11,12,1,2,3,4],
+    window: { start: '20:00', end: '02:00' },
+    note: 'valid: temporada y ventana nocturna adecuada; reservar tour gestionado por operadores locales.'
+  },
+  dayTrips: {
+    'Madrid':      ['Segovia','Toledo','Ávila'],
+    'Barcelona':   ['Montserrat','Girona','Sitges'],
+    'Reykjavik':   ['Golden Circle','Snaefellsnes'],
+    'Reykjavík':   ['Golden Circle','Snaefellsnes'],
+    'Tromsø':      ['Lyngen Alps','Ersfjordbotn']
+  }
+};
+
+function isAuroraCity(city){
+  const c = (city||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
+  return CITY_HEURISTICS.auroras.cities
+    .some(x=>x.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()===c);
+}
+function inAuroraSeason(baseDateStr){
+  try{
+    if(!baseDateStr) return true; // sin fecha, asumimos plausible
+    const [mm,dd,yyyy] = baseDateStr.split(/[\/\-]/);
+    const m = parseInt(mm||'9',10); // por defecto sep
+    return CITY_HEURISTICS.auroras.seasonMonths.includes(m);
+  }catch{ return true; }
+}
+function getCanonicalDayTrips(city){
+  return CITY_HEURISTICS.dayTrips[city] || [];
+}
+function normKey(s){
+  return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'')
+    .toLowerCase().replace(/\s+/g,' ').trim();
+}
+
+/* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
 ================================= */
 function chatMsg(html, who='ai'){
