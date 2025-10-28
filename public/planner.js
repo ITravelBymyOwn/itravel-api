@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v62 (parte 1/3)
-   Base: v61
+   ITRAVELBYMYOWN · PLANNER v63 (parte 1/3)
+   Base: v62
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -124,41 +124,56 @@ const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
 
 /* ==============================
-   SECCIÓN 3H · Heurística de destinos (auroras + day trips canónicos)
+   SECCIÓN 3H · Heurística Global Inteligente (Auroras + Day Trips)
 ================================= */
-const CITY_HEURISTICS = {
-  auroras: {
-    cities: ['Tromsø','Reykjavik','Reykjavík'],
-    // Meses 1–12 en número. Temporada fuerte: sep–mar; tolerancia: fin de ago y principios de abr
-    seasonMonths: [8,9,10,11,12,1,2,3,4],
-    window: { start: '20:00', end: '02:00' },
-    note: 'valid: temporada y ventana nocturna adecuada; reservar tour gestionado por operadores locales.'
-  },
-  dayTrips: {
-    'Madrid':      ['Segovia','Toledo','Ávila'],
-    'Barcelona':   ['Montserrat','Girona','Sitges'],
-    'Reykjavik':   ['Golden Circle','Snaefellsnes'],
-    'Reykjavík':   ['Golden Circle','Snaefellsnes'],
-    'Tromsø':      ['Lyngen Alps','Ersfjordbotn']
-  }
-};
 
-function isAuroraCity(city){
-  const c = (city||'').normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase();
-  return CITY_HEURISTICS.auroras.cities
-    .some(x=>x.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase()===c);
+// 🌍 Cinturón de auroras (latitud aprox. ≥ 60° N/S)
+const AURORA_LATITUDE_THRESHOLD = 60;
+const AURORA_SEASON_MONTHS = [8,9,10,11,12,1,2,3,4];
+
+// 🌌 Ventana horaria estándar para tours de auroras
+const AURORA_DEFAULT_WINDOW = { start: '20:00', end: '02:00' };
+
+// 🔹 Heurística dinámica para auroras
+function isAuroraCityDynamic(lat, lng){
+  if(typeof lat !== 'number') return false;
+  return Math.abs(lat) >= AURORA_LATITUDE_THRESHOLD;
 }
-function inAuroraSeason(baseDateStr){
+
+function inAuroraSeasonDynamic(baseDateStr){
   try{
-    if(!baseDateStr) return true; // sin fecha, asumimos plausible
-    const [mm,dd,yyyy] = baseDateStr.split(/[\/\-]/);
-    const m = parseInt(mm||'9',10); // por defecto sep
-    return CITY_HEURISTICS.auroras.seasonMonths.includes(m);
+    if(!baseDateStr) return true; // sin fecha → asumimos plausible
+    const [mm] = baseDateStr.split(/[\/\-]/);
+    const m = parseInt(mm||'9',10);
+    return AURORA_SEASON_MONTHS.includes(m);
   }catch{ return true; }
 }
-function getCanonicalDayTrips(city){
-  return CITY_HEURISTICS.dayTrips[city] || [];
+
+// 🌐 Day trip dinámico: se decidirá en el prompt, pero puedes sugerir candidatos comunes
+// ⚡ En vez de listas fijas, usamos algunos patrones heurísticos + razonamiento posterior
+const GLOBAL_DAY_TRIP_HINTS = {
+  radiusKm: 200, // radio máximo razonable
+  examples: [
+    'París: Versalles, Giverny, Mont Saint-Michel',
+    'Bruselas: Brujas, Gante',
+    'Roma: Florencia, Tivoli, Pompeya',
+    'Londres: Oxford, Bath, Cambridge',
+    'Zúrich: Lucerna, Jungfraujoch',
+    'Rovaniemi: Kemi, Levi, auroras',
+    'Tromsø: Lyngen Alps, Ersfjordbotn'
+  ]
+};
+
+function getHeuristicDayTripContext(city){
+  // 👇 Aquí no devolvemos lista fija sino contexto que el agente puede usar para razonar
+  return {
+    radiusKm: GLOBAL_DAY_TRIP_HINTS.radiusKm,
+    hintExamples: GLOBAL_DAY_TRIP_HINTS.examples,
+    city
+  };
 }
+
+// 🧭 Normalizador de claves para dedupe
 function normKey(s){
   return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'')
     .toLowerCase().replace(/\s+/g,' ').trim();
@@ -848,11 +863,43 @@ Reglas:
 `;
 
 /* ==============================
-   SECCIÓN 12 · Llamada a Astra (estilo global, reforzado v63)
+   SECCIÓN 12 · Llamada a Astra (estilo global, reforzado v64 con heurística dinámica)
 ================================= */
 async function callAgent(text, useHistory = true, opts = {}){
-  const { timeoutMs = 60000 } = opts; // ⏳ 60 s por defecto
+  const { timeoutMs = 60000, cityName = null, baseDate = null } = opts; // ⏳ 60 s por defecto
   const history = useHistory ? session : [];
+
+  // 🧭 Hook dinámico de heurísticas globales
+  let heuristicsContext = '';
+  if (cityName) {
+    // Determinar heurística de auroras
+    let auroraCity = false;
+    let auroraSeason = false;
+    let auroraWindow = AURORA_DEFAULT_WINDOW;
+    let dayTripContext = {};
+
+    try {
+      const coords = getCoordinatesForCity(cityName); // ⚠️ Debe existir función global (puede usar cache del planner)
+      if (coords && typeof coords.lat === 'number') {
+        auroraCity = isAuroraCityDynamic(coords.lat, coords.lng);
+        auroraSeason = inAuroraSeasonDynamic(baseDate);
+      }
+      dayTripContext = getHeuristicDayTripContext(cityName);
+    } catch (err) {
+      console.warn('Heurística dinámica no disponible para:', cityName, err);
+    }
+
+    heuristicsContext = `
+───────────────────────────────
+🧭 CONTEXTO HEURÍSTICO GLOBAL
+───────────────────────────────
+- Ciudad analizada: ${cityName}
+- Aurora City: ${auroraCity}
+- Aurora Season: ${auroraSeason}
+- Aurora Window: ${JSON.stringify(auroraWindow)}
+- DayTrip Context: ${JSON.stringify(dayTripContext)}
+    `.trim();
+  }
 
   const globalStyle = `
 Eres "Astra", un agente de viajes internacional con conocimiento experto y actualizado de **destinos turísticos, transporte, cultura, gastronomía, clima, estacionalidad, seguridad y logística global**.
@@ -883,9 +930,8 @@ Tu propósito es ayudar a planificar viajes **de forma inteligente, práctica y 
 - Si el usuario definió horarios por día, respétalos y razona a partir de ellos.
 - Si NO definió horarios, usa por defecto la ventana base **08:30–19:00** para todos los días sin información.
 - Extiende horarios cuando tenga sentido logístico o turístico (cenas, tours nocturnos, auroras boreales, eventos especiales).
-- Si extiendes un día por una actividad nocturna, **ajusta inteligentemente el inicio del día siguiente** (por ejemplo, comienza más tarde).
-- **No heredes horarios automáticamente** entre días: cada día debe partir de su propia lógica contextual.
-- Siempre asegúrate de proponer secuencias horarias coherentes, sin traslados imposibles ni saltos temporales absurdos.
+- Si extiendes un día por una actividad nocturna, **ajusta inteligentemente el inicio del día siguiente**.
+- No heredes horarios automáticamente entre días.
 - Añade buffers entre actividades (15 min mínimo, más si hay movilidad reducida o niños).
 - Para actividades estacionales como auroras:
   • Nunca las programes de mañana.  
@@ -895,48 +941,40 @@ Tu propósito es ayudar a planificar viajes **de forma inteligente, práctica y 
 ───────────────────────────────
 ✈️ **MOVILIDAD Y TRANSPORTE**
 ───────────────────────────────
-- Elige modos de transporte plausibles según el tipo de actividad:
-  • A pie en zonas turísticas compactas.  
-  • Metro / tren / bus en entornos urbanos o interurbanos lógicos.  
-  • Auto o tours organizados para excursiones fuera de la ciudad.
+- Elige modos de transporte plausibles según el tipo de actividad.
 - Considera tiempos reales de traslado y conéctalos con la secuencia del itinerario.
-- Ajusta sugerencias de transporte según preferencias del usuario (alquiler, transporte público, Uber/taxi, mixto).
+- Ajusta sugerencias de transporte según preferencias del usuario.
 
 ───────────────────────────────
 🧭 **SEGURIDAD Y RESTRICCIONES**
 ───────────────────────────────
 - No propongas actividades en zonas con riesgos relevantes, horarios peligrosos o restricciones evidentes.
-- Si detectas algo riesgoso, **sustituye** por una alternativa segura, razonable y práctica.
-- Incluye breves notas informativas (sin alarmismo) si hay restricciones, estacionalidad o requisitos especiales (visas, permisos, clima extremo, etc.).
+- Si detectas algo riesgoso, **sustituye** por una alternativa segura y práctica.
 
 ───────────────────────────────
 📝 **NOTAS Y CONTEXTO TURÍSTICO**
 ───────────────────────────────
 - NUNCA dejes “notes” vacío ni “seed”.
-- Usa las notas para:
-  • Tips locales y culturales.  
-  • Consejos de reservas anticipadas.  
-  • Información de accesibilidad o logística.  
-  • Recomendaciones realistas (ej. “llevar abrigo”, “reservar con 48h”, “tour en grupo pequeño recomendado”).
-- Para actividades estacionales, incluye “valid:” con justificación breve (ej. temporada de auroras, mejor horario de avistamiento, requerimientos climáticos, etc.).
+- Usa las notas para tips, reservas anticipadas, información de accesibilidad, cultura local y recomendaciones prácticas.
+- Para actividades estacionales, incluye “valid:” con justificación breve.
 
 ───────────────────────────────
 🧠 **RAZONAMIENTO ADAPTATIVO**
 ───────────────────────────────
-- Comprende instrucciones naturales del usuario y tradúcelas a acciones de itinerario inteligentes.
+- Comprende instrucciones naturales del usuario y tradúcelas a acciones inteligentes.
 - Si no se indica un día específico, reacomoda de forma lógica sin duplicar.
 - Si cambian preferencias de viaje, ajusta automáticamente el itinerario completo manteniendo coherencia.
 - Si no hay información horaria, genera itinerarios completos igualmente, con horarios plausibles.
-- Si se trata de una edición, responde siempre con JSON válido.
-- Si es una pregunta informativa, responde de forma útil y conversacional (sin JSON).
 
 ───────────────────────────────
 🧭 **INTELIGENCIA CONTEXTUAL GLOBAL**
 ───────────────────────────────
 - Usa tu conocimiento general del mundo real como lo haría un experto humano.
 - Considera diferencias hemisféricas, temporadas turísticas, festivos nacionales, cultura local, transporte real, condiciones meteorológicas típicas y patrones de comportamiento de turistas.
-- Prioriza fluidez y naturalidad en la planificación: el resultado debe sentirse **coherente, factible y disfrutable**.
+- Prioriza fluidez y naturalidad en la planificación.
 - Puedes sugerir una opción principal y una alternativa razonable si corresponde.
+
+${heuristicsContext}
 
 Recuerda siempre:
 - Entregar respuestas accionables, bien razonadas y libres de inconsistencias.
@@ -1263,10 +1301,33 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado v63
-   (fusión de criterios fuertes)
+   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado v64
+   (con validación dinámica de auroras y day trips)
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
+  // 🧭 Hook heurístico dinámico
+  let heuristicsContext = '';
+  try {
+    const coords = getCoordinatesForCity(city);
+    const auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
+    const auroraSeason = inAuroraSeasonDynamic(baseDate);
+    const auroraWindow = AURORA_DEFAULT_WINDOW;
+    const dayTripContext = getHeuristicDayTripContext(city);
+
+    heuristicsContext = `
+───────────────────────────────
+🧭 CONTEXTO HEURÍSTICO GLOBAL
+───────────────────────────────
+- Ciudad: ${city}
+- Aurora City: ${auroraCity}
+- Aurora Season: ${auroraSeason}
+- Aurora Window: ${JSON.stringify(auroraWindow)}
+- Day Trip Context: ${JSON.stringify(dayTripContext)}
+    `.trim();
+  } catch(err){
+    console.warn('Heurística no disponible para validación:', city, err);
+  }
+
   const payload = `
 Devuelve SOLO JSON válido:
 {
@@ -1336,6 +1397,8 @@ REGLAS DE FUSIÓN:
 - Devuelve "allowed" ya corregidas; solo pasa a "removed" lo incompatible.
 - Ajusta actividades de manera inteligente antes de removerlas, cuando sea posible.
 
+${heuristicsContext}
+
 Contexto:
 - Ciudad: "${city}"
 - Fecha base (Día 1): ${baseDate || 'N/A'}
@@ -1357,7 +1420,7 @@ Contexto:
 }
 
 /* ==============================
-   SECCIÓN 15 · Generación por ciudad (modificada v63)
+   SECCIÓN 15 · Generación por ciudad (modificada v64 con heurística global auroras + day trips dinámicos)
 ================================= */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -1415,6 +1478,29 @@ async function generateCityItinerary(city){
     session.length = 0;
   }
 
+  // 🧠 Inyección de contexto heurístico global (auroras y day trips)
+  let heuristicsContext = '';
+  try {
+    const coords = getCoordinatesForCity(city);
+    const auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
+    const auroraSeason = inAuroraSeasonDynamic(baseDate);
+    const auroraWindow = AURORA_DEFAULT_WINDOW;
+    const dayTripContext = getHeuristicDayTripContext(city);
+
+    heuristicsContext = `
+───────────────────────────────
+🧭 CONTEXTO HEURÍSTICO GLOBAL
+───────────────────────────────
+- Ciudad: ${city}
+- Aurora City: ${auroraCity}
+- Aurora Season: ${auroraSeason}
+- Aurora Window: ${JSON.stringify(auroraWindow)}
+- Day Trip Context: ${JSON.stringify(dayTripContext)}
+`.trim();
+  } catch(err){
+    console.warn('Heurística no disponible para generación:', city, err);
+  }
+
   const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
@@ -1426,7 +1512,8 @@ ${FORMAT}
 - NO dejes ningún día sin actividades.
 - Cada fila debe incluir el campo "day" correcto.
 - Incluye imperdibles diurnos y nocturnos.
-- Si el número total de días es ≥ 4, sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día).
+- Si la ciudad es auroral y la temporada es adecuada, **propón al menos 1 noche de auroras** con horario realista y nota “valid”.
+- Sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día) cuando sea plausible y turístico.
 
 🕒 **Horarios inteligentes y plausibles:**
 - Si el usuario definió horario, respétalo.
@@ -1449,6 +1536,8 @@ ${FORMAT}
   • Sustituir por alternativas seguras cuando aplique.
 - Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto) sin duplicar otras noches.
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
+
+${heuristicsContext}
 
 Contexto actual:
 ${buildIntake()}
@@ -1539,7 +1628,7 @@ ${lockedDaysText}
 
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
 - Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
-${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : `- Si el número total de días es ≥ 4 y no se indicó destino, sugiere automáticamente un imperdible cercano.`}
+${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : `- Si no se indicó destino, sugiere automáticamente un imperdible cercano cuando sea plausible y turístico.`}
 - ❌ NO DUPLICAR actividades existentes en ningún día.
   • Si ya existe, sustituye por alternativa distinta.
 - El último día debe ser más liviano, respetando lógica de preparación de regreso.
