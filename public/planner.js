@@ -1745,8 +1745,8 @@ function askNextHotelTransport(){
 }
 
 /* ==============================
-   SECCIÓN 17 · NLU robusta + Intents (v61 extendida)
-   (expande regex e intents para day trips y preferencias dinámicas)
+   SECCIÓN 17 · NLU robusta + Intents (v64 extendida)
+   (expande regex e intents para day trips y preferencias dinámicas + auroras)
 ================================= */
 const WORD_NUM = {
   'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,
@@ -1867,10 +1867,16 @@ function intentFromText(text){
   }
 
   // ✅ “Quiero un tour de un día / preferDayTrip” aunque no se agreguen días
-  if(/\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|algo fuera de la ciudad|un viaje de un d[ií]a)\b/.test(t)){
+  if(/\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|algo fuera de la ciudad|un viaje de un d[ií]a|una escapada|salida de un d[ií]a)\b/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const placeM = t.match(/a\s+([a-záéíóúüñ\s]+)$/i);
     return {type:'prefer_day_trip', city, dayTripTo: placeM ? placeM[1].trim() : null};
+  }
+
+  // ✅ Auroras boreales — intención específica
+  if(/\b(auroras|aurora boreal|northern lights|ver auroras|tour de auroras|ver la aurora)\b/.test(t)){
+    const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
+    return {type:'prefer_aurora', city};
   }
 
   // ✅ Eliminar día
@@ -1924,7 +1930,7 @@ function intentFromText(text){
 }
 
 /* ==============================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v63 reforzada)
+   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v64 reforzada)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -1996,20 +2002,25 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip pendiente
+  // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip / aurora pendiente
   let forceReplanBlock = '';
   const hasForceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
   const hasDayTripPending = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
   const hasPreferDayTrip = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
+  const hasPreferAurora = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferAurora);
 
-  if (hasForceReplan || hasDayTripPending || hasPreferDayTrip) {
+  if (hasForceReplan || hasDayTripPending || hasPreferDayTrip || hasPreferAurora) {
     forceReplanBlock = `
 👉 IMPORTANTE:
-- El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
+- El usuario ha extendido su estadía o indicó preferencia por actividades especiales en ${city}.
 - REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
 - Evalúa siempre la posibilidad de realizar excursiones de 1 día a ciudades cercanas (máx. 2 h de trayecto por sentido).
 - Si las excursiones aportan más valor turístico que actividades locales adicionales, inclúyelas en el itinerario.
 - Si el usuario especificó un destino concreto (dayTripTo), programa ese tour automáticamente.
+- Si el usuario indicó preferencia por ver auroras boreales:
+  • Considera la temporada y latitud para programarlas inteligentemente.
+  • Usa horarios plausibles (20:00–02:30 aprox.).
+  • Si no aplica por temporada o latitud, sugiere alternativas realistas.
 - Prioriza imperdibles locales primero y evita duplicar cualquier actividad ya existente.
 - Respeta ritmo, movilidad y preferencias de viaje (perfil usuario).
 - Devuelve una planificación clara y optimizada.
@@ -2017,8 +2028,8 @@ async function optimizeDay(city, day){
   }
 
   // 🧠 OPTIMIZADO: intake reducido si no hay cambios globales
-  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
-    ? buildIntake()        // Full contexto solo si es replanificación completa o hay day trip pendiente
+  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip || hasPreferAurora)
+    ? buildIntake()        // Full contexto si es replanificación completa, day trip o auroras pendientes
     : buildIntakeLite();   // ⚡ más liviano para recalculos simples
 
   const prompt = `
