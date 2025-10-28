@@ -1956,7 +1956,7 @@ function intentFromText(text){
 }
 
 /* ==============================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v64 reforzada)
+   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v63 reforzada)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2028,25 +2028,20 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip / aurora pendiente
+  // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip pendiente
   let forceReplanBlock = '';
   const hasForceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
   const hasDayTripPending = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
   const hasPreferDayTrip = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
-  const hasPreferAurora = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferAurora);
 
-  if (hasForceReplan || hasDayTripPending || hasPreferDayTrip || hasPreferAurora) {
+  if (hasForceReplan || hasDayTripPending || hasPreferDayTrip) {
     forceReplanBlock = `
 👉 IMPORTANTE:
-- El usuario ha extendido su estadía o indicó preferencia por actividades especiales en ${city}.
+- El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
 - REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
 - Evalúa siempre la posibilidad de realizar excursiones de 1 día a ciudades cercanas (máx. 2 h de trayecto por sentido).
 - Si las excursiones aportan más valor turístico que actividades locales adicionales, inclúyelas en el itinerario.
 - Si el usuario especificó un destino concreto (dayTripTo), programa ese tour automáticamente.
-- Si el usuario indicó preferencia por ver auroras boreales:
-  • Considera la temporada y latitud para programarlas inteligentemente.
-  • Usa horarios plausibles (20:00–02:30 aprox.).
-  • Si no aplica por temporada o latitud, sugiere alternativas realistas.
 - Prioriza imperdibles locales primero y evita duplicar cualquier actividad ya existente.
 - Respeta ritmo, movilidad y preferencias de viaje (perfil usuario).
 - Devuelve una planificación clara y optimizada.
@@ -2054,8 +2049,8 @@ async function optimizeDay(city, day){
   }
 
   // 🧠 OPTIMIZADO: intake reducido si no hay cambios globales
-  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip || hasPreferAurora)
-    ? buildIntake()        // Full contexto si es replanificación completa, day trip o auroras pendientes
+  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
+    ? buildIntake()        // Full contexto solo si es replanificación completa o hay day trip pendiente
     : buildIntakeLite();   // ⚡ más liviano para recalculos simples
 
   const prompt = `
