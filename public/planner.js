@@ -1522,10 +1522,11 @@ async function generateCityItinerary(city){
 
   // 🧠 Inyección de contexto heurístico global (auroras y day trips)
   let heuristicsContext = '';
+  let coords = null, auroraCity = false, auroraSeason = false;
   try {
-    const coords = getCoordinatesForCity(city);
-    const auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
-    const auroraSeason = inAuroraSeasonDynamic(baseDate);
+    coords = getCoordinatesForCity(city);
+    auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
+    auroraSeason = inAuroraSeasonDynamic(baseDate);
     const auroraWindow = AURORA_DEFAULT_WINDOW;
     const dayTripContext = getHeuristicDayTripContext(city);
 
@@ -1542,6 +1543,14 @@ async function generateCityItinerary(city){
   } catch(err){
     console.warn('Heurística no disponible para generación:', city, err);
   }
+
+  // 🌌 Requisito dinámico de auroras (sólo si aplica)
+  const auroraRequirement = (auroraCity && auroraSeason) ? `
+🌌 **Requisito especial**:
+- Esta ciudad es auroral y la temporada es adecuada.
+- Debes sugerir **al menos una noche de auroras**, en un horario realista (20:00–02:30), con nota “valid” y transporte coherente (Tour/Bus/Van o Auto).
+- Prioriza la primera o segunda noche, o la noche con menor carga diurna. Si el clima fuera adverso, sugiere alternativa flexible o rango de días posibles.
+`.trim() : '';
 
   const buildInstructions = (lite=false) => `
 ${FORMAT}
@@ -1564,6 +1573,8 @@ ${FORMAT}
     – Añade traslados claros entre cada punto (“Desde” y “Hacia” precisos).  
     – Evita duplicar traslados consecutivos o actividades redundantes.
 
+${auroraRequirement}
+
 🕒 **Horarios inteligentes y plausibles:**
 - Si el usuario definió horario, respétalo.
 - Si no hay horario definido, usa 08:30–19:00 como base diaria.
@@ -1576,7 +1587,7 @@ ${FORMAT}
 
 🌍 **Lógica de actividades y seguridad (transporte coherente)**:
 - Transporte coherente por tipo de actividad:
-  • **Barco** para whale watching, islas, cruceros fluviales, traslados a islas/parques marinos.  
+  • **Barco** para whale watching, islas, cruceros fluviales y traslados a islas/parques marinos.  
   • **Bus/Van tour** para excursiones interurbanas y day trips organizados.  
   • **Tren/Bus/Auto** para traslados terrestres entre ciudades o atracciones.  
   • **A pie/Metro** en zonas urbanas compactas.
@@ -1669,16 +1680,22 @@ ${lite ? buildIntakeLite() : buildIntake()}
       }
     }
 
-    // 🔒 Garantía dura: si aún hay días vacíos, rebalanceo selectivo
+    // 🔒 Garantía dura: si aún hay días vacíos, rebalanceo selectivo/total
     const missing = [];
     for (let d = 1; d <= dest.days; d++){
       const len = (itineraries[tmpCity].byDay?.[d] || []).length;
       if(!len){ missing.push(d); }
     }
     if(missing.length){
-      const firstMissing = Math.min(...missing);
-      console.warn(`[Hard-Fill] ${tmpCity}: faltan días ${missing.join(', ')} → rebalanceo ${firstMissing}-${dest.days}`);
-      await rebalanceWholeCity(tmpCity, { start: firstMissing, end: dest.days });
+      const missingRatio = missing.length / dest.days;
+      if(missingRatio >= 0.4){
+        console.warn(`[Hard-Fill] ${tmpCity}: falta ${Math.round(missingRatio*100)}% de días → rebalanceo total`);
+        await rebalanceWholeCity(tmpCity, { start: 1, end: dest.days });
+      }else{
+        const firstMissing = Math.min(...missing);
+        console.warn(`[Hard-Fill] ${tmpCity}: faltan días ${missing.join(', ')} → rebalanceo ${firstMissing}-${dest.days}`);
+        await rebalanceWholeCity(tmpCity, { start: firstMissing, end: dest.days });
+      }
     }
 
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
@@ -1701,14 +1718,19 @@ ${lite ? buildIntakeLite() : buildIntake()}
     for (let d = 1; d <= dest.days; d++) {
       await optimizeDay(city, d);
     }
-    // Si aún hay días vacíos, rebalanceo total
+    // Si aún hay días vacíos, rebalanceo total o selectivo según porcentaje
     const missing = [];
     for (let d = 1; d <= dest.days; d++){
       if(!(itineraries[city].byDay?.[d]||[]).length) missing.push(d);
     }
     if(missing.length){
-      const firstMissing = Math.min(...missing);
-      await rebalanceWholeCity(city, { start: firstMissing, end: dest.days });
+      const missingRatio = missing.length / dest.days;
+      if(missingRatio >= 0.4){
+        await rebalanceWholeCity(city, { start: 1, end: dest.days });
+      }else{
+        const firstMissing = Math.min(...missing);
+        await rebalanceWholeCity(city, { start: firstMissing, end: dest.days });
+      }
     }
   } finally {
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
