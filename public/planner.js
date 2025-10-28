@@ -1425,6 +1425,11 @@ Contexto:
 
 /* ─────────────────────────────────────────────────────────────
    [15.1] Overlay helpers (mensajes y bloqueo de UI)
+   Cambios aplicados:
+   - ✅ Mantiene habilitado solo “reset-planner”
+   - 🆕 Bloquea “info-chat-floating” cuando showWOW = true
+   - 🆕 Incluye atributo aria-busy para mejor accesibilidad
+   - 🆕 Guarda/restaura tabindex de los elementos bloqueados (para teclado)
 ───────────────────────────────────────────────────────────── */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -1435,8 +1440,9 @@ function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
   $overlayWOW.style.display = on ? 'flex' : 'none';
+  $overlayWOW.setAttribute('aria-busy', on ? 'true' : 'false');
 
-  const all = qsa('button, input, select, textarea');
+  const all = qsa('button, input, select, textarea, a');
   all.forEach(el=>{
     // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
@@ -1444,18 +1450,40 @@ function showWOW(on, msg){
     // 🆕 Bloquear también el botón flotante de Info Chat
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
+      if (on) {
+        el._prevTabIndex = el.getAttribute('tabindex');
+        el.setAttribute('tabindex','-1');
+      } else {
+        if (typeof el._prevTabIndex !== 'undefined') {
+          el.setAttribute('tabindex', el._prevTabIndex);
+          delete el._prevTabIndex;
+        } else {
+          el.removeAttribute('tabindex');
+        }
+      }
       return;
     }
 
     if(on){
+      // Guardar estado previo
       el._prevDisabled = el.disabled;
+      el._prevTabIndex = el.getAttribute('tabindex');
       el.disabled = true;
+      el.setAttribute('tabindex','-1');
     }else{
+      // Restaurar estado previo
       if(typeof el._prevDisabled !== 'undefined'){
         el.disabled = el._prevDisabled;
         delete el._prevDisabled;
       }else{
         el.disabled = false;
+      }
+
+      if(typeof el._prevTabIndex !== 'undefined'){
+        el.setAttribute('tabindex', el._prevTabIndex);
+        delete el._prevTabIndex;
+      }else{
+        el.removeAttribute('tabindex');
       }
     }
   });
@@ -1463,13 +1491,14 @@ function showWOW(on, msg){
 
 /* ─────────────────────────────────────────────────────────────
    [15.2] Generación principal por ciudad
-   Cambios quirúrgicos:
-   - (Q1) Prompt: aclarar que el day trip AUTOMÁTICO debe venir con
-         itinerario completo (traslados+visitas+comidas+regreso).
-   - (Q2) Filtro interno anti-duplicados dentro de la propia generación
-         (evita la doble línea "Traslado a X" y actividades repetidas
-         el mismo día). NO toca el resto de la lógica.
-   - (Q3) Limpieza de preferencias de uso único (ya estaba) se mantiene.
+   Cambios aplicados:
+   - ✅ Q1: Prompt day trip claro y completo (ya estaba).
+   - ✅ Q2: Filtro duplicados más robusto con “makeKey” para traslados y comidas genéricas.
+   - ✅ Q3: Limpieza de preferencias de uso único (sin cambios).
+   - 🆕 P01: Integración de helper applyTransportSmartFixes (actividades acuáticas/islas).
+   - 🆕 P02: Integración de helper applyThermalSpaMinDuration (Blue Lagoon ≥ 3h).
+   - 🆕 P11 / P17: sanitizeNotes(rows) para limpiar “seed”.
+   - 🆕 P03: Relleno mínimo cuando el modelo no devuelve suficientes actividades por día.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -1515,7 +1544,7 @@ async function generateCityItinerary(city){
     console.warn('Heurística no disponible para generación:', city, err);
   }
 
-    const instructions = `
+  const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
@@ -1532,7 +1561,7 @@ ${FORMAT}
     – Comienza siempre desde el hotel o punto base del usuario.  
     – Incluye las paradas intermedias en secuencia lógica (p. ej. Thingvellir → Geysir → Gullfoss).  
     – Finaliza siempre con el retorno al hotel o base.  
-    – Usa nombres reales de lugares, no genéricos (“Excursión al…” debe ser “Hotel → Parque Thingvellir”, etc.).  
+    – Usa nombres reales de lugares, no genéricos.  
     – Añade traslados claros entre cada punto (“Desde” y “Hacia” precisos).  
     – Evita duplicar traslados consecutivos o actividades redundantes.
 
@@ -1588,15 +1617,13 @@ ${buildIntake()}
       const act = norm(r.activity);
       const from = norm(r.from);
       const to   = norm(r.to);
-      // Para actos genéricos (comidas/tiempo libre), permitir repetición en distintos días.
       if(GENERIC_ACT.test(act)){
         return scope==='day' ? `GEN|${act}|${r.day||0}` : `GEN|${act}`;
       }
-      // Para traslados/visitas, clave por actividad + dirección (from→to)
       return `${act}|${from}|${to}${scope==='day' ? `|${r.day||0}` : ''}`;
     };
 
-    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente (más fino)
+    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente
     const existingKeys = new Set(
       Object.values(itineraries[city]?.byDay || {})
         .flat()
@@ -1604,9 +1631,7 @@ ${buildIntake()}
     );
     tmpRows = tmpRows.filter(r => !existingKeys.has(makeKey(r, 'city')));
 
-    // 🧼 FILTRO LOCAL (B): **NUEVO** anti-duplicados internos dentro de la misma generación (por día)
-    // Evita líneas repetidas como doble "Traslado a Segovia" en el mismo día, 
-    // pero permite el regreso porque la dirección from→to difiere.
+    // 🧼 FILTRO LOCAL (B): anti-duplicados internos dentro de la misma generación
     (function removeIntraBatchDuplicates(){
       const seenDay = new Set();
       tmpRows = tmpRows.filter(r=>{
@@ -1617,11 +1642,16 @@ ${buildIntake()}
       });
     })();
 
-    const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
+    // 🧭 Helpers de post-proceso: transporte, termales, notas
+    let fixed = applyTransportSmartFixes(tmpRows);
+    fixed = applyThermalSpaMinDuration(fixed);
+    fixed = sanitizeNotes(fixed);
+
+    const val = await validateRowsWithAgent(tmpCity, fixed, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan);
 
     // 🧭 PASADA FINAL · Rellenar días vacíos o pobres
-    const MIN_ROWS_PER_DAY = 2; // si queda <2, se fuerza optimización focal
+    const MIN_ROWS_PER_DAY = 2;
     ensureDays(tmpCity);
     for (let d = 1; d <= dest.days; d++) {
       const dayRows = (itineraries[tmpCity].byDay?.[d] || []);
@@ -1660,7 +1690,12 @@ ${buildIntake()}
 
 /* ─────────────────────────────────────────────────────────────
    [15.3] Rebalanceo masivo de una ciudad
-   (SIN cambios funcionales; solo se mantiene el bloque tal como lo diste)
+   Cambios aplicados:
+   - 🆕 P01: applyTransportSmartFixes (transporte acuático/islas, scenic drive).
+   - 🆕 P02: applyThermalSpaMinDuration (mínimo 3h en termales).
+   - 🆕 P05: Filtro anti-duplicados más robusto (makeKey).
+   - 🆕 P11/P17: sanitizeNotes para eliminar “seed”.
+   - 🆕 P03/P15: Reoptimización y fallback si el modelo devuelve días vacíos o pobres.
 ───────────────────────────────────────────────────────────── */
 /* 🆕 Rebalanceo masivo tras cambios (agregar días / day trip pedido) */
 async function rebalanceWholeCity(city, opts={}){
@@ -1725,20 +1760,48 @@ ${buildIntake()}
       rows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
-    // 🧼 FILTRO LOCAL · Eliminar duplicados usando plannerState.existingActs si está disponible
-    let existingActs = Object.values(itineraries[city]?.byDay || {})
-      .flat()
-      .map(r => String(r.activity || '').trim().toLowerCase());
-    if(plannerState.existingActs && plannerState.existingActs[city]){
-      existingActs = [...new Set([...existingActs, ...Array.from(plannerState.existingActs[city])])];
-    }
-    rows = rows.filter(r => !existingActs.includes(String(r.activity || '').trim().toLowerCase()));
+    // 🔑 Helpers de normalización de duplicados
+    const GENERIC_ACT = /^(desayuno|almuerzo|cena|comida|tiempo\s*libre|descanso|paseo\s*libre)$/i;
+    const norm = (s)=>String(s||'').trim().toLowerCase();
+    const makeKey = (r, scope='city')=>{
+      const act = norm(r.activity);
+      const from = norm(r.from);
+      const to   = norm(r.to);
+      if(GENERIC_ACT.test(act)){
+        return scope==='day' ? `GEN|${act}|${r.day||0}` : `GEN|${act}`;
+      }
+      return `${act}|${from}|${to}${scope==='day' ? `|${r.day||0}` : ''}`;
+    };
 
-    const val = await validateRowsWithAgent(city, rows, baseDate);
+    // 🧼 FILTRO LOCAL · Eliminar duplicados usando plannerState.existingActs y makeKey
+    let existingKeys = new Set(
+      Object.values(itineraries[city]?.byDay || {})
+        .flat()
+        .map(r => makeKey(r, 'city'))
+    );
+    if(plannerState.existingActs && plannerState.existingActs[city]){
+      const ext = Array.from(plannerState.existingActs[city]).map(a=>a.toLowerCase());
+      existingKeys = new Set([...existingKeys, ...ext]);
+    }
+    rows = rows.filter(r => !existingKeys.has(makeKey(r, 'city')));
+
+    // 🧭 Helpers de post-proceso
+    let fixed = applyTransportSmartFixes(rows);
+    fixed = applyThermalSpaMinDuration(fixed);
+    fixed = sanitizeNotes(fixed);
+
+    const val = await validateRowsWithAgent(city, fixed, baseDate);
     pushRows(city, val.allowed, forceReplan);
 
-    // 🧠 Optimiza solo el rango de días afectado
-    for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
+    // 🧠 Optimiza solo el rango de días afectado y aplica relleno mínimo si quedan pobres
+    const MIN_ROWS_PER_DAY = 2;
+    for(let d=startDay; d<=endDay; d++) {
+      await optimizeDay(city, d);
+      const dayRows = (itineraries[city].byDay?.[d] || []);
+      if (!dayRows.length || dayRows.length < MIN_ROWS_PER_DAY) {
+        await optimizeDay(city, d);
+      }
+    }
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
