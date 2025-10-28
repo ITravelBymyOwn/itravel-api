@@ -872,19 +872,18 @@ async function callAgent(text, useHistory = true, opts = {}){
   // 🧭 Hook dinámico de heurísticas globales
   let heuristicsContext = '';
   if (cityName) {
-    // Determinar heurística de auroras
     let auroraCity = false;
     let auroraSeason = false;
     let auroraWindow = AURORA_DEFAULT_WINDOW;
     let dayTripContext = {};
 
     try {
-      const coords = getCoordinatesForCity(cityName); // ⚠️ Debe existir función global (puede usar cache del planner)
-      if (coords && typeof coords.lat === 'number') {
+      const coords = getCoordinatesForCity(cityName);
+      if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
         auroraCity = isAuroraCityDynamic(coords.lat, coords.lng);
         auroraSeason = inAuroraSeasonDynamic(baseDate);
       }
-      dayTripContext = getHeuristicDayTripContext(cityName);
+      dayTripContext = getHeuristicDayTripContext(cityName) || {};
     } catch (err) {
       console.warn('Heurística dinámica no disponible para:', cityName, err);
     }
@@ -1305,14 +1304,14 @@ function addMultipleDaysToCity(city, extraDays){
    (con validación dinámica de auroras y day trips)
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
-  // 🧭 Hook heurístico dinámico
+  // 🧭 Hook heurístico dinámico (alineado con Sección 12)
   let heuristicsContext = '';
   try {
     const coords = getCoordinatesForCity(city);
     const auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
-    const auroraSeason = inAuroraSeasonDynamic(baseDate);
+    const auroraSeason = baseDate ? inAuroraSeasonDynamic(baseDate) : false;
     const auroraWindow = AURORA_DEFAULT_WINDOW;
-    const dayTripContext = getHeuristicDayTripContext(city);
+    const dayTripContext = getHeuristicDayTripContext(city) || {};
 
     heuristicsContext = `
 ───────────────────────────────
@@ -1326,6 +1325,7 @@ async function validateRowsWithAgent(city, rows, baseDate){
     `.trim();
   } catch(err){
     console.warn('Heurística no disponible para validación:', city, err);
+    heuristicsContext = '⚠️ Sin contexto heurístico disponible para esta validación.';
   }
 
   const payload = `
