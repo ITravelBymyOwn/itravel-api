@@ -1420,14 +1420,12 @@ Contexto:
 }
 
 /* ==============================
-   SECCIÓN 15 · Generación por ciudad (v65)
-   — Auroras inteligentes + day trips dinámicos + POI especiales + radio ampliado + limpieza de traslados duplicados + bloqueo UI global
+   SECCIÓN 15 · Generación por ciudad (modificada v64 con heurística global auroras + day trips dinámicos)
 ================================= */
 
-/* ============================================================
-   🧩 15.1 · Overlay y control WOW
-   — Controla el bloqueo/desbloqueo global de la UI
-============================================================ */
+/* ─────────────────────────────────────────────────────────────
+   [15.1] Overlay helpers (mensajes y bloqueo de UI)
+───────────────────────────────────────────────────────────── */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
   if(p) p.textContent = msg;
@@ -1463,10 +1461,16 @@ function showWOW(on, msg){
   });
 }
 
-/* ============================================================
-   🧩 15.2 · Generación de itinerario por ciudad
-   — Núcleo de Astra: auroras, day trips, radio dinámico, POI especiales
-============================================================ */
+/* ─────────────────────────────────────────────────────────────
+   [15.2] Generación principal por ciudad
+   Cambios quirúrgicos:
+   - (Q1) Prompt: aclarar que el day trip AUTOMÁTICO debe venir con
+         itinerario completo (traslados+visitas+comidas+regreso).
+   - (Q2) Filtro interno anti-duplicados dentro de la propia generación
+         (evita la doble línea "Traslado a X" y actividades repetidas
+         el mismo día). NO toca el resto de la lógica.
+   - (Q3) Limpieza de preferencias de uso único (ya estaba) se mantiene.
+───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -1488,17 +1492,14 @@ async function generateCityItinerary(city){
     session.length = 0;
   }
 
-  /* --------------------------------------------
-     🧠 HEURÍSTICA GLOBAL: auroras + day trips + POI
-  -------------------------------------------- */
+  // 🧠 Inyección de contexto heurístico global (auroras y day trips)
   let heuristicsContext = '';
   try {
     const coords = getCoordinatesForCity(city);
     const auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
     const auroraSeason = inAuroraSeasonDynamic(baseDate);
     const auroraWindow = AURORA_DEFAULT_WINDOW;
-    const dayTripContext = getHeuristicDayTripContext(city, transport);
-    const specialPOI = detectSpecialPOI(city);
+    const dayTripContext = getHeuristicDayTripContext(city);
 
     heuristicsContext = `
 ───────────────────────────────
@@ -1509,15 +1510,11 @@ async function generateCityItinerary(city){
 - Aurora Season: ${auroraSeason}
 - Aurora Window: ${JSON.stringify(auroraWindow)}
 - Day Trip Context: ${JSON.stringify(dayTripContext)}
-- Special POI: ${JSON.stringify(specialPOI)}
 `.trim();
   } catch(err){
     console.warn('Heurística no disponible para generación:', city, err);
   }
 
-  /* --------------------------------------------
-     📝 PROMPT PRINCIPAL ASTRAL
-  -------------------------------------------- */
   const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
@@ -1525,24 +1522,35 @@ ${FORMAT}
 
 🚨 **COBERTURA OBLIGATORIA:**
 - Devuelve actividades para TODOS los días 1 a ${dest.days}.
-- Usa 08:30–19:00 como base cuando no haya horarios definidos.
+- Si el usuario no proporcionó horarios para algunos días, usa como base 08:30–19:00 y amplía inteligentemente si hay actividades nocturnas (auroras, cenas, tours especiales).
+- NO dejes ningún día sin actividades.
+- Cada fila debe incluir el campo "day" correcto.
 - Incluye imperdibles diurnos y nocturnos.
-- Si la ciudad es auroral y la temporada es adecuada, propón al menos 1 noche de auroras (20:00–02:30, nota “valid”).
-- Sugiere automáticamente 1 day trip a un imperdible cercano (≤ 2.5 h transporte público o ≤ 3 h si vehículo alquilado).
-- Si hay POI especiales (ej. Blue Lagoon), da suficiente tiempo y flexibilidad.
+- Si la ciudad es auroral y la temporada es adecuada, **propón al menos 1 noche de auroras** con horario realista y nota “valid”.
+- Sugiere automáticamente UN (1) day trip a un imperdible cercano (≤ 2 h por trayecto, ida y vuelta el mismo día) cuando sea plausible y turístico.
+  • **Si incluyes day trip, entrega un ITINERARIO COMPLETO del día**: traslados de ida y vuelta + visitas clave + pausas (comida) + regreso con horarios plausibles. **Evita duplicar traslados** consecutivos o actividades redundantes.
 
 🕒 **Horarios inteligentes y plausibles:**
-- Auroras: 20:00–02:30 aprox.
-- Cenas/nocturno: 19:00–23:30.
-- Buffers ≥ 15 min.
-- Ajusta inteligentemente inicios cuando haya horarios extendidos.
+- Si el usuario definió horario, respétalo.
+- Si no hay horario definido, usa 08:30–19:00 como base diaria.
+- Extiende horarios sólo cuando sea razonable:
+  • Auroras: 20:00–02:30 aprox. (nunca en horario diurno).  
+  • Cenas y vida nocturna: 19:00–23:30 aprox.
+- Si extiendes el horario de un día, ajusta de forma inteligente el inicio del siguiente.
+- ❌ No heredes horarios directamente entre días.
+- Añade buffers realistas entre actividades (≥15 min).
 
-🌍 **Lógica y seguridad:**
+🌍 **Lógica de actividades y seguridad:**
 - Agrupar por zonas, evitar solapamientos.
-- ❌ NO DUPLICAR actividades existentes.
-- Sustituir por alternativas si ya existe.
-- Validar plausibilidad y seguridad.
-- Notas siempre informativas.
+- ❌ NO DUPLICAR actividades ya existentes en ningún día:
+  • Siempre verifica todas las actividades de la ciudad antes de proponer nuevas.
+  • Si ya existe, sustituye por alternativa distinta.
+- Validar plausibilidad global y seguridad:
+  • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
+  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
+  • Sustituir por alternativas seguras cuando aplique.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤2 h por trayecto) sin duplicar otras noches.
+- Notas SIEMPRE informativas (nunca vacías ni "seed").
 
 ${heuristicsContext}
 
@@ -1550,9 +1558,6 @@ Contexto actual:
 ${buildIntake()}
 `.trim();
 
-  /* --------------------------------------------
-     🚀 LLAMADA AL AGENTE
-  -------------------------------------------- */
   showWOW(true, 'Astra está generando itinerarios…');
   const text = await callAgent(instructions, false);
   const parsed = parseJSON(text);
@@ -1570,44 +1575,29 @@ ${buildIntake()}
       tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
-    /* --------------------------------------------
-       🧼 FILTROS LOCALES POST-PROCESAMIENTO
-    -------------------------------------------- */
-
-    // 🔸 Eliminar duplicados previos
+    // 🧼 FILTRO LOCAL (A): duplicados contra lo ya existente (idéntico a tu versión)
     const existingActs = Object.values(itineraries[city]?.byDay || {})
       .flat()
       .map(r => String(r.activity || '').trim().toLowerCase());
     tmpRows = tmpRows.filter(r => !existingActs.includes(String(r.activity || '').trim().toLowerCase()));
 
-    // 🔸 Eliminar duplicaciones de traslados iniciales
-    tmpRows = tmpRows.filter((row, idx, arr) => {
-      if (idx === 0) return true;
-      const prev = arr[idx - 1];
-      return !(
-        row.start === prev.start &&
-        row.end === prev.end &&
-        (row.to || '').toLowerCase() === (prev.to || '').toLowerCase() &&
-        /traslado|viaje en tren|viaje en bus|bus|tren/i.test(prev.activity) &&
-        /traslado|viaje en tren|viaje en bus|bus|tren/i.test(row.activity)
-      );
-    });
+    // 🧼 FILTRO LOCAL (B): **NUEVO** anti-duplicados internos dentro de la misma generación
+    // Evita líneas repetidas como doble "Traslado a Segovia" en el mismo día.
+    (function removeIntraBatchDuplicates(){
+      const seen = new Set();
+      tmpRows = tmpRows.filter(r=>{
+        const act = String(r.activity||'').trim().toLowerCase();
+        const key = `${r.day||0}|${act}`;
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    })();
 
-    // 🔸 Ajuste dinámico para POI especiales (ej. Blue Lagoon)
-    tmpRows = tmpRows.map(r=>{
-      if (/blue lagoon|laguna azul|termales/i.test(r.activity||'')){
-        return {...r, end: addMinutes(r.start, 240), notes:`Actividad con tiempo flexible — puedes quedarte más si lo deseas.`};
-      }
-      return r;
-    });
-
-    /* --------------------------------------------
-       🧭 VALIDACIÓN Y PUSH FINAL
-    -------------------------------------------- */
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan);
 
-    // 🔸 Rellenar días vacíos si el modelo no los devolvió
+    // 🧭 PASADA FINAL · Rellenar días vacíos si el modelo no los devolvió
     ensureDays(tmpCity);
     for (let d = 1; d <= dest.days; d++) {
       if (!(itineraries[tmpCity].byDay?.[d] || []).length) {
@@ -1621,6 +1611,7 @@ ${buildIntake()}
     $resetBtn?.removeAttribute('disabled');
     if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
 
+    // 🧹 Limpieza de preferencias de uso único
     if (plannerState.preferences) {
       delete plannerState.preferences.preferDayTrip;
       delete plannerState.preferences.preferAurora;
@@ -1629,13 +1620,11 @@ ${buildIntake()}
     return;
   }
 
-  /* --------------------------------------------
-     🆘 FALLBACK LOCAL
-  -------------------------------------------- */
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   showWOW(false);
   $resetBtn?.removeAttribute('disabled');
 
+  // 🧹 Limpieza también en fallback
   if (plannerState.preferences) {
     delete plannerState.preferences.preferDayTrip;
     delete plannerState.preferences.preferAurora;
@@ -1644,10 +1633,11 @@ ${buildIntake()}
   chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
 }
 
-/* ============================================================
-   🧩 15.3 · Rebalanceo masivo tras cambios
-   — Reequilibrar itinerario cuando se agregan días / day trip pedido
-============================================================ */
+/* ─────────────────────────────────────────────────────────────
+   [15.3] Rebalanceo masivo de una ciudad
+   (SIN cambios funcionales; solo se mantiene el bloque tal como lo diste)
+───────────────────────────────────────────────────────────── */
+/* 🆕 Rebalanceo masivo tras cambios (agregar días / day trip pedido) */
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
@@ -1658,12 +1648,14 @@ async function rebalanceWholeCity(city, opts={}){
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
+  // 🆕 Determinar rango de rebalanceo
   const startDay = opts.start || 1;
   const endDay = opts.end || totalDays;
   const lockedDaysText = startDay > 1 
     ? `Mantén intactos los días 1 a ${startDay - 1}.`
     : '';
 
+  // 🧭 Detectar si se debe forzar replanificación
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const prompt = `
@@ -1683,7 +1675,11 @@ ${lockedDaysText}
 - Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
 ${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : `- Si no se indicó destino, sugiere automáticamente un imperdible cercano cuando sea plausible y turístico.`}
 - ❌ NO DUPLICAR actividades existentes en ningún día.
+  • Si ya existe, sustituye por alternativa distinta.
 - El último día debe ser más liviano, respetando lógica de preparación de regreso.
+- Valida plausibilidad y seguridad global:
+  • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
+  • Si hay alerta razonable, sustitúyelo por alternativa más segura o indica brevemente en notes.
 - Notas SIEMPRE útiles (nunca vacías ni "seed").
 Contexto actual (para fusionar sin borrar): 
 ${buildIntake()}
@@ -1704,7 +1700,7 @@ ${buildIntake()}
       rows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
-    // 🧼 FILTRO LOCAL · Eliminar duplicados
+    // 🧼 FILTRO LOCAL · Eliminar duplicados usando plannerState.existingActs si está disponible
     let existingActs = Object.values(itineraries[city]?.byDay || {})
       .flat()
       .map(r => String(r.activity || '').trim().toLowerCase());
@@ -1716,6 +1712,7 @@ ${buildIntake()}
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
 
+    // 🧠 Optimiza solo el rango de días afectado
     for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -1724,6 +1721,7 @@ ${buildIntake()}
 
     if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
 
+    // 🧹 Limpieza de preferencias de uso único tras rebalanceo
     if (plannerState.preferences) {
       delete plannerState.preferences.preferDayTrip;
       delete plannerState.preferences.preferAurora;
@@ -1733,6 +1731,7 @@ ${buildIntake()}
     showWOW(false);
     $resetBtn?.removeAttribute('disabled');
 
+    // 🧹 Limpieza también en fallback
     if (plannerState.preferences) {
       delete plannerState.preferences.preferDayTrip;
       delete plannerState.preferences.preferAurora;
