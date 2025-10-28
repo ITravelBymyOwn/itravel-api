@@ -1474,12 +1474,13 @@ function showWOW(on, msg){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [15.2] Generación principal por ciudad (v65 estable)
+   [15.2] Generación principal por ciudad (v65 estable + Fix auroras + termales)
    Cambios integrados:
    - Mutex anti-carreras (una ciudad a la vez)
    - Fixers globales (transporte, termales, notes)
    - Auroras robustas (detecta auroraCity y season)
    - Anti-duplicados locales
+   - 🆕 Post-proceso auroras garantizado (si el modelo no lo devuelve)
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   // 🔒 Mutex simple por ciudad
@@ -1590,6 +1591,28 @@ ${buildIntake()}
 
       const val=await validateRowsWithAgent(city,tmpRows,baseDate);
       pushRows(city,val.allowed,forceReplan);
+
+      /* 🆕 Post-proceso auroras si no fueron incluidas */
+      if (auroraCity && (auroraSeason || !baseDate)) {
+        const acts = Object.values(itineraries[city]?.byDay || {})
+          .flat()
+          .map(r => String(r.activity || '').toLowerCase());
+        const hasAurora = acts.some(a => a.includes('aurora') || a.includes('northern light'));
+        if (!hasAurora) {
+          const auroraRow = {
+            day: 1,
+            start: '20:00',
+            end: '02:30',
+            activity: 'Caza de auroras',
+            from: 'Hotel/Base',
+            to: 'Punto de observación',
+            transport: 'Tour/Bus/Van',
+            notes: 'valid: Aurora chase'
+          };
+          pushRows(city, [auroraRow], false);
+          console.warn(`[Aurora Injection] Se añadió aurora automáticamente en ${city}`);
+        }
+      }
 
       ensureDays(city);
       for(let d=1; d<=dest.days; d++){
