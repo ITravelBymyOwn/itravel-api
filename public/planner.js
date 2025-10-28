@@ -1498,9 +1498,9 @@ function showWOW(on, msg){
          (evita la doble línea "Traslado a X" y actividades repetidas
          el mismo día). NO toca el resto de la lógica.
    - (Q3) Limpieza de preferencias de uso único (ya estaba) se mantiene.
-   - (Q4) Forzar JSON + reintento degradado (evitar fallback).
-   - (Q5) **Garantía dura de días completos**: si quedan días vacíos,
-          lanzar rebalanceo selectivo para completarlos.
+   - (Q4) JSON estricto + reintento degradado.
+   - (Q5) Garantía dura: completar días vacíos vía rebalanceo selectivo.
+   - (Q6) Concurrency-safe: NO tocar `session` global aquí.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -1518,10 +1518,7 @@ async function generateCityItinerary(city){
   // 🧭 Detectar si se debe forzar replanificación
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
-  // ⚠️ Limpieza de historial para evitar sesgos entre ciudades
-  if (typeof session !== 'undefined' && Array.isArray(session)) {
-    session.length = 0;
-  }
+  // ⛔ Concurrency-safe: NO tocar `session` global aquí (evita carreras entre ciudades)
 
   // 🧠 Inyección de contexto heurístico global (auroras y day trips)
   let heuristicsContext = '';
@@ -1575,23 +1572,20 @@ ${FORMAT}
   • Cenas y vida nocturna: 19:00–23:30 aprox.
 - Si extiendes el horario de un día, ajusta de forma inteligente el inicio del siguiente.
 - ❌ No heredes horarios directamente entre días.
-- Añade buffers realistas entre actividades (≥15 min).
+- Añade buffers realistas (≥15 min).
 
 🌍 **Lógica de actividades y seguridad (transporte coherente)**:
 - Transporte coherente por tipo de actividad:
   • **Barco** para whale watching, islas, cruceros fluviales, traslados a islas/parques marinos.  
   • **Bus/Van tour** para excursiones interurbanas y day trips organizados.  
   • **Tren/Bus/Auto** para traslados terrestres entre ciudades o atracciones.  
-  • **A pie/Metro** en zonas urbanas compactas y visitas peatonales.
+  • **A pie/Metro** en zonas urbanas compactas.
 - Agrupar por zonas, evitar solapamientos.
 - ❌ NO DUPLICAR actividades ya existentes en ningún día:
-  • Siempre verifica todas las actividades de la ciudad antes de proponer nuevas.
-  • Si ya existe, sustituye por alternativa distinta.
-- Validar plausibilidad global y seguridad:
-  • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
-  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
-  • Sustituir por alternativas seguras cuando aplique.
-- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤ 2 h por trayecto) sin duplicar otras noches.
+  • Verifica todas las actividades de la ciudad antes de proponer nuevas.
+- Validar plausibilidad y seguridad:
+  • Añadir "valid: <justificación>" en notes cuando aplique.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o day trips (≤ 2 h por trayecto).
 - Notas SIEMPRE informativas (nunca vacías ni "seed").
 
 ${heuristicsContext}
@@ -1600,20 +1594,18 @@ Contexto actual:
 ${lite ? buildIntakeLite() : buildIntake()}
 `.trim();
 
-  // 🔒 Llamada en modo JSON estricto + reintento degradado
   showWOW(true, 'Astra está generando itinerarios…');
 
-  let text, parsed;
+  // 🔒 JSON estricto + reintento degradado
+  let parsed = null;
   try{
-    text = await callAgent(buildInstructions(false), true);
+    const text = await callAgent(buildInstructions(false), true);
     parsed = parseJSON(text);
   }catch(e){
     console.warn('Primer intento fallido en generateCityItinerary:', e);
   }
-
   if(!parsed || !(parsed.rows || parsed.destinations || parsed.itineraries)){
     try{
-      console.warn('Reintento degradado con intake lite…');
       const text2 = await callAgent(buildInstructions(true), true);
       parsed = parseJSON(text2);
     }catch(e2){
@@ -1677,7 +1669,7 @@ ${lite ? buildIntakeLite() : buildIntake()}
       }
     }
 
-    // 🔒 **Garantía dura**: si aún hay días vacíos, rebalanceo selectivo
+    // 🔒 Garantía dura: si aún hay días vacíos, rebalanceo selectivo
     const missing = [];
     for (let d = 1; d <= dest.days; d++){
       const len = (itineraries[tmpCity].byDay?.[d] || []).length;
@@ -1703,17 +1695,32 @@ ${lite ? buildIntakeLite() : buildIntake()}
     return;
   }
 
-  renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-  showWOW(false);
-  $resetBtn?.removeAttribute('disabled');
+  // 🚨 Fallback por ciudad: garantizar salida útil aunque no haya JSON
+  try{
+    ensureDays(city);
+    for (let d = 1; d <= dest.days; d++) {
+      await optimizeDay(city, d);
+    }
+    // Si aún hay días vacíos, rebalanceo total
+    const missing = [];
+    for (let d = 1; d <= dest.days; d++){
+      if(!(itineraries[city].byDay?.[d]||[]).length) missing.push(d);
+    }
+    if(missing.length){
+      const firstMissing = Math.min(...missing);
+      await rebalanceWholeCity(city, { start: firstMissing, end: dest.days });
+    }
+  } finally {
+    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
 
-  // 🧹 Limpieza también en fallback
-  if (plannerState.preferences) {
-    delete plannerState.preferences.preferDayTrip;
-    delete plannerState.preferences.preferAurora;
+    // 🧹 Limpieza también en fallback
+    if (plannerState.preferences) {
+      delete plannerState.preferences.preferDayTrip;
+      delete plannerState.preferences.preferAurora;
+    }
   }
-
-  chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
 }
 
 /* ─────────────────────────────────────────────────────────────
