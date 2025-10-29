@@ -1924,6 +1924,8 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
+   v60 base + overlay bloqueado global hasta terminar todas las ciudades
+   (concurrencia controlada vía runWithConcurrency)
 ================================= */
 async function startPlanning(){
   if(savedDestinations.length===0) return;
@@ -1938,32 +1940,24 @@ async function startPlanning(){
 }
 
 function askNextHotelTransport(){
-  // ✅ Si ya se procesaron todos los destinos
+  // ✅ Si ya se procesaron todos los destinos → generar itinerarios
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
 
     (async ()=>{
+      // 🔒 Mantener UI bloqueada durante la generación global
       showWOW(true, 'Astra está generando itinerarios…');
 
-      // 🔁 NUEVO: ejecución secuencial en lugar de concurrencia
-      for (let i = 0; i < savedDestinations.length; i++) {
-        const city = savedDestinations[i].city;
-        console.log(`[SEQ] Generando itinerario ${i+1}/${savedDestinations.length} → ${city}`);
-        if (typeof setOverlayMessage === 'function') {
-          setOverlayMessage(`Generando itinerario ${i+1}/${savedDestinations.length} para ${city}…`);
-        }
-        try {
-          await generateCityItinerary(city);
-        } catch (err) {
-          console.error(`[ERROR] Fallo al generar itinerario para ${city}:`, err);
-          chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>. Continuaré con la siguiente ciudad.`, 'ai');
-        }
-      }
+      // ⚙️ Concurrencia controlada (v60): no tocar
+      const taskFns = savedDestinations.map(({city}) => async () => {
+        await generateCityItinerary(city);
+      });
+      await runWithConcurrency(taskFns);
 
+      // ✅ Al terminar TODAS las ciudades, desbloquear UI
       showWOW(false);
       chatMsg(tone.doneAll);
-      console.log(`[SEQ] Generación secuencial finalizada.`);
     })();
     return;
   }
@@ -1974,13 +1968,13 @@ function askNextHotelTransport(){
     cityMeta[city] = { baseDate: null, hotel:'', transport:'', perDay: [] };
   }
 
-  // ✅ Si no hay hotel definido, no avanzar hasta que el usuario lo indique
+  // ⛔ Debe esperar explícitamente hotel/zona antes de avanzar (requisito)
   const currentHotel = cityMeta[city].hotel || '';
   if(!currentHotel.trim()){
     setActiveCity(city);
     renderCityItinerary(city);
     chatMsg(tone.askHotelTransport(city), 'ai');
-    return;
+    return; // 👈 No avanza hasta que el usuario indique hotel/zona
   }
 
   // 🧭 Avanzar al siguiente destino si ya hay hotel guardado
