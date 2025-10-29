@@ -2116,6 +2116,16 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
+  // 🧊 NUEVO: proteger actividades especiales (auroras y termales)
+  const protectedRows = rows.filter(r=>{
+    const act = (r.activity||'').toLowerCase();
+    return act.includes('aurora') || act.includes('northern light') || act.includes('laguna azul') || act.includes('blue lagoon');
+  });
+  const rowsForOptimization = rows.filter(r=>{
+    const act = (r.activity||'').toLowerCase();
+    return !act.includes('aurora') && !act.includes('northern light') && !act.includes('laguna azul') && !act.includes('blue lagoon');
+  });
+
   // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip pendiente
   let forceReplanBlock = '';
   const hasForceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
@@ -2148,7 +2158,7 @@ Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
 Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales:
-${JSON.stringify(rows)}
+${JSON.stringify(rowsForOptimization)}
 ${forceReplanBlock}
 
 🕒 **Horarios inteligentes y plausibles**:
@@ -2200,7 +2210,10 @@ ${intakeData}
     normalized = reorderLinearVisits(normalized);       // ✅ P14 Secuencia lógica lineal
     normalized = ensureAuroraNight(normalized, city);   // ✅ P07 + P10 + P13 auroras
 
-    const val = await validateRowsWithAgent(city, normalized, baseDate);
+    // 🧩 Reconstrucción con protegidas
+    const finalRows = [...normalized, ...protectedRows];
+
+    const val = await validateRowsWithAgent(city, finalRows, baseDate);
     pushRows(city, val.allowed, false);
   }
 }
