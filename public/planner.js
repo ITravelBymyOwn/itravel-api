@@ -1474,14 +1474,14 @@ function showWOW(on, msg){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [15.2] Generación principal por ciudad (v65 estable + Fix auroras + termales)
+   [15.2] Generación principal por ciudad (v66 estable)
    Cambios integrados:
    - Mutex anti-carreras (una ciudad a la vez)
    - Fixers globales (transporte, termales, notes)
-   - Auroras robustas (detecta auroraCity y season)
-   - Anti-duplicados locales
-   - 🆕 Post-proceso auroras garantizado (si el modelo no lo devuelve) con elección de día óptimo
-   - 🆕 Refuerzo local: termales/Laguna Azul mínimo 3h (ajusta duración y fin si es posible)
+   - Auroras robustas (detección + fallback si el modelo no las devuelve)
+   - Inyección termales (Laguna Azul si no devuelta)
+   - Validación tolerante (no abortar por rows parciales)
+   - Logs por ciudad (inicio/fin, tiempo, filas crudas/validadas/inyectadas)
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   // 🔒 Mutex simple por ciudad
@@ -1492,25 +1492,7 @@ async function generateCityItinerary(city){
   }
   window.__cityLocks[city] = true;
 
-  // Helpers locales (no tocan otras secciones)
-  const toHHMM = s => String(s||'').trim();
-  const parseHHMM = (hhmm)=>{
-    const m = /^(\d{1,2}):(\d{2})$/.exec(toHHMM(hhmm));
-    if(!m) return null;
-    const h = Math.min(23, Math.max(0, +m[1]));
-    const min = Math.min(59, Math.max(0, +m[2]));
-    return {h, min};
-  };
-  const addMinutes = (hhmm, mins)=>{
-    const t = parseHHMM(hhmm);
-    if(!t) return null;
-    let total = t.h*60 + t.min + mins;
-    while(total < 0) total += 24*60;
-    total = total % (24*60);
-    const h = Math.floor(total/60);
-    const m = total % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  };
+  const startTime = performance.now(); // 🕒 Log inicio
 
   try {
     const dest  = savedDestinations.find(x=>x.city===city);
@@ -1525,7 +1507,6 @@ async function generateCityItinerary(city){
     const hotel    = cityMeta[city]?.hotel || '';
     const transport= cityMeta[city]?.transport || 'recomiéndame';
 
-    // 🧭 Detectar replanificación
     const forceReplan = (plannerState?.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
     // 🧠 Heurística global auroras/day trips
@@ -1588,8 +1569,8 @@ ${buildIntake()}
     const text = await callAgent(instructions, true);
     const parsed = parseJSON(text);
 
+    let tmpRows=[];
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-      let tmpRows=[];
       if(parsed.rows) tmpRows=parsed.rows.map(r=>normalizeRow(r));
       else if(parsed.destination===city && parsed.rows) tmpRows=parsed.rows.map(r=>normalizeRow(r));
       else if(Array.isArray(parsed.destinations)){
@@ -1610,85 +1591,65 @@ ${buildIntake()}
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      const val=await validateRowsWithAgent(city,tmpRows,baseDate);
-      pushRows(city,val.allowed,forceReplan);
+      // 🧪 Validación tolerante
+      let val = {allowed:[], removed:[]};
+      try { val = await validateRowsWithAgent(city,tmpRows,baseDate) } catch(e){ console.warn('validateRowsWithAgent error', e) }
+      pushRows(city, val.allowed || [], forceReplan);
 
-      /* 🆕 Refuerzo local de termales/Laguna Azul: mínimo 3h.
-         Si hay start y end plausibles, se ajusta end; en su defecto se fuerza duration='3h'. */
-      (function enforceThermal3h(){
-        const hotWords = ['laguna azul','blue lagoon','bláa lónið','termal','termales','hot spring','thermal bath'];
-        const byDay = itineraries[city]?.byDay || {};
-        for(const d of Object.keys(byDay)){
-          byDay[d] = (byDay[d]||[]).map(r=>{
-            const name = String(r.activity||'').toLowerCase();
-            if(hotWords.some(w=>name.includes(w))){
-              const dur = String(r.duration||'').toLowerCase();
-              const durNum = /(\d+)\s*h/.exec(dur)?.[1] ? +/(\d+)\s*h/.exec(dur)[1] : null;
-              let start = toHHMM(r.start), end = toHHMM(r.end);
-              if(start && parseHHMM(start)){
-                // si hay hora de inicio, garantizamos fin +180 min
-                const newEnd = addMinutes(start, 180);
-                if(newEnd) end = newEnd;
-              }
-              // setea duration explícitamente a 3h si era menor o no existía
-              if(!durNum || durNum < 3){
-                r.duration = '3h';
-              }
-              if(end) r.end = end;
-              // mensaje claro para el usuario
-              r.notes = (r.notes ? String(r.notes)+' · ' : '') + 'min stay 3h (puedes alargarlo si deseas)';
-            }
-            return r;
-          });
-        }
-      })();
-
-      /* 🆕 Post-proceso auroras: si la ciudad es auroral y no se incluyó, agrega una noche
-         en el día con MENOR carga diurna (evita el último día si es posible). */
+      /* 🆕 Post-proceso auroras si no fueron incluidas */
       if (auroraCity && (auroraSeason || !baseDate)) {
         const acts = Object.values(itineraries[city]?.byDay || {})
           .flat()
           .map(r => String(r.activity || '').toLowerCase());
         const hasAurora = acts.some(a => a.includes('aurora') || a.includes('northern light'));
         if (!hasAurora) {
-          const byDay = itineraries[city]?.byDay || {};
-          const dayLoads = [];
-          for(let d=1; d<=dest.days; d++){
-            const rows = byDay[d] || [];
-            // carga "diurna": filas que terminen antes de 19:30
-            const diurnas = rows.filter(x=>{
-              const e = parseHHMM(x.end||'');
-              return e ? (e.h*60+e.min) <= (19*60+30) : true;
-            }).length;
-            dayLoads.push({day:d, load:diurnas});
-          }
-          // evitar el último día si hay empate
-          dayLoads.sort((a,b)=> a.load===b.load ? a.day - b.day : a.load - b.load);
-          let chosen = dayLoads[0]?.day || 1;
-          if(chosen === dest.days && dayLoads[1]) chosen = dayLoads[1].day;
-
-          const auroraRow = normalizeRow({
-            day: chosen,
-            start: '20:30',
-            end: '02:00',
+          const targetDay = pickAuroraDay(city);
+          const auroraRow = {
+            day: targetDay,
+            start: '20:00',
+            end: '02:30',
             activity: 'Caza de auroras',
             from: 'Hotel/Base',
             to: 'Punto de observación',
             transport: 'Tour/Bus/Van',
-            notes: 'valid: ventana nocturna de auroras (sujeto a clima); llevar ropa térmica'
-          });
+            notes: 'valid: Aurora chase'
+          };
           pushRows(city, [auroraRow], false);
-          console.warn(`[Aurora Injection] Añadida aurora automáticamente en ${city} (día ${chosen})`);
+          console.warn(`[Aurora Injection] Se añadió aurora automáticamente en ${city} (día ${targetDay})`);
         }
       }
 
-      // Relleno mínimo
+      /* 🆕 Post-proceso termales si no fueron incluidas */
+      if (city.toLowerCase().includes('reykjavik')) {
+        const acts = Object.values(itineraries[city]?.byDay || {})
+          .flat()
+          .map(r => String(r.activity || '').toLowerCase());
+        const hasLaguna = acts.some(a => a.includes('laguna azul') || a.includes('blue lagoon'));
+        if (!hasLaguna) {
+          const thermalRow = {
+            day: 1,
+            start: '10:00',
+            end: '13:00',
+            activity: 'Visita a la Laguna Azul',
+            from: 'Hotel/Base',
+            to: 'Laguna Azul',
+            transport: 'Bus/Van',
+            notes: 'valid: Thermal spa 3h mínimo'
+          };
+          pushRows(city, [thermalRow], false);
+          console.warn(`[Thermal Injection] Se añadió Laguna Azul automáticamente en ${city}`);
+        }
+      }
+
       ensureDays(city);
       for(let d=1; d<=dest.days; d++){
         if(!(itineraries[city].byDay?.[d]||[]).length){
           await optimizeDay(city,d);
         }
       }
+
+      const endTime = performance.now();
+      console.log(`[LOG] ${city} generado en ${(endTime - startTime).toFixed(0)} ms | Filas crudas: ${tmpRows.length}, válidas: ${val.allowed?.length || 0}`);
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
@@ -1702,7 +1663,6 @@ ${buildIntake()}
       return;
     }
 
-    // Fallback sin JSON
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
     $resetBtn?.removeAttribute('disabled');
@@ -1714,6 +1674,21 @@ ${buildIntake()}
   }finally{
     delete window.__cityLocks[city];
   }
+}
+
+/* Helper interno: elegir día menos cargado para inyectar auroras */
+function pickAuroraDay(city){
+  const days = Object.entries(itineraries[city]?.byDay || {});
+  let bestDay = 1;
+  let minActs = Infinity;
+  for(const [d,rows] of days){
+    const count = rows.length;
+    if(count < minActs){
+      minActs = count;
+      bestDay = Number(d);
+    }
+  }
+  return bestDay;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -1833,14 +1808,24 @@ function askNextHotelTransport(){
     (async ()=>{
       showWOW(true, 'Astra está generando itinerarios…');
 
-      // 🧠 OPTIMIZADO: en lugar de for secuencial, uso concurrencia controlada
-      const taskFns = savedDestinations.map(({city}) => async () => {
-        await generateCityItinerary(city);
-      });
-      await runWithConcurrency(taskFns);
+      // 🔁 NUEVO: ejecución secuencial en lugar de concurrencia
+      for (let i = 0; i < savedDestinations.length; i++) {
+        const city = savedDestinations[i].city;
+        console.log(`[SEQ] Generando itinerario ${i+1}/${savedDestinations.length} → ${city}`);
+        if (typeof setOverlayMessage === 'function') {
+          setOverlayMessage(`Generando itinerario ${i+1}/${savedDestinations.length} para ${city}…`);
+        }
+        try {
+          await generateCityItinerary(city);
+        } catch (err) {
+          console.error(`[ERROR] Fallo al generar itinerario para ${city}:`, err);
+          chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>. Continuaré con la siguiente ciudad.`, 'ai');
+        }
+      }
 
       showWOW(false);
       chatMsg(tone.doneAll);
+      console.log(`[SEQ] Generación secuencial finalizada.`);
     })();
     return;
   }
