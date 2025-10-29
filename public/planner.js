@@ -1983,83 +1983,119 @@ function askNextHotelTransport(){
 }
 
 /* ==============================
-   SECCIÓN 17 · NLU robusta + Intents (v64 extendida)
-   (expande regex e intents para day trips y preferencias dinámicas + auroras)
+   SECCIÓN 17 · NLU robusta + Intents (v60 base + mejoras v64)
+   - Mantiene lógica global limpia (sin disparar acciones aquí)
+   - No desbloquea UI, no reequilibra ni genera (solo detecta intención)
+   - Soporta preferencias de day trip y auroras
+   - Soporta “un día más” y “N días” (+ opcional “y uno para ir a X”)
+   - Soporta ventanas horarias en lenguaje natural (e.g., “tres y cuarto”)
 ================================= */
+
+// Números en texto → enteros
 const WORD_NUM = {
   'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,
   'seis':6,'siete':7,'ocho':8,'nueve':9,'diez':10,
   'once':11,'doce':12,'trece':13,'catorce':14,'quince':15
 };
 
+// Normaliza tokens de hora (e.g., “tres y cuarto”, “mediodía”, “11 pm”)
 function normalizeHourToken(tok){
-  tok = tok.toLowerCase().trim();
+  tok = String(tok||'').toLowerCase().trim();
+
+  // “tres y media / cuarto / tres cuartos”
   const yM = tok.match(/^(\d{1,2}|\w+)\s+y\s+(media|cuarto|tres\s+cuartos)$/i);
   if(yM){
     let h = yM[1];
     let hh = WORD_NUM[h] || parseInt(h,10);
     if(!isFinite(hh)) return null;
-    let mm = 0; const frag = yM[2].replace(/\s+/g,' ');
-    if(frag==='media') mm=30; else if(frag==='cuarto') mm=15; else if(frag==='tres cuartos') mm=45;
-    if(hh>=0 && hh<=24) return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+    let mm = 0;
+    const frag = yM[2].replace(/\s+/g,' ');
+    if(frag==='media') mm=30;
+    else if(frag==='cuarto') mm=15;
+    else if(frag==='tres cuartos') mm=45;
+    if(hh>=0 && hh<=24) return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
     return null;
   }
+
+  // Palabras especiales
   const mapWords = { 'mediodía':'12:00', 'medianoche':'00:00' };
   if(mapWords[tok]) return mapWords[tok];
 
-  const w = WORD_NUM[tok]; if(w) return String(w).padStart(2,'0')+':00';
+  // Números en texto
+  const w = WORD_NUM[tok]; if(w) return `${String(w).padStart(2,'0')}:00`;
+
+  // Formatos hh[:mm] am/pm
   const m = tok.match(/^(\d{1,2})(?::(\d{1,2}))?\s*(am|pm|a\.m\.|p\.m\.)?$/i);
   if(!m) return null;
-  let hh = parseInt(m[1],10), mm = m[2]?parseInt(m[2],10):0; const ap = m[3]?.toLowerCase();
-  if(ap){ if((ap==='pm' || ap==='p.m.') && hh<12) hh += 12; if((ap==='am' || ap==='a.m.') && hh===12) hh = 0; }
+  let hh = parseInt(m[1],10);
+  let mm = m[2] ? parseInt(m[2],10) : 0;
+  const ap = m[3]?.toLowerCase();
+  if(ap){
+    if((ap==='pm' || ap==='p.m.') && hh<12) hh += 12;
+    if((ap==='am' || ap==='a.m.') && hh===12) hh = 0;
+  }
   if(hh>=0 && hh<=24 && mm>=0 && mm<60) return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
   return null;
 }
 
+// Extrae ventana horaria desde texto libre
 function parseTimeRangeFromText(text){
-  const t = text.toLowerCase();
+  const t = String(text||'').toLowerCase();
+
+  // “de/entre X a/hasta Y”
   let m = t.match(/(?:de|entre)\s+([0-9]{1,2}(?::[0-9]{2})?|\w+(?:\s+y\s+(?:media|cuarto|tres\s+cuartos))?)\s*(?:a|hasta|y)\s*([0-9]{1,2}(?::[0-9]{2})?|\w+(?:\s+y\s+(?:media|cuarto|tres\s+cuartos))?)/i);
-  if(m){ const s=normalizeHourToken(m[1]); const e=normalizeHourToken(m[2]); if(s||e) return {start:s||null, end:e||null}; }
+  if(m){
+    const s = normalizeHourToken(m[1]);
+    const e = normalizeHourToken(m[2]);
+    if(s||e) return { start: s||null, end: e||null };
+  }
+
+  // Solo inicio
   m = t.match(/(?:iniciar|empezar|arrancar|inicio)\s*(?:el día|la jornada)?\s*(?:a|a las)?\s*([0-9]{1,2}(?::[0-9]{2})?|\w+(?:\s+y\s+(?:media|cuarto|tres\s+cuartos))?)/i);
   const startOnly = m ? normalizeHourToken(m[1]) : null;
+
+  // Solo fin
   m = t.match(/(?:terminar|finalizar|hasta|acabar)\s*(?:a las|a)?\s*([0-9]{1,2}(?::[0-9]{2})?|\w+(?:\s+y\s+(?:media|cuarto|tres\s+cuartos))?)/i);
   const endOnly = m ? normalizeHourToken(m[1]) : null;
-  return {start:startOnly, end:endOnly};
+
+  return { start: startOnly, end: endOnly };
 }
 
-// 🧠 OPTIMIZADO: precomputar listas de ciudades lowercased y ordenar una sola vez
+// Cache de ciudades para detección rápida + fuzzy
 let cachedCityList = [];
 function refreshCityCache(){
-  cachedCityList = savedDestinations
+  cachedCityList = (savedDestinations||[])
     .map(d=>d.city)
     .filter(Boolean)
     .sort((a,b)=>b.length - a.length)
-    .map(c=>({orig:c, low:c.toLowerCase()}));
+    .map(c=>({orig:c, low:String(c).toLowerCase()}));
 }
 
 function detectCityInText(text){
-  const lowered = text.toLowerCase();
+  const lowered = String(text||'').toLowerCase();
   if(!cachedCityList.length) refreshCityCache();
-  for(const {orig,low} of cachedCityList){
+
+  // Coincidencia directa por inclusión
+  for(const {orig, low} of cachedCityList){
     if(lowered.includes(low)) return orig;
   }
-  // Fuzzy extra
-  for(const {orig,low} of cachedCityList){
+  // Fuzzy simple
+  for(const {orig, low} of cachedCityList){
     if(low.startsWith(lowered) || lowered.startsWith(low)) return orig;
     if(levenshteinDistance(lowered, low) <= 2) return orig;
   }
   return null;
 }
 
-// Detectar ciudad base a partir de país
+// Heurística: ciudad por país mencionado
 function detectCityFromCountryInText(text){
-  const lowered = text.toLowerCase();
+  const lowered = String(text||'').toLowerCase();
   const countryMap = {
     'islandia':'reykjavik','españa':'madrid','francia':'parís','italia':'roma',
     'inglaterra':'londres','reino unido':'londres','japón':'tokio',
     'eeuu':'nueva york','estados unidos':'nueva york','alemania':'berlín',
     'portugal':'lisboa','brasil':'rio de janeiro','argentina':'buenos aires',
-    'chile':'santiago','méxico':'ciudad de méxico'
+    'chile':'santiago','méxico':'ciudad de méxico','mexico':'ciudad de méxico'
   };
   for(const k in countryMap){
     if(lowered.includes(k)) return countryMap[k];
@@ -2067,13 +2103,14 @@ function detectCityFromCountryInText(text){
   return null;
 }
 
+// Distancia de Levenshtein (fuzzy)
 function levenshteinDistance(a,b){
   const m = [];
   for(let i=0;i<=b.length;i++){ m[i]=[i]; }
   for(let j=0;j<=a.length;j++){ m[0][j]=j; }
   for(let i=1;i<=b.length;i++){
     for(let j=1;j<=a.length;j++){
-      m[i][j] = b.charAt(i-1)==a.charAt(j-1)
+      m[i][j] = b.charAt(i-1)===a.charAt(j-1)
         ? m[i-1][j-1]
         : Math.min(m[i-1][j-1]+1, Math.min(m[i][j-1]+1, m[i-1][j]+1));
     }
@@ -2081,90 +2118,121 @@ function levenshteinDistance(a,b){
   return m[b.length][a.length];
 }
 
+/**
+ * Devuelve un objeto { type: <intent>, ...payload } sin efectos secundarios.
+ * No invoca generación ni rebalanceo ni desbloquea UI; eso lo hace el caller.
+ */
 function intentFromText(text){
-  const t = text.toLowerCase().trim();
+  const t = String(text||'').toLowerCase().trim();
 
-  // ✅ Confirmaciones y cancelaciones
-  if(/^(sí|si|ok|dale|hazlo|confirmo|de una|aplica)\b/.test(t)) return {type:'confirm'};
-  if(/^(no|mejor no|cancela|cancelar|cancelá)\b/.test(t)) return {type:'cancel'};
+  // Confirmaciones / cancelaciones
+  if(/^(sí|si|ok|dale|hazlo|confirmo|de una|aplica)\b/.test(t)) return { type:'confirm' };
+  if(/^(no|mejor no|cancela|cancelar|cancelá)\b/.test(t))        return { type:'cancel' };
 
-  // ✅ Agregar un día al FINAL (prioridad sobre varios días)
-  if(/\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b/.test(t) || /\b(un\s+d[ií]a\s+m[aá]s)\b/.test(t) || /(agrega|añade|suma)\s+un\s+d[ií]a/.test(t)){
+  // “Un día más” (prioritario sobre “N días”)
+  if(/\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b/.test(t) || /\b(un\s+d[ií]a\s+m[aá]s)\b/.test(t) || /(agrega|añade|suma)\s+un\s+d[ií]a\b/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const placeM = t.match(/para\s+ir\s+a\s+([a-záéíóúüñ\s]+)$/i);
-    return {type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null};
+    return { type:'add_day_end', city, dayTripTo: placeM ? placeM[1].trim() : null };
   }
 
-  // ✅ Agregar varios días — robusto + soporte para "y uno para ir a Segovia"
+  // “N días / N noches” + opcional “y uno para ir a X”
   const addMulti = t.match(/(agrega|añade|suma|extiende|prolonga|quedarme|me\s+quedo|me\s+voy\s+a\s+quedar)\s+(\d+|\w+)\s+(d[ií]as?|noches?)(?:.*?y\s+uno\s+para\s+ir\s+a\s+([a-záéíóúüñ\s]+))?/i);
   if(addMulti){
     const n = WORD_NUM[addMulti[2]] || parseInt(addMulti[2],10) || 1;
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const dayTripTo = addMulti[4] ? addMulti[4].trim() : null;
-    return {type:'add_days', city, extraDays:n, dayTripTo};
+    return { type:'add_days', city, extraDays:n, dayTripTo };
   }
 
-  // ✅ “Quiero un tour de un día / preferDayTrip” aunque no se agreguen días
-  if(/\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|algo fuera de la ciudad|un viaje de un d[ií]a|una escapada|salida de un d[ií]a)\b/.test(t)){
+  // Preferencia explícita de day trip (sin agregar días)
+  if(/\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|un\s*d[ií]a\s+fuera|viaje de un d[ií]a|day\s*trip|una escapada|algo fuera de la ciudad)\b/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
-    const placeM = t.match(/a\s+([a-záéíóúüñ\s]+)$/i);
-    return {type:'prefer_day_trip', city, dayTripTo: placeM ? placeM[1].trim() : null};
+    const placeM = t.match(/\b(?:a|hacia)\s+([a-záéíóúüñ\s]+)$/i);
+    return { type:'prefer_day_trip', city, dayTripTo: placeM ? placeM[1].trim() : null };
   }
 
-  // ✅ Auroras boreales — intención específica
+  // Preferencia explícita de auroras
   if(/\b(auroras|aurora boreal|northern lights|ver auroras|tour de auroras|ver la aurora)\b/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
-    return {type:'prefer_aurora', city};
+    return { type:'prefer_aurora', city };
   }
 
-  // ✅ Eliminar día
+  // Eliminar día
   const rem = t.match(/(quita|elimina|borra)\s+el\s+d[ií]a\s+(\d+)/i);
-  if(rem){ return {type:'remove_day', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, day: parseInt(rem[2],10)}; }
+  if(rem){
+    return {
+      type:'remove_day',
+      city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity,
+      day: parseInt(rem[2],10)
+    };
+  }
 
-  // ✅ Intercambiar días
+  // Intercambiar días (si no menciona actividad)
   const swap = t.match(/(?:pasa|mueve|cambia)\s+el\s+d[ií]a\s+(\d+)\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
   if(swap && !/actividad|museo|visita|tour|cena|almuerzo|desayuno/i.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
-    return {type:'swap_day', city, from: parseInt(swap[1],10), to: parseInt(swap[2],10)};
+    return { type:'swap_day', city, from: parseInt(swap[1],10), to: parseInt(swap[2],10) };
   }
 
-  // ✅ Mover actividad
+  // Mover actividad entre días
   const mv = t.match(/(?:mueve|pasa|cambia)\s+(.*?)(?:\s+del\s+d[ií]a\s+(\d+)|\s+del\s+(\d+))\s+(?:al|a)\s+(?:d[ií]a\s+)?(\d+)/i);
-  if(mv){ return {type:'move_activity', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, query:(mv[1]||'').trim(), fromDay:parseInt(mv[2]||mv[3],10), toDay:parseInt(mv[4],10)}; }
+  if(mv){
+    return {
+      type:'move_activity',
+      city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity,
+      query: (mv[1]||'').trim(),
+      fromDay: parseInt(mv[2]||mv[3],10),
+      toDay: parseInt(mv[4],10)
+    };
+  }
 
-  // ✅ Swap activity por texto natural
+  // Sustituir/eliminar actividad por texto natural
   if(/\b(no\s+quiero|sustituye|reemplaza|quita|elimina|borra)\b/.test(t)){
     const city = detectCityInText(t) || detectCityFromCountryInText(t) || activeCity;
     const m = t.match(/no\s+quiero\s+ir\s+a\s+(.+?)(?:,|\.)?$/i);
-    return {type:'swap_activity', city, target: m ? m[1].trim() : null, details:text};
+    return { type:'swap_activity', city, target: m ? m[1].trim() : null, details: text };
   }
 
-  // ✅ Horarios personalizados
+  // Cambiar horas (ventana diaria)
   const range = parseTimeRangeFromText(text);
-  if(range.start || range.end) return {type:'change_hours', city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity, range};
+  if(range.start || range.end){
+    return {
+      type:'change_hours',
+      city: detectCityInText(t) || detectCityFromCountryInText(t) || activeCity,
+      range
+    };
+  }
 
-  // ✅ Añadir ciudad nueva
+  // Agregar ciudad
   const addCity = t.match(/(?:agrega|añade|suma)\s+([a-záéíóúüñ\s]+?)\s+(?:con\s+)?(\d+)\s*d[ií]as?(?:\s+(?:desde|iniciando)\s+(\d{1,2}\/\d{1,2}\/\d{4}))?/i);
   if(addCity){
-    return {type:'add_city', city: addCity[1].trim(), days:parseInt(addCity[2],10), baseDate:addCity[3]||''};
+    return {
+      type:'add_city',
+      city: addCity[1].trim(),
+      days: parseInt(addCity[2],10),
+      baseDate: addCity[3] || ''
+    };
   }
 
-  // ✅ Eliminar ciudad
+  // Eliminar ciudad
   const delCity = t.match(/(?:elimina|borra|quita)\s+(?:la\s+ciudad\s+)?([a-záéíóúüñ\s]+)/i);
-  if(delCity){ return {type:'remove_city', city: delCity[1].trim()}; }
-
-  // ✅ Actualizar perfil de preferencias (pace, transporte, movilidad, niños, dieta, etc.)
-  if(/\b(ritmo|relax|tranquilo|aventura|rápido|balanceado|niños|movilidad|caminar poco|transporte|uber|metro|autob[uú]s|bus|auto|veh[ií]culo|dieta|vegetariano|vegano|gluten|cel[ií]aco|preferencia|preferencias)\b/.test(t)){
-    return {type:'set_profile', details:text};
+  if(delCity){
+    return { type:'remove_city', city: delCity[1].trim() };
   }
 
-  // ✅ Preguntas informativas (clima, seguridad, etc.)
+  // Ajuste de perfil / preferencias (ritmo, movilidad, transporte, dieta, etc.)
+  if(/\b(ritmo|relax|tranquilo|aventura|rápido|balanceado|niños|movilidad|caminar poco|transporte|uber|metro|tren|bus|autob[uú]s|veh[ií]culo|coche|auto|dieta|vegetariano|vegano|gluten|cel[ií]aco|preferencia|preferencias)\b/.test(t)){
+    return { type:'set_profile', details: text };
+  }
+
+  // Preguntas informativas (clima, moneda, enchufes, etc.)
   if(/\b(clima|tiempo|temperatura|lluvia|horas de luz|moneda|cambio|propina|seguridad|visado|visa|fronteras|aduana|vuelos|aerol[ií]neas|equipaje|salud|vacunas|enchufes|taxis|alquiler|conducci[oó]n|peatonal|festivos|temporada|mejor época|gastronom[ií]a|restaurantes|precios|presupuesto|wifi|sim|roaming)\b/.test(t)){
-    return {type:'info_query', details:text};
+    return { type:'info_query', details: text };
   }
 
-  // 🆓 Edición libre (fallback)
-  return {type:'free_edit', details:text};
+  // Fallback: edición libre
+  return { type:'free_edit', details: text };
 }
 
 /* ==============================
