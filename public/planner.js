@@ -1474,25 +1474,21 @@ function showWOW(on, msg){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [15.2] Generación principal por ciudad (v65 estable + Fix auroras + termales)
-   Cambios integrados:
-   - Mutex anti-carreras (una ciudad a la vez)
-   - Fixers globales (transporte, termales, notes)
-   - Auroras robustas (detecta auroraCity y season)
-   - Anti-duplicados locales
-   - 🆕 Post-proceso auroras garantizado (si el modelo no lo devuelve) con elección de día óptimo
-   - 🆕 Refuerzo local: termales/Laguna Azul mínimo 3h (ajusta duración y fin si es posible)
+   SECCIÓN 15.2 · Generación principal por ciudad
+   Base: v60 (exacta) + injertos quirúrgicos v64 (mutex, auroras, termales,
+   fixers, dedupe, validaciones) · Sin parches predefinidos.
+   Nota: No cierra overlay aquí para evitar desbloqueo prematuro de UI.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
-  // 🔒 Mutex simple por ciudad
+  // 🔒 Mutex simple por ciudad (evita carreras si el usuario dispara acciones rápidas)
   window.__cityLocks = window.__cityLocks || {};
   if (window.__cityLocks[city]) {
-    console.warn(`[Mutex] Generación en curso para ${city}`);
+    console.warn(`[Mutex] Generación ya en curso para ${city}`);
     return;
   }
   window.__cityLocks[city] = true;
 
-  // Helpers locales
+  // Helpers locales puros (sin efectos colaterales)
   const toHHMM = s => String(s||'').trim();
   const parseHHMM = (hhmm)=>{
     const m = /^(\d{1,2}):(\d{2})$/.exec(toHHMM(hhmm));
@@ -1513,7 +1509,7 @@ async function generateCityItinerary(city){
   };
 
   try {
-    const dest = savedDestinations.find(x=>x.city===city);
+    const dest  = savedDestinations.find(x=>x.city===city);
     if(!dest) return;
 
     const perDay = Array.from({length:dest.days}, (_,i)=>{
@@ -1525,18 +1521,19 @@ async function generateCityItinerary(city){
     const hotel    = cityMeta[city]?.hotel || '';
     const transport= cityMeta[city]?.transport || 'recomiéndame';
 
-    // 🧭 Detectar replanificación
-    const forceReplan = (plannerState?.forceReplan && plannerState.forceReplan[city]) ? true : false;
+    // 🧭 ¿Replan forzado?
+    const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
-    // 🧠 Heurística global auroras/day trips
+    // 🧠 Contexto heurístico (auroras / day trips) — sin “defaults” predefinidos
     let heuristicsContext = '';
     let auroraCity=false, auroraSeason=false;
     try{
       const coords = getCoordinatesForCity(city);
       auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
-      auroraSeason = inAuroraSeasonDynamic(baseDate);
+      auroraSeason = baseDate ? inAuroraSeasonDynamic(baseDate) : false;
       const auroraWindow = AURORA_DEFAULT_WINDOW;
-      const dayTripContext = getHeuristicDayTripContext(city);
+      const dayTripContext = getHeuristicDayTripContext(city) || {};
+
       heuristicsContext = `
 ───────────────────────────────
 🧭 CONTEXTO HEURÍSTICO GLOBAL
@@ -1546,37 +1543,47 @@ async function generateCityItinerary(city){
 - Aurora Season: ${auroraSeason}
 - Aurora Window: ${JSON.stringify(auroraWindow)}
 - Day Trip Context: ${JSON.stringify(dayTripContext)}
-`.trim();
-    }catch(err){console.warn('Heurística no disponible:',city,err);}
+      `.trim();
+    }catch(err){
+      console.warn('Heurística no disponible:', city, err);
+      heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
+    }
 
+    // Requisito condicional (no “parche”, solo guía contextual al agente)
     const auroraRequirement = (auroraCity && (auroraSeason || !baseDate)) ? `
-🌌 **Requisito especial:**
-- Ciudad auroral y temporada adecuada o sin fecha definida.
-- Sugiere al menos **una noche de auroras** (20:00–02:30), nota “valid” y transporte coherente.
+🌌 **Instrucción contextual**:
+- Si es plausible, incluye **al menos una noche** de auroras (20:00–02:30 aprox.), con "valid:" en notes y transporte coherente (Tour/Van/Auto).
+- Ajusta el inicio del día siguiente si se extiende demasiado.
 ` : '';
 
     const instructions = `
 ${FORMAT}
-**ROL:** Planificador “Astra”. Crea itinerario completo para "${city}" (${dest.days} día/s).
-- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan?'true':'false'}}.
+**ROL:** Planificador “Astra”. Elabora el itinerario completo SOLO para "${city}" (${dest.days} día/s).
+- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-🚨 **COBERTURA:**
-- Incluye TODOS los días 1–${dest.days}.
-- Usa 08:30–19:00 base; extiende si aplica (auroras, cenas, tours).
-- No dejes días vacíos.
-- Incluye imperdibles diurnos y nocturnos.
+🧭 Cobertura:
+- Cubre TODOS los días 1–${dest.days}. Sin días vacíos.
+- Ventanas base por día: ${JSON.stringify(perDay)}. Puedes proponer extensiones lógicas (cenas, tours nocturnos, auroras).
+- Imperdibles diurnos y nocturnos. Balance sin redundancias.
+
+🚆 Transporte lógico por tipo:
+- Barco: actividades marinas / whale watching.
+- Bus/Van tour: excursiones interurbanas.
+- Tren/Bus/Auto: trayectos terrestres razonables.
+- A pie/Metro: zonas urbanas compactas.
+
+🕒 Horarios plausibles:
+- Base 08:30–19:00 si no se indicó algo mejor.
+- Añade buffers ≥15 min. Evita solapes y herencia ciega de horarios entre días.
+- Si extiendes por nocturnas, compensa siguiente día.
+
+🧭 Day trips:
+- Solo si aportan valor y ≤ 2 h por trayecto (ida), regreso mismo día. Itinerario secuencial claro (ida → visitas → regreso).
+
 ${auroraRequirement}
-- Añade 1 day trip si plausible (≤2h/ida), con itinerario completo (inicio→visitas→regreso).
-- Transporte coherente por tipo:
-  • Barco para islas/parques marinos.
-  • Bus/Van tour para excursiones interurbanas.
-  • Tren/Bus/Auto para trayectos terrestres.
-  • A pie/Metro en áreas urbanas.
 
-🕒 **Horarios plausibles:**
-- Ajusta inteligentemente; sin heredar horarios.
-- Añade buffers ≥15 min.
-- Notas siempre útiles (“valid:” o contexto).
+🔎 Notas:
+- SIEMPRE informativas (nunca vacías ni "seed"); incluye "valid:" cuando corresponda (temporada/latitud/operativa).
 
 ${heuristicsContext}
 
@@ -1584,15 +1591,23 @@ Contexto actual:
 ${buildIntake()}
 `.trim();
 
-    showWOW(true,'Astra está generando itinerarios…');
+    // Actualiza mensaje de overlay sin cerrar (el cierre lo hará el orquestador)
+    if (typeof setOverlayMessage === 'function') {
+      try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
+    }
+
+    // Llamada al agente
     const text = await callAgent(instructions, true);
     const parsed = parseJSON(text);
 
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-      let tmpRows=[];
-      if(parsed.rows) tmpRows=parsed.rows.map(r=>normalizeRow(r));
-      else if(parsed.destination===city && parsed.rows) tmpRows=parsed.rows.map(r=>normalizeRow(r));
-      else if(Array.isArray(parsed.destinations)){
+      // Normalización multi-formato
+      let tmpRows = [];
+      if(parsed.rows){
+        tmpRows = parsed.rows.map(r=>normalizeRow(r));
+      }else if(parsed.destination===city && parsed.rows){
+        tmpRows = parsed.rows.map(r=>normalizeRow(r));
+      }else if(Array.isArray(parsed.destinations)){
         const d=parsed.destinations.find(x=>(x.name||x.destination)===city);
         tmpRows=(d?.rows||[]).map(r=>normalizeRow(r));
       }else if(Array.isArray(parsed.itineraries)){
@@ -1600,20 +1615,21 @@ ${buildIntake()}
         tmpRows=(i?.rows||[]).map(r=>normalizeRow(r));
       }
 
-      // 🧼 Filtro duplicados
+      // 🧼 Anti-duplicados locales vs lo ya existente en la ciudad
       const existingActs = Object.values(itineraries[city]?.byDay||{})
         .flat().map(r=>String(r.activity||'').trim().toLowerCase());
       tmpRows = tmpRows.filter(r=>!existingActs.includes(String(r.activity||'').trim().toLowerCase()));
 
-      // 🛠️ Fixers globales
+      // 🛠️ Fixers globales (si existen en el entorno)
       if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      const val=await validateRowsWithAgent(city,tmpRows,baseDate);
-      pushRows(city,val.allowed,forceReplan);
+      // ✅ Validación global con IA (no elimina auroras plausibles)
+      const val = await validateRowsWithAgent(city, tmpRows, baseDate);
+      pushRows(city, val.allowed, forceReplan);
 
-      /* 🆕 Refuerzo local de termales/Laguna Azul: mínimo 3h */
+      /* ♨️ Refuerzo local termales / Blue Lagoon ≥ 3h (sin suposiciones rígidas) */
       (function enforceThermal3h(){
         const hotWords = ['laguna azul','blue lagoon','bláa lónið','termal','termales','hot spring','thermal bath'];
         const byDay = itineraries[city]?.byDay || {};
@@ -1621,23 +1637,23 @@ ${buildIntake()}
           byDay[d] = (byDay[d]||[]).map(r=>{
             const name = String(r.activity||'').toLowerCase();
             if(hotWords.some(w=>name.includes(w))){
-              const dur = String(r.duration||'').toLowerCase();
-              const durNum = /(\d+)\s*h/.exec(dur)?.[1] ? +/(\d+)\s*h/.exec(dur)[1] : null;
-              let start = toHHMM(r.start), end = toHHMM(r.end);
-              if(start && parseHHMM(start)){
-                const newEnd = addMinutes(start, 180);
-                if(newEnd) end = newEnd;
-              }
-              if(!durNum || durNum < 3){ r.duration = '3h'; }
-              if(end) r.end = end;
-              r.notes = (r.notes ? String(r.notes)+' · ' : '') + 'min stay 3h (puedes alargarlo si deseas)';
+              const start = toHHMM(r.start);
+              const hasStart = !!parseHHMM(start);
+              // Si no trae duración ≥ 3h, ajusta suave (no invade otras actividades)
+              const newEnd = hasStart ? addMinutes(start, 180) : r.end;
+              const durTxt = String(r.duration||'').toLowerCase();
+              const hoursMatch = /(\d+(?:\.\d+)?)\s*h/.exec(durTxt);
+              const durH = hoursMatch ? parseFloat(hoursMatch[1]) : null;
+              if(!durH || durH < 3) r.duration = '3h';
+              if(newEnd) r.end = newEnd;
+              r.notes = (r.notes ? String(r.notes)+' · ' : '') + 'min stay ~3h (ajustable)';
             }
             return r;
           });
         }
       })();
 
-      /* 🆕 Post-proceso auroras */
+      /* 🌌 Post-proceso auroras: garantiza ≥ 1 noche si ciudad/temporada lo permiten */
       if (auroraCity && (auroraSeason || !baseDate)) {
         const acts = Object.values(itineraries[city]?.byDay || {})
           .flat()
@@ -1656,7 +1672,9 @@ ${buildIntake()}
           }
           dayLoads.sort((a,b)=> a.load===b.load ? a.day - b.day : a.load - b.load);
           let chosen = dayLoads[0]?.day || 1;
+          // Evita concentrar auroras el último día si hay alternativa
           if(chosen === dest.days && dayLoads[1]) chosen = dayLoads[1].day;
+
           const auroraRow = normalizeRow({
             day: chosen,
             start: '20:30',
@@ -1665,14 +1683,14 @@ ${buildIntake()}
             from: 'Hotel/Base',
             to: 'Punto de observación',
             transport: 'Tour/Bus/Van',
-            notes: 'valid: ventana nocturna de auroras (sujeto a clima); llevar ropa térmica'
+            notes: 'valid: ventana nocturna auroral (sujeto a clima); vestir térmico'
           });
           pushRows(city, [auroraRow], false);
           console.warn(`[Aurora Injection] Añadida aurora automáticamente en ${city} (día ${chosen})`);
         }
       }
 
-      // Relleno mínimo
+      // 🧩 Relleno mínimo + micro-optimizaciones por día vacío
       ensureDays(city);
       for(let d=1; d<=dest.days; d++){
         if(!(itineraries[city].byDay?.[d]||[]).length){
@@ -1680,33 +1698,32 @@ ${buildIntake()}
         }
       }
 
+      // Render UI (sin cerrar overlay aquí)
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-      showWOW(false);
-      $resetBtn?.removeAttribute('disabled');
 
-      if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
-      if(plannerState.preferences){
+      // Limpieza de flags
+      if(forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
+      if(plannerState?.preferences){
         delete plannerState.preferences.preferDayTrip;
         delete plannerState.preferences.preferAurora;
       }
+      $resetBtn?.removeAttribute('disabled');
       return;
     }
 
-    // Fallback sin JSON
+    // Fallback sin JSON válido — mantén UI y registro
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-    showWOW(false);
     $resetBtn?.removeAttribute('disabled');
-    if(plannerState.preferences){
-      delete plannerState.preferences.preferDayTrip;
-      delete plannerState.preferences.preferAurora;
-    }
-    chatMsg('⚠️ Fallback local: sin respuesta del agente.','ai');
+    chatMsg('⚠️ Fallback local: sin respuesta JSON válida del agente.','ai');
 
+  } catch(err){
+    console.error(`[ERROR] generateCityItinerary(${city})`, err);
+    chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>.`, 'ai');
   } finally {
     delete window.__cityLocks[city];
+    // ⚠️ NO hacemos showWOW(false) aquí; el cierre global lo maneja el orquestador de concurrencia.
   }
 }
-
 
 /* ─────────────────────────────────────────────────────────────
    [15.3] Rebalanceo masivo por ciudad (v65)
