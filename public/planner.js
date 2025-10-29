@@ -1300,34 +1300,11 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado v64
-   (con validación dinámica de auroras y day trips)
+   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
+   Base v60 (exacta) + injertos quirúrgicos v64 (protecciones auroras, termales,
+   notas obligatorias, tolerancia de duraciones, límites suaves)
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
-  // 🧭 Hook heurístico dinámico (alineado con Sección 12)
-  let heuristicsContext = '';
-  try {
-    const coords = getCoordinatesForCity(city);
-    const auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
-    const auroraSeason = baseDate ? inAuroraSeasonDynamic(baseDate) : false;
-    const auroraWindow = AURORA_DEFAULT_WINDOW;
-    const dayTripContext = getHeuristicDayTripContext(city) || {};
-
-    heuristicsContext = `
-───────────────────────────────
-🧭 CONTEXTO HEURÍSTICO GLOBAL
-───────────────────────────────
-- Ciudad: ${city}
-- Aurora City: ${auroraCity}
-- Aurora Season: ${auroraSeason}
-- Aurora Window: ${JSON.stringify(auroraWindow)}
-- Day Trip Context: ${JSON.stringify(dayTripContext)}
-    `.trim();
-  } catch(err){
-    console.warn('Heurística no disponible para validación:', city, err);
-    heuristicsContext = '⚠️ Sin contexto heurístico disponible para esta validación.';
-  }
-
   const payload = `
 Devuelve SOLO JSON válido:
 {
@@ -1335,69 +1312,36 @@ Devuelve SOLO JSON válido:
     {"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}
   ],
   "removed":[
-    {"reason":"..","row":{"day":..,"activity":".."}}
+    {"reason":"..","row":{"day":..,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}}
   ]
 }
 
-CRITERIOS GLOBALES:
-- Corrige horas plausibles (sin solapes ni secuencias ilógicas).
-- Transporte lógico según actividad:
-  • Barco para whale watching.  
-  • Tour/bus para excursiones interurbanas.  
-  • Tren/bus/auto para traslados razonables.  
-  • A pie/metro en zonas urbanas compactas.
-- Day trips ≤ 2 h por trayecto; si no es posible, "removed" con reason "distance:" + sugerencia alternativa.
-- Seguridad y restricciones:
-  • Si hay riesgo evidente, restricción oficial, alerta razonable o ventana horaria insegura, "removed" con reason "risk:" + sugerencia segura o reubicación alternativa.
+CRITERIOS GLOBALES (corrige y valida):
+- Sin solapes; añade buffers realistas (≥15 min).
+- Transporte coherente por actividad (barco para whale watching; tour/bus/van para excursiones; tren/bus/auto interurbano; a pie/metro en ciudad).
+- Day trips ≤ 2 h por trayecto; si excede, muévelo a "removed" con reason "distance:" + alternativa viable.
+- Seguridad/restricciones:
+  • Si hay riesgo evidente, restricción oficial, alerta razonable o franja insegura, "removed" con reason "risk:" + sugerencia segura.
   • Prioriza siempre opciones plausibles, seguras y razonables.
-- Notas NUNCA vacías ni "seed"; añade tip breve útil y contextual.
-- Si duración en minutos, permite "90m" o "1.5h".
-- Máx. 20 filas/día; prioriza actividades icónicas y no redundantes.
-- Respetar la lógica contextual de la ciudad y temporada.
-
-🕒 **Horarios y plausibilidad reforzada**:
-- Si no hay horario definido para el día, usa ventana base 08:30–19:00.
-- Extiende horarios solo cuando tenga sentido logístico o turístico (cenas, auroras, tours nocturnos).
-- Si extiendes un día por actividad nocturna, considera compensar el inicio del siguiente día (inicio más tarde).
-- No heredes horarios directamente de un día al otro.
-- Añade buffers realistas entre actividades (≥15 min por defecto).
-- Evita solapamientos, horarios absurdos (ej. tours a las 03:00 sin justificación) o secuencias logísticas incoherentes.
-- Si detectas horarios irreales, corrígelos proactivamente y añade una nota clara al respecto.
+- Notas SIEMPRE útiles (nunca vacías ni "seed"); añade "valid:" cuando aplique (temporada/operativa).
+- Duración flexible: acepta "90m", "1.5h", "2h", etc.
+- Máx. 20 filas por día; si hay exceso, prioriza icónicas y no redundantes.
 
 CASOS ESPECIALES:
-1) Whale watching:
-   - Transporte: "Barco".
-   - Salida desde puerto local.
-   - Duración: 3–4h aprox.
-   - Incluir "valid:" por temporada si aplica.
-   - Horario típico: diurno (09:00–15:00 aprox.).
+1) Whale watching: transporte "Barco", salida desde puerto local, 3–4h aprox., incluir "valid:" por temporada si aplica.
+2) Auroras: nocturno (20:00–02:30 aprox.), transporte "Tour/Bus/Van" o "Auto"; incluir "valid:" si plausible por fecha/latitud.
+3) Rutas en coche (círculo dorado/costas): 3–6h conducción total con paradas clave; si sin coche ni tour viable, marca "logistics" o "risk" y sugiere tour.
+4) Museos/monumentos: horario diurno.
+5) Cenas/vida nocturna: 19:00–23:30 aprox.
 
-2) Auroras boreales:
-   - Siempre en horario nocturno (20:00–02:30 aprox.).
-   - Transporte: "Tour", "Bus/Van tour" o "Auto" si procede.
-   - Incluir "valid:" con justificación (temporada/latitud).
-   - Si aparece fuera de este rango → corregir horario automáticamente o "removed" con reason "valid:season".
-   - Si no es temporada o no es plausible en el destino → "removed" con sugerencia alternativa.
-   - Si la actividad extiende mucho la jornada, **ajusta el inicio del día siguiente**.
-
-3) Rutas en coche (círculo dorado/costas u otras escénicas):
-   - Duración total: 3–6h con paradas clave.
-   - Si no hay coche ni tour viable, marcar "logistics" o "risk" y sugerir tour alternativo.
-   - Horario plausible: diurno.
-
-4) Museos/monumentos:
-   - Horario diurno (aprox. 09:00–18:00).
-   - No programar en horarios absurdos o nocturnos.
-
-5) Cenas/vida nocturna:
-   - Horario plausible: 19:00–23:30 aprox.
-   - Considerar buffers con actividades previas y traslados realistas.
+PROTECCIONES (no eliminar injustificadamente):
+- No mandes auroras a "removed" a menos que haya "risk:" claro o "distance:" real.
+- Blue Lagoon / termales: recomienda ≥ 3h de permanencia; ajusta duración si fuese menor.
+- Evita duplicados exactos dentro del mismo día.
 
 REGLAS DE FUSIÓN:
 - Devuelve "allowed" ya corregidas; solo pasa a "removed" lo incompatible.
-- Ajusta actividades de manera inteligente antes de removerlas, cuando sea posible.
-
-${heuristicsContext}
+- En "removed.row" incluye la fila completa que descartas (si es posible).
 
 Contexto:
 - Ciudad: "${city}"
@@ -1405,18 +1349,137 @@ Contexto:
 - Filas a validar: ${JSON.stringify(rows)}
 `.trim();
 
+  // Helpers locales (sin dependencias externas)
+  const toStr = v => (v==null ? '' : String(v));
+  const lc = s => toStr(s).trim().toLowerCase();
+  const isAurora = a => /\baurora|northern\s+light(s)?\b/i.test(toStr(a));
+  const isThermal = a => /(blue\s*lagoon|bláa\s*lón(i|í)d|laguna\s+azul|termal(es)?|hot\s*spring|thermal\s*bath)/i.test(toStr(a));
+
+  // Post-sanitizado suave de filas "allowed"
+  const postSanitize = (arr=[])=>{
+    // Agrupar por día para aplicar límite blando de 20
+    const byDay = {};
+    arr.forEach(r=>{
+      const d = Number(r.day)||1;
+      (byDay[d] ||= []).push(r);
+    });
+
+    const out = [];
+    for(const dStr of Object.keys(byDay)){
+      const d = Number(dStr);
+      let dayRows = byDay[d].map(r=>{
+        // Notas nunca vacías ni "seed"
+        let notes = toStr(r.notes).trim();
+        if(!notes || lc(notes)==='seed'){
+          notes = 'Sugerencia: verifica horarios, seguridad y reservas con antelación.';
+        }
+
+        // Auroras: si faltan ventanas, establecer una base plausible; transporte coherente
+        if(isAurora(r.activity)){
+          const start = r.start && r.start.match(/^\d{2}:\d{2}$/) ? r.start : '20:30';
+          const end   = r.end   && r.end.match(/^\d{2}:\d{2}$/)   ? r.end   : '02:00';
+          const transport = r.transport ? r.transport : 'Tour/Bus/Van';
+          if(!/valid:/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'valid: ventana nocturna auroral (sujeto a clima).';
+          return {...r, day:d, start, end, transport, notes};
+        }
+
+        // Termales / Blue Lagoon: reforzar ≥ 3h si viniera menor/indefinido
+        if(isThermal(r.activity)){
+          let duration = toStr(r.duration).trim();
+          const isShort =
+            (!duration) ||
+            /^(\d{1,2})m$/.test(duration) && Number(RegExp.$1) < 180 ||
+            /^(\d+(?:\.\d+)?)h$/.test(duration) && Number(RegExp.$1) < 3;
+          if(isShort) duration = '3h';
+          if(!/min\s*stay|3h/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'min stay ~3h (ajustable)';
+          return {...r, day:d, duration, notes};
+        }
+
+        return {...r, day:d, notes};
+      });
+
+      // Límite suave: máximo 20 filas por día
+      if(dayRows.length > 20){
+        // Prioriza no-duplicadas e icónicas (heurística simple: descarta texto muy corto/repetido)
+        const seen = new Set();
+        const filtered = [];
+        for(const r of dayRows){
+          const key = lc(r.activity) + '|' + (r.start||'') + '|' + (r.end||'');
+          if(!seen.has(key)){
+            seen.add(key);
+            filtered.push(r);
+          }
+          if(filtered.length === 20) break;
+        }
+        dayRows = filtered;
+      }
+
+      out.push(...dayRows);
+    }
+
+    return out;
+  };
+
   try{
     const res = await callAgent(payload, true);
     const parsed = parseJSON(res);
-    if(parsed?.allowed) return parsed;
-  }catch(e){ console.warn('Validator error', e); }
 
-  // Fail-open con sanitización mínima de notes
+    if(parsed?.allowed){
+      // Sanitizado local y protecciones suaves
+      const allowed = postSanitize(parsed.allowed || []);
+      const removed = Array.isArray(parsed.removed) ? parsed.removed : [];
+      return { allowed, removed };
+    }
+  }catch(e){
+    console.warn('Validator error', e);
+  }
+
+  // Fail-open con sanitización mínima si el agente falla
   const sanitized = (rows||[]).map(r => {
-    const notes = (r.notes||'').trim();
-    return { ...r, notes: notes && notes.toLowerCase()!=='seed' ? notes : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.' };
+    const notesRaw = toStr(r.notes).trim();
+    const notes = notesRaw && lc(notesRaw)!=='seed'
+      ? notesRaw
+      : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
+    // Ajuste suave si es aurora o termal aun en fail-open
+    if(isAurora(r.activity)){
+      return {
+        ...r,
+        start: r.start && /^\d{2}:\d{2}$/.test(r.start) ? r.start : '20:30',
+        end:   r.end   && /^\d{2}:\d{2}$/.test(r.end)   ? r.end   : '02:00',
+        transport: r.transport || 'Tour/Bus/Van',
+        notes: /valid:/i.test(notes) ? notes : notes + ' · valid: ventana nocturna auroral (sujeto a clima).'
+      };
+    }
+    if(isThermal(r.activity)){
+      let duration = toStr(r.duration).trim();
+      if(!duration) duration = '3h';
+      return { ...r, duration, notes: /min\s*stay/i.test(notes) ? notes : notes + ' · min stay ~3h (ajustable)' };
+    }
+    return { ...r, notes };
   });
-  return { allowed: sanitized, removed: [] };
+
+  // También aplicamos límite suave de 20 por día en fail-open
+  const grouped = {};
+  sanitized.forEach(r=>{
+    const d = Number(r.day)||1;
+    (grouped[d] ||= []).push(r);
+  });
+  const allowed = Object.keys(grouped).flatMap(dStr=>{
+    const d = Number(dStr);
+    const arr = grouped[d];
+    if(arr.length <= 20) return arr.map(x=>({...x, day:d}));
+    const seen = new Set(); const out=[];
+    for(const r of arr){
+      const key = lc(r.activity) + '|' + (r.start||'') + '|' + (r.end||'');
+      if(!seen.has(key)){
+        seen.add(key); out.push({...r, day:d});
+      }
+      if(out.length===20) break;
+    }
+    return out;
+  });
+
+  return { allowed, removed: [] };
 }
 
 /* ==============================
