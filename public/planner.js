@@ -2236,15 +2236,8 @@ function intentFromText(text){
 }
 
 /* ==============================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación (v63 reforzada)
-   Cambios aplicados:
-   - ✅ P07: Balance de horarios cuando hay auroras u horarios extendidos.
-   - ✅ P08: Buffers automáticos mínimos entre actividades (≥15 min).
-   - ✅ P10: Mejora en tratamiento de auroras (tour vs auto).
-   - ✅ P13: Asegurar al menos una noche de auroras si aplica.
-   - ✅ P14: Secuencia lógica de visitas lineales (p. ej. parques, day trips).
-   - 🆕 Integración helpers post-proceso: applyBufferBetweenRows, ensureAuroraNight, reorderLinearVisits.
-   - ⚠️ Mantiene estructura, funciones y prompts base intactos.
+   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
+   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2316,40 +2309,46 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 NUEVO: proteger actividades especiales (auroras y termales)
+  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas en reordenamientos
   const protectedRows = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
-    return act.includes('aurora') || act.includes('northern light') || act.includes('laguna azul') || act.includes('blue lagoon');
+    return act.includes('aurora') || act.includes('northern light') ||
+           act.includes('laguna azul') || act.includes('blue lagoon');
   });
   const rowsForOptimization = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
-    return !act.includes('aurora') && !act.includes('northern light') && !act.includes('laguna azul') && !act.includes('blue lagoon');
+    return !act.includes('aurora') && !act.includes('northern light') &&
+           !act.includes('laguna azul') && !act.includes('blue lagoon');
   });
 
-  // 🧠 Bloque adicional si la ciudad está marcada para replanificación o hay day trip pendiente
-  let forceReplanBlock = '';
-  const hasForceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
-  const hasDayTripPending = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
-  const hasPreferDayTrip = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
+  // 🧠 Flags de replanificación / preferencias
+  const hasForceReplan     = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
+  const hasDayTripPending  = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
+  const hasPreferDayTrip   = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
 
+  let forceReplanBlock = '';
   if (hasForceReplan || hasDayTripPending || hasPreferDayTrip) {
     forceReplanBlock = `
 👉 IMPORTANTE:
 - El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
 - REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
-- Evalúa siempre la posibilidad de realizar excursiones de 1 día a ciudades cercanas (máx. 2 h de trayecto por sentido).
-- Si las excursiones aportan más valor turístico que actividades locales adicionales, inclúyelas en el itinerario.
-- Si el usuario especificó un destino concreto (dayTripTo), programa ese tour automáticamente.
-- Prioriza imperdibles locales primero y evita duplicar cualquier actividad ya existente.
-- Respeta ritmo, movilidad y preferencias de viaje (perfil usuario).
-- Devuelve una planificación clara y optimizada.
-    `;
+- Evalúa excursiones de 1 día (máx. 2 h por trayecto) cuando aporten valor.
+- Si el usuario especificó un destino (dayTripTo), prográmalo.
+- Prioriza imperdibles locales y evita duplicados globales.
+- Devuelve una planificación clara y optimizada.`;
   }
 
-  // 🧠 OPTIMIZADO: intake reducido si no hay cambios globales
+  // ⚡ Intake reducido si no se requiere replan global
   const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
-    ? buildIntake()        // Full contexto solo si es replanificación completa o hay day trip pendiente
-    : buildIntakeLite();   // ⚡ más liviano para recalculos simples
+    ? buildIntake()
+    : buildIntakeLite();
+
+  // 🧭 Detección de contexto auroral para permitir múltiples noches
+  let auroraCity=false;
+  try{
+    const coords = getCoordinatesForCity(city);
+    auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
+  }catch(_){ auroraCity=false; }
 
   const prompt = `
 ${FORMAT}
@@ -2361,28 +2360,28 @@ Filas actuales:
 ${JSON.stringify(rowsForOptimization)}
 ${forceReplanBlock}
 
-🕒 **Horarios inteligentes y plausibles**:
+🕒 **Horarios inteligentes**:
 - Si no hay horario definido, usa 08:30–19:00 como base.
 - Extiende horarios solo cuando sea razonable:
-  • Auroras: 20:00–02:30 aprox. (nunca en horario diurno).
+  • Auroras: 20:00–02:30 aprox. (nunca diurno).
   • Cenas/vida nocturna: 19:00–23:30 aprox.
-- Si extiendes el horario de un día, ajusta inteligentemente el inicio del día siguiente.
-- ❌ No heredes horarios directamente entre días.
-- Añade buffers realistas entre actividades (≥15 min).
-- Ajusta horarios absurdos automáticamente (ej. tours nocturnos a las 06:00 AM → corregir o eliminar).
+- Si extiendes una noche, **ajusta el inicio del día siguiente**.
 
-🌍 **Instrucción de optimización**:
-- Reordena y optimiza para minimizar traslados y agrupar por zonas.
-- Sustituye huecos por opciones realistas (sin duplicar otros días).
-- Para actividades nocturnas (ej. auroras), usa horarios plausibles y añade alternativas si aplica.
-- Day trips ≤ 2 h por trayecto (ida), si hay tiempo disponible y aportan valor turístico.
-- Prioriza imperdibles locales y considera perfil del viajero (ritmo, movilidad reducida, niños, transporte preferido, etc.).
-- Valida PLAUSIBILIDAD GLOBAL y SEGURIDAD:
-  • No propongas actividades en zonas con riesgos o restricciones evidentes.
-  • Sustituye por alternativas seguras si aplica.
-  • Añade siempre notas útiles (nunca vacías ni “seed”).
-- ❌ NO DUPLICAR actividades ya existentes en otros días de la ciudad.
-  • Si ya existe una actividad similar, sustitúyela por una alternativa distinta.
+🌍 **Optimización**:
+- Reordena para minimizar traslados y agrupar por zonas.
+- Rellena huecos con opciones plausibles, sin duplicar otros días.
+- Day trips ≤ 2 h por trayecto (ida), si hay tiempo y aportan valor.
+- Valida PLAUSIBILIDAD y SEGURIDAD (evita zonas/restricciones con riesgo).
+- Notas SIEMPRE útiles (nunca vacías ni “seed”).
+
+🌌 **Auroras (si aplica)**:
+- En destinos aurorales se permiten **múltiples noches de auroras** (una por cada noche si tiene sentido y clima/latitud lo justifican).
+- No consideres las auroras **duplicadas** si están en **noches distintas**.
+- Usa transporte plausible (“Tour/Bus/Van” o “Auto”) y añade breve justificación en notes (p.ej. \`valid:\`).
+
+❌ **No duplicar**:
+- No repitas la **misma actividad** ya existente **en el mismo día**.
+- Entre días, evita duplicados salvo **auroras** (permitidas multi-noche en destinos aurorales).
 - Devuelve C {"rows":[...],"replace":false}.
 
 Contexto:
@@ -2394,7 +2393,7 @@ ${intakeData}
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // 🧼 FILTRO LOCAL · Eliminar duplicados ya existentes
+    // 🧼 FILTRO LOCAL · Evitar duplicados entre días, PERO permitir auroras multi-noche
     const allExisting = Object.values(itineraries[city].byDay || {})
       .flat()
       .filter(r => r.day !== day)
@@ -2402,17 +2401,28 @@ ${intakeData}
 
     normalized = normalized.filter(r=>{
       const act = String(r.activity||'').trim().toLowerCase();
+      const isAurora = act.includes('aurora') || act.includes('northern light');
+      // Permitir auroras en varias noches: no las tratamos como duplicados entre días
+      if(isAurora && auroraCity) return true;
       return act && !allExisting.includes(act);
     });
 
-    // 🧭 Helpers de post-procesado
-    normalized = applyBufferBetweenRows(normalized);    // ✅ P08 Buffers automáticos
-    normalized = reorderLinearVisits(normalized);       // ✅ P14 Secuencia lógica lineal
-    normalized = ensureAuroraNight(normalized, city);   // ✅ P07 + P10 + P13 auroras
+    // 🧭 Post-procesadores (refuerzos v64)
+    if(typeof applyBufferBetweenRows === 'function'){
+      normalized = applyBufferBetweenRows(normalized);     // Buffers ≥15 min
+    }
+    if(typeof reorderLinearVisits === 'function'){
+      normalized = reorderLinearVisits(normalized);        // Secuencia lineal lógica
+    }
+    if(typeof ensureAuroraNight === 'function'){
+      // Garantiza al menos una noche si procede; no elimina noches extra
+      normalized = ensureAuroraNight(normalized, city);
+    }
 
-    // 🧩 Reconstrucción con protegidas
+    // 🧩 Reconstrucción con protegidas (auroras/termales previamente existentes)
     const finalRows = [...normalized, ...protectedRows];
 
+    // ✅ Validación global y push
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     pushRows(city, val.allowed, false);
   }
