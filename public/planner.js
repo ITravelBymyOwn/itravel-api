@@ -3025,7 +3025,10 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
       plannerState.budget = '';
       plannerState.currency = 'USD';
-      plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
+      plannerState.forceReplan = {};     // 🧼 limpiar banderas de replanificación
+      plannerState.preferences = {};     // 🧼 limpiar preferencias (day trips, auroras, etc.)
+      plannerState.dayTripPending = {};  // 🧼 limpiar flags de day trip pendiente
+      plannerState.existingActs = {};    // 🧼 limpiar cache de actividades existentes
     }
 
     overlay.classList.remove('active');
@@ -3187,4 +3190,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
+
 
