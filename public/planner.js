@@ -2914,7 +2914,10 @@ document.addEventListener('input', (e)=>{
       e.target.value = filtered;
       if(typeof pos === 'number'){
         // ⚡ Ajuste más suave del cursor para que no salte abruptamente
-        e.target.setSelectionRange(pos - (original.length - filtered.length), pos - (original.length - filtered.length));
+        e.target.setSelectionRange(
+          pos - (original.length - filtered.length),
+          pos - (original.length - filtered.length)
+        );
       }
     }
   }
