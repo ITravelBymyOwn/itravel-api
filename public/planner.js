@@ -3016,7 +3016,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     const $in = qs('#p-infants');  if($in) $in.value = '0';
     const $se = qs('#p-seniors');  if($se) $se.value = '0';
     const $bu = qs('#budget');     if($bu) $bu.value = '';
-    const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
+    const $cu = qs('#currency');   if($cu) $value = 'USD';
 
     // 🔄 Sincronizar plannerState (definido en Sección 1)
     if (typeof plannerState !== 'undefined') {
@@ -3081,12 +3081,16 @@ $chatI?.addEventListener('keydown', e=>{
   }
 });
 
-// CTA y upsell
+// CTA y upsell (con guardas para evitar null.style)
 $confirmCTA?.addEventListener('click', ()=>{ 
-  isItineraryLocked = true; 
-  qs('#monetization-upsell').style.display='flex'; 
+  isItineraryLocked = true;
+  const upsell = qs('#monetization-upsell');
+  if (upsell) upsell.style.display = 'flex';
 });
-$upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
+$upsellClose?.addEventListener('click', ()=>{
+  const upsell = qs('#monetization-upsell');
+  if (upsell) upsell.style.display = 'none';
+});
 
 /* 🆕 Listener: Rebalanceo inteligente al agregar días */
 document.addEventListener('itbmo:addDays', e=>{
@@ -3190,5 +3194,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
+
 
 
