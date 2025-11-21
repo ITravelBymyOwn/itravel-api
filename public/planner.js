@@ -2966,7 +2966,7 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', saveDestinations);
 
-// ⛔ Reset con confirmación modal (corregido: visible → active, y $cu.value)
+// ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
   overlay.className = 'reset-overlay';
@@ -2990,15 +2990,13 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 
   confirmReset.addEventListener('click', ()=>{
     // 🔄 Estado principal
-    if($cityList) $cityList.innerHTML='';
-    savedDestinations=[]; itineraries={}; cityMeta={};
-    addCityRow?.();
-
-    if($start) $start.disabled = true;
-    if($tabs)  $tabs.innerHTML='';
-    if($itWrap)$itWrap.innerHTML='';
-    if($chatBox) $chatBox.style.display='none';
-    if($chatM)   $chatM.innerHTML='';
+    $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+    addCityRow();
+    if ($start) $start.disabled = true;
+    if ($tabs) $tabs.innerHTML='';
+    if ($itWrap) $itWrap.innerHTML='';
+    if ($chatBox) $chatBox.style.display='none';
+    if ($chatM) $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
 
     // 🔄 Flags de planificación
@@ -3009,7 +3007,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     activeCity = null;
 
     // 🔄 Limpiar overlays/tooltips si están activos
-    try { if($overlayWOW) $overlayWOW.style.display = 'none'; } catch(_) {}
+    try { if ($overlayWOW) $overlayWOW.style.display = 'none'; } catch(_) {}
     qsa('.date-tooltip').forEach(t => t.remove());
 
     // 🔄 Restaurar formulario lateral a valores por defecto
@@ -3020,7 +3018,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     const $in = qs('#p-infants');  if($in) $in.value = '0';
     const $se = qs('#p-seniors');  if($se) $se.value = '0';
     const $bu = qs('#budget');     if($bu) $bu.value = '';
-    const $cu = qs('#currency');   if($cu) $cu.value = 'USD'; // ✅ fix
+    const $cu = qs('#currency');   if($cu) $cu.value = 'USD'; // ✅ FIX: era $value
 
     // 🔄 Sincronizar plannerState (definido en Sección 1)
     if (typeof plannerState !== 'undefined') {
@@ -3198,7 +3196,3 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 });
-
-
-
-
