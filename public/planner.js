@@ -66,13 +66,17 @@ async function runWithConcurrency(taskFns, limit = MAX_CONCURRENCY){
   await Promise.all(workers);
 }
 
-
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
 const tone = {
   hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
-  askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
+  // 🔹 Nueva indicación breve por ciudad (con recordatorio del Info Chat sin recargar texto)
+  // - Debe validar lo que reciba (hotel exacto, zona aproximada, dirección o link)
+  // - Si falta claridad, debe repreguntar ANTES de avanzar a la siguiente ciudad
+  askHotelTransport: (city)=>`Para <strong>${city}</strong>, indícame tu <strong>hotel o zona</strong> (puede ser nombre exacto, zona aproximada, dirección o link) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”). Validaré que lo entendí bien para optimizar el itinerario; si hay dudas, te lo confirmo antes de seguir.`,
+  // 🔹 Mensaje global de una sola vez al iniciar planificación (lo usaremos en Sección 16)
+  infoStartHint: 'ℹ️ Recuerda: tienes el <strong>Info Chat</strong> (botón “i”) para pedir <em>sugerencias de hotel/zona y transporte</em> antes de responder cada ciudad.',
   confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
   doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
   fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
@@ -2237,7 +2241,8 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
+   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras + fill seguro de días vacíos
+    + contexto ligero por rango para rendimiento)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2299,6 +2304,54 @@ function moveActivities(city, fromDay, toDay, query=''){
   itineraries[city].byDay = byDay;
 }
 
+/**
+ * 🧯 Fallback rápido para días vacíos:
+ * - Si tras la optimización el día queda sin filas, generamos un set compacto y plausible
+ *   con un prompt mínimo (contexto por rango) para garantizar que NUNCA queden días en blanco.
+ */
+async function fillEmptyDayIfNeeded(city, day){
+  ensureDays(city);
+  const rowsNow = itineraries[city]?.byDay?.[day] || [];
+  if(rowsNow.length > 0) return;
+
+  const baseDate = itineraries[city]?.baseDate || cityMeta[city]?.baseDate || '';
+  const pd = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
+
+  const prompt = `
+${FORMAT}
+Genera actividades plausibles para **${city}** (día ${day}), sin borrar nada previo.
+Devuelve C {"rows":[...],"replace":false} con 5–8 filas máximo, horarios realistas dentro de ${JSON.stringify(pd)}.
+- Sin solapes, buffers ≥15 min.
+- Notas SIEMPRE útiles (nunca vacías); usa "valid:" si procede.
+- Transporte coherente (a pie/metro en casco urbano; tren/bus/auto para interurbano si aplica).
+- Evita duplicados de otros días si es posible.
+Contexto mínimo por rango:
+${buildIntakeLite(city, {start:day, end:day})}
+`.trim();
+
+  const ans = await callAgent(prompt, true, { timeoutMs: 35000 });
+  const parsed = parseJSON(ans);
+  if(parsed?.rows?.length){
+    const normalized = parsed.rows.map(r=>normalizeRow({...r, day}));
+    const val = await validateRowsWithAgent(city, normalized, baseDate);
+    pushRows(city, val.allowed, false);
+  } else {
+    // Último recurso: bloque de tiempo libre con sugerencias
+    const free = normalizeRow({
+      day,
+      start: pd.start || '09:00',
+      end:   pd.end   || '18:30',
+      activity: `Bloque libre en ${city}`,
+      from: 'Zona céntrica',
+      to: 'Varios puntos de interés',
+      transport: 'A pie/Metro',
+      duration: '',
+      notes: 'Sugerencia: elige 2–3 imperdibles cercanos, pausa para almuerzo y paseo por el casco histórico.'
+    }, day);
+    pushRows(city, [free], false);
+  }
+}
+
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2309,16 +2362,18 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas en reordenamientos
+  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas
   const protectedRows = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return act.includes('aurora') || act.includes('northern light') ||
-           act.includes('laguna azul') || act.includes('blue lagoon');
+           act.includes('laguna azul') || act.includes('blue lagoon') ||
+           act.includes('termal');
   });
   const rowsForOptimization = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return !act.includes('aurora') && !act.includes('northern light') &&
-           !act.includes('laguna azul') && !act.includes('blue lagoon');
+           !act.includes('laguna azul') && !act.includes('blue lagoon') &&
+           !act.includes('termal');
   });
 
   // 🧠 Flags de replanificación / preferencias
@@ -2338,10 +2393,10 @@ async function optimizeDay(city, day){
 - Devuelve una planificación clara y optimizada.`;
   }
 
-  // ⚡ Intake reducido si no se requiere replan global
+  // ⚡ Contexto por rango para rendimiento (MUY importante para ciudades grandes)
   const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
-    ? buildIntake()
-    : buildIntakeLite();
+    ? buildIntake()                                        // si hay replan global, usa panorama completo
+    : buildIntakeLite(city, { start: day, end: day });     // si no, sólo el día objetivo
 
   // 🧭 Detección de contexto auroral para permitir múltiples noches
   let auroraCity=false;
@@ -2384,11 +2439,11 @@ ${forceReplanBlock}
 - Entre días, evita duplicados salvo **auroras** (permitidas multi-noche en destinos aurorales).
 - Devuelve C {"rows":[...],"replace":false}.
 
-Contexto:
+Contexto (rango compacto):
 ${intakeData}
 `.trim();
 
-  const ans = await callAgent(prompt, true);
+  const ans = await callAgent(prompt, true, { timeoutMs: 45000 });
   const parsed = parseJSON(ans);
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
@@ -2401,9 +2456,8 @@ ${intakeData}
 
     normalized = normalized.filter(r=>{
       const act = String(r.activity||'').trim().toLowerCase();
-      const isAurora = act.includes('aurora') || act.includes('northern light');
-      // Permitir auroras en varias noches: no las tratamos como duplicados entre días
-      if(isAurora && auroraCity) return true;
+      const isAur = act.includes('aurora') || act.includes('northern light');
+      if(isAur && auroraCity) return true;
       return act && !allExisting.includes(act);
     });
 
@@ -2426,6 +2480,9 @@ ${intakeData}
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     pushRows(city, val.allowed, false);
   }
+
+  // 🔁 Garantía de no-día-vacío (si por cualquier causa quedó vacío)
+  await fillEmptyDayIfNeeded(city, day);
 }
 
 /* ==============================
