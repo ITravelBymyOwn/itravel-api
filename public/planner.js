@@ -2495,7 +2495,6 @@ ${intakeData}
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
    — Optimizada con intents extendidos, day trips y auroras
-   + Validación inteligente de hotel/zona/transporte en modo collectingHotels
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2512,85 +2511,23 @@ async function onSend(){
   // - Unifica renderizaciones posteriores para mejorar fluidez visual.
   // ============================================================
 
-  // Helpers locales SOLO para la validación de hotel/zona/transporte
-  const _isUnknownAnswer = (s)=>{
-    const t = String(s||'').toLowerCase().trim();
-    return !!t && /\b(no\s*s[eé]|no\s+definido|sin\s+definir|a[uú]n\s+no|indefinido|no\s*lo\s*s[eé]|no\s*tengo)\b/.test(t);
-  };
-  const _parseTransport = (s)=>{
-    const t = String(s||'').toLowerCase();
-    if(/recom/i.test(t)) return 'recomiéndame';
-    if(/alquilad|rent|veh[ií]culo|coche|auto|carro/.test(t)) return 'vehículo alquilado';
-    if(/metro|tren|bus|autob[uú]s|p[uú]blico/.test(t))        return 'transporte público';
-    if(/uber|taxi|cabify|lyft/.test(t))                      return 'otros (Uber/Taxi)';
-    return '';
-  };
-  const _looksLikeCoords = (s)=>{
-    return /-?\d{1,3}\.\d+\s*,\s*-?\d{1,3}\.\d+/.test(s) || /@-?\d{1,3}\.\d+,\s*-?\d{1,3}\.\d+/.test(s);
-  };
-  const _looksLikeLink = (s)=>{
-    return /https?:\/\//i.test(s) || /maps\.google|goo\.gl\/maps/i.test(s);
-  };
-  const _looksLikeAddress = (s)=>{
-    const t = String(s||'');
-    const hasNum = /\d/.test(t);
-    const streetKw = /(calle|avenida|av\.?|street|st\.?|via|piazza|plaza|#)/i.test(t);
-    return hasNum && streetKw;
-  };
-  const _looksLikeZoneOrPOI = (s)=>{
-    return /(hotel|hostel|apart|airbnb|inn|resid|zona|barrio|distrito|cerca\s+de|junto\s+a|por\s+la|por\s+el|near)/i.test(s);
-  };
-  const _isPlausibleLocation = (s)=>{
-    const v = String(s||'').trim();
-    if(!v) return false;
-    if(_looksLikeCoords(v) || _looksLikeLink(v) || _looksLikeAddress(v) || _looksLikeZoneOrPOI(v)) return true;
-    // Frases tipo “Cerca de Sagrada Familia”, “Frente al Coliseo”, “junto a Plaza Mayor”
-    if(/^(cerca|junto|al\s+lado|frente|por\s+(la|el)|a\s+pasos\s+de)/i.test(v)) return true;
-    // Al menos dos palabras con pinta de lugar propio
-    const words = v.split(/\s+/).filter(Boolean);
-    if(words.length >= 2 && v.length >= 6) return true;
-    return false;
-  };
-
   // Colecta hotel/transporte (primer paso antes de generar itinerarios)
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
-    const transport = _parseTransport(text);
 
-    // Aceptar respuestas “desconozco / no definido”
-    if (_isUnknownAnswer(text)) {
-      upsertCityMeta({ city, hotel: 'Aún no definido', transport: transport || 'recomiéndame' });
-      chatMsg('Perfecto. Tomo “aún no definido” como punto de partida y seguiré con la siguiente ciudad. Puedes ajustar más tarde.', 'ai');
-      metaProgressIndex++;
-      askNextHotelTransport();
-      return;
-    }
+    // detectar transporte (incluye “recomiéndame”, “no sé”, “aún no definido”)
+    const transport = (/recom/i.test(text)) ? 'recomiéndame'
+      : (/(no\s+se|no\s+s[eé]|a[uú]n\s+no\s+definido|a[uú]n\s+no|indefinido|por\s+definir)/i.test(text)) ? ''
+      : (/alquilad|rent|veh[ií]culo|coche|auto|carro/i.test(text)) ? 'vehículo alquilado'
+      : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
+      : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
+      : '';
 
-    // Si menciona algo como “recomiéndame”, aceptamos igualmente
-    if (/recom/i.test(text) && !_isPlausibleLocation(text)) {
-      upsertCityMeta({ city, hotel: 'Aún no definido', transport: 'recomiéndame' });
-      metaProgressIndex++;
-      askNextHotelTransport();
-      return;
-    }
+    // guardar tal cual el texto como hotel/zona (nombre, zona, dirección, link o “indefinido”)
+    upsertCityMeta({ city, hotel: text, transport });
 
-    // Validación de ubicación plausible (nombre exacto, zona, dirección, link o coordenadas)
-    if (_isPlausibleLocation(text)) {
-      upsertCityMeta({ city, hotel: text, transport });
-      // Confirmación breve de entendimiento (sin avanzar si tenemos dudas)
-      // Aquí asumimos comprensión; si quisieras doble validación IA, conectarías ENABLE_VALIDATOR.
-      metaProgressIndex++;
-      askNextHotelTransport();
-      return;
-    }
-
-    // Si llegó aquí, la entrada es ambigua → pedir precisión (no avanzar)
-    chatMsg(
-      `Para <strong>${city}</strong>, ¿podrías precisar un poco más tu <strong>hotel o zona</strong>? ` +
-      `Puede ser <em>nombre exacto</em>, <em>zona aproximada</em>, <em>dirección</em>, <em>coordenadas</em> o <em>link</em>. ` +
-      `Si prefieres, también puedes decir <em>“aún no definido”</em> o <em>“recomiéndame”</em>.`,
-      'ai'
-    );
+    metaProgressIndex++;
+    askNextHotelTransport();
     return;
   }
 
@@ -2621,7 +2558,7 @@ async function onSend(){
 
   // ============================================================
   // 0) Preferencia explícita de day trip sin agregar días
-  //    (ej: “quiero un tour de un d[ií]a cerca de X”)
+  //    (ej: “quiero un tour de un día cerca de X”)
   // ============================================================
   if(intent.type === 'free_edit' && /\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|algo fuera de la ciudad|un viaje de un d[ií]a|una escapada|salida de un d[ií]a)\b/i.test(text)){
     const city = activeCity || savedDestinations[0]?.city;
@@ -2679,6 +2616,7 @@ async function onSend(){
 
   // ============================================================
   // 3) Agregar día al FINAL (con o sin day trip detallado)
+  //     ⚠️ FIX: asegurar perDay para el nuevo día antes de optimizar
   // ============================================================
   if (intent.type === 'add_day_end' && intent.city) {
     const city = intent.city;
@@ -2687,7 +2625,23 @@ async function onSend(){
     const byDay = itineraries[city].byDay || {};
     const days = Object.keys(byDay).map(n => +n).sort((a, b) => a - b);
     const numericPos = days.length + 1;
+
     insertDayAt(city, numericPos);
+
+    // 🔧 FIX CRÍTICO: definir ventana horaria del nuevo día
+    if(!cityMeta[city]) cityMeta[city] = { perDay: [] };
+    if(!Array.isArray(cityMeta[city].perDay)) cityMeta[city].perDay = [];
+
+    // Hereda del día anterior si existe, si no usa base 08:30–19:00
+    const prevPd = cityMeta[city].perDay.find(x=>x.day===numericPos-1) || { start: DEFAULT_START, end: DEFAULT_END };
+    let pd = cityMeta[city].perDay.find(x=>x.day===numericPos);
+    if(!pd){
+      pd = { day: numericPos, start: prevPd.start || DEFAULT_START, end: prevPd.end || DEFAULT_END };
+      cityMeta[city].perDay.push(pd);
+    }else{
+      pd.start = pd.start || prevPd.start || DEFAULT_START;
+      pd.end   = pd.end   || prevPd.end   || DEFAULT_END;
+    }
 
     // =============================
     // Semilla + itinerario detallado para day trip (si aplica)
@@ -2697,9 +2651,6 @@ async function onSend(){
       const start =
         cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start ||
         DEFAULT_START;
-      const end =
-        cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.end ||
-        DEFAULT_END;
 
       // Semilla inicial clara
       const rowsSeed = [
@@ -2781,7 +2732,7 @@ Genera un itinerario completo y secuencial de 1 día para visitar **${destTrip}*
       }
     }
 
-    // Optimización del nuevo día
+    // Optimización del nuevo día (ya con perDay definido)
     await optimizeDay(city, numericPos);
     renderCityTabs();
     setActiveCity(city);
