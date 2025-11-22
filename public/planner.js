@@ -71,12 +71,16 @@ async function runWithConcurrency(taskFns, limit = MAX_CONCURRENCY){
 ================================= */
 const tone = {
   hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
-  // 🔹 Nueva indicación breve por ciudad (con recordatorio del Info Chat sin recargar texto)
-  // - Debe validar lo que reciba (hotel exacto, zona aproximada, dirección o link)
-  // - Si falta claridad, debe repreguntar ANTES de avanzar a la siguiente ciudad
+
+  // 💬 Mensaje breve que aparece UNA SOLA VEZ justo después del saludo,
+  // para sugerir el uso del Info Chat antes de dar los hoteles/transportes.
+  infoTip: '💡 Si necesitas ayuda para elegir hospedaje, transporte u otros detalles, abre el <strong>Info Chat</strong> (botón verde), consulta lo que gustes y luego continúa con el itinerario.',
+
+  // 🔎 Pregunta por hotel/zona y transporte con validación: acepta nombre exacto,
+  // zona aproximada, dirección o link; “recomiéndame” también es válido.
+  // Además, le avisa al usuario que se validará lo entendido y se confirmará si hay dudas.
   askHotelTransport: (city)=>`Para <strong>${city}</strong>, indícame tu <strong>hotel o zona</strong> (puede ser nombre exacto, zona aproximada, dirección o link) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”). Validaré que lo entendí bien para optimizar el itinerario; si hay dudas, te lo confirmo antes de seguir.`,
-  // 🔹 Mensaje global de una sola vez al iniciar planificación (lo usaremos en Sección 16)
-  infoStartHint: 'ℹ️ Recuerda: tienes el <strong>Info Chat</strong> (botón “i”) para pedir <em>sugerencias de hotel/zona y transporte</em> antes de responder cada ciudad.',
+
   confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
   doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
   fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
@@ -1921,11 +1925,6 @@ ${buildIntake()}
   }
 }
 
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v55.1 (parte 3/3)
-   Base: v54  ✅
-========================================================= */
-
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
    v60 base + overlay bloqueado global hasta terminar todas las ciudades
@@ -1939,7 +1938,14 @@ async function startPlanning(){
   session = [];
   metaProgressIndex = 0;
 
+  // 1) Saludo inicial
   chatMsg(`${tone.hi}`);
+
+  // 2) Tip del Info Chat (se muestra una sola vez al iniciar)
+  //    Queda inmediatamente DEBAJO del saludo, antes de pedir el primer hotel/transporte.
+  chatMsg(`${tone.infoTip}`, 'ai');
+
+  // 3) Comienza flujo de solicitud de hotel/zona y transporte
   askNextHotelTransport();
 }
 
@@ -1985,6 +1991,7 @@ function askNextHotelTransport(){
   metaProgressIndex++;
   askNextHotelTransport();
 }
+
 
 /* ==============================
    SECCIÓN 17 · NLU robusta + Intents (v60 base + mejoras v64)
