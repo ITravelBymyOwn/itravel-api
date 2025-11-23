@@ -2249,6 +2249,11 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
+   Refuerzo v65.1:
+   - Si, tras evitar duplicados, el día queda "ligero", el agente DEBE completarlo
+     con imperdibles pendientes o experiencias complementarias (barrios, miradores,
+     mercados, playa urbana —p.ej., La Barceloneta en Barcelona—), manteniendo lógica
+     y evitando duplicados entre días. Objetivo: ~6–7h netas dentro de la ventana diaria.
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2350,10 +2355,9 @@ async function optimizeDay(city, day){
   }
 
   // ⚡ Intake reducido si no se requiere replan global
-  // 🔧 FIX: pasar SIEMPRE la ciudad y el rango del día actual
   const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
     ? buildIntake()
-    : buildIntakeLite(city, { start: day, end: day });
+    : buildIntakeLite(city, { start: day, end: day }); // 👈 acotamos al día visible para rapidez
 
   // 🧭 Detección de contexto auroral para permitir múltiples noches
   let auroraCity=false;
@@ -2367,40 +2371,47 @@ ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
-Ventanas definidas: ${JSON.stringify(perDay)}
-Filas actuales:
+Ventanas definidas para el día ${day}: ${JSON.stringify(perDay)}
+Filas actuales (a optimizar sin perder protegidas):
 ${JSON.stringify(rowsForOptimization)}
 ${forceReplanBlock}
 
 🕒 **Horarios inteligentes**:
 - Si no hay horario definido, usa 08:30–19:00 como base.
-- Extiende horarios solo cuando sea razonable:
+- Puedes extender horarios cuando sea razonable:
   • Auroras: 20:00–02:30 aprox. (nunca diurno).
   • Cenas/vida nocturna: 19:00–23:30 aprox.
 - Si extiendes una noche, **ajusta el inicio del día siguiente**.
 
 🌍 **Optimización**:
 - Reordena para minimizar traslados y agrupar por zonas.
-- Rellena huecos con opciones plausibles, sin duplicar otros días.
+- Evita duplicados con otros días ya planificados.
+- **Si tras evitar duplicados el día queda "ligero" (< ~6h netas), DEBES completarlo** con:
+   • Imperdibles de la ciudad que aún no estén cubiertos, y/o
+   • Experiencias complementarias: barrio histórico, mercado principal, miradores/parques, paseo costero o **playa urbana si aplica** (p.ej., en Barcelona la playa de **La Barceloneta** es una opción frecuente), rutas panorámicas o gastronomía típica.
+- Respeta la ventana del día; añade buffers ≥15 min entre actividades.
 - Day trips ≤ 2 h por trayecto (ida), si hay tiempo y aportan valor.
-- Valida PLAUSIBILIDAD y SEGURIDAD (evita zonas/restricciones con riesgo).
-- Notas SIEMPRE útiles (nunca vacías ni “seed”).
 
 🌌 **Auroras (si aplica)**:
 - En destinos aurorales se permiten **múltiples noches de auroras** (una por cada noche si tiene sentido y clima/latitud lo justifican).
 - No consideres las auroras **duplicadas** si están en **noches distintas**.
 - Usa transporte plausible (“Tour/Bus/Van” o “Auto”) y añade breve justificación en notes (p.ej. \`valid:\`).
 
+📝 **Notas**:
+- Siempre útiles y concisas (nunca vacías ni “seed”).
+- Indica “valid:” cuando sea estacional/operativo.
+
 ❌ **No duplicar**:
 - No repitas la **misma actividad** ya existente **en el mismo día**.
 - Entre días, evita duplicados salvo **auroras** (permitidas multi-noche en destinos aurorales).
-- Devuelve C {"rows":[...],"replace":false}.
 
-Contexto:
+Devuelve C {"rows":[...],"replace":false}.
+
+Contexto mínimo para fusionar sin borrar:
 ${intakeData}
 `.trim();
 
-  const ans = await callAgent(prompt, true);
+  const ans = await callAgent(prompt, true, { cityName: city, baseDate });
   const parsed = parseJSON(ans);
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
@@ -2414,8 +2425,7 @@ ${intakeData}
     normalized = normalized.filter(r=>{
       const act = String(r.activity||'').trim().toLowerCase();
       const isAurora = act.includes('aurora') || act.includes('northern light');
-      // Permitir auroras en varias noches: no las tratamos como duplicados entre días
-      if(isAurora && auroraCity) return true;
+      if(isAurora && auroraCity) return true; // auroras permitidas multi-noche
       return act && !allExisting.includes(act);
     });
 
@@ -2439,7 +2449,6 @@ ${intakeData}
     pushRows(city, val.allowed, false);
   }
 }
-
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
