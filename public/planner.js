@@ -2249,10 +2249,6 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
-   + v65·patch:
-     - Normalización estricta HH:MM (corrige "08:3" → "08:03")
-     - Early-exit para acelerar cuando no hay nada que optimizar
-     - Intake compacto con rango del día para prompts más ligeros
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2315,54 +2311,21 @@ function moveActivities(city, fromDay, toDay, query=''){
 }
 
 async function optimizeDay(city, day){
-  // ──────────────────────────────
-  // Helpers locales para tiempo
-  // ──────────────────────────────
-  const PAD = n => String(Math.max(0, parseInt(n||0,10))).padStart(2,'0');
-  const padHHMM = (v)=>{
-    // Normaliza "8:3" → "08:03", "8"→"08:00", "08:30" queda igual
-    if(!v) return '';
-    const s = String(v).trim();
-    // hh:mm
-    let m = s.match(/^(\d{1,2}):(\d{1,2})$/);
-    if(m) return `${PAD(m[1])}:${PAD(m[2])}`;
-    // hhmm
-    m = s.match(/^(\d{1,2})(\d{2})$/);
-    if(m) return `${PAD(m[1])}:${PAD(m[2])}`;
-    // solo hh
-    m = s.match(/^(\d{1,2})$/);
-    if(m) return `${PAD(m[1])}:00`;
-    // fallback: si no matchea, devolver tal cual (validator/agent lo ajustará)
-    return s;
-  };
-
-  // ──────────────────────────────
-  // Datos del día
-  // ──────────────────────────────
   const data = itineraries[city];
-  const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
-  const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
-
-  // Filas actuales del día
   const rows = (data?.byDay?.[day]||[]).map(r=>({
-    day,
-    start: padHHMM(r.start||''),
-    end:   padHHMM(r.end||''),
-    activity: r.activity||'',
-    from: r.from||'',
-    to: r.to||'',
-    transport: r.transport||'',
-    duration: r.duration||'',
-    notes: r.notes||''
+    day, start:r.start||'', end:r.end||'', activity:r.activity||'',
+    from:r.from||'', to:r.to||'', transport:r.transport||'',
+    duration:r.duration||'', notes:r.notes||''
   }));
+  const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
+  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales)
+  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas en reordenamientos
   const protectedRows = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return act.includes('aurora') || act.includes('northern light') ||
            act.includes('laguna azul') || act.includes('blue lagoon');
-  }).map(r => ({ ...r, start: padHHMM(r.start), end: padHHMM(r.end) }));
-
+  });
   const rowsForOptimization = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return !act.includes('aurora') && !act.includes('northern light') &&
@@ -2374,23 +2337,23 @@ async function optimizeDay(city, day){
   const hasDayTripPending  = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
   const hasPreferDayTrip   = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
 
-  // ⚡️ Early exit: si NO hay nada que optimizar (solo protegidas) y no hay replan/prefs, evita LLM
-  if (!hasForceReplan && !hasDayTripPending && !hasPreferDayTrip && rowsForOptimization.length === 0) {
-    // Asegura normalización HH:MM in-place en las protegidas ya existentes
-    const byDay = itineraries[city]?.byDay || {};
-    byDay[day] = (byDay[day] || []).map(r => ({
-      ...r,
-      start: padHHMM(r.start || DEFAULT_START),
-      end:   padHHMM(r.end   || DEFAULT_END)
-    }));
-    itineraries[city].byDay = byDay;
-    return;
+  let forceReplanBlock = '';
+  if (hasForceReplan || hasDayTripPending || hasPreferDayTrip) {
+    forceReplanBlock = `
+👉 IMPORTANTE:
+- El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
+- REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
+- Evalúa excursiones de 1 día (máx. 2 h por trayecto) cuando aporten valor.
+- Si el usuario especificó un destino (dayTripTo), prográmalo.
+- Prioriza imperdibles locales y evita duplicados globales.
+- Devuelve una planificación clara y optimizada.`;
   }
 
-  // ⚙️ Intake compacto SOLO del rango del día
+  // ⚡ Intake reducido si no se requiere replan global
+  // 🔧 FIX: pasar SIEMPRE la ciudad y el rango del día actual
   const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
-    ? buildIntake()                 // contexto completo si hay replan o preferencia fuerte
-    : buildIntakeLite(city, {start:day, end:day}); // rango específico → payload más ligero
+    ? buildIntake()
+    : buildIntakeLite(city, { start: day, end: day });
 
   // 🧭 Detección de contexto auroral para permitir múltiples noches
   let auroraCity=false;
@@ -2404,22 +2367,10 @@ ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
-Ventanas definidas: ${JSON.stringify({
-  day,
-  start: padHHMM(perDay.start || DEFAULT_START),
-  end:   padHHMM(perDay.end   || DEFAULT_END)
-})}
+Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales:
 ${JSON.stringify(rowsForOptimization)}
-${(hasForceReplan || hasDayTripPending || hasPreferDayTrip) ? `
-👉 IMPORTANTE:
-- El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
-- REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
-- Evalúa excursiones de 1 día (máx. 2 h por trayecto) cuando aporten valor.
-- Si el usuario especificó un destino (dayTripTo), prográmalo.
-- Prioriza imperdibles locales y evita duplicados globales.
-- Devuelve una planificación clara y optimizada.
-`.trim() : ''}
+${forceReplanBlock}
 
 🕒 **Horarios inteligentes**:
 - Si no hay horario definido, usa 08:30–19:00 como base.
@@ -2454,13 +2405,6 @@ ${intakeData}
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // 🧼 Normalización estricta HH:MM para start/end
-    normalized = normalized.map(r => ({
-      ...r,
-      start: padHHMM(r.start || DEFAULT_START),
-      end:   padHHMM(r.end   || DEFAULT_END)
-    }));
-
     // 🧼 FILTRO LOCAL · Evitar duplicados entre días, PERO permitir auroras multi-noche
     const allExisting = Object.values(itineraries[city].byDay || {})
       .flat()
@@ -2470,6 +2414,7 @@ ${intakeData}
     normalized = normalized.filter(r=>{
       const act = String(r.activity||'').trim().toLowerCase();
       const isAurora = act.includes('aurora') || act.includes('northern light');
+      // Permitir auroras en varias noches: no las tratamos como duplicados entre días
       if(isAurora && auroraCity) return true;
       return act && !allExisting.includes(act);
     });
@@ -2487,23 +2432,14 @@ ${intakeData}
     }
 
     // 🧩 Reconstrucción con protegidas (auroras/termales previamente existentes)
-    const finalRows = [...normalized, ...protectedRows.map(r=>({
-      ...r,
-      start: padHHMM(r.start || DEFAULT_START),
-      end:   padHHMM(r.end   || DEFAULT_END)
-    }))];
+    const finalRows = [...normalized, ...protectedRows];
 
     // ✅ Validación global y push
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
-    // Normaliza HH:MM también después de la validación (por si el val retornó "8:3")
-    const allowedFixed = (val.allowed||[]).map(r=>({
-      ...r,
-      start: padHHMM(r.start || DEFAULT_START),
-      end:   padHHMM(r.end   || DEFAULT_END)
-    }));
-    pushRows(city, allowedFixed, false);
+    pushRows(city, val.allowed, false);
   }
 }
+
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
