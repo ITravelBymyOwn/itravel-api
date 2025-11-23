@@ -2248,12 +2248,7 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
-   ── v65.q1 hotfix:
-      • Días agregados al final: intake completo + instrucción de “día normal” (no día de salida)
-      • Ventana base 08:30–19:00 (el agente puede ajustarla)
-      • Densificación automática si el día queda muy “corto”
-      • Timeouts más cortos para optimizaciones puntuales
+   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras + gap-fill + anti-duplicados canónicos)
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2315,6 +2310,109 @@ function moveActivities(city, fromDay, toDay, query=''){
   itineraries[city].byDay = byDay;
 }
 
+/* ─────────── Normalizador canónico de actividades (anti-duplicados robusto) ─────────── */
+function activityKey(s){
+  let t = String(s||'').toLowerCase();
+
+  // Eliminar acentos
+  t = t.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+  // Quitar prefijos comunes
+  t = t.replace(/\b(visita|visitar|exploraci[oó]n|recorrido|paseo|tour|entrada|acceso|descubr(e|ir|imiento)|conocer|caminar|free\s*tour)\b/g,'');
+  t = t.replace(/\b(a|al|a la|por|en|de|del|la|el|los|las|un|una|uno)\b/g,'');
+
+  // Simplificar conectores y signos
+  t = t.replace(/[^\w\s]/g,' ').replace(/\s+/g,' ').trim();
+
+  // Unificar nombres conocidos abreviados (ligero, no city-specific)
+  t = t
+    .replace(/\bcasa batllo\b/g,'casa batllo')
+    .replace(/\bla pedrera|casa mila\b/g,'la pedrera')
+    .replace(/\bsagrada familia\b/g,'sagrada familia')
+    .replace(/\bbarri[o|o] gotic[o]?\b/g,'barrio gotico')
+    .replace(/\bblue lagoon|laguna azul\b/g,'blue lagoon')
+    .replace(/\bnorthern lights|auroras\b/g,'auroras');
+
+  return t;
+}
+
+/* ─────────── Relleno de huecos diurnos con bloques plausibles ─────────── */
+function fillGapsLocal(rows, perDay){
+  const toM = s=>{
+    const m=/^(\d{1,2}):(\d{2})$/.exec(String(s||'').trim());
+    if(!m) return null;
+    return (+m[1])*60+(+m[2]);
+  };
+  const toHHMM = mins=>{
+    const h=Math.floor(mins/60), m=mins%60;
+    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+  };
+
+  const startDay = toM(perDay.start || DEFAULT_START) ?? 8*60+30;
+  const endDay   = toM(perDay.end   || DEFAULT_END)   ?? 19*60;
+
+  const list = [...rows].sort((a,b)=>(a.start||'') < (b.start||'') ? -1 : 1);
+  if(!list.length) return list;
+
+  const out = [];
+  for(let i=0;i<list.length;i++){
+    const cur = list[i];
+    out.push(cur);
+    const next = (i<list.length-1) ? list[i+1] : null;
+    if(!next) break;
+
+    const toMsafe = x => {
+      const v = toM(x);
+      return (v==null ? null : v);
+    };
+    const curEnd = toMsafe(cur.end);
+    const nextStart = toMsafe(next.start);
+    if(curEnd==null || nextStart==null) continue;
+
+    const gap = nextStart - curEnd;
+
+    const isMidday = (curEnd >= 12*60 && curEnd <= 15*60+30);
+    if(gap >= 60 && isMidday){
+      const lunchStart = Math.max(curEnd, 13*60);
+      const lunchEnd   = Math.min(lunchStart + 60, endDay);
+      if(lunchEnd - lunchStart >= 45){
+        out.push({
+          day: cur.day,
+          start: toHHMM(lunchStart),
+          end: toHHMM(lunchEnd),
+          activity: 'Almuerzo local',
+          from: 'Zona cercana',
+          to: 'Restaurante recomendado',
+          transport: 'A pie',
+          duration: `${lunchEnd - lunchStart}m`,
+          notes: 'Tip: menú del día o tapeo popular en la zona.'
+        });
+      }
+      continue;
+    }
+
+    const diurnalGap = (curEnd >= startDay && nextStart <= endDay);
+    if(gap >= 75 && diurnalGap){
+      const slotStart = curEnd;
+      const slotEnd   = Math.min(slotStart + Math.min(90, gap-10), nextStart);
+      if(slotEnd - slotStart >= 45){
+        out.push({
+          day: cur.day,
+          start: toHHMM(slotStart),
+          end: toHHMM(slotEnd),
+          activity: 'Pausa con café / mirador',
+          from: 'Zona cercana',
+          to: 'Café/plaza/mirador',
+          transport: 'A pie',
+          duration: `${slotEnd - slotStart}m`,
+          notes: 'Breve descanso y fotos; ajustable por clima y gustos.'
+        });
+      }
+    }
+  }
+  return out.sort((a,b)=>(a.start||'') < (b.start||'') ? -1 : 1);
+}
+
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2323,9 +2421,9 @@ async function optimizeDay(city, day){
     duration:r.duration||'', notes:r.notes||''
   }));
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
-  const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
+  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas en reordenamientos
+  // 🧊 Protegidas (auroras / termales)
   const protectedRows = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return act.includes('aurora') || act.includes('northern light') ||
@@ -2337,174 +2435,117 @@ async function optimizeDay(city, day){
            !act.includes('laguna azul') && !act.includes('blue lagoon');
   });
 
-  // 🧠 Flags de replanificación / preferencias
+  // 🧠 Flags
   const hasForceReplan     = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]);
   const hasDayTripPending  = (typeof plannerState !== 'undefined' && plannerState.dayTripPending && plannerState.dayTripPending[city]);
   const hasPreferDayTrip   = (typeof plannerState !== 'undefined' && plannerState.preferences && plannerState.preferences.preferDayTrip);
-
-  // 🧩 ¿Es el nuevo último día agregado?
-  const totalDays = Object.keys(itineraries[city]?.byDay||{}).length || 0;
-  const wasExtended = Number.isInteger(itineraries[city]?.originalDays) && day > itineraries[city].originalDays;
-  const isNewTail   = (day === totalDays) && (wasExtended || (rowsForOptimization.length === 0));
 
   let forceReplanBlock = '';
   if (hasForceReplan || hasDayTripPending || hasPreferDayTrip) {
     forceReplanBlock = `
 👉 IMPORTANTE:
-- El usuario ha extendido su estadía o indicó preferencia por un tour de 1 día en ${city}.
-- REEQUILIBRA el itinerario de ${city} considerando el nuevo total de días.
-- Evalúa excursiones de 1 día (máx. 2 h por trayecto) cuando aporten valor.
-- Si el usuario especificó un destino (dayTripTo), prográmalo.
+- El usuario extendió su estadía o pidió day trip en ${city}.
+- REEQUILIBRA ${city} considerando el nuevo total de días.
+- Day trips ≤ 2 h por trayecto cuando aporten valor.
+- Si el usuario especificó destino (dayTripTo), prográmalo.
 - Prioriza imperdibles locales y evita duplicados globales.
 - Devuelve una planificación clara y optimizada.`;
   }
 
-  // ⚡ Intake:
-  //  • Para el nuevo último día → intake COMPLETO (contexto global)
-  //  • En otros casos → intakeLite por rango (solo el día actual)
-  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip || isNewTail)
+  // ⚡ Intake reducido (si no hay replan global): ciudad + día
+  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
     ? buildIntake()
     : buildIntakeLite(city, { start: day, end: day });
 
-  // 🧭 Detección de contexto auroral para permitir múltiples noches
+  // 🧭 Contexto auroral
   let auroraCity=false;
   try{
     const coords = getCoordinatesForCity(city);
     auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
   }catch(_){ auroraCity=false; }
 
-  // 🧠 Instrucción específica para el NUEVO último día:
-  const tailInstruction = isNewTail ? `
-🧩 **Día agregado al final**:
-- Trátalo como **día completo normal**, NO como “día de salida”.
-- Usa ventana base **08:30–19:00** (puedes ajustarla si hay buena razón).
-- Mantén **densidad similar** a otros días (4–7 actividades plausibles).
-- Evita grandes huecos; agrupa por zonas; incluye **imperdibles restantes** si faltan.
-` : '';
+  // 🔒 ACTIVIDADES YA HECHAS (todas menos el día actual) — en clave y en texto
+  const allOtherDays = Object.entries(itineraries[city]?.byDay || {})
+    .filter(([d]) => Number(d)!==Number(day))
+    .flatMap(([,arr]) => arr || []);
+  const doneKeys = new Set(allOtherDays.map(r => activityKey(r.activity)));
+  const doneHuman = [...new Set(allOtherDays.map(r => String(r.activity||'').trim()))].slice(0,100);
 
   const prompt = `
 ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
-Ventanas definidas: ${JSON.stringify(perDay)}  ← Base por día. Puedes ajustar horarios si aporta lógica al plan.
-Filas actuales:
+Ventanas definidas: ${JSON.stringify(perDay)}
+Actividades ya hechas en otros días (evitar repetir): ${JSON.stringify(doneHuman)}
+Filas actuales (editables del día):
 ${JSON.stringify(rowsForOptimization)}
 ${forceReplanBlock}
-${tailInstruction}
 
-🕒 **Horarios inteligentes**:
-- Si no hay horario definido, usa 08:30–19:00 como base.
-- Extiende horarios solo cuando sea razonable:
-  • Auroras: 20:00–02:30 aprox. (nunca diurno).
-  • Cenas/vida nocturna: 19:00–23:30 aprox.
-- Si extiendes una noche, **ajusta el inicio del día siguiente**.
+🕒 **Horarios inteligentes**
+- Base 08:30–19:00 (si no hay ventana definida).
+- Puedes extender horarios (cenas, vida nocturna, auroras).
+- **No dejes huecos diurnos > 60–75 min** sin marcar descanso/almuerzo/traslado.
+- Incluye **almuerzo** (~13:00–14:30) si procede y no existe.
 
-🌍 **Optimización**:
-- Reordena para minimizar traslados y agrupar por zonas.
-- Rellena huecos con opciones plausibles, sin duplicar otros días.
-- Day trips ≤ 2 h por trayecto (ida), si hay tiempo y aportan valor.
-- Valida PLAUSIBILIDAD y SEGURIDAD (evita zonas/restricciones con riesgo).
-- Notas SIEMPRE útiles (nunca vacías ni “seed”).
+🌍 **Optimización**
+- Empieza por **imperdibles** y agrupa por zonas para minimizar traslados.
+- **Evita duplicados** con lo ya hecho (lista arriba). Si choca, propone alternativa de valor en la misma zona.
+- Considera **day trips** (≤ 2 h por trayecto) cuando aporten valor y tiempo.
+- Notas SIEMPRE útiles.
 
-🌌 **Auroras (si aplica)**:
-- En destinos aurorales se permiten **múltiples noches de auroras** (una por cada noche si tiene sentido y clima/latitud lo justifican).
-- No consideres las auroras **duplicadas** si están en **noches distintas**.
-- Usa transporte plausible (“Tour/Bus/Van” o “Auto”) y añade breve justificación en notes (p.ej. \`valid:\`).
+🌌 **Auroras (si aplica)**
+- Multi-noche permitido (no es duplicado si son noches distintas) 20:00–02:30 aprox.
 
-❌ **No duplicar**:
-- No repitas la **misma actividad** ya existente **en el mismo día**.
-- Entre días, evita duplicados salvo **auroras** (permitidas multi-noche en destinos aurorales).
+❌ **No duplicar**
+- No repitas la misma actividad en el mismo día.
+- Entre días evita duplicados salvo **auroras** (multi-noche permitido).
 - Devuelve C {"rows":[...],"replace":false}.
 
 Contexto:
 ${intakeData}
 `.trim();
 
-  // ⏱️ Optimización puntual: timeout menor
-  const ans = await callAgent(prompt, true, { timeoutMs: 35000 });
+  const ans = await callAgent(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // 🧼 FILTRO LOCAL · Evitar duplicados entre días, PERO permitir auroras multi-noche
-    const allExisting = Object.values(itineraries[city].byDay || {})
-      .flat()
-      .filter(r => r.day !== day)
-      .map(r => String(r.activity||'').trim().toLowerCase());
-
+    // 🧼 Anti-duplicados canónicos (otros días)
     normalized = normalized.filter(r=>{
-      const act = String(r.activity||'').trim().toLowerCase();
-      const isAurora = act.includes('aurora') || act.includes('northern light');
-      if(isAurora && auroraCity) return true;       // permitir multi-noche
-      return act && !allExisting.includes(act);
+      const act = String(r.activity||'').trim();
+      if(!act) return false;
+      const key = activityKey(act);
+      const isAurora = key.includes('aurora');
+      if(isAurora && auroraCity) return true; // auroras multi-noche OK
+      return !doneKeys.has(key);
     });
 
-    // 🧭 Post-procesadores (refuerzos v64)
+    // 🧭 Post-procesadores (v64)
     if(typeof applyBufferBetweenRows === 'function'){
-      normalized = applyBufferBetweenRows(normalized);     // Buffers ≥15 min
+      normalized = applyBufferBetweenRows(normalized);
     }
     if(typeof reorderLinearVisits === 'function'){
-      normalized = reorderLinearVisits(normalized);        // Secuencia lineal lógica
+      normalized = reorderLinearVisits(normalized);
     }
     if(typeof ensureAuroraNight === 'function'){
-      normalized = ensureAuroraNight(normalized, city);    // Garantiza ≥1 noche si aplica
+      normalized = ensureAuroraNight(normalized, city);
     }
 
-    // 🧩 Reconstrucción con protegidas (auroras/termales previamente existentes)
-    let finalRows = [...normalized, ...protectedRows];
+    // 🧩 Unir protegidas y rellenar huecos diurnos
+    let combined = [...normalized, ...protectedRows]
+      .sort((a,b)=>(a.start||'') < (b.start||'') ? -1 : 1);
+    combined = fillGapsLocal(combined, perDay);
 
     // ✅ Validación global y push
-    const val = await validateRowsWithAgent(city, finalRows, baseDate);
+    const val = await validateRowsWithAgent(city, combined, baseDate);
     pushRows(city, val.allowed, false);
-
-    // 🔁 Densificación: si el día quedó “corto”, una segunda pasada rápida (una sola vez)
-    try{
-      if(!plannerState) window.plannerState = {};
-      if(!plannerState._densify) plannerState._densify = {};
-      const key = `${city}#${day}`;
-
-      const countNow = (itineraries[city]?.byDay?.[day]||[]).length;
-      const isAuroraOnly = (itineraries[city]?.byDay?.[day]||[]).every(r=>{
-        const a = String(r.activity||'').toLowerCase();
-        return a.includes('aurora') || a.includes('northern light');
-      });
-
-      if(!plannerState._densify[key] && !isAuroraOnly && countNow < 3){
-        plannerState._densify[key] = true;
-
-        const densifyPrompt = `
-${FORMAT}
-Ciudad: ${city}
-Día: ${day}
-Objetivo: **Densificar** el día para cubrir razonablemente la ventana 08:30–19:00 con 4–7 actividades plausibles, sin duplicar lo ya existente.
-- Mantén lógica por zonas y tiempos de traslado realistas.
-- Evita solapes; añade buffers ≥15 min.
-- Devuelve C {"rows":[...],"replace":false}.
-Contexto (compacto del día actual):
-${buildIntakeLite(city, { start: day, end: day })}
-`.trim();
-
-        const ans2 = await callAgent(densifyPrompt, true, { timeoutMs: 25000 });
-        const parsed2 = parseJSON(ans2);
-        if(parsed2?.rows){
-          const rows2 = parsed2.rows.map(r=>normalizeRow({...r, day}));
-          const val2  = await validateRowsWithAgent(city, rows2, baseDate);
-          pushRows(city, val2.allowed, false);
-        }
-      }
-    }catch(_e){ /* densify best-effort */ }
   }
 }
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
-   — Optimizada con intents extendidos, day trips y auroras
-   — v65.q2:
-     • “Un día más” y “varios días más” añaden días al FINAL sin tocar los anteriores
-     • Se define originalDays al primer extendido (para que la Sección 18 detecte “tail”)
-     • Cada nuevo día crea su ventana perDay 08:30–19:00 y se optimiza individualmente
-     • Se evita rebalanceo global salvo que el usuario lo solicite expresamente
+   — Optimizada con intents extendidos, day trips y auroras (anti-duplicados robustos)
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2512,7 +2553,7 @@ async function onSend(){
   chatMsg(text,'user');
   $chatI.value='';
 
-  // Colecta hotel/transporte (primer paso antes de generar itinerarios)
+  // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
@@ -2520,22 +2561,19 @@ async function onSend(){
       : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
-
-    // 🧠 Guardar hotel y transporte aunque sea texto libre (zona, dirección, coordenadas o link)
     upsertCityMeta({ city, hotel: text, transport });
     metaProgressIndex++;
     askNextHotelTransport();
     return;
   }
 
-  // 🆕 Detectar cambio de hotel después de haber generado itinerario
+  // Cambio de hotel
   const hotelChangeMatch = text.match(/^(?:hotel|zona|direcci[oó]n):?\s*(.+)$/i);
   if(hotelChangeMatch && activeCity){
     const newHotel = hotelChangeMatch[1].trim();
     const city = activeCity;
     if(!cityMeta[city]) cityMeta[city] = { baseDate:null, hotel:'', transport:'', perDay:[] };
     const prevHotel = cityMeta[city].hotel || '';
-
     if(newHotel && newHotel !== prevHotel){
       cityMeta[city].hotel = newHotel;
       chatMsg(`🏨 Actualicé el hotel/zona de <strong>${city}</strong>. Reajustando itinerario…`, 'ai');
@@ -2549,34 +2587,33 @@ async function onSend(){
     return;
   }
 
-  // Detecta intent
   const intent = intentFromText(text);
 
-  // 0) Preferencia explícita de day trip sin agregar días
-  if(intent.type === 'free_edit' && /\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|algo fuera de la ciudad|un viaje de un d[ií]a|una escapada|salida de un d[ií]a)\b/i.test(text)){
+  // Day trip preferencia libre
+  if(intent.type === 'free_edit' && /\b(tour de un d[ií]a|excursi[oó]n de un d[ií]a|viaje de un d[ií]a|escapada|salida de un d[ií]a)\b/i.test(text)){
     const city = activeCity || savedDestinations[0]?.city;
     if(city){
       if(!plannerState.preferences) plannerState.preferences = {};
       plannerState.preferences.preferDayTrip = true;
-      chatMsg(`🧭 Perfecto — tendré en cuenta incluir una <strong>excursión de 1 día</strong> cerca de <strong>${city}</strong> cuando sea viable.`, 'ai');
+      chatMsg(`🧭 Consideraré una <strong>excursión de 1 día</strong> cerca de <strong>${city}</strong> si aporta valor.`, 'ai');
       await rebalanceWholeCity(city);
       return;
     }
   }
 
-  // 0.b) Preferencia explícita de auroras
+  // Preferencia de auroras
   if(intent.type === 'prefer_aurora'){
     const city = intent.city || activeCity || savedDestinations[0]?.city;
     if(city){
       if(!plannerState.preferences) plannerState.preferences = {};
       plannerState.preferences.preferAurora = true;
-      chatMsg(`🌌 Perfecto — priorizaré <strong>noches de auroras</strong> en <strong>${city}</strong> cuando sea plausible.`, 'ai');
+      chatMsg(`🌌 Priorizaré <strong>noches de auroras</strong> en <strong>${city}</strong> cuando sea plausible.`, 'ai');
       await rebalanceWholeCity(city);
       return;
     }
   }
 
-  // 1) Normalizar "un día más" a add_day_end (y capturar day trip)
+  // Normalizar "un día más"
   if(intent && intent.type==='add_days'){
     const t = text.toLowerCase();
     const isOneMoreDay = /\b(me\s+quedo|quedarme)\s+un\s+d[ií]a\s+m[aá]s\b|\bun\s+d[ií]a\s+m[aá]s\b/.test(t);
@@ -2588,134 +2625,74 @@ async function onSend(){
     }
   }
 
-  // 2) Agregar varios días (N>0) — sin tocar los días previos
+  // Agregar varios días N>0 (sin tocar días previos)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
-    showWOW(true,'Agregando días y optimizando…');
+    showWOW(true,'Agregando días y reoptimizando…');
 
     ensureDays(city);
-    if(!cityMeta[city]) cityMeta[city] = { baseDate:null, hotel:'', transport:'', perDay:[] };
-    if(!itineraries[city]) itineraries[city] = { byDay:{}, baseDate: cityMeta[city].baseDate||null };
-
-    const byDay = itineraries[city].byDay || {};
-    const existingDays = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-    const currentCount = existingDays.length;
-
-    // 🔐 Fijar originalDays si aún no existe (sirve a la Sección 18 para detectar “tail”)
-    if(typeof itineraries[city].originalDays !== 'number' || itineraries[city].originalDays < currentCount){
-      itineraries[city].originalDays = currentCount;
+    if (!itineraries[city].originalDays) {
+      const byDay = itineraries[city].byDay || {};
+      const present = Object.keys(byDay).map(n=>+n);
+      itineraries[city].originalDays = present.length ? Math.max(...present) : 0;
     }
 
-    // Añadir uno a uno
-    for(let i=1; i<=intent.extraDays; i++){
-      const newIndex = Object.keys(itineraries[city].byDay||{}).length + 1;
-      insertDayAt(city, newIndex);
+    addMultipleDaysToCity(city, intent.extraDays);
 
-      // Ventana base 08:30–19:00 (el agente puede ajustarla)
-      if(!cityMeta[city].perDay) cityMeta[city].perDay = [];
-      if(!cityMeta[city].perDay.some(x=>x.day===newIndex)){
-        cityMeta[city].perDay.push({ day:newIndex, start:'08:30', end:'19:00' });
-      }
+    const start = Math.max(1, itineraries[city].originalDays);
+    const total = Object.keys(itineraries[city].byDay||{}).length;
+    await rebalanceWholeCity(city, { start, end: total, dayTripTo: intent.dayTripTo||'' });
 
-      // Optimizar SOLO el nuevo día
-      // (La Sección 18 ya maneja: tail normal, densificación, no “día de salida”)
-      await optimizeDay(city, newIndex);
-    }
-
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y optimicé cada uno sin tocar los días anteriores.`, 'ai');
+    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé desde el último día original hasta el final evitando duplicados.`, 'ai');
     return;
   }
 
-  // 3) Agregar 1 día al FINAL (con o sin day trip)
+  // Agregar 1 día al final (sin tocar días previos)
   if (intent.type === 'add_day_end' && intent.city) {
     const city = intent.city;
     showWOW(true, 'Insertando día y optimizando…');
-    ensureDays(city);
 
+    ensureDays(city);
     const byDay = itineraries[city].byDay || {};
     const days = Object.keys(byDay).map(n => +n).sort((a, b) => a - b);
-    const numericPos = days.length + 1;
 
-    // 🔐 Fijar originalDays si aún no existe
-    if(typeof itineraries[city].originalDays !== 'number' || itineraries[city].originalDays < days.length){
-      itineraries[city].originalDays = days.length;
+    if (!itineraries[city].originalDays) {
+      itineraries[city].originalDays = days.length ? Math.max(...days) : 0;
     }
 
-    // Inserta estructura de día
+    const numericPos = days.length + 1;
     insertDayAt(city, numericPos);
 
-    // Ventana por día para el nuevo día (NO copiar del anterior)
-    if(!cityMeta[city]) cityMeta[city] = { baseDate:null, hotel:'', transport:'', perDay:[] };
-    const hasPD = cityMeta[city].perDay?.some(x=>x.day===numericPos);
-    if(!hasPD){
-      cityMeta[city].perDay.push({ day:numericPos, start:'08:30', end:'19:00' });
-    }
-
-    // (Opcional) Day trip detallado si fue solicitado
     if (intent.dayTripTo) {
       const destTrip = intent.dayTripTo;
-      const start = cityMeta[city].perDay.find(x=>x.day===numericPos)?.start || '08:30';
-
-      const rowsSeed = [{
+      const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
+      pushRows(city, [{
         day: numericPos,
-        start,
-        end: (()=>{ const [H,M]=(start||'08:30').split(':').map(n=>parseInt(n,10)); const t=(H*60+M)+60; const h=String(Math.floor(t/60)%24).padStart(2,'0'); const m=String(t%60).padStart(2,'0'); return `${h}:${m}`; })(),
+        start: baseStart,
+        end: addMinutes(baseStart, 60),
         activity: `Traslado a ${destTrip}`,
         from: `Hotel (${city})`,
         to: destTrip,
         transport: 'Tren/Bus',
         duration: '≈ 1h',
         notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`
-      }];
-      pushRows(city, rowsSeed, false);
-
-      const promptDayTrip = `
-${FORMAT}
-Genera un itinerario **completo y secuencial** de 1 día para visitar **${destTrip}** saliendo desde **${city}** y regresando el mismo día.
-- Trátalo como **día normal** (no día de salida).
-- Ventana base 08:30–19:00 (puedes ajustar si hay buena razón).
-- Traslados claros (Hotel → ${destTrip} → Hotel) y visitas en orden lógico.
-- Evita duplicados con otros días.
-Devuelve C {"rows":[...],"replace":false}.
-`.trim();
-
-      try{
-        const ansTrip = await callAgent(promptDayTrip, true, { timeoutMs: 35000 });
-        const parsedTrip = parseJSON(ansTrip);
-        if (parsedTrip?.rows?.length) {
-          const detailedRows = parsedTrip.rows.map(r => normalizeRow({ ...r, day: numericPos }));
-          // Limpia semilla si el modelo ya incluyó el primer traslado
-          itineraries[city].byDay[numericPos] =
-            (itineraries[city].byDay[numericPos] || []).filter(r => {
-              const f = String(r.from||'').toLowerCase();
-              const t = String(r.to||'').toLowerCase();
-              return !(f===`hotel (${city})`.toLowerCase() && t===destTrip.toLowerCase() && /traslado|viaje/i.test(String(r.activity||'')));
-            });
-          pushRows(city, detailedRows, false);
-          chatMsg(`🧭 Generé un itinerario de excursión a <strong>${destTrip}</strong>.`, 'ai');
-        } else {
-          chatMsg(`⚠️ No logré generar un detalle completo para <strong>${destTrip}</strong>; se mantiene la estructura básica.`, 'ai');
-        }
-      }catch(err){
-        console.error('Error generando day trip:', err);
-        chatMsg(`⚠️ Ocurrió un error al generar el itinerario detallado para ${destTrip}.`, 'ai');
-      }
+      }], false);
     }
 
-    // Optimiza SOLO el nuevo día (Sección 18 manejará densificación si queda corto)
-    await optimizeDay(city, numericPos);
+    const start = Math.max(1, itineraries[city].originalDays);
+    const total = Object.keys(itineraries[city].byDay||{}).length;
+    await rebalanceWholeCity(city, { start, end: total });
 
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Día agregado y plan reoptimizado globalmente.', 'ai');
+    chatMsg('✅ Día agregado y plan reoptimizado (primeros días intactos y sin duplicados).', 'ai');
     return;
   }
 
-  // 4) Quitar día (reoptimiza sólo días posteriores)
+  // Quitar día
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
     showWOW(true,'Eliminando día…');
     removeDayAt(intent.city, intent.day);
@@ -2727,7 +2704,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 5) Intercambiar días
+  // Intercambiar días
   if(intent.type==='swap_day' && intent.city){
     showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
@@ -2741,7 +2718,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 6) Mover actividad entre días
+  // Mover actividad
   if(intent.type==='move_activity' && intent.city){
     showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
@@ -2755,7 +2732,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 7) Sustituir/Eliminar actividad (día visible)
+  // Sustituir/Eliminar actividad
   if(intent.type==='swap_activity' && intent.city){
     const city = intent.city;
     const day  = itineraries[city]?.currentDay || 1;
@@ -2772,7 +2749,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 8) Cambiar horas (ventana por día)
+  // Cambiar horas
   if(intent.type==='change_hours' && intent.city){
     showWOW(true,'Ajustando horarios…');
     const city = intent.city;
@@ -2789,7 +2766,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 9) Agregar ciudad
+  // Agregar ciudad
   if(intent.type==='add_city' && intent.city){
     const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
     const days = intent.days || 2;
@@ -2799,13 +2776,13 @@ Devuelve C {"rows":[...],"replace":false}.
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
     saveDestinations();
     chatMsg(
-      `✅ Añadí <strong>${name}</strong>. Dime tu <strong>hotel/zona</strong> (puede ser zona aproximada, dirección exacta, nombre del hotel o link) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
+      `✅ Añadí <strong>${name}</strong>. Dime tu <strong>hotel/zona</strong> (nombre, zona, dirección o link) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
       'ai'
     );
     return;
   }
 
-  // 10) Eliminar ciudad
+  // Eliminar ciudad
   if(intent.type==='remove_city' && intent.city){
     const name = intent.city.trim();
     savedDestinations = savedDestinations.filter(x=>x.city!==name);
@@ -2816,7 +2793,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 11) Preguntas informativas
+  // Preguntas informativas
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
@@ -2828,7 +2805,7 @@ Devuelve C {"rows":[...],"replace":false}.
     return;
   }
 
-  // 12) Edición libre — reoptimiza sólo días con cambios
+  // Edición libre
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
     if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.'); return; }
@@ -2842,7 +2819,7 @@ Devuelve C {"rows":[...],"replace":false}.
     const prompt = `
 ${FORMAT}
 **Contexto (reducido si es posible):**
-${buildIntakeLite(city, { start: day, end: day })}
+${buildIntakeLite()}
 
 **Ciudad a editar:** ${city}
 **Día visible:** ${day}
@@ -2853,17 +2830,17 @@ ${dayRows}
 **Instrucción del usuario (libre):** ${text}
 
 🕒 Horarios:
-- Usa 08:30–19:00 como base si no hay nada definido.
-- Puedes extender horarios cuando sea razonable (auroras, cenas, tours especiales).
-- Si extiendes el horario de un día, ajusta inteligentemente el inicio del día siguiente.
-- Añade buffers ≥15 min entre actividades.
+- Base 08:30–19:00 si no hay ventana.
+- Se puede extender por cenas/tours/auroras.
+- Evita huecos > 60–75 min sin descanso/almuerzo/traslado.
+- Buffers ≥15 min entre actividades.
 
-- Integra lo pedido SIN borrar lo existente (fusión). 
+- Integra lo pedido SIN borrar lo existente (fusión).
 - Si no se especifica un día concreto, reacomoda toda la ciudad evitando duplicados.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
-    const ans = await callAgent(prompt, true, { timeoutMs: 35000 });
+    const ans = await callAgent(prompt, true);
     const parsed = parseJSON(ans);
 
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
@@ -2881,7 +2858,6 @@ ${dayRows}
       const val = await validateRowsWithAgent(city, rows, baseDate);
       pushRows(city, val.allowed, false);
 
-      // ⚡ Optimiza solo días con cambios
       const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
       await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
 
