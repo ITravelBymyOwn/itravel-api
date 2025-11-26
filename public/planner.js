@@ -1909,19 +1909,43 @@ ${intakeForRange}
       }
     }
 
-    // 🧼 Anti-duplicados LOCAL (doble barrera)
-    // 1) Contra todo lo ya existente ANTES del rango
-    // 2) Contra lo que se vaya proponiendo dentro del mismo rango en este batch
-    const seenInBatch = new Set([...blacklistRange]); // arrancamos con lo que ya existe en el rango
+       // 🧼 Anti-duplicados LOCAL (versión v66-refined)
+    const normalizeKey = (txt) => {
+      if (!txt) return '';
+      return String(txt)
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, '')   // quita tildes
+        .replace(/\b(a|al|la|el|por|en|de|del|las|los)\b/g, '') // quita preposiciones comunes
+        .replace(/s\b/g, '')               // quita plurales simples
+        .replace(/\s+/g, ' ')              // normaliza espacios
+        .trim();
+    };
+
+    const seenInBatch = new Set([...blacklistRange].map(normalizeKey));
+
     rows = (rows || []).filter(r => {
-      const act = normalizeAct(r.activity);
-      if (!act) return false;
-      // permitir auroras repetidas en noches distintas: se filtran en validador/optimizador diario
-      const isAurora = act.includes('aurora') || act.includes('northern light');
+      const raw = r.activity || '';
+      const key = normalizeKey(raw);
+      if (!key) return false;
+      const isAurora = key.includes('aurora') || key.includes('northern light');
       if (isAurora) return true;
-      if (existingActsGlobal.has(act)) return false; // ya estaba en días previos
-      if (seenInBatch.has(act)) return false;        // repetido en el mismo rango
-      seenInBatch.add(act);
+
+      // check si coincide parcialmente con algo ya existente
+      const alreadyExists = [...existingActsGlobal].some(a => {
+        const ref = normalizeKey(a);
+        return ref.includes(key) || key.includes(ref);
+      });
+
+      if (alreadyExists || seenInBatch.has(key)) return false;
+      seenInBatch.add(key);
+
+      // guarda en cache global si plannerState lo permite
+      if (plannerState?.existingActs) {
+        if (!plannerState.existingActs[city]) plannerState.existingActs[city] = new Set();
+        plannerState.existingActs[city].add(key);
+      }
+
       return true;
     });
 
