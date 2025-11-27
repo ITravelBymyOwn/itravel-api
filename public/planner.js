@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v66
-   Base: v65
+   ITRAVELBYMYOWN · PLANNER v68
+   Base: v67
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -1791,7 +1791,8 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo masivo tras cambios (agregar días / day trip pedido)
-   Base v65 + anti-duplicados v66 + fallback por día (robusto)
+   Base v65 exacta + refuerzo anti-duplicados v66 (rango selectivo + blacklist)
+   REGLAS: reoptimiza (último día original) + (días nuevos), mantiene 1..N-1 intactos, sin duplicados.
 ================================= */
 async function rebalanceWholeCity(city, opts = {}) {
   const data = itineraries[city];
@@ -1800,77 +1801,91 @@ async function rebalanceWholeCity(city, opts = {}) {
     return;
   }
 
+  // Total de días actuales luego del cambio
   const totalDays = Object.keys(data.byDay || {}).length;
 
-  // Ventanas por día actuales (con fallback a DEFAULT_START/END)
+  // Ventanas por día actuales (fallback a DEFAULT_START/END)
   const perDay = Array.from({ length: totalDays }, (_, i) => {
     const src = (cityMeta[city]?.perDay || []).find(x => x.day === i + 1) || { start: DEFAULT_START, end: DEFAULT_END };
     return { day: i + 1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
   });
 
-  const baseDate  = data.baseDate || cityMeta[city]?.baseDate || '';
+  const baseDate   = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo || '').trim();
 
-  // Rango a reequilibrar: desde el último día original hasta el nuevo final,
-  // salvo que se indique start/end explícitos
+  // Marca “originalDays” indica cuántos días tenía la ciudad ANTES de agregar más.
+  // Rango a reoptimizar = [originalDays, totalDays]
+  // Si no existe la marca (caso borde), reoptimiza solo el último día.
   const originalDays = Number(itineraries[city]?.originalDays || 0);
-  const defaultStart = Math.max(1, originalDays || totalDays);
-  const startDay = Math.max(1, Number.isInteger(opts.start) ? opts.start : defaultStart);
-  const endDay   = Math.min(totalDays, Number.isInteger(opts.end) ? opts.end : totalDays);
+  const defaultStart = originalDays > 0 ? Math.min(originalDays, totalDays) : Math.max(1, totalDays);
+  const startDay     = Math.max(1, Number.isInteger(opts.start) ? opts.start : defaultStart);
+  const endDay       = Math.min(totalDays, Number.isInteger(opts.end) ? opts.end : totalDays);
 
   const lockedDaysText = startDay > 1 ? `Mantén intactos los días 1 a ${startDay - 1}.` : '';
+
+  // ¿Alguna bandera de replan forzado?
   const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
-  // ===== BLACKLIST global (días intocables) + de rango =====
-  const normalizeAct = s => String(s || '').trim().toLowerCase();
+  // ===== Blacklists anti-duplicados =====
+  const norm = s => String(s || '').trim().toLowerCase();
 
+  // 1) Actividades de los días preservados (1..startDay-1) → jamás repetir
   const existingActsGlobal = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) < startDay)
-      .flatMap(([_, rows]) => rows.map(r => normalizeAct(r.activity)))
+      .flatMap(([_, rows]) => rows.map(r => norm(r.activity)))
       .filter(Boolean)
   );
 
+  // 2) Actividades ya en el rango (punto de partida) → evita repetirte en el propio batch
   const blacklistRange = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) >= startDay && Number(d) <= endDay)
-      .flatMap(([_, rows]) => rows.map(r => normalizeAct(r.activity)))
+      .flatMap(([_, rows]) => rows.map(r => norm(r.activity)))
       .filter(Boolean)
   );
 
-  // Intake del RANGO (ligero y específico)
+  // Intake reducido al rango
   const intakeForRange = (() => {
     try { return buildIntakeLite(city, { start: startDay, end: endDay }); }
     catch { return buildIntake(); }
   })();
 
-  // ===== PROMPT principal (rango) =====
+  // ===== Prompt =====
   const prompt = `
 ${FORMAT}
 **ROL:** Reequilibra la ciudad "${city}" **SOLO** entre los días ${startDay} y ${endDay}. ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-- Respeta ventanas por día: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}, pero puedes extender si tiene sentido (cenas, noche, auroras, termales).
-- Prioriza imperdibles y reparte por temas. Sin huecos irrazonables.
+- Respeta ventanas por día: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Prioriza imperdibles reales, agrupa por zonas, evita huecos irrazonables.
+
+🧩 **Regla de “día suave” (sin huecos):**
+- El **primer día del rango (${startDay})** es el antiguo **último día original**.
+- Debe ser **de menor intensidad**, pero **día completo**: paseos, miradores, cafés, mercados, relax en playas/parques, atardeceres, etc.
+- Nada de dejar la mayor parte del día vacío: rellena con actividades plausibles y buffers ≥15 min.
 
 🧭 Day trips:
-- Máximo 1 dentro del rango si aporta valor (**ida ≤ ${(totalDays > 5) ? 3 : 2} h** por trayecto).
-${wantedTrip ? `- Preferencia explícita de day trip: "${wantedTrip}". Úsalo una sola vez si es razonable.` : ''}
+- Puedes sugerir **máximo 1** excursión de 1 día dentro del rango si aporta valor (ida ≤ ${Object.keys(data.byDay || {}).length > 5 ? 3 : 2} h).
+${wantedTrip ? `- El usuario pidió "${wantedTrip}": úsalo exactamente 1 día si es razonable.` : ''}
 
 ❌ **NO DUPLICAR (OBLIGATORIO)**:
-- No repitas actividades ya existentes **en días anteriores**:
-${JSON.stringify([...existingActsGlobal].slice(0, 100))}
-- Evita duplicarte **dentro del mismo rango** (si propones algo el ${startDay}, no lo repitas el ${startDay+1}, etc.). Sustituye por alternativas de valor.
+- No repitas actividades ya existentes en días previos (1..${startDay - 1}). Lista (case-insensitive):
+${JSON.stringify([...existingActsGlobal].slice(0, 120))}
+- Tampoco te dupliques dentro del **mismo rango**: si algo lo propones en un día, evita repetirlo en otro.
+- Si una actividad ya está cubierta, sugiere una **alternativa distinta** de valor equivalente.
 
 🕒 Horarios:
-- Base 08:30–19:00, con buffers ≥15 min y sin solapes. Puedes extender con cenas o auroras (20:00–02:30, solo nocturnas).
+- Base 08:30–19:00; puedes extender para cenas/vida nocturna o auroras (20:00–02:30).
+- Ajusta inteligentemente para evitar solapes y añade buffers ≥15 min.
 
-🔒 Seguridad/plausibilidad:
-- Evita restricciones/evidentes riesgos. Auroras si latitud/fecha lo permiten (marca "valid:" en notes). Termales: estadía ≥3 h.
+🔒 Seguridad / plausibilidad:
+- Evita zonas/horarios con riesgo o restricciones.
+- Auroras (si plausible por latitud/fecha): nocturnas, transporte lógico; pon “valid:” en notes.
+- Termales (tipo Blue Lagoon): recomienda ≥3 h.
 
-📝 Notas:
-- Siempre útiles (no vacías ni “seed”) con tips de reserva, accesibilidad y contexto.
+📝 Notas: siempre útiles (nunca vacías ni “seed”).
 
-Contexto (rango):
+Contexto (solo rango):
 ${intakeForRange}
 `.trim();
 
@@ -1880,7 +1895,7 @@ ${intakeForRange}
     const ans = await callAgent(prompt, true, { cityName: city, baseDate });
     const parsed = parseJSON(ans);
 
-    // Normalización de filas con compatibilidad múltiple
+    // Normalización tolerante a varios formatos
     let rows = [];
     if (parsed && (parsed.rows || parsed.destinations || parsed.itineraries)) {
       if (parsed.rows) {
@@ -1896,67 +1911,57 @@ ${intakeForRange}
       }
     }
 
-    // ===== Si el agente no retornó JSON válido o vino vacío ⇒ Fallback por día =====
-    const needPerDayFallback = !rows || rows.length === 0;
+    // Anti-duplicados local (v66-refined)
+    const normalizeKey = (txt) => {
+      if (!txt) return '';
+      return String(txt)
+        .toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\b(a|al|la|el|por|en|de|del|las|los)\b/g, '')
+        .replace(/s\b/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+    const seenInBatch = new Set([...blacklistRange].map(normalizeKey));
 
-    // Limpia el rango antes de reescribir (solo el rango)
+    rows = (rows || []).filter(r => {
+      const raw = r.activity || '';
+      const key = normalizeKey(raw);
+      if (!key) return false;
+
+      const isAurora = key.includes('aurora') || key.includes('northern light');
+      if (isAurora) return true;
+
+      // Ya en días preservados
+      const clashPrev = [...existingActsGlobal].some(a => {
+        const ref = normalizeKey(a);
+        return ref.includes(key) || key.includes(ref);
+      });
+      if (clashPrev || seenInBatch.has(key)) return false;
+
+      seenInBatch.add(key);
+      if (plannerState?.existingActs) {
+        if (!plannerState.existingActs[city]) plannerState.existingActs[city] = new Set();
+        plannerState.existingActs[city].add(key);
+      }
+      return true;
+    });
+
+    // Validación general (horarios, buffers, etc.)
+    const val = await validateRowsWithAgent(city, rows, baseDate);
+
+    // Merge: solo filas del rango
+    const filteredByRange = (val.allowed || []).filter(r => {
+      const d = Number(r.day) || startDay;
+      return d >= startDay && d <= endDay;
+    });
+    pushRows(city, filteredByRange, !!forceReplan);
+
+    // Optimiza SOLO los días del rango
     for (let d = startDay; d <= endDay; d++) {
-      itineraries[city].byDay[d] = (itineraries[city].byDay[d] || []).filter(() => false);
+      await optimizeDay(city, d);
     }
 
-    if (needPerDayFallback) {
-      // Genera día por día con optimizeDay (rápido y enfocado)
-      for (let d = startDay; d <= endDay; d++) {
-        await optimizeDay(city, d);
-      }
-    } else {
-      // ===== Anti-duplicados LOCAL de batch =====
-      const normalizeKey = (txt) => {
-        if (!txt) return '';
-        return String(txt)
-          .toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g, '')
-          .replace(/\b(a|al|la|el|por|en|de|del|las|los)\b/g, '')
-          .replace(/s\b/g, '')
-          .replace(/\s+/g, ' ')
-          .trim();
-      };
-
-      const seenInBatch = new Set([...blacklistRange].map(normalizeKey));
-
-      rows = (rows || []).filter(r => {
-        const raw = r.activity || '';
-        const key = normalizeKey(raw);
-        if (!key) return false;
-
-        const isAurora = key.includes('aurora') || key.includes('northern light');
-        if (isAurora) return true;
-
-        const existsBefore = [...existingActsGlobal].some(a => {
-          const ref = normalizeKey(a);
-          return ref.includes(key) || key.includes(ref);
-        });
-
-        if (existsBefore || seenInBatch.has(key)) return false;
-        seenInBatch.add(key);
-        return true;
-      });
-
-      // Validación + push SOLO del rango
-      const val = await validateRowsWithAgent(city, rows, baseDate);
-      const filteredByRange = (val.allowed || []).filter(r => {
-        const d = Number(r.day) || startDay;
-        return d >= startDay && d <= endDay;
-      });
-      pushRows(city, filteredByRange, false);
-
-      // Optimiza día por día el rango ya escrito
-      for (let d = startDay; d <= endDay; d++) {
-        await optimizeDay(city, d);
-      }
-    }
-
-    // Render final
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
@@ -1967,7 +1972,6 @@ ${intakeForRange}
     if (forceReplan && plannerState?.forceReplan) {
       delete plannerState.forceReplan[city];
     }
-
   } catch (err) {
     console.warn('rebalanceWholeCity error', err);
     showWOW(false);
@@ -2464,6 +2468,7 @@ ${intakeData}
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
    — Optimizada con intents extendidos, day trips y auroras (anti-duplicados robustos)
+   — v66.2: rango dinámico = (último día existente ANTES de agregar) … (nuevo total)
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2549,20 +2554,35 @@ async function onSend(){
     showWOW(true,'Agregando días y reoptimizando…');
 
     ensureDays(city);
-    if (!itineraries[city].originalDays) {
-      const byDay = itineraries[city].byDay || {};
-      const present = Object.keys(byDay).map(n=>+n);
-      itineraries[city].originalDays = present.length ? Math.max(...present) : 0;
-    }
+
+    // ⏱️ capturar el total ANTES de agregar (último día existente)
+    const byDayPre  = itineraries[city].byDay || {};
+    const prevTotal = Object.keys(byDayPre).length || 0;      // este será el inicio del rango
+    // actualizar referencia para siguientes adiciones
+    itineraries[city].originalDays = prevTotal;
+
+    // 🆕 Fijar replan del rango (último anterior … nuevo total)
+    if (!plannerState.forceReplan) plannerState.forceReplan = {};
+    plannerState.forceReplan[city] = true;
 
     addMultipleDaysToCity(city, intent.extraDays);
 
-    const start = Math.max(1, itineraries[city].originalDays);
+    // Blindar ventanas por día para el rango (previo último + nuevos)
+    if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
+    cityMeta[city].perDay = cityMeta[city].perDay || [];
+    const ensureWindow = (d)=>{
+      let pd = cityMeta[city].perDay.find(x=>x.day===d);
+      if(!pd){ pd = {day:d, start:DEFAULT_START, end:DEFAULT_END}; cityMeta[city].perDay.push(pd); }
+      if(!pd.start) pd.start = DEFAULT_START;
+      if(!pd.end)   pd.end   = DEFAULT_END;
+    };
     const total = Object.keys(itineraries[city].byDay||{}).length;
-    await rebalanceWholeCity(city, { start, end: total, dayTripTo: intent.dayTripTo||'' });
+    for(let d=prevTotal; d<=total; d++) ensureWindow(d);
+
+    await rebalanceWholeCity(city, { start: prevTotal, end: total, dayTripTo: intent.dayTripTo||'' });
 
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé desde el último día original hasta el final evitando duplicados.`, 'ai');
+    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé desde el último día existente hasta el final evitando duplicados.`, 'ai');
     return;
   }
 
@@ -2573,17 +2593,33 @@ async function onSend(){
 
     ensureDays(city);
     const byDay = itineraries[city].byDay || {};
-    const days = Object.keys(byDay).map(n => +n).sort((a, b) => a - b);
+    const days  = Object.keys(byDay).map(n => +n).sort((a,b)=>a-b);
 
-    if (!itineraries[city].originalDays) {
-      itineraries[city].originalDays = days.length ? Math.max(...days) : 0;
-    }
+    // ⏱️ capturar el total ANTES de insertar (último día existente)
+    const prevTotal = days.length || 0;
+    itineraries[city].originalDays = prevTotal;  // actualizar referencia
 
-    const numericPos = days.length + 1;
+    // 🆕 Forzar replan del rango (último anterior + nuevo)
+    if (!plannerState.forceReplan) plannerState.forceReplan = {};
+    plannerState.forceReplan[city] = true;
+
+    const numericPos = prevTotal + 1;
     insertDayAt(city, numericPos);
 
+    // Blindar ventanas por día para {prevTotal, numericPos}
+    if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
+    cityMeta[city].perDay = cityMeta[city].perDay || [];
+    const ensureWindow = (d)=>{
+      let pd = cityMeta[city].perDay.find(x=>x.day===d);
+      if(!pd){ pd = {day:d, start:DEFAULT_START, end:DEFAULT_END}; cityMeta[city].perDay.push(pd); }
+      if(!pd.start) pd.start = DEFAULT_START;
+      if(!pd.end)   pd.end   = DEFAULT_END;
+    };
+    ensureWindow(prevTotal);
+    ensureWindow(numericPos);
+
     if (intent.dayTripTo) {
-      const destTrip = intent.dayTripTo;
+      const destTrip  = intent.dayTripTo;
       const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
       pushRows(city, [{
         day: numericPos,
@@ -2598,9 +2634,8 @@ async function onSend(){
       }], false);
     }
 
-    const start = Math.max(1, itineraries[city].originalDays);
     const total = Object.keys(itineraries[city].byDay||{}).length;
-    await rebalanceWholeCity(city, { start, end: total });
+    await rebalanceWholeCity(city, { start: prevTotal, end: total });
 
     renderCityTabs();
     setActiveCity(city);
@@ -2644,7 +2679,7 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
-    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
+    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
     return;
@@ -2858,6 +2893,7 @@ document.addEventListener('input', (e)=>{
    SECCIÓN 21 · INIT y listeners
    (v55.1 añade: validación previa de fechas, botón flotante Info Chat
     y reset con modal; mantiene startPlanning de v54)
+   + FIX: Auto-recovery para habilitar “Iniciar planificación”
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -2895,17 +2931,43 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', saveDestinations);
 
+/* ===== FIX: Auto-recovery para habilitar start ===== */
+function formHasBasics(){
+  const row = qs('.city-row', $cityList);
+  if(!row) return false;
+  const city = (qs('.city', row)?.value||'').trim();
+  const country = (qs('.country', row)?.value||'').trim();
+  const days = parseInt(qs('.days', row)?.value||'0', 10);
+  const base = (qs('.baseDate', row)?.value||'').trim();
+  return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
+}
+function enableStartIfReady(){
+  if($start){
+    if(formHasBasics()) $start.disabled = false;
+  }
+}
+// Re-evalúa cuando el usuario escribe/cambia
+document.addEventListener('input', (e)=>{
+  if(e.target && (
+     e.target.classList?.contains('city') ||
+     e.target.classList?.contains('country') ||
+     e.target.classList?.contains('days') ||
+     e.target.classList?.contains('baseDate')
+  )){
+    enableStartIfReady();
+  }
+});
+
 /* ===== Recuperación/inyector del botón Reset si no existe ===== */
 function ensureResetButton(){
   let btn = document.getElementById('reset-planner');
   if(!btn){
-    const bar = document.querySelector('#actions-bar') || document.body; // contenedor de acciones si existe
+    const bar = document.querySelector('#actions-bar') || document.body;
     btn = document.createElement('button');
     btn.id = 'reset-planner';
     btn.className = 'btn warn';
     btn.textContent = 'Reiniciar planificación';
     btn.setAttribute('type','button');
-    // Ubícalo al final del contenedor de acciones o en body como fallback
     (bar || document.body).appendChild(btn);
   }
   return btn;
@@ -2953,7 +3015,7 @@ function bindReset(){
       isItineraryLocked = false;
       activeCity = null;
 
-      // 🔄 Limpiar overlays/tooltips si están activos
+      // 🔄 Limpiezas UI
       try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
       qsa('.date-tooltip').forEach(t => t.remove());
 
@@ -2967,7 +3029,6 @@ function bindReset(){
       const $bu = qs('#budget');     if($bu) $bu.value = '';
       const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
 
-      // 🔄 plannerState
       if (typeof plannerState !== 'undefined') {
         plannerState.destinations = [];
         plannerState.specialConditions = '';
@@ -2983,7 +3044,6 @@ function bindReset(){
       overlay.classList.remove('active');
       setTimeout(()=>overlay.remove(), 300);
 
-      // UX
       if ($sidebar) $sidebar.classList.remove('disabled');
       if ($infoFloating){
         $infoFloating.style.pointerEvents = 'auto';
@@ -2991,6 +3051,9 @@ function bindReset(){
         $infoFloating.disabled = false;
       }
       if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+
+      // Tras reset, vuelve a evaluar habilitación de start
+      enableStartIfReady();
 
       const firstCity = qs('.city-row .city');
       if (firstCity) firstCity.focus();
@@ -3012,8 +3075,11 @@ function bindReset(){
 }
 
 // ▶️ Start: valida fechas y luego ejecuta startPlanning()
+// FIX: si el botón quedó deshabilitado por error, intenta validar e iniciar igual
 $start?.addEventListener('click', ()=>{
   if(!validateBaseDatesDMY()) return;
+  // fuerza habilitar si el formulario está bien
+  $start.disabled = false;
   startPlanning();
 });
 $send?.addEventListener('click', onSend);
@@ -3109,5 +3175,7 @@ function bindInfoChatListeners(){
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
-  bindReset(); // << asegura botón y listener de "Reiniciar planificación"
+  bindReset();
+  // habilita start si el formulario ya estaba completo tras un hot-reload
+  enableStartIfReady();
 });
