@@ -2862,7 +2862,6 @@ document.addEventListener('input', (e)=>{
 $addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
-  // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
   for(const r of rows){
@@ -2870,7 +2869,6 @@ function validateBaseDatesDMY(){
     const v = (el?.value||'').trim();
     if(!v || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(v) || !parseDMY(v)){
       firstInvalid = el;
-      // microanimación
       el?.classList.add('shake-highlight');
       setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
       break;
@@ -2897,109 +2895,123 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', saveDestinations);
 
+/* ===== Recuperación/inyector del botón Reset si no existe ===== */
+function ensureResetButton(){
+  let btn = document.getElementById('reset-planner');
+  if(!btn){
+    const bar = document.querySelector('#actions-bar') || document.body; // contenedor de acciones si existe
+    btn = document.createElement('button');
+    btn.id = 'reset-planner';
+    btn.className = 'btn warn';
+    btn.textContent = 'Reiniciar planificación';
+    btn.setAttribute('type','button');
+    // Ubícalo al final del contenedor de acciones o en body como fallback
+    (bar || document.body).appendChild(btn);
+  }
+  return btn;
+}
+
 // ⛔ Reset con confirmación modal (corregido: visible → active)
-qs('#reset-planner')?.addEventListener('click', ()=>{
-  const overlay = document.createElement('div');
-  overlay.className = 'reset-overlay';
+function bindReset(){
+  const $btn = ensureResetButton();
+  $btn.removeAttribute('disabled');
 
-  const modal = document.createElement('div');
-  modal.className = 'reset-modal';
-  modal.innerHTML = `
-    <h3>¿Reiniciar planificación? 🧭</h3>
-    <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
-    <div class="reset-actions">
-      <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
-      <button id="cancel-reset" class="btn ghost">Cancelar</button>
-    </div>
-  `;
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-  setTimeout(()=>overlay.classList.add('active'), 10);
+  $btn.addEventListener('click', ()=>{
+    const overlay = document.createElement('div');
+    overlay.className = 'reset-overlay';
 
-  const confirmReset = overlay.querySelector('#confirm-reset');
-  const cancelReset  = overlay.querySelector('#cancel-reset');
+    const modal = document.createElement('div');
+    modal.className = 'reset-modal';
+    modal.innerHTML = `
+      <h3>¿Reiniciar planificación? 🧭</h3>
+      <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
+      <div class="reset-actions">
+        <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
+        <button id="cancel-reset" class="btn ghost">Cancelar</button>
+      </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    setTimeout(()=>overlay.classList.add('active'), 10);
 
-  confirmReset.addEventListener('click', ()=>{
-    // 🔄 Estado principal
-    $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
-    addCityRow();
-    if ($start) $start.disabled = true;
-    if ($tabs) $tabs.innerHTML='';
-    if ($itWrap) $itWrap.innerHTML='';
-    if ($chatBox) $chatBox.style.display='none';
-    if ($chatM) $chatM.innerHTML='';
-    session = []; hasSavedOnce=false; pendingChange=null;
+    const confirmReset = overlay.querySelector('#confirm-reset');
+    const cancelReset  = overlay.querySelector('#cancel-reset');
 
-    // 🔄 Flags de planificación
-    planningStarted = false;
-    metaProgressIndex = 0;
-    collectingHotels = false;
-    isItineraryLocked = false;
-    activeCity = null;
+    confirmReset.addEventListener('click', ()=>{
+      // 🔄 Estado principal
+      $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+      addCityRow();
+      $start.disabled = true;
+      $tabs.innerHTML=''; $itWrap.innerHTML='';
+      $chatBox.style.display='none'; $chatM.innerHTML='';
+      session = []; hasSavedOnce=false; pendingChange=null;
 
-    // 🔄 Limpiar overlays/tooltips si están activos
-    try { if ($overlayWOW) $overlayWOW.style.display = 'none'; } catch(_) {}
-    qsa('.date-tooltip').forEach(t => t.remove());
+      // 🔄 Flags de planificación
+      planningStarted = false;
+      metaProgressIndex = 0;
+      collectingHotels = false;
+      isItineraryLocked = false;
+      activeCity = null;
 
-    // 🔄 Restaurar formulario lateral a valores por defecto
-    const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-    const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
-    const $yo = qs('#p-young');    if($yo) $yo.value = '0';
-    const $ch = qs('#p-children'); if($ch) $ch.value = '0';
-    const $in = qs('#p-infants');  if($in) $in.value = '0';
-    const $se = qs('#p-seniors');  if($se) $se.value = '0';
-    const $bu = qs('#budget');     if($bu) $bu.value = '';
-    const $cu = qs('#currency');   if($cu) $cu.value = 'USD'; // ✅ FIX: era $value
+      // 🔄 Limpiar overlays/tooltips si están activos
+      try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
+      qsa('.date-tooltip').forEach(t => t.remove());
 
-    // 🔄 Sincronizar plannerState (definido en Sección 1)
-    if (typeof plannerState !== 'undefined') {
-      plannerState.destinations = [];
-      plannerState.specialConditions = '';
-      plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
-      plannerState.budget = '';
-      plannerState.currency = 'USD';
-      plannerState.forceReplan = {};     // 🧼 limpiar banderas de replanificación
-      plannerState.preferences = {};     // 🧼 limpiar preferencias (day trips, auroras, etc.)
-      plannerState.dayTripPending = {};  // 🧼 limpiar flags de day trip pendiente
-      plannerState.existingActs = {};    // 🧼 limpiar cache de actividades existentes
-    }
+      // 🔄 Restaurar formulario lateral
+      const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
+      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
+      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
+      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
+      const $in = qs('#p-infants');  if($in) $in.value = '0';
+      const $se = qs('#p-seniors');  if($se) $se.value = '0';
+      const $bu = qs('#budget');     if($bu) $bu.value = '';
+      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
 
-    overlay.classList.remove('active');
-    setTimeout(()=>overlay.remove(), 300);
+      // 🔄 plannerState
+      if (typeof plannerState !== 'undefined') {
+        plannerState.destinations = [];
+        plannerState.specialConditions = '';
+        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+        plannerState.budget = '';
+        plannerState.currency = 'USD';
+        plannerState.forceReplan = {};
+        plannerState.preferences = {};
+        plannerState.dayTripPending = {};
+        plannerState.existingActs = {};
+      }
 
-    // 🧹 Desbloquear sidebar tras reinicio
-    if ($sidebar) $sidebar.classList.remove('disabled');
-
-    // 🧹 Restaurar Info Floating si aplica
-    if ($infoFloating){
-      $infoFloating.style.pointerEvents = 'auto';
-      $infoFloating.style.opacity = '1';
-      $infoFloating.disabled = false;
-    }
-
-    // 🧹 Desactivar botón de reinicio
-    if ($resetBtn) $resetBtn.setAttribute('disabled','true');
-
-    // UX: enfocar primer input de ciudad
-    const firstCity = qs('.city-row .city');
-    if (firstCity) firstCity.focus();
-  });
-
-  cancelReset.addEventListener('click', ()=>{
-    overlay.classList.remove('active');
-    setTimeout(()=>overlay.remove(), 300);
-  });
-
-  document.addEventListener('keydown', function escHandler(e){
-    if(e.key === 'Escape'){
       overlay.classList.remove('active');
       setTimeout(()=>overlay.remove(), 300);
-      document.removeEventListener('keydown', escHandler);
-    }
-  });
-});
 
-// ▶️ Start: valida fechas (formato v54) y luego ejecuta startPlanning()
+      // UX
+      if ($sidebar) $sidebar.classList.remove('disabled');
+      if ($infoFloating){
+        $infoFloating.style.pointerEvents = 'auto';
+        $infoFloating.style.opacity = '1';
+        $infoFloating.disabled = false;
+      }
+      if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+
+      const firstCity = qs('.city-row .city');
+      if (firstCity) firstCity.focus();
+    });
+
+    cancelReset.addEventListener('click', ()=>{
+      overlay.classList.remove('active');
+      setTimeout(()=>overlay.remove(), 300);
+    });
+
+    document.addEventListener('keydown', function escHandler(e){
+      if(e.key === 'Escape'){
+        overlay.classList.remove('active');
+        setTimeout(()=>overlay.remove(), 300);
+        document.removeEventListener('keydown', escHandler);
+      }
+    });
+  });
+}
+
+// ▶️ Start: valida fechas y luego ejecuta startPlanning()
 $start?.addEventListener('click', ()=>{
   if(!validateBaseDatesDMY()) return;
   startPlanning();
@@ -3014,7 +3026,7 @@ $chatI?.addEventListener('keydown', e=>{
   }
 });
 
-// CTA y upsell (con guardas para evitar null.style)
+// CTA y upsell
 $confirmCTA?.addEventListener('click', ()=>{ 
   isItineraryLocked = true;
   const upsell = qs('#monetization-upsell');
@@ -3029,50 +3041,30 @@ $upsellClose?.addEventListener('click', ()=>{
 document.addEventListener('itbmo:addDays', e=>{
   const { city, extraDays, dayTripTo } = e.detail || {};
   if(!city || !extraDays) return;
-  // Usa la misma lógica de addMultipleDaysToCity
   addMultipleDaysToCity(city, extraDays);
 
-  // 🧠 Determinar rango de rebalanceo dinámico
   const start = itineraries[city]?.originalDays || 1;
   const end = (itineraries[city]?.originalDays || 0) + extraDays;
 
-  // ⚡ Ejecutar rebalanceo selectivo
   rebalanceWholeCity(city, { start, end, dayTripTo });
 });
 
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
-function openInfoModal(){
-  const modal = qs('#info-chat-modal');
-  if(!modal) return;
-  modal.style.display = 'flex';
-  modal.classList.add('active');
-}
-function closeInfoModal(){
-  const modal = qs('#info-chat-modal');
-  if(!modal) return;
-  modal.classList.remove('active');
-  modal.style.display = 'none';
-}
+function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
+function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
 async function sendInfoMessage(){
-  const input = qs('#info-chat-input');
-  const btn   = qs('#info-chat-send');
-  if(!input || !btn) return;
-  const txt = (input.value||'').trim();
-  if(!txt) return;
-  infoChatMsg(txt,'user');
-  input.value='';
-  input.style.height = 'auto'; // reset altura tras envío
-  const ans = await callInfoAgent(txt);
-  infoChatMsg(ans||'');
+  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
+  if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
+  infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
+  const ans = await callInfoAgent(txt); infoChatMsg(ans||'');
 }
 function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
-  const toggleFloating = qs('#info-chat-floating'); // 🆕 soporte flotante
+  const toggleFloating = qs('#info-chat-floating');
   const close  = qs('#info-chat-close');
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
-  // Limpieza previa por si se re-vincula
   toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
@@ -3090,35 +3082,26 @@ function bindInfoChatListeners(){
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
   s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
 
-  // Chat estilo GPT: Enter = enviar / Shift+Enter = salto de línea
   i2?.addEventListener('keydown', (e)=>{
-    if(e.key==='Enter' && !e.shiftKey){
-      e.preventDefault();
-      sendInfoMessage();
-    }
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
   });
 
-  // Textarea auto-ajustable
   if(i2){
     i2.setAttribute('rows','1');
     i2.style.overflowY = 'hidden';
     const maxRows = 10;
     i2.addEventListener('input', ()=>{
       i2.style.height = 'auto';
-      const lineHeight = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
+      const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
       const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${lineHeight * lines + 8}px`;
+      i2.style.height = `${lh * lines + 8}px`;
       i2.scrollTop = i2.scrollHeight;
     });
   }
 
-  // Delegación de respaldo por si el toggle cambia internamente
   document.addEventListener('click', (e)=>{
     const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
-    if(el){
-      e.preventDefault();
-      openInfoModal();
-    }
+    if(el){ e.preventDefault(); openInfoModal(); }
   });
 }
 
@@ -3126,4 +3109,5 @@ function bindInfoChatListeners(){
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
+  bindReset(); // << asegura botón y listener de "Reiniciar planificación"
 });
