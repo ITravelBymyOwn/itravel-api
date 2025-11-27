@@ -2298,7 +2298,8 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras + DEDUPE normalizado v66)
+   (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
+   FIX v66: intake normal por defecto + retry con intake completo si el día queda vacío/pobre
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2370,7 +2371,7 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales)
+  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas en reordenamientos
   const protectedRows = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return act.includes('aurora') || act.includes('northern light') ||
@@ -2399,10 +2400,11 @@ async function optimizeDay(city, day){
 - Devuelve una planificación clara y optimizada.`;
   }
 
-  // ⚡ Intake reducido si no se requiere replan global (rango = solo el día actual)
-  const intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
+  // ⚡ Intake por defecto: LITE global (con contexto suficiente).
+  // Si hay replan explícito, usa el intake completo.
+  let intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
     ? buildIntake()
-    : buildIntakeLite(city, { start: day, end: day });
+    : buildIntakeLite();   // ← RESTAURADO (evita “quedarse sin ideas”)
 
   // 🧭 Detección de contexto auroral para permitir múltiples noches
   let auroraCity=false;
@@ -2411,7 +2413,60 @@ async function optimizeDay(city, day){
     auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
   }catch(_){ auroraCity=false; }
 
-  const prompt = `
+  // ————— función auxiliar de ejecución+postproceso (permite retry con intake completo) —————
+  const runAndPostProcess = async (promptBody, relaxDedup=false) => {
+    const ans = await callAgent(promptBody, true);
+    const parsed = parseJSON(ans);
+    if(!parsed?.rows) return [];
+
+    let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
+
+    // 🧼 FILTRO LOCAL · Evitar duplicados entre días, PERO permitir auroras multi-noche
+    const allExisting = Object.values(itineraries[city].byDay || {})
+      .flat()
+      .filter(r => r.day !== day)
+      .map(r => String(r.activity||'').trim().toLowerCase());
+
+    if (!relaxDedup) {
+      normalized = normalized.filter(r=>{
+        const act = String(r.activity||'').trim().toLowerCase();
+        const isAurora = act.includes('aurora') || act.includes('northern light');
+        if(isAurora && auroraCity) return true;
+        return act && !allExisting.includes(act);
+      });
+    } else {
+      // Dedupe laxo: solo elimina exactos dentro del mismo día
+      const seen = new Set();
+      normalized = normalized.filter(r=>{
+        const key = String(r.activity||'').trim().toLowerCase();
+        if(!key) return false;
+        if(seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+
+    // 🧭 Post-procesadores (refuerzos v64)
+    if(typeof applyBufferBetweenRows === 'function'){
+      normalized = applyBufferBetweenRows(normalized);     // Buffers ≥15 min
+    }
+    if(typeof reorderLinearVisits === 'function'){
+      normalized = reorderLinearVisits(normalized);        // Secuencia lineal lógica
+    }
+    if(typeof ensureAuroraNight === 'function'){
+      normalized = ensureAuroraNight(normalized, city);    // asegura ≥1 noche si aplica
+    }
+
+    // 🧩 Reconstrucción con protegidas (auroras/termales previamente existentes)
+    const finalRows = [...normalized, ...protectedRows];
+
+    // ✅ Validación global y push
+    const val = await validateRowsWithAgent(city, finalRows, baseDate);
+    return val.allowed || [];
+  };
+
+  // Prompt principal
+  const basePrompt = `
 ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
@@ -2449,57 +2504,26 @@ Contexto:
 ${intakeData}
 `.trim();
 
-  const ans = await callAgent(prompt, true);
-  const parsed = parseJSON(ans);
-  if(parsed?.rows){
-    let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
+  // 1) Intento normal (intake LITE + dedupe normal)
+  let allowed = await runAndPostProcess(basePrompt, /*relaxDedup=*/false);
 
-    // 🔑 Normalizador robusto (coincidencias difusas para evitar duplicados)
-    const normalizeKey = (txt) => {
-      if (!txt) return '';
-      return String(txt)
-        .toLowerCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')         // quita tildes
-        .replace(/\b(la|el|las|los|de|del|al|por|en|a|un|una|unos|unas)\b/g,'') // artículos/preps
-        .replace(/\b(visita|recorrido|paseo|explora(r)?|descubre|tour|excursion)\b/g,'') // verbos genéricos
-        .replace(/s\b/g,'')                                      // plural simple
-        .replace(/\s+/g,' ')
-        .trim();
-    };
+  // 2) Retry si quedó pobre (<3 filas “reales” sin contar protegidas)
+  const nonProtected = allowed.filter(r=>{
+    const act = String(r.activity||'').toLowerCase();
+    return !act.includes('aurora') && !act.includes('northern light') &&
+           !act.includes('laguna azul') && !act.includes('blue lagoon');
+  });
+  if (nonProtected.length < 3) {
+    // Cambiamos a intake completo y dedupe laxo
+    intakeData = buildIntake();
+    const retryPrompt = basePrompt.replace(/Contexto:[\s\S]*$/,'Contexto:\n'+intakeData);
+    const allowedRetry = await runAndPostProcess(retryPrompt, /*relaxDedup=*/true);
+    if (allowedRetry?.length) allowed = allowedRetry;
+  }
 
-    // 🧼 FILTRO LOCAL · Evitar duplicados entre días con comparación normalizada
-    const allExistingKeys = new Set(
-      Object.values(itineraries[city].byDay || {})
-        .flat()
-        .filter(r => r.day !== day)
-        .map(r => normalizeKey(r.activity))
-        .filter(Boolean)
-    );
-
-    normalized = normalized.filter(r=>{
-      const key = normalizeKey(r.activity);
-      const isAurora = key.includes('aurora') || key.includes('northern light');
-      if(isAurora && auroraCity) return true; // auroras multi-noche permitidas
-      return key && !allExistingKeys.has(key);
-    });
-
-    // 🧭 Post-procesadores (refuerzos v64)
-    if(typeof applyBufferBetweenRows === 'function'){
-      normalized = applyBufferBetweenRows(normalized);     // Buffers ≥15 min
-    }
-    if(typeof reorderLinearVisits === 'function'){
-      normalized = reorderLinearVisits(normalized);        // Secuencia lineal lógica
-    }
-    if(typeof ensureAuroraNight === 'function'){
-      normalized = ensureAuroraNight(normalized, city);    // Asegura ≥1 noche si aplica
-    }
-
-    // 🧩 Reconstrucción con protegidas
-    const finalRows = [...normalized, ...protectedRows];
-
-    // ✅ Validación y push
-    const val = await validateRowsWithAgent(city, finalRows, baseDate);
-    pushRows(city, val.allowed, false);
+  // Push final si hay algo que agregar
+  if (allowed && allowed.length) {
+    pushRows(city, allowed, false);
   }
 }
 
