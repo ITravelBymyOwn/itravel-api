@@ -2299,7 +2299,7 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    (Base v60 + refuerzos v64 + ajuste multi-noche de auroras)
-   FIX v66: intake normal por defecto + retry con intake completo si el día queda vacío/pobre
+   FIX v66.2: intake LITE por ciudad + lista explícita de “ya cubierto” entre días + retry seguro
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2371,7 +2371,7 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales) para no perderlas en reordenamientos
+  // 🧊 Protege actividades especiales (auroras, Blue Lagoon/termales)
   const protectedRows = rows.filter(r=>{
     const act = (r.activity||'').toLowerCase();
     return act.includes('aurora') || act.includes('northern light') ||
@@ -2400,20 +2400,25 @@ async function optimizeDay(city, day){
 - Devuelve una planificación clara y optimizada.`;
   }
 
-  // ⚡ Intake por defecto: LITE global (con contexto suficiente).
-  // Si hay replan explícito, usa el intake completo.
+  // 🔎 Actividades ya cubiertas en otros días (para que el agente NO las repita)
+  const alreadyCoveredOtherDays = Object.entries(itineraries[city]?.byDay || {})
+    .filter(([d]) => Number(d) !== Number(day))
+    .flatMap(([_, rs]) => rs.map(r => String(r.activity||'').trim()))
+    .filter(Boolean)
+    .slice(0, 80); // no satures
+
+  // ⚡ Intake por defecto: LITE por CIUDAD (no global). Si hay replan, usa completo.
   let intakeData = (hasForceReplan || hasDayTripPending || hasPreferDayTrip)
     ? buildIntake()
-    : buildIntakeLite();   // ← RESTAURADO (evita “quedarse sin ideas”)
+    : buildIntakeLite(city);
 
-  // 🧭 Detección de contexto auroral para permitir múltiples noches
+  // 🧭 Detección auroral
   let auroraCity=false;
   try{
     const coords = getCoordinatesForCity(city);
     auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
   }catch(_){ auroraCity=false; }
 
-  // ————— función auxiliar de ejecución+postproceso (permite retry con intake completo) —————
   const runAndPostProcess = async (promptBody, relaxDedup=false) => {
     const ans = await callAgent(promptBody, true);
     const parsed = parseJSON(ans);
@@ -2421,7 +2426,7 @@ async function optimizeDay(city, day){
 
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // 🧼 FILTRO LOCAL · Evitar duplicados entre días, PERO permitir auroras multi-noche
+    // 🧼 Dedupe entre días (laxo solo en retry)
     const allExisting = Object.values(itineraries[city].byDay || {})
       .flat()
       .filter(r => r.day !== day)
@@ -2435,7 +2440,6 @@ async function optimizeDay(city, day){
         return act && !allExisting.includes(act);
       });
     } else {
-      // Dedupe laxo: solo elimina exactos dentro del mismo día
       const seen = new Set();
       normalized = normalized.filter(r=>{
         const key = String(r.activity||'').trim().toLowerCase();
@@ -2446,26 +2450,22 @@ async function optimizeDay(city, day){
       });
     }
 
-    // 🧭 Post-procesadores (refuerzos v64)
     if(typeof applyBufferBetweenRows === 'function'){
-      normalized = applyBufferBetweenRows(normalized);     // Buffers ≥15 min
+      normalized = applyBufferBetweenRows(normalized);
     }
     if(typeof reorderLinearVisits === 'function'){
-      normalized = reorderLinearVisits(normalized);        // Secuencia lineal lógica
+      normalized = reorderLinearVisits(normalized);
     }
     if(typeof ensureAuroraNight === 'function'){
-      normalized = ensureAuroraNight(normalized, city);    // asegura ≥1 noche si aplica
+      normalized = ensureAuroraNight(normalized, city);
     }
 
-    // 🧩 Reconstrucción con protegidas (auroras/termales previamente existentes)
     const finalRows = [...normalized, ...protectedRows];
-
-    // ✅ Validación global y push
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     return val.allowed || [];
   };
 
-  // Prompt principal
+  // Prompt principal (con “ya cubierto”)
   const basePrompt = `
 ${FORMAT}
 Ciudad: ${city}
@@ -2478,50 +2478,52 @@ ${forceReplanBlock}
 
 🕒 **Horarios inteligentes**:
 - Si no hay horario definido, usa 08:30–19:00 como base.
-- Extiende horarios solo cuando sea razonable:
-  • Auroras: 20:00–02:30 aprox. (nunca diurno).
-  • Cenas/vida nocturna: 19:00–23:30 aprox.
-- Si extiendes una noche, **ajusta el inicio del día siguiente**.
+- Extiende horarios cuando sea razonable (auroras 20:00–02:30; cenas/vida nocturna 19:00–23:30).
+- Si extiendes una noche, ajusta el inicio del día siguiente.
 
 🌍 **Optimización**:
 - Reordena para minimizar traslados y agrupar por zonas.
-- Rellena huecos con opciones plausibles, sin duplicar otros días.
-- Day trips ≤ 2 h por trayecto (ida), si hay tiempo y aportan valor.
-- Valida PLAUSIBILIDAD y SEGURIDAD (evita zonas/restricciones con riesgo).
-- Notas SIEMPRE útiles (nunca vacías ni “seed”).
+- Rellena huecos con opciones plausibles y variadas (barrios, miradores, mercados, cafés), sin duplicar otros días.
+- Day trips ≤ 2 h por trayecto (ida) si aporta valor.
+- Valida PLAUSIBILIDAD y SEGURIDAD.
+
+❌ **NO PROPONGAS lo ya cubierto en otros días de ${city}**:
+${JSON.stringify(alreadyCoveredOtherDays)}
 
 🌌 **Auroras (si aplica)**:
-- En destinos aurorales se permiten **múltiples noches de auroras** (una por cada noche si tiene sentido y clima/latitud lo justifican).
-- No consideres las auroras **duplicadas** si están en **noches distintas**.
-- Usa transporte plausible (“Tour/Bus/Van” o “Auto”) y añade breve justificación en notes (p.ej. \`valid:\`).
+- Se permiten múltiples noches (no es duplicado si son noches distintas).
+- Usa transporte plausible y añade \`valid:\` en notes.
 
 ❌ **No duplicar**:
-- No repitas la **misma actividad** ya existente **en el mismo día**.
-- Entre días, evita duplicados salvo **auroras** (permitidas multi-noche en destinos aurorales).
+- No repitas la misma actividad en el mismo día.
+- Entre días evita duplicados salvo auroras multi-noche.
 - Devuelve C {"rows":[...],"replace":false}.
 
 Contexto:
 ${intakeData}
 `.trim();
 
-  // 1) Intento normal (intake LITE + dedupe normal)
+  // 1) Intento normal (intake LITE por ciudad + dedupe normal)
   let allowed = await runAndPostProcess(basePrompt, /*relaxDedup=*/false);
 
-  // 2) Retry si quedó pobre (<3 filas “reales” sin contar protegidas)
+  // 2) Retry si quedó pobre (<3 filas no protegidas)
   const nonProtected = allowed.filter(r=>{
     const act = String(r.activity||'').toLowerCase();
     return !act.includes('aurora') && !act.includes('northern light') &&
            !act.includes('laguna azul') && !act.includes('blue lagoon');
   });
   if (nonProtected.length < 3) {
-    // Cambiamos a intake completo y dedupe laxo
+    // Reintento: intake completo + recordatorio estricto de “no repetir lista”
     intakeData = buildIntake();
-    const retryPrompt = basePrompt.replace(/Contexto:[\s\S]*$/,'Contexto:\n'+intakeData);
+    const retryPrompt = `
+${basePrompt.replace(/Contexto:[\s\S]*$/,'').trim()}
+Contexto:
+${intakeData}
+`.trim();
     const allowedRetry = await runAndPostProcess(retryPrompt, /*relaxDedup=*/true);
     if (allowedRetry?.length) allowed = allowedRetry;
   }
 
-  // Push final si hay algo que agregar
   if (allowed && allowed.length) {
     pushRows(city, allowed, false);
   }
