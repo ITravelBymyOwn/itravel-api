@@ -1539,8 +1539,9 @@ function showWOW(on, msg){
 
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
-   Base: v60 (exacta) + injertos quirúrgicos v64 (mutex, auroras, termales,
-   fixers, dedupe, validaciones) · Sin parches predefinidos.
+   Base: v68 + fixes canónicos (anti-duplicados fuertes),
+   llamada explícita a purgeGlobalDuplicatesForCity(),
+   y dedupe interno del batch inicial.
    Nota: No cierra overlay aquí para evitar desbloqueo prematuro de UI.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
@@ -1588,7 +1589,7 @@ async function generateCityItinerary(city){
     // 🧭 ¿Replan forzado?
     const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
-    // 🧠 Contexto heurístico (auroras / day trips) — sin “defaults” predefinidos
+    // 🧠 Contexto heurístico (auroras / day trips)
     let heuristicsContext = '';
     let auroraCity=false, auroraSeason=false;
     try{
@@ -1613,7 +1614,7 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
-    // Requisito condicional (no “parche”, solo guía contextual al agente)
+    // Requisito condicional (guía contextual al agente)
     const auroraRequirement = (auroraCity && (auroraSeason || !baseDate)) ? `
 🌌 **Instrucción contextual**:
 - Si es plausible, incluye **al menos una noche** de auroras (20:00–02:30 aprox.), con "valid:" en notes y transporte coherente (Tour/Van/Auto).
@@ -1638,8 +1639,7 @@ ${FORMAT}
 
 🕒 Horarios plausibles:
 - Base 08:30–19:00 si no se indicó algo mejor.
-- Añade buffers ≥15 min. Evita solapes y herencia ciega de horarios entre días.
-- Si extiendes por nocturnas, compensa siguiente día.
+- Añade buffers ≥15 min. Evita solapes y NO reutilices el mismo POI en días distintos salvo que sea una experiencia claramente distinta (p. ej. “cúpula” vs “basílica” y que no exista ya).
 
 🧭 Day trips:
 - Solo si aportan valor y ≤ 2 h por trayecto (ida), regreso mismo día. Itinerario secuencial claro (ida → visitas → regreso).
@@ -1679,10 +1679,21 @@ ${buildIntake()}
         tmpRows=(i?.rows||[]).map(r=>normalizeRow(r));
       }
 
-      // 🧼 Anti-duplicados locales vs lo ya existente en la ciudad
-      const existingActs = Object.values(itineraries[city]?.byDay||{})
-        .flat().map(r=>String(r.activity||'').trim().toLowerCase());
-      tmpRows = tmpRows.filter(r=>!existingActs.includes(String(r.activity||'').trim().toLowerCase()));
+      // 🧼 Anti-duplicados locales vs lo ya existente en la ciudad (clave canónica)
+      const existingCanon = new Set(
+        Object.values(itineraries[city]?.byDay||{})
+          .flat()
+          .map(r => _canonicalPOIKey(r)).filter(Boolean)
+      );
+      const seenBatch = new Set();
+      tmpRows = tmpRows.filter(r=>{
+        const k = _canonicalPOIKey(r);
+        if(!k) return true;               // filas no-POI (traslados, etc.)
+        if(existingCanon.has(k)) return false;
+        if(seenBatch.has(k))   return false;
+        seenBatch.add(k);
+        return true;
+      });
 
       // 🛠️ Fixers globales (si existen en el entorno)
       if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
@@ -1693,7 +1704,7 @@ ${buildIntake()}
       const val = await validateRowsWithAgent(city, tmpRows, baseDate);
       pushRows(city, val.allowed, forceReplan);
 
-      /* ♨️ Refuerzo local termales / Blue Lagoon ≥ 3h (sin suposiciones rígidas) */
+      /* ♨️ Refuerzo termales / Blue Lagoon ≥ 3h (suave) */
       (function enforceThermal3h(){
         const hotWords = ['laguna azul','blue lagoon','bláa lónið','termal','termales','hot spring','thermal bath'];
         const byDay = itineraries[city]?.byDay || {};
@@ -1703,7 +1714,6 @@ ${buildIntake()}
             if(hotWords.some(w=>name.includes(w))){
               const start = toHHMM(r.start);
               const hasStart = !!parseHHMM(start);
-              // Si no trae duración ≥ 3h, ajusta suave (no invade otras actividades)
               const newEnd = hasStart ? addMinutes(start, 180) : r.end;
               const durTxt = String(r.duration||'').toLowerCase();
               const hoursMatch = /(\d+(?:\.\d+)?)\s*h/.exec(durTxt);
@@ -1736,7 +1746,6 @@ ${buildIntake()}
           }
           dayLoads.sort((a,b)=> a.load===b.load ? a.day - b.day : a.load - b.load);
           let chosen = dayLoads[0]?.day || 1;
-          // Evita concentrar auroras el último día si hay alternativa
           if(chosen === dest.days && dayLoads[1]) chosen = dayLoads[1].day;
 
           const auroraRow = normalizeRow({
@@ -1762,7 +1771,8 @@ ${buildIntake()}
         }
       }
 
-      // Render UI (sin cerrar overlay aquí)
+      // ✅ DEDUPE GLOBAL CANÓNICO Y RENDER
+      purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
 
       // Limpieza de flags
@@ -1775,7 +1785,7 @@ ${buildIntake()}
       return;
     }
 
-    // Fallback sin JSON válido — mantén UI y registro
+    // Fallback sin JSON válido
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     chatMsg('⚠️ Fallback local: sin respuesta JSON válida del agente.','ai');
@@ -1791,11 +1801,8 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo masivo tras cambios (agregar días / day trip pedido)
-   v68.1 (base v68) — FIX:
-   - Anti-duplicados robusto por "POI canónico" (no sólo activity|to)
-   - Lista explícita "YA_CUBIERTO" al agente (evita re-proponer Güell/Batlló, etc.)
-   - Rango selectivo y “día suave” se mantienen
-   - Post: optimizeDay(d) + fixDayTimesSequential(d) sólo en el rango
+   Base v68 + dedupe canónico fuerte (previos + rango + lote),
+   “día suave” conservado, y purge global posterior.
 ================================= */
 async function rebalanceWholeCity(city, opts = {}) {
   const data = itineraries[city];
@@ -1806,7 +1813,7 @@ async function rebalanceWholeCity(city, opts = {}) {
 
   const totalDays = Object.keys(data.byDay || {}).length;
 
-  // Ventanas actuales por día
+  // Ventanas por día actuales
   const perDay = Array.from({ length: totalDays }, (_, i) => {
     const src = (cityMeta[city]?.perDay || []).find(x => x.day === i + 1) || { start: DEFAULT_START, end: DEFAULT_END };
     return { day: i + 1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
@@ -1815,7 +1822,7 @@ async function rebalanceWholeCity(city, opts = {}) {
   const baseDate   = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo || '').trim();
 
-  // Rango de trabajo
+  // Rango: desde el último día original (marcado por addMultipleDaysToCity) hasta el final
   const daysNow = Object.keys(data.byDay || {}).map(n => +n);
   const lastNow = daysNow.length ? Math.max(...daysNow) : 1;
 
@@ -1829,42 +1836,17 @@ async function rebalanceWholeCity(city, opts = {}) {
   // ¿Replan forzado?
   const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
-  // ===== Normalizadores para anti-dup =====
-  const _normTxt = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-  const canonicalPOI = (s) => {
-    let t = _normTxt(s||'');
-    t = t
-      .replace(/\b(visita|paseo|recorrido|exploracion|descubre|descubrir|conoce|conocer|almuerzo|cena|cafe|museo|fundacion)\b/g,' ')
-      .replace(/\b(en|por|a|al|la|el|los|las|de|del|hacia)\b/g,' ')
-      .replace(/\s+/g,' ')
-      .trim();
-    return t;
-  };
-  const actCanon = r => canonicalPOI(r.activity || '') || '';
-  const _norm = s => String(s || '').trim().toLowerCase();
-  const _actKey = r => `${_norm(r.activity)}|${_norm(r.to)}`;
-
-  // ===== Listas anti-duplicados =====
-  // A) Canon de "ya cubierto" en días previos al rango
-  const alreadyCoveredCanon = new Set(
-    Object.entries(data.byDay || {})
-      .filter(([d]) => Number(d) < startDay)
-      .flatMap(([, rows]) => rows.map(actCanon))
-      .filter(Boolean)
-  );
-
-  // B) Blacklist por clave (activity|to) para proteger también dentro del rango
+  // ===== Blacklists anti-duplicados (CLAVE CANÓNICA) =====
   const blacklistPrev = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) < startDay)
-      .flatMap(([, rows]) => rows.map(_actKey))
+      .flatMap(([, rows]) => rows.map(_canonicalPOIKey))
       .filter(Boolean)
   );
-
   const blacklistRange = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) >= startDay && Number(d) <= endDay)
-      .flatMap(([, rows]) => rows.map(_actKey))
+      .flatMap(([, rows]) => rows.map(_canonicalPOIKey))
       .filter(Boolean)
   );
 
@@ -1888,13 +1870,13 @@ ${FORMAT}
 - No dejes el día medio vacío: rellena con actividades plausibles y buffers ≥15 min.
 
 🧭 Day trips:
-- Máximo **1** día de excursión dentro del rango si **aporta valor** (ida ≤ ${endDay - startDay + 1 > 5 ? 3 : 2} h).
+- Máximo **1** día de excursión dentro del rango si **aporta valor** (ida ≤ ${endDay - startDay + 1 + (startDay>1 ? (startDay-1) : 0) > 5 ? 3 : 2} h).
 ${wantedTrip ? `- Preferencia del usuario: "${wantedTrip}". Úsala exactamente 1 día si es razonable.` : ''}
 
 ❌ **NO DUPLICAR (OBLIGATORIO)**:
-- No repitas actividades ya cubiertas antes del rango.
-- Lista de POIs ya cubiertos: ${JSON.stringify([...alreadyCoveredCanon].slice(0,80))}
-- Si algo ya está cubierto, propone **alternativa equivalente** en otra zona.
+- No repitas el **mismo POI** ya existente (Sagrada Familia, Parque Güell, Boquería, etc.) en días distintos, salvo experiencia realmente distinta (p. ej. “subir a la cúpula” vs “misa”, y que no exista ya).
+- No te repitas dentro del **mismo rango**.
+- Si algo ya está cubierto, propone **alternativa equivalente** (otro barrio, otro museo, otro mirador).
 
 🕒 Horarios:
 - Base **08:30–19:00**; cenas/vida nocturna OK; auroras **20:00–02:30** (si aplica). Buffers ≥15 min.
@@ -1928,22 +1910,15 @@ ${intakeForRange}
       }
     }
 
-    // Anti-duplicados local: 1) por clave activity|to  2) por POI canónico
-    const seenKeys  = new Set([...blacklistRange, ...blacklistPrev]);
-    const seenCanon = new Set(alreadyCoveredCanon);
-
+    // 🧼 Dedupe por clave canónica respecto a (previos + ya en rango) y dentro del lote
+    const seen = new Set([...blacklistRange, ...blacklistPrev]);
+    const seenBatch = new Set();
     rows = (rows || []).filter(r => {
-      const key   = _actKey(r);
-      const canon = actCanon(r);
-      if (!canon) return false;
-      if (seenCanon.has(canon)) return false;
-      if (key && seenKeys.has(key)) return false;
-      seenCanon.add(canon);
-      if (key) seenKeys.add(key);
-      if (plannerState?.existingActs) {
-        if (!plannerState.existingActs[city]) plannerState.existingActs[city] = new Set();
-        plannerState.existingActs[city].add(key);
-      }
+      const k = _canonicalPOIKey(r);
+      if(!k) return true;                 // dejar traslados/etc.
+      if (seen.has(k)) return false;
+      if (seenBatch.has(k)) return false;
+      seenBatch.add(k);
       return true;
     });
 
@@ -1963,8 +1938,8 @@ ${intakeForRange}
       fixDayTimesSequential(city, d);
     }
 
-    // Limpieza global final (usa canónico para asegurar no-repetición)
-    purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true, useCanonical: true });
+    // Limpieza global final (canónica)
+    purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
 
     // Render/UI
     renderCityTabs();
@@ -1985,6 +1960,7 @@ ${intakeForRange}
     chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?', 'ai');
   }
 }
+
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
@@ -2309,15 +2285,13 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   v68.1 — dedupe global fortalecido (clave y canónico),
-   horarios sanos y duraciones realistas
+   Base v68 + clave canónica de POI + dedupe fuerte inter-días
 ================================= */
 
 // Helpers horarios
 function _tMin(hhmm){ if(!hhmm) return null; const [h,m]=String(hhmm).split(':').map(x=>+x||0); return h*60+m; }
 function _toHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
-function _durToMin(d){ // "1h 15min" | "45min" | "2h" | "0.75h"
-  const s=String(d||'').toLowerCase(); let min=0;
+function _durToMin(d){ const s=String(d||'').toLowerCase(); let min=0;
   const hm=s.match(/(\d+)\s*h/); if(hm) min+=+hm[1]*60;
   const mm=s.match(/(\d+)\s*min/); if(mm) min+=+mm[1];
   if(!hm && !mm){ const f=parseFloat(s.replace(',','.')); if(!isNaN(f)) min+=Math.round(f*60); }
@@ -2325,7 +2299,61 @@ function _durToMin(d){ // "1h 15min" | "45min" | "2h" | "0.75h"
 }
 function _minToDur(min){ if(min<60) return `${min}min`; const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}min`:`${h}h`; }
 
-// Insertar/quitar/demás
+// Normalización de texto
+function _normTxt(s){
+  return String(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\s+/g,' ')
+    .replace(/[\(\[][^\)\]]*[\)\]]/g,'') // quita paréntesis/etiquetas
+    .trim().toLowerCase();
+}
+
+// Palabras vacías comunes en “activity”
+const _POI_STOPWORDS = [
+  'visita a','visita','paseo por','paseo','exploracion de','exploración de',
+  'descubre','recorrido por','recorrido','almuerzo','cena','desayuno',
+  'cafe','café','mercado de','mercado','barrio de','barrio','parque de','parque',
+  'museo de','museo','mirador de','mirador','plaza de','plaza','puerto de','puerto',
+  'catedral de','catedral','basílica de','basilica','castillo de','castillo'
+];
+
+// Extrae nombre “canónico” del POI desde activity|to
+function _canonicalPOIName(r){
+  const a = _normTxt(r.activity);
+  const t = _normTxt(r.to);
+  let base = t || a;
+
+  // elimina stopwords iniciales
+  for(const w of _POI_STOPWORDS){
+    if(base.startsWith(w+' ')) base = base.slice(w.length+1);
+  }
+
+  // reducciones típicas (gaudí, casa/la pedrera, etc.)
+  base = base
+    .replace(/\b(sagrada familia)\b.*/,'sagrada familia')
+    .replace(/\b(parque guell|park guell|parc guell)\b.*/,'parque guell')
+    .replace(/\b(casa batllo|batll[oó])\b.*/,'casa batllo')
+    .replace(/\b(casa mila|la pedrera|pedrera)\b.*/,'casa mila')
+    .replace(/\b(casa vicens)\b.*/,'casa vicens')
+    .replace(/\b(boqueria|la boqueria)\b.*/,'mercado de la boqueria')
+    .replace(/\b(catedral de barcelona|catedral)\b.*/,'catedral de barcelona')
+    .replace(/\b(montjuic|monjuic|montjuïc)\b.*/,'montjuic')
+    .replace(/\b(barrio gotico|barrio g[oó]tico|gothic quarter)\b.*/,'barrio gotico')
+    .replace(/\b(parque de la ciutadella|parc de la ciutadella)\b.*/,'parque de la ciutadella')
+    .replace(/\b(puerto de barcelona|port vell|moll)\b.*/,'puerto de barcelona');
+
+  base = base.replace(/\s+/g,' ').trim();
+  return base || null;
+}
+
+// Clave canónica estable
+function _canonicalPOIKey(r){
+  const name = _canonicalPOIName(r);
+  if(!name) return null;
+  return name; // ya normalizado
+}
+
+// Insertar/quitar/demás (v68 sin cambios funcionales)
 function insertDayAt(city, position){
   ensureDays(city);
   const byDay = itineraries[city].byDay || {};
@@ -2372,52 +2400,19 @@ function moveActivities(city, fromDay, toDay, query=''){
   itineraries[city].byDay=byDay;
 }
 
-// ===== Helpers de normalización/duplicados (v68.1) =====
-function _normTxt(s){
-  return String(s||'')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,' ').trim().toLowerCase();
-}
-function _isAuroraName(s){ return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(s||'')); }
-
-// POI canónico: extrae "la esencia" del lugar para evitar repetirlo con variaciones
-function canonicalPOIName(s){
-  let t = _normTxt(s||'');
-  t = t
-    .replace(/\b(visita|paseo|recorrido|exploracion|descubre|descubrir|conoce|conocer|almuerzo|cena|cafe)\b/g,' ')
-    .replace(/\b(en|por|a|al|la|el|los|las|de|del|hacia)\b/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-  return t;
-}
-function _actKey(r){
-  const a=_normTxt(r.activity), to=_normTxt(r.to);
-  return `${a}|${to}`;
-}
-
-/**
- * Dedupe global por ciudad.
- * - Por defecto mantiene multi-noche de auroras.
- * - Si useCanonical=true, también elimina duplicados por POI canónico (más agresivo).
- */
-function purgeGlobalDuplicatesForCity(city,{allowAuroraMultiNight=true, useCanonical=false}={}){
+// Anti-duplicados global (permite multi-noche de auroras) — **CANÓNICO**
+function _isAuroraName(s){return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(s||''));}
+function purgeGlobalDuplicatesForCity(city,{allowAuroraMultiNight=true}={}){
   const data=itineraries[city]; if(!data) return;
   const byDay=data.byDay||{}; const days=Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   let auroraCity=false; try{ const c=getCoordinatesForCity(city); auroraCity=c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){}
-  const seenKeys=new Set();
-  const seenCanon=new Set();
-
+  const seen=new Set();
   for(const d of days){
     const out=[];
     for(const r of (byDay[d]||[])){
       if(allowAuroraMultiNight && auroraCity && _isAuroraName(r.activity)){ out.push(r); continue; }
-      const key=_actKey(r);
-      const canon=canonicalPOIName(r.activity||'');
-      const dupByKey   = key && seenKeys.has(key);
-      const dupByCanon = useCanonical && canon && seenCanon.has(canon);
-      if(dupByKey || dupByCanon) continue;
-      if(key) seenKeys.add(key);
-      if(useCanonical && canon) seenCanon.add(canon);
+      const k=_canonicalPOIKey(r); if(k && seen.has(k)) continue;
+      if(k) seen.add(k);
       out.push(r);
     }
     byDay[d]=out;
@@ -2446,7 +2441,6 @@ function fixDayTimesSequential(city, day){
     return row;
   });
 
-  // cortar a hardEnd si se pasó (última ligera puede quedar 30–45 min)
   rows = rows.map((r,i)=>{
     if (_isAuroraName(r.activity)) return r;
     const s=_tMin(r.start), e=_tMin(r.end);
@@ -2465,15 +2459,14 @@ function fixDayTimesSequential(city, day){
 function applyRealisticDurations(rows){
   return rows.map(r=>{
     if (_isAuroraName(r.activity)) return r;
-    const a=_normTxt(r.activity), to=_normTxt(r.to);
-    const txt = `${a} ${to}`;
+    const txt = `${_normTxt(r.activity)} ${_normTxt(r.to)}`;
     let min=_durToMin(r.duration)||0;
 
     if (/\bmuse(o|u)|galer[ií]a|museum|gallery/.test(txt)) min = Math.max(min, 90);
     else if (/\bcatedral|basilica|duomo|church|templo/.test(txt)) min = Math.max(min, 75);
     else if (/\bmirador|viewpoint|torre|skydeck|telef[eé]rico/.test(txt)) min = Math.max(min, 45);
-    else if (/\bplaya|barceloneta|beach|parque\b/.test(txt)) min = Math.max(min, 120);
-    else if (/\bmercado|market|boquer[ií]a|san antoni/.test(txt)) min = Math.max(min, 60);
+    else if (/\bplaya|beach|parque\b/.test(txt)) min = Math.max(min, 120);
+    else if (/\bmercado|market|boquer[ií]a/.test(txt)) min = Math.max(min, 60);
 
     const duration = _minToDur(min||60);
     return {...r, duration};
@@ -2482,6 +2475,7 @@ function applyRealisticDurations(rows){
 
 /* ─────────────────────────────────────────────────────────────
    OPTIMIZACIÓN DE DÍA (llamado por 15.3 y operaciones locales)
+   — evita repetir POIs ya presentes en otros días de la ciudad —
 ───────────────────────────────────────────────────────────── */
 async function optimizeDay(city, day){
   const data = itineraries[city];
@@ -2525,9 +2519,8 @@ Filas actuales (no protegidas): ${JSON.stringify(rowsForOptimization)}
 🌍 **Contenido**:
 - Imperdibles no cubiertos, sin duplicar con otros días; agrupa por zonas.
 - Day trip a ≤ 2 h por trayecto SOLO si aporta valor y encaja.
-- Ciudades costeras: considera paseo/barrio marinero si aún no aparece y clima lo permite.
 
-❌ No repitas lo ya existente en otros días (excepto auroras multi-noche).
+❌ No repitas el **mismo POI** ya usado en otros días (Sagrada Familia, Parque Güell, Boquería, Montjuïc, etc.), salvo experiencia realmente distinta y no existente ya.
 Devuelve C {"rows":[...],"replace":false}. Notas SIEMPRE útiles.
 Contexto:
 ${intakeData}
@@ -2538,15 +2531,21 @@ ${intakeData}
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // Evitar duplicados con el resto de días
-    const allExisting = Object.entries(itineraries[city].byDay || {})
-      .filter(([d]) => +d !== day)
-      .flatMap(([,arr]) => arr.map(_actKey));
-
+    // Evitar duplicados con el resto de días (CLAVE CANÓNICA)
+    const allExistingCanon = new Set(
+      Object.entries(itineraries[city].byDay || {})
+        .filter(([d]) => +d !== day)
+        .flatMap(([,arr]) => arr.map(_canonicalPOIKey))
+        .filter(Boolean)
+    );
+    const seenBatch = new Set();
     normalized = normalized.filter(r=>{
-      const isAurora=_isAuroraName(r.activity);
-      if(isAurora && auroraCity) return true;
-      const k=_actKey(r); return k && !allExisting.includes(k);
+      const k=_canonicalPOIKey(r);
+      if(!k) return true;
+      if(allExistingCanon.has(k)) return false;
+      if(seenBatch.has(k)) return false;
+      seenBatch.add(k);
+      return true;
     });
 
     // Duraciones realistas + buffers/orden
@@ -2560,7 +2559,7 @@ ${intakeData}
     pushRows(city, val.allowed, false);
 
     // Limpieza global y fijación de horas de ese día
-    purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true, useCanonical: true });
+    purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
     fixDayTimesSequential(city, day);
   }
 }
