@@ -2264,6 +2264,10 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
+   v69 — Refuerzos globales:
+   - Dedupe inteligente entre días (alias/idiomas) y dentro del mismo día
+   - “Último día original” full-day pero liviano al extender
+   - Día siguiente a día pesado: arranque más tarde y menor carga
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2323,6 +2327,74 @@ function moveActivities(city,fromDay,toDay,query=''){
   itineraries[city].byDay=byDay;
 }
 
+/* ====== Utilidades DEDUPE inteligente (global) ====== */
+// Clave canónica robusta por actividad: Unicode, sin diacríticos, tokens útiles
+function normalizeActivityKey(s){
+  const base = String(s||'')
+    .normalize('NFD').replace(/\p{Diacritic}/gu,'') // quita tildes
+    .replace(/[\(\)\[\]{}.,;:¡!¿?\-_/\\'"`·•]+/g,' ') // fuera signos/punct
+    .toLowerCase();
+
+  // Stopwords multilenguaje genéricas (no específicas de ciudades)
+  const STOP = new Set([
+    'the','a','an','of','and','de','la','el','las','los','y','del','da','do','das','dos',
+    'temple','church','cathedral','basilica','museum','park','plaza','square','palace',
+    'museo','parque','plaza','palacio','iglesia','catedral','basílica','baslica','mirador',
+    'tower','torre','castle','castillo','market','mercado','old','nuevo','nuevo/a','nuevo/a',
+    'old','viejo','antiguo','centro','historic','histórico','historic/a','area','zona'
+  ]);
+
+  return base.split(/\s+/)
+    .filter(t=>t && !STOP.has(t) && t.length>1)
+    .join(' ');
+}
+
+// similitud por Jaccard de tokens (umbral medio para alias/idiomas)
+function similarActivities(a,b, threshold=0.6){
+  const A = new Set(normalizeActivityKey(a).split(' ').filter(Boolean));
+  const B = new Set(normalizeActivityKey(b).split(' ').filter(Boolean));
+  if(A.size===0 || B.size===0) return false;
+  let inter=0;
+  for(const x of A) if(B.has(x)) inter++;
+  const union = A.size + B.size - inter;
+  return (inter/union) >= threshold;
+}
+
+// ¿Actividad “especial” protegida?
+function isProtectedActivity(act){
+  const low = String(act||'').toLowerCase();
+  const hotSpringRegex = /(termal|hot spring|thermal|geothermal)/i;
+  return low.includes('aurora') || low.includes('northern light') || hotSpringRegex.test(low);
+}
+
+// Calcula “carga” del día (heurístico: nº actividades + duración si disponible)
+function dayLoadScore(rows){
+  if(!Array.isArray(rows)||!rows.length) return 0;
+  const count = rows.length;
+  // bonus por duración si viene en formato “xh” u “xx min”
+  let dur = 0;
+  for(const r of rows){
+    const d = String(r?.duration||'').toLowerCase();
+    const m1 = d.match(/(\d+(?:\.\d+)?)\s*h/);
+    const m2 = d.match(/(\d+)\s*min/);
+    if(m1) dur += parseFloat(m1[1])*60;
+    else if(m2) dur += parseInt(m2[1],10);
+    else dur += 45; // heurística si no hay dato
+  }
+  // score: actividades + (minutos/120)
+  return count + (dur/120);
+}
+
+// Dedupe dentro del mismo día (mantiene la primera aparición)
+function removeDuplicatesSameDay(rows){
+  const out=[]; 
+  for(const r of rows){
+    const dup = out.some(x=> similarActivities(x.activity, r.activity));
+    if(!dup) out.push(r);
+  }
+  return out;
+}
+
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2334,20 +2406,15 @@ async function optimizeDay(city, day){
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
   // 🧊 Protege actividades especiales (auroras / termales genéricas)
-  const hotSpringRegex = /(termal|hot spring|thermal|geothermal)/i;
-  const protectedRows = rows.filter(r=>{
-    const act=(r.activity||'').toLowerCase();
-    return act.includes('aurora')||act.includes('northern light')||hotSpringRegex.test(act);
-  });
-  const rowsForOptimization = rows.filter(r=>{
-    const act=(r.activity||'').toLowerCase();
-    return !act.includes('aurora')&&!act.includes('northern light')&&!hotSpringRegex.test(act);
-  });
+  const protectedRows = rows.filter(r=> isProtectedActivity(r.activity));
+  const rowsForOptimization = rows.filter(r=> !isProtectedActivity(r.activity));
 
-  // Flags de replanificación
+  // Flags de replanificación / extensión
   const hasForceReplan = plannerState?.forceReplan?.[city];
   const hasDayTripPending = plannerState?.dayTripPending?.[city];
   const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
+  const originalLast = itineraries[city]?.originalDays || 0;
+  const isLastOriginal = !!originalLast && (day === originalLast) && hasForceReplan;
 
   // 🔁 Intake adaptativo (solo rango actual)
   const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
@@ -2366,30 +2433,55 @@ async function optimizeDay(city, day){
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
+  // ===== Carga del día previo y ajuste “día pesado → siguiente liviano + más tarde” =====
+  const prevRows = (itineraries[city]?.byDay?.[day-1]||[]);
+  const prevScore = dayLoadScore(prevRows);
+  const PREV_HEAVY_THRESHOLD = 6; // ~ 4-6 actividades o >~ 240–360 min acumulados
+  const prevWasHeavy = prevScore >= PREV_HEAVY_THRESHOLD;
+
+  // Ajuste de ventana si el anterior fue pesado (si no hay una definida por el usuario)
+  if(prevWasHeavy && perDay && (!perDay._userLocked)){ // _userLocked si alguna parte de la UI lo marcó
+    // arrancar un poco más tarde
+    const startLater = '09:45';
+    if(!perDay.start || perDay.start < startLater) perDay.start = startLater;
+  }
+
+  // ===== Contexto Anti-duplicados multi-día (inteligente por similitud) =====
+  const allExistingOtherDays = Object.values(itineraries[city].byDay||{})
+    .flat()
+    .filter(r=>r.day!==day)
+    .map(r=>String(r.activity||''));
+
   const prompt=`
 ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
 Ventanas definidas: ${JSON.stringify(perDay)}
-Filas actuales:
+Filas actuales (libres de protegidas):
 ${JSON.stringify(rowsForOptimization)}
 
-📋 **REGLAS INTELIGENTES v66**
+📋 **REGLAS INTELIGENTES v66 + refuerzos v69**
 - Identifica e incluye los **imperdibles de clase mundial** de ${city} antes que otros.
 - Distribuye las experiencias en **temas distintos** (cultura, gastronomía, naturaleza, ocio, compras, relax).
 - Ajusta el plan según clima/temporada: interiores si frío o lluvia, exteriores si templado o verano.
 - Mantén balance energético y pausas; sin más de 3 actividades exigentes seguidas.
 - Si ${city} es costera, incluye paseo marítimo/puerto/playa icónica si el clima lo permite.
 - Day trips de ida ≤ ${maxOneWayHours} h; solo si agrega valor.
-- No dupliques actividades existentes en otros días.
+- **No repitas actividades que ya existen en otros días**, aunque estén con **alias o en otro idioma**. Si detectas equivalentes, propon la **alternativa no repetida**.
+- Dentro del **mismo día**, **no** dupliques actividades ni equivalentes.
 - Auroras (si plausible): noches 20:00–02:30 h, transporte lógico, \`valid:\` en notes.
 - Notas SIEMPRE útiles (no vacías).
-- Horario base 08:30–19:00; puedes extender o ajustar según contexto y energía del día.
+- Horario base 08:30–19:00 (ajustable).
+${prevWasHeavy ? '- El día anterior fue **pesado**: este día debe ser **más ligero** y puede **iniciar más tarde**.\n' : ''}
+${isLastOriginal ? '- Este es el **último día original** tras extender: hazlo **full-day pero liviano**, optimizando con lo que ya existe en días 1..'+(day-1)+'.\n' : ''}
 - Devuelve formato C {"rows":[...],"replace":false}.
 
 Contexto:
 ${intakeData}
+
+Referencia de actividades ya existentes en otros días (para evitar duplicados):
+${JSON.stringify(allExistingOtherDays.slice(0,80))}  // (muestra parcial si es largo)
 `.trim();
 
   const ans = await callAgent(prompt,true,{cityName:city,baseDate});
@@ -2397,26 +2489,28 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // 🔍 Anti-duplicados multi-día (permitir auroras)
-    const allExisting=Object.values(itineraries[city].byDay||{})
-      .flat().filter(r=>r.day!==day)
-      .map(r=>String(r.activity||'').trim().toLowerCase());
-    normalized=normalized.filter(r=>{
-      const act=String(r.activity||'').trim().toLowerCase();
-      const isAurora=act.includes('aurora')||act.includes('northern light');
-      return act && (!allExisting.includes(act) || isAurora);
+    // 🔍 Anti-duplicados multi-día (permitir auroras/termales protegidas)
+    const filteredCrossDays = normalized.filter(r=>{
+      const act = String(r.activity||'');
+      if(!act) return false;
+      if(isProtectedActivity(act)) return true; // se permite coexistir
+      // si es similar a alguna de otros días → fuera
+      return !allExistingOtherDays.some(prev => similarActivities(prev, act));
     });
+
+    // 🧼 Dedupe dentro del mismo día
+    let dedupedSameDay = removeDuplicatesSameDay(filteredCrossDays);
 
     // 🧭 Post-procesadores
     if(typeof applyBufferBetweenRows==='function')
-      normalized=applyBufferBetweenRows(normalized);
+      dedupedSameDay = applyBufferBetweenRows(dedupedSameDay);
     if(typeof reorderLinearVisits==='function')
-      normalized=reorderLinearVisits(normalized);
+      dedupedSameDay = reorderLinearVisits(dedupedSameDay);
     if(typeof ensureAuroraNight==='function')
-      normalized=ensureAuroraNight(normalized,city);
+      dedupedSameDay = ensureAuroraNight(dedupedSameDay,city);
 
-    // 🧩 Reconstrucción
-    const finalRows=[...normalized,...protectedRows];
+    // 🧩 Reconstrucción + protegidas
+    const finalRows=[...dedupedSameDay,...protectedRows];
 
     // Validación y push
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
