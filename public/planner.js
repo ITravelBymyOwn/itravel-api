@@ -1801,8 +1801,12 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo masivo tras cambios (agregar días / day trip pedido)
-   Base v68 + dedupe canónico fuerte (previos + rango + lote),
-   “día suave” conservado, y purge global posterior.
+   v68 base + mejoras definitivas:
+   - Anti-duplicados global con clave canónica (actividad|lugar normalizado)
+   - Cobertura de Contenidos para forzar variedad real (museo, iglesia, barrio, mercado, mar, mirador, Gaudí, etc.)
+   - Rango selectivo (último día original → último día actual)
+   - “Día suave” al inicio del rango (pero de día completo, sin huecos)
+   - Post: optimizeDay(d) + fixDayTimesSequential(d) sólo en el rango
 ================================= */
 async function rebalanceWholeCity(city, opts = {}) {
   const data = itineraries[city];
@@ -1823,6 +1827,7 @@ async function rebalanceWholeCity(city, opts = {}) {
   const wantedTrip = (opts.dayTripTo || '').trim();
 
   // Rango: desde el último día original (marcado por addMultipleDaysToCity) hasta el final
+  // Si no existe marca, reoptimiza solo el último día presente.
   const daysNow = Object.keys(data.byDay || {}).map(n => +n);
   const lastNow = daysNow.length ? Math.max(...daysNow) : 1;
 
@@ -1836,19 +1841,107 @@ async function rebalanceWholeCity(city, opts = {}) {
   // ¿Replan forzado?
   const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
-  // ===== Blacklists anti-duplicados (CLAVE CANÓNICA) =====
+  // ===== Helpers de normalización/alias para dedupe robusto =====
+  const _normTxt = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+  const _canonPlace = (s) => {
+    let t = _normTxt(s)
+      .replace(/\b(seccion|sector|zona)\s+no\s+visitad[ao]\b/g,'')
+      .replace(/\b(seccion|sector|zona)\b/g,'')
+      .replace(/\b(barrio\s+de|el\s+barrio\s+de|barri\s+de)\b/g,'')
+      .replace(/\b(parque\s+de|parc\s+de|park\s+de)\b/g,'')
+      .replace(/\b(museo\s+de|museum\s+of)\b/g,'')
+      .replace(/\s+/g,' ')
+      .trim();
+
+    // Alias frecuentes globales (extensible). Mantener corto y seguro.
+    const alias = {
+      // Barcelona (ejemplos más comunes)
+      'sagrada familia':'sagrada familia',
+      'temple expiatori de la sagrada familia':'sagrada familia',
+      'parque guell':'park guell',
+      'parc guell':'park guell',
+      'park guell':'park guell',
+      'casa batllo':'casa batllo',
+      'la pedrera':'casa mila',
+      'casa mila':'casa mila',
+      'barri gotic':'barrio gotico',
+      'gothic quarter':'barrio gotico',
+      'la rambla':'la rambla',
+      'passeig de gracia':'passeig de gracia',
+      'gracia':'gracia',
+      'montjuic':'montjuic',
+      'mnac':'mnac',
+      'museo nacional de arte de cataluna':'mnac',
+      'playa de la barceloneta':'barceloneta',
+      'barceloneta':'barceloneta',
+      'mercado de la boqueria':'la boqueria',
+      'la boqueria':'la boqueria',
+      'palau de la musica catalana':'palau musica',
+      'museo picasso':'museo picasso',
+      'joan miro':'fundacion joan miro',
+      'fundacion joan miro':'fundacion joan miro',
+      'castillo de montjuic':'castillo montjuic',
+      'mirador de colon':'mirador colon'
+    };
+    return alias[t] || t;
+  };
+  const _actKey = (r) => {
+    const a = _normTxt(r.activity), to = _canonPlace(r.to || r.hacia || '');
+    if(!a && !to) return '';
+    return `${a}|${to}`;
+  };
+
+  // ===== Blacklists anti-duplicados =====
+  // 1) todo lo previo (1..start-1) → jamás repetir
   const blacklistPrev = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) < startDay)
-      .flatMap(([, rows]) => rows.map(_canonicalPOIKey))
+      .flatMap(([, rows]) => rows.map(_actKey))
       .filter(Boolean)
   );
+
+  // 2) punto de partida del propio rango (evita repetirse en batch)
   const blacklistRange = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) >= startDay && Number(d) <= endDay)
-      .flatMap(([, rows]) => rows.map(_canonicalPOIKey))
+      .flatMap(([, rows]) => rows.map(_actKey))
       .filter(Boolean)
   );
+
+  // ===== Cobertura de contenidos (para forzar variedad útil) =====
+  function rowCategory(r){
+    const txt = _normTxt(`${r.activity} ${r.to} ${r.hacia} ${r.notes}`);
+    if (/aurora|northern\s+light/.test(txt))     return 'aurora';
+    if (/gaudi|sagrada|batllo|mila|pedrera|guell/.test(txt)) return 'gaudi';
+    if (/museo|museum|picasso|mnac|miro|macba|maritimo/.test(txt)) return 'museo';
+    if (/catedral|basilica|church|templo|cathedral/.test(txt))     return 'iglesia';
+    if (/mercado|market|boqueria|sant antoni|santantoni/.test(txt))return 'mercado';
+    if (/barrio|barri|g[oó]tic|gracia|raval|born|barceloneta/.test(txt)) return 'barrio';
+    if (/mirador|viewpoint|teleferico|colon/.test(txt))            return 'mirador';
+    if (/playa|beach|barceloneta/.test(txt))                       return 'mar';
+    if (/parque|park|ciutadella|montjuic|creueta/.test(txt))       return 'parque';
+    if (/paseo|ramblas?|passeig/.test(txt))                        return 'paseo';
+    if (/cafe|cafeteria|terraza|coffee|pasteleria|dulces/.test(txt)) return 'cafe';
+    return 'otros';
+  }
+  function coverageSummary(upToDay){
+    const cov = { gaudi:0,museo:0,iglesia:0,mercado:0,barrio:0,mirador:0,mar:0,parque:0,paseo:0,cafe:0,otros:0 };
+    Object.entries(data.byDay || {})
+      .filter(([d]) => Number(d) <= (upToDay || lastNow))
+      .forEach(([,rows])=>{
+        rows.forEach(r => cov[rowCategory(r)]++);
+      });
+    return cov;
+  }
+  // cobertura previa (todo antes del rango) y del rango (si existía contenido)
+  const covBefore = coverageSummary(startDay - 1);
+  const covRange  = (() => {
+    const cov = { gaudi:0,museo:0,iglesia:0,mercado:0,barrio:0,mirador:0,mar:0,parque:0,paseo:0,cafe:0,otros:0 };
+    Object.entries(data.byDay || {})
+      .filter(([d]) => Number(d) >= startDay && Number(d) <= endDay)
+      .forEach(([,rows]) => rows.forEach(r => cov[rowCategory(r)]++));
+    return cov;
+  })();
 
   // Intake reducido al rango (si falla, completo)
   const intakeForRange = (() => {
@@ -1856,7 +1949,7 @@ async function rebalanceWholeCity(city, opts = {}) {
     catch { return buildIntake(); }
   })();
 
-  // ===== Prompt =====
+  // ===== Prompt con Cobertura y Reglas estrictas =====
   const prompt = `
 ${FORMAT}
 **ROL:** Reequilibra la ciudad "${city}" **SOLO** entre los días ${startDay} y ${endDay}. ${lockedDaysText}
@@ -1864,9 +1957,15 @@ ${FORMAT}
 - Respeta ventanas (puedes ajustar si tiene sentido logístico): ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
 - Prioriza **imperdibles reales**, agrupa por zonas y evita **huecos irrazonables** (>90 min sin propósito).
 
+🧭 **Matriz de Cobertura (para evitar repetir y rellenar huecos):**
+- Cobertura ANTES del rango (1..${startDay-1}): ${JSON.stringify(covBefore)}
+- Cobertura DENTRO del rango actual (${startDay}..${endDay}): ${JSON.stringify(covRange)}
+- Rellena categorías con baja presencia y evita repetir macro-hitos ya cubiertos (Gaudí grandes: Sagrada Familia, Park Güell, Casa Batlló, Casa Milà/La Pedrera; zonas: Barri Gòtic, La Rambla, Barceloneta, Montjuïc, Passeig de Gràcia…).
+- Si repites una **zona**, debe ser con **experiencia distinta** y valor claro (p.ej. “Casa Vicens” si ya hubo Gaudí, o “Bunkers del Carmel” si faltó mirador).
+
 🧩 **Regla de “día suave” (sin huecos):**
 - El **día ${startDay}** es el antiguo **último día original**.
-- Debe ser **de menor intensidad** pero **completo** (parques, paseos, miradores, cafés, mercado, atardecer, etc.).
+- Debe ser **de menor intensidad** pero **completo** (parques, paseos, miradores, cafés, mercado o mar).
 - No dejes el día medio vacío: rellena con actividades plausibles y buffers ≥15 min.
 
 🧭 Day trips:
@@ -1874,9 +1973,9 @@ ${FORMAT}
 ${wantedTrip ? `- Preferencia del usuario: "${wantedTrip}". Úsala exactamente 1 día si es razonable.` : ''}
 
 ❌ **NO DUPLICAR (OBLIGATORIO)**:
-- No repitas el **mismo POI** ya existente (Sagrada Familia, Parque Güell, Boquería, etc.) en días distintos, salvo experiencia realmente distinta (p. ej. “subir a la cúpula” vs “misa”, y que no exista ya).
+- No repitas macro-hitos ya visitados (usa nuevas piezas si quieres variedad).
 - No te repitas dentro del **mismo rango**.
-- Si algo ya está cubierto, propone **alternativa equivalente** (otro barrio, otro museo, otro mirador).
+- Si algo ya está cubierto, propone **alternativa equivalente** (otro mirador, otro barrio, otro museo).
 
 🕒 Horarios:
 - Base **08:30–19:00**; cenas/vida nocturna OK; auroras **20:00–02:30** (si aplica). Buffers ≥15 min.
@@ -1910,15 +2009,17 @@ ${intakeForRange}
       }
     }
 
-    // 🧼 Dedupe por clave canónica respecto a (previos + ya en rango) y dentro del lote
+    // Anti-duplicados local respecto a (previos + ya en rango), usando clave canónica
     const seen = new Set([...blacklistRange, ...blacklistPrev]);
-    const seenBatch = new Set();
     rows = (rows || []).filter(r => {
-      const k = _canonicalPOIKey(r);
-      if(!k) return true;                 // dejar traslados/etc.
+      const k = _actKey(r);
+      if (!k) return false;
       if (seen.has(k)) return false;
-      if (seenBatch.has(k)) return false;
-      seenBatch.add(k);
+      seen.add(k);
+      if (plannerState?.existingActs) {
+        if (!plannerState.existingActs[city]) plannerState.existingActs[city] = new Set();
+        plannerState.existingActs[city].add(k);
+      }
       return true;
     });
 
@@ -1938,7 +2039,7 @@ ${intakeForRange}
       fixDayTimesSequential(city, d);
     }
 
-    // Limpieza global final (canónica)
+    // Limpieza global final (permite aurora multi-noche)
     purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
 
     // Render/UI
@@ -1960,7 +2061,6 @@ ${intakeForRange}
     chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?', 'ai');
   }
 }
-
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
@@ -2285,13 +2385,17 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v68 + clave canónica de POI + dedupe fuerte inter-días
+   v68 base + refuerzos definitivos:
+   - Clave canónica actividad|lugar normalizado
+   - Dedupe por categoría para evitar repeticiones conceptuales (café/terraza, paseo, etc.)
+   - Horarios sanos + duraciones realistas
 ================================= */
 
 // Helpers horarios
 function _tMin(hhmm){ if(!hhmm) return null; const [h,m]=String(hhmm).split(':').map(x=>+x||0); return h*60+m; }
 function _toHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
-function _durToMin(d){ const s=String(d||'').toLowerCase(); let min=0;
+function _durToMin(d){ // "1h 15min" | "45min" | "2h" | "0.75h"
+  const s=String(d||'').toLowerCase(); let min=0;
   const hm=s.match(/(\d+)\s*h/); if(hm) min+=+hm[1]*60;
   const mm=s.match(/(\d+)\s*min/); if(mm) min+=+mm[1];
   if(!hm && !mm){ const f=parseFloat(s.replace(',','.')); if(!isNaN(f)) min+=Math.round(f*60); }
@@ -2299,61 +2403,7 @@ function _durToMin(d){ const s=String(d||'').toLowerCase(); let min=0;
 }
 function _minToDur(min){ if(min<60) return `${min}min`; const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}min`:`${h}h`; }
 
-// Normalización de texto
-function _normTxt(s){
-  return String(s||'')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/\s+/g,' ')
-    .replace(/[\(\[][^\)\]]*[\)\]]/g,'') // quita paréntesis/etiquetas
-    .trim().toLowerCase();
-}
-
-// Palabras vacías comunes en “activity”
-const _POI_STOPWORDS = [
-  'visita a','visita','paseo por','paseo','exploracion de','exploración de',
-  'descubre','recorrido por','recorrido','almuerzo','cena','desayuno',
-  'cafe','café','mercado de','mercado','barrio de','barrio','parque de','parque',
-  'museo de','museo','mirador de','mirador','plaza de','plaza','puerto de','puerto',
-  'catedral de','catedral','basílica de','basilica','castillo de','castillo'
-];
-
-// Extrae nombre “canónico” del POI desde activity|to
-function _canonicalPOIName(r){
-  const a = _normTxt(r.activity);
-  const t = _normTxt(r.to);
-  let base = t || a;
-
-  // elimina stopwords iniciales
-  for(const w of _POI_STOPWORDS){
-    if(base.startsWith(w+' ')) base = base.slice(w.length+1);
-  }
-
-  // reducciones típicas (gaudí, casa/la pedrera, etc.)
-  base = base
-    .replace(/\b(sagrada familia)\b.*/,'sagrada familia')
-    .replace(/\b(parque guell|park guell|parc guell)\b.*/,'parque guell')
-    .replace(/\b(casa batllo|batll[oó])\b.*/,'casa batllo')
-    .replace(/\b(casa mila|la pedrera|pedrera)\b.*/,'casa mila')
-    .replace(/\b(casa vicens)\b.*/,'casa vicens')
-    .replace(/\b(boqueria|la boqueria)\b.*/,'mercado de la boqueria')
-    .replace(/\b(catedral de barcelona|catedral)\b.*/,'catedral de barcelona')
-    .replace(/\b(montjuic|monjuic|montjuïc)\b.*/,'montjuic')
-    .replace(/\b(barrio gotico|barrio g[oó]tico|gothic quarter)\b.*/,'barrio gotico')
-    .replace(/\b(parque de la ciutadella|parc de la ciutadella)\b.*/,'parque de la ciutadella')
-    .replace(/\b(puerto de barcelona|port vell|moll)\b.*/,'puerto de barcelona');
-
-  base = base.replace(/\s+/g,' ').trim();
-  return base || null;
-}
-
-// Clave canónica estable
-function _canonicalPOIKey(r){
-  const name = _canonicalPOIName(r);
-  if(!name) return null;
-  return name; // ya normalizado
-}
-
-// Insertar/quitar/demás (v68 sin cambios funcionales)
+// Insertar/quitar/demás
 function insertDayAt(city, position){
   ensureDays(city);
   const byDay = itineraries[city].byDay || {};
@@ -2400,20 +2450,95 @@ function moveActivities(city, fromDay, toDay, query=''){
   itineraries[city].byDay=byDay;
 }
 
-// Anti-duplicados global (permite multi-noche de auroras) — **CANÓNICO**
+// ===== Normalización y dedupe robustos =====
+function _normTxt(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();}
+function _canonPlaceName(city, s){
+  // alias mínimos seguros (se puede ampliar por ciudad sin romper nada)
+  const t = _normTxt(s)
+    .replace(/\b(seccion|sector|zona)\s+no\s+visitad[ao]\b/g,'')
+    .replace(/\b(seccion|sector|zona)\b/g,'')
+    .replace(/\b(barrio\s+de|el\s+barrio\s+de|barri\s+de)\b/g,'')
+    .replace(/\b(parque\s+de|parc\s+de|park\s+de)\b/g,'')
+    .replace(/\b(museo\s+de|museum\s+of)\b/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
+
+  const aliasBarna = {
+    'sagrada familia':'sagrada familia',
+    'temple expiatori de la sagrada familia':'sagrada familia',
+    'parque guell':'park guell',
+    'parc guell':'park guell',
+    'park guell':'park guell',
+    'casa batllo':'casa batllo',
+    'la pedrera':'casa mila',
+    'casa mila':'casa mila',
+    'barri gotic':'barrio gotico',
+    'gothic quarter':'barrio gotico',
+    'la rambla':'la rambla',
+    'passeig de gracia':'passeig de gracia',
+    'gracia':'gracia',
+    'montjuic':'montjuic',
+    'mnac':'mnac',
+    'museo nacional de arte de cataluna':'mnac',
+    'playa de la barceloneta':'barceloneta',
+    'barceloneta':'barceloneta',
+    'mercado de la boqueria':'la boqueria',
+    'la boqueria':'la boqueria',
+    'palau de la musica catalana':'palau musica',
+    'museo picasso':'museo picasso',
+    'joan miro':'fundacion joan miro',
+    'fundacion joan miro':'fundacion joan miro',
+    'castillo de montjuic':'castillo montjuic',
+    'mirador de colon':'mirador colon'
+  };
+  if (_normTxt(city)==='barcelona' && aliasBarna[t]) return aliasBarna[t];
+  return t;
+}
 function _isAuroraName(s){return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(s||''));}
+function _rowCategory(r){
+  const txt = _normTxt(`${r.activity} ${r.to} ${r.hacia} ${r.notes}`);
+  if (/aurora|northern\s+light/.test(txt))     return 'aurora';
+  if (/gaudi|sagrada|batllo|mila|pedrera|guell/.test(txt)) return 'gaudi';
+  if (/museo|museum|picasso|mnac|miro|macba|maritimo/.test(txt)) return 'museo';
+  if (/catedral|basilica|church|templo|cathedral/.test(txt))     return 'iglesia';
+  if (/mercado|market|boqueria|sant antoni|santantoni/.test(txt))return 'mercado';
+  if (/barrio|barri|gotic|gracia|raval|born|barceloneta/.test(txt)) return 'barrio';
+  if (/mirador|viewpoint|teleferico|colon/.test(txt))            return 'mirador';
+  if (/playa|beach|barceloneta/.test(txt))                       return 'mar';
+  if (/parque|park|ciutadella|montjuic|creueta/.test(txt))       return 'parque';
+  if (/paseo|ramblas?|passeig/.test(txt))                        return 'paseo';
+  if (/cafe|cafeteria|terraza|coffee|pasteleria|dulces/.test(txt)) return 'cafe';
+  return 'otros';
+}
+function _actKeyCanon(city, r){
+  const a=_normTxt(r.activity);
+  const to=_canonPlaceName(city, r.to||r.hacia||'');
+  if(!a && !to) return '';
+  return `${a}|${to}`;
+}
+
 function purgeGlobalDuplicatesForCity(city,{allowAuroraMultiNight=true}={}){
   const data=itineraries[city]; if(!data) return;
   const byDay=data.byDay||{}; const days=Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   let auroraCity=false; try{ const c=getCoordinatesForCity(city); auroraCity=c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){}
-  const seen=new Set();
+  const seenKeys=new Set();
+
   for(const d of days){
     const out=[];
+    const catSeen=new Set(); // evita dos cafés o dos “paseos” pegados
     for(const r of (byDay[d]||[])){
       if(allowAuroraMultiNight && auroraCity && _isAuroraName(r.activity)){ out.push(r); continue; }
-      const k=_canonicalPOIKey(r); if(k && seen.has(k)) continue;
-      if(k) seen.add(k);
-      out.push(r);
+
+      const k=_actKeyCanon(city, r);
+      if(k && seenKeys.has(k)) continue; // ya salió en días previos
+      // Dedupe por categoría: si este día ya tiene demasiados “café/terraza” o “paseo” seguidos, suprime el extra
+      const cat=_rowCategory(r);
+      if(['cafe','paseo','barrio'].includes(cat) && catSeen.has(cat)) {
+        // permitimos máximo 1 por día de estas categorías “blandas”
+        continue;
+      }
+
+      seenKeys.add(k); catSeen.add(cat); out.push(r);
     }
     byDay[d]=out;
   }
@@ -2441,6 +2566,7 @@ function fixDayTimesSequential(city, day){
     return row;
   });
 
+  // cortar a hardEnd si se pasó (última ligera puede quedar 30–45 min)
   rows = rows.map((r,i)=>{
     if (_isAuroraName(r.activity)) return r;
     const s=_tMin(r.start), e=_tMin(r.end);
@@ -2459,14 +2585,15 @@ function fixDayTimesSequential(city, day){
 function applyRealisticDurations(rows){
   return rows.map(r=>{
     if (_isAuroraName(r.activity)) return r;
-    const txt = `${_normTxt(r.activity)} ${_normTxt(r.to)}`;
+    const a=_normTxt(r.activity), to=_normTxt(r.to);
+    const txt = `${a} ${to}`;
     let min=_durToMin(r.duration)||0;
 
-    if (/\bmuse(o|u)|galer[ií]a|museum|gallery/.test(txt)) min = Math.max(min, 90);
-    else if (/\bcatedral|basilica|duomo|church|templo/.test(txt)) min = Math.max(min, 75);
+    if (/\bmuse(o|u)|galer[ií]a|museum|gallery/.test(txt)) min = Math.max(min, 90);      // ≥1h30
+    else if (/\bcatedral|basilica|duomo|church|templo/.test(txt)) min = Math.max(min, 75); // 1h15–1h45
     else if (/\bmirador|viewpoint|torre|skydeck|telef[eé]rico/.test(txt)) min = Math.max(min, 45);
-    else if (/\bplaya|beach|parque\b/.test(txt)) min = Math.max(min, 120);
-    else if (/\bmercado|market|boquer[ií]a/.test(txt)) min = Math.max(min, 60);
+    else if (/\bplaya|barceloneta|beach|parque\b/.test(txt)) min = Math.max(min, 120);
+    else if (/\bmercado|market|boquer[ií]a|san antoni/.test(txt)) min = Math.max(min, 60);
 
     const duration = _minToDur(min||60);
     return {...r, duration};
@@ -2475,7 +2602,6 @@ function applyRealisticDurations(rows){
 
 /* ─────────────────────────────────────────────────────────────
    OPTIMIZACIÓN DE DÍA (llamado por 15.3 y operaciones locales)
-   — evita repetir POIs ya presentes en otros días de la ciudad —
 ───────────────────────────────────────────────────────────── */
 async function optimizeDay(city, day){
   const data = itineraries[city];
@@ -2519,8 +2645,9 @@ Filas actuales (no protegidas): ${JSON.stringify(rowsForOptimization)}
 🌍 **Contenido**:
 - Imperdibles no cubiertos, sin duplicar con otros días; agrupa por zonas.
 - Day trip a ≤ 2 h por trayecto SOLO si aporta valor y encaja.
+- Ciudades costeras: considera paseo/barrio marinero si aún no aparece y clima lo permite.
 
-❌ No repitas el **mismo POI** ya usado en otros días (Sagrada Familia, Parque Güell, Boquería, Montjuïc, etc.), salvo experiencia realmente distinta y no existente ya.
+❌ No repitas lo ya existente en otros días (excepto auroras multi-noche).
 Devuelve C {"rows":[...],"replace":false}. Notas SIEMPRE útiles.
 Contexto:
 ${intakeData}
@@ -2531,21 +2658,16 @@ ${intakeData}
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // Evitar duplicados con el resto de días (CLAVE CANÓNICA)
-    const allExistingCanon = new Set(
-      Object.entries(itineraries[city].byDay || {})
-        .filter(([d]) => +d !== day)
-        .flatMap(([,arr]) => arr.map(_canonicalPOIKey))
-        .filter(Boolean)
-    );
-    const seenBatch = new Set();
+    // Evitar duplicados con el resto de días (clave canónica) y exceso de categorías blandas
+    const allExistingKeys = Object.entries(itineraries[city].byDay || {})
+      .filter(([d]) => +d !== day)
+      .flatMap(([,arr]) => arr.map(r => _actKeyCanon(city, r)));
+
     normalized = normalized.filter(r=>{
-      const k=_canonicalPOIKey(r);
-      if(!k) return true;
-      if(allExistingCanon.has(k)) return false;
-      if(seenBatch.has(k)) return false;
-      seenBatch.add(k);
-      return true;
+      const isAurora=_isAuroraName(r.activity);
+      if(isAurora && auroraCity) return true;
+      const k=_actKeyCanon(city, r);
+      return k && !allExistingKeys.includes(k);
     });
 
     // Duraciones realistas + buffers/orden
