@@ -2306,10 +2306,10 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
-   🔧 v69 fix: dedupe multi-idioma con normKey
-   🔧 v71 fix: el “día ligero pero COMPLETO” apunta SIEMPRE al NUEVO último día
-              tras agregar días (bandera plannerState.lightDayTarget[city])
+   Base v71 — Fix final
+   🔧 Ajustes quirúrgicos:
+   (1) Día ligero apunta siempre al NUEVO último día.
+   (2) Deduplicado extendido con aliasKey para sinónimos.
 ================================= */
 
 function insertDayAt(city, position){
@@ -2370,6 +2370,21 @@ function moveActivities(city,fromDay,toDay,query=''){
   itineraries[city].byDay=byDay;
 }
 
+/* --- NUEVA función aliasKey: detecta sinónimos comunes --- */
+function aliasKey(s){
+  const x = normKey(s);
+  if(/\bmontju(i|ï|ic)\b/.test(x)) return 'montjuic';
+  if(/\bsagrada\s*fam(ilia)?\b/.test(x)) return 'sagrada_familia';
+  if(/\bpark?\s*gu(e|ë|é)ll\b/.test(x)) return 'park_guell';
+  if(/\bcasa\s*batllo\b/.test(x)) return 'casa_batllo';
+  if(/\bla\s*pedrera|casa\s*mila\b/.test(x)) return 'la_pedrera';
+  if(/\bboqueria\b/.test(x)) return 'boqueria';
+  if(/\bbarceloneta\b/.test(x)) return 'barceloneta';
+  if(/\bpicasso\b/.test(x)) return 'museo_picasso';
+  if(/\bpaseo\s*de\s*gracia\b/.test(x)) return 'paseo_de_gracia';
+  return x;
+}
+
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2380,7 +2395,6 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras / termales)
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
     return act.includes('aurora')||act.includes('northern light')||
@@ -2392,17 +2406,14 @@ async function optimizeDay(city, day){
            !act.includes('laguna azul')&&!act.includes('blue lagoon');
   });
 
-  // Flags de replanificación
   const hasForceReplan = plannerState?.forceReplan?.[city];
   const hasDayTripPending = plannerState?.dayTripPending?.[city];
   const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
 
-  // 🔁 Intake adaptativo (solo rango actual si hay fuerza)
   const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
 
-  // Contexto auroras y clima
   let auroraCity=false, auroraSeason=false;
   try{
     const coords=getCoordinatesForCity(city);
@@ -2410,23 +2421,17 @@ async function optimizeDay(city, day){
     auroraSeason=inAuroraSeasonDynamic(baseDate);
   }catch(_){}
 
-  // Duración máxima para day trips extendidos
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
-  /* --- v71 fix: seleccionar el DÍA LIGERO dinámicamente ---
-     Prioridad:
-       1) plannerState.lightDayTarget[city] (definido en Sección 19 al agregar días)
-       2) (retro-compat) si existía lógica de “último original”, úsala solo si no hay #1
-  */
-  const softTarget =
-    (plannerState?.lightDayTarget?.[city])
-    ?? ((itineraries[city]?.originalDays > 0 && stayDays > itineraries[city].originalDays)
-          ? itineraries[city].originalDays
-          : null);
-  const isLightDay = (day === softTarget);
+  /* --- DÍA LIGERO DINÁMICO (v71.fix) --- */
+  const hadOriginal = (itineraries[city]?.originalDays > 0);
+  const addedDays   = hadOriginal && (stayDays > itineraries[city].originalDays);
+  const explicitSoft = plannerState?.lightDayTarget?.[city] || null;
+  const isLightDay  = explicitSoft ? (day === explicitSoft)
+                                   : (addedDays && (day === stayDays));
   const lightNote = isLightDay
-    ? `\n- **Día ligero pero COMPLETO** (nuevo último día): cubrir toda la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin picos de esfuerzo ni huecos largos.\n`
+    ? `\n- **Día ligero pero COMPLETO**: cubrir toda la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin sobrecarga ni huecos largos.\n`
     : '';
 
   const prompt=`
@@ -2438,20 +2443,17 @@ Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales (para optimizar):
 ${JSON.stringify(rowsForOptimization)}
 
-📋 **REGLAS INTELIGENTES v66**
-- Prioriza **imperdibles de clase mundial** en ${city}.
-- Distribuye en **temas distintos** (cultura, gastronomía, naturaleza, ocio, compras, relax).
-- Ajusta por clima/temporada: interiores si frío/lluvia; exteriores si templado/verano.
-- Balance energético con pausas; no más de 3 actividades exigentes seguidas.
-- Si ${city} es costera, añade paseo marítimo/puerto/playa icónica si el clima lo permite.
-- Day trips: ida ≤ ${maxOneWayHours} h; solo si agrega valor real.
-- Evita **duplicados multi-día** (considera sinónimos/idiomas).
-- Auroras (si plausible): ventana 20:00–02:30, transporte lógico y "valid:" en notes.
-- Notas siempre útiles (no vacías).
-- Horario base 08:30–19:00; **cubre la ventana** sin dejar “medio día” salvo justificación clara (añade alternativas suaves).
+📋 **REGLAS INTELIGENTES**
+- Prioriza imperdibles de ${city}.
+- Temas variados: cultura, gastronomía, naturaleza, ocio, relax.
+- Balance energético; no más de 3 actividades exigentes seguidas.
+- Si costera, añade paseo marítimo o puerto si aplica.
+- Day trips: ida ≤ ${maxOneWayHours} h.
+- Evita duplicados multi-día (considera sinónimos/idiomas).
+- Auroras: ventana 20:00–02:30, transporte lógico.
+- Horario base 08:30–19:00; cubre toda la ventana.
 ${lightNote}
-- Devuelve **formato C** {"rows":[...],"replace":false}.
-
+- Devuelve {"rows":[...],"replace":false}.
 Contexto:
 ${intakeData}
 `.trim();
@@ -2461,17 +2463,16 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // 🔍 Anti-duplicados multi-día (permitir auroras) con normKey
+    // Anti-duplicados extendido
     const allExisting=Object.values(itineraries[city].byDay||{})
       .flat().filter(r=>r.day!==day)
-      .map(r=>normKey(r.activity||''));
+      .map(r=>aliasKey(r.activity||''));
     normalized=normalized.filter(r=>{
-      const act=normKey(r.activity||'');
-      const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(act);
-      return act && (!allExisting.includes(act) || (isAurora && auroraCity));
+      const key=aliasKey(r.activity||'');
+      const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(key);
+      return key && (!allExisting.includes(key) || (isAurora && auroraCity));
     });
 
-    // 🧭 Post-procesadores
     if(typeof applyBufferBetweenRows==='function')
       normalized=applyBufferBetweenRows(normalized);
     if(typeof reorderLinearVisits==='function')
@@ -2479,10 +2480,7 @@ ${intakeData}
     if(typeof ensureAuroraNight==='function')
       normalized=ensureAuroraNight(normalized,city);
 
-    // 🧩 Reconstrucción
     const finalRows=[...normalized,...protectedRows];
-
-    // Validación y push
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
     pushRows(city,val.allowed,false);
   }
