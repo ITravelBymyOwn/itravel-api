@@ -168,26 +168,15 @@ function inAuroraSeasonDynamic(baseDateStr){
   }catch{ return true; }
 }
 
-// 🌐 Day trip dinámico: se decidirá en el prompt, pero puedes sugerir candidatos comunes
-// ⚡ En vez de listas fijas, usamos algunos patrones heurísticos + razonamiento posterior
+// 🌐 Day trip dinámico (neutral, sin ejemplos preestablecidos)
 const GLOBAL_DAY_TRIP_HINTS = {
-  radiusKm: 200, // radio máximo razonable
-  examples: [
-    'París: Versalles, Giverny, Mont Saint-Michel',
-    'Bruselas: Brujas, Gante',
-    'Roma: Florencia, Tivoli, Pompeya',
-    'Londres: Oxford, Bath, Cambridge',
-    'Zúrich: Lucerna, Jungfraujoch',
-    'Rovaniemi: Kemi, Levi, auroras',
-    'Tromsø: Lyngen Alps, Ersfjordbotn'
-  ]
+  radiusKm: 200 // radio máximo razonable; el agente decide candidatos
 };
 
 function getHeuristicDayTripContext(city){
-  // 👇 Aquí no devolvemos lista fija sino contexto que el agente puede usar para razonar
+  // Contexto neutro para que el agente razone sin sesgos por destino
   return {
     radiusKm: GLOBAL_DAY_TRIP_HINTS.radiusKm,
-    hintExamples: GLOBAL_DAY_TRIP_HINTS.examples,
     city
   };
 }
@@ -2029,7 +2018,7 @@ const WORD_NUM = {
   'once':11,'doce':12,'trece':13,'catorce':14,'quince':15
 };
 
-// Normaliza tokens de hora (e.g., “tres y cuarto”, “mediodía”, “11 pm”)
+// Normaliza tokens de hora (e.g., “tres y media / cuarto”, “mediodía”, “11 pm”)
 function normalizeHourToken(tok){
   tok = String(tok||'').toLowerCase().trim();
 
@@ -2118,18 +2107,24 @@ function detectCityInText(text){
   return null;
 }
 
-// Heurística: ciudad por país mencionado
+// Heurística: ciudad por país mencionado (sin mapas fijos; usa tus destinos guardados)
 function detectCityFromCountryInText(text){
-  const lowered = String(text||'').toLowerCase();
-  const countryMap = {
-    'islandia':'reykjavik','españa':'madrid','francia':'parís','italia':'roma',
-    'inglaterra':'londres','reino unido':'londres','japón':'tokio',
-    'eeuu':'nueva york','estados unidos':'nueva york','alemania':'berlín',
-    'portugal':'lisboa','brasil':'rio de janeiro','argentina':'buenos aires',
-    'chile':'santiago','méxico':'ciudad de méxico','mexico':'ciudad de méxico'
-  };
-  for(const k in countryMap){
-    if(lowered.includes(k)) return countryMap[k];
+  const raw = String(text||'');
+  const lowered = raw.toLowerCase();
+
+  // helper unicode (coincide con uso global del planner)
+  const norm = (s)=> String(s||'')
+    .normalize('NFD').replace(/\p{Diacritic}/gu,'')
+    .toLowerCase().trim();
+
+  const loweredNorm = norm(lowered);
+
+  // Busca en savedDestinations por coincidencia con su "country" (si existe)
+  for(const d of (savedDestinations||[])){
+    const ctry = norm(d.country || '');
+    if(ctry && loweredNorm.includes(ctry)){
+      return d.city || null;
+    }
   }
   return null;
 }
@@ -2252,12 +2247,12 @@ function intentFromText(text){
     return { type:'remove_city', city: delCity[1].trim() };
   }
 
-  // Ajuste de perfil / preferencias (ritmo, movilidad, transporte, dieta, etc.)
+  // Ajuste de perfil / preferencias
   if(/\b(ritmo|relax|tranquilo|aventura|rápido|balanceado|niños|movilidad|caminar poco|transporte|uber|metro|tren|bus|autob[uú]s|veh[ií]culo|coche|auto|dieta|vegetariano|vegano|gluten|cel[ií]aco|preferencia|preferencias)\b/.test(t)){
     return { type:'set_profile', details: text };
   }
 
-  // Preguntas informativas (clima, moneda, enchufes, etc.)
+  // Preguntas informativas
   if(/\b(clima|tiempo|temperatura|lluvia|horas de luz|moneda|cambio|propina|seguridad|visado|visa|fronteras|aduana|vuelos|aerol[ií]neas|equipaje|salud|vacunas|enchufes|taxis|alquiler|conducci[oó]n|peatonal|festivos|temporada|mejor época|gastronom[ií]a|restaurantes|precios|presupuesto|wifi|sim|roaming)\b/.test(t)){
     return { type:'info_query', details: text };
   }
@@ -2338,16 +2333,15 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras / termales)
+  // 🧊 Protege actividades especiales (auroras / termales genéricas)
+  const hotSpringRegex = /(termal|hot spring|thermal|geothermal)/i;
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
-    return act.includes('aurora')||act.includes('northern light')||
-           act.includes('laguna azul')||act.includes('blue lagoon');
+    return act.includes('aurora')||act.includes('northern light')||hotSpringRegex.test(act);
   });
   const rowsForOptimization = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
-    return !act.includes('aurora')&&!act.includes('northern light')&&
-           !act.includes('laguna azul')&&!act.includes('blue lagoon');
+    return !act.includes('aurora')&&!act.includes('northern light')&&!hotSpringRegex.test(act);
   });
 
   // Flags de replanificación
@@ -2410,7 +2404,7 @@ ${intakeData}
     normalized=normalized.filter(r=>{
       const act=String(r.activity||'').trim().toLowerCase();
       const isAurora=act.includes('aurora')||act.includes('northern light');
-      return act && (!allExisting.includes(act) || (isAurora && auroraCity));
+      return act && (!allExisting.includes(act) || isAurora);
     });
 
     // 🧭 Post-procesadores
@@ -2833,16 +2827,17 @@ addCityRow = function(pref){
   if(row) addRowReorderControls(row);
 };
 
-// 🧼 País: permitir solo letras y espacios (protección suave en input)
+// 🧼 País: permitir letras Unicode y espacios (global)
 document.addEventListener('input', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('country')){
     const original = e.target.value;
-    const filtered = original.replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
+    // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
+    const filtered = original.replace(/[^\p{L}\s]/gu,'');
     if(filtered !== original){
       const pos = e.target.selectionStart;
       e.target.value = filtered;
       if(typeof pos === 'number'){
-        // ⚡ Ajuste más suave del cursor para que no salte abruptamente
+        // ⚡ Ajuste suave del cursor
         e.target.setSelectionRange(
           pos - (original.length - filtered.length),
           pos - (original.length - filtered.length)
