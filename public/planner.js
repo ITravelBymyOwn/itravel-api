@@ -1539,85 +1539,16 @@ function showWOW(on, msg){
 
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
-   Base: v68 + fixes canónicos (anti-duplicados fuertes)
-   + Añadidos: helpers autocontenidos si faltan (normalizeRow, dedupeInto, pushRows, _canonicalPOIKey)
-   + Llamada explícita a purgeGlobalDuplicatesForCity()
+   Base: v68 + fixes canónicos (anti-duplicados fuertes),
+   llamada explícita a purgeGlobalDuplicatesForCity(),
+   y dedupe interno del batch inicial.
    Nota: No cierra overlay aquí para evitar desbloqueo prematuro de UI.
 ───────────────────────────────────────────────────────────── */
-
-// —— Helpers mínimos si faltan (no sobrescriben si ya existen) ——
-if (typeof normalizeRow !== 'function') {
-  function normalizeRow(r = {}) {
-    const z = (x, d='') => (x == null ? d : String(x));
-    const hh = s => {
-      const m = String(s||'').match(/(\d{1,2}):(\d{2})/);
-      if (!m) return '';
-      const h = Math.max(0, Math.min(23, +m[1]));
-      const mi = Math.max(0, Math.min(59, +m[2]));
-      return `${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
-    };
-    const tmap = { 'a pie':'A pie','pie':'A pie','walk':'A pie','walking':'A pie',
-                   'metro':'Metro','subway':'Metro','underground':'Metro',
-                   'bus':'Bus','autobús':'Bus',
-                   'tren':'Tren','train':'Tren',
-                   'taxi':'Taxi','uber':'Taxi','auto':'Auto','car':'Auto' };
-    const t = String(r.transport||'').toLowerCase().trim();
-    const tr = tmap[t] || (t ? (t.charAt(0).toUpperCase()+t.slice(1)) : '');
-    return {
-      day: Number(r.day)||1,
-      start: hh(r.start||''), end: hh(r.end||''),
-      activity: z(r.activity).trim(),
-      from: z(r.from).trim(), to: z(r.to).trim(),
-      transport: tr, duration: z(r.duration).trim(), notes: z(r.notes).trim()
-    };
-  }
-}
-if (typeof dedupeInto !== 'function') {
-  function dedupeInto(dst, row) {
-    const key = x => `${String(x.activity||'').trim().toLowerCase()}|${String(x.to||'').trim().toLowerCase()}`;
-    const k = key(row); if (!k) return;
-    if (!dst.some(r => key(r) === k)) dst.push(normalizeRow(row));
-  }
-}
-if (typeof pushRows !== 'function') {
-  function pushRows(city, rows = [], replace = false) {
-    if(!itineraries[city]) itineraries[city]={byDay:{}};
-    const byDay = itineraries[city].byDay || {};
-    if (replace) {
-      const newByDay = {};
-      rows.forEach(r=>{
-        const d = Number(r.day)||1;
-        if (!newByDay[d]) newByDay[d]=[];
-        dedupeInto(newByDay[d], r);
-      });
-      itineraries[city].byDay = newByDay;
-      return;
-    }
-    rows.forEach(r=>{
-      const d = Number(r.day)||1;
-      if (!byDay[d]) byDay[d] = [];
-      dedupeInto(byDay[d], r);
-    });
-    itineraries[city].byDay = byDay;
-  }
-}
-if (typeof _canonicalPOIKey !== 'function') {
-  function _canonicalPOIKey(r){
-    const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-    return `${norm(r.activity)}|${norm(r.to)}`;
-  }
-}
-
 async function generateCityItinerary(city){
-  // 🔒 Mutex simple por ciudad (evita carreras si el usuario dispara acciones rápidas)
   window.__cityLocks = window.__cityLocks || {};
-  if (window.__cityLocks[city]) {
-    console.warn(`[Mutex] Generación ya en curso para ${city}`);
-    return;
-  }
+  if (window.__cityLocks[city]) { console.warn(`[Mutex] Generación ya en curso para ${city}`); return; }
   window.__cityLocks[city] = true;
 
-  // Helpers locales puros (sin efectos colaterales)
   const toHHMM = s => String(s||'').trim();
   const parseHHMM = (hhmm)=>{
     const m = /^(\d{1,2}):(\d{2})$/.exec(toHHMM(hhmm));
@@ -1650,10 +1581,8 @@ async function generateCityItinerary(city){
     const hotel    = cityMeta[city]?.hotel || '';
     const transport= cityMeta[city]?.transport || 'recomiéndame';
 
-    // 🧭 ¿Replan forzado?
     const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
-    // 🧠 Contexto heurístico (auroras / day trips)
     let heuristicsContext = '';
     let auroraCity=false, auroraSeason=false;
     try{
@@ -1718,17 +1647,14 @@ Contexto actual:
 ${buildIntake()}
 `.trim();
 
-    // Overlay (mensaje)
     if (typeof setOverlayMessage === 'function') {
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
 
-    // Llamada al agente
     const text = await callAgent(instructions, true);
     const parsed = parseJSON(text);
 
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-      // Normalización multi-formato
       let tmpRows = [];
       if(parsed.rows){
         tmpRows = parsed.rows.map(r=>normalizeRow(r));
@@ -1742,7 +1668,6 @@ ${buildIntake()}
         tmpRows=(i?.rows||[]).map(r=>normalizeRow(r));
       }
 
-      // 🧼 Anti-duplicados locales vs lo ya existente en la ciudad (clave canónica)
       const existingCanon = new Set(
         Object.values(itineraries[city]?.byDay||{})
           .flat()
@@ -1751,23 +1676,26 @@ ${buildIntake()}
       const seenBatch = new Set();
       tmpRows = tmpRows.filter(r=>{
         const k = _canonicalPOIKey(r);
-        if(!k) return true;               // filas no-POI (traslados, etc.)
+        if(!k) return true;
         if(existingCanon.has(k)) return false;
         if(seenBatch.has(k))   return false;
         seenBatch.add(k);
         return true;
       });
 
-      // 🛠️ Fixers globales (si existen en el entorno)
       if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      // ✅ Validación global con IA
       const val = await validateRowsWithAgent(city, tmpRows, baseDate);
       pushRows(city, val.allowed, forceReplan);
 
-      /* ♨️ Refuerzo termales / Blue Lagoon ≥ 3h (suave) */
+      /* NEW: reglas globales de consistencia tras la inyección */
+      purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
+      _applyAreaNoRepeatAcrossDays(city);
+      enforceCityWideSoftCaps(city);
+
+      /* ♨️ Termales/Blue Lagoon ≥3h (suave) */
       (function enforceThermal3h(){
         const hotWords = ['laguna azul','blue lagoon','bláa lónið','termal','termales','hot spring','thermal bath'];
         const byDay = itineraries[city]?.byDay || {};
@@ -1776,15 +1704,13 @@ ${buildIntake()}
             const name = String(r.activity||'').toLowerCase();
             if(hotWords.some(w=>name.includes(w))){
               const start = toHHMM(r.start);
-              const m = /^(\d{1,2}):(\d{2})$/.exec(start||'');
-              if(m){
-                const end = addMinutes(start, 180);
-                if(end) r.end = end;
-              }
-              const txt = String(r.duration||'').toLowerCase();
-              const hm = /(\d+(?:\.\d+)?)\s*h/.exec(txt);
-              const durH = hm ? parseFloat(hm[1]) : null;
+              const hasStart = !!parseHHMM(start);
+              const newEnd = hasStart ? addMinutes(start, 180) : r.end;
+              const durTxt = String(r.duration||'').toLowerCase();
+              const hoursMatch = /(\d+(?:\.\d+)?)\s*h/.exec(durTxt);
+              const durH = hoursMatch ? parseFloat(hoursMatch[1]) : null;
               if(!durH || durH < 3) r.duration = '3h';
+              if(newEnd) r.end = newEnd;
               r.notes = (r.notes ? String(r.notes)+' · ' : '') + 'min stay ~3h (ajustable)';
             }
             return r;
@@ -1792,23 +1718,57 @@ ${buildIntake()}
         }
       })();
 
-      // 🧩 Relleno mínimo + micro-opt por día vacío
-      if(typeof ensureDays==='function'){
-        ensureDays(city);
-        for(let d=1; d<=dest.days; d++){
-          if(!(itineraries[city].byDay?.[d]||[]).length){
-            await optimizeDay(city,d);
+      /* 🌌 Inyección aurora si aplica (igual que antes) */
+      if (auroraCity && (auroraSeason || !baseDate)) {
+        const acts = Object.values(itineraries[city]?.byDay || {})
+          .flat()
+          .map(r => String(r.activity || '').toLowerCase());
+        const hasAurora = acts.some(a => a.includes('aurora') || a.includes('northern light'));
+        if (!hasAurora) {
+          const byDay = itineraries[city]?.byDay || {};
+          const dayLoads = [];
+          for(let d=1; d<=dest.days; d++){
+            const rows = byDay[d] || [];
+            const diurnas = rows.filter(x=>{
+              const e = (x.end||'').split(':'); const h=+e[0]||0, m=+e[1]||0;
+              return (h*60+m) <= (19*60+30);
+            }).length;
+            dayLoads.push({day:d, load:diurnas});
           }
+          dayLoads.sort((a,b)=> a.load===b.load ? a.day - b.day : a.load - b.load);
+          let chosen = dayLoads[0]?.day || 1;
+          if(chosen === dest.days && dayLoads[1]) chosen = dayLoads[1].day;
+
+          const auroraRow = normalizeRow({
+            day: chosen,
+            start: '20:30',
+            end: '02:00',
+            activity: 'Caza de auroras',
+            from: 'Hotel/Base',
+            to: 'Punto de observación',
+            transport: 'Tour/Bus/Van',
+            notes: 'valid: ventana nocturna auroral (sujeto a clima); vestir térmico'
+          });
+          pushRows(city, [auroraRow], false);
         }
       }
 
-      // ✅ DEDUPE GLOBAL y RENDER
-      if (typeof purgeGlobalDuplicatesForCity==='function') {
-        purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
+      ensureDays(city);
+      for(let d=1; d<=dest.days; d++){
+        if(!(itineraries[city].byDay?.[d]||[]).length){
+          await optimizeDay(city,d);
+        } else {
+          // afina también los días que ya tienen contenido
+          _applySoftCapsForDay(city, d);
+          fixDayTimesSequential(city, d);
+        }
       }
+
+      purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
+      _applyAreaNoRepeatAcrossDays(city);
+      enforceCityWideSoftCaps(city);
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
 
-      // Limpieza de flags
       if(forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
       if(plannerState?.preferences){
         delete plannerState.preferences.preferDayTrip;
@@ -1818,7 +1778,6 @@ ${buildIntake()}
       return;
     }
 
-    // Fallback sin JSON válido
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     chatMsg('⚠️ Fallback local: sin respuesta JSON válida del agente.','ai');
@@ -1828,16 +1787,16 @@ ${buildIntake()}
     chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>.`, 'ai');
   } finally {
     delete window.__cityLocks[city];
-    // (overlay se cierra en el orquestador global)
   }
 }
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo masivo tras cambios (agregar días / day trip pedido)
    Base v65 + anti-duplicados v66 + fallback por día (robusto)
-   + FIX: no limpiar el rango hasta tener nuevo contenido (evita “no genera nada”)
+   + FIX: no limpiar el rango hasta tener nuevo contenido
    + Dedupe por actividad+destino (más fuerte)
    + Post: optimize + caps blandos + horas secuenciales por día
+   + NEW: no repetir “zona ancla” entre días + caps temáticos por ciudad
 ================================= */
 async function rebalanceWholeCity(city, opts = {}) {
   ensureDays(city);
@@ -1846,7 +1805,6 @@ async function rebalanceWholeCity(city, opts = {}) {
 
   const totalDays = Object.keys(data.byDay || {}).length;
 
-  // Ventanas por día actuales (con fallback a DEFAULT_START/END)
   const perDay = Array.from({ length: totalDays }, (_, i) => {
     const src = (cityMeta[city]?.perDay || []).find(x => x.day === i + 1) || { start: DEFAULT_START, end: DEFAULT_END };
     return { day: i + 1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
@@ -1855,7 +1813,6 @@ async function rebalanceWholeCity(city, opts = {}) {
   const baseDate   = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo || '').trim();
 
-  // Rango a reequilibrar
   const originalDays = Number(itineraries[city]?.originalDays || 0);
   const defaultStart = Math.max(1, originalDays || totalDays);
   const startDay     = Math.max(1, Number.isInteger(opts.start) ? opts.start : defaultStart);
@@ -1864,7 +1821,6 @@ async function rebalanceWholeCity(city, opts = {}) {
   const lockedDaysText = startDay > 1 ? `Mantén intactos los días 1 a ${startDay - 1}.` : '';
   const forceReplan    = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
-  // ===== BLACKLIST global (días intocables) + de rango =====
   const _norm = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
   const _key  = r => `${_norm(r.activity)}|${_norm(r.to)}`;
 
@@ -1882,10 +1838,8 @@ async function rebalanceWholeCity(city, opts = {}) {
       .filter(Boolean)
   );
 
-  // Intake del RANGO (ligero y específico)
   const intakeForRange = (() => { try { return buildIntakeLite(city, { start: startDay, end: endDay }); } catch { return buildIntake(); } })();
 
-  // ===== PROMPT principal (rango) =====
   const prompt = `
 ${FORMAT}
 **ROL:** Reequilibra la ciudad "${city}" **SOLO** entre los días ${startDay} y ${endDay}. ${lockedDaysText}
@@ -1906,7 +1860,7 @@ ${JSON.stringify(Array.from(existingActsGlobal).slice(0, 80))}
 - Base 08:30–19:00, con buffers ≥15 min y sin solapes. Puedes extender con cenas o auroras (20:00–02:30, solo nocturnas).
 
 🔒 Seguridad/plausibilidad:
-- Evita restricciones/evidentes riesgos. Auroras si latitud/fecha lo permiten (marca "valid:" en notes). Termales: estadía ≥3 h.
+- Evita restricciones/evidentes riesgos. Auroras si latitud/fecha lo permiten (marca "valid:" en notes). Termales: estadía ≥ 3 h.
 
 📝 Notas: siempre útiles (no vacías) con tips de reserva, accesibilidad y contexto.
 
@@ -1920,7 +1874,6 @@ ${intakeForRange}
     const ans    = await callAgent(prompt, true, { cityName: city, baseDate });
     const parsed = parseJSON(ans);
 
-    // Normalización de filas con compatibilidad múltiple
     let rows = [];
     if (parsed && (parsed.rows || parsed.destinations || parsed.itineraries)) {
       if (parsed.rows) rows = parsed.rows.map(r => normalizeRow(r));
@@ -1935,62 +1888,54 @@ ${intakeForRange}
     }
 
     const needPerDayFallback = !rows || rows.length === 0;
-
-    // ⚠️ NO limpiar aún: generamos/validamos primero y luego reemplazamos el rango.
     let producedSomething = false;
 
     if (needPerDayFallback) {
-      // Fallback día a día (rápido y robusto)
       for (let d = startDay; d <= endDay; d++) {
         await optimizeDay(city, d);
         producedSomething = producedSomething || (itineraries[city]?.byDay?.[d]||[]).length > 0;
       }
     } else {
-      // Anti-duplicados LOCAL de batch (actividad+destino)
       const seenInBatch = new Set([...blacklistRange]);
       rows = (rows || []).filter(r => {
         const k = _key(r);
         if (!k) return false;
-
         const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||''));
         if (isAurora) return true;
-
         if (existingActsGlobal.has(k) || seenInBatch.has(k)) return false;
         seenInBatch.add(k);
         return true;
       });
 
-      // Validación y filtrado por rango
       const val = await validateRowsWithAgent(city, rows, baseDate);
       const filteredByRange = (val.allowed || []).filter(r => {
         const d = Number(r.day) || startDay;
         return d >= startDay && d <= endDay;
       });
 
-      // Ahora sí: limpiamos el rango y escribimos
       for (let d = startDay; d <= endDay; d++) {
         itineraries[city].byDay[d] = [];
       }
       pushRows(city, filteredByRange, false);
       producedSomething = filteredByRange.length > 0;
 
-      // Optimización por día del rango ya escrito
       for (let d = startDay; d <= endDay; d++) {
         await optimizeDay(city, d);
       }
     }
 
-    // Si por alguna razón no se produjo nada, mantenemos el contenido previo (no lo borramos).
     if (!producedSomething) {
       console.warn('[rebalanceWholeCity] No se generó contenido nuevo; se conserva el existente.');
     }
 
-    // Limpieza global y formateo final
     purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
     for (let d = startDay; d <= endDay; d++) {
       _applySoftCapsForDay(city, d);
       fixDayTimesSequential(city, d);
     }
+    /* NEW: reglas globales post-rango */
+    _applyAreaNoRepeatAcrossDays(city);
+    enforceCityWideSoftCaps(city);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false); $resetBtn?.removeAttribute('disabled');
@@ -2327,185 +2272,14 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v65 + refuerzos v66 · Global y sin predefiniciones
-   + Añadidos: ensureDays, normalizeRow, dedupeInto, pushRows, _canonicalPOIKey (si faltan)
-   + Caps blandos, duraciones realistas y horas secuenciales
+   (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
+   + Caps blandos por día (evita doble “café/terraza”, “paseo de barrio”, “playa”)
+   + Duraciones realistas y horas secuenciales
+   + NEW: Dedupe por “zona ancla” entre días (global, por tokens)
+   + NEW: Caps temáticos a nivel ciudad (evita monótonos “café/terraza” diarios)
+   + NEW: Transporte “A pie” si se mantiene el mismo área; notas con tip útil
 ================================= */
 
-// —— Helpers de infraestructura (solo si faltan) ——
-if (typeof ensureDays !== 'function') {
-  function ensureDays(city){
-    if(!itineraries[city]) itineraries[city]={byDay:{}};
-    if(!itineraries[city].byDay) itineraries[city].byDay={};
-  }
-}
-if (typeof normalizeRow !== 'function') {
-  function normalizeRow(r = {}) {
-    const z = (x, d='') => (x == null ? d : String(x));
-    const hh = s => {
-      const m = String(s||'').match(/(\d{1,2}):(\d{2})/);
-      if (!m) return '';
-      const h = Math.max(0, Math.min(23, +m[1]));
-      const mi = Math.max(0, Math.min(59, +m[2]));
-      return `${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
-    };
-    const tmap = { 'a pie':'A pie','pie':'A pie','walk':'A pie','walking':'A pie',
-                   'metro':'Metro','subway':'Metro','underground':'Metro',
-                   'bus':'Bus','autobús':'Bus',
-                   'tren':'Tren','train':'Tren',
-                   'taxi':'Taxi','uber':'Taxi','auto':'Auto','car':'Auto' };
-    const t = String(r.transport||'').toLowerCase().trim();
-    const tr = tmap[t] || (t ? (t.charAt(0).toUpperCase()+t.slice(1)) : '');
-    return {
-      day: Number(r.day)||1,
-      start: hh(r.start||''), end: hh(r.end||''),
-      activity: z(r.activity).trim(),
-      from: z(r.from).trim(), to: z(r.to).trim(),
-      transport: tr, duration: z(r.duration).trim(), notes: z(r.notes).trim()
-    };
-  }
-}
-if (typeof dedupeInto !== 'function') {
-  function dedupeInto(dst, row) {
-    const key = x => `${String(x.activity||'').trim().toLowerCase()}|${String(x.to||'').trim().toLowerCase()}`;
-    const k = key(row); if (!k) return;
-    if (!dst.some(r => key(r) === k)) dst.push(normalizeRow(row));
-  }
-}
-if (typeof pushRows !== 'function') {
-  function pushRows(city, rows = [], replace = false) {
-    ensureDays(city);
-    const byDay = itineraries[city].byDay || {};
-    if (replace) {
-      const newByDay = {};
-      rows.forEach(r=>{
-        const d = Number(r.day)||1;
-        if (!newByDay[d]) newByDay[d]=[];
-        dedupeInto(newByDay[d], r);
-      });
-      itineraries[city].byDay = newByDay;
-      return;
-    }
-    rows.forEach(r=>{
-      const d = Number(r.day)||1;
-      if (!byDay[d]) byDay[d] = [];
-      dedupeInto(byDay[d], r);
-    });
-    itineraries[city].byDay = byDay;
-  }
-}
-if (typeof _canonicalPOIKey !== 'function') {
-  function _canonicalPOIKey(r){
-    const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-    return `${norm(r.activity)}|${norm(r.to)}`;
-  }
-}
-
-/* ---------- Helpers horarios/duración ---------- */
-function _tMin(hhmm){ if(!hhmm) return null; const [h,m]=String(hhmm).split(':').map(x=>+x||0); return h*60+m; }
-function _toHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
-function _durToMin(d){
-  const s=String(d||'').toLowerCase(); let min=0;
-  const hm=s.match(/(\d+)\s*h/); if(hm) min+=+hm[1]*60;
-  const mm=s.match(/(\d+)\s*min/); if(mm) min+=+mm[1];
-  if(!hm && !mm){ const f=parseFloat(s.replace(',','.')); if(!isNaN(f)) min+=Math.round(f*60); }
-  return min||0;
-}
-function _minToDur(min){ if(min<60) return `${min}min`; const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}min`:`${h}h`; }
-
-/* ---------- Dedup/categorías ---------- */
-function _normTxt(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();}
-function _isAuroraName(s){return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(s||''));}
-function _actKey(r){ const a=_normTxt(r.activity), to=_normTxt(r.to); return `${a}|${to}`; }
-
-function purgeGlobalDuplicatesForCity(city,{allowAuroraMultiNight=true}={}){
-  const data=itineraries[city]; if(!data) return;
-  const byDay=data.byDay||{}; const days=Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  let auroraCity=false; try{ const c=getCoordinatesForCity(city); auroraCity=c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){}
-  const seen=new Set();
-  for(const d of days){
-    const out=[];
-    for(const r of (byDay[d]||[])){
-      if(allowAuroraMultiNight && auroraCity && _isAuroraName(r.activity)){ out.push(r); continue; }
-      const k=_actKey(r); if(seen.has(k)) continue; seen.add(k); out.push(r);
-    }
-    byDay[d]=out;
-  }
-  itineraries[city].byDay=byDay;
-}
-
-/* ---------- Duraciones realistas ---------- */
-function applyRealisticDurations(rows){
-  return rows.map(r=>{
-    if (_isAuroraName(r.activity)) return r;
-    const t=_normTxt(`${r.activity} ${r.to}`);
-    let min=_durToMin(r.duration)||0;
-    if (/\bmuse(o|u)|galer[ií]a|museum|gallery/.test(t))       min = Math.max(min, 90);
-    else if (/\bcatedral|basilica|duomo|church|templo/.test(t)) min = Math.max(min, 75);
-    else if (/\bmirador|viewpoint|torre|skydeck|telef[eé]rico/.test(t)) min = Math.max(min, 45);
-    else if (/\bplaya|beach|parque\b/.test(t))                  min = Math.max(min, 120);
-    else if (/\bmercado|market\b/.test(t))                      min = Math.max(min, 60);
-    return {...r, duration:_minToDur(min||60)};
-  });
-}
-
-/* ---------- Caps blandos por día (evita doble café/terraza, paseo, playa) ---------- */
-function _softCategory(row){
-  const t=_normTxt(`${row.activity} ${row.to}`);
-  if (/\bcafe|caf[eé]|espresso|coffee|pasteler[ií]a|bakery|patisserie|terraza|bar\b/.test(t)) return 'cafe';
-  if (/\bpaseo|stroll|walk|ramblas?|boulevard|barrio|district|old\s*town|centro|g[oó]tico|eixample|gracia\b/.test(t)) return 'stroll';
-  if (/\bplaya|beach|costa|orla\b/.test(t)) return 'beach';
-  return null;
-}
-const MAX_SOFT_CAT_PER_DAY = { cafe: 1, stroll: 1, beach: 1 };
-
-function _applySoftCapsForDay(city, day){
-  const byDay = itineraries[city]?.byDay || {}; const rows = byDay[day]||[];
-  const count = { cafe:0, stroll:0, beach:0 };
-  const out = [];
-  for(const r of rows){
-    const cat = _softCategory(r);
-    if(!cat){ out.push(r); continue; }
-    if(count[cat] < (MAX_SOFT_CAT_PER_DAY[cat]||1)){ count[cat]++; out.push(r); }
-    // si excede, lo omitimos silenciosamente
-  }
-  byDay[day]=out;
-}
-
-/* ---------- Fijación de horas secuenciales ---------- */
-function fixDayTimesSequential(city, day){
-  const byDay = itineraries[city]?.byDay || {};
-  let rows = (byDay[day]||[]).slice().sort((a,b)=>(_tMin(a.start)||0)-(_tMin(b.start)||0));
-
-  const pd = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START, end:DEFAULT_END};
-  let cursor = _tMin(pd.start)||510; // 08:30
-  const hardEnd = _tMin(pd.end)||1140; // 19:00
-  const MIN_GAP = 15;
-
-  rows = rows.map(r=>{
-    const dur = Math.max(15, _durToMin(r.duration)||75);
-    if (_isAuroraName(r.activity)) return r;
-    const s = Math.max(cursor, _tMin(r.start)||cursor);
-    const e = s + dur;
-    const row = {...r, start:_toHHMM(s), end:_toHHMM(e), duration:_minToDur(dur)};
-    cursor = e + MIN_GAP;
-    return row;
-  });
-
-  rows = rows.map((r,i)=>{
-    if (_isAuroraName(r.activity)) return r;
-    const s=_tMin(r.start), e=_tMin(r.end);
-    if(e>hardEnd){
-      const dur = i===rows.length-1 ? Math.max(30, hardEnd - s) : Math.max(15, hardEnd - s);
-      return {...r, end:_toHHMM(s+dur), duration:_minToDur(dur)};
-    }
-    return r;
-  });
-
-  byDay[day]=rows;
-}
-
-/* ---------- CRUD día/actividad ---------- */
 function insertDayAt(city, position){
   ensureDays(city);
   const byDay = itineraries[city].byDay || {};
@@ -2544,6 +2318,7 @@ function swapDays(city,a,b){
   const A = (byDay[a]||[]).map(r=>({...r,day:b}));
   const B = (byDay[b]||[]).map(r=>({...r,day:a}));
   byDay[a]=B; byDay[b]=A;
+  itineraries[city].byDay = byDay;
 }
 
 function moveActivities(city,fromDay,toDay,query=''){
@@ -2560,6 +2335,191 @@ function moveActivities(city,fromDay,toDay,query=''){
   byDay[fromDay]=remain.map(normalizeRow);
   moved.forEach(r=>dedupeInto(dst,{...r,day:toDay}));
   byDay[toDay]=dst.map(normalizeRow).sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
+  itineraries[city].byDay=byDay;
+}
+
+/* ---------- Helpers horarios/duración ---------- */
+function _tMin(hhmm){ if(!hhmm) return null; const [h,m]=String(hhmm).split(':').map(x=>+x||0); return h*60+m; }
+function _toHHMM(min){ const h=Math.floor(min/60), m=min%60; return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; }
+function _durToMin(d){
+  const s=String(d||'').toLowerCase(); let min=0;
+  const hm=s.match(/(\d+)\s*h/); if(hm) min+=+hm[1]*60;
+  const mm=s.match(/(\d+)\s*min/); if(mm) min+=+mm[1];
+  if(!hm && !mm){ const f=parseFloat(s.replace(',','.')); if(!isNaN(f)) min+=Math.round(f*60); }
+  return min||0;
+}
+function _minToDur(min){ if(min<60) return `${min}min`; const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}min`:`${h}h`; }
+
+/* ---------- Dedupe/categorías ---------- */
+function _normTxt(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();}
+function _isAuroraName(s){return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(s||''));}
+function _actKey(r){ const a=_normTxt(r.activity), to=_normTxt(r.to); return `${a}|${to}`; }
+
+/* NEW: inferir “zona ancla” por tokens genéricos (global) */
+const AREA_TOKENS = [
+  // zonas urbanas típicas (genéricas, multi-ciudad por idioma)
+  'gothic','gótico','gotico','born','ciutadella','eixample','gracia','gràcia',
+  'barceloneta','poblenou','raval','poble sec','montjuic','montjuïc','ramblas','las ramblas',
+  'paseo de gracia','passeig de gracia','passeig de gràcia','puerto','marina','old town','centro',
+  'market','mercado','harbor','harbour','teleferico','teleférico','castle','castillo','cathedral','catedral',
+  'park','parque','mirador','viewpoint','beach','playa','boulevard'
+];
+function inferAreaKey(row){
+  const t = _normTxt(`${row.activity||''} ${row.to||''} ${row.from||''} ${row.notes||''}`);
+  const hit = AREA_TOKENS.find(tok=> t.includes(tok));
+  if(hit) return hit;
+  // fallback: usa el “to” como ancla abreviada si es un nombre largo
+  const to = _normTxt(row.to||'');
+  if(to){
+    // toma primeras dos palabras distintivas
+    const two = to.split(' ').slice(0,2).join(' ');
+    return two || to;
+  }
+  return null;
+}
+
+/* NEW: no repetir misma “zona ancla” en días distintos (salvo auroras) */
+function _applyAreaNoRepeatAcrossDays(city){
+  const byDay = itineraries[city]?.byDay || {};
+  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+  const seen = new Set();
+  for(const d of days){
+    const out=[];
+    for(const r of (byDay[d]||[])){
+      if(_isAuroraName(r.activity)){ out.push(r); continue; }
+      const area = inferAreaKey(r);
+      const key  = area ? `${area}|${d}` : null; // permitimos volver a la misma zona dentro del MISMO día
+      const globalKey = area ? `${area}|GLOBAL` : null;
+      if(area){
+        // si ya se usó esta zona en días anteriores, lo saltamos
+        if(seen.has(globalKey)){ continue; }
+        seen.add(globalKey);
+      }
+      out.push(r);
+    }
+    byDay[d]=out;
+  }
+  itineraries[city].byDay = byDay;
+}
+
+/* ---------- Duraciones realistas + transporte/nota útil ---------- */
+function applyRealisticDurations(rows){
+  return rows.map(r=>{
+    if (_isAuroraName(r.activity)) return r;
+    const t=_normTxt(`${r.activity} ${r.to}`);
+    let min=_durToMin(r.duration)||0;
+
+    if (/\bmuse(o|u)|galer[ií]a|museum|gallery/.test(t))              min = Math.max(min, 90);
+    else if (/\bcatedral|basilica|duomo|church|templo/.test(t))       min = Math.max(min, 75);
+    else if (/\bpalau\s+de\s+la\s+m[uú]sica|auditorio|teatro/.test(t))min = Math.max(min, 60);
+    else if (/\bmirador|viewpoint|torre|skydeck|telef[eé]rico/.test(t)) min = Math.max(min, 45);
+    else if (/\bplaya|beach|parque\b/.test(t))                        min = Math.max(min, 90);
+    else if (/\bmercado|market\b/.test(t))                            min = Math.max(min, 60);
+    else if (/\bcafe|caf[eé]|coffee|pasteler[ií]a|bakery|patisserie\b/.test(t)) {
+      if(min===0) min = 45; // cafés realistas 30–60
+      min = Math.min(Math.max(min, 30), 60);
+    } else {
+      min = min || 60;
+    }
+
+    // Transporte: si la “zona ancla” no cambia, a pie
+    let transport = r.transport || '';
+    try{
+      const a1 = inferAreaKey(r) || '';
+      const a2 = inferAreaKey({to:r.from}) || '';
+      if(a1 && a2 && a1===a2) transport = 'A pie';
+    }catch(_){}
+
+    // Notas: si vienen muy genéricas, agrega tip útil breve
+    let notes = String(r.notes||'').trim();
+    if(!notes || /descubre|rel[aá]jate|admira/i.test(notes)){
+      notes = (notes? notes+' · ' : '') + 'tip: reserva/cola anticipada o visita temprano para evitar filas.';
+    }
+
+    return {...r, duration:_minToDur(min), transport, notes};
+  });
+}
+
+/* ---------- Caps blandos por día (evita doble café/terraza, paseo, playa) ---------- */
+function _softCategory(row){
+  const t=_normTxt(`${row.activity} ${row.to}`);
+  if (/\bcafe|caf[eé]|espresso|coffee|pasteler[ií]a|bakery|patisserie|terraza|bar\b/.test(t)) return 'cafe';
+  if (/\bpaseo|stroll|walk|ramblas?|boulevard|barrio|district|old\s*town|centro|g[oó]tico|eixample|gracia\b/.test(t)) return 'stroll';
+  if (/\bplaya|beach|costa|orla\b/.test(t)) return 'beach';
+  return null;
+}
+const MAX_SOFT_CAT_PER_DAY = { cafe: 1, stroll: 1, beach: 1 };
+
+/* NEW: caps temáticos a nivel ciudad (para estadías cortas evita monotonía) */
+const MAX_SOFT_CAT_PER_CITY = { cafe: 2, stroll: 3, beach: 2 }; // se aplica si total de días ≤ 5
+
+function _applySoftCapsForDay(city, day){
+  const byDay = itineraries[city]?.byDay || {}; const rows = byDay[day]||[];
+  const count = { cafe:0, stroll:0, beach:0 };
+  const out = [];
+  for(const r of rows){
+    const cat = _softCategory(r);
+    if(!cat){ out.push(r); continue; }
+    if(count[cat] < (MAX_SOFT_CAT_PER_DAY[cat]||1)){ count[cat]++; out.push(r); }
+  }
+  byDay[day]=out;
+}
+
+/* NEW: caps temáticos por ciudad (evita café/terraza todos los días) */
+function enforceCityWideSoftCaps(city){
+  const byDay = itineraries[city]?.byDay || {};
+  const totalDays = Object.keys(byDay).length || 0;
+  if(totalDays === 0) return;
+
+  const caps = (totalDays <= 5) ? MAX_SOFT_CAT_PER_CITY : { cafe: Infinity, stroll: Infinity, beach: Infinity };
+  const acc = { cafe:0, stroll:0, beach:0 };
+
+  // barrido cronológico: si excede el cupo global, suprime silenciosamente
+  for(const d of Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b)){
+    const out=[];
+    for(const r of (byDay[d]||[])){
+      const cat = _softCategory(r);
+      if(!cat){ out.push(r); continue; }
+      if(acc[cat] < (caps[cat]||Infinity)){ acc[cat]++; out.push(r); }
+      // si se excede, lo omitimos
+    }
+    byDay[d]=out;
+  }
+  itineraries[city].byDay = byDay;
+}
+
+/* ---------- Fijación de horas secuenciales ---------- */
+function fixDayTimesSequential(city, day){
+  const byDay = itineraries[city]?.byDay || {};
+  let rows = (byDay[day]||[]).slice().sort((a,b)=>(_tMin(a.start)||0)-(_tMin(b.start)||0));
+
+  const pd = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START, end:DEFAULT_END};
+  let cursor = _tMin(pd.start)||510; // 08:30
+  const hardEnd = _tMin(pd.end)||1140; // 19:00
+  const MIN_GAP = 15;
+
+  rows = rows.map(r=>{
+    const dur = Math.max(15, _durToMin(r.duration)||75);
+    if (_isAuroraName(r.activity)) return r;
+    const s = Math.max(cursor, _tMin(r.start)||cursor);
+    const e = s + dur;
+    const row = {...r, start:_toHHMM(s), end:_toHHMM(e), duration:_minToDur(dur)};
+    cursor = e + MIN_GAP;
+    return row;
+  });
+
+  rows = rows.map((r,i)=>{
+    if (_isAuroraName(r.activity)) return r;
+    const s=_tMin(r.start), e=_tMin(r.end);
+    if(e>hardEnd){
+      const dur = i===rows.length-1 ? Math.max(30, hardEnd - s) : Math.max(15, hardEnd - s);
+      return {...r, end:_toHHMM(s+dur), duration:_minToDur(dur)};
+    }
+    return r;
+  });
+
+  byDay[day]=rows;
+  itineraries[city].byDay = byDay;
 }
 
 /* ---------- Optimización de día ---------- */
@@ -2591,7 +2551,7 @@ async function optimizeDay(city, day){
   // Intake adaptativo
   const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
     ? buildIntake()
-    : (typeof buildIntakeLite==='function' ? buildIntakeLite(city,{start:day,end:day}) : buildIntake());
+    : buildIntakeLite(city,{start:day,end:day});
 
   // Contexto simple para auroras
   let auroraCity=false; try{ const c=getCoordinatesForCity(city); auroraCity=c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){}
@@ -2637,7 +2597,7 @@ ${intakeData}
       return k && (!allExisting.includes(k) || (isAurora && auroraCity));
     });
 
-    // Duraciones/orden/auroras
+    // Duraciones/transporte/notas
     normalized = applyRealisticDurations(normalized);
     if(typeof applyBufferBetweenRows==='function') normalized=applyBufferBetweenRows(normalized);
     if(typeof reorderLinearVisits==='function')   normalized=reorderLinearVisits(normalized);
@@ -2648,9 +2608,11 @@ ${intakeData}
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
     pushRows(city,val.allowed,false);
 
-    // Limpieza y formato final del día
+    // Limpieza y formato final del día + reglas globales nuevas
     purgeGlobalDuplicatesForCity(city,{allowAuroraMultiNight:true});
+    _applyAreaNoRepeatAcrossDays(city);
     _applySoftCapsForDay(city, day);
+    enforceCityWideSoftCaps(city);
     fixDayTimesSequential(city, day);
   }
 }
