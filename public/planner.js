@@ -2308,8 +2308,10 @@ function intentFromText(text){
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
    🔧 v69 fix: dedupe multi-idioma con normKey
-   🔧 v69 fix: cuando es el último día original tras agregar días → “ligero pero COMPLETO”
+   🔧 v71 fix: el “día ligero pero COMPLETO” apunta SIEMPRE al NUEVO último día
+              tras agregar días (bandera plannerState.lightDayTarget[city])
 ================================= */
+
 function insertDayAt(city, position){
   ensureDays(city);
   const byDay = itineraries[city].byDay || {};
@@ -2376,7 +2378,7 @@ async function optimizeDay(city, day){
     duration:r.duration||'',notes:r.notes||''
   }));
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
-  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
+  const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
   // 🧊 Protege actividades especiales (auroras / termales)
   const protectedRows = rows.filter(r=>{
@@ -2395,7 +2397,7 @@ async function optimizeDay(city, day){
   const hasDayTripPending = plannerState?.dayTripPending?.[city];
   const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
 
-  // 🔁 Intake adaptativo (solo rango actual)
+  // 🔁 Intake adaptativo (solo rango actual si hay fuerza)
   const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
@@ -2412,12 +2414,19 @@ async function optimizeDay(city, day){
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
-  // 🔧 Nuevo: si este día es el último día original tras agregar días, pedir “ligero pero completo”
-  const isLightDay = (itineraries[city]?.originalDays > 0) &&
-                     (day === itineraries[city].originalDays) &&
-                     (stayDays > itineraries[city].originalDays);
+  /* --- v71 fix: seleccionar el DÍA LIGERO dinámicamente ---
+     Prioridad:
+       1) plannerState.lightDayTarget[city] (definido en Sección 19 al agregar días)
+       2) (retro-compat) si existía lógica de “último original”, úsala solo si no hay #1
+  */
+  const softTarget =
+    (plannerState?.lightDayTarget?.[city])
+    ?? ((itineraries[city]?.originalDays > 0 && stayDays > itineraries[city].originalDays)
+          ? itineraries[city].originalDays
+          : null);
+  const isLightDay = (day === softTarget);
   const lightNote = isLightDay
-    ? `\n- Este es el **último día original** tras agregar días. Déjalo **ligero pero COMPLETO**: cubrir la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin picos de esfuerzo ni huecos largos.\n`
+    ? `\n- **Día ligero pero COMPLETO** (nuevo último día): cubrir toda la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin picos de esfuerzo ni huecos largos.\n`
     : '';
 
   const prompt=`
@@ -2426,22 +2435,22 @@ Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
 Ventanas definidas: ${JSON.stringify(perDay)}
-Filas actuales:
+Filas actuales (para optimizar):
 ${JSON.stringify(rowsForOptimization)}
 
 📋 **REGLAS INTELIGENTES v66**
-- Identifica e incluye los **imperdibles de clase mundial** de ${city} antes que otros.
-- Distribuye las experiencias en **temas distintos** (cultura, gastronomía, naturaleza, ocio, compras, relax).
-- Ajusta el plan según clima/temporada: interiores si frío o lluvia, exteriores si templado o verano.
-- Mantén balance energético y pausas; sin más de 3 actividades exigentes seguidas.
-- Si ${city} es costera, incluye paseo marítimo/puerto/playa icónica si el clima lo permite.
-- Day trips de ida ≤ ${maxOneWayHours} h; solo si agrega valor.
-- No dupliques actividades existentes en otros días (considera sinónimos/idiomas).
-- Auroras (si plausible): noches 20:00–02:30 h, transporte lógico, \`valid:\` en notes.
-- Notas SIEMPRE útiles (no vacías).
-- Horario base 08:30–19:00; **cubre la ventana** sin dejar “medio día” salvo justificación explícita (y añade alternativas suaves).
+- Prioriza **imperdibles de clase mundial** en ${city}.
+- Distribuye en **temas distintos** (cultura, gastronomía, naturaleza, ocio, compras, relax).
+- Ajusta por clima/temporada: interiores si frío/lluvia; exteriores si templado/verano.
+- Balance energético con pausas; no más de 3 actividades exigentes seguidas.
+- Si ${city} es costera, añade paseo marítimo/puerto/playa icónica si el clima lo permite.
+- Day trips: ida ≤ ${maxOneWayHours} h; solo si agrega valor real.
+- Evita **duplicados multi-día** (considera sinónimos/idiomas).
+- Auroras (si plausible): ventana 20:00–02:30, transporte lógico y "valid:" en notes.
+- Notas siempre útiles (no vacías).
+- Horario base 08:30–19:00; **cubre la ventana** sin dejar “medio día” salvo justificación clara (añade alternativas suaves).
 ${lightNote}
-- Devuelve formato C {"rows":[...],"replace":false}.
+- Devuelve **formato C** {"rows":[...],"replace":false}.
 
 Contexto:
 ${intakeData}
@@ -2481,7 +2490,10 @@ ${intakeData}
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
-   v68.1 — Ajuste en “agregar 1 día” para reequilibrar rango
+   v71.fix — Extensión de días estable
+   - Reequilibra desde el último día original hasta el nuevo final
+   - Define "día suave" en el NUEVO último día
+   - Asegura ventana/optimización completa del día nuevo
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2561,23 +2573,27 @@ async function onSend(){
     }
   }
 
-  // Agregar varios días N>0 (sin tocar días previos)
+  /* ---------- Agregar varios días N>0 ---------- */
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
     showWOW(true,'Agregando días y reoptimizando…');
 
     ensureDays(city);
 
-    // total ANTES de agregar (último día existente)
+    // total ANTES de agregar (último día ORIGINAL)
     const byDayPre  = itineraries[city].byDay || {};
     const prevTotal = Object.keys(byDayPre).length || 0;
-    itineraries[city].originalDays = prevTotal;
 
+    // Marcar explícitamente el "último original" (histórico)
+    itineraries[city].lastOriginalDay = prevTotal;
+
+    // Forzar replan en rango y añadir días
     if (!plannerState.forceReplan) plannerState.forceReplan = {};
     plannerState.forceReplan[city] = true;
 
     addMultipleDaysToCity(city, intent.extraDays);
 
+    // Ventanas seguras para todos los días nuevos
     if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
     cityMeta[city].perDay = cityMeta[city].perDay || [];
     const ensureWindow = (d)=>{
@@ -2587,16 +2603,26 @@ async function onSend(){
       if(!pd.end)   pd.end   = DEFAULT_END;
     };
     const total = Object.keys(itineraries[city].byDay||{}).length;
-    for(let d=prevTotal; d<=total; d++) ensureWindow(d);
+    for(let d=prevTotal+1; d<=total; d++) ensureWindow(d);
 
-    await rebalanceWholeCity(city, { start: prevTotal, end: total, dayTripTo: intent.dayTripTo||'' });
+    // 👉 Definir "día suave" en el NUEVO último día
+    if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
+    plannerState.lightDayTarget[city] = total;
+
+    // Reequilibrar desde el último día original hasta el nuevo final
+    await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total, dayTripTo: intent.dayTripTo||'' });
+
+    // Garantía de completitud del último día
+    if ((itineraries[city].byDay?.[total]||[]).length < 3) {
+      await optimizeDay(city, total);
+    }
 
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé desde el último día existente hasta el final evitando duplicados.`, 'ai');
+    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city}. Reoptimicé de D${prevTotal} a D${total} y marqué D${total} como "ligero pero COMPLETO".`, 'ai');
     return;
   }
 
-  // Agregar 1 día al final (sin tocar días previos) — v68.1
+  /* ---------- Agregar exactamente 1 día al final ---------- */
   if (intent.type === 'add_day_end' && intent.city) {
     const city = intent.city;
     showWOW(true, 'Insertando día y optimizando…');
@@ -2605,18 +2631,18 @@ async function onSend(){
     const byDay = itineraries[city].byDay || {};
     const days  = Object.keys(byDay).map(n => +n).sort((a,b)=>a-b);
 
-    // total ANTES de insertar (antiguo último existente)
+    // total ANTES de insertar (último día ORIGINAL)
     const prevTotal = days.length || 0;
-    itineraries[city].originalDays = prevTotal;  // referenciar para 15.3
+    itineraries[city].lastOriginalDay = prevTotal; // histórico
 
-    // Forzar replan del rango (último anterior + nuevo)
+    // Forzar replan del rango
     if (!plannerState.forceReplan) plannerState.forceReplan = {};
     plannerState.forceReplan[city] = true;
 
     const numericPos = prevTotal + 1;
     insertDayAt(city, numericPos);
 
-    // Blindar ventanas por día para {prevTotal, numericPos}
+    // Ventanas seguras para {numericPos}
     if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
     cityMeta[city].perDay = cityMeta[city].perDay || [];
     const ensureWindow = (d)=>{
@@ -2625,9 +2651,9 @@ async function onSend(){
       if(!pd.start) pd.start = DEFAULT_START;
       if(!pd.end)   pd.end   = DEFAULT_END;
     };
-    ensureWindow(prevTotal);
     ensureWindow(numericPos);
 
+    // Semilla opcional si el usuario pidió "para ir a X"
     if (intent.dayTripTo) {
       const destTrip  = intent.dayTripTo;
       const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
@@ -2646,14 +2672,23 @@ async function onSend(){
 
     const total = Object.keys(itineraries[city].byDay||{}).length;
 
-    // Rebalancea desde el antiguo último (día suave) hasta el nuevo final
-    await rebalanceWholeCity(city, { start: prevTotal, end: total });
+    // 👉 Definir "día suave" en el NUEVO último día
+    if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
+    plannerState.lightDayTarget[city] = total;
+
+    // Rebalancear desde el último día original hasta el nuevo final
+    await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total });
+
+    // Garantía de completitud del nuevo día
+    if ((itineraries[city].byDay?.[total]||[]).length < 3) {
+      await optimizeDay(city, total);
+    }
 
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Día agregado y plan reoptimizado (primeros días intactos, sin duplicados).', 'ai');
+    chatMsg('✅ Día agregado y plan reoptimizado (primeros días intactos; el nuevo último día queda "ligero pero COMPLETO").', 'ai');
     return;
   }
 
