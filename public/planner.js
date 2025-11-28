@@ -1801,12 +1801,10 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo masivo tras cambios (agregar días / day trip pedido)
-   v68 base + mejoras definitivas:
-   - Anti-duplicados global con clave canónica (actividad|lugar normalizado)
-   - Cobertura de Contenidos para forzar variedad real (museo, iglesia, barrio, mercado, mar, mirador, Gaudí, etc.)
-   - Rango selectivo (último día original → último día actual)
-   - “Día suave” al inicio del rango (pero de día completo, sin huecos)
-   - Post: optimizeDay(d) + fixDayTimesSequential(d) sólo en el rango
+   Base v68 + FIX inteligencia por rango + anti-duplicados global (actividad|destino)
+   + Rango selectivo (último día original → último día actual)
+   + “Día suave” al inicio del rango (pero de día completo, sin huecos)
+   + Post: optimizeDay(d) + fixDayTimesSequential(d) sólo en el rango
 ================================= */
 async function rebalanceWholeCity(city, opts = {}) {
   const data = itineraries[city];
@@ -1815,24 +1813,22 @@ async function rebalanceWholeCity(city, opts = {}) {
     return;
   }
 
-  const totalDays = Object.keys(data.byDay || {}).length;
+  // Días actuales
+  const daysNow = Object.keys(data.byDay || {}).map(n => +n);
+  const lastNow = daysNow.length ? Math.max(...daysNow) : 1;
 
-  // Ventanas por día actuales
-  const perDay = Array.from({ length: totalDays }, (_, i) => {
-    const src = (cityMeta[city]?.perDay || []).find(x => x.day === i + 1) || { start: DEFAULT_START, end: DEFAULT_END };
-    return { day: i + 1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
+  // Ventanas por día (defensivo)
+  const perDay = Array.from({ length: lastNow }, (_, i) => {
+    const pd = (cityMeta[city]?.perDay || []).find(x => x.day === i + 1);
+    return { day: i + 1, start: (pd?.start || DEFAULT_START), end: (pd?.end || DEFAULT_END) };
   });
 
   const baseDate   = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo || '').trim();
 
-  // Rango: desde el último día original (marcado por addMultipleDaysToCity) hasta el final
-  // Si no existe marca, reoptimiza solo el último día presente.
-  const daysNow = Object.keys(data.byDay || {}).map(n => +n);
-  const lastNow = daysNow.length ? Math.max(...daysNow) : 1;
-
+  // Rango: desde el último día original (marcado) hasta el final
   const originalDays = Number(itineraries[city]?.originalDays || 0);
-  const defaultStart = originalDays > 0 ? Math.min(originalDays, lastNow) : lastNow; // antiguo último
+  const defaultStart = originalDays > 0 ? Math.min(originalDays, lastNow) : lastNow;
   const startDay     = Math.max(1, Number.isInteger(opts.start) ? opts.start : defaultStart);
   const endDay       = Math.min(lastNow, Number.isInteger(opts.end) ? opts.end : lastNow);
 
@@ -1841,57 +1837,10 @@ async function rebalanceWholeCity(city, opts = {}) {
   // ¿Replan forzado?
   const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
-  // ===== Helpers de normalización/alias para dedupe robusto =====
-  const _normTxt = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
-  const _canonPlace = (s) => {
-    let t = _normTxt(s)
-      .replace(/\b(seccion|sector|zona)\s+no\s+visitad[ao]\b/g,'')
-      .replace(/\b(seccion|sector|zona)\b/g,'')
-      .replace(/\b(barrio\s+de|el\s+barrio\s+de|barri\s+de)\b/g,'')
-      .replace(/\b(parque\s+de|parc\s+de|park\s+de)\b/g,'')
-      .replace(/\b(museo\s+de|museum\s+of)\b/g,'')
-      .replace(/\s+/g,' ')
-      .trim();
-
-    // Alias frecuentes globales (extensible). Mantener corto y seguro.
-    const alias = {
-      // Barcelona (ejemplos más comunes)
-      'sagrada familia':'sagrada familia',
-      'temple expiatori de la sagrada familia':'sagrada familia',
-      'parque guell':'park guell',
-      'parc guell':'park guell',
-      'park guell':'park guell',
-      'casa batllo':'casa batllo',
-      'la pedrera':'casa mila',
-      'casa mila':'casa mila',
-      'barri gotic':'barrio gotico',
-      'gothic quarter':'barrio gotico',
-      'la rambla':'la rambla',
-      'passeig de gracia':'passeig de gracia',
-      'gracia':'gracia',
-      'montjuic':'montjuic',
-      'mnac':'mnac',
-      'museo nacional de arte de cataluna':'mnac',
-      'playa de la barceloneta':'barceloneta',
-      'barceloneta':'barceloneta',
-      'mercado de la boqueria':'la boqueria',
-      'la boqueria':'la boqueria',
-      'palau de la musica catalana':'palau musica',
-      'museo picasso':'museo picasso',
-      'joan miro':'fundacion joan miro',
-      'fundacion joan miro':'fundacion joan miro',
-      'castillo de montjuic':'castillo montjuic',
-      'mirador de colon':'mirador colon'
-    };
-    return alias[t] || t;
-  };
-  const _actKey = (r) => {
-    const a = _normTxt(r.activity), to = _canonPlace(r.to || r.hacia || '');
-    if(!a && !to) return '';
-    return `${a}|${to}`;
-  };
-
   // ===== Blacklists anti-duplicados =====
+  const _norm = s => String(s || '').trim().toLowerCase();
+  const _actKey = r => `${_norm(r.activity)}|${_norm(r.to)}`;
+
   // 1) todo lo previo (1..start-1) → jamás repetir
   const blacklistPrev = new Set(
     Object.entries(data.byDay || {})
@@ -1900,7 +1849,7 @@ async function rebalanceWholeCity(city, opts = {}) {
       .filter(Boolean)
   );
 
-  // 2) punto de partida del propio rango (evita repetirse en batch)
+  // 2) evitar repetición dentro del mismo rango
   const blacklistRange = new Set(
     Object.entries(data.byDay || {})
       .filter(([d]) => Number(d) >= startDay && Number(d) <= endDay)
@@ -1908,83 +1857,38 @@ async function rebalanceWholeCity(city, opts = {}) {
       .filter(Boolean)
   );
 
-  // ===== Cobertura de contenidos (para forzar variedad útil) =====
-  function rowCategory(r){
-    const txt = _normTxt(`${r.activity} ${r.to} ${r.hacia} ${r.notes}`);
-    if (/aurora|northern\s+light/.test(txt))     return 'aurora';
-    if (/gaudi|sagrada|batllo|mila|pedrera|guell/.test(txt)) return 'gaudi';
-    if (/museo|museum|picasso|mnac|miro|macba|maritimo/.test(txt)) return 'museo';
-    if (/catedral|basilica|church|templo|cathedral/.test(txt))     return 'iglesia';
-    if (/mercado|market|boqueria|sant antoni|santantoni/.test(txt))return 'mercado';
-    if (/barrio|barri|g[oó]tic|gracia|raval|born|barceloneta/.test(txt)) return 'barrio';
-    if (/mirador|viewpoint|teleferico|colon/.test(txt))            return 'mirador';
-    if (/playa|beach|barceloneta/.test(txt))                       return 'mar';
-    if (/parque|park|ciutadella|montjuic|creueta/.test(txt))       return 'parque';
-    if (/paseo|ramblas?|passeig/.test(txt))                        return 'paseo';
-    if (/cafe|cafeteria|terraza|coffee|pasteleria|dulces/.test(txt)) return 'cafe';
-    return 'otros';
-  }
-  function coverageSummary(upToDay){
-    const cov = { gaudi:0,museo:0,iglesia:0,mercado:0,barrio:0,mirador:0,mar:0,parque:0,paseo:0,cafe:0,otros:0 };
-    Object.entries(data.byDay || {})
-      .filter(([d]) => Number(d) <= (upToDay || lastNow))
-      .forEach(([,rows])=>{
-        rows.forEach(r => cov[rowCategory(r)]++);
-      });
-    return cov;
-  }
-  // cobertura previa (todo antes del rango) y del rango (si existía contenido)
-  const covBefore = coverageSummary(startDay - 1);
-  const covRange  = (() => {
-    const cov = { gaudi:0,museo:0,iglesia:0,mercado:0,barrio:0,mirador:0,mar:0,parque:0,paseo:0,cafe:0,otros:0 };
-    Object.entries(data.byDay || {})
-      .filter(([d]) => Number(d) >= startDay && Number(d) <= endDay)
-      .forEach(([,rows]) => rows.forEach(r => cov[rowCategory(r)]++));
-    return cov;
-  })();
-
   // Intake reducido al rango (si falla, completo)
   const intakeForRange = (() => {
     try { return buildIntakeLite(city, { start: startDay, end: endDay }); }
     catch { return buildIntake(); }
   })();
 
-  // ===== Prompt con Cobertura y Reglas estrictas =====
+  // ===== Prompt =====
   const prompt = `
 ${FORMAT}
 **ROL:** Reequilibra la ciudad "${city}" **SOLO** entre los días ${startDay} y ${endDay}. ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-- Respeta ventanas (puedes ajustar si tiene sentido logístico): ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Respeta/ajusta ventanas si tiene sentido logístico: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
 - Prioriza **imperdibles reales**, agrupa por zonas y evita **huecos irrazonables** (>90 min sin propósito).
-
-🧭 **Matriz de Cobertura (para evitar repetir y rellenar huecos):**
-- Cobertura ANTES del rango (1..${startDay-1}): ${JSON.stringify(covBefore)}
-- Cobertura DENTRO del rango actual (${startDay}..${endDay}): ${JSON.stringify(covRange)}
-- Rellena categorías con baja presencia y evita repetir macro-hitos ya cubiertos (Gaudí grandes: Sagrada Familia, Park Güell, Casa Batlló, Casa Milà/La Pedrera; zonas: Barri Gòtic, La Rambla, Barceloneta, Montjuïc, Passeig de Gràcia…).
-- Si repites una **zona**, debe ser con **experiencia distinta** y valor claro (p.ej. “Casa Vicens” si ya hubo Gaudí, o “Bunkers del Carmel” si faltó mirador).
+- No heredes horarios entre días; usa buffers ≥15 min.
 
 🧩 **Regla de “día suave” (sin huecos):**
 - El **día ${startDay}** es el antiguo **último día original**.
-- Debe ser **de menor intensidad** pero **completo** (parques, paseos, miradores, cafés, mercado o mar).
-- No dejes el día medio vacío: rellena con actividades plausibles y buffers ≥15 min.
+- Debe ser **de menor intensidad** pero **completo** (parques, miradores, mercados, barrios pintorescos, cafés puntuales).
 
 🧭 Day trips:
-- Máximo **1** día de excursión dentro del rango si **aporta valor** (ida ≤ ${endDay - startDay + 1 + (startDay>1 ? (startDay-1) : 0) > 5 ? 3 : 2} h).
-${wantedTrip ? `- Preferencia del usuario: "${wantedTrip}". Úsala exactamente 1 día si es razonable.` : ''}
+- Máximo **1** día de excursión dentro del rango si **aporta valor** (ida ≤ 2 h por trayecto; regreso el mismo día).
+${wantedTrip ? `- Preferencia del usuario: "${wantedTrip}". Úsala 1 sola vez si es razonable.` : ''}
 
 ❌ **NO DUPLICAR (OBLIGATORIO)**:
-- No repitas macro-hitos ya visitados (usa nuevas piezas si quieres variedad).
+- No repitas actividades ya existentes en días previos (1..${startDay - 1}).
 - No te repitas dentro del **mismo rango**.
-- Si algo ya está cubierto, propone **alternativa equivalente** (otro mirador, otro barrio, otro museo).
+- Si algo ya está cubierto, propone alternativa equivalente.
 
 🕒 Horarios:
-- Base **08:30–19:00**; cenas/vida nocturna OK; auroras **20:00–02:30** (si aplica). Buffers ≥15 min.
-
-🔒 Seguridad / plausibilidad:
-- Evita zonas/horarios con riesgo o restricciones; termales ≥3 h; auroras con transporte lógico y nota "valid:".
+- Base **08:30–19:00**; cenas/vida nocturna OK; auroras 20:00–02:30 (si aplica). Buffers ≥15 min.
 
 📝 Notas: útiles (nunca vacías ni “seed”).
-
 Contexto (sólo rango):
 ${intakeForRange}
 `.trim();
@@ -1995,27 +1899,30 @@ ${intakeForRange}
     const ans = await callAgent(prompt, true, { cityName: city, baseDate });
     const parsed = parseJSON(ans);
 
-    // Normalización de múltiples formatos de salida
+    // Normalización de formatos
     let rows = [];
     if (parsed && (parsed.rows || parsed.destinations || parsed.itineraries)) {
-      if (parsed.rows) rows = parsed.rows.map(r => normalizeRow(r));
-      else if (parsed.destination === city && parsed.rows) rows = parsed.rows.map(r => normalizeRow(r));
+      if (parsed.rows) rows = parsed.rows;
+      else if (parsed.destination === city && parsed.rows) rows = parsed.rows;
       else if (Array.isArray(parsed.destinations)) {
         const dd = parsed.destinations.find(d => (d.name || d.destination) === city);
-        rows = (dd?.rows || []).map(r => normalizeRow(r));
+        rows = dd?.rows || [];
       } else if (Array.isArray(parsed.itineraries)) {
         const ii = parsed.itineraries.find(x => (x.city || x.name || x.destination) === city);
-        rows = (ii?.rows || []).map(r => normalizeRow(r));
+        rows = ii?.rows || [];
       }
     }
 
-    // Anti-duplicados local respecto a (previos + ya en rango), usando clave canónica
+    rows = (rows || []).map(r => normalizeRow(r));
+
+    // Filtro anti-duplicados local vs previos y dentro del propio batch
     const seen = new Set([...blacklistRange, ...blacklistPrev]);
-    rows = (rows || []).filter(r => {
+    rows = rows.filter(r => {
       const k = _actKey(r);
       if (!k) return false;
       if (seen.has(k)) return false;
       seen.add(k);
+      // cache opcional
       if (plannerState?.existingActs) {
         if (!plannerState.existingActs[city]) plannerState.existingActs[city] = new Set();
         plannerState.existingActs[city].add(k);
@@ -2023,7 +1930,7 @@ ${intakeForRange}
       return true;
     });
 
-    // Validación general
+    // Validación IA
     const val = await validateRowsWithAgent(city, rows, baseDate);
 
     // Merge sólo del rango
@@ -2039,7 +1946,7 @@ ${intakeForRange}
       fixDayTimesSequential(city, d);
     }
 
-    // Limpieza global final (permite aurora multi-noche)
+    // Limpieza global final (permite multi-noche de auroras)
     purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
 
     // Render/UI
@@ -2050,9 +1957,7 @@ ${intakeForRange}
     showWOW(false);
     $resetBtn?.removeAttribute('disabled');
 
-    if (forceReplan && plannerState?.forceReplan) {
-      delete plannerState.forceReplan[city];
-    }
+    if (forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
   } catch (err) {
     console.warn('rebalanceWholeCity error', err);
@@ -2385,10 +2290,10 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   v68 base + refuerzos definitivos:
-   - Clave canónica actividad|lugar normalizado
-   - Dedupe por categoría para evitar repeticiones conceptuales (café/terraza, paseo, etc.)
-   - Horarios sanos + duraciones realistas
+   Base v68 + refuerzos:
+   - Anti-duplicados global (actividad|destino) estable
+   - Límite por categorías suaves (café/terraza, paseo/barrio, playa)
+   - Horarios secuenciales sanos y duraciones realistas
 ================================= */
 
 // Helpers horarios
@@ -2403,142 +2308,60 @@ function _durToMin(d){ // "1h 15min" | "45min" | "2h" | "0.75h"
 }
 function _minToDur(min){ if(min<60) return `${min}min`; const h=Math.floor(min/60), m=min%60; return m?`${h}h ${m}min`:`${h}h`; }
 
-// Insertar/quitar/demás
-function insertDayAt(city, position){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  const maxD = days.length ? Math.max(...days) : 0;
-  const pos = Math.min(Math.max(1, position), maxD+1);
-  for(let d=maxD; d>=pos; d--){ byDay[d+1] = (byDay[d]||[]).map(r=>({...r, day:d+1})); }
-  byDay[pos]=[];
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days=(dest.days||maxD)+1;
-}
-function removeDayAt(city, day){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  if(!days.includes(day)) return;
-  delete byDay[day];
-  const maxD = days.length ? Math.max(...days) : 0;
-  for(let d=day+1; d<=maxD; d++){
-    byDay[d-1]=(byDay[d]||[]).map(r=>({...r, day:d-1})); delete byDay[d];
-  }
-  itineraries[city].byDay = byDay;
-  const dest=savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days=Math.max(0,(dest.days||days.length)-1);
-}
-function swapDays(city,a,b){
-  ensureDays(city); if(a===b) return;
-  const byDay=itineraries[city].byDay||{};
-  const A=(byDay[a]||[]).map(r=>({...r, day:b}));
-  const B=(byDay[b]||[]).map(r=>({...r, day:a}));
-  byDay[a]=B; byDay[b]=A; itineraries[city].byDay=byDay;
-}
-function moveActivities(city, fromDay, toDay, query=''){
-  ensureDays(city);
-  const byDay=itineraries[city].byDay||{};
-  const src=byDay[fromDay]||[], dst=byDay[toDay]||[];
-  const q=String(query||'').toLowerCase().trim();
-  const moved=[], remain=[];
-  src.forEach(r=>{ const ok=!q || String(r.activity||'').toLowerCase().includes(q); (ok?moved:remain).push(r); });
-  byDay[fromDay]=remain.map(normalizeRow);
-  moved.forEach(r=>dedupeInto(dst,{...r,day:toDay}));
-  byDay[toDay]=dst.map(normalizeRow).sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
-  itineraries[city].byDay=byDay;
-}
-
-// ===== Normalización y dedupe robustos =====
+// Normalizador de texto
 function _normTxt(s){return String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();}
-function _canonPlaceName(city, s){
-  // alias mínimos seguros (se puede ampliar por ciudad sin romper nada)
-  const t = _normTxt(s)
-    .replace(/\b(seccion|sector|zona)\s+no\s+visitad[ao]\b/g,'')
-    .replace(/\b(seccion|sector|zona)\b/g,'')
-    .replace(/\b(barrio\s+de|el\s+barrio\s+de|barri\s+de)\b/g,'')
-    .replace(/\b(parque\s+de|parc\s+de|park\s+de)\b/g,'')
-    .replace(/\b(museo\s+de|museum\s+of)\b/g,'')
-    .replace(/\s+/g,' ')
-    .trim();
-
-  const aliasBarna = {
-    'sagrada familia':'sagrada familia',
-    'temple expiatori de la sagrada familia':'sagrada familia',
-    'parque guell':'park guell',
-    'parc guell':'park guell',
-    'park guell':'park guell',
-    'casa batllo':'casa batllo',
-    'la pedrera':'casa mila',
-    'casa mila':'casa mila',
-    'barri gotic':'barrio gotico',
-    'gothic quarter':'barrio gotico',
-    'la rambla':'la rambla',
-    'passeig de gracia':'passeig de gracia',
-    'gracia':'gracia',
-    'montjuic':'montjuic',
-    'mnac':'mnac',
-    'museo nacional de arte de cataluna':'mnac',
-    'playa de la barceloneta':'barceloneta',
-    'barceloneta':'barceloneta',
-    'mercado de la boqueria':'la boqueria',
-    'la boqueria':'la boqueria',
-    'palau de la musica catalana':'palau musica',
-    'museo picasso':'museo picasso',
-    'joan miro':'fundacion joan miro',
-    'fundacion joan miro':'fundacion joan miro',
-    'castillo de montjuic':'castillo montjuic',
-    'mirador de colon':'mirador colon'
-  };
-  if (_normTxt(city)==='barcelona' && aliasBarna[t]) return aliasBarna[t];
-  return t;
-}
 function _isAuroraName(s){return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(s||''));}
-function _rowCategory(r){
-  const txt = _normTxt(`${r.activity} ${r.to} ${r.hacia} ${r.notes}`);
-  if (/aurora|northern\s+light/.test(txt))     return 'aurora';
-  if (/gaudi|sagrada|batllo|mila|pedrera|guell/.test(txt)) return 'gaudi';
-  if (/museo|museum|picasso|mnac|miro|macba|maritimo/.test(txt)) return 'museo';
-  if (/catedral|basilica|church|templo|cathedral/.test(txt))     return 'iglesia';
-  if (/mercado|market|boqueria|sant antoni|santantoni/.test(txt))return 'mercado';
-  if (/barrio|barri|gotic|gracia|raval|born|barceloneta/.test(txt)) return 'barrio';
-  if (/mirador|viewpoint|teleferico|colon/.test(txt))            return 'mirador';
-  if (/playa|beach|barceloneta/.test(txt))                       return 'mar';
-  if (/parque|park|ciutadella|montjuic|creueta/.test(txt))       return 'parque';
-  if (/paseo|ramblas?|passeig/.test(txt))                        return 'paseo';
-  if (/cafe|cafeteria|terraza|coffee|pasteleria|dulces/.test(txt)) return 'cafe';
-  return 'otros';
-}
-function _actKeyCanon(city, r){
-  const a=_normTxt(r.activity);
-  const to=_canonPlaceName(city, r.to||r.hacia||'');
-  if(!a && !to) return '';
+
+// Clave estable para dedupe global
+function _actKey(r){
+  const a=_normTxt(r.activity), to=_normTxt(r.to);
   return `${a}|${to}`;
 }
 
+// Categorización suave para limitar repeticiones de bajo valor
+const MAX_SOFT_CAT_PER_DAY = Object.freeze({
+  cafe: 1,          // café/terraza/pastelería/dulces por día
+  paseo: 1,         // paseo por barrio/ramblas/ciutadella… genérico
+  playa: 1          // playa/chiringuito por día
+});
+function _softCategoryOf(row){
+  const t = _normTxt(`${row.activity} ${row.to}`);
+  if (/\b(cafe|cafeteria|pasteler(i|í)a|dulce|merienda|terraza)\b/.test(t)) return 'cafe';
+  if (/\b(rambla|barrio|g(o|ó)tico|born|gracia|paseo|recorrido|caminar|ciutadella|port[o|u])\b/.test(t)) return 'paseo';
+  if (/\bplaya|barceloneta|chiringuito\b/.test(t)) return 'playa';
+  return null;
+}
+
+// Anti-duplicados global (permite multi-noche de auroras) + tope por categoría por día
 function purgeGlobalDuplicatesForCity(city,{allowAuroraMultiNight=true}={}){
   const data=itineraries[city]; if(!data) return;
   const byDay=data.byDay||{}; const days=Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+
   let auroraCity=false; try{ const c=getCoordinatesForCity(city); auroraCity=c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){}
-  const seenKeys=new Set();
 
   for(const d of days){
     const out=[];
-    const catSeen=new Set(); // evita dos cafés o dos “paseos” pegados
+    const seenKeys=new Set();
+    const catSeen = { cafe:0, paseo:0, playa:0 };
+
     for(const r of (byDay[d]||[])){
+      // auroras
       if(allowAuroraMultiNight && auroraCity && _isAuroraName(r.activity)){ out.push(r); continue; }
 
-      const k=_actKeyCanon(city, r);
-      if(k && seenKeys.has(k)) continue; // ya salió en días previos
-      // Dedupe por categoría: si este día ya tiene demasiados “café/terraza” o “paseo” seguidos, suprime el extra
-      const cat=_rowCategory(r);
-      if(['cafe','paseo','barrio'].includes(cat) && catSeen.has(cat)) {
-        // permitimos máximo 1 por día de estas categorías “blandas”
-        continue;
+      // dedupe estricto por actividad|destino
+      const k=_actKey(r);
+      if(k && seenKeys.has(k)) continue;
+
+      // tope por categoría suave
+      const cat = _softCategoryOf(r);
+      if (cat && MAX_SOFT_CAT_PER_DAY[cat] !== undefined) {
+        const used = catSeen[cat] || 0;
+        if (used >= MAX_SOFT_CAT_PER_DAY[cat]) continue;
+        catSeen[cat] = used + 1;
       }
 
-      seenKeys.add(k); catSeen.add(cat); out.push(r);
+      seenKeys.add(k);
+      out.push(r);
     }
     byDay[d]=out;
   }
@@ -2566,7 +2389,7 @@ function fixDayTimesSequential(city, day){
     return row;
   });
 
-  // cortar a hardEnd si se pasó (última ligera puede quedar 30–45 min)
+  // corte suave a hardEnd
   rows = rows.map((r,i)=>{
     if (_isAuroraName(r.activity)) return r;
     const s=_tMin(r.start), e=_tMin(r.end);
@@ -2585,15 +2408,14 @@ function fixDayTimesSequential(city, day){
 function applyRealisticDurations(rows){
   return rows.map(r=>{
     if (_isAuroraName(r.activity)) return r;
-    const a=_normTxt(r.activity), to=_normTxt(r.to);
-    const txt = `${a} ${to}`;
+    const txt = _normTxt(`${r.activity} ${r.to}`);
     let min=_durToMin(r.duration)||0;
 
-    if (/\bmuse(o|u)|galer[ií]a|museum|gallery/.test(txt)) min = Math.max(min, 90);      // ≥1h30
-    else if (/\bcatedral|basilica|duomo|church|templo/.test(txt)) min = Math.max(min, 75); // 1h15–1h45
-    else if (/\bmirador|viewpoint|torre|skydeck|telef[eé]rico/.test(txt)) min = Math.max(min, 45);
-    else if (/\bplaya|barceloneta|beach|parque\b/.test(txt)) min = Math.max(min, 120);
-    else if (/\bmercado|market|boquer[ií]a|san antoni/.test(txt)) min = Math.max(min, 60);
+    if (/\bmuse(o|u)|galer(i|í)a|museum|gallery/.test(txt)) min = Math.max(min, 90);
+    else if (/\bcatedral|basilica|duomo|church|templo/.test(txt)) min = Math.max(min, 75);
+    else if (/\bmirador|viewpoint|torre|skydeck|telef(e|é)rico/.test(txt)) min = Math.max(min, 45);
+    else if (/\bplaya|barceloneta|parque\b/.test(txt)) min = Math.max(min, 120);
+    else if (/\bmercado|market|boquer(i|í)a|san antoni/.test(txt)) min = Math.max(min, 60);
 
     const duration = _minToDur(min||60);
     return {...r, duration};
@@ -2613,10 +2435,10 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // Protegidas (auroras/termales)
+  // Protegidas (auroras/termales/Blue Lagoon)
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
-    return act.includes('aurora') || act.includes('northern light') || act.includes('blue lagoon') || act.includes('laguna azul');
+    return act.includes('aurora') || act.includes('northern light') || act.includes('blue lagoon') || act.includes('laguna azul') || act.includes('termal');
   });
   const rowsForOptimization = rows.filter(r=>!protectedRows.includes(r));
 
@@ -2645,7 +2467,6 @@ Filas actuales (no protegidas): ${JSON.stringify(rowsForOptimization)}
 🌍 **Contenido**:
 - Imperdibles no cubiertos, sin duplicar con otros días; agrupa por zonas.
 - Day trip a ≤ 2 h por trayecto SOLO si aporta valor y encaja.
-- Ciudades costeras: considera paseo/barrio marinero si aún no aparece y clima lo permite.
 
 ❌ No repitas lo ya existente en otros días (excepto auroras multi-noche).
 Devuelve C {"rows":[...],"replace":false}. Notas SIEMPRE útiles.
@@ -2658,16 +2479,15 @@ ${intakeData}
   if(parsed?.rows){
     let normalized = parsed.rows.map(x=>normalizeRow({...x, day}));
 
-    // Evitar duplicados con el resto de días (clave canónica) y exceso de categorías blandas
-    const allExistingKeys = Object.entries(itineraries[city].byDay || {})
+    // Evitar duplicados con el resto de días
+    const allExisting = Object.entries(itineraries[city].byDay || {})
       .filter(([d]) => +d !== day)
-      .flatMap(([,arr]) => arr.map(r => _actKeyCanon(city, r)));
+      .flatMap(([,arr]) => arr.map(_actKey));
 
     normalized = normalized.filter(r=>{
       const isAurora=_isAuroraName(r.activity);
       if(isAurora && auroraCity) return true;
-      const k=_actKeyCanon(city, r);
-      return k && !allExistingKeys.includes(k);
+      const k=_actKey(r); return k && !allExisting.includes(k);
     });
 
     // Duraciones realistas + buffers/orden
