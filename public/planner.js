@@ -1769,85 +1769,100 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo global por ciudad
-   v69 (base) + FIX definitivo duplicados al extender itinerario
-   — Mantiene intactos los n−1 días originales.
-   — Reoptimiza el último día original + los nuevos días solicitados.
-   — El agente recibe una lista explícita de actividades previas (n−1 días)
-     con normalización/alias para NO repetirlas en ningún idioma/variación.
+   v69 (base) + FIX: deduplicación robusta sin bloquear comidas/traslados
+   + Fallback de generación por día si el agente no retorna filas útiles
 ================================= */
 
-/* ——— Utilitarios LOCALES (scope de la sección, no global) ——— */
+/* ——— Utilitarios LOCALES (scope de la sección) ——— */
 
 /** Normaliza texto: minúsculas, sin tildes, sin símbolos, colapsa espacios. */
 function __canonTxt__(s){
   return String(s||'')
     .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // quita acentos
-    .replace(/[^\p{L}\p{N}\s]/gu,' ')                  // deja letras/números
-    .replace(/\s+/g,' ')                                // colapsa espacios
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\p{L}\p{N}\s]/gu,' ')
+    .replace(/\s+/g,' ')
     .trim();
 }
 
-/** Quita palabras muy genéricas que no ayudan a identificar el lugar. */
-function __stripStopWords__(s){
-  // listado mínimo, neutral a idiomas más comunes
-  const STOP = [
-    'the','la','el','los','las','de','del','da','do','dos','das','di','du',
-    'a','al','en','of','da','di','du','and','y','e',
-    'museum','museo','cathedral','catedral','park','parque','plaza','square',
-    'market','mercado','church','iglesia','castle','castillo','palace','palacio',
-    'beach','playa','port','puerto','hill','monte','mont','mon','montjuic','montjuïc'
+/** Detecta actividades genéricas que NO deben bloquearse al extender días. */
+function __isGenericActivity__(name){
+  const t = __canonTxt__(name);
+  // comidas, descansos, traslados, compras sin lugar concreto
+  const generic = [
+    'desayuno','almuerzo','comida','merienda','cena',
+    'descanso','relax','tiempo libre','libre',
+    'traslado','transfer','check in','check-in','check out','check-out',
+    'shopping','compras'
   ];
-  const toks = s.split(' ').filter(w=>w && !STOP.includes(w));
-  return toks.join(' ').trim() || s; // evita vacíos
+  // si solo contiene una de estas palabras o patrones muy genéricos
+  if (generic.some(g => t === g || t.startsWith(g+' ') || (' '+t+' ').includes(' '+g+' '))) return true;
+  // si es extremadamente corto y sin entidad clara
+  if (t.split(' ').length <= 2 && /^(almuerzo|cena|desayuno|traslado|descanso)$/i.test(t)) return true;
+  return false;
 }
 
-/** Genera una clave canónica robusta para deduplicar lugares/actividades. */
-function __placeKey__(name){
-  const base = __canonTxt__(name);
-  // alias básicos de muy alta frecuencia (multi-idioma)
+/** Quita algunas palabras poco discriminantes (sin romper nombres propios). */
+function __stripStopWords__(s){
+  const STOP = [
+    'the','la','el','los','las','de','del','da','do','dos','das','di','du',
+    'a','al','en','of','and','y','e'
+  ];
+  const toks = s.split(' ').filter(w=>w && !STOP.includes(w));
+  return toks.join(' ').trim() || s;
+}
+
+/** Alias frecuentes (multi-idioma) para POIs de Barcelona y genéricos de ciudad. */
+function __aliasKey__(base){
   const ALIAS = [
+    // Barcelona frecuentes
     ['park guell','parc guell','parque guell','parque güell','park güell','güell park','guell park','guell'],
-    ['sagrada familia','basílica sagrada familia','templo expiatorio de la sagrada familia','templo de la sagrada familia'],
+    ['sagrada familia','basilica sagrada familia','templo expiatorio de la sagrada familia','templo de la sagrada familia'],
     ['casa batllo','casa batlló','batllo','batlló'],
     ['la rambla','las ramblas','rambla'],
     ['barceloneta','playa de la barceloneta'],
     ['gothic quarter','barrio gotico','barrio gótico','gothic','gotico','gótico'],
     ['ciutadella','parc de la ciutadella','parque de la ciutadella','ciutadella park'],
-    ['born','el borne','el born']
+    ['born','el borne','el born'],
+    // genéricos urbanos frecuentes
+    ['old town','ciudad vieja','casco antiguo','centro historico','centro histórico'],
   ];
-  let k = base;
   for(const group of ALIAS){
     const norm = group.map(__canonTxt__);
-    if(norm.some(a=>k.includes(a))){
-      k = norm[0]; // usa el primer alias como forma canónica
-      break;
-    }
+    if(norm.some(a=>base.includes(a))) return norm[0];
   }
-  return __stripStopWords__(k);
+  return base;
 }
 
-/** Construye Set de claves previas (días < start) para exclusión. */
+/** Genera clave canónica para deduplicar POIs (omite genéricos). */
+function __placeKey__(name){
+  const raw = String(name||'').trim();
+  if(!raw) return '';
+  if(__isGenericActivity__(raw)) return ''; // <- no bloquea genéricos
+  const base = __stripStopWords__(__canonTxt__(raw));
+  return __aliasKey__(base);
+}
+
+/** Construye Set de claves previas (días < start) para exclusión de POIs. */
 function __buildPrevActivityKeySet__(byDay, start){
   const keys = new Set();
   const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   for(const d of days){
     if(d >= start) break;
     for(const r of (byDay[d]||[])){
-      const act = String(r.activity||'').trim();
-      if(act) keys.add(__placeKey__(act));
+      const k = __placeKey__(r.activity||'');
+      if(k) keys.add(k);
     }
   }
   return keys;
 }
 
-/** Exporta lista legible (limitada) para meter en prompt como referencia. */
+/** Lista acotada para mostrar al agente como referencia. */
 function __keysToExampleList__(keys, limit=80){
   return Array.from(keys).slice(0, limit);
 }
 
-/* ——— Rebalanceo por rangos (manteniendo v69) con exclusión explícita ——— */
-
+/* ——— Rebalanceo por rango (manteniendo v69) ——— */
 async function rebalanceWholeCity(city, rangeOpt = {}){
   if(!city || !itineraries[city]) return;
 
@@ -1857,27 +1872,26 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
   const allDays  = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   if(!allDays.length) return;
 
-  // v69: rango por opción o completo
+  // v69: rango explícito o completo
   const start = Math.max(1, parseInt(rangeOpt.start||1,10));
   const end   = Math.max(start, parseInt(rangeOpt.end||allDays[allDays.length-1],10));
 
-  // ✅ NUEVO (quirúrgico): construir claves previas n−1 para exclusión robusta
+  // Conjunto de POIs ya cubiertos en n−1 días (NO comidas/traslados)
   const prevKeySet = __buildPrevActivityKeySet__(byDay, start);
 
-  // ✅ también incorpora histórico opcional (si existiera) sin suponer estructura
+  // Histórico opcional del planner (si existe)
   try{
     const extra = plannerState?.existingActs?.[city];
     if(Array.isArray(extra)){
       for(const name of extra){
-        if(name) prevKeySet.add(__placeKey__(name));
+        const k = __placeKey__(name);
+        if(k) prevKeySet.add(k);
       }
     }
-  }catch(_){ /* no-op */ }
+  }catch(_){}
 
-  // Lista ejemplo para el prompt (solo referencia humana al agente)
   const prevExamples = __keysToExampleList__(prevKeySet);
 
-  // v69: showWOW + prompt de rango (se mantiene estructura)
   showWOW(true, `Reequilibrando ${city}…`);
 
   const prompt = `
@@ -1890,43 +1904,49 @@ Objetivo:
 • Mantener intactos los días 1–${start-1}.
 • Reoptimizar el itinerario desde el día ${start} hasta el ${end}.
 
-Reglas duras (NO romper):
-1) No repitas actividades ya realizadas en días 1–${start-1} aunque cambien de idioma o nombre.
-   Usa esta referencia (normalizada) como lista de exclusión: ${JSON.stringify(prevExamples)}
-2) Revisa equivalencias por alias/sinónimos (ej.: "Parc Güell" ≡ "Park Güell" ≡ "Parque Güell").
+Reglas duras:
+1) No repitas POIs ya cubiertos en días 1–${start-1} aunque cambien idioma/nombre.
+   Lista de exclusión (normalizada): ${JSON.stringify(prevExamples)}
+   ⚠️ Las actividades genéricas (comidas/traslados/descansos) SÍ se pueden repetir en distintos lugares.
+2) Evita duplicados dentro del mismo día.
 3) Balance energético: si el día ${start-1} fue intenso, el ${start} debe ser más liviano y/o iniciar más tarde.
-4) Mantén coherencia geográfica/temática y evita duplicados dentro del mismo día.
-5) Devuelve formato C {"rows":[...],"replace":false} o formato D {"itinerary":{"${city}":{...}}}.
+4) Mantén coherencia geográfica/temática y huecos razonables.
+5) Devuelve formato C {"rows":[...],"replace":false} o D {"itinerary":{"${city}":{...}}}.
 `.trim();
 
   const ans = await callAgent(prompt, true, { cityName: city, baseDate });
   const parsed = parseJSON(ans);
 
-  // v69: integración segura (se conserva)
+  let appliedRows = 0;
+
   if(parsed && parsed.itinerary && parsed.itinerary[city]){
+    // Mantiene el merge v69 existente
     mergeItinerary(city, parsed.itinerary[city], { start, end });
+    // Contamos filas nuevas (si el merge expone byDay)
+    try{
+      const seg = parsed.itinerary[city].byDay || {};
+      appliedRows = Object.values(seg).flat().length;
+    }catch(_){}
   } else if(parsed && parsed.rows){
     const merged = { ...(data.byDay || {}) };
     const newRows = parsed.rows.map(r=>normalizeRow(r));
 
-    // ✅ FILTRO QUIRÚRGICO local: evita inyecciones duplicadas dentro del rango
+    // filtro local anti-duplicados dentro del rango y contra prevKeySet
     const byDayLocal = {};
     for(const r of newRows){
       if(!r || !r.day) continue;
       const key = __placeKey__(r.activity||'');
-      if(!key) continue;
-
-      // excluye si ya estaba en n−1 días
-      if(prevKeySet.has(key)) continue;
-
-      // evita duplicados dentro del mismo día (por si el modelo repite)
+      // si es genérico, no bloquea por prevKeySet; igual prevenimos duplicado intra-día por texto
+      const dedupeKey = key || __canonTxt__(r.activity||'');
       byDayLocal[r.day] = byDayLocal[r.day] || new Set();
-      if(byDayLocal[r.day].has(key)) continue;
-      byDayLocal[r.day].add(key);
+      if(byDayLocal[r.day].has(dedupeKey)) continue;
+      if(key && prevKeySet.has(key)) continue; // excluye solo POIs reales ya vistos
+      byDayLocal[r.day].add(dedupeKey);
 
-      // acumula al día correspondiente
+      // limpia posibles placeholders generados previamente
       merged[r.day] = (merged[r.day]||[]).filter(x=> !(x && x.__generated__ && x.day===r.day));
       merged[r.day] = [...(merged[r.day]||[]), {...r, __generated__: true}];
+      appliedRows++;
     }
 
     // orden horario por día (mantiene v69)
@@ -1938,7 +1958,19 @@ Reglas duras (NO romper):
     itineraries[city].byDay = merged;
   }
 
-  // v69: render + focus (se conserva)
+  // ✅ Fallback seguro: si no se aplicó nada, generamos por día con 18.optimizeDay
+  if(!appliedRows){
+    try{
+      for(let d=start; d<=end; d++){
+        // evita borrar lo previo; optimizeDay respeta anti-duplicados multi-día
+        // y reequilibra con reglas v66 (balance, buffers, clima/auroras)
+        /* eslint-disable no-await-in-loop */
+        await optimizeDay(city, d);
+      }
+    }catch(_){}
+  }
+
+  // Render y UI (v69 intacto)
   renderCityTabs();
   setActiveCity(city);
   renderCityItinerary(city);
