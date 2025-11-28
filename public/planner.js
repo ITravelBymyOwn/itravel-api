@@ -304,12 +304,10 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
-  // 🆕 Placeholder visible + tooltip — Formato **DD/MM/AAAA**
   el.placeholder = 'DD/MM/AAAA';
   el.title = 'Formato: DD/MM/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
-    // Ensambla como **DD/MM/AAAA**
     if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
     else el.value = v;
   });
