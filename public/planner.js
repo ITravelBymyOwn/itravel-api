@@ -151,9 +151,20 @@ function isAuroraCityDynamic(lat, lng){
 function inAuroraSeasonDynamic(baseDateStr){
   try{
     if(!baseDateStr) return true; // sin fecha → asumimos plausible
-    const [mm] = baseDateStr.split(/[\/\-]/);
-    const m = parseInt(mm||'9',10);
-    return AURORA_SEASON_MONTHS.includes(m);
+    // Formato estándar del planner: DD/MM/AAAA
+    const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(baseDateStr.trim());
+    if(m){
+      const month = parseInt(m[2], 10);
+      return AURORA_SEASON_MONTHS.includes(month);
+    }
+    // Fallback robusto si llegara otro formato: intenta inferir el mes
+    const parts = baseDateStr.split(/[\/\-]/).map(x=>parseInt(x,10)).filter(Number.isFinite);
+    if(parts.length >= 2){
+      const [a,b] = parts;
+      const monthGuess = (a > 12 && b >=1 && b<=12) ? b : (a>=1 && a<=12 ? a : b);
+      return AURORA_SEASON_MONTHS.includes(monthGuess);
+    }
+    return true;
   }catch{ return true; }
 }
 
@@ -304,13 +315,17 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
-  // 🆕 Placeholder visible + tooltip
-  el.placeholder = 'MM/DD/AAAA';
-  el.title = 'Formato: MM/DD/AAAA';
+  // 🆕 Placeholder visible + tooltip (coherente con todo el planner)
+  el.placeholder = 'DD/MM/AAAA';
+  el.title = 'Formato: DD/MM/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
-    if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
-    else el.value = v;
+    if(v.length===8){
+      // DD/MM/AAAA
+      el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
+    } else {
+      el.value = v;
+    }
   });
 }
 function parseDMY(str){
@@ -2720,7 +2735,7 @@ async function onSend(){
     const prompt = `
 ${FORMAT}
 **Contexto (reducido si es posible):**
-${buildIntakeLite()}
+${buildIntakeLite(city)}
 
 **Ciudad a editar:** ${city}
 **Día visible:** ${day}
