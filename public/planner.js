@@ -304,11 +304,12 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
-  // 🆕 Placeholder visible + tooltip
-  el.placeholder = 'MM/DD/AAAA';
-  el.title = 'Formato: MM/DD/AAAA';
+  // 🆕 Placeholder visible + tooltip — Formato **DD/MM/AAAA**
+  el.placeholder = 'DD/MM/AAAA';
+  el.title = 'Formato: DD/MM/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
+    // Ensambla como **DD/MM/AAAA**
     if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
     else el.value = v;
   });
@@ -333,32 +334,6 @@ function addMinutes(hhmm, min){
   const d = new Date(2000,0,1,H||0,M||0,0);
   d.setMinutes(d.getMinutes()+min);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-}
-
-/* ==============================
-   🧭 Helper global para ventanas horarias por día
-   - Si el usuario definió horario para un día → usarlo.
-   - Si no definió → usar 08:30–19:00 como base.
-   - No hereda horarios entre días.
-   - Devuelve siempre una lista completa para todos los días.
-================================= */
-function getEffectivePerDay(city, totalDays){
-  const baseStart = '08:30';
-  const baseEnd   = '19:00';
-  const meta = cityMeta[city] || {};
-  const perDay = Array.isArray(meta.perDay) ? meta.perDay.slice() : [];
-  const map = new Map(perDay.map(x=>[x.day, {start:x.start||baseStart, end:x.end||baseEnd}]));
-
-  const result = [];
-  for(let d=1; d<=totalDays; d++){
-    if(map.has(d)){
-      const val = map.get(d);
-      result.push({day:d, start:val.start||baseStart, end:val.end||baseEnd});
-    } else {
-      result.push({day:d, start:baseStart, end:baseEnd});
-    }
-  }
-  return result;
 }
 
 /* ==============================
@@ -2721,7 +2696,7 @@ async function onSend(){
     const prompt = `
 ${FORMAT}
 **Contexto (reducido si es posible):**
-${buildIntakeLite()}
+${buildIntakeLite(city)}
 
 **Ciudad a editar:** ${city}
 **Día visible:** ${day}
