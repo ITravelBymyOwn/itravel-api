@@ -1539,11 +1539,75 @@ function showWOW(on, msg){
 
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
-   Base: v68 + fixes canónicos (anti-duplicados fuertes),
-   llamada explícita a purgeGlobalDuplicatesForCity(),
-   y dedupe interno del batch inicial.
+   Base: v68 + fixes canónicos (anti-duplicados fuertes)
+   + Añadidos: helpers autocontenidos si faltan (normalizeRow, dedupeInto, pushRows, _canonicalPOIKey)
+   + Llamada explícita a purgeGlobalDuplicatesForCity()
    Nota: No cierra overlay aquí para evitar desbloqueo prematuro de UI.
 ───────────────────────────────────────────────────────────── */
+
+// —— Helpers mínimos si faltan (no sobrescriben si ya existen) ——
+if (typeof normalizeRow !== 'function') {
+  function normalizeRow(r = {}) {
+    const z = (x, d='') => (x == null ? d : String(x));
+    const hh = s => {
+      const m = String(s||'').match(/(\d{1,2}):(\d{2})/);
+      if (!m) return '';
+      const h = Math.max(0, Math.min(23, +m[1]));
+      const mi = Math.max(0, Math.min(59, +m[2]));
+      return `${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
+    };
+    const tmap = { 'a pie':'A pie','pie':'A pie','walk':'A pie','walking':'A pie',
+                   'metro':'Metro','subway':'Metro','underground':'Metro',
+                   'bus':'Bus','autobús':'Bus',
+                   'tren':'Tren','train':'Tren',
+                   'taxi':'Taxi','uber':'Taxi','auto':'Auto','car':'Auto' };
+    const t = String(r.transport||'').toLowerCase().trim();
+    const tr = tmap[t] || (t ? (t.charAt(0).toUpperCase()+t.slice(1)) : '');
+    return {
+      day: Number(r.day)||1,
+      start: hh(r.start||''), end: hh(r.end||''),
+      activity: z(r.activity).trim(),
+      from: z(r.from).trim(), to: z(r.to).trim(),
+      transport: tr, duration: z(r.duration).trim(), notes: z(r.notes).trim()
+    };
+  }
+}
+if (typeof dedupeInto !== 'function') {
+  function dedupeInto(dst, row) {
+    const key = x => `${String(x.activity||'').trim().toLowerCase()}|${String(x.to||'').trim().toLowerCase()}`;
+    const k = key(row); if (!k) return;
+    if (!dst.some(r => key(r) === k)) dst.push(normalizeRow(row));
+  }
+}
+if (typeof pushRows !== 'function') {
+  function pushRows(city, rows = [], replace = false) {
+    if(!itineraries[city]) itineraries[city]={byDay:{}};
+    const byDay = itineraries[city].byDay || {};
+    if (replace) {
+      const newByDay = {};
+      rows.forEach(r=>{
+        const d = Number(r.day)||1;
+        if (!newByDay[d]) newByDay[d]=[];
+        dedupeInto(newByDay[d], r);
+      });
+      itineraries[city].byDay = newByDay;
+      return;
+    }
+    rows.forEach(r=>{
+      const d = Number(r.day)||1;
+      if (!byDay[d]) byDay[d] = [];
+      dedupeInto(byDay[d], r);
+    });
+    itineraries[city].byDay = byDay;
+  }
+}
+if (typeof _canonicalPOIKey !== 'function') {
+  function _canonicalPOIKey(r){
+    const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+    return `${norm(r.activity)}|${norm(r.to)}`;
+  }
+}
+
 async function generateCityItinerary(city){
   // 🔒 Mutex simple por ciudad (evita carreras si el usuario dispara acciones rápidas)
   window.__cityLocks = window.__cityLocks || {};
@@ -1614,7 +1678,6 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
-    // Requisito condicional (guía contextual al agente)
     const auroraRequirement = (auroraCity && (auroraSeason || !baseDate)) ? `
 🌌 **Instrucción contextual**:
 - Si es plausible, incluye **al menos una noche** de auroras (20:00–02:30 aprox.), con "valid:" en notes y transporte coherente (Tour/Van/Auto).
@@ -1655,7 +1718,7 @@ Contexto actual:
 ${buildIntake()}
 `.trim();
 
-    // Actualiza mensaje de overlay sin cerrar (el cierre lo hará el orquestador)
+    // Overlay (mensaje)
     if (typeof setOverlayMessage === 'function') {
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
@@ -1700,7 +1763,7 @@ ${buildIntake()}
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      // ✅ Validación global con IA (no elimina auroras plausibles)
+      // ✅ Validación global con IA
       const val = await validateRowsWithAgent(city, tmpRows, baseDate);
       pushRows(city, val.allowed, forceReplan);
 
@@ -1713,13 +1776,15 @@ ${buildIntake()}
             const name = String(r.activity||'').toLowerCase();
             if(hotWords.some(w=>name.includes(w))){
               const start = toHHMM(r.start);
-              const hasStart = !!parseHHMM(start);
-              const newEnd = hasStart ? addMinutes(start, 180) : r.end;
-              const durTxt = String(r.duration||'').toLowerCase();
-              const hoursMatch = /(\d+(?:\.\d+)?)\s*h/.exec(durTxt);
-              const durH = hoursMatch ? parseFloat(hoursMatch[1]) : null;
+              const m = /^(\d{1,2}):(\d{2})$/.exec(start||'');
+              if(m){
+                const end = addMinutes(start, 180);
+                if(end) r.end = end;
+              }
+              const txt = String(r.duration||'').toLowerCase();
+              const hm = /(\d+(?:\.\d+)?)\s*h/.exec(txt);
+              const durH = hm ? parseFloat(hm[1]) : null;
               if(!durH || durH < 3) r.duration = '3h';
-              if(newEnd) r.end = newEnd;
               r.notes = (r.notes ? String(r.notes)+' · ' : '') + 'min stay ~3h (ajustable)';
             }
             return r;
@@ -1727,52 +1792,20 @@ ${buildIntake()}
         }
       })();
 
-      /* 🌌 Post-proceso auroras: garantiza ≥ 1 noche si ciudad/temporada lo permiten */
-      if (auroraCity && (auroraSeason || !baseDate)) {
-        const acts = Object.values(itineraries[city]?.byDay || {})
-          .flat()
-          .map(r => String(r.activity || '').toLowerCase());
-        const hasAurora = acts.some(a => a.includes('aurora') || a.includes('northern light'));
-        if (!hasAurora) {
-          const byDay = itineraries[city]?.byDay || {};
-          const dayLoads = [];
-          for(let d=1; d<=dest.days; d++){
-            const rows = byDay[d] || [];
-            const diurnas = rows.filter(x=>{
-              const e = parseHHMM(x.end||'');
-              return e ? (e.h*60+e.min) <= (19*60+30) : true;
-            }).length;
-            dayLoads.push({day:d, load:diurnas});
+      // 🧩 Relleno mínimo + micro-opt por día vacío
+      if(typeof ensureDays==='function'){
+        ensureDays(city);
+        for(let d=1; d<=dest.days; d++){
+          if(!(itineraries[city].byDay?.[d]||[]).length){
+            await optimizeDay(city,d);
           }
-          dayLoads.sort((a,b)=> a.load===b.load ? a.day - b.day : a.load - b.load);
-          let chosen = dayLoads[0]?.day || 1;
-          if(chosen === dest.days && dayLoads[1]) chosen = dayLoads[1].day;
-
-          const auroraRow = normalizeRow({
-            day: chosen,
-            start: '20:30',
-            end: '02:00',
-            activity: 'Caza de auroras',
-            from: 'Hotel/Base',
-            to: 'Punto de observación',
-            transport: 'Tour/Bus/Van',
-            notes: 'valid: ventana nocturna auroral (sujeto a clima); vestir térmico'
-          });
-          pushRows(city, [auroraRow], false);
-          console.warn(`[Aurora Injection] Añadida aurora automáticamente en ${city} (día ${chosen})`);
         }
       }
 
-      // 🧩 Relleno mínimo + micro-optimizaciones por día vacío
-      ensureDays(city);
-      for(let d=1; d<=dest.days; d++){
-        if(!(itineraries[city].byDay?.[d]||[]).length){
-          await optimizeDay(city,d);
-        }
+      // ✅ DEDUPE GLOBAL y RENDER
+      if (typeof purgeGlobalDuplicatesForCity==='function') {
+        purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
       }
-
-      // ✅ DEDUPE GLOBAL CANÓNICO Y RENDER
-      purgeGlobalDuplicatesForCity(city, { allowAuroraMultiNight: true });
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
 
       // Limpieza de flags
@@ -1795,7 +1828,7 @@ ${buildIntake()}
     chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>.`, 'ai');
   } finally {
     delete window.__cityLocks[city];
-    // ⚠️ NO hacemos showWOW(false) aquí; el cierre global lo maneja el orquestador de concurrencia.
+    // (overlay se cierra en el orquestador global)
   }
 }
 
@@ -2294,67 +2327,78 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
-   + Caps blandos por día (evita doble “café/terraza”, “paseo de barrio”, “playa”)
-   + Duraciones realistas y horas secuenciales
+   Base v65 + refuerzos v66 · Global y sin predefiniciones
+   + Añadidos: ensureDays, normalizeRow, dedupeInto, pushRows, _canonicalPOIKey (si faltan)
+   + Caps blandos, duraciones realistas y horas secuenciales
 ================================= */
 
-function insertDayAt(city, position){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  const maxD = days.length ? Math.max(...days) : 0;
-  const pos = Math.min(Math.max(1, position), maxD+1);
-  for(let d=maxD; d>=pos; d--){
-    byDay[d+1] = (byDay[d]||[]).map(r=>({...r, day:d+1}));
+// —— Helpers de infraestructura (solo si faltan) ——
+if (typeof ensureDays !== 'function') {
+  function ensureDays(city){
+    if(!itineraries[city]) itineraries[city]={byDay:{}};
+    if(!itineraries[city].byDay) itineraries[city].byDay={};
   }
-  byDay[pos] = [];
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = (dest.days||maxD)+1;
 }
-
-function removeDayAt(city, day){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  if(!days.includes(day)) return;
-  delete byDay[day];
-  const maxD = days.length ? Math.max(...days):0;
-  for(let d=day+1; d<=maxD; d++){
-    byDay[d-1] = (byDay[d]||[]).map(r=>({...r, day:d-1}));
-    delete byDay[d];
+if (typeof normalizeRow !== 'function') {
+  function normalizeRow(r = {}) {
+    const z = (x, d='') => (x == null ? d : String(x));
+    const hh = s => {
+      const m = String(s||'').match(/(\d{1,2}):(\d{2})/);
+      if (!m) return '';
+      const h = Math.max(0, Math.min(23, +m[1]));
+      const mi = Math.max(0, Math.min(59, +m[2]));
+      return `${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
+    };
+    const tmap = { 'a pie':'A pie','pie':'A pie','walk':'A pie','walking':'A pie',
+                   'metro':'Metro','subway':'Metro','underground':'Metro',
+                   'bus':'Bus','autobús':'Bus',
+                   'tren':'Tren','train':'Tren',
+                   'taxi':'Taxi','uber':'Taxi','auto':'Auto','car':'Auto' };
+    const t = String(r.transport||'').toLowerCase().trim();
+    const tr = tmap[t] || (t ? (t.charAt(0).toUpperCase()+t.slice(1)) : '');
+    return {
+      day: Number(r.day)||1,
+      start: hh(r.start||''), end: hh(r.end||''),
+      activity: z(r.activity).trim(),
+      from: z(r.from).trim(), to: z(r.to).trim(),
+      transport: tr, duration: z(r.duration).trim(), notes: z(r.notes).trim()
+    };
   }
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = Math.max(0,(dest.days||days.length)-1);
 }
-
-function swapDays(city,a,b){
-  ensureDays(city);
-  if(a===b) return;
-  const byDay = itineraries[city].byDay||{};
-  const A = (byDay[a]||[]).map(r=>({...r,day:b}));
-  const B = (byDay[b]||[]).map(r=>({...r,day:a}));
-  byDay[a]=B; byDay[b]=A;
-  itineraries[city].byDay = byDay;
+if (typeof dedupeInto !== 'function') {
+  function dedupeInto(dst, row) {
+    const key = x => `${String(x.activity||'').trim().toLowerCase()}|${String(x.to||'').trim().toLowerCase()}`;
+    const k = key(row); if (!k) return;
+    if (!dst.some(r => key(r) === k)) dst.push(normalizeRow(row));
+  }
 }
-
-function moveActivities(city,fromDay,toDay,query=''){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay||{};
-  const src = byDay[fromDay]||[];
-  const dst = byDay[toDay]||[];
-  const q = String(query||'').toLowerCase().trim();
-  const moved=[], remain=[];
-  src.forEach(r=>{
-    const match=!q||String(r.activity||'').toLowerCase().includes(q);
-    (match?moved:remain).push(r);
-  });
-  byDay[fromDay]=remain.map(normalizeRow);
-  moved.forEach(r=>dedupeInto(dst,{...r,day:toDay}));
-  byDay[toDay]=dst.map(normalizeRow).sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
-  itineraries[city].byDay=byDay;
+if (typeof pushRows !== 'function') {
+  function pushRows(city, rows = [], replace = false) {
+    ensureDays(city);
+    const byDay = itineraries[city].byDay || {};
+    if (replace) {
+      const newByDay = {};
+      rows.forEach(r=>{
+        const d = Number(r.day)||1;
+        if (!newByDay[d]) newByDay[d]=[];
+        dedupeInto(newByDay[d], r);
+      });
+      itineraries[city].byDay = newByDay;
+      return;
+    }
+    rows.forEach(r=>{
+      const d = Number(r.day)||1;
+      if (!byDay[d]) byDay[d] = [];
+      dedupeInto(byDay[d], r);
+    });
+    itineraries[city].byDay = byDay;
+  }
+}
+if (typeof _canonicalPOIKey !== 'function') {
+  function _canonicalPOIKey(r){
+    const norm = s => String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ').trim().toLowerCase();
+    return `${norm(r.activity)}|${norm(r.to)}`;
+  }
 }
 
 /* ---------- Helpers horarios/duración ---------- */
@@ -2459,7 +2503,63 @@ function fixDayTimesSequential(city, day){
   });
 
   byDay[day]=rows;
+}
+
+/* ---------- CRUD día/actividad ---------- */
+function insertDayAt(city, position){
+  ensureDays(city);
+  const byDay = itineraries[city].byDay || {};
+  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+  const maxD = days.length ? Math.max(...days) : 0;
+  const pos = Math.min(Math.max(1, position), maxD+1);
+  for(let d=maxD; d>=pos; d--){
+    byDay[d+1] = (byDay[d]||[]).map(r=>({...r, day:d+1}));
+  }
+  byDay[pos] = [];
   itineraries[city].byDay = byDay;
+  const dest = savedDestinations.find(x=>x.city===city);
+  if(dest) dest.days = (dest.days||maxD)+1;
+}
+
+function removeDayAt(city, day){
+  ensureDays(city);
+  const byDay = itineraries[city].byDay || {};
+  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+  if(!days.includes(day)) return;
+  delete byDay[day];
+  const maxD = days.length ? Math.max(...days):0;
+  for(let d=day+1; d<=maxD; d++){
+    byDay[d-1] = (byDay[d]||[]).map(r=>({...r, day:d-1}));
+    delete byDay[d];
+  }
+  itineraries[city].byDay = byDay;
+  const dest = savedDestinations.find(x=>x.city===city);
+  if(dest) dest.days = Math.max(0,(dest.days||days.length)-1);
+}
+
+function swapDays(city,a,b){
+  ensureDays(city);
+  if(a===b) return;
+  const byDay = itineraries[city].byDay||{};
+  const A = (byDay[a]||[]).map(r=>({...r,day:b}));
+  const B = (byDay[b]||[]).map(r=>({...r,day:a}));
+  byDay[a]=B; byDay[b]=A;
+}
+
+function moveActivities(city,fromDay,toDay,query=''){
+  ensureDays(city);
+  const byDay = itineraries[city].byDay||{};
+  const src = byDay[fromDay]||[];
+  const dst = byDay[toDay]||[];
+  const q = String(query||'').toLowerCase().trim();
+  const moved=[], remain=[];
+  src.forEach(r=>{
+    const match=!q||String(r.activity||'').toLowerCase().includes(q);
+    (match?moved:remain).push(r);
+  });
+  byDay[fromDay]=remain.map(normalizeRow);
+  moved.forEach(r=>dedupeInto(dst,{...r,day:toDay}));
+  byDay[toDay]=dst.map(normalizeRow).sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
 }
 
 /* ---------- Optimización de día ---------- */
@@ -2491,7 +2591,7 @@ async function optimizeDay(city, day){
   // Intake adaptativo
   const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
     ? buildIntake()
-    : buildIntakeLite(city,{start:day,end:day});
+    : (typeof buildIntakeLite==='function' ? buildIntakeLite(city,{start:day,end:day}) : buildIntake());
 
   // Contexto simple para auroras
   let auroraCity=false; try{ const c=getCoordinatesForCity(city); auroraCity=c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){}
