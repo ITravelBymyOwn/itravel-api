@@ -1939,14 +1939,47 @@ function askNextHotelTransport(){
       showWOW(true, 'Astra está generando itinerarios…');
 
       // ⚙️ Concurrencia controlada (v60): no tocar
-      const taskFns = savedDestinations.map(({city}) => async () => {
-        await generateCityItinerary(city);
+      const taskFns = savedDestinations.map(({city, baseDate}) => async () => {
+        try{
+          // Prepara contenedores mínimos por si el generador principal falla
+          if(!itineraries[city]) itineraries[city] = { city, baseDate: baseDate||cityMeta[city]?.baseDate||'', byDay:{} };
+          if(!cityMeta[city])   cityMeta[city]   = { baseDate: baseDate||null, hotel:(cityMeta[city]?.hotel||''), transport:(cityMeta[city]?.transport||''), perDay:[] };
+
+          await generateCityItinerary(city);
+
+          // 🧪 Verifica que haya contenido; si no, aplica generador alterno (optimizeDay d1)
+          const hasRows = Object.values(itineraries[city]?.byDay||{}).some(arr => Array.isArray(arr) && arr.length>0);
+          if(!hasRows){
+            ensureDays(city);                  // crea día 1 si no existe
+            if (!plannerState?.forceReplan) plannerState.forceReplan = {};
+            plannerState.forceReplan[city] = true;
+            await optimizeDay(city, 1);        // fallback mínimo para no dejar la ciudad vacía
+          }
+        }catch(e){
+          // ⚠️ Fallback en error duro
+          chatMsg(`⚠️ No se pudo generar el itinerario para ${city}. Intento un plan alterno…`, 'ai');
+          try{
+            if(!itineraries[city]) itineraries[city] = { city, baseDate: baseDate||cityMeta[city]?.baseDate||'', byDay:{} };
+            ensureDays(city);
+            if (!plannerState?.forceReplan) plannerState.forceReplan = {};
+            plannerState.forceReplan[city] = true;
+            await optimizeDay(city, 1);
+          }catch(_){}
+        }
       });
+
       await runWithConcurrency(taskFns);
 
       // ✅ Al terminar TODAS las ciudades, desbloquear UI
       showWOW(false);
       chatMsg(tone.doneAll);
+
+      // Refresca tabs/itinerario por si se generó vía fallback
+      try{
+        renderCityTabs();
+        if(!activeCity && savedDestinations[0]) setActiveCity(savedDestinations[0].city);
+        if(activeCity) renderCityItinerary(activeCity);
+      }catch(_){}
     })();
     return;
   }
