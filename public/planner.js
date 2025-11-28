@@ -2307,7 +2307,8 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
-   v69.fix-DUP — normalización multilingüe para anti-duplicados y "día suave" opcional
+   🔧 v69 fix: dedupe multi-idioma con normKey
+   🔧 v69 fix: cuando es el último día original tras agregar días → “ligero pero COMPLETO”
 ================================= */
 function insertDayAt(city, position){
   ensureDays(city);
@@ -2367,53 +2368,6 @@ function moveActivities(city,fromDay,toDay,query=''){
   itineraries[city].byDay=byDay;
 }
 
-/* 🔑 Normaliza nombres de actividades en múltiples idiomas para detectar equivalencias
-   (ej.: "Parque de la Ciudadela" ≈ "Parc de la Ciutadella" ≈ "Ciutadella Park") */
-function normalizeActivityKey(s=''){
-  let t = String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-  t = t.replace(/[\.\,\(\)\-\_]/g,' ').replace(/\s+/g,' ').trim();
-
-  const map = [
-    [/^la\s+/, ' '], [/^el\s+/, ' '], [/^the\s+/, ' '],
-    [/\b(parc|park|parque|parqueo)\b/g, 'park'],
-    [/\b(catedral|cathedral|duomo)\b/g, 'cathedral'],
-    [/\b(mercado|mercat|market|bazaar)\b/g, 'market'],
-    [/\b(museo|museum|museu)\b/g, 'museum'],
-    [/\b(playa|beach|praia)\b/g, 'beach'],
-    [/\b(castillo|castle|castel)\b/g, 'castle'],
-    [/\b(barrio|neighborhood|quartier|district)\b/g, 'neighborhood'],
-    [/\b(plaza|square|piazza|platz)\b/g, 'square'],
-    [/\b(parque|park)\s+(de|da|do|del|da la|de la)\s+/g, 'park ']
-  ];
-  for(const [re,rep] of map){ t = t.replace(re, rep).trim(); }
-
-  // elimina palabras muy genéricas
-  t = t.replace(/\b(visit(a|e|ar)?|explora(r|cion)?|paseo|tour|recorrido|walk|vista|mirador|zona|area|local)\b/g,'').trim();
-  t = t.replace(/\s+/g,' ').trim();
-  return t;
-}
-
-function buildExistingActivitySet(city, {excludeDays=[], includeDays=[]}={}){
-  const byDay = itineraries[city]?.byDay || {};
-  const days = Object.keys(byDay).map(d=>+d);
-  const set = new Set();
-
-  const shouldInclude = (d)=>{
-    if(includeDays.length) return includeDays.includes(d);
-    if(excludeDays.length) return !excludeDays.includes(d);
-    return true;
-  };
-
-  for(const d of days){
-    if(!shouldInclude(d)) continue;
-    for(const r of (byDay[d]||[])){
-      const k = normalizeActivityKey(r.activity||'');
-      if(k) set.add(k);
-    }
-  }
-  return set;
-}
-
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2458,14 +2412,13 @@ async function optimizeDay(city, day){
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
-  // 🎯 Anti-duplicados: set normalizado de todo lo ya planificado (excepto el día en curso)
-  const existingOtherDays = buildExistingActivitySet(city, {excludeDays:[day]});
-  // Extra: si se pasó un set de exclusión por “agregar días”, únelo
-  const extraExclusions = (plannerState?.existingActs?.[city]?.keys) || new Set();
-  const existingAll = new Set([...existingOtherDays, ...extraExclusions]);
-
-  // ☁️ Día suave opcional (cuando se agregan días: último día original)
-  const isSoftDay = plannerState?.forceLightDay?.[city] === day;
+  // 🔧 Nuevo: si este día es el último día original tras agregar días, pedir “ligero pero completo”
+  const isLightDay = (itineraries[city]?.originalDays > 0) &&
+                     (day === itineraries[city].originalDays) &&
+                     (stayDays > itineraries[city].originalDays);
+  const lightNote = isLightDay
+    ? `\n- Este es el **último día original** tras agregar días. Déjalo **ligero pero COMPLETO**: cubrir la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin picos de esfuerzo ni huecos largos.\n`
+    : '';
 
   const prompt=`
 ${FORMAT}
@@ -2482,16 +2435,14 @@ ${JSON.stringify(rowsForOptimization)}
 - Ajusta el plan según clima/temporada: interiores si frío o lluvia, exteriores si templado o verano.
 - Mantén balance energético y pausas; sin más de 3 actividades exigentes seguidas.
 - Si ${city} es costera, incluye paseo marítimo/puerto/playa icónica si el clima lo permite.
-- Day trips de ida ≤ ${maxOneWayHours} h; sólo si agrega valor.
-- No dupliques actividades existentes en otros días ni equivalentes por idioma/alias.
+- Day trips de ida ≤ ${maxOneWayHours} h; solo si agrega valor.
+- No dupliques actividades existentes en otros días (considera sinónimos/idiomas).
 - Auroras (si plausible): noches 20:00–02:30 h, transporte lógico, \`valid:\` en notes.
 - Notas SIEMPRE útiles (no vacías).
-- Horario base 08:30–19:00; puedes ajustar.
-
-⚖️ **Día suave**: ${isSoftDay ? 'Sí' : 'No'}
-${isSoftDay ? '- Empieza un poco más tarde (ej. 10:00) y reduce intensidad. Incluye más pausas y actividades ligeras.' : ''}
-
+- Horario base 08:30–19:00; **cubre la ventana** sin dejar “medio día” salvo justificación explícita (y añade alternativas suaves).
+${lightNote}
 - Devuelve formato C {"rows":[...],"replace":false}.
+
 Contexto:
 ${intakeData}
 `.trim();
@@ -2501,18 +2452,15 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // 🔍 Anti-duplicados multi-día con normalización (permitir auroras)
-    const filtered=[];
-    for(const r of normalized){
-      const actKey = normalizeActivityKey(r.activity||'');
-      const isAurora = actKey.includes('aurora') || actKey.includes('northern light');
-      if(!actKey) continue;
-      if(!isAurora && existingAll.has(actKey)) continue;
-      // Evita duplicados en el MISMO día
-      if(filtered.some(x=>normalizeActivityKey(x.activity||'')===actKey)) continue;
-      filtered.push(r);
-    }
-    normalized = filtered;
+    // 🔍 Anti-duplicados multi-día (permitir auroras) con normKey
+    const allExisting=Object.values(itineraries[city].byDay||{})
+      .flat().filter(r=>r.day!==day)
+      .map(r=>normKey(r.activity||''));
+    normalized=normalized.filter(r=>{
+      const act=normKey(r.activity||'');
+      const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(act);
+      return act && (!allExisting.includes(act) || (isAurora && auroraCity));
+    });
 
     // 🧭 Post-procesadores
     if(typeof applyBufferBetweenRows==='function')
@@ -2534,7 +2482,6 @@ ${intakeData}
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
    v68.1 — Ajuste en “agregar 1 día” para reequilibrar rango
-   v69.fix-DUP — exclusión n-1 días (normalizada) y "día suave"
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2614,7 +2561,7 @@ async function onSend(){
     }
   }
 
-  // Agregar varios días N>0 (sin tocar días previos) — rango [prevTotal .. total]
+  // Agregar varios días N>0 (sin tocar días previos)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
     showWOW(true,'Agregando días y reoptimizando…');
@@ -2631,7 +2578,6 @@ async function onSend(){
 
     addMultipleDaysToCity(city, intent.extraDays);
 
-    // Ventanas aseguradas para todo el nuevo rango
     if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
     cityMeta[city].perDay = cityMeta[city].perDay || [];
     const ensureWindow = (d)=>{
@@ -2643,24 +2589,14 @@ async function onSend(){
     const total = Object.keys(itineraries[city].byDay||{}).length;
     for(let d=prevTotal; d<=total; d++) ensureWindow(d);
 
-    // 🛡️ Excluir TODAS las actividades de los n-1 días iniciales (1..prevTotal-1)
-    if(!plannerState.existingActs) plannerState.existingActs = {};
-    plannerState.existingActs[city] = {
-      range: { start: 1, end: Math.max(1, prevTotal-1) },
-      keys: buildExistingActivitySet(city, { includeDays: Array.from({length: Math.max(0, prevTotal-1)}, (_,i)=>i+1) })
-    };
-    // 💤 Marcar "día suave" = último día original
-    if(!plannerState.forceLightDay) plannerState.forceLightDay = {};
-    plannerState.forceLightDay[city] = prevTotal;
-
     await rebalanceWholeCity(city, { start: prevTotal, end: total, dayTripTo: intent.dayTripTo||'' });
 
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé desde el último día original hasta el final, evitando equivalentes y duplicados.`, 'ai');
+    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé desde el último día existente hasta el final evitando duplicados.`, 'ai');
     return;
   }
 
-  // Agregar 1 día al final (sin tocar días previos) — v68.1 + v69.fix-DUP
+  // Agregar 1 día al final (sin tocar días previos) — v68.1
   if (intent.type === 'add_day_end' && intent.city) {
     const city = intent.city;
     showWOW(true, 'Insertando día y optimizando…');
@@ -2710,16 +2646,6 @@ async function onSend(){
 
     const total = Object.keys(itineraries[city].byDay||{}).length;
 
-    // 🛡️ Excluir TODAS las actividades de los n-1 días iniciales (1..prevTotal-1)
-    if(!plannerState.existingActs) plannerState.existingActs = {};
-    plannerState.existingActs[city] = {
-      range: { start: 1, end: Math.max(1, prevTotal-1) },
-      keys: buildExistingActivitySet(city, { includeDays: Array.from({length: Math.max(0, prevTotal-1)}, (_,i)=>i+1) })
-    };
-    // 💤 Día suave = último día original
-    if(!plannerState.forceLightDay) plannerState.forceLightDay = {};
-    plannerState.forceLightDay[city] = prevTotal;
-
     // Rebalancea desde el antiguo último (día suave) hasta el nuevo final
     await rebalanceWholeCity(city, { start: prevTotal, end: total });
 
@@ -2727,7 +2653,7 @@ async function onSend(){
     setActiveCity(city);
     renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Día agregado y plan reoptimizado (primeros días intactos, sin duplicados/alias).', 'ai');
+    chatMsg('✅ Día agregado y plan reoptimizado (primeros días intactos, sin duplicados).', 'ai');
     return;
   }
 
@@ -2858,7 +2784,7 @@ async function onSend(){
     const prompt = `
 ${FORMAT}
 **Contexto (reducido si es posible):**
-${buildIntakeLite()}
+${buildIntakeLite(city)}
 
 **Ciudad a editar:** ${city}
 **Día visible:** ${day}
