@@ -2309,14 +2309,14 @@ function intentFromText(text){
    (Base v65 + refuerzos v66 · equilibrio temático, clima, duplicados multi-día)
    🔧 v69 fix: dedupe multi-idioma con normKey
    🔧 v69 fix: cuando es el último día original tras agregar días → “ligero pero COMPLETO”
-   🚀 v71.fix:
-       - Dedupe local por día (evita repetidos en el mismo día)
-       - Corrección de horas idénticas (auto-buffer si dos inician igual)
-       - Día ligero realmente relajado (máx. 6 actividades)
-       - Aurora auto-inteligente: detecta ciudad/temporada y garantiza ≥1 noche
+   🚀 v71.fix2:
+       - Dedupe local por día (sinónimos/idiomas)
+       - Corrección de horas idénticas (auto-buffer)
+       - Día ligero ≤6 actividades útiles
+       - Auroras: inyección inteligente **no bloqueante** + guard de re-entrada
 ================================= */
 
-// Utilidad local: clave de alias para dedupe intra-día (sinónimos/idiomas)
+// === Utils locales para esta sección ===
 function aliasKey(s){
   return normKey(String(s||'')
     .replace(/\b(the|la|el|los|las|de|del|da|do|dos|das)\b/gi,'')
@@ -2325,7 +2325,6 @@ function aliasKey(s){
     .trim());
 }
 
-// Desplaza una hora "HH:MM" por una duración "1h", "1h 30m", "90m"
 function shiftTime(hhmm, duration){
   const [H,M] = (hhmm||'00:00').split(':').map(x=>parseInt(x,10)||0);
   let mins = (H*60+M);
@@ -2334,102 +2333,110 @@ function shiftTime(hhmm, duration){
   const m2 = String(duration||'').match(/(\d+)\s*m/);
   if(m1) add += parseInt(m1[1],10)*60;
   if(m2) add += parseInt(m2[1],10);
-  mins += Math.max(add, 30); // mínimo 30 min si la duración no es clara
+  mins += Math.max(add, 30);
   const H2 = Math.floor(mins/60)%24, M2 = mins%60;
   return `${String(H2).padStart(2,'0')}:${String(M2).padStart(2,'0')}`;
 }
 
-// Fallback robusto: temporada de auroras por mes (sept–abr)
+// Temporada auroras fallback (sep–abr)
 function isAuroraSeasonByMonth(dateStr){
-  // espera "DD/MM/AAAA" o "YYYY-MM-DD" o vacío
   let m = -1;
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr||'')){ m = parseInt(dateStr.split('/')[1],10)-1; }
   else if(/^\d{4}-\d{2}-\d{2}$/.test(dateStr||'')){ m = parseInt(dateStr.split('-')[1],10)-1; }
-  if(m<0) return true; // si no hay fecha, asumimos flexible (true) para no perder auroras
-  return (m>=8 || m<=3); // sep(8)–abr(3)
+  if(m<0) return true;
+  return (m>=8 || m<=3);
 }
 
-// Detecta si la ciudad aplica auroras por latitud o por nombre
+// Ciudad apta para auroras por latitud/nombre
 function isAuroraCityByHeuristic(city){
   try{
     const c = getCoordinatesForCity(city);
-    if(c && typeof c.lat==='number') return c.lat>=55; // heurística global
+    if(c && typeof c.lat==='number') return c.lat>=55;
   }catch(_){}
   const name = String(city||'').toLowerCase();
-  return /troms|reykjav/i.test(name); // respaldo por nombre
+  return /troms|reykjav/i.test(name);
 }
 
-// Garantiza que la ciudad tenga al menos 1 noche de auroras si aplica
+// Guard por ciudad para evitar re-entradas
+if (typeof plannerState!=='undefined' && !plannerState.__auroraGuard){
+  plannerState.__auroraGuard = {};
+}
+
+// Inyecta una noche de auroras si aplica (NO BLOQUEANTE)
 async function ensureAuroraCoverage(city){
   if(!city || !itineraries[city] || !itineraries[city].byDay) return;
 
-  const data = itineraries[city];
-  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
-  const auroraCity =
-    (typeof isAuroraCityDynamic==='function' && (()=>{
-      try{ const c=getCoordinatesForCity(city); return c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){ return false; }
-    })()) || isAuroraCityByHeuristic(city);
+  // evita re-entradas durante el mismo ciclo de reequilibrio
+  if (plannerState?.__auroraGuard?.[city]) return;
+  plannerState.__auroraGuard[city] = true;
 
-  const auroraSeason =
-    (typeof inAuroraSeasonDynamic==='function' && (()=>{
-      try{ return inAuroraSeasonDynamic(baseDate); }catch(_){ return false; }
-    })()) || isAuroraSeasonByMonth(baseDate);
+  try{
+    const data = itineraries[city];
+    const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  if(!auroraCity || !auroraSeason) return;
+    const auroraCity =
+      (typeof isAuroraCityDynamic==='function' && (()=>{
+        try{ const c=getCoordinatesForCity(city); return c?isAuroraCityDynamic(c.lat,c.lng):false; }catch(_){ return false; }
+      })()) || isAuroraCityByHeuristic(city);
 
-  // ¿Ya existe alguna noche de auroras en cualquier día?
-  const anyAurora = Object.values(data.byDay).flat()
-    .some(r => /\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+    const auroraSeason =
+      (typeof inAuroraSeasonDynamic==='function' && (()=>{
+        try{ return inAuroraSeasonDynamic(baseDate); }catch(_){ return false; }
+      })()) || isAuroraSeasonByMonth(baseDate);
 
-  if(anyAurora) return;
+    if(!auroraCity || !auroraSeason) return;
 
-  // Elegimos el último día disponible para noche de auroras (o el penúltimo si existe)
-  const days = Object.keys(data.byDay).map(n=>+n).sort((a,b)=>a-b);
-  if(!days.length) return;
-  const targetDay = days.length>=2 ? days[days.length-1] : days[0];
+    // ¿Ya existe alguna noche de auroras?
+    const anyAurora = Object.values(data.byDay).flat()
+      .some(r => /\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+    if(anyAurora) return;
 
-  // Hora base: 20:30–01:30 (ajustable si ya hay actividad tarde)
-  const perDay = (cityMeta[city]?.perDay||[]);
-  const pd = perDay.find(x=>x.day===targetDay) || {start:DEFAULT_START, end:DEFAULT_END};
-  let start = '20:30';
-  if(pd.end && pd.end>'20:00') start = pd.end<'21:00' ? '20:30' : '21:00';
+    // Target: último día (o el único)
+    const days = Object.keys(data.byDay).map(n=>+n).sort((a,b)=>a-b);
+    if(!days.length) return;
+    const targetDay = days[days.length-1];
 
-  const auroraRow = {
-    day: targetDay,
-    start,
-    end: '01:30',
-    activity: 'Tour de auroras (caza de Northern Lights)',
-    from: `Hotel (${city})`,
-    to: 'Puntos de observación (cielos despejados)',
-    transport: 'Minivan/Bus',
-    duration: '≈5h',
-    notes: 'Prioritario si el pronóstico lo permite. Incluye guía, paradas estratégicas y fotos. valid: aurora'
-  };
+    const perDay = (cityMeta[city]?.perDay||[]);
+    const pd = perDay.find(x=>x.day===targetDay) || {start:DEFAULT_START, end:DEFAULT_END};
+    let start = '20:30';
+    if(pd.end && pd.end>'20:00') start = pd.end<'21:00' ? '20:30' : '21:00';
 
-  // Evitar duplicados con el día
-  const list = data.byDay[targetDay] || [];
-  const k = aliasKey(auroraRow.activity);
-  const existsLocal = list.some(r => aliasKey(r.activity||'')===k);
-  if(!existsLocal){
-    pushRows(city, [auroraRow], false);
+    const auroraRow = {
+      day: targetDay,
+      start,
+      end: '01:30',
+      activity: 'Tour de auroras (caza de Northern Lights)',
+      from: `Hotel (${city})`,
+      to: 'Puntos de observación (cielos despejados)',
+      transport: 'Minivan/Bus',
+      duration: '≈5h',
+      notes: 'Prioritario si el pronóstico lo permite. Incluye guía, paradas estratégicas y fotos. valid: aurora'
+    };
+
+    // dedupe local en el día
+    const list = data.byDay[targetDay] || [];
+    const k = aliasKey(auroraRow.activity);
+    const existsLocal = list.some(r => aliasKey(r.activity||'')===k);
+    if(!existsLocal){
+      pushRows(city, [auroraRow], false);
+    }
+  } finally {
+    // libera guard unos ms después para no encadenar re-entradas
+    setTimeout(()=>{ if(plannerState?.__auroraGuard) plannerState.__auroraGuard[city]=false; }, 50);
   }
 }
 
-// Normaliza y refuerza orden + buffers, corrigiendo horas duplicadas
+// Normaliza/ordena y aplica buffers mínimos
 function normalizeAndBufferRows(rows){
-  let out = rows.slice();
+  let out = rows.slice().sort((a,b)=> (a.start||'')<(b.start||'') ? -1 : 1);
 
-  // Orden simple por hora
-  out.sort((a,b)=> (a.start||'')<(b.start||'') ? -1 : 1);
-
-  // Ajuste de horas idénticas consecutivas
+  // Corrige inicios idénticos consecutivos
   for(let i=1;i<out.length;i++){
     if((out[i].start||'') === (out[i-1].start||'')){
       out[i].start = shiftTime(out[i-1].start, out[i-1].duration || '1h');
     }
   }
 
-  // Buffers mínimos entre actividades (si helper global existe, úsalo)
   if(typeof applyBufferBetweenRows==='function'){
     out = applyBufferBetweenRows(out);
   }
@@ -2446,7 +2453,7 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
-  // 🧊 Protege actividades especiales (auroras / termales)
+  // Protegidos
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
     return act.includes('aurora')||act.includes('northern light')||
@@ -2458,42 +2465,41 @@ async function optimizeDay(city, day){
            !act.includes('laguna azul')&&!act.includes('blue lagoon');
   });
 
-  // Flags de replanificación
+  // Flags
   const hasForceReplan = plannerState?.forceReplan?.[city];
   const hasDayTripPending = plannerState?.dayTripPending?.[city];
   const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
 
-  // 🔁 Intake adaptativo (solo rango actual)
+  // Intake
   const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
 
-  // Aurora: auto-preferencia si la ciudad/temporada lo justifican
-  let auroraCity=false, auroraSeason=false;
+  // Señal suave de preferencia de auroras (no bloqueante)
   try{
     const coords=getCoordinatesForCity(city);
-    auroraCity=(coords?isAuroraCityDynamic(coords.lat,coords.lng):false) || isAuroraCityByHeuristic(city);
-    auroraSeason=(typeof inAuroraSeasonDynamic==='function' ? inAuroraSeasonDynamic(baseDate) : false) || isAuroraSeasonByMonth(baseDate);
-  }catch(_){}
-  if(auroraCity && auroraSeason){
-    if(!plannerState.preferences) plannerState.preferences = {};
-    if(plannerState.preferences.preferAurora!==true){
-      plannerState.preferences.preferAurora = true;
+    const auroraCity=(coords?isAuroraCityDynamic(coords.lat,coords.lng):false) || isAuroraCityByHeuristic(city);
+    const auroraSeason=(typeof inAuroraSeasonDynamic==='function' ? inAuroraSeasonDynamic(baseDate) : false) || isAuroraSeasonByMonth(baseDate);
+    if(auroraCity && auroraSeason){
+      if(!plannerState.preferences) plannerState.preferences = {};
+      if(plannerState.preferences.preferAurora!==true){
+        plannerState.preferences.preferAurora = true;
+      }
     }
-  }
+  }catch(_){}
 
-  // Duración máxima para day trips extendidos
+  // Duración máx. ida day trips
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
-  // 🔧 Día ligero: último original tras agregar días → RELAJADO
+  // Día ligero
   const isLightDay = (itineraries[city]?.originalDays > 0) &&
                      (day === itineraries[city].originalDays) &&
                      (stayDays > itineraries[city].originalDays);
   const lightNote = isLightDay
     ? `
 - **Día ligero y relajado**: máximo 5–6 actividades, con pausas generosas (brunch/cafés/miradores/compras).
-- Cubre la ventana sin “picos” de esfuerzo; no más de 2 actividades exigentes.
+- Cubre la ventana sin picos de esfuerzo; no más de 2 exigentes.
 `
     : '';
 
@@ -2506,15 +2512,15 @@ Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales:
 ${JSON.stringify(rowsForOptimization)}
 
-📋 **REGLAS INTELIGENTES v66 + v71.fix**
-- Prioriza **imperdibles de clase mundial** de ${city} y distribuye por **temas** (cultura, gastronomía, naturaleza, ocio, compras, relax).
-- Ajusta según clima/temporada; sin más de 3 exigentes seguidas.
-- Si ${city} es costera, considera paseo marítimo cuando el clima lo permita.
-- Day trips de ida ≤ ${maxOneWayHours} h; solo si agrega valor.
-- No dupliques actividades existentes en otros días (considera sinónimos/idiomas).
-- **Auroras** (si plausible): noches 20:00–02:30, transporte lógico, y \`valid:\` en notes.
-- Notas SIEMPRE útiles (no vacías).
-- Horario base 08:30–19:00; **cubre la ventana** sin dejar “medio día” salvo justificación (añade alternativas suaves).
+📋 **REGLAS v66 + v71.fix2**
+- Imperdibles de ${city} + distribución temática (cultura, gastronomía, naturaleza, ocio, compras, relax).
+- Ajuste por clima/temporada; sin 3 exigentes seguidas.
+- Si ${city} es costera, permite paseo marítimo si el clima ayuda.
+- Day trips (ida) ≤ ${maxOneWayHours} h.
+- Sin duplicar lo ya existente en otros días (sinónimos/idiomas).
+- **Auroras** (si plausible): 20:00–02:30, transporte lógico, y \`valid:\` en notes.
+- Notas útiles (no vacías).
+- Ventana base 08:30–19:00 y cubrirla; si medio día, justificar y dar alternativas suaves.
 ${lightNote}
 - Devuelve formato C {"rows":[...],"replace":false}.
 Contexto:
@@ -2526,17 +2532,17 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // 🔍 Dedupe multi-día (permitir auroras) con normKey
+    // Dedupe multi-día (permite auroras)
     const allExisting=Object.values(itineraries[city].byDay||{})
       .flat().filter(r=>r.day!==day)
       .map(r=>normKey(r.activity||''));
     normalized=normalized.filter(r=>{
       const act=normKey(r.activity||'');
       const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(act);
-      return act && (!allExisting.includes(act) || (isAurora && auroraCity));
+      return act && (!allExisting.includes(act) || isAurora);
     });
 
-    // 🔍 Dedupe local por día (evita repetidos dentro del mismo día)
+    // Dedupe local por día
     const seenLocal = new Set();
     normalized = normalized.filter(r=>{
       const key = aliasKey(r.activity||'');
@@ -2545,20 +2551,19 @@ ${intakeData}
       return true;
     });
 
-    // 🧭 Post-procesadores y correcciones de horario
+    // Orden + buffers
     normalized = normalizeAndBufferRows(normalized);
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
     if(typeof ensureAuroraNight==='function')
       normalized=ensureAuroraNight(normalized,city);
 
-    // 🧩 Reconstrucción con protegidos
     const finalRows=[...normalized,...protectedRows];
 
-    // Validación y push
+    // Validar y aplicar
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
 
-    // Si es día ligero, recorta a máx. 6 actividades útiles (sin borrar protegidos)
+    // Recorte suave si es “día ligero”
     let allowed = val.allowed || [];
     if(isLightDay){
       const protectedKeys = new Set(protectedRows.map(r=>aliasKey(r.activity||'')));
@@ -2570,8 +2575,8 @@ ${intakeData}
 
     pushRows(city, allowed, false);
 
-    // 🔭 Cobertura de auroras a nivel ciudad (si aún no hay)
-    try{ await ensureAuroraCoverage(city); }catch(_){}
+    // 👇 **No bloqueante**: cobertura de auroras a nivel ciudad
+    try{ ensureAuroraCoverage(city); }catch(_){}
   }
 }
 
