@@ -1,5 +1,5 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v72
+   ITRAVELBYMYOWN · PLANNER v73
    Base: v71
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
