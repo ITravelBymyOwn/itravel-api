@@ -2310,8 +2310,6 @@ function intentFromText(text){
    🔧 Ajustes quirúrgicos:
    (1) Día ligero apunta siempre al NUEVO último día.
    (2) Deduplicado extendido con aliasKey para sinónimos.
-   (3) FIX cuelgue: prompt bien formado (backticks) y .trim() correcto.
-   (4) Intake pesado solo 1 vez por ciudad tras forceReplan; luego lite.
 ================================= */
 
 function insertDayAt(city, position){
@@ -2412,17 +2410,9 @@ async function optimizeDay(city, day){
   const hasDayTripPending = plannerState?.dayTripPending?.[city];
   const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
 
-  // ⚙️ Intake pesado SOLO 1 vez por ciudad tras forceReplan; luego lite
-  if (!plannerState.__forceReplanOnce) plannerState.__forceReplanOnce = {};
-  const needHeavy = !!(hasForceReplan || hasDayTripPending || hasPreferDayTrip);
-  let intakeData;
-  if (needHeavy && !plannerState.__forceReplanOnce[city]) {
-    intakeData = buildIntake();
-    plannerState.__forceReplanOnce[city] = true;
-    if (plannerState.forceReplan) plannerState.forceReplan[city] = false;
-  } else {
-    intakeData = buildIntakeLite(city,{start:day,end:day});
-  }
+  const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
+    ? buildIntake()
+    : buildIntakeLite(city,{start:day,end:day});
 
   let auroraCity=false, auroraSeason=false;
   try{
@@ -2444,7 +2434,7 @@ async function optimizeDay(city, day){
     ? `\n- **Día ligero pero COMPLETO**: cubrir toda la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin sobrecarga ni huecos largos.\n`
     : '';
 
-  const prompt = `
+  const prompt=`
 ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
@@ -2464,7 +2454,6 @@ ${JSON.stringify(rowsForOptimization)}
 - Horario base 08:30–19:00; cubre toda la ventana.
 ${lightNote}
 - Devuelve {"rows":[...],"replace":false}.
-
 Contexto:
 ${intakeData}
 `.trim();
