@@ -943,3 +943,77 @@ table.itinerary th{ letter-spacing: .15px !important; }
 
 /* 6) Sombra del topbar un poco más suave */
 .topbar{ box-shadow: 0 6px 20px rgba(16,24,40,.06) !important; }
+
+/* ===== ITBMO Planner — FIX post-hotfix (v72.1) ===== */
+
+/* 0) Revertir el full-width y centrar contenedor sin transform */
+#planner-grid{
+  width: auto !important;
+  max-width: 1360px !important;   /* ancho cómodo, puedes subir a 1440/1500 */
+  margin: 0 auto !important;
+  transform: none !important;
+
+  grid-template-columns: 420px 1fr !important;  /* sidebar cómoda + main muy ancho */
+  gap: 1.75rem !important;
+  padding: 1.25rem 1.5rem !important;
+}
+
+/* 1) Evitar que Webflow “achique” el planner pero sin romper el resto */
+.w-layout-blockcontainer,
+.w-container{
+  max-width: 100% !important;  /* libera ancho del wrapper de la página del planner */
+}
+
+/* 2) Asegurar que el main pueda crecer y no se comprima por overflow */
+.main{ min-width: 0 !important; }
+.main .box.itinerary-section{
+  width: 100% !important;
+  max-width: 1100px !important;   /* controla que el bloque de “Itinerario” no se sienta desproporcionado */
+}
+
+/* 3) Restaurar y fijar posiciones de los botones de Info Chat */
+#info-chat-toggle{
+  display: flex !important;
+  align-items: center;
+}
+#info-chat-floating{
+  display: inline-flex !important;
+  position: fixed !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  z-index: 2000 !important;        /* por encima de elementos de Webflow */
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+/* 4) Píldoras/tabs y toolbar: proporción agradable sin verse “estiradas” */
+.city-tabs{ gap: .6rem !important; }
+.city-tab{ padding: .48rem .88rem !important; font-weight: 700 !important; }
+.toolbar{
+  max-width: 1100px !important;           /* acompaña al ancho de la sección */
+  grid-template-columns: repeat(6, 1fr) !important;
+  gap: .6rem !important;
+}
+@media (max-width: 1200px){
+  .toolbar{ grid-template-columns: repeat(3, 1fr) !important; }
+}
+@media (max-width: 960px){
+  .toolbar{ grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* 5) Chat ancho y visible (sin topes fantasmas) */
+.chat{
+  max-width: unset !important;
+  width: 100% !important;
+  height: 420px !important;
+}
+
+/* 6) Micro-pulidos para sensación premium consistente */
+.city-row input,
+.city-row select,
+#traveler-grid input[type="number"],
+.special-conditions textarea,
+.chat-input input{
+  border-radius: .65rem !important;
+}
+.topbar{ box-shadow: 0 6px 20px rgba(16,24,40,.06) !important; }
