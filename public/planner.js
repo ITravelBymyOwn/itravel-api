@@ -2310,8 +2310,8 @@ function intentFromText(text){
    🔧 Ajustes quirúrgicos:
    (1) Día ligero apunta siempre al NUEVO último día.
    (2) Deduplicado extendido con aliasKey para sinónimos.
-   (3) Guard anti-atasco: buildIntake pesado solo en la primera pasada;
-       después buildIntakeLite y se apaga forceReplan[city].
+   (3) FIX cuelgue: prompt bien formado (backticks) y .trim() correcto.
+   (4) Intake pesado solo 1 vez por ciudad tras forceReplan; luego lite.
 ================================= */
 
 function insertDayAt(city, position){
@@ -2387,11 +2387,6 @@ function aliasKey(s){
   return x;
 }
 
-/* --- Guard de replan pesado: solo la primera vez por ciclo --- */
-if (typeof plannerState !== 'undefined' && !plannerState.__forceReplanOnce){
-  plannerState.__forceReplanOnce = {};
-}
-
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2413,26 +2408,21 @@ async function optimizeDay(city, day){
            !act.includes('laguna azul')&&!act.includes('blue lagoon');
   });
 
-  // ⛳️ Guard: buildIntake pesado SOLO en la primera pasada con forceReplan
-  const hasForceReplan = !!(plannerState?.forceReplan?.[city]);
-  let useHeavy = false;
-  if (hasForceReplan){
-    const count = plannerState.__forceReplanOnce[city] || 0;
-    if (count === 0){
-      useHeavy = true;                         // primera llamada: contexto completo
-      plannerState.__forceReplanOnce[city] = 1;
-    } else {
-      useHeavy = false;                        // siguientes: versión ligera
-      try { plannerState.forceReplan[city] = false; } catch(_){}
-    }
-  }
-
+  const hasForceReplan = plannerState?.forceReplan?.[city];
   const hasDayTripPending = plannerState?.dayTripPending?.[city];
   const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
 
-  const intakeData = (useHeavy || hasDayTripPending || hasPreferDayTrip)
-    ? buildIntake()
-    : buildIntakeLite(city,{start:day,end:day});
+  // ⚙️ Intake pesado SOLO 1 vez por ciudad tras forceReplan; luego lite
+  if (!plannerState.__forceReplanOnce) plannerState.__forceReplanOnce = {};
+  const needHeavy = !!(hasForceReplan || hasDayTripPending || hasPreferDayTrip);
+  let intakeData;
+  if (needHeavy && !plannerState.__forceReplanOnce[city]) {
+    intakeData = buildIntake();
+    plannerState.__forceReplanOnce[city] = true;
+    if (plannerState.forceReplan) plannerState.forceReplan[city] = false;
+  } else {
+    intakeData = buildIntakeLite(city,{start:day,end:day});
+  }
 
   let auroraCity=false, auroraSeason=false;
   try{
@@ -2454,7 +2444,7 @@ async function optimizeDay(city, day){
     ? `\n- **Día ligero pero COMPLETO**: cubrir toda la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin sobrecarga ni huecos largos.\n`
     : '';
 
-  const prompt=`
+  const prompt = `
 ${FORMAT}
 Ciudad: ${city}
 Día: ${day}
@@ -2474,6 +2464,7 @@ ${JSON.stringify(rowsForOptimization)}
 - Horario base 08:30–19:00; cubre toda la ventana.
 ${lightNote}
 - Devuelve {"rows":[...],"replace":false}.
+
 Contexto:
 ${intakeData}
 `.trim();
