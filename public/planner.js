@@ -2304,12 +2304,13 @@ function intentFromText(text){
   return { type:'free_edit', details: text };
 }
 
-/* ==============================
+/* ============================== 
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    Base v71 — Fix final
    🔧 Ajustes quirúrgicos:
    (1) Día ligero apunta siempre al NUEVO último día.
    (2) Deduplicado extendido con aliasKey para sinónimos.
+   (3) AURORAS: detección robusta por latitud/temporada (incluye fallback DD/MM/AAAA y nombres Tromsø/Reykjavik).
 ================================= */
 
 function insertDayAt(city, position){
@@ -2414,12 +2415,43 @@ async function optimizeDay(city, day){
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
 
+  /* ====== AURORAS: Detección robusta (quirúrgico) ======
+     - Usa coords si existen (isAuroraCityDynamic).
+     - Si la temporada no puede inferirse por el helper global, intenta parsear DD/MM/AAAA.
+     - Fallback por nombre de ciudad para Tromsø/Reykjavik si no hay coords. */
   let auroraCity=false, auroraSeason=false;
   try{
     const coords=getCoordinatesForCity(city);
-    auroraCity=coords?isAuroraCityDynamic(coords.lat,coords.lng):false;
-    auroraSeason=inAuroraSeasonDynamic(baseDate);
+    // ciudad apta por latitud
+    auroraCity = coords ? isAuroraCityDynamic(coords.lat,coords.lng) : false;
+
+    // temporada vía helper global
+    auroraSeason = inAuroraSeasonDynamic(baseDate);
+
+    // si el helper no pudo determinar (o devolvió falso por formato), intenta parsear DD/MM/AAAA
+    if(!auroraSeason){
+      const d = (typeof parseDMY==='function') ? parseDMY(baseDate) : null;
+      if(d instanceof Date && !isNaN(d)){
+        const m = d.getMonth()+1; // 1..12
+        // Temporada amplia: SEP–MAR (permite finales de AGO e inicios de ABR si se desea ajustar)
+        auroraSeason = (m>=9 || m<=3);
+      }
+    }
+
+    // Fallback por nombre si no hay coords disponibles
+    if(!coords){
+      const cname = String(city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+      if(/\btromso\b|\btroms[oø]\b/.test(cname) || /\breykjavik\b|\breikiavik\b/.test(cname)){
+        auroraCity = true;
+      }
+    }
   }catch(_){}
+
+  // Si la ciudad y la temporada son aptas (o no hay fecha pero es ciudad ártica), activa preferAurora
+  if(auroraCity && (auroraSeason || !baseDate)){
+    if(!plannerState.preferences) plannerState.preferences = {};
+    plannerState.preferences.preferAurora = true;
+  }
 
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
@@ -2450,10 +2482,11 @@ ${JSON.stringify(rowsForOptimization)}
 - Si costera, añade paseo marítimo o puerto si aplica.
 - Day trips: ida ≤ ${maxOneWayHours} h.
 - Evita duplicados multi-día (considera sinónimos/idiomas).
-- Auroras: ventana 20:00–02:30, transporte lógico.
+- Auroras: ventana 20:00–02:30, transporte lógico${(auroraCity && (auroraSeason || !baseDate)) ? ' **(OBLIGATORIO incluir una noche de caza si hay disponibilidad)**' : ''}.
 - Horario base 08:30–19:00; cubre toda la ventana.
 ${lightNote}
 - Devuelve {"rows":[...],"replace":false}.
+
 Contexto:
 ${intakeData}
 `.trim();
@@ -2463,7 +2496,7 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // Anti-duplicados extendido
+    // Anti-duplicados extendido (permitir auroras si ciudad apta)
     const allExisting=Object.values(itineraries[city].byDay||{})
       .flat().filter(r=>r.day!==day)
       .map(r=>aliasKey(r.activity||''));
@@ -2478,7 +2511,7 @@ ${intakeData}
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
     if(typeof ensureAuroraNight==='function')
-      normalized=ensureAuroraNight(normalized,city);
+      normalized=ensureAuroraNight(normalized,city); // ya recibe preferAurora=true si corresponde
 
     const finalRows=[...normalized,...protectedRows];
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
