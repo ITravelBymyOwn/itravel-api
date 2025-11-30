@@ -1981,6 +1981,7 @@ Reglas duras:
    SECCIÓN 16 · Inicio (hotel/transport)
    v60 base + overlay bloqueado global hasta terminar todas las ciudades
    (concurrencia controlada vía runWithConcurrency)
+   + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
 ================================= */
 async function startPlanning(){
   if(savedDestinations.length===0) return;
@@ -1989,6 +1990,15 @@ async function startPlanning(){
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
+
+  // 🛠️ Preferencias globales (consumidas por el optimizador/AI):
+  // - Cena visible en la franja correcta, aunque no haya “actividad especial”
+  // - Ventana vespertina flexible (no anclar rígido 08:30–19:00 si el contexto lo amerita)
+  // - Sugerencias icónicas con frecuencia moderada (similares a auroras)
+  if(!plannerState.preferences) plannerState.preferences = {};
+  plannerState.preferences.alwaysIncludeDinner = true;
+  plannerState.preferences.flexibleEvening     = true;
+  plannerState.preferences.iconicHintsModerate = true;
 
   // 1) Saludo inicial
   chatMsg(`${tone.hi}`);
@@ -1999,6 +2009,91 @@ async function startPlanning(){
 
   // 3) Comienza flujo de solicitud de hotel/zona y transporte
   askNextHotelTransport();
+}
+
+/* ====== Resolutor inteligente de Hotel/Zona (fuzzy & alias) ====== */
+const hotelResolverCache = {}; // cache por ciudad
+function _normTxt(s){
+  return String(s||'')
+    .normalize('NFD').replace(/\p{Diacritic}/gu,'')
+    .toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+function _tokenSet(str){
+  return new Set(_normTxt(str).split(' ').filter(Boolean));
+}
+function _jaccard(a,b){
+  const A=_tokenSet(a), B=_tokenSet(b);
+  const inter = [...A].filter(x=>B.has(x)).length;
+  const uni   = new Set([...A,...B]).size || 1;
+  return inter/uni;
+}
+function _levRatio(a,b){
+  // usa levenshteinDistance disponible en la Sección 17
+  const A=_normTxt(a), B=_normTxt(b);
+  const maxlen = Math.max(A.length,B.length) || 1;
+  return (maxlen - levenshteinDistance(A,B))/maxlen;
+}
+
+// Pre-carga alias por ciudad: nombres populares, barrios, POIs cercanos, etc.
+function preloadHotelAliases(city){
+  if(!city) return;
+  if(!plannerState.hotelAliases) plannerState.hotelAliases = {};
+  if(plannerState.hotelAliases[city]) return;
+
+  const base = [city];
+  const extras = [
+    'centro','downtown','old town','historic center','main square','cathedral',
+    'harbor','port','university','station','bus terminal','train station'
+  ];
+
+  // si existen referencias del usuario en cityMeta (últimos hoteles elegidos), úsalas
+  const prev = (cityMeta[city]?.hotel ? [cityMeta[city].hotel] : []);
+  plannerState.hotelAliases[city] = [...new Set([...base, ...extras, ...prev])];
+}
+
+function resolveHotelInput(userText, city){
+  const raw = String(userText||'').trim();
+  if(!raw) return {text:'', confidence:0};
+
+  // 1) Atajos: links → conf alta
+  if(/^https?:\/\//i.test(raw)){
+    return { text: raw, confidence: 0.98, resolvedVia: 'url' };
+  }
+
+  // 2) Si el usuario da “zona/landmark”, intenta casar con alias y POIs ya vistos
+  const candidates = new Set();
+
+  // Aliases precargados
+  (plannerState.hotelAliases?.[city] || []).forEach(x=>candidates.add(x));
+
+  // Heurística: añade nombres de sitios del itinerario actual (si existe)
+  const byDay = itineraries?.[city]?.byDay || {};
+  Object.values(byDay).flat().forEach(r=>{
+    if(r?.activity) candidates.add(r.activity);
+    if(r?.to)       candidates.add(r.to);
+    if(r?.from)     candidates.add(r.from);
+  });
+
+  // Hotel previo del usuario si existía
+  if(cityMeta?.[city]?.hotel) candidates.add(cityMeta[city].hotel);
+
+  // 3) Puntuar por mezcla: Jaccard de tokens + Levenshtein ratio
+  let best = { text: raw, confidence: 0.50, resolvedVia: 'raw' };
+  const list = [...candidates].filter(Boolean);
+  for(const c of list){
+    const j = _jaccard(raw, c);
+    const l = _levRatio(raw, c);
+    // mezcla: 60% Jaccard + 40% Levenshtein ratio
+    const score = 0.6*j + 0.4*l;
+    if(score > (best.score||0)){
+      best = { text: c, confidence: Math.max(0.55, Math.min(0.99, score)), resolvedVia: 'alias', score };
+    }
+  }
+
+  // 4) Cache y retorno
+  hotelResolverCache[city] = hotelResolverCache[city] || {};
+  hotelResolverCache[city][raw] = best;
+  return best;
 }
 
 function askNextHotelTransport(){
@@ -2030,6 +2125,9 @@ function askNextHotelTransport(){
     cityMeta[city] = { baseDate: null, hotel:'', transport:'', perDay: [] };
   }
 
+  // 🔎 Pre-carga de alias/POIs para ayudar al usuario a escribir “a su manera”
+  preloadHotelAliases(city);
+
   // ⛔ Debe esperar explícitamente hotel/zona antes de avanzar (requisito)
   const currentHotel = cityMeta[city].hotel || '';
   if(!currentHotel.trim()){
@@ -2043,7 +2141,6 @@ function askNextHotelTransport(){
   metaProgressIndex++;
   askNextHotelTransport();
 }
-
 
 /* ==============================
    SECCIÓN 17 · NLU robusta + Intents (v60 base + mejoras v64)
@@ -2637,6 +2734,8 @@ ${intakeData}
    - Reequilibra desde el último día original hasta el nuevo final
    - Define "día suave" en el NUEVO último día
    - Asegura ventana/optimización completa del día nuevo
+   + Mejora: uso del resolutor de hotel/zona, feedback de confianza,
+     y activación automática de preferAurora cuando aplique
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2647,12 +2746,46 @@ async function onSend(){
   // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
+
+    // 🚀 Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
+    const res = resolveHotelInput(text, city);
+    const resolvedHotel = res.text || text;
+
+    // Detección de transporte (conserva tu lógica original)
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
       : (/alquilad|rent|veh[ií]culo|coche|auto|carro/i.test(text)) ? 'vehículo alquilado'
       : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
-    upsertCityMeta({ city, hotel: text, transport });
+
+    upsertCityMeta({ city, hotel: resolvedHotel, transport });
+
+    // 🗣️ Feedback al usuario según confianza del match
+    if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
+      chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
+    }else if((res.confidence||0) >= 0.65){
+      chatMsg(`🏨 Usaré <strong>${resolvedHotel}</strong> como referencia en <strong>${city}</strong> (interpretado por similitud). Si deseas otro, escríbelo con más detalle o pega el link.`, 'ai');
+    }else{
+      chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
+    }
+
+    // 🌌 Activar preferAurora automáticamente si la ciudad es apta
+    try{
+      const canon = (typeof normalizeCityForGeo==='function') ? normalizeCityForGeo(city) : city;
+      const coords = (typeof getCoordinatesForCity==='function') ? (getCoordinatesForCity(canon) || getCoordinatesForCity(city)) : null;
+      const auroraCity = coords && (typeof isAuroraCityDynamic==='function') ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
+
+      // Si no hay coords, usa heurística por nombre (Reykjavik/Tromsø variantes)
+      if(!coords){
+        const low = String(canon||city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+        if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) { if(!plannerState.preferences) plannerState.preferences={}; plannerState.preferences.preferAurora = true; }
+        if(/\btroms[oø]\b|\btromso\b/.test(low)) { if(!plannerState.preferences) plannerState.preferences={}; plannerState.preferences.preferAurora = true; }
+      }else if(auroraCity){
+        if(!plannerState.preferences) plannerState.preferences = {};
+        plannerState.preferences.preferAurora = true;
+      }
+    }catch(_){ /* no-op seguro */ }
+
     metaProgressIndex++;
     askNextHotelTransport();
     return;
@@ -2661,13 +2794,26 @@ async function onSend(){
   // Cambio de hotel
   const hotelChangeMatch = text.match(/^(?:hotel|zona|direcci[oó]n):?\s*(.+)$/i);
   if(hotelChangeMatch && activeCity){
-    const newHotel = hotelChangeMatch[1].trim();
+    const newHotelRaw = hotelChangeMatch[1].trim();
     const city = activeCity;
+
+    // 🧠 Resolver también en cambios de hotel
+    const res = resolveHotelInput(newHotelRaw, city);
+    const newHotel = res.text || newHotelRaw;
+
     if(!cityMeta[city]) cityMeta[city] = { baseDate:null, hotel:'', transport:'', perDay:[] };
     const prevHotel = cityMeta[city].hotel || '';
     if(newHotel && newHotel !== prevHotel){
       cityMeta[city].hotel = newHotel;
-      chatMsg(`🏨 Actualicé el hotel/zona de <strong>${city}</strong>. Reajustando itinerario…`, 'ai');
+
+      if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
+        chatMsg(`🏨 Actualicé el hotel/zona de <strong>${city}</strong> a <strong>${newHotel}</strong>. Reajustando itinerario…`, 'ai');
+      }else if((res.confidence||0) >= 0.65){
+        chatMsg(`🏨 Apliqué <strong>${newHotel}</strong> como nueva referencia en <strong>${city}</strong> (interpretado por similitud). Reajustando itinerario…`, 'ai');
+      }else{
+        chatMsg(`🏨 Actualicé tu referencia en <strong>${city}</strong>. Si tienes el link exacto, compártelo. Reajustando itinerario…`, 'ai');
+      }
+
       showWOW(true,'Reequilibrando tras cambio de hotel…');
       await rebalanceWholeCity(city);
       showWOW(false);
@@ -2869,7 +3015,7 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
-    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(city);
+    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
     return;
