@@ -2310,7 +2310,7 @@ function intentFromText(text){
    🔧 Ajustes quirúrgicos:
    (1) Día ligero apunta siempre al NUEVO último día.
    (2) Deduplicado extendido con aliasKey para sinónimos.
-   (3) AURORAS: detección robusta por latitud/temporada (incluye fallback DD/MM/AAAA y nombres Tromsø/Reykjavik).
+   (3) AURORAS: alias/fuzzy para ciudades árticas (Reykjavik/Tromsø) + temporada robusta DD/MM/AAAA.
 ================================= */
 
 function insertDayAt(city, position){
@@ -2386,6 +2386,17 @@ function aliasKey(s){
   return x;
 }
 
+/* --- NUEVO: normalizador mínimo de nombres de ciudad para geocoding/auroras --- */
+function normalizeCityForGeo(name){
+  const raw = String(name||'').trim();
+  const low = raw.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+  // Reykjavik variantes comunes intencionales
+  if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) return 'Reykjavik';
+  // Tromsø / Tromso
+  if(/\btroms[oø]\b|\btromso\b/.test(low)) return 'Tromsø';
+  return raw; // demás: deja intacto
+}
+
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const rows = (data?.byDay?.[day]||[]).map(r=>({
@@ -2415,39 +2426,36 @@ async function optimizeDay(city, day){
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
 
-  /* ====== AURORAS: Detección robusta (quirúrgico) ======
-     - Usa coords si existen (isAuroraCityDynamic).
-     - Si la temporada no puede inferirse por el helper global, intenta parsear DD/MM/AAAA.
-     - Fallback por nombre de ciudad para Tromsø/Reykjavik si no hay coords. */
+  /* ====== AURORAS: detección robusta con alias + temporada ====== */
   let auroraCity=false, auroraSeason=false;
   try{
-    const coords=getCoordinatesForCity(city);
-    // ciudad apta por latitud
-    auroraCity = coords ? isAuroraCityDynamic(coords.lat,coords.lng) : false;
+    // 1) Normaliza ciudad para geocoding (tolera typos)
+    const canonicalCity = normalizeCityForGeo(city);
 
-    // temporada vía helper global
+    // 2) Usa coords de la forma canónica
+    const coords = getCoordinatesForCity(canonicalCity) || getCoordinatesForCity(city);
+    auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
+
+    // 3) Temporada vía helper; si falla, parsea DD/MM/AAAA
     auroraSeason = inAuroraSeasonDynamic(baseDate);
-
-    // si el helper no pudo determinar (o devolvió falso por formato), intenta parsear DD/MM/AAAA
     if(!auroraSeason){
       const d = (typeof parseDMY==='function') ? parseDMY(baseDate) : null;
       if(d instanceof Date && !isNaN(d)){
         const m = d.getMonth()+1; // 1..12
-        // Temporada amplia: SEP–MAR (permite finales de AGO e inicios de ABR si se desea ajustar)
+        // Ventana amplia: SEP–MAR (cubre fin de dic e inicios de ene)
         auroraSeason = (m>=9 || m<=3);
       }
     }
 
-    // Fallback por nombre si no hay coords disponibles
+    // 4) Fallback por nombre aunque no haya coords (muy tolerante)
     if(!coords){
-      const cname = String(city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
-      if(/\btromso\b|\btroms[oø]\b/.test(cname) || /\breykjavik\b|\breikiavik\b/.test(cname)){
-        auroraCity = true;
-      }
+      const low = String(canonicalCity||city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+      if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) auroraCity = true;
+      if(/\btroms[oø]\b|\btromso\b/.test(low)) auroraCity = true;
     }
   }catch(_){}
 
-  // Si la ciudad y la temporada son aptas (o no hay fecha pero es ciudad ártica), activa preferAurora
+  // Si ciudad y temporada son aptas (o sin fecha), fuerza preferAurora para toda la ciudad
   if(auroraCity && (auroraSeason || !baseDate)){
     if(!plannerState.preferences) plannerState.preferences = {};
     plannerState.preferences.preferAurora = true;
@@ -2511,7 +2519,7 @@ ${intakeData}
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
     if(typeof ensureAuroraNight==='function')
-      normalized=ensureAuroraNight(normalized,city); // ya recibe preferAurora=true si corresponde
+      normalized=ensureAuroraNight(normalized,city);
 
     const finalRows=[...normalized,...protectedRows];
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
