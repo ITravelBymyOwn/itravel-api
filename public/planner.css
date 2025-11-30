@@ -881,3 +881,65 @@ table.itinerary th{
   margin-top: 1rem;
   width: 100%;
 }
+/* ===== HOTFIX WEBFLOW FULL-WIDTH ===== */
+
+/* 0) Evitar scroll horizontal accidental al usar 100vw */
+html, body { overflow-x: hidden; }
+
+/* 1) Romper el encierro del contenedor de Webflow SOLO para el planner */
+#planner-grid{
+  /* Forzar a ocupar el ancho de la ventana, pero centrado y con tope elegante */
+  width: 100vw !important;
+  max-width: 1600px !important;
+  margin-left: 50% !important;
+  transform: translateX(-50%) !important;
+
+  /* Mantener el layout amplio que definimos */
+  grid-template-columns: 360px 1fr !important;
+  gap: 1.5rem !important;
+  padding: 1.25rem 1.5rem !important;
+}
+
+/* 2) Asegurar que los contenedores padres de Webflow no achiquen el planner */
+.w-layout-blockcontainer, .w-container, .container, .section, [class*="container"]{
+  /* Solo tendrá efecto si son ancestros del planner; no rompe otras páginas publicadas aparte */
+  max-width: none !important;
+}
+
+/* 3) En móviles seguimos respetando una sola columna */
+@media (max-width: 1024px){
+  #planner-grid{ grid-template-columns: 1fr !important; }
+}
+
+/* 4) El chat y la toolbar no deben tener tope estrecho dentro del contenedor de Webflow */
+.chat{
+  max-width: unset !important;
+  width: 100% !important;
+  height: 420px !important;
+}
+.toolbar{
+  max-width: unset !important;
+  grid-template-columns: repeat(6, 1fr) !important;
+  gap: .6rem !important;
+}
+@media (max-width: 1200px){
+  .toolbar{ grid-template-columns: repeat(3, 1fr) !important; }
+}
+@media (max-width: 960px){
+  .toolbar{ grid-template-columns: repeat(2, 1fr) !important; }
+}
+
+/* 5) Micro-ajustes para que se perciba más “premium” sin cambiar tu identidad */
+.city-row input,
+.city-row select,
+#traveler-grid input[type="number"],
+.special-conditions textarea,
+.chat-input input{
+  border-radius: .65rem !important;
+}
+.city-tab{ font-weight: 700 !important; }
+table.itinerary{ font-size: .95rem !important; }
+table.itinerary th{ letter-spacing: .15px !important; }
+
+/* 6) Sombra del topbar un poco más suave */
+.topbar{ box-shadow: 0 6px 20px rgba(16,24,40,.06) !important; }
