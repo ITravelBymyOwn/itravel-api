@@ -2,9 +2,14 @@
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>ITravelByMyOwn · Planner</title>
+  <title>I Travel — By My Own · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
+
+  <!-- 🎨 Estilos globales premium (Home) -->
+  <link rel="stylesheet" href="assets/css/main.css" />
+
+  <!-- 👇 Tus estilos del planner (se mantienen, tienen prioridad específica) -->
   <link rel="stylesheet" href="./planner.css?v=57" />
 
   <!-- Tipografía -->
@@ -16,7 +21,41 @@
   </script>
 </head>
 <body>
-  <!-- TOPBAR -->
+  <!-- Loader global (UI premium) -->
+  <div id="app-loader" class="loader hidden" aria-hidden="true">
+    <div class="loader-track"><div class="loader-bar"></div></div>
+    <div class="loader-veil"><div class="spinner" aria-label="Cargando"></div></div>
+  </div>
+
+  <!-- Header sticky premium (no toca tu lógica) -->
+  <header class="site-header is-sticky" data-sticky>
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="I Travel — By My Own">
+        <div class="wordmark">
+          <span class="i-travel">I Travel</span>
+          <span class="by-my-own">By My Own</span>
+        </div>
+      </a>
+
+      <nav class="nav" aria-label="Principal">
+        <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
+          <span class="nav-toggle-bar"></span><span class="sr-only">Abrir menú</span>
+        </button>
+        <ul id="nav-menu" class="nav-menu">
+          <li><a href="index.html">Home</a></li>
+          <li><a class="is-active" href="planner.html">Planner</a></li>
+          <li><a href="pricing.html" data-aff="pricing">Pricing</a></li>
+          <li><a href="dashboard.html">Dashboard</a></li>
+          <li class="nav-cta"><a href="auth.html">Login</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Botón flotante Home (móvil) -->
+  <a href="index.html" class="fab-home" aria-label="Volver al Home">🏠</a>
+
+  <!-- TOPBAR original (se conserva para no romper lógica) -->
   <div class="topbar">
     <div class="brand">ITravelByMyOwn Planner</div>
     <div class="lang">
@@ -25,31 +64,33 @@
       <a href="#">FR</a>
       <a href="#">PT</a>
     </div>
-    <!-- Botón Info Chat WOW ✨ -->
+    <!-- Botón Info Chat WOW ✨ (ID intacto) -->
     <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Abrir Info Chat">💬 Info Chat</button>
   </div>
 
-  <div id="planner-grid">
-    <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <h2>Planificador</h2>
+  <!-- Contenedor del planner con padding vertical consistente -->
+  <main class="block-padding" style="padding-top:24px;">
+    <div id="planner-grid" class="container">
+      <!-- SIDEBAR -->
+      <aside class="sidebar">
+        <h2>Planificador</h2>
 
-      <section class="box">
-        <h3>Destinos</h3>
-        <div id="city-list"></div>
-        <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
-        </div>
-        <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
-        <!-- 🆕 Botón de reinicio reubicado -->
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-          Reiniciar planificación
-        </button>
-      </section>
+        <section class="box">
+          <h3>Destinos</h3>
+          <div id="city-list"></div>
+          <div class="row-actions">
+            <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+          </div>
+          <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
+          <!-- 🆕 Botón de reinicio reubicado -->
+          <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
+            Reiniciar planificación
+          </button>
+        </section>
 
-      <section class="box special-conditions">
-        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
+        <section class="box special-conditions">
+          <h3>Preferencias / Restricciones / Condiciones especiales</h3>
+          <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
 Esta información permitirá crear un itinerario 100 % alineado contigo.
 
 🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
@@ -60,41 +101,38 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
 
 📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
-      </section>
+        </section>
 
-      <section class="box">
-        <h3>Viajeros</h3>
-        <div id="traveler-grid">
-          <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
-          <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
-          <label>Infantes (0–5)<input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
-        </div>
-      </section>
+        <section class="box">
+          <h3>Viajeros</h3>
+          <div id="traveler-grid">
+            <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
+            <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
+            <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
+            <label>Infantes (0–5)<input id="p-infants" type="number" min="0" value="0"></label>
+            <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
+          </div>
+        </section>
 
-      <section class="box budget-box">
-        <h3>Presupuesto total</h3>
-        <div class="grid-2">
-          <label>Monto<input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
-          <label>Moneda
-            <select id="currency">
-              <option value="USD" selected>$ USD</option>
-              <option value="EUR">€ EUR</option>
-              <option value="GBP">£ GBP</option>
-              <option value="CRC">₡ CRC</option>
-            </select>
-          </label>
-        </div>
-      </section>
-    </aside>
+        <section class="box budget-box">
+          <h3>Presupuesto total</h3>
+          <div class="grid-2">
+            <label>Monto<input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
+            <label>Moneda
+              <select id="currency">
+                <option value="USD" selected>$ USD</option>
+                <option value="EUR">€ EUR</option>
+                <option value="GBP">£ GBP</option>
+                <option value="CRC">₡ CRC</option>
+              </select>
+            </label>
+          </div>
+        </section>
+      </aside>
 
-    <!-- MAIN -->
-    <main class="main">
-      <section class="box itinerary-section">
+      <!-- MAIN -->
+      <section class="main box itinerary-section">
         <h2>Itinerario</h2>
-
-        <!-- 🧹 Se eliminó la guía de horarios de esta sección -->
 
         <div class="itinerary-actions">
           <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
@@ -127,11 +165,30 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
         <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button>
       </section>
-    </main>
-  </div>
+    </div>
+  </main>
 
-  <footer class="footer">
-    © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
+  <!-- Footer premium -->
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div class="footer-brand">
+        <div class="wordmark small">
+          <span class="i-travel">I Travel</span>
+          <span class="by-my-own">By My Own</span>
+        </div>
+        <p class="muted small">© <span id="y"></span> I Travel — By My Own. Todos los derechos reservados.</p>
+      </div>
+      <nav class="footer-nav" aria-label="Enlaces del sitio">
+        <a href="pricing.html">Pricing</a>
+        <a href="dashboard.html">Dashboard</a>
+        <a href="auth.html">Login</a>
+      </nav>
+      <div class="footer-social">
+        <a href="#" aria-disabled="true" title="Próximamente">Instagram</a>
+        <a href="#" aria-disabled="true" title="Próximamente">YouTube</a>
+        <a href="#" aria-disabled="true" title="Próximamente">X / Twitter</a>
+      </div>
+    </div>
   </footer>
 
   <!-- Modal Info Chat -->
@@ -172,6 +229,10 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     💬 Info Chat
   </button>
 
-  <script src="./planner.js?v=57"></script>
+  <!-- UI global (loader/menú/afiliados ready) -->
+  <script defer src="assets/js/ui.js"></script>
+
+  <!-- Tu lógica del planner (se mantiene intacta) -->
+  <script src="./planner.js?v=57" defer></script>
 </body>
 </html>
