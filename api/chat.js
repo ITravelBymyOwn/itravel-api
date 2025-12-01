@@ -1,8 +1,8 @@
-// /api/chat.js — v31.1 (ESM compatible en Vercel)
+// /api/chat.js — v31.2 (ESM compatible en Vercel) — cambios quirúrgicos sobre v31.1
 import OpenAI from "openai";
 
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_OPENAI_API_KEY || process.env.OPENAI_API_KEY, // tolerante a var alternativa
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // ==============================
@@ -18,16 +18,25 @@ function extractMessages(body = {}) {
 
 function cleanToJSON(raw = "") {
   if (!raw || typeof raw !== "string") return null;
+
+  // 1) Intenta JSON directo
   try {
     return JSON.parse(raw);
-  } catch {
-    try {
-      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
-      return JSON.parse(cleaned);
-    } catch {
-      return null;
-    }
-  }
+  } catch {}
+
+  // 2) Remueve fences ```json ... ```
+  try {
+    const fenced = raw.replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, "$1").trim();
+    if (fenced && fenced !== raw) return JSON.parse(fenced);
+  } catch {}
+
+  // 3) Recorta basura fuera de { ... }
+  try {
+    const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+    return JSON.parse(cleaned);
+  } catch {}
+
+  return null;
 }
 
 function fallbackJSON() {
@@ -43,7 +52,8 @@ function fallbackJSON() {
         to: "",
         transport: "",
         duration: "",
-        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+        notes:
+          "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
     followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
@@ -51,7 +61,7 @@ function fallbackJSON() {
 }
 
 // ==============================
-// Prompt base mejorado ✨ (global: tours/transportes/auroras)
+// Prompt base mejorado ✨ (flex hours, tours y transporte realistas, auroras globales)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -61,13 +71,13 @@ Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** que describa un itinerario
 B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
 C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
-⚠️ REGLAS GENERALES (GLOBALES)
+⚠️ REGLAS GENERALES
 - Devuelve SIEMPRE al menos una actividad en "rows".
 - Nada de texto fuera del JSON.
 - 20 actividades máximo por día.
 - Usa horas **realistas con flexibilidad**: no asumas una ventana fija (no fuerces 08:30–19:00).
-  Si no hay información de horarios, distribuye lógicamente en mañana / mediodía / tarde y, cuando tenga sentido,
-  puedes extender la noche (cenas, shows, paseos, **auroras**). **No obligues la cena**: sugiérela sólo si aporta valor.
+  Si no hay información de horarios, distribuye lógicamente en mañana / mediodía / tarde y, cuando tenga sentido, puedes extender la noche (cenas, shows, paseos, auroras).
+  **No obligues la cena**: sugiérela sólo si aporta valor ese día.
 - La respuesta debe poder renderizarse directamente en una UI web.
 - Nunca devuelvas "seed" ni dejes campos vacíos.
 
@@ -79,65 +89,84 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "activity": "Nombre claro y específico",
   "from": "Lugar de partida",
   "to": "Lugar de destino",
-  "transport": "Transporte realista (A pie, Metro, Tren, Auto, etc.)",
+  "transport": "Transporte realista (A pie, Metro, Tren, Auto, Tour guiado, etc.)",
   "duration": "2h",
   "notes": "Descripción motivadora y breve"
 }
 
 🧠 ESTILO Y EXPERIENCIA DE USUARIO
-- Tono cálido, entusiasta y narrativo.
-- Notas: 1–2 líneas que expliquen por qué la actividad es especial; motiva (“Admira…”, “Descubre…”, “Siente…”).
-- Varía el vocabulario; evita notas idénticas en varias actividades.
-- Si faltan datos, usa un fallback inspirador (“Una parada ideal para disfrutar la esencia de este destino”).
+- Usa un tono cálido, entusiasta y narrativo.
+- Las notas deben:
+  • Explicar en 1 o 2 líneas por qué la actividad es especial.  
+  • Transmitir emoción y motivación (ej. “Admira…”, “Descubre…”, “Siente…”).  
+  • Si no hay información específica, usa un fallback inspirador (“Una parada ideal para disfrutar la esencia de este destino”).
+- Personaliza las notas según la naturaleza de la actividad: arquitectura, gastronomía, cultura, naturaleza, etc.
+- Varía el vocabulario: evita repetir exactamente la misma nota.
 
-🚆 TRANSPORTE (GLOBAL, INTELIGENTE)
-- Usa medios coherentes con el contexto (a pie, metro, tren, taxi, bus, auto, ferry…).
-- **Si el usuario NO especificó transporte y la actividad es FUERA de ciudad (day trip o trayecto interurbano),
-  sugiere como opciones principales: "Auto (alquilado) o Tour guiado".**
-- Evita proponer bus/tren cuando no sea habitual o práctico para ese trayecto; sólo sugiérelo si es realmente viable/localmente común.
-- Si el usuario dijo explícitamente que alquila auto o que usará transporte público, respeta su preferencia.
+🌌 AURORAS (regla global, si aplica por destino/temporada)
+- Trátalas como **imperdibles** cuando el destino y la época lo permitan.
+- **Evita** programarlas en la **última noche del viaje**; prioriza noches tempranas.
+- Evita noches consecutivas salvo que haya una **justificación clara** (ej. condiciones climáticas variables, estadías largas, alta latitud).
+- Sugiérelas con horarios **plausibles del mercado local** (p. ej., salida alrededor de 18:00–19:30 y retorno tarde, según ciudad/temporada).
 
-🧭 TOURS (GLOBAL)
-- **Desglosa** los tours en **paradas/waypoints clave** como filas separadas para que el plan sea accionable.
-  Ejemplos de estilo (no son listas cerradas):
-  • “Parque Thingvellir → Geysir → Gullfoss” (Círculo Dorado)
-  • “Seljalandsfoss → Skógafoss → Reynisfjara → Vík” (Costa Sur)
+🚆 TRANSPORTE Y TIEMPOS (realistas, no inventar redes inexistentes)
+- **Investiga o infiere** la disponibilidad real de medios (a pie, metro, tren, bus, auto, ferri, tour guiado).
+- **No** asumas buses o trenes donde no apliquen; para destinos con poca red pública, prefiere **Auto (alquilado)** o **Tour guiado**.
+- Si el usuario ya indicó preferencia (p. ej., “vehículo alquilado”), **respétala**.  
+  Si **no** lo hizo y el destino lo permite, **ofrece ambas opciones** (“Tour guiado” y “Auto (alquilado)”) — usa **uno** en "transport" y menciona la alternativa en "notes".
+- Las horas deben estar ordenadas y no superponerse. Incluye tiempos aproximados de actividad y traslados.
+
+🎫 TOURS Y ACTIVIDADES GUIADAS (robustecer horarios y sentido)
 - **Investiga o infiere los horarios reales** que se manejan en los tours o actividades equivalentes del destino,
-  basándote en prácticas comunes y condiciones locales (luz, distancia, clima, demanda).
-  Usa los ejemplos de ventanas sólo como guía general.
-- Para **costas/penínsulas** prioriza **horas de luz**; evita programarlas demasiado tarde salvo justificación clara.
+  basándote en **prácticas comunes y condiciones locales** (luz, distancia, clima, demanda).
+- Usa ejemplos de ventanas solo como **guía general**, ajustando al contexto.
+- Para **auroras** u otras experiencias icónicas, considera ventanas habituales del destino (p. ej., **salidas ~18:00** en latitudes altas por desplazamientos y búsqueda de cielos despejados).
 
-🌌 AURORAS (GLOBAL)
-- Sugiere “caza de auroras” cuando sea plausible por **destino y época** (no inventes donde no aplica).
-- **Evita noches consecutivas**.
-- **No dejes la única noche de auroras para el último día del viaje**; reparte antes si es razonable.
-- En estancias de 4–5+ días suele ser común 2–3 noches no consecutivas, pero decide según condiciones (clima, distancia, fatiga) y deja que el usuario ajuste.
+💰 MONETIZACIÓN FUTURA (sin marcas)
+- Sugiere actividades naturalmente vinculables a upsells (cafés, museos, experiencias locales).
+- No incluyas precios ni nombres comerciales.
+- No digas “compra aquí” — solo describe experiencias.
 
 📝 EDICIÓN INTELIGENTE
 - Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
-- Si no especifica hora, distribuye las actividades lógicamente y con flexibilidad para la noche si corresponde.
-- Mantén secuencia clara y cronológica.
+- Si no especifica hora, distribuye las actividades lógicamente en mañana / mediodía / tarde, con flexibilidad para la noche si corresponde.
+- Mantén la secuencia clara y cronológica.
 
 🎨 UX Y NARRATIVA
 - Cada día debe fluir como una historia (inicio, desarrollo, cierre).
-- Descripciones cortas, sin párrafos largos.
+- Usa descripciones cortas, sin párrafos largos.
+- Mantén claridad y variedad en las actividades.
 
 🚫 ERRORES A EVITAR
 - No devuelvas “seed”.
+- No uses frases impersonales (“Esta actividad es…”).
 - No incluyas saludos ni explicaciones fuera del JSON.
-- No repitas notas idénticas.
+- No repitas notas idénticas en varias actividades.
+
+Ejemplo de nota motivadora correcta:
+“Descubre uno de los rincones más encantadores de la ciudad y disfruta su atmósfera única.”
+
+📌 REGLA QUÍRÚRGICA ADICIONAL
+- “Investiga o infiere los horarios reales que se manejan en los tours o actividades equivalentes del destino, basándote en prácticas comunes y condiciones locales (luz, distancia, clima, demanda). Usa los ejemplos de ventanas solo como guía general. El tour de auroras **no puede quedar para el último día** del viaje.”
 `.trim();
 
 // ==============================
-// Llamada al modelo
+// Llamadas al modelo
 // ==============================
-async function callStructured(messages, temperature = 0.4) {
-  const resp = await client.responses.create({
+async function callStructured(messages, temperature = 0.4, { json = false } = {}) {
+  const req = {
     model: "gpt-4o-mini",
     temperature,
-    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
     max_output_tokens: 2200,
-  });
+  };
+
+  // Forzamos JSON SOLO cuando lo necesitamos (planner). Evita romper el modo "info".
+  if (json) {
+    req.response_format = { type: "json_object" };
+  }
+
+  const resp = await client.responses.create(req);
 
   const text =
     resp?.output_text?.trim() ||
@@ -157,41 +186,56 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body;
-    const mode = body.mode || "planner"; // 👈 mantiene parámetro
+    const body = req.body || {};
+    const mode = body.mode || "planner"; // 👈 parámetro de modo
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
     if (mode === "info") {
-      const raw = await callStructured(clientMessages);
+      const raw = await callStructured(clientMessages, 0.4, { json: false });
       const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — reglas globales reforzadas
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
+    // 🧭 MODO PLANNER — reglas flexibles con robustez adicional
+    let raw = await callStructured(
+      [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
+      0.4,
+      { json: true }
+    );
     let parsed = cleanToJSON(raw);
 
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
-      const strictPrompt = SYSTEM_PROMPT + `
+      const strictPrompt =
+        SYSTEM_PROMPT +
+        `
 OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
+      raw = await callStructured(
+        [{ role: "system", content: strictPrompt }, ...clientMessages],
+        0.25,
+        { json: true }
+      );
       parsed = cleanToJSON(raw);
     }
 
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
-      const ultraPrompt = SYSTEM_PROMPT + `
+      const ultraPrompt =
+        SYSTEM_PROMPT +
+        `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
+      raw = await callStructured(
+        [{ role: "system", content: ultraPrompt }, ...clientMessages],
+        0.1,
+        { json: true }
+      );
       parsed = cleanToJSON(raw);
     }
 
     if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
-
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
