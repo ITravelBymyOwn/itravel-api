@@ -2403,12 +2403,13 @@ function intentFromText(text){
 
 /* ============================== 
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v71 — Fix final + (horarios flexibles · auroras post · cena siempre)
+   Base v71 — Fix final (flex horarios + cena sugerida + auroras robustas)
    🔧 Ajustes quirúrgicos:
    (1) Día ligero apunta siempre al NUEVO último día.
-   (2) Deduplicado extendido con aliasKey para sinónimos.
+   (2) Deduplicado extendido con aliasKey para sinónimos (sin eliminar “cena/almuerzo”).
    (3) AURORAS: alias/fuzzy para ciudades árticas (Reykjavik/Tromsø) + temporada robusta DD/MM/AAAA.
-   (4) Horario base FLEXIBLE (no rígido) + cena garantizada; “icónica” con frecuencia máx. ~1 cada 2 noches.
+   (4) Horarios flexibles (no forzar 08:30–19:00). Se permite noche/auroras/cenas.
+   (5) Inserción de “cena sugerida” si el día terminó sin una cena explícita.
 ================================= */
 
 function insertDayAt(city, position){
@@ -2481,6 +2482,9 @@ function aliasKey(s){
   if(/\bbarceloneta\b/.test(x)) return 'barceloneta';
   if(/\bpicasso\b/.test(x)) return 'museo_picasso';
   if(/\bpaseo\s*de\s*gracia\b/.test(x)) return 'paseo_de_gracia';
+  // 👇 No consolidar comidas genéricas para permitir “almuerzo/cena” diarios
+  if(/\b(almuerzo|comida|lunch)\b/.test(x)) return `almuerzo_generic_${Date.now()}`;
+  if(/\b(cena|dinner)\b/.test(x)) return `cena_generic_${Date.now()}`;
   return x;
 }
 
@@ -2495,97 +2499,52 @@ function normalizeCityForGeo(name){
   return raw; // demás: deja intacto
 }
 
-/* --- NUEVAS utilidades quirúrgicas para horario de auroras y cena --- */
-function isAuroraRow(r){
-  const a = String(r?.activity||'').toLowerCase();
-  return /\baurora\b|\bnorthern\s+lights?\b|\bauroras?\b/.test(a);
-}
-function isDinnerRow(r){
-  const a = String(r?.activity||'').toLowerCase();
-  return /\bcena\b|\bdinner\b|\bdegustaci[oó]n\b/.test(a);
-}
-function clampAuroraWindow(r){
-  // Asegura 20:00–02:30 (si el agente dio horas incoherentes)
-  const DEF_START = '21:00';
-  const DEF_END   = '00:30';
-  let s = r.start || DEF_START;
-  let e = r.end   || DEF_END;
-  // Si por texto viene algo raro (p.ej., 17:00), forzamos al rango noche
-  if(s < '20:00') s = '20:00';
-  // Nota: después de medianoche la comparación léxica complica;
-  // permitimos hasta 02:30, si el agente puso algo mayor a '19:59' y menor a '08:00' lo preservamos.
-  // Si e no existe o es muy temprano, ponemos 00:30; si es más tarde que 02:30 y antes de '08:00', lo recortamos.
-  if(!e || e < '20:00') e = DEF_END;
-  if(e > '02:30' && e < '08:00') e = '02:30';
-  r.start = s; r.end = e;
-  return r;
-}
-function ensureDinnerSlot(city, day, rows, perDay){
-  // Si ya hay cena → no hacemos nada.
-  if(rows.some(isDinnerRow)) return rows;
+/* --- NUEVO: geocoding tolerante a typos/variantes sobre el helper existente --- */
+function getCoordinatesForCityFuzzy(name){
+  const tries = [];
+  const orig = String(name||'').trim();
+  if(orig) tries.push(orig);
 
-  const dayWindowStart = perDay?.start || DEFAULT_START;
-  const dayWindowEnd   = perDay?.end   || DEFAULT_END;
+  const canon = normalizeCityForGeo(orig);
+  if(canon && canon!==orig) tries.push(canon);
 
-  // Ubicación preferente de la cena:
-  // - Si hay aurora, colocar la cena justo antes del inicio de aurora (≈ 18:30–20:00 si cuadra).
-  // - Si no hay aurora, colocar 19:30–21:00 (o terminar a más tardar 21:00 si la ventana es corta).
-  const auroraIdx = rows.findIndex(isAuroraRow);
-  let dinnerStart = '19:30';
-  let dinnerEnd   = '21:00';
+  const noDiac = orig.normalize('NFD').replace(/\p{Diacritic}/gu,'');
+  if(noDiac && !tries.includes(noDiac)) tries.push(noDiac);
 
-  if(auroraIdx >= 0){
-    const aStart = rows[auroraIdx].start || '21:00';
-    // Coloca la cena para terminar 30–60 min antes de la aurora
-    dinnerEnd   = (aStart > '19:30') ? addMinutes(aStart, -45) : '20:00';
-    // Asegura tiempo suficiente para cenar (mín 60–75 min)
-    dinnerStart = addMinutes(dinnerEnd, -75);
-    // No dejes la cena antes de 18:15
-    if(dinnerStart < '18:15') { dinnerStart = '18:15'; dinnerEnd = addMinutes(dinnerStart, 75); }
-  }else{
-    // Ajusta si la ventana diaria termina antes
-    if(dayWindowEnd && dayWindowEnd < '21:00'){
-      dinnerEnd   = dayWindowEnd;
-      dinnerStart = addMinutes(dinnerEnd, -60);
-      if(dinnerStart < '18:30') dinnerStart = '18:30';
-    }
+  // Variantes muy comunes
+  if(/reyk/.test(noDiac||'')) tries.push('Reykjavik');
+  if(/troms/.test(noDiac||'')) tries.push('Tromsø', 'Tromso');
+
+  for(const t of tries){
+    const c = getCoordinatesForCity(t);
+    if(c) return c;
   }
+  return null;
+}
 
-  // Regla de frecuencia para “cenas icónicas”: máx. ~1 cada 2 noches
-  const byDay = itineraries[city]?.byDay || {};
-  const stayDays = Object.keys(byDay).length;
-  const maxIconic = Math.max(1, Math.ceil(stayDays/2 / 2)); // ≈ una cada 2 noches
-  itineraries[city].iconicDinnerCount = itineraries[city].iconicDinnerCount || 0;
-  const canIconic = itineraries[city].iconicDinnerCount < maxIconic;
+/* --- NUEVO: inserción de “cena sugerida” si no existe en el día --- */
+function ensureDinnerSuggestion(city, day){
+  const byDay = itineraries?.[city]?.byDay || {};
+  const rows = byDay[day] || [];
+  const hasDinner = rows.some(r => /cena|dinner/i.test(r.activity||'') || (/19|20|21|22/.test(String(r.start||'')) && /rest|bistr|bar|taverna|asador|steak|sushi|ramen|pizzer|tratt|osteria|tapas/i.test(r.notes||'')));
+  if(hasDinner) return;
 
-  const baseStartRef = rows.find(r=>r.start)?.start || dayWindowStart || '18:30';
+  const baseStart = cityMeta?.[city]?.perDay?.find(x=>x.day===day)?.start || '09:00';
+  const proposedStart = '19:30';
+  const proposedEnd   = '21:00';
 
-  const dinnerRow = {
+  const dinner = {
     day,
-    start: dinnerStart || baseStartRef,
-    end:   dinnerEnd   || addMinutes(baseStartRef, 75),
-    activity: canIconic ? 'Cena icónica (reserva sugerida)'
-                        : 'Cena (elige restaurante a tu gusto)',
+    start: proposedStart,
+    end: proposedEnd,
+    activity: 'Cena sugerida',
     from: `Zona hotel (${city})`,
-    to:   canIconic ? 'Restaurante icónico'
-                    : 'Restaurante recomendado / a elección',
-    transport: 'A pie/Uber',
-    duration: '≈ 1h15',
-    notes: canIconic
-      ? 'Propuesta de experiencia gastronómica destacada. Puedes reemplazar por tu opción favorita.'
-      : 'Bloque de cena para que decidas según antojo y presupuesto.'
+    to: 'Restaurante recomendado (estilo local)',
+    transport: 'A pie/Taxi',
+    duration: '≈ 1h30',
+    notes: 'Sugerencia de cena en franja adecuada. Puedes elegir un lugar icónico o tradicional cercano.'
   };
-
-  // Inserta antes de la aurora si existe; si no, al final manteniendo orden por hora
-  if(auroraIdx >= 0){
-    rows.splice(auroraIdx, 0, normalizeRow(dinnerRow));
-  }else{
-    dedupeInto(rows, normalizeRow(dinnerRow));
-    rows.sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
-  }
-
-  if(canIconic) itineraries[city].iconicDinnerCount += 1;
-  return rows;
+  pushRows(city, [dinner], false);
 }
 
 async function optimizeDay(city, day){
@@ -2601,12 +2560,14 @@ async function optimizeDay(city, day){
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
     return act.includes('aurora')||act.includes('northern light')||
-           act.includes('laguna azul')||act.includes('blue lagoon');
+           act.includes('laguna azul')||act.includes('blue lagoon')||
+           act.includes('cena')||act.includes('dinner');
   });
   const rowsForOptimization = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
     return !act.includes('aurora')&&!act.includes('northern light')&&
-           !act.includes('laguna azul')&&!act.includes('blue lagoon');
+           !act.includes('laguna azul')&&!act.includes('blue lagoon')&&
+           !act.includes('cena')&&!act.includes('dinner');
   });
 
   const hasForceReplan = plannerState?.forceReplan?.[city];
@@ -2623,8 +2584,8 @@ async function optimizeDay(city, day){
     // 1) Normaliza ciudad para geocoding (tolera typos)
     const canonicalCity = normalizeCityForGeo(city);
 
-    // 2) Usa coords de la forma canónica
-    const coords = getCoordinatesForCity(canonicalCity) || getCoordinatesForCity(city);
+    // 2) Usa coords con fuzzy
+    const coords = getCoordinatesForCityFuzzy(canonicalCity) || getCoordinatesForCityFuzzy(city);
     auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
 
     // 3) Temporada vía helper; si falla, parsea DD/MM/AAAA
@@ -2665,6 +2626,7 @@ async function optimizeDay(city, day){
     ? `\n- **Día ligero pero COMPLETO**: cubrir toda la ventana con ritmo relajado (brunch/paseo/miradores/compras/cena), sin sobrecarga ni huecos largos.\n`
     : '';
 
+  // ⚠️ Horarios FLEXIBLES: NO imponemos 08:30–19:00. Permitimos noche/cena/auroras.
   const prompt=`
 ${FORMAT}
 Ciudad: ${city}
@@ -2681,10 +2643,10 @@ ${JSON.stringify(rowsForOptimization)}
 - Si costera, añade paseo marítimo o puerto si aplica.
 - Day trips: ida ≤ ${maxOneWayHours} h.
 - Evita duplicados multi-día (considera sinónimos/idiomas).
-- Auroras: ventana 20:00–02:30, transporte lógico${(auroraCity && (auroraSeason || !baseDate)) ? ' **(OBLIGATORIO incluir una noche de caza si hay disponibilidad)**' : ''}.
-- **Horario de referencia 08:30–19:00 (FLEXIBLE)**: puedes extender o reducir según convenga (cenas, espectáculos, auroras, eventos).
-- **Cena**: siempre reserva un bloque de cena (aunque sea sin sitio concreto) para que el usuario decida. 
-  - Si hay opciones **icónicas**, sugiere una cena/degustación destacada con frecuencia máx. ~1 cada 2 noches.
+- Horarios FLEXIBLES: mañana / tarde / noche. Se permiten actividades nocturnas si aportan valor.
+- Inserta ventanas de descanso razonables (buffers ≥15–20 min). Evita huecos > 75–90 min sin propósito.
+- **CENA sugerida**: mantener una franja lógica 19:00–21:30 aunque no haya show especial (se puede ya estar cubierta si el plan lo contempla).
+${(auroraCity && (auroraSeason || !baseDate)) ? '- Auroras: considera 1–2 noches de caza en la estancia. Ventana 20:00–02:30 (no todas las noches). Si ya existe en la ciudad, evita duplicar salvo justificación.' : ''}
 ${lightNote}
 - Devuelve {"rows":[...],"replace":false}.
 
@@ -2697,32 +2659,29 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // Anti-duplicados extendido (permitir auroras si ciudad apta)
+    // Anti-duplicados extendido (permitir auroras y comidas diarias)
     const allExisting=Object.values(itineraries[city].byDay||{})
       .flat().filter(r=>r.day!==day)
       .map(r=>aliasKey(r.activity||''));
     normalized=normalized.filter(r=>{
       const key=aliasKey(r.activity||'');
       const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(key);
-      return key && (!allExisting.includes(key) || (isAurora && auroraCity));
+      const isMeal=/\b(almuerzo|comida|lunch|cena|dinner)\b/i.test(key);
+      return key && (!allExisting.includes(key) || isAurora || isMeal);
     });
 
     if(typeof applyBufferBetweenRows==='function')
       normalized=applyBufferBetweenRows(normalized);
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
-
-    // ✅ Corrección quirúrgica: asegurar franja nocturna de AURORAS
-    if(auroraCity && (auroraSeason || !baseDate)){
-      normalized = normalized.map(r => isAuroraRow(r) ? clampAuroraWindow(r) : r);
-      if(typeof ensureAuroraNight==='function')
-        normalized=ensureAuroraNight(normalized,city);
-    }
-
-    // ✅ Cena obligatoria (aunque no haya especial): insertar si falta
-    normalized = ensureDinnerSlot(city, day, normalized, perDay);
+    if(typeof ensureAuroraNight==='function')
+      normalized=ensureAuroraNight(normalized,city);
 
     const finalRows=[...normalized,...protectedRows];
+
+    // ✅ Inserta “cena sugerida” si el día quedó sin una
+    try { ensureDinnerSuggestion(city, day); } catch(_){}
+
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
     pushRows(city,val.allowed,false);
   }
