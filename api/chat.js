@@ -1,4 +1,4 @@
-// /api/chat.js — v31.3 (ESM compatible en Vercel)
+// /api/chat.js — v31.4 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -51,7 +51,7 @@ function fallbackJSON() {
 }
 
 // ==============================
-// Prompt base mejorado ✨ (global: auroras, tours y transporte realistas)
+// Prompt base mejorado ✨ (global: auroras, tours con sub-paradas y transporte realista)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -88,7 +88,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Tono cálido y narrativo.
 - Notas en 1–2 líneas con emoción (“Admira…”, “Descubre…”, “Siente…”).
 - Fallback inspirador si falta dato (“Una parada ideal para disfrutar la esencia del destino”).
-- Varía el vocabulario y personaliza según la actividad.
+- Varía vocabulario y personaliza según la actividad.
 
 🌌 AURORAS (REGLA **GLOBAL** si el destino/temporada lo permiten)
 - Trátalas como **imperdibles** cuando proceda.
@@ -103,12 +103,17 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   **"Vehículo alquilado o Tour guiado"** (elige el que mejor encaje en esa actividad) y menciona la alternativa en "notes".
 - Horarios ordenados, sin superposición, con duraciones aproximadas y traslados.
 
-🎫 TOURS Y ACTIVIDADES (horarios reales y paradas)
+🎫 TOURS Y ACTIVIDADES (horarios reales, sub-paradas y sentido)
 - **Investiga o infiere horarios** basados en prácticas locales (luz, distancia, clima, demanda).
 - Usa ejemplos de ventanas solo como guía.
-- En tours emblemáticos, **lista las paradas clave en orden lógico** (p. ej.,
-  Círculo Dorado: Thingvellir → Geysir/Haukadalur → Gullfoss;
-  Costa Sur: Seljalandsfoss → Skógafoss → Reynisfjara → Vík).
+- En **tours de jornada completa o de nombre genérico** (“Círculo Dorado”, “Costa Sur”, “Ruta del Vino”, “Tour por Kioto”, etc.), **detalla las sub-paradas** como **actividades separadas pero agrupadas por el mismo título principal**.
+  Ejemplo:
+    "Círculo Dorado" / "Thingvellir"
+    "Círculo Dorado" / "Geysir"
+    "Círculo Dorado" / "Gullfoss"
+  Así el usuario entiende que todas forman parte del mismo tour.
+- Aplica este formato **globalmente**: si una actividad agrupa varios hitos (p. ej. “Ruta del Vino de Toscana”, “Tour por el Delta del Mekong”, “Excursión a la Costa Amalfitana”), genera sub-filas bajo el mismo encabezado principal.
+- **Incluye localidades clave** cuando sean parte natural de la ruta (ej. si se visita Reynisfjara, incluir también Vík).
 
 💰 MONETIZACIÓN FUTURA (sin marcas)
 - Sugiere experiencias naturalmente monetizables (museos, cafés, actividades), sin precios ni marcas.
@@ -164,7 +169,7 @@ export default async function handler(req, res) {
     }
 
     const body = req.body;
-    const mode = body.mode || "planner"; // 👈 nuevo parámetro
+    const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
