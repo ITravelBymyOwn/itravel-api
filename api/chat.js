@@ -1,4 +1,4 @@
-// /api/chat.js — v31.1 (ESM compatible en Vercel) · actualización puntual transporte global
+// /api/chat.js — v31.2 (ESM compatible en Vercel) · fix JSON planner + margen de tokens
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -145,8 +145,10 @@ Ejemplo de nota motivadora correcta:
 `.trim();
 
 // ==============================
-// Llamada al modelo
+// Llamadas al modelo
 // ==============================
+
+// Texto libre (modo info): NO forzar JSON
 async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
@@ -160,7 +162,26 @@ async function callStructured(messages, temperature = 0.4) {
     resp?.output?.[0]?.content?.[0]?.text?.trim() ||
     "";
 
-  console.log("🛰️ RAW RESPONSE:", text);
+  console.log("🛰️ RAW RESPONSE (info):", text);
+  return text;
+}
+
+// Planner: forzar JSON nativo del modelo para evitar fallos de parseo
+async function callStructuredJSON(messages, temperature = 0.35) {
+  const resp = await client.responses.create({
+    model: "gpt-4o-mini",
+    temperature,
+    response_format: { type: "json_object" }, // 🔒 fuerza JSON válido
+    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    max_output_tokens: 2600, // 🔧 margen extra para itinerarios largos
+  });
+
+  const text =
+    resp?.output_text?.trim() ||
+    resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+    "";
+
+  console.log("🛰️ RAW RESPONSE (planner-json):", text);
   return text;
 }
 
@@ -185,14 +206,14 @@ export default async function handler(req, res) {
     }
 
     // 🧭 MODO PLANNER — comportamiento original con reglas flexibles y mejoras
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
+    let raw = await callStructuredJSON([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
       const strictPrompt = SYSTEM_PROMPT + `
 OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
+      raw = await callStructuredJSON([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
       parsed = cleanToJSON(raw);
     }
 
@@ -201,7 +222,7 @@ OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
       const ultraPrompt = SYSTEM_PROMPT + `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
+      raw = await callStructuredJSON([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
       parsed = cleanToJSON(raw);
     }
 
