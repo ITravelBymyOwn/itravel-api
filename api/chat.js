@@ -1,4 +1,4 @@
-// /api/chat.js — v31.6 (ESM compatible en Vercel)
+// /api/chat.js — v31.7 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -43,7 +43,8 @@ function fallbackJSON() {
         to: "",
         transport: "",
         duration: "",
-        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+        notes:
+          "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
     followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
@@ -51,7 +52,7 @@ function fallbackJSON() {
 }
 
 // ==============================
-// Prompt base mejorado ✨ (global: auroras, tours con sub-paradas y transporte realista)
+// Prompt base mejorado ✨ (global: auroras, tours con sub-paradas, transporte realista)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -65,10 +66,10 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Devuelve SIEMPRE al menos una actividad en "rows".
 - Nada de texto fuera del JSON.
 - 20 actividades máximo por día.
-- Usa horas **realistas con flexibilidad**: no asumas ventana fija (no fuerces 08:30–19:00).
+- Usa horas **realistas con flexibilidad**: no fuerces 08:30–19:00.
   Si no hay información de horarios, reparte mañana / mediodía / tarde y extiende la noche sólo cuando tenga sentido (cenas, shows, paseos, auroras).
   **No obligues la cena**: sólo si aporta valor.
-- La respuesta debe poder renderizarse en UI web.
+- La respuesta debe poder renderizarse en una UI web.
 - Nunca devuelvas "seed" ni dejes campos vacíos.
 
 🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
@@ -93,33 +94,35 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 🌌 AURORAS (REGLA **GLOBAL** si el destino/temporada lo permiten)
 - Trátalas como **imperdibles** cuando proceda.
 - **Evita** programarlas en la **última noche**; prioriza noches tempranas.
-- Para estancias de **≥4–5 noches**, sugiere **2–3 oportunidades** espaciadas (sin regla dura ni noches consecutivas salvo justificación de clima/latitud).
-- Usa ventanas **plausibles locales**: **salida ~19:00–21:00**, **duración 4–6h**, **regreso ≥00:30** (típico 01:00–02:30).
-- Si el usuario ya indicó preferencia (p. ej., vehículo), respétala; si no, sugiere el formato más coherente (tour o auto) y menciona la alternativa en "notes".
+- Programa **2–3 noches** en estancias de 5–7 días si es razonable; evita noches consecutivas salvo **justificación clara** (clima muy variable, latitud alta, ventana corta).
+- Horarios **plausibles de mercado**:
+  • **Salida mínima 19:00** (preferente 20:00–21:30).
+  • **Duración típica 4–6h** (nunca <3.5h).
+  • **Regreso ≥ 23:30** (habitual 00:30–02:30).
+- Indica “Tour guiado” cuando sea la opción natural; si el usuario indicó **vehículo alquilado**, respétalo y sugiere puntos de observación seguros.
 
 🚆 TRANSPORTE Y TIEMPOS (realistas, sin inventar redes)
 - **Investiga o infiere** la disponibilidad real (a pie, metro, tren, bus, auto, ferri, tour).
 - Cuando **no** haya transporte público razonable y el usuario **no** haya indicado preferencia, en "transport" usa **EXACTAMENTE**:
-  **"Vehículo alquilado o Tour guiado"**.
-  (Puedes explicar la alternativa elegida en "notes", pero el campo "transport" debe respetar literalmente esa cadena.)
-- En excursiones de día completo a zonas rurales (p. ej., costas, penínsulas, valles, desiertos, parques nacionales), **prefiere también** "Vehículo alquilado o Tour guiado" salvo que el destino tenga transporte público claramente viable.
-- Horarios ordenados y sin superposición; incluye duraciones y traslados.
+  **"Vehículo alquilado o Tour guiado"**
+  (elige una como principal para esa fila según el contexto) y menciona la alternativa en "notes".
+- Horarios ordenados, sin superposición, con duraciones y traslados aproximados.
 
-🎫 TOURS Y ACTIVIDADES (horarios reales, sub-paradas y sentido)
+🎫 TOURS Y ACTIVIDADES (horarios reales, sub-paradas y sentido) — **GLOBAL**
 - **Investiga o infiere horarios** basados en prácticas locales (luz, distancia, clima, demanda).
-- Usa ejemplos de ventanas solo como guía.
-- En **tours de jornada completa o de nombre genérico** (“Círculo Dorado”, “Costa Sur”, “Península de Snæfellsnes”, “Exploración de Reykjanes”, “Ruta del Vino”, “Delta del Mekong”, “Costa Amalfitana”, “Tour por Kioto”, etc.), **detalla sub-paradas** como **actividades separadas pero agrupadas por el mismo título principal**, 3–6 hitos representativos.
-  Formato:
+- En **tours de nombre genérico o de jornada completa** (p. ej. “Círculo Dorado”, “Costa Sur”, “Reykjanes”, “Ruta del Vino”, “Tour por Kioto”, “Delta del Mekong”, “Costa Amalfitana”…), **desglosa como sub-paradas** en filas separadas **bajo el mismo encabezado principal** en "activity":
+  Ejemplos de formato:
     "Círculo Dorado — Þingvellir"
     "Círculo Dorado — Geysir"
     "Círculo Dorado — Gullfoss"
-  Aplica este patrón **globalmente**. Ejemplos análogos:
-    "Costa Sur — Seljalandsfoss" / "Skógafoss" / "Reynisfjara" / "Vík"
-    "Reykjanes — Bridge Between Continents" / "Gunnuhver" / "Seltún (Krýsuvík)" / "Kleifarvatn" / "Brimketill"
-- **Incluye localidades clave** cuando sean parte natural de la ruta (p. ej., si se visita Reynisfjara, incluir también **Vík**).
+    "Costa Sur — Reynisfjara"
+    "Costa Sur — Vík"
+    "Reykjanes — Brimketill" / "Reykjanes — Puente entre Continentes" / "Reykjanes — campos de lava", etc.
+- **Incluye localidades clave naturalmente ligadas** a la ruta (p. ej., si aparece Reynisfjara, incluir también **Vík**).
+- Mantén trazado lógico punto-a-punto; evita saltos innecesarios.
 
 💰 MONETIZACIÓN FUTURA (sin marcas)
-- Sugiere experiencias naturalmente monetizables (museos, cafés, actividades), sin precios ni marcas.
+- Sugiere experiencias monetizables (museos, cafés, actividades), sin precios ni marcas.
 
 📝 EDICIÓN INTELIGENTE
 - Ante “agregar día/quitar/ajustar”, responde con el JSON actualizado.
@@ -139,7 +142,7 @@ Ejemplo de nota correcta:
 - “Investiga o infiere los horarios reales que se manejan en los tours o actividades equivalentes del destino,
   basándote en prácticas comunes y condiciones locales (luz, distancia, clima, demanda).
   Usa los ejemplos de ventanas solo como guía general.
-  El tour de auroras **no puede quedar para el último día** del viaje.”
+  El tour de auroras **no puede quedar para el último día** del viaje ni comenzar antes de **19:00**, y su **duración mínima** será de **3h 30m**.”
 `.trim();
 
 // ==============================
@@ -149,7 +152,9 @@ async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
-    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    input: messages
+      .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
+      .join("\n\n"),
     max_output_tokens: 2200,
   });
 
@@ -183,29 +188,40 @@ export default async function handler(req, res) {
     }
 
     // 🧭 MODO PLANNER — comportamiento original con reglas flexibles
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
+    let raw = await callStructured(
+      [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]
+    );
     let parsed = cleanToJSON(raw);
 
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
-      const strictPrompt = SYSTEM_PROMPT + `
+      const strictPrompt =
+        SYSTEM_PROMPT +
+        `
 OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
+      raw = await callStructured(
+        [{ role: "system", content: strictPrompt }, ...clientMessages],
+        0.25
+      );
       parsed = cleanToJSON(raw);
     }
 
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
-      const ultraPrompt = SYSTEM_PROMPT + `
+      const ultraPrompt =
+        SYSTEM_PROMPT +
+        `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
+      raw = await callStructured(
+        [{ role: "system", content: ultraPrompt }, ...clientMessages],
+        0.1
+      );
       parsed = cleanToJSON(raw);
     }
 
     if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
-
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
