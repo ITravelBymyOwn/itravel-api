@@ -1,4 +1,4 @@
-// /api/chat.js — v32.3 (ESM compatible en Vercel)
+// /api/chat.js — v32.2 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -51,7 +51,7 @@ function fallbackJSON() {
 }
 
 // ==============================
-// Prompt base ✨ (flex hours, transporte dual cuando aplica, tours con ventanas reales, auroras globales sin límite fijo, costos opcionales)
+// Prompt base mejorado ✨ (flex hours, transporte sensible, tours/imperdibles globales, auroras inteligentes globales sin límite fijo)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -98,38 +98,28 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   • Tramos **urbanos**: A pie / Bus local / Metro / Taxi.
   • Tramos **interurbanos o rurales con poca oferta**: prioriza **Auto (alquiler)** o **Tour guiado**.
   • Evita sugerir **tren** en destinos **sin red ferroviaria** (p. ej., Islandia) y evita sugerir **bus interurbano** cuando sea poco frecuente o poco práctico.
-- **Regla dual por defecto (cuando aplique)**: si el destino/actividad admite tanto **self-drive** como **tour guiado** y el usuario no fijó preferencia, **propón ambas**:  
-  • En **transport** usa “Auto (alquiler) **o** Tour guiado (recomendado)” **o** la variante inversa, justificando en *notes* la recomendación (seguridad, clima, logística, experiencia).  
-  • No te quedes sólo con una opción salvo que la otra sea inviable en ese destino.
+  • Si un modo es dudoso, no lo afirmes: ofrece 1–2 opciones razonables, señalando la más recomendable (ej.: "Auto (alquiler) o Tour guiado").
 - Incluye duración/traslado aproximado cuando ayude.
 
-🎟️ TOURS — ventanas y requisitos prácticos (sin marcas ni enlaces)
-- Usa conocimiento típico del destino para **hora de salida**, **ventanas**, **duración** y **requisitos**. No inventes marcas ni políticas específicas.  
-- Si el usuario pide **costos**, da **rangos aproximados** (p. ej., “aprox. USD 80–140 pp”), y si la certeza es baja marca **TBD / confirmar**. Si no lo pide, **no incluyas precios**.
-- Ajusta logística alrededor del tour: posible **recogida 30–60 min antes**, buffers, cena temprano o tardía según corresponda.
-- Ejemplos de ventanas típicas (orientativas, no rígidas):
-  • **Auroras (latitudes altas HN)**: salidas/hotel-pickup aprox. **18:00–21:00**, en ruta hasta **00:00–02:30+** (flexible por pronóstico y cobertura de nubes).  
-  • **Day trips en Islandia** (Círculo Dorado / Costa Sur / Snaefellsnes): salidas **07:30–09:30**, regreso **17:00–20:00**.  
-  • Ajusta por estación (luz, clima) y cansancio del viajero.
-
 🌌 AURORAS — **Regla global e inteligente, sin límite prefijado**
-- Trata la “caza de auroras” como **actividad imperdible** cuando sea **plausible** por destino y **temporada**; proponla con criterio experto y sin saturar.
-- Plausibilidad (heurística):
-  • Hemisferio **norte**: latitudes **≈≥55°N** / **óvalo auroral** (Islandia; norte de Noruega; Laponia FI/SE; Groenlandia; Alaska; Canadá norte; Islas Feroe; norte de Escocia en noches fuertes; Siberia nororiental).
-  • Hemisferio **sur**: **Tasmania** y **Isla Sur (NZ)** en noches favorables.
+- Trata la “caza de auroras” como **actividad imperdible** siempre que sea **plausible** por destino y **temporada**; proponla con criterio experto.
+- Heurística de plausibilidad:
+  • Hemisferio **norte**: destinos en latitudes altas (≈ **≥55°N**) o dentro del **óvalo auroral** (p. ej., Islandia; norte de Noruega; Laponia finlandesa/sueca; Groenlandia; Alaska; Canadá norte—Yukon/NWT/Nunavut—; Islas Feroe; norte de Escocia en noches fuertes; Siberia nororiental).
+  • Hemisferio **sur**: latitudes altas (p. ej., **Tasmania** y **Isla Sur de Nueva Zelanda**) en noches favorables.
 - Temporadas orientativas:
   • **HN:** **SEP–MAR** (pico aprox. OCT–MAR).
   • **HS:** **MAR–SEP** (pico aprox. MAY–AUG).
-- **Deja que el modelo decida** cuántas noches recomendar y cómo **espaciarlas** según la duración del viaje, fatiga y alternativas top; deja claro que el **usuario confirma** cuántas noches desea.
-- Ventana típica operativa: **18:00–21:00 salida / 00:00–02:30+ regreso**. Ajusta cena y descansos.
+- **Deja que el modelo decida** cuántas noches recomendar y cómo **espaciarlas** según el contexto del viaje (duración, fatiga, climatología, alternativas top), **evitando saturación**. Sugiere claramente que el **usuario confirme** cuántas noches desea.
+- Ventana típica si aplica: **20:00–02:30**. Si la previsión fuera dudosa, ofrece alternativas nocturnas de alto valor.
 
-⭐ IMPERDIBLES Y EXPERIENCIAS TOP (regla global “mejor de lo mejor”)
-- Detecta y propone **experiencias icónicas** del destino (no solo auroras): excursiones clave, miradores, museos emblemáticos, navegación por fiordos, cuevas de hielo, trekkings célebres, mercados históricos, etc. (**sin marcas ni links**).
-- Presenta **alternativas** cuando existan varias opciones válidas e indica la **más recomendable**, dejando la **decisión final al usuario**.
-- Evita sobrecargar días consecutivos con actividades muy exigentes; usa buffers y mezcla de ritmos.
+⭐ IMPERDIBLES Y TOURS (REGLA GLOBAL “mejor de lo mejor”)
+- Detecta y propone **experiencias icónicas** del destino (no solo auroras): excursiones clave, miradores, museos emblemáticos, navegación de fiordos, cuevas de hielo, treks célebres, espectáculos, mercados históricos, etc. (**sin marcas ni precios**).
+- No inventes nombres comerciales; usa descriptores genéricos (“Tour guiado de…”, “Excursión de…”).
+- **Presenta alternativas** cuando existan varias opciones válidas (p. ej., “Excursión costa sur” **o** “Círculo Dorado”), indicando la **más recomendable** y dejando la **decisión final al usuario**.
+- Evita sobrecargar días consecutivos con actividades muy exigentes.
 
 💰 MONETIZACIÓN FUTURA (sin marcas)
-- Sugiere actividades naturalmente vinculables a upsells (cafés, museos, experiencias locales) sin precios/marcas, salvo que el usuario pida rangos.
+- Sugiere actividades naturalmente vinculables a upsells (cafés, museos, experiencias locales) sin precios/marcas.
 
 📝 EDICIÓN INTELIGENTE
 - Si el usuario pide “agregar un día / quitar actividad / ajustar horarios”, responde con el itinerario JSON actualizado.
@@ -190,7 +180,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — comportamiento con reglas actualizadas
+    // 🧭 MODO PLANNER — comportamiento con reglas flexibles y “mejor de lo mejor” global
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
