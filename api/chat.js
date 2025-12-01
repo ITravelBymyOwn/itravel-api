@@ -1,9 +1,10 @@
-// /api/chat.js — v31.2 (ESM compatible en Vercel) — cambios quirúrgicos sobre v31.1
+// /api/chat.js — v31.1 (ESM compatible en Vercel) · actualización puntual transporte global
 import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+
 
 // ==============================
 // Helpers
@@ -18,25 +19,16 @@ function extractMessages(body = {}) {
 
 function cleanToJSON(raw = "") {
   if (!raw || typeof raw !== "string") return null;
-
-  // 1) Intenta JSON directo
   try {
     return JSON.parse(raw);
-  } catch {}
-
-  // 2) Remueve fences ```json ... ```
-  try {
-    const fenced = raw.replace(/```(?:json)?\s*([\s\S]*?)\s*```/i, "$1").trim();
-    if (fenced && fenced !== raw) return JSON.parse(fenced);
-  } catch {}
-
-  // 3) Recorta basura fuera de { ... }
-  try {
-    const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
-    return JSON.parse(cleaned);
-  } catch {}
-
-  return null;
+  } catch {
+    try {
+      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
+  }
 }
 
 function fallbackJSON() {
@@ -52,8 +44,7 @@ function fallbackJSON() {
         to: "",
         transport: "",
         duration: "",
-        notes:
-          "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
     followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
@@ -113,7 +104,10 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - **Investiga o infiere** la disponibilidad real de medios (a pie, metro, tren, bus, auto, ferri, tour guiado).
 - **No** asumas buses o trenes donde no apliquen; para destinos con poca red pública, prefiere **Auto (alquilado)** o **Tour guiado**.
 - Si el usuario ya indicó preferencia (p. ej., “vehículo alquilado”), **respétala**.  
-  Si **no** lo hizo y el destino lo permite, **ofrece ambas opciones** (“Tour guiado” y “Auto (alquilado)”) — usa **uno** en "transport" y menciona la alternativa en "notes".
+  Si **no** lo hizo y el destino lo permite, **ofrece ambas opciones** (“Tour guiado” y “Auto (alquilado)”):
+  — Usa **uno** en "transport" (el más razonable) y menciona la **alternativa** en "notes" con una frase breve.
+- ✅ **Si no hay transporte público disponible y el usuario no indicó nada, el campo "transport" debe mostrar literalmente:**  
+  **"Vehículo alquilado o Tour guiado"** (elige el orden según cómo quede más natural).
 - Las horas deben estar ordenadas y no superponerse. Incluye tiempos aproximados de actividad y traslados.
 
 🎫 TOURS Y ACTIVIDADES GUIADAS (robustecer horarios y sentido)
@@ -151,22 +145,15 @@ Ejemplo de nota motivadora correcta:
 `.trim();
 
 // ==============================
-// Llamadas al modelo
+// Llamada al modelo
 // ==============================
-async function callStructured(messages, temperature = 0.4, { json = false } = {}) {
-  const req = {
+async function callStructured(messages, temperature = 0.4) {
+  const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
-    input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
     max_output_tokens: 2200,
-  };
-
-  // Forzamos JSON SOLO cuando lo necesitamos (planner). Evita romper el modo "info".
-  if (json) {
-    req.response_format = { type: "json_object" };
-  }
-
-  const resp = await client.responses.create(req);
+  });
 
   const text =
     resp?.output_text?.trim() ||
@@ -186,56 +173,41 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body || {};
-    const mode = body.mode || "planner"; // 👈 parámetro de modo
+    const body = req.body;
+    const mode = body.mode || "planner"; // 👈 nuevo parámetro
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
     if (mode === "info") {
-      const raw = await callStructured(clientMessages, 0.4, { json: false });
+      const raw = await callStructured(clientMessages);
       const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — reglas flexibles con robustez adicional
-    let raw = await callStructured(
-      [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
-      0.4,
-      { json: true }
-    );
+    // 🧭 MODO PLANNER — comportamiento original con reglas flexibles y mejoras
+    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
-      const strictPrompt =
-        SYSTEM_PROMPT +
-        `
+      const strictPrompt = SYSTEM_PROMPT + `
 OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
-      raw = await callStructured(
-        [{ role: "system", content: strictPrompt }, ...clientMessages],
-        0.25,
-        { json: true }
-      );
+      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
       parsed = cleanToJSON(raw);
     }
 
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
-      const ultraPrompt =
-        SYSTEM_PROMPT +
-        `
+      const ultraPrompt = SYSTEM_PROMPT + `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callStructured(
-        [{ role: "system", content: ultraPrompt }, ...clientMessages],
-        0.1,
-        { json: true }
-      );
+      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
       parsed = cleanToJSON(raw);
     }
 
     if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
+
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
