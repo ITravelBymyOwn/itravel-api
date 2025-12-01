@@ -1996,7 +1996,8 @@ async function startPlanning(){
   // - Ventana vespertina flexible (no anclar rígido 08:30–19:00 si el contexto lo amerita)
   // - Sugerencias icónicas con frecuencia moderada (similares a auroras)
   if(!plannerState.preferences) plannerState.preferences = {};
-  plannerState.preferences.alwaysIncludeDinner = true;
+  // ⚠️ Coherencia con Sección 18: sin “cena obligatoria”
+  plannerState.preferences.alwaysIncludeDinner = false;
   plannerState.preferences.flexibleEvening     = true;
   plannerState.preferences.iconicHintsModerate = true;
 
