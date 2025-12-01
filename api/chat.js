@@ -1,4 +1,4 @@
-// /api/chat.js — v30.0 (ESM compatible en Vercel)
+// /api/chat.js — v31.0 (ESM compatible en Vercel) — horarios flex + cena + auroras
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -36,8 +36,8 @@ function fallbackJSON() {
     rows: [
       {
         day: 1,
-        start: "08:30",
-        end: "19:00",
+        start: "09:00",
+        end: "21:00",
         activity: "Itinerario base (fallback)",
         from: "",
         to: "",
@@ -45,13 +45,24 @@ function fallbackJSON() {
         duration: "",
         notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
+      {
+        day: 1,
+        start: "19:30",
+        end: "21:00",
+        activity: "Cena sugerida",
+        from: "",
+        to: "Restaurante recomendado (estilo local)",
+        transport: "A pie/Taxi",
+        duration: "≈ 1h30",
+        notes: "Sugerencia de cena en franja adecuada para cerrar el día.",
+      },
     ],
     followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
 // ==============================
-// Prompt base mejorado ✨
+// Prompt base mejorado ✨ (horarios flex + cena + auroras)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -64,57 +75,51 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 ⚠️ REGLAS GENERALES
 - Devuelve SIEMPRE al menos una actividad en "rows".
 - Nada de texto fuera del JSON.
-- 20 actividades máximo por día.
-- Usa horas realistas (o 08:30–19:00 si no se indica nada).
+- Máx. 20 actividades por día.
+- Usa horas realistas y **flexibles** (mañana/tarde/noche). Se permiten actividades nocturnas si aportan valor (shows, miradores, eventos, auroras cuando aplique).
 - La respuesta debe poder renderizarse directamente en una UI web.
 - Nunca devuelvas "seed" ni dejes campos vacíos.
 
 🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
 {
   "day": 1,
-  "start": "08:30",
+  "start": "09:00",
   "end": "10:30",
   "activity": "Nombre claro y específico",
   "from": "Lugar de partida",
   "to": "Lugar de destino",
   "transport": "Transporte realista (A pie, Metro, Tren, Auto, etc.)",
-  "duration": "2h",
+  "duration": "1h30",
   "notes": "Descripción motivadora y breve"
 }
 
-🧠 ESTILO Y EXPERIENCIA DE USUARIO
-- Usa un tono cálido, entusiasta y narrativo.
-- Las notas deben:
-  • Explicar en 1 o 2 líneas por qué la actividad es especial.  
-  • Transmitir emoción y motivación (ej. “Admira…”, “Descubre…”, “Siente…”).  
-  • Si no hay información específica, usa un fallback inspirador (“Una parada ideal para disfrutar la esencia de este destino”).
-- Personaliza las notas según la naturaleza de la actividad: arquitectura, gastronomía, cultura, naturaleza, etc.
-- Varía el vocabulario: evita repetir exactamente la misma nota.
+🍽️ CENA (OBLIGATORIA POR DÍA)
+- Incluye **una "Cena sugerida"** entre **19:00–21:30** si el plan del día no la incorpora naturalmente.
+- Puede ser icónica/tradicional según el destino (sin marcas ni precios).
+
+🌌 AURORAS (cuando la ciudad/temporada lo permita)
+- Si la ciudad es apta y la temporada es plausible, incluye **1–2 noches de caza de auroras** en toda la estancia (no todas las noches).
+- Franja recomendada **20:00–02:30** con transporte/nota coherente.
+
+⭐ OPCIONES ICÓNICAS
+- Sugiere experiencias icónicas (shows/restaurantes/experiencias) con **frecuencia moderada** durante el viaje (similar a auroras: sin saturar).
 
 🚆 TRANSPORTE Y TIEMPOS
 - Usa medios coherentes con el contexto (a pie, metro, tren, taxi, bus, auto, ferry…).
-- Las horas deben estar ordenadas y no superponerse.
+- Ordena horas y evita solapamientos.
 - Incluye tiempos aproximados de actividad y traslados.
-
-💰 MONETIZACIÓN FUTURA (sin marcas)
-- Sugiere actividades naturalmente vinculables a upsells (ej. cafés, museos, experiencias locales).
-- No incluyas precios ni nombres comerciales.
-- No digas “compra aquí” — solo describe experiencias.
 
 📝 EDICIÓN INTELIGENTE
 - Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
-- Si no especifica hora, distribuye las actividades lógicamente en mañana / mediodía / tarde.
-- Mantén la secuencia clara y cronológica.
+- Si no se especifica hora, distribuye lógicamente (mañana / mediodía / tarde / noche).
 
 🎨 UX Y NARRATIVA
 - Cada día debe fluir como una historia (inicio, desarrollo, cierre).
-- Usa descripciones cortas, sin párrafos largos.
-- Mantén claridad y variedad en las actividades.
+- Notas cortas, variadas y motivadoras.
 
 🚫 ERRORES A EVITAR
 - No devuelvas “seed”.
-- No uses frases impersonales (“Esta actividad es…”).
-- No incluyas saludos ni explicaciones fuera del JSON.
+- No incluyas texto fuera del JSON.
 - No repitas notas idénticas en varias actividades.
 
 Ejemplo de nota motivadora correcta:
@@ -151,7 +156,7 @@ export default async function handler(req, res) {
     }
 
     const body = req.body;
-    const mode = body.mode || "planner"; // 👈 nuevo parámetro
+    const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
@@ -161,7 +166,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — comportamiento original
+    // 🧭 MODO PLANNER — comportamiento estructurado
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
