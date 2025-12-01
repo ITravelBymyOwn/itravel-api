@@ -2402,14 +2402,16 @@ function intentFromText(text){
   return { type:'free_edit', details: text };
 }
 
-/* ============================== 
+/* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL
-   Cambios clave:
-   (1) Sin “cena obligatoria”: el agente decide cuándo proponerla.
-   (2) Auroras con tope inteligente (1–2 noches máx., no consecutivas).
-   (3) Reykjavik fix: sin preferencia global y sin obligación; nombre normalizado tolerante.
-   (4) Horarios realmente flexibles (sin “08:30–19:00” como regla dura).
+   Base v73 — Ajuste flexible FINAL (v73.1)
+   Cambios clave (quirúrgicos):
+   (A) Sin tope rígido de auroras ni prohibición de noches consecutivas por código.
+       La priorización y frecuencia queda al agente, pero:
+       → Regla local: NO colocar auroras en el ÚLTIMO día de la estancia.
+   (B) Prompt reforzado: transporte/tours realistas (investigar/ inferir horarios y disponibilidad);
+       si el usuario no indicó transporte, ofrecer Tour guiado y Auto (mencionar alternativa en notes).
+   (C) Horarios realmente flexibles (sin “08:30–19:00” como regla dura).
 ================================= */
 
 function insertDayAt(city, position){
@@ -2494,7 +2496,7 @@ function normalizeCityForGeo(name){
   return raw;
 }
 
-/* === Utilidades auroras (nueva lógica de “tope” no-consecutivo) === */
+/* === Utilidades auroras (ajuste sin tope rígido) === */
 function countAuroraNights(city){
   const byDay = itineraries[city]?.byDay || {};
   let c=0;
@@ -2504,32 +2506,13 @@ function countAuroraNights(city){
   }
   return c;
 }
-function suggestedAuroraCap(stayDays){
-  if(stayDays>=5) return 2;
-  if(stayDays>=3) return 1;
-  return 1;
-}
-function isConsecutiveAurora(city, day){
-  const byDay = itineraries[city]?.byDay||{};
-  const prev = byDay[day-1]||[];
-  const next = byDay[day+1]||[];
-  const hasPrev = prev.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-  const hasNext = next.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-  return hasPrev || hasNext;
-}
 
-/* Enforce cap en el set de filas del día actual (no añade si supera cap o si sería consecutivo) */
-function enforceAuroraCapForDay(city, day, rows, cap){
-  const already = countAuroraNights(city);
-  const willAdd = rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-  if(!willAdd) return rows;
+/* NOTE: retiramos suggestedAuroraCap() e isConsecutiveAurora/enforceAuroraCap previos. */
 
-  // Evita consecutivas
-  if(isConsecutiveAurora(city, day)) {
-    return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-  }
-  // Evita exceder el tope
-  if(already >= cap){
+/* Evita auroras en el último día (regla local mínima) */
+function filterAuroraIfLastDay(city, day, rows){
+  const totalDays = Object.keys(itineraries[city]?.byDay || {}).length || 0;
+  if(day === totalDays){
     return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   }
   return rows;
@@ -2565,7 +2548,7 @@ async function optimizeDay(city, day){
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
 
-  /* ====== AURORAS: detección flexible y sin “obligatorio” ====== */
+  /* ====== AURORAS: detección flexible global ====== */
   let auroraCity=false, auroraSeason=false;
   try{
     const canonicalCity = normalizeCityForGeo(city);
@@ -2577,7 +2560,7 @@ async function optimizeDay(city, day){
       const d = (typeof parseDMY==='function') ? parseDMY(baseDate) : null;
       if(d instanceof Date && !isNaN(d)){
         const m = d.getMonth()+1;
-        auroraSeason = (m>=9 || m<=3); // SEP–MAR
+        auroraSeason = (m>=9 || m<=3); // SEP–MAR (fallback)
       }
     }
     // Fallback por nombre si no hay coords
@@ -2588,8 +2571,7 @@ async function optimizeDay(city, day){
     }
   }catch(_){}
 
-  // ⚠️ Importante: NO activamos preferAurora global. Solo influye en el prompt del día.
-  let stayDays=Object.keys(itineraries[city].byDay||{}).length;
+  const stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
   // Día “ligero” dinámico (sin obligación de contenido extra)
@@ -2602,7 +2584,7 @@ async function optimizeDay(city, day){
     ? `\n- Si este fuera un día “ligero”, mantén ritmo relajado y evita sobrecargar.\n`
     : '';
 
-  /* Prompt flexible (sin horarios rígidos ni cena obligatoria) */
+  /* Prompt reforzado (transportes/tours realistas; auroras no en último día) */
   const prompt = `
 ${FORMAT}
 Ciudad: ${city}
@@ -2617,7 +2599,9 @@ ${JSON.stringify(rowsForOptimization)}
 - Balance energético; evita encadenar demasiadas actividades exigentes.
 - Day trips: ida ≤ ${maxOneWayHours} h si aportan valor claro.
 - Evita duplicados multi-día (considera sinónimos/idiomas).
-${auroraCity && (auroraSeason || !baseDate) ? '- Considera proponer “caza de auroras” si la noche y condiciones lo justifican (no es obligatorio).' : ''}
+${auroraCity && (auroraSeason || !baseDate) ? '- Considera proponer “caza de auroras” si la noche y condiciones lo justifican (imperdible), **pero no la programes en el último día**; prefiere noches tempranas.' : ''}
+- **Transporte realista**: investiga o infiere disponibilidad local real (no asumas bus/tren si no existen). Si el usuario no fijó transporte y el destino lo permite, usa un medio en "transport" (p. ej., "Tour guiado") y en "notes" menciona la alternativa (p. ej., "Opción: Auto (alquilado)").
+- **Tours y horarios**: investiga o infiere **horarios reales** de las actividades guiadas según prácticas locales (luz, distancia, clima, demanda). Las ventanas de ejemplo son guía, no obligación.
 - Organiza con **flexibilidad**: puedes extender la noche si corresponde (shows, paseos, auroras, cenas, etc.). Si no agregas actividad nocturna, no forces.
 ${lightNote}
 - Devuelve {"rows":[...],"replace":false}.
@@ -2631,15 +2615,13 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // Anti-duplicados extendido (permite auroras, pero controladas más abajo)
+    // Anti-duplicados extendido (permitimos auroras; sin cap rígido)
     const allExisting=Object.values(itineraries[city].byDay||{})
       .flat().filter(r=>r.day!==day)
       .map(r=>aliasKey(r.activity||''));
     normalized=normalized.filter(r=>{
       const key=aliasKey(r.activity||'');
-      const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(key);
-      // deja pasar si no existe; auroras se capean después
-      return key && (!allExisting.includes(key) || isAurora);
+      return key && (!allExisting.includes(key) || /\baurora\b|\bnorthern\s+lights?\b/i.test(key));
     });
 
     if(typeof applyBufferBetweenRows==='function')
@@ -2647,10 +2629,9 @@ ${intakeData}
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
 
-    // 👉 Auroras con tope (1–2 noches según estadía), evitando consecutivas
+    // 👉 Regla mínima local: NO en el último día
     if(auroraCity && (auroraSeason || !baseDate)){
-      const cap = suggestedAuroraCap(stayDays);
-      normalized = enforceAuroraCapForDay(city, day, normalized, cap);
+      normalized = filterAuroraIfLastDay(city, day, normalized);
     }else{
       // Si no es ciudad/temporada aurora, elimina por si el modelo inventa
       normalized = normalized.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
