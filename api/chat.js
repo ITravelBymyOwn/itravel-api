@@ -1,10 +1,9 @@
-// /api/chat.js — v31.2 (ESM compatible en Vercel) · fix JSON planner + margen de tokens
+// /api/chat.js — v31.2 (ESM compatible en Vercel) · ajustes quirúrgicos JSON + auroras + transporte
 import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-
 
 // ==============================
 // Helpers
@@ -80,7 +79,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "activity": "Nombre claro y específico",
   "from": "Lugar de partida",
   "to": "Lugar de destino",
-  "transport": "Transporte realista (A pie, Metro, Tren, Auto, Tour guiado, etc.)",
+  "transport": "Transporte realista (A pie, Metro, Tren, Bus, Auto, Tour guiado, etc.)",
   "duration": "2h",
   "notes": "Descripción motivadora y breve"
 }
@@ -97,24 +96,25 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 🌌 AURORAS (regla global, si aplica por destino/temporada)
 - Trátalas como **imperdibles** cuando el destino y la época lo permitan.
 - **Evita** programarlas en la **última noche del viaje**; prioriza noches tempranas.
-- Evita noches consecutivas salvo que haya una **justificación clara** (ej. condiciones climáticas variables, estadías largas, alta latitud).
-- Sugiérelas con horarios **plausibles del mercado local** (p. ej., salida alrededor de 18:00–19:30 y retorno tarde, según ciudad/temporada).
+- Evita noches consecutivas salvo que haya una **justificación clara** (p. ej., condiciones climáticas variables, estadías largas, alta latitud).
+- Para estadías **≥ 5 días**, sugiere **al menos 2 noches** (no consecutivas) si es plausible.
+- Usa ventanas y duraciones **plausibles** del mercado local: salida habitual **~18:00–19:30**, duración **≥ 4–6 h**, con **regreso no antes de 23:30** (a menudo pasada la medianoche, p. ej. 00:30–02:00).
 
 🚆 TRANSPORTE Y TIEMPOS (realistas, no inventar redes inexistentes)
 - **Investiga o infiere** la disponibilidad real de medios (a pie, metro, tren, bus, auto, ferri, tour guiado).
 - **No** asumas buses o trenes donde no apliquen; para destinos con poca red pública, prefiere **Auto (alquilado)** o **Tour guiado**.
 - Si el usuario ya indicó preferencia (p. ej., “vehículo alquilado”), **respétala**.  
-  Si **no** lo hizo y el destino lo permite, **ofrece ambas opciones** (“Tour guiado” y “Auto (alquilado)”):
-  — Usa **uno** en "transport" (el más razonable) y menciona la **alternativa** en "notes" con una frase breve.
-- ✅ **Si no hay transporte público disponible y el usuario no indicó nada, el campo "transport" debe mostrar literalmente:**  
-  **"Vehículo alquilado o Tour guiado"** (elige el orden según cómo quede más natural).
+  Si **no** lo hizo y el destino lo permite, **ofrece ambas opciones**:
+  — Usa **uno** en "transport" (el más razonable) y menciona la **alternativa** en "notes".
+- ✅ Si **no hay transporte público razonable** y el usuario **no** indicó preferencia, el campo **"transport" debe decir literalmente**:
+  "**Vehículo alquilado o Tour guiado**".
 - Las horas deben estar ordenadas y no superponerse. Incluye tiempos aproximados de actividad y traslados.
 
 🎫 TOURS Y ACTIVIDADES GUIADAS (robustecer horarios y sentido)
 - **Investiga o infiere los horarios reales** que se manejan en los tours o actividades equivalentes del destino,
   basándote en **prácticas comunes y condiciones locales** (luz, distancia, clima, demanda).
 - Usa ejemplos de ventanas solo como **guía general**, ajustando al contexto.
-- Para **auroras** u otras experiencias icónicas, considera ventanas habituales del destino (p. ej., **salidas ~18:00** en latitudes altas por desplazamientos y búsqueda de cielos despejados).
+- Para experiencias icónicas (p. ej., auroras, rutas emblemáticas), detalla brevemente las **paradas clave** y el **orden lógico**.
 
 💰 MONETIZACIÓN FUTURA (sin marcas)
 - Sugiere actividades naturalmente vinculables a upsells (cafés, museos, experiencias locales).
@@ -166,14 +166,14 @@ async function callStructured(messages, temperature = 0.4) {
   return text;
 }
 
-// Planner: forzar JSON nativo del modelo para evitar fallos de parseo
+// Planner: forzar JSON nativo para evitar fallos de parseo y horarios incoherentes
 async function callStructuredJSON(messages, temperature = 0.35) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
     response_format: { type: "json_object" }, // 🔒 fuerza JSON válido
     input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-    max_output_tokens: 2600, // 🔧 margen extra para itinerarios largos
+    max_output_tokens: 2600, // margen extra para itinerarios de varios días
   });
 
   const text =
