@@ -2404,90 +2404,63 @@ function intentFromText(text){
 
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico)
+   Base v73 — Ajuste flexible FINAL (actualizado)
    Cambios clave:
-   (1) Sin “cena obligatoria”: el agente decide cuándo proponerla.
-   (2) Auroras con tope inteligente (1–2 noches máx., no consecutivas).
-   (3) Reykjavik fix: sin preferencia global y sin obligación; nombre normalizado tolerante.
-   (4) Horarios realmente flexibles (sin “08:30–19:00” como regla dura).
-   (5) Normalizador local de auroras: inicio ≥18:00 y duración ≥4h, regreso ≥00:30 cuando aplique.
-   (6) fixOverlaps: corrige solapes y añade buffers suaves.
+   (1) Cena NO obligatoria; horarios realmente flexibles.
+   (2) Auroras: lógica GLOBAL sin tope duro; evita consecutivas y “último día único”.
+       Incentivo suave a ≥2 noches cuando la estancia es de 4–5+ días (sin imponer).
+   (3) Reykjavik/Tromsø ya no son casos especiales: aplica a cualquier ciudad apta.
+   (4) Transporte: si el usuario no especificó y la actividad es fuera de ciudad,
+       sugerir "Auto (alquilado) o Tour guiado" (evitar bus/tren si no es viable).
+   (5) Tours: pedir al agente desglosar paradas/waypoints clave como filas separadas.
+   (6) Heurística suave: si aparece Reynisfjara y no está Vík, añadir visita a Vík.
+   (7) Orden horario más realista para costa/penínsulas (preferir horas de luz).
 ================================= */
 
-function insertDayAt(city, position){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  const maxD = days.length ? Math.max(...days) : 0;
-  const pos = Math.min(Math.max(1, position), maxD+1);
-  for(let d=maxD; d>=pos; d--){
-    byDay[d+1] = (byDay[d]||[]).map(r=>({...r, day:d+1}));
+/* --- Utilidades auxiliares nuevas (no rompen contratos existentes) --- */
+function isOutOfTownKeyword(s){
+  const x = String(s||'').toLowerCase();
+  // Lugares típicos de day trips en múltiples destinos (ejemplos no exhaustivos)
+  return /\b(círculo\s*dorado|golden\s*circle|thingvellir|gullfoss|geysir|blue\s*lagoon|pen[ií]nsula\s*de\s*reykjanes|costa\s*sur|seljalandsfoss|sk[oó]gafoss|reynisfjara|v[ií]k|glaciar|fiordo|volc[aá]n|desierto|valle|cañ[oó]n|parque\s*nacional|snowmobile|ice\s*cave|safari|islas?)\b/.test(x);
+}
+function prefersDualTransport(city){
+  // Si el usuario no indicó transporte, deja al UX las dos opciones viables para day trips
+  const t = (cityMeta[city]?.transport||'').trim().toLowerCase();
+  return !t; // dual si el usuario no definió aún
+}
+function normalizeTransportForRow(city,row){
+  const act = String(row.activity||'');
+  if(isOutOfTownKeyword(act) && prefersDualTransport(city)){
+    row.transport = 'Auto (alquilado) o Tour guiado';
   }
-  byDay[pos] = [];
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = (dest.days||maxD)+1;
+  return row;
+}
+function containsActivity(rows, needle){
+  const n = String(needle||'').toLowerCase();
+  return (rows||[]).some(r => String(r.activity||'').toLowerCase().includes(n));
+}
+function addVisitIfMissing(rows, day, afterKey, newActivity, opts={}){
+  if(containsActivity(rows,newActivity)) return rows;
+  const idx = rows.findIndex(r => String(r.activity||'').toLowerCase().includes(afterKey.toLowerCase()));
+  const baseStart = rows[idx]?.end || '14:30';
+  const end = addMinutes(baseStart, opts.durationMin||90);
+  const insert = {
+    day,
+    start: baseStart,
+    end,
+    activity: newActivity,
+    from: rows[idx]?.to || rows[idx]?.activity || '',
+    to: newActivity,
+    transport: 'Auto (alquilado) o Tour guiado',
+    duration: `${(opts.durationMin||90)/60}h`,
+    notes: opts.notes || 'Añade esta parada cercana para completar el circuito con sentido lógico.'
+  };
+  const clone = rows.slice();
+  if(idx>=0) clone.splice(idx+1,0,insert); else clone.push(insert);
+  return clone;
 }
 
-function removeDayAt(city, day){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  if(!days.includes(day)) return;
-  delete byDay[day];
-  const maxD = days.length ? Math.max(...days):0;
-  for(let d=day+1; d<=maxD; d++){
-    byDay[d-1] = (byDay[d]||[]).map(r=>({...r, day:d-1}));
-    delete byDay[d];
-  }
-  itineraries[city].byDay = byDay;
-  const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = Math.max(0,(dest.days||days.length)-1);
-}
-
-function swapDays(city,a,b){
-  ensureDays(city);
-  if(a===b) return;
-  const byDay = itineraries[city].byDay||{};
-  const A = (byDay[a]||[]).map(r=>({...r,day:b}));
-  const B = (byDay[b]||[]).map(r=>({...r,day:a}));
-  byDay[a]=B; byDay[b]=A;
-  itineraries[city].byDay = byDay;
-}
-
-function moveActivities(city,fromDay,toDay,query=''){
-  ensureDays(city);
-  const byDay = itineraries[city].byDay||{};
-  const src = byDay[fromDay]||[];
-  const dst = byDay[toDay]||[];
-  const q = String(query||'').toLowerCase().trim();
-  const moved=[], remain=[];
-  src.forEach(r=>{
-    const match=!q||String(r.activity||'').toLowerCase().includes(q);
-    (match?moved:remain).push(r);
-  });
-  byDay[fromDay]=remain.map(normalizeRow);
-  moved.forEach(r=>dedupeInto(dst,{...r,day:toDay}));
-  byDay[toDay]=dst.map(normalizeRow).sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
-  itineraries[city].byDay=byDay;
-}
-
-/* --- aliasKey para deduplicado por sinónimos comunes --- */
-function aliasKey(s){
-  const x = normKey(s);
-  if(/\bmontju(i|ï|ic)\b/.test(x)) return 'montjuic';
-  if(/\bsagrada\s*fam(ilia)?\b/.test(x)) return 'sagrada_familia';
-  if(/\bpark?\s*gu(e|ë|é)ll\b/.test(x)) return 'park_guell';
-  if(/\bcasa\s*batllo\b/.test(x)) return 'casa_batllo';
-  if(/\bla\s*pedrera|casa\s*mila\b/.test(x)) return 'la_pedrera';
-  if(/\bboqueria\b/.test(x)) return 'boqueria';
-  if(/\bbarceloneta\b/.test(x)) return 'barceloneta';
-  if(/\bpicasso\b/.test(x)) return 'museo_picasso';
-  if(/\bpaseo\s*de\s*gracia\b/.test(x)) return 'paseo_de_gracia';
-  return x;
-}
-
-/* --- Normalizador mínimo de ciudad para auroras --- */
+/* --- Normalizador mínimo de ciudad para auroras (se mantiene) --- */
 function normalizeCityForGeo(name){
   const raw = String(name||'').trim();
   const low = raw.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
@@ -2496,7 +2469,7 @@ function normalizeCityForGeo(name){
   return raw;
 }
 
-/* === Utilidades auroras (tope no-consecutivo) === */
+/* === Auroras (versión global, sin tope duro) === */
 function countAuroraNights(city){
   const byDay = itineraries[city]?.byDay || {};
   let c=0;
@@ -2506,11 +2479,6 @@ function countAuroraNights(city){
   }
   return c;
 }
-function suggestedAuroraCap(stayDays){
-  if(stayDays>=5) return 2;
-  if(stayDays>=3) return 1;
-  return 1;
-}
 function isConsecutiveAurora(city, day){
   const byDay = itineraries[city]?.byDay||{};
   const prev = byDay[day-1]||[];
@@ -2519,85 +2487,26 @@ function isConsecutiveAurora(city, day){
   const hasNext = next.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   return hasPrev || hasNext;
 }
+function isLastDay(city, day){
+  const keys = Object.keys(itineraries[city]?.byDay||{}).map(n=>+n);
+  return keys.length ? day === Math.max(...keys) : false;
+}
 
-/* Enforce cap en el set de filas del día actual (no añade si supera cap o si sería consecutivo) */
-function enforceAuroraCapForDay(city, day, rows, cap){
-  const already = countAuroraNights(city);
-  const willAdd = rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-  if(!willAdd) return rows;
+/* Regla suave de auroras: evita consecutivas y desalienta “solo último día”.
+   NO elimina si el plan ya trae varias; sólo filtra cuando rompe reglas suaves. */
+function applyAuroraSoftRules(city, day, rows){
+  const hasAurora = rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+  if(!hasAurora) return rows;
 
-  if(isConsecutiveAurora(city, day)) {
+  // Evita consecutivas
+  if(isConsecutiveAurora(city, day)){
     return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   }
-  if(already >= cap){
+  // No poner como ÚNICA noche el último día: si ya existen 0 previas y es último, filtra.
+  if(isLastDay(city, day) && countAuroraNights(city)===0){
     return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   }
   return rows;
-}
-
-/* === Helpers Sección 18 (quirúrgicos) === */
-
-// Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30
-function normalizeAuroraWindow(row){
-  const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
-  if(!isAurora) return row;
-
-  const toMin = t => {
-    const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null;
-    return parseInt(m[1],10)*60 + parseInt(m[2],10);
-  };
-  const toHH = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
-
-  let start = toMin(row.start||"20:00");
-  let end   = toMin(row.end||"00:30");
-
-  if(start==null) start = 20*60;
-  if(end==null)   end   = 0*60 + 30;
-
-  if(start < 18*60) start = 18*60;              // ≥ 18:00
-  const minDur = 4*60;                           // ≥ 4h
-  if(end - start < minDur) end = start + minDur;
-  if(end < 0*60 + 30) end = 0*60 + 30;          // ≥ 00:30
-
-  const durMin = end - start;
-  const durLbl = durMin >= 60
-    ? `${Math.floor(durMin/60)}h${(durMin%60? ' '+(durMin%60)+'m' : '')}`
-    : `${durMin}m`;
-
-  return { ...row, start: toHH(start), end: toHH(end), duration: durLbl };
-}
-
-// Corrige solapes y aplica buffers mínimos
-function fixOverlaps(rows){
-  const toMin = t => { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
-  const toHH  = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
-  const durMin = d => {
-    if(!d) return 0;
-    const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-    if(m) return parseInt(m[1],10)*60 + (m[2]?parseInt(m[2],10):0);
-    const m2 = String(d).match(/(\d+)\s*m/i);
-    if(m2) return parseInt(m2[1],10);
-    return 0;
-  };
-
-  const sorted = [...rows].sort((a,b)=> (a.start||'')<(b.start||'') ? -1 : 1);
-  let prevEnd = null;
-  const out = [];
-  for(const r of sorted){
-    let s = toMin(r.start||"");
-    let e = toMin(r.end||"");
-    const d = durMin(r.duration||"");
-
-    if(s!=null && (e==null || e<=s)) e = s + (d>0? d : 60);
-    if(s==null && e!=null && d>0)    s = e - d;
-    if(s==null && e==null){ s = prevEnd!=null ? prevEnd + 15 : 9*60; e = s + 60; }
-
-    if(prevEnd!=null && s < prevEnd + 15){ const shift = (prevEnd + 15) - s; s += shift; e += shift; }
-    prevEnd = Math.max(prevEnd ?? 0, e);
-
-    out.push({ ...r, start: toHH(s), end: toHH(e), duration: (d>0? r.duration : `${Math.max(60, e-s)}m`) });
-  }
-  return out;
 }
 
 async function optimizeDay(city, day){
@@ -2610,7 +2519,7 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
-  // Protegidos: mantener lo ya fijado (ej. auroras, Blue Lagoon)
+  // Protegidos: mantener lo ya fijado (ej. auroras, Blue Lagoon) sin reescribir
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
     return act.includes('aurora')||act.includes('northern light')||
@@ -2630,7 +2539,7 @@ async function optimizeDay(city, day){
     ? buildIntake()
     : buildIntakeLite(city,{start:day,end:day});
 
-  /* ====== AURORAS: detección flexible (sin obligación) ====== */
+  /* ====== AURORAS: detección flexible y GLOBAL ====== */
   let auroraCity=false, auroraSeason=false;
   try{
     const canonicalCity = normalizeCityForGeo(city);
@@ -2642,9 +2551,10 @@ async function optimizeDay(city, day){
       const d = (typeof parseDMY==='function') ? parseDMY(baseDate) : null;
       if(d instanceof Date && !isNaN(d)){
         const m = d.getMonth()+1;
-        auroraSeason = (m>=9 || m<=3); // SEP–MAR
+        auroraSeason = (m>=9 || m<=3); // SEP–MAR como fallback
       }
     }
+    // Fallback nominal si no hay coords
     if(!coords){
       const low = String(canonicalCity||city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
       if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) auroraCity = true;
@@ -2652,9 +2562,11 @@ async function optimizeDay(city, day){
     }
   }catch(_){}
 
+  // Parámetros suaves
   let stayDays=Object.keys(itineraries[city].byDay||{}).length;
   const maxOneWayHours = stayDays>5?3:2;
 
+  // Día “ligero” dinámico
   const hadOriginal = (itineraries[city]?.originalDays > 0);
   const addedDays   = hadOriginal && (stayDays > itineraries[city].originalDays);
   const explicitSoft = plannerState?.lightDayTarget?.[city] || null;
@@ -2664,7 +2576,7 @@ async function optimizeDay(city, day){
     ? `\n- Si este fuera un día “ligero”, mantén ritmo relajado y evita sobrecargar.\n`
     : '';
 
-  /* Prompt reforzado: investigación previa + sub-paradas obligatorias + transporte correcto */
+  /* Prompt flexible (reforzado para tours/transportes/auroras) */
   const prompt = `
 ${FORMAT}
 Ciudad: ${city}
@@ -2674,19 +2586,25 @@ Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales (para optimizar):
 ${JSON.stringify(rowsForOptimization)}
 
-📋 **REGLAS INTELIGENTES (OBLIGATORIAS)**
-- Realiza primero una **investigación rápida** de imperdibles locales y de 1 día alrededor (luz, distancia, clima, demanda).
-- En tours genéricos o de jornada completa, **DESGLOSA SUB-PARADAS** (3–6) bajo el mismo título: p.ej. "Círculo Dorado — Þingvellir / — Geysir / — Gullfoss"; análogos para Costa Sur, Snæfellsnes, Reykjanes, etc.
-- No priorices "A pie"/público por defecto. Para salidas fuera de ciudad usa **"Vehículo alquilado o Tour guiado"** (literal).
-- Day trips: ida ≤ ${maxOneWayHours}h si aportan valor claro.
+📋 **REGLAS INTELIGENTES**
+- Prioriza imperdibles de ${city} con variedad (cultura, gastronomía, naturaleza, ocio).
+- Balance energético; evita encadenar demasiadas actividades exigentes.
+- Day trips: ida ≤ ${maxOneWayHours} h si aportan valor claro.
 - Evita duplicados multi-día (considera sinónimos/idiomas).
-${auroraCity && (auroraSeason || !baseDate) ? '- Puedes proponer “caza de auroras” si la noche y condiciones lo justifican (no obligatorio). Evita la última noche de la estancia.' : ''}
-- No fijes horas rígidas: investiga/infierelas y evita solapes; si faltan, reparte mañana/mediodía/tarde y extiende noche solo si corresponde.
+- Ordena con **flexibilidad**: puedes extender la noche si corresponde (shows, paseos, auroras, cenas). Si no agregas actividad nocturna, no forces.
+- Para **costa o penínsulas**, prefiere horas de **luz** (no lo dejes muy tarde salvo justificación clara).
+- **Transporte**: si el usuario no indicó uno, y la actividad implica salida fuera de ciudad, asume opciones viables **"Auto (alquilado) o Tour guiado"**. Evita sugerir bus/tren donde no sea realista.
+- **Tours**: desglosa el recorrido en **paradas/waypoints clave** como filas separadas (p. ej., “Parque Thingvellir → Geysir → Gullfoss” para Círculo Dorado; “Seljalandsfoss → Skógafoss → Reynisfjara → Vík” para Costa Sur).
+${auroraCity && (auroraSeason || !baseDate) ? '- **Auroras (global):** sugiere noches de caza cuando sea plausible. Evita noches consecutivas y NO lo dejes para el último día como única noche. En estancias de 4–5+ días, suele ser razonable **2–3 noches no consecutivas**, pero decide según clima, distancia y fatiga.' : ''}
 ${lightNote}
 - Devuelve {"rows":[...],"replace":false}.
 
 Contexto:
 ${intakeData}
+
+💡 UX:
+- No obligues “cena”; proponla sólo si aporta valor.
+- Horarios sin solaparse; buffers razonables (≥15m). Evita huecos largos sin propósito.
 `.trim();
 
   const ans = await callAgent(prompt,true,{cityName:city,baseDate});
@@ -2694,7 +2612,7 @@ ${intakeData}
   if(parsed?.rows){
     let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
 
-    // Anti-duplicados extendido (permite auroras, controladas más abajo)
+    // Anti-duplicados extendido (permite auroras; reglas suaves más abajo)
     const allExisting=Object.values(itineraries[city].byDay||{})
       .flat().filter(r=>r.day!==day)
       .map(r=>aliasKey(r.activity||''));
@@ -2709,21 +2627,27 @@ ${intakeData}
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
 
-    // 👉 Auroras: normalizador local + tope (1–2 noches) evitando consecutivas
+    // Transporte dual cuando aplique (si el usuario no definió)
+    normalized = normalized.map(r => normalizeTransportForRow(city, r));
+
+    // Reglas suaves de auroras (globales)
     if(auroraCity && (auroraSeason || !baseDate)){
-      normalized = normalized.map(normalizeAuroraWindow);
-      const cap = suggestedAuroraCap(stayDays);
-      normalized = enforceAuroraCapForDay(city, day, normalized, cap);
+      normalized = applyAuroraSoftRules(city, day, normalized);
     }else{
-      // Si no aplica, elimina posibles inventos del modelo
+      // Si no es ciudad/temporada aurora, elimina por si el modelo inventa
       normalized = normalized.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
     }
 
-    // Reincorpora protegidos (p.ej., Blue Lagoon o aurora ya fijada previamente)
-    let finalRows=[...normalized,...protectedRows];
+    // Heurística: si hay Reynisfjara y falta Vík, añádelo cerca
+    if(containsActivity(normalized,'reynisfjara') && !containsActivity(normalized,'vík')){
+      normalized = addVisitIfMissing(normalized, day, 'reynisfjara', 'Visita al pueblo de Vík', {
+        durationMin: 60,
+        notes: 'Aprovecha que está a pocos minutos de Reynisfjara para completar el circuito clásico de la Costa Sur.'
+      });
+    }
 
-    // Anti-solapes y buffers
-    finalRows = fixOverlaps(finalRows);
+    // Reincorpora protegidos (p.ej., Blue Lagoon o aurora ya fijada previamente)
+    const finalRows=[...normalized,...protectedRows];
 
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
     pushRows(city,val.allowed,false);
