@@ -1,4 +1,4 @@
-// /api/chat.js — v31.5 (ESM compatible en Vercel)
+// /api/chat.js — v31.5.1 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -240,7 +240,7 @@ function normalizeParsed(parsed) {
         activity,
         from: (r.from || "").toString(),
         to: (r.to || "").toString(),
-        transport: transport || "Taxi", // evitar sesgo a “A pie” por defecto
+        transport: transport || "A pie o Taxi", // CHANGED: fallback neutral (no prioriza ni restringe)
         duration: (r.duration || "").toString(),
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
@@ -275,11 +275,7 @@ function normalizeParsed(parsed) {
 }
 
 // ==============================
-// Prompt base mejorado ✨
-// (horarios flexibles; cena NO obligatoria; auroras inteligentes no consecutivas;
-// transporte dual en day trips; desglose “Destino — Subparada”; fila de regreso;
-// identificación de loops icónicos dentro del presupuesto de tiempo por trayecto;
-// sin predefinir lugares: solo guía de calidad)
+// Prompt base
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes de ITravelByMyOwn.
@@ -326,7 +322,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 🕓 TIEMPOS Y TRANSPORTE
 - Horas ordenadas, sin solapes, con buffers razonables.
-- En ciudades frías o distancias largas, **no priorices “A pie”**: usa Taxi/Bus/Metro cuando sea lógico.
+- **No priorices “A pie” por sistema**: elige lo óptimo para la experiencia; cuando no haya evidencia suficiente, usa **"A pie o Taxi"** como etiqueta neutral. // CHANGED
 - **Obligatorio**: cuando salgas de la ciudad base, **añade al final** una fila clara de **"Regreso a <Ciudad base>"** con hora coherente.
 
 📝 EDICIÓN INTELIGENTE
@@ -405,7 +401,7 @@ export default async function handler(req, res) {
         SYSTEM_PROMPT +
         `
 Ejemplo válido:
-{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
+{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie o Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
       raw = await callStructured(
         [{ role: "system", content: ultraPrompt }, ...clientMessages],
         0.1
