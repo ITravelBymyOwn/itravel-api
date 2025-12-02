@@ -1,4 +1,4 @@
-// /api/chat.js — v31.6 (ESM compatible en Vercel)
+// /api/chat.js — v31.7 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -18,14 +18,25 @@ function extractMessages(body = {}) {
 
 function cleanToJSON(raw = "") {
   if (!raw || typeof raw !== "string") return null;
+  // 1) intento directo
   try {
     return JSON.parse(raw);
   } catch {
+    // 2) quitar fences ``` y ```json si los hubiera
     try {
-      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
-      return JSON.parse(cleaned);
+      const unfenced = raw
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+      return JSON.parse(unfenced);
     } catch {
-      return null;
+      // 3) recortar basura fuera de llaves
+      try {
+        const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
+        return JSON.parse(cleaned);
+      } catch {
+        return null;
+      }
     }
   }
 }
@@ -86,7 +97,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 }
 
 🧠 ESTILO Y EXPERIENCIA
-- Tono cálido y narrativo.
+- Tono cálido, emocional e inspirador, sin párrafos largos.
 - Notas en 1–2 líneas con emoción (“Admira…”, “Descubre…”, “Siente…”).
 - Fallback inspirador si falta dato (“Una parada ideal para disfrutar la esencia del destino”).
 - Varía vocabulario y personaliza según la actividad.
@@ -94,12 +105,8 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 🌌 AURORAS (REGLA **GLOBAL** si el destino/temporada lo permiten)
 - Trátalas como **imperdibles** cuando proceda.
 - **Evita** programarlas en la **última noche**; prioriza noches tempranas.
-- Para estancias de **≥4–5 noches**, sugiere **2–3 oportunidades** espaciadas (sin regla dura ni noches consecutivas salvo justificación de clima/latitud).
-- **Ventanas obligatorias y autocorrección**:
-  • **Inicio ≥ 19:30** (preferente 20:00–21:30).  
-  • **Duración 4–6h** (si calculaste < 3h30m, **ajusta** a ≥ 4h).  
-  • **Fin ≥ 00:30** (habitual 01:00–02:30).  
-  Si tu primera propuesta no cumple estos rangos, **ajusta automáticamente** las horas para que cumplan.
+- Para estancias de **≥4–5 noches**, sugiere **2–3 oportunidades** espaciadas (sin regla dura; evita noches consecutivas salvo justificación de clima/latitud).
+- Ventanas **plausibles locales**: **salida preferente 18:00–19:30**, **duración 4–6h**, **regreso 00:30–02:30**.
 - Si el usuario ya indicó preferencia (p. ej., vehículo), respétala; si no, sugiere el formato más coherente (tour o auto) y menciona la alternativa en "notes".
 
 🚆 TRANSPORTE Y TIEMPOS (realistas, sin inventar redes)
@@ -107,26 +114,27 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Cuando **no** haya transporte público razonable y el usuario **no** haya indicado preferencia, en "transport" usa **EXACTAMENTE**:
   **"Vehículo alquilado o Tour guiado"**.
   (Puedes explicar la alternativa elegida en "notes", pero el campo "transport" debe respetar literalmente esa cadena.)
-- En excursiones de día completo a zonas rurales (p. ej., costas, penínsulas, valles, parques nacionales), **prefiere también** "Vehículo alquilado o Tour guiado" salvo que exista transporte público claramente viable.
+- En excursiones de día completo a zonas rurales (p. ej., costas, penínsulas, valles, desiertos, parques nacionales), **prefiere también** "Vehículo alquilado o Tour guiado" salvo que el destino tenga transporte público claramente viable.
 - Horarios ordenados y sin superposición; incluye duraciones y traslados.
 
 🎫 TOURS Y ACTIVIDADES (horarios reales, sub-paradas y sentido)
 - **Investiga o infiere horarios** basados en prácticas locales (luz, distancia, clima, demanda).
-- En **tours de jornada completa o de nombre genérico** (“Círculo Dorado”, “Costa Sur”, “Península de Snæfellsnes”, “Exploración de Reykjanes”, “Ruta del Vino”, “Delta del Mekong”, “Costa Amalfitana”, “Tour por Kioto”, etc.), **desglosa sub-paradas** como **actividades separadas pero agrupadas por el mismo título principal**, 3–6 hitos representativos.
+- Usa ejemplos de ventanas solo como guía.
+- En **tours de jornada completa o de nombre genérico** (“Círculo Dorado”, “Costa Sur”, “Península de Snæfellsnes”, “Exploración de Reykjanes”, “Ruta del Vino”, “Delta del Mekong”, “Costa Amalfitana”, “Tour por Kioto”, etc.), **detalla sub-paradas** como **actividades separadas pero agrupadas por el mismo título principal**, 3–6 hitos representativos.
   Formato:
     "Círculo Dorado — Þingvellir"
     "Círculo Dorado — Geysir"
     "Círculo Dorado — Gullfoss"
   Aplica este patrón **globalmente**. Ejemplos análogos:
     "Costa Sur — Seljalandsfoss" / "Skógafoss" / "Reynisfjara" / "Vík"
-    "Reykjanes — Puente entre Continentes" / "Gunnuhver" / "Seltún (Krýsuvík)" / "Kleifarvatn" / "Brimketill"
+    "Reykjanes — Bridge Between Continents" / "Gunnuhver" / "Seltún (Krýsuvík)" / "Kleifarvatn" / "Brimketill"
 - **Incluye localidades clave** cuando sean parte natural de la ruta (p. ej., si se visita Reynisfjara, incluir también **Vík**).
 
 💰 MONETIZACIÓN FUTURA (sin marcas)
 - Sugiere experiencias naturalmente monetizables (museos, cafés, actividades), sin precios ni marcas.
 
 📝 EDICIÓN INTELIGENTE
-- Ante “agregar día/quitar/ajustar”, responde con el itinerario JSON actualizado.
+- Ante “agregar día/quitar/ajustar”, responde con el JSON actualizado.
 - Si no hay hora, reparte lógicamente mañana/mediodía/tarde y, si corresponde, noche.
 - Mantén la secuencia cronológica.
 
@@ -138,17 +146,23 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 Ejemplo de nota correcta:
 “Descubre uno de los rincones más encantadores de la ciudad y disfruta su atmósfera única.”
+
+📌 REGLA QUÍRÚRGICA ADICIONAL
+- “Investiga o infiere los horarios reales que se manejan en los tours o actividades equivalentes del destino,
+  basándote en prácticas comunes y condiciones locales (luz, distancia, clima, demanda).
+  Usa los ejemplos de ventanas solo como guía general.
+  El tour de auroras **no puede quedar para el último día** del viaje.”
 `.trim();
 
 // ==============================
 // Llamada al modelo
 // ==============================
-async function callStructured(messages, temperature = 0.4) {
+async function callStructured(messages, temperature = 0.35) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
-    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-    max_output_tokens: 2200,
+    input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    max_output_tokens: 2400,
   });
 
   const text =
@@ -186,15 +200,19 @@ export default async function handler(req, res) {
 
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
-      const strictPrompt = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
+      const strictPrompt =
+        SYSTEM_PROMPT +
+        `
+OBLIGATORIO: Devuelve SOLO JSON válido con al menos 1 fila en "rows". Nada de meta ni explicaciones.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
       parsed = cleanToJSON(raw);
     }
 
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
-      const ultraPrompt = SYSTEM_PROMPT + `
+      const ultraPrompt =
+        SYSTEM_PROMPT +
+        `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
       raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
@@ -203,7 +221,6 @@ Ejemplo válido:
 
     if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
-
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
