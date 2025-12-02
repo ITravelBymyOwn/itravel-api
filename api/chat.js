@@ -1,4 +1,4 @@
-// /api/chat.js — v31.1 (ESM compatible en Vercel) — “ultraquirúrgico” sobre v31.0
+// /api/chat.js — v31.2 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -16,85 +16,27 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-/** Remueve fences y repara comas colgantes sin alterar contenido válido */
-function _prep(raw = "") {
-  if (!raw || typeof raw !== "string") return "";
-  let t = raw.trim();
-
-  // El modelo a veces envía ```json ... ``` o ``` ... ```
-  t = t.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "");
-
-  // También puede anteponer/posponer texto explicativo
-  // (dejamos un intento rápido con regex de bloque JSON balanceado)
-  return t;
+function stripCodeFences(text = "") {
+  if (typeof text !== "string") return text;
+  // remove ```json ... ``` or ``` ... ```
+  return text.replace(/^\s*```[\s\S]*?\n/, "").replace(/\n```[\s\S]*?$/m, "").trim();
 }
 
-/** Busca el primer bloque JSON balanceado { ... } dentro de un string */
-function _extractBalancedJSONObjectString(s = "") {
-  const n = s.length;
-  let depth = 0;
-  let start = -1;
-  let inStr = false;
-  let esc = false;
-
-  for (let i = 0; i < n; i++) {
-    const c = s[i];
-
-    if (inStr) {
-      if (!esc && c === "\\") { esc = true; continue; }
-      if (!esc && c === '"') inStr = false;
-      esc = false;
-      continue;
-    }
-
-    if (c === '"') { inStr = true; continue; }
-    if (c === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (c === "}") {
-      if (depth > 0) depth--;
-      if (depth === 0 && start !== -1) {
-        return s.slice(start, i + 1);
-      }
-    }
-  }
-  return "";
-}
-
-/** Intenta parsear JSON con varias estrategias conservadoras */
 function cleanToJSON(raw = "") {
-  try {
-    if (!raw || typeof raw !== "string") return null;
-
-    // 1) Directo
-    try { return JSON.parse(raw); } catch {}
-
-    // 2) Sin fences / comas colgantes simples
-    let t = _prep(raw).replace(/,\s*([}\]])/g, "$1");
-    try { return JSON.parse(t); } catch {}
-
-    // 3) Buscar primer objeto balanceado y parsear
-    const blk = _extractBalancedJSONObjectString(t);
-    if (blk) {
-      try { return JSON.parse(blk); } catch {}
-      // 3b) Intento con comas colgantes dentro del bloque
-      const repaired = blk.replace(/,\s*([}\]])/g, "$1");
-      try { return JSON.parse(repaired); } catch {}
-    }
-
-    // 4) Último intento: recortar texto antes/después de llaves
+  if (!raw || typeof raw !== "string") return null;
+  const txt = stripCodeFences(raw);
+  const attempts = [
+    (s) => s,
+    (s) => s.replace(/^[^\{]+/, "").replace(/[^\}]+$/, ""),
+  ];
+  for (const fn of attempts) {
     try {
-      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
-      return JSON.parse(cleaned);
-    } catch {}
-
-    return null;
-  } catch {
-    return null;
+      return JSON.parse(fn(txt));
+    } catch (_) {}
   }
+  return null;
 }
 
-/** Fallback mínimo seguro (no romper render) */
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -107,53 +49,67 @@ function fallbackJSON() {
         from: "",
         to: "",
         transport: "A pie",
-        duration: "9h",
+        duration: "",
         notes:
           "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
-    followup:
-      "⚠️ Fallback local: revisa configuración de Vercel o la API Key si esto persiste.",
+    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
-/** Normaliza/asegura el “shape” esperado por el planner */
-function coercePlannerShape(parsed) {
+/** Normaliza una respuesta del modelo:
+ *  - Si viene en formato C (destinations[]), lo transforma a formato B
+ *  - Garantiza rows con campos mínimos y day numérico
+ */
+function normalizeParsed(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
 
-  // Caso B
-  if (Array.isArray(parsed.rows)) return parsed;
-
-  // Caso C => mantenemos “destinations” (el planner ya lo soporta)
-  if (Array.isArray(parsed.destinations)) return parsed;
-
-  // Algunos modelos devuelven {destination, itinerary:[...]} u otros campos
-  if (Array.isArray(parsed.itinerary)) {
-    return { destination: parsed.destination || "Desconocido", rows: parsed.itinerary };
-  }
-  if (Array.isArray(parsed.items)) {
-    return { destination: parsed.destination || "Desconocido", rows: parsed.items };
-  }
-
-  // Si sólo hay “rows” sueltas
-  if (parsed.rows && typeof parsed.rows === "object") {
-    const arr = Array.isArray(parsed.rows) ? parsed.rows : Object.values(parsed.rows);
-    return { destination: parsed.destination || "Desconocido", rows: arr };
-  }
-
-  // Último recurso: intentar encontrar “rows” dentro de algún campo conocido
-  for (const k of Object.keys(parsed)) {
-    if (Array.isArray(parsed[k]) && parsed[k].length && parsed[k][0]?.day !== undefined) {
-      return { destination: parsed.destination || "Desconocido", rows: parsed[k] };
+  // Aceptar formato C -> convertir al primero con rows
+  if (!parsed.rows && Array.isArray(parsed.destinations)) {
+    const first = parsed.destinations.find(
+      (d) => Array.isArray(d.rows) && d.rows.length > 0
+    );
+    if (first) {
+      parsed = {
+        destination: first.name || first.city || first.destination || "Destino",
+        rows: first.rows,
+        followup: parsed.followup || "",
+      };
     }
   }
+
+  if (!Array.isArray(parsed.rows)) return null;
+
+  // Sanitizar filas
+  parsed.rows = parsed.rows
+    .map((r, idx) => {
+      const dayNum =
+        Number.isFinite(+r.day) && +r.day > 0 ? +r.day : 1 + (idx % 5);
+      const start = (r.start || "").toString().trim() || "09:00";
+      const end = (r.end || "").toString().trim() || "10:00";
+      const activity = (r.activity || "").toString().trim() || "Actividad";
+      return {
+        day: dayNum,
+        start,
+        end,
+        activity,
+        from: (r.from || "").toString(),
+        to: (r.to || "").toString(),
+        transport: (r.transport || "").toString() || "A pie",
+        duration: (r.duration || "").toString(),
+        notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
+      };
+    })
+    .slice(0, 100); // safety
 
   return parsed;
 }
 
 // ==============================
-// Prompt base mejorado ✨ (flex hours, cena no obligatoria, auroras inteligentes,
-// transporte dual para day trips si el usuario no lo definió, y tours desglosados)
+// Prompt base mejorado ✨
+// (horarios flex, cena NO obligatoria, auroras inteligentes,
+// transporte dual en day trips, desglose de tours por paradas)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -165,13 +121,14 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 ⚠️ REGLAS GENERALES
 - Devuelve SIEMPRE al menos una actividad en "rows".
-- Nada de texto fuera del JSON.
+- Nada de texto fuera del JSON (sin explicaciones).
 - 20 actividades máximo por día.
-- Horarios **realistas con flexibilidad**: NO asumas una ventana fija (no fuerces 08:30–19:00).
-  Si no hay información de horarios, reparte en mañana / mediodía / tarde y, si tiene sentido, extiende la noche (shows, paseos, auroras, cenas).
-- **No obligues la cena**: sugiérela sólo cuando aporte valor real.
+- Usa horas **realistas con flexibilidad**: NO asumas ventana fija (no fuerces 08:30–19:00).
+  Si no hay horarios previos, distribuye lógicamente mañana/mediodía/tarde y, cuando tenga sentido,
+  extiende la noche (cenas, shows, paseos, auroras).
+- **No obligues la cena**: sugiérela sólo si aporta valor ese día.
 - La respuesta debe poder renderizarse directamente en una UI web.
-- No devuelvas "seed" y evita valores nulos/undefined.
+- Nunca devuelvas "seed" ni dejes campos vacíos.
 
 🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
 {
@@ -179,42 +136,50 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "start": "08:30",
   "end": "10:30",
   "activity": "Nombre claro y específico",
-  "from": "Lugar de partida (vacío si no aplica)",
-  "to": "Lugar de destino (vacío si no aplica)",
-  "transport": "Transporte realista (A pie, Metro, Bus, Tren, Taxi/Uber, Auto, Tour guiado, Ferry, etc.)",
+  "from": "Lugar de partida",
+  "to": "Lugar de destino",
+  "transport": "Transporte realista (A pie, Metro, Tren, Auto, etc.)",
   "duration": "2h",
   "notes": "Descripción motivadora y breve"
 }
 
-🧠 ESTILO Y EXPERIENCIA DE USUARIO
-- Tono cálido, entusiasta y específico.
-- Notas: 1–2 líneas que expliquen por qué la actividad es especial. Varía vocabulario y evita repeticiones.
-
 🌌 AURORAS (si aplica por destino/temporada)
-- Sugiere “caza de auroras” sólo cuando sea plausible por destino/época.
-- Evita noches consecutivas y **NO** la dejes como única noche en el último día.
-- Estancia 4–5+ días: suele ser razonable 2–3 noches no consecutivas (es una guía, no obligación).
+- Sólo proponlas cuando sea plausible.
+- **Evita noches consecutivas**.
+- **Evita** que la **única** noche de auroras sea el **último día**.
+- En estancias de 4–5+ días, es razonable 2–3 noches **no consecutivas** (incentivo suave, no obligatorio).
 
 🚆 TRANSPORTE Y TIEMPOS
-- Usa medios coherentes con el contexto.
-- Las horas deben estar ordenadas y no superponerse; incluye tiempos aproximados.
-- Si el usuario **no especificó transporte** y la actividad es **fuera de la ciudad (day trip)**,
-  asume opciones viables **"Auto (alquilado) o Tour guiado"** (evita bus/tren si no es realista).
-- Para **tours/recorridos**, **desglosa paradas/waypoints clave** como filas separadas cuando corresponda
-  (ej.: Círculo Dorado: Thingvellir → Geysir → Gullfoss; Costa Sur: Seljalandsfoss → Skógafoss → Reynisfjara → Vík).
-- En costa/penínsulas prioriza las horas de **luz**.
+- Medios coherentes (a pie, metro, taxi, bus, auto, ferry…).
+- Horas ordenadas, **sin solaparse** y con buffers razonables.
+- **Si el usuario no indicó transporte y la actividad es fuera de la ciudad (day trip)**:
+  usa **"Auto (alquilado) o Tour guiado"** (evita bus/tren si no es viable en el destino).
+- Incluye tiempos aproximados de actividad y traslados.
+
+🧭 TOURS / DAY TRIPS — DESGLOSE
+- Cuando sea un recorrido típico, **divide en paradas/waypoints clave** como filas separadas.
+  Ejemplos:
+  • Círculo Dorado: Thingvellir → Geysir → Gullfoss.
+  • Costa Sur: Seljalandsfoss → Skógafoss → Reynisfjara → Vík.
+  • Whale watching / fiordos: incluye salida, navegación, retorno.
+- Prioriza horas de **luz** para costas/penínsulas.
+
+💰 MONETIZACIÓN FUTURA (sin marcas)
+- Sugiere actividades naturalmente vinculables a upsells (cafés, museos, experiencias locales) sin precios.
 
 📝 EDICIÓN INTELIGENTE
-- Si te piden agregar/quitar/ajustar, devuelve el JSON actualizado (B o C) manteniendo secuencia clara y cronológica.
+- Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
+- Mantén secuencia clara y cronológica.
 
 🎨 UX Y NARRATIVA
 - Cada día debe fluir como una historia (inicio, desarrollo, cierre).
-- Descripciones cortas; claridad y variedad.
+- Notas cortas y motivadoras; varía el vocabulario.
 
 🚫 ERRORES A EVITAR
+- No devuelvas “seed”.
 - No uses frases impersonales (“Esta actividad es…”).
-- No incluyas saludos ni texto fuera del JSON.
-- No repitas notas idénticas.
+- No incluyas saludos ni explicaciones fuera del JSON.
+- No repitas notas idénticas en varias actividades.
 `.trim();
 
 // ==============================
@@ -238,7 +203,7 @@ async function callStructured(messages, temperature = 0.4) {
 }
 
 // ==============================
-// Exportación ESM correcta
+// Exportación ESM
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -246,8 +211,8 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body;
-    const mode = body.mode || "planner"; // 👈 modo: "planner" | "info"
+    const body = req.body || {};
+    const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
@@ -257,34 +222,42 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — comportamiento original con reglas flexibles
-    // Pass 1
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
-    let parsed = coercePlannerShape(cleanToJSON(raw));
+    // 🧭 MODO PLANNER — con reglas flexibles
+    let raw = await callStructured(
+      [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
+      0.4
+    );
+    let parsed = normalizeParsed(cleanToJSON(raw));
 
-    // Pass 2 — “strict” (baja temperatura) si no llegaron rows/destinations
-    const hasRows = parsed && (parsed.rows || parsed.destinations);
+    // Pass 2: exige al menos 1 row
+    const hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     if (!hasRows) {
-      const strictPrompt = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve **al menos 1** fila en "rows". Nada de texto fuera del JSON.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
-      parsed = coercePlannerShape(cleanToJSON(raw));
+      const strictPrompt =
+        SYSTEM_PROMPT +
+        `\n\nOBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
+      raw = await callStructured(
+        [{ role: "system", content: strictPrompt }, ...clientMessages],
+        0.25
+      );
+      parsed = normalizeParsed(cleanToJSON(raw));
     }
 
-    // Pass 3 — ejemplo mínimo si aún no hay JSON válido
-    const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
+    // Pass 3: ejemplo mínimo
+    const stillNoRows = !parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0;
     if (stillNoRows) {
-      const ultraPrompt = SYSTEM_PROMPT + `
+      const ultraPrompt =
+        SYSTEM_PROMPT +
+        `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
-      parsed = coercePlannerShape(cleanToJSON(raw));
+      raw = await callStructured(
+        [{ role: "system", content: ultraPrompt }, ...clientMessages],
+        0.1
+      );
+      parsed = normalizeParsed(cleanToJSON(raw));
     }
 
-    // Guard final — nunca devolvemos vacío
     if (!parsed) parsed = fallbackJSON();
-
-    // Entregamos como string para el planner (mantiene contrato actual)
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
