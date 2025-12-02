@@ -1,4 +1,4 @@
-// /api/chat.js — v34.2 (ESM compatible en Vercel)
+// /api/chat.js — v31.4 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -19,35 +19,19 @@ function extractMessages(body = {}) {
 function stripCodeFences(text = "") {
   if (typeof text !== "string") return text;
   // elimina ```json ... ``` o ``` ... ```
-  return text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-}
-
-function tryExtractJSONObject(s = "") {
-  // Busca el primer bloque {...} balanceado
-  const txt = String(s);
-  const start = txt.indexOf("{");
-  const end = txt.lastIndexOf("}");
-  if (start >= 0 && end > start) return txt.slice(start, end + 1);
-  return null;
+  return text.replace(/^\s*```[\s\S]*?\n/, "").replace(/\n```[\s\S]*?$/m, "").trim();
 }
 
 function cleanToJSON(raw = "") {
   if (!raw || typeof raw !== "string") return null;
-
-  const candidates = [];
-  const stripped = stripCodeFences(raw);
-  candidates.push(stripped);
-
-  const fenced = (raw.match(/```(?:json)?([\s\S]*?)```/i) || [])[1];
-  if (fenced) candidates.push(fenced.trim());
-
-  const sliced = tryExtractJSONObject(raw);
-  if (sliced) candidates.push(sliced);
-
-  for (const c of candidates) {
+  const txt = stripCodeFences(raw);
+  const attempts = [
+    (s) => s,
+    (s) => s.replace(/^[^\{]+/, "").replace(/[^\}]+$/, ""),
+  ];
+  for (const fn of attempts) {
     try {
-      const j = JSON.parse(c);
-      if (j && typeof j === "object") return j;
+      return JSON.parse(fn(txt));
     } catch (_) {}
   }
   return null;
@@ -60,13 +44,14 @@ function fallbackJSON() {
       {
         day: 1,
         start: "09:00",
-        end: "10:00",
-        activity: "Actividad",
+        end: "18:00",
+        activity: "Itinerario base (fallback)",
         from: "",
         to: "",
         transport: "A pie",
-        duration: "1h",
-        notes: "Explora un rincón de la ciudad.",
+        duration: "",
+        notes:
+          "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
     followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
@@ -77,7 +62,7 @@ function fallbackJSON() {
 // Normalización y post-procesos
 // ==============================
 const OUT_OF_TOWN_RE =
-  /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|kirkjufell|djúpalónssandur|puente\s+entre\s+continentes|sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching)\b/i;
+  /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|kirkjufell|djúpalónssandur|puente\s+entre\s+continentes|parque\s+sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching)\b/i;
 
 const AURORA_RE = /\b(auroras?|northern\s*lights?)\b/i;
 
@@ -126,9 +111,9 @@ function ensureReturnLine(destination, rowsOfDay) {
     new RegExp(destination, "i").test(last.to || "");
   if (alreadyBack) return rowsOfDay;
 
-  // crear regreso con buffer 30m–90m
+  // crear regreso con buffer 30m
   const endMins = toMinutes(last.end || "18:00");
-  const start = toHHMM(endMins + 20);
+  const start = toHHMM(endMins + 15);
   const end = toHHMM(endMins + 90);
   const back = {
     day: last.day,
@@ -141,8 +126,8 @@ function ensureReturnLine(destination, rowsOfDay) {
       /tour|veh[ií]culo|auto/i.test(last.transport || "")
         ? "Vehículo alquilado o Tour guiado"
         : (last.transport || "Vehículo alquilado o Tour guiado"),
-    duration: "1h 10m",
-    notes: "Retorno a la ciudad base para cerrar el día.",
+    duration: "1h 15m",
+    notes: "Vuelta a la ciudad base para cerrar el recorrido del día.",
   };
   return [...rowsOfDay, back];
 }
@@ -153,7 +138,7 @@ function isAuroraCity(name = "") {
   return /(reykjav[ií]k|reikiavik|reykiavik|troms[oø]|tromso|abisko|rovaniemi)/i.test(n);
 }
 
-// Inyecta auroras si el itinerario plausible no las incluyó (no consecutivas, evitando solo el último día)
+// Inyecta auroras si el itinerario plausible no las incluyó
 function injectAuroraIfMissing(dest, rows) {
   if (!isAuroraCity(dest)) return rows;
 
@@ -168,14 +153,15 @@ function injectAuroraIfMissing(dest, rows) {
   const hasAurora = rows.some(r => AURORA_RE.test(r.activity || ""));
   if (hasAurora) return rows;
 
-  const lastDay = days[days.length - 1];
-  const candidate1 = days.find(d => d !== lastDay) || days[0];
+  // elegir días no consecutivos y evitando el último
+  const candidate1 = days.find(d => d !== days[days.length - 1]) || days[0];
   const candidate2 =
     totalDays >= 4
-      ? days.find(d => d !== candidate1 && d !== lastDay)
+      ? days.find(d => d !== candidate1 && d !== days[days.length - 1])
       : null;
 
   const makeAuroraRow = (day) => {
+    // colocar al final del día, 21:30–23:30
     const endLast = toMinutes((byDay[day].slice(-1)[0]?.end) || "20:45");
     const s = Math.max(endLast + 30, toMinutes("21:30"));
     const e = s + 120;
@@ -188,7 +174,7 @@ function injectAuroraIfMissing(dest, rows) {
       to: "Zona de caza",
       transport: "Vehículo alquilado o Tour guiado",
       duration: "2h",
-      notes: "Salida nocturna para intentar ver auroras (horario orientativo).",
+      notes: "Salida nocturna para intentar ver el cielo iluminado por auroras (horario orientativo).",
     });
   };
 
@@ -198,6 +184,7 @@ function injectAuroraIfMissing(dest, rows) {
     augmented.push(makeAuroraRow(candidate2));
   }
 
+  // reordenar por día/hora tras insertar
   augmented.sort((a, b) => (a.day - b.day) || (toMinutes(a.start) - toMinutes(b.start)));
   return augmented;
 }
@@ -205,7 +192,8 @@ function injectAuroraIfMissing(dest, rows) {
 /** Normaliza una respuesta del modelo:
  *  - Si viene en formato C (destinations[]), lo transforma a formato B
  *  - Garantiza rows con campos mínimos y day numérico
- *  - Post-procesa auroras, transporte y línea de regreso
+ *  - Post-procesa auroras y línea de regreso
+ *  - Fuerza transporte dual en day trips cuando el modelo lo omite
  */
 function normalizeParsed(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
@@ -230,21 +218,16 @@ function normalizeParsed(parsed) {
   let rows = parsed.rows
     .map((r, idx) => {
       const dayNum =
-        Number.isFinite(+r.day) && +r.day > 0 ? +r.day : 1 + (idx % 7);
+        Number.isFinite(+r.day) && +r.day > 0 ? +r.day : 1 + (idx % 5);
       const start = (r.start || "").toString().trim() || "09:00";
       const end = (r.end || "").toString().trim() || "10:00";
       const activity = (r.activity || "").toString().trim() || "Actividad";
       let transport = ((r.transport || "").toString().trim());
 
-      // Fuerza transporte dual en salidas fuera de ciudad si está vacío o no viable
+      // Fuerza transporte dual en salidas fuera de ciudad si está vacío o genérico
       const isTrip = OUT_OF_TOWN_RE.test(`${activity} ${(r.to || "").toString()}`);
       if (isTrip && (!transport || /a pie|bus|tren/i.test(transport))) {
         transport = "Vehículo alquilado o Tour guiado";
-      }
-
-      // En urbano: no priorizar "A pie"—si duraciones largas o clima frío probable, permitir Taxi/Bus
-      if (!isTrip && (!transport || /a pie/i.test(transport))) {
-        transport = "A pie"; // se mantiene si el modelo lo eligió, pero no lo forzamos por defecto
       }
 
       return {
@@ -254,12 +237,12 @@ function normalizeParsed(parsed) {
         activity,
         from: (r.from || "").toString(),
         to: (r.to || "").toString(),
-        transport: transport || "Taxi",
-        duration: (r.duration || "").toString() || "1h",
+        transport: transport || "A pie",
+        duration: (r.duration || "").toString(),
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
     })
-    .slice(0, 160); // safety
+    .slice(0, 120); // safety
 
   // Ajustes de auroras (ventanas plausibles)
   rows = rows.map(normalizeAuroraWindow);
@@ -290,25 +273,31 @@ function normalizeParsed(parsed) {
 }
 
 // ==============================
-// Prompt base (reglas, sin predefinir rutas)
+// Prompt base mejorado ✨
+// (horarios flex, cena NO obligatoria, auroras inteligentes,
+// transporte dual en day trips, desglose de tours por paradas,
+// y obligación de agregar la fila de regreso)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
 Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** que describa un itinerario turístico inspirador y funcional.
 
-📌 FORMATOS VÁLIDOS
+📌 FORMATOS VÁLIDOS DE RESPUESTA
 B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
 C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 ⚠️ REGLAS GENERALES
 - Devuelve SIEMPRE al menos una actividad en "rows".
 - Nada de texto fuera del JSON (sin explicaciones).
-- Máximo 20 actividades por día.
-- Usa horas **realistas con flexibilidad** (no asumas ventana fija). Distribuye mañana/mediodía/tarde y extiende la noche cuando tenga sentido (cenas, shows, auroras).
-- La respuesta debe renderizarse directamente en una UI web.
-- No devuelvas "seed" ni dejes campos vacíos.
+- 20 actividades máximo por día.
+- Usa horas **realistas con flexibilidad**: NO asumas ventana fija (no fuerces 08:30–19:00).
+  Si no hay horarios previos, distribuye lógicamente mañana/mediodía/tarde y, cuando tenga sentido,
+  extiende la noche (cenas, shows, paseos, auroras).
+- **No obligues la cena**: sugiérela sólo si aporta valor ese día.
+- La respuesta debe poder renderizarse directamente en una UI web.
+- Nunca devuelvas "seed" ni dejes campos vacíos.
 
-🧭 ESTRUCTURA DE CADA ACTIVIDAD
+🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
 {
   "day": 1,
   "start": "08:30",
@@ -321,33 +310,43 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "notes": "Descripción motivadora y breve"
 }
 
-🌟 COBERTURA DE IMPERDIBLES (sin listas predefinidas)
-- Identifica **recorridos icónicos** del destino consultando tu conocimiento general: day-trips, penínsulas, cascadas, volcanes, parques, rutas escénicas, etc.
-- Si la estancia es **≤ 5 días**, prioriza lo mejor dentro de **~2h por trayecto** desde la ciudad base; si es **> 5 días**, puedes llegar hasta **~3h por trayecto**.
-- Desglosa tours en **sub-paradas** usando “**Destino — Subparada**” (p.ej., “Costa Sur — Cascada X”).
-- No priorices “A pie” por inercia: elige el **medio más conveniente** para maximizar la experiencia (clima, distancias, confort).
-
 🌌 AURORAS (si aplica por destino/temporada)
-- Proponlas de forma inteligente (sin noches consecutivas y evitando que solo sea el último día).
-- Horarios plausibles: inicio **21:30–22:30**, fin **00:00–02:30**.
+- Sólo proponlas cuando sea plausible.
+- **Evita noches consecutivas**.
+- **Evita** que la **única** noche de auroras sea el **último día**.
+- En estancias de 4–5+ días, es razonable 2–3 noches **no consecutivas** (incentivo suave, no obligatorio).
+- **Horarios plausibles**: inicia entre **21:30–22:30** y termina entre **00:00–02:30** (local). No antes de 21:00 ni después de 03:00.
 
 🚆 TRANSPORTE Y TIEMPOS
-- Horas ordenadas y **sin solaparse**, con buffers razonables.
-- En **salidas fuera de la ciudad** cuando el usuario no especifica, usa **"Vehículo alquilado o Tour guiado"** (evita bus/tren si no es viable).
-- Incluye tiempos de actividad y traslados.
+- Horas ordenadas, **sin solaparse** y con buffers razonables.
+- **Si el usuario no indicó transporte y la actividad es fuera de la ciudad (day trip)**:
+  usa **"Vehículo alquilado o Tour guiado"** (evita bus/tren si no es viable en el destino).
+- En trayectos urbanos largos o con clima frío puedes usar **Taxi/Bus urbano**; no abuses de "A pie".
 
-🔁 REGRESO
-- Si el día sale fuera de la ciudad base, **agrega** al final una fila “**Regreso a <Ciudad base>**” con hora realista.
+🧭 TOURS / DAY TRIPS — DESGLOSE Y REGRESO
+- Cuando sea un recorrido típico, **divide en paradas/waypoints clave** como filas separadas, usando **“Destino — Subparada”** en **activity**.
+  Ejemplos:
+  • Círculo Dorado: "Círculo Dorado — Thingvellir" → "Círculo Dorado — Geysir" → "Círculo Dorado — Gullfoss".
+  • Costa Sur: "Costa Sur — Seljalandsfoss" → "Costa Sur — Skógafoss" → "Costa Sur — Reynisfjara" → (opcional) "Costa Sur — Vík".
+  • Snæfellsnes: "Snæfellsnes — Kirkjufell" → "Snæfellsnes — Djúpalónssandur" → "Snæfellsnes — Parque Snæfellsjökull" → "Snæfellsnes — Arnarstapi".
+- **Obligatorio**: si el día salió fuera de la ciudad base, **agrega una fila final** clara de **"Regreso a <Ciudad base>"** con hora realista.
 
-📝 EDICIÓN
-- Si el usuario pide agregar/quitar/ajustar, responde con el **JSON actualizado**.
+💰 MONETIZACIÓN FUTURA (sin marcas)
+- Sugiere actividades naturalmente vinculables a upsells (cafés, museos, experiencias locales) sin precios.
 
-🎨 ESTILO
-- Flujo de día como “historia” (inicio, desarrollo, cierre).
-- Notas cortas y motivadoras; vocabulario variado.
+📝 EDICIÓN INTELIGENTE
+- Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
+- Mantén secuencia clara y cronológica.
 
-🚫 EVITA
-- “seed”, saludos, explicaciones externas, notas repetidas, frases impersonales.
+🎨 UX Y NARRATIVA
+- Cada día debe fluir como una historia (inicio, desarrollo, cierre).
+- Notas cortas y motivadoras; varía el vocabulario.
+
+🚫 ERRORES A EVITAR
+- No devuelvas “seed”.
+- No uses frases impersonales (“Esta actividad es…”).
+- No incluyas saludos ni explicaciones fuera del JSON.
+- No repitas notas idénticas en varias actividades.
 `.trim();
 
 // ==============================
@@ -398,43 +397,34 @@ export default async function handler(req, res) {
     let parsed = normalizeParsed(cleanToJSON(raw));
 
     // Pass 2: exige al menos 1 row
-    let hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
+    const hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     if (!hasRows) {
       const strictPrompt =
         SYSTEM_PROMPT +
-        `
-
-OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
+        `\n\nOBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
       raw = await callStructured(
         [{ role: "system", content: strictPrompt }, ...clientMessages],
         0.25
       );
       parsed = normalizeParsed(cleanToJSON(raw));
-      hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     }
 
-    // Pass 3: ejemplo mínimo (sin predefinir destino; solo formato)
-    if (!hasRows) {
+    // Pass 3: ejemplo mínimo
+    const stillNoRows = !parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0;
+    if (stillNoRows) {
       const ultraPrompt =
         SYSTEM_PROMPT +
         `
-Ejemplo VÁLIDO de formato mínimo:
-{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
+Ejemplo válido:
+{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
       raw = await callStructured(
         [{ role: "system", content: ultraPrompt }, ...clientMessages],
         0.1
       );
       parsed = normalizeParsed(cleanToJSON(raw));
-      hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     }
 
-    // Última malla: si sigue sin parsear, sintetiza una fila mínima para NO caer en fallback total
-    if (!hasRows) {
-      const synth = fallbackJSON();
-      // pero sin marcar seguimiento de error duro para no cortar el flujo del planner
-      return res.status(200).json({ text: JSON.stringify(synth) });
-    }
-
+    if (!parsed) parsed = fallbackJSON();
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
