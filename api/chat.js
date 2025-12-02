@@ -1,4 +1,4 @@
-// /api/chat.js — v31.0 (ESM compatible en Vercel)
+// /api/chat.js — v31.1 (ESM compatible en Vercel) — “ultraquirúrgico” sobre v31.0
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -16,20 +16,85 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
+/** Remueve fences y repara comas colgantes sin alterar contenido válido */
+function _prep(raw = "") {
+  if (!raw || typeof raw !== "string") return "";
+  let t = raw.trim();
+
+  // El modelo a veces envía ```json ... ``` o ``` ... ```
+  t = t.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "");
+
+  // También puede anteponer/posponer texto explicativo
+  // (dejamos un intento rápido con regex de bloque JSON balanceado)
+  return t;
+}
+
+/** Busca el primer bloque JSON balanceado { ... } dentro de un string */
+function _extractBalancedJSONObjectString(s = "") {
+  const n = s.length;
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+
+  for (let i = 0; i < n; i++) {
+    const c = s[i];
+
+    if (inStr) {
+      if (!esc && c === "\\") { esc = true; continue; }
+      if (!esc && c === '"') inStr = false;
+      esc = false;
+      continue;
+    }
+
+    if (c === '"') { inStr = true; continue; }
+    if (c === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (c === "}") {
+      if (depth > 0) depth--;
+      if (depth === 0 && start !== -1) {
+        return s.slice(start, i + 1);
+      }
+    }
+  }
+  return "";
+}
+
+/** Intenta parsear JSON con varias estrategias conservadoras */
 function cleanToJSON(raw = "") {
-  if (!raw || typeof raw !== "string") return null;
   try {
-    return JSON.parse(raw);
-  } catch {
+    if (!raw || typeof raw !== "string") return null;
+
+    // 1) Directo
+    try { return JSON.parse(raw); } catch {}
+
+    // 2) Sin fences / comas colgantes simples
+    let t = _prep(raw).replace(/,\s*([}\]])/g, "$1");
+    try { return JSON.parse(t); } catch {}
+
+    // 3) Buscar primer objeto balanceado y parsear
+    const blk = _extractBalancedJSONObjectString(t);
+    if (blk) {
+      try { return JSON.parse(blk); } catch {}
+      // 3b) Intento con comas colgantes dentro del bloque
+      const repaired = blk.replace(/,\s*([}\]])/g, "$1");
+      try { return JSON.parse(repaired); } catch {}
+    }
+
+    // 4) Último intento: recortar texto antes/después de llaves
     try {
       const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
       return JSON.parse(cleaned);
-    } catch {
-      return null;
-    }
+    } catch {}
+
+    return null;
+  } catch {
+    return null;
   }
 }
 
+/** Fallback mínimo seguro (no romper render) */
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -41,17 +106,54 @@ function fallbackJSON() {
         activity: "Itinerario base (fallback)",
         from: "",
         to: "",
-        transport: "",
-        duration: "",
-        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+        transport: "A pie",
+        duration: "9h",
+        notes:
+          "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
-    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
+    followup:
+      "⚠️ Fallback local: revisa configuración de Vercel o la API Key si esto persiste.",
   };
 }
 
+/** Normaliza/asegura el “shape” esperado por el planner */
+function coercePlannerShape(parsed) {
+  if (!parsed || typeof parsed !== "object") return null;
+
+  // Caso B
+  if (Array.isArray(parsed.rows)) return parsed;
+
+  // Caso C => mantenemos “destinations” (el planner ya lo soporta)
+  if (Array.isArray(parsed.destinations)) return parsed;
+
+  // Algunos modelos devuelven {destination, itinerary:[...]} u otros campos
+  if (Array.isArray(parsed.itinerary)) {
+    return { destination: parsed.destination || "Desconocido", rows: parsed.itinerary };
+  }
+  if (Array.isArray(parsed.items)) {
+    return { destination: parsed.destination || "Desconocido", rows: parsed.items };
+  }
+
+  // Si sólo hay “rows” sueltas
+  if (parsed.rows && typeof parsed.rows === "object") {
+    const arr = Array.isArray(parsed.rows) ? parsed.rows : Object.values(parsed.rows);
+    return { destination: parsed.destination || "Desconocido", rows: arr };
+  }
+
+  // Último recurso: intentar encontrar “rows” dentro de algún campo conocido
+  for (const k of Object.keys(parsed)) {
+    if (Array.isArray(parsed[k]) && parsed[k].length && parsed[k][0]?.day !== undefined) {
+      return { destination: parsed.destination || "Desconocido", rows: parsed[k] };
+    }
+  }
+
+  return parsed;
+}
+
 // ==============================
-// Prompt base mejorado ✨ (flex hours, cena no obligatoria, auroras inteligentes)
+// Prompt base mejorado ✨ (flex hours, cena no obligatoria, auroras inteligentes,
+// transporte dual para day trips si el usuario no lo definió, y tours desglosados)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -65,11 +167,11 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Devuelve SIEMPRE al menos una actividad en "rows".
 - Nada de texto fuera del JSON.
 - 20 actividades máximo por día.
-- Usa horas **realistas con flexibilidad**: no asumas una ventana fija (no fuerces 08:30–19:00). 
-  Si no hay información de horarios, distribuye lógicamente en mañana / mediodía / tarde y, cuando tenga sentido, puedes extender la noche (cenas, shows, paseos, auroras). 
-  **No obligues la cena**: sugiérela sólo si aporta valor ese día.
+- Horarios **realistas con flexibilidad**: NO asumas una ventana fija (no fuerces 08:30–19:00).
+  Si no hay información de horarios, reparte en mañana / mediodía / tarde y, si tiene sentido, extiende la noche (shows, paseos, auroras, cenas).
+- **No obligues la cena**: sugiérela sólo cuando aporte valor real.
 - La respuesta debe poder renderizarse directamente en una UI web.
-- Nunca devuelvas "seed" ni dejes campos vacíos.
+- No devuelvas "seed" y evita valores nulos/undefined.
 
 🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
 {
@@ -77,55 +179,42 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "start": "08:30",
   "end": "10:30",
   "activity": "Nombre claro y específico",
-  "from": "Lugar de partida",
-  "to": "Lugar de destino",
-  "transport": "Transporte realista (A pie, Metro, Tren, Auto, etc.)",
+  "from": "Lugar de partida (vacío si no aplica)",
+  "to": "Lugar de destino (vacío si no aplica)",
+  "transport": "Transporte realista (A pie, Metro, Bus, Tren, Taxi/Uber, Auto, Tour guiado, Ferry, etc.)",
   "duration": "2h",
   "notes": "Descripción motivadora y breve"
 }
 
 🧠 ESTILO Y EXPERIENCIA DE USUARIO
-- Usa un tono cálido, entusiasta y narrativo.
-- Las notas deben:
-  • Explicar en 1 o 2 líneas por qué la actividad es especial.  
-  • Transmitir emoción y motivación (ej. “Admira…”, “Descubre…”, “Siente…”).  
-  • Si no hay información específica, usa un fallback inspirador (“Una parada ideal para disfrutar la esencia de este destino”).
-- Personaliza las notas según la naturaleza de la actividad: arquitectura, gastronomía, cultura, naturaleza, etc.
-- Varía el vocabulario: evita repetir exactamente la misma nota.
+- Tono cálido, entusiasta y específico.
+- Notas: 1–2 líneas que expliquen por qué la actividad es especial. Varía vocabulario y evita repeticiones.
 
 🌌 AURORAS (si aplica por destino/temporada)
-- Sugiere “caza de auroras” sólo cuando sea plausible (destino y época adecuados).
-- **No** la propongas todos los días ni en noches consecutivas.
-- Frecuencia orientativa: 1–2 noches en total según la duración de la estancia.
+- Sugiere “caza de auroras” sólo cuando sea plausible por destino/época.
+- Evita noches consecutivas y **NO** la dejes como única noche en el último día.
+- Estancia 4–5+ días: suele ser razonable 2–3 noches no consecutivas (es una guía, no obligación).
 
 🚆 TRANSPORTE Y TIEMPOS
-- Usa medios coherentes con el contexto (a pie, metro, tren, taxi, bus, auto, ferry…).
-- Las horas deben estar ordenadas y no superponerse.
-- Incluye tiempos aproximados de actividad y traslados.
-
-💰 MONETIZACIÓN FUTURA (sin marcas)
-- Sugiere actividades naturalmente vinculables a upsells (ej. cafés, museos, experiencias locales).
-- No incluyas precios ni nombres comerciales.
-- No digas “compra aquí” — solo describe experiencias.
+- Usa medios coherentes con el contexto.
+- Las horas deben estar ordenadas y no superponerse; incluye tiempos aproximados.
+- Si el usuario **no especificó transporte** y la actividad es **fuera de la ciudad (day trip)**,
+  asume opciones viables **"Auto (alquilado) o Tour guiado"** (evita bus/tren si no es realista).
+- Para **tours/recorridos**, **desglosa paradas/waypoints clave** como filas separadas cuando corresponda
+  (ej.: Círculo Dorado: Thingvellir → Geysir → Gullfoss; Costa Sur: Seljalandsfoss → Skógafoss → Reynisfjara → Vík).
+- En costa/penínsulas prioriza las horas de **luz**.
 
 📝 EDICIÓN INTELIGENTE
-- Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
-- Si no especifica hora, distribuye las actividades lógicamente en mañana / mediodía / tarde, con flexibilidad para la noche si corresponde.
-- Mantén la secuencia clara y cronológica.
+- Si te piden agregar/quitar/ajustar, devuelve el JSON actualizado (B o C) manteniendo secuencia clara y cronológica.
 
 🎨 UX Y NARRATIVA
 - Cada día debe fluir como una historia (inicio, desarrollo, cierre).
-- Usa descripciones cortas, sin párrafos largos.
-- Mantén claridad y variedad en las actividades.
+- Descripciones cortas; claridad y variedad.
 
 🚫 ERRORES A EVITAR
-- No devuelvas “seed”.
 - No uses frases impersonales (“Esta actividad es…”).
-- No incluyas saludos ni explicaciones fuera del JSON.
-- No repitas notas idénticas en varias actividades.
-
-Ejemplo de nota motivadora correcta:
-“Descubre uno de los rincones más encantadores de la ciudad y disfruta su atmósfera única.”
+- No incluyas saludos ni texto fuera del JSON.
+- No repitas notas idénticas.
 `.trim();
 
 // ==============================
@@ -135,7 +224,7 @@ async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
-    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+    input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
     max_output_tokens: 2200,
   });
 
@@ -158,7 +247,7 @@ export default async function handler(req, res) {
     }
 
     const body = req.body;
-    const mode = body.mode || "planner"; // 👈 nuevo parámetro
+    const mode = body.mode || "planner"; // 👈 modo: "planner" | "info"
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
@@ -169,29 +258,34 @@ export default async function handler(req, res) {
     }
 
     // 🧭 MODO PLANNER — comportamiento original con reglas flexibles
+    // Pass 1
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
-    let parsed = cleanToJSON(raw);
+    let parsed = coercePlannerShape(cleanToJSON(raw));
 
+    // Pass 2 — “strict” (baja temperatura) si no llegaron rows/destinations
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
       const strictPrompt = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
+OBLIGATORIO: Devuelve **al menos 1** fila en "rows". Nada de texto fuera del JSON.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
-      parsed = cleanToJSON(raw);
+      parsed = coercePlannerShape(cleanToJSON(raw));
     }
 
+    // Pass 3 — ejemplo mínimo si aún no hay JSON válido
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
       const ultraPrompt = SYSTEM_PROMPT + `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
       raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
-      parsed = cleanToJSON(raw);
+      parsed = coercePlannerShape(cleanToJSON(raw));
     }
 
+    // Guard final — nunca devolvemos vacío
     if (!parsed) parsed = fallbackJSON();
-    return res.status(200).json({ text: JSON.stringify(parsed) });
 
+    // Entregamos como string para el planner (mantiene contrato actual)
+    return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
