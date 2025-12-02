@@ -1,5 +1,5 @@
-// /api/chat.js — v36.1 (ESM compatible en Vercel)
-// Basado exactamente en v36.0; fix ultra-quirúrgico para evitar fallback por RegExp inválido en ensureReturnLine.
+// /api/chat.js — v36.2 (ESM compatible en Vercel)
+// FIX: paréntesis extra en extractMessages (provocaba fallback inmediato).
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -13,7 +13,7 @@ function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
   const prev = Array.isArray(history) ? history : [];
-  const userText = typeof input === "string") ? input : "";
+  const userText = typeof input === "string" ? input : ""; // ✅ fix aquí
   return [...prev, { role: "user", content: userText }];
 }
 
@@ -137,7 +137,7 @@ function ensureReturnLine(destination, rowsOfDay) {
 
   const last = rowsOfDay[rowsOfDay.length - 1] || {};
 
-  // 🔧 FIX: escapar el destino antes de compilar el RegExp para evitar errores
+  // ⛑️ Escapar el destino antes de compilar el RegExp
   const safeDest = escapeRegExp(destination || "");
   const alreadyBack =
     /regreso\s+a/i.test(last.activity || "") ||
@@ -181,7 +181,6 @@ function injectAuroraIfMissing(dest, rows) {
   const days = Object.keys(byDay).map(Number).sort((a, b) => a - b);
   if (!days.length) return rows;
 
-  // Si ya hay auroras, respetar; si no, proponer 1–2 noches no consecutivas.
   const hasAurora = rows.some(r => AURORA_RE.test(r.activity || ""));
   if (hasAurora) return rows;
 
