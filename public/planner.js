@@ -3378,6 +3378,10 @@ ${dayRows}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
+   Ajustes quirúrgicos:
+   - Soporta visualización de actividades que cruzan de día (20:30–02:00).
+   - Evita truncar tiempos mayores a 23:59 y conserva formato real.
+   - Mantiene controles ↑ ↓ y validación Unicode en país.
 ================================= */
 function addRowReorderControls(row){
   const ctrlWrap = document.createElement('div');
@@ -3421,7 +3425,48 @@ addCityRow = function(pref){
   if(row) addRowReorderControls(row);
 };
 
-// 🧼 País: permitir letras Unicode y espacios (global)
+/* ──────────────────────────────────────────────
+   🕒 Corrección de renderizado para actividades
+   que cruzan de día (20:30–02:00).
+   No recorta a medianoche ni fuerza límites visuales.
+─────────────────────────────────────────────── */
+function formatTimeRange(start, end){
+  if(!start && !end) return '';
+  const s = String(start||'').trim();
+  const e = String(end||'').trim();
+  // Detectar cruce de día (00:00–05:00) y marcar visualmente
+  if(s && e){
+    const [sh,sm] = s.split(':').map(Number);
+    const [eh,em] = e.split(':').map(Number);
+    if(!isNaN(sh) && !isNaN(eh)){
+      if(eh < sh || (eh === sh && em < sm)){
+        return `${s} → ${e} (+1 día)`; // ejemplo: 20:30 → 02:00 (+1 día)
+      }
+    }
+  }
+  return `${s} – ${e}`;
+}
+
+// 🔄 Hook opcional para cuando se re-renderizan actividades
+// (puede usarse en renderCityItinerary si no existe ya)
+if(typeof window.enhanceRowTimes !== 'function'){
+  window.enhanceRowTimes = function(){
+    try{
+      document.querySelectorAll('.itinerary-row').forEach(el=>{
+        const s = el.getAttribute('data-start');
+        const e = el.getAttribute('data-end');
+        if(s && e){
+          el.querySelector('.time').textContent = formatTimeRange(s,e);
+        }
+      });
+    }catch(_){}
+  };
+  document.addEventListener('DOMContentLoaded', ()=>setTimeout(window.enhanceRowTimes,500));
+}
+
+/* ──────────────────────────────────────────────
+   🧼 País: permitir letras Unicode y espacios
+─────────────────────────────────────────────── */
 document.addEventListener('input', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('country')){
     const original = e.target.value;
@@ -3443,8 +3488,7 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (mantiene v55.1 + FIX: el botón “Iniciar planificación”
-    **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
+   (mantiene v55.1 + FIX + coherencia global con v74)
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -3482,10 +3526,7 @@ function validateBaseDatesDMY(){
 
 /* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
 $save?.addEventListener('click', ()=>{
-  // ejecuta lógica propia de guardado
   try { saveDestinations(); } catch(_) {}
-
-  // valida y sólo entonces habilita
   const basicsOK = formHasBasics();
   const datesOK  = validateBaseDatesDMY();
   if (basicsOK && datesOK) {
@@ -3516,7 +3557,6 @@ document.addEventListener('input', (e)=>{
      e.target.classList?.contains('days') ||
      e.target.classList?.contains('baseDate')
   )){
-    // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
     if(!formHasBasics()) $start.disabled = true;
   }
 });
@@ -3536,7 +3576,7 @@ function ensureResetButton(){
   return btn;
 }
 
-// ⛔ Reset con confirmación modal
+// ⛔ Reset con confirmación modal (limpia banderas extendidas)
 function bindReset(){
   const $btn = ensureResetButton();
   $btn.removeAttribute('disabled');
@@ -3563,7 +3603,6 @@ function bindReset(){
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
     confirmReset.addEventListener('click', ()=>{
-      // Estado principal
       $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
       addCityRow();
       if ($start) $start.disabled = true;
@@ -3571,7 +3610,6 @@ function bindReset(){
       $chatBox.style.display='none'; $chatM.innerHTML='';
       session = []; hasSavedOnce=false; pendingChange=null;
 
-      // Flags
       planningStarted = false;
       metaProgressIndex = 0;
       collectingHotels = false;
@@ -3581,14 +3619,19 @@ function bindReset(){
       try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
       qsa('.date-tooltip').forEach(t => t.remove());
 
-      const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
-      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
-      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
-      const $in = qs('#p-infants');  if($in) $in.value = '0';
-      const $se = qs('#p-seniors');  if($se) $se.value = '0';
-      const $bu = qs('#budget');     if($bu) $bu.value = '';
-      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
+      const resetInputs = {
+        '#special-conditions':'',
+        '#p-adults':'1',
+        '#p-young':'0',
+        '#p-children':'0',
+        '#p-infants':'0',
+        '#p-seniors':'0',
+        '#budget':'',
+        '#currency':'USD'
+      };
+      Object.entries(resetInputs).forEach(([sel,val])=>{
+        const el=qs(sel); if(el) el.value=val;
+      });
 
       if (typeof plannerState !== 'undefined') {
         plannerState.destinations = [];
@@ -3600,6 +3643,8 @@ function bindReset(){
         plannerState.preferences = {};
         plannerState.dayTripPending = {};
         plannerState.existingActs = {};
+        plannerState.lightDayTarget = {};
+        plannerState.bufferState = {};
       }
 
       overlay.classList.remove('active');
@@ -3635,7 +3680,7 @@ function bindReset(){
 // ▶️ Start: valida y ejecuta
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
-  if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
+  if(!hasSavedOnce){
     chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
     return;
   }
@@ -3663,7 +3708,7 @@ $upsellClose?.addEventListener('click', ()=>{
   if (upsell) upsell.style.display = 'none';
 });
 
-/* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
+/* 🆕 Listener: Rebalanceo inteligente al agregar días */
 document.addEventListener('itbmo:addDays', e=>{
   const { city, extraDays, dayTripTo } = e.detail || {};
   if(!city || !extraDays) return;
@@ -3734,6 +3779,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
   bindReset();
-  // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
