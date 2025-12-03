@@ -1535,6 +1535,32 @@ function showWOW(on, msg){
   });
 }
 
+/* 🕒 Helpers de tiempo (para ordenar correctamente actividades pos-medianoche) */
+const LATE_NIGHT_CUTOFF_MIN = 5 * 60; // 05:00 → sigue considerándose “noche del día anterior”
+function __parseHHMM__(s){
+  const m = /^(\d{1,2}):([0-5]\d)$/.exec(String(s||'').trim());
+  if(!m) return null;
+  let h = +m[1]; let min = +m[2];
+  if(h<0||h>23) return null;
+  return {h, min};
+}
+function __toMinutes__(hhmm){
+  const t = __parseHHMM__(hhmm);
+  if(!t) return null;
+  return t.h*60 + t.min;
+}
+/** Clave de orden: 00:00–05:00 se empuja al final del día (+24h) */
+function timeSortKey(row){
+  const pick = (row && row.start) ? row.start : (row?.end||'');
+  const m = __toMinutes__(pick);
+  if(m===null) return Number.MAX_SAFE_INTEGER; // sin hora → al final
+  return (m < LATE_NIGHT_CUTOFF_MIN) ? (m + 24*60) : m;
+}
+/** Ordena por clave de tiempo, estableciendo cronología “noche → pos-medianoche” */
+function sortRowsByDayTime(rows){
+  return (rows||[]).slice().sort((a,b)=> timeSortKey(a) - timeSortKey(b));
+}
+
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
    Base v60 + injertos v64 + dedupe global con normKey
@@ -1607,7 +1633,7 @@ async function generateCityItinerary(city){
 
     const auroraRequirement = (auroraCity && (auroraSeason || !baseDate)) ? `
 🌌 **Instrucción contextual**:
-- Si es plausible, incluye **al menos una noche** de auroras (20:00–02:30 aprox.), con "valid:" en notes y transporte coherente (Tour/Van/Auto).
+- Si es plausible, incluye **al menos una noche** de auroras (**18:00–01:00** aprox.), con "valid:" en notes y transporte coherente (**Vehículo alquilado o Tour guiado**).
 - Ajusta el inicio del día siguiente si se extiende demasiado.
 ` : '';
 
@@ -1702,6 +1728,15 @@ ${buildIntake()}
         }
       })();
 
+      // 👉 Ordenar por día con regla pos-medianoche al final
+      try{
+        const byDay = itineraries[city]?.byDay || {};
+        Object.keys(byDay).forEach(d=>{
+          byDay[d] = sortRowsByDayTime(byDay[d]);
+        });
+      }catch(_){}
+
+      // 🌌 Inyección de aurora si falta (ventana 18:00–01:00)
       if (auroraCity && (auroraSeason || !baseDate)) {
         const acts = Object.values(itineraries[city]?.byDay || {})
           .flat()
@@ -1724,16 +1759,24 @@ ${buildIntake()}
 
           const auroraRow = normalizeRow({
             day: chosen,
-            start: '20:30',
-            end: '02:00',
+            start: '18:00',
+            end: '01:00',
             activity: 'Caza de auroras',
             from: 'Hotel/Base',
             to: 'Punto de observación',
-            transport: 'Tour/Bus/Van',
+            transport: 'Vehículo alquilado o Tour guiado',
             notes: 'valid: ventana nocturna auroral (sujeto a clima); vestir térmico'
           });
           pushRows(city, [auroraRow], false);
           console.warn(`[Aurora Injection] Añadida aurora automáticamente en ${city} (día ${chosen})`);
+
+          // Reordenar nuevamente por posible inserción pos-medianoche
+          try{
+            const byDay2 = itineraries[city]?.byDay || {};
+            Object.keys(byDay2).forEach(d=>{
+              byDay2[d] = sortRowsByDayTime(byDay2[d]);
+            });
+          }catch(_){}
         }
       }
 
@@ -1741,8 +1784,14 @@ ${buildIntake()}
       for(let d=1; d<=dest.days; d++){
         if(!(itineraries[city].byDay?.[d]||[]).length){
           await optimizeDay(city,d);
+        }else{
+          // Garantiza orden consistente tras generación
+          itineraries[city].byDay[d] = sortRowsByDayTime(itineraries[city].byDay[d]);
         }
       }
+
+      // ⏰ Si existe, aplica inicio tardío tras noche extendida
+      try{ if(typeof enforceLateStartAfterLateNight==='function') enforceLateStartAfterLateNight(city); }catch(_){}
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
 
@@ -1949,10 +1998,9 @@ Reglas duras:
       appliedRows++;
     }
 
-    // orden horario por día (mantiene v69)
+    // Orden horario por día (respetando pos-medianoche)
     Object.keys(merged).forEach(d=>{
-      merged[d] = (merged[d]||[]).map(normalizeRow)
-        .sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
+      merged[d] = sortRowsByDayTime((merged[d]||[]).map(normalizeRow));
     });
 
     itineraries[city].byDay = merged;
@@ -1962,13 +2010,16 @@ Reglas duras:
   if(!appliedRows){
     try{
       for(let d=start; d<=end; d++){
-        // evita borrar lo previo; optimizeDay respeta anti-duplicados multi-día
-        // y reequilibra con reglas v66 (balance, buffers, clima/auroras)
         /* eslint-disable no-await-in-loop */
         await optimizeDay(city, d);
+        // Reordenar por si se generan actividades pos-medianoche
+        itineraries[city].byDay[d] = sortRowsByDayTime(itineraries[city].byDay[d]||[]);
       }
     }catch(_){}
   }
+
+  // ⏰ Aplicar regla de inicio tardío tras noches extendidas (si existe)
+  try{ if(typeof enforceLateStartAfterLateNight==='function') enforceLateStartAfterLateNight(city); }catch(_){}
 
   // Render y UI (v69 intacto)
   renderCityTabs();
@@ -2412,6 +2463,7 @@ function intentFromText(text){
    (4) Horarios realmente flexibles (sin “08:30–19:00” como regla dura).
    (5) Normalizador local de auroras: inicio ≥18:00 y duración ≥4h, regreso ≥00:30 cuando aplique.
    (6) fixOverlaps: corrige solapes y añade buffers suaves.
+   (7) ✅ Soporte de actividades que CRUZAN DE DÍA (p.ej. 20:30–02:00) sin recortarlas.
 ================================= */
 
 function insertDayAt(city, position){
@@ -2537,7 +2589,18 @@ function enforceAuroraCapForDay(city, day, rows, cap){
 
 /* === Helpers Sección 18 (quirúrgicos) === */
 
-// Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30
+// Determina si una fila es naturalmente nocturna (apto para cruzar de día)
+function __isNightRow__(row){
+  const name = String(row.activity||'').toLowerCase();
+  const start = String(row.start||'');
+  const nightKW = /\baurora\b|\bnorthern\s+lights?\b|\bnight\b|\bnocturn/i;
+  const isAurora = nightKW.test(name);
+  const hh = /^(\d{1,2}):(\d{2})$/.exec(start);
+  const startM = hh ? (+hh[1])*60 + (+hh[2]) : null;
+  return isAurora || (startM!=null && startM >= 18*60);
+}
+
+// Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30, permitiendo cruzar de día
 function normalizeAuroraWindow(row){
   const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
   if(!isAurora) return row;
@@ -2546,31 +2609,35 @@ function normalizeAuroraWindow(row){
     const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null;
     return parseInt(m[1],10)*60 + parseInt(m[2],10);
   };
-  const toHH = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  const toHH = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
 
-  let start = toMin(row.start||"20:00");
-  let end   = toMin(row.end||"00:30");
+  let s = toMin(row.start||"20:30");
+  let e = toMin(row.end||"02:00");
+  if(s==null) s = 20*60+30;
+  if(e==null) e = 2*60;
 
-  if(start==null) start = 20*60;
-  if(end==null)   end   = 0*60 + 30;
+  if(s < 18*60) s = 18*60;          // ≥ 18:00
+  // Si el fin es “temprano” (e <= s), asumimos cruce al siguiente día
+  if(e <= s) e += 24*60;
 
-  if(start < 18*60) start = 18*60;              // ≥ 18:00
-  const minDur = 4*60;                           // ≥ 4h
-  if(end - start < minDur) end = start + minDur;
-  if(end < 0*60 + 30) end = 0*60 + 30;          // ≥ 00:30
+  // Duración mínima 4h
+  if((e - s) < 4*60) e = s + 4*60;
+  // Fin mínimo 00:30 del día siguiente si cruzó
+  if(e < (24*60 + 30)) e = Math.max(e, 24*60 + 30);
 
-  const durMin = end - start;
+  const durMin = e - s;
   const durLbl = durMin >= 60
     ? `${Math.floor(durMin/60)}h${(durMin%60? ' '+(durMin%60)+'m' : '')}`
     : `${durMin}m`;
 
-  return { ...row, start: toHH(start), end: toHH(end), duration: durLbl };
+  const cross = e >= 24*60;
+  return { ...row, start: toHH(s), end: toHH(e), duration: durLbl, _crossDay: !!cross };
 }
 
-// Corrige solapes y aplica buffers mínimos
+// Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
 function fixOverlaps(rows){
   const toMin = t => { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
-  const toHH  = m => `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+  const toHH  = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
   const durMin = d => {
     if(!d) return 0;
     const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
@@ -2580,23 +2647,57 @@ function fixOverlaps(rows){
     return 0;
   };
 
-  const sorted = [...rows].sort((a,b)=> (a.start||'')<(b.start||'') ? -1 : 1);
-  let prevEnd = null;
-  const out = [];
-  for(const r of sorted){
+  // Antes de ordenar, expande minutos para filas nocturnas si el fin “parece” anterior al inicio
+  const expanded = rows.map(r=>{
     let s = toMin(r.start||"");
     let e = toMin(r.end||"");
     const d = durMin(r.duration||"");
+    let cross = false;
 
-    if(s!=null && (e==null || e<=s)) e = s + (d>0? d : 60);
-    if(s==null && e!=null && d>0)    s = e - d;
-    if(s==null && e==null){ s = prevEnd!=null ? prevEnd + 15 : 9*60; e = s + 60; }
+    if(s!=null && (e==null || e<=s)){
+      // Si es nocturna o sugiere cruce, empujamos fin al día +1
+      if(__isNightRow__(r) || (d>0 && s>=18*60)){
+        e = (e!=null ? e : s + Math.max(d,60)) + 24*60;
+        cross = true;
+      }else{
+        e = e!=null ? (e <= s ? s + Math.max(d,60) : e) : s + Math.max(d,60);
+      }
+    }else if(s==null && e!=null && d>0){
+      s = e - d;
+      if(s<0) s = 9*60; // fallback suave
+    }else if(s==null && e==null){
+      s = 9*60; e = s + 60;
+    }
 
-    if(prevEnd!=null && s < prevEnd + 15){ const shift = (prevEnd + 15) - s; s += shift; e += shift; }
+    return { __s:s, __e:e, __d:d, __cross:cross, raw:r };
+  });
+
+  // Orden por inicio (en minutos expandidos)
+  expanded.sort((a,b)=> (a.__s||0) - (b.__s||0));
+
+  const out = [];
+  let prevEnd = null;
+  for(const item of expanded){
+    let { __s:s, __e:e, __d:d, __cross:cross, raw:r } = item;
+
+    if(prevEnd!=null && s < prevEnd + 15){
+      const shift = (prevEnd + 15) - s;
+      s += shift; e += shift;
+    }
     prevEnd = Math.max(prevEnd ?? 0, e);
 
-    out.push({ ...r, start: toHH(s), end: toHH(e), duration: (d>0? r.duration : `${Math.max(60, e-s)}m`) });
+    // Duración textual si faltaba
+    const finalDur = d>0 ? r.duration : `${Math.max(60, e - s)}m`;
+
+    out.push({
+      ...r,
+      start: toHH(s),
+      end: toHH(e),
+      duration: finalDur,
+      _crossDay: (r._crossDay || cross || e >= 24*60) ? true : false
+    });
   }
+
   return out;
 }
 
@@ -2605,7 +2706,7 @@ async function optimizeDay(city, day){
   const rows = (data?.byDay?.[day]||[]).map(r=>({
     day,start:r.start||'',end:r.end||'',activity:r.activity||'',
     from:r.from||'',to:r.to||'',transport:r.transport||'',
-    duration:r.duration||'',notes:r.notes||''
+    duration:r.duration||'',notes:r.notes||'', _crossDay: !!r._crossDay
   }));
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
@@ -2683,6 +2784,7 @@ ${JSON.stringify(rowsForOptimization)}
 ${auroraCity && (auroraSeason || !baseDate) ? '- Puedes proponer “caza de auroras” si la noche y condiciones lo justifican (no obligatorio). Evita la última noche de la estancia.' : ''}
 - No fijes horas rígidas: investiga/infierelas y evita solapes; si faltan, reparte mañana/mediodía/tarde y extiende noche solo si corresponde.
 ${lightNote}
+- Puedes **cruzar de día** si una actividad nocturna lo requiere (p.ej., 20:30–02:00). No recortes esas filas.
 - Devuelve {"rows":[...],"replace":false}.
 
 Contexto:
@@ -2722,7 +2824,7 @@ ${intakeData}
     // Reincorpora protegidos (p.ej., Blue Lagoon o aurora ya fijada previamente)
     let finalRows=[...normalized,...protectedRows];
 
-    // Anti-solapes y buffers
+    // Anti-solapes, buffers y soporte de cruce post-medianoche
     finalRows = fixOverlaps(finalRows);
 
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
@@ -2737,12 +2839,82 @@ ${intakeData}
    - Mantiene flujo original.
    - Cuando el usuario no definió transporte, reforzamos feedback para dual opción.
    - Activación preferAurora se mantiene global.
+   - ✅ Soporte de actividades que CRUZAN DE DÍA y ajuste suave del inicio del día siguiente.
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
   chatMsg(text,'user');
   $chatI.value='';
+
+  /* ── Helpers locales (quirúrgicos) ───────────────────────── */
+
+  // Minutos HH:MM (tolerante); null si no parsea
+  const __toMin__ = (t)=>{
+    const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/);
+    if(!m) return null;
+    return parseInt(m[1],10)*60 + parseInt(m[2],10);
+  };
+
+  // ¿El día tiene alguna fila marcada como cruce (_crossDay) o una nocturna que termine ≥ 00:30?
+  function __hasCrossNight__(city, day){
+    const rows = (itineraries[city]?.byDay?.[day]||[]);
+    for(const r of rows){
+      const name = String(r.activity||'').toLowerCase();
+      const isAurora = /\baurora\b|\bnorthern\s+lights?\b/.test(name);
+      if(r._crossDay) return true;
+      const endM = __toMin__(r.end);
+      // Si el modelo “plegó” a HH:MM del mismo día, igual consideramos noches que terminen después de medianoche razonable (>= 00:30)
+      if(isAurora && (endM===null || endM >= 30)) return true;
+    }
+    return false;
+  }
+
+  // Empuja el inicio del día siguiente si la noche previa fue larga (no pisa si ya es más tarde)
+  function __nudgeNextDayAfterLateNight__(city, day){
+    try{
+      if(!__hasCrossNight__(city, day)) return;
+      const nextDay = day + 1;
+      const totalDays = Object.keys(itineraries[city]?.byDay||{}).length || 0;
+      if(nextDay > totalDays) return;
+
+      if(!cityMeta[city]) cityMeta[city] = { perDay: [] };
+      cityMeta[city].perDay = cityMeta[city].perDay || [];
+
+      let pd = cityMeta[city].perDay.find(x=>x.day===nextDay);
+      if(!pd){
+        pd = { day: nextDay, start: DEFAULT_START, end: DEFAULT_END };
+        cityMeta[city].perDay.push(pd);
+      }
+
+      const target = '09:45'; // inicio suave por noche larga
+      const curM   = __toMin__(pd.start||DEFAULT_START);
+      const tgtM   = __toMin__(target);
+      if(curM!=null && tgtM!=null && curM < tgtM){
+        pd.start = target; // sólo movemos hacia más tarde si aplica
+      }
+    }catch(_){}
+  }
+
+  // Normaliza transporte dual cuando el usuario no fijó preferencia y es salida fuera de ciudad.
+  function normalizeTransportForRow(city, row){
+    try{
+      const act = String(row.activity||'').toLowerCase();
+      const to  = String(row.to||'').toLowerCase();
+      const isOutOfCity = !!to && !to.includes(String(city||'').toLowerCase());
+      if(!row.transport && isOutOfCity){
+        return { ...row, transport: 'Vehículo alquilado o Tour guiado' };
+      }
+    }catch(_){}
+    return row;
+  }
+
+  // Helpers existentes referenciados en esta sección:
+  // - resolveHotelInput, askNextHotelTransport, rebalanceWholeCity, optimizeDay, addMultipleDaysToCity,
+  //   insertDayAt, removeDayAt, swapDays, moveActivities, buildIntakeLite, callAgent, parseJSON, validateRowsWithAgent,
+  //   pushRows, renderCityTabs, setActiveCity, renderCityItinerary, intentFromText,
+  //   ensureDays, upsertCityMeta, showWOW, chatMsg, normalizeCityForGeo, getCoordinatesForCity, isAuroraCityDynamic
+  //   DEFAULT_START, DEFAULT_END, plannerState, savedDestinations, itineraries, cityMeta, $cityList, $chatI, $chatBox
 
   // Colecta hotel/transporte
   if(collectingHotels){
@@ -2822,6 +2994,9 @@ async function onSend(){
 
       showWOW(true,'Reequilibrando tras cambio de hotel…');
       await rebalanceWholeCity(city);
+      // Si la noche previa quedó larga, empujar un poco el inicio del día siguiente
+      const cur = itineraries[city]?.currentDay || 1;
+      __nudgeNextDayAfterLateNight__(city, cur);
       showWOW(false);
       chatMsg('✅ Itinerario reequilibrado tras el cambio de hotel.','ai');
     } else {
@@ -2912,6 +3087,9 @@ async function onSend(){
       await optimizeDay(city, total);
     }
 
+    // Ajuste suave por posible noche larga
+    __nudgeNextDayAfterLateNight__(city, total-1);
+
     showWOW(false);
     chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city}. Reoptimicé de D${prevTotal} a D${total} y marqué D${total} como "ligero pero COMPLETO".`, 'ai');
     return;
@@ -2979,6 +3157,9 @@ async function onSend(){
       await optimizeDay(city, total);
     }
 
+    // Ajuste suave por posible noche larga en el penúltimo día
+    __nudgeNextDayAfterLateNight__(city, total-1);
+
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
@@ -3007,6 +3188,9 @@ async function onSend(){
       optimizeDay(intent.city, intent.from),
       optimizeDay(intent.city, intent.to)
     ]);
+    // Si alguno quedó con noche larga, suavizar inicio del siguiente
+    __nudgeNextDayAfterLateNight__(intent.city, intent.from);
+    __nudgeNextDayAfterLateNight__(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
@@ -3021,6 +3205,8 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
+    __nudgeNextDayAfterLateNight__(intent.city, intent.fromDay);
+    __nudgeNextDayAfterLateNight__(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
@@ -3038,6 +3224,7 @@ async function onSend(){
       itineraries[city].byDay[day] = before.filter(r => !String(r.activity||'').toLowerCase().includes(q));
     }
     await optimizeDay(city, day);
+    __nudgeNextDayAfterLateNight__(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Sustituí la actividad y reoptimicé el día.','ai');
@@ -3055,6 +3242,7 @@ async function onSend(){
     if(intent.range.start) pd.start = intent.range.start;
     if(intent.range.end)   pd.end   = intent.range.end;
     await optimizeDay(city, day);
+    __nudgeNextDayAfterLateNight__(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Ajusté los horarios y reoptimicé tu día.','ai');
@@ -3126,7 +3314,7 @@ ${dayRows}
 
 🕒 Horarios:
 - Base 08:30–19:00 si no hay ventana.
-- Se puede extender por cenas/tours/auroras.
+- Se puede extender por cenas/tours/auroras y se permite **cruzar de día** cuando corresponda (p.ej., 20:30–02:00) sin recortar la fila.
 - Evita huecos > 60–75 min sin descanso/almuerzo/traslado.
 - Buffers ≥15 min entre actividades.
 
@@ -3171,6 +3359,11 @@ ${dayRows}
 
       const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
       await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
+
+      // Ajuste suave si alguna de las jornadas modificadas terminó “larga”
+      for(const d of daysChanged){
+        __nudgeNextDayAfterLateNight__(city, d);
+      }
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
