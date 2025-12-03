@@ -1,13 +1,21 @@
+// ============================================================
 // /api/chat.js — v36.7 (ESM compatible en Vercel) — ajustes quirúrgicos anti-fallback + lógica reforzada
+// ============================================================
+
+
+/* ==============================
+   SECCIÓN 1 · Configuración base
+================================= */
 import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ==============================
-// Helpers
-// ==============================
+
+/* ==============================
+   SECCIÓN 2 · Helpers
+================================= */
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
@@ -88,10 +96,10 @@ function fallbackJSON() {
   };
 }
 
-// ==============================
-// Normalización y post-procesos
-// ==============================
 
+/* ==============================
+   SECCIÓN 3 · Constantes y regex globales
+================================= */
 const OUT_OF_TOWN_RE =
   /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|kirkjufell|djúpalónssandur|puente\s+entre\s+continentes|sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching)\b/i;
 
@@ -100,6 +108,10 @@ const AURORA_RE = /\b(auroras?|northern\s*lights?)\b/i;
 const AURORA_CITY_RE =
   /(reykjav[ií]k|reikiavik|reykiavik|akureyri|troms[oø]|tromso|alta|bod[oø]|narvik|lofoten|abisko|kiruna|rovaniemi|yellowknife|fairbanks|murmansk|iceland|islandia|lapland|laponia)/i;
 
+
+/* ==============================
+   SECCIÓN 4 · Funciones de tiempo
+================================= */
 function pad(n) { return n.toString().padStart(2, "0"); }
 function toMinutes(hhmm = "00:00") {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm).trim());
@@ -113,6 +125,10 @@ function toHHMM(mins = 0) {
   return `${pad(h)}:${pad(m)}`;
 }
 
+
+/* ==============================
+   SECCIÓN 5 · Normalización de horarios
+================================= */
 // Clave de orden por minuto que tolera actividades nocturnas/cruce de medianoche
 function sortKeyMinutes(row) {
   const s = toMinutes(row.start || "00:00");
@@ -160,6 +176,10 @@ function normalizeAuroraWindow(row) {
   };
 }
 
+
+/* ==============================
+   SECCIÓN 6 · Cierre de día y retorno hotel
+================================= */
 // Inserta “Regreso a <dest>” si hubo salida fuera de ciudad y el día no cierra con retorno
 function ensureReturnLine(destination, rowsOfDay) {
   if (!Array.isArray(rowsOfDay) || !rowsOfDay.length) return rowsOfDay;
@@ -223,6 +243,10 @@ function isAuroraEligibleCity(name = "") {
   return AURORA_CITY_RE.test(String(name || ""));
 }
 
+
+/* ==============================
+   SECCIÓN 7 · Inyección y control global de auroras
+================================= */
 // Inyecta 1–2 noches de auroras si falta, evitando la última noche y noches consecutivas
 function injectAuroraIfMissing(dest, rows) {
   if (!isAuroraEligibleCity(dest)) return rows;
@@ -350,6 +374,10 @@ function enforceAuroraCapGlobal(rows) {
   return merged;
 }
 
+
+/* ==============================
+   SECCIÓN 8 · Normalizador global de respuesta
+================================= */
 /** Normaliza la respuesta del modelo */
 function normalizeParsed(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
@@ -454,7 +482,7 @@ function normalizeParsed(parsed) {
   // Reconstruir nuevamente tras la relajación
   const afterRelax = [];
   Object.keys(byDay2).map(Number).sort((a,b)=>a-b).forEach(d=>{
-    byDay2[d].sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
+    byDay2[d].sort((a,b) => sortKeyMinutes(a)-sortKeyMinutes(b));
     afterRelax.push(...byDay2[d]);
   });
 
@@ -469,9 +497,10 @@ function normalizeParsed(parsed) {
   return parsed;
 }
 
-// ==============================
-// Prompt base (reglas del agente)
-// ==============================
+
+/* ==============================
+   SECCIÓN 9 · Prompt base (reglas del agente)
+================================= */
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes de ITravelByMyOwn.
 Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** con un itinerario inspirador y funcional.
@@ -530,9 +559,11 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Cada día fluye como una historia; notas cortas y motivadoras.
 `.trim();
 
-// ==============================
+
+/* ==============================
+   SECCIÓN 10 · Llamada al modelo y handler ESM
+================================= */
 // Llamada al modelo (triple intento con refuerzo)
-// ==============================
 async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
@@ -550,9 +581,7 @@ async function callStructured(messages, temperature = 0.4) {
   return text;
 }
 
-// ==============================
 // Exportación ESM
-// ==============================
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
