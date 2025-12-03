@@ -1,4 +1,4 @@
-// /api/chat.js — v36.5 (ESM compatible en Vercel)
+// /api/chat.js — v36.6 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -18,7 +18,6 @@ function extractMessages(body = {}) {
 
 function stripCodeFences(text = "") {
   if (typeof text !== "string") return text;
-  // elimina ```json ... ``` o ``` ... ```
   return text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
@@ -76,13 +75,11 @@ function fallbackJSON() {
 // Normalización y post-procesos
 // ==============================
 
-// Heurística para detectar salidas fuera de ciudad (day-trips conocidos/semánticos)
 const OUT_OF_TOWN_RE =
   /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|kirkjufell|djúpalónssandur|puente\s+entre\s+continentes|sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching)\b/i;
 
 const AURORA_RE = /\b(auroras?|northern\s*lights?)\b/i;
 
-// Ciudades/regiones típicas de latitud >= ~55°N (heurístico)
 const AURORA_CITY_RE =
   /(reykjav[ií]k|reikiavik|reykiavik|akureyri|troms[oø]|tromso|alta|bod[oø]|narvik|lofoten|abisko|kiruna|rovaniemi|yellowknife|fairbanks|murmansk|iceland|islandia|lapland|laponia)/i;
 
@@ -98,10 +95,24 @@ function toHHMM(mins = 0) {
   return `${pad(h)}:${pad(m)}`;
 }
 
-// Ajuste horario para actividades de auroras (18:00–01:00; preferencia 21:30–00:30)
+// *** NUEVO: clave de orden por minuto que respeta actividades nocturnas ***
+function sortKeyMinutes(row) {
+  const s = toMinutes(row.start || "00:00");
+  const e = toMinutes(row.end || row.start || "00:00");
+  let key = s;
+
+  // Auroras que cruzan medianoche: end < start → empújalas al final (+24h)
+  if (AURORA_RE.test(row.activity || "") && e < s) key = s + 1440;
+
+  // "Regreso a hotel" tras auroras: si empieza de madrugada (<04:00), va después (+24h)
+  if (/regreso\s+a\s+hotel/i.test(row.activity || "") && s < 240) key = s + 1440;
+
+  return key;
+}
+
+// Ajuste horario para auroras (18:00–01:00; preferencia 21:30–00:30)
 function normalizeAuroraWindow(row) {
   if (!AURORA_RE.test(row.activity || "")) return row;
-
   const MIN_EVENING = toMinutes("18:00");
   const PREF_START = toMinutes("21:30");
   const PREF_END = toMinutes("00:30");
@@ -181,12 +192,10 @@ function ensureHotelReturnAfterAurora(rowsOfDay) {
   return [...rowsOfDay, back];
 }
 
-// Detección simple de ciudades aptas para auroras por nombre (lat >= ~55°N)
 function isAuroraEligibleCity(name = "") {
   return AURORA_CITY_RE.test(String(name || ""));
 }
 
-// Inyecta auroras si el itinerario plausible no las incluyó (no consecutivas, evitando sólo el último día)
 function injectAuroraIfMissing(dest, rows) {
   if (!isAuroraEligibleCity(dest)) return rows;
 
@@ -227,11 +236,10 @@ function injectAuroraIfMissing(dest, rows) {
   augmented.push(makeAuroraRow(d1));
   if (d2) augmented.push(makeAuroraRow(d2));
 
-  augmented.sort((a, b) => (a.day - b.day) || (toMinutes(a.start) - toMinutes(b.start)));
+  augmented.sort((a, b) => (a.day - b.day) || (sortKeyMinutes(a) - sortKeyMinutes(b)));
   return augmented;
 }
 
-// Si hubo auroras noche anterior, retrasar inicio del día siguiente a >=10:30
 function relaxNextMorningIfAurora(byDay) {
   const dayNums = Object.keys(byDay).map(Number).sort((a,b)=>a-b);
   const auroraDays = new Set(
@@ -244,12 +252,10 @@ function relaxNextMorningIfAurora(byDay) {
     const rows = byDay[d];
     if (!rows || !rows.length) continue;
 
-    // obtener el primer inicio
     let firstStart = Math.min(...rows.map(r => toMinutes(r.start || "23:59")));
     if (firstStart >= MIN_START) continue;
     const shift = MIN_START - firstStart;
 
-    // desplazar todas las horas del día manteniendo orden
     for (const r of rows) {
       const s = toMinutes(r.start || "00:00") + shift;
       const e = toMinutes(r.end || r.start || "00:00") + shift;
@@ -259,15 +265,10 @@ function relaxNextMorningIfAurora(byDay) {
   }
 }
 
-/** Normaliza la respuesta del modelo:
- *  - Acepta formato C (destinations[]) y lo convierte a B
- *  - Sanitiza filas
- *  - Postprocesa transporte, auroras y líneas de regreso
- */
+/** Normaliza la respuesta del modelo */
 function normalizeParsed(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
 
-  // Aceptar formato C -> convertir al primero con rows
   if (!parsed.rows && Array.isArray(parsed.destinations)) {
     const first = parsed.destinations.find(
       (d) => Array.isArray(d.rows) && d.rows.length > 0
@@ -283,7 +284,6 @@ function normalizeParsed(parsed) {
 
   if (!Array.isArray(parsed.rows)) return null;
 
-  // Sanitizar filas (sin cambiar la semántica)
   let rows = parsed.rows
     .map((r, idx) => {
       const dayNum = Number.isFinite(+r.day) && +r.day > 0 ? +r.day : 1 + (idx % 7);
@@ -292,12 +292,11 @@ function normalizeParsed(parsed) {
       const activity = (r.activity || "").toString().trim() || "Actividad";
       let transport = ((r.transport || "").toString().trim());
 
-      // Day trip: SIEMPRE fuerza "Vehículo alquilado o Tour guiado"
+      // *** AJUSTE: sólo fuerzo la dupla si está vacío o "A pie"; respeto Bus/Tren/Metro si el modelo lo eligió ***
       const isTrip = OUT_OF_TOWN_RE.test(`${activity} ${(r.to || "").toString()}`);
-      if (isTrip) {
+      if (isTrip && (!transport || /a pie/i.test(transport))) {
         transport = "Vehículo alquilado o Tour guiado";
-      } else if (!transport) {
-        // Urbano sin especificar → no priorizar A pie
+      } else if (!isTrip && !transport) {
         transport = "Taxi";
       }
 
@@ -313,12 +312,10 @@ function normalizeParsed(parsed) {
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
     })
-    .slice(0, 120); // safety
+    .slice(0, 120);
 
-  // Ajustes de auroras (ventanas plausibles)
   rows = rows.map(normalizeAuroraWindow);
 
-  // Agrupar por día y aplicar regresos + retorno a hotel tras auroras
   const dest = parsed.destination || "Ciudad";
   const byDay = rows.reduce((acc, r) => {
     (acc[r.day] = acc[r.day] || []).push(r);
@@ -329,29 +326,27 @@ function normalizeParsed(parsed) {
     .map((d) => +d)
     .sort((a, b) => a - b)
     .forEach((d) => {
-      // ordenar cronológico
-      byDay[d].sort((a,b) => toMinutes(a.start) - toMinutes(b.start));
+      byDay[d].sort((a,b) => sortKeyMinutes(a) - sortKeyMinutes(b));
       let fixed = ensureReturnLine(dest, byDay[d]);
       fixed = ensureHotelReturnAfterAurora(fixed);
       byDay[d] = fixed;
       merged.push(...fixed);
     });
 
-  // Ajustar mañana posterior a auroras
   relaxNextMorningIfAurora(byDay);
 
-  // Recolectar nuevamente tras el shift
   const shifted = [];
   Object.keys(byDay)
     .map(Number)
     .sort((a,b)=>a-b)
-    .forEach(d => shifted.push(...byDay[d]));
+    .forEach(d => {
+      byDay[d].sort((a,b) => sortKeyMinutes(a) - sortKeyMinutes(b));
+      shifted.push(...byDay[d]);
+    });
 
-  // Inyectar auroras si corresponde y no existen (ciudades elegibles)
   const withAuroras = injectAuroraIfMissing(dest, shifted);
 
-  // Reorden final por día/hora
-  withAuroras.sort((a, b) => (a.day - b.day) || (toMinutes(a.start) - toMinutes(b.start)));
+  withAuroras.sort((a, b) => (a.day - b.day) || (sortKeyMinutes(a) - sortKeyMinutes(b)));
 
   parsed.rows = withAuroras;
   return parsed;
@@ -369,7 +364,7 @@ B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
 C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 ⚠️ REGLAS GENERALES
-- Devuelve SIEMPRE al menos una actividad en "rows".
+- Devuelve SIEMPRE al menos 1 actividad en "rows".
 - Cero texto fuera del JSON (sin explicaciones).
 - Máximo 20 actividades por día.
 - Horarios **flexibles y realistas** (no asumas ventana fija). Distribuye mañana/mediodía/tarde y extiende la noche cuando aporte valor (cenas, shows, auroras).
@@ -390,35 +385,32 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 }
 
 🌟 IMPERDIBLES Y RADIO DE COBERTURA
-- Con tu conocimiento general, **identifica recorridos icónicos** del destino (day-trips, penínsulas, cascadas, volcanes, rutas escénicas, etc.).
-- Si la estancia es **≤ 5 días**, prioriza lo mejor dentro de **~2h–2h30 por trayecto** desde la ciudad base; si es **> 5 días**, permite **~3h por trayecto**.
-- Cuando el recorrido lo amerite, desglosa en **sub-paradas** con el formato **"Destino — Subparada"** (p.ej., "Costa Sur — Seljalandsfoss", "Círculo Dorado — Geysir").
-- **No priorices "A pie" por inercia**: elige el medio que maximiza la experiencia (clima, distancias, confort).
+- Identifica **recorridos icónicos** del destino (day-trips, penínsulas, cascadas, volcanes, rutas escénicas).
+- Si la estancia es **≤ 5 días**, prioriza lo mejor dentro de **~2h–2h30 por trayecto**; si es **> 5 días**, permite **~3h**.
+- Desglosa en **sub-paradas** con el formato **"Destino — Subparada"** (p.ej., "Costa Sur — Seljalandsfoss", "Círculo Dorado — Geysir").
+- **No priorices "A pie" por inercia**: elige el medio que maximiza experiencia (clima, distancia, confort).
+- Si existe **transporte público eficiente** para un day trip, puedes usarlo; si no, usa **"Vehículo alquilado o Tour guiado"**.
 
 🌌 AURORAS — **REGLA DURA**
-- Sugiere auroras sólo si el destino está en latitudes ≥ ~55°N **y** la fecha está en temporada (aprox. finales de agosto a mediados de abril).
-- Horarios **siempre ≥ 18:00**, ideal **21:30–00:30** (no más tarde de ~01:00).
-- Evita noches consecutivas y evita que la única noche sea el último día; en 4–5+ días, 2–3 noches es razonable.
-- Tras una noche de auroras, **el día siguiente inicia ≥10:30** y **prefiere plan urbano o cercano** (evita recorridos de conducción prolongada).
+- Sugiere auroras sólo si latitud ≥ ~55°N y fecha en temporada (fin de ago–mediados de abr).
+- Horarios **≥ 18:00**, ideal **21:30–00:30** (no más tarde de ~01:00).
+- Evita noches consecutivas y que la única sea el último día.
+- Tras una noche de auroras, **día siguiente inicia ≥10:30** con plan urbano/cercano.
 
 🚆 TRANSPORTE Y TIEMPOS
-- Horas ordenadas, **sin solapes**, con buffers razonables.
-- En **day trips** cuando el usuario no especifica, usa **"Vehículo alquilado o Tour guiado"** (evita bus/tren si no es viable).
+- Horas ordenadas, sin solapes, con buffers razonables.
+- En day trips sin preferencia explícita del usuario, usa **"Vehículo alquilado o Tour guiado"** salvo que el transporte público sea **claramente** eficiente.
 - Incluye tiempos aproximados de actividad y traslados.
 
 🔁 REGRESO
-- Si el día salió fuera de la ciudad base, **agrega al final** "Regreso a <Ciudad base>" con hora realista.
-- En noches de auroras, **finaliza con "Regreso a hotel"**.
+- Si hubo salida fuera de la ciudad base, agrega **"Regreso a <Ciudad base>"** al final.
+- En noches de auroras, finaliza con **"Regreso a hotel"**.
 
 📝 EDICIÓN
 - Si el usuario pide agregar/quitar/ajustar, responde con el **JSON actualizado**.
 
 🎨 ESTILO
-- Cada día debe fluir como una historia (inicio, desarrollo, cierre).
-- Notas cortas y motivadoras; vocabulario variado.
-
-🚫 EVITA
-- saludos, meta-explicaciones, "seed", notas repetidas, frases impersonales.
+- Cada día fluye como una historia; notas cortas y motivadoras.
 `.trim();
 
 // ==============================
@@ -454,21 +446,18 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // 🧭 MODO INFO CHAT — sin JSON, texto libre
     if (mode === "info") {
       const raw = await callStructured(clientMessages);
       const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — con reglas flexibles
     let raw = await callStructured(
       [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
       0.4
     );
     let parsed = normalizeParsed(cleanToJSON(raw));
 
-    // Pass 2: exige al menos 1 row
     const hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     if (!hasRows) {
       const strictPrompt =
@@ -483,7 +472,6 @@ OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
       parsed = normalizeParsed(cleanToJSON(raw));
     }
 
-    // Pass 3: ejemplo mínimo (solo formato; sin predefinir contenido)
     const stillNoRows = !parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0;
     if (stillNoRows) {
       const ultraPrompt =
