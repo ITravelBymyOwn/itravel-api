@@ -139,6 +139,11 @@ function toHHMM(mins = 0) {
    SECCIÓN 4 · Post-procesos (orden, auroras, retornos, dedupe)
 ────────────────────────────────────────────────────── */
 
+// Escapa texto para uso seguro en RegExp (evita Invalid regular expression)
+function escapeRegExp(str = "") {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // Clave de orden por minuto que tolera actividades nocturnas/cruce de medianoche
 function sortKeyMinutes(row) {
   const s = toMinutes(row.start || "00:00");
@@ -166,13 +171,16 @@ function normalizeAuroraWindow(row) {
   // Defaults razonables si faltan
   let s = toMinutes(row.start || "20:30");
   let e = toMinutes(row.end || "00:30");
-  // Si el "end" parece ser pasada la medianoche y nos dieron HH:MM del mismo día (e < s),
-  // lo estiramos; de cualquier modo forzamos ≥ 4h más abajo.
-  if (e <= s) e = s + 240;
+
+  // Normalizar números por si llegan NaN
+  if (!Number.isFinite(s)) s = toMinutes("20:30");
+  if (!Number.isFinite(e)) e = s + 240;
+
+  if (e <= s) e = s + 240; // asegurar ≥4h
 
   // Encajar en la franja 18:00–01:00
   if (s < MIN) s = MIN;
-  if (e - s < 240) e = s + 240;      // asegurar 4h mínimas
+  if (e - s < 240) e = s + 240;
   if (e > MAX) {
     // Si nos pasamos del límite, corremos el inicio hacia atrás manteniendo 4h
     s = Math.max(MIN, MAX - 240);
@@ -185,7 +193,7 @@ function normalizeAuroraWindow(row) {
   return {
     ...row,
     start: toHHMM(s),
-    end: toHHMM(e % (24 * 60)), // devolvemos HH:MM modulo 24h
+    end: toHHMM(e), // toHHMM ya hace wrap modulo 24h
     transport: row.transport || "Vehículo alquilado o Tour guiado",
     duration: row.duration || durTxt,
   };
@@ -213,15 +221,17 @@ function normalizeTransportTrip(activity = "", to = "", transport = "") {
 // Si hubo salida fuera de ciudad, aseguramos “Regreso a <Ciudad>”
 function ensureReturnToCity(destination, rowsOfDay) {
   if (!Array.isArray(rowsOfDay) || !rowsOfDay.length) return rowsOfDay;
+
   const anyTrip = rowsOfDay.some(r =>
     OUT_OF_TOWN_RE.test(`${r.activity||""} ${r.to||""}`)
   );
   if (!anyTrip) return rowsOfDay;
 
   const last = rowsOfDay[rowsOfDay.length - 1] || {};
+  const destRe = new RegExp(escapeRegExp(destination), "i"); // ← seguro
   const alreadyBack =
     /regreso\s+a/i.test(last.activity || "") ||
-    new RegExp(destination, "i").test(last.to || "");
+    destRe.test(last.to || "");
   if (alreadyBack) return rowsOfDay;
 
   const endM = toMinutes(last.end || "18:00");
@@ -310,7 +320,7 @@ function injectAuroraIfMissing(dest, rows) {
   const mk = (day) => normalizeAuroraWindow({
     day,
     start: "20:30",
-    end: "00:30",         // será ajustado a 4h por normalizeAuroraWindow
+    end: "00:30",         // se ajustará a ≥4h por normalizeAuroraWindow
     activity: "Caza de Auroras Boreales",
     from: dest,
     to: "Zona de observación",
