@@ -1,5 +1,8 @@
-// /api/chat.js — v36.2 (ESM compatible en Vercel)
-// FIX: paréntesis extra en extractMessages (provocaba fallback inmediato).
+// /api/chat.js — v36.3 (ESM compatible en Vercel)
+// Cambios 36.3 (ultra-quirúrgicos):
+// - callStructured con 3 intentos (JSON-forzado en el 2.º).
+// - max_output_tokens 3500.
+// - sin tocar lógica de normalización/prompt.
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -13,7 +16,7 @@ function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
   const prev = Array.isArray(history) ? history : [];
-  const userText = typeof input === "string" ? input : ""; // ✅ fix aquí
+  const userText = typeof input === "string" ? input : "";
   return [...prev, { role: "user", content: userText }];
 }
 
@@ -136,8 +139,6 @@ function ensureReturnLine(destination, rowsOfDay) {
   if (!anyTrip) return rowsOfDay;
 
   const last = rowsOfDay[rowsOfDay.length - 1] || {};
-
-  // ⛑️ Escapar el destino antes de compilar el RegExp
   const safeDest = escapeRegExp(destination || "");
   const alreadyBack =
     /regreso\s+a/i.test(last.activity || "") ||
@@ -364,23 +365,66 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 `.trim();
 
 // ==============================
-// Llamada al modelo
+// Llamada al modelo (con 3 intentos)
 // ==============================
 async function callStructured(messages, temperature = 0.4) {
-  const resp = await client.responses.create({
-    model: "gpt-4o-mini",
-    temperature,
-    input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-    max_output_tokens: 2200,
-  });
+  // Intento 1: normal
+  try {
+    const resp1 = await client.responses.create({
+      model: "gpt-4o-mini",
+      temperature,
+      input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+      max_output_tokens: 3500,
+    });
+    const txt1 =
+      resp1?.output_text?.trim() ||
+      resp1?.output?.[0]?.content?.[0]?.text?.trim() ||
+      "";
+    if (txt1) return txt1;
+  } catch (e) {
+    console.warn("callStructured try#1 error:", e?.message || e);
+  }
 
-  const text =
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-    "";
+  // Intento 2: forzar JSON si la API lo soporta
+  try {
+    const resp2 = await client.responses.create({
+      model: "gpt-4o-mini",
+      temperature: Math.max(0, temperature - 0.1),
+      response_format: { type: "json_object" }, // si no se soporta, el try/catch lo absorbe
+      input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}\n`).join("\n"),
+      max_output_tokens: 3500,
+    });
+    const txt2 =
+      resp2?.output_text?.trim() ||
+      resp2?.output?.[0]?.content?.[0]?.text?.trim() ||
+      "";
+    if (txt2) return txt2;
+  } catch (e) {
+    console.warn("callStructured try#2 (json_object) error:", e?.message || e);
+  }
 
-  console.log("🛰️ RAW RESPONSE:", text);
-  return text;
+  // Intento 3: recordatorio explícito “SOLO JSON”, temperatura baja
+  try {
+    const forced = [
+      { role: "system", content: "Devuelve EXCLUSIVAMENTE un JSON válido del itinerario solicitado. Ningún texto fuera del JSON." },
+      ...messages,
+    ];
+    const resp3 = await client.responses.create({
+      model: "gpt-4o-mini",
+      temperature: 0.2,
+      input: forced.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+      max_output_tokens: 3500,
+    });
+    const txt3 =
+      resp3?.output_text?.trim() ||
+      resp3?.output?.[0]?.content?.[0]?.text?.trim() ||
+      "";
+    if (txt3) return txt3;
+  } catch (e) {
+    console.warn("callStructured try#3 error:", e?.message || e);
+  }
+
+  return "";
 }
 
 // ==============================
