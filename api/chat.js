@@ -1,8 +1,9 @@
-// /api/chat.js — v36.3 (ESM compatible en Vercel)
-// Cambios 36.3 (ultra-quirúrgicos):
-// - callStructured con 3 intentos (JSON-forzado en el 2.º).
-// - max_output_tokens 3500.
-// - sin tocar lógica de normalización/prompt.
+// /api/chat.js — v36.4 (ESM compatible en Vercel)
+// Cambios v36.4 (ultra-quirúrgicos):
+// - callStructured simplificado y robusto (3 intentos, sin response_format).
+// - cleanToJSON vuelve al enfoque tolerante de v31.2 + 1 pasada extra opcional.
+// - Se mantiene TODA la lógica nueva: auroras (regla dura horarios ≥18:00), “Vehículo alquilado o Tour guiado” en day-trips,
+//   sub-paradas "Destino — Subparada", regreso a ciudad base, radio ≤2h (≤5d) o ≤3h (>5d), no priorizar “A pie” por inercia.
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -22,37 +23,37 @@ function extractMessages(body = {}) {
 
 function stripCodeFences(text = "") {
   if (typeof text !== "string") return text;
-  // elimina ```json ... ``` o ``` ... ```
-  return text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-}
-
-function tryExtractJSONObject(s = "") {
-  const txt = String(s);
-  const start = txt.indexOf("{");
-  const end = txt.lastIndexOf("}");
-  if (start >= 0 && end > start) return txt.slice(start, end + 1);
-  return null;
+  // Remueve cercas si vinieran, pero sin vaciar todo si no existen
+  const t = text.trim();
+  if (/^```/m.test(t) && /```$/m.test(t)) {
+    return t.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  }
+  return t;
 }
 
 function cleanToJSON(raw = "") {
   if (!raw || typeof raw !== "string") return null;
-  const candidates = [];
 
-  const stripped = stripCodeFences(raw);
-  if (stripped) candidates.push(stripped);
+  // Enfoque v31.2 (tolerante) + una pasada extra opcional
+  const txt = stripCodeFences(raw);
 
-  const fenced = (raw.match(/```(?:json)?([\s\S]*?)```/i) || [])[1];
-  if (fenced) candidates.push(fenced.trim());
+  // 1) parse directo
+  try {
+    return JSON.parse(txt);
+  } catch {}
 
-  const sliced = tryExtractJSONObject(raw);
-  if (sliced) candidates.push(sliced);
+  // 2) recorta basura antes/después del primer/último brace (v31.2 style)
+  try {
+    const cleaned = txt.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+    return JSON.parse(cleaned);
+  } catch {}
 
-  for (const c of candidates) {
-    try {
-      const j = JSON.parse(c);
-      if (j && typeof j === "object") return j;
-    } catch (_) {}
-  }
+  // 3) pasada opcional: toma el mayor bloque { ... } si existiera
+  try {
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+  } catch {}
+
   return null;
 }
 
@@ -76,7 +77,6 @@ function fallbackJSON() {
   };
 }
 
-// Escapar texto para usarlo dentro de un RegExp literal sin romperlo
 function escapeRegExp(str = "") {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -84,16 +84,13 @@ function escapeRegExp(str = "") {
 // ==============================
 // Normalización y post-procesos
 // ==============================
-
-// Heurística para detectar salidas fuera de ciudad (day-trips conocidos/semánticos)
 const OUT_OF_TOWN_RE =
   /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|kirkjufell|djúpalónssandur|puente\s+entre\s+continentes|sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching)\b/i;
 
 const AURORA_RE = /\b(auroras?|northern\s*lights?)\b/i;
 
-// Ciudades/regiones típicas de latitud >= ~55°N (heurístico)
 const AURORA_CITY_RE =
-  /(reykjav[ií]k|reikiavik|reykiavik|akureyri|troms[oø]|tromso|alta|bod[oø]|narvik|lofoten|abisko|kiruna|rovaniemi|ivattilo|inuvik|yellowknife|fairbanks|murmansk|iceland|islandia|lapland|laponia)/i;
+  /(reykjav[ií]k|reikiavik|reykiavik|akureyri|troms[oø]|tromso|alta|bod[oø]|narvik|lofoten|abisko|kiruna|rovaniemi|inuvik|yellowknife|fairbanks|murmansk|iceland|islandia|lapland|laponia)/i;
 
 function pad(n) { return n.toString().padStart(2, "0"); }
 function toMinutes(hhmm = "00:00") {
@@ -107,18 +104,17 @@ function toHHMM(mins = 0) {
   return `${pad(h)}:${pad(m)}`;
 }
 
-// Ajuste horario para actividades de auroras (>=18:00; óptimo 21:30–02:30)
+// ≥18:00; preferible 21:30–02:30
 function normalizeAuroraWindow(row) {
   if (!AURORA_RE.test(row.activity || "")) return row;
 
-  // Duro: nunca antes de 18:00. Óptimo 21:30–02:30
   const MIN_EVENING = toMinutes("18:00");
   let s = toMinutes(row.start || "21:30");
   let e = toMinutes(row.end || "00:30");
   const PREF_START = toMinutes("21:30");
   const MAX_END = toMinutes("03:00");
   if (s < MIN_EVENING) s = PREF_START;
-  if (e <= s) e = s + 120; // mínimo 2h
+  if (e <= s) e = s + 120;
   if (e > MAX_END) e = MAX_END;
 
   return {
@@ -129,7 +125,6 @@ function normalizeAuroraWindow(row) {
   };
 }
 
-// Inserta “Regreso a <dest>” si hubo salida fuera de ciudad y el día no cierra con retorno
 function ensureReturnLine(destination, rowsOfDay) {
   if (!Array.isArray(rowsOfDay) || !rowsOfDay.length) return rowsOfDay;
 
@@ -145,7 +140,6 @@ function ensureReturnLine(destination, rowsOfDay) {
     (safeDest ? new RegExp(safeDest, "i").test(last.to || "") : false);
   if (alreadyBack) return rowsOfDay;
 
-  // crear regreso con buffer 20–90m
   const endMins = toMinutes(last.end || "18:00");
   const start = toHHMM(endMins + 20);
   const end = toHHMM(endMins + 90);
@@ -166,12 +160,10 @@ function ensureReturnLine(destination, rowsOfDay) {
   return [...rowsOfDay, back];
 }
 
-// Detección simple de ciudades aptas para auroras por nombre (lat >= ~55°N)
 function isAuroraEligibleCity(name = "") {
   return AURORA_CITY_RE.test(String(name || ""));
 }
 
-// Inyecta auroras si el itinerario plausible no las incluyó (no consecutivas, evitando sólo el último día)
 function injectAuroraIfMissing(dest, rows) {
   if (!isAuroraEligibleCity(dest)) return rows;
 
@@ -216,15 +208,9 @@ function injectAuroraIfMissing(dest, rows) {
   return augmented;
 }
 
-/** Normaliza la respuesta del modelo:
- *  - Acepta formato C (destinations[]) y lo convierte a B
- *  - Sanitiza filas
- *  - Postprocesa transporte, auroras y línea de regreso
- */
 function normalizeParsed(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
 
-  // Aceptar formato C -> convertir al primero con rows
   if (!parsed.rows && Array.isArray(parsed.destinations)) {
     const first = parsed.destinations.find(
       (d) => Array.isArray(d.rows) && d.rows.length > 0
@@ -240,7 +226,6 @@ function normalizeParsed(parsed) {
 
   if (!Array.isArray(parsed.rows)) return null;
 
-  // Sanitizar filas (sin cambiar la semántica)
   let rows = parsed.rows
     .map((r, idx) => {
       const dayNum = Number.isFinite(+r.day) && +r.day > 0 ? +r.day : 1 + (idx % 7);
@@ -249,13 +234,10 @@ function normalizeParsed(parsed) {
       const activity = (r.activity || "").toString().trim() || "Actividad";
       let transport = ((r.transport || "").toString().trim());
 
-      // Day trip: fuerza transporte dual si está vacío / no viable
       const isTrip = OUT_OF_TOWN_RE.test(`${activity} ${(r.to || "").toString()}`);
       if (isTrip && (!transport || /a pie|bus|tren/i.test(transport))) {
         transport = "Vehículo alquilado o Tour guiado";
       }
-
-      // En urbano: no priorizar "A pie" por defecto; si el modelo lo puso, se respeta.
       if (!isTrip && !transport) {
         transport = "Taxi";
       }
@@ -272,12 +254,10 @@ function normalizeParsed(parsed) {
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
     })
-    .slice(0, 120); // safety
+    .slice(0, 120);
 
-  // Ajustes de auroras (ventanas plausibles)
   rows = rows.map(normalizeAuroraWindow);
 
-  // Insertar "Regreso a <ciudad>" al final de días con day-trip si falta
   const dest = parsed.destination || "Ciudad";
   const byDay = rows.reduce((acc, r) => {
     (acc[r.day] = acc[r.day] || []).push(r);
@@ -292,10 +272,8 @@ function normalizeParsed(parsed) {
       merged.push(...fixed);
     });
 
-  // Inyectar auroras si corresponde y no existen (ciudades elegibles)
   const withAuroras = injectAuroraIfMissing(dest, merged);
 
-  // Reorden final por día/hora
   withAuroras.sort((a, b) => (a.day - b.day) || (toMinutes(a.start) - toMinutes(b.start)));
 
   parsed.rows = withAuroras;
@@ -365,63 +343,70 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 `.trim();
 
 // ==============================
-// Llamada al modelo (con 3 intentos)
+// Llamada al modelo (3 intentos seguros)
 // ==============================
 async function callStructured(messages, temperature = 0.4) {
-  // Intento 1: normal
+  // 1) intento normal (como v31.2)
   try {
-    const resp1 = await client.responses.create({
+    const resp = await client.responses.create({
       model: "gpt-4o-mini",
       temperature,
       input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-      max_output_tokens: 3500,
+      max_output_tokens: 3200,
     });
-    const txt1 =
-      resp1?.output_text?.trim() ||
-      resp1?.output?.[0]?.content?.[0]?.text?.trim() ||
+    const text =
+      resp?.output_text?.trim() ||
+      resp?.output?.[0]?.content?.[0]?.text?.trim() ||
       "";
-    if (txt1) return txt1;
+    if (text) return text;
   } catch (e) {
-    console.warn("callStructured try#1 error:", e?.message || e);
+    console.warn("callStructured#1", e?.message || e);
   }
 
-  // Intento 2: forzar JSON si la API lo soporta
-  try {
-    const resp2 = await client.responses.create({
-      model: "gpt-4o-mini",
-      temperature: Math.max(0, temperature - 0.1),
-      response_format: { type: "json_object" }, // si no se soporta, el try/catch lo absorbe
-      input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}\n`).join("\n"),
-      max_output_tokens: 3500,
-    });
-    const txt2 =
-      resp2?.output_text?.trim() ||
-      resp2?.output?.[0]?.content?.[0]?.text?.trim() ||
-      "";
-    if (txt2) return txt2;
-  } catch (e) {
-    console.warn("callStructured try#2 (json_object) error:", e?.message || e);
-  }
-
-  // Intento 3: recordatorio explícito “SOLO JSON”, temperatura baja
+  // 2) intento estricto: SOLO JSON
   try {
     const forced = [
       { role: "system", content: "Devuelve EXCLUSIVAMENTE un JSON válido del itinerario solicitado. Ningún texto fuera del JSON." },
       ...messages,
     ];
-    const resp3 = await client.responses.create({
+    const resp = await client.responses.create({
       model: "gpt-4o-mini",
-      temperature: 0.2,
+      temperature: 0.25,
       input: forced.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-      max_output_tokens: 3500,
+      max_output_tokens: 3200,
     });
-    const txt3 =
-      resp3?.output_text?.trim() ||
-      resp3?.output?.[0]?.content?.[0]?.text?.trim() ||
+    const text =
+      resp?.output_text?.trim() ||
+      resp?.output?.[0]?.content?.[0]?.text?.trim() ||
       "";
-    if (txt3) return txt3;
+    if (text) return text;
   } catch (e) {
-    console.warn("callStructured try#3 error:", e?.message || e);
+    console.warn("callStructured#2", e?.message || e);
+  }
+
+  // 3) intento con ejemplo de FORMATO mínimo (no contenido)
+  try {
+    const exemplar = [
+      ...messages,
+      {
+        role: "system",
+        content:
+          'Ejemplo VÁLIDO de formato mínimo:\n{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}',
+      },
+    ];
+    const resp = await client.responses.create({
+      model: "gpt-4o-mini",
+      temperature: 0.1,
+      input: exemplar.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+      max_output_tokens: 3200,
+    });
+    const text =
+      resp?.output_text?.trim() ||
+      resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+      "";
+    if (text) return text;
+  } catch (e) {
+    console.warn("callStructured#3", e?.message || e);
   }
 
   return "";
