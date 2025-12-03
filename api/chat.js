@@ -103,7 +103,7 @@ function fallbackJSON() {
    SECCIÓN 3 · Constantes, utilidades de tiempo y regex
 ────────────────────────────────────────────────────── */
 const OUT_OF_TOWN_RE =
-  /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|kirkjufell|djúpalónssandur|puente\s+entre\s+continentes|sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching|snaefellsnes)\b/i;
+  /\b(thingvellir|þingvellir|gullfoss|geysir|golden\s*circle|círculo\s*dorado|seljalandsfoss|skógafoss|skogafoss|reynisfjara|v[ií]k|sn[aá]efellsnes|snaefellsnes|kirkjufell|kirkjufellsfoss|djúpalónssandur|dritv[ií]k|arnarstapi|hellnar|b[uú]ð(i|ir)|puente\s+entre\s+continentes|bridge\s+between\s+continents|sn[aá]efellsj[oö]kull|blue\s*lagoon|laguna\s*azul|reykjanes|kr[ýy]suv[ií]k|selt[uú]n|kleifarvatn|reykjanesviti|fagradalsfjall|costa\s*sur|pen[ií]nsula|fiordo|glaciar|volc[aá]n|cueva\s+de\s+hielo|ice\s*cave|whale\s*watching|toledo|segovia)\b/i;
 
 const AURORA_RE = /\b(auroras?|northern\s*lights?)\b/i;
 
@@ -115,7 +115,8 @@ const NO_PUBLIC_EFFICIENT = [
   "círculo dorado", "golden circle",
   "snæfellsnes", "snaefellsnes",
   "costa sur", "reynisfjara", "vík", "vik",
-  "reykjanes", "kirkjufell", "kirkjufellsfoss"
+  "reykjanes", "kirkjufell", "kirkjufellsfoss",
+  "kleifarvatn", "krýsuvík", "seltún", "reykjanesviti", "fagradalsfjall"
 ];
 
 function pad(n) { return n.toString().padStart(2, "0"); }
@@ -182,7 +183,6 @@ function normalizeTransportTrip(activity = "", to = "", transport = "") {
   const alreadyOK = /tour|alquilad|veh[ií]culo|auto|carro|coche/.test(t);
   if (alreadyOK) return transport;
 
-  // si el modelo propuso metro/bus/tren para rutas sin público eficiente → forzar dupla
   const usedPublic = /(metro|bus|autob|tren|p[uú]blico)/.test(t);
   const mentionsNoPublic = NO_PUBLIC_EFFICIENT.some(w => txt.includes(w));
   if (!t || usedPublic || mentionsNoPublic) {
@@ -266,20 +266,36 @@ function dedupeRows(rows = []) {
   return out;
 }
 
-// Inyección de auroras (si falta) con 1–2 noches, nunca consecutivas y no solo último día
+// ¿ciudad apta para auroras?
 function isAuroraEligibleCity(name = "") { return AURORA_CITY_RE.test(String(name || "")); }
 
-function injectAuroraIfMissing(dest, rows) {
+/** Inyecta auroras hasta alcanzar el mínimo requerido:
+ *  - Estancia ≥3 días: objetivo = 2 noches
+ *  - Evita última noche y noches consecutivas
+ *  - Mantiene cualquier noche ya existente
+ */
+function injectAurorasToReachMinimum(dest, rows) {
   if (!isAuroraEligibleCity(dest)) return rows;
-  if (rows.some(r => AURORA_RE.test(r.activity || ""))) return rows;
 
   const byDay = rows.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   const days = Object.keys(byDay).map(Number).sort((a,b)=>a-b);
   if (!days.length) return rows;
 
-  const last = days[days.length - 1];
-  const d1 = days.find(d => d !== last) || days[0];
-  const d2 = days.length >= 4 ? days.find(d => d !== d1 && d !== last && Math.abs(d - d1) > 1) : null;
+  const stay = days.length;
+  const target = stay >= 3 ? 2 : 1;
+
+  const existing = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
+  if (existing.length >= target) return rows;
+
+  const forbidden = new Set([days[days.length-1], ...existing, ...existing.map(d=>d-1), ...existing.map(d=>d+1)]);
+  const choices = [];
+  for (const d of days) {
+    if (forbidden.has(d)) continue;
+    if (choices.length && Math.abs(d - choices[choices.length-1]) <= 1) continue;
+    choices.push(d);
+    if (existing.length + choices.length >= target) break;
+  }
+  if (!choices.length) return rows;
 
   const mk = (day) => normalizeAuroraWindow({
     day,
@@ -290,12 +306,11 @@ function injectAuroraIfMissing(dest, rows) {
     to: "Zona de observación",
     transport: "Vehículo alquilado o Tour guiado",
     duration: "3h",
-    notes: "Salida nocturna para intentar ver auroras (horario orientativo).",
+    notes: "Salida nocturna (si las condiciones lo permiten).",
   });
 
   const out = rows.slice();
-  out.push(mk(d1));
-  if (d2) out.push(mk(d2));
+  choices.forEach(d => out.push(mk(d)));
   out.sort((a,b)=>(a.day-b.day)||(sortKeyMinutes(a)-sortKeyMinutes(b)));
   return out;
 }
@@ -318,24 +333,33 @@ function relaxNextMorningIfAurora(byDay) {
   }
 }
 
+// Máximo global de auroras (no consecutivas; nunca dejar solo la última noche)
 function enforceAuroraCapGlobal(rows) {
   const byDay = rows.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   const days = Object.keys(byDay).map(Number).sort((a,b)=>a-b);
   const stay = days.length;
-  const cap = stay >= 5 ? 2 : (stay >= 3 ? 1 : 1);
+  const cap = stay >= 3 ? 2 : 1; // ← permite hasta 2 noches desde 3 días de estancia
 
   let auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
   auroraDays.sort((a,b)=>a-b);
+
+  // evitar consecutivas
   for (let i=1; i<auroraDays.length; i++){
     if (auroraDays[i] === auroraDays[i-1] + 1) {
       byDay[auroraDays[i]] = (byDay[auroraDays[i]]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
     }
   }
+
+  // recalcular
   auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
+
+  // evitar que la ÚNICA sea el último día
   if (auroraDays.length === 1 && auroraDays[0] === days[days.length-1]) {
     const last = days[days.length-1];
     byDay[last] = (byDay[last]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
   }
+
+  // aplicar tope (máx 2)
   auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
   if (auroraDays.length > cap) {
     const keep = auroraDays.slice(0, cap);
@@ -343,6 +367,7 @@ function enforceAuroraCapGlobal(rows) {
       if (!keep.includes(d)) byDay[d] = (byDay[d]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
     }
   }
+
   const merged = [];
   days.forEach(d => (byDay[d]||[]).forEach(r=>merged.push(r)));
   return merged;
@@ -442,8 +467,8 @@ function normalizeParsed(parsed) {
     afterRelax.push(...byDay2[d]);
   });
 
-  // Inyección de auroras (si aplica) + tope global
-  let withAuroras = injectAuroraIfMissing(dest, afterRelax);
+   // Inyección de auroras hasta alcanzar el mínimo (y tope global)
+  let withAuroras = injectAurorasToReachMinimum(dest, afterRelax);
   withAuroras = enforceAuroraCapGlobal(withAuroras);
 
   // Deduplicación final
@@ -488,24 +513,32 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "notes": "Descripción motivadora y breve"
 }
 
-🌟 TOURS ICÓNICOS (obligatorio formato)
-- Usa SIEMPRE el formato **"Ruta — Subparada"**.
-- Incluye **al menos 3 subparadas** por ruta cuando aplique.
-- Ejemplos:
-  - "Círculo Dorado — Þingvellir", "Círculo Dorado — Geysir", "Círculo Dorado — Gullfoss"
-  - "Reykjanes — Laguna Azul", "Reykjanes — Krýsuvík", "Reykjanes — Seltún"
-  - "Snæfellsnes — Kirkjufell", "Snæfellsnes — Kirkjufellsfoss", "Snæfellsnes — Parque Nacional Snæfellsjökull"
+🌆 PRIORIDAD DE IMPERDIBLES URBANOS (LÓGICA GLOBAL)
+- Prioriza **imperdibles de la ciudad base** antes de proponer excursiones.
+  Ejemplos:
+  • **Madrid**: Prado, Palacio Real, Plaza Mayor, Retiro, Gran Vía, Templo de Debod; **luego** (si hay tiempo) **Toledo/Segovia**.
+  • **París/Londres/Roma**: cubre 6–10 hitos intramuros antes de day trips.
+- En destinos como **Reikiavik**, equilibra 2–3 day trips icónicos con tiempo en ciudad (Hallgrímskirkja, Harpa, Laugavegur, Museo Nacional).
 
-🌌 AURORAS — **REGLA DURA**
-- Sugiere auroras solo si latitud ≥ ~55°N y temporada (fin de ago–mediados de abr).
-- Duración 2–4h, **entre 18:00 y 01:00**.
-- Evita noches consecutivas y que la única sea el último día.
-- Después de una noche de auroras, el **día siguiente inicia ≥10:30** con plan cercano/urbano.
+🧭 TOURS ICÓNICOS (formato obligatorio)
+- Usa SIEMPRE el formato **"Ruta — Subparada"**.
+- Incluye **≥3 subparadas** por ruta cuando aplique.
+- Ejemplos:
+  - **Círculo Dorado** — Þingvellir; Geysir; Gullfoss.
+  - **Reykjanes** — Kleifarvatn; Seltún/Krýsuvík; Bridge Between Continents; Reykjanesviti; Fagradalsfjall (vista/centro); Blue Lagoon (si aplica).
+  - **Snæfellsnes** — Kirkjufell; Kirkjufellsfoss; Arnarstapi/Hellnar; Djúpalónssandur/Dritvík; Parque Nac. Snæfellsjökull; Búðir.
 
 🚆 TRANSPORTE Y TIEMPOS
 - Orden sin solapes, con buffers razonables.
 - **Si el usuario no especificó transporte y no hay transporte público claramente eficiente para un day trip, usa "Vehículo alquilado o Tour guiado".**
 - Incluye tiempos aproximados de actividad y traslados.
+
+🌌 AURORAS — **REGLAS DURAS**
+- Solo si latitud ≥ ~55°N y temporada (fin de ago–mediados de abr).
+- Duración 2–4h, **entre 18:00 y 01:00**.
+- Propón **al menos 2 noches** si la estancia es ≥3 días, **no consecutivas** y **nunca en el último día**.
+- El día siguiente a una noche de auroras inicia **≥10:30** con plan cercano/urbano.
+- En "followup", añade que se pueden sumar **noches opcionales** de auroras si el pronóstico lo permite.
 
 🔁 CIERRE DEL DÍA
 - **Siempre** termina cada día con **"Regreso a hotel"**.
