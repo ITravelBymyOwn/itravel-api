@@ -15,13 +15,20 @@ import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
+  timeout: 30000, // ← evita timeouts cortos que acaban en fallback silencioso
 });
 
 /* ────────────────────────────────────────────────────
    SECCIÓN 2 · Helpers de parsing y fallback
 ────────────────────────────────────────────────────── */
+function preferBody(req) {
+  // Soporta Next API (req.body ya parseado) y posibles edge runtimes.
+  if (req && typeof req.body === "object" && req.body !== null) return req.body;
+  return null;
+}
+
 function extractMessages(body = {}) {
-  const { messages, input, history } = body;
+  const { messages, input, history } = body || {};
   if (Array.isArray(messages) && messages.length) return messages;
   const prev = Array.isArray(history) ? history : [];
   const userText = typeof input === "string" ? input : "";
@@ -49,7 +56,10 @@ function tryRepairJsonMinor(raw = "") {
   return t;
 }
 
-function cleanToJSON(raw = "") {
+function cleanToJSON(raw) {
+  // Acepta objetos ya “JSONeados” por el SDK
+  if (raw && typeof raw === "object") return raw;
+
   if (!raw || typeof raw !== "string") return null;
   const candidates = [];
 
@@ -76,7 +86,7 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
-function fallbackJSON() {
+function fallbackJSON(reason = "unknown") {
   return {
     destination: "Desconocido",
     rows: [
@@ -93,7 +103,7 @@ function fallbackJSON() {
       },
     ],
     replace: false,
-    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
+    followup: `⚠️ Fallback local (${reason}). Revisa logs/RED.`,
   };
 }
 
@@ -519,18 +529,30 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 /* ────────────────────────────────────────────────────
    SECCIÓN 7 · Llamada al modelo (triple intento)
 ────────────────────────────────────────────────────── */
+function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
 async function chatJSON(messages, temperature = 0.3) {
-  // messages: [{role:"system"/"user"/"assistant", content:"..."}]
-  const resp = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature,
-    response_format: { type: "json_object" },
-    messages,
-    max_tokens: 3200, // margen extra para 4–5 días
-  });
-  const text =
-    resp?.choices?.[0]?.message?.content?.trim() || "";
-  return text;
+  // Hasta 3 reintentos con backoff suave, captura 429/5xx y timeouts.
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const resp = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature,
+        response_format: { type: "json_object" },
+        messages,
+        max_tokens: 3200,
+      });
+      const content = resp?.choices?.[0]?.message?.content;
+      if (!content) throw new Error("Empty content");
+      return content; // suele venir como string JSON válido
+    } catch (err) {
+      lastErr = err;
+      // 1º backoff 300ms, 2º 800ms (no bloquea al usuario perceptiblemente)
+      await wait(attempt === 1 ? 300 : 800);
+    }
+  }
+  throw lastErr || new Error("Unknown OpenAI error");
 }
 
 /* ────────────────────────────────────────────────────
@@ -542,24 +564,30 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body || {};
+    // Body robusto
+    const fromBody = preferBody(req);
+    const body = fromBody || {};
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
     if (mode === "info") {
-      // En modo info no forzamos JSON
-      const text = await chatJSON(clientMessages, 0.3);
-      return res.status(200).json({ text: text || "⚠️ No se obtuvo respuesta del asistente." });
+      // Devuelve texto del modelo (no forzamos post-proceso)
+      try {
+        const text = await chatJSON(clientMessages, 0.3);
+        return res.status(200).json({ text: text || "⚠️ Sin respuesta" });
+      } catch (e) {
+        console.error("info mode error:", e);
+        return res.status(200).json({ text: JSON.stringify(fallbackJSON("info-mode-error")) });
+      }
     }
 
-    // Construir messages (system + conversación del cliente)
     const baseMsgs = [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages];
 
     // Intento 1
     let raw = await chatJSON(baseMsgs, 0.3);
     let parsed = normalizeParsed(cleanToJSON(raw));
 
-    // Intento 2 (insistir con al menos 1 fila)
+    // Intento 2 (forzar al menos 1 fila)
     const hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     if (!hasRows) {
       const strictMsgs = [
@@ -575,7 +603,7 @@ export default async function handler(req, res) {
     if (stillNoRows) {
       const ultraMsgs = [
         { role: "system", content: SYSTEM_PROMPT + `
-Ejemplo VÁLIDO de formato mínimo (devuélvelo como JSON real, sin texto extra):
+Ejemplo VÁLIDO (devuélvelo como JSON real):
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}],"replace":false}` },
         ...clientMessages,
       ];
@@ -583,10 +611,11 @@ Ejemplo VÁLIDO de formato mínimo (devuélvelo como JSON real, sin texto extra)
       parsed = normalizeParsed(cleanToJSON(raw));
     }
 
-    if (!parsed) parsed = fallbackJSON();
+    if (!parsed) parsed = fallbackJSON("no-parse-after-3-attempts");
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
-    console.error("❌ /api/chat error:", err);
-    return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
+    console.error("❌ /api/chat fatal error:", err?.message || err);
+    return res.status(200).json({ text: JSON.stringify(fallbackJSON(err?.message || "unknown-error")) });
   }
 }
+
