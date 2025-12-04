@@ -1,6 +1,6 @@
 // =====================================================
 // /api/chat.js — v36.8 (ESM compatible en Vercel)
-// Correcciones: anti-fallback robusto, auroras 18:00–01:00,
+// Correcciones: anti-fallback robusto, auroras 18:00–01:00 (mín. 4h),
 // regreso a hotel al final de TODOS los días,
 // transporte dual agresivo para day trips,
 // poda de "regresos" al inicio del día, deduplicación fuerte,
@@ -160,29 +160,22 @@ function sortKeyMinutes(row) {
 }
 
 // Ventana de auroras: **entre 18:00 y 01:00**; **duración mínima 4h**.
-// Si la ventana no alcanza, movemos el inicio hacia atrás para garantizar ≥4h.
 function normalizeAuroraWindow(row) {
   if (!AURORA_RE.test(row.activity || "")) return row;
 
   const MIN = toMinutes("18:00");
-  // Usamos 01:00 “del día siguiente”: sumamos 24h para poder cruzar medianoche
-  const MAX = toMinutes("01:00") + 24 * 60;
+  const MAX = toMinutes("01:00") + 24 * 60; // 01:00 del día siguiente
 
-  // Defaults razonables si faltan
   let s = toMinutes(row.start || "20:30");
   let e = toMinutes(row.end || "00:30");
 
-  // Normalizar números por si llegan NaN
   if (!Number.isFinite(s)) s = toMinutes("20:30");
   if (!Number.isFinite(e)) e = s + 240;
+  if (e <= s) e = s + 240;
 
-  if (e <= s) e = s + 240; // asegurar ≥4h
-
-  // Encajar en la franja 18:00–01:00
   if (s < MIN) s = MIN;
   if (e - s < 240) e = s + 240;
   if (e > MAX) {
-    // Si nos pasamos del límite, corremos el inicio hacia atrás manteniendo 4h
     s = Math.max(MIN, MAX - 240);
     e = s + 240;
   }
@@ -193,7 +186,7 @@ function normalizeAuroraWindow(row) {
   return {
     ...row,
     start: toHHMM(s),
-    end: toHHMM(e), // toHHMM ya hace wrap modulo 24h
+    end: toHHMM(e),
     transport: row.transport || "Vehículo alquilado o Tour guiado",
     duration: row.duration || durTxt,
   };
@@ -209,7 +202,6 @@ function normalizeTransportTrip(activity = "", to = "", transport = "") {
   const alreadyOK = /tour|alquilad|veh[ií]culo|auto|carro|coche/.test(t);
   if (alreadyOK) return transport;
 
-  // si el modelo propuso metro/bus/tren para rutas sin público eficiente → forzar dupla
   const usedPublic = /(metro|bus|autob|tren|p[uú]blico)/.test(t);
   const mentionsNoPublic = NO_PUBLIC_EFFICIENT.some(w => txt.includes(w));
   if (!t || usedPublic || mentionsNoPublic) {
@@ -228,7 +220,7 @@ function ensureReturnToCity(destination, rowsOfDay) {
   if (!anyTrip) return rowsOfDay;
 
   const last = rowsOfDay[rowsOfDay.length - 1] || {};
-  const destRe = new RegExp(escapeRegExp(destination), "i"); // ← seguro
+  const destRe = new RegExp(escapeRegExp(destination), "i");
   const alreadyBack =
     /regreso\s+a/i.test(last.activity || "") ||
     destRe.test(last.to || "");
@@ -320,7 +312,7 @@ function injectAuroraIfMissing(dest, rows) {
   const mk = (day) => normalizeAuroraWindow({
     day,
     start: "20:30",
-    end: "00:30",         // se ajustará a ≥4h por normalizeAuroraWindow
+    end: "00:30",
     activity: "Caza de Auroras Boreales",
     from: dest,
     to: "Zona de observación",
@@ -447,7 +439,7 @@ function normalizeParsed(parsed) {
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
 
-      // End vacío o anterior a start → duración razonable (90m; auroras 3–4h se ajustan luego)
+      // End vacío o anterior a start → duración razonable (90m; auroras se ajustan luego)
       const s = toMinutes(base.start);
       const e = endRaw ? toMinutes(endRaw) : null;
       if (e === null || e <= s) {
@@ -461,7 +453,7 @@ function normalizeParsed(parsed) {
     })
     .slice(0, 180);
 
-  // Auroras a ventana 18:00–01:00
+  // Auroras a ventana 18:00–01:00 (mín 4h via normalizeAuroraWindow)
   rows = rows.map(normalizeAuroraWindow);
 
   const dest = parsed.destination || "Ciudad";
@@ -497,8 +489,9 @@ function normalizeParsed(parsed) {
     afterRelax.push(...byDay2[d]);
   });
 
-   // Inyección de auroras hasta alcanzar el mínimo (y tope global)
-  let withAuroras = injectAurorasToReachMinimum(dest, afterRelax);
+  // Inyección de auroras (si aplica) + tope global
+  // ⬇️ FIX: usar la función correcta (antes llamaba a una inexistente)
+  let withAuroras = injectAuroraIfMissing(dest, afterRelax);
   withAuroras = enforceAuroraCapGlobal(withAuroras);
 
   // Deduplicación final
@@ -568,7 +561,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 🌌 AURORAS (regla específica, NO global)
 - Solo si latitud ≥ ~55°N y temporada (fin ago–mediados abr).
-- Duración 2–4h **entre 18:00 y 01:00**.
+- Duración 2–4h **entre 18:00 y 01:00** (el post-proceso asegura ≥4h).
 - Evita noches consecutivas y que la única sea el último día.
 - Si un día tiene auroras, **finaliza la parte diurna ≤18:00**.
 - El día siguiente inicia **≥10:30** y con plan **urbano/cercano**.
