@@ -21,10 +21,15 @@ const client = new OpenAI({
 /* ────────────────────────────────────────────────────
    SECCIÓN 2 · Helpers de parsing y fallback
 ────────────────────────────────────────────────────── */
-function preferBody(req) {
-  // Soporta Next API (req.body ya parseado) y posibles edge runtimes.
-  if (req && typeof req.body === "object" && req.body !== null) return req.body;
-  return null;
+function safeGetBody(req) {
+  // Soporta body como objeto (Next API) o como string (algunos proxies)
+  const b = req?.body;
+  if (!b) return {};
+  if (typeof b === "string") {
+    try { return JSON.parse(b); } catch { return {}; }
+  }
+  if (typeof b === "object") return b;
+  return {};
 }
 
 function extractMessages(body = {}) {
@@ -57,7 +62,7 @@ function tryRepairJsonMinor(raw = "") {
 }
 
 function cleanToJSON(raw) {
-  // Acepta objetos ya “JSONeados” por el SDK
+  // Acepta objetos ya deserializados por el SDK
   if (raw && typeof raw === "object") return raw;
 
   if (!raw || typeof raw !== "string") return null;
@@ -366,6 +371,21 @@ function enforceAuroraCapGlobal(rows) {
 /* ────────────────────────────────────────────────────
    SECCIÓN 5 · Normalización integral de la respuesta
 ────────────────────────────────────────────────────── */
+function ensureAtLeastOneRow(destination, rows = []) {
+  if (Array.isArray(rows) && rows.length > 0) return rows;
+  return [{
+    day: 1,
+    start: "09:30",
+    end: "11:00",
+    activity: `Centro histórico de ${destination}`,
+    from: destination,
+    to: destination,
+    transport: "A pie",
+    duration: "1h 30m",
+    notes: "Recorrido base por los imprescindibles cercanos para iniciar el día.",
+  }];
+}
+
 function normalizeParsed(parsed) {
   if (!parsed || typeof parsed !== "object") return null;
 
@@ -391,6 +411,7 @@ function normalizeParsed(parsed) {
       const endRaw = (r.end || "").toString().trim() || "";
       const activity = (r.activity || "").toString().trim() || "Actividad";
 
+      // Transporte (forzar dupla si es day-trip sin público eficiente)
       let transport = ((r.transport || "").toString().trim());
       transport = normalizeTransportTrip(activity, (r.to || "").toString(), transport);
 
@@ -406,10 +427,11 @@ function normalizeParsed(parsed) {
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
 
+      // End vacío o anterior a start → duración razonable (90m; auroras ≥4h se ajustan luego)
       const s = toMinutes(base.start);
       const e = endRaw ? toMinutes(endRaw) : null;
       if (e === null || e <= s) {
-        const dur = AURORA_RE.test(activity) ? 180 : 90;
+        const dur = AURORA_RE.test(activity) ? 240 : 90;
         base.end = toHHMM(s + dur);
         if (!base.duration) {
           base.duration = dur >= 60 ? `${Math.floor(dur/60)}h${dur%60? " "+(dur%60)+"m":""}` : `${dur}m`;
@@ -419,19 +441,23 @@ function normalizeParsed(parsed) {
     })
     .slice(0, 180);
 
+  // Auroras a ventana 18:00–01:00 (≥4h por tu regla)
   rows = rows.map(normalizeAuroraWindow);
 
   const dest = parsed.destination || "Ciudad";
 
+  // Agrupar para ordenar e inyectar retornos
   const byDay = rows.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   const orderedMerged = [];
   Object.keys(byDay).map(Number).sort((a,b)=>a-b).forEach(d => {
     byDay[d].sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
     let fixed = byDay[d];
 
+    // Regreso a ciudad si hubo salida, luego siempre Regreso a hotel
     fixed = ensureReturnToCity(dest, fixed);
     fixed = ensureEndReturnToHotel(fixed);
 
+    // Reordenar y podar "regresos" al inicio
     fixed.sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
     fixed = pruneLeadingReturns(fixed);
 
@@ -439,9 +465,11 @@ function normalizeParsed(parsed) {
     orderedMerged.push(...fixed);
   });
 
+  // Relajar mañana tras auroras
   const byDay2 = orderedMerged.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   relaxNextMorningIfAurora(byDay2);
 
+  // Reconstrucción
   let afterRelax = [];
   Object.keys(byDay2).map(Number).sort((a,b)=>a-b).forEach(d => {
     byDay2[d].sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
@@ -449,12 +477,17 @@ function normalizeParsed(parsed) {
     afterRelax.push(...byDay2[d]);
   });
 
+  // Inyección auroras mínima + tope global (tu regla)
   let withAuroras = injectAuroraIfMissing(dest, afterRelax);
   withAuroras = enforceAuroraCapGlobal(withAuroras);
 
+  // Deduplicación fuerte
   withAuroras = dedupeRows(withAuroras);
-  withAuroras.sort((a,b)=>(a.day-b.day)||(sortKeyMinutes(a)-sortKeyMinutes(b)));
 
+  // ⚠️ Salvaguarda: si quedó vacío por podas/dedupe, reinyecta 1 fila segura
+  withAuroras = ensureAtLeastOneRow(dest, withAuroras);
+
+  withAuroras.sort((a,b)=>(a.day-b.day)||(sortKeyMinutes(a)-sortKeyMinutes(b)));
   parsed.rows = withAuroras;
   if (typeof parsed.followup !== "string") parsed.followup = "";
   return parsed;
@@ -531,28 +564,32 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 ────────────────────────────────────────────────────── */
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function chatJSON(messages, temperature = 0.3) {
-  // Hasta 3 reintentos con backoff suave, captura 429/5xx y timeouts.
+async function callStructured(messages, temperature = 0.35) {
   let lastErr = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      const resp = await client.chat.completions.create({
+      const resp = await client.responses.create({
         model: "gpt-4o-mini",
         temperature,
-        response_format: { type: "json_object" },
-        messages,
-        max_tokens: 3200,
+        input: messages.map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+        max_output_tokens: 2400,
       });
-      const content = resp?.choices?.[0]?.message?.content;
-      if (!content) throw new Error("Empty content");
-      return content; // suele venir como string JSON válido
+
+      // Respuesta robusta (vía Responses API)
+      const text =
+        resp?.output_text?.trim() ||
+        resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+        "";
+
+      if (!text) throw new Error("empty-output");
+      return text;
     } catch (err) {
       lastErr = err;
-      // 1º backoff 300ms, 2º 800ms (no bloquea al usuario perceptiblemente)
-      await wait(attempt === 1 ? 300 : 800);
+      // Backoff leve para 429/5xx/transitorios
+      await wait(attempt === 1 ? 250 : 600);
     }
   }
-  throw lastErr || new Error("Unknown OpenAI error");
+  throw lastErr || new Error("responses-create-failed");
 }
 
 /* ────────────────────────────────────────────────────
@@ -564,50 +601,56 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    // Body robusto
-    const fromBody = preferBody(req);
-    const body = fromBody || {};
+    // Body robusto (objeto o string)
+    const body = safeGetBody(req);
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
     if (mode === "info") {
-      // Devuelve texto del modelo (no forzamos post-proceso)
       try {
-        const text = await chatJSON(clientMessages, 0.3);
-        return res.status(200).json({ text: text || "⚠️ Sin respuesta" });
+        const raw = await callStructured(clientMessages, 0.35);
+        const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
+        return res.status(200).json({ text });
       } catch (e) {
-        console.error("info mode error:", e);
+        console.error("info mode error:", e?.message || e);
         return res.status(200).json({ text: JSON.stringify(fallbackJSON("info-mode-error")) });
       }
     }
 
-    const baseMsgs = [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages];
-
     // Intento 1
-    let raw = await chatJSON(baseMsgs, 0.3);
+    let raw = await callStructured(
+      [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
+      0.35
+    );
     let parsed = normalizeParsed(cleanToJSON(raw));
 
-    // Intento 2 (forzar al menos 1 fila)
+    // Intento 2: forzar al menos 1 fila
     const hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     if (!hasRows) {
-      const strictMsgs = [
-        { role: "system", content: SYSTEM_PROMPT + "\n\nOBLIGATORIO: Devuelve al menos 1 fila en \"rows\". Sólo JSON." },
-        ...clientMessages,
-      ];
-      raw = await chatJSON(strictMsgs, 0.2);
+      const strictPrompt =
+        SYSTEM_PROMPT +
+        `
+
+OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta. SOLO JSON.`;
+      raw = await callStructured(
+        [{ role: "system", content: strictPrompt }, ...clientMessages],
+        0.25
+      );
       parsed = normalizeParsed(cleanToJSON(raw));
     }
 
-    // Intento 3 (plantilla mínima)
+    // Intento 3: plantilla mínima
     const stillNoRows = !parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0;
     if (stillNoRows) {
-      const ultraMsgs = [
-        { role: "system", content: SYSTEM_PROMPT + `
-Ejemplo VÁLIDO (devuélvelo como JSON real):
-{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}],"replace":false}` },
-        ...clientMessages,
-      ];
-      raw = await chatJSON(ultraMsgs, 0.1);
+      const ultraPrompt =
+        SYSTEM_PROMPT +
+        `
+Ejemplo VÁLIDO de formato mínimo (devuélvelo como JSON real):
+{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}],"replace":false}`;
+      raw = await callStructured(
+        [{ role: "system", content: ultraPrompt }, ...clientMessages],
+        0.15
+      );
       parsed = normalizeParsed(cleanToJSON(raw));
     }
 
