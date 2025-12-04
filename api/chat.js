@@ -1,11 +1,9 @@
 // =====================================================
 // /api/chat.js — v36.9 (ESM compatible en Vercel)
-// Cambios clave (anti-fallback definitivo):
-// - chat.completions con response_format: {type:"json_object"}
-// - messages bien formados (system + user/history)
-// - triple intento también forzado a JSON
-// Lógica mantenida: auroras 18:00–01:00 (mín. 4h), retornos, transporte dual,
-// dedupe, “Ruta — Subparada”, priorización ciudad vs. day-trips.
+// Base estable: v36.7 + hardenings anti-fallback + reglas globales
+// Cambios clave: parsing robusto, backoff leve, auroras ≥4h (18:00–01:00),
+// análisis Ciudad vs Day-trips, transporte dual en day-trips, “Ruta — Subparada”,
+// regreso a <Ciudad> y a Hotel, dedupe fuerte, salvavidas “mínimo 1 fila”.
 // =====================================================
 
 /* ────────────────────────────────────────────────────
@@ -15,14 +13,12 @@ import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  timeout: 30000, // ← evita timeouts cortos que acaban en fallback silencioso
 });
 
 /* ────────────────────────────────────────────────────
-   SECCIÓN 2 · Helpers de parsing y fallback
+   SECCIÓN 2 · Helpers de parsing y fallback (robustos)
 ────────────────────────────────────────────────────── */
 function safeGetBody(req) {
-  // Soporta body como objeto (Next API) o como string (algunos proxies)
   const b = req?.body;
   if (!b) return {};
   if (typeof b === "string") {
@@ -54,15 +50,18 @@ function tryExtractJSONObject(s = "") {
 }
 
 function tryRepairJsonMinor(raw = "") {
+  // Reparaciones mínimas seguras
   let t = String(raw || "");
   t = stripCodeFences(t);
-  t = t.replace(/,\s*([\]}])/g, "$1"); // trailing commas
+  // Comas antes de ] o } (trailing commas)
+  t = t.replace(/,\s*([\]}])/g, "$1");
+  // Caso raro de filas como string entre comillas simples
   t = t.replace(/"rows":\s*\[\s*'([^"]+)'/g, (_, g1) => `"rows":["${g1.replace(/"/g, '\\"')}"]`);
   return t;
 }
 
 function cleanToJSON(raw) {
-  // Acepta objetos ya deserializados por el SDK
+  // Acepta objetos ya deserializados
   if (raw && typeof raw === "object") return raw;
 
   if (!raw || typeof raw !== "string") return null;
@@ -123,7 +122,7 @@ const AURORA_RE = /\b(auroras?|northern\s*lights?)\b/i;
 const AURORA_CITY_RE =
   /(reykjav[ií]k|reikiavik|reykiavik|akureyri|troms[oø]|tromso|alta|bod[oø]|narvik|lofoten|abisko|kiruna|rovaniemi|yellowknife|fairbanks|murmansk|iceland|islandia|lapland|laponia)/i;
 
-// Rutas sin transporte público eficiente
+// Lista conservadora de rutas SIN transporte público eficiente habitual
 const NO_PUBLIC_EFFICIENT = [
   // Islandia
   "círculo dorado", "golden circle",
@@ -131,7 +130,7 @@ const NO_PUBLIC_EFFICIENT = [
   "costa sur", "reynisfjara", "vík", "vik",
   "reykjanes", "kirkjufell", "kirkjufellsfoss",
   "kleifarvatn", "krýsuvík", "seltún", "reykjanesviti", "gunnuhver", "valahnúkamöl", "fagradalsfjall",
-  // Madrid y alrededores
+  // Madrid y alrededores (day trips típicos)
   "toledo", "segovia", "ávila", "avila", "el escorial", "aranjuez"
 ];
 
@@ -151,10 +150,13 @@ function toHHMM(mins = 0) {
 /* ────────────────────────────────────────────────────
    SECCIÓN 4 · Post-procesos (orden, auroras, retornos, dedupe)
 ────────────────────────────────────────────────────── */
+
+// Escapa texto para usar en RegExp dinámica
 function escapeRegExp(str = "") {
   return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Clave de orden tolerante a nocturnas/cruce medianoche
 function sortKeyMinutes(row) {
   const s = toMinutes(row.start || "00:00");
   const e = toMinutes(row.end || row.start || "00:00");
@@ -164,24 +166,23 @@ function sortKeyMinutes(row) {
   return key;
 }
 
-// Auroras: 18:00–01:00, duración mínima 4h (mueve ventana para cumplir)
+// Auroras: **entre 18:00 y 01:00**, **mínimo 4h**
 function normalizeAuroraWindow(row) {
   if (!AURORA_RE.test(row.activity || "")) return row;
-  const MIN = toMinutes("18:00");
-  const MAX = toMinutes("01:00") + 24 * 60;
 
+  const MIN = toMinutes("18:00");
+  const MAX = toMinutes("01:00") + 24 * 60; // 01:00 del “día siguiente”
   let s = toMinutes(row.start || "20:30");
   let e = toMinutes(row.end || "00:30");
+
   if (!Number.isFinite(s)) s = toMinutes("20:30");
   if (!Number.isFinite(e)) e = s + 240;
   if (e <= s) e = s + 240;
 
   if (s < MIN) s = MIN;
   if (e - s < 240) e = s + 240;
-  if (e > MAX) {
-    s = Math.max(MIN, MAX - 240);
-    e = s + 240;
-  }
+  if (e > MAX) { s = Math.max(MIN, MAX - 240); e = s + 240; }
+
   const dur = Math.max(240, e - s);
   const durTxt = `${Math.floor(dur/60)}h${dur%60 ? " "+(dur%60)+"m" : ""}`;
 
@@ -194,6 +195,7 @@ function normalizeAuroraWindow(row) {
   };
 }
 
+// Transporte dual agresivo para day-trips
 function normalizeTransportTrip(activity = "", to = "", transport = "") {
   const txt = `${activity} ${to}`.toLowerCase();
   const isTrip = OUT_OF_TOWN_RE.test(txt);
@@ -211,6 +213,7 @@ function normalizeTransportTrip(activity = "", to = "", transport = "") {
   return transport || "Vehículo alquilado o Tour guiado";
 }
 
+// “Regreso a <Ciudad>” si hubo salida fuera de ciudad
 function ensureReturnToCity(destination, rowsOfDay) {
   if (!Array.isArray(rowsOfDay) || !rowsOfDay.length) return rowsOfDay;
 
@@ -241,6 +244,7 @@ function ensureReturnToCity(destination, rowsOfDay) {
   return [...rowsOfDay, back];
 }
 
+// Siempre terminar con “Regreso a hotel”
 function ensureEndReturnToHotel(rowsOfDay) {
   if (!Array.isArray(rowsOfDay) || !rowsOfDay.length) return rowsOfDay;
   const last = rowsOfDay[rowsOfDay.length - 1];
@@ -264,6 +268,7 @@ function ensureEndReturnToHotel(rowsOfDay) {
   return [...rowsOfDay, back];
 }
 
+// Podar “regresos” inválidos al inicio del día
 function pruneLeadingReturns(rowsOfDay) {
   if (!Array.isArray(rowsOfDay) || !rowsOfDay.length) return rowsOfDay;
   return rowsOfDay.filter((r, idx) => {
@@ -274,6 +279,7 @@ function pruneLeadingReturns(rowsOfDay) {
   });
 }
 
+// Deduplicación fuerte por día + (actividad, to) + ventana
 function dedupeRows(rows = []) {
   const seen = new Set();
   const out = [];
@@ -286,8 +292,12 @@ function dedupeRows(rows = []) {
   return out;
 }
 
-function isAuroraEligibleCity(name = "") { return AURORA_CITY_RE.test(String(name || "")); }
+// Elegibilidad de ciudad para auroras
+function isAuroraEligibleCity(name = "") {
+  return AURORA_CITY_RE.test(String(name || ""));
+}
 
+// Inyecta 1–2 noches de auroras si falta, evitando última noche y no consecutivas
 function injectAuroraIfMissing(dest, rows) {
   if (!isAuroraEligibleCity(dest)) return rows;
   if (rows.some(r => AURORA_RE.test(r.activity || ""))) return rows;
@@ -298,19 +308,26 @@ function injectAuroraIfMissing(dest, rows) {
 
   const last = days[days.length - 1];
   const d1 = days.find(d => d !== last) || days[0];
-  const d2 = days.length >= 4 ? days.find(d => d !== d1 && d !== last && Math.abs(d - d1) > 1) : null;
+  const d2 = days.length >= 4
+    ? days.find(d => d !== d1 && d !== last && Math.abs(d - d1) > 1)
+    : null;
 
-  const mk = (day) => normalizeAuroraWindow({
-    day,
-    start: "20:30",
-    end: "00:30",
-    activity: "Caza de Auroras Boreales",
-    from: dest,
-    to: "Zona de observación",
-    transport: "Vehículo alquilado o Tour guiado",
-    duration: "4h",
-    notes: "Salida nocturna para intentar ver auroras (horario orientativo).",
-  });
+  const mk = (day) => {
+    const endLast = toMinutes((byDay[day].slice(-1)[0]?.end) || "20:30");
+    const s = Math.max(endLast + 30, toMinutes("20:30"));
+    const e = s + 240; // 4h
+    return normalizeAuroraWindow({
+      day,
+      start: toHHMM(s),
+      end: toHHMM(e),
+      activity: "Caza de Auroras Boreales",
+      from: dest,
+      to: "Zona de observación",
+      transport: "Vehículo alquilado o Tour guiado",
+      duration: "4h",
+      notes: "Salida nocturna para intentar ver auroras (horario orientativo).",
+    });
+  };
 
   const out = rows.slice();
   out.push(mk(d1));
@@ -319,10 +336,14 @@ function injectAuroraIfMissing(dest, rows) {
   return out;
 }
 
+// Relajar mañana tras auroras
 function relaxNextMorningIfAurora(byDay) {
   const days = Object.keys(byDay).map(Number).sort((a,b)=>a-b);
-  const auroraDays = new Set(days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||""))));
+  const auroraDays = new Set(
+    days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")))
+  );
   const MIN_START = toMinutes("10:30");
+
   for (const d of days) {
     if (!auroraDays.has(d - 1)) continue;
     const rows = byDay[d]; if (!rows?.length) continue;
@@ -338,6 +359,7 @@ function relaxNextMorningIfAurora(byDay) {
   }
 }
 
+// Tope global y reglas extra para auroras
 function enforceAuroraCapGlobal(rows) {
   const byDay = rows.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   const days = Object.keys(byDay).map(Number).sort((a,b)=>a-b);
@@ -346,16 +368,24 @@ function enforceAuroraCapGlobal(rows) {
 
   let auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
   auroraDays.sort((a,b)=>a-b);
+
+  // Evitar consecutivas (elimina la 2ª)
   for (let i=1; i<auroraDays.length; i++){
     if (auroraDays[i] === auroraDays[i-1] + 1) {
       byDay[auroraDays[i]] = (byDay[auroraDays[i]]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
     }
   }
+
+  // Recalcular
   auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
+
+  // Evitar que la única sea el último día
   if (auroraDays.length === 1 && auroraDays[0] === days[days.length-1]) {
     const last = days[days.length-1];
     byDay[last] = (byDay[last]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
   }
+
+  // Aplicar tope global
   auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
   if (auroraDays.length > cap) {
     const keep = auroraDays.slice(0, cap);
@@ -363,6 +393,8 @@ function enforceAuroraCapGlobal(rows) {
       if (!keep.includes(d)) byDay[d] = (byDay[d]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
     }
   }
+
+  // Reconstrucción
   const merged = [];
   days.forEach(d => (byDay[d]||[]).forEach(r=>merged.push(r)));
   return merged;
@@ -427,7 +459,7 @@ function normalizeParsed(parsed) {
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
 
-      // End vacío o anterior a start → duración razonable (90m; auroras ≥4h se ajustan luego)
+      // Si end vacío o ≤ start → duración razonable (90m; auroras ≥4h se ajustan luego)
       const s = toMinutes(base.start);
       const e = endRaw ? toMinutes(endRaw) : null;
       if (e === null || e <= s) {
@@ -441,7 +473,7 @@ function normalizeParsed(parsed) {
     })
     .slice(0, 180);
 
-  // Auroras a ventana 18:00–01:00 (≥4h por tu regla)
+  // Auroras a ventana 18:00–01:00, ≥4h
   rows = rows.map(normalizeAuroraWindow);
 
   const dest = parsed.destination || "Ciudad";
@@ -453,11 +485,9 @@ function normalizeParsed(parsed) {
     byDay[d].sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
     let fixed = byDay[d];
 
-    // Regreso a ciudad si hubo salida, luego siempre Regreso a hotel
     fixed = ensureReturnToCity(dest, fixed);
     fixed = ensureEndReturnToHotel(fixed);
 
-    // Reordenar y podar "regresos" al inicio
     fixed.sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
     fixed = pruneLeadingReturns(fixed);
 
@@ -477,14 +507,14 @@ function normalizeParsed(parsed) {
     afterRelax.push(...byDay2[d]);
   });
 
-  // Inyección auroras mínima + tope global (tu regla)
+  // Inyección auroras mínima + tope global
   let withAuroras = injectAuroraIfMissing(dest, afterRelax);
   withAuroras = enforceAuroraCapGlobal(withAuroras);
 
   // Deduplicación fuerte
   withAuroras = dedupeRows(withAuroras);
 
-  // ⚠️ Salvaguarda: si quedó vacío por podas/dedupe, reinyecta 1 fila segura
+  // Salvavidas: evitar 0 filas tras podas/dedupe
   withAuroras = ensureAtLeastOneRow(dest, withAuroras);
 
   withAuroras.sort((a,b)=>(a.day-b.day)||(sortKeyMinutes(a)-sortKeyMinutes(b)));
@@ -494,7 +524,7 @@ function normalizeParsed(parsed) {
 }
 
 /* ────────────────────────────────────────────────────
-   SECCIÓN 6 · Prompt del agente (reglas reforzadas, globales)
+   SECCIÓN 6 · Prompt del agente (reglas globales)
 ────────────────────────────────────────────────────── */
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes de ITravelByMyOwn.
@@ -508,8 +538,8 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Devuelve SIEMPRE al menos 1 actividad en "rows".
 - Nada de texto fuera del JSON.
 - Máximo 20 actividades por día.
-- Horarios **realistas**; permite cruce de medianoche si aporta valor.
-- Cenas **opcionales**.
+- Horarios realistas; permite cruce de medianoche cuando aporte valor.
+- Cenas opcionales, no obligatorias.
 - No devuelvas "seed" ni dejes campos vacíos.
 
 🧭 ESTRUCTURA DE CADA ACTIVIDAD
@@ -525,42 +555,47 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "notes": "Descripción motivadora y breve"
 }
 
-🌟 TOURS ICÓNICOS (obligatorio formato “Ruta — Subparada”)
-- Círculo Dorado: "Círculo Dorado — Þingvellir", "— Geysir", "— Gullfoss" (+ "— Cráter Kerið" opcional).
-- Reykjanes: "Reykjanes — Kleifarvatn", "— Krýsuvík/Seltún", "— Puente entre Continentes", "— Reykjanesviti", "— Gunnuhver", "— Fagradalsfjall (mirador)" (+ "— Laguna Azul" opcional).
+🌟 TOURS ICÓNICOS (formato obligatorio “Ruta — Subparada”)
+- Círculo Dorado: "Círculo Dorado — Þingvellir", "— Geysir", "— Gullfoss", "— Cráter Kerið" (opcional).
+- Reykjanes: "Reykjanes — Kleifarvatn", "— Krýsuvík/Seltún", "— Puente entre Continentes", "— Reykjanesviti", "— Gunnuhver", "— Fagradalsfjall (mirador)", "— Laguna Azul" (opcional).
 - Snæfellsnes: "Snæfellsnes — Kirkjufell", "— Kirkjufellsfoss", "— Parque Nacional Snæfellsjökull", "— Arnarstapi/Hellnar".
 - Costa Sur: "Costa Sur — Seljalandsfoss", "— Skógafoss", "— Reynisfjara", "— Vík".
-- Incluye **≥3 subparadas** cuando aplique.
+- Incluye ≥3 subparadas cuando aplique.
 
 🏛️ REGLA GLOBAL: PRIORIDAD CIUDAD vs. DAY-TRIPS (con ANÁLISIS)
-- Haz un **análisis breve** (en "followup") para decidir si conviene seguir en la ciudad o proponer un day-trip.
+- Explica en "followup" (breve) por qué conviene seguir en ciudad o proponer day-trip.
 - Criterios:
-  1) Cubrir **imperdibles de la ciudad** (≥ top-5) antes de asignar day-trips.
-  2) Duración de la estadía:
-     - 1–2 días: 0 day-trips (salvo caso extraordinario).
-     - 3–4 días: máx. **1** day-trip.
-     - ≥5 días: **1–2** day-trips según valor y clima.
-  3) Valor diferencial del day-trip (paisajes icónicos, patrimonio único).
-  4) Tiempos de traslado: usualmente ≤2h30 por trayecto (≤3h sólo si la estadía es larga).
-- Ejemplos guía: Madrid (Toledo/Segovia), Roma (Tívoli/Ostia), París (Versalles).
+  1) Cubre imperdibles de la ciudad (top-5) antes de asignar day-trips.
+  2) Duración:
+     - 1–2 días: 0 day-trips salvo caso extraordinario.
+     - 3–4 días: máx. 1 day-trip.
+     - ≥5 días: 1–2 day-trips según valor y clima.
+  3) Valor diferencial del day-trip (paisajes icónicos/patrimonio).
+  4) Tiempos de traslado: usualmente ≤2h30 (≤3h si la estadía es larga).
+- Ejemplos guía:
+  - Madrid: Prado, Palacio Real, Plaza Mayor, Retiro, Gran Vía, Templo de Debod; luego Toledo/Segovia si hay margen.
+  - Roma: Coliseo/Foro/Palatino, Vaticano/San Pedro, Trevi, Pantheon; luego Tívoli/Ostia Antica.
+  - París: Louvre, Torre Eiffel, Île de la Cité, Montmartre, Orsay; luego Versalles.
 
-🌌 AURORAS (regla específica, NO global)
+🌌 AURORAS (regla específica)
 - Solo si latitud ≥ ~55°N y temporada (fin ago–mediados abr).
-- Duración 2–4h **entre 18:00 y 01:00** (el posproceso asegura **≥4h**).
+- Duración 4h, **entre 18:00 y 01:00**.
 - Evita noches consecutivas y que la única sea el último día.
-- Si un día tiene auroras, cerrar parte diurna **≤18:00** y el día siguiente iniciar **≥10:30** con plan urbano.
+- Tras auroras, el día siguiente inicia **≥10:30** y plan cercano/urbano.
+- Cierra el día con "Regreso a hotel".
 
 🚆 TRANSPORTE Y TIEMPOS (global)
-- Orden sin solapes y buffers razonables.
-- Si el usuario no especifica transporte y el day-trip no tiene transporte público **claramente eficiente**, usa **"Vehículo alquilado o Tour guiado"**.
+- Orden sin solapes, buffers razonables.
+- Si el usuario no especifica transporte y el day-trip no tiene público claramente eficiente, usa **"Vehículo alquilado o Tour guiado"**.
+- Incluye tiempos aproximados de actividad y traslados.
 
 🔁 CIERRE DEL DÍA (global)
-- Si hubo salida fuera, agrega **"Regreso a <Ciudad base>"** antes de finalizar.
-- **Siempre** termina con **"Regreso a hotel"**.
+- Si hubo salida fuera de la ciudad, agrega "Regreso a <Ciudad base>" antes de finalizar.
+- **Siempre** termina con "Regreso a hotel".
 `.trim();
 
 /* ────────────────────────────────────────────────────
-   SECCIÓN 7 · Llamada al modelo (triple intento)
+   SECCIÓN 7 · Llamada al modelo (triple intento + backoff)
 ────────────────────────────────────────────────────── */
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -575,7 +610,6 @@ async function callStructured(messages, temperature = 0.35) {
         max_output_tokens: 2400,
       });
 
-      // Respuesta robusta (vía Responses API)
       const text =
         resp?.output_text?.trim() ||
         resp?.output?.[0]?.content?.[0]?.text?.trim() ||
@@ -585,8 +619,7 @@ async function callStructured(messages, temperature = 0.35) {
       return text;
     } catch (err) {
       lastErr = err;
-      // Backoff leve para 429/5xx/transitorios
-      await wait(attempt === 1 ? 250 : 600);
+      await wait(attempt === 1 ? 250 : 600); // backoff leve
     }
   }
   throw lastErr || new Error("responses-create-failed");
@@ -601,7 +634,6 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    // Body robusto (objeto o string)
     const body = safeGetBody(req);
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
@@ -645,7 +677,7 @@ OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta. SOLO JSON.`;
       const ultraPrompt =
         SYSTEM_PROMPT +
         `
-Ejemplo VÁLIDO de formato mínimo (devuélvelo como JSON real):
+Ejemplo VÁLIDO de formato mínimo:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}],"replace":false}`;
       raw = await callStructured(
         [{ role: "system", content: ultraPrompt }, ...clientMessages],
@@ -661,4 +693,3 @@ Ejemplo VÁLIDO de formato mínimo (devuélvelo como JSON real):
     return res.status(200).json({ text: JSON.stringify(fallbackJSON(err?.message || "unknown-error")) });
   }
 }
-
