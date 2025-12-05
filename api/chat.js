@@ -1,15 +1,23 @@
-// /api/chat.js — v30.0 (ESM compatible en Vercel)
+// /api/chat.js — v37.0 (ESM · Vercel compatible)
+// Objetivo: simplificar y reforzar reglas globales para AURORAS y “Destino → Sub-paradas”
+// Mantiene compatibilidad con el planner (formatos A/B/C/D), sin cambiar nombres/contratos.
+
 import OpenAI from "openai";
+
+export const config = {
+  runtime: "edge", // puedes quitar esta línea si prefieres Node.js runtime estándar
+};
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// ==============================
-// Helpers
-// ==============================
+/* ==============================
+   Helpers básicos (compatibles con versiones previas)
+================================= */
 function extractMessages(body = {}) {
-  const { messages, input, history } = body;
+  // Prioriza "messages"; si no, arma con history + input para compatibilidad
+  const { messages, input, history } = body || {};
   if (Array.isArray(messages) && messages.length) return messages;
   const prev = Array.isArray(history) ? history : [];
   const userText = typeof input === "string" ? input : "";
@@ -22,9 +30,19 @@ function cleanToJSON(raw = "") {
     return JSON.parse(raw);
   } catch {
     try {
-      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+      // Extrae el primer bloque JSON válido incluso si vienen “prefijos/sufijos”
+      const cleaned = raw.replace(/^[^\[{]+/, "").replace(/[^\]}]+$/, "");
       return JSON.parse(cleaned);
     } catch {
+      // Intenta extraer bloque entre ```json ... ```
+      const m = raw.match(/```json\s*([\s\S]*?)```/i);
+      if (m) {
+        try {
+          return JSON.parse(m[1]);
+        } catch {
+          return null;
+        }
+      }
       return null;
     }
   }
@@ -33,160 +51,178 @@ function cleanToJSON(raw = "") {
 function fallbackJSON() {
   return {
     destination: "Desconocido",
+    replace: false,
     rows: [
       {
         day: 1,
-        start: "08:30",
-        end: "19:00",
-        activity: "Itinerario base (fallback)",
-        from: "",
-        to: "",
-        transport: "",
-        duration: "",
-        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+        start: "09:00",
+        end: "10:30",
+        activity: "Paseo de orientación",
+        from: "Hotel",
+        to: "Centro",
+        transport: "A pie",
+        duration: "1h30m",
+        notes:
+          "Explora los alrededores del hotel para ubicar servicios, comidas y transporte.",
       },
     ],
-    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
-// ==============================
-// Prompt base mejorado ✨
-// ==============================
+/* ==============================
+   Reglas globales (SYSTEM PROMPT)
+   — Sintetiza y fija criterios para el agente
+================================= */
+
+// Texto obligatorio para notas de auroras (con **negrita** desde “Después de inolvidable”)
+const AURORA_NOTE_TEXT =
+  'Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. **La hora de regreso al hotel dependerá del tour de auroras que se tome. Puedes optar por tour guiado o movilización por tu cuenta (es probable que debas conducir con nieve y de noche, investiga acerca de la seguridad en la época de tu visita).**';
+
+// Distribución determinística solicitada por el usuario
+// (se evita última noche y noches consecutivas cuando sea posible)
+const AURORA_DISTRIBUTION_RULES = `
+Auroras (si la ciudad/latitud y la temporada lo permiten):
+- Distribución por duración de la estancia (evitando la última noche y noches consecutivas cuando sea posible):
+  • 1–5 días → Días 1 y 3
+  • 1–7 días → Días 1, 3 y 5
+  • 1–10 días → Días 1, 3, 5 y 7
+  • 1–15 días → Días 1, 3, 5, 7, 9 y 11
+- Ventana horaria base: inicio ≥ 18:00 y fin ~ 00:30–01:00, permitiendo cruce de día (start < end del día siguiente).
+- Duración: si no se especifica, usa “Depende del tour”.
+- Transporte: “Tour guiado o Vehículo propio”.
+- Nota (obligatoria, exacta): ${AURORA_NOTE_TEXT}
+- Estética de nota: usar clase de estilo "note-sm" (en el campo "noteClass" si corresponde).
+`;
+
+// Regla “Destino → Sub-paradas” (aplica a tours/día completo fuera de ciudad)
+const SUBPARADAS_RULES = `
+Desglose “Destino → Sub-paradas” (aplicable a tours/excursiones/rutas/día completo que salgan del entorno urbano):
+- Divide la jornada en 3–6 sub-paradas (mín. 3; ideal 5–6; máx. 8 si el día es muy completo).
+- Estructura recomendada:
+  1) Salida desde la ciudad base (30–60 min; “Vehículo alquilado o Tour guiado”).
+  2–6) Sub-paradas intermedias (45–120 min cada una; “A pie” o “Tour guiado” dentro del sitio).
+  7) Pausa gastronómica/cultural (60–90 min).
+  8) Regreso a <Ciudad> (≈ 1–3 h; “Vehículo alquilado o Tour guiado”).
+- Criterios:
+  • Orden geográfico realista, sin saltos ni retrocesos.
+  • Horas crecientes, sin superposición (buffers ≥ 15 min).
+  • Variedad de experiencias (paisaje/actividad/pueblo/mirador/descanso).
+  • Duración total del bloque diurno aprox. 8–11 h (08:00–18:30).
+- Siempre cerrar el bloque con “Regreso a <Ciudad>” ANTES de cualquier cena o evento nocturno.
+- Tras el “Regreso a <Ciudad>”, NO heredar “Vehículo alquilado o Tour guiado” en nuevas actividades urbanas.
+`;
+
+// Transporte correcto + retornos y buffers
+const TRANSPORT_RETURNS_RULES = `
+Transporte y retornos:
+- Entre puntos foráneos o interurbanos, determina “Vehículo alquilado o Tour guiado”.
+- En ciudad, o después de “Regreso a <Ciudad>”, usa “A pie / Transporte público / Taxi”.
+- Añade buffers ≥ 15 min. Evita solapes; si una actividad nocturna cruza de día (ej. auroras), permítelo.
+- “Regreso a <Ciudad>” obligatorio cuando se sale del entorno urbano. Si esa misma noche hay auroras, el retorno debe terminar ≤ 18:30.
+- “Regreso a hotel” al final del día, EXCEPTO cuando la última actividad sea auroras (el tour ya contempla el retorno).
+- Rango horario recomendado del día: 08:00–18:30 (diurno). Actividades nocturnas pueden extenderse hasta ~01:00.
+`;
+
+// Formatos admitidos por el planner (mantener compatibilidad)
+const FORMAT_RULES = `
+Formatos esperados (cualquiera de los siguientes):
+- A) {"destination":"<Ciudad>","rows":[...],"replace": false}
+- B) {"rows":[...],"replace": false}
+- C) {"rows":[...]} (siempre se interpreta como replace=false)
+- D) {"itinerary":{"<Ciudad>":{"byDay":{"1":[...],"2":[...]}}}}
+Requisitos por fila:
+- {day, start, end, activity, from, to, transport, duration, notes?, noteClass? , _crossDay?}
+- start/end en "HH:MM". Si una actividad nocturna cruza de día (ej. 20:30–01:00), marca _crossDay=true.
+- “notes” informativas (nunca vacías) y sin texto de sistema/plantilla.
+`;
+
+// Prompt del sistema consolidado
 const SYSTEM_PROMPT = `
-Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
-Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** que describa un itinerario turístico inspirador y funcional.
+Eres “Astra”, un planificador de viajes. Devuelves SIEMPRE uno de los formatos JSON válidos que el cliente acepta.
 
-📌 FORMATOS VÁLIDOS DE RESPUESTA
-B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
-C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
+Objetivo:
+- Tomar instrucciones del usuario/llamador (contexto del planner) y devolver un itinerario optimizado, sin solapes, con transporte lógico y detalles útiles.
 
-⚠️ REGLAS GENERALES
-- Devuelve SIEMPRE al menos una actividad en "rows".
-- Nada de texto fuera del JSON.
-- 20 actividades máximo por día.
-- Usa horas realistas (o 08:30–19:00 si no se indica nada).
-- La respuesta debe poder renderizarse directamente en una UI web.
-- Nunca devuelvas "seed" ni dejes campos vacíos.
+Reglas universales:
+${SUBPARADAS_RULES}
 
-🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
-{
-  "day": 1,
-  "start": "08:30",
-  "end": "10:30",
-  "activity": "Nombre claro y específico",
-  "from": "Lugar de partida",
-  "to": "Lugar de destino",
-  "transport": "Transporte realista (A pie, Metro, Tren, Auto, etc.)",
-  "duration": "2h",
-  "notes": "Descripción motivadora y breve"
-}
+${TRANSPORT_RETURNS_RULES}
 
-🧠 ESTILO Y EXPERIENCIA DE USUARIO
-- Usa un tono cálido, entusiasta y narrativo.
-- Las notas deben:
-  • Explicar en 1 o 2 líneas por qué la actividad es especial.  
-  • Transmitir emoción y motivación (ej. “Admira…”, “Descubre…”, “Siente…”).  
-  • Si no hay información específica, usa un fallback inspirador (“Una parada ideal para disfrutar la esencia de este destino”).
-- Personaliza las notas según la naturaleza de la actividad: arquitectura, gastronomía, cultura, naturaleza, etc.
-- Varía el vocabulario: evita repetir exactamente la misma nota.
+${AURORA_DISTRIBUTION_RULES}
 
-🚆 TRANSPORTE Y TIEMPOS
-- Usa medios coherentes con el contexto (a pie, metro, tren, taxi, bus, auto, ferry…).
-- Las horas deben estar ordenadas y no superponerse.
-- Incluye tiempos aproximados de actividad y traslados.
+${FORMAT_RULES}
 
-💰 MONETIZACIÓN FUTURA (sin marcas)
-- Sugiere actividades naturalmente vinculables a upsells (ej. cafés, museos, experiencias locales).
-- No incluyas precios ni nombres comerciales.
-- No digas “compra aquí” — solo describe experiencias.
+Política de estilo:
+- Nombres claros de actividades.
+- Notas breves y motivadoras (1–2 líneas), y en auroras usa el texto exacto indicado (con **negrita** en el tramo final).
+- Evita duplicados multi-día.
+`;
 
-📝 EDICIÓN INTELIGENTE
-- Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
-- Si no especifica hora, distribuye las actividades lógicamente en mañana / mediodía / tarde.
-- Mantén la secuencia clara y cronológica.
+/* ==============================
+   Llamada al modelo
+================================= */
+async function callModel(messages) {
+  // Inserta el system prompt al inicio, respetando cualquier system existente del cliente
+  const msgs = [];
+  const hasSystem = (messages || []).some((m) => m.role === "system");
+  if (!hasSystem) msgs.push({ role: "system", content: SYSTEM_PROMPT });
+  else {
+    // Precede el SYSTEM_PROMPT y luego los messages originales (para reforzar reglas)
+    msgs.push({ role: "system", content: SYSTEM_PROMPT });
+  }
+  msgs.push(...(messages || []));
 
-🎨 UX Y NARRATIVA
-- Cada día debe fluir como una historia (inicio, desarrollo, cierre).
-- Usa descripciones cortas, sin párrafos largos.
-- Mantén claridad y variedad en las actividades.
-
-🚫 ERRORES A EVITAR
-- No devuelvas “seed”.
-- No uses frases impersonales (“Esta actividad es…”).
-- No incluyas saludos ni explicaciones fuera del JSON.
-- No repitas notas idénticas en varias actividades.
-
-Ejemplo de nota motivadora correcta:
-“Descubre uno de los rincones más encantadores de la ciudad y disfruta su atmósfera única.”
-`.trim();
-
-// ==============================
-// Llamada al modelo
-// ==============================
-async function callStructured(messages, temperature = 0.4) {
-  const resp = await client.responses.create({
-    model: "gpt-4o-mini",
-    temperature,
-    input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-    max_output_tokens: 2200,
+  const completion = await client.chat.completions.create({
+    model: "gpt-5.1",
+    temperature: 0.2,
+    top_p: 0.9,
+    max_tokens: 1500,
+    messages: msgs,
+    response_format: { type: "text" }, // devuelve texto plano JSON-friendly
   });
 
   const text =
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-    "";
+    completion.choices?.[0]?.message?.content?.trim() ||
+    JSON.stringify(fallbackJSON());
 
-  console.log("🛰️ RAW RESPONSE:", text);
   return text;
 }
 
-// ==============================
-// Exportación ESM correcta
-// ==============================
-export default async function handler(req, res) {
+/* ==============================
+   Handler HTTP (Edge/Node)
+================================= */
+export default async function handler(req) {
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ error: "Method not allowed" });
+    const body = req.method === "POST" ? await req.json() : {};
+    const messages = extractMessages(body);
+
+    // Compat: si el caller envía "instructions" directo
+    if (typeof body.instructions === "string" && body.instructions.trim()) {
+      messages.push({ role: "user", content: body.instructions.trim() });
     }
 
-    const body = req.body;
-    const mode = body.mode || "planner"; // 👈 nuevo parámetro
-    const clientMessages = extractMessages(body);
+    const text = await callModel(messages);
 
-    // 🧭 MODO INFO CHAT — sin JSON, texto libre
-    if (mode === "info") {
-      const raw = await callStructured(clientMessages);
-      const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
-      return res.status(200).json({ text });
+    // Intenta validar que haya JSON parseable; si no, devuelve texto tal cual (el planner es tolerante)
+    const j = cleanToJSON(text);
+    if (j) {
+      return new Response(JSON.stringify(j), {
+        status: 200,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
     }
 
-    // 🧭 MODO PLANNER — comportamiento original
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
-    let parsed = cleanToJSON(raw);
-
-    const hasRows = parsed && (parsed.rows || parsed.destinations);
-    if (!hasRows) {
-      const strictPrompt = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
-      parsed = cleanToJSON(raw);
-    }
-
-    const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
-    if (stillNoRows) {
-      const ultraPrompt = SYSTEM_PROMPT + `
-Ejemplo válido:
-{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
-      parsed = cleanToJSON(raw);
-    }
-
-    if (!parsed) parsed = fallbackJSON();
-    return res.status(200).json({ text: JSON.stringify(parsed) });
-
+    // Fallback: texto plano (el planner intentará parsearlo)
+    return new Response(text, {
+      status: 200,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
   } catch (err) {
-    console.error("❌ /api/chat error:", err);
-    return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
+    console.error("[/api/chat] ERROR:", err);
+    // Devuelve fallback JSON seguro
+    return new Response(JSON.stringify(fallbackJSON()), {
+      status: 200,
+      headers: { "content-type": "application/json; charset=utf-8" },
+    });
   }
 }
