@@ -2446,18 +2446,11 @@ function countAuroraNights(city){
   }
   return c;
 }
-
-/* >>> AJUSTE AURORAS (cap por duración de estancia) <<< */
 function suggestedAuroraCap(stayDays){
-  const d = Math.max(1, Number(stayDays||1));
-  if(d<=3)  return 1;   // 1–3 días: 1
-  if(d<=5)  return 2;   // 4–5 días: 2
-  if(d<=7)  return 3;   // 6–7 días: 3
-  if(d<=10) return 5;   // 8–10 días: 5
-  if(d<=15) return 7;   // 11–15 días: 7
-  return Math.min(9, Math.ceil(d*0.5)); // fallback suave
+  if(stayDays>=5) return 2;
+  if(stayDays>=3) return 1;
+  return 1;
 }
-
 function isConsecutiveAurora(city, day){
   const byDay = itineraries[city]?.byDay||{};
   const prev = byDay[day-1]||[];
@@ -2495,32 +2488,38 @@ function __isNightRow__(row){
   return isAurora || (startM!=null && startM >= 18*60);
 }
 
-/* >>> AJUSTE AURORAS (ventana fija + nota inspiradora) <<< */
-const AURORA_FIXED_START = '18:00';
-const AURORA_FIXED_END   = '01:00'; // cruza al día siguiente
-const AURORA_NOTE = [
-  'La caza de auroras es una experiencia mágica: saldrás con ilusión, abrirás bien los ojos y el corazón,',
-  'y dejarás que el cielo te sorprenda. Puede ser con **tour de caza de auroras** o por **tu propia cuenta en vehículo**.',
-  '**La hora de regreso al hotel dependerá del tour de auroras que se tome.**'
-].join(' ');
-
-// Normaliza a ventana FIJA 18:00–01:00, duración “Depende del tour”, transport sugerido y nota
+// Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30, permitiendo cruzar de día
 function normalizeAuroraWindow(row){
   const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
   if(!isAurora) return row;
 
-  const notesBase = String(row.notes||'').trim();
-  const finalNotes = notesBase ? `${notesBase} ${AURORA_NOTE}` : AURORA_NOTE;
-
-  return {
-    ...row,
-    start: AURORA_FIXED_START,
-    end: AURORA_FIXED_END,
-    duration: 'Depende del tour',
-    transport: row.transport || 'Tour guiado o Vehículo alquilado',
-    notes: finalNotes,
-    _crossDay: true
+  const toMin = t => {
+    const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null;
+    return parseInt(m[1],10)*60 + parseInt(m[2],10);
   };
+  const toHH = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
+
+  let s = toMin(row.start||"20:30");
+  let e = toMin(row.end||"02:00");
+  if(s==null) s = 20*60+30;
+  if(e==null) e = 2*60;
+
+  if(s < 18*60) s = 18*60;          // ≥ 18:00
+  // Si el fin es “temprano” (e <= s), asumimos cruce al siguiente día
+  if(e <= s) e += 24*60;
+
+  // Duración mínima 4h
+  if((e - s) < 4*60) e = s + 4*60;
+  // Fin mínimo 00:30 del día siguiente si cruzó
+  if(e < (24*60 + 30)) e = Math.max(e, 24*60 + 30);
+
+  const durMin = e - s;
+  const durLbl = durMin >= 60
+    ? `${Math.floor(durMin/60)}h${(durMin%60? ' '+(durMin%60)+'m' : '')}`
+    : `${durMin}m`;
+
+  const cross = e >= 24*60;
+  return { ...row, start: toHH(s), end: toHH(e), duration: durLbl, _crossDay: !!cross };
 }
 
 // Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
@@ -2717,17 +2716,16 @@ function ensureReturnToCity(city, day, rows){
   }catch(_){ return rows; }
 }
 
-/* >>> AJUSTE AURORAS: NO añadir “Regreso a hotel” si la última actividad es aurora <<< */
 function ensureEndReturnToHotel(rows){
   try{
     if(!Array.isArray(rows) || rows.length===0) return rows;
     const last = rows[rows.length-1] || {};
     const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(last.activity||''));
     const isHotel  = /regreso\s+al?\s*hotel/i.test(String(last.activity||'').toLowerCase());
-    if(isHotel || isAurora) return rows; // si termina en auroras, NO se agrega retorno al hotel
+    if(isHotel) return rows;
 
     const start = last.end || last.start || '20:30';
-    const end   = __addMinutesSafe__(start, 30);
+    const end   = isAurora ? __addMinutesSafe__(start, 30) : __addMinutesSafe__(start, 30);
 
     rows.push({
       day: last.day || 1,
@@ -2736,9 +2734,11 @@ function ensureEndReturnToHotel(rows){
       activity: 'Regreso a hotel',
       from: last.to || '',
       to: 'Hotel',
-      transport: last.transport || 'Taxi',
-      duration: '30m',
-      notes: 'Cierre del día y descanso en el hotel.'
+      transport: isAurora ? 'Tour guiado' : (last.transport || 'Taxi'),
+      duration: isAurora ? 'Depende del tour' : '30m',
+      notes: isAurora
+        ? 'Tras la caza de auroras, regreso con el operador al hotel.'
+        : 'Cierre del día y descanso en el hotel.'
     });
     return rows;
   }catch(_){ return rows; }
@@ -2825,7 +2825,7 @@ ${JSON.stringify(rowsForOptimization)}
 - No priorices "A pie"/público por defecto. Para salidas fuera de ciudad usa **"Vehículo alquilado o Tour guiado"** (literal).
 - Day trips: ida ≤ ${maxOneWayHours}h si aportan valor claro.
 - Evita duplicados multi-día (considera sinónimos/idiomas).
-${auroraCity && (auroraSeason || !baseDate) ? '- Puedes proponer “caza de auroras”; recuerda que su ventana es 18:00–01:00, duración "Depende del tour" y NO añadir retorno a hotel tras esta actividad.' : ''}
+${auroraCity && (auroraSeason || !baseDate) ? '- Puedes proponer “caza de auroras” si la noche y condiciones lo justifican (no obligatorio). Evita la última noche de la estancia.' : ''}
 - No fijes horas rígidas: investiga/infierelas y evita solapes; si faltan, reparte mañana/mediodía/tarde y extiende noche solo si corresponde.
 ${lightNote}
 - Puedes **cruzar de día** si una actividad nocturna lo requiere (p.ej., 20:30–02:00). No recortes esas filas.
@@ -2860,7 +2860,7 @@ ${intakeData}
     if(typeof reorderLinearVisits==='function')
       normalized=reorderLinearVisits(normalized);
 
-    // 👉 Auroras: ventana fija + cap por estancia evitando consecutivas
+    // 👉 Auroras: normalizador local + tope (1–2 noches) evitando consecutivas
     if(auroraCity && (auroraSeason || !baseDate)){
       normalized = normalized.map(normalizeAuroraWindow);
       const cap = suggestedAuroraCap(stayDays);
