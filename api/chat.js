@@ -1,12 +1,12 @@
 // =====================================================
-// /api/chat.js — v37.0 (ESM compatible en Vercel)
-// BASE: v31.0 estable + injerto quirúrgico de mejoras (v36.9)
-// - Parsing y anti-fallback robusto
-// - Post-procesador integral (orden, auroras ≥4h 18:00–01:00, no consecutivas,
-//   relax mañana ≥10:30, regreso a <Ciudad> y “Regreso a hotel” siempre,
-//   transporte dual en day-trips, dedupe fuerte, “Ruta — Subparada” via prompt)
-// - Regla global Ciudad vs Day-trips (prioriza imperdibles de ciudad)
-// - Triple intento con backoff leve; salvavidas “mínimo 1 fila”
+// /api/chat.js — v37.2 (ESM · Vercel)
+// BASE estable (v31.0) + TODA la lógica reforzada + FIX DURO anti-fallback
+// Cambios clave para “que sirva”:
+// 1) Responses API con mensajes estructurados (no concatenados en un string).
+// 2) response_format:{type:"json_object"} para forzar JSON válido.
+// 3) Retrys con backoff y guardas locales de parseo.
+// 4) Post-proceso completo (auroras ≥4h 18:00–01:00, no consecutivas, relax ≥10:30,
+//    regreso a <Ciudad> y “Regreso a hotel”, transporte dual en day-trips, dedupe, etc.).
 // =====================================================
 
 /* ────────────────────────────────────────────────────
@@ -60,36 +60,30 @@ function tryRepairJsonMinor(raw = "") {
   return t;
 }
 
-// Acepta string u objeto del modelo; extrae JSON válido
-function cleanToJSON(raw = "") {
-  // ya es objeto?
-  if (raw && typeof raw === "object") return raw;
-  if (!raw || typeof raw !== "string") return null;
+function cleanToJSON(raw) {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
 
-  // ruta simple (v31.0)
-  try { return JSON.parse(raw); } catch {}
-
-  // ruta robusta
   const candidates = [];
-  const stripped = stripCodeFences(raw);
-  if (stripped) candidates.push(stripped);
-  const fenced = (raw.match(/```(?:json)?([\s\S]*?)```/i) || [])[1];
-  if (fenced) candidates.push(fenced.trim());
-  const sliced = tryExtractJSONObject(raw);
-  if (sliced) candidates.push(sliced);
+  if (typeof raw === "string") {
+    const stripped = stripCodeFences(raw);
+    if (stripped) candidates.push(stripped);
+    const fenced = (raw.match(/```(?:json)?([\s\S]*?)```/i) || [])[1];
+    if (fenced) candidates.push(fenced.trim());
+    const sliced = tryExtractJSONObject(raw);
+    if (sliced) candidates.push(sliced);
+  }
 
   for (const c of candidates) {
     try { const j = JSON.parse(c); if (j && typeof j === "object") return j; } catch {}
     try { const j2 = JSON.parse(tryRepairJsonMinor(c)); if (j2 && typeof j2 === "object") return j2; } catch {}
   }
 
-  // fallback minimalista (v31.0 hacía otro intento simple)
+  try { return JSON.parse(raw); } catch {}
   try {
-    const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
+    const cleaned = String(raw).replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function fallbackJSON(reason = "unknown") {
@@ -125,13 +119,11 @@ const AURORA_CITY_RE =
   /(reykjav[ií]k|reikiavik|reykiavik|akureyri|troms[oø]|tromso|alta|bod[oø]|narvik|lofoten|abisko|kiruna|rovaniemi|yellowknife|fairbanks|murmansk|iceland|islandia|lapland|laponia)/i;
 
 const NO_PUBLIC_EFFICIENT = [
-  // Islandia
   "círculo dorado", "golden circle",
   "snæfellsnes", "snaefellsnes",
   "costa sur", "reynisfjara", "vík", "vik",
   "reykjanes", "kirkjufell", "kirkjufellsfoss",
   "kleifarvatn", "krýsuvík", "seltún", "reykjanesviti", "gunnuhver", "valahnúkamöl", "fagradalsfjall",
-  // Madrid y alrededores
   "toledo", "segovia", "ávila", "avila", "el escorial", "aranjuez"
 ];
 
@@ -158,12 +150,12 @@ function sortKeyMinutes(row) {
   const s = toMinutes(row.start || "00:00");
   const e = toMinutes(row.end || row.start || "00:00");
   let key = s;
-  if (AURORA_RE.test(row.activity || "") && e <= s) key = s + 1440; // noche cruza medianoche
-  if (/regreso\s+a\s+hotel/i.test(row.activity || "") && s < 240) key = s + 1440; // madrugada
+  if (AURORA_RE.test(row.activity || "") && e <= s) key = s + 1440;
+  if (/regreso\s+a\s+hotel/i.test(row.activity || "") && s < 240) key = s + 1440;
   return key;
 }
 
-// Auroras: 18:00–01:00 (cruzando día), mínimo 4h
+// Auroras: 18:00–01:00 cruzando día, mínimo 4h
 function normalizeAuroraWindow(row) {
   if (!AURORA_RE.test(row.activity || "")) return row;
   const MIN = toMinutes("18:00");
@@ -203,9 +195,7 @@ function normalizeTransportTrip(activity = "", to = "", transport = "") {
 
   const usedPublic = /(metro|bus|autob|tren|p[uú]blico)/.test(t);
   const mentionsNoPublic = NO_PUBLIC_EFFICIENT.some(w => txt.includes(w));
-  if (!t || usedPublic || mentionsNoPublic) {
-    return "Vehículo alquilado o Tour guiado";
-  }
+  if (!t || usedPublic || mentionsNoPublic) return "Vehículo alquilado o Tour guiado";
   return transport || "Vehículo alquilado o Tour guiado";
 }
 
@@ -357,23 +347,18 @@ function enforceAuroraCapGlobal(rows) {
   let auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
   auroraDays.sort((a,b)=>a-b);
 
-  // Evitar noches consecutivas (elimina la 2ª)
   for (let i=1; i<auroraDays.length; i++){
     if (auroraDays[i] === auroraDays[i-1] + 1) {
       byDay[auroraDays[i]] = (byDay[auroraDays[i]]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
     }
   }
 
-  // Recalcular
   auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
-
-  // Evitar que la única sea el último día
   if (auroraDays.length === 1 && auroraDays[0] === days[days.length-1]) {
     const last = days[days.length-1];
     byDay[last] = (byDay[last]||[]).filter(r=>!AURORA_RE.test(r.activity||""));
   }
 
-  // Aplicar tope
   auroraDays = days.filter(d => (byDay[d]||[]).some(r => AURORA_RE.test(r.activity||"")));
   if (auroraDays.length > cap) {
     const keep = auroraDays.slice(0, cap);
@@ -445,7 +430,7 @@ function normalizeParsed(parsed) {
         notes: (r.notes || "").toString() || "Una parada ideal para disfrutar.",
       };
 
-      // End vacío o ≤ start → duración razonable (90m; auroras ≥4h se ajustan luego)
+      // End vacío o ≤ start → 90m; auroras ≥4h se ajustan luego
       const s = toMinutes(base.start);
       const e = endRaw ? toMinutes(endRaw) : null;
       if (e === null || e <= s) {
@@ -459,12 +444,10 @@ function normalizeParsed(parsed) {
     })
     .slice(0, 180);
 
-  // Ajuste de auroras
   rows = rows.map(normalizeAuroraWindow);
 
   const dest = parsed.destination || "Ciudad";
 
-  // Orden y retornos por día
   const byDay = rows.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   const mergedOrdered = [];
   Object.keys(byDay).map(Number).sort((a,b)=>a-b).forEach(d => {
@@ -481,11 +464,9 @@ function normalizeParsed(parsed) {
     mergedOrdered.push(...fixed);
   });
 
-  // Relajar mañana tras auroras
   const byDay2 = mergedOrdered.reduce((acc, r) => ((acc[r.day] = acc[r.day] || []).push(r), acc), {});
   relaxNextMorningIfAurora(byDay2);
 
-  // Reconstruir
   let afterRelax = [];
   Object.keys(byDay2).map(Number).sort((a,b)=>a-b).forEach(d => {
     byDay2[d].sort((a,b)=>sortKeyMinutes(a)-sortKeyMinutes(b));
@@ -493,12 +474,10 @@ function normalizeParsed(parsed) {
     afterRelax.push(...byDay2[d]);
   });
 
-  // Auroras: inyección mínima + tope global + dedupe
   let withAuroras = injectAuroraIfMissing(dest, afterRelax);
   withAuroras = enforceAuroraCapGlobal(withAuroras);
   withAuroras = dedupeRows(withAuroras);
 
-  // Salvavidas: garantizar al menos 1 fila
   withAuroras = ensureAtLeastOneRow(dest, withAuroras);
 
   withAuroras.sort((a,b)=>(a.day-b.day)||(sortKeyMinutes(a)-sortKeyMinutes(b)));
@@ -547,7 +526,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Costa Sur: "Costa Sur — Seljalandsfoss", "— Skógafoss", "— Reynisfjara", "— Vík".
 - Incluye ≥3 subparadas cuando aplique.
 
-🏛️ REGLA GLOBAL: PRIORIDAD CIUDAD vs. DAY-TRIPS (con ANÁLISIS)
+🏛️ REGLA GLOBAL: CIUDAD vs. DAY-TRIPS (con ANÁLISIS)
 - Explica en "followup" (breve) si conviene seguir en ciudad o proponer day-trip.
 - Criterios:
   1) Cubre imperdibles top-5 de la ciudad antes de asignar day-trips.
@@ -560,7 +539,7 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
 🌌 AURORAS (regla específica, no global)
 - Solo si latitud ≥ ~55°N y temporada (fin ago–mediados abr).
-- Duración 4h, **entre 18:00 y 01:00**.
+- Duración **4h**, entre **18:00 y 01:00**.
 - Evita noches consecutivas y que la única sea el último día.
 - Tras auroras, el día siguiente inicia **≥10:30** y con plan urbano/cercano.
 - Cierra el día con "Regreso a hotel".
@@ -576,20 +555,34 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 `.trim();
 
 /* ────────────────────────────────────────────────────
-   SECCIÓN 7 · Llamada al modelo (triple intento + backoff)
+   SECCIÓN 7 · Llamada al modelo (mensajes estructurados + JSON FORZADO)
 ────────────────────────────────────────────────────── */
+function toResponsesMessages(arr) {
+  // Convierte [{role, content}] en formato Responses API
+  return arr.map(m => ({
+    role: m.role,
+    content: [{ type: "text", text: String(m.content ?? "") }],
+  }));
+}
+
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function callStructured(messages, temperature = 0.35) {
+async function callStructured(messages, temperature = 0.3) {
+  const inputMsgs = toResponsesMessages(messages);
   let lastErr = null;
+
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const resp = await client.responses.create({
         model: "gpt-4o-mini",
         temperature,
-        input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-        max_output_tokens: 2400,
+        modalities: ["text"],
+        response_format: { type: "json_object" }, // ← FUERZA JSON
+        input: inputMsgs,
+        max_output_tokens: 3000,
       });
+
+      // Con response_format json_object, output_text devuelve JSON
       const text =
         resp?.output_text?.trim() ||
         resp?.output?.[0]?.content?.[0]?.text?.trim() ||
@@ -598,6 +591,7 @@ async function callStructured(messages, temperature = 0.35) {
       return text;
     } catch (err) {
       lastErr = err;
+      // backoff leve
       await wait(attempt === 1 ? 250 : 600);
     }
   }
@@ -617,11 +611,20 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // MODO INFO: eco de texto libre del modelo (sin JSON)
+    // MODO INFO: texto libre (sin JSON forzado) para respuestas explicativas
     if (mode === "info") {
       try {
-        const raw = await callStructured(clientMessages, 0.35);
-        const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
+        const resp = await client.responses.create({
+          model: "gpt-4o-mini",
+          temperature: 0.35,
+          modalities: ["text"],
+          input: toResponsesMessages(clientMessages),
+          max_output_tokens: 1500,
+        });
+        const text =
+          resp?.output_text?.trim() ||
+          resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+          "⚠️ No se obtuvo respuesta del asistente.";
         return res.status(200).json({ text });
       } catch (e) {
         console.error("info mode error:", e?.message || e);
@@ -629,10 +632,10 @@ export default async function handler(req, res) {
       }
     }
 
-    // Intento 1
+    // Intento 1 (JSON forzado)
     let raw = await callStructured(
       [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
-      0.35
+      0.3
     );
     let parsed = cleanToJSON(raw);
     parsed = normalizeParsed(parsed);
@@ -640,14 +643,12 @@ export default async function handler(req, res) {
     // Intento 2: refuerzo “al menos 1 fila”
     const hasRows = parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0;
     if (!hasRows) {
-      const strictPrompt =
-        SYSTEM_PROMPT +
-        `
+      const strict = SYSTEM_PROMPT + `
 
-OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta. SOLO JSON.`;
+OBLIGATORIO: Devuelve al menos 1 fila en "rows". SOLO JSON.`;
       raw = await callStructured(
-        [{ role: "system", content: strictPrompt }, ...clientMessages],
-        0.25
+        [{ role: "system", content: strict }, ...clientMessages],
+        0.2
       );
       parsed = normalizeParsed(cleanToJSON(raw));
     }
@@ -655,13 +656,13 @@ OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta. SOLO JSON.`;
     // Intento 3: plantilla mínima válida
     const stillNoRows = !parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0;
     if (stillNoRows) {
-      const ultraPrompt =
+      const ultra =
         SYSTEM_PROMPT +
         `
-Ejemplo VÁLIDO de formato mínimo:
+Ejemplo VÁLIDO mínimo:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"Taxi","duration":"60m","notes":"Explora un rincón único de la ciudad"}],"replace":false}`;
       raw = await callStructured(
-        [{ role: "system", content: ultraPrompt }, ...clientMessages],
+        [{ role: "system", content: ultra }, ...clientMessages],
         0.15
       );
       parsed = normalizeParsed(cleanToJSON(raw));
@@ -669,7 +670,6 @@ Ejemplo VÁLIDO de formato mínimo:
 
     if (!parsed) parsed = fallbackJSON("no-parse-after-3-attempts");
 
-    // Salida final
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat fatal error:", err?.message || err);
