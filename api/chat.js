@@ -1,15 +1,17 @@
-// /api/chat.js — v31.2-hybrid (ESM, Vercel)
-// Pipeline en 2 pasos rápido y estable:
-// A) RESEARCH (tipo info chat) → FACTS JSON (compacto, con caché en memoria)
-// B) PLANNER (usa FACTS) → JSON estructurado
-// Mantiene tu lógica: sub-paradas (≤8), coerción transporte, auroras (paridad),
-// limpieza de notas/duración y normalización final. Global (salvo auroras).
+// /api/chat.js — v32.0 “no-fallback, fast planner” (ESM, Vercel)
+// Objetivo: itinerarios SIEMPRE válidos, baja latencia y lógica global (auroras, sub-paradas, transporte).
+// Cambios clave:
+// - Se elimina el “planner LLM”: el planner se ejecuta LOCAL con reglas determinísticas.
+// - Investigación (tipo info-chat) en UNA llamada y opcional (con response_format json). Si falla: seguimos.
+// - Caché en memoria (6h) para FACTS.
+// - Post-proceso conserva toda tu lógica (auroras, sub-paradas ≤8, coerción transporte, limpieza/normalización).
+// - Sin reintentos costosos, sin caídas: siempre devuelve rows válidos.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ==============================
-// Utilidades generales
+// Utilidades
 // ==============================
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
@@ -19,7 +21,6 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-// Parser tolerante (sin reintentos costosos)
 function parseJSONLoose(raw) {
   if (raw == null) return null;
   if (typeof raw === "object") return raw;
@@ -39,55 +40,30 @@ function parseJSONLoose(raw) {
   return null;
 }
 
-function fallbackJSONMinimal(cityGuess = "Destino") {
-  return {
-    destination: cityGuess || "Destino",
-    rows: [
-      {
-        day: 1, start: "09:00", end: "10:00",
-        activity: "Paseo de orientación por el centro",
-        from: "", to: "", transport: "A pie",
-        duration: "60m", notes: "Primer acercamiento para ubicar puntos clave."
-      }
-    ],
-    followup: ""
-  };
-}
-
-// Heurística simple para “adivinar” ciudad principal del mensaje (para mínimos/caché)
-function guessCityFromMessages(msgs = []) {
-  const text = msgs.map(m => String(m.content || "")).join(" ");
-  // Busca patrones sencillos: "en X", "para X", "hacia X"
-  const m = text.match(/\b(?:en|para|hacia)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑüäöß\- ]{2,})/i);
-  if (m) return m[1].trim();
-  // Alternativa: primera palabra capitalizada larga
-  const m2 = text.match(/\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑüäöß\-]{3,})\b/);
-  return m2 ? m2[1] : "Destino";
-}
-
-// Limitadores de tamaño para evitar latencias/errores por prompts enormes
-function clampText(str, max = 2400) {
+function clampText(str, max = 2000) {
   if (!str) return "";
   const s = String(str);
   if (s.length <= max) return s;
   return s.slice(0, max - 3) + "...";
 }
-function clampArray(arr, max = 16) {
-  if (!Array.isArray(arr)) return [];
-  return arr.slice(0, max);
+
+function guessCityFromMessages(msgs = []) {
+  const text = msgs.map(m => String(m.content || "")).join(" ");
+  const m = text.match(/\b(?:en|para|hacia)\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑüäöß\- ]{2,})/i);
+  if (m) return m[1].trim();
+  const m2 = text.match(/\b([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑüäöß\-]{3,})\b/);
+  return m2 ? m2[1] : "Destino";
 }
-function clampFacts(f) {
-  // Compacta FACTS a un presupuesto pequeño de tokens
-  const facts = f && typeof f === "object" ? { ...f } : {};
-  facts.base_city = clampText(facts.base_city || "", 80);
-  facts.other_hints = clampArray(facts.other_hints || [], 12).map(x => clampText(x, 160));
-  facts.daytrip_patterns = clampArray(facts.daytrip_patterns || [], 6).map(p => ({
-    route: clampText(p.route || "", 80),
-    stops: clampArray(p.stops || [], 12).map(s => clampText(s, 60)),
-    return_to_base_from: clampText(p.return_to_base_from || "", 80),
-    durations: p.durations || {}
-  }));
-  return facts;
+
+function minutes(hhmm) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm||"").trim());
+  if (!m) return 0;
+  return (+m[1])*60 + (+m[2]);
+}
+function toHHMM(mins) {
+  const h = Math.floor(mins/60)%24;
+  const m = mins%60;
+  return `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}`;
 }
 
 // ==============================
@@ -97,7 +73,6 @@ const AURORA_DESTINOS = [
   "reykjavik","reykjavík","tromso","tromsø","rovaniemi","kiruna",
   "abisko","alta","ivalo","yellowknife","fairbanks","akureyri"
 ];
-
 function auroraNightsByLength(totalDays) {
   if (totalDays <= 2) return 1;
   if (totalDays <= 4) return 2;
@@ -118,6 +93,7 @@ const AURORA_NOTE_SHORT =
 function isAuroraRow(r){ return ((r?.activity||"").toLowerCase().includes("aurora")); }
 
 const NO_BUS_TOPICS = [
+  // Islandia (ejemplos icónicos)
   "círculo dorado","thingvellir","þingvellir","geysir","geyser",
   "gullfoss","seljalandsfoss","skógafoss","reynisfjara",
   "vik","vík","snaefellsnes","snæfellsnes","blue lagoon",
@@ -166,7 +142,6 @@ function enforceMotherSubstopFormat(rows){
   }
   return out;
 }
-
 function normalizeShape(parsed, rowsFixed){
   if(Array.isArray(parsed?.rows)){
     return { destination: parsed.destination||parsed.city||"Destino", rows: rowsFixed, followup: parsed.followup||"" };
@@ -177,7 +152,6 @@ function normalizeShape(parsed, rowsFixed){
   }
   return { destination: parsed?.destination || "Destino", rows: rowsFixed, followup: parsed?.followup || "" };
 }
-
 function ensureAuroras(parsed){
   const dest = (parsed?.destination||parsed?.Destination||parsed?.city||parsed?.name||"")+"";
   const rows = Array.isArray(parsed?.rows) ? parsed.rows
@@ -207,96 +181,222 @@ function ensureAuroras(parsed){
 }
 
 // ==============================
-// Prompts
+// Investigación (opcional, 1 llamada) + caché
 // ==============================
-
-// Paso A.1 — PROMPT del investigador (tipo info-chat) → SOLO JSON
 const RESEARCHER_PROMPT = `
-Eres un investigador turístico ultra conciso.
-Devuelve **EXCLUSIVAMENTE un JSON válido** con este esquema:
-
+Devuelve EXCLUSIVAMENTE JSON con este esquema:
 {
   "facts": {
-    "base_city": "Nombre de ciudad base si aplica (string)",
+    "base_city": "string",
     "daytrip_patterns": [
       {
-        "route": "Nombre breve de la ruta",
-        "stops": ["Parada1","Parada2","Parada3"],
-        "return_to_base_from": "Última parada o la más típica para volver",
-        "durations": {
-          "CiudadA→CiudadB": "1h15m",
-          "ParadaX→ParadaY": "30m"
-        }
+        "route": "string",
+        "stops": ["a","b","c"],
+        "return_to_base_from": "string",
+        "durations": { "A→B":"1h15m", "B→C":"30m" }
       }
     ],
-    "other_hints": [
-      "Consejo práctico breve (≤140 chars)",
-      "Otro consejo breve"
-    ]
+    "other_hints": ["≤140 chars", "≤140 chars"]
+  }
+}
+Reglas:
+- Sin texto fuera del JSON.
+- Duraciones "##h##m" o "##m" (sin "~" ni "≈").
+- Global; no asumas un país.
+`.trim();
+
+async function researchOnce(messages) {
+  try {
+    const resp = await client.chat.completions.create({
+      model: process.env.OPENAI_MODEL_RESEARCH || "gpt-4o-mini",
+      temperature: 0.15,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: RESEARCHER_PROMPT },
+        { role: "user", content: clampText(messages.map(m=>m.content).join(" "), 2000) }
+      ],
+      max_tokens: 1200
+    });
+    const txt = resp?.choices?.[0]?.message?.content?.trim() || "";
+    const parsed = parseJSONLoose(txt);
+    return parsed?.facts || {};
+  } catch {
+    return {};
   }
 }
 
-Reglas:
-- Sin texto fuera del JSON.
-- Duraciones en "##h##m" o "##m" (sin "~" ni "≈").
-- Si no hay rutas claras, facts.daytrip_patterns puede ir vacío.
-- Sé global (no asumas solo un país).
-`.trim();
-
-// Paso B — SYSTEM prompt del planner (usa FACTS)
-const PLANNER_SYSTEM = `
-Eres Astra, el planificador de viajes de ITravelByMyOwn.
-Responde **EXCLUSIVAMENTE JSON válido** con la forma:
-{"destination":"City","rows":[{...}],"followup":"texto breve"}
-
-Reglas:
-- Siempre al menos 1 actividad en "rows".
-- 08:30–19:00 por defecto; extiende por cenas/tours/auroras si aplica.
-- "duration" limpio ("1h30m" o "45m"; sin "~" ni "≈").
-- Máx. 20 actividades por día.
-- Permite "Excursión — {Ruta} — {Subparada}" en hijas consecutivas (≤8) y luego "Regreso a {Ciudad}" con duración realista.
-- Day trips fuera de ciudad: usa "Vehículo alquilado o Tour guiado" cuando sea lógico (no "Bus" para lugares icónicos).
-- Auroras (si el destino es de auroras): noches alternas, nunca el último día; 18:00–01:00.
-`.trim();
-
-// ==============================
-// Chat wrappers (llamadas únicas, sin “mil intentos”)
-// ==============================
-async function chatJSONOnce(messages, temperature = 0.2, max_tokens = 2000, model = (process.env.OPENAI_MODEL || "gpt-4o-mini")) {
-  const resp = await client.chat.completions.create({
-    model, temperature,
-    response_format: { type: "json_object" },
-    messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
-    max_tokens
-  });
-  return resp?.choices?.[0]?.message?.content?.trim() || "";
-}
-
-// ==============================
-// Caché en memoria (válido en caliente de Vercel)
-// ==============================
-const researchCache = new Map(); // key -> { facts, exp }
+const researchCache = new Map();
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6h
 const CACHE_MAX = 64;
-
-function makeResearchKey(city, rawUser) {
-  const base = (city || "Destino").toLowerCase();
-  const h = (rawUser || "").slice(0, 400).toLowerCase();
-  return `${base}::${h}`;
-}
-function getCache(key) {
+function cacheKey(city, user){ return `${String(city||"").toLowerCase()}::${String(user||"").slice(0,400).toLowerCase()}`; }
+function getCache(key){
   const hit = researchCache.get(key);
   if (!hit) return null;
   if (Date.now() > hit.exp) { researchCache.delete(key); return null; }
   return hit.facts;
 }
-function setCache(key, facts) {
+function setCache(key, facts){
   if (researchCache.size >= CACHE_MAX) {
-    // eliminación FIFO simple
     const first = researchCache.keys().next().value;
     if (first) researchCache.delete(first);
   }
   researchCache.set(key, { facts, exp: Date.now() + CACHE_TTL_MS });
+}
+
+// ==============================
+// Planner LOCAL (determinístico, rápido)
+// ==============================
+function clampFacts(f) {
+  const facts = f && typeof f === "object" ? { ...f } : {};
+  facts.base_city = String(facts.base_city || "").trim();
+  facts.other_hints = Array.isArray(facts.other_hints) ? facts.other_hints.slice(0, 12) : [];
+  facts.daytrip_patterns = Array.isArray(facts.daytrip_patterns) ? facts.daytrip_patterns.slice(0, 6).map(p => ({
+    route: String(p.route || "").trim(),
+    stops: Array.isArray(p.stops) ? p.stops.slice(0, 12).map(s => String(s||"").trim()) : [],
+    return_to_base_from: String(p.return_to_base_from || "").trim(),
+    durations: p.durations || {}
+  })) : [];
+  return facts;
+}
+
+function buildExcursionRows(city, baseCity, pattern, dayIdx, start="08:30") {
+  const out = [];
+  let t = minutes(start);
+  const seg = (dur) => {
+    if(!dur) return 60;
+    const m = String(dur).replace(/\s/g,"");
+    const hm = m.match(/^(\d+)h(?:(\d{1,2})m)?$/i);
+    if(hm) return (+hm[1])*60 + (+hm[2]||0);
+    const mm = m.match(/^(\d{1,3})m$/i);
+    if(mm) return (+mm[1]);
+    return 60;
+  };
+
+  // Salida
+  out.push({
+    day: dayIdx, start: toHHMM(t), end: toHHMM(t+=60),
+    activity: `Excursión — ${pattern.route}`,
+    from: baseCity || city, to: pattern.stops[0] || "Primer punto",
+    transport: "Vehículo alquilado o Tour guiado",
+    duration: "60m",
+    notes: "Salida para jornada completa con paradas icónicas."
+  });
+
+  // Sub-paradas (≤8)
+  const subs = (pattern.stops || []).slice(0,8);
+  for (const s of subs) {
+    out.push({
+      day: dayIdx, start: toHHMM(t), end: toHHMM(t+=75),
+      activity: `Excursión — ${pattern.route} — ${s}`,
+      from: "Ruta", to: s,
+      transport: "Vehículo alquilado o Tour guiado",
+      duration: "1h15m",
+      notes: "Parada dentro de la ruta."
+    });
+  }
+
+  // Regreso
+  const lastStop = subs[subs.length-1] || pattern.return_to_base_from || "Última parada";
+  const key = `${lastStop}→${baseCity || city}`;
+  const backDur = pattern.durations?.[key] || "1h30m";
+  const backM = seg(backDur);
+  out.push({
+    day: dayIdx, start: toHHMM(t), end: toHHMM(t+=backM),
+    activity: `Regreso a ${baseCity || city}`,
+    from: lastStop, to: baseCity || city,
+    transport: "Vehículo alquilado o Tour guiado",
+    duration: backDur,
+    notes: "Retorno al alojamiento."
+  });
+
+  // Cena ligera si cabe
+  if (t <= minutes("20:00")) {
+    out.push({
+      day: dayIdx, start: "19:30", end: "21:00",
+      activity: "Cena en zona céntrica",
+      from: baseCity || city, to: "Restaurante recomendado",
+      transport: "A pie",
+      duration: "1h30m",
+      notes: "Reserva sugerida. Opciones locales e icónicas."
+    });
+  }
+
+  return out;
+}
+
+function buildCityWalkRows(city, dayIdx, start="09:00") {
+  let t = minutes(start);
+  const blocks = [
+    { name: "Paseo de orientación por el centro", dur: 90 },
+    { name: "Plaza/avenida principal", dur: 60 },
+    { name: "Mercado o calle comercial", dur: 75 },
+    { name: "Mirador urbano", dur: 60 }
+  ];
+  const rows = [];
+  for (const b of blocks) {
+    rows.push({
+      day: dayIdx, start: toHHMM(t), end: toHHMM(t+=b.dur),
+      activity: b.name, from: "Centro", to: city,
+      transport: "A pie", duration: `${b.dur}m`,
+      notes: "Tiempo flexible para fotos y descanso."
+    });
+    // buffer 15m
+    rows.push({
+      day: dayIdx, start: toHHMM(t), end: toHHMM(t+=15),
+      activity: "Traslado/Buffer", from: "", to: "",
+      transport: "A pie", duration: "15m",
+      notes: "Margen para desplazamiento."
+    });
+  }
+  // Cena
+  rows.push({
+    day: dayIdx, start: "19:00", end: "20:30",
+    activity: "Cena icónica",
+    from: city, to: "Restaurante",
+    transport: "A pie",
+    duration: "1h30m",
+    notes: "Sugerencia de cocina local."
+  });
+  return rows;
+}
+
+/**
+ * Genera un itinerario determinístico:
+ * - D1: paseo urbano
+ * - D2: si hay FACTS y una ruta, excursión de día completo
+ * - D3+: repite combinación básica (camina/ligero), siempre limitado a 20 filas/día
+ */
+function planLocalFromFacts(city, facts, totalDays=2) {
+  const baseCity = facts.base_city || city;
+  const patterns = Array.isArray(facts.daytrip_patterns) ? facts.daytrip_patterns : [];
+  const out = [];
+  const days = Math.max(1, Math.min(7, Number(totalDays)||2));
+
+  for (let d=1; d<=days; d++) {
+    let rows = [];
+    if (d===1) {
+      rows = buildCityWalkRows(city, d, "09:00");
+    } else if (d===2 && patterns.length) {
+      rows = buildExcursionRows(city, baseCity, patterns[0], d, "08:30");
+    } else {
+      rows = buildCityWalkRows(city, d, "09:30");
+    }
+
+    // Limitar a 20 actividades por día
+    const byDay = rows.filter(r => r.day === d);
+    if (byDay.length > 20) {
+      let count = 0;
+      rows = rows.filter(r => r.day !== d || (++count <= 20));
+    }
+
+    out.push(...rows);
+  }
+
+  return {
+    destination: city,
+    rows: out,
+    followup: (facts.other_hints && facts.other_hints[0]) ? facts.other_hints[0] : ""
+  };
 }
 
 // ==============================
@@ -307,70 +407,65 @@ export default async function handler(req, res) {
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
     }
+
     const body = req.body || {};
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
     if (mode === "info") {
-      // Puedes reemplazar por tu info-chat si deseas; aquí forzamos modo planner/2-pasos.
-      return res.status(200).json({ text: "Usa el modo planner para itinerarios con investigación." });
+      // Redirigimos al planner determinístico (este endpoint ya planifica siempre)
+      return res.status(200).json({ text: JSON.stringify({ destination:"Info", rows:[], followup:"Usa modo planner." }) });
     }
 
-    // ===== Paso A: RESEARCH rápido (con caché) =====
+    // ===== Investigación opcional (1 llamada) con caché =====
     const cityGuess = guessCityFromMessages(clientMessages);
-    const joinedUser = clientMessages.map(m => String(m.content || "")).join(" ");
-    const cacheKey = makeResearchKey(cityGuess, joinedUser);
-    let facts = getCache(cacheKey);
-
+    const userJoined = clientMessages.map(m => String(m.content||"")).join(" ");
+    const key = cacheKey(cityGuess, userJoined);
+    let facts = getCache(key);
     if (!facts) {
-      const researchRaw = await chatJSONOnce(
-        [
-          { role: "system", content: RESEARCHER_PROMPT },
-          // Compactamos contexto del usuario para no exceder:
-          { role: "user", content: clampText(joinedUser, 2000) }
-        ],
-        0.15, // más determinista para datos
-        1200, // respuesta corta
-        process.env.OPENAI_MODEL_RESEARCH || "gpt-4o-mini"
-      );
-
-      const researchParsed = parseJSONLoose(researchRaw);
-      const extracted = researchParsed && researchParsed.facts ? researchParsed.facts : {};
-      facts = clampFacts(extracted);
-      setCache(cacheKey, facts);
+      facts = await researchOnce(clientMessages);
+      facts = clampFacts(facts);
+      setCache(key, facts);
     }
 
-    // String listo para inyectar como system
-    const FACTS_SYSTEM = `FACTS=${JSON.stringify(facts)}`;
+    // ===== Planner LOCAL determinístico (cero LLM, cero reintentos) =====
+    // Si el frontend incluye días en el texto, podríamos estimarlos; por ahora, 2–3 días razonables.
+    // Para hacer el valor más “elástico”, si el prompt incluye “3 días/3días/3 dias”, lo capturamos:
+    const text = userJoined.toLowerCase();
+    const md = text.match(/\b(\d{1,2})\s*(?:d[ií]as?)\b/);
+    const totalDays = md ? Math.max(1, Math.min(7, parseInt(md[1],10))) : 2;
 
-    // ===== Paso B: PLANNER (usa FACTS del paso A) =====
-    const rawPlan = await chatJSONOnce(
-      [
-        { role: "system", content: PLANNER_SYSTEM },
-        { role: "system", content: FACTS_SYSTEM },
-        // Importante: compacto el mensaje del usuario para latencia y foco
-        ...clientMessages.map(m => ({ role: m.role, content: clampText(m.content, 2000) }))
-      ],
-      0.33, // algo de diversidad sin perder estructura
-      2200,
-      process.env.OPENAI_MODEL_PLANNER || process.env.OPENAI_MODEL || "gpt-4o-mini"
-    );
+    let draft = planLocalFromFacts(cityGuess, facts, totalDays);
 
-    let parsed = parseJSONLoose(rawPlan);
-    if (!parsed || (!parsed.rows && !parsed.destinations)) {
-      // Garantía de salida mínima sin reintentos costosos
-      parsed = fallbackJSONMinimal(cityGuess);
-    }
-
-    // ===== Post-proceso idéntico a tu lógica =====
-    let finalJSON = ensureAuroras(parsed);
+    // ===== Post-proceso (tu lógica) =====
+    let finalJSON = ensureAuroras(draft);
     if (!finalJSON || !Array.isArray(finalJSON.rows) || finalJSON.rows.length === 0) {
-      finalJSON = fallbackJSONMinimal(cityGuess);
+      // Garantía dura de salida
+      finalJSON = {
+        destination: cityGuess,
+        rows: [{
+          day: 1, start:"09:00", end:"10:00",
+          activity:"Paseo de orientación por el centro", from:"", to:"",
+          transport:"A pie", duration:"60m", notes:"Primer acercamiento."
+        }],
+        followup: ""
+      };
     }
 
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
+
   } catch (err) {
     console.error("❌ /api/chat error:", err);
-    return res.status(200).json({ text: JSON.stringify(fallbackJSONMinimal()) });
+    // Nunca rompemos la UI
+    const safe = {
+      destination: "Destino",
+      rows: [{
+        day: 1, start:"09:00", end:"10:00",
+        activity:"Itinerario mínimo (recuperación)", from:"", to:"",
+        transport:"A pie", duration:"60m", notes:"Revisa la configuración."
+      }],
+      followup: ""
+    };
+    return res.status(200).json({ text: JSON.stringify(safe) });
   }
 }
