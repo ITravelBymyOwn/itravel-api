@@ -1,12 +1,13 @@
-// /api/chat.js — v30.12 (ESM compatible en Vercel)
-// Base exacta: v30.11.
-// Cambios (planner con "mente de info chat", sin tiempos predefinidos):
-// - Prompt rediseñado para que el modelo USE su conocimiento turístico global
-//   (igual que el info chat) y calcule distancias/tiempos reales sin plantillas.
-// - Se exige calcular el “Regreso a {Ciudad}” desde la ÚLTIMA parada del day-trip.
-// - Mantengo: Chat Completions + response_format JSON, triple reintento anti-fallback,
-//   parser robusto, subparadas ≤8, coerción transporte, paridad auroras,
-//   scrub de notas (blue lagoon y “valid: …”), normalización “A pie”.
+// /api/chat.js — v30.13 (ESM compatible en Vercel)
+// Base exacta: v30.12.
+// Cambios clave:
+// - Paso de INVESTIGACIÓN previo (como Info Chat) -> obtiene "FACTS" turísticos en JSON
+//   y se inyectan al prompt del planner para que use tiempos/distancias realistas.
+// - Formato destino–subparadas: garantiza "Excursión — {Ruta} — {Subparada}" en cada fila hija
+//   (sin colapsar la actividad madre; máximo 8 subparadas contiguas).
+// - Limpieza agresiva de notas y duraciones (elimina "≈", "~", "valid: ..." y duplicados Blue Lagoon).
+// - Parser y triple intento se mantienen (anti-fallback).
+// - Mantiene coerción de transporte y paridad de auroras.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -22,30 +23,39 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-// Parser robusto (objeto nativo → bloque {...} → limpieza → fences)
 function cleanToJSONPlus(raw) {
   if (!raw) return null;
 
+  // 0) ya viene objeto
   if (typeof raw === "object") {
     const obj = raw;
-    if (obj.rows || obj.destinations) return obj;
+    if (obj.rows || obj.destinations || obj.facts) return obj;
     try { return JSON.parse(JSON.stringify(obj)); } catch {}
   }
-
   if (typeof raw !== "string") return null;
+
   let s = raw.trim();
+  // quitar fences
   s = s.replace(/^```json/i, "```").replace(/^```/, "").replace(/```$/, "").trim();
 
+  // 1) intento directo
   try { return JSON.parse(s); } catch {}
+
+  // 2) primer {...} último }
   try {
     const first = s.indexOf("{");
     const last = s.lastIndexOf("}");
-    if (first >= 0 && last > first) return JSON.parse(s.slice(first, last + 1));
+    if (first >= 0 && last > first) {
+      return JSON.parse(s.slice(first, last + 1));
+    }
   } catch {}
+
+  // 3) limpieza de bordes agresiva
   try {
     const cleaned = s.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
   } catch {}
+
   return null;
 }
 
@@ -70,11 +80,11 @@ function fallbackJSON() {
 }
 
 // ==============================
-// LÓGICA POST-PROCESO (auroras, transporte, subparadas)
+// LÓGICA POST-PROCESO (auroras, transporte, subparadas, limpieza)
 // ==============================
 const AURORA_DESTINOS = [
-  "reykjavik", "reykjavík", "tromso", "tromsø", "rovaniemi", "kiruna",
-  "abisko", "alta", "ivalo", "yellowknife", "fairbanks", "akureyri"
+  "reykjavik","reykjavík","tromso","tromsø","rovaniemi","kiruna",
+  "abisko","alta","ivalo","yellowknife","fairbanks","akureyri"
 ];
 
 function auroraNightsByLength(totalDays) {
@@ -84,41 +94,41 @@ function auroraNightsByLength(totalDays) {
   if (totalDays <= 9) return 3;
   return 3;
 }
+
 function planAuroraDays(totalDays, count) {
   const start = (totalDays % 2 === 0) ? 1 : 2;
   const out = [];
   for (let d = start; out.length < count && d < totalDays; d += 2) out.push(d);
   return out;
 }
+
 const AURORA_NOTE_SHORT =
   "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. " +
-  "La hora de regreso al hotel dependerá del tour de auroras que se tome. " +
-  "Puedes optar por tour guiado o movilización por tu cuenta (es probable que debas conducir con nieve y de noche; investiga seguridad para tus fechas).";
+  "La hora de regreso al hotel dependerá del tour elegido. " +
+  "Puedes optar por tour guiado o movilización por tu cuenta (conducirás de noche y con posible nieve; verifica seguridad para tus fechas).";
 
 function isAuroraRow(r) {
   const t = (r?.activity || "").toLowerCase();
   return t.includes("aurora");
 }
 
-// Rutas sin bus eficiente habitual (para coerción a “Vehículo alquilado o Tour guiado”)
 const NO_BUS_TOPICS = [
-  "círculo dorado", "thingvellir", "þingvellir", "geysir", "geyser",
-  "gullfoss", "seljalandsfoss", "skógafoss", "reynisfjara",
-  "vik", "vík", "snaefellsnes", "snæfellsnes", "blue lagoon",
-  "reykjanes", "krýsuvík", "arnarstapi", "hellnar", "djúpalónssandur",
-  "kirkjufell", "puente entre continentes"
+  "círculo dorado","thingvellir","þingvellir","geysir","geyser",
+  "gullfoss","seljalandsfoss","skógafoss","reynisfjara",
+  "vik","vík","snaefellsnes","snæfellsnes","blue lagoon",
+  "reykjanes","krýsuvík","arnarstapi","hellnar","djúpalónssandur",
+  "kirkjufell","puente entre continentes"
 ];
+
 function needsVehicleOrTour(row) {
   const a = (row.activity || "").toLowerCase();
   const to = (row.to || "").toLowerCase();
   return NO_BUS_TOPICS.some(k => a.includes(k) || to.includes(k));
 }
+
 function coerceTransport(rows) {
   return rows.map(r => {
-    let transport = (r.transport || "").toLowerCase();
-    if (transport.includes("walking") || transport.includes("caminando")) {
-      return { ...r, transport: "A pie" };
-    }
+    const transport = (r.transport || "").toLowerCase();
     if (transport.includes("bus") && needsVehicleOrTour(r)) {
       return { ...r, transport: "Vehículo alquilado o Tour guiado" };
     }
@@ -126,61 +136,77 @@ function coerceTransport(rows) {
   });
 }
 
-// Limpieza de notas (auroras y Blue Lagoon)
 function scrubAuroraValid(text = "") {
   if (!text) return text;
   return text.replace(/valid:[^.\n\r]*auroral[^.\n\r]*\.?/gi, "").trim();
 }
+
 function scrubBlueLagoon(text = "") {
   if (!text) return text;
+  // elimina duplicaciones del "min stay ~3h (ajustable)"
   return text
     .replace(/(\s*[-–•·]\s*)?min\s*stay\s*~?3h\s*\(ajustable\)/gi, "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
 
-// Compactador de subparadas (actividad madre + hasta 8 hijas)
-function compactSubstops(rows) {
-  const out = [];
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r) continue;
-    const act = (r.activity || "").toLowerCase();
+function stripApproxDuration(d = "") {
+  if (!d) return d;
+  return String(d).replace(/[~≈]/g, "").trim();
+}
 
-    if (act.startsWith("excursión") || act.includes("costa sur") || act.includes("península") || act.includes("círculo dorado")) {
-      const sub = [];
-      let j = i + 1;
-      while (j < rows.length && sub.length < 8) {
-        const rj = rows[j];
-        const aj = (rj?.activity || "").toLowerCase();
-        const isSub = aj.startsWith("visita")
-          || aj.includes("cascada")
-          || aj.includes("playa")
-          || aj.includes("geysir")
-          || aj.includes("thingvellir")
-          || aj.includes("gullfoss")
-          || aj.includes("kirkjufell")
-          || aj.includes("arnarstapi")
-          || aj.includes("hellnar")
-          || aj.includes("djúpalónssandur")
-          || aj.includes("djupalonssandur")
-          || aj.includes("vík") || aj.includes("vik")
-          || aj.includes("reynisfjara");
-        if (isSub) { sub.push(rj?.to || rj?.activity || ""); j++; } else break;
-      }
-      if (sub.length) {
-        const pretty = sub.filter(Boolean).map(s => s.replace(/^visita (a |al )?/i, "").trim()).join(" → ");
-        const merged = { ...r, activity: (r.activity || "").replace(/\s—.*$/, "") + (pretty ? ` — ${pretty}` : "") };
-        out.push(merged);
-        for (let k = i + 1; k < i + 1 + sub.length; k++) {
-          const rr = rows[k];
-          out.push({ ...rr, notes: (rr.notes || "Parada dentro de la ruta.") });
-        }
-        i = i + sub.length;
-        continue;
-      }
+/**
+ * Garantiza el formato destino–subparadas SIN colapsar:
+ * - Detecta bloque que inicia con actividad que contiene "Excursión".
+ * - Hasta 8 filas siguientes que sean visitas/paradas típicas se renombran a:
+ *   "Excursión — {RutaBase} — {SubparadaBonita}"
+ * - No elimina filas; solo renombra y añade una nota breve si falta.
+ */
+function enforceMotherSubstopFormat(rows) {
+  const out = [...rows];
+  for (let i = 0; i < out.length; i++) {
+    const r = out[i];
+    const act = (r.activity || "").toLowerCase();
+    if (!/excursión/.test(act)) continue;
+
+    // Determinar "RutaBase": tomamos la porción después de "Excursión" y antes de "—" o fin
+    const rawName = (r.activity || "").trim();
+    const routeBase = rawName
+      .replace(/^excursión\s*(a|al)?\s*/i, "")
+      .split("—")[0]
+      .trim() || "Ruta";
+
+    // Renombrar hasta 8 subparadas siguientes
+    let count = 0;
+    for (let j = i + 1; j < out.length && count < 8; j++) {
+      const rj = out[j];
+      const aj = (rj?.activity || "").toLowerCase();
+      const isSub =
+        aj.startsWith("visita") ||
+        aj.includes("cascada") ||
+        aj.includes("playa") ||
+        aj.includes("geysir") ||
+        aj.includes("thingvellir") ||
+        aj.includes("gullfoss") ||
+        aj.includes("kirkjufell") ||
+        aj.includes("arnarstapi") ||
+        aj.includes("hellnar") ||
+        aj.includes("djúpalónssandur") ||
+        aj.includes("djupalonssandur") ||
+        aj.includes("vík") || aj.includes("vik") ||
+        aj.includes("reynisfjara");
+
+      if (!isSub) break;
+
+      // nombre bonito de subparada
+      const pretty = (rj.to || rj.activity || "")
+        .replace(/^visita\s+(a|al)\s*/i, "")
+        .trim();
+
+      rj.activity = `Excursión — ${routeBase} — ${pretty}`;
+      if (!rj.notes) rj.notes = "Parada dentro de la ruta.";
+      count++;
     }
-    out.push(r);
   }
   return out;
 }
@@ -199,20 +225,22 @@ function ensureAuroras(parsed) {
 
   if (!rows.length) return parsed;
 
-  let base = coerceTransport(compactSubstops(rows)).map(r => {
-    let notes = scrubAuroraValid(r.notes);
-    const inLagoon = ((r.to || "") + " " + (r.activity || "")).toLowerCase().includes("blue lagoon");
-    if (inLagoon) notes = scrubBlueLagoon(notes);
-    return { ...r, notes };
-  });
-
-  // Si no es destino de auroras, sólo normalizamos forma
+  const totalDays = Math.max(...rows.map(r => Number(r.day) || 1));
   const isAuroraPlace = AURORA_DESTINOS.some(x => low.includes(x));
+
+  let base = rows.map(r => ({
+    ...r,
+    duration: stripApproxDuration(r.duration),
+    notes: scrubBlueLagoon(scrubAuroraValid(r.notes))
+  }));
+
+  // Transporte coherente y formato madre-subparadas
+  base = coerceTransport(enforceMotherSubstopFormat(base));
+
   if (!isAuroraPlace) return normalizeShape(parsed, base);
 
-  // Reinyectar auroras por paridad (modelo calcula todo lo demás)
+  // Reinyectar auroras por paridad
   base = base.filter(r => !isAuroraRow(r));
-  const totalDays = Math.max(...base.map(r => Number(r.day) || 1));
   const targetCount = auroraNightsByLength(totalDays);
   const targetDays = planAuroraDays(totalDays, targetCount);
 
@@ -225,7 +253,7 @@ function ensureAuroras(parsed) {
       from: "Hotel",
       to: "Puntos de observación (variable)",
       transport: "Vehículo alquilado o Tour guiado",
-      duration: "~7h",
+      duration: "7h",
       notes: AURORA_NOTE_SHORT,
     });
   }
@@ -244,28 +272,64 @@ function normalizeShape(parsed, rowsFixed) {
 }
 
 // ==============================
-// SYSTEM PROMPT (mente turística del info chat, sin tiempos prefijados)
+// Prompts
 // ==============================
-const SYSTEM_PROMPT = `
-Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn. Usa la MISMA capacidad de conocimiento turístico y mundo real que en el “Info Chat”.
-Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** (sin texto adicional).
 
-📌 FORMATO ÚNICO
+// Paso 1: INVESTIGACIÓN (como Info Chat) -> devuelve FACTS en JSON
+const RESEARCH_PROMPT = `
+Eres un asistente turístico experto. Analiza el destino y el rango de días implícito en el mensaje del usuario y
+devuelve **EXCLUSIVAMENTE JSON** con tiempos realistas de conducción/traslado entre paradas típicas.
+
+Formato:
+{
+  "facts":{
+    "base_city":"<ciudad base si aplica>",
+    "daytrip_patterns":[
+      {
+        "route":"Círculo Dorado",
+        "stops":["Þingvellir","Geysir","Gullfoss"],
+        "return_to_base_from":"Gullfoss",
+        "durations":{
+          "Reykjavík→Þingvellir":"1h",
+          "Þingvellir→Geysir":"1h-1h15m",
+          "Geysir→Gullfoss":"15m-30m",
+          "Gullfoss→Reykjavík":"1h30m-1h45m"
+        }
+      }
+    ],
+    "other_hints":[
+      "Usa 'Vehículo alquilado o Tour guiado' para day-trips icónicos en Islandia"
+    ]
+  }
+}
+No texto fuera del JSON.
+`.trim();
+
+// Paso 2: PLANNER (forzamos JSON)
+const SYSTEM_PROMPT = `
+Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn. Eres un experto mundial en turismo.
+Tu salida debe ser **EXCLUSIVAMENTE un JSON válido**.
+
+Dispones de un bloque "FACTS" con tiempos y patrones turísticos investigados previamente: úsalo para
+establecer **duraciones concretas y realistas** de cada traslado y del "Regreso a {Ciudad}".
+
+📌 FORMATO
 {"destination":"City","rows":[{...}],"followup":"texto breve"}
 
 ⚠️ REGLAS GENERALES
-- Devuelve SIEMPRE al menos una fila en "rows".
-- Prohíbe texto fuera del JSON.
-- Máximo 20 actividades por día.
-- Horarios realistas (si no hay preferencia, usa 08:30–19:00).
-- No devuelvas "seed" ni campos vacíos ni placebos.
+- Devuelve SIEMPRE al menos una actividad en "rows".
+- Nada de texto fuera del JSON.
+- Máx. 20 actividades por día.
+- Usa horas realistas (08:30–19:00 si no hay otras).
+- No devuelvas "seed" ni campos vacíos.
+- En "duration" escribe valores limpios (por ejemplo "1h45m", "30m"). **No uses** "~" ni "≈".
 
 🧭 ESTRUCTURA DE CADA FILA
 {
   "day": 1,
   "start": "08:30",
   "end": "10:30",
-  "activity": "Nombre claro y específico (se permite 'Excursión — A → B → C')",
+  "activity": "Nombre claro y específico (permitido: 'Excursión — Ruta — Subparada')",
   "from": "Lugar de partida",
   "to": "Lugar de destino",
   "transport": "A pie, Metro, Tren, Auto, Taxi, Bus, Ferry, Vehículo alquilado o Tour guiado",
@@ -273,25 +337,28 @@ Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** (sin texto adicional).
   "notes": "Descripción breve y motivadora"
 }
 
-🌍 CONOCIMIENTO TURÍSTICO GLOBAL (SIN PLANTILLAS)
-- Calcula **con tu conocimiento de turismo mundial** (como en el info chat) las **distancias y tiempos de traslado reales** entre puntos.
-- Usa carreteras y patrones habituales de cada país/region para estimar tiempos verosímiles.
-- Si el destino no tiene red pública eficiente (p. ej., day-trips clásicos en Islandia), usa **"Vehículo alquilado o Tour guiado"** en lugar de "Bus".
+🌍 CONOCIMIENTO + FACTS
+- Usa **FACTS** para los tiempos habituales entre paradas y para el **Regreso a {Ciudad}**.
+- Si FACTS no cubre una pareja exacta de lugares, aplica tu conocimiento turístico global para estimar tiempos coherentes.
 
-🧭 DAY-TRIPS Y SUBPARADAS
-- Modela rutas de 1 día como actividad madre **“Excursión — {Ruta}”** seguida de hasta **8 subparadas** inmediatamente después (“Visita ...”, cascadas, playas, etc.).
-- La fila **“Regreso a {Ciudad}”** debe calcular su **duración real desde la ÚLTIMA parada** visitada ese día. NO reutilices traslados internos ni tiempos prefijados.
+🚗 TRANSPORTE
+- En day-trips icónicos de Islandia (Círculo Dorado, Costa Sur, Snæfellsnes, Reykjanes/Blue Lagoon) usa
+  **"Vehículo alquilado o Tour guiado"** en vez de "Bus".
 
-🌌 AURORAS (única regla predefinida)
-- Distribuye en **noches alternas por paridad** (par→1,3,5…; impar→2,4,6…), **nunca** el último día.
+🌌 AURORAS
+- Noches alternas por paridad (par→1,3,5…; impar→2,4,6…), nunca el último día.
 - Horario 18:00–01:00; transporte "Vehículo alquilado o Tour guiado".
-- No incluyas frases como “valid: ventana nocturna auroral (sujeto a clima)”.
+- **No** escribas “valid: ventana nocturna auroral (sujeto a clima)”.
+
+🧩 DESTINO–SUBPARADAS
+- Usa la convención **"Excursión — {Ruta} — {Subparada}"** en cada parada hija consecutiva (hasta 8),
+  y luego agrega explícitamente la fila **"Regreso a {Ciudad}"** con el tiempo real de vuelta.
 `.trim();
 
 // ==============================
 // Llamadas al modelo (Chat Completions)
 // ==============================
-async function chatPlanner(messages, temperature = 0.35) {
+async function chatJSON(messages, temperature = 0.35) {
   const resp = await client.chat.completions.create({
     model: "gpt-4o-mini",
     temperature,
@@ -299,11 +366,10 @@ async function chatPlanner(messages, temperature = 0.35) {
     messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
     max_tokens: 3200,
   });
-  const choice = resp?.choices?.[0];
-  const text = choice?.message?.content?.trim() || "";
-  return text;
+  return resp?.choices?.[0]?.message?.content?.trim() || "";
 }
-async function chatInfo(messages, temperature = 0.5) {
+
+async function chatFree(messages, temperature = 0.5) {
   const resp = await client.chat.completions.create({
     model: "gpt-4o-mini",
     temperature,
@@ -326,38 +392,71 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // INFO CHAT (texto libre)
+    // ===== INFO MODE (como tu info chat) =====
     if (mode === "info") {
-      const raw = await chatInfo(clientMessages);
+      const raw = await chatFree(clientMessages);
       return res.status(200).json({ text: raw || "⚠️ No se obtuvo respuesta." });
     }
 
-    // PLANNER — JSON forzado
-    let raw = await chatPlanner([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages], 0.35);
+    // ===== Paso 1: INVESTIGACIÓN (obtener FACTS en JSON) =====
+    // Usamos el mensaje del usuario como contexto para que la investigación sea relevante.
+    const researchRaw = await chatJSON(
+      [
+        { role: "system", content: RESEARCH_PROMPT },
+        ...clientMessages
+      ],
+      0.4
+    );
+    const researchParsed = cleanToJSONPlus(researchRaw);
+    const FACTS = researchParsed?.facts ? JSON.stringify(researchParsed.facts) : "{}";
+
+    // ===== Paso 2: PLANNER (forzamos JSON e inyectamos FACTS) =====
+    let raw = await chatJSON(
+      [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: `FACTS=${FACTS}` },
+        ...clientMessages
+      ],
+      0.35
+    );
     let parsed = cleanToJSONPlus(raw);
 
     // Reintento estricto
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
-      const strictPrompt = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve solo un JSON con "destination" y al menos 1 fila en "rows".`;
-      raw = await chatPlanner([{ role: "system", content: strictPrompt }, ...clientMessages], 0.2);
+      const strict = SYSTEM_PROMPT + `
+OBLIGATORIO: Devuelve un único JSON con "destination" y al menos 1 fila en "rows".`;
+      raw = await chatJSON(
+        [
+          { role: "system", content: strict },
+          { role: "system", content: `FACTS=${FACTS}` },
+          ...clientMessages
+        ],
+        0.2
+      );
       parsed = cleanToJSONPlus(raw);
     }
 
-    // Plantilla mínima (último intento)
+    // Último intento (plantilla mínima)
     const stillNo = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNo) {
-      const ultraPrompt = SYSTEM_PROMPT + `
-Ejemplo válido estrictamente:
-{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await chatPlanner([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
+      const ultra = SYSTEM_PROMPT + `
+Ejemplo válido:
+{"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora la ciudad"}]}`;
+      raw = await chatJSON(
+        [
+          { role: "system", content: ultra },
+          { role: "system", content: `FACTS=${FACTS}` },
+          ...clientMessages
+        ],
+        0.1
+      );
       parsed = cleanToJSONPlus(raw);
     }
 
     if (!parsed) parsed = fallbackJSON();
 
-    // Post-proceso y normalización (sin imponer tiempos; el modelo los calculó)
+    // Post-proceso y normalización
     const finalJSON = ensureAuroras(parsed);
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
 
