@@ -1,16 +1,11 @@
-// /api/chat.js — v30.15 (ESM compatible en Vercel)
-// Base exacta: v30.13 → v30.14 (tuya) → v30.15 (este patch).
-// Mantiene TODOS tus nombres, reglas y flujo. Cambios quirúrgicos anti-fallback:
-// - Limpieza/parseo JSON más robusta (fences, relleno, primer/último brace, reparación).
-// - Retries extra + "modo estricto" y "plantilla mínima" antes de caer en fallback.
-// - Normalización final garantizada a {"destination","rows"} para que el planner no caiga.
-// - Regex y utilidades endurecidas (durations válidas, sub-paradas ≤ 8, transporte coherente).
-// - Se conserva: subparadas≤8, coerción transporte, auroras (paridad), limpieza de notas/duraciones,
-//   FACTS locales por defecto (Islandia) y mezcla con investigación.
+// /api/chat.js — v30.14 (ESM compatible en Vercel)
+// Base exacta: v30.13 (se mantienen nombres, lógica y flujo).
+// Refuerzos clave (anti-fallback + precisión):
+// - Retries y captura robusta en investigación y planner.
+// - FACTS locales por defecto (Islandia) si la investigación falla o llega vacía.
+// - Post-proceso aplica duraciones de "Regreso a {Ciudad}" desde FACTS (sin genéricos).
+// - Mantiene: subparadas≤8, coerción transporte, auroras (paridad), limpieza de notas/duraciones.
 
-// ==============================
-// Imports y cliente
-// ==============================
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -25,49 +20,37 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-/**
- * Intento robusto de convertir cualquier salida a JSON:
- * - Acepta objeto ya parseado
- * - Quita fences ``` y ```json
- * - Intenta parseo directo
- * - Extrae primer '{' ... último '}'
- * - Limpieza de bordes agresiva
- */
 function cleanToJSONPlus(raw) {
-  if (raw == null) return null;
-
-  // Ya es objeto
+  if (!raw) return null;
+  // 0) ya viene objeto
   if (typeof raw === "object") {
     const obj = raw;
-    if (obj.rows || obj.destinations || obj.facts || obj.itineraries || obj.destination) return obj;
-    try { return JSON.parse(JSON.stringify(obj)); } catch { /* no-op */ }
+    if (obj.rows || obj.destinations || obj.facts) return obj;
+    try { return JSON.parse(JSON.stringify(obj)); } catch {}
   }
-
   if (typeof raw !== "string") return null;
+
   let s = raw.trim();
+  // quitar fences
+  s = s.replace(/^```json/i, "```").replace(/^```/, "").replace(/```$/, "").trim();
 
-  // Quitar fences tipo ```json ... ``` o ``` ... ```
-  s = s.replace(/```json\s*([\s\S]*?)```/gi, "$1");
-  s = s.replace(/```\s*([\s\S]*?)```/g, "$1");
+  // 1) intento directo
+  try { return JSON.parse(s); } catch {}
 
-  // Intento directo
-  try { return JSON.parse(s); } catch { /* sigue */ }
-
-  // Primer '{' a último '}' (tolerante a texto alrededor)
+  // 2) primer {...} último }
   try {
     const first = s.indexOf("{");
     const last = s.lastIndexOf("}");
     if (first >= 0 && last > first) {
-      const slice = s.slice(first, last + 1);
-      return JSON.parse(slice);
+      return JSON.parse(s.slice(first, last + 1));
     }
-  } catch { /* sigue */ }
+  } catch {}
 
-  // Limpieza agresiva de bordes
+  // 3) limpieza de bordes agresiva
   try {
-    const cleaned = s.replace(/^[^{\[]+/, "").replace(/[^}\]]+$/, "");
+    const cleaned = s.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
-  } catch { /* no-op */ }
+  } catch {}
 
   return null;
 }
@@ -85,10 +68,10 @@ function fallbackJSON() {
         to: "",
         transport: "",
         duration: "",
-        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos."
-      }
+        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+      },
     ],
-    followup: "⚠️ Fallback controlado: revisa configuración o API Key."
+    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
@@ -107,14 +90,12 @@ function auroraNightsByLength(totalDays) {
   if (totalDays <= 9) return 3;
   return 3;
 }
-
 function planAuroraDays(totalDays, count) {
   const start = (totalDays % 2 === 0) ? 1 : 2;
   const out = [];
   for (let d = start; out.length < count && d < totalDays; d += 2) out.push(d);
   return out;
 }
-
 const AURORA_NOTE_SHORT =
   "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. " +
   "La hora de regreso al hotel dependerá del tour elegido. " +
@@ -132,13 +113,11 @@ const NO_BUS_TOPICS = [
   "reykjanes","krýsuvík","arnarstapi","hellnar","djúpalónssandur",
   "kirkjufell","puente entre continentes"
 ];
-
 function needsVehicleOrTour(row) {
   const a = (row.activity || "").toLowerCase();
   const to = (row.to || "").toLowerCase();
   return NO_BUS_TOPICS.some(k => a.includes(k) || to.includes(k));
 }
-
 function coerceTransport(rows) {
   return rows.map(r => {
     const transport = (r.transport || "").toLowerCase();
@@ -151,10 +130,8 @@ function coerceTransport(rows) {
 
 function scrubAuroraValid(text = "") {
   if (!text) return text;
-  // en tu regla actual no quieres "valid: ..." para auroras en API (lo maneja el JS si hace falta)
   return text.replace(/valid:[^.\n\r]*auroral[^.\n\r]*\.?/gi, "").trim();
 }
-
 function scrubBlueLagoon(text = "") {
   if (!text) return text;
   // elimina duplicaciones del "min stay ~3h (ajustable)"
@@ -163,16 +140,15 @@ function scrubBlueLagoon(text = "") {
     .replace(/\s{2,}/g, " ")
     .trim();
 }
-
 function stripApproxDuration(d = "") {
   if (!d) return d;
   return String(d).replace(/[~≈]/g, "").trim();
 }
 
 /**
- * Garantiza el formato madre→subparadas SIN colapsar:
- * - Detecta fila madre con "Excursión".
- * - Hasta 8 filas hijas consecutivas → "Excursión — {Ruta} — {Subparada}".
+ * Garantiza el formato destino–subparadas SIN colapsar:
+ * - Detecta bloque con "Excursión".
+ * - Hasta 8 filas siguientes hijas => "Excursión — {Ruta} — {Subparada}".
  */
 function enforceMotherSubstopFormat(rows) {
   const out = [...rows];
@@ -278,13 +254,15 @@ const FACTS_DEFAULT = {
 };
 
 /**
- * Dado rows y FACTS, rellena "Regreso a {Ciudad}" con duración real cuando falte.
+ * Dado el array de filas y un objeto FACTS {daytrip_patterns:[], base_city:...},
+ * si detecta una fila "Regreso a {Ciudad}" con duración vacía o sospechosa,
+ * aplica la duración desde FACTS.return_to_base_from → base_city.
  */
 function applyReturnDurationsFromFacts(rows, facts) {
   if (!facts || !facts.daytrip_patterns || !facts.base_city) return rows;
   const baseCity = (facts.base_city || "").toLowerCase();
 
-  // Reverse lookup: stop -> duration to base
+  // Build a quick reverse lookup: stop -> duration to base
   const toBase = {};
   for (const p of facts.daytrip_patterns) {
     const from = p.return_to_base_from || (p.stops && p.stops[p.stops.length - 1]);
@@ -293,8 +271,6 @@ function applyReturnDurationsFromFacts(rows, facts) {
     if (from && dur) toBase[from.toLowerCase()] = dur;
   }
 
-  const DUR_RE = /^(\d+h(?:\d{1,2}m)?)|(^\d{1,2}m)$/i; // 1h, 1h30m, 45m
-
   return rows.map(r => {
     const act = (r.activity || "").toLowerCase();
     const to = (r.to || "").toLowerCase();
@@ -302,7 +278,7 @@ function applyReturnDurationsFromFacts(rows, facts) {
     if (!isReturn) return r;
 
     const prevTo = (r.from || "").toLowerCase(); // muchas UIs ponen from=última parada
-    const durationKnown = r.duration && DUR_RE.test(r.duration.replace(/\s/g, ""));
+    const durationKnown = r.duration && /^[0-9]h|[0-9]+m|[0-9]h[0-9]{1,2}m$/i.test(r.duration.replace(/\s/g,""));
     if (!durationKnown) {
       const best = toBase[prevTo] || null;
       if (best) return { ...r, duration: best };
@@ -312,36 +288,32 @@ function applyReturnDurationsFromFacts(rows, facts) {
 }
 
 function ensureAuroras(parsed) {
-  const dest =
-    (parsed?.destination || parsed?.Destination || parsed?.city || parsed?.name || "") + "";
+  const dest = (parsed?.destination || parsed?.Destination || parsed?.city || parsed?.name || "").toString();
   const destName = dest || (parsed?.destinations?.[0]?.name || "");
   const low = destName.toLowerCase();
 
-  const rows =
-    Array.isArray(parsed?.rows)
-      ? parsed.rows
-      : Array.isArray(parsed?.destinations?.[0]?.rows)
-        ? parsed.destinations[0].rows
-        : [];
-
+  const rows = Array.isArray(parsed?.rows)
+    ? parsed.rows
+    : Array.isArray(parsed?.destinations?.[0]?.rows)
+      ? parsed.destinations[0].rows
+      : [];
   if (!rows.length) return parsed;
 
   const totalDays = Math.max(...rows.map(r => Number(r.day) || 1));
   const isAuroraPlace = AURORA_DESTINOS.some(x => low.includes(x));
 
-  // limpieza común
   let base = rows.map(r => ({
     ...r,
     duration: stripApproxDuration(r.duration),
     notes: scrubBlueLagoon(scrubAuroraValid(r.notes))
   }));
 
-  // transporte coherente + madre→subparadas
+  // Transporte coherente y formato madre-subparadas
   base = coerceTransport(enforceMotherSubstopFormat(base));
 
   if (!isAuroraPlace) return normalizeShape(parsed, base);
 
-  // reinyectar auroras por paridad (sin última noche)
+  // Reinyectar auroras por paridad
   base = base.filter(r => !isAuroraRow(r));
   const targetCount = auroraNightsByLength(totalDays);
   const targetDays = planAuroraDays(totalDays, targetCount);
@@ -356,7 +328,7 @@ function ensureAuroras(parsed) {
       to: "Puntos de observación (variable)",
       transport: "Vehículo alquilado o Tour guiado",
       duration: "7h",
-      notes: AURORA_NOTE_SHORT
+      notes: AURORA_NOTE_SHORT,
     });
   }
 
@@ -365,9 +337,7 @@ function ensureAuroras(parsed) {
 }
 
 function normalizeShape(parsed, rowsFixed) {
-  if (Array.isArray(parsed?.rows)) {
-    return { ...parsed, rows: rowsFixed, destination: parsed.destination || parsed.city || "Destino" };
-  }
+  if (Array.isArray(parsed?.rows)) return { ...parsed, rows: rowsFixed };
   if (Array.isArray(parsed?.destinations)) {
     const name = parsed.destinations?.[0]?.name || parsed.destination || "Destino";
     return { destination: name, rows: rowsFixed, followup: parsed.followup || "" };
@@ -379,9 +349,8 @@ function normalizeShape(parsed, rowsFixed) {
 // Prompts
 // ==============================
 
-// Paso 1: INVESTIGACIÓN (como Info Chat) → FACTS en JSON
-const RESEARCH_PROMPT = `
-Eres un asistente turístico experto. Analiza el destino y fechas implícitas del mensaje del usuario y devuelve **EXCLUSIVAMENTE JSON** con tiempos realistas de conducción/traslado entre paradas típicas.
+// Paso 1: INVESTIGACIÓN (como Info Chat) -> devuelve FACTS en JSON
+const RESEARCH_PROMPT = `Eres un asistente turístico experto. Analiza el destino y fechas implícitas del mensaje del usuario y devuelve **EXCLUSIVAMENTE JSON** con tiempos realistas de conducción/traslado entre paradas típicas.
 
 Formato:
 {
@@ -405,14 +374,11 @@ Formato:
     ]
   }
 }
-No texto fuera del JSON.
-`.trim();
 
-// Paso 2: PLANNER (forzamos JSON), conserva TODAS tus reglas
-const SYSTEM_PROMPT = `
-Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn. Eres un experto mundial en turismo.
-Tu salida debe ser **EXCLUSIVAMENTE un JSON válido**.
-Dispones de un bloque "FACTS" con tiempos y patrones turísticos investigados previamente: úsalo para establecer **duraciones concretas y realistas** de cada traslado y del "Regreso a {Ciudad}".
+No texto fuera del JSON.`.trim();
+
+// Paso 2: PLANNER (forzamos JSON)
+const SYSTEM_PROMPT = `Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn. Eres un experto mundial en turismo. Tu salida debe ser **EXCLUSIVAMENTE un JSON válido**. Dispones de un bloque "FACTS" con tiempos y patrones turísticos investigados previamente: úsalo para establecer **duraciones concretas y realistas** de cada traslado y del "Regreso a {Ciudad}".
 
 📌 FORMATO
 {"destination":"City","rows":[{...}],"followup":"texto breve"}
@@ -444,48 +410,45 @@ Dispones de un bloque "FACTS" con tiempos y patrones turísticos investigados pr
 
 🚗 TRANSPORTE
 - En day-trips icónicos de Islandia (Círculo Dorado, Costa Sur, Snæfellsnes, Reykjanes/Blue Lagoon) usa **"Vehículo alquilado o Tour guiado"** en vez de "Bus".
-- Al regresar a la ciudad, NO heredes "Vehículo alquilado o Tour guiado" en las actividades que continúen dentro de ciudad: usa el transporte lógico (A pie/Metro/Taxi/Bus).
 
 🌌 AURORAS
-- Noches alternas por paridad (par→1,3,5…; impar→2,4,6…), **nunca el último día**.
+- Noches alternas por paridad (par→1,3,5…; impar→2,4,6…), nunca el último día.
 - Horario 18:00–01:00; transporte "Vehículo alquilado o Tour guiado".
-- No escribas “valid: ventana nocturna auroral (sujeto a clima)”.
+- **No** escribas “valid: ventana nocturna auroral (sujeto a clima)”.
 
 🧩 DESTINO–SUBPARADAS
-- Usa la convención **"Excursión — {Ruta} — {Subparada}"** en cada parada hija consecutiva (hasta **8**).
-- Tras el bloque de sub-paradas, agrega explícitamente una fila **"Regreso a {Ciudad}"** con su duración real (basada en FACTS o estimación razonable).
-`.trim();
+- Usa la convención **"Excursión — {Ruta} — {Subparada}"** en cada parada hija consecutiva (hasta 8), y luego agrega explícitamente la fila **"Regreso a {Ciudad}"** con el tiempo real de vuelta.`.trim();
 
 // ==============================
 // Llamadas al modelo (Chat Completions) con retries
 // ==============================
-async function chatJSON(messages, temperature = 0.35, tries = 3) {
+async function chatJSON(messages, temperature = 0.35, tries = 2) {
   for (let k = 0; k < Math.max(1, tries); k++) {
     try {
       const resp = await client.chat.completions.create({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        model: "gpt-4o-mini",
         temperature,
         response_format: { type: "json_object" },
         messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
-        max_tokens: 3200
+        max_tokens: 3200,
       });
       const text = resp?.choices?.[0]?.message?.content?.trim();
       if (text) return text;
     } catch (e) {
+      // intenta nuevamente
       if (k === tries - 1) throw e;
     }
   }
   return "";
 }
-
 async function chatFree(messages, temperature = 0.5, tries = 2) {
   for (let k = 0; k < Math.max(1, tries); k++) {
     try {
       const resp = await client.chat.completions.create({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        model: "gpt-4o-mini",
         temperature,
         messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
-        max_tokens: 3200
+        max_tokens: 3200,
       });
       const text = resp?.choices?.[0]?.message?.content?.trim();
       if (text) return text;
@@ -497,7 +460,7 @@ async function chatFree(messages, temperature = 0.5, tries = 2) {
 }
 
 // ==============================
-// Handler (mantiene firma y forma de respuesta)
+// Handler
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -514,7 +477,7 @@ export default async function handler(req, res) {
       try {
         const raw = await chatFree(clientMessages, 0.5, 2);
         return res.status(200).json({ text: raw || "⚠️ No se obtuvo respuesta." });
-      } catch {
+      } catch (e) {
         return res.status(200).json({ text: "⚠️ No se obtuvo respuesta." });
       }
     }
@@ -524,11 +487,11 @@ export default async function handler(req, res) {
     try {
       const researchRaw = await chatJSON(
         [{ role: "system", content: RESEARCH_PROMPT }, ...clientMessages],
-        0.35,
-        3
+        0.4,
+        2
       );
       researchParsed = cleanToJSONPlus(researchRaw);
-    } catch {
+    } catch (e) {
       // seguimos con defaults
     }
 
@@ -544,12 +507,12 @@ export default async function handler(req, res) {
       }
       return out;
     })();
+
     const FACTS = JSON.stringify(factsMerged);
 
     // ===== Paso 2: PLANNER (forzamos JSON e inyectamos FACTS) =====
     let parsed = null;
     try {
-      // Intento normal
       let raw = await chatJSON(
         [
           { role: "system", content: SYSTEM_PROMPT },
@@ -557,14 +520,14 @@ export default async function handler(req, res) {
           ...clientMessages
         ],
         0.35,
-        3
+        2
       );
       parsed = cleanToJSONPlus(raw);
 
-      // Reintento estricto si no hay rows
-      const hasRows = parsed && (parsed.rows || parsed.destinations || parsed.itineraries);
+      // Reintento estricto
+      const hasRows = parsed && (parsed.rows || parsed.destinations);
       if (!hasRows) {
-        const strict = SYSTEM_PROMPT + "\nOBLIGATORIO: Devuelve un único JSON con \"destination\" y al menos 1 fila en \"rows\".";
+        const strict = SYSTEM_PROMPT + " OBLIGATORIO: Devuelve un único JSON con \"destination\" y al menos 1 fila en \"rows\".";
         raw = await chatJSON(
           [
             { role: "system", content: strict },
@@ -577,12 +540,10 @@ export default async function handler(req, res) {
         parsed = cleanToJSONPlus(raw);
       }
 
-      // Último intento con ejemplo mínimo válido
-      const stillNo = !parsed || (!parsed.rows && !parsed.destinations && !parsed.itineraries);
+      // Último intento (plantilla mínima)
+      const stillNo = !parsed || (!parsed.rows && !parsed.destinations);
       if (stillNo) {
-        const ultra =
-          SYSTEM_PROMPT +
-          '\nEjemplo válido: {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"45m","notes":"Explora la ciudad"}]}';
+        const ultra = SYSTEM_PROMPT + ' Ejemplo válido: {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora la ciudad"}]}';
         raw = await chatJSON(
           [
             { role: "system", content: ultra },
@@ -594,7 +555,7 @@ export default async function handler(req, res) {
         );
         parsed = cleanToJSONPlus(raw);
       }
-    } catch {
+    } catch (e) {
       // si la llamada al planner revienta, parsed queda null y caemos al fallback controlado
     }
 
@@ -602,12 +563,11 @@ export default async function handler(req, res) {
 
     // Post-proceso, limpieza y normalización
     let finalJSON = ensureAuroras(parsed);
+
     // Aplicar duraciones realistas de regreso usando FACTS fusionados
     finalJSON.rows = applyReturnDurationsFromFacts(finalJSON.rows || [], factsMerged);
 
-    // 🔒 Siempre devolver en el mismo envoltorio { text: JSON.stringify(...) } (tu contrato actual)
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
-
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     // Entregamos JSON válido para no romper la UI
