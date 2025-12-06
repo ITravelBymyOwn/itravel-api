@@ -1,13 +1,10 @@
-// /api/chat.js — v30.13 (ESM compatible en Vercel)
-// Base exacta: v30.12.
-// Cambios clave:
-// - Paso de INVESTIGACIÓN previo (como Info Chat) -> obtiene "FACTS" turísticos en JSON
-//   y se inyectan al prompt del planner para que use tiempos/distancias realistas.
-// - Formato destino–subparadas: garantiza "Excursión — {Ruta} — {Subparada}" en cada fila hija
-//   (sin colapsar la actividad madre; máximo 8 subparadas contiguas).
-// - Limpieza agresiva de notas y duraciones (elimina "≈", "~", "valid: ..." y duplicados Blue Lagoon).
-// - Parser y triple intento se mantienen (anti-fallback).
-// - Mantiene coerción de transporte y paridad de auroras.
+// /api/chat.js — v30.14 (ESM compatible en Vercel)
+// Base exacta: v30.13 (se mantienen nombres, lógica y flujo).
+// Refuerzos clave (anti-fallback + precisión):
+// - Retries y captura robusta en investigación y planner.
+// - FACTS locales por defecto (Islandia) si la investigación falla o llega vacía.
+// - Post-proceso aplica duraciones de "Regreso a {Ciudad}" desde FACTS (sin genéricos).
+// - Mantiene: subparadas≤8, coerción transporte, auroras (paridad), limpieza de notas/duraciones.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -157,10 +154,8 @@ function stripApproxDuration(d = "") {
 
 /**
  * Garantiza el formato destino–subparadas SIN colapsar:
- * - Detecta bloque que inicia con actividad que contiene "Excursión".
- * - Hasta 8 filas siguientes que sean visitas/paradas típicas se renombran a:
- *   "Excursión — {RutaBase} — {SubparadaBonita}"
- * - No elimina filas; solo renombra y añade una nota breve si falta.
+ * - Detecta bloque con "Excursión".
+ * - Hasta 8 filas siguientes hijas => "Excursión — {Ruta} — {Subparada}".
  */
 function enforceMotherSubstopFormat(rows) {
   const out = [...rows];
@@ -169,14 +164,12 @@ function enforceMotherSubstopFormat(rows) {
     const act = (r.activity || "").toLowerCase();
     if (!/excursión/.test(act)) continue;
 
-    // Determinar "RutaBase": tomamos la porción después de "Excursión" y antes de "—" o fin
     const rawName = (r.activity || "").trim();
     const routeBase = rawName
       .replace(/^excursión\s*(a|al)?\s*/i, "")
       .split("—")[0]
       .trim() || "Ruta";
 
-    // Renombrar hasta 8 subparadas siguientes
     let count = 0;
     for (let j = i + 1; j < out.length && count < 8; j++) {
       const rj = out[j];
@@ -198,7 +191,6 @@ function enforceMotherSubstopFormat(rows) {
 
       if (!isSub) break;
 
-      // nombre bonito de subparada
       const pretty = (rj.to || rj.activity || "")
         .replace(/^visita\s+(a|al)\s*/i, "")
         .trim();
@@ -209,6 +201,97 @@ function enforceMotherSubstopFormat(rows) {
     }
   }
   return out;
+}
+
+// --- FACTS locales por defecto (para evitar tiempos genéricos y asegurar regresos) ---
+const FACTS_DEFAULT = {
+  base_city: "Reykjavík",
+  daytrip_patterns: [
+    {
+      route: "Círculo Dorado",
+      stops: ["Þingvellir","Geysir","Gullfoss"],
+      return_to_base_from: "Gullfoss",
+      durations: {
+        "Reykjavík→Þingvellir": "1h",
+        "Þingvellir→Geysir": "1h15m",
+        "Geysir→Gullfoss": "25m",
+        "Gullfoss→Reykjavík": "1h30m"
+      }
+    },
+    {
+      route: "Costa Sur",
+      stops: ["Seljalandsfoss","Skógafoss","Reynisfjara","Vík"],
+      return_to_base_from: "Vík",
+      durations: {
+        "Reykjavík→Seljalandsfoss": "1h45m",
+        "Seljalandsfoss→Skógafoss": "30m",
+        "Skógafoss→Reynisfjara": "45m",
+        "Reynisfjara→Vík": "15m",
+        "Vík→Reykjavík": "2h45m"
+      }
+    },
+    {
+      route: "Snæfellsnes",
+      stops: ["Kirkjufell","Arnarstapi","Hellnar","Djúpalónssandur"],
+      return_to_base_from: "Djúpalónssandur",
+      durations: {
+        "Reykjavík→Kirkjufell": "2h10m",
+        "Kirkjufell→Arnarstapi": "45m",
+        "Arnarstapi→Hellnar": "10m",
+        "Hellnar→Djúpalónssandur": "20m",
+        "Djúpalónssandur→Reykjavík": "2h30m"
+      }
+    },
+    {
+      route: "Reykjanes / Blue Lagoon",
+      stops: ["Blue Lagoon","Gunnuhver","Puente entre continentes"],
+      return_to_base_from: "Puente entre continentes",
+      durations: {
+        "Reykjavík→Blue Lagoon": "50m",
+        "Blue Lagoon→Gunnuhver": "20m",
+        "Gunnuhver→Puente entre continentes": "15m",
+        "Puente entre continentes→Reykjavík": "50m"
+      }
+    }
+  ],
+  other_hints: [
+    "Usa 'Vehículo alquilado o Tour guiado' para day-trips icónicos en Islandia"
+  ]
+};
+
+/**
+ * Dado el array de filas y un objeto FACTS {daytrip_patterns:[], base_city:...},
+ * si detecta una fila "Regreso a {Ciudad}" con duración vacía o sospechosa,
+ * aplica la duración desde FACTS.return_to_base_from → base_city.
+ */
+function applyReturnDurationsFromFacts(rows, facts) {
+  if (!facts || !facts.daytrip_patterns || !facts.base_city) return rows;
+  const baseCity = (facts.base_city || "").toLowerCase();
+
+  // Build a quick reverse lookup: stop -> duration to base
+  const toBase = {};
+  for (const p of facts.daytrip_patterns) {
+    const from = p.return_to_base_from || (p.stops && p.stops[p.stops.length - 1]);
+    const key = `${from}→${facts.base_city}`;
+    const dur = p.durations?.[key];
+    if (from && dur) toBase[from.toLowerCase()] = dur;
+  }
+
+  return rows.map(r => {
+    const act = (r.activity || "").toLowerCase();
+    const to = (r.to || "").toLowerCase();
+    const isReturn = act.startsWith("regreso a") && to.includes(baseCity);
+    if (!isReturn) return r;
+
+    const prevTo = (r.from || "").toLowerCase(); // muchas UIs ponen from=última parada
+    const durationKnown = r.duration && /^[0-9]h|[0-9]+m|[0-9]h[0-9]{1,2}m$/i.test(r.duration.replace(/\s/g,""));
+
+    if (!durationKnown) {
+      const best = toBase[prevTo] || null;
+      if (best) return { ...r, duration: best };
+    }
+    return r;
+  });
 }
 
 function ensureAuroras(parsed) {
@@ -277,7 +360,7 @@ function normalizeShape(parsed, rowsFixed) {
 
 // Paso 1: INVESTIGACIÓN (como Info Chat) -> devuelve FACTS en JSON
 const RESEARCH_PROMPT = `
-Eres un asistente turístico experto. Analiza el destino y el rango de días implícito en el mensaje del usuario y
+Eres un asistente turístico experto. Analiza el destino y fechas implícitas del mensaje del usuario y
 devuelve **EXCLUSIVAMENTE JSON** con tiempos realistas de conducción/traslado entre paradas típicas.
 
 Formato:
@@ -291,9 +374,9 @@ Formato:
         "return_to_base_from":"Gullfoss",
         "durations":{
           "Reykjavík→Þingvellir":"1h",
-          "Þingvellir→Geysir":"1h-1h15m",
-          "Geysir→Gullfoss":"15m-30m",
-          "Gullfoss→Reykjavík":"1h30m-1h45m"
+          "Þingvellir→Geysir":"1h15m",
+          "Geysir→Gullfoss":"25m",
+          "Gullfoss→Reykjavík":"1h30m"
         }
       }
     ],
@@ -356,27 +439,44 @@ establecer **duraciones concretas y realistas** de cada traslado y del "Regreso 
 `.trim();
 
 // ==============================
-// Llamadas al modelo (Chat Completions)
+// Llamadas al modelo (Chat Completions) con retries
 // ==============================
-async function chatJSON(messages, temperature = 0.35) {
-  const resp = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature,
-    response_format: { type: "json_object" },
-    messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
-    max_tokens: 3200,
-  });
-  return resp?.choices?.[0]?.message?.content?.trim() || "";
+async function chatJSON(messages, temperature = 0.35, tries = 2) {
+  for (let k = 0; k < Math.max(1, tries); k++) {
+    try {
+      const resp = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature,
+        response_format: { type: "json_object" },
+        messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
+        max_tokens: 3200,
+      });
+      const text = resp?.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+    } catch (e) {
+      // intenta nuevamente
+      if (k === tries - 1) throw e;
+    }
+  }
+  return "";
 }
 
-async function chatFree(messages, temperature = 0.5) {
-  const resp = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature,
-    messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
-    max_tokens: 3200,
-  });
-  return resp?.choices?.[0]?.message?.content?.trim() || "";
+async function chatFree(messages, temperature = 0.5, tries = 2) {
+  for (let k = 0; k < Math.max(1, tries); k++) {
+    try {
+      const resp = await client.chat.completions.create({
+        model: "gpt-4o-mini",
+        temperature,
+        messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
+        max_tokens: 3200,
+      });
+      const text = resp?.choices?.[0]?.message?.content?.trim();
+      if (text) return text;
+    } catch (e) {
+      if (k === tries - 1) throw e;
+    }
+  }
+  return "";
 }
 
 // ==============================
@@ -394,74 +494,105 @@ export default async function handler(req, res) {
 
     // ===== INFO MODE (como tu info chat) =====
     if (mode === "info") {
-      const raw = await chatFree(clientMessages);
-      return res.status(200).json({ text: raw || "⚠️ No se obtuvo respuesta." });
+      try {
+        const raw = await chatFree(clientMessages, 0.5, 2);
+        return res.status(200).json({ text: raw || "⚠️ No se obtuvo respuesta." });
+      } catch (e) {
+        return res.status(200).json({ text: "⚠️ No se obtuvo respuesta." });
+      }
     }
 
-    // ===== Paso 1: INVESTIGACIÓN (obtener FACTS en JSON) =====
-    // Usamos el mensaje del usuario como contexto para que la investigación sea relevante.
-    const researchRaw = await chatJSON(
-      [
-        { role: "system", content: RESEARCH_PROMPT },
-        ...clientMessages
-      ],
-      0.4
-    );
-    const researchParsed = cleanToJSONPlus(researchRaw);
-    const FACTS = researchParsed?.facts ? JSON.stringify(researchParsed.facts) : "{}";
+    // ===== Paso 1: INVESTIGACIÓN (FACTS) =====
+    let researchParsed = null;
+    try {
+      const researchRaw = await chatJSON(
+        [{ role: "system", content: RESEARCH_PROMPT }, ...clientMessages],
+        0.4,
+        2
+      );
+      researchParsed = cleanToJSONPlus(researchRaw);
+    } catch (e) {
+      // seguimos con defaults
+    }
+    // Mezcla: FACTS del modelo (si existen) + defaults locales
+    const factsMerged = (() => {
+      const m = (researchParsed && researchParsed.facts) ? researchParsed.facts : {};
+      const out = { ...FACTS_DEFAULT, ...m };
+      // merge arrays de daytrip_patterns si ambos existen
+      if (FACTS_DEFAULT.daytrip_patterns && m?.daytrip_patterns) {
+        const titles = new Set(FACTS_DEFAULT.daytrip_patterns.map(p => p.route));
+        const extra = m.daytrip_patterns.filter(p => !titles.has(p.route));
+        out.daytrip_patterns = [...FACTS_DEFAULT.daytrip_patterns, ...extra];
+      }
+      return out;
+    })();
+    const FACTS = JSON.stringify(factsMerged);
 
     // ===== Paso 2: PLANNER (forzamos JSON e inyectamos FACTS) =====
-    let raw = await chatJSON(
-      [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "system", content: `FACTS=${FACTS}` },
-        ...clientMessages
-      ],
-      0.35
-    );
-    let parsed = cleanToJSONPlus(raw);
-
-    // Reintento estricto
-    const hasRows = parsed && (parsed.rows || parsed.destinations);
-    if (!hasRows) {
-      const strict = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve un único JSON con "destination" y al menos 1 fila en "rows".`;
-      raw = await chatJSON(
+    let parsed = null;
+    try {
+      let raw = await chatJSON(
         [
-          { role: "system", content: strict },
+          { role: "system", content: SYSTEM_PROMPT },
           { role: "system", content: `FACTS=${FACTS}` },
           ...clientMessages
         ],
-        0.2
+        0.35,
+        2
       );
       parsed = cleanToJSONPlus(raw);
-    }
 
-    // Último intento (plantilla mínima)
-    const stillNo = !parsed || (!parsed.rows && !parsed.destinations);
-    if (stillNo) {
-      const ultra = SYSTEM_PROMPT + `
+      // Reintento estricto
+      const hasRows = parsed && (parsed.rows || parsed.destinations);
+      if (!hasRows) {
+        const strict = SYSTEM_PROMPT + `
+OBLIGATORIO: Devuelve un único JSON con "destination" y al menos 1 fila en "rows".`;
+        raw = await chatJSON(
+          [
+            { role: "system", content: strict },
+            { role: "system", content: `FACTS=${FACTS}` },
+            ...clientMessages
+          ],
+          0.2,
+          2
+        );
+        parsed = cleanToJSONPlus(raw);
+      }
+
+      // Último intento (plantilla mínima)
+      const stillNo = !parsed || (!parsed.rows && !parsed.destinations);
+      if (stillNo) {
+        const ultra = SYSTEM_PROMPT + `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora la ciudad"}]}`;
-      raw = await chatJSON(
-        [
-          { role: "system", content: ultra },
-          { role: "system", content: `FACTS=${FACTS}` },
-          ...clientMessages
-        ],
-        0.1
-      );
-      parsed = cleanToJSONPlus(raw);
+        raw = await chatJSON(
+          [
+            { role: "system", content: ultra },
+            { role: "system", content: `FACTS=${FACTS}` },
+            ...clientMessages
+          ],
+          0.1,
+          1
+        );
+        parsed = cleanToJSONPlus(raw);
+      }
+    } catch (e) {
+      // si la llamada al planner revienta, parsed queda null y caemos al fallback controlado
     }
 
     if (!parsed) parsed = fallbackJSON();
 
-    // Post-proceso y normalización
-    const finalJSON = ensureAuroras(parsed);
+    // Post-proceso, limpieza y normalización
+    let finalJSON = ensureAuroras(parsed);
+
+    // Aplicar duraciones realistas de regreso usando FACTS fusionados
+    finalJSON.rows = applyReturnDurationsFromFacts(finalJSON.rows || [], factsMerged);
+
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
 
   } catch (err) {
     console.error("❌ /api/chat error:", err);
+    // Entregamos JSON válido para no romper la UI
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
