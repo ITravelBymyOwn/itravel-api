@@ -1,10 +1,9 @@
-// /api/chat.js — v30.3 (ESM compatible en Vercel)
-// Base exacta: v30.2 estable. Cambios:
-// - Limpieza estricta de nota de auroras (sin "valid: ...").
-// - Mejora Destino-Subparadas (sin sobre-aplicar).
-// - Corrección de transporte en day-trips sin bus.
-// - Ajuste de DURACIÓN del regreso en day-trips (mapeos realistas).
-// - Prompt reforzado para identificar tours clásicos y separar el regreso.
+// /api/chat.js — v30.3.1 (ESM compatible en Vercel)
+// Base exacta: v30.3 que enviaste. Cambios mínimos:
+// - Limpieza estricta de nota de auroras (elimina cualquier “valid: … auroral”).
+// - Ajuste de DURACIÓN del “Regreso a Reykjavík” en day-trips (mapa realista).
+// - Refuerzo de transporte correcto en regresos y mantenimiento de subparadas (hasta 8).
+// - Prompt con prohibición explícita de la frase “valid: ventana nocturna auroral (sujeto a clima)”.
 
 import OpenAI from "openai";
 
@@ -23,7 +22,7 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-// Parser tolerante: toma el primer bloque {...} completo
+// Parser más tolerante: toma el primer bloque {...} completo
 function cleanToJSONPlus(raw = "") {
   if (!raw || typeof raw !== "string") return null;
   try { return JSON.parse(raw); } catch {}
@@ -42,7 +41,7 @@ function cleanToJSONPlus(raw = "") {
   return null;
 }
 
-// Fallback mínimo válido para la UI
+// Fallback mínimo, pero ya en formato válido para la UI
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -104,7 +103,7 @@ const AURORA_NOTE_SHORT =
   "La hora de regreso al hotel dependerá del tour de auroras que se tome. " +
   "Puedes optar por tour guiado o movilización por tu cuenta (es probable que debas conducir con nieve y de noche; investiga seguridad para tus fechas).";
 
-// eliminar cualquier rastro tipo “valid: ventana nocturna auroral…”
+// elimina cualquier variante tipo “valid: … auroral …”
 function scrubAuroraValid(text = "") {
   if (!text) return text;
   return text.replace(/valid:[^.\n\r]*auroral[^.\n\r]*\.?/gi, "").trim();
@@ -115,12 +114,12 @@ function isAuroraRow(r) {
   return t.includes("aurora");
 }
 
-// zonas típicas de day-trip donde no usar “Bus”
+// simple regla: excursiones icónicas fuera de ciudad — no usar “Bus”
 const NO_BUS_TOPICS = [
   "círculo dorado", "thingvellir", "þingvellir", "geysir", "geyser",
   "gullfoss", "seljalandsfoss", "skógafoss", "reynisfjara", "vik", "vík",
-  "snaefellsnes", "snæfellsnes", "kirkjufell", "djúpalónssandur", "arnarstapi", "hellnar",
-  "blue lagoon", "reykjanes", "krýsuvík", "krysuvik", "grindavik"
+  "snaefellsnes", "snæfellsnes", "blue lagoon", "reykjanes", "krýsuvík",
+  "krysuvik", "arnarstapi", "hellnar", "kirkjufell", "djúpalónssandur", "djupalonssandur", "grindavik"
 ];
 
 function needsVehicleOrTour(row) {
@@ -132,7 +131,6 @@ function needsVehicleOrTour(row) {
 function coerceTransport(rows) {
   return rows.map(r => {
     const transport = (r.transport || "").toLowerCase();
-    // excepciones marítimas (p.ej., ballenas)
     const maritime = /ballena|ballenas|whale|barco|boat/.test((r.activity || "").toLowerCase());
     if (!maritime && transport.includes("bus") && needsVehicleOrTour(r)) {
       return { ...r, transport: "Vehículo alquilado o Tour guiado" };
@@ -141,7 +139,7 @@ function coerceTransport(rows) {
   });
 }
 
-// Compacta actividad madre con subparadas: sólo si viene precedida por “Excursión …”
+// Compacta actividad madre con subparadas: "Excursión — A → B → C"
 function compactSubstops(rows) {
   const out = [];
   for (let i = 0; i < rows.length; i++) {
@@ -149,25 +147,26 @@ function compactSubstops(rows) {
     if (!r) continue;
 
     const act = (r.activity || "").toLowerCase();
-
-    const isExcursionTrigger =
-      act.startsWith("excursión") ||
-      act.includes("costa sur") ||
-      act.includes("península") ||
-      act.includes("círculo dorado");
-
-    if (isExcursionTrigger) {
+    if (act.startsWith("excursión") || act.includes("costa sur") || act.includes("península") || act.includes("círculo dorado")) {
       const sub = [];
       let j = i + 1;
-      while (j < rows.length && sub.length < 3) {
-        const rj = rows[j]; if (!rj) break;
-        // subparadas típicas de estas rutas
-        const aj = (rj.activity || "").toLowerCase();
-        const isSub =
-          aj.startsWith("visita") ||
-          /cascada|playa|geysir|þingvellir|thingvellir|gullfoss|kirkjufell|djúpalónssandur|arnarstapi|hellnar/.test(aj);
+      // hasta 8 subparadas máximas
+      while (j < rows.length && sub.length < 8) {
+        const rj = rows[j];
+        const aj = (rj?.activity || "").toLowerCase();
+        const isSub = aj.startsWith("visita")
+          || aj.includes("cascada")
+          || aj.includes("playa")
+          || aj.includes("geysir")
+          || aj.includes("thingvellir")
+          || aj.includes("gullfoss")
+          || aj.includes("kirkjufell")
+          || aj.includes("arnarstapi")
+          || aj.includes("hellnar")
+          || aj.includes("djúpalónssandur")
+          || aj.includes("djupalonssandur");
         if (isSub) {
-          sub.push(rj.to || rj.activity || "");
+          sub.push(rj?.to || rj?.activity || "");
           j++;
         } else break;
       }
@@ -183,7 +182,7 @@ function compactSubstops(rows) {
         out.push(merged);
         for (let k = i + 1; k < i + 1 + sub.length; k++) {
           const rr = rows[k];
-          out.push({ ...rr, notes: (rr?.notes || "Parada dentro de la ruta.") });
+          out.push({ ...rr, notes: (rr.notes || "Parada dentro de la ruta.") });
         }
         i = i + sub.length;
         continue;
@@ -196,7 +195,7 @@ function compactSubstops(rows) {
 
 // Ajusta DURACIONES de “Regreso a Reykjavík” según las paradas del día
 function adjustDayTripReturns(rows) {
-  // índices por día
+  // agrupar por día
   const days = {};
   for (const r of rows) {
     const d = Number(r.day) || 1;
@@ -205,27 +204,22 @@ function adjustDayTripReturns(rows) {
   }
 
   const contains = (arr, regex) =>
-    arr.some(x => regex.test((x.activity || "") + " " + (x.to || "")));
+    arr.some(x => regex.test(((x.activity || "") + " " + (x.to || "")).toLowerCase()));
 
   const setReturnDuration = (row, txt) => {
     row.duration = txt;
-    // refuerza transporte correcto en regreso
-    if (needsVehicleOrTour(row)) {
-      row.transport = "Vehículo alquilado o Tour guiado";
-    } else if (!row.transport) {
+    if (needsVehicleOrTour(row) || !row.transport) {
       row.transport = "Vehículo alquilado o Tour guiado";
     }
   };
 
   Object.values(days).forEach(dayRows => {
-    // detectar el último “Regreso a Reykjavík”
     const returns = dayRows.filter(r => /regreso a reykjav[ií]k/.test((r.activity || "").toLowerCase()));
     if (!returns.length) return;
 
-    // señales del tipo de ruta en el día
-    const isSouth = contains(dayRows, /(vik|vík|reynisfjara|seljalandsfoss|skógafoss)/i);
+    const isSouth = contains(dayRows, /(vik|vík|reynisfjara|seljalandsfoss|skógafoss|skogafoss)/i);
     const isGolden = contains(dayRows, /(gullfoss|geysir|geyser|þingvellir|thingvellir|círculo dorado)/i);
-    const isSnaef = contains(dayRows, /(snæfellsnes|snaefellsnes|kirkjufell|djúpalónssandur|arnarstapi|hellnar)/i);
+    const isSnaef = contains(dayRows, /(snæfellsnes|snaefellsnes|kirkjufell|djúpalónssandur|djupalonssandur|arnarstapi|hellnar)/i);
     const isReykjanes = contains(dayRows, /(blue lagoon|reykjanes|krýsuvík|krysuvik|grindavik)/i);
 
     const target =
@@ -249,7 +243,7 @@ function ensureAuroras(parsed) {
 
   const rows = Array.isArray(parsed?.rows)
     ? parsed.rows
-    : Array.isArray(parsed?.destinations?.[0]?.rows])
+    : Array.isArray(parsed?.destinations?.[0]?.rows)
       ? parsed.destinations[0].rows
       : [];
 
@@ -258,7 +252,7 @@ function ensureAuroras(parsed) {
   const totalDays = Math.max(...rows.map(r => Number(r.day) || 1));
   const isAuroraPlace = AURORA_DESTINOS.some(x => low.includes(x));
 
-  // Normalizar transporte, subparadas
+  // Normalizamos transporte y subparadas
   let base = coerceTransport(compactSubstops(rows));
 
   // Limpieza de "valid: ..." en todas las notas
@@ -270,10 +264,10 @@ function ensureAuroras(parsed) {
     return normalizeShape(parsed, withReturns);
   }
 
-  // Eliminar auroras preexistentes (para reinyectar en los días correctos)
+  // Eliminar auroras que vinieran ya mal ubicadas
   base = base.filter(r => !isAuroraRow(r));
 
-  // Paridad + conteo recomendado
+  // Paridad: pares→1,3,5… ; impares→2,4,6… ; nunca último
   const targetCount = auroraNightsByLength(totalDays);
   const targetDays = planAuroraDays(totalDays, targetCount);
 
@@ -292,10 +286,10 @@ function ensureAuroras(parsed) {
     });
   }
 
-  // Orden por día/hora
+  // Orden cronológico por día y hora
   base.sort((a, b) => (a.day - b.day) || (a.start || "").localeCompare(b.start || ""));
 
-  // Ajustar regresos en day-trips
+  // Ajustar regresos de day-trips
   const withReturns = adjustDayTripReturns(base);
 
   return normalizeShape(parsed, withReturns);
@@ -344,22 +338,30 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   "notes": "Descripción breve y motivadora"
 }
 
-🚆 TRANSPORTE Y DAY-TRIPS (Reykjavík)
-- Identifica los day-trips clásicos:
-  • Círculo Dorado (Þingvellir — Geysir — Gullfoss)
-  • Costa Sur (Seljalandsfoss — Skógafoss — Reynisfjara — **Vík**)
-  • Península de Snæfellsnes (Kirkjufell — Djúpalónssandur — Arnarstapi/Hellnar)
-  • Reykjanes / Blue Lagoon (Blue Lagoon — Krýsuvík — Grindavík)
-- En estas rutas evita "Bus" y usa "Vehículo alquilado o Tour guiado".
-- SEPARA el **regreso a Reykjavík** como una actividad propia. La **duración del regreso** debe ser el tiempo de trayecto real desde la última parada a Reykjavík (NO sumes paradas).
-  • Referencias de trayecto (aprox.): Vík↔Reykjavík ≈ 2h45; Geysir↔Reykjavík ≈ 1h45; Arnarstapi/Hellnar↔Reykjavík ≈ 2h40; Blue Lagoon↔Reykjavík ≈ 45m–1h.
-  • Si dudas, usa una estimación conservadora (nunca < 1h).
+🚆 TRANSPORTE Y TIEMPOS (MUY IMPORTANTE)
+- En destinos sin red pública eficiente (p. ej., Islandia para Círculo Dorado, Costa Sur/Reynisfjara/Vík y Snæfellsnes),
+  usa **"Vehículo alquilado o Tour guiado"** en lugar de "Bus".
+- Para la fila **"Regreso a {Ciudad}"** de un **day-trip**:
+  • **NO** reutilices la duración de la última parada ni un traslado interno como si fuera el regreso.
+  • Estima el **trayecto real** desde el **último punto visitado** hasta la ciudad base.
+  • Usa valores **conservadores y realistas**, redondeados a **15 min** y **nunca menores a 1h**.
+  • Guías orientativas (no rígidas):
+    - **Círculo Dorado ↔ Reykjavík**: aprox. **1h15m–1h45m**.
+    - **Costa Sur (Vík/Reynisfjara) ↔ Reykjavík**: aprox. **2h30m–3h**.
+    - **Snæfellsnes (Arnarstapi/Ólafsvík) ↔ Reykjavík**: aprox. **2h15m–3h**.
+    - **Reykjanes/Blue Lagoon ↔ Reykjavík**: aprox. **45m–1h**.
+  • Si dudas, **prefiere sobreestimar** ligeramente el regreso.
 
 🌌 AURORAS (si aplica por destino/temporada)
-- Distribuye noches **no consecutivas** según la paridad (pares→1,3,5… ; impares→2,4,6…).
-- **Nunca** programes auroras en el último día.
-- Horario fijo **18:00–01:00**; transporte **"Vehículo alquilado o Tour guiado"**.
-- Nota breve SIN la frase “valid: ventana nocturna auroral…”.
+- Distribuye noches **no consecutivas** según la **paridad**:
+  • Total **par** → noches **1, 3, 5, …** (nunca el último día).
+  • Total **impar** → noches **2, 4, 6, …** (nunca el último día).
+- Horario predefinido **18:00–01:00**; transporte **"Vehículo alquilado o Tour guiado"**.
+- **Nunca escribas** la frase “valid: ventana nocturna auroral (sujeto a clima)”.
+
+🧩 DESTINO–SUBPARADAS
+- Representa excursiones con varias paradas como una **actividad madre** (“Excursión — …”) seguida de subparadas,
+  pudiendo mostrar hasta **8** paradas (p. ej., Þingvellir → Geysir → Gullfoss → …) antes del regreso.
 
 📝 EDICIÓN INTELIGENTE
 - Si el usuario pide ajustes, responde con el JSON completo y actualizado.
@@ -387,7 +389,7 @@ async function callStructured(messages, temperature = 0.4) {
 }
 
 // ==============================
-// Exportación ESM
+// Exportación ESM correcta
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -428,16 +430,17 @@ Ejemplo válido estrictamente:
       parsed = cleanToJSONPlus(raw);
     }
 
-    // Si aún falla, NO rompemos la UI: base mínima
+    // Si aún falla, NO rompemos la UI: generamos base mínima
     if (!parsed) parsed = fallbackJSON();
 
-    // Post-proceso integral (auroras / transporte / subparadas / regresos + normalización)
+    // Post-proceso: auroras / transporte / subparadas / regresos y salida normalizada
     const finalJSON = ensureAuroras(parsed);
 
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
 
   } catch (err) {
     console.error("❌ /api/chat error:", err);
+    // Entregamos JSON válido para no romper la UI
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
