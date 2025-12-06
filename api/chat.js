@@ -1,4 +1,4 @@
-// /api/chat.js — v30.0 (ESM compatible en Vercel)
+// /api/chat.js — v30.1 (ESM compatible en Vercel) — cambios mínimos
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -111,6 +111,12 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Usa descripciones cortas, sin párrafos largos.
 - Mantén claridad y variedad en las actividades.
 
+🔭 AURORAS (regla global, si aplica por latitud/temporada)
+- Si el destino está en una zona típica de auroras (p. ej., Reykjavik, Tromsø, Abisko, Rovaniemi, Fairbanks, Yellowknife, Kiruna, Alta, Akureyri, Ivalo, Svalbard) y la época es propicia,
+  reparte **noches de caza de auroras** NO consecutivas según la duración de la estancia.
+- Cada noche de auroras debe ir 18:00–01:00, transporte **"Vehículo alquilado o Tour guiado"** y nota breve clara.
+- Evita colocar “Vehículo alquilado o Tour guiado” en actividades posteriores a un “Regreso …” dentro de la misma noche/ciudad.
+
 🚫 ERRORES A EVITAR
 - No devuelvas “seed”.
 - No uses frases impersonales (“Esta actividad es…”).
@@ -120,6 +126,131 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 Ejemplo de nota motivadora correcta:
 “Descubre uno de los rincones más encantadores de la ciudad y disfruta su atmósfera única.”
 `.trim();
+
+// ==============================
+// Utilidades de post-proceso (AÑADIDO)
+// ==============================
+
+// Ciudades comunes con auroras (lista estática mínima — sin dependencias)
+const AURORA_CITIES = new Set([
+  "reykjavik","reykjavík","tromso","tromsø","rovaniemi","abisko","fairbanks",
+  "yellowknife","kiruna","alta","akureyri","murmansk","svalbard","ivalo","honningsvag","honningvåg"
+]);
+
+// Nota reducida (sin tamaño pequeño; con la parte final en negrita)
+const AURORA_NOTE =
+  "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. **Regreso según tour. Puedes ir con tour guiado o por tu cuenta; si conduces, infórmate sobre seguridad invernal y nieve nocturna.**";
+
+// Decide cuántas noches de auroras según total de días
+function auroraNightsFor(totalDays) {
+  if (totalDays <= 2) return 1;
+  if (totalDays <= 4) return 2;
+  if (totalDays <= 6) return 3;
+  return 4;
+}
+
+// Inserta noches de auroras (no consecutivas, prioriza noches tempranas)
+function injectAurorasIfNeeded(parsed) {
+  try {
+    const city =
+      (parsed?.destination || parsed?.destinations?.[0]?.name || "").toString().toLowerCase().trim();
+
+    if (!city) return parsed;
+    if (![true, "true"].includes(parsed?.__skipAuroras)) {
+      // Heurística: si la ciudad pertenece a la lista, consideramos que “aplica”
+      const applies = AURORA_CITIES.has(city);
+      if (!applies) return parsed;
+    } else {
+      return parsed;
+    }
+
+    // Normalizamos acceso a rows
+    const rows = parsed.rows || parsed.destinations?.[0]?.rows || [];
+    if (!Array.isArray(rows) || rows.length === 0) return parsed;
+
+    // Si ya hay actividades de auroras, no duplicar
+    const already = rows.some(r =>
+      (r?.activity || "").toLowerCase().includes("aurora")
+      || (r?.notes || "").toLowerCase().includes("aurora")
+    );
+    if (already) return parsed;
+
+    const maxDay = rows.reduce((m, r) => Math.max(m, Number(r.day || 1)), 1);
+    const targetNights = auroraNightsFor(maxDay);
+
+    // Elegimos días: 1, 3, 5, 7...
+    const chosenDays = [];
+    for (let d = 1; d <= maxDay && chosenDays.length < targetNights; d += 2) {
+      chosenDays.push(d);
+    }
+
+    // Insertamos actividad al final de cada día elegido
+    chosenDays.forEach(dayNum => {
+      rows.push({
+        day: dayNum,
+        start: "18:00",
+        end: "01:00",
+        activity: "Caza de auroras boreales",
+        from: "Hotel",
+        to: "Puntos de observación (variable)",
+        transport: "Vehículo alquilado o Tour guiado",
+        duration: "≈7h",
+        notes: AURORA_NOTE
+      });
+    });
+
+    // Re-escribimos estructura sin cambiar formato del usuario
+    if (parsed.rows) {
+      parsed.rows = rows;
+    } else if (parsed.destinations && parsed.destinations[0]) {
+      parsed.destinations[0].rows = rows;
+    }
+    return parsed;
+  } catch {
+    return parsed;
+  }
+}
+
+// Corrige transporte “post-regreso”: tras una fila con “Regreso …”, 
+// si aparecen filas con “Vehículo alquilado o Tour guiado” dentro de la ciudad, las relajamos a “A pie”.
+function fixTransportAfterReturn(parsed) {
+  try {
+    const rows = parsed.rows || parsed.destinations?.[0]?.rows || [];
+    if (!Array.isArray(rows) || rows.length === 0) return parsed;
+
+    // Ordenamos por (day, start) de forma defensiva (no cambiamos el resto)
+    const normalized = [...rows].sort((a, b) => {
+      const da = Number(a.day || 1), db = Number(b.day || 1);
+      if (da !== db) return da - db;
+      return String(a.start || "").localeCompare(String(b.start || ""));
+    });
+
+    let returnedFlagByDay = {}; // day -> boolean
+    normalized.forEach((r) => {
+      const day = Number(r.day || 1);
+      const text = (r.activity || "").toLowerCase();
+      if (text.startsWith("regreso")) {
+        returnedFlagByDay[day] = true;
+      } else if (returnedFlagByDay[day]) {
+        if (typeof r.transport === "string" &&
+            r.transport.toLowerCase().includes("vehículo alquilado")) {
+          // Cambiamos a algo urbano y neutro
+          r.transport = "A pie o taxi local";
+        }
+      }
+    });
+
+    // Reaplicamos
+    if (parsed.rows) {
+      parsed.rows = normalized;
+    } else if (parsed.destinations && parsed.destinations[0]) {
+      parsed.destinations[0].rows = normalized;
+    }
+    return parsed;
+  } catch {
+    return parsed;
+  }
+}
 
 // ==============================
 // Llamada al modelo
@@ -180,6 +311,12 @@ Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
       raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
       parsed = cleanToJSON(raw);
+    }
+
+    // ⬇️ AÑADIDOS ULTRA-QUIRÚRGICOS
+    if (parsed && (parsed.rows || parsed.destinations)) {
+      parsed = injectAurorasIfNeeded(parsed);
+      parsed = fixTransportAfterReturn(parsed);
     }
 
     if (!parsed) parsed = fallbackJSON();
