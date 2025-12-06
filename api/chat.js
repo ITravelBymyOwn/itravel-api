@@ -1,6 +1,5 @@
-// /api/chat.js — v30.5 (ESM compatible en Vercel)
-// Base: v30.4 con mejoras completas de conocimiento turístico, formato de subparadas expandido,
-// limpieza avanzada de notas (Blue Lagoon), y ajustes de regreso por tour.
+// /api/chat.js — v30.6 (ESM compatible en Vercel)
+// Base: v30.5, con limpieza completa de frases aurorales y refuerzo de tiempos de regreso realistas.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -53,12 +52,14 @@ function fallbackJSON() {
 }
 
 // ==============================
-// Limpieza de notas
+// Limpieza de notas (auroras y laguna)
 // ==============================
 function scrubLagoonAdjustable(text = "") {
   if (!text) return text;
   return text
-    .replace(/valid:[^.\n\r]*auroral[^.\n\r]*\.?/gi, "")
+    .replace(/valid:[^.\n\r]*auroral[^.\n\r]*\.?/gi, "") // elimina frases aurorales
+    .replace(/ventana nocturna auroral[^.\n\r]*\.?/gi, "")
+    .replace(/sujeto a clima[^.\n\r]*\.?/gi, "")
     .replace(/min\s*stay[^.\n\r]*|ajustable|recommended\s*stay[^.\n\r]*/gi, "")
     .trim();
 }
@@ -144,40 +145,17 @@ function expandDayTourSubstops(rows) {
   return out;
 }
 
-// ajuste de duración de regreso
+// función auxiliar de respaldo (mantiene coherencia mínima)
 function adjustDayTripReturns(rows) {
   const out = [...rows];
-  const contains = (arr, regex) =>
-    arr.some(x => regex.test(((x.activity || "") + " " + (x.to || "")).toLowerCase()));
-
-  const days = {};
   for (const r of out) {
-    const d = Number(r.day) || 1;
-    if (!days[d]) days[d] = [];
-    days[d].push(r);
-  }
-
-  Object.values(days).forEach(dayRows => {
-    const isSouth = contains(dayRows, /(vik|vík|reynisfjara|seljalandsfoss|skógafoss)/i);
-    const isGolden = contains(dayRows, /(gullfoss|geysir|thingvellir|þingvellir)/i);
-    const isSnaef = contains(dayRows, /(snæfellsnes|snaefellsnes|kirkjufell|arnarstapi|hellnar)/i);
-    const isReykjanes = contains(dayRows, /(blue lagoon|reykjanes|krýsuvík|grindavik)/i);
-
-    const target =
-      isSouth ? "≈ 2h45m–3h" :
-      isGolden ? "≈ 1h15m–1h45m" :
-      isSnaef ? "≈ 2h15m–3h" :
-      isReykjanes ? "≈ 45m–1h" :
-      "≈ 1h+";
-
-    for (const r of dayRows) {
-      if (/regreso a reykjav[ií]k/i.test(r.activity)) {
-        r.duration = target;
-        if (needsVehicleOrTour(r)) r.transport = "Vehículo alquilado o Tour guiado";
+    if (/regreso a reykjav[ií]k/i.test(r.activity)) {
+      if (needsVehicleOrTour(r) && !r.duration) {
+        r.duration = "≈1h–3h (según distancia real)";
+        r.transport = "Vehículo alquilado o Tour guiado";
       }
     }
-  });
-
+  }
   return out;
 }
 
@@ -244,35 +222,36 @@ function normalizeShape(parsed, rowsFixed) {
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
-Usa tus conocimientos de turismo mundial, distancias, clima, accesibilidad y tiempos reales entre atracciones.
+Usa tus conocimientos turísticos globales para construir itinerarios realistas y detallados, con tiempos de traslado verdaderos y experiencias auténticas.
 
 📌 FORMATO JSON ÚNICO
 {"destination":"City","rows":[{...}],"followup":"texto breve"}
 
 ⚙️ REGLAS
 - Devuelve siempre al menos una actividad.
-- Cero texto fuera del JSON.
-- Hasta 20 actividades por día, horas realistas (08:30–19:00 si no se indica otra).
+- Nada de texto fuera del JSON.
+- Hasta 20 actividades por día.
+- Horas realistas (08:30–19:00 si no se indica otra).
 - No incluyas campos vacíos ni seeds.
 
-🚗 TRANSPORTE
-- Usa "Vehículo alquilado o Tour guiado" cuando el destino no tenga transporte público eficiente.
-- Aplica conocimientos reales sobre distancias y tiempos entre atracciones.
-
-🏔️ TOURS CLÁSICOS DESDE REYKJAVÍK
-- Círculo Dorado: Thingvellir → Geysir → Gullfoss → regreso (≈1h15m–1h45m)
-- Costa Sur: Seljalandsfoss → Skógafoss → Reynisfjara → Vík → regreso (≈2h30m–3h)
-- Snæfellsnes: Kirkjufell, Arnarstapi, Hellnar, Djúpalónssandur → regreso (≈2h15m–3h)
-- Reykjanes / Blue Lagoon: última parada en la laguna → regreso (≈45m–1h)
+🚗 TRANSPORTE Y TIEMPOS
+- Usa “Vehículo alquilado o Tour guiado” cuando no haya red pública eficiente.
+- Determina todos los tiempos (incluido el regreso) usando tus conocimientos turísticos globales y distancias reales entre lugares.
+- Los tiempos de regreso a la ciudad deben corresponder con los promedios reales, como:
+  • Círculo Dorado → Reykjavík ≈ 1h30m
+  • Costa Sur (Vík) → Reykjavík ≈ 2h30m–2h45m
+  • Snæfellsnes → Reykjavík ≈ 2h15m
+  • Reykjanes → Reykjavík ≈ 45m
+- No uses tiempos genéricos si conoces los reales.
 
 🌌 AURORAS
 - Noches alternas según paridad de días (par→1,3,5…; impar→2,4,6…), nunca el último día.
 - Horario 18:00–01:00, transporte “Vehículo alquilado o Tour guiado”.
-- No incluyas frases de validez climática.
+- No incluyas frases de validez climática ni "ventana auroral".
 
 🧩 FORMATO DE TOURS Y SUBPARADAS
-- Muestra cada parada en su propia fila.
-  Ejemplo: "Excursión a la Costa Sur — Seljalandsfoss", "Excursión a la Costa Sur — Skógafoss".
+- Muestra cada parada en su propia fila:
+  Ejemplo: “Excursión a la Costa Sur — Seljalandsfoss”, “Excursión a la Costa Sur — Skógafoss”.
 - Máximo 8 subparadas antes del regreso.
 `.trim();
 
