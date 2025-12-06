@@ -118,15 +118,15 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
   • Estancias 6–8: 3 noches → D1, D3, D5  
   • Estancias 9–12: 4 noches → D1, D3, D5, D7  
   • Estancias 13–15: 5 noches → D1, D3, D5, D7, D9  
-  (Si alguno de esos días coincide con el último día de estancia, muévelo a D-1.)
+  (Si alguno de esos días cae en el último día, muévelo a D-1.)
 - **Horario fijo:** "start":"18:00", "end":"01:00" (cruce nocturno permitido).
 - **Transporte fijo:** "Vehículo alquilado o Tour guiado".
-- **Actividad sugerida:** "Caza de Auroras Boreales" (o equivalente local).
+- **Actividad:** "Caza de Auroras Boreales".
 - **Notas EXACTAS**: 
   "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. <small><strong>La hora de regreso al hotel dependerá del tour de auroras que se tome. Puedes optar por tour guiado o movilización por tu cuenta (es probable que debas conducir con nieve y de noche, investiga acerca de la seguridad en la época de tu visita).</strong></small>"
-  Si el HTML no es apropiado, resume el segundo tramo manteniendo el mismo mensaje.
+  Si el HTML no es apropiado para la UI, resume el segundo tramo manteniendo el mismo mensaje.
 - Evita noches consecutivas de auroras.
-- Ajusta ligeramente el inicio del día siguiente si fuera necesario por la hora de regreso.
+- Si se coloca una aurora, permite empezar un poco más tarde el día siguiente si es coherente.
 
 🚫 ERRORES A EVITAR
 - No devuelvas “seed”.
@@ -168,7 +168,7 @@ export default async function handler(req, res) {
     }
 
     const body = req.body;
-    const mode = body.mode || "planner";
+    const mode = body.mode || "planner"; // 👈 nuevo parámetro
     const clientMessages = extractMessages(body);
 
     // 🧭 MODO INFO CHAT — sin JSON, texto libre
@@ -178,7 +178,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — comportamiento original con reglas de auroras
+    // 🧭 MODO PLANNER — comportamiento original
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
