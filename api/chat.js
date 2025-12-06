@@ -1,11 +1,9 @@
-// /api/chat.js — v32.0 “no-fallback, fast planner” (ESM, Vercel)
-// Objetivo: itinerarios SIEMPRE válidos, baja latencia y lógica global (auroras, sub-paradas, transporte).
-// Cambios clave:
-// - Se elimina el “planner LLM”: el planner se ejecuta LOCAL con reglas determinísticas.
-// - Investigación (tipo info-chat) en UNA llamada y opcional (con response_format json). Si falla: seguimos.
-// - Caché en memoria (6h) para FACTS.
-// - Post-proceso conserva toda tu lógica (auroras, sub-paradas ≤8, coerción transporte, limpieza/normalización).
-// - Sin reintentos costosos, sin caídas: siempre devuelve rows válidos.
+// /api/chat.js — v32.1 “no-fallback, fast, GLOBAL (solo auroras predefinidas)” — ESM/Vercel
+// Cambios vs v32.0:
+// - Eliminado cualquier hardcode de destinos/temas islandeses (NO_BUS_TOPICS, Blue Lagoon, etc.).
+// - Coerción de transporte GLOBAL: si la actividad es “Excursión — …”, usar “Vehículo alquilado o Tour guiado”.
+// - Investigación (1 llamada, tipo info-chat) + caché; si falla, planner local genera siempre rows válidos.
+// - Lógica de auroras permanece (único preset global), resto 100% neutral por país/ciudad.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -67,11 +65,12 @@ function toHHMM(mins) {
 }
 
 // ==============================
-// Post-proceso (mantiene tu lógica)
+// Post-proceso (GLOBAL) + AURORAS (único preset)
 // ==============================
 const AURORA_DESTINOS = [
   "reykjavik","reykjavík","tromso","tromsø","rovaniemi","kiruna",
-  "abisko","alta","ivalo","yellowknife","fairbanks","akureyri"
+  "abisko","alta","ivalo","yellowknife","fairbanks","akureyri",
+  "murmansk","longyearbyen","svalbard","nuuk","anchorage","grundarfjordur"
 ];
 function auroraNightsByLength(totalDays) {
   if (totalDays <= 2) return 1;
@@ -92,56 +91,57 @@ const AURORA_NOTE_SHORT =
   "Puedes optar por tour guiado o movilización por tu cuenta (posible nieve y noche; verifica seguridad).";
 function isAuroraRow(r){ return ((r?.activity||"").toLowerCase().includes("aurora")); }
 
-const NO_BUS_TOPICS = [
-  // Islandia (ejemplos icónicos)
-  "círculo dorado","thingvellir","þingvellir","geysir","geyser",
-  "gullfoss","seljalandsfoss","skógafoss","reynisfjara",
-  "vik","vík","snaefellsnes","snæfellsnes","blue lagoon",
-  "reykjanes","krýsuvík","arnarstapi","hellnar","djúpalónssandur",
-  "kirkjufell","puente entre continentes"
-];
-function needsVehicleOrTour(row){
-  const a=(row.activity||"").toLowerCase(); const to=(row.to||"").toLowerCase();
-  return NO_BUS_TOPICS.some(k => a.includes(k) || to.includes(k));
-}
+// Coerción de transporte GLOBAL: si es “Excursión — …”, usar vehículo/tour
 function coerceTransport(rows){
   return rows.map(r=>{
-    const t=(r.transport||"").toLowerCase();
-    if(t.includes("bus") && needsVehicleOrTour(r)) return { ...r, transport:"Vehículo alquilado o Tour guiado" };
+    const act = String(r.activity||"");
+    if (/^Excursión\s+—/i.test(act)) {
+      return { ...r, transport: "Vehículo alquilado o Tour guiado" };
+    }
     return r;
   });
 }
+
 function stripApproxDuration(d=""){ return d? String(d).replace(/[~≈]/g,"").trim() : d; }
 function scrubNotes(text=""){
   if(!text) return "";
   return text
     .replace(/valid:[^.\n\r]*auroral[^.\n\r]*\.?/gi,"")
-    .replace(/(\s*[-–•·]\s*)?min\s*stay\s*~?3h\s*\(ajustable\)/gi,"")
     .replace(/\s{2,}/g," ")
     .trim();
 }
+
+/**
+ * Convención madre-subparadas GLOBAL (sin listas locales):
+ * “Excursión — {Ruta}” seguido por ≤8 filas hijas consecutivas (si existen),
+ * renombradas como “Excursión — {Ruta} — {Subparada}”.
+ */
 function enforceMotherSubstopFormat(rows){
   const out=[...rows];
   for(let i=0;i<out.length;i++){
-    const r=out[i]; const act=(r.activity||"").toLowerCase();
-    if(!/excursión/.test(act)) continue;
-    const routeBase=(r.activity||"").replace(/^excursión\s*(a|al)?\s*/i,"").split("—")[0].trim()||"Ruta";
+    const r=out[i]; const act=String(r.activity||"");
+    const m = act.match(/^Excursión\s+—\s*(.+)$/i);
+    if(!m) continue;
+    const routeBase = m[1].split("—")[0].trim() || "Ruta";
     let count=0;
     for(let j=i+1;j<out.length && count<8;j++){
-      const rj=out[j]; const aj=(rj?.activity||"").toLowerCase();
-      const isSub = aj.startsWith("visita")||aj.includes("cascada")||aj.includes("playa")||aj.includes("geysir")
-        ||aj.includes("thingvellir")||aj.includes("gullfoss")||aj.includes("kirkjufell")||aj.includes("arnarstapi")
-        ||aj.includes("hellnar")||aj.includes("djúpalónssandur")||aj.includes("djupalonssandur")||aj.includes("vík")
-        ||aj.includes("vik")||aj.includes("reynisfjara");
-      if(!isSub) break;
-      const pretty=(rj.to||rj.activity||"").replace(/^visita\s+(a|al)\s*/i,"").trim();
-      rj.activity=`Excursión — ${routeBase} — ${pretty}`;
-      if(!rj.notes) rj.notes="Parada dentro de la ruta.";
-      count++;
+      const rj=out[j];
+      if(!rj) break;
+      const aj=String(rj.activity||"");
+      // Heurística: si la siguiente fila parece “parada” (p.ej. “Visita …”, “Parada …”, “Mirador …”, etc.)
+      if (/^(Visita|Parada|Mirador|Museo|Playa|Cascada|Pueblo|Templo|Iglesia|Barrio|Mercado)\b/i.test(aj)) {
+        const pretty = (rj.to || rj.activity || "").replace(/^Visita\s+(a|al)\s*/i,"").trim() || aj;
+        rj.activity=`Excursión — ${routeBase} — ${pretty}`;
+        if(!rj.notes) rj.notes="Parada dentro de la ruta.";
+        count++;
+        continue;
+      }
+      break;
     }
   }
   return out;
 }
+
 function normalizeShape(parsed, rowsFixed){
   if(Array.isArray(parsed?.rows)){
     return { destination: parsed.destination||parsed.city||"Destino", rows: rowsFixed, followup: parsed.followup||"" };
@@ -152,6 +152,7 @@ function normalizeShape(parsed, rowsFixed){
   }
   return { destination: parsed?.destination || "Destino", rows: rowsFixed, followup: parsed?.followup || "" };
 }
+
 function ensureAuroras(parsed){
   const dest = (parsed?.destination||parsed?.Destination||parsed?.city||parsed?.name||"")+"";
   const rows = Array.isArray(parsed?.rows) ? parsed.rows
@@ -244,7 +245,7 @@ function setCache(key, facts){
 }
 
 // ==============================
-// Planner LOCAL (determinístico, rápido)
+// Planner LOCAL (determinístico, global)
 // ==============================
 function clampFacts(f) {
   const facts = f && typeof f === "object" ? { ...f } : {};
@@ -276,7 +277,7 @@ function buildExcursionRows(city, baseCity, pattern, dayIdx, start="08:30") {
   out.push({
     day: dayIdx, start: toHHMM(t), end: toHHMM(t+=60),
     activity: `Excursión — ${pattern.route}`,
-    from: baseCity || city, to: pattern.stops[0] || "Primer punto",
+    from: baseCity || city, to: pattern.stops?.[0] || "Primer punto",
     transport: "Vehículo alquilado o Tour guiado",
     duration: "60m",
     notes: "Salida para jornada completa con paradas icónicas."
@@ -353,18 +354,17 @@ function buildCityWalkRows(city, dayIdx, start="09:00") {
     day: dayIdx, start: "19:00", end: "20:30",
     activity: "Cena icónica",
     from: city, to: "Restaurante",
-    transport: "A pie",
-    duration: "1h30m",
+    transport: "A pie", duration: "1h30m",
     notes: "Sugerencia de cocina local."
   });
   return rows;
 }
 
 /**
- * Genera un itinerario determinístico:
+ * Generador determinístico GLOBAL:
  * - D1: paseo urbano
- * - D2: si hay FACTS y una ruta, excursión de día completo
- * - D3+: repite combinación básica (camina/ligero), siempre limitado a 20 filas/día
+ * - D2: si hay FACTS.daytrip_patterns[0] => Excursión de día completo
+ * - D3+: esquema urbano ligero. Máx. 20 filas/día.
  */
 function planLocalFromFacts(city, facts, totalDays=2) {
   const baseCity = facts.base_city || city;
@@ -413,7 +413,7 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
 
     if (mode === "info") {
-      // Redirigimos al planner determinístico (este endpoint ya planifica siempre)
+      // Este endpoint es solo planner; devolvemos estructura mínima válida
       return res.status(200).json({ text: JSON.stringify({ destination:"Info", rows:[], followup:"Usa modo planner." }) });
     }
 
@@ -423,21 +423,19 @@ export default async function handler(req, res) {
     const key = cacheKey(cityGuess, userJoined);
     let facts = getCache(key);
     if (!facts) {
-      facts = await researchOnce(clientMessages);
-      facts = clampFacts(facts);
+      const raw = await researchOnce(clientMessages);
+      facts = clampFacts(raw);
       setCache(key, facts);
     }
 
     // ===== Planner LOCAL determinístico (cero LLM, cero reintentos) =====
-    // Si el frontend incluye días en el texto, podríamos estimarlos; por ahora, 2–3 días razonables.
-    // Para hacer el valor más “elástico”, si el prompt incluye “3 días/3días/3 dias”, lo capturamos:
     const text = userJoined.toLowerCase();
     const md = text.match(/\b(\d{1,2})\s*(?:d[ií]as?)\b/);
     const totalDays = md ? Math.max(1, Math.min(7, parseInt(md[1],10))) : 2;
 
     let draft = planLocalFromFacts(cityGuess, facts, totalDays);
 
-    // ===== Post-proceso (tu lógica) =====
+    // ===== Post-proceso (GLOBAL + AURORAS) =====
     let finalJSON = ensureAuroras(draft);
     if (!finalJSON || !Array.isArray(finalJSON.rows) || finalJSON.rows.length === 0) {
       // Garantía dura de salida
