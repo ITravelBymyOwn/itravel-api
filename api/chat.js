@@ -1,4 +1,4 @@
-// /api/chat.js — v30.1 (ESM compatible en Vercel) — cambios mínimos
+// /api/chat.js — v30.2 (ESM compatible en Vercel) — refactor defensivo sobre v30
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -6,7 +6,7 @@ const client = new OpenAI({
 });
 
 // ==============================
-// Helpers
+// Helpers (idénticos + utilidades nuevas)
 // ==============================
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
@@ -16,13 +16,26 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
+// Más tolerante con bloques ```json ... ```
 function cleanToJSON(raw = "") {
   if (!raw || typeof raw !== "string") return null;
   try {
     return JSON.parse(raw);
   } catch {
     try {
-      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+      let cleaned = raw.trim();
+
+      // quita fences ```json ... ```
+      if (cleaned.startsWith("```")) {
+        cleaned = cleaned.replace(/^```[a-zA-Z]*\s*/,"").replace(/```$/,"").trim();
+      }
+
+      // recorta a primer { ... } último }
+      const first = cleaned.indexOf("{");
+      const last = cleaned.lastIndexOf("}");
+      if (first !== -1 && last !== -1 && last > first) {
+        cleaned = cleaned.slice(first, last + 1);
+      }
       return JSON.parse(cleaned);
     } catch {
       return null;
@@ -50,8 +63,43 @@ function fallbackJSON() {
   };
 }
 
+// Normalizadores/validadores seguros
+const safeStr = (v) => (typeof v === "string" ? v : "");
+const toLower = (s) => safeStr(s).toLowerCase();
+const stripAccents = (s) =>
+  safeStr(s).normalize("NFD").replace(/\p{Diacritic}/gu, "");
+
+// Acceso seguro a rows en ambos formatos soportados
+function getRows(parsed) {
+  try {
+    if (!parsed || typeof parsed !== "object") return [];
+    if (Array.isArray(parsed.rows)) return parsed.rows;
+    if (Array.isArray(parsed?.destinations?.[0]?.rows))
+      return parsed.destinations[0].rows;
+    return [];
+  } catch {
+    return [];
+  }
+}
+function setRows(parsed, rows) {
+  try {
+    if (!parsed || typeof parsed !== "object" || !Array.isArray(rows)) return;
+    if (Array.isArray(parsed.rows)) {
+      parsed.rows = rows;
+    } else if (Array.isArray(parsed?.destinations?.[0]?.rows)) {
+      parsed.destinations[0].rows = rows;
+    }
+  } catch {
+    /* no-op */
+  }
+}
+function hasRows(parsed) {
+  const r = getRows(parsed);
+  return Array.isArray(r) && r.length > 0;
+}
+
 // ==============================
-// Prompt base mejorado ✨
+// Prompt base (igual al v30 + bloque Aurora breve)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -96,11 +144,6 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Las horas deben estar ordenadas y no superponerse.
 - Incluye tiempos aproximados de actividad y traslados.
 
-💰 MONETIZACIÓN FUTURA (sin marcas)
-- Sugiere actividades naturalmente vinculables a upsells (ej. cafés, museos, experiencias locales).
-- No incluyas precios ni nombres comerciales.
-- No digas “compra aquí” — solo describe experiencias.
-
 📝 EDICIÓN INTELIGENTE
 - Si el usuario pide “agregar un día”, “quitar actividad” o “ajustar horarios”, responde con el itinerario JSON actualizado.
 - Si no especifica hora, distribuye las actividades lógicamente en mañana / mediodía / tarde.
@@ -111,11 +154,9 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Usa descripciones cortas, sin párrafos largos.
 - Mantén claridad y variedad en las actividades.
 
-🔭 AURORAS (regla global, si aplica por latitud/temporada)
-- Si el destino está en una zona típica de auroras (p. ej., Reykjavik, Tromsø, Abisko, Rovaniemi, Fairbanks, Yellowknife, Kiruna, Alta, Akureyri, Ivalo, Svalbard) y la época es propicia,
-  reparte **noches de caza de auroras** NO consecutivas según la duración de la estancia.
-- Cada noche de auroras debe ir 18:00–01:00, transporte **"Vehículo alquilado o Tour guiado"** y nota breve clara.
-- Evita colocar “Vehículo alquilado o Tour guiado” en actividades posteriores a un “Regreso …” dentro de la misma noche/ciudad.
+🔭 AURORAS (si corresponde por latitud/temporada)
+- Para destinos típicos de auroras, reparte **noches de caza de auroras** NO consecutivas (18:00–01:00), con transporte **"Vehículo alquilado o Tour guiado"** y nota breve. 
+- Evita que actividades en ciudad, posteriores a un “Regreso…”, hereden ese transporte.
 
 🚫 ERRORES A EVITAR
 - No devuelvas “seed”.
@@ -128,64 +169,60 @@ Ejemplo de nota motivadora correcta:
 `.trim();
 
 // ==============================
-// Utilidades de post-proceso (AÑADIDO)
+// Post-proceso defensivo (nuevo)
 // ==============================
-
-// Ciudades comunes con auroras (lista estática mínima — sin dependencias)
 const AURORA_CITIES = new Set([
-  "reykjavik","reykjavík","tromso","tromsø","rovaniemi","abisko","fairbanks",
-  "yellowknife","kiruna","alta","akureyri","murmansk","svalbard","ivalo","honningsvag","honningvåg"
+  "reykjavik","reykjavik","tromso","tromsø","rovaniemi","abisko","fairbanks",
+  "yellowknife","kiruna","alta","akureyri","murmansk","svalbard","ivalo","honningsvag","honningvag"
 ]);
 
-// Nota reducida (sin tamaño pequeño; con la parte final en negrita)
 const AURORA_NOTE =
   "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. **Regreso según tour. Puedes ir con tour guiado o por tu cuenta; si conduces, infórmate sobre seguridad invernal y nieve nocturna.**";
 
-// Decide cuántas noches de auroras según total de días
 function auroraNightsFor(totalDays) {
+  if (!Number.isFinite(totalDays) || totalDays <= 0) return 1;
   if (totalDays <= 2) return 1;
   if (totalDays <= 4) return 2;
   if (totalDays <= 6) return 3;
   return 4;
 }
 
-// Inserta noches de auroras (no consecutivas, prioriza noches tempranas)
 function injectAurorasIfNeeded(parsed) {
   try {
-    const city =
-      (parsed?.destination || parsed?.destinations?.[0]?.name || "").toString().toLowerCase().trim();
+    if (!parsed) return parsed;
 
-    if (!city) return parsed;
-    if (![true, "true"].includes(parsed?.__skipAuroras)) {
-      // Heurística: si la ciudad pertenece a la lista, consideramos que “aplica”
-      const applies = AURORA_CITIES.has(city);
-      if (!applies) return parsed;
-    } else {
-      return parsed;
-    }
+    const cityRaw =
+      parsed?.destination ??
+      parsed?.destinations?.[0]?.name ??
+      "";
 
-    // Normalizamos acceso a rows
-    const rows = parsed.rows || parsed.destinations?.[0]?.rows || [];
+    const cityKey = stripAccents(toLower(cityRaw));
+    if (!cityKey) return parsed;
+
+    // Aplica sólo en ciudades típicas
+    if (!AURORA_CITIES.has(cityKey)) return parsed;
+
+    const rows = getRows(parsed);
     if (!Array.isArray(rows) || rows.length === 0) return parsed;
 
-    // Si ya hay actividades de auroras, no duplicar
-    const already = rows.some(r =>
-      (r?.activity || "").toLowerCase().includes("aurora")
-      || (r?.notes || "").toLowerCase().includes("aurora")
-    );
+    // Evitar duplicados si ya hay auroras
+    const already = rows.some((r) => {
+      const a = toLower(r?.activity);
+      const n = toLower(r?.notes);
+      return a.includes("aurora") || n.includes("aurora");
+    });
     if (already) return parsed;
 
-    const maxDay = rows.reduce((m, r) => Math.max(m, Number(r.day || 1)), 1);
-    const targetNights = auroraNightsFor(maxDay);
+    const maxDay = rows.reduce((m, r) => {
+      const d = Number(r?.day ?? 1);
+      return Number.isFinite(d) && d > m ? d : m;
+    }, 1);
 
-    // Elegimos días: 1, 3, 5, 7...
-    const chosenDays = [];
-    for (let d = 1; d <= maxDay && chosenDays.length < targetNights; d += 2) {
-      chosenDays.push(d);
-    }
+    const target = auroraNightsFor(maxDay);
+    const chosen = [];
+    for (let d = 1; d <= maxDay && chosen.length < target; d += 2) chosen.push(d);
 
-    // Insertamos actividad al final de cada día elegido
-    chosenDays.forEach(dayNum => {
+    chosen.forEach((dayNum) => {
       rows.push({
         day: dayNum,
         start: "18:00",
@@ -195,57 +232,47 @@ function injectAurorasIfNeeded(parsed) {
         to: "Puntos de observación (variable)",
         transport: "Vehículo alquilado o Tour guiado",
         duration: "≈7h",
-        notes: AURORA_NOTE
+        notes: AURORA_NOTE,
       });
     });
 
-    // Re-escribimos estructura sin cambiar formato del usuario
-    if (parsed.rows) {
-      parsed.rows = rows;
-    } else if (parsed.destinations && parsed.destinations[0]) {
-      parsed.destinations[0].rows = rows;
-    }
+    // Ordenamos suavemente por (day,start) sin tirar si falta formato de hora
+    const norm = [...rows].sort((a, b) => {
+      const da = Number(a?.day ?? 1), db = Number(b?.day ?? 1);
+      if (da !== db) return da - db;
+      return safeStr(a?.start).localeCompare(safeStr(b?.start));
+    });
+
+    setRows(parsed, norm);
     return parsed;
   } catch {
     return parsed;
   }
 }
 
-// Corrige transporte “post-regreso”: tras una fila con “Regreso …”, 
-// si aparecen filas con “Vehículo alquilado o Tour guiado” dentro de la ciudad, las relajamos a “A pie”.
 function fixTransportAfterReturn(parsed) {
   try {
-    const rows = parsed.rows || parsed.destinations?.[0]?.rows || [];
+    const rows = getRows(parsed);
     if (!Array.isArray(rows) || rows.length === 0) return parsed;
 
-    // Ordenamos por (day, start) de forma defensiva (no cambiamos el resto)
-    const normalized = [...rows].sort((a, b) => {
-      const da = Number(a.day || 1), db = Number(b.day || 1);
-      if (da !== db) return da - db;
-      return String(a.start || "").localeCompare(String(b.start || ""));
-    });
+    let returnedByDay = new Map();
 
-    let returnedFlagByDay = {}; // day -> boolean
-    normalized.forEach((r) => {
-      const day = Number(r.day || 1);
-      const text = (r.activity || "").toLowerCase();
-      if (text.startsWith("regreso")) {
-        returnedFlagByDay[day] = true;
-      } else if (returnedFlagByDay[day]) {
-        if (typeof r.transport === "string" &&
-            r.transport.toLowerCase().includes("vehículo alquilado")) {
-          // Cambiamos a algo urbano y neutro
+    const norm = rows.map((r) => ({ ...r })); // copia superficial
+    norm.forEach((r) => {
+      const day = Number(r?.day ?? 1);
+      const act = stripAccents(toLower(r?.activity));
+      const isReturn = act.startsWith("regreso"); // “Regreso a …”
+      if (isReturn) {
+        returnedByDay.set(day, true);
+      } else if (returnedByDay.get(day)) {
+        const tr = stripAccents(toLower(r?.transport));
+        if (tr.includes("vehiculo alquilado")) {
           r.transport = "A pie o taxi local";
         }
       }
     });
 
-    // Reaplicamos
-    if (parsed.rows) {
-      parsed.rows = normalized;
-    } else if (parsed.destinations && parsed.destinations[0]) {
-      parsed.destinations[0].rows = normalized;
-    }
+    setRows(parsed, norm);
     return parsed;
   } catch {
     return parsed;
@@ -253,7 +280,7 @@ function fixTransportAfterReturn(parsed) {
 }
 
 // ==============================
-// Llamada al modelo
+// Llamada al modelo (idéntica)
 // ==============================
 async function callStructured(messages, temperature = 0.4) {
   const resp = await client.responses.create({
@@ -273,7 +300,7 @@ async function callStructured(messages, temperature = 0.4) {
 }
 
 // ==============================
-// Exportación ESM correcta
+// Handler (igual, con post-proceso seguro)
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -282,30 +309,28 @@ export default async function handler(req, res) {
     }
 
     const body = req.body;
-    const mode = body.mode || "planner"; // 👈 nuevo parámetro
+    const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // 🧭 MODO INFO CHAT — sin JSON, texto libre
+    // MODO INFO (texto libre)
     if (mode === "info") {
       const raw = await callStructured(clientMessages);
       const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — comportamiento original
+    // MODO PLANNER
     let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
     let parsed = cleanToJSON(raw);
 
-    const hasRows = parsed && (parsed.rows || parsed.destinations);
-    if (!hasRows) {
+    if (!(parsed && hasRows(parsed))) {
       const strictPrompt = SYSTEM_PROMPT + `
 OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
       parsed = cleanToJSON(raw);
     }
 
-    const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
-    if (stillNoRows) {
+    if (!(parsed && hasRows(parsed))) {
       const ultraPrompt = SYSTEM_PROMPT + `
 Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
@@ -313,8 +338,8 @@ Ejemplo válido:
       parsed = cleanToJSON(raw);
     }
 
-    // ⬇️ AÑADIDOS ULTRA-QUIRÚRGICOS
-    if (parsed && (parsed.rows || parsed.destinations)) {
+    // Post-procesos defensivos (no lanzan excepciones)
+    if (parsed && hasRows(parsed)) {
       parsed = injectAurorasIfNeeded(parsed);
       parsed = fixTransportAfterReturn(parsed);
     }
@@ -324,6 +349,7 @@ Ejemplo válido:
 
   } catch (err) {
     console.error("❌ /api/chat error:", err);
+    // Nunca devolvemos 500 para no romper el front
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
