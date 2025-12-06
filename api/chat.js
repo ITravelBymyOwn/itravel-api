@@ -1,11 +1,11 @@
-// /api/chat.js — v30.10 (ESM compatible en Vercel)
+// /api/chat.js — v30.11 (ESM compatible en Vercel)
 // Base exacta: v30.4.
-// Fix crítico anti-fallback:
-// 1) Llamadas al modelo con mensajes ESTRUCTURADOS (system+user) en Responses API.
-// 2) response_format: { type: "json_object" } en planner (fuerza JSON puro).
-// 3) Parser robusto (objeto nativo, bloque {...}, limpieza de fences).
-// 4) Triple intento (normal → estricto → plantilla mínima).
-// Mantiene TODA tu lógica: auroras (paridad), subparadas (≤8), coerción transporte,
+// Reestructura anti-fallback:
+// - Cambiamos a Chat Completions (más estable en prod) con response_format JSON.
+// - Mensajes por rol (system/user), sin concatenar.
+// - Parser robusto (objeto nativo, bloque {...}, fences).
+// - Triple intento (normal → estricto → plantilla mínima).
+// Mantiene tu lógica: subparadas ≤8, coerción transporte, auroras (paridad),
 // limpieza de notas (sin “valid: ventana nocturna auroral…”, sin duplicar “min stay ~3h (ajustable)”).
 
 import OpenAI from "openai";
@@ -22,19 +22,10 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-// Responses API: texto estructurado por rol
-function toResponsesInput(msgs = []) {
-  return msgs.map(m => ({
-    role: m.role || "user",
-    content: [{ type: "text", text: String(m.content ?? "") }]
-  }));
-}
-
-// Parser muy tolerante
 function cleanToJSONPlus(raw) {
   if (!raw) return null;
 
-  // 0) Ya es objeto con rows/destinations
+  // 0) Ya viene como objeto
   if (typeof raw === "object") {
     const obj = raw;
     if (obj.rows || obj.destinations) return obj;
@@ -42,35 +33,32 @@ function cleanToJSONPlus(raw) {
   }
 
   if (typeof raw !== "string") return null;
-  const s0 = raw.trim();
+  let s = raw.trim();
 
-  // 1) Quitar fences ```json ... ```
-  const fence = s0.replace(/^```json/i, "```").replace(/^```/i, "").replace(/```$/i, "").trim();
-  try { return JSON.parse(fence); } catch {}
+  // Quitar fences ```json ... ```
+  s = s.replace(/^```json/i, "```").replace(/^```/, "").replace(/```$/, "").trim();
 
-  // 2) Intento directo
-  try { return JSON.parse(s0); } catch {}
+  // 1) Intento directo
+  try { return JSON.parse(s); } catch {}
 
-  // 3) Primer "{" y último "}"
+  // 2) Primer { ... último }
   try {
-    const first = s0.indexOf("{");
-    const last = s0.lastIndexOf("}");
+    const first = s.indexOf("{");
+    const last = s.lastIndexOf("}");
     if (first >= 0 && last > first) {
-      const sliced = s0.slice(first, last + 1);
-      return JSON.parse(sliced);
+      return JSON.parse(s.slice(first, last + 1));
     }
   } catch {}
 
-  // 4) Limpieza de bordes
+  // 3) Limpieza de bordes agresiva
   try {
-    const cleaned = s0.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
+    const cleaned = s.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
   } catch {}
 
   return null;
 }
 
-// Fallback mínimo, pero válido para la UI
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -154,8 +142,10 @@ function scrubAuroraValid(text = "") {
 }
 function scrubBlueLagoon(text = "") {
   if (!text) return text;
-  // Quita duplicidades de “min stay ~3h (ajustable)”
-  return text.replace(/(\s*[-–•·]\s*)?min\s*stay\s*~?3h\s*\(ajustable\)/gi, "").replace(/\s{2,}/g, " ").trim();
+  return text
+    .replace(/(\s*[-–•·]\s*)?min\s*stay\s*~?3h\s*\(ajustable\)/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function compactSubstops(rows) {
@@ -184,24 +174,13 @@ function compactSubstops(rows) {
           || aj.includes("djupalonssandur")
           || aj.includes("vík") || aj.includes("vik")
           || aj.includes("reynisfjara");
-        if (isSub) {
-          sub.push(rj?.to || rj?.activity || "");
-          j++;
-        } else break;
+        if (isSub) { sub.push(rj?.to || rj?.activity || ""); j++; } else break;
       }
       if (sub.length) {
-        const pretty = sub.filter(Boolean)
-          .map(s => s.replace(/^visita (a |al )?/i, "").trim())
-          .join(" → ");
-        const merged = {
-          ...r,
-          activity: (r.activity || "").replace(/\s—.*$/, "") + (pretty ? ` — ${pretty}` : "")
-        };
+        const pretty = sub.filter(Boolean).map(s => s.replace(/^visita (a |al )?/i, "").trim()).join(" → ");
+        const merged = { ...r, activity: (r.activity || "").replace(/\s—.*$/, "") + (pretty ? ` — ${pretty}` : "") };
         out.push(merged);
-        for (let k = i + 1; k < i + 1 + sub.length; k++) {
-          const rr = rows[k];
-          out.push({ ...rr, notes: (rr.notes || "Parada dentro de la ruta.") });
-        }
+        for (let k = i + 1; k < i + 1 + sub.length; k++) out.push({ ...rows[k], notes: (rows[k].notes || "Parada dentro de la ruta.") });
         i = i + sub.length;
         continue;
       }
@@ -212,8 +191,7 @@ function compactSubstops(rows) {
 }
 
 function ensureAuroras(parsed) {
-  const dest =
-    (parsed?.destination || parsed?.Destination || parsed?.city || parsed?.name || "").toString();
+  const dest = (parsed?.destination || parsed?.Destination || parsed?.city || parsed?.name || "").toString();
   const destName = dest || (parsed?.destinations?.[0]?.name || "");
   const low = destName.toLowerCase();
 
@@ -228,18 +206,14 @@ function ensureAuroras(parsed) {
   const totalDays = Math.max(...rows.map(r => Number(r.day) || 1));
   const isAuroraPlace = AURORA_DESTINOS.some(x => low.includes(x));
 
-  let base = coerceTransport(compactSubstops(rows))
-    .map(r => {
-      let notes = scrubAuroraValid(r.notes);
-      if ((r.to || "").toLowerCase().includes("blue lagoon") || (r.activity || "").toLowerCase().includes("blue lagoon")) {
-        notes = scrubBlueLagoon(notes);
-      }
-      return { ...r, notes };
-    });
+  let base = coerceTransport(compactSubstops(rows)).map(r => {
+    let notes = scrubAuroraValid(r.notes);
+    const inLagoon = ((r.to || "") + " " + (r.activity || "")).toLowerCase().includes("blue lagoon");
+    if (inLagoon) notes = scrubBlueLagoon(notes);
+    return { ...r, notes };
+  });
 
-  if (!isAuroraPlace) {
-    return normalizeShape(parsed, base);
-  }
+  if (!isAuroraPlace) return normalizeShape(parsed, base);
 
   // Reinyectar auroras por paridad
   base = base.filter(r => !isAuroraRow(r));
@@ -265,9 +239,7 @@ function ensureAuroras(parsed) {
 }
 
 function normalizeShape(parsed, rowsFixed) {
-  if (Array.isArray(parsed?.rows)) {
-    return { ...parsed, rows: rowsFixed };
-  }
+  if (Array.isArray(parsed?.rows)) return { ...parsed, rows: rowsFixed };
   if (Array.isArray(parsed?.destinations)) {
     const name = parsed.destinations?.[0]?.name || parsed.destination || "Destino";
     return { destination: name, rows: rowsFixed, followup: parsed.followup || "" };
@@ -276,7 +248,7 @@ function normalizeShape(parsed, rowsFixed) {
 }
 
 // ==============================
-// Prompt base con conocimiento turístico global
+// Prompt base (con conocimiento turístico global)
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn. Eres un experto mundial en turismo.
@@ -309,7 +281,7 @@ Tu salida debe ser **EXCLUSIVAMENTE un JSON válido**.
 - Usa tus conocimientos turísticos para estimar **tiempos y distancias reales** entre puntos.
 - En Islandia para Círculo Dorado, Costa Sur y Snæfellsnes, prefiere **"Vehículo alquilado o Tour guiado"**.
 
-🏔️ TOURS CLÁSICOS DESDE REYKJAVÍK (duraciones de regreso habituales)
+🏔️ TOURS CLÁSICOS DESDE REYKJAVÍK (regresos habituales)
 - **Círculo Dorado**: Thingvellir → Geysir → Gullfoss → regreso a Reykjavík (≈1h15m–1h45m).
 - **Costa Sur**: Seljalandsfoss → Skógafoss → Reynisfjara → Vík → regreso a Reykjavík (≈2h30m–3h).
 - **Snæfellsnes**: Kirkjufell / Arnarstapi / Hellnar / Djúpalónssandur → regreso (≈2h15m–3h).
@@ -325,48 +297,34 @@ Tu salida debe ser **EXCLUSIVAMENTE un JSON válido**.
 `.trim();
 
 // ==============================
-// Llamadas al modelo
+// Llamadas al modelo (Chat Completions)
 // ==============================
-async function callPlanner(messages, temperature = 0.35) {
-  const resp = await client.responses.create({
+async function chatPlanner(messages, temperature = 0.35) {
+  const resp = await client.chat.completions.create({
     model: "gpt-4o-mini",
     temperature,
-    input: toResponsesInput(messages),
     response_format: { type: "json_object" },
-    max_output_tokens: 3200,
+    messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
+    max_tokens: 3200,
   });
 
-  // Intento de extracción de objeto nativo
-  const c = resp?.output?.[0]?.content?.[0];
-  if (c && typeof c === "object" && (c.json || c.parsed || c.object)) {
-    return c.json || c.parsed || c.object;
-  }
-
-  const text =
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.find?.(x => typeof x.text === "string")?.text?.trim() ||
-    "";
-
+  const choice = resp?.choices?.[0];
+  const text = choice?.message?.content?.trim() || "";
   return text;
 }
 
-async function callInfo(messages, temperature = 0.5) {
-  const resp = await client.responses.create({
+async function chatInfo(messages, temperature = 0.5) {
+  const resp = await client.chat.completions.create({
     model: "gpt-4o-mini",
     temperature,
-    input: toResponsesInput(messages),
-    max_output_tokens: 3200,
+    messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
+    max_tokens: 3200,
   });
-
-  return (
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.find?.(x => typeof x.text === "string")?.text?.trim() ||
-    ""
-  );
+  return resp?.choices?.[0]?.message?.content?.trim() || "";
 }
 
 // ==============================
-// Handler ESM
+// Handler
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -374,21 +332,17 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body;
+    const body = req.body || {};
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // INFO CHAT — libre (sin forzar JSON)
     if (mode === "info") {
-      const raw = await callInfo(clientMessages);
+      const raw = await chatInfo(clientMessages);
       return res.status(200).json({ text: raw || "⚠️ No se obtuvo respuesta." });
     }
 
-    // PLANNER — forzar JSON
-    let raw = await callPlanner(
-      [{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages],
-      0.3
-    );
+    // PLANNER — forzamos JSON
+    let raw = await chatPlanner([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages], 0.35);
     let parsed = cleanToJSONPlus(raw);
 
     // Reintento estricto
@@ -396,27 +350,25 @@ export default async function handler(req, res) {
     if (!hasRows) {
       const strictPrompt = SYSTEM_PROMPT + `
 OBLIGATORIO: Devuelve solo un JSON con "destination" y al menos 1 fila en "rows".`;
-      raw = await callPlanner([{ role: "system", content: strictPrompt }, ...clientMessages], 0.2);
+      raw = await chatPlanner([{ role: "system", content: strictPrompt }, ...clientMessages], 0.2);
       parsed = cleanToJSONPlus(raw);
     }
 
-    // Último intento con plantilla mínima
-    const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
-    if (stillNoRows) {
+    // Último intento (plantilla mínima)
+    const stillNo = !parsed || (!parsed.rows && !parsed.destinations);
+    if (stillNo) {
       const ultraPrompt = SYSTEM_PROMPT + `
 Ejemplo válido estrictamente:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
-      raw = await callPlanner([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
+      raw = await chatPlanner([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
       parsed = cleanToJSONPlus(raw);
     }
 
-    // Fallback de seguridad (la UI nunca se rompe)
     if (!parsed) parsed = fallbackJSON();
 
-    // Post-proceso y normalización
     const finalJSON = ensureAuroras(parsed);
-
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
+
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
