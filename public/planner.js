@@ -1538,6 +1538,7 @@ function showWOW(on, msg){
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
    Base v60 + injertos v64 + dedupe global con normKey
+   + FIX anti-fallback: extractor JSON robusto + reintentos estrictos
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -1547,6 +1548,7 @@ async function generateCityItinerary(city){
   }
   window.__cityLocks[city] = true;
 
+  // ---- Helpers locales ONLY para esta sección (no afectan global) ----
   const toHHMM = s => String(s||'').trim();
   const parseHHMM = (hhmm)=>{
     const m = /^(\d{1,2}):(\d{2})$/.exec(toHHMM(hhmm));
@@ -1566,6 +1568,51 @@ async function generateCityItinerary(city){
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   };
 
+  // 🔒 Extractor robusto de JSON (tolerante a texto extra y triples codefences)
+  function extractJsonStrict(txt){
+    if(!txt) return null;
+    // 1) intenta parse directo
+    try { return JSON.parse(txt); } catch(_) {}
+    // 2) extrae primer bloque {...} o [...] balanceado
+    const start = txt.search(/[{[]/);
+    if(start === -1) return null;
+    let depth = 0, end = -1, stack = [];
+    for(let i=start;i<txt.length;i++){
+      const ch = txt[i];
+      if(ch==='{' || ch==='['){ depth++; stack.push(ch); }
+      else if(ch==='}' || ch===']'){
+        if(!depth) break;
+        const last = stack[stack.length-1];
+        if((last==='{' && ch==='}') || (last==='[' && ch===']')){ stack.pop(); depth--; }
+      }
+      if(depth===0){ end = i+1; break; }
+    }
+    if(end>start){
+      const slice = txt.slice(start, end);
+      try { return JSON.parse(slice); } catch(_) {}
+    }
+    // 3) quita ```json fences
+    const fenced = txt.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if(fenced){
+      try { return JSON.parse(fenced[1]); } catch(_){}
+    }
+    return null;
+  }
+
+  // 🔎 Verificador mínimo de la forma esperada
+  function looksValidPayload(p, targetCity){
+    if(!p) return false;
+    if(Array.isArray(p.rows)) return true;
+    if(p.destination === targetCity && Array.isArray(p.rows)) return true;
+    if(Array.isArray(p.destinations)){
+      return p.destinations.some(d => (d.name||d.destination)===targetCity && Array.isArray(d.rows));
+    }
+    if(Array.isArray(p.itineraries)){
+      return p.itineraries.some(i => (i.city||i.name||i.destination)===targetCity && Array.isArray(i.rows));
+    }
+    return false;
+  }
+
   try {
     const dest  = savedDestinations.find(x=>x.city===city);
     if(!dest) return;
@@ -1578,9 +1625,9 @@ async function generateCityItinerary(city){
     const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
     const hotel    = cityMeta[city]?.hotel || '';
     const transport= cityMeta[city]?.transport || 'recomiéndame';
+    const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
-    const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
-
+    // ─── Contexto heurístico (sin cambios funcionales) ───
     let heuristicsContext = '';
     let auroraCity=false, auroraSeason=false;
     try{
@@ -1611,7 +1658,8 @@ async function generateCityItinerary(city){
 - Ajusta el inicio del día siguiente si se extiende demasiado.
 ` : '';
 
-    const instructions = `
+    // Prompt base (igual lógica + énfasis en JSON estricto)
+    const baseInstructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Elabora el itinerario completo SOLO para "${city}" (${dest.days} día/s).
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
@@ -1619,9 +1667,8 @@ ${FORMAT}
 🧭 Cobertura:
 - Cubre TODOS los días 1–${dest.days}. Sin días vacíos.
 - Ventanas base por día: ${JSON.stringify(perDay)}. Puedes proponer extensiones lógicas (cenas, tours nocturnos, auroras).
-- Imperdibles diurnos y nocturnos. Balance sin redundancias.
 
-🚆 Transporte lógico por tipo:
+🚆 Transporte lógico:
 - Barco: actividades marinas / whale watching.
 - Bus/Van tour: excursiones interurbanas.
 - Tren/Bus/Auto: trayectos terrestres razonables.
@@ -1629,20 +1676,20 @@ ${FORMAT}
 
 🕒 Horarios plausibles:
 - Base 08:30–19:00 si no se indicó algo mejor.
-- Añade buffers ≥15 min. Evita solapes y herencia ciega de horarios entre días.
-- Si extiendes por nocturnas, compensa siguiente día.
+- Buffers ≥15 min. Evita solapes.
+- Si extiendes por nocturnas, compensa el día siguiente.
 
 🧭 Day trips:
-- Solo si aportan valor y ≤ 2 h por trayecto (ida), regreso mismo día. Itinerario secuencial claro (ida → visitas → regreso).
+- Solo si aportan valor y ≤ 2 h por trayecto (ida), regreso mismo día.
 
 ${auroraRequirement}
 
 🔎 Notas:
-- SIEMPRE informativas (nunca vacías ni "seed"); incluye "valid:" cuando corresponda (temporada/latitud/operativa).
+- SIEMPRE informativas (nunca vacías ni "seed"); incluye "valid:" cuando corresponda.
 
 ${heuristicsContext}
 
-Contexto actual:
+Contexto:
 ${buildIntake()}
 `.trim();
 
@@ -1650,8 +1697,22 @@ ${buildIntake()}
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
 
-    const text = await callAgent(instructions, true);
-    const parsed = parseJSON(text);
+    // 🔁 Reintentos: normal → estricto → súper estricto (si hiciera falta)
+    const attempts = [
+      { name:'normal',  hint:'' },
+      { name:'estricto', hint: '\nDEVUELVE **EXCLUSIVAMENTE** JSON VÁLIDO sin texto adicional ni codefences.' },
+      { name:'super',    hint: '\nSOLO JSON. No incluyas comentarios, explicaciones ni bloques ```.' }
+    ];
+
+    let parsed = null, rawText = '';
+    for (let i=0; i<attempts.length; i++){
+      const hint = attempts[i].hint;
+      const text = await callAgent(baseInstructions + hint, true);
+      rawText = text || '';
+      parsed = extractJsonStrict(rawText);
+      if (looksValidPayload(parsed, city)) break; // éxito
+      parsed = null; // fuerza otro intento
+    }
 
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
       let tmpRows = [];
@@ -1667,7 +1728,7 @@ ${buildIntake()}
         tmpRows=(i?.rows||[]).map(r=>normalizeRow(r));
       }
 
-      // 🧼 Anti-duplicados locales vs lo ya existente en la ciudad (multi-idioma)
+      // 🧼 Anti-duplicados locales vs ya existente
       const existingActs = Object.values(itineraries[city]?.byDay||{})
         .flat()
         .map(r=>normKey(String(r.activity||'')));
@@ -1680,6 +1741,7 @@ ${buildIntake()}
       const val = await validateRowsWithAgent(city, tmpRows, baseDate);
       pushRows(city, val.allowed, forceReplan);
 
+      // ⚖️ Enforce termales 3h (igual a tu versión previa)
       (function enforceThermal3h(){
         const hotWords = ['laguna azul','blue lagoon','bláa lónið','termal','termales','hot spring','thermal bath'];
         const byDay = itineraries[city]?.byDay || {};
@@ -1702,6 +1764,7 @@ ${buildIntake()}
         }
       })();
 
+      // 🌌 Inyección aurora si aplica (tal cual tenías)
       if (auroraCity && (auroraSeason || !baseDate)) {
         const acts = Object.values(itineraries[city]?.byDay || {})
           .flat()
@@ -1737,6 +1800,7 @@ ${buildIntake()}
         }
       }
 
+      // Completar huecos día a día
       ensureDays(city);
       for(let d=1; d<=dest.days; d++){
         if(!(itineraries[city].byDay?.[d]||[]).length){
@@ -1755,9 +1819,16 @@ ${buildIntake()}
       return;
     }
 
+    // ⚠️ Fallback visible si ningún intento dio JSON válido
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
-    chatMsg('⚠️ Fallback local: sin respuesta JSON válida del agente.','ai');
+    chatMsg('⚠️ Fallback local: el agente no devolvió JSON válido tras reintentos. Intentaré optimizar por días.', 'ai');
+
+    // Fallback útil: fuerza optimizeDay para cada día como red de seguridad
+    ensureDays(city);
+    for(let d=1; d<=dest.days; d++){
+      await optimizeDay(city, d);
+    }
 
   } catch(err){
     console.error(`[ERROR] generateCityItinerary(${city})`, err);
