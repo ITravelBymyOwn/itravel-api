@@ -1,5 +1,4 @@
-// /api/chat.js — v30.2 (ESM compatible en Vercel)
-// Base: v30.1 estable (anti-fallback). Cambio: regla de PARIDAD para noches de auroras.
+// /api/chat.js — v30.4 (ESM compatible en Vercel) — basado en v30.2
 import OpenAI from "openai";
 
 const client = new OpenAI({
@@ -17,26 +16,44 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-// Parser más tolerante: toma el primer bloque {...} completo
-function cleanToJSONPlus(raw = "") {
+// Busca el primer bloque JSON balanceando llaves
+function looseJsonFind(raw = "") {
   if (!raw || typeof raw !== "string") return null;
-  try { return JSON.parse(raw); } catch {}
-  try {
-    const first = raw.indexOf("{");
-    const last = raw.lastIndexOf("}");
-    if (first >= 0 && last > first) {
-      const sliced = raw.slice(first, last + 1);
-      return JSON.parse(sliced);
+  let start = raw.indexOf("{");
+  if (start === -1) return null;
+  let depth = 0;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (ch === "{") depth++;
+    if (ch === "}") depth--;
+    if (depth === 0) {
+      const slice = raw.slice(start, i + 1);
+      try {
+        return JSON.parse(slice);
+      } catch {
+        // continuar
+      }
     }
-  } catch {}
-  try {
-    const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
-    return JSON.parse(cleaned);
-  } catch {}
+  }
   return null;
 }
 
-// Fallback mínimo, pero ya en formato válido para la UI
+function cleanToJSON(raw = "") {
+  if (!raw || typeof raw !== "string") return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    const looser = looseJsonFind(raw);
+    if (looser) return looser;
+    try {
+      const cleaned = raw.replace(/^[^\{]+/, "").replace(/[^\}]+$/, "");
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
+  }
+}
+
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -50,194 +67,275 @@ function fallbackJSON() {
         to: "",
         transport: "",
         duration: "",
-        notes: "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
+        notes:
+          "Explora libremente la ciudad y descubre sus lugares más emblemáticos.",
       },
     ],
-    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
+    followup:
+      "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
 // ==============================
-// LÓGICA POST-PROCESO (auroras, transporte, subparadas)
+// Reglas y post-proceso
 // ==============================
 
-// Heurística rápida de destinos clásicos de auroras
-const AURORA_DESTINOS = [
-  "reykjavik", "reykjavík", "tromso", "tromsø", "rovaniemi", "kiruna",
-  "abisko", "alta", "ivalo", "yellowknife", "fairbanks", "akureyri"
-];
-
-// número recomendado de noches según días de viaje (cap sensato)
-function auroraNightsByLength(totalDays) {
-  if (totalDays <= 2) return 1;
-  if (totalDays <= 4) return 2;
-  if (totalDays <= 6) return 2;   // p.ej., 5 días → 2 noches (d2 y d4)
-  if (totalDays <= 9) return 3;
-  return 3;
+// --- AURORAS ---
+function isAuroraEligibleName(name = "") {
+  const n = (name || "").toLowerCase();
+  const hits = [
+    "reykjavik","reykjavík","iceland","islandia","tromsø","tromso","norway","noruega",
+    "lapland","laponia","rovaniemi","abisko","fairbanks","yellowknife","alta","kiruna",
+  ];
+  return hits.some((h) => n.includes(h));
 }
 
-/**
- * PARIDAD solicitada:
- * - totalDays PAR  → empezar en día 1 e ir 1,3,5,… (< totalDays)
- * - totalDays IMPAR→ empezar en día 2 e ir 2,4,6,… (< totalDays)
- * - Nunca usar el último día.
- */
-function planAuroraDays(totalDays, count) {
-  const start = (totalDays % 2 === 0) ? 1 : 2; // par→1, impar→2
-  const out = [];
-  let d = start;
-  while (out.length < count && d < totalDays) { // d < totalDays evita el último día
-    out.push(d);
-    d += 2;
-  }
-  return out;
+function computeAuroraNights(totalDays) {
+  const nights = [];
+  if (!totalDays || totalDays < 2) return nights;
+  const start = totalDays % 2 === 0 ? 1 : 2; // par→1,3,5 / impar→2,4,6
+  for (let d = start; d <= totalDays - 1; d += 2) nights.push(d); // nunca el último día
+  return nights;
 }
 
-const AURORA_NOTE_SHORT =
-  "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. " +
-  "La hora de regreso al hotel dependerá del tour de auroras que se tome. " +
-  "Puedes optar por tour guiado o movilización por tu cuenta (es probable que debas conducir con nieve y de noche; investiga seguridad para tus fechas).";
-
-function isAuroraRow(r) {
-  const t = (r?.activity || "").toLowerCase();
-  return t.includes("aurora");
-}
-
-// simple regla: excursiones icónicas fuera de ciudad — no usar “Bus”
-const NO_BUS_TOPICS = [
-  "círculo dorado", "thingvellir", "þingvellir", "geysir", "geyser",
-  "gullfoss", "seljalandsfoss", "skógafoss", "reynisfjara", "vik", "vík",
-  "snaefellsnes", "snæfellsnes", "blue lagoon", "reykjanes", "krýsuvík",
-  "arnarstapi"
-];
-
-function needsVehicleOrTour(row) {
-  const a = (row.activity || "").toLowerCase();
-  const to = (row.to || "").toLowerCase();
-  return NO_BUS_TOPICS.some(k => a.includes(k) || to.includes(k));
-}
-
-function coerceTransport(rows) {
-  return rows.map(r => {
-    const transport = (r.transport || "").toLowerCase();
-    if (transport.includes("bus") && needsVehicleOrTour(r)) {
-      return { ...r, transport: "Vehículo alquilado o Tour guiado" };
-    }
-    return r;
-  });
-}
-
-// Compacta actividad madre con subparadas: "Excursión — A → B → C"
-function compactSubstops(rows) {
-  const out = [];
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    if (!r) continue;
-
-    const act = (r.activity || "").toLowerCase();
-    if (act.startsWith("excursión") || act.includes("costa sur") || act.includes("península") || act.includes("círculo dorado")) {
-      const sub = [];
-      let j = i + 1;
-      while (j < rows.length && sub.length < 2) {
-        const rj = rows[j];
-        const aj = (rj?.activity || "").toLowerCase();
-        if (aj.startsWith("visita") || aj.includes("cascada") || aj.includes("playa") || aj.includes("geysir") || aj.includes("thingvellir") || aj.includes("gullfoss")) {
-          sub.push(rj?.to || rj?.activity || "");
-          j++;
-        } else break;
-      }
-      if (sub.length) {
-        const pretty = sub.filter(Boolean).map(s => s.replace(/^visita (a |al )?/i, "").trim()).join(" → ");
-        const merged = {
-          ...r,
-          activity: (r.activity || "").replace(/\s—.*$/, "") + (pretty ? ` — ${pretty}` : "")
-        };
-        out.push(merged);
-        for (let k = i + 1; k < i + 1 + sub.length; k++) {
-          const rr = rows[k];
-          out.push({ ...rr, notes: (rr.notes || "Parada dentro de la ruta.") });
-        }
-        i = i + sub.length;
-        continue;
-      }
-    }
-    out.push(r);
-  }
-  return out;
-}
+const AURORA_ACTIVITY_NAME = "Caza de auroras boreales";
+const AURORA_NOTE_COMPACTA =
+  "Noche especial de caza de auroras. Con cielos despejados y paciencia, podrás presenciar un espectáculo natural inolvidable. La hora de regreso al hotel dependerá del tour que elijas. Puedes optar por tour guiado o movilizarte por tu cuenta; infórmate sobre seguridad invernal y conducción nocturna.";
 
 function ensureAuroras(parsed) {
-  const dest =
-    (parsed?.destination || parsed?.Destination || parsed?.city || parsed?.name || "").toString();
-  const destName = dest || (parsed?.destinations?.[0]?.name || "");
-  const low = destName.toLowerCase();
+  const injectInRows = (rows, totalDays, destName) => {
+    if (!Array.isArray(rows) || !rows.length) return rows;
+    if (!isAuroraEligibleName(destName)) return rows;
 
-  const rows = Array.isArray(parsed?.rows)
-    ? parsed.rows
-    : Array.isArray(parsed?.destinations?.[0]?.rows)
-      ? parsed.destinations[0].rows
-      : [];
+    const maxDay =
+      totalDays ||
+      rows.reduce((acc, r) => Math.max(acc, Number(r.day) || 0), 0);
 
-  if (!rows.length) return parsed;
+    const targetDays = computeAuroraNights(maxDay);
+    if (!targetDays.length) return rows;
 
-  const totalDays = Math.max(...rows.map(r => Number(r.day) || 1));
-  const isAuroraPlace = AURORA_DESTINOS.some(x => low.includes(x));
+    const hasAuroraForDay = (d) =>
+      rows.some(
+        (r) =>
+          Number(r.day) === d &&
+          (r.activity || "").toLowerCase().includes("aurora")
+      );
 
-  // Siempre normalizamos transporte y subparadas
-  let base = coerceTransport(compactSubstops(rows));
+    const newRows = [...rows];
+    for (const d of targetDays) {
+      if (hasAuroraForDay(d)) continue;
+      newRows.push({
+        day: d,
+        start: "18:00",
+        end: "01:00",
+        activity: AURORA_ACTIVITY_NAME,
+        from: "Hotel",
+        to: "Puntos de observación (variable)",
+        transport: "Vehículo alquilado o Tour guiado",
+        duration: "≈7h",
+        notes: AURORA_NOTE_COMPACTA,
+      });
+    }
 
-  if (!isAuroraPlace) {
-    return normalizeShape(parsed, base);
-  }
-
-  // Eliminar auroras que vinieran ya mal ubicadas
-  base = base.filter(r => !isAuroraRow(r));
-
-  // Paridad: pares→1,3,5… ; impares→2,4,6… ; nunca último
-  const targetCount = auroraNightsByLength(totalDays);
-  const targetDays = planAuroraDays(totalDays, targetCount);
-
-  // Inyectar auroras 18:00–01:00
-  for (const d of targetDays) {
-    base.push({
-      day: d,
-      start: "18:00",
-      end: "01:00",
-      activity: "Caza de auroras boreales",
-      from: "Hotel",
-      to: "Puntos de observación (variable)",
-      transport: "Vehículo alquilado o Tour guiado",
-      duration: "~7h",
-      notes: AURORA_NOTE_SHORT,
+    newRows.sort((a, b) => {
+      const da = Number(a.day) || 0;
+      const db = Number(b.day) || 0;
+      if (da !== db) return da - db;
+      return (a.start || "").localeCompare(b.start || "");
     });
+
+    return newRows;
+  };
+
+  if (parsed?.destinations?.length) {
+    parsed.destinations = parsed.destinations.map((d) => ({
+      ...d,
+      rows: injectInRows(d.rows, undefined, d.name || parsed.destination || ""),
+    }));
+    return parsed;
   }
-
-  // Orden cronológico por día y hora
-  base.sort((a, b) => (a.day - b.day) || (a.start || "").localeCompare(b.start || ""));
-
-  return normalizeShape(parsed, base);
+  if (parsed?.rows?.length) {
+    parsed.rows = injectInRows(
+      parsed.rows,
+      undefined,
+      parsed.destination || ""
+    );
+    return parsed;
+  }
+  return parsed;
 }
 
-// Uniformar salida al formato B) preferido
-function normalizeShape(parsed, rowsFixed) {
-  if (Array.isArray(parsed?.rows)) {
-    return { ...parsed, rows: rowsFixed };
+// --- Transporte/regresos ---
+const OUT_OF_CITY_HINTS = [
+  "thingvellir","þingvellir","gullfoss","geysir","geysers","vik","vík","reynisfjara",
+  "snæfells","snaefells","dyrhólaey","dyrholaey","seljalandsfoss","skogafoss","skógafoss",
+  "blue lagoon","península","peninsula","glaciar","kirkjufell","arfnes","arfnastapi","arna",
+];
+
+function isExcursionLike(row) {
+  const act = (row.activity || "").toLowerCase();
+  const to = (row.to || "").toLowerCase();
+  const combo = `${act} ${to}`;
+  const clues =
+    act.includes("excursión") ||
+    act.includes("excursion") ||
+    act.includes("península") ||
+    act.includes("peninsula") ||
+    act.includes("cascada") ||
+    act.includes("glaciar") ||
+    act.includes("parque") ||
+    act.includes("playa") ||
+    OUT_OF_CITY_HINTS.some((h) => combo.includes(h));
+  return clues;
+}
+
+function parseMinutes(dur = "") {
+  if (!dur) return 0;
+  const s = dur.toLowerCase().replace(/[≈~]/g, "").trim();
+  let mins = 0;
+  const hm = s.match(/(\d+(?:[.,]\d+)?)\s*h/);
+  const mm = s.match(/(\d+)\s*m/);
+  if (hm) mins += Math.round(parseFloat(hm[1].replace(",", ".")) * 60);
+  if (mm) mins += parseInt(mm[1], 10);
+  if (!hm && !mm) {
+    // soporta “1h30m”, “1h30”, “90m”
+    const h30 = s.match(/(\d+)\s*h\s*(\d+)\s*m?/);
+    if (h30) {
+      mins += parseInt(h30[1], 10) * 60 + parseInt(h30[2], 10);
+    }
   }
-  if (Array.isArray(parsed?.destinations)) {
-    const name = parsed.destinations?.[0]?.name || parsed.destination || "Destino";
-    return { destination: name, rows: rowsFixed, followup: parsed.followup || "" };
+  return mins || 0;
+}
+
+function prettyMinutes(mins) {
+  const round15 = Math.round(mins / 15) * 15;
+  const h = Math.floor(round15 / 60);
+  const m = round15 % 60;
+  if (h && m) return `≈ ${h}h ${m}m`;
+  if (h) return `≈ ${h}h`;
+  return `≈ ${m}m`;
+}
+
+// Suma lógicas de traslado del día y ajusta la fila de “Regreso a … Reykjavik”
+function fixReturnsForDay(dayRows) {
+  if (!Array.isArray(dayRows) || !dayRows.length) return dayRows;
+
+  const rows = [...dayRows];
+  // índice de “Regreso … Reykjavik”
+  const idxRegreso = rows.findIndex((r) => {
+    const act = (r.activity || "").toLowerCase();
+    const to = (r.to || "").toLowerCase();
+    return act.startsWith("regreso") && to.includes("reykjav");
+  });
+  if (idxRegreso === -1) return rows;
+
+  // Detecta el bloque de excursión (desde la primera fila “excursionLike” hasta antes del regreso)
+  let startIdx = rows.findIndex((r) => isExcursionLike(r));
+  if (startIdx === -1) return rows;
+
+  const endIdx = idxRegreso - 1;
+  if (endIdx <= startIdx) return rows;
+
+  // Suma minutos de filas “de trayecto/excursión” dentro del bloque
+  let sum = 0;
+  for (let i = startIdx; i <= endIdx; i++) {
+    const r = rows[i];
+    // contamos duraciones de filas de movimiento/actividad interurbana
+    const isMove =
+      (r.transport || "").toLowerCase().includes("vehículo") ||
+      (r.transport || "").toLowerCase().includes("auto") ||
+      (r.transport || "").toLowerCase().includes("tour") ||
+      isExcursionLike(r);
+    if (!isMove) continue;
+
+    // evitamos sumar almuerzos estáticos en ciudad
+    const act = (r.activity || "").toLowerCase();
+    const staticStop =
+      act.includes("almuerzo") ||
+      act.includes("cena") ||
+      act.includes("caf") ||
+      act.includes("paseo por el centro") ||
+      act.includes("museo") ||
+      act.includes("parque") ||
+      act.includes("mercado");
+    if (staticStop) continue;
+
+    sum += parseMinutes(r.duration);
   }
-  return { destination: parsed?.destination || "Destino", rows: rowsFixed, followup: parsed?.followup || "" };
+
+  // Mínimo ≈ 1h
+  if (sum < 60) sum = 60;
+
+  // Aplica sólo si es mayor a lo que trae el modelo
+  const current = parseMinutes(rows[idxRegreso].duration);
+  if (sum > current) {
+    rows[idxRegreso] = {
+      ...rows[idxRegreso],
+      duration: prettyMinutes(sum),
+    };
+  }
+  return rows;
+}
+
+function normalizeTransportAndReturns(parsed) {
+  const fixOne = (rows) => {
+    if (!Array.isArray(rows)) return rows;
+
+    // 1) Normalizar transporte en excursiones
+    const normalized = rows.map((r) => {
+      const rr = { ...r };
+      if (
+        isExcursionLike(rr) &&
+        (rr.transport || "").toLowerCase() === "bus"
+      ) {
+        rr.transport = "Vehículo alquilado o Tour guiado";
+      }
+      return rr;
+    });
+
+    // 2) Ajustar “Regreso … Reykjavik” sumando traslados previos del día
+    const days = [...new Set(normalized.map((r) => Number(r.day) || 0))].filter(
+      (d) => d > 0
+    );
+    let out = [];
+    for (const d of days) {
+      const dayRows = normalized.filter((r) => Number(r.day) === d);
+      const fixed = fixReturnsForDay(dayRows);
+      out = out.concat(fixed);
+    }
+
+    // Orden cronológico por seguridad
+    out.sort((a, b) => {
+      const da = Number(a.day) || 0;
+      const db = Number(b.day) || 0;
+      if (da !== db) return da - db;
+      return (a.start || "").localeCompare(b.start || "");
+    });
+    return out;
+  };
+
+  if (parsed?.destinations?.length) {
+    parsed.destinations = parsed.destinations.map((d) => ({
+      ...d,
+      rows: fixOne(d.rows),
+    }));
+    return parsed;
+  }
+  if (parsed?.rows?.length) {
+    parsed.rows = fixOne(parsed.rows);
+    return parsed;
+  }
+  return parsed;
 }
 
 // ==============================
-// Prompt base mejorado ✨
+// Prompt base ✨
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
-Tu salida debe ser **EXCLUSIVAMENTE un JSON válido**.
+Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** que describa un itinerario turístico inspirador y funcional.
 
-📌 FORMATOS VÁLIDOS
+📌 FORMATOS VÁLIDOS DE RESPUESTA
 B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
 C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 
@@ -246,34 +344,50 @@ C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
 - Nada de texto fuera del JSON.
 - 20 actividades máximo por día.
 - Usa horas realistas (o 08:30–19:00 si no se indica nada).
+- La respuesta debe poder renderizarse directamente en una UI web.
 - Nunca devuelvas "seed" ni dejes campos vacíos.
 
-🧭 ESTRUCTURA DE CADA ACTIVIDAD
+🧭 ESTRUCTURA OBLIGATORIA DE CADA ACTIVIDAD
 {
   "day": 1,
   "start": "08:30",
   "end": "10:30",
-  "activity": "Nombre claro y específico (permitido: 'Excursión — A → B → C')",
+  "activity": "Nombre claro y específico",
   "from": "Lugar de partida",
   "to": "Lugar de destino",
-  "transport": "A pie, Metro, Tren, Auto, Taxi, Bus, Ferry, Vehículo alquilado o Tour guiado",
+  "transport": "Transporte realista (A pie, Metro, Tren, Auto, etc.)",
   "duration": "2h",
-  "notes": "Descripción breve y motivadora"
+  "notes": "Descripción motivadora y breve"
 }
 
-🚆 TRANSPORTE Y TIEMPOS
-- Evita "Bus" para excursiones fuera de ciudad en destinos sin red pública eficiente: usa "Vehículo alquilado o Tour guiado".
-- Horas ordenadas, sin superposición. Incluye traslados.
+🧠 ESTILO Y EXPERIENCIA DE USUARIO
+- Tono cálido y entusiasta.
+- Notas breves (1–2 líneas), sin repeticiones textuales.
 
-🌌 AURORAS (si aplica por destino/temporada)
-- Distribuye noches **no consecutivas** según la paridad solicitada (pares→1,3,5… ; impares→2,4,6…).
-- **Nunca** programes auroras en el último día.
-- Horario predefinido **18:00–01:00**; transporte **"Vehículo alquilado o Tour guiado"**.
-- Nota breve (sin estilos especiales).
+🚆 TRANSPORTE Y TIEMPOS
+- En áreas sin transporte público eficiente (p.ej., Islandia: Círculo Dorado, Costa Sur, Snæfellsnes) usa **"Vehículo alquilado o Tour guiado"**.
+- Ordena horas sin superposición e incluye traslados.
+- En los **regresos a la ciudad** de un day-trip, usa una duración realista (≈1–2h) y evita subestimaciones.
+
+🌌 AURORAS (REGLA GLOBAL)
+- Si el destino/temporada permiten auroras, actividad **"Caza de auroras boreales"**, de **18:00–01:00**, con **"Vehículo alquilado o Tour guiado"** y nota **compacta** (sin meta).
+- Distribución por número de días:
+  • Total par → noches 1,3,5,… (nunca el último día).
+  • Total impar → noches 2,4,6,… (nunca el último día).
+- Evita poner auroras el último día.
+
+🧩 DESTINO–SUBPARADAS
+- Para excursiones con varias paradas, representa el flujo con varias filas consecutivas (p.ej., Thingvellir → Geysir → Gullfoss → Regreso).
+
+💰 MONETIZACIÓN FUTURA (sin marcas)
+- Sugerencias “upsellables” sin precios ni enlaces.
 
 📝 EDICIÓN INTELIGENTE
-- Si el usuario pide ajustes, responde con el JSON completo y actualizado.
-- Mantén narrativa corta y variada.
+- Ante cambios del usuario, devuelve SIEMPRE el JSON actualizado (sin meta).
+
+🚫 ERRORES A EVITAR
+- No devuelvas “seed”.
+- No incluyas saludos ni explicaciones fuera del JSON.
 `.trim();
 
 // ==============================
@@ -284,7 +398,7 @@ async function callStructured(messages, temperature = 0.4) {
     model: "gpt-4o-mini",
     temperature,
     input: messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
-    max_output_tokens: 3000,
+    max_output_tokens: 2200,
   });
 
   const text =
@@ -309,46 +423,49 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // MODO INFO CHAT — sin JSON
+    // MODO INFO
     if (mode === "info") {
       const raw = await callStructured(clientMessages);
       const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
       return res.status(200).json({ text });
     }
 
-    // MODO PLANNER — JSON
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages]);
-    let parsed = cleanToJSONPlus(raw);
+    // MODO PLANNER — reintentos controlados
+    const sysMsg = { role: "system", content: SYSTEM_PROMPT };
 
+    // intento 1
+    let raw = await callStructured([sysMsg, ...clientMessages]);
+    let parsed = cleanToJSON(raw);
+
+    // intento 2
     const hasRows = parsed && (parsed.rows || parsed.destinations);
     if (!hasRows) {
       const strictPrompt = SYSTEM_PROMPT + `
-OBLIGATORIO: Devuelve solo JSON y al menos 1 fila en "rows". Sin explicaciones.`;
+OBLIGATORIO: Devuelve al menos 1 fila en "rows". Nada de meta.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.25);
-      parsed = cleanToJSONPlus(raw);
+      parsed = cleanToJSON(raw);
     }
 
-    // Último intento con plantilla mínima
+    // intento 3 con ejemplo mínimo
     const stillNoRows = !parsed || (!parsed.rows && !parsed.destinations);
     if (stillNoRows) {
       const ultraPrompt = SYSTEM_PROMPT + `
-Ejemplo válido estrictamente:
+Ejemplo válido:
 {"destination":"CITY","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"Actividad","from":"","to":"","transport":"A pie","duration":"60m","notes":"Explora un rincón único de la ciudad"}]}`;
       raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.1);
-      parsed = cleanToJSONPlus(raw);
+      parsed = cleanToJSON(raw);
     }
 
-    // Si aún falla, NO rompemos la UI: generamos base mínima
     if (!parsed) parsed = fallbackJSON();
 
-    // Post-proceso: auroras / transporte / subparadas y salida normalizada
-    const finalJSON = ensureAuroras(parsed);
+    // Post-proceso: auroras y transporte/regresos
+    parsed = ensureAuroras(parsed);
+    parsed = normalizeTransportAndReturns(parsed);
 
-    return res.status(200).json({ text: JSON.stringify(finalJSON) });
+    return res.status(200).json({ text: JSON.stringify(parsed) });
 
   } catch (err) {
     console.error("❌ /api/chat error:", err);
-    // Entregamos JSON válido para no romper la UI
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
