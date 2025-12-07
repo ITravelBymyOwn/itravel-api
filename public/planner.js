@@ -3449,14 +3449,13 @@ ${dayRows}
 }
 
 /* ==============================
-   SECCIÓN 20 · Render / UI
+   SECCIÓN 20 · Render / UI (RESTABLECIDA)
    v71.fix — Compatible con Info-first → Planner
+   ✅ Sin redefinir renderCityItinerary (usa la de SECCIÓN 18)
    - Tabs de ciudades con estado y activación
-   - Render por día con tabla accesible
-   - Soporte _crossDay (⯈ +1 día)
-   - Limpieza visual de duration (sin "~" ni "≈")
-   - Estilo claro para "Regreso a {Ciudad}" y "Regreso a hotel"
-   - Indentación ligera para "Excursión — Ruta — Subparada"
+   - Helpers DOM seguros
+   - Limpieza visual de duration (si alguna vista ajena la usara)
+   - Mantiene clases/estilos existentes
 ================================= */
 
 /* ---------- Helpers DOM seguros ---------- */
@@ -3480,7 +3479,7 @@ function __itineraryEl(){
   return __q('[data-ui="itinerary"]') || __q('#itinerary') || __q('#itineraryPane') || __q('.itinerary');
 }
 
-/* ---------- Helpers de formato ---------- */
+/* ---------- Helpers de formato mínimos (compatibilidad) ---------- */
 function __escape(s){
   return String(s==null?'':s)
     .replace(/&/g,'&amp;')
@@ -3489,35 +3488,6 @@ function __escape(s){
 }
 function __cleanDuration(d=''){
   return String(d).replace(/[~≈]/g,'').trim();
-}
-function __time(t){
-  const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/);
-  if(!m) return '';
-  const h = (+m[1]); const mi = m[2];
-  return `${String(h).padStart(2,'0')}:${mi}`;
-}
-function __isReturnHotel(row){
-  return /regreso\s+al?\s*hotel/i.test(String(row.activity||'').toLowerCase());
-}
-function __isReturnCity(row, city){
-  const a = String(row.activity||'').toLowerCase();
-  return /regreso\s+a\s+/.test(a) && a.includes(String(city||'').toLowerCase());
-}
-function __isAurora(row){
-  return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
-}
-function __splitExcursionLabel(activity){
-  // Estructura: "Excursión — {Ruta} — {Subparada}"
-  const raw = String(activity||'');
-  const parts = raw.split('—').map(x=>x.trim());
-  if(/^excursi[oó]n/i.test(parts[0]||'')){
-    const route = (parts[1]||'').trim();
-    const sub   = (parts[2]||'').trim();
-    if(route && sub){
-      return { isExcursion:true, route, sub };
-    }
-  }
-  return { isExcursion:false, route:'', sub:'' };
 }
 
 /* ---------- Tabs de ciudades ---------- */
@@ -3529,13 +3499,13 @@ function renderCityTabs(){
   const act  = activeCity || (list[0]?.city || '');
 
   $tabs.innerHTML = '';
-  list.forEach((item, idx)=>{
+  list.forEach((item)=>{
     const city = item.city;
     const tab = __el('button','tab-city');
     tab.type = 'button';
     tab.setAttribute('data-city', city);
 
-    // Estado visual
+    // Estado visual (usa contador de días existentes en itineraries)
     const total = Object.keys(itineraries[city]?.byDay||{}).length || 0;
     const badge = total ? `<span class="tab-badge" aria-label="${total} días">${total}</span>` : '';
     const isAct = (city === act);
@@ -3547,175 +3517,41 @@ function renderCityTabs(){
 
     tab.addEventListener('click', ()=>{
       setActiveCity(city);
-      renderCityTabs(); // vuelve a pintar activo
-      renderCityItinerary(city);
+      renderCityTabs();               // repinta el activo
+      // ⚠️ Importante: delega el render al motor oficial de la SECCIÓN 18
+      try {
+        // Llamada directa al renderer unificado
+        if (typeof renderCityItinerary === 'function') {
+          renderCityItinerary(city);
+        } else {
+          // Si por algún motivo no está aún definido, intenta forzar un mensaje visible
+          const $root = __itineraryEl();
+          if ($root) {
+            $root.innerHTML = `<div class="it-empty"><p>Itinerario pendiente de generar…</p></div>`;
+          }
+        }
+      } catch (err) {
+        console.error('Error al renderizar la ciudad:', err);
+      }
     });
 
     $tabs.appendChild(tab);
   });
 }
 
-/* ---------- Render del itinerario por ciudad ---------- */
-function renderCityItinerary(city){
-  const $root = __itineraryEl();
-  if(!$root) return;
-
-  const data = itineraries[city] || { byDay:{} };
-  const byDay = data.byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-
-  // Título + metadatos
-  const hotel = cityMeta[city]?.hotel || '';
-  const baseDate = cityMeta[city]?.baseDate || data.baseDate || '';
-  const transportPref = cityMeta[city]?.transport || '';
-
-  const header = `
-    <div class="it-header">
-      <div class="it-title">
-        <h2>${__escape(city)}</h2>
-        ${hotel ? `<div class="it-hotel">🏨 ${__escape(hotel)}</div>`:''}
-      </div>
-      <div class="it-meta">
-        ${baseDate ? `<span class="it-meta-pill" title="Fecha base">📅 ${__escape(baseDate)}</span>`:''}
-        ${transportPref ? `<span class="it-meta-pill" title="Transporte preferido">🛞 ${__escape(transportPref)}</span>`:''}
-      </div>
-    </div>
-  `;
-
-  const out = [header];
-
-  // Días
-  for(const d of days){
-    out.push(renderDayBlock(city, d, byDay[d]||[]));
-  }
-
-  // Si no hay días, vacío
-  if(!days.length){
-    out.push(`
-      <div class="it-empty">
-        <p>No hay actividades para <strong>${__escape(city)}</strong> todavía.</p>
-      </div>
-    `);
-  }
-
-  $root.innerHTML = out.join('\n');
-}
-
-/* ---------- Render de bloque por día ---------- */
-function renderDayBlock(city, day, rows){
-  const pd = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START, end:DEFAULT_END};
-  const light = plannerState?.lightDayTarget?.[city] === day;
-  const dayTitle = `
-    <div class="day-header">
-      <div class="day-left">
-        <h3>Día ${day}</h3>
-        ${light ? `<span class="day-pill" title="Día suave">🌿 Suave</span>`:''}
-      </div>
-      <div class="day-right">
-        <span class="win-pill" title="Ventana de planificación">${__escape(pd.start||DEFAULT_START)}–${__escape(pd.end||DEFAULT_END)}</span>
-      </div>
-    </div>
-  `;
-
-  const table = renderDayTable(city, day, rows);
-  return `<section class="day-block" data-city="${__escape(city)}" data-day="${day}">
-    ${dayTitle}
-    ${table}
-  </section>`;
-}
-
-/* ---------- Tabla por día ---------- */
-function renderDayTable(city, day, rows){
-  const header = `
-    <table class="it-table" aria-label="Itinerario Día ${day}">
-      <thead>
-        <tr>
-          <th scope="col">Hora</th>
-          <th scope="col">Actividad</th>
-          <th scope="col">Destino</th>
-          <th scope="col">Transporte</th>
-          <th scope="col">Duración</th>
-          <th scope="col">Notas</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows.map(r=>renderRowTr(city, r)).join('')}
-      </tbody>
-    </table>
-  `;
-  return header;
-}
-
-/* ---------- Fila (tr) ---------- */
-function renderRowTr(city, r){
-  const start = __time(r.start)||'';
-  const end   = __time(r.end)||'';
-  const dur   = __cleanDuration(r.duration||'');
-  const cross = r._crossDay ? ' ⯈ +1 día' : '';
-  const isRetHotel = __isReturnHotel(r);
-  const isRetCity  = __isReturnCity(r, city);
-  const isAur = __isAurora(r);
-
-  // Estilo/semántica especial para retornos
-  const rowClass = [
-    'it-row',
-    isRetCity ? 'is-return-city':'',
-    isRetHotel ? 'is-return-hotel':'',
-    isAur ? 'is-aurora':'',
-    r._crossDay ? 'is-cross-day':''
-  ].filter(Boolean).join(' ');
-
-  // Indentación ligera para "Excursión — Ruta — Subparada"
-  const { isExcursion, route, sub } = __splitExcursionLabel(r.activity);
-  let activityHtml = __escape(r.activity||'');
-  if(isExcursion){
-    activityHtml = `
-      <div class="act-excursion">
-        <div class="act-route">Excursión — ${__escape(route)}</div>
-        <div class="act-sub">↳ ${__escape(sub)}</div>
-      </div>
-    `;
-  }
-
-  const timeCell = (start||end)
-    ? `<div class="time-wrap"><span class="t">${__escape(start)}</span>–<span class="t">${__escape(end)}</span>${cross?`<em class="cross">${cross}</em>`:''}</div>`
-    : `<div class="time-wrap t-na">—</div>`;
-
-  // Normaliza destinos: si no hay "to" pero hay "from", deja "—"
-  const to = r.to ? __escape(r.to) : '—';
-  const transport = r.transport ? __escape(r.transport) : '—';
-  const notes = r.notes ? __escape(r.notes) : '';
-
-  return `
-    <tr class="${rowClass}">
-      <td class="col-time">${timeCell}</td>
-      <td class="col-activity">${activityHtml}</td>
-      <td class="col-to">${to}</td>
-      <td class="col-transport">${transport}</td>
-      <td class="col-duration">${dur||'—'}</td>
-      <td class="col-notes">${notes}</td>
-    </tr>
-  `;
-}
-
-/* ---------- Estilos mínimos sugeridos (opcional; si ya tienes CSS, ignora) ----------
-.it-header{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;margin-bottom:.75rem}
-.it-title h2{margin:0;font-size:1.25rem}
-.it-hotel{font-size:.95rem;opacity:.9}
-.it-meta{display:flex;gap:.5rem;flex-wrap:wrap}
-.it-meta-pill,.win-pill,.day-pill,.tab-badge{display:inline-flex;align-items:center;gap:.25rem;border:1px solid rgba(0,0,0,.1);padding:.25rem .5rem;border-radius:.75rem;font-size:.85rem}
+/* ---------- NOTA DE ESTILOS (opcional, si no tienes CSS aplicado) ----------
 .city-tabs,.tab-city{display:flex}
 .tab-city{align-items:center;gap:.5rem;padding:.5rem .75rem;border:1px solid transparent;background:transparent;border-radius:.75rem;cursor:pointer}
 .tab-city.is-active{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.08)}
-.day-header{display:flex;justify-content:space-between;align-items:center;margin:.5rem 0}
-.it-table{width:100%;border-collapse:collapse}
-.it-table th,.it-table td{border-bottom:1px solid rgba(0,0,0,.08);padding:.5rem .5rem;vertical-align:top}
-.col-time .cross{margin-left:.35rem;font-size:.85em;opacity:.7}
-.is-return-city .col-activity,.is-return-hotel .col-activity{font-weight:600}
-.is-aurora .col-activity{color:#0a5}
-.act-excursion .act-route{font-weight:600}
-.act-excursion .act-sub{opacity:.9;margin-top:.15rem}
+.tab-badge{display:inline-flex;align-items:center;gap:.25rem;border:1px solid rgba(0,0,0,.1);padding:.15rem .45rem;border-radius:.75rem;font-size:.82rem}
 ----------------------------------------------------------------------------- */
+
+/* ---------- Export seguro (opcional) ---------- */
+try {
+  if (typeof window !== 'undefined') {
+    window.renderCityTabs = renderCityTabs;
+  }
+} catch(_) {}
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
