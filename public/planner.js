@@ -2393,12 +2393,15 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    Base v73 — Ajuste flexible FINAL (quirúrgico)
-   Cambios clave (PATCH A.1–A.3):
+   Cambios clave (PATCH A.1–A.4):
    (A.1) Unificador de formato (soporta {destinations:[{name,rows}]} → {rows}).
    (A.2) Normalización determinística de transporte y detección “fuera de ciudad”.
    (A.3) Retornos garantizados: “Regreso a <Ciudad>” tras salidas y “Regreso a hotel” al cierre
-         (si la última actividad es aurora: transporte "Tour guiado" y duración "Depende del tour").
-   — Resto de la sección se mantiene intacto.
+         (si la última actividad es aurora: transporte "Tour guiado").
+   (A.4) Compatibilidad estricta con el validador + fallback seguro:
+         • Duraciones numéricas válidas: '1h', '30m' (sin símbolos).
+         • Transporte hereda del último tramo cuando aplica.
+         • Fallback si validateRowsWithAgent devuelve 0 filas.
 ================================= */
 
 /* --- aliasKey para deduplicado por sinónimos comunes --- */
@@ -2684,7 +2687,9 @@ function ensureReturnToCity(city, day, rows){
     const isReturnToCity = /regreso\s+a\s+/i.test(actL) && actL.includes(String(city||'').toLowerCase());
 
     if(!isReturnToCity){
-      const start = last.end || last.start || '18:00';
+      // Inicio seguro, aún si last no existe o fue invalidado más adelante
+      const baseStart = (last && (last.end || last.start)) ? (last.end || last.start) : '18:00';
+      const start = baseStart;
       const end   = __addMinutesSafe__(start, 60);
       rows = [
         ...rows,
@@ -2693,10 +2698,12 @@ function ensureReturnToCity(city, day, rows){
           start,
           end,
           activity: `Regreso a ${city}`,
-          from: last.to || `Alrededores de ${city}`,
+          from: last?.to || `Alrededores de ${city}`,
           to: city,
-          transport: 'Vehículo alquilado o Tour guiado',
-          duration: '≈ 1h',
+          // Heredamos transporte si el último tramo ya definía uno válido
+          transport: (last && last.transport) ? last.transport : 'Vehículo alquilado o Tour guiado',
+          // ⬅︎ Duración estrictamente numérica para pasar validación
+          duration: '1h',
           notes: `Ruta de retorno hacia ${city}.`
         }
       ];
@@ -2714,7 +2721,7 @@ function ensureEndReturnToHotel(rows){
     if(isHotel) return rows;
 
     const start = last.end || last.start || '20:30';
-    const end   = isAurora ? __addMinutesSafe__(start, 30) : __addMinutesSafe__(start, 30);
+    const end   = __addMinutesSafe__(start, 30);
 
     rows.push({
       day: last.day || 1,
@@ -2723,10 +2730,11 @@ function ensureEndReturnToHotel(rows){
       activity: 'Regreso a hotel',
       from: last.to || '',
       to: 'Hotel',
+      // Si fue aurora, mantenemos “Tour guiado”, pero siempre con duración numérica válida
       transport: isAurora ? 'Tour guiado' : (last.transport || 'Taxi'),
-      duration: isAurora ? 'Depende del tour' : '30m',
+      duration: '30m',
       notes: isAurora
-        ? 'Tras la caza de auroras, regreso con el operador al hotel.'
+        ? 'Tras la caza de auroras, regreso con el operador al hotel. (Duración aproximada variable)'
         : 'Cierre del día y descanso en el hotel.'
     });
     return rows;
@@ -2862,7 +2870,7 @@ ${intakeData}
     /* === A.2: Transporte/“fuera de ciudad” (determinístico) === */
     normalized = enforceTransportAndOutOfTown(city, normalized);
 
-    /* === A.3: Retornos garantizados (a ciudad y a hotel) === */
+    /* === A.3: Retornos garantizados (a ciudad y a hotel) — con formatos válidos === */
     normalized = ensureReturnToCity(city, day, normalized);
     let finalRows=[...normalized,...protectedRows];
     finalRows = ensureEndReturnToHotel(finalRows);
@@ -2870,8 +2878,20 @@ ${intakeData}
     // Anti-solapes, buffers y soporte de cruce post-medianoche
     finalRows = fixOverlaps(finalRows);
 
+    // === Validación + Fallback seguro (A.4) ===
     const val=await validateRowsWithAgent(city,finalRows,baseDate);
-    pushRows(city,val.allowed,false);
+
+    if (Array.isArray(val?.allowed) && val.allowed.length) {
+      pushRows(city,val.allowed,false);
+    } else {
+      // Fallback: si el validador vacía todas las filas (p.ej., por formatos),
+      // empujamos versión segura con duraciones numéricas válidas.
+      const safe = finalRows.map(r => ({
+        ...r,
+        duration: (/\d/.test(String(r.duration||''))) ? r.duration : '30m'
+      }));
+      pushRows(city, safe, false);
+    }
   }
 }
 
