@@ -1535,307 +1535,138 @@ function showWOW(on, msg){
   });
 }
 
-/* ─────────────────────────────────────────────────────────────
-   SECCIÓN 15.2 · Generación principal por ciudad
-   Base v60 + injertos v64 + dedupe global con normKey
-   + FIX anti-fallback: extractor JSON robusto + reintentos estrictos
-───────────────────────────────────────────────────────────── */
-async function generateCityItinerary(city){
-  window.__cityLocks = window.__cityLocks || {};
-  if (window.__cityLocks[city]) {
-    console.warn(`[Mutex] Generación ya en curso para ${city}`);
-    return;
+/* ==============================
+   SECCIÓN 15.2 · Bridge de Red / Agentes (Info-first → Planner)
+   v71.fast — AbortController, timeouts y cacheo ligero
+   - callInfoAgent(query: string): string (respuesta breve “info”)
+   - callAgent(prompt: string, forceJSON?: boolean, meta?: {cityName, baseDate}): string (JSON stringify desde API)
+   - parseJSON(raw): any (tolerante a fences/backticks)
+   - Cache por ciudad para investigación (evita llamadas redundantes)
+================================= */
+
+/* ---------- Configuración de red ---------- */
+const API_CHAT_ENDPOINT = '/api/chat';
+const NET_TIMEOUT_INFO_MS    = 10_000; // 10s: info debe ser MUY rápido
+const NET_TIMEOUT_PLANNER_MS = 18_000; // 18s: planner acotado para evitar fallback por latencia
+
+/* ---------- Caches ligeros en memoria de sesión ---------- */
+const researchCache = Object.create(null); // { [cityKey]: { text, at:number } }
+const plannerCache  = Object.create(null); // { [hashKey]: { text, at:number } }
+
+/* ---------- Utilidades ---------- */
+function __stringHash__(s){
+  let h = 2166136261 >>> 0;
+  for(let i=0;i<s.length;i++){
+    h ^= s.charCodeAt(i);
+    h += (h<<1) + (h<<4) + (h<<7) + (h<<8) + (h<<24);
   }
-  window.__cityLocks[city] = true;
+  return (h>>>0).toString(36);
+}
+function __normCityKey__(name){
+  return String(name||'')
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu,'')
+    .trim()
+    .toLowerCase();
+}
 
-  // ---- Helpers locales ONLY para esta sección (no afectan global) ----
-  const toHHMM = s => String(s||'').trim();
-  const parseHHMM = (hhmm)=>{
-    const m = /^(\d{1,2}):(\d{2})$/.exec(toHHMM(hhmm));
-    if(!m) return null;
-    const h = Math.min(23, Math.max(0, +m[1]));
-    const min = Math.min(59, Math.max(0, +m[2]));
-    return {h, min};
-  };
-  const addMinutes = (hhmm, mins)=>{
-    const t = parseHHMM(hhmm);
-    if(!t) return null;
-    let total = t.h*60 + t.min + mins;
-    while(total < 0) total += 24*60;
-    total = total % (24*60);
-    const h = Math.floor(total/60);
-    const m = total % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  };
-
-  // 🔒 Extractor robusto de JSON (tolerante a texto extra y triples codefences)
-  function extractJsonStrict(txt){
-    if(!txt) return null;
-    // 1) intenta parse directo
-    try { return JSON.parse(txt); } catch(_) {}
-    // 2) extrae primer bloque {...} o [...] balanceado
-    const start = txt.search(/[{[]/);
-    if(start === -1) return null;
-    let depth = 0, end = -1, stack = [];
-    for(let i=start;i<txt.length;i++){
-      const ch = txt[i];
-      if(ch==='{' || ch==='['){ depth++; stack.push(ch); }
-      else if(ch==='}' || ch===']'){
-        if(!depth) break;
-        const last = stack[stack.length-1];
-        if((last==='{' && ch==='}') || (last==='[' && ch===']')){ stack.pop(); depth--; }
-      }
-      if(depth===0){ end = i+1; break; }
-    }
-    if(end>start){
-      const slice = txt.slice(start, end);
-      try { return JSON.parse(slice); } catch(_) {}
-    }
-    // 3) quita ```json fences
-    const fenced = txt.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if(fenced){
-      try { return JSON.parse(fenced[1]); } catch(_){}
-    }
-    return null;
+/* ---------- Limpieza de fences/JSON ---------- */
+function parseJSON(raw){
+  if(!raw) return null;
+  if(typeof raw === 'object') {
+    try { return JSON.parse(JSON.stringify(raw)); } catch { return raw; }
   }
-
-  // 🔎 Verificador mínimo de la forma esperada
-  function looksValidPayload(p, targetCity){
-    if(!p) return false;
-    if(Array.isArray(p.rows)) return true;
-    if(p.destination === targetCity && Array.isArray(p.rows)) return true;
-    if(Array.isArray(p.destinations)){
-      return p.destinations.some(d => (d.name||d.destination)===targetCity && Array.isArray(d.rows));
-    }
-    if(Array.isArray(p.itineraries)){
-      return p.itineraries.some(i => (i.city||i.name||i.destination)===targetCity && Array.isArray(i.rows));
-    }
-    return false;
-  }
-
+  let s = String(raw).trim();
+  // quitar ```json ... ```
+  s = s.replace(/^```json/i,'```').replace(/^```/,'').replace(/```$/,'').trim();
+  // intento directo
+  try { return JSON.parse(s); } catch {}
+  // primer { ... } último }
   try {
-    const dest  = savedDestinations.find(x=>x.city===city);
-    if(!dest) return;
+    const a = s.indexOf('{'); const b = s.lastIndexOf('}');
+    if(a>=0 && b>a) return JSON.parse(s.slice(a, b+1));
+  } catch {}
+  // limpieza de bordes agresiva
+  try {
+    const cleaned = s.replace(/^[^{]+/,'').replace(/[^}]+$/,'');
+    return JSON.parse(cleaned);
+  } catch {}
+  return null;
+}
 
-    const perDay = Array.from({length:dest.days}, (_,i)=>{
-      const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-      return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
+/* ---------- Capa de red con abort ---------- */
+async function fetchJSON(url, payload, timeoutMs){
+  const ctrl = new AbortController();
+  const id = setTimeout(()=>ctrl.abort(), timeoutMs||NET_TIMEOUT_PLANNER_MS);
+
+  try{
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload||{}),
+      signal: ctrl.signal
     });
-
-    const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-    const hotel    = cityMeta[city]?.hotel || '';
-    const transport= cityMeta[city]?.transport || 'recomiéndame';
-    const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
-
-    // ─── Contexto heurístico (sin cambios funcionales) ───
-    let heuristicsContext = '';
-    let auroraCity=false, auroraSeason=false;
-    try{
-      const coords = getCoordinatesForCity(city);
-      auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
-      auroraSeason = baseDate ? inAuroraSeasonDynamic(baseDate) : false;
-      const auroraWindow = AURORA_DEFAULT_WINDOW;
-      const dayTripContext = getHeuristicDayTripContext(city) || {};
-
-      heuristicsContext = `
-───────────────────────────────
-🧭 CONTEXTO HEURÍSTICO GLOBAL
-───────────────────────────────
-- Ciudad: ${city}
-- Aurora City: ${auroraCity}
-- Aurora Season: ${auroraSeason}
-- Aurora Window: ${JSON.stringify(auroraWindow)}
-- Day Trip Context: ${JSON.stringify(dayTripContext)}
-      `.trim();
-    }catch(err){
-      console.warn('Heurística no disponible:', city, err);
-      heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
-    }
-
-    const auroraRequirement = (auroraCity && (auroraSeason || !baseDate)) ? `
-🌌 **Instrucción contextual**:
-- Si es plausible, incluye **al menos una noche** de auroras (20:00–02:30 aprox.), con "valid:" en notes y transporte coherente (Tour/Van/Auto).
-- Ajusta el inicio del día siguiente si se extiende demasiado.
-` : '';
-
-    // Prompt base (igual lógica + énfasis en JSON estricto)
-    const baseInstructions = `
-${FORMAT}
-**ROL:** Planificador “Astra”. Elabora el itinerario completo SOLO para "${city}" (${dest.days} día/s).
-- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-
-🧭 Cobertura:
-- Cubre TODOS los días 1–${dest.days}. Sin días vacíos.
-- Ventanas base por día: ${JSON.stringify(perDay)}. Puedes proponer extensiones lógicas (cenas, tours nocturnos, auroras).
-
-🚆 Transporte lógico:
-- Barco: actividades marinas / whale watching.
-- Bus/Van tour: excursiones interurbanas.
-- Tren/Bus/Auto: trayectos terrestres razonables.
-- A pie/Metro: zonas urbanas compactas.
-
-🕒 Horarios plausibles:
-- Base 08:30–19:00 si no se indicó algo mejor.
-- Buffers ≥15 min. Evita solapes.
-- Si extiendes por nocturnas, compensa el día siguiente.
-
-🧭 Day trips:
-- Solo si aportan valor y ≤ 2 h por trayecto (ida), regreso mismo día.
-
-${auroraRequirement}
-
-🔎 Notas:
-- SIEMPRE informativas (nunca vacías ni "seed"); incluye "valid:" cuando corresponda.
-
-${heuristicsContext}
-
-Contexto:
-${buildIntake()}
-`.trim();
-
-    if (typeof setOverlayMessage === 'function') {
-      try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
-    }
-
-    // 🔁 Reintentos: normal → estricto → súper estricto (si hiciera falta)
-    const attempts = [
-      { name:'normal',  hint:'' },
-      { name:'estricto', hint: '\nDEVUELVE **EXCLUSIVAMENTE** JSON VÁLIDO sin texto adicional ni codefences.' },
-      { name:'super',    hint: '\nSOLO JSON. No incluyas comentarios, explicaciones ni bloques ```.' }
-    ];
-
-    let parsed = null, rawText = '';
-    for (let i=0; i<attempts.length; i++){
-      const hint = attempts[i].hint;
-      const text = await callAgent(baseInstructions + hint, true);
-      rawText = text || '';
-      parsed = extractJsonStrict(rawText);
-      if (looksValidPayload(parsed, city)) break; // éxito
-      parsed = null; // fuerza otro intento
-    }
-
-    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-      let tmpRows = [];
-      if(parsed.rows){
-        tmpRows = parsed.rows.map(r=>normalizeRow(r));
-      }else if(parsed.destination===city && parsed.rows){
-        tmpRows = parsed.rows.map(r=>normalizeRow(r));
-      }else if(Array.isArray(parsed.destinations)){
-        const d=parsed.destinations.find(x=>(x.name||x.destination)===city);
-        tmpRows=(d?.rows||[]).map(r=>normalizeRow(r));
-      }else if(Array.isArray(parsed.itineraries)){
-        const i=parsed.itineraries.find(x=>(x.city||x.name||x.destination)===city);
-        tmpRows=(i?.rows||[]).map(r=>normalizeRow(r));
-      }
-
-      // 🧼 Anti-duplicados locales vs ya existente
-      const existingActs = Object.values(itineraries[city]?.byDay||{})
-        .flat()
-        .map(r=>normKey(String(r.activity||'')));
-      tmpRows = tmpRows.filter(r=>!existingActs.includes(normKey(String(r.activity||''))));
-
-      if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
-      if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
-      if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
-
-      const val = await validateRowsWithAgent(city, tmpRows, baseDate);
-      pushRows(city, val.allowed, forceReplan);
-
-      // ⚖️ Enforce termales 3h (igual a tu versión previa)
-      (function enforceThermal3h(){
-        const hotWords = ['laguna azul','blue lagoon','bláa lónið','termal','termales','hot spring','thermal bath'];
-        const byDay = itineraries[city]?.byDay || {};
-        for(const d of Object.keys(byDay)){
-          byDay[d] = (byDay[d]||[]).map(r=>{
-            const name = String(r.activity||'').toLowerCase();
-            if(hotWords.some(w=>name.includes(w))){
-              const start = toHHMM(r.start);
-              const hasStart = !!parseHHMM(start);
-              const newEnd = hasStart ? addMinutes(start, 180) : r.end;
-              const durTxt = String(r.duration||'').toLowerCase();
-              const hoursMatch = /(\d+(?:\.\d+)?)\s*h/.exec(durTxt);
-              const durH = hoursMatch ? parseFloat(hoursMatch[1]) : null;
-              if(!durH || durH < 3) r.duration = '3h';
-              if(newEnd) r.end = newEnd;
-              r.notes = (r.notes ? String(r.notes)+' · ' : '') + 'min stay ~3h (ajustable)';
-            }
-            return r;
-          });
-        }
-      })();
-
-      // 🌌 Inyección aurora si aplica (tal cual tenías)
-      if (auroraCity && (auroraSeason || !baseDate)) {
-        const acts = Object.values(itineraries[city]?.byDay || {})
-          .flat()
-          .map(r => normKey(String(r.activity || '')));
-        const hasAurora = acts.some(a => a.includes('aurora') || a.includes('northern light'));
-        if (!hasAurora) {
-          const byDay = itineraries[city]?.byDay || {};
-          const dayLoads = [];
-          for(let d=1; d<=dest.days; d++){
-            const rows = byDay[d] || [];
-            const diurnas = rows.filter(x=>{
-              const e = parseHHMM(x.end||'');
-              return e ? (e.h*60+e.min) <= (19*60+30) : true;
-            }).length;
-            dayLoads.push({day:d, load:diurnas});
-          }
-          dayLoads.sort((a,b)=> a.load===b.load ? a.day - b.day : a.load - b.load);
-          let chosen = dayLoads[0]?.day || 1;
-          if(chosen === dest.days && dayLoads[1]) chosen = dayLoads[1].day;
-
-          const auroraRow = normalizeRow({
-            day: chosen,
-            start: '20:30',
-            end: '02:00',
-            activity: 'Caza de auroras',
-            from: 'Hotel/Base',
-            to: 'Punto de observación',
-            transport: 'Tour/Bus/Van',
-            notes: 'valid: ventana nocturna auroral (sujeto a clima); vestir térmico'
-          });
-          pushRows(city, [auroraRow], false);
-          console.warn(`[Aurora Injection] Añadida aurora automáticamente en ${city} (día ${chosen})`);
-        }
-      }
-
-      // Completar huecos día a día
-      ensureDays(city);
-      for(let d=1; d<=dest.days; d++){
-        if(!(itineraries[city].byDay?.[d]||[]).length){
-          await optimizeDay(city,d);
-        }
-      }
-
-      renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-
-      if(forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
-      if(plannerState?.preferences){
-        delete plannerState.preferences.preferDayTrip;
-        delete plannerState.preferences.preferAurora;
-      }
-      $resetBtn?.removeAttribute('disabled');
-      return;
-    }
-
-    // ⚠️ Fallback visible si ningún intento dio JSON válido
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-    $resetBtn?.removeAttribute('disabled');
-    chatMsg('⚠️ Fallback local: el agente no devolvió JSON válido tras reintentos. Intentaré optimizar por días.', 'ai');
-
-    // Fallback útil: fuerza optimizeDay para cada día como red de seguridad
-    ensureDays(city);
-    for(let d=1; d<=dest.days; d++){
-      await optimizeDay(city, d);
-    }
-
-  } catch(err){
-    console.error(`[ERROR] generateCityItinerary(${city})`, err);
-    chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>.`, 'ai');
+    const data = await resp.json().catch(()=> ({}));
+    return data;
   } finally {
-    delete window.__cityLocks[city];
+    clearTimeout(id);
   }
+}
+
+/* ---------- Agente INFO (rápido, texto) ---------- */
+async function callInfoAgent(query){
+  const q = String(query||'').trim();
+  if(!q) return '';
+
+  // Si está claro a qué ciudad se refiere, cacheamos por ciudad
+  const cityGuess = activeCity || savedDestinations?.[0]?.city || '';
+  const key = cityGuess ? __normCityKey__(cityGuess) : '';
+
+  if(key && researchCache[key] && (Date.now() - researchCache[key].at) < 6*60*1000){
+    return researchCache[key].text || '';
+  }
+
+  const payload = {
+    mode: 'info',
+    messages: [{ role:'user', content: q }]
+  };
+
+  const data = await fetchJSON(API_CHAT_ENDPOINT, payload, NET_TIMEOUT_INFO_MS);
+  const text = (data && typeof data.text === 'string') ? data.text : '';
+
+  if(key){
+    researchCache[key] = { text, at: Date.now() };
+  }
+  return text;
+}
+
+/* ---------- Agente PLANNER (JSON como string) ---------- */
+async function callAgent(prompt, forceJSON = true, meta = {}){
+  const p = String(prompt||'').trim();
+  if(!p) return '';
+
+  // Cache por hash de prompt + ciudad + fecha base (evita recomputar idénticos)
+  const c = __normCityKey__(meta.cityName||'');
+  const base = String(meta.baseDate||'');
+  const cacheKey = __stringHash__(`[P]${p}#${c}#${base}#${forceJSON?'J':'F'}`);
+
+  if(plannerCache[cacheKey] && (Date.now() - plannerCache[cacheKey].at) < 3*60*1000){
+    return plannerCache[cacheKey].text;
+  }
+
+  // Nota: el API ya fuerza JSON y hace post-proceso; aquí sólo enviamos el mensaje del usuario
+  const payload = {
+    mode: 'planner',
+    messages: [{ role:'user', content: p }]
+  };
+
+  // Planner con timeout acotado; sin bucles de reintentos costosos
+  const data = await fetchJSON(API_CHAT_ENDPOINT, payload, NET_TIMEOUT_PLANNER_MS);
+  // API responde { text: "<JSON-string>" } incluso en fallback controlado
+  const outText = (data && typeof data.text === 'string') ? data.text : '';
+
+  plannerCache[cacheKey] = { text: outText, at: Date.now() };
+  return outText;
 }
 
 /* ==============================
