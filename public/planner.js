@@ -2778,7 +2778,7 @@ function ensureReturnToCity(city, day, rows){
           from: last.to || `Alrededores de ${city}`,
           to: city,
           transport: 'Vehículo alquilado o Tour guiado',
-          duration: '≈ 1h',
+          duration: '1h', // <-- Ajuste quirúrgico: sin "≈", duración limpia
           notes: `Ruta de retorno hacia ${city}.`
         }
       ];
@@ -2965,12 +2965,46 @@ ${intakeData}
    - Asegura ventana/optimización completa del día nuevo
    + Mejora: uso del resolutor de hotel/zona, feedback de confianza,
      y activación automática de preferAurora cuando aplique
+   + Ajustes quirúrgicos:
+     • Semillas sin símbolos de aproximación en duration (sin "~" ni "≈")
+     • Dedupe de "Regreso a {Ciudad}" y "Regreso a hotel" tras optimizaciones
+     • Respeto de _crossDay ya gestionado por Sección 18
 ================================= */
+
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
   chatMsg(text,'user');
   $chatI.value='';
+
+  /* --- Helper local (quirúrgico): dedupe de retornos --- */
+  function dedupeDayReturns(city, day){
+    try{
+      const rows = (itineraries[city]?.byDay?.[day]||[]);
+      if(!rows.length) return;
+
+      const cityLow = String(city||'').toLowerCase();
+      let seenHotel = false, seenCity = false;
+      const out = [];
+
+      for(const r of rows){
+        const act = String(r.activity||'').toLowerCase();
+        const isReturnHotel = /regreso\s+al?\s*hotel/i.test(act);
+        const isReturnCity  = /regreso\s+a\s+/i.test(act) && act.includes(cityLow);
+
+        if(isReturnHotel){
+          if(seenHotel) continue;
+          seenHotel = true;
+        }
+        if(isReturnCity){
+          if(seenCity) continue;
+          seenCity = true;
+        }
+        out.push(r);
+      }
+      itineraries[city].byDay[day] = out;
+    }catch(_){/* no-op */}
+  }
 
   // Colecta hotel/transporte
   if(collectingHotels){
@@ -3045,6 +3079,9 @@ async function onSend(){
 
       showWOW(true,'Reequilibrando tras cambio de hotel…');
       await rebalanceWholeCity(city);
+      // Dedupe retornos por seguridad tras reopt
+      const byDay = itineraries[city]?.byDay||{};
+      Object.keys(byDay).forEach(d=>dedupeDayReturns(city, +d));
       showWOW(false);
       chatMsg('✅ Itinerario reequilibrado tras el cambio de hotel.','ai');
     } else {
@@ -3063,6 +3100,8 @@ async function onSend(){
       plannerState.preferences.preferDayTrip = true;
       chatMsg(`🧭 Consideraré una <strong>excursión de 1 día</strong> cerca de <strong>${city}</strong> si aporta valor.`, 'ai');
       await rebalanceWholeCity(city);
+      const byDay = itineraries[city]?.byDay||{};
+      Object.keys(byDay).forEach(d=>dedupeDayReturns(city, +d));
       return;
     }
   }
@@ -3075,6 +3114,8 @@ async function onSend(){
       plannerState.preferences.preferAurora = true;
       chatMsg(`🌌 Priorizaré <strong>noches de auroras</strong> en <strong>${city}</strong> cuando sea plausible.`, 'ai');
       await rebalanceWholeCity(city);
+      const byDay = itineraries[city]?.byDay||{};
+      Object.keys(byDay).forEach(d=>dedupeDayReturns(city, +d));
       return;
     }
   }
@@ -3135,6 +3176,10 @@ async function onSend(){
       await optimizeDay(city, total);
     }
 
+    // Dedupe retornos por seguridad
+    const byDay = itineraries[city]?.byDay||{};
+    Object.keys(byDay).forEach(d=>dedupeDayReturns(city, +d));
+
     showWOW(false);
     chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city}. Reoptimicé de D${prevTotal} a D${total} y marqué D${total} como "ligero pero COMPLETO".`, 'ai');
     return;
@@ -3183,7 +3228,7 @@ async function onSend(){
         from: `Hotel (${city})`,
         to: destTrip,
         transport: 'Tren/Bus',
-        duration: '≈ 1h',
+        duration: '1h', // ← sin "≈", duración limpia
         notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`
       }], false);
     }
@@ -3202,6 +3247,10 @@ async function onSend(){
       await optimizeDay(city, total);
     }
 
+    // Dedupe de retornos tras la optimización
+    const byDay2 = itineraries[city]?.byDay||{};
+    Object.keys(byDay2).forEach(d=>dedupeDayReturns(city, +d));
+
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
@@ -3215,7 +3264,10 @@ async function onSend(){
     showWOW(true,'Eliminando día…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
-    for(let d=intent.day; d<=totalDays; d++) await optimizeDay(intent.city, d);
+    for(let d=intent.day; d<=totalDays; d++){
+      await optimizeDay(intent.city, d);
+      dedupeDayReturns(intent.city, d);
+    }
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Día eliminado y plan reequilibrado.','ai');
@@ -3230,6 +3282,8 @@ async function onSend(){
       optimizeDay(intent.city, intent.from),
       optimizeDay(intent.city, intent.to)
     ]);
+    dedupeDayReturns(intent.city, intent.from);
+    dedupeDayReturns(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
@@ -3244,6 +3298,8 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
+    dedupeDayReturns(intent.city, intent.fromDay);
+    dedupeDayReturns(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
@@ -3261,6 +3317,7 @@ async function onSend(){
       itineraries[city].byDay[day] = before.filter(r => !String(r.activity||'').toLowerCase().includes(q));
     }
     await optimizeDay(city, day);
+    dedupeDayReturns(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Sustituí la actividad y reoptimicé el día.','ai');
@@ -3278,6 +3335,7 @@ async function onSend(){
     if(intent.range.start) pd.start = intent.range.start;
     if(intent.range.end)   pd.end   = intent.range.end;
     await optimizeDay(city, day);
+    dedupeDayReturns(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Ajusté los horarios y reoptimicé tu día.','ai');
@@ -3378,6 +3436,7 @@ ${dayRows}
 
       const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
       await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
+      [...daysChanged].forEach(d=>dedupeDayReturns(city, d));
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
@@ -3391,69 +3450,273 @@ ${dayRows}
 }
 
 /* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
+   SECCIÓN 20 · Render / UI
+   v71.fix — Compatible con Info-first → Planner
+   - Tabs de ciudades con estado y activación
+   - Render por día con tabla accesible
+   - Soporte _crossDay (⯈ +1 día)
+   - Limpieza visual de duration (sin "~" ni "≈")
+   - Estilo claro para "Regreso a {Ciudad}" y "Regreso a hotel"
+   - Indentación ligera para "Excursión — Ruta — Subparada"
 ================================= */
-function addRowReorderControls(row){
-  const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display = 'flex';
-  ctrlWrap.style.gap = '.35rem';
-  ctrlWrap.style.alignItems = 'center';
 
-  const up = document.createElement('button');
-  up.textContent = '↑';
-  up.className = 'btn ghost';
-  const down = document.createElement('button');
-  down.textContent = '↓';
-  down.className = 'btn ghost';
+/* ---------- Helpers DOM seguros ---------- */
+function __q(sel){
+  return document.querySelector(sel);
+}
+function __qs(sel){
+  return Array.from(document.querySelectorAll(sel));
+}
+function __el(tag, cls){
+  const n = document.createElement(tag);
+  if(cls) n.className = cls;
+  return n;
+}
 
-  ctrlWrap.appendChild(up);
-  ctrlWrap.appendChild(down);
-  row.appendChild(ctrlWrap);
+/* Contenedores con fallbacks (no rompe tu HTML existente) */
+function __tabsEl(){
+  return __q('[data-ui="city-tabs"]') || __q('#city-tabs') || __q('#cityTabs') || __q('.city-tabs');
+}
+function __itineraryEl(){
+  return __q('[data-ui="itinerary"]') || __q('#itinerary') || __q('#itineraryPane') || __q('.itinerary');
+}
 
-  // 🆙 Subir ciudad
-  up.addEventListener('click', ()=>{
-    if(row.previousElementSibling){
-      $cityList.insertBefore(row, row.previousElementSibling);
-      saveDestinations(); // ⚡ sincroniza inmediatamente orden
+/* ---------- Helpers de formato ---------- */
+function __escape(s){
+  return String(s==null?'':s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+function __cleanDuration(d=''){
+  return String(d).replace(/[~≈]/g,'').trim();
+}
+function __time(t){
+  const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return '';
+  const h = (+m[1]); const mi = m[2];
+  return `${String(h).padStart(2,'0')}:${mi}`;
+}
+function __isReturnHotel(row){
+  return /regreso\s+al?\s*hotel/i.test(String(row.activity||'').toLowerCase());
+}
+function __isReturnCity(row, city){
+  const a = String(row.activity||'').toLowerCase();
+  return /regreso\s+a\s+/.test(a) && a.includes(String(city||'').toLowerCase());
+}
+function __isAurora(row){
+  return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
+}
+function __splitExcursionLabel(activity){
+  // Estructura: "Excursión — {Ruta} — {Subparada}"
+  const raw = String(activity||'');
+  const parts = raw.split('—').map(x=>x.trim());
+  if(/^excursi[oó]n/i.test(parts[0]||'')){
+    const route = (parts[1]||'').trim();
+    const sub   = (parts[2]||'').trim();
+    if(route && sub){
+      return { isExcursion:true, route, sub };
     }
-  });
+  }
+  return { isExcursion:false, route:'', sub:'' };
+}
 
-  // ⬇️ Bajar ciudad
-  down.addEventListener('click', ()=>{
-    if(row.nextElementSibling){
-      $cityList.insertBefore(row.nextElementSibling, row);
-      saveDestinations(); // ⚡ sincroniza inmediatamente orden
-    }
+/* ---------- Tabs de ciudades ---------- */
+function renderCityTabs(){
+  const $tabs = __tabsEl();
+  if(!$tabs) return;
+
+  const list = Array.isArray(savedDestinations)? savedDestinations : [];
+  const act  = activeCity || (list[0]?.city || '');
+
+  $tabs.innerHTML = '';
+  list.forEach((item, idx)=>{
+    const city = item.city;
+    const tab = __el('button','tab-city');
+    tab.type = 'button';
+    tab.setAttribute('data-city', city);
+
+    // Estado visual
+    const total = Object.keys(itineraries[city]?.byDay||{}).length || 0;
+    const badge = total ? `<span class="tab-badge" aria-label="${total} días">${total}</span>` : '';
+    const isAct = (city === act);
+    tab.innerHTML = `
+      <span class="tab-label">${__escape(city)}</span>
+      ${badge}
+    `;
+    if(isAct) tab.classList.add('is-active');
+
+    tab.addEventListener('click', ()=>{
+      setActiveCity(city);
+      renderCityTabs(); // vuelve a pintar activo
+      renderCityItinerary(city);
+    });
+
+    $tabs.appendChild(tab);
   });
 }
 
-// 🧭 Inyectar controles de ordenamiento a cada nueva fila de ciudad
-const origAddCityRow = addCityRow;
-addCityRow = function(pref){
-  origAddCityRow(pref);
-  const row = $cityList.lastElementChild;
-  if(row) addRowReorderControls(row);
-};
+/* ---------- Render del itinerario por ciudad ---------- */
+function renderCityItinerary(city){
+  const $root = __itineraryEl();
+  if(!$root) return;
 
-// 🧼 País: permitir letras Unicode y espacios (global)
-document.addEventListener('input', (e)=>{
-  if(e.target && e.target.classList && e.target.classList.contains('country')){
-    const original = e.target.value;
-    // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
-    const filtered = original.replace(/[^\p{L}\s]/gu,'');
-    if(filtered !== original){
-      const pos = e.target.selectionStart;
-      e.target.value = filtered;
-      if(typeof pos === 'number'){
-        // ⚡ Ajuste suave del cursor
-        e.target.setSelectionRange(
-          pos - (original.length - filtered.length),
-          pos - (original.length - filtered.length)
-        );
-      }
-    }
+  const data = itineraries[city] || { byDay:{} };
+  const byDay = data.byDay || {};
+  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+
+  // Título + metadatos
+  const hotel = cityMeta[city]?.hotel || '';
+  const baseDate = cityMeta[city]?.baseDate || data.baseDate || '';
+  const transportPref = cityMeta[city]?.transport || '';
+
+  const header = `
+    <div class="it-header">
+      <div class="it-title">
+        <h2>${__escape(city)}</h2>
+        ${hotel ? `<div class="it-hotel">🏨 ${__escape(hotel)}</div>`:''}
+      </div>
+      <div class="it-meta">
+        ${baseDate ? `<span class="it-meta-pill" title="Fecha base">📅 ${__escape(baseDate)}</span>`:''}
+        ${transportPref ? `<span class="it-meta-pill" title="Transporte preferido">🛞 ${__escape(transportPref)}</span>`:''}
+      </div>
+    </div>
+  `;
+
+  const out = [header];
+
+  // Días
+  for(const d of days){
+    out.push(renderDayBlock(city, d, byDay[d]||[]));
   }
-});
+
+  // Si no hay días, vacío
+  if(!days.length){
+    out.push(`
+      <div class="it-empty">
+        <p>No hay actividades para <strong>${__escape(city)}</strong> todavía.</p>
+      </div>
+    `);
+  }
+
+  $root.innerHTML = out.join('\n');
+}
+
+/* ---------- Render de bloque por día ---------- */
+function renderDayBlock(city, day, rows){
+  const pd = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START, end:DEFAULT_END};
+  const light = plannerState?.lightDayTarget?.[city] === day;
+  const dayTitle = `
+    <div class="day-header">
+      <div class="day-left">
+        <h3>Día ${day}</h3>
+        ${light ? `<span class="day-pill" title="Día suave">🌿 Suave</span>`:''}
+      </div>
+      <div class="day-right">
+        <span class="win-pill" title="Ventana de planificación">${__escape(pd.start||DEFAULT_START)}–${__escape(pd.end||DEFAULT_END)}</span>
+      </div>
+    </div>
+  `;
+
+  const table = renderDayTable(city, day, rows);
+  return `<section class="day-block" data-city="${__escape(city)}" data-day="${day}">
+    ${dayTitle}
+    ${table}
+  </section>`;
+}
+
+/* ---------- Tabla por día ---------- */
+function renderDayTable(city, day, rows){
+  const header = `
+    <table class="it-table" aria-label="Itinerario Día ${day}">
+      <thead>
+        <tr>
+          <th scope="col">Hora</th>
+          <th scope="col">Actividad</th>
+          <th scope="col">Destino</th>
+          <th scope="col">Transporte</th>
+          <th scope="col">Duración</th>
+          <th scope="col">Notas</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r=>renderRowTr(city, r)).join('')}
+      </tbody>
+    </table>
+  `;
+  return header;
+}
+
+/* ---------- Fila (tr) ---------- */
+function renderRowTr(city, r){
+  const start = __time(r.start)||'';
+  const end   = __time(r.end)||'';
+  const dur   = __cleanDuration(r.duration||'');
+  const cross = r._crossDay ? ' ⯈ +1 día' : '';
+  const isRetHotel = __isReturnHotel(r);
+  const isRetCity  = __isReturnCity(r, city);
+  const isAur = __isAurora(r);
+
+  // Estilo/semántica especial para retornos
+  const rowClass = [
+    'it-row',
+    isRetCity ? 'is-return-city':'',
+    isRetHotel ? 'is-return-hotel':'',
+    isAur ? 'is-aurora':'',
+    r._crossDay ? 'is-cross-day':''
+  ].filter(Boolean).join(' ');
+
+  // Indentación ligera para "Excursión — Ruta — Subparada"
+  const { isExcursion, route, sub } = __splitExcursionLabel(r.activity);
+  let activityHtml = __escape(r.activity||'');
+  if(isExcursion){
+    activityHtml = `
+      <div class="act-excursion">
+        <div class="act-route">Excursión — ${__escape(route)}</div>
+        <div class="act-sub">↳ ${__escape(sub)}</div>
+      </div>
+    `;
+  }
+
+  const timeCell = (start||end)
+    ? `<div class="time-wrap"><span class="t">${__escape(start)}</span>–<span class="t">${__escape(end)}</span>${cross?`<em class="cross">${cross}</em>`:''}</div>`
+    : `<div class="time-wrap t-na">—</div>`;
+
+  // Normaliza destinos: si no hay "to" pero hay "from", deja "—"
+  const to = r.to ? __escape(r.to) : '—';
+  const transport = r.transport ? __escape(r.transport) : '—';
+  const notes = r.notes ? __escape(r.notes) : '';
+
+  return `
+    <tr class="${rowClass}">
+      <td class="col-time">${timeCell}</td>
+      <td class="col-activity">${activityHtml}</td>
+      <td class="col-to">${to}</td>
+      <td class="col-transport">${transport}</td>
+      <td class="col-duration">${dur||'—'}</td>
+      <td class="col-notes">${notes}</td>
+    </tr>
+  `;
+}
+
+/* ---------- Estilos mínimos sugeridos (opcional; si ya tienes CSS, ignora) ----------
+.it-header{display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;margin-bottom:.75rem}
+.it-title h2{margin:0;font-size:1.25rem}
+.it-hotel{font-size:.95rem;opacity:.9}
+.it-meta{display:flex;gap:.5rem;flex-wrap:wrap}
+.it-meta-pill,.win-pill,.day-pill,.tab-badge{display:inline-flex;align-items:center;gap:.25rem;border:1px solid rgba(0,0,0,.1);padding:.25rem .5rem;border-radius:.75rem;font-size:.85rem}
+.city-tabs,.tab-city{display:flex}
+.tab-city{align-items:center;gap:.5rem;padding:.5rem .75rem;border:1px solid transparent;background:transparent;border-radius:.75rem;cursor:pointer}
+.tab-city.is-active{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.08)}
+.day-header{display:flex;justify-content:space-between;align-items:center;margin:.5rem 0}
+.it-table{width:100%;border-collapse:collapse}
+.it-table th,.it-table td{border-bottom:1px solid rgba(0,0,0,.08);padding:.5rem .5rem;vertical-align:top}
+.col-time .cross{margin-left:.35rem;font-size:.85em;opacity:.7}
+.is-return-city .col-activity,.is-return-hotel .col-activity{font-weight:600}
+.is-aurora .col-activity{color:#0a5}
+.act-excursion .act-route{font-weight:600}
+.act-excursion .act-sub{opacity:.9;margin-top:.15rem}
+----------------------------------------------------------------------------- */
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
