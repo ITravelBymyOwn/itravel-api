@@ -1669,6 +1669,18 @@ async function callAgent(prompt, forceJSON = true, meta = {}){
   return outText;
 }
 
+/* ---------- Helper Info-first: hint comprimido desde researchCache ---------- */
+/* Devuelve una línea corta con pistas de investigación previas para inyectar en prompts. */
+function __mkResearchHint__(city){
+  try{
+    const key = __normCityKey__(city||'');
+    const hit = key && researchCache[key] ? String(researchCache[key].text||'').trim() : '';
+    if(!hit) return '';
+    // Comprimir a una línea segura y breve
+    return hit.replace(/\s+/g,' ').slice(0, 280);
+  }catch(_){ return ''; }
+}
+
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo global por ciudad
    v69 (base) + FIX: deduplicación robusta sin bloquear comidas/traslados
@@ -1884,6 +1896,7 @@ Reglas duras:
    v60 base + overlay bloqueado global hasta terminar todas las ciudades
    (concurrencia controlada vía runWithConcurrency)
    + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
+   + 🆕 Precalentado Info-first (researchCache) por ciudad antes de generar
 ================================= */
 async function startPlanning(){
   if(savedDestinations.length===0) return;
@@ -2008,6 +2021,12 @@ function askNextHotelTransport(){
       // 🔒 Mantener UI bloqueada durante la generación global
       showWOW(true, 'Astra está generando itinerarios…');
 
+      // 🆕 Precalentado Info-first: investiga rápidamente cada ciudad para que 15/18
+      // puedan inyectar pistas (via __mkResearchHint__) y reducir latencia/fallback.
+      try{
+        await prewarmResearchForCities(savedDestinations.map(d=>d.city).filter(Boolean));
+      }catch(_){ /* no-op seguro */ }
+
       // ⚙️ Concurrencia controlada (v60): no tocar
       const taskFns = savedDestinations.map(({city}) => async () => {
         await generateCityItinerary(city);
@@ -2042,6 +2061,48 @@ function askNextHotelTransport(){
   // 🧭 Avanzar al siguiente destino si ya hay hotel guardado
   metaProgressIndex++;
   askNextHotelTransport();
+}
+
+/* 🆕 Helper: Precalentado Info-first por ciudad
+   - Lanza consultas muy breves para llenar researchCache (15.2)
+   - No bloquea si falla; se limita por tiempo con Promise.race + timeout suave
+*/
+async function prewarmResearchForCities(cities){
+  if(!Array.isArray(cities) || !cities.length) return;
+
+  // Genera un prompt corto por ciudad (neutral y global)
+  const mkPrompt = (c)=>`Investigación express para planificador:
+- Ciudad: ${c}
+- Dame una línea con 4–7 palabras clave de imperdibles y/o rutas cercanas (day trips) separadas por comas.
+- No incluyas horarios ni precios. Responde en una sola línea.`;
+
+  // Timeout suave local por tarea (más bajo que NET_TIMEOUT_INFO_MS para no bloquear)
+  const softTimeout = (ms, promise) =>
+    Promise.race([
+      promise,
+      new Promise(res=>setTimeout(()=>res(''), ms))
+    ]);
+
+  // Ejecuta en paralelo pero con límite razonable (hasta 3 simultáneas)
+  const queue = [...new Set(cities)].slice(0, 12); // top 12 por seguridad
+  const MAX_CONC = 3;
+  let idx = 0;
+  const runNext = async ()=>{
+    while(idx < queue.length){
+      const myIndex = idx++;
+      const city = queue[myIndex];
+      try{
+        // Si ya hay cache fresca, omite
+        const key = (typeof __normCityKey__==='function') ? __normCityKey__(city) : String(city||'').toLowerCase();
+        const hit = key && researchCache[key] && (Date.now() - researchCache[key].at) < 6*60*1000;
+        if(hit) continue;
+
+        const prompt = mkPrompt(city);
+        await softTimeout(7000, callInfoAgent(prompt));
+      }catch(_){ /* no-op */ }
+    }
+  };
+  await Promise.all(Array.from({length: Math.min(MAX_CONC, queue.length)}, runNext));
 }
 
 /* ==============================
