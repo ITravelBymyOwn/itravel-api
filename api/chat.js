@@ -1,12 +1,62 @@
-// /api/chat.js — v31.2 (robust-planner: JSON ALWAYS with >=1 row, strict durations, better model & retries)
-// Objetivo: evitar respuestas vacías, garantizar al menos 1–2 filas útiles y mantener el shape clásico del frontend.
+// /api/chat.js — v42.0 (stateful-ready, contract+versioning, robust fallback)
+// Compatible con el render actual (responde { text: JSON.stringify(finalJSON) })
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// ==============================
-// Helpers
-// ==============================
+// =============== Storage Adapter (Redis opcional) ===============
+let _redis = null;
+async function getRedis() {
+  if (_redis !== null) return _redis;
+  const has =
+    !!process.env.UPSTASH_REDIS_REST_URL &&
+    !!process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!has) {
+    _redis = false;
+    return _redis;
+  }
+  try {
+    const { Redis } = await import("@upstash/redis");
+    _redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    return _redis;
+  } catch {
+    _redis = false;
+    return _redis;
+  }
+}
+
+const K = (id) => `itbmo:itinerary:${id}`;
+async function storeLoad(id) {
+  const r = await getRedis();
+  if (!r || !id) return null;
+  try {
+    return await r.get(K(id));
+  } catch {
+    return null;
+  }
+}
+async function storeSave(obj) {
+  const r = await getRedis();
+  if (!r) return; // modo stateless
+  try {
+    await r.set(K(obj.itinerary_id), obj, { ex: 60 * 60 * 24 }); // 24h
+  } catch {}
+}
+
+// =============== Utilidades generales ===============
+function uuid() {
+  if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  // fallback simple
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0,
+      v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
@@ -15,98 +65,79 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
-// Heurística muy suave para inferir ciudad si faltara
-function guessCityFromMessages(msgs = []) {
-  const all = msgs.map(m => String(m?.content || "")).join(" ");
-  // Aprende de tus casos (Reykjavik/Tromsø) y nombres con mayúsculas típicas:
-  const known = [
-    "Reykjavik","Reikiavik","Reykjavík","Tromsø","Tromso","Oslo","Roma","Florencia","Kyoto","Tokyo","Tokio"
-  ];
-  for (const k of known) if (new RegExp(`\\b${k}\\b`, "i").test(all)) return k;
-  // Fallback: última palabra Capitalizada de 4+ letras
-  const m = all.match(/(?:^|\s)([A-ZÁÉÍÓÚÑ][a-záéíóúñ]{3,}(?:[ -][A-ZÁÉÍÓÚÑ][a-záéíóúñ]{2,})?)/g);
-  if (m && m.length) return m[m.length - 1].trim();
-  return "Destino";
-}
-
-// Parser tolerante (acepta string JSON, bloque {...} embebido u objeto)
+// Parser tolerante (acepta string JSON, bloque {...} u objeto)
 function cleanToJSONPlus(raw) {
   if (!raw) return null;
-
   if (typeof raw === "object") {
-    try { return JSON.parse(JSON.stringify(raw)); } catch { return raw; }
+    try {
+      return JSON.parse(JSON.stringify(raw));
+    } catch {
+      return raw;
+    }
   }
-
   if (typeof raw !== "string") return null;
-
   let s = raw.trim();
   s = s.replace(/^```json/i, "```").replace(/^```/, "").replace(/```$/, "").trim();
-
-  try { return JSON.parse(s); } catch {}
+  try {
+    return JSON.parse(s);
+  } catch {}
   try {
     const first = s.indexOf("{");
-    const last  = s.lastIndexOf("}");
+    const last = s.lastIndexOf("}");
     if (first >= 0 && last > first) return JSON.parse(s.slice(first, last + 1));
   } catch {}
-
   try {
     const cleaned = s.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
   } catch {}
-
   return null;
 }
 
 function fallbackJSON(city = "Destino") {
   return {
+    itinerary_id: uuid(),
+    version: 1,
     destination: city || "Destino",
     rows: [
       {
         day: 1,
-        start: "09:00",
-        end: "17:30",
-        activity: `Recorrido esencial por ${city || "la ciudad"}`,
+        start: "08:30",
+        end: "19:00",
+        activity: "Itinerario base (fallback)",
         from: "",
-        to: city || "Centro",
+        to: "",
         transport: "A pie",
-        duration: "8h30m",
-        notes: "Explora los sitios icónicos, organiza tus entradas y tiempos de comida."
+        duration: "2h",
+        notes: "Explora los imperdibles del centro. Reajusta desde el chat.",
       },
-      {
-        day: 1,
-        start: "17:30",
-        end: "18:00",
-        activity: "Regreso a hotel",
-        from: city || "Centro",
-        to: "Hotel",
-        transport: "Taxi",
-        duration: "30m",
-        notes: "Cierre del día y descanso."
-      }
     ],
-    followup: "⚠️ Fallback local: revisión de parámetros o API Key podría ser necesaria."
+    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
-// ==============================
-// Limpieza / Transporte / Subparadas / Duraciones
-// ==============================
+// Duraciones limpias
+function stripApproxDuration(d = "") {
+  if (!d) return d;
+  return String(d).replace(/[~≈]/g, "").trim();
+}
+
+// =============== Transporte & Subparadas & Duraciones extra ===============
 const NO_BUS_TOPICS = [
-  "círculo dorado","thingvellir","þingvellir","geysir","geyser",
-  "gullfoss","seljalandsfoss","skógafoss","reynisfjara","vik","vík",
-  "snaefellsnes","snæfellsnes","blue lagoon","reykjanes","krýsuvík",
-  "arnarstapi","hellnar","djúpalónssandur","kirkjufell","puente entre continentes",
-  "dyrhólaey","kirkjufellsfoss","kleifarvatn","seltún","reykjanesviti"
+  "círculo dorado", "thingvellir", "þingvellir", "geysir", "geyser",
+  "gullfoss", "seljalandsfoss", "skógafoss", "reynisfjara", "vik", "vík",
+  "snaefellsnes", "snæfellsnes", "blue lagoon", "reykjanes", "krýsuvík",
+  "arnarstapi", "hellnar", "djúpalónssandur", "djupalonssandur",
+  "kirkjufell", "puente entre continentes"
 ];
 
 function needsVehicleOrTour(row) {
   const a = (row.activity || "").toLowerCase();
   const to = (row.to || "").toLowerCase();
-  return NO_BUS_TOPICS.some(k => a.includes(k) || to.includes(k));
+  return NO_BUS_TOPICS.some((k) => a.includes(k) || to.includes(k));
 }
 
 function coerceTransport(rows) {
-  return rows.map(r => {
+  return rows.map((r) => {
     const t = String(r.transport || "").toLowerCase();
     if ((!t || t.includes("bus")) && needsVehicleOrTour(r)) {
       return { ...r, transport: "Vehículo alquilado o Tour guiado" };
@@ -115,34 +146,18 @@ function coerceTransport(rows) {
   });
 }
 
-function stripApproxDuration(d = "") {
-  if (!d) return d;
-  return String(d).replace(/[~≈]/g, "").trim();
-}
-
-function ensureStrictDuration(d = "") {
-  // Acepta "1h", "1h30m", "90m", "45m"
-  const s = String(d || "").replace(/\s+/g, "");
-  if (/^\d+h(\d{1,2}m)?$/.test(s) || /^\d+m$/.test(s)) return s;
-  // Reconstrucción simple si trajera "1:30" o "02:00"
-  const h = s.match(/^(\d{1,2}):(\d{2})$/);
-  if (h) {
-    const mm = parseInt(h[1],10)*60 + parseInt(h[2],10);
-    return mm >= 60 ? `${Math.floor(mm/60)}h${mm%60 ? `${mm%60}m` : ""}` : `${mm}m`;
-  }
-  // Fallback mínimo
-  return "30m";
-}
-
 function enforceMotherSubstopFormat(rows) {
   const out = [...rows];
   for (let i = 0; i < out.length; i++) {
     const r = out[i];
     const act = (r.activity || "").toLowerCase();
-    if (!/excursión/.test(act)) continue;
+    const isExc = /excursión/.test(act) || /day\s*trip/i.test(act);
+    if (!isExc) continue;
 
     const rawName = (r.activity || "").trim();
-    const routeBase = rawName.replace(/^excursión\s*(a|al)?\s*/i, "").split("—")[0].trim() || "Ruta";
+    const routeBase =
+      rawName.replace(/^excursión\s*(a|al)?\s*/i, "").split("—")[0].trim() ||
+      "Ruta";
 
     let count = 0;
     for (let j = i + 1; j < out.length && count < 8; j++) {
@@ -150,11 +165,19 @@ function enforceMotherSubstopFormat(rows) {
       const aj = (rj?.activity || "").toLowerCase();
       const isSub =
         aj.startsWith("visita") ||
-        aj.includes("cascada") || aj.includes("playa") ||
-        aj.includes("geysir")   || aj.includes("thingvellir") || aj.includes("gullfoss") ||
-        aj.includes("kirkjufell")|| aj.includes("arnarstapi")  || aj.includes("hellnar") ||
-        aj.includes("djúpalónssandur") || aj.includes("djupalonssandur") ||
-        aj.includes("vík") || aj.includes("vik") || aj.includes("reynisfjara");
+        aj.includes("cascada") ||
+        aj.includes("playa") ||
+        aj.includes("geysir") ||
+        aj.includes("thingvellir") ||
+        aj.includes("gullfoss") ||
+        aj.includes("kirkjufell") ||
+        aj.includes("arnarstapi") ||
+        aj.includes("hellnar") ||
+        aj.includes("djúpalónssandur") ||
+        aj.includes("djupalonssandur") ||
+        aj.includes("vík") ||
+        aj.includes("vik") ||
+        aj.includes("reynisfjara");
 
       if (!isSub) break;
 
@@ -170,7 +193,7 @@ function enforceMotherSubstopFormat(rows) {
   return out;
 }
 
-// Usa FACTS (si existen) para ajustar duración de “Regreso a {Ciudad}”
+// Duraciones del regreso si FACTS trae hints
 function applyReturnDurationsFromFacts(rows, facts) {
   if (!facts || !facts.daytrip_patterns || !facts.base_city) return rows;
   const baseCity = (facts.base_city || "").toLowerCase();
@@ -180,12 +203,12 @@ function applyReturnDurationsFromFacts(rows, facts) {
     const from = p.return_to_base_from || (p.stops && p.stops[p.stops.length - 1]);
     const key = `${from}→${facts.base_city}`;
     const dur = p.durations?.[key];
-    if (from && dur) toBaseMap[from.toLowerCase()] = ensureStrictDuration(dur);
+    if (from && dur) toBaseMap[from.toLowerCase()] = dur;
   }
 
-  return rows.map(r => {
+  return rows.map((r) => {
     const act = (r.activity || "").toLowerCase();
-    const to  = (r.to || "").toLowerCase();
+    const to = (r.to || "").toLowerCase();
     const isReturn = act.startsWith("regreso a") && to.includes(baseCity);
     if (!isReturn) return r;
 
@@ -199,114 +222,31 @@ function applyReturnDurationsFromFacts(rows, facts) {
   });
 }
 
-// Si se detecta salida fuera de ciudad y no hay “Regreso a {Ciudad}”, lo añadimos
-function ensureReturnToCityIfDaytrip(rows, city) {
-  const cityLow = String(city || "").toLowerCase();
-  const outOfTown = rows.some(r => {
-    const a = (r.activity || "").toLowerCase();
-    const t = (r.to || "").toLowerCase();
-    return NO_BUS_TOPICS.some(k => a.includes(k) || t.includes(k));
-  });
-  if (!outOfTown) return rows;
+function normalizeShapeContract(parsed, rowsFixed, prev = null) {
+  const destination =
+    parsed?.destination ||
+    parsed?.destinations?.[0]?.name ||
+    prev?.destination ||
+    "Destino";
 
-  const hasReturn = rows.some(r => {
-    const a = (r.activity || "").toLowerCase();
-    const t = (r.to || "").toLowerCase();
-    return a.startsWith("regreso a") && t.includes(cityLow);
-  });
-  if (hasReturn) return rows;
+  const itinerary_id = parsed?.itinerary_id || prev?.itinerary_id || uuid();
+  const version =
+    typeof parsed?.version === "number"
+      ? parsed.version
+      : typeof prev?.version === "number"
+      ? prev.version + 1
+      : 1;
 
-  const last = rows[rows.length - 1] || {};
-  const start = last.end || "17:00";
-  return [
-    ...rows,
-    {
-      day: last.day || 1,
-      start,
-      end: addMinutes(start, 60),
-      activity: `Regreso a ${city}`,
-      from: last.to || "Alrededores",
-      to: city,
-      transport: "Vehículo alquilado o Tour guiado",
-      duration: "1h",
-      notes: "Ruta de retorno hacia base."
-    }
-  ];
+  return {
+    itinerary_id,
+    version,
+    destination,
+    rows: rowsFixed,
+    followup: parsed?.followup || "",
+  };
 }
 
-// Asegura “Regreso a hotel” al final del día
-function ensureReturnToHotel(rows, city) {
-  if (!rows.length) return rows;
-  const last = rows[rows.length - 1];
-  const isHotel = /regreso\s+al?\s*hotel/i.test(String(last.activity || ""));
-  if (isHotel) return rows;
-  const start = last.end || "20:00";
-  return [
-    ...rows,
-    {
-      day: last.day || 1,
-      start,
-      end: addMinutes(start, 30),
-      activity: "Regreso a hotel",
-      from: last.to || city || "",
-      to: "Hotel",
-      transport: "Taxi",
-      duration: "30m",
-      notes: "Cierre del día."
-    }
-  ];
-}
-
-// Normaliza respuesta al contrato clásico
-function normalizeShape(parsed, rowsFixed) {
-  if (Array.isArray(parsed?.rows)) {
-    return { ...parsed, rows: rowsFixed };
-  }
-  if (Array.isArray(parsed?.destinations)) {
-    const name = parsed.destinations?.[0]?.name || parsed.destination || "Destino";
-    return { destination: name, rows: rowsFixed, followup: parsed.followup || "" };
-  }
-  return { destination: parsed?.destination || "Destino", rows: rowsFixed, followup: parsed?.followup || "" };
-}
-
-// Tiempo util
-function toMin(t) { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if (!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); }
-function toHH(m) { const mm = ((m%1440)+1440)%1440; const h = Math.floor(mm/60), mi = mm%60; return `${String(h).padStart(2,"0")}:${String(mi).padStart(2,"0")}`; }
-function addMinutes(hhmm = "09:00", add = 30) { const s = toMin(hhmm) ?? 540; return toHH(s + add); }
-
-// Si rows viene vacío, generamos un set mínimo (nunca devolvemos 0 filas)
-function synthesizeIfEmpty(rows, destination) {
-  if (Array.isArray(rows) && rows.length > 0) return rows;
-  const city = destination || "Destino";
-  return [
-    {
-      day: 1,
-      start: "09:00",
-      end: "17:30",
-      activity: `Recorrido esencial por ${city}`,
-      from: "",
-      to: city,
-      transport: "A pie",
-      duration: "8h30m",
-      notes: "Itinerario base generado para evitar vacío."
-    },
-    {
-      day: 1,
-      start: "17:30",
-      end: "18:00",
-      activity: "Regreso a hotel",
-      from: city,
-      to: "Hotel",
-      transport: "Taxi",
-      duration: "30m",
-      notes: "Cierre del día."
-    }
-  ];
-}
-
-// ==============================
-// Prompts (Pre-INFO → Planner)
-// ==============================
+// =============== Prompts ===============
 const PRE_INFO_PROMPT = `
 Eres un asistente turístico experto (MODO INVESTIGACIÓN RÁPIDA).
 Devuelve **solo JSON**:
@@ -343,28 +283,28 @@ Eres Astra, el planificador de viajes de ITravelByMyOwn.
 Tu salida debe ser **EXCLUSIVAMENTE un JSON válido** con shape:
 {"destination":"City","rows":[{...}],"followup":"texto breve"}
 
-Reglas:
-- Siempre al menos 1 actividad en "rows".
-- Sin texto fuera del JSON. Máx 20 actividades por día.
-- Horas realistas (08:30–19:00 si no hay otras).
+Reglas duras:
+- Siempre >= 1 actividad en "rows" (si no hay nada claro, sintetiza 1-2 filas plausibles).
+- Máx 20 actividades por día. Horas coherentes (08:30–19:00 si no hay otros datos).
 - "duration" limpio: "1h45m" o "30m".
 - Si FACTS no cubre una pareja exacta, estima tiempos coherentes.
-- Para rutas de jornada completa, usar "Excursión — {Ruta} — {Subparada}" en paradas hijas (hasta 8).
-- Agrega explícitamente "Regreso a {Ciudad}" cuando el día sale fuera.
+- Day-trip fuera de ciudad: agrega "Regreso a {Ciudad}" con transporte correcto.
+- Para rutas largas, usa formato madre/hijas: "Excursión — {Ruta} — {Subparada}" (hasta 8).
 `.trim();
 
-// ==============================
-// Llamadas modelo (con retries)
-// ==============================
-async function chatJSON(messages, temperature = 0.25, tries = 2, model = "gpt-4o-mini") {
+// =============== Llamadas Modelo ===============
+async function chatJSON(messages, temperature = 0.4, tries = 2) {
   for (let k = 0; k < Math.max(1, tries); k++) {
     try {
       const resp = await client.chat.completions.create({
-        model,
+        model: "gpt-4o-mini",
         temperature,
         response_format: { type: "json_object" },
-        messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
-        max_tokens: 2200,
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: String(m.content ?? ""),
+        })),
+        max_tokens: 2600,
       });
       const text = resp?.choices?.[0]?.message?.content?.trim();
       if (text) return text;
@@ -375,13 +315,16 @@ async function chatJSON(messages, temperature = 0.25, tries = 2, model = "gpt-4o
   return "";
 }
 
-async function chatFree(messages, temperature = 0.5, tries = 1, model = "gpt-4o-mini") {
+async function chatFree(messages, temperature = 0.6, tries = 1) {
   for (let k = 0; k < Math.max(1, tries); k++) {
     try {
       const resp = await client.chat.completions.create({
-        model,
+        model: "gpt-4o-mini",
         temperature,
-        messages: messages.map(m => ({ role: m.role, content: String(m.content ?? "") })),
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: String(m.content ?? ""),
+        })),
         max_tokens: 2200,
       });
       const text = resp?.choices?.[0]?.message?.content?.trim();
@@ -393,9 +336,7 @@ async function chatFree(messages, temperature = 0.5, tries = 1, model = "gpt-4o-
   return "";
 }
 
-// ==============================
-// Handler
-// ==============================
+// =============== Handler principal ===============
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -406,24 +347,33 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
 
-    // ===== Modo INFO: responde libre (no JSON estricto) =====
+    // ===== Modo INFO (respuestas libres para Info Chat) =====
     if (mode === "info") {
       try {
-        const raw = await chatFree(clientMessages, 0.5, 1, "gpt-4o-mini");
+        const raw = await chatFree(clientMessages, 0.5, 1);
         return res.status(200).json({ text: raw || "⚠️ No se obtuvo respuesta." });
       } catch (e) {
         return res.status(200).json({ text: "⚠️ No se obtuvo respuesta." });
       }
     }
 
-    // ===== Paso 1: PRE-INFO (investigación + seed) =====
+    // ===== Metadata opcional para estado =====
+    const incomingId = typeof body.itinerary_id === "string" ? body.itinerary_id : null;
+    const incomingVersion =
+      typeof body.version === "number" && isFinite(body.version)
+        ? body.version
+        : null;
+
+    // Carga estado previo si existe (solo si hay Redis)
+    const prevState = incomingId ? await storeLoad(incomingId) : null;
+
+    // ===== Paso 1: PRE-INFO (investigación + seed)
     let pre = null;
     try {
       const preRaw = await chatJSON(
         [{ role: "system", content: PRE_INFO_PROMPT }, ...clientMessages],
-        0.25,
-        2,
-        "gpt-4o-mini"
+        0.35,
+        1
       );
       pre = cleanToJSONPlus(preRaw);
     } catch (_) {}
@@ -441,12 +391,111 @@ export default async function handler(req, res) {
     const seedMerged = (() => {
       const s = (pre && pre.seed && pre.seed.rows) ? pre.seed : null;
       if (!s) return null;
-      const rows = (s.rows || []).map(r => ({ ...r, duration: ensureStrictDuration(stripApproxDuration(r.duration)) }));
+      const rows = (s.rows || []).map((r) => ({
+        ...r,
+        duration: stripApproxDuration(r.duration),
+      }));
       return { destination: s.destination || "", rows };
     })();
 
     const FACTS = JSON.stringify(factsMerged);
-    const SEED  = seedMerged ? JSON.stringify(seedMerged) : "";
+    const SEED = seedMerged ? JSON.stringify(seedMerged) : "";
+
+    // ===== Modo PATCH (ajustes sobre tabla previa con versionado) =====
+    if (mode === "patch") {
+      // Requiere itinerary_id válido y versión
+      if (!incomingId || incomingVersion == null) {
+        const fb = fallbackJSON(seedMerged?.destination || "Destino");
+        return res.status(200).json({ text: JSON.stringify(fb) });
+      }
+
+      // Si hay estado durable, compara versiones
+      if (prevState && typeof prevState.version === "number") {
+        if (incomingVersion < prevState.version) {
+          // Versión vieja → devolvemos estado actual sin aplicar
+          return res
+            .status(200)
+            .json({ text: JSON.stringify(prevState) });
+        }
+      }
+
+      // PATCH: el usuario pidió un cambio; pedimos al modelo que
+      // ajuste EN FUNCIÓN de la tabla previa (de body.rows o prevState.rows)
+      const baseRows =
+        Array.isArray(body.rows) && body.rows.length
+          ? body.rows
+          : Array.isArray(prevState?.rows)
+          ? prevState.rows
+          : [];
+
+      const opText =
+        typeof body.operation === "string"
+          ? body.operation
+          : clientMessages[clientMessages.length - 1]?.content || "";
+
+      const patchSystem = `
+Eres Astra (MODO PATCH).
+Ajusta la tabla existente según la instrucción del usuario SIN borrar lo demás.
+Devuelve únicamente JSON: {"destination":"...","rows":[...],"followup":""}
+- Mantén formato, horas plausibles, y agrega "Regreso a {Ciudad}" si sales fuera.
+- No devuelvas texto fuera del JSON.
+`;
+      const patchUser = `
+DESTINO: ${seedMerged?.destination || prevState?.destination || "Destino"}
+TABLA_ACTUAL:
+${JSON.stringify(baseRows, null, 2)}
+
+INSTRUCCIÓN_USUARIO:
+${opText}
+
+Devuelve {"destination":"...","rows":[...],"followup":""}
+`.trim();
+
+      let patched = null;
+      try {
+        const raw = await chatJSON(
+          [
+            { role: "system", content: patchSystem },
+            { role: "system", content: `FACTS=${FACTS}` },
+            ...(SEED ? [{ role: "system", content: `SEED=${SEED}` }] : []),
+            { role: "user", content: patchUser },
+          ],
+          0.35,
+          2
+        );
+        patched = cleanToJSONPlus(raw);
+      } catch {}
+
+      if (!patched) patched = { destination: prevState?.destination || "Destino", rows: baseRows, followup: "⚠️ Patch sin cambios (fallback)" };
+
+      // Post-proceso
+      let rows = Array.isArray(patched.rows) ? patched.rows : [];
+      rows = rows.map((r) => ({ ...r, duration: stripApproxDuration(r.duration) }));
+      rows = coerceTransport(enforceMotherSubstopFormat(rows));
+      rows = applyReturnDurationsFromFacts(rows, factsMerged);
+
+      // Siempre al menos 1 fila
+      if (!rows.length) {
+        rows.push({
+          day: 1,
+          start: "09:00",
+          end: "10:30",
+          activity: "Ajuste mínimo aplicado",
+          from: "",
+          to: "",
+          transport: "A pie",
+          duration: "90m",
+          notes: "Fila sintética para mantener consistencia.",
+        });
+      }
+
+      const final = normalizeShapeContract(patched, rows, prevState || null);
+
+      // Persistir si hay Redis
+      await storeSave(final);
+
+      return res.status(200).json({ text: JSON.stringify(final) });
+    }
 
     // ===== Paso 2: PLANNER (consume FACTS + SEED) =====
     let parsed = null;
@@ -456,64 +505,63 @@ export default async function handler(req, res) {
           { role: "system", content: SYSTEM_PROMPT },
           { role: "system", content: `FACTS=${FACTS}` },
           ...(SEED ? [{ role: "system", content: `SEED=${SEED}` }] : []),
-          ...clientMessages
+          ...clientMessages,
         ],
-        0.2,
-        2,
-        "gpt-4o" // Modelo más fuerte para cumplir JSON y contenido
+        0.35,
+        2
       );
       parsed = cleanToJSONPlus(plannerRaw);
-    } catch (_) {}
+    } catch {}
 
-    // ===== Robustez contra null/rows vacías =====
-    const destinationRaw =
-      parsed?.destination ||
-      factsMerged?.base_city ||
-      seedMerged?.destination ||
-      guessCityFromMessages(clientMessages) ||
-      "Destino";
+    // Fallback duro si no hay parsed
+    if (!parsed) parsed = { destination: seedMerged?.destination || "Destino", rows: seedMerged?.rows || [] };
 
-    // Si no hay parsed o viene sin rows válidas, generamos un mínimo
-    if (!parsed || !Array.isArray(parsed.rows)) {
-      parsed = fallbackJSON(destinationRaw);
-    }
-
-    // ===== Post-proceso para shape clásico =====
+    // Post-proceso clásico
     let rows = Array.isArray(parsed.rows)
       ? parsed.rows
       : Array.isArray(parsed?.destinations?.[0]?.rows)
-        ? parsed.destinations[0].rows
-        : [];
+      ? parsed.destinations[0].rows
+      : [];
 
-    // Aseguramos que NUNCA quede vacío
-    rows = synthesizeIfEmpty(rows, destinationRaw);
-
-    // Normalizaciones adicionales
-    rows = rows.map(r => ({
-      ...r,
-      duration: ensureStrictDuration(stripApproxDuration(r.duration)),
-      start: r.start || "09:00",
-      end: r.end || addMinutes(r.start || "09:00", 90),
-      day: r.day ?? 1
-    }));
-
+    rows = rows.map((r) => ({ ...r, duration: stripApproxDuration(r.duration) }));
     rows = coerceTransport(enforceMotherSubstopFormat(rows));
     rows = applyReturnDurationsFromFacts(rows, factsMerged);
-    rows = ensureReturnToCityIfDaytrip(rows, destinationRaw);
-    rows = ensureReturnToHotel(rows, destinationRaw);
 
-    // Salida normalizada EXACTA al contrato que tu UI espera
-    const finalJSON = normalizeShape(
-      { ...parsed, destination: destinationRaw || parsed?.destination || "Destino" },
-      rows
-    );
+    // Siempre al menos 1 fila
+    if (!rows.length) {
+      rows.push({
+        day: 1,
+        start: "09:00",
+        end: "10:30",
+        activity: "Inicio de exploración",
+        from: "",
+        to: "",
+        transport: "A pie",
+        duration: "90m",
+        notes: "Fila sintética para garantizar render.",
+      });
+    }
 
-    // Importante: devolvemos SIEMPRE como string en "text" (shape clásico)
+    // Normalizamos al contrato y asignamos ID/versión
+    const prevForContract =
+      prevState ||
+      (incomingId && {
+        itinerary_id: incomingId,
+        version: incomingVersion ?? 0,
+        destination: seedMerged?.destination || "Destino",
+      }) ||
+      null;
+
+    const finalJSON = normalizeShapeContract(parsed, rows, prevForContract);
+
+    // Persistir si hay Redis
+    await storeSave(finalJSON);
+
+    // Salida EXACTA que tu UI espera (string en "text")
     return res.status(200).json({ text: JSON.stringify(finalJSON) });
-
   } catch (err) {
     console.error("❌ /api/chat error:", err);
-    const city = "Destino";
-    return res.status(200).json({ text: JSON.stringify(fallbackJSON(city)) });
+    const fb = fallbackJSON("Destino");
+    return res.status(200).json({ text: JSON.stringify(fb) });
   }
 }
