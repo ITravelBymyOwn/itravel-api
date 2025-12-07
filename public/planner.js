@@ -1537,28 +1537,26 @@ function showWOW(on, msg){
 
 /* ==============================
    SECCIÓN 15.2 · Bridge de Red / Agentes (Info-first → Planner)
-   v71.fast — AbortController, timeouts y cacheo ligero
-   - callInfoAgent(query: string): string (respuesta breve “info”)
-   - callAgent(prompt: string, forceJSON?: boolean, meta?: {cityName, baseDate}): string (JSON stringify desde API)
-   - parseJSON(raw): any (tolerante a fences/backticks)
-   - Cache por ciudad para investigación (evita llamadas redundantes)
+   v75.fix — Restauración render inmediato + red estable
+   - Mantiene toda la lógica Info-first / Planner intacta.
+   - Añade handleSaveDestinations() con render inmediato de ciudades al guardar.
 ================================= */
 
 /* ---------- Configuración de red ---------- */
 const API_CHAT_ENDPOINT = '/api/chat';
-const NET_TIMEOUT_INFO_MS    = 10_000; // 10s: info debe ser MUY rápido
-const NET_TIMEOUT_PLANNER_MS = 18_000; // 18s: planner acotado para evitar fallback por latencia
+const NET_TIMEOUT_INFO_MS    = 10_000;
+const NET_TIMEOUT_PLANNER_MS = 18_000;
 
-/* ---------- Caches ligeros en memoria de sesión ---------- */
-const researchCache = Object.create(null); // { [cityKey]: { text, at:number } }
-const plannerCache  = Object.create(null); // { [hashKey]: { text, at:number } }
+/* ---------- Caches ligeros ---------- */
+const researchCache = Object.create(null);
+const plannerCache  = Object.create(null);
 
 /* ---------- Utilidades ---------- */
 function __stringHash__(s){
   let h = 2166136261 >>> 0;
   for(let i=0;i<s.length;i++){
     h ^= s.charCodeAt(i);
-    h += (h<<1) + (h<<4) + (h<<7) + (h<<8) + (h<<24);
+    h += (h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24);
   }
   return (h>>>0).toString(36);
 }
@@ -1573,112 +1571,140 @@ function __normCityKey__(name){
 /* ---------- Limpieza de fences/JSON ---------- */
 function parseJSON(raw){
   if(!raw) return null;
-  if(typeof raw === 'object') {
-    try { return JSON.parse(JSON.stringify(raw)); } catch { return raw; }
+  if(typeof raw === 'object'){
+    try{ return JSON.parse(JSON.stringify(raw)); }catch{ return raw; }
   }
   let s = String(raw).trim();
-  // quitar ```json ... ```
   s = s.replace(/^```json/i,'```').replace(/^```/,'').replace(/```$/,'').trim();
-  // intento directo
-  try { return JSON.parse(s); } catch {}
-  // primer { ... } último }
-  try {
-    const a = s.indexOf('{'); const b = s.lastIndexOf('}');
-    if(a>=0 && b>a) return JSON.parse(s.slice(a, b+1));
-  } catch {}
-  // limpieza de bordes agresiva
-  try {
-    const cleaned = s.replace(/^[^{]+/,'').replace(/[^}]+$/,'');
+  try{ return JSON.parse(s); }catch{}
+  try{
+    const a=s.indexOf('{'); const b=s.lastIndexOf('}');
+    if(a>=0 && b>a) return JSON.parse(s.slice(a,b+1));
+  }catch{}
+  try{
+    const cleaned=s.replace(/^[^{]+/,'').replace(/[^}]+$/,'');
     return JSON.parse(cleaned);
-  } catch {}
+  }catch{}
   return null;
 }
 
 /* ---------- Capa de red con abort ---------- */
-async function fetchJSON(url, payload, timeoutMs){
-  const ctrl = new AbortController();
-  const id = setTimeout(()=>ctrl.abort(), timeoutMs||NET_TIMEOUT_PLANNER_MS);
-
+async function fetchJSON(url,payload,timeoutMs){
+  const ctrl=new AbortController();
+  const id=setTimeout(()=>ctrl.abort(),timeoutMs||NET_TIMEOUT_PLANNER_MS);
   try{
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(payload||{}),
-      signal: ctrl.signal
+    const resp=await fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload||{}),
+      signal:ctrl.signal
     });
-    const data = await resp.json().catch(()=> ({}));
+    const data=await resp.json().catch(()=>({}));
     return data;
-  } finally {
-    clearTimeout(id);
-  }
+  }finally{ clearTimeout(id); }
 }
 
-/* ---------- Agente INFO (rápido, texto) ---------- */
+/* ---------- Agente INFO ---------- */
 async function callInfoAgent(query){
-  const q = String(query||'').trim();
+  const q=String(query||'').trim();
   if(!q) return '';
-
-  // Si está claro a qué ciudad se refiere, cacheamos por ciudad
-  const cityGuess = activeCity || savedDestinations?.[0]?.city || '';
-  const key = cityGuess ? __normCityKey__(cityGuess) : '';
-
-  if(key && researchCache[key] && (Date.now() - researchCache[key].at) < 6*60*1000){
-    return researchCache[key].text || '';
+  const cityGuess=activeCity||savedDestinations?.[0]?.city||'';
+  const key=cityGuess?__normCityKey__(cityGuess):'';
+  if(key&&researchCache[key]&&(Date.now()-researchCache[key].at)<6*60*1000){
+    return researchCache[key].text||'';
   }
-
-  const payload = {
-    mode: 'info',
-    messages: [{ role:'user', content: q }]
-  };
-
-  const data = await fetchJSON(API_CHAT_ENDPOINT, payload, NET_TIMEOUT_INFO_MS);
-  const text = (data && typeof data.text === 'string') ? data.text : '';
-
-  if(key){
-    researchCache[key] = { text, at: Date.now() };
-  }
+  const payload={mode:'info',messages:[{role:'user',content:q}]};
+  const data=await fetchJSON(API_CHAT_ENDPOINT,payload,NET_TIMEOUT_INFO_MS);
+  const text=(data&&typeof data.text==='string')?data.text:'';
+  if(key){ researchCache[key]={text,at:Date.now()}; }
   return text;
 }
 
-/* ---------- Agente PLANNER (JSON como string) ---------- */
-async function callAgent(prompt, forceJSON = true, meta = {}){
-  const p = String(prompt||'').trim();
+/* ---------- Agente PLANNER ---------- */
+async function callAgent(prompt,forceJSON=true,meta={}){
+  const p=String(prompt||'').trim();
   if(!p) return '';
-
-  // Cache por hash de prompt + ciudad + fecha base (evita recomputar idénticos)
-  const c = __normCityKey__(meta.cityName||'');
-  const base = String(meta.baseDate||'');
-  const cacheKey = __stringHash__(`[P]${p}#${c}#${base}#${forceJSON?'J':'F'}`);
-
-  if(plannerCache[cacheKey] && (Date.now() - plannerCache[cacheKey].at) < 3*60*1000){
+  const c=__normCityKey__(meta.cityName||'');
+  const base=String(meta.baseDate||'');
+  const cacheKey=__stringHash__(`[P]${p}#${c}#${base}#${forceJSON?'J':'F'}`);
+  if(plannerCache[cacheKey]&&(Date.now()-plannerCache[cacheKey].at)<3*60*1000){
     return plannerCache[cacheKey].text;
   }
-
-  // Nota: el API ya fuerza JSON y hace post-proceso; aquí sólo enviamos el mensaje del usuario
-  const payload = {
-    mode: 'planner',
-    messages: [{ role:'user', content: p }]
-  };
-
-  // Planner con timeout acotado; sin bucles de reintentos costosos
-  const data = await fetchJSON(API_CHAT_ENDPOINT, payload, NET_TIMEOUT_PLANNER_MS);
-  // API responde { text: "<JSON-string>" } incluso en fallback controlado
-  const outText = (data && typeof data.text === 'string') ? data.text : '';
-
-  plannerCache[cacheKey] = { text: outText, at: Date.now() };
+  const payload={mode:'planner',messages:[{role:'user',content:p}]};
+  const data=await fetchJSON(API_CHAT_ENDPOINT,payload,NET_TIMEOUT_PLANNER_MS);
+  const outText=(data&&typeof data.text==='string')?data.text:'';
+  plannerCache[cacheKey]={text:outText,at:Date.now()};
   return outText;
 }
 
-/* ---------- Helper Info-first: hint comprimido desde researchCache ---------- */
-/* Devuelve una línea corta con pistas de investigación previas para inyectar en prompts. */
+/* ---------- Helper Info-first ---------- */
 function __mkResearchHint__(city){
   try{
-    const key = __normCityKey__(city||'');
-    const hit = key && researchCache[key] ? String(researchCache[key].text||'').trim() : '';
+    const key=__normCityKey__(city||'');
+    const hit=key&&researchCache[key]?String(researchCache[key].text||'').trim():'';
     if(!hit) return '';
-    // Comprimir a una línea segura y breve
-    return hit.replace(/\s+/g,' ').slice(0, 280);
-  }catch(_){ return ''; }
+    return hit.replace(/\s+/g,' ').slice(0,280);
+  }catch(_){return'';}
+}
+
+/* =====================================================
+   🔁 handleSaveDestinations — Restauración del render inmediato
+   (Reinstala comportamiento original al guardar)
+===================================================== */
+async function handleSaveDestinations(){
+  const rows=[...$cityList.querySelectorAll('.city-row')];
+  if(!rows.length){
+    alert('Por favor, agrega al menos una ciudad.');
+    return;
+  }
+
+  const newDestinations=rows.map(r=>({
+    city:(r.querySelector('.city')?.value||'').trim(),
+    country:(r.querySelector('.country')?.value||'').trim(),
+    days:Number(r.querySelector('.days')?.value||0),
+    baseDate:(r.querySelector('.start')?.value||'').trim()
+  })).filter(d=>d.city&&d.days>0);
+
+  if(!newDestinations.length){
+    alert('Completa ciudad y número de días antes de continuar.');
+    return;
+  }
+
+  savedDestinations=newDestinations;
+  persistState('destinations',savedDestinations);
+
+  $cityList.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);
+  $saveBtn.disabled=true;
+  $resetBtn.disabled=false;
+  $startBtn.disabled=false;
+
+  chatMsg('✈️ Destinos guardados. Generando estructura base del itinerario…','ai');
+
+  try{
+    itineraries={};
+    cityMeta={};
+    $cityTabs.innerHTML='';
+    $itineraryBody.innerHTML='';
+
+    for(const dest of savedDestinations){
+      const {city,days,baseDate}=dest;
+      itineraries[city]={byDay:{},baseDate};
+      cityMeta[city]={baseDate,hotel:'',transport:'',perDay:[]};
+      createCityTab(city);
+      renderCityItinerary(city,{placeholder:true,days,baseDate});
+    }
+
+    if(savedDestinations.length){
+      const firstCity=savedDestinations[0].city;
+      setActiveCity(firstCity);
+      renderCityItinerary(firstCity,{placeholder:true});
+    }
+
+    chatMsg('🗺️ Estructura de itinerario lista. Pulsa “Iniciar planificación” para continuar.','ai');
+  }catch(err){
+    console.error('Error en render inicial:',err);
+    chatMsg('⚠️ Ocurrió un problema al generar las tablas base. Intenta de nuevo.','ai');
+  }
 }
 
 /* ==============================
