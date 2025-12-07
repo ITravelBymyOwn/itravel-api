@@ -2398,108 +2398,8 @@ function intentFromText(text){
    (A.2) Normalización determinística de transporte y detección “fuera de ciudad”.
    (A.3) Retornos garantizados: “Regreso a <Ciudad>” tras salidas y “Regreso a hotel” al cierre
          (si la última actividad es aurora: transporte "Tour guiado" y duración "Depende del tour").
-   EXTENSIÓN (compatibilidad histórica):
-   — renderCityItinerary(city, {placeholder:true}) para que “Guardar destinos” muestre tablas por ciudad
-     (placeholders) antes de la planificación, igual que en versiones previas.
+   — Resto de la sección se mantiene intacto.
 ================================= */
-
-/* --- Renderizador principal de itinerarios por ciudad (placeholders o datos) --- */
-function renderCityItinerary(city, opts = {}) {
-  try {
-    if (!city) return;
-    const container = document.getElementById('itinerary-body') || $itineraryBody;
-    if (!container) return;
-
-    const cityKey = normKey(city);
-    const tabContentId = `itinerary-${cityKey}`;
-
-    // Crea/obtiene sección
-    let section = document.getElementById(tabContentId);
-    if (!section) {
-      section = document.createElement('div');
-      section.id = tabContentId;
-      section.className = 'itinerary-section';
-      container.appendChild(section);
-    }
-    section.innerHTML = '';
-
-    // Encabezado
-    const header = document.createElement('h3');
-    header.textContent = city;
-    header.className = 'itinerary-header';
-    section.appendChild(header);
-
-    // Tabla
-    const table = document.createElement('table');
-    table.className = 'itinerary-table';
-    const thead = document.createElement('thead');
-    thead.innerHTML = `
-      <tr>
-        <th>Hora inicio</th>
-        <th>Hora final</th>
-        <th>Actividad</th>
-        <th>Desde</th>
-        <th>Hacia</th>
-        <th>Transporte</th>
-        <th>Duración</th>
-        <th>Notas</th>
-      </tr>`;
-    table.appendChild(thead);
-
-    const tbody = document.createElement('tbody');
-    table.appendChild(tbody);
-    section.appendChild(table);
-
-    // Placeholder mientras no existan filas
-    if (opts.placeholder) {
-      const msg = document.createElement('tr');
-      msg.innerHTML = `<td colspan="8" style="text-align:center;opacity:0.6;">Itinerario pendiente de generar...</td>`;
-      tbody.appendChild(msg);
-      setActiveCity(city);
-      return;
-    }
-
-    // Render con datos si existen
-    const data = itineraries[city]?.byDay || {};
-    const days = Object.keys(data).map(n => parseInt(n, 10)).sort((a,b)=>a-b);
-    if (!days.length) {
-      const msg = document.createElement('tr');
-      msg.innerHTML = `<td colspan="8" style="text-align:center;opacity:0.6;">Sin datos disponibles.</td>`;
-      tbody.appendChild(msg);
-      setActiveCity(city);
-      return;
-    }
-
-    for (const day of days) {
-      const rows = data[day] || [];
-      if (!rows.length) continue;
-
-      const dayRow = document.createElement('tr');
-      dayRow.className = 'day-row';
-      dayRow.innerHTML = `<td colspan="8" class="day-label">Día ${day}</td>`;
-      tbody.appendChild(dayRow);
-
-      for (const r of rows) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${r.start || ''}</td>
-          <td>${r.end || ''}</td>
-          <td>${r.activity || ''}</td>
-          <td>${r.from || ''}</td>
-          <td>${r.to || ''}</td>
-          <td>${r.transport || ''}</td>
-          <td>${r.duration || ''}</td>
-          <td>${r.notes || ''}</td>
-        `;
-        tbody.appendChild(tr);
-      }
-    }
-
-    setActiveCity(city);
-  } catch (err) {
-    console.error('Error en renderCityItinerary:', err);
-  }
-}
 
 /* --- aliasKey para deduplicado por sinónimos comunes --- */
 function aliasKey(s){
@@ -2548,10 +2448,13 @@ function isConsecutiveAurora(city, day){
   const hasNext = next.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   return hasPrev || hasNext;
 }
+
+/* Enforce cap en el set de filas del día actual (no añade si supera cap o si sería consecutivo) */
 function enforceAuroraCapForDay(city, day, rows, cap){
   const already = countAuroraNights(city);
   const willAdd = rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   if(!willAdd) return rows;
+
   if(isConsecutiveAurora(city, day)) {
     return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   }
@@ -2562,6 +2465,8 @@ function enforceAuroraCapForDay(city, day, rows, cap){
 }
 
 /* === Helpers Sección 18 (quirúrgicos) === */
+
+// Determina si una fila es naturalmente nocturna (apto para cruzar de día)
 function __isNightRow__(row){
   const name = String(row.activity||'').toLowerCase();
   const start = String(row.start||'');
@@ -2572,7 +2477,7 @@ function __isNightRow__(row){
   return isAurora || (startM!=null && startM >= 18*60);
 }
 
-/* Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30 (admite cruce de día) */
+// Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30, permitiendo cruzar de día
 function normalizeAuroraWindow(row){
   const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
   if(!isAurora) return row;
@@ -2588,23 +2493,27 @@ function normalizeAuroraWindow(row){
   if(s==null) s = 20*60+30;
   if(e==null) e = 2*60;
 
-  if(s < 18*60) s = 18*60;
+  if(s < 18*60) s = 18*60;          // ≥ 18:00
+  // Si el fin es “temprano” (e <= s), asumimos cruce al siguiente día
   if(e <= s) e += 24*60;
+
+  // Duración mínima 4h
   if((e - s) < 4*60) e = s + 4*60;
+  // Fin mínimo 00:30 del día siguiente si cruzó
   if(e < (24*60 + 30)) e = Math.max(e, 24*60 + 30);
 
   const durMin = e - s;
   const durLbl = durMin >= 60
-    ? `${Math.floor(durMin/60)}h${(durMin%60? (durMin%60)+'m' : '')}`
+    ? `${Math.floor(durMin/60)}h${(durMin%60? ' '+(durMin%60)+'m' : '')}`
     : `${durMin}m`;
 
   const cross = e >= 24*60;
   return { ...row, start: toHH(s), end: toHH(e), duration: durLbl, _crossDay: !!cross };
 }
 
-/* Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche) */
+// Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
 function fixOverlaps(rows){
-  const toMin = t => { const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
+  const toMin = t => { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
   const toHH  = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
   const durMin = d => {
     if(!d) return 0;
@@ -2615,6 +2524,7 @@ function fixOverlaps(rows){
     return 0;
   };
 
+  // Antes de ordenar, expande minutos para filas nocturnas si el fin “parece” anterior al inicio
   const expanded = rows.map(r=>{
     let s = toMin(r.start||"");
     let e = toMin(r.end||"");
@@ -2622,6 +2532,7 @@ function fixOverlaps(rows){
     let cross = false;
 
     if(s!=null && (e==null || e<=s)){
+      // Si es nocturna o sugiere cruce, empujamos fin al día +1
       if(__isNightRow__(r) || (d>0 && s>=18*60)){
         e = (e!=null ? e : s + Math.max(d,60)) + 24*60;
         cross = true;
@@ -2630,7 +2541,7 @@ function fixOverlaps(rows){
       }
     }else if(s==null && e!=null && d>0){
       s = e - d;
-      if(s<0) s = 9*60;
+      if(s<0) s = 9*60; // fallback suave
     }else if(s==null && e==null){
       s = 9*60; e = s + 60;
     }
@@ -2638,6 +2549,7 @@ function fixOverlaps(rows){
     return { __s:s, __e:e, __d:d, __cross:cross, raw:r };
   });
 
+  // Orden por inicio (en minutos expandidos)
   expanded.sort((a,b)=> (a.__s||0) - (b.__s||0));
 
   const out = [];
@@ -2651,6 +2563,7 @@ function fixOverlaps(rows){
     }
     prevEnd = Math.max(prevEnd ?? 0, e);
 
+    // Duración textual si faltaba
     const finalDur = d>0 ? r.duration : `${Math.max(60, e - s)}m`;
 
     out.push({
@@ -2671,6 +2584,7 @@ function fixOverlaps(rows){
 function unifyRowsFormat(parsed, preferCity){
   if(!parsed) return { rows: [] };
   if(Array.isArray(parsed.rows)) return { rows: parsed.rows };
+  // destinos: [{name, rows}] o {destination, rows}
   if(Array.isArray(parsed.destinations)){
     if(preferCity){
       const dd = parsed.destinations.find(d=> (d.name||d.destination)===preferCity);
@@ -2692,6 +2606,7 @@ function unifyRowsFormat(parsed, preferCity){
 /* ---------------------------
    PATCH A.2 — Transporte/“fuera de ciudad”
 ---------------------------- */
+// Listas mínimas (ampliables) para Islandia + genéricos
 const OUT_OF_TOWN_RE = [
   /círculo\s+dorado|golden\s+circle|þingvellir|thingvellir|geysir|gullfoss/i,
   /reykjanes|gunnuhver|kr[ýy]suv[ií]k|selt[uú]n|kleifarvatn|reykjanesviti/i,
@@ -2716,6 +2631,7 @@ function isOutOfTownRow(city, row){
   const to = String(row.to||'').toLowerCase();
   const act = String(row.activity||'').toLowerCase();
   if(_includesPattern(act, OUT_OF_TOWN_RE) || _includesPattern(to, OUT_OF_TOWN_RE)) return true;
+  // heurística simple: destino distinto y no contiene ciudad
   return (to && !to.includes(cityLow));
 }
 
@@ -2759,6 +2675,7 @@ function __addMinutesSafe__(hhmm, add){
 function ensureReturnToCity(city, day, rows){
   try{
     if(!Array.isArray(rows) || rows.length===0) return rows;
+    // Si no hubo salida, no añadimos retorno a ciudad
     const hadOut = rows.some(r=>isOutOfTownRow(city, r));
     if(!hadOut) return rows;
 
@@ -2779,7 +2696,7 @@ function ensureReturnToCity(city, day, rows){
           from: last.to || `Alrededores de ${city}`,
           to: city,
           transport: 'Vehículo alquilado o Tour guiado',
-          duration: '1h',
+          duration: '≈ 1h',
           notes: `Ruta de retorno hacia ${city}.`
         }
       ];
@@ -2797,7 +2714,7 @@ function ensureEndReturnToHotel(rows){
     if(isHotel) return rows;
 
     const start = last.end || last.start || '20:30';
-    const end   = __addMinutesSafe__(start, 30);
+    const end   = isAurora ? __addMinutesSafe__(start, 30) : __addMinutesSafe__(start, 30);
 
     rows.push({
       day: last.day || 1,
@@ -2881,6 +2798,7 @@ async function optimizeDay(city, day){
     ? `\n- Si este fuera un día “ligero”, mantén ritmo relajado y evita sobrecargar.\n`
     : '';
 
+  /* Prompt reforzado: investigación previa + sub-paradas obligatorias + transporte correcto */
   const prompt = `
 ${FORMAT}
 Ciudad: ${city}
@@ -2937,6 +2855,7 @@ ${intakeData}
       const cap = suggestedAuroraCap(stayDays);
       normalized = enforceAuroraCapForDay(city, day, normalized, cap);
     }else{
+      // Si no aplica, elimina posibles inventos del modelo
       normalized = normalized.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
     }
 
@@ -2955,6 +2874,174 @@ ${intakeData}
     pushRows(city,val.allowed,false);
   }
 }
+
+/* ==============================
+   SECCIÓN 18 · Render unificado de tablas — Injerto v75.R
+   (Se agrega al final de la Sección 18; NO pisa funciones existentes)
+   - Define renderCityItinerary SOLO si no existe
+   - Usa itineraries[city].byDay como fuente de verdad
+   - Soporta sub-paradas (prefijo "— " o " — ")
+   - Etiqueta nocturnas/auroras/out-of-town para estilos
+================================= */
+(function attachUnifiedRenderer(){
+  if (typeof renderCityItinerary === 'function') return; // ya existe en tu build
+
+  /* Helpers DOM seguros */
+  function __q(sel){ return document.querySelector(sel); }
+  function __itWrapEl(){
+    return __q('[data-ui="itinerary"]') || __q('#itinerary') || __q('#itineraryPane') || __q('.itinerary') || document.body;
+  }
+  function __esc(s){
+    return String(s==null?'':s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+  function __fmtHM(t){ return t ? __esc(String(t)) : ''; }
+
+  function __isAuroraRow(r){
+    return /\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||''));
+  }
+  function __isNightRow(r){
+    const s = String(r.start||'');
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    const mins = m ? (+m[1])*60 + (+m[2]) : 0;
+    return __isAuroraRow(r) || mins >= 18*60;
+  }
+  function __isOutOfTown(city, r){
+    try { return isOutOfTownRow(city, r); } catch(_){ return false; }
+  }
+
+  function __maybeDateLabel(city, day){
+    try{
+      const base = itineraries[city]?.baseDate || cityMeta[city]?.baseDate || '';
+      if(!base || typeof parseDMY !== 'function') return '';
+      const d0 = parseDMY(base);
+      if(!(d0 instanceof Date) || isNaN(d0)) return '';
+      const d = new Date(d0.getTime());
+      d.setDate(d.getDate() + (day-1));
+      const dd = String(d.getDate()).padStart(2,'0');
+      const mm = String(d.getMonth()+1).padStart(2,'0');
+      const yyyy = d.getFullYear();
+      return ` <span class="it-date">(${dd}/${mm}/${yyyy})</span>`;
+    }catch(_){ return ''; }
+  }
+
+  function __renderRows(city, rows){
+    return rows.map(r=>{
+      const aur = __isAuroraRow(r);
+      const night = __isNightRow(r);
+      const oot = __isOutOfTown(city, r);
+
+      // Sub-parada: si empieza por "— " o contiene " — "
+      const actRaw = String(r.activity||'');
+      const isSub  = /^—\s+/.test(actRaw) || /\s—\s/.test(actRaw);
+      const act    = __esc(actRaw);
+
+      const cls = [
+        'it-row',
+        aur ? 'is-aurora' : '',
+        night ? 'is-night' : '',
+        oot ? 'is-out' : '',
+        isSub ? 'is-sub' : ''
+      ].filter(Boolean).join(' ');
+
+      return `
+        <tr class="${cls}">
+          <td class="it-col it-time">${__fmtHM(r.start)}</td>
+          <td class="it-col it-time">${__fmtHM(r.end)}</td>
+          <td class="it-col it-activity">${act}</td>
+          <td class="it-col it-route">
+            ${r.from ? `<span class="from">${__esc(r.from)}</span>` : ''}
+            ${r.to ? ` <span class="arrow">→</span> <span class="to">${__esc(r.to)}</span>` : ''}
+          </td>
+          <td class="it-col it-transport">${r.transport ? __esc(r.transport) : ''}</td>
+          <td class="it-col it-notes">${r.notes ? __esc(r.notes) : ''}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function __buildDayTable(city, day, rows){
+    const dateLabel = __maybeDateLabel(city, day);
+    return `
+      <section class="it-day" data-day="${day}">
+        <header class="it-day-h">
+          <h3 class="it-day-title">Día ${day}${dateLabel || ''}</h3>
+        </header>
+        <div class="it-table-wrap">
+          <table class="it-table" aria-label="Itinerario día ${day}">
+            <thead>
+              <tr>
+                <th>Inicio</th>
+                <th>Fin</th>
+                <th>Actividad</th>
+                <th>De → A</th>
+                <th>Transporte</th>
+                <th>Notas</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${__renderRows(city, rows)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    `;
+  }
+
+  /* Export principal */
+  window.renderCityItinerary = function renderCityItinerary(city, opts = {}){
+    try{
+      const $root = __itWrapEl();
+      if(!$root) return;
+
+      const byDay = (itineraries?.[city]?.byDay) || {};
+      const days  = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+
+      // Day visible / currentDay
+      let showDay = +opts.day || itineraries[city]?.currentDay || days[0] || 1;
+      if(!byDay[showDay] || !byDay[showDay].length){
+        const firstNonEmpty = days.find(d => (byDay[d]||[]).length);
+        showDay = firstNonEmpty || days[0] || 1;
+      }
+      if(!itineraries[city]) itineraries[city] = {};
+      itineraries[city].currentDay = showDay;
+
+      // Construye HTML (todas las tablas, con el “día activo” primero)
+      const orderedDays = [showDay, ...days.filter(d=>d!==showDay)];
+      let html = '';
+      if(!orderedDays.length){
+        html = `<div class="it-empty"><p>Itinerario pendiente de generar…</p></div>`;
+      }else{
+        html = orderedDays.map(d=>{
+          const rows = (byDay[d]||[]).slice().sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
+          return __buildDayTable(city, d, rows);
+        }).join('');
+      }
+
+      $root.innerHTML = html;
+
+      // Focus accesible al primer encabezado del día activo
+      const activeH = $root.querySelector('.it-day[data-day="'+showDay+'"] .it-day-title');
+      activeH && activeH.setAttribute('tabindex','-1');
+      activeH && activeH.focus({ preventScroll:false });
+
+    }catch(err){
+      console.error('[Render Error] renderCityItinerary', err);
+      try{
+        const $root = __itWrapEl();
+        if($root) $root.innerHTML = `<div class="it-empty"><p>⚠️ No se pudo renderizar el itinerario.</p></div>`;
+      }catch(_){}
+    }
+  };
+
+  // Exponer atajo para renderizar solo el día actual (opcional)
+  window.renderCurrentDay = function(city, day){
+    return window.renderCityItinerary(city, { day });
+  };
+})();
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
