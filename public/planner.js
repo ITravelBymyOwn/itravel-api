@@ -2347,7 +2347,7 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    Base v73 — Ajuste flexible FINAL (quirúrgico)
-   Cambios clave (PATCH 42.4-INFO/PLANNER):
+   Cambios clave (PATCH 42.4-INFO/PLANNER) + PATCH TABS-SAFE
    • Doble etapa vía API:
        (1) mode:"info"  → investigación, imperdibles, macro-tours (≤8 sub-paradas),
            tiempos REALES entre puntos y **tiempos de regreso** (hotel/ciudad).
@@ -2458,6 +2458,7 @@ function normalizeAuroraWindow(row){
 }
 
 // Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
+// ⚠️ PATCH TABS-SAFE: NO cambia el "day" de la fila; sólo horarios.
 function fixOverlaps(rows){
   const toMin = t => { const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2]) };
   const toHH  = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
@@ -2470,6 +2471,7 @@ function fixOverlaps(rows){
     return 0;
   };
 
+  // Ordenar por inicio (no altera day)
   const expanded = rows.map(r=>{
     let s = toMin(r.start||"");
     let e = toMin(r.end||"");
@@ -2510,6 +2512,7 @@ function fixOverlaps(rows){
 
     out.push({
       ...r,
+      // ⚠️ no tocamos r.day
       start: toHH(s),
       end: toHH(e),
       duration: finalDur,
@@ -2592,6 +2595,27 @@ function ensureReturnToCity(city, day, rows){ return rows; }
 function ensureEndReturnToHotel(rows){ return rows; }
 
 /* ---------------------------
+   PATCH TABS-SAFE: Normalizador de día sin alterar tabbing
+---------------------------- */
+// Asegura day >=1 y numérico; opción de clamp contra days declarados para la ciudad
+function __normalizeDayField__(city, r){
+  let d = Number(r.day);
+  if(!Number.isFinite(d) || d < 1) d = 1;
+  const total = (itineraries[city]?.originalDays) || (cityMeta[city]?.days) || 0;
+  if(total > 0 && d > total) d = total; // clamp defensivo (no forzamos tabs nuevas)
+  return { ...r, day: d };
+}
+// Orden estable: por day asc y por start asc (sin mover day)
+function __sortRowsTabsSafe__(rows){
+  return [...rows].sort((a,b)=>{
+    const da = Number(a.day)||1, db = Number(b.day)||1;
+    if(da !== db) return da - db;
+    const sa = __toMinHHMM__(a.start)||0, sb = __toMinHHMM__(b.start)||0;
+    return sa - sb;
+  });
+}
+
+/* ---------------------------
    NEW: Recolector de contexto completo para INFO
 ---------------------------- */
 function __collectPlannerContext__(city, day){
@@ -2635,9 +2659,6 @@ async function optimizeDay(city, day){
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
-  // Endpoint configurable (permite override global sin tocar código)
-  const API_ENDPOINT = (typeof window!=='undefined' && window.ITBMO_API_ENDPOINT) || '/api/chat';
-
   // Filas "protegidas"
   const rows = (data?.byDay?.[day]||[]).map(r=>({
     day,start:r.start||'',end:r.end||'',activity:r.activity||'',
@@ -2652,7 +2673,7 @@ async function optimizeDay(city, day){
   try{
     // 1) INFO
     const context = __collectPlannerContext__(city, day);
-    const infoResp = await fetch(API_ENDPOINT, {
+    const infoResp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode:'info', context })
@@ -2661,7 +2682,7 @@ async function optimizeDay(city, day){
     const research = cleanToJSONPlus(infoData?.text || infoData);
 
     // 2) PLANNER
-    const plannerResp = await fetch(API_ENDPOINT, {
+    const plannerResp = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode:'planner', research_json: research })
@@ -2673,6 +2694,9 @@ async function optimizeDay(city, day){
     const unified = unifyRowsFormat(structured, city);
     let finalRows = (unified?.rows||[]).map(x=>normalizeRow({ ...x, day: (x.day||day) }));
 
+    // ⚠️ PATCH TABS-SAFE: no alteramos day; sólo normalizamos tipo/rango
+    finalRows = finalRows.map(r => __normalizeDayField__(city, r));
+
     if(typeof applyBufferBetweenRows==='function') finalRows = applyBufferBetweenRows(finalRows);
     if(typeof reorderLinearVisits==='function')    finalRows = reorderLinearVisits(finalRows);
 
@@ -2682,23 +2706,40 @@ async function optimizeDay(city, day){
     // Transporte: sólo rellenamos si vinieron vacíos
     finalRows = enforceTransportAndOutOfTown(city, finalRows);
 
-    // Anti-solapes y cruce post-medianoche
+    // Anti-solapes y cruce post-medianoche (sin mover day)
     finalRows = fixOverlaps(finalRows);
 
-    // Reincorporar protegidas
+    // Reincorporar protegidas (mismo day)
     if(protectedRows.length){
-      finalRows = [...finalRows, ...protectedRows];
+      finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
       finalRows = fixOverlaps(finalRows);
     }
 
+    // Orden estable por day/start para que el renderer v75 cree tabs correctamente
+    finalRows = __sortRowsTabsSafe__(finalRows);
+
     // Validación final y volcado
-    const val=await validateRowsWithAgent(city, finalRows, baseDate);
+    const val = await validateRowsWithAgent(city, finalRows, baseDate);
     pushRows(city, val.allowed, false);
+
+    // 🔔 PATCH TABS-SAFE: notificar (benigno) para refresco de tabs/tablas si hay listeners
+    try {
+      document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } }));
+    } catch(_) {}
 
   }catch(e){
     console.error('optimizeDay INFO→PLANNER error:', e);
-    const val=await validateRowsWithAgent(city, rows, baseDate);
+
+    // Reforzar estabilidad en error: normalizar/ordenar sin tocar day
+    let safeRows = rows.map(r => __normalizeDayField__(city, r));
+    safeRows = __sortRowsTabsSafe__(fixOverlaps(safeRows));
+
+    const val = await validateRowsWithAgent(city, safeRows, baseDate);
     pushRows(city, val.allowed, false);
+
+    try {
+      document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } }));
+    } catch(_) {}
   }
 }
 
