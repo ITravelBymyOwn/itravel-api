@@ -1,12 +1,21 @@
-// /api/chat.js — v42.5 (ESM, Vercel)
+// /api/chat.js — v42.5.1 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
-// Respeta estrictamente preferencias/condiciones del usuario.
+// Respeta estrictamente preferencias/condiciones del usuario. Salidas SIEMPRE en { text: "<JSON|texto>" }.
 
 import OpenAI from "openai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // =============== Utilidades comunes ===============
+function parseBody(reqBody) {
+  // Acepta objetos ya parseados o string JSON
+  if (!reqBody) return {};
+  if (typeof reqBody === "string") {
+    try { return JSON.parse(reqBody); } catch { return {}; }
+  }
+  return reqBody;
+}
+
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
@@ -172,7 +181,9 @@ Eres **Astra Planner**. Recibes "research_json" del Info Chat con datos fáctico
 TU TAREA:
 - Convertir research_json en {"destination","rows":[...]}.
 - **No inventes** tiempos ni destinos: usa exactamente los tiempos de research_json.
-- Asigna horas razonables dentro de la ventana 08:30–19:00, agregando buffers ≥15m.
+- Asigna horas razonables dentro de la ventana 08:30–19:00 para actividades diurnas,
+  agregando buffers ≥15m. **Si research_json.aurora.window_local existe, NO limites por horario:
+  crea filas nocturnas con esa ventana exacta** (no hay bloqueo de horarios nocturnos).
 - Inserta **notas motivadoras** breves en cada fila (sin texto florido).
 - Para macro-tours, usa **"Actividad": "Excursión — A / — B / — C ..."** (hasta 8 sub-paradas).
 - Respeta preferencias/condiciones del usuario si research_json las contempla (no sobrecargues días, evita largas caminatas si se indicó, etc.).
@@ -210,14 +221,13 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const body = req.body || {};
-    const mode = body.mode || "planner";
+    const body = parseBody(req.body);
+    const mode = (body.mode || "planner").toLowerCase();
 
     // -------------------- MODO INFO --------------------
     // Entrada esperada: { mode:"info", context:{...TODOS LOS DATOS DEL PLANNER...} }
     if (mode === "info") {
       const context = body.context || {};
-      // Hard-guard: debe llegar TODO lo del planner (preferencias/condiciones incluidas)
       const infoUserMsg = {
         role: "user",
         content: JSON.stringify({ context }, null, 2),
@@ -265,7 +275,6 @@ export default async function handler(req, res) {
 
       // Permitir también flujo legado (mensajes), pero preferimos research_json directo
       if (!research) {
-        // Flujo legado con messages: intentamos estructurar, pero sin inventar
         const clientMessages = extractMessages(body);
         let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3500);
         let parsed = cleanToJSONPlus(raw);
@@ -311,6 +320,7 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("❌ /api/chat error:", err);
+    // Entregamos JSON válido para no romper la UI
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
