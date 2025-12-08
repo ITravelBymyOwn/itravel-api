@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v76
-   Base: v75
+   ITRAVELBYMYOWN · PLANNER v77
+   Base: v76
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -1542,14 +1542,12 @@ function showWOW(on, msg){
    🆕 Robustez: usa callApiChat (si existe) con timeout/reintentos + caché research
    🆕 Auroras: normalización + tope no consecutivo por día ANTES de pushRows
    🆕 Inyección segura post-planner: duration normalizada / cena / retorno a ciudad
-   🆕 Rendimiento: optimizeDay sólo en días realmente vacíos (o si forceReplan)
+   🆕 Rendimiento: optimizeDay sólo en días realmente vacíos o “flacos” (≥ umbral)
+   🆕 Coherencia: 1 sola aurora por día + limpieza de transporte tras “Regreso”
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
-  if (window.__cityLocks[city]) {
-    console.warn(`[Mutex] Generación ya en curso para ${city}`);
-    return;
-  }
+  if (window.__cityLocks[city]) { console.warn(`[Mutex] Generación ya en curso para ${city}`); return; }
   window.__cityLocks[city] = true;
 
   const toHHMM = s => String(s||'').trim();
@@ -1572,7 +1570,6 @@ async function generateCityItinerary(city){
   };
 
   /* ==================== Helpers API ==================== */
-  // Preferimos el fetch robusto centralizado si está disponible (Sección 18)
   const hasCallApiChat = (typeof callApiChat === 'function');
 
   async function callPlannerAPI_withResearch(researchJson){
@@ -1623,12 +1620,16 @@ async function generateCityItinerary(city){
     return parseJSON(text);
   }
 
-  // Cobertura simple por día
   function hasCoverageForAllDays(rows, totalDays){
     if(!Array.isArray(rows) || !rows.length) return false;
     const flags = new Set(rows.map(r=>Number(r.day)||1));
     for(let d=1; d<=totalDays; d++){ if(!flags.has(d)) return false; }
     return true;
+  }
+  // 🆕 umbral de “día flaco”
+  function dayIsTooThin(city, day, min=3){
+    const cur = itineraries[city]?.byDay?.[day] || [];
+    return cur.filter(r=>!!r.activity).length < min;
   }
 
   try {
@@ -1643,8 +1644,7 @@ async function generateCityItinerary(city){
     const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
     const hotel    = cityMeta[city]?.hotel || '';
     const transport= cityMeta[city]?.transport || 'recomiéndame';
-
-    const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+    const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
     let heuristicsContext = '';
     try{
@@ -1663,27 +1663,22 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
-    // INTAKE (mantenido para LEGACY)
     const intakeText = `
 ${FORMAT}
-**Genera únicamente ${dest.days} día/s para "${city}"** (tabs y tablas ya existen en UI).
+**Genera únicamente ${dest.days} día/s para "${city}"** (tabs ya existen en UI).
 Ventanas base por día (UI): ${JSON.stringify(perDay)}.
 Hotel/zona: ${hotel || 'a determinar'} · Transporte preferido: ${transport || 'a determinar'}.
-
 Requisitos:
 - Cobertura completa días 1–${dest.days} (sin días vacíos).
-- Usa rutas madre → subparadas cuando aplique. Inserta "Regreso a ${city}" en day-trips.
-- Horarios plausibles: base 08:30–19:00 si no hay nada mejor; buffers ≥15m.
-- Transporte coherente: urbano a pie/metro; interurbano vehículo o tour si no hay bus local.
+- Rutas madre → subparadas; inserta "Regreso a ${city}" en day-trips.
+- Horarios plausibles: base 08:30–19:00; buffers ≥15m.
+- Transporte coherente: urbano a pie/metro; interurbano vehículo/tour si no hay bus local.
 - Duraciones normalizadas ("1h30m", "45m"). Máx 20 filas/día.
-
 Notas:
-- Siempre informativas, breves y útiles (con "valid:" cuando corresponda).
-- Si el research trae auroras, respétalas tal cual (ventanas/nota/duración).
-
+- Breves y útiles (con "valid:" cuando aplique).
+- Si el research trae auroras, respétalas tal cual (ventana/nota/duración).
 Contexto adicional:
 ${heuristicsContext}
-
 INTAKE:
 ${buildIntake()}
 `.trim();
@@ -1698,14 +1693,13 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      const context = __collectPlannerContext__(city, 1); // día 1 como ancla
+      const context = __collectPlannerContext__(city, 1);
       const research = cached || await callInfoAPI(context);
-      if(!cached) window.__researchCache[city] = research; // cachear por ciudad
+      if(!cached) window.__researchCache[city] = research;
       const structured = await callPlannerAPI_withResearch(research);
       parsed = structured;
     }catch(errInfoPlanner){
       console.warn('[generateCityItinerary] INFO→PLANNER falló, uso LEGACY:', errInfoPlanner);
-      // Fallback LEGACY por mensajes (comportamiento anterior)
       const apiMessages = [{ role: "user", content: intakeText }];
       const current = itineraries?.[city] || null;
       parsed = await callPlannerAPI_legacy(apiMessages, {
@@ -1716,75 +1710,64 @@ ${buildIntake()}
 
     if(parsed && (parsed.rows || parsed.destination)){
       const rowsFromApi = Array.isArray(parsed.rows) ? parsed.rows : [];
+      // 1 sola pasada de normalización → performance
       let tmpRows = rowsFromApi.map(r=>normalizeRow(r));
 
-      // 🧼 Anti-duplicados contra lo ya presente en la ciudad
-      const existingActs = Object.values(itineraries[city]?.byDay||{})
-        .flat()
-        .map(r=>normKey(String(r.activity||'')));
+      // Dedupe contra lo ya existente
+      const existingActs = Object.values(itineraries[city]?.byDay||{}).flat().map(r=>normKey(String(r.activity||'')));
       tmpRows = tmpRows.filter(r=>!existingActs.includes(normKey(String(r.activity||''))));
 
-      // 🔧 Fixes suaves (no invasivos)
+      // Fixes suaves
       if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      // 🆕 Normaliza duraciones decimales → “h/m”
+      // === PIPELINE COHERENTE (una sola pasada por transformación pesada) ===
+      // A) normalizaciones
       if(typeof normalizeDurationLabel==='function') tmpRows = tmpRows.map(normalizeDurationLabel);
-
-      // 🆕 Normaliza ventanas de aurora (si vinieran sin cerrar)
-      if(typeof normalizeAuroraWindow==='function') tmpRows = tmpRows.map(normalizeAuroraWindow);
-
-      // 🆕 Tope de auroras NO consecutivas — antes del push (tabs-safe)
+      if(typeof normalizeAuroraWindow==='function')  tmpRows = tmpRows.map(normalizeAuroraWindow);
+      // B) auroras: 1 por día + tope no consecutivo (cap global)
+      if(typeof enforceOneAuroraPerDay==='function') tmpRows = enforceOneAuroraPerDay(tmpRows);
       if(typeof enforceAuroraCapForDay==='function' && typeof suggestedAuroraCap==='function'){
         const cap = suggestedAuroraCap(dest.days || tmpRows.reduce((m,r)=>Math.max(m, Number(r.day)||1), 1));
-        const byDay = {};
-        tmpRows.forEach(r => {
-          const d = Number(r.day)||1;
-          (byDay[d] = byDay[d] || []).push(r);
-        });
+        const byDay = {}; tmpRows.forEach(r => { const d=Number(r.day)||1; (byDay[d]=byDay[d]||[]).push(r); });
         const rebuilt = [];
         Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
           rebuilt.push(...enforceAuroraCapForDay(city, day, byDay[day], cap));
         });
         tmpRows = rebuilt;
       }
-
-      // 🆕 Inserta “Regreso a {city}” si detecta day-trip sin retorno explícito (tabs-safe)
+      // C) transporte (relleno sólo si falta)
+      if(typeof enforceTransportAndOutOfTown==='function') tmpRows = enforceTransportAndOutOfTown(city, tmpRows);
+      // D) anti-solapes + cruce nocturno tabs-safe (PATCH dentro de fixOverlaps)
+      if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
+      // E) retorno a ciudad si day-trip
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
-
-      // 🆕 Inyecta “Cena” si preferencia global y no existe en franja 19:00–21:30
+      // F) limpiar transporte en actividades urbanas posteriores al regreso
+      if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
+      // G) cena si procede
       if(plannerState?.preferences?.alwaysIncludeDinner && typeof injectDinnerIfMissing==='function'){
         tmpRows = injectDinnerIfMissing(city, tmpRows);
       }
+      // H) poda de genéricos redundantes
+      if(typeof pruneGenericPerDay==='function') tmpRows = pruneGenericPerDay(tmpRows);
 
-      // 🧩 Empuje a estado
+      // Empuje a estado
       pushRows(city, tmpRows, !!forceReplan);
 
-      // ✅ Días y optimización: sólo en días vacíos (o si forceReplan)
+      // Render/optimización sólo donde hace falta
       ensureDays(city);
-      const totalDays = dest.days||Object.keys(itineraries[city].byDay||{}).length||1;
+      const totalDays = dest.days || Object.keys(itineraries[city].byDay||{}).length || 1;
 
       const hasAll = hasCoverageForAllDays(tmpRows, totalDays);
-      if(forceReplan || !hasAll){
-        // optimiza únicamente los días que sigan vacíos
-        for(let d=1; d<=totalDays; d++){
-          const currentRows = (itineraries[city]?.byDay?.[d]||[]);
-          if(forceReplan || !Array.isArray(currentRows) || currentRows.length===0){
-            /* eslint-disable no-await-in-loop */
-            await optimizeDay(city,d);
-          }
-        }
+      for(let d=1; d<=totalDays; d++){
+        const need = forceReplan || !hasAll || dayIsTooThin(city, d, 3);
+        if (need){ /* eslint-disable no-await-in-loop */ await optimizeDay(city,d); }
       }
 
-      // Render idéntico a v75
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-
       if(forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
-      if(plannerState?.preferences){
-        delete plannerState.preferences.preferDayTrip;
-        delete plannerState.preferences.preferAurora;
-      }
+      if(plannerState?.preferences){ delete plannerState.preferences.preferDayTrip; delete plannerState.preferences.preferAurora; }
       $resetBtn?.removeAttribute('disabled');
       return;
     }
@@ -2343,326 +2326,338 @@ function intentFromText(text){
   return { type:'free_edit', details: text };
 }
 
-/* ==============================
+/* ============================================================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico)
-   Cambios clave (PATCH 42.4-INFO/PLANNER) + PATCH TABS-SAFE + FIX INFO-CHAT EXTERNO
-   • Doble etapa vía API (info → planner) con timeout/reintentos.
-   • 🆕 Helpers tabs-safe: normalizeDurationLabel / ensureReturnRow / injectDinnerIfMissing
-   • 🆕 callApiChat(): fetch robusto para /api/chat (arregla errores intermitentes del info chat externo).
-================================= */
+   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.1
+   Cambios clave en este patch:
+   • Doble etapa con el agente: INFO → PLANNER (timeouts/retry).
+   • Auroras: 1 por día, franja nocturna, no consecutivas (cap global).
+   • Overlaps nocturnos tabs-safe (no cambia "day"; respeta cruce).
+   • Limpieza de transporte urbano tras “Regreso a {city}”.
+   • Poda ligera de genéricos (desayuno/almuerzo/cena/día libre).
+   • Ordenamiento tabs-safe ponderando filas post-medianoche.
+   • Llamadas a optimización y validación sólo cuando agrega valor.
+   • Todas las funciones nuevas se registran con guardas para no
+     pisar implementaciones existentes en otras secciones.
+   ============================================================ */
 
-/* --- aliasKey para deduplicado por sinónimos comunes --- */
-function aliasKey(s){
-  const x = normKey(s);
-  if(/\bmontju(i|ï|ic)\b/.test(x)) return 'montjuic';
-  if(/\bsagrada\s*fam(ilia)?\b/.test(x)) return 'sagrada_familia';
-  if(/\bpark?\s*gu(e|ë|é)ll\b/.test(x)) return 'park_guell';
-  if(/\bcasa\s*batllo\b/.test(x)) return 'casa_batllo';
-  if(/\bla\s*pedrera|casa\s*mila\b/.test(x)) return 'la_pedrera';
-  if(/\bboqueria\b/.test(x)) return 'boqueria';
-  if(/\bbarceloneta\b/.test(x)) return 'barceloneta';
-  if(/\bpicasso\b/.test(x)) return 'museo_picasso';
-  if(/\bpaseo\s*de\s*gracia\b/.test(x)) return 'paseo_de_gracia';
-  return x;
+/* ------------------------------------------------------------------
+   Utilidades base (si no existen en otras secciones, se definen aquí)
+------------------------------------------------------------------- */
+if (typeof __toMinHHMM__ !== 'function') {
+  function __toMinHHMM__(t) {
+    const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+    const mi = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+    return h * 60 + mi;
+  }
+}
+if (typeof __toHHMMfromMin__ !== 'function') {
+  function __toHHMMfromMin__(mins) {
+    let m = Math.round(Math.max(0, Number(mins) || 0));
+    m = m % (24 * 60);
+    const h = Math.floor(m / 60);
+    const mm = m % 60;
+    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+}
+if (typeof __addMinutesSafe__ !== 'function') {
+  function __addMinutesSafe__(hhmm, add) {
+    const base = __toMinHHMM__(hhmm);
+    if (base == null) return hhmm || '09:00';
+    const target = base + (Number(add) || 0);
+    return __toHHMMfromMin__(target);
+  }
 }
 
-/* --- Normalizador mínimo de ciudad para auroras (compatibilidad) --- */
-function normalizeCityForGeo(name){
-  const raw = String(name||'').trim();
-  const low = raw.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
-  if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) return 'Reykjavik';
-  if(/\btroms[oø]\b|\btromso\b/.test(low)) return 'Tromsø';
-  return raw;
+/* ------------------------------------------------------------------
+   Detección de nocturnas / auroras / out-of-town
+------------------------------------------------------------------- */
+if (typeof __isNightRow__ !== 'function') {
+  function __isNightRow__(r) {
+    const act = String(r?.activity || '').toLowerCase();
+    const notes = String(r?.notes || '').toLowerCase();
+    const sMin = __toMinHHMM__(r?.start);
+    const eMin = __toMinHHMM__(r?.end);
+    if (/auroras?|northern\s*lights/.test(act)) return true;
+    if (/noche|nocturn/.test(notes)) return true;
+    if (sMin != null && sMin >= 18 * 60) return true;
+    if (eMin != null && eMin >= 24 * 60) return true;
+    return false;
+  }
+}
+if (typeof isOutOfTownRow !== 'function') {
+  // Fallback conservador: considera out-of-town si hay palabras clave
+  function isOutOfTownRow(city, r) {
+    const a = (r?.activity || '').toLowerCase();
+    const f = (r?.from || '').toLowerCase();
+    const t = (r?.to || '').toLowerCase();
+    const c = String(city || '').toLowerCase();
+    const hints = /excursi[oó]n|pen[ií]nsula|costa|glaciar|c[ií]rculo|parque|volc[aá]n|lago|cascada/;
+    const notCity = (str) => str && c && !str.includes(c);
+    return hints.test(a) || notCity(f) || notCity(t);
+  }
 }
 
-/* === Utilidades auroras (tope no-consecutivo) — mantenidas por compatibilidad === */
-function __isAuroraName__(txt){
-  return /\bauroras?\b|\bnorthern\s+lights?\b/i.test(String(txt||''));
+/* ------------------------------------------------------------------
+   Normalizadores (duración y ventana de auroras)
+------------------------------------------------------------------- */
+if (typeof normalizeDurationLabel !== 'function') {
+  function normalizeDurationLabel(r) {
+    // Acepta "1h30m", "90m", "2 h", "1 h 15 m"...
+    const raw = String(r?.duration || '').trim();
+    let minutes = 0;
+    let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+    if (m) {
+      minutes = parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
+    } else {
+      m = raw.match(/(\d+)\s*m/i);
+      if (m) minutes = parseInt(m[1], 10);
+    }
+    if (!minutes) {
+      const s = __toMinHHMM__(r?.start), e = __toMinHHMM__(r?.end);
+      if (s != null && e != null) minutes = ((e - s) + 24 * 60) % (24 * 60);
+      if (!minutes) minutes = 60;
+    }
+    const h = Math.floor(minutes / 60);
+    const mm = minutes % 60;
+    const label = h ? (mm ? `${h}h${mm}m` : `${h}h`) : `${mm}m`;
+    return { ...r, duration: label };
+  }
 }
-function countAuroraNights(city){
+if (typeof normalizeAuroraWindow !== 'function') {
+  function normalizeAuroraWindow(r) {
+    const act = String(r?.activity || '');
+    if (!/\bauroras?\b|\bnorthern\s+lights?\b/i.test(act)) return r;
+
+    // Ventana por defecto 20:15–00:15 (4h) si no hay datos plausibles
+    const fallbackStart = '20:15';
+    const fallbackEnd = '00:15';
+
+    let s = __toMinHHMM__(r?.start);
+    let e = __toMinHHMM__(r?.end);
+    let d = String(r?.duration || '').trim();
+
+    // Si no hay tiempos válidos, aplica ventana por defecto
+    if (s == null || e == null || e <= s) {
+      s = __toMinHHMM__(fallbackStart);
+      e = __toMinHHMM__(fallbackEnd) + 24 * 60; // cruza medianoche
+    }
+
+    // Duración coherente si viene en blanco
+    const dur = (function () {
+      const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+      const mm = d.match(/(\d+)\s*m/i);
+      if (md) return parseInt(md[1], 10) * 60 + (md[2] ? parseInt(md[2], 10) : 0);
+      if (mm) return parseInt(mm[1], 10);
+      return ((e - s) + 24 * 60) % (24 * 60) || 240; // 4h
+    })();
+
+    // Ajusta a nocturna y marca _crossDay para sort tabs-safe
+    const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
+    const endHH = __toHHMMfromMin__(e % (24 * 60));
+    const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
+    return { ...r, start: startHH, end: endHH, duration: lbl, _crossDay: true };
+  }
+}
+
+/* ------------------------------------------------------------------
+   Reglas de auroras (cap/no consecutivas/una por día)
+------------------------------------------------------------------- */
+function __isAuroraName__(txt) { return /\bauroras?\b|\bnorthern\s+lights?\b/i.test(String(txt || '')); }
+
+function countAuroraNights(city) {
   const byDay = itineraries[city]?.byDay || {};
-  let c=0;
-  for(const d of Object.keys(byDay)){
-    const rows = byDay[d]||[];
-    if(rows.some(r=>__isAuroraName__(r.activity))) c++;
+  let c = 0;
+  for (const d of Object.keys(byDay)) {
+    const rows = byDay[d] || [];
+    if (rows.some(r => __isAuroraName__(r.activity))) c++;
   }
   return c;
 }
-function suggestedAuroraCap(stayDays){
-  if(stayDays>=5) return 2;
-  if(stayDays>=3) return 1;
+
+function suggestedAuroraCap(stayDays) {
+  if (stayDays >= 5) return 2;
+  if (stayDays >= 3) return 1;
   return 1;
 }
-function isConsecutiveAurora(city, day){
-  const byDay = itineraries[city]?.byDay||{};
-  const prev = byDay[day-1]||[];
-  const next = byDay[day+1]||[];
-  const hasPrev = prev.some(r=>__isAuroraName__(r.activity));
-  const hasNext = next.some(r=>__isAuroraName__(r.activity));
-  return hasPrev || hasNext;
+
+function isConsecutiveAurora(city, day) {
+  const byDay = itineraries[city]?.byDay || {};
+  const prev = byDay[day - 1] || [], next = byDay[day + 1] || [];
+  return prev.some(r => __isAuroraName__(r.activity)) || next.some(r => __isAuroraName__(r.activity));
 }
-function enforceAuroraCapForDay(city, day, rows, cap){
+
+function enforceAuroraCapForDay(city, day, rows, cap) {
   const already = countAuroraNights(city);
-  const willAdd = rows.some(r=>__isAuroraName__(r.activity));
-  if(!willAdd) return rows;
-  if(isConsecutiveAurora(city, day)) {
-    return rows.filter(r=>!__isAuroraName__(r.activity));
-  }
-  if(already >= cap){
-    return rows.filter(r=>!__isAuroraName__(r.activity));
-  }
+  const willAdd = rows.some(r => __isAuroraName__(r.activity));
+  if (!willAdd) return rows;
+  if (isConsecutiveAurora(city, day)) return rows.filter(r => !__isAuroraName__(r.activity));
+  if (already >= cap) return rows.filter(r => !__isAuroraName__(r.activity));
   return rows;
 }
 
-/* === Helpers Sección 18 (quirúrgicos) === */
-
-// Determina si una fila es naturalmente nocturna (apto para cruce de día)
-function __isNightRow__(row){
-  const name = String(row.activity||'').toLowerCase();
-  const start = String(row.start||'');
-  const nightKW = /\bauroras?\b|\bnorthern\s+lights?\b|\bnight\b|\bnocturn/i;
-  const isAurora = nightKW.test(name);
-  const hh = /^(\d{1,2}):(\d{2})$/.exec(start);
-  const startM = hh ? (+hh[1])*60 + (+hh[2]) : null;
-  return isAurora || (startM!=null && startM >= 18*60);
+function enforceOneAuroraPerDay(rows) {
+  const byDay = {};
+  rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
+  const out = [];
+  Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
+    let seen = false;
+    for (const r of byDay[day]) {
+      if (__isAuroraName__(r.activity)) { if (seen) continue; seen = true; }
+      out.push(r);
+    }
+  });
+  return out;
 }
 
-// 🆕 Normaliza etiquetas de duración “decimales” → “h/m”
-function normalizeDurationLabel(row){
-  const r = { ...row };
-  const txt = String(r.duration||'').trim();
-  if(!txt) return r;
-
-  // "1.5h", "0.75h", "2h", "90m"
-  const dh = txt.match(/^(\d+(?:\.\d+)?)\s*h$/i);
-  const dm = txt.match(/^(\d+)\s*m$/i);
-
-  if(dh){
-    const hours = parseFloat(dh[1]);
-    const total = Math.round(hours*60);
-    const h = Math.floor(total/60);
-    const m = total%60;
-    r.duration = h>0 ? (m>0 ? `${h}h${m}m` : `${h}h`) : `${m}m`;
-    return r;
+/* ------------------------------------------------------------------
+   Poda de genéricos y limpieza de transporte post-Regreso
+------------------------------------------------------------------- */
+function pruneGenericPerDay(rows) {
+  const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
+  const out = [];
+  for (const d of Object.keys(byDay)) {
+    const list = byDay[d];
+    let seen = { desayuno: false, almuerzo: false, cena: false };
+    const dayHasContent = list.filter(r => !/d[ií]a\s*libre/i.test(String(r.activity || ''))).length >= 3;
+    for (const r of list) {
+      const a = String(r.activity || '').toLowerCase();
+      if (/desayuno\b/.test(a)) { if (seen.desayuno) continue; seen.desayuno = true; }
+      if (/almuerzo\b|comida\b/.test(a)) { if (seen.almuerzo) continue; seen.almuerzo = true; }
+      if (/cena\b/.test(a)) { if (seen.cena) continue; seen.cena = true; }
+      if (/d[ií]a\s*libre/.test(a) && dayHasContent) continue;
+      out.push(r);
+    }
   }
-  if(dm){ return r; }
+  return out;
+}
 
-  // Si vino "1h30" sin "m" normalizamos a "1h30m"
-  const hMix = txt.match(/^(\d+)h(\d{1,2})$/i);
-  if(hMix){
-    r.duration = `${hMix[1]}h${hMix[2]}m`;
+function clearTransportAfterReturn(city, rows) {
+  const cityLow = String(city || '').toLowerCase();
+  let afterReturn = false;
+  return rows.map(r => {
+    const act = String(r.activity || '').toLowerCase();
+    const to = String(r.to || '').toLowerCase();
+    if (/regreso/.test(act) || (to.includes('hotel') && to.includes(cityLow))) { afterReturn = true; return r; }
+    if (afterReturn && !isOutOfTownRow(city, r)) {
+      return { ...r, transport: (r.transport && /pie|metro|bus|uber|taxi/i.test(r.transport)) ? r.transport : 'A pie' };
+    }
     return r;
-  }
-  return r;
+  });
 }
 
-// Normaliza ventana de auroras (si viniera incompleta)
-function normalizeAuroraWindow(row){
-  const isAurora = __isAuroraName__(row.activity);
-  if(!isAurora) return row;
-
-  const toMin = t => { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
-  const toHH = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
-
-  let s = toMin(row.start||"20:30");
-  let e = toMin(row.end||"02:00");
-  if(s==null) s = 20*60+30;
-  if(e==null) e = 2*60;
-
-  if(s < 18*60) s = 18*60;
-  if(e <= s) e += 24*60;
-  if((e - s) < 4*60) e = s + 4*60;
-  if(e < (24*60 + 30)) e = Math.max(e, 24*60 + 30);
-
-  const durMin = e - s;
-  const durLbl = durMin >= 60
-    ? `${Math.floor(durMin/60)}h${(durMin%60? ' '+(durMin%60)+'m' : '')}`
-    : `${durMin}m`;
-
-  const cross = e >= 24*60;
-  return { ...row, start: toHH(s), end: toHH(e), duration: durLbl, _crossDay: !!cross };
-}
-
-// Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
-// ⚠️ PATCH TABS-SAFE: NO cambia el "day" de la fila; sólo horarios.
-function fixOverlaps(rows){
-  const toMin = t => { const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
-  const toHH  = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
-  const durMin = d => {
-    if(!d) return 0;
+/* ------------------------------------------------------------------
+   Overlaps & orden tabs-safe (no altera "day")
+------------------------------------------------------------------- */
+function fixOverlaps(rows) {
+  const toMin = __toMinHHMM__;
+  const toHH = __toHHMMfromMin__;
+  const durMin = (d) => {
+    if (!d) return 0;
     const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-    if(m) return parseInt(m[1],10)*60 + (m[2]?parseInt(m[2],10):0);
+    if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
     const m2 = String(d).match(/(\d+)\s*m/i);
-    if(m2) return parseInt(m2[1],10);
+    if (m2) return parseInt(m2[1], 10);
     return 0;
   };
 
-  const expanded = rows.map(r=>{
-    let s = toMin(r.start||"");
-    let e = toMin(r.end||"");
-    const d = durMin(r.duration||"");
+  const expanded = rows.map(r => {
+    let s = toMin(r.start || '');
+    let e = toMin(r.end || '');
+    const d = durMin(r.duration || '');
     let cross = false;
 
-    if(s!=null && (e==null || e<=s)){
-      if(__isNightRow__(r) || (d>0 && s>=18*60)){
-        e = (e!=null ? e : s + Math.max(d,60)) + 24*60;
+    if (s != null && (e == null || e <= s)) {
+      if (__isNightRow__(r) || (d > 0 && s >= 18 * 60)) {
+        e = (e != null ? e : s + Math.max(d, 60)) + 24 * 60;
         cross = true;
-      }else{
-        e = e!=null ? (e <= s ? s + Math.max(d,60) : e) : s + Math.max(d,60);
+      } else {
+        e = e != null ? (e <= s ? s + Math.max(d, 60) : e) : s + Math.max(d, 60);
       }
-    }else if(s==null && e!=null && d>0){
-      s = e - d;
-      if(s<0) s = 9*60;
-    }else if(s==null && e==null){
-      s = 9*60; e = s + 60;
+    } else if (s == null && e != null && d > 0) {
+      s = e - d; if (s < 0) s = 9 * 60;
+    } else if (s == null && e == null) {
+      s = 9 * 60; e = s + 60;
     }
 
-    return { __s:s, __e:e, __d:d, __cross:cross, raw:r };
+    return { __s: s, __e: e, __d: d, __cross: cross, raw: r };
   });
 
-  expanded.sort((a,b)=> (a.__s||0) - (b.__s||0));
+  expanded.sort((a, b) => (a.__s || 0) - (b.__s || 0));
 
   const out = [];
   let prevEnd = null;
-  for(const item of expanded){
-    let { __s:s, __e:e, __d:d, __cross:cross, raw:r } = item;
+  for (const item of expanded) {
+    let { __s: s, __e: e, __d: d, __cross: cross, raw: r } = item;
 
-    if(prevEnd!=null && s < prevEnd + 15){
+    if (prevEnd != null && s < prevEnd + 15) {
       const shift = (prevEnd + 15) - s;
       s += shift; e += shift;
     }
     prevEnd = Math.max(prevEnd ?? 0, e);
 
-    const finalDur = d>0 ? r.duration : `${Math.max(60, e - s)}m`;
+    const finalDur = d > 0 ? r.duration : `${Math.max(60, e - s)}m`;
 
-    out.push({
-      ...r,
-      start: toHH(s),
-      end: toHH(e),
-      duration: finalDur,
-      _crossDay: (r._crossDay || cross || e >= 24*60) ? true : false
-    });
+    const isNight = __isNightRow__(r);
+    if (isNight && s >= 24 * 60) { e -= 24 * 60; s -= 24 * 60; cross = true; }
+
+    const startHH = isNight ? toHH(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59)) : toHH(s);
+    const endHH = toHH(e);
+
+    out.push({ ...r, start: startHH, end: endHH, duration: finalDur, _crossDay: (r._crossDay || cross || e >= 24 * 60) ? true : false });
   }
   return out;
 }
 
-/* ---------------------------
-   PATCH A.1 — Unificador formato
----------------------------- */
-function unifyRowsFormat(parsed, preferCity){
-  if(!parsed) return { rows: [] };
-  if(Array.isArray(parsed.rows)) return { rows: parsed.rows };
-  if(Array.isArray(parsed.destinations)){
-    if(preferCity){
-      const dd = parsed.destinations.find(d=> (d.name||d.destination)===preferCity);
-      if(dd && Array.isArray(dd.rows)) return { rows: dd.rows };
-    }
-    const first = parsed.destinations.find(d=>Array.isArray(d.rows));
-    if(first) return { rows: first.rows };
-  }
-  if(parsed.destination && Array.isArray(parsed.rows)) return { rows: parsed.rows };
-  if(Array.isArray(parsed.itineraries)){
-    const ii = preferCity
-      ? parsed.itineraries.find(x=> (x.city||x.name||x.destination)===preferCity)
-      : parsed.itineraries[0];
-    if(ii && Array.isArray(ii.rows)) return { rows: ii.rows };
-  }
-  return { rows: [] };
-}
-
-/* ---------------------------
-   Transporte/“fuera de ciudad” — GLOBAL (sin listas locales)
----------------------------- */
-function isOutOfTownRow(city, row){
-  const cityLow = String(city||'').toLowerCase();
-  const to = String(row.to||'').toLowerCase();
-  if(!to) return false;
-  return !to.includes(cityLow);
-}
-function enforceTransportAndOutOfTown(city, rows){
-  return rows.map(r=>{
-    if(r && r.transport) return r;
-    const out = isOutOfTownRow(city, r);
-    if(out){
-      return { ...r, transport: 'Vehículo alquilado o Tour guiado' };
-    }
-    return r;
-  });
-}
-
-/* ---------------------------
-   Helpers mínimos para tiempos (usados por overlaps)
----------------------------- */
-function __toMinHHMM__(t){
-  const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/);
-  if(!m) return null;
-  return parseInt(m[1],10)*60 + parseInt(m[2],10);
-}
-function __toHHMMfromMin__(m){
-  const mm = ((m%1440)+1440)%1440;
-  const h = Math.floor(mm/60), mi = mm%60;
-  return `${String(h).padStart(2,'0')}:${String(mi).padStart(2,'0')}`;
-}
-function __addMinutesSafe__(hhmm, add){
-  if(typeof addMinutes === 'function') return addMinutes(hhmm, add);
-  const s = __toMinHHMM__(hhmm)||540; // 09:00 fallback
-  return __toHHMMfromMin__(s + (add||0));
-}
-
-/* ---------------------------
-   (DEPRECATED) Retornos locales — compatibilidad
----------------------------- */
-function ensureReturnToCity(city, day, rows){ return rows; }
-function ensureEndReturnToHotel(rows){ return rows; }
-
-/* ---------------------------
-   PATCH TABS-SAFE: Normalizador de día sin alterar tabbing
----------------------------- */
-function __normalizeDayField__(city, r){
+function __normalizeDayField__(city, r) {
   let d = Number(r.day);
-  if(!Number.isFinite(d) || d < 1) d = 1;
+  if (!Number.isFinite(d) || d < 1) d = 1;
   const total = (itineraries[city]?.originalDays) || (cityMeta[city]?.days) || 0;
-  if(total > 0 && d > total) d = total;
+  if (total > 0 && d > total) d = total;
   return { ...r, day: d };
 }
-function __sortRowsTabsSafe__(rows){
-  return [...rows].sort((a,b)=>{
-    const da = Number(a.day)||1, db = Number(b.day)||1;
-    if(da !== db) return da - db;
-    const sa = __toMinHHMM__(a.start)||0, sb = __toMinHHMM__(b.start)||0;
-    return sa - sb;
+
+function __sortRowsTabsSafe__(rows) {
+  return [...rows].sort((a, b) => {
+    const da = Number(a.day) || 1, db = Number(b.day) || 1;
+    if (da !== db) return da - db;
+    const sa = __toMinHHMM__(a.start) || 0, sb = __toMinHHMM__(b.start) || 0;
+    const wa = (a._crossDay && sa < 360) ? sa + 24 * 60 : sa;
+    const wb = (b._crossDay && sb < 360) ? sb + 24 * 60 : sb;
+    return wa - wb;
   });
 }
 
-/* ---------------------------
-   🆕 Tabs-safe: inserta retorno a ciudad si detecta day-trip sin retorno
----------------------------- */
-function ensureReturnRow(city, rows){
+/* ------------------------------------------------------------------
+   “Regreso a {city}” en day-trips (sin duplicar si ya existe)
+------------------------------------------------------------------- */
+function ensureReturnRow(city, rows) {
   const byDay = {};
-  for(const r of rows){
-    const d = Number(r.day)||1;
-    (byDay[d] = byDay[d] || []).push(r);
-  }
+  for (const r of rows) { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); }
   const out = [];
-  const cityLbl = String(city||'').trim();
-
-  Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
+  const cityLbl = String(city || '').trim();
+  Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
     const list = byDay[day].slice();
     const hasOut = list.some(r => isOutOfTownRow(city, r));
-    const hasReturn = list.some(r => /regreso\s+a\s+/i.test(String(r.activity||'')) || /hotel/i.test(String(r.to||'')));
-    if(hasOut && !hasReturn){
-      const startBase = (cityMeta[city]?.perDay?.find(x=>x.day===day)?.start) || DEFAULT_START;
-      const endBase   = (cityMeta[city]?.perDay?.find(x=>x.day===day)?.end)   || DEFAULT_END;
-      const lastEnd   = list.reduce((mx,r)=> Math.max(mx, __toMinHHMM__(r.end)||0), __toMinHHMM__(endBase)||1140);
-      const startRet  = __toHHMMfromMin__(Math.max(lastEnd, __toMinHHMM__(endBase)||1140));
-      const endRet    = __addMinutesSafe__(startRet, 45);
+    const hasReturn = list.some(r => {
+      const act = String(r.activity || '').toLowerCase();
+      const to = String(r.to || '').toLowerCase();
+      const cty = String(cityLbl || '').toLowerCase();
+      return /regreso/.test(act) || (to.includes('hotel') && to.includes(cty));
+    });
+    if (hasOut && !hasReturn) {
+      const endBase = (cityMeta[city]?.perDay?.find(x => x.day === day)?.end) || DEFAULT_END || '19:00';
+      const lastEnd = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__(endBase) || 1140);
+      const startRet = __toHHMMfromMin__(Math.max(lastEnd, __toMinHHMM__(endBase) || 1140));
+      const endRet = __addMinutesSafe__(startRet, 45);
       list.push({
         day,
         start: startRet,
         end: endRet,
         activity: `Regreso a ${cityLbl}`,
-        from: list[list.length-1]?.to || 'Excursión',
+        from: list[list.length - 1]?.to || 'Excursión',
         to: `Hotel (${cityLbl})`,
         transport: 'Vehículo alquilado o Tour guiado',
         duration: '45m',
@@ -2674,263 +2669,176 @@ function ensureReturnRow(city, rows){
   return out;
 }
 
-/* ---------------------------
-   🆕 Tabs-safe: inserta “Cena” si preferencia global y falta slot 19:00–21:30
----------------------------- */
-function injectDinnerIfMissing(city, rows){
-  if(!plannerState?.preferences?.alwaysIncludeDinner) return rows;
-
-  const byDay = {};
-  for(const r of rows){
-    const d = Number(r.day)||1;
-    (byDay[d] = byDay[d] || []).push(r);
-  }
-  const out = [];
-  Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
-    const list = byDay[day].slice().sort((a,b)=> (__toMinHHMM__(a.start)||0) - (__toMinHHMM__(b.start)||0));
-    const hasDinner = list.some(r => /cena\b/i.test(String(r.activity||'')));
-    if(!hasDinner){
-      const dayEnd = list.reduce((mx,r)=> Math.max(mx, __toMinHHMM__(r.end)||0), __toMinHHMM__(DEFAULT_END)||1140);
-      let s = Math.max(__toMinHHMM__('19:00')||1140, Math.min(dayEnd, __toMinHHMM__('21:15')||1275));
-      if(s < __toMinHHMM__('19:00')) s = __toMinHHMM__('19:00');
-      const start = __toHHMMfromMin__(s);
-      const end   = __addMinutesSafe__(start, 75);
-      list.push({
-        day,
-        start,
-        end,
-        activity: 'Cena',
-        from: list[list.length-1]?.to || 'Centro',
-        to: 'Restaurante local',
-        transport: 'A pie',
-        duration: '1h15m',
-        notes: 'Reserva sugerida si es un sitio popular.'
-      });
-      list.sort((a,b)=> (__toMinHHMM__(a.start)||0) - (__toMinHHMM__(b.start)||0));
-    }
-    out.push(...list);
-  });
-  return out;
-}
-
-/* ---------------------------
-   NEW: Recolector de contexto completo para INFO
----------------------------- */
-function __collectPlannerContext__(city, day){
-  const byDay = itineraries[city]?.byDay || {};
-  const totalDays = Object.keys(byDay).length || 0;
-  const meta = cityMeta[city] || {};
-  const perDay = (meta.perDay||[]).map(x=>({ day:x.day, start:x.start||DEFAULT_START, end:x.end||DEFAULT_END }));
-  const currentRows = (byDay[day]||[]).map(r=>({
-    day, start:r.start||'', end:r.end||'', activity:r.activity||'',
-    from:r.from||'', to:r.to||'', transport:r.transport||'',
-    duration:r.duration||'', notes:r.notes||''
-  }));
-
-  return {
-    city,
-    country: meta.country || '',
-    base_date: meta.baseDate || '',
-    days_total: totalDays,
-    hotel_address: meta.hotel || '',
-    transport_preferred: meta.transport || (plannerState?.preferences?.transport || ''),
-    windows: perDay,
-    current_day: day,
-    current_rows: currentRows,
-    travelers: plannerState?.travelers || {},
-    pace: plannerState?.pace || '',
-    budget: plannerState?.budget || '',
-    preferences: { ...(plannerState?.preferences||{}) },
-    special_conditions: { ...(plannerState?.conditions||{}) },
-    all_cities: (savedDestinations||[]).map(c=>({ city:c.city, days:c.days, baseDate:c.baseDate })),
-    rules: {
-      max_substops_per_tour: 8,
-      optimize_order_by_distance_and_time: true,
-      respect_user_preferences_and_conditions: true,
-      avoid_duplicates_across_days: true
-    }
-  };
-}
-
-/* ---------------------------
-   🆕 FIX INFO-CHAT EXTERNO: fetch robusto a /api/chat con timeout y reintentos
-   - Centraliza llamadas para INFO y PLANNER (y reutilizable por Info Chat UI).
----------------------------- */
-async function callApiChat(mode, payload, opt={}){
-  const timeoutMs = Number(opt.timeoutMs)||30000; // 30s
-  const retries   = Number(opt.retries)||1;       // 1 reintento por defecto
-  const endpoint  = '/api/chat';
-
-  let body = { mode, ...payload, source: 'planner', ui: 'itbmo', ts: Date.now() };
-
-  try {
-    if(body.research_json && typeof body.research_json === 'object'){
-      const str = JSON.stringify(body.research_json);
-      if(str.length > 250_000){
-        body.research_json = { ...(body.research_json||{}), _trimmed: true };
+/* ------------------------------------------------------------------
+   Inyección de cena (respeta preferencia global)
+------------------------------------------------------------------- */
+if (typeof injectDinnerIfMissing !== 'function') {
+  function injectDinnerIfMissing(city, rows) {
+    const prefer = plannerState?.preferences?.alwaysIncludeDinner;
+    if (!prefer) return rows;
+    const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
+    const out = [];
+    Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
+      const list = byDay[day].slice();
+      const hasDinner = list.some(r => /cena\b/i.test(String(r.activity || '')));
+      if (!hasDinner) {
+        const endMax = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__('19:30'));
+        const start = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
+        const end = __addMinutesSafe__(start, 75);
+        list.push({
+          day,
+          start,
+          end,
+          activity: 'Cena',
+          from: 'Centro',
+          to: 'Restaurante local',
+          transport: 'A pie',
+          duration: '1h15m',
+          notes: 'Reserva sugerida si es sitio popular.'
+        });
       }
-    }
-  } catch(_) {}
+      out.push(...list);
+    });
+    return out;
+  }
+}
 
-  const doFetch = () => new Promise((resolve, reject)=>{
+/* ------------------------------------------------------------------
+   Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
+------------------------------------------------------------------- */
+if (typeof callApiChat !== 'function') {
+  async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
     const controller = new AbortController();
-    const t = setTimeout(()=> controller.abort(), timeoutMs);
-    fetch(endpoint, {
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Accept':'application/json',
-        'X-ITBMO-Client':'planner',
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    })
-    .then(async (res)=>{
-      clearTimeout(t);
-      if(!res.ok){
-        const text = await res.text().catch(()=> '');
-        const err  = new Error(`API ${endpoint} ${res.status}`);
-        err.payload = text;
-        throw err;
-      }
-      // Preferimos JSON; si falla, devolvemos texto crudo envuelto
-      try {
-        const j = await res.json();
-        resolve(j);
-      } catch(e){
-        const text = await res.text().catch(()=> '');
-        resolve(text ? { text } : {});
-      }
-    })
-    .catch((err)=>{ clearTimeout(t); reject(err); });
-  });
-
-  let attempt = 0;
-  while(true){
-    try{
-      const resp = await doFetch();
-      return resp;
-    }catch(err){
-      attempt++;
-      if(attempt > retries) throw err;
-      await new Promise(r=>setTimeout(r, 400 + Math.random()*600));
-    }
-  }
-}
-
-/* ---------------------------
-   🆕 Limpieza/parseo seguro para respuestas del API
----------------------------- */
-function safeParseApiText(any){
-  // 1) Si ya es objeto con forma JSON, úsalo
-  if(any && typeof any === 'object'){
-    // Algunas rutas devuelven { text: "<json>" }
-    if(typeof any.text === 'string'){
-      try { return JSON.parse(any.text); } catch {}
-    }
-    return any;
-  }
-  // 2) Si es string, intenta parseo robusto
-  if(typeof any === 'string'){
-    try { return JSON.parse(any); } catch {}
+    const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      if(typeof cleanToJSONPlus === 'function'){
-        const v = cleanToJSONPlus(any);
-        if(v) return v;
-      }
-    } catch {}
-    return {};
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({ mode, ...payload })
+      });
+      clearTimeout(id);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      return data; // { text: "..."}
+    } catch (e) {
+      clearTimeout(id);
+      if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
+      throw e;
+    }
   }
-  return {};
 }
 
-/* ================= MAIN: optimizeDay (flujo INFO → PLANNER) ================= */
-async function optimizeDay(city, day){
+/* ------------------------------------------------------------------
+   Parse seguro de respuestas del API y unificador
+------------------------------------------------------------------- */
+if (typeof safeParseApiText !== 'function') {
+  function safeParseApiText(txt) {
+    if (!txt) return {};
+    if (typeof txt === 'object') return txt;
+    try { return JSON.parse(String(txt)); } catch { return { text: String(txt) }; }
+  }
+}
+if (typeof unifyRowsFormat !== 'function') {
+  function unifyRowsFormat(obj, city) {
+    if (!obj) return { rows: [] };
+    if (Array.isArray(obj.rows)) return obj;
+    if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
+    // a veces viene como {days:[{day:1, rows:[...]}]}
+    if (Array.isArray(obj.days)) {
+      const rows = [];
+      for (const d of obj.days) {
+        const dayNum = Number(d.day) || 1;
+        (d.rows || []).forEach(r => rows.push({ ...r, day: r.day || dayNum }));
+      }
+      return { rows };
+    }
+    return { rows: [] };
+  }
+}
+
+/* ------------------------------------------------------------------
+   VALIDACIÓN con agente (si no existe, pasa-through)
+------------------------------------------------------------------- */
+if (typeof validateRowsWithAgent !== 'function') {
+  async function validateRowsWithAgent(city, rows, baseDate) {
+    try {
+      const resp = await callApiChat('planner', { validate: true, city, baseDate, rows }, { timeoutMs: 22000, retries: 0 });
+      const parsed = safeParseApiText(resp?.text ?? resp);
+      if (Array.isArray(parsed?.allowed)) return parsed;
+      return { allowed: rows, rejected: [] };
+    } catch {
+      return { allowed: rows, rejected: [] };
+    }
+  }
+}
+
+/* ------------------------------------------------------------------
+   OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
+------------------------------------------------------------------- */
+async function optimizeDay(city, day) {
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
-  // Filas existentes del día (para fallback y protegidas)
-  const rows = (data?.byDay?.[day]||[]).map(r=>({
-    day,start:r.start||'',end:r.end||'',activity:r.activity||'',
-    from:r.from||'',to:r.to||'',transport:r.transport||'',
-    duration:r.duration||'',notes:r.notes||'', _crossDay: !!r._crossDay
+  const rows = (data?.byDay?.[day] || []).map(r => ({
+    day, start: r.start || '', end: r.end || '', activity: r.activity || '',
+    from: r.from || '', to: r.to || '', transport: r.transport || '',
+    duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
   }));
-  const protectedRows = rows.filter(r=>{
-    const act=(r.activity||'').toLowerCase();
-    return act.includes('laguna azul')||act.includes('blue lagoon');
+
+  // Protección de filas “fijas” (ej. Blue Lagoon)
+  const protectedRows = rows.filter(r => {
+    const act = (r.activity || '').toLowerCase();
+    return act.includes('laguna azul') || act.includes('blue lagoon');
   });
 
-  try{
-    // 1) INFO (robusto)
-    const context = __collectPlannerContext__(city, day);
-    const infoRaw  = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
-    const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw||'') };
+  try {
+    // 1) INFO
+    const context = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
+    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+    const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
     const research = safeParseApiText(infoData?.text ?? infoData);
 
-    // 2) PLANNER (robusto)
-    const plannerRaw  = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
-    const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw||'') };
-    const structured  = safeParseApiText(plannerData?.text ?? plannerData) || {};
+    // 2) PLANNER
+    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
+    const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
+    const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
 
-    // Unificar y normalizar
     const unified = unifyRowsFormat(structured, city);
-    let finalRows = (unified?.rows||[]).map(x=>normalizeRow({ ...x, day: (x.day||day) }));
+    let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
 
-    // ⚠️ PATCH TABS-SAFE: no alteramos day; sólo normalizamos tipo/rango
-    finalRows = finalRows.map(r => __normalizeDayField__(city, r));
-
-    if(typeof applyBufferBetweenRows==='function') finalRows = applyBufferBetweenRows(finalRows);
-    if(typeof reorderLinearVisits==='function')    finalRows = reorderLinearVisits(finalRows);
-
-    // Respetar auroras del research/planner
-    finalRows = finalRows.map(normalizeAuroraWindow);
-
-    // Transporte: sólo rellenamos si vinieron vacíos
-    finalRows = enforceTransportAndOutOfTown(city, finalRows);
-
-    // 🆕 Normaliza duraciones “decimales”
+    // === PIPELINE COHERENTE (mismas transformaciones que en 15.2) ===
     finalRows = finalRows.map(normalizeDurationLabel);
-
-    // Anti-solapes y cruce post-medianoche (sin mover day)
+    finalRows = finalRows.map(normalizeAuroraWindow);
+    finalRows = enforceOneAuroraPerDay(finalRows);
+    if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
     finalRows = fixOverlaps(finalRows);
-
-    // Reincorporar protegidas (mismo day)
-    if(protectedRows.length){
+    finalRows = finalRows.map(r => __normalizeDayField__(city, r));
+    if (protectedRows.length) {
       finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
       finalRows = fixOverlaps(finalRows);
     }
-
-    // 🆕 “Regreso a {city}” si aplica (tabs-safe)
     finalRows = ensureReturnRow(city, finalRows);
-
-    // 🆕 Cena si preferencia global y falta
-    finalRows = injectDinnerIfMissing(city, finalRows);
-
-    // Orden estable por day/start para que el renderer v75 cree tabs correctamente
+    finalRows = clearTransportAfterReturn(city, finalRows);
+    if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
+    finalRows = pruneGenericPerDay(finalRows);
     finalRows = __sortRowsTabsSafe__(finalRows);
 
-    // Validación final y volcado
+    // VALIDACIÓN
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
-    pushRows(city, val.allowed, false);
+    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+    try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-    try {
-      document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } }));
-    } catch(_) {}
-
-  }catch(e){
+  } catch (e) {
     console.error('optimizeDay INFO→PLANNER error:', e);
-
+    // Fallback conservador: ordenar/limpiar lo que ya había
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = __sortRowsTabsSafe__(fixOverlaps(safeRows));
-    safeRows = ensureReturnRow(city, safeRows);
-    safeRows = injectDinnerIfMissing(city, safeRows);
-
+    safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing(city, safeRows)));
+    safeRows = clearTransportAfterReturn(city, safeRows);
+    safeRows = __sortRowsTabsSafe__(safeRows);
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
-    pushRows(city, val.allowed, false);
-
-    try {
-      document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } }));
-    } catch(_) {}
+    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+    try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
   }
 }
 
