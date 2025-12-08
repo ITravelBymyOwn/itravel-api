@@ -3541,6 +3541,33 @@ document.addEventListener('itbmo:addDays', e=>{
 });
 
 /* ====== Info Chat ====== */
+// 🔧 SHIM QUIRÚRGICO: asegura uso del endpoint EXTERNO simple (texto libre)
+function __ensureInfoAgentClient__(){
+  // Defaults (respetan los ya definidos en el embed/plantilla)
+  window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
+  window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
+
+  // Si no existe, o si alguien coló un client que manda `context`, lo sobrescribimos con el mínimo.
+  const mustOverride = !window.callInfoAgent || window.callInfoAgent.__usesContext__;
+  if(mustOverride){
+    const simpleInfo = async function(userText){
+      const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        // ✅ Sólo mandamos el texto del usuario. Nada de `context`.
+        body: JSON.stringify({ input: String(userText || "") })
+      }).catch(()=>null);
+      if(!resp) return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
+      const data = await resp.json().catch(()=>({text:""}));
+      return data?.text || "⚠️ No se obtuvo respuesta del asistente.";
+    };
+    // flag para evitar que otra parte lo vuelva a sustituir por el que añade `context`
+    simpleInfo.__usesContext__ = false;
+    window.callInfoAgent = simpleInfo;
+  }
+}
+
 function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
 function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
 async function sendInfoMessage(){
@@ -3557,10 +3584,10 @@ function bindInfoChatListeners(){
   const input  = qs('#info-chat-input');
 
   // limpiar posibles dobles handlers si hubo rehidrataciones
-  toggleTop?.replaceWith(toggleTop.cloneNode(true));
-  toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
-  close?.replaceWith(close.cloneNode(true));
-  send?.replaceWith(send.cloneNode(true));
+  toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
+  toggleFloating?.replaceWith(toggleFloating?.cloneNode?.(true) || toggleFloating);
+  close?.replaceWith(close?.cloneNode?.(true) || close);
+  send?.replaceWith(send?.cloneNode?.(true) || send);
 
   const tTop = qs('#info-chat-toggle');
   const tFloat = qs('#info-chat-floating');
@@ -3600,6 +3627,10 @@ function bindInfoChatListeners(){
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+  // ⛑️ Garantiza Info Chat externo simple antes de bindear los listeners
+  __ensureInfoAgentClient__();
+
   bindInfoChatListeners();
   bindReset();
   // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
