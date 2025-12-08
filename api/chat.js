@@ -78,6 +78,7 @@ function normalizeDurationsInParsed(parsed){
   const norm = (txt)=>{
     const s = String(txt||'').trim();
     if(!s) return s;
+    // ~7h → conserva, 2h → 2h, 1.5h → 1h30m, 90m → 90m (se respeta)
     const dh = s.match(/^(\d+(?:\.\d+)?)\s*h$/i);
     const hMix = s.match(/^(\d+)h(\d{1,2})$/i);
     if(dh){
@@ -221,8 +222,8 @@ SALIDA — JSON ÚNICO (sin texto fuera):
       "duration": "45m",
       "leg_from_prev": "15m desde hotel (A pie/Taxi)",
       "kind": "icónico",
-      "start": "09:15",         // INCLUIR si ya estimaste horarios de actividad
-      "end": "10:00"            // INCLUIR si ya estimaste horarios de actividad
+      "start": "09:15",
+      "end": "10:00"
     },
     {
       "day": 2,
