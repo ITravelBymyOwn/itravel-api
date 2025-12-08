@@ -1537,10 +1537,9 @@ function showWOW(on, msg){
 
 /* ==============================
    SECCIÓN 15.2 · Bridge de Red / Agentes (Info-first → Planner)
-   v75.fix — Restauración render inmediato + red estable
-   + PATCH botón “Guardar destinos” (null-safety y habilitación robusta del inicio)
-   - Mantiene toda la lógica Info-first / Planner intacta.
-   - Añade handleSaveDestinations() con render inmediato de ciudades al guardar.
+   v75.fix2 — Restauración de scaffold + render inmediato tras "Guardar destinos"
+   - Fuerza montaje del panel derecho (tabs + cabecera de tabla)
+   - Mantiene lógica Info-first / Planner y cachés
 ================================= */
 
 /* ---------- Configuración de red ---------- */
@@ -1573,9 +1572,9 @@ function __normCityKey__(name){
 function parseJSON(raw){
   if(!raw) return null;
 
-  // 🆕 Prioriza el objeto del API cuando viene como { text, json, ... }
+  // Si el backend adjunta un JSON parseado, úsalo
   if(typeof raw === 'object'){
-    if (raw && raw.json) return raw.json; // 👈 usa el JSON ya parseado del backend
+    if (raw && raw.json) return raw.json;
     try{ return JSON.parse(JSON.stringify(raw)); }catch{ return raw; }
   }
 
@@ -1634,13 +1633,12 @@ async function callAgent(prompt,forceJSON=true,meta={}){
   const base=String(meta.baseDate||'');
   const cacheKey=__stringHash__(`[P]${p}#${c}#${base}#${forceJSON?'J':'F'}`);
 
-  // 🆕 Cachea y devuelve el objeto entero (no sólo texto)
+  // cachea el objeto completo de la respuesta del backend
   if(plannerCache[cacheKey]&&(Date.now()-plannerCache[cacheKey].at)<3*60*1000){
     return plannerCache[cacheKey].data;
   }
   const payload={mode:'planner',messages:[{role:'user',content:p}]};
   const data=await fetchJSON(API_CHAT_ENDPOINT,payload,NET_TIMEOUT_PLANNER_MS);
-  // El backend devuelve p.ej.: { text: "...", json: {...}, usage: {...}, ... }
   plannerCache[cacheKey]={data,at:Date.now()};
   return data;
 }
@@ -1656,20 +1654,10 @@ function __mkResearchHint__(city){
 }
 
 /* =====================================================
-   🔁 handleSaveDestinations — Restauración del render inmediato
-   (Reinstala comportamiento original al guardar)
-   + PATCH: null-safety de elementos y habilitación robusta de “Iniciar planificación”
+   🔁 handleSaveDestinations — Render inmediato + scaffold forzado
 ===================================================== */
 async function handleSaveDestinations(){
-  // Null-safety para $cityList
-  const cityList = (typeof $cityList !== 'undefined' && $cityList) ? $cityList
-                   : document.getElementById('city-list') || document.querySelector('[data-city-list]') || null;
-  if(!cityList){
-    alert('No se encontró la lista de ciudades en el DOM.');
-    return;
-  }
-
-  const rows=[...cityList.querySelectorAll('.city-row,[data-city-row]')];
+  const rows=[...$cityList.querySelectorAll('.city-row')];
   if(!rows.length){
     alert('Por favor, agrega al menos una ciudad.');
     return;
@@ -1687,58 +1675,49 @@ async function handleSaveDestinations(){
     return;
   }
 
+  // Persistimos y desbloqueamos botones principales
   savedDestinations=newDestinations;
-  try{ persistState && persistState('destinations',savedDestinations); }catch(_){}
+  persistState('destinations',savedDestinations);
 
-  // Deshabilitar inputs de la tabla (null-safe)
-  try{ cityList.querySelectorAll('input,select,button').forEach(el=>el.disabled=true); }catch(_){}
+  $cityList.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);
+  if($saveBtn)  $saveBtn.disabled=true;
+  if($resetBtn) $resetBtn.disabled=false;
+  if($startBtn) $startBtn.disabled=false;
 
-  // Botones (null-safe)
-  try{ if(typeof $saveBtn  !== 'undefined' && $saveBtn ) $saveBtn.disabled  = true; }catch(_){}
-  try{ if(typeof $resetBtn !== 'undefined' && $resetBtn) $resetBtn.disabled = false; }catch(_){}
-
-  // Habilitar “Iniciar planificación” por id o data-attr si $startBtn no existe
-  const startBtn =
-    (typeof $startBtn !== 'undefined' && $startBtn) ? $startBtn :
-    document.getElementById('start-planning') ||
-    document.querySelector('[data-action="start-planning"]') ||
-    null;
-  if(startBtn){
-    startBtn.disabled = false;
-    startBtn.classList?.remove('is-disabled');
-    startBtn.removeAttribute?.('aria-disabled');
-  }
-
-  chatMsg('✈️ Destinos guardados. Generando estructura base del itinerario…','ai');
+  chatMsg('✈️ Destinos guardados. Preparando la estructura base…','ai');
 
   try{
-    // Null-safe contenedores
-    try{ if($cityTabs) $cityTabs.innerHTML=''; }catch(_){}
-    try{ if($itineraryBody) $itineraryBody.innerHTML=''; }catch(_){}
-
+    // Limpia estado y DOM previos
     itineraries={};
     cityMeta={};
+    if($cityTabs)      $cityTabs.innerHTML='';
+    if($itineraryBody) $itineraryBody.innerHTML='';
 
+    // ⚙️ Asegura el scaffold del panel derecho (tabs + cabecera de la tabla)
+    if(typeof ensureItineraryScaffold==='function'){
+      ensureItineraryScaffold();           // ← build de header/footers/paginación
+    }else if(typeof initItineraryUI==='function'){
+      initItineraryUI();                   // ← nombre alterno en builds previas
+    }
+
+    // Crea estructura por cada ciudad (tabs + placeholder por días)
     for(const dest of savedDestinations){
       const {city,days,baseDate}=dest;
       itineraries[city]={byDay:{},baseDate};
       cityMeta[city]={baseDate,hotel:'',transport:'',perDay:[]};
-      try{ createCityTab && createCityTab(city); }catch(_){}
-      try{ renderCityItinerary && renderCityItinerary(city,{placeholder:true,days,baseDate}); }catch(_){}
+      if(typeof createCityTab==='function')      createCityTab(city);
+      if(typeof renderCityItinerary==='function') renderCityItinerary(city,{placeholder:true,days,baseDate});
     }
 
+    // Refresca tabs y activa la primera ciudad
     if(savedDestinations.length){
       const firstCity=savedDestinations[0].city;
-      try{ setActiveCity && setActiveCity(firstCity); }catch(_){}
-      try{ renderCityItinerary && renderCityItinerary(firstCity,{placeholder:true}); }catch(_){}
+      if(typeof renderCityTabs==='function') renderCityTabs();
+      if(typeof setActiveCity==='function')  setActiveCity(firstCity);
+      if(typeof renderCityItinerary==='function') renderCityItinerary(firstCity,{placeholder:true});
     }
 
-    // Evento opcional para otros listeners
-    try{
-      document.dispatchEvent(new CustomEvent('destinations:saved',{detail:{destinations:[...savedDestinations]}}));
-    }catch(_){}
-
-    chatMsg('🗺️ Estructura de itinerario lista. Pulsa “Iniciar planificación” para continuar.','ai');
+    chatMsg('🗺️ Estructura lista. Pulsa “Iniciar planificación” para generar con IA.','ai');
   }catch(err){
     console.error('Error en render inicial:',err);
     chatMsg('⚠️ Ocurrió un problema al generar las tablas base. Intenta de nuevo.','ai');
@@ -2006,10 +1985,9 @@ Reglas duras:
 
 /* ==============================
    SECCIÓN 16 · Flujo principal de planificación
-   v75.relink — Totalmente compatible con API v42.1 y nuevas secciones 15.x
-   - Controla el flujo “Iniciar planificación”
-   - Solicita datos de hospedaje/transporte
-   - Dispara generateCityItinerary()
+   v75.relink.fix — Compatible con scaffold inmediato (15.2) y API v42.1
+   - Usa el panel ya renderizado (tabs + tabla)
+   - Solicita hotel/transporte y lanza generateCityItinerary()
 ================================= */
 
 /* ---------- Variables de control ---------- */
@@ -2023,7 +2001,6 @@ async function startPlanning(){
     alert('Primero guarda los destinos antes de planificar.');
     return;
   }
-
   if(planningInProgress){
     alert('La planificación ya está en curso.');
     return;
@@ -2040,17 +2017,23 @@ async function startPlanning(){
       currentPlanningIndex = i;
       const cityObj = planningQueue[i];
       const cityName = cityObj.city;
+
+      // Asegura que la pestaña/tabla de la ciudad esté visible
+      if(typeof setActiveCity==='function') setActiveCity(cityName);
+      if(typeof renderCityItinerary==='function') renderCityItinerary(cityName,{placeholder:true});
+
       showWOW(true, `Configurando ${cityName}…`);
 
+      // 1) Pregunta hotel/zona + transporte (bloquea avance hasta obtenerlos)
       await askNextHotelTransport(cityObj);
 
-      // 🚀 Genera itinerario para la ciudad
+      // 2) Genera itinerario con IA para la ciudad actual
       await generateCityItinerary(cityName);
 
       chatMsg(`✅ Itinerario de ${cityName} generado exitosamente.`,'ai');
     }
 
-    chatMsg('✨ Planificación completa. Puedes ajustar días o actividades desde el chat o los botones del planner.','ai');
+    chatMsg('✨ Planificación completa. Ajusta días o actividades cuando gustes.','ai');
   }catch(err){
     console.error('[startPlanning] error:',err);
     chatMsg('⚠️ Ocurrió un error al planificar. Revisa la consola para más detalles.','ai');
@@ -2062,48 +2045,38 @@ async function startPlanning(){
 
 /* ============================================================
    askNextHotelTransport(dest)
-   — Solicita hotel y transporte al usuario antes de generar itinerario.
+   — Solicita hotel y transporte (previo a la generación IA)
 ============================================================ */
 async function askNextHotelTransport(dest){
   if(!dest) return;
-  const { city, days, baseDate } = dest;
+  const { city, baseDate } = dest;
   const key = city;
 
   chatMsg(`🏨 ¿En qué zona te hospedarás en ${city}? (ej: centro, playa, barrio histórico, etc.)`,'ai');
-
   const hotel = await askUserInput(`Zona o área de hospedaje en ${city}:`);
   cityMeta[key] = cityMeta[key] || {};
-  cityMeta[key].hotel = hotel?.trim() || 'Zona central';
+  cityMeta[key].hotel = (hotel||'').trim() || 'Zona central';
   cityMeta[key].baseDate = baseDate || '';
 
   chatMsg(`🚗 ¿Cómo te desplazarás en ${city}? (auto, transporte público, tour, etc.)`,'ai');
-
   const transport = await askUserInput(`Medio de transporte principal en ${city}:`);
-  cityMeta[key].transport = transport?.trim() || 'A pie';
+  cityMeta[key].transport = (transport||'').trim() || 'A pie';
 
   persistState('cityMeta', cityMeta);
   chatMsg(`Gracias. Ahora generaré el itinerario para ${city}.`, 'ai');
-
-  // Genera el itinerario tras definir hotel/transporte
-  await generateCityItinerary(city);
 }
 
 /* ============================================================
-   askUserInput(promptMsg)
-   — Helper genérico para input en ventana modal.
+   askUserInput(promptMsg) — Helper simple por prompt()
 ============================================================ */
 function askUserInput(promptMsg){
   return new Promise(resolve=>{
-    setTimeout(()=>{
-      const val = prompt(promptMsg||'Ingrese un valor:') || '';
-      resolve(val.trim());
-    }, 300);
+    setTimeout(()=>resolve((prompt(promptMsg||'Ingrese un valor:')||'').trim()),300);
   });
 }
 
 /* ============================================================
-   resetPlannerFlow()
-   — Restablece el estado de planificación sin perder destinos.
+   resetPlannerFlow() — Restablece flujo sin borrar destinos
 ============================================================ */
 function resetPlannerFlow(){
   planningInProgress = false;
