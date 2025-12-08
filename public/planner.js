@@ -2321,12 +2321,15 @@ function normalizeCityForGeo(name){
 }
 
 /* === Utilidades auroras (tope no-consecutivo) — mantenidas por compatibilidad === */
+function __isAuroraName__(txt){
+  return /\bauroras?\b|\bnorthern\s+lights?\b/i.test(String(txt||''));
+}
 function countAuroraNights(city){
   const byDay = itineraries[city]?.byDay || {};
   let c=0;
   for(const d of Object.keys(byDay)){
     const rows = byDay[d]||[];
-    if(rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')))) c++;
+    if(rows.some(r=>__isAuroraName__(r.activity))) c++;
   }
   return c;
 }
@@ -2339,19 +2342,19 @@ function isConsecutiveAurora(city, day){
   const byDay = itineraries[city]?.byDay||{};
   const prev = byDay[day-1]||[];
   const next = byDay[day+1]||[];
-  const hasPrev = prev.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-  const hasNext = next.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+  const hasPrev = prev.some(r=>__isAuroraName__(r.activity));
+  const hasNext = next.some(r=>__isAuroraName__(r.activity));
   return hasPrev || hasNext;
 }
 function enforceAuroraCapForDay(city, day, rows, cap){
   const already = countAuroraNights(city);
-  const willAdd = rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+  const willAdd = rows.some(r=>__isAuroraName__(r.activity));
   if(!willAdd) return rows;
   if(isConsecutiveAurora(city, day)) {
-    return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+    return rows.filter(r=>!__isAuroraName__(r.activity));
   }
   if(already >= cap){
-    return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
+    return rows.filter(r=>!__isAuroraName__(r.activity));
   }
   return rows;
 }
@@ -2362,7 +2365,7 @@ function enforceAuroraCapForDay(city, day, rows, cap){
 function __isNightRow__(row){
   const name = String(row.activity||'').toLowerCase();
   const start = String(row.start||'');
-  const nightKW = /\baurora\b|\bnorthern\s+lights?\b|\bnight\b|\bnocturn/i;
+  const nightKW = /\bauroras?\b|\bnorthern\s+lights?\b|\bnight\b|\bnocturn/i;
   const isAurora = nightKW.test(name);
   const hh = /^(\d{1,2}):(\d{2})$/.exec(start);
   const startM = hh ? (+hh[1])*60 + (+hh[2]) : null;
@@ -2400,7 +2403,7 @@ function normalizeDurationLabel(row){
 
 // Normaliza ventana de auroras (si viniera incompleta)
 function normalizeAuroraWindow(row){
-  const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
+  const isAurora = __isAuroraName__(row.activity);
   if(!isAurora) return row;
 
   const toMin = t => { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
@@ -2734,6 +2737,7 @@ async function callApiChat(mode, payload, opt={}){
         err.payload = text;
         throw err;
       }
+      // Preferimos JSON; si falla, devolvemos texto crudo envuelto
       try {
         const j = await res.json();
         resolve(j);
@@ -2762,15 +2766,25 @@ async function callApiChat(mode, payload, opt={}){
    🆕 Limpieza/parseo seguro para respuestas del API
 ---------------------------- */
 function safeParseApiText(any){
-  try {
-    if(typeof cleanToJSONPlus === 'function'){
-      return cleanToJSONPlus(any);
+  // 1) Si ya es objeto con forma JSON, úsalo
+  if(any && typeof any === 'object'){
+    // Algunas rutas devuelven { text: "<json>" }
+    if(typeof any.text === 'string'){
+      try { return JSON.parse(any.text); } catch {}
     }
-  } catch(_) {}
-  try {
-    if(typeof any === 'string') return parseJSON(any) || { text: any };
-    if(typeof any === 'object' && any) return any;
-  } catch(_) {}
+    return any;
+  }
+  // 2) Si es string, intenta parseo robusto
+  if(typeof any === 'string'){
+    try { return JSON.parse(any); } catch {}
+    try {
+      if(typeof cleanToJSONPlus === 'function'){
+        const v = cleanToJSONPlus(any);
+        if(v) return v;
+      }
+    } catch {}
+    return {};
+  }
   return {};
 }
 
@@ -2793,14 +2807,14 @@ async function optimizeDay(city, day){
   try{
     // 1) INFO (robusto)
     const context = __collectPlannerContext__(city, day);
-    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+    const infoRaw  = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
     const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw||'') };
-    const research = safeParseApiText(infoData?.text || infoData);
+    const research = safeParseApiText(infoData?.text ?? infoData);
 
     // 2) PLANNER (robusto)
-    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
+    const plannerRaw  = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
     const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw||'') };
-    const structured = safeParseApiText(plannerData?.text || plannerData) || {};
+    const structured  = safeParseApiText(plannerData?.text ?? plannerData) || {};
 
     // Unificar y normalizar
     const unified = unifyRowsFormat(structured, city);
@@ -3363,6 +3377,7 @@ document.addEventListener('input', (e)=>{
    SECCIÓN 21 · INIT y listeners
    (mantiene v55.1 + FIX: el botón “Iniciar planificación”
     **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
+   🛡️ Nota quirúrgica: se añade un pequeño guard para evitar doble-inicialización si el script se reinyecta.
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -3695,8 +3710,11 @@ function bindInfoChatListeners(){
   });
 }
 
-// Inicialización
+// Inicialización (con guard anti-doble init)
 document.addEventListener('DOMContentLoaded', ()=>{
+  if(window.__ITBMO_SECTION21_READY__) return;
+  window.__ITBMO_SECTION21_READY__ = true;
+
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
   // ⛑️ Garantiza Info Chat externo simple antes de bindear los listeners
