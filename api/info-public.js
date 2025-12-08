@@ -1,6 +1,6 @@
-// /api/info-public.js — v1.0.1 (ESM, Vercel)
-// Endpoint exclusivo para el Info Chat externo (widget flotante y botón superior).
-// Responde SIEMPRE en formato { text: "..." } para no romper la UI del planner.
+// /api/info-public.js — v1.1.1 (ESM, Vercel)
+// Info Chat EXTERNO: responde preguntas random de viaje (texto corto).
+// Siempre responde { text: "..." } para no romper la UI. Nada de JSON en el contenido.
 
 import OpenAI from "openai";
 
@@ -14,9 +14,11 @@ function parseBody(reqBody) {
   }
   return reqBody;
 }
+
 function extractMessages(body = {}) {
   const { messages, input, query, history, context } = body;
 
+  // Si ya vienen messages, se respetan tal cual
   if (Array.isArray(messages) && messages.length) return messages;
 
   const prev = Array.isArray(history) ? history : [];
@@ -25,8 +27,9 @@ function extractMessages(body = {}) {
     : typeof query === "string" ? query
     : "";
 
+  // El contexto (si llega) solo se pasa como ayudante, sin reglas del planner
   const ctxMsg = context
-    ? [{ role: "system", content: `Contexto del planner (si aplica): ${JSON.stringify(context)}` }]
+    ? [{ role: "system", content: `Contexto adicional (opcional): ${JSON.stringify(context)}` }]
     : [];
 
   return [
@@ -35,6 +38,7 @@ function extractMessages(body = {}) {
     { role: "user", content: userText }
   ];
 }
+
 async function callText(messages, temperature = 0.35, max_output_tokens = 700) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
@@ -52,14 +56,33 @@ async function callText(messages, temperature = 0.35, max_output_tokens = 700) {
   );
 }
 
-// ====== Prompt del Info Chat externo ======
+// Sanitizador: garantiza salida en TEXTO (sin JSON ni code fences)
+function sanitizeText(s) {
+  if (!s || typeof s !== "string") return s;
+  let out = s.trim();
+
+  // Quitar fences ```...```
+  if (out.startsWith("```")) {
+    out = out.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
+  }
+
+  // Si parece JSON, lo convertimos a resumen plano
+  if (/^[\[{]/.test(out)) {
+    out = `Resumen:\n${out}`;
+  }
+
+  return out;
+}
+
+// ====== Prompt del Info Chat EXTERNO (simple, sin reglas de itinerario) ======
 const SYSTEM_INFO_PUBLIC = `
-Eres **Astra · Info Chat** para viajeros. Responde de forma breve, clara y útil.
-- Idioma: responde en el mismo idioma del usuario (si no se detecta, usa español).
-- Sé específico y práctico (rangos horarios, ejemplos de transporte, costos aproximados, clima típico).
-- Si la pregunta es sobre auroras: indica meses probables, ventanas horarias y advertencias de clima/seguridad.
-- Evita enlaces con seguimiento. Si sugieres búsqueda, di qué buscar (términos concretos).
-- No devuelvas JSON, solo texto legible; máximo ~12 líneas. Usa viñetas cuando ayuden.
+Eres **Astra · Info Chat** para viajeros. Responde **solo texto**, breve y útil.
+- Idioma: el mismo del usuario (si no se detecta, usa español).
+- Estilo: concreto; máximo ~10–12 líneas. Usa viñetas cuando ayuden.
+- Incluye datos prácticos cuando aplique: rangos horarios, opciones de transporte, costos aproximados, clima típico, seguridad.
+- Auroras (si preguntan): meses probables, ventana nocturna típica y advertencias de clima/seguridad.
+- Si sugieres buscar algo, di **qué términos** usar (sin enlaces con tracking).
+- No devuelvas JSON ni bloques de código.
 `.trim();
 
 // ====== CORS helper ======
@@ -90,7 +113,7 @@ export default async function handler(req, res) {
     );
     if (!hasUser) {
       return res.status(200).json({
-        text: "Escríbeme una pregunta concreta (clima, transporte, costos, auroras, etc.) y te respondo al instante."
+        text: "Escríbeme tu duda de viaje (clima, transporte, costos, auroras, etc.) y te respondo al instante."
       });
     }
 
@@ -100,8 +123,9 @@ export default async function handler(req, res) {
       700
     );
 
-    const text = raw && raw.length > 0
-      ? raw
+    const safe = sanitizeText(raw);
+    const text = safe && safe.length > 0
+      ? safe
       : "No pude obtener una respuesta ahora. Verifica tu API Key/URL en Vercel e inténtalo de nuevo.";
 
     return res.status(200).json({ text });
