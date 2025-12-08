@@ -1,4 +1,4 @@
-// /api/info-public.js — v1.1.1 (ESM, Vercel)
+// /api/info-public.js — v1.1.2 (ESM, Vercel)
 // Info Chat EXTERNO: responde preguntas random de viaje (texto corto).
 // Siempre responde { text: "..." } para no romper la UI. Nada de JSON en el contenido.
 
@@ -56,6 +56,13 @@ async function callText(messages, temperature = 0.35, max_output_tokens = 700) {
   );
 }
 
+// Detección muy sencilla de "parece JSON"
+function looksLikeJSON(s) {
+  if (!s || typeof s !== "string") return false;
+  const t = s.trim();
+  return t.startsWith("{") || t.startsWith("[") || /^```json/i.test(t);
+}
+
 // Sanitizador: garantiza salida en TEXTO (sin JSON ni code fences)
 function sanitizeText(s) {
   if (!s || typeof s !== "string") return s;
@@ -66,9 +73,9 @@ function sanitizeText(s) {
     out = out.replace(/^```[a-zA-Z]*\n?/, "").replace(/```$/, "").trim();
   }
 
-  // Si parece JSON, lo convertimos a resumen plano
-  if (/^[\[{]/.test(out)) {
-    out = `Resumen:\n${out}`;
+  // Si aún parece JSON, solo resumimos declarativamente
+  if (looksLikeJSON(out)) {
+    out = "Aquí tienes la respuesta en términos prácticos (sin formato técnico).";
   }
 
   return out;
@@ -76,13 +83,23 @@ function sanitizeText(s) {
 
 // ====== Prompt del Info Chat EXTERNO (simple, sin reglas de itinerario) ======
 const SYSTEM_INFO_PUBLIC = `
-Eres **Astra · Info Chat** para viajeros. Responde **solo texto**, breve y útil.
+Eres **Astra · Info Chat** para viajeros. Responde **solo TEXTO**, breve y útil.
 - Idioma: el mismo del usuario (si no se detecta, usa español).
 - Estilo: concreto; máximo ~10–12 líneas. Usa viñetas cuando ayuden.
 - Incluye datos prácticos cuando aplique: rangos horarios, opciones de transporte, costos aproximados, clima típico, seguridad.
 - Auroras (si preguntan): meses probables, ventana nocturna típica y advertencias de clima/seguridad.
-- Si sugieres buscar algo, di **qué términos** usar (sin enlaces con tracking).
+- Si sugieres buscar algo, indica **qué términos** usar (sin enlaces con tracking).
 - No devuelvas JSON ni bloques de código.
+`.trim();
+
+// Versión estricta (segundo intento) para evitar cualquier JSON
+const SYSTEM_INFO_PUBLIC_STRICT = (base) => `
+${base}
+
+OBLIGATORIO:
+- Responde solamente TEXTO plano (sin JSON, sin code fences).
+- Si el usuario pide "cómo está el clima", da rangos y consejos prácticos en 4–8 líneas.
+- Nada de objetos { ... } ni arrays [ ... ].
 `.trim();
 
 // ====== CORS helper ======
@@ -117,11 +134,21 @@ export default async function handler(req, res) {
       });
     }
 
-    const raw = await callText(
+    // Primer intento (normal)
+    let raw = await callText(
       [{ role: "system", content: SYSTEM_INFO_PUBLIC }, ...clientMessages],
       0.35,
       700
     );
+
+    // Si el modelo devolvió algo con pinta de JSON, hacemos un segundo intento ESTRICTO
+    if (looksLikeJSON(raw)) {
+      raw = await callText(
+        [{ role: "system", content: SYSTEM_INFO_PUBLIC_STRICT(SYSTEM_INFO_PUBLIC) }, ...clientMessages],
+        0.3,
+        650
+      );
+    }
 
     const safe = sanitizeText(raw);
     const text = safe && safe.length > 0
