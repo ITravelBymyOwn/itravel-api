@@ -3377,7 +3377,8 @@ document.addEventListener('input', (e)=>{
    SECCIÓN 21 · INIT y listeners
    (mantiene v55.1 + FIX: el botón “Iniciar planificación”
     **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
-   🛡️ Nota quirúrgica: guard anti-doble init + aislamiento total del Info Chat externo.
+   🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
+   💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -3441,6 +3442,7 @@ function formHasBasics(){
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
+// Deshabilita start si rompen el formulario (ya no habilita automáticamente)
 document.addEventListener('input', (e)=>{
   if(!$start) return;
   if(e.target && (
@@ -3621,11 +3623,9 @@ function __ensureInfoAgentClient__(){
   const wrongClient = (fn)=>{
     if(typeof fn !== 'function') return true;
     const src = Function.prototype.toString.call(fn);
-    // Sospechoso si parece enviar context o llamar /api/chat o modos internos
     if(/\/api\/chat/.test(src)) return true;
     if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
     if(/context/.test(src)) return true;
-    // si no está marcado como client público
     if(fn.__source !== 'external-public-v1') return true;
     if(fn.__usesContext__ !== false) return true;
     return false;
@@ -3644,12 +3644,10 @@ function __ensureInfoAgentClient__(){
       }catch(_){
         return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
       }
-      // Siempre devolvemos TEXTO plano
       try{
         const data = await resp.json();
         let txt = (typeof data?.text === 'string') ? data.text : '';
         if(!txt || /^\s*\{/.test(txt)) {
-          // Si accidentalmente llega JSON, lo convertimos a frase corta para el usuario.
           try {
             const j = JSON.parse(txt);
             if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
@@ -3670,22 +3668,56 @@ function __ensureInfoAgentClient__(){
 
 function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
 function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+
+/* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
+function __infoTypingOn__(){
+  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
+  if(!box) return;
+  if(document.getElementById('info-typing')) return; // ya existe
+  const b = document.createElement('div');
+  b.id = 'info-typing';
+  b.className = 'bubble ai typing';
+  b.setAttribute('aria-live','polite');
+  b.textContent = '...';
+  box.appendChild(b);
+  let i = 0;
+  b.__timer = setInterval(()=>{
+    i = (i+1)%3;
+    b.textContent = '.'.repeat(i+1);
+  }, 400);
+  box.scrollTop = box.scrollHeight;
+}
+function __infoTypingOff__(){
+  const b = document.getElementById('info-typing');
+  if(!b) return;
+  if(b.__timer) clearInterval(b.__timer);
+  b.remove();
+}
+
 async function sendInfoMessage(){
   const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
   if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
   infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
-  const ans = await callInfoAgent(txt);
-  // Blindaje final: si por error llega JSON, lo limpiamos a texto antes de pintar
-  let out = ans;
-  if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
-  if(typeof out === 'string' && /^\s*\{/.test(out)){
-    try{
-      const j = JSON.parse(out);
-      out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
-    }catch{ /* deja out tal cual */ }
+
+  __infoTypingOn__();
+  try{
+    const ans = await callInfoAgent(txt);
+    let out = ans;
+    if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
+    if(typeof out === 'string' && /^\s*\{/.test(out)){
+      try{
+        const j = JSON.parse(out);
+        out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
+      }catch{}
+    }
+    __infoTypingOff__();
+    infoChatMsg(out || 'No tengo la respuesta exacta. Reformula la pregunta y lo vuelvo a intentar.');
+  }catch(_){
+    __infoTypingOff__();
+    infoChatMsg('No pude obtener respuesta del asistente ahora mismo. Intenta de nuevo.', 'ai');
   }
-  infoChatMsg(out||'');
 }
+
 function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
   const toggleFloating = qs('#info-chat-floating');
@@ -3693,6 +3725,7 @@ function bindInfoChatListeners(){
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
+  // limpiar posibles dobles handlers si hubo rehidrataciones
   toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
   toggleFloating?.replaceWith(toggleFloating?.cloneNode?.(true) || toggleFloating);
   close?.replaceWith(close?.cloneNode?.(true) || close);
@@ -3740,7 +3773,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
-  // ⛑️ Aísla Info Chat externo antes de listeners
+  // Aísla Info Chat externo antes de listeners
   __ensureInfoAgentClient__();
 
   bindInfoChatListeners();
