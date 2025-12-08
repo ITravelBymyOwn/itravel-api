@@ -1538,9 +1538,11 @@ function showWOW(on, msg){
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
    Base v60 + injertos v64 + dedupe global con normKey
-   🆕 v75→API42.5.1: **primer poblado con doble etapa INFO→PLANNER**
-   🆕 Eliminado: bloque de "Aurora Injection" local (la decide INFO→PLANNER)
-   🆕 Inyección segura post-planner: normalización duration / cena / retorno a ciudad
+   🆕 v75→API42.6.x: primer poblado con doble etapa INFO→PLANNER
+   🆕 Robustez: usa callApiChat (si existe) con timeout/reintentos + caché research
+   🆕 Auroras: normalización + tope no consecutivo por día ANTES de pushRows
+   🆕 Inyección segura post-planner: duration normalizada / cena / retorno a ciudad
+   🆕 Rendimiento: optimizeDay sólo en días realmente vacíos (o si forceReplan)
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -1569,8 +1571,16 @@ async function generateCityItinerary(city){
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   };
 
-  // 🆕 helpers de API
+  /* ==================== Helpers API ==================== */
+  // Preferimos el fetch robusto centralizado si está disponible (Sección 18)
+  const hasCallApiChat = (typeof callApiChat === 'function');
+
   async function callPlannerAPI_withResearch(researchJson){
+    if (hasCallApiChat) {
+      const resp = await callApiChat('planner', { research_json: researchJson }, { timeoutMs: 42000, retries: 1 });
+      const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
+      return cleanToJSONPlus(txt || resp) || {};
+    }
     const resp = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1578,9 +1588,15 @@ async function generateCityItinerary(city){
     });
     if (!resp.ok) throw new Error(`API planner HTTP ${resp.status}`);
     const data = await resp.json();
-    return parseJSON(data?.text || "");
+    return cleanToJSONPlus(data?.text || data) || {};
   }
+
   async function callInfoAPI(context){
+    if (hasCallApiChat) {
+      const resp = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+      const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
+      return cleanToJSONPlus(txt || resp) || {};
+    }
     const resp = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1588,8 +1604,9 @@ async function generateCityItinerary(city){
     });
     if (!resp.ok) throw new Error(`API info HTTP ${resp.status}`);
     const data = await resp.json();
-    return cleanToJSONPlus(data?.text || data);
+    return cleanToJSONPlus(data?.text || data) || {};
   }
+
   async function callPlannerAPI_legacy(messages, opts = {}) {
     const payload = { mode: "planner", messages };
     if (opts.itinerary_id) payload.itinerary_id = opts.itinerary_id;
@@ -1604,6 +1621,14 @@ async function generateCityItinerary(city){
     const data = await resp.json();
     const text = data?.text || "";
     return parseJSON(text);
+  }
+
+  // Cobertura simple por día
+  function hasCoverageForAllDays(rows, totalDays){
+    if(!Array.isArray(rows) || !rows.length) return false;
+    const flags = new Set(rows.map(r=>Number(r.day)||1));
+    for(let d=1; d<=totalDays; d++){ if(!flags.has(d)) return false; }
+    return true;
   }
 
   try {
@@ -1638,7 +1663,7 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
-    // INTAKE (se mantiene para camino legado como fallback)
+    // INTAKE (mantenido para LEGACY)
     const intakeText = `
 ${FORMAT}
 **Genera únicamente ${dest.days} día/s para "${city}"** (tabs y tablas ya existen en UI).
@@ -1648,7 +1673,7 @@ Hotel/zona: ${hotel || 'a determinar'} · Transporte preferido: ${transport || '
 Requisitos:
 - Cobertura completa días 1–${dest.days} (sin días vacíos).
 - Usa rutas madre → subparadas cuando aplique. Inserta "Regreso a ${city}" en day-trips.
-- Horarios plausibles: base 08:30–19:00 si no hay nada mejor; buffers ≥15m. (No bloquees nocturnos si el research lo sugiere.)
+- Horarios plausibles: base 08:30–19:00 si no hay nada mejor; buffers ≥15m.
 - Transporte coherente: urbano a pie/metro; interurbano vehículo o tour si no hay bus local.
 - Duraciones normalizadas ("1h30m", "45m"). Máx 20 filas/día.
 
@@ -1667,11 +1692,15 @@ ${buildIntake()}
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
 
-    // 🆕 PRIMER POBLADO → DOBLE ETAPA INFO→PLANNER
+    /* =================== Doble etapa INFO→PLANNER con caché =================== */
+    window.__researchCache = window.__researchCache || {};
+    const cached = window.__researchCache[city];
+
     let parsed = null;
     try{
       const context = __collectPlannerContext__(city, 1); // día 1 como ancla
-      const research = await callInfoAPI(context);
+      const research = cached || await callInfoAPI(context);
+      if(!cached) window.__researchCache[city] = research; // cachear por ciudad
       const structured = await callPlannerAPI_withResearch(research);
       parsed = structured;
     }catch(errInfoPlanner){
@@ -1703,6 +1732,24 @@ ${buildIntake()}
       // 🆕 Normaliza duraciones decimales → “h/m”
       if(typeof normalizeDurationLabel==='function') tmpRows = tmpRows.map(normalizeDurationLabel);
 
+      // 🆕 Normaliza ventanas de aurora (si vinieran sin cerrar)
+      if(typeof normalizeAuroraWindow==='function') tmpRows = tmpRows.map(normalizeAuroraWindow);
+
+      // 🆕 Tope de auroras NO consecutivas — antes del push (tabs-safe)
+      if(typeof enforceAuroraCapForDay==='function' && typeof suggestedAuroraCap==='function'){
+        const cap = suggestedAuroraCap(dest.days || tmpRows.reduce((m,r)=>Math.max(m, Number(r.day)||1), 1));
+        const byDay = {};
+        tmpRows.forEach(r => {
+          const d = Number(r.day)||1;
+          (byDay[d] = byDay[d] || []).push(r);
+        });
+        const rebuilt = [];
+        Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
+          rebuilt.push(...enforceAuroraCapForDay(city, day, byDay[day], cap));
+        });
+        tmpRows = rebuilt;
+      }
+
       // 🆕 Inserta “Regreso a {city}” si detecta day-trip sin retorno explícito (tabs-safe)
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
 
@@ -1714,14 +1761,23 @@ ${buildIntake()}
       // 🧩 Empuje a estado
       pushRows(city, tmpRows, !!forceReplan);
 
-      // ✅ Asegura días con contenido mínimo **y optimiza todos los días iniciales** (INFO→PLANNER)
+      // ✅ Días y optimización: sólo en días vacíos (o si forceReplan)
       ensureDays(city);
       const totalDays = dest.days||Object.keys(itineraries[city].byDay||{}).length||1;
-      for(let d=1; d<=totalDays; d++){
-        /* eslint-disable no-await-in-loop */
-        await optimizeDay(city,d);
+
+      const hasAll = hasCoverageForAllDays(tmpRows, totalDays);
+      if(forceReplan || !hasAll){
+        // optimiza únicamente los días que sigan vacíos
+        for(let d=1; d<=totalDays; d++){
+          const currentRows = (itineraries[city]?.byDay?.[d]||[]);
+          if(forceReplan || !Array.isArray(currentRows) || currentRows.length===0){
+            /* eslint-disable no-await-in-loop */
+            await optimizeDay(city,d);
+          }
+        }
       }
 
+      // Render idéntico a v75
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
 
       if(forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
