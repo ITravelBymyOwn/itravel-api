@@ -1,8 +1,4 @@
-// /api/chat.js — v43 (ESM, Vercel)
-// Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
-// Respuestas SIEMPRE como { text: "<JSON|texto>" }.
-// ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
-
+// /api/chat.js — v43 (ESM, Vercel) // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura). // Respuestas SIEMPRE como { text: "<JSON|texto>" }. // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -72,7 +68,7 @@ function fallbackJSON() {
 // Llamada unificada a Responses API (entrada como string consolidado)
 async function callText(messages, temperature = 0.35, max_output_tokens = 3200) {
   const inputStr = messages
-    .map(m => `${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
+    .map(m => ${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)})
     .join("\n\n");
 
   const resp = await client.responses.create({
@@ -108,13 +104,13 @@ function normalizeDurationsInParsed(parsed){
       const total = Math.round(hours*60);
       const h = Math.floor(total/60);
       const m = total%60;
-      return h>0 ? (m>0 ? `${h}h${m}m` : `${h}h`) : `${m}m`;
+      return h>0 ? (m>0 ? ${h}h${m}m : ${h}h) : ${m}m;
     }
 
     // 1h30 ó 1 h 30 → 1h30m
     const hMix = s.match(/^(\d+)\s*h\s*(\d{1,2})$/i);
     if(hMix){
-      return `${hMix[1]}h${hMix[2]}m`;
+      return ${hMix[1]}h${hMix[2]}m;
     }
 
     // 90m → 90m (ya está bien)
@@ -147,12 +143,13 @@ function normalizeDurationsInParsed(parsed){
   return parsed;
 }
 
-/* ============== Prompts del sistema (robustecidos) ============== */
+/* ============== Prompts del sistema ============== */
 
 /**
  * 1) SISTEMA — INFO CHAT (interno)
- * Rol: Motor de investigación y decisión.
- * Objetivo: Entregar research_json COMPLETO y AUTO-CONSISTENTE para que el Planner solo estructure.
+ * - Genera TODO el contenido “masticado” que el Planner solo acomodará.
+ * - Horarios: respeta horas del usuario; si faltan, recomienda realistas.
+ * - Reglas explícitas: AURORAS (no consecutivas, evitar último día), REYKJANES sub-paradas (≤8), LAGUNAS ≥3h y no pegadas a actividad pesada inmediata.
  */
 const SYSTEM_INFO = `
 Eres el **motor de investigación** de ITravelByMyOwn (Info Chat interno) y un **experto internacional en turismo**.
@@ -279,50 +276,44 @@ REGLAS DE FORMATO:
 
 /**
  * 2) SISTEMA — PLANNER (estructura)
- * Rol: Convertir research_json en {"destination","rows":[...]} SIN creatividad extra.
- * Objetivo: Respetar a rajatabla lo decidido por SYSTEM_INFO y producir filas limpias y ordenadas.
+ * - Transforma research_json en {"destination","rows":[...]} sin creatividad adicional.
+ * - Respeta ventanas/horas provistas y NO altera auroras.
+ * - Macro-tours: actividad madre con ≤8 sub-paradas; no agregar transporte “post retorno”.
+ * - Lagunas: asegura ≥3h si el skeleton viniera menor.
  */
 const SYSTEM_PLANNER = `
-Eres **Astra Planner**. Recibes un "research_json" del Info Chat interno con DECISIONES cerradas
-(actividades, orden lógico, ventanas horarias sugeridas/mandatorias, day_hours, sub-paradas, auroras, transporte, notas).
-Tu trabajo es **estructurar** en el formato final **sin creatividad adicional**.
+Eres **Astra Planner**. Recibes "research_json" del Info Chat interno con datos fácticos
+(decisiones, tiempos, regreso al hotel, ventanas de auroras, day_hours y/o start/end por actividad).
 
-========================
-PRINCIPIOS:
-- **No inventes** actividades, horarios ni transportes si ya vienen definidos. Usa exactamente lo provisto.
-- Si un ítem de "rows_skeleton" trae "start/end" ⇒ **úsalo tal cual**.
-- Si NO trae "start/end" ⇒ asígnalos **DENTRO del rango** indicado por research_json.day_hours del día.
-- Respeta horas **MANDATORIAS del usuario** (user_day_hours) cuando existan en research_json → no impongas plantillas 08:30–19:00.
-- **Auroras**: respeta exactamente los días/ventanas/duración; **no** añadas ni muevas a días consecutivos ni al último día.
-- **Macro-tours**: crea 1 actividad madre con título claro + sub-paradas "A → B → C" (≤8). Si existe "return_to_city_duration", no agregues manejo/transporte adicional luego.
-- **Lagunas termales**: asegúrate de **≥3h** si el skeleton fuese menor (ajusta "duration" y "end" en consecuencia).
-- **Clusters por zona**: preserva el orden de cercanía y secuencia lógica provistos por research_json.
-- **Buffers y solapes**: evita solapes evidentes y respeta una holgura mínima entre filas (≥15m) si asignas horas.
-- **Notas**: conserva las notas provistas y permite una breve nota motivadora si "kind" lo sugiere (icónico, macro_tour, aurora), sin introducir datos inventados.
+TU TAREA:
+- Convertir research_json en {"destination","rows":[...]} sin creatividad adicional.
+- Si un ítem de rows_skeleton trae "start/end" ⇒ úsalo tal cual.
+- Si NO trae "start/end" ⇒ asigna dentro del rango research_json.day_hours del día.
+- Respeta horas MANDATORIAS del usuario. No impongas 08:30–19:00 por defecto.
+- Auroras: usa la ventana exacta definida por Info (días no consecutivos, nunca el último).
+- Macro-tours: actividad madre “Excursión — … — A → B → C” (≤8 sub-paradas) y **no** añadir transporte tras "return_to_city_duration".
+- Lagunas termales: garantizar **≥3h** efectivas si el skeleton fuese menor.
+- Inserta notas motivadoras breves (basadas en kind: icónico, macro_tour, aurora, etc.).
 
-========================
-SALIDA ÚNICA (JSON VÁLIDO, sin texto extra):
+FORMATO ÚNICO (JSON válido, sin texto adicional):
 {
   "destination":"Ciudad",
   "rows":[
     {
-      "day": 1,
-      "start": "HH:MM",
-      "end": "HH:MM",
-      "activity": "Nombre breve (p.ej., “Excursión — Península X — A → B → C”)",
-      "from": "Hotel / Punto A",
-      "to": "Punto B",
-      "transport": "A pie / Metro / Bus / Tren / Taxi / Ride-hailing / Vehículo alquilado o Tour guiado",
-      "duration": "45m|1h30m|~2h",
-      "notes": "Consejo breve y/o ticket/alternativa",
-      "kind": "icónico|macro_tour|aurora|laguna|museo|vista|mercado|parque|libre",
-      "zone": "barrio/sector (si aplica)"
+      "day":1,
+      "start":"09:15",
+      "end":"10:00",
+      "activity":"Visitar X",
+      "from":"Hotel",
+      "to":"X",
+      "transport":"A pie / Metro / Tren / Taxi / Vehículo alquilado o Tour guiado",
+      "duration":"45m",
+      "notes":"Consejo breve y motivador"
     }
   ],
-  "followup":"Sugerencia breve opcional (máx. 1 línea)"
+  "followup":"Sugerencia breve opcional"
 }
 
-========================
 REGLAS DE FORMATO Y NORMALIZACIÓN:
 - **JSON válido** y único. Nada de texto fuera.
 - Horas en **24h** locales ("HH:MM"). Si asignas horas a un ítem sin "start/end", usa \`day_hours\` del día (inicio/fin) y deja **≥15m** entre filas.
@@ -333,7 +324,6 @@ REGLAS DE FORMATO Y NORMALIZACIÓN:
 - No añadas “cena” u otras comidas si research_json no las trajo como actividad. Las comidas van como contexto/logística (meals_suggestions) salvo que vengan explícitas.
 - Mantén los campos presentes en skeleton; si faltan "from/to/transport", deriva de contexto (“Hotel”, “A pie”) solo cuando sea obvio y coherente con day_hours y zona.
 
-========================
 POLÍTICAS DE COHERENCIA:
 - **No inventar** tickets, precios ni rutas no provistas; puedes mantener una nota motivadora breve.
 - **No modificar** las decisiones del Info (días, orden, ventanas, auroras, sub-paradas). Tu rol es estructurar, no decidir.
