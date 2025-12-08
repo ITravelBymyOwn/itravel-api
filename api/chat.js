@@ -6,10 +6,15 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function parseBody(reqBody) {
   if (!reqBody) return {};
   if (typeof reqBody === "string") {
-    try { return JSON.parse(reqBody); } catch { return {}; }
+    try {
+      return JSON.parse(reqBody);
+    } catch {
+      return {};
+    }
   }
   return reqBody;
 }
+
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
@@ -23,10 +28,10 @@ function cleanToJSONPlus(raw = "") {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
   if (typeof raw !== "string") return null;
-
   // 1) Intento directo
-  try { return JSON.parse(raw); } catch {}
-
+  try {
+    return JSON.parse(raw);
+  } catch {}
   // 2) Primer/último corchete
   try {
     const first = raw.indexOf("{");
@@ -35,13 +40,11 @@ function cleanToJSONPlus(raw = "") {
       return JSON.parse(raw.slice(first, last + 1));
     }
   } catch {}
-
   // 3) Recorte de ruido en extremos
   try {
     const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
   } catch {}
-
   return null;
 }
 
@@ -70,14 +73,12 @@ async function callText(messages, temperature = 0.35, max_output_tokens = 3200) 
   const inputStr = messages
     .map(m => ${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)})
     .join("\n\n");
-
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
     max_output_tokens,
     input: inputStr,
   });
-
   return (
     resp?.output_text?.trim() ||
     resp?.output?.[0]?.content?.[0]?.text?.trim() ||
@@ -88,15 +89,12 @@ async function callText(messages, temperature = 0.35, max_output_tokens = 3200) 
 // Normalizador de duraciones dentro del JSON ya parseado
 function normalizeDurationsInParsed(parsed){
   if(!parsed) return parsed;
-
   const norm = (txt)=>{
     const s = String(txt ?? "").trim();
     if(!s) return s;
-
     // Acepta formatos: "1.5h", "1h30", "1 h 30", "90m", "~7h", "2h"
     // No tocamos si empieza con "~"
     if (/^~\s*\d+(\.\d+)?\s*h$/i.test(s)) return s;
-
     // 1.5h → 1h30m
     const dh = s.match(/^(\d+(?:\.\d+)?)\s*h$/i);
     if(dh){
@@ -106,24 +104,21 @@ function normalizeDurationsInParsed(parsed){
       const m = total%60;
       return h>0 ? (m>0 ? ${h}h${m}m : ${h}h) : ${m}m;
     }
-
     // 1h30 ó 1 h 30 → 1h30m
     const hMix = s.match(/^(\d+)\s*h\s*(\d{1,2})$/i);
     if(hMix){
       return ${hMix[1]}h${hMix[2]}m;
     }
-
     // 90m → 90m (ya está bien)
     if (/^\d+\s*m$/i.test(s)) return s;
-
     // 2h → 2h (ya está bien)
     if (/^\d+\s*h$/i.test(s)) return s;
-
     return s;
   };
-
-  const touchRows = (rows=[]) => rows.map(r=>({ ...r, duration: norm(r.duration) }));
-
+  const touchRows = (rows=[]) => rows.map(r=>({
+    ...r,
+    duration: norm(r.duration)
+  }));
   try{
     if(Array.isArray(parsed.rows)) parsed.rows = touchRows(parsed.rows);
     if(Array.isArray(parsed.destinations)){
@@ -139,18 +134,16 @@ function normalizeDurationsInParsed(parsed){
       }));
     }
   }catch{}
-
   return parsed;
 }
 
 /* ============== Prompts del sistema ============== */
 
-/**
- * 1) SISTEMA — INFO CHAT (interno)
- * - Genera TODO el contenido “masticado” que el Planner solo acomodará.
- * - Horarios: respeta horas del usuario; si faltan, recomienda realistas.
- * - Reglas explícitas: AURORAS (no consecutivas, evitar último día), REYKJANES sub-paradas (≤8), LAGUNAS ≥3h y no pegadas a actividad pesada inmediata.
- */
+/* =======================
+   SISTEMA — INFO CHAT (interno)
+   Rol: Motor de investigación y decisión.
+   Objetivo: Entregar research_json COMPLETO y AUTO-CONSISTENTE para que el Planner solo estructure.
+   ======================= */
 const SYSTEM_INFO = `
 Eres el **motor de investigación** de ITravelByMyOwn (Info Chat interno) y un **experto internacional en turismo**.
 Tu salida será consumida por un Planner que SOLO acomoda lo que tú decides. Por eso debes:
@@ -274,46 +267,52 @@ REGLAS DE FORMATO:
 - No inventes precios exactos; puedes dar consejos (“requiere ticket anticipado”).
 `.trim();
 
-/**
- * 2) SISTEMA — PLANNER (estructura)
- * - Transforma research_json en {"destination","rows":[...]} sin creatividad adicional.
- * - Respeta ventanas/horas provistas y NO altera auroras.
- * - Macro-tours: actividad madre con ≤8 sub-paradas; no agregar transporte “post retorno”.
- * - Lagunas: asegura ≥3h si el skeleton viniera menor.
- */
+/* =======================
+   SISTEMA — PLANNER (estructurador)
+   Rol: Convertir research_json en {"destination","rows":[...]} SIN creatividad extra.
+   Objetivo: Respetar a rajatabla lo decidido por SYSTEM_INFO y producir filas limpias y ordenadas.
+   ======================= */
 const SYSTEM_PLANNER = `
-Eres **Astra Planner**. Recibes "research_json" del Info Chat interno con datos fácticos
-(decisiones, tiempos, regreso al hotel, ventanas de auroras, day_hours y/o start/end por actividad).
+Eres **Astra Planner**. Recibes un "research_json" del Info Chat interno con DECISIONES cerradas
+(actividades, orden lógico, ventanas horarias sugeridas/mandatorias, day_hours, sub-paradas, auroras, transporte, notas).
+Tu trabajo es **estructurar** en el formato final **sin creatividad adicional**.
 
-TU TAREA:
-- Convertir research_json en {"destination","rows":[...]} sin creatividad adicional.
-- Si un ítem de rows_skeleton trae "start/end" ⇒ úsalo tal cual.
-- Si NO trae "start/end" ⇒ asigna dentro del rango research_json.day_hours del día.
-- Respeta horas MANDATORIAS del usuario. No impongas 08:30–19:00 por defecto.
-- Auroras: usa la ventana exacta definida por Info (días no consecutivos, nunca el último).
-- Macro-tours: actividad madre “Excursión — … — A → B → C” (≤8 sub-paradas) y **no** añadir transporte tras "return_to_city_duration".
-- Lagunas termales: garantizar **≥3h** efectivas si el skeleton fuese menor.
-- Inserta notas motivadoras breves (basadas en kind: icónico, macro_tour, aurora, etc.).
+========================
+PRINCIPIOS:
+- **No inventes** actividades, horarios ni transportes si ya vienen definidos. Usa exactamente lo provisto.
+- Si un ítem de "rows_skeleton" trae "start/end" ⇒ **úsalo tal cual**.
+- Si NO trae "start/end" ⇒ asígnalos **DENTRO del rango** indicado por research_json.day_hours del día.
+- Respeta horas **MANDATORIAS del usuario** (user_day_hours) cuando existan en research_json → no impongas plantillas 08:30–19:00.
+- **Auroras**: respeta exactamente los días/ventanas/duración; **no** añadas ni muevas a días consecutivos ni al último día.
+- **Macro-tours**: crea 1 actividad madre con título claro + sub-paradas "A → B → C" (≤8). Si existe "return_to_city_duration", no agregues manejo/transporte adicional luego.
+- **Lagunas termales**: asegúrate de **≥3h** si el skeleton fuese menor (ajusta "duration" y "end" en consecuencia).
+- **Clusters por zona**: preserva el orden de cercanía y secuencia lógica provistos por research_json.
+- **Buffers y solapes**: evita solapes evidentes y respeta una holgura mínima entre filas (≥15m) si asignas horas.
+- **Notas**: conserva las notas provistas y permite una breve nota motivadora si "kind" lo sugiere (icónico, macro_tour, aurora), sin introducir datos inventados.
 
-FORMATO ÚNICO (JSON válido, sin texto adicional):
+========================
+SALIDA ÚNICA (JSON VÁLIDO, sin texto extra):
 {
   "destination":"Ciudad",
   "rows":[
     {
-      "day":1,
-      "start":"09:15",
-      "end":"10:00",
-      "activity":"Visitar X",
-      "from":"Hotel",
-      "to":"X",
-      "transport":"A pie / Metro / Tren / Taxi / Vehículo alquilado o Tour guiado",
-      "duration":"45m",
-      "notes":"Consejo breve y motivador"
+      "day": 1,
+      "start": "HH:MM",
+      "end": "HH:MM",
+      "activity": "Nombre breve (p.ej., “Excursión — Península X — A → B → C”)",
+      "from": "Hotel / Punto A",
+      "to": "Punto B",
+      "transport": "A pie / Metro / Bus / Tren / Taxi / Ride-hailing / Vehículo alquilado o Tour guiado",
+      "duration": "45m|1h30m|~2h",
+      "notes": "Consejo breve y/o ticket/alternativa",
+      "kind": "icónico|macro_tour|aurora|laguna|museo|vista|mercado|parque|libre",
+      "zone": "barrio/sector (si aplica)"
     }
   ],
-  "followup":"Sugerencia breve opcional"
+  "followup":"Sugerencia breve opcional (máx. 1 línea)"
 }
 
+========================
 REGLAS DE FORMATO Y NORMALIZACIÓN:
 - **JSON válido** y único. Nada de texto fuera.
 - Horas en **24h** locales ("HH:MM"). Si asignas horas a un ítem sin "start/end", usa \`day_hours\` del día (inicio/fin) y deja **≥15m** entre filas.
@@ -324,6 +323,7 @@ REGLAS DE FORMATO Y NORMALIZACIÓN:
 - No añadas “cena” u otras comidas si research_json no las trajo como actividad. Las comidas van como contexto/logística (meals_suggestions) salvo que vengan explícitas.
 - Mantén los campos presentes en skeleton; si faltan "from/to/transport", deriva de contexto (“Hotel”, “A pie”) solo cuando sea obvio y coherente con day_hours y zona.
 
+========================
 POLÍTICAS DE COHERENCIA:
 - **No inventar** tickets, precios ni rutas no provistas; puedes mantener una nota motivadora breve.
 - **No modificar** las decisiones del Info (días, orden, ventanas, auroras, sub-paradas). Tu rol es estructurar, no decidir.
@@ -353,7 +353,7 @@ export default async function handler(req, res) {
       let parsed = cleanToJSONPlus(raw);
 
       if (!parsed) {
-        const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
+        const strict = SYSTEM_INFO + \nOBLIGATORIO: responde solo un JSON válido.;
         raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3200);
         parsed = cleanToJSONPlus(raw);
       }
@@ -378,7 +378,10 @@ export default async function handler(req, res) {
             note: "Actividad sujeta a clima; depende del tour",
             duration: "Depende del tour o horas que dediques si vas por tu cuenta"
           },
-          constraints: { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
+          constraints: {
+            max_substops_per_tour: 8,
+            respect_user_preferences_and_conditions: true
+          },
           day_hours: [],
           rows_skeleton: []
         };
@@ -407,13 +410,12 @@ export default async function handler(req, res) {
         let parsed = cleanToJSONPlus(raw);
 
         if (!parsed) {
-          const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
+          const strict = SYSTEM_PLANNER + \nOBLIGATORIO: responde solo un JSON válido.;
           raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3000);
           parsed = cleanToJSONPlus(raw);
         }
 
         if (!parsed) parsed = fallbackJSON();
-
         parsed = normalizeDurationsInParsed(parsed);
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
@@ -429,19 +431,17 @@ export default async function handler(req, res) {
       let parsed = cleanToJSONPlus(raw);
 
       if (!parsed) {
-        const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
+        const strict = SYSTEM_PLANNER + \nOBLIGATORIO: responde solo un JSON válido.;
         raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.2, 3000);
         parsed = cleanToJSONPlus(raw);
       }
 
       if (!parsed) parsed = fallbackJSON();
-
       parsed = normalizeDurationsInParsed(parsed);
       return res.status(200).json({ text: JSON.stringify(parsed) });
     }
 
     return res.status(400).json({ error: "Invalid mode" });
-
   } catch (err) {
     console.error("❌ /api/chat error:", err);
     // Respuesta de compatibilidad para el Planner
