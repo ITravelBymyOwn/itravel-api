@@ -2401,12 +2401,14 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    Base v73 — Ajuste flexible FINAL (quirúrgico)
-   Cambios clave (PATCH A.1–A.3):
-   (A.1) Unificador de formato (soporta {destinations:[{name,rows}]} → {rows}).
-   (A.2) Normalización determinística de transporte y detección “fuera de ciudad”.
-   (A.3) Retornos garantizados: “Regreso a <Ciudad>” tras salidas y “Regreso a hotel” al cierre
-         (si la última actividad es aurora: transporte "Tour guiado" y duración "Depende del tour").
-   — Resto de la sección se mantiene intacto.
+   Cambios clave (PATCH 42.4-INFO/PLANNER):
+   • Doble etapa vía API:
+       (1) mode:"info"  → investigación, imperdibles, macro-tours (≤8 sub-paradas),
+           tiempos REALES entre puntos y **tiempos de regreso** (hotel/ciudad).
+       (2) mode:"planner" → estructuración en filas (rows) sin inventar datos.
+   • Respeto estricto de preferencias/condiciones del usuario (prioridad máxima).
+   • Se eliminan heurísticos locales de retorno a ciudad/hotel (quedan funciones, no se usan).
+   • Se conserva validación + pushRows y utilitarios previos (buffers/overlaps, etc.)
 ================================= */
 
 /* --- aliasKey para deduplicado por sinónimos comunes --- */
@@ -2433,7 +2435,7 @@ function normalizeCityForGeo(name){
   return raw;
 }
 
-/* === Utilidades auroras (tope no-consecutivo) === */
+/* === Utilidades auroras (tope no-consecutivo) — mantenidas por compatibilidad (no forzamos) === */
 function countAuroraNights(city){
   const byDay = itineraries[city]?.byDay || {};
   let c=0;
@@ -2456,13 +2458,10 @@ function isConsecutiveAurora(city, day){
   const hasNext = next.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   return hasPrev || hasNext;
 }
-
-/* Enforce cap en el set de filas del día actual (no añade si supera cap o si sería consecutivo) */
 function enforceAuroraCapForDay(city, day, rows, cap){
   const already = countAuroraNights(city);
   const willAdd = rows.some(r=>/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   if(!willAdd) return rows;
-
   if(isConsecutiveAurora(city, day)) {
     return rows.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
   }
@@ -2485,7 +2484,7 @@ function __isNightRow__(row){
   return isAurora || (startM!=null && startM >= 18*60);
 }
 
-// Normaliza ventana de auroras: inicio ≥18:00, duración ≥4h, fin ≥00:30, permitiendo cruzar de día
+// Normaliza ventana de auroras (mantenida, no se fuerza si viene del research)
 function normalizeAuroraWindow(row){
   const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
   if(!isAurora) return row;
@@ -2501,13 +2500,9 @@ function normalizeAuroraWindow(row){
   if(s==null) s = 20*60+30;
   if(e==null) e = 2*60;
 
-  if(s < 18*60) s = 18*60;          // ≥ 18:00
-  // Si el fin es “temprano” (e <= s), asumimos cruce al siguiente día
+  if(s < 18*60) s = 18*60;
   if(e <= s) e += 24*60;
-
-  // Duración mínima 4h
   if((e - s) < 4*60) e = s + 4*60;
-  // Fin mínimo 00:30 del día siguiente si cruzó
   if(e < (24*60 + 30)) e = Math.max(e, 24*60 + 30);
 
   const durMin = e - s;
@@ -2521,7 +2516,7 @@ function normalizeAuroraWindow(row){
 
 // Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
 function fixOverlaps(rows){
-  const toMin = t => { const m = String(t||"").match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
+  const toMin = t => { const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
   const toHH  = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
   const durMin = d => {
     if(!d) return 0;
@@ -2532,7 +2527,6 @@ function fixOverlaps(rows){
     return 0;
   };
 
-  // Antes de ordenar, expande minutos para filas nocturnas si el fin “parece” anterior al inicio
   const expanded = rows.map(r=>{
     let s = toMin(r.start||"");
     let e = toMin(r.end||"");
@@ -2540,7 +2534,6 @@ function fixOverlaps(rows){
     let cross = false;
 
     if(s!=null && (e==null || e<=s)){
-      // Si es nocturna o sugiere cruce, empujamos fin al día +1
       if(__isNightRow__(r) || (d>0 && s>=18*60)){
         e = (e!=null ? e : s + Math.max(d,60)) + 24*60;
         cross = true;
@@ -2549,7 +2542,7 @@ function fixOverlaps(rows){
       }
     }else if(s==null && e!=null && d>0){
       s = e - d;
-      if(s<0) s = 9*60; // fallback suave
+      if(s<0) s = 9*60;
     }else if(s==null && e==null){
       s = 9*60; e = s + 60;
     }
@@ -2557,7 +2550,6 @@ function fixOverlaps(rows){
     return { __s:s, __e:e, __d:d, __cross:cross, raw:r };
   });
 
-  // Orden por inicio (en minutos expandidos)
   expanded.sort((a,b)=> (a.__s||0) - (b.__s||0));
 
   const out = [];
@@ -2571,7 +2563,6 @@ function fixOverlaps(rows){
     }
     prevEnd = Math.max(prevEnd ?? 0, e);
 
-    // Duración textual si faltaba
     const finalDur = d>0 ? r.duration : `${Math.max(60, e - s)}m`;
 
     out.push({
@@ -2592,7 +2583,6 @@ function fixOverlaps(rows){
 function unifyRowsFormat(parsed, preferCity){
   if(!parsed) return { rows: [] };
   if(Array.isArray(parsed.rows)) return { rows: parsed.rows };
-  // destinos: [{name, rows}] o {destination, rows}
   if(Array.isArray(parsed.destinations)){
     if(preferCity){
       const dd = parsed.destinations.find(d=> (d.name||d.destination)===preferCity);
@@ -2612,9 +2602,8 @@ function unifyRowsFormat(parsed, preferCity){
 }
 
 /* ---------------------------
-   PATCH A.2 — Transporte/“fuera de ciudad”
+   Transporte/“fuera de ciudad” (mantenido como salvaguarda; NO debe sobreescribir research)
 ---------------------------- */
-// Listas mínimas (ampliables) para Islandia + genéricos
 const OUT_OF_TOWN_RE = [
   /círculo\s+dorado|golden\s+circle|þingvellir|thingvellir|geysir|gullfoss/i,
   /reykjanes|gunnuhver|kr[ýy]suv[ií]k|selt[uú]n|kleifarvatn|reykjanesviti/i,
@@ -2628,38 +2617,31 @@ const NO_PUBLIC_EFFICIENT = [
   /reynisfjara|dyrh[óo]laey|v[ií]k/i,
   /reykjanes|gunnuhver|kr[ýy]suv[ií]k|selt[uú]n|kleifarvatn|reykjanesviti/i
 ];
-
 function _includesPattern(text, patterns){
   const t = String(text||'');
   return patterns.some(rx=>rx.test(t));
 }
-
 function isOutOfTownRow(city, row){
   const cityLow = String(city||'').toLowerCase();
   const to = String(row.to||'').toLowerCase();
   const act = String(row.activity||'').toLowerCase();
   if(_includesPattern(act, OUT_OF_TOWN_RE) || _includesPattern(to, OUT_OF_TOWN_RE)) return true;
-  // heurística simple: destino distinto y no contiene ciudad
   return (to && !to.includes(cityLow));
 }
-
 function enforceTransportAndOutOfTown(city, rows){
   return rows.map(r=>{
+    // Si el research/planner ya fijó transporte, lo respetamos:
+    if(r && r.transport) return r;
     const out = isOutOfTownRow(city, r);
     if(out){
-      const trans = String(r.transport||'').toLowerCase();
-      const pub   = /(a\s*p(i|í)e|metro|bus|autob[uú]s|tren)/i.test(trans);
-      const noEff = _includesPattern(r.activity||'', NO_PUBLIC_EFFICIENT) || _includesPattern(r.to||'', NO_PUBLIC_EFFICIENT);
-      if(!trans || pub || noEff){
-        return { ...r, transport: 'Vehículo alquilado o Tour guiado' };
-      }
+      return { ...r, transport: 'Vehículo alquilado o Tour guiado' };
     }
     return r;
   });
 }
 
 /* ---------------------------
-   Helpers mínimos para tiempos (usados en PATCH A.3)
+   Helpers mínimos para tiempos (usados por overlaps)
 ---------------------------- */
 function __toMinHHMM__(t){
   const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/);
@@ -2678,219 +2660,128 @@ function __addMinutesSafe__(hhmm, add){
 }
 
 /* ---------------------------
-   PATCH A.3 — Retornos
+   (DEPRECATED) Retornos locales — se mantienen por compatibilidad pero NO se usan ya.
 ---------------------------- */
-function ensureReturnToCity(city, day, rows){
-  try{
-    if(!Array.isArray(rows) || rows.length===0) return rows;
-    // Si no hubo salida, no añadimos retorno a ciudad
-    const hadOut = rows.some(r=>isOutOfTownRow(city, r));
-    if(!hadOut) return rows;
+function ensureReturnToCity(city, day, rows){ return rows; }
+function ensureEndReturnToHotel(rows){ return rows; }
 
-    const last = rows[rows.length-1] || {};
-    const actL = String(last.activity||'').toLowerCase();
-    const isReturnToCity = /regreso\s+a\s+/i.test(actL) && actL.includes(String(city||'').toLowerCase());
+/* ---------------------------
+   NEW: Recolector de contexto completo para INFO
+---------------------------- */
+function __collectPlannerContext__(city, day){
+  const byDay = itineraries[city]?.byDay || {};
+  const totalDays = Object.keys(byDay).length || 0;
+  const meta = cityMeta[city] || {};
+  const perDay = (meta.perDay||[]).map(x=>({ day:x.day, start:x.start||DEFAULT_START, end:x.end||DEFAULT_END }));
+  const currentRows = (byDay[day]||[]).map(r=>({
+    day, start:r.start||'', end:r.end||'', activity:r.activity||'',
+    from:r.from||'', to:r.to||'', transport:r.transport||'',
+    duration:r.duration||'', notes:r.notes||''
+  }));
 
-    if(!isReturnToCity){
-      const start = last.end || last.start || '18:00';
-      const end   = __addMinutesSafe__(start, 60);
-      rows = [
-        ...rows,
-        {
-          day,
-          start,
-          end,
-          activity: `Regreso a ${city}`,
-          from: last.to || `Alrededores de ${city}`,
-          to: city,
-          transport: 'Vehículo alquilado o Tour guiado',
-          duration: '≈ 1h',
-          notes: `Ruta de retorno hacia ${city}.`
-        }
-      ];
+  return {
+    city,
+    country: meta.country || '',
+    base_date: meta.baseDate || '',
+    days_total: totalDays,
+    hotel_address: meta.hotel || '',
+    transport_preferred: meta.transport || (plannerState?.preferences?.transport || ''),
+    windows: perDay,
+    current_day: day,
+    current_rows: currentRows,
+    // TODO del planner (inputs del tab):
+    travelers: plannerState?.travelers || {},
+    pace: plannerState?.pace || '',
+    budget: plannerState?.budget || '',
+    preferences: { ...(plannerState?.preferences||{}) },          // p.ej. preferAurora, preferDayTrip, etc.
+    special_conditions: { ...(plannerState?.conditions||{}) },     // movilidad, restricciones, etc.
+    all_cities: (savedDestinations||[]).map(c=>({ city:c.city, days:c.days, baseDate:c.baseDate })),
+    rules: {
+      max_substops_per_tour: 8,
+      optimize_order_by_distance_and_time: true,
+      respect_user_preferences_and_conditions: true,
+      avoid_duplicates_across_days: true
     }
-    return rows;
-  }catch(_){ return rows; }
+  };
 }
 
-function ensureEndReturnToHotel(rows){
-  try{
-    if(!Array.isArray(rows) || rows.length===0) return rows;
-    const last = rows[rows.length-1] || {};
-    const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(last.activity||''));
-    const isHotel  = /regreso\s+al?\s*hotel/i.test(String(last.activity||'').toLowerCase());
-    if(isHotel) return rows;
-
-    const start = last.end || last.start || '20:30';
-    const end   = isAurora ? __addMinutesSafe__(start, 30) : __addMinutesSafe__(start, 30);
-
-    rows.push({
-      day: last.day || 1,
-      start,
-      end,
-      activity: 'Regreso a hotel',
-      from: last.to || '',
-      to: 'Hotel',
-      transport: isAurora ? 'Tour guiado' : (last.transport || 'Taxi'),
-      duration: isAurora ? 'Depende del tour' : '30m',
-      notes: isAurora
-        ? 'Tras la caza de auroras, regreso con el operador al hotel.'
-        : 'Cierre del día y descanso en el hotel.'
-    });
-    return rows;
-  }catch(_){ return rows; }
-}
-
-/* ================= MAIN: optimizeDay ================= */
+/* ================= MAIN: optimizeDay (nuevo flujo INFO → PLANNER) ================= */
 async function optimizeDay(city, day){
   const data = itineraries[city];
+  const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
+
+  // Filas "protegidas" (no se tocan en este optimize)
   const rows = (data?.byDay?.[day]||[]).map(r=>({
     day,start:r.start||'',end:r.end||'',activity:r.activity||'',
     from:r.from||'',to:r.to||'',transport:r.transport||'',
     duration:r.duration||'',notes:r.notes||'', _crossDay: !!r._crossDay
   }));
-  const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day)||{start:DEFAULT_START,end:DEFAULT_END};
-  const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
-
-  // Protegidos: mantener lo ya fijado (ej. auroras, Blue Lagoon)
   const protectedRows = rows.filter(r=>{
     const act=(r.activity||'').toLowerCase();
-    return act.includes('aurora')||act.includes('northern light')||
-           act.includes('laguna azul')||act.includes('blue lagoon');
-  });
-  const rowsForOptimization = rows.filter(r=>{
-    const act=(r.activity||'').toLowerCase();
-    return !act.includes('aurora')&&!act.includes('northern light')&&
-           !act.includes('laguna azul')&&!act.includes('blue lagoon');
+    return act.includes('laguna azul')||act.includes('blue lagoon');
   });
 
-  const hasForceReplan = plannerState?.forceReplan?.[city];
-  const hasDayTripPending = plannerState?.dayTripPending?.[city];
-  const hasPreferDayTrip = plannerState?.preferences?.preferDayTrip;
-
-  const intakeData = (hasForceReplan||hasDayTripPending||hasPreferDayTrip)
-    ? buildIntake()
-    : buildIntakeLite(city,{start:day,end:day});
-
-  /* ====== AURORAS: detección flexible (sin obligación) ====== */
-  let auroraCity=false, auroraSeason=false;
   try{
-    const canonicalCity = normalizeCityForGeo(city);
-    const coords = getCoordinatesForCity(canonicalCity) || getCoordinatesForCity(city);
-    auroraCity = coords ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
-
-    auroraSeason = inAuroraSeasonDynamic(baseDate);
-    if(!auroraSeason){
-      const d = (typeof parseDMY==='function') ? parseDMY(baseDate) : null;
-      if(d instanceof Date && !isNaN(d)){
-        const m = d.getMonth()+1;
-        auroraSeason = (m>=9 || m<=3); // SEP–MAR
-      }
-    }
-    if(!coords){
-      const low = String(canonicalCity||city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
-      if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) auroraCity = true;
-      if(/\btroms[oø]\b|\btromso\b/.test(low)) auroraCity = true;
-    }
-  }catch(_){}
-
-  let stayDays=Object.keys(itineraries[city].byDay||{}).length;
-  const maxOneWayHours = stayDays>5?3:2;
-
-  const hadOriginal = (itineraries[city]?.originalDays > 0);
-  const addedDays   = hadOriginal && (stayDays > itineraries[city].originalDays);
-  const explicitSoft = plannerState?.lightDayTarget?.[city] || null;
-  const isLightDay  = explicitSoft ? (day === explicitSoft)
-                                   : (addedDays && (day === stayDays));
-  const lightNote = isLightDay
-    ? `\n- Si este fuera un día “ligero”, mantén ritmo relajado y evita sobrecargar.\n`
-    : '';
-
-  /* Prompt reforzado: investigación previa + sub-paradas obligatorias + transporte correcto */
-  const prompt = `
-${FORMAT}
-Ciudad: ${city}
-Día: ${day}
-Fecha base (d1): ${baseDate||'N/A'}
-Ventanas definidas: ${JSON.stringify(perDay)}
-Filas actuales (para optimizar):
-${JSON.stringify(rowsForOptimization)}
-
-📋 **REGLAS INTELIGENTES (OBLIGATORIAS)**
-- Realiza primero una **investigación rápida** de imperdibles locales y de 1 día alrededor (luz, distancia, clima, demanda).
-- En tours genéricos o de jornada completa, **DESGLOSA SUB-PARADAS** (3–6) bajo el mismo título: p.ej. "Círculo Dorado — Þingvellir / — Geysir / — Gullfoss"; análogos para Costa Sur, Snæfellsnes, Reykjanes, etc.
-- No priorices "A pie"/público por defecto. Para salidas fuera de ciudad usa **"Vehículo alquilado o Tour guiado"** (literal).
-- Day trips: ida ≤ ${maxOneWayHours}h si aportan valor claro.
-- Evita duplicados multi-día (considera sinónimos/idiomas).
-${auroraCity && (auroraSeason || !baseDate) ? '- Puedes proponer “caza de auroras” si la noche y condiciones lo justifican (no obligatorio). Evita la última noche de la estancia.' : ''}
-- No fijes horas rígidas: investiga/infierelas y evita solapes; si faltan, reparte mañana/mediodía/tarde y extiende noche solo si corresponde.
-${lightNote}
-- Puedes **cruzar de día** si una actividad nocturna lo requiere (p.ej., 20:30–02:00). No recortes esas filas.
-- Devuelve {"rows":[...],"replace":false}.
-
-Contexto:
-${intakeData}
-`.trim();
-
-  const ans = await callAgent(prompt,true,{cityName:city,baseDate});
-  const parsed=parseJSON(ans);
-
-  /* === A.1: Unificar formato === */
-  const unified = unifyRowsFormat(parsed, city);
-  if(unified && Array.isArray(unified.rows)) parsed.rows = unified.rows;
-
-  if(parsed?.rows){
-    let normalized=parsed.rows.map(x=>normalizeRow({...x,day}));
-
-    // Anti-duplicados extendido (permite auroras, controladas más abajo)
-    const allExisting=Object.values(itineraries[city].byDay||{})
-      .flat().filter(r=>r.day!==day)
-      .map(r=>aliasKey(r.activity||''));
-    normalized=normalized.filter(r=>{
-      const key=aliasKey(r.activity||'');
-      const isAurora=/\baurora\b|\bnorthern\s+lights?\b/i.test(key);
-      return key && (!allExisting.includes(key) || isAurora);
+    // 1) INFO — investigación completa con TODO el contexto del planner
+    const context = __collectPlannerContext__(city, day);
+    const infoResp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode:'info', context })
     });
+    const infoData = await infoResp.json();
+    const research = cleanToJSONPlus(infoData?.text || infoData);
 
-    if(typeof applyBufferBetweenRows==='function')
-      normalized=applyBufferBetweenRows(normalized);
-    if(typeof reorderLinearVisits==='function')
-      normalized=reorderLinearVisits(normalized);
+    // 2) PLANNER — estructuración exacta (sin inventar tiempos)
+    const plannerResp = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode:'planner', research_json: research })
+    });
+    const plannerData = await plannerResp.json();
+    const structured = cleanToJSONPlus(plannerData?.text || plannerData) || {};
 
-    // 👉 Auroras: normalizador local + tope (1–2 noches) evitando consecutivas
-    if(auroraCity && (auroraSeason || !baseDate)){
-      normalized = normalized.map(normalizeAuroraWindow);
-      const cap = suggestedAuroraCap(stayDays);
-      normalized = enforceAuroraCapForDay(city, day, normalized, cap);
-    }else{
-      // Si no aplica, elimina posibles inventos del modelo
-      normalized = normalized.filter(r=>!/\baurora\b|\bnorthern\s+lights?\b/i.test(String(r.activity||'')));
-    }
+    // Unificar formato para tomar rows
+    const unified = unifyRowsFormat(structured, city);
+    let finalRows = (unified?.rows||[]).map(x=>normalizeRow({ ...x, day: (x.day||day) }));
 
-    /* === A.2: Transporte/“fuera de ciudad” (determinístico) === */
-    normalized = enforceTransportAndOutOfTown(city, normalized);
+    // Salvaguardas suaves (no deben alterar research/planner):
+    if(typeof applyBufferBetweenRows==='function') finalRows = applyBufferBetweenRows(finalRows);
+    if(typeof reorderLinearVisits==='function')    finalRows = reorderLinearVisits(finalRows);
 
-    /* === A.3: Retornos garantizados (a ciudad y a hotel) === */
-    normalized = ensureReturnToCity(city, day, normalized);
-    let finalRows=[...normalized,...protectedRows];
-    finalRows = ensureEndReturnToHotel(finalRows);
+    // Si el research marcó auroras, respetamos; si no, no forzamos nada.
+    finalRows = finalRows.map(normalizeAuroraWindow);
 
-    // Anti-solapes, buffers y soporte de cruce post-medianoche
+    // Transporte: sólo rellenamos si vinieron vacíos (no sobreescribir)
+    finalRows = enforceTransportAndOutOfTown(city, finalRows);
+
+    // Anti-solapes y soporte de cruce post-medianoche
     finalRows = fixOverlaps(finalRows);
 
-    const val=await validateRowsWithAgent(city,finalRows,baseDate);
-    pushRows(city,val.allowed,false);
+    // Reincorporar filas protegidas si aplica
+    if(protectedRows.length){
+      finalRows = [...finalRows, ...protectedRows];
+      finalRows = fixOverlaps(finalRows);
+    }
+
+    // Validación final y volcado al estado
+    const val=await validateRowsWithAgent(city, finalRows, baseDate);
+    pushRows(city, val.allowed, false);
+
+  }catch(e){
+    console.error('optimizeDay INFO→PLANNER error:', e);
+    // Fallback: no romper UI
+    const val=await validateRowsWithAgent(city, rows, baseDate);
+    pushRows(city, val.allowed, false);
   }
 }
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
-   v71.fix — Extensión de días estable
-   - Reequilibra desde el último día original hasta el nuevo final
-   - Define "día suave" en el NUEVO último día
-   - Asegura ventana/optimización completa del día nuevo
-   + Mejora: uso del resolutor de hotel/zona, feedback de confianza,
-     y activación automática de preferAurora cuando aplique
+   v71.fix — Extensión de días estable + integración INFO→PLANNER
+   - Mantiene flujos existentes (add/swap/move/etc.)
+   - Rebalanceos y optimizaciones llaman a optimizeDay (que ya usa INFO→PLANNER)
+   - Respeta y registra preferencias/condiciones del usuario
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2902,7 +2793,7 @@ async function onSend(){
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
 
-    // 🚀 Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
+    // Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
     const res = resolveHotelInput(text, city);
     const resolvedHotel = res.text || text;
 
@@ -2915,7 +2806,7 @@ async function onSend(){
 
     upsertCityMeta({ city, hotel: resolvedHotel, transport });
 
-    // 🗣️ Feedback al usuario según confianza del match
+    // Feedback al usuario según confianza del match
     if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
       chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
     }else if((res.confidence||0) >= 0.65){
@@ -2924,13 +2815,12 @@ async function onSend(){
       chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
     }
 
-    // 🌌 Activar preferAurora automáticamente si la ciudad es apta
+    // Activar preferAurora automáticamente si la ciudad es apta
     try{
       const canon = (typeof normalizeCityForGeo==='function') ? normalizeCityForGeo(city) : city;
       const coords = (typeof getCoordinatesForCity==='function') ? (getCoordinatesForCity(canon) || getCoordinatesForCity(city)) : null;
       const auroraCity = coords && (typeof isAuroraCityDynamic==='function') ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
 
-      // Si no hay coords, usa heurística por nombre (Reykjavik/Tromsø variantes)
       if(!coords){
         const low = String(canon||city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
         if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) { if(!plannerState.preferences) plannerState.preferences={}; plannerState.preferences.preferAurora = true; }
@@ -2939,7 +2829,7 @@ async function onSend(){
         if(!plannerState.preferences) plannerState.preferences = {};
         plannerState.preferences.preferAurora = true;
       }
-    }catch(_){ /* no-op seguro */ }
+    }catch(_){ /* no-op */ }
 
     metaProgressIndex++;
     askNextHotelTransport();
@@ -2952,7 +2842,7 @@ async function onSend(){
     const newHotelRaw = hotelChangeMatch[1].trim();
     const city = activeCity;
 
-    // 🧠 Resolver también en cambios de hotel
+    // Resolver también en cambios de hotel
     const res = resolveHotelInput(newHotelRaw, city);
     const newHotel = res.text || newHotelRaw;
 
@@ -3049,11 +2939,11 @@ async function onSend(){
     const total = Object.keys(itineraries[city].byDay||{}).length;
     for(let d=prevTotal+1; d<=total; d++) ensureWindow(d);
 
-    // 👉 Definir "día suave" en el NUEVO último día
+    // Día suave en el nuevo último día
     if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
     plannerState.lightDayTarget[city] = total;
 
-    // Reequilibrar desde el último día original hasta el nuevo final
+    // Reequilibrar rango completo (usa optimizeDay → INFO→PLANNER)
     await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total, dayTripTo: intent.dayTripTo||'' });
 
     // Garantía de completitud del último día
@@ -3077,7 +2967,7 @@ async function onSend(){
 
     // total ANTES de insertar (último día ORIGINAL)
     const prevTotal = days.length || 0;
-    itineraries[city].lastOriginalDay = prevTotal; // histórico
+    itineraries[city].lastOriginalDay = prevTotal;
 
     // Forzar replan del rango
     if (!plannerState.forceReplan) plannerState.forceReplan = {};
@@ -3116,11 +3006,11 @@ async function onSend(){
 
     const total = Object.keys(itineraries[city].byDay||{}).length;
 
-    // 👉 Definir "día suave" en el NUEVO último día
+    // Día suave en el nuevo último día
     if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
     plannerState.lightDayTarget[city] = total;
 
-    // Rebalancear desde el último día original hasta el nuevo final
+    // Rebalancear desde el último día original hasta el final (optimizeDay nuevo)
     await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total });
 
     // Garantía de completitud del nuevo día
@@ -3237,7 +3127,7 @@ async function onSend(){
     return;
   }
 
-  // Preguntas informativas
+  // Preguntas informativas → usa Info Agent (independiente del plan)
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
