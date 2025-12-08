@@ -1,4 +1,4 @@
-// /api/info-public.js — v1.0 (ESM, Vercel)
+// /api/info-public.js — v1.0.1 (ESM, Vercel)
 // Endpoint exclusivo para el Info Chat externo (widget flotante y botón superior).
 // Responde SIEMPRE en formato { text: "..." } para no romper la UI del planner.
 
@@ -88,9 +88,10 @@ export default async function handler(req, res) {
     const body = parseBody(req.body);
     const clientMessages = extractMessages(body);
 
-    // Si no hay texto de usuario, devolvemos aviso amable (para no romper UI)
-    const hasUser =
-      clientMessages.some(m => m.role === "user" && (m.content || "").trim().length > 0);
+    // ✅ FIX: validar tipo antes de usar .trim() para evitar errores cuando content no es string
+    const hasUser = clientMessages.some(
+      (m) => m.role === "user" && typeof m.content === "string" && m.content.trim().length > 0
+    );
 
     if (!hasUser) {
       return res.status(200).json({
