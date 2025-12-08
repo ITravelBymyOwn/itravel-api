@@ -1,4 +1,4 @@
-// /api/chat.js — v42.5.1 (ESM, Vercel)
+// /api/chat.js — v42.6 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
 // Respeta estrictamente preferencias/condiciones del usuario. Salidas SIEMPRE en { text: "<JSON|texto>" }.
 
@@ -21,9 +21,17 @@ function extractMessages(body = {}) {
   const userText = typeof input === "string" ? input : "";
   return [...prev, { role: "user", content: userText }];
 }
+
+// Limpia y extrae un único JSON de un texto (tolerante a prólogos/epílogos)
 function cleanToJSONPlus(raw = "") {
-  if (!raw || typeof raw !== "string") return null;
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  if (typeof raw !== "string") return null;
+
+  // 1) Intento directo
   try { return JSON.parse(raw); } catch {}
+
+  // 2) Primer/último corchete
   try {
     const first = raw.indexOf("{");
     const last = raw.lastIndexOf("}");
@@ -31,12 +39,16 @@ function cleanToJSONPlus(raw = "") {
       return JSON.parse(raw.slice(first, last + 1));
     }
   } catch {}
+
+  // 3) Recorte de ruido en extremos
   try {
     const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
   } catch {}
+
   return null;
 }
+
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -56,15 +68,20 @@ function fallbackJSON() {
     followup: "⚠️ Fallback local: revisa OPENAI_API_KEY o ancho de banda.",
   };
 }
-async function callText(messages, temperature = 0.4, max_output_tokens = 3000) {
+
+// Llamada unificada a Responses API (entrada como string consolidado)
+async function callText(messages, temperature = 0.35, max_output_tokens = 3200) {
+  const inputStr = messages
+    .map(m => `${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
+    .join("\n\n");
+
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
     max_output_tokens,
-    input: messages
-      .map(m => `${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
-      .join("\n\n"),
+    input: inputStr,
   });
+
   return (
     resp?.output_text?.trim() ||
     resp?.output?.[0]?.content?.[0]?.text?.trim() ||
@@ -72,15 +89,20 @@ async function callText(messages, temperature = 0.4, max_output_tokens = 3000) {
   );
 }
 
-// 🆕 Normalizador ligero de duraciones dentro del JSON ya parseado
+// 🆕 Normalizador de duraciones dentro del JSON ya parseado
 function normalizeDurationsInParsed(parsed){
   if(!parsed) return parsed;
+
   const norm = (txt)=>{
-    const s = String(txt||'').trim();
+    const s = String(txt ?? "").trim();
     if(!s) return s;
-    // ~7h → conserva, 2h → 2h, 1.5h → 1h30m, 90m → 90m (se respeta)
+
+    // Acepta formatos: "1.5h", "1h30", "1 h 30", "90m", "~7h", "2h"
+    // No tocamos si empieza con "~"
+    if (/^~\s*\d+(\.\d+)?\s*h$/i.test(s)) return s;
+
+    // 1.5h → 1h30m
     const dh = s.match(/^(\d+(?:\.\d+)?)\s*h$/i);
-    const hMix = s.match(/^(\d+)h(\d{1,2})$/i);
     if(dh){
       const hours = parseFloat(dh[1]);
       const total = Math.round(hours*60);
@@ -88,12 +110,24 @@ function normalizeDurationsInParsed(parsed){
       const m = total%60;
       return h>0 ? (m>0 ? `${h}h${m}m` : `${h}h`) : `${m}m`;
     }
+
+    // 1h30 ó 1 h 30 → 1h30m
+    const hMix = s.match(/^(\d+)\s*h\s*(\d{1,2})$/i);
     if(hMix){
       return `${hMix[1]}h${hMix[2]}m`;
     }
+
+    // 90m → 90m (ya está bien)
+    if (/^\d+\s*m$/i.test(s)) return s;
+
+    // 2h → 2h (ya está bien)
+    if (/^\d+\s*h$/i.test(s)) return s;
+
     return s;
   };
+
   const touchRows = (rows=[]) => rows.map(r=>({ ...r, duration: norm(r.duration) }));
+
   try{
     if(Array.isArray(parsed.rows)) parsed.rows = touchRows(parsed.rows);
     if(Array.isArray(parsed.destinations)){
@@ -109,6 +143,7 @@ function normalizeDurationsInParsed(parsed){
       }));
     }
   }catch{}
+
   return parsed;
 }
 
@@ -121,6 +156,7 @@ function normalizeDurationsInParsed(parsed){
  *    • Si el usuario dio horas de inicio/fin por día ⇒ MANDATORIAS.
  *    • Si NO las dio ⇒ recomienda horas realistas por día y por actividad (experto en turismo global).
  * - Entrega también rows_skeleton ya con start/end cuando corresponda (o day_hours por día para que el Planner pueda asignar).
+ * - Reglas explícitas incluidas: AURORAS (días no consecutivos, evitar último día), REYKJANES sub-paradas (≤8), LAGUNAS ≥3h y no pegadas a actividad pesada inmediata.
  */
 const SYSTEM_INFO = `
 Eres el **motor de investigación** de ITravelByMyOwn (Info Chat interno). Actúas como un experto en turismo internacional.
@@ -154,7 +190,14 @@ OBJETIVO:
    - Si NO hay horas del usuario ⇒ **recomienda horas realistas** por día y por actividad según el destino/época y la logística (no impongas 08:30–19:00).
    - Para macro-tours, bloquea el rango lógico como una sola actividad madre y devuelve return_to_city_duration.
    - Para auroras, usa la ventana exacta (ej. 20:30–01:30) y marca "kind":"aurora".
-4) SALIDA: un ÚNICO **JSON válido** que el Planner usará directamente sin creatividad adicional.
+4) LAGUNAS TERMALES (Blue Lagoon / Secret Lagoon / Sky Lagoon, etc.):
+   - **Duración mínima 3h efectivas en sitio** (sin contar traslados).
+   - Evitar pegarlas inmediatamente a otra actividad "pesada" (ballenas, glaciares, trekking largo) en la misma mañana/tarde.
+   - Si el usuario puso hora fija de entrada, respétala y ajusta salida para alcanzar ≥3h.
+5) REYKJANES / RUTAS CON SUB-PARADAS:
+   - Si hay day-trip a Reykjanes (o rutas similares), devuelve **una actividad madre** con **5–8 sub-paradas** canónicas en orden lógico (≤8 total).
+   - Incluye "return_to_city_duration".
+6) SALIDA: un ÚNICO **JSON válido** que el Planner usará directamente sin creatividad adicional.
 
 SALIDA — JSON ÚNICO (sin texto fuera):
 {
@@ -250,6 +293,16 @@ SALIDA — JSON ÚNICO (sin texto fuera):
       "kind":"aurora",
       "aurora_window": { "start":"20:30", "end":"01:30" },
       "note":"Actividad sujeta a clima; depende del tour"
+    },
+    {
+      "day": 3,
+      "activity":"Blue Lagoon",
+      "from":"Hotel",
+      "to":"Blue Lagoon",
+      "transport":"Vehículo alquilado o Tour guiado",
+      "duration":"3h", // mínimo 3h efectivas
+      "kind":"termal_spa",
+      "note":"Reserva con antelación; lleva traje de baño."
     }
   ]
 }
@@ -257,10 +310,10 @@ SALIDA — JSON ÚNICO (sin texto fuera):
 REGLAS CLAVE:
 - Responde SOLO con un JSON válido.
 - No inventes enlaces ni operadores concretos; sí incluye ventanas horarias típicas y duraciones realistas.
-- Si hay choques con preferencias/condiciones, explícalo en "rationale".
 - Respeta horas MANDATORIAS del usuario (user_day_hours); en su ausencia, recomienda "day_hours" y/o "start/end" en cada ítem de rows_skeleton.
 - Evita duplicar lugares entre días. Macro-tours con sub-paradas (máx. 8).
 - Para auroras: días no consecutivos y nunca el último día; usa su ventana exacta.
+- Para lagunas termales: duración mínima 3h efectivas y evita encadenarlas a actividades pesadas inmediatas.
 `.trim();
 
 /**
@@ -268,6 +321,7 @@ REGLAS CLAVE:
  * - Usa horarios ya provistos por Info Chat (rows_skeleton.start/end) o, si faltan, usa day_hours por día.
  * - Si el usuario dio horas mandatorias (reflejadas por Info Chat), se respetan tal cual.
  * - Crea filas con notas motivadoras cortas; NO altera ventanas de auroras.
+ * - No agrega transporte "post excursión" después del retorno.
  */
 const SYSTEM_PLANNER = `
 Eres **Astra Planner**. Recibes "research_json" del Info Chat interno con datos fácticos
@@ -285,7 +339,9 @@ TU TAREA:
   - Días sugeridos NO consecutivos y nunca el último día (ya decidido por Info Chat). No cueles auroras fuera de esa ventana.
 - **Macro-tours**:
   - Pinta una actividad madre “Excursión — … — A → B → C” (hasta 8 sub-paradas).
-  - NO agregues nuevo transporte “post excursión” después de "return_to_city_duration".
+  - **NO** agregues nuevo transporte “post excursión” después de "return_to_city_duration".
+- **Lagunas termales**:
+  - Asegura **≥3h** efectivas en sitio (si la duración del skeleton fuera menor, ajusta a 3h).
 - **Notas**:
   - Inserta notas motivadoras breves y variadas en cada fila (sin texto florido). Puedes basarte en el "kind" del skeleton (icónico, macro_tour, aurora, paseo, kids, comida, descanso).
 
@@ -324,7 +380,11 @@ export default async function handler(req, res) {
       const context = body.context || {};
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
 
-      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 3500);
+      let raw = await callText(
+        [{ role: "system", content: SYSTEM_INFO }, infoUserMsg],
+        0.35,
+        3500
+      );
       let parsed = cleanToJSONPlus(raw);
 
       if (!parsed) {
@@ -333,32 +393,36 @@ export default async function handler(req, res) {
         parsed = cleanToJSONPlus(raw);
       }
 
-      if (!parsed) parsed = {
-        destination: context.city || "Destino",
-        country: context.country || "",
-        days_total: context.days_total || 1,
-        hotel_base: context.hotel_address || "",
-        rationale: "Fallback mínimo.",
-        imperdibles: [],
-        macro_tours: [],
-        in_city_routes: [],
-        meals_suggestions: [],
-        aurora: {
-          plausible: false,
-          suggested_days: [],
-          window_local: { start: "", end: "" },
-          transport_default: "",
-          note: "Actividad sujeta a clima; depende del tour",
-          duration: "Depende del tour o horas que dediques si vas por tu cuenta"
-        },
-        constraints: { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
-        day_hours: [],
-        rows_skeleton: []
-      };
+      if (!parsed) {
+        // Fallback mínimo coherente con lo que espera la Sección 18
+        parsed = {
+          destination: context.city || "Destino",
+          country: context.country || "",
+          days_total: context.days_total || 1,
+          hotel_base: context.hotel_address || "",
+          rationale: "Fallback mínimo.",
+          imperdibles: [],
+          macro_tours: [],
+          in_city_routes: [],
+          meals_suggestions: [],
+          aurora: {
+            plausible: false,
+            suggested_days: [],
+            window_local: { start: "", end: "" },
+            transport_default: "",
+            note: "Actividad sujeta a clima; depende del tour",
+            duration: "Depende del tour o horas que dediques si vas por tu cuenta"
+          },
+          constraints: { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
+          day_hours: [],
+          rows_skeleton: []
+        };
+      }
 
-      // 🆕 normalización suave
+      // 🆕 normalización suave (decimales → h/m, etc.)
       parsed = normalizeDurationsInParsed(parsed);
 
+      // **Salida estable para Info Chat externo e interno**
       return res.status(200).json({ text: JSON.stringify(parsed) });
     }
 
@@ -366,16 +430,23 @@ export default async function handler(req, res) {
     if (mode === "planner") {
       const research = body.research_json || null;
 
-      // Camino legado (mensajes)
+      // Camino legado (mensajes del cliente)
       if (!research) {
         const clientMessages = extractMessages(body);
-        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3500);
+
+        let raw = await callText(
+          [{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages],
+          0.35,
+          3500
+        );
         let parsed = cleanToJSONPlus(raw);
+
         if (!parsed) {
           const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
           raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3000);
           parsed = cleanToJSONPlus(raw);
         }
+
         if (!parsed) parsed = fallbackJSON();
 
         // 🆕 normalización suave
@@ -384,10 +455,14 @@ export default async function handler(req, res) {
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
-      // Camino nuevo (research_json)
+      // Camino nuevo (research_json directo)
       const plannerUserMsg = { role: "user", content: JSON.stringify({ research_json: research }, null, 2) };
 
-      let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3500);
+      let raw = await callText(
+        [{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg],
+        0.35,
+        3500
+      );
       let parsed = cleanToJSONPlus(raw);
 
       if (!parsed) {
@@ -415,6 +490,7 @@ export default async function handler(req, res) {
 
   } catch (err) {
     console.error("❌ /api/chat error:", err);
+    // Respuesta de compatibilidad para el Planner/Info Chat
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
