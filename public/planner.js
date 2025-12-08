@@ -1536,212 +1536,86 @@ function showWOW(on, msg){
 }
 
 /* ==============================
-   SECCIÓN 15.2 · Bridge de Red / Agentes (Info-first → Planner)
-   v75.fix2 — Restauración de scaffold + render inmediato tras "Guardar destinos"
-   - Fuerza montaje del panel derecho (tabs + cabecera de tabla)
-   - Mantiene lógica Info-first / Planner y cachés
+   SECCIÓN 15.2 · Bridge Guardar destinos → Estructura base
+   v75.retrofit — Arma estructuras y render inicial (tabs + tabla)
+   - No hace llamadas al API
+   - Tolerante a datos faltantes (usa defaults)
+   - Idéntico al flujo v75: tras Guardar ya puedes ver tabs/tabla
 ================================= */
 
-/* ---------- Configuración de red ---------- */
-const API_CHAT_ENDPOINT = '/api/chat';
-const NET_TIMEOUT_INFO_MS    = 10_000;
-const NET_TIMEOUT_PLANNER_MS = 18_000;
-
-/* ---------- Caches ligeros ---------- */
-const researchCache = Object.create(null);
-const plannerCache  = Object.create(null);
-
-/* ---------- Utilidades ---------- */
-function __stringHash__(s){
-  let h = 2166136261 >>> 0;
-  for(let i=0;i<s.length;i++){
-    h ^= s.charCodeAt(i);
-    h += (h<<1)+(h<<4)+(h<<7)+(h<<8)+(h<<24);
-  }
-  return (h>>>0).toString(36);
-}
-function __normCityKey__(name){
-  return String(name||'')
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu,'')
-    .trim()
-    .toLowerCase();
-}
-
-/* ---------- Limpieza de fences/JSON ---------- */
-function parseJSON(raw){
-  if(!raw) return null;
-
-  // Si el backend adjunta un JSON parseado, úsalo
-  if(typeof raw === 'object'){
-    if (raw && raw.json) return raw.json;
-    try{ return JSON.parse(JSON.stringify(raw)); }catch{ return raw; }
-  }
-
-  let s = String(raw).trim();
-  s = s.replace(/^```json/i,'```').replace(/^```/,'').replace(/```$/,'').trim();
-  try{ return JSON.parse(s); }catch{}
-  try{
-    const a=s.indexOf('{'); const b=s.lastIndexOf('}');
-    if(a>=0 && b>a) return JSON.parse(s.slice(a,b+1));
-  }catch{}
-  try{
-    const cleaned=s.replace(/^[^{]+/,'').replace(/[^}]+$/,'');
-    return JSON.parse(cleaned);
-  }catch{}
-  return null;
-}
-
-/* ---------- Capa de red con abort ---------- */
-async function fetchJSON(url,payload,timeoutMs){
-  const ctrl=new AbortController();
-  const id=setTimeout(()=>ctrl.abort(),timeoutMs||NET_TIMEOUT_PLANNER_MS);
-  try{
-    const resp=await fetch(url,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(payload||{}),
-      signal:ctrl.signal
-    });
-    const data=await resp.json().catch(()=>({}));
-    return data;
-  }finally{ clearTimeout(id); }
-}
-
-/* ---------- Agente INFO ---------- */
-async function callInfoAgent(query){
-  const q=String(query||'').trim();
-  if(!q) return '';
-  const cityGuess=activeCity||savedDestinations?.[0]?.city||'';
-  const key=cityGuess?__normCityKey__(cityGuess):'';
-  if(key&&researchCache[key]&&(Date.now()-researchCache[key].at)<6*60*1000){
-    return researchCache[key].text||'';
-  }
-  const payload={mode:'info',messages:[{role:'user',content:q}]};
-  const data=await fetchJSON(API_CHAT_ENDPOINT,payload,NET_TIMEOUT_INFO_MS);
-  const text=(data&&typeof data.text==='string')?data.text:'';
-  if(key){ researchCache[key]={text,at:Date.now()}; }
-  return text;
-}
-
-/* ---------- Agente PLANNER ---------- */
-async function callAgent(prompt,forceJSON=true,meta={}){
-  const p=String(prompt||'').trim();
-  if(!p) return '';
-
-  const c=__normCityKey__(meta.cityName||'');
-  const base=String(meta.baseDate||'');
-  const cacheKey=__stringHash__(`[P]${p}#${c}#${base}#${forceJSON?'J':'F'}`);
-
-  // cachea el objeto completo de la respuesta del backend
-  if(plannerCache[cacheKey]&&(Date.now()-plannerCache[cacheKey].at)<3*60*1000){
-    return plannerCache[cacheKey].data;
-  }
-  const payload={mode:'planner',messages:[{role:'user',content:p}]};
-  const data=await fetchJSON(API_CHAT_ENDPOINT,payload,NET_TIMEOUT_PLANNER_MS);
-  plannerCache[cacheKey]={data,at:Date.now()};
-  return data;
-}
-
-/* ---------- Helper Info-first ---------- */
-function __mkResearchHint__(city){
-  try{
-    const key=__normCityKey__(city||'');
-    const hit=key&&researchCache[key]?String(researchCache[key].text||'').trim():'';
-    if(!hit) return '';
-    return hit.replace(/\s+/g,' ').slice(0,280);
-  }catch(_){return'';}
-}
-
-/* =====================================================
-   🔁 handleSaveDestinations — Render inmediato + scaffold forzado
-   Restauración del flujo v75:
-   - Tabs por ciudad + placeholders por día
-   - Activación de botones (reset habilitado, start habilitado)
-   - Limpieza segura de estado previo antes de montar nuevo scaffold
-===================================================== */
 async function handleSaveDestinations(){
-  const rows=[...$cityList.querySelectorAll('.city-row')];
-  if(!rows.length){
-    alert('Por favor, agrega al menos una ciudad.');
-    return;
+  // 1) Leer formulario
+  const rows = qsa('.city-row', $cityList);
+  if(!rows.length) throw new Error('No hay filas de ciudades');
+
+  const parseDMYSafe = (s)=>{
+    try{ return (typeof parseDMY==='function') ? parseDMY(s) : null; }catch(_){ return null; }
+  };
+
+  const draft = [];
+  for(const r of rows){
+    const city    = (qs('.city', r)?.value||'').trim();
+    const country = (qs('.country', r)?.value||'').trim();
+    const daysVal = parseInt((qs('.days', r)?.value||'0'),10) || 0;
+    const baseStr = (qs('.baseDate', r)?.value||'').trim();
+    const base    = parseDMYSafe(baseStr);
+    if(!city || !country || !daysVal || !base) continue;
+
+    // Ventanas día a día (HH:MM) — iguales a v75
+    const starts = Array.from(r.querySelectorAll('.day-start')).map(i=> (i.value||'').trim());
+    const ends   = Array.from(r.querySelectorAll('.day-end')).map(i=> (i.value||'').trim());
+
+    draft.push({
+      city, country, days: daysVal, baseDate: baseStr,
+      starts, ends
+    });
   }
+  if(!draft.length) throw new Error('Formulario incompleto');
 
-  const newDestinations=rows.map(r=>({
-    city:(r.querySelector('.city')?.value||'').trim(),
-    country:(r.querySelector('.country')?.value||'').trim(),
-    days:Number(r.querySelector('.days')?.value||0),
-    baseDate:(r.querySelector('.start')?.value||'').trim()
-  })).filter(d=>d.city&&d.days>0);
+  // 2) Persistir en plannerState
+  plannerState = plannerState || {};
+  plannerState.destinations = draft.map(d=>({ city:d.city, country:d.country, days:d.days, baseDate:d.baseDate }));
 
-  if(!newDestinations.length){
-    alert('Completa ciudad y número de días antes de continuar.');
-    return;
-  }
+  // 3) Guardar lista visible
+  savedDestinations = draft.map(d=>({ city: d.city, country: d.country, days: d.days, baseDate: d.baseDate }));
 
-  // Persistimos y desbloqueamos botones principales
-  savedDestinations=newDestinations;
-  persistState('destinations',savedDestinations);
+  // 4) Inicializar cityMeta (hoteles/transporte quedan como estén)
+  cityMeta = cityMeta || {};
+  for(const d of draft){
+    if(!cityMeta[d.city]) cityMeta[d.city] = { baseDate: d.baseDate, hotel: (cityMeta[d.city]?.hotel||''), transport: (cityMeta[d.city]?.transport||''), perDay: [] };
 
-  // 🔒 Deshabilita inputs de la grilla de destinos (pero re-habilita Start/Reset)
-  $cityList.querySelectorAll('input,select,button').forEach(el=>{ el.disabled=true; });
-  if($saveBtn)  $saveBtn.disabled=true;
-  if($resetBtn) $resetBtn.disabled=false;
-  if($startBtn) $startBtn.disabled=false;
-
-  // Limpia flags que podrían bloquear el arranque
-  if(typeof plannerState==='object'){
-    delete plannerState.forceReplan;
-    delete plannerState.dayTripPending;
-  }
-
-  chatMsg('✈️ Destinos guardados. Preparando la estructura base…','ai');
-
-  try{
-    // Limpia estado y DOM previos
-    itineraries={};
-    cityMeta={};
-    if($cityTabs)      $cityTabs.innerHTML='';
-    if($itineraryBody) $itineraryBody.innerHTML='';
-
-    // ⚙️ Asegura el scaffold del panel derecho (tabs + cabecera de la tabla)
-    if(typeof ensureItineraryScaffold==='function'){
-      ensureItineraryScaffold();           // ← build de header/footers/paginación
-    }else if(typeof initItineraryUI==='function'){
-      initItineraryUI();                   // ← nombre alterno en builds previas
+    // Ventanas por día (siempre existen en v75)
+    const perDay = [];
+    for(let i=1;i<=d.days;i++){
+      const st = (d.starts && d.starts[i-1]) || DEFAULT_START;
+      const en = (d.ends   && d.ends[i-1])   || DEFAULT_END;
+      perDay.push({ day:i, start: st || DEFAULT_START, end: en || DEFAULT_END });
     }
-
-    // Crea estructura por cada ciudad (tabs + placeholder por días)
-    for(const dest of savedDestinations){
-      const {city,days,baseDate}=dest;
-      itineraries[city]={byDay:{},baseDate};
-      cityMeta[city]={baseDate,hotel:'',transport:'',perDay:[]};
-
-      // Pre-crea ventana diaria por defecto (como en v75) para un render consistente
-      for(let d=1; d<=days; d++){
-        cityMeta[city].perDay.push({ day:d, start:DEFAULT_START, end:DEFAULT_END });
-        itineraries[city].byDay[d] = []; // placeholder vacío
-      }
-
-      if(typeof createCityTab==='function')       createCityTab(city);
-      if(typeof renderCityItinerary==='function') renderCityItinerary(city,{placeholder:true,days,baseDate});
-    }
-
-    // Refresca tabs y activa la primera ciudad (restaurando el UX de v75)
-    if(savedDestinations.length){
-      const firstCity=savedDestinations[0].city;
-      if(typeof renderCityTabs==='function') renderCityTabs();
-      if(typeof setActiveCity==='function')  setActiveCity(firstCity);
-      if(typeof renderCityItinerary==='function') renderCityItinerary(firstCity,{placeholder:true});
-    }
-
-    // 💡 Sugerencia de siguiente paso + focus en "Iniciar planificación"
-    chatMsg('🗺️ Estructura lista. Pulsa “Iniciar planificación” para generar con IA.','ai');
-    try{ if($startBtn){ $startBtn.focus(); } }catch(_){}
-  }catch(err){
-    console.error('Error en render inicial:',err);
-    chatMsg('⚠️ Ocurrió un problema al generar las tablas base. Intenta de nuevo.','ai');
+    cityMeta[d.city].perDay = perDay;
   }
+
+  // 5) Inicializar itineraries[city].byDay vacío (igual que v75)
+  itineraries = itineraries || {};
+  for(const d of draft){
+    if(!itineraries[d.city]){
+      itineraries[d.city] = { baseDate: d.baseDate, originalDays: d.days, byDay: {} };
+    }
+    const byDay = itineraries[d.city].byDay || {};
+    for(let i=1;i<=d.days;i++){
+      if(!Array.isArray(byDay[i])) byDay[i] = [];
+    }
+    itineraries[d.city].byDay = byDay;
+  }
+
+  // 6) UI: tabs & primer render (idéntico a v75)
+  activeCity = activeCity || draft[0].city;
+  if(typeof renderCityTabs === 'function') renderCityTabs();
+  if(typeof renderCityItinerary === 'function') renderCityItinerary(activeCity);
+
+  // 7) Mostrar chat y estados
+  if($chatBox) $chatBox.style.display = 'block';
+  planningStarted = false; // Igual que v75: inicia cuando pulses "Iniciar planificación"
+  return true;
 }
 
 /* ==============================
@@ -2437,15 +2311,17 @@ function intentFromText(text){
 }
 
 /* ==============================
-   SECCIÓN 18 · Render unificado de tablas — Injerto v75.R
+   SECCIÓN 18 · Render unificado de tablas — Injerto v75.R2
    (Se agrega al final de la Sección 18; NO pisa funciones existentes)
-   - Define renderCityItinerary SOLO si no existe
+   - NO bloquear si hay un stub previo (inyecta salvo que ya sea el unificado)
+   - Marca renderCityItinerary.__itbmoUnified = true
    - Usa itineraries[city].byDay como fuente de verdad
    - Soporta sub-paradas (prefijo "— " o " — ")
    - Etiqueta nocturnas/auroras/out-of-town para estilos
 ================================= */
 (function attachUnifiedRenderer(){
-  if (typeof renderCityItinerary === 'function') return; // ya existe en tu build
+  // Solo NO inyectar si el existente ya es el unificado
+  if (typeof renderCityItinerary === 'function' && renderCityItinerary.__itbmoUnified === true) return;
 
   /* Helpers DOM seguros */
   function __q(sel){ return document.querySelector(sel); }
@@ -2552,7 +2428,7 @@ function intentFromText(text){
     `;
   }
 
-  /* Export principal */
+  /* Export principal idéntico a v75 */
   window.renderCityItinerary = function renderCityItinerary(city, opts = {}){
     try{
       const $root = __itWrapEl();
@@ -2561,7 +2437,7 @@ function intentFromText(text){
       const byDay = (itineraries?.[city]?.byDay) || {};
       const days  = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
 
-      // Day visible / currentDay
+      // Día visible como en v75
       let showDay = +opts.day || itineraries[city]?.currentDay || days[0] || 1;
       if(!byDay[showDay] || !byDay[showDay].length){
         const firstNonEmpty = days.find(d => (byDay[d]||[]).length);
@@ -2570,7 +2446,7 @@ function intentFromText(text){
       if(!itineraries[city]) itineraries[city] = {};
       itineraries[city].currentDay = showDay;
 
-      // Construye HTML (todas las tablas, con el “día activo” primero)
+      // Construir HTML (día activo primero)
       const orderedDays = [showDay, ...days.filter(d=>d!==showDay)];
       let html = '';
       if(!orderedDays.length){
@@ -2584,7 +2460,7 @@ function intentFromText(text){
 
       $root.innerHTML = html;
 
-      // Focus accesible al primer encabezado del día activo
+      // Focus accesible
       const activeH = $root.querySelector('.it-day[data-day="'+showDay+'"] .it-day-title');
       activeH && activeH.setAttribute('tabindex','-1');
       activeH && activeH.focus({ preventScroll:false });
@@ -2598,7 +2474,10 @@ function intentFromText(text){
     }
   };
 
-  // Exponer atajo para renderizar solo el día actual (opcional)
+  // Marca de renderer unificado
+  try { window.renderCityItinerary.__itbmoUnified = true; } catch(_) {}
+
+  // Atajo opcional
   window.renderCurrentDay = function(city, day){
     return window.renderCityItinerary(city, { day });
   };
@@ -3097,48 +2976,18 @@ ${dayRows}
 }
 
 /* ==============================
-   SECCIÓN 20 · Render / UI (RESTABLECIDA)
-   v71.fix — Compatible con Info-first → Planner
-   ✅ Sin redefinir renderCityItinerary (usa la de SECCIÓN 18)
+   SECCIÓN 20 · Render / UI (v75.fix)
    - Tabs de ciudades con estado y activación
-   - Helpers DOM seguros
-   - Limpieza visual de duration (si alguna vista ajena la usara)
-   - Mantiene clases/estilos existentes
+   - Delegación al renderer unificado de Sección 18
 ================================= */
 
-/* ---------- Helpers DOM seguros ---------- */
-function __q(sel){
-  return document.querySelector(sel);
-}
-function __qs(sel){
-  return Array.from(document.querySelectorAll(sel));
-}
-function __el(tag, cls){
-  const n = document.createElement(tag);
-  if(cls) n.className = cls;
-  return n;
-}
+function __q(sel){ return document.querySelector(sel); }
+function __el(tag, cls){ const n=document.createElement(tag); if(cls) n.className=cls; return n; }
 
-/* Contenedores con fallbacks (no rompe tu HTML existente) */
 function __tabsEl(){
   return __q('[data-ui="city-tabs"]') || __q('#city-tabs') || __q('#cityTabs') || __q('.city-tabs');
 }
-function __itineraryEl(){
-  return __q('[data-ui="itinerary"]') || __q('#itinerary') || __q('#itineraryPane') || __q('.itinerary');
-}
 
-/* ---------- Helpers de formato mínimos (compatibilidad) ---------- */
-function __escape(s){
-  return String(s==null?'':s)
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;');
-}
-function __cleanDuration(d=''){
-  return String(d).replace(/[~≈]/g,'').trim();
-}
-
-/* ---------- Tabs de ciudades ---------- */
 function renderCityTabs(){
   const $tabs = __tabsEl();
   if(!$tabs) return;
@@ -3153,33 +3002,17 @@ function renderCityTabs(){
     tab.type = 'button';
     tab.setAttribute('data-city', city);
 
-    // Estado visual (usa contador de días existentes en itineraries)
     const total = Object.keys(itineraries[city]?.byDay||{}).length || 0;
     const badge = total ? `<span class="tab-badge" aria-label="${total} días">${total}</span>` : '';
     const isAct = (city === act);
-    tab.innerHTML = `
-      <span class="tab-label">${__escape(city)}</span>
-      ${badge}
-    `;
+    tab.innerHTML = `<span class="tab-label">${city}</span>${badge}`;
     if(isAct) tab.classList.add('is-active');
 
     tab.addEventListener('click', ()=>{
       setActiveCity(city);
-      renderCityTabs();               // repinta el activo
-      // ⚠️ Importante: delega el render al motor oficial de la SECCIÓN 18
-      try {
-        // Llamada directa al renderer unificado
-        if (typeof renderCityItinerary === 'function') {
-          renderCityItinerary(city);
-        } else {
-          // Si por algún motivo no está aún definido, intenta forzar un mensaje visible
-          const $root = __itineraryEl();
-          if ($root) {
-            $root.innerHTML = `<div class="it-empty"><p>Itinerario pendiente de generar…</p></div>`;
-          }
-        }
-      } catch (err) {
-        console.error('Error al renderizar la ciudad:', err);
+      renderCityTabs();
+      if (typeof renderCityItinerary === 'function') {
+        renderCityItinerary(city);
       }
     });
 
@@ -3187,19 +3020,7 @@ function renderCityTabs(){
   });
 }
 
-/* ---------- NOTA DE ESTILOS (opcional, si no tienes CSS aplicado) ----------
-.city-tabs,.tab-city{display:flex}
-.tab-city{align-items:center;gap:.5rem;padding:.5rem .75rem;border:1px solid transparent;background:transparent;border-radius:.75rem;cursor:pointer}
-.tab-city.is-active{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.08)}
-.tab-badge{display:inline-flex;align-items:center;gap:.25rem;border:1px solid rgba(0,0,0,.1);padding:.15rem .45rem;border-radius:.75rem;font-size:.82rem}
------------------------------------------------------------------------------ */
-
-/* ---------- Export seguro (opcional) ---------- */
-try {
-  if (typeof window !== 'undefined') {
-    window.renderCityTabs = renderCityTabs;
-  }
-} catch(_) {}
+try { if (typeof window !== 'undefined') window.renderCityTabs = renderCityTabs; } catch(_) {}
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
@@ -3503,4 +3324,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
 
