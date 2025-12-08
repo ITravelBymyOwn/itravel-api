@@ -2329,7 +2329,7 @@ function intentFromText(text){
 
 /* ============================================================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.1 (clean)
+   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.1
    Cambios clave en este patch:
    • Doble etapa con el agente: INFO → PLANNER (timeouts/retry).
    • Auroras: 1 por día, franja nocturna, no consecutivas (cap global).
@@ -2340,7 +2340,6 @@ function intentFromText(text){
    • Llamadas a optimización y validación sólo cuando agrega valor.
    • Todas las funciones nuevas se registran con guardas para no
      pisar implementaciones existentes en otras secciones.
-   • **Sin inyección de cena ni horarios predefinidos externos.**
    ============================================================ */
 
 /* ------------------------------------------------------------------
@@ -2672,6 +2671,40 @@ function ensureReturnRow(city, rows) {
 }
 
 /* ------------------------------------------------------------------
+   Inyección de cena (respeta preferencia global)
+------------------------------------------------------------------- */
+if (typeof injectDinnerIfMissing !== 'function') {
+  function injectDinnerIfMissing(city, rows) {
+    const prefer = plannerState?.preferences?.alwaysIncludeDinner;
+    if (!prefer) return rows;
+    const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
+    const out = [];
+    Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
+      const list = byDay[day].slice();
+      const hasDinner = list.some(r => /cena\b/i.test(String(r.activity || '')));
+      if (!hasDinner) {
+        const endMax = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__('19:30'));
+        const start = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
+        const end = __addMinutesSafe__(start, 75);
+        list.push({
+          day,
+          start,
+          end,
+          activity: 'Cena',
+          from: 'Centro',
+          to: 'Restaurante local',
+          transport: 'A pie',
+          duration: '1h15m',
+          notes: 'Reserva sugerida si es sitio popular.'
+        });
+      }
+      out.push(...list);
+    });
+    return out;
+  }
+}
+
+/* ------------------------------------------------------------------
    Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
 ------------------------------------------------------------------- */
 if (typeof callApiChat !== 'function') {
@@ -2788,7 +2821,7 @@ async function optimizeDay(city, day) {
     }
     finalRows = ensureReturnRow(city, finalRows);
     finalRows = clearTransportAfterReturn(city, finalRows);
-    // (Sin inyección de cena)
+    if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
     finalRows = pruneGenericPerDay(finalRows);
     finalRows = __sortRowsTabsSafe__(finalRows);
 
@@ -2801,8 +2834,7 @@ async function optimizeDay(city, day) {
     console.error('optimizeDay INFO→PLANNER error:', e);
     // Fallback conservador: ordenar/limpiar lo que ya había
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = ensureReturnRow(city, safeRows);
-    safeRows = fixOverlaps(safeRows);
+    safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing(city, safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
@@ -2810,7 +2842,6 @@ async function optimizeDay(city, day) {
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
   }
 }
-
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
