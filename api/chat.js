@@ -52,7 +52,7 @@ function fallbackJSON() {
   };
 }
 
-async function callText(messages, temperature = 0.4, max_output_tokens = 3000) {
+async function callText(messages, temperature = 0.4, max_output_tokens = 4200) {
   const resp = await client.responses.create({
     model: "gpt-4o-mini",
     temperature,
@@ -75,69 +75,86 @@ const SYSTEM_INFO = `
 Eres el **motor de investigación** de ITravelByMyOwn (Info Chat).
 
 RECIBES: un objeto JSON "context" con TODOS los datos del planner:
-- ciudad, país, fechas, días totales
+- ciudad, país, fechas (por día), días totales
 - dirección/nombre de hotel (punto base exacto para tiempos)
 - viajeros (edades), ritmo, presupuesto
-- **preferencias** y **condiciones especiales** del usuario (¡PRIORIDAD MÁXIMA!)
-- transporte preferido/disponible
+- **preferencias** y **condiciones especiales** del usuario (PRIORIDAD MÁXIMA)
+- transporte preferido/disponible y restricciones (p.ej., no conducir)
 - ciudades previa/siguiente (si aplica)
 - notas libres del usuario
 - reglas del sistema (p.ej., max_substops_per_tour=8)
 
-TU TAREA:
-1) Identifica **imperdibles** (must_see=true) y ordénalos por cercanía/zonas.
-2) Detecta **macro-tours de 1 día** (ciudades cercanas relevantes) *solo si*
-   respetan las preferencias/condiciones y aportan más valor que alternativas locales.
-3) Calcula **tiempos REALES** entre puntos, incluyendo **regreso al hotel**.
-   - Si falta dirección exacta, usa la del hotel_base como referencia urbana.
-   - Entrega tiempos como duraciones ("45m", "1h15", "2h") y, si es útil, modo sugerido.
-4) Construye para cada día una **ruta optimizada** (orden lógico, sin sobrecargar).
-5) Para excursiones, lista **sub-paradas (hasta 8)** con nombres precisos.
-6) Si la latitud/temporada lo permiten, marca auroras con plausibilidad y días sugeridos (no consecutivos, nunca el último día). **No inventes horarios**, solo plausibilidad y ventanas típicas.
-7) Incluye sugerencias de comida/descanso si son icónicas y compatibles con condiciones (p.ej., evitar largas colas si hay movilidad reducida).
+TU TAREA (investiga/razona y devuelve datos fácticos):
+1) Identifica **imperdibles** (must_see=true), clasifícalos por zona y ordénalos por cercanía/tiempos.
+2) Detecta **macro-tours de 1 día** (ciudades/zonas cercanas) *sólo si* aportan más valor que alternativas locales y cuadran con preferencias/condiciones. 
+3) Calcula **tiempos REALES** entre puntos, incluyendo **REGRESO al hotel**:
+   - Usa el hotel_base como origen/fin por defecto.
+   - Entrega cada tramo como duración legible ("45m","1h15") y, si es útil, con modo sugerido (Metro/Taxi/Tren/Tour).
+4) Construye para cada día una **ruta optimizada** (orden lógico sin sobrecargar, huecos razonables).
+5) En macro-tours, lista **sub-paradas (hasta 8)** con nombres precisos y tiempos de cada tramo.
+6) **Auroras**: 
+   - A partir de la **ciudad y fechas**, infiere **latitud** y **temporada**. 
+   - Determina **plausibilidad** de ver auroras y **días sugeridos no consecutivos** (nunca el último día).
+   - **Investiga ventanas típicas de tours** (p. ej., salida 19:30–21:30 y regreso 00:30–02:00) y propone una **ventana recomendada**. 
+   - Provee un **template de fila** con:
+     transport = "Vehículo alquilado o Tour guiado",
+     duration = "Depende del tour o horas que dediques si vas por tu cuenta",
+     note = "Noche especial de caza de auroras... (el retorno depende del tour)".
+   - No inventes certezas meteorológicas; expresa plausibilidad/ventanas típicas.
+7) Comidas/descanso: sugiere slots (60–90m) cuando aporte a la experiencia y respete condiciones (movilidad, niños, etc.).
 
 REGLAS CLAVE:
 - **Nunca ignores** preferencias/condiciones del usuario; si chocan con un imperdible, explícalo en "rationale".
 - No devuelvas texto fuera de JSON. Respuesta **única** en JSON válido.
 
-SALIDA JSON ÚNICA:
+SALIDA JSON ÚNICA (ejemplo de campos):
 {
   "destination": "Ciudad",
   "country": "País",
   "days_total": 5,
   "hotel_base": "Nombre o dirección",
-  "rationale": "Notas de porqué este orden y elecciones, considerando preferencias/condiciones.",
+  "rationale": "Por qué este orden (preferencias/condiciones).",
   "imperdibles": [
-    { "name":"...", "type":"...", "area":"...", "must_see": true }
+    { "name":"...", "type":"museo/parque/monumento", "area":"Centro/…", "must_see": true }
   ],
   "macro_tours": [
     {
-      "name":"Excursión — Toledo",
-      "typical_transport": "Tren o Tour guiado",
+      "name":"Excursión — Círculo Dorado",
+      "typical_transport": "Vehículo alquilado o Tour guiado",
       "substops":[
-        { "name":"Casco histórico", "duration":"1h45", "leg_from_prev":"30m Tren/Taxi" },
-        { "name":"Catedral Primada", "duration":"1h15", "leg_from_prev":"10m a pie" }
+        { "name":"Þingvellir", "duration":"1h15", "leg_from_prev":"45m desde hotel (Auto/Tour)" },
+        { "name":"Geysir", "duration":"1h", "leg_from_prev":"50m Auto/Tour" },
+        { "name":"Gullfoss", "duration":"1h15", "leg_from_prev":"10m Auto/Tour" }
       ],
-      "return_to_city_duration":"1h Tren",
-      "why": "Aporta más valor que X en días N según preferencias/ritmo."
+      "return_to_city_duration":"2h45 Auto/Tour",
+      "why": "Clásico de la zona; encaja con ritmo y condiciones."
     }
   ],
   "in_city_routes": [
     {
       "day": 1,
       "optimized_order": [
-        { "name":"Palacio Real", "duration":"1h30", "leg_from_prev":"20m desde hotel (Metro/Taxi)" },
-        { "name":"Plaza Mayor", "duration":"45m", "leg_from_prev":"10m a pie" }
+        { "name":"Hallgrímskirkja", "duration":"1h30", "leg_from_prev":"15m desde hotel (A pie/Taxi)" },
+        { "name":"Laugavegur", "duration":"1h30", "leg_from_prev":"10m a pie" }
       ],
-      "return_to_hotel_duration":"20m Metro/Taxi"
+      "return_to_hotel_duration":"20m Taxi/A pie"
     }
   ],
   "meals_suggestions":[
     { "slot":"almuerzo", "area":"Centro", "type":"local", "duration":"60–90m" }
   ],
   "aurora": {
-    "plausible": false,
-    "suggested_days": []
+    "plausible": true,
+    "latitude": "≈64.1°N",
+    "season_window": "Sep–Mar",
+    "typical_tour_windows": ["19:30–00:30","20:30–01:30"],
+    "recommended_window": "18:30–01:00",
+    "suggested_days": [2,4],
+    "row_template": {
+      "transport": "Vehículo alquilado o Tour guiado",
+      "duration": "Depende del tour o horas que dediques si vas por tu cuenta",
+      "note": "Noche especial de caza de auroras. El horario exacto y retorno dependen del tour; si vas por tu cuenta, verifica clima/seguridad en carretera."
+    }
   },
   "constraints": {
     "max_substops_per_tour": 8,
@@ -156,11 +173,15 @@ Eres **Astra Planner**. Recibes "research_json" del Info Chat con datos fáctico
 TU TAREA:
 - Convertir research_json en {"destination","rows":[...]}.
 - **No inventes** tiempos ni destinos: usa exactamente los tiempos de research_json.
-- Asigna horas razonables dentro de la ventana 08:30–19:00, agregando buffers ≥15m.
-- Inserta **notas motivadoras** breves en cada fila (sin texto florido).
+- Asigna horas razonables **sin imponer un tope fijo** (NO fuerces 19:00): 
+  permite extensiones nocturnas si el contenido del día lo amerita.
+- Inserta **notas motivadoras breves** en cada fila (sin texto florido).
 - Para macro-tours, usa **"Actividad": "Excursión — A / — B / — C ..."** (hasta 8 sub-paradas).
-- Respeta preferencias/condiciones del usuario si research_json las contempla (no sobrecargues días, evita largas caminatas si se indicó, etc.).
-- Si "aurora.plausible = true" y research_json sugiere días, crea filas nocturnas 18:00–01:00 (sin usar el último día), con transporte y nota estándar provistos por research_json cuando existan. Si no hay nota, usa una genérica corta.
+- Respeta preferencias/condiciones del usuario (no sobrecargues días, evita caminatas largas si se indicó, etc.).
+- **Auroras**: si "aurora.plausible=true", usa "recommended_window" o una de "typical_tour_windows" del research_json
+  para la franja horaria de la fila nocturna, en días sugeridos (no consecutivos y nunca el último día).
+  Aplica el "row_template" de research_json (transport/duration/note) y conserva la nota "Depende del tour...".
+- Añade **buffers ≥15m** entre filas; evita solapes; permite cruce post-medianoche.
 
 FORMATO ÚNICO (JSON válido, sin texto adicional):
 {
@@ -196,20 +217,27 @@ export default async function handler(req, res) {
     // Entrada esperada: { mode:"info", context:{...TODOS LOS DATOS DEL PLANNER...} }
     if (mode === "info") {
       const context = body.context || {};
-      // Hard-guard: debe llegar TODO lo del planner (preferencias/condiciones incluidas)
       const infoUserMsg = {
         role: "user",
         content: JSON.stringify({ context }, null, 2),
       };
 
       // 1er intento (normal)
-      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 3500);
+      let raw = await callText(
+        [{ role: "system", content: SYSTEM_INFO }, infoUserMsg],
+        0.35,
+        5200
+      );
       let parsed = cleanToJSONPlus(raw);
 
       // Reintento más estricto si no hay JSON válido
       if (!parsed) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3200);
+        raw = await callText(
+          [{ role: "system", content: strict }, infoUserMsg],
+          0.25,
+          4800
+        );
         parsed = cleanToJSONPlus(raw);
       }
 
@@ -223,7 +251,19 @@ export default async function handler(req, res) {
         macro_tours: [],
         in_city_routes: [],
         meals_suggestions: [],
-        aurora: { plausible: false, suggested_days: [] },
+        aurora: {
+          plausible: false,
+          latitude: "",
+          season_window: "",
+          typical_tour_windows: [],
+          recommended_window: "",
+          suggested_days: [],
+          row_template: {
+            transport: "Vehículo alquilado o Tour guiado",
+            duration: "Depende del tour o horas que dediques si vas por tu cuenta",
+            note: "Noche de auroras; el horario exacto y retorno dependen del tour."
+          }
+        },
         constraints: { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true }
       };
 
@@ -235,15 +275,22 @@ export default async function handler(req, res) {
     if (mode === "planner") {
       const research = body.research_json || null;
 
-      // Permitir también flujo legado (mensajes), pero preferimos research_json directo
+      // Permitir también flujo legado (messages), pero preferimos research_json directo
       if (!research) {
-        // Flujo legado con messages: intentamos estructurar, pero sin inventar
         const clientMessages = extractMessages(body);
-        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3500);
+        let raw = await callText(
+          [{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages],
+          0.35,
+          4200
+        );
         let parsed = cleanToJSONPlus(raw);
         if (!parsed) {
           const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3000);
+          raw = await callText(
+            [{ role: "system", content: strict }, ...clientMessages],
+            0.25,
+            3800
+          );
           parsed = cleanToJSONPlus(raw);
         }
         if (!parsed) parsed = fallbackJSON();
@@ -256,14 +303,20 @@ export default async function handler(req, res) {
         content: JSON.stringify({ research_json: research }, null, 2),
       };
 
-      // 1er intento normal
-      let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3500);
+      let raw = await callText(
+        [{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg],
+        0.35,
+        4200
+      );
       let parsed = cleanToJSONPlus(raw);
 
-      // Reintento estricto si falló
       if (!parsed) {
         const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.2, 3000);
+        raw = await callText(
+          [{ role: "system", content: strict }, plannerUserMsg],
+          0.25,
+          3800
+        );
         parsed = cleanToJSONPlus(raw);
       }
 
@@ -278,7 +331,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ text: raw || "" });
     }
 
-    // Modo desconocido
     return res.status(400).json({ error: "Invalid mode" });
 
   } catch (err) {
