@@ -2635,6 +2635,9 @@ async function optimizeDay(city, day){
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
+  // Endpoint configurable (permite override global sin tocar código)
+  const API_ENDPOINT = (typeof window!=='undefined' && window.ITBMO_API_ENDPOINT) || '/api/chat';
+
   // Filas "protegidas"
   const rows = (data?.byDay?.[day]||[]).map(r=>({
     day,start:r.start||'',end:r.end||'',activity:r.activity||'',
@@ -2649,7 +2652,7 @@ async function optimizeDay(city, day){
   try{
     // 1) INFO
     const context = __collectPlannerContext__(city, day);
-    const infoResp = await fetch('/api/chat', {
+    const infoResp = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode:'info', context })
@@ -2658,7 +2661,7 @@ async function optimizeDay(city, day){
     const research = cleanToJSONPlus(infoData?.text || infoData);
 
     // 2) PLANNER
-    const plannerResp = await fetch('/api/chat', {
+    const plannerResp = await fetch(API_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mode:'planner', research_json: research })
@@ -3427,14 +3430,71 @@ document.addEventListener('itbmo:addDays', e=>{
 });
 
 /* ====== Info Chat ====== */
+// Endpoint por defecto para el Info Chat EXTERNO
+if (typeof window !== 'undefined' && !window.ITBMO_INFO_ENDPOINT) {
+  window.ITBMO_INFO_ENDPOINT = '/api/info-public';
+}
+
+// Shim seguro: si ya existe callInfoAgent global, lo usamos; si no, lo creamos aquí.
+const callInfoAgent = (typeof window !== 'undefined' && typeof window.callInfoAgent === 'function')
+  ? window.callInfoAgent
+  : async function(query, extraCtx = {}) {
+      const url = (typeof window !== 'undefined' && window.ITBMO_INFO_ENDPOINT) || '/api/info-public';
+      // Contexto mínimo del planner si está disponible
+      let context = {};
+      try {
+        if (typeof plannerState !== 'undefined') {
+          const d = (plannerState.destinations || [])[0] || {};
+          context = {
+            city: d.city || '',
+            country: d.country || '',
+            days_total: d.days || 0,
+            hotel_address: plannerState.hotelBase || '',
+            start_date: d.baseDate || '',
+            preferences: plannerState.preferences || {},
+            special_conditions: plannerState.specialConditions || ''
+          };
+        }
+      } catch(_) {}
+
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: query, context: { ...context, ...extraCtx } })
+        });
+        const data = await resp.json().catch(()=>({ text: '' }));
+        return (data?.text && String(data.text).trim()) ||
+               'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
+      } catch (err) {
+        console.error('InfoChat fetch error:', err);
+        return 'Hubo un problema de conexión con el Info Chat. Inténtalo de nuevo en unos segundos.';
+      }
+    };
+
 function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
 function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+
 async function sendInfoMessage(){
-  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
-  if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
-  infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
-  const ans = await callInfoAgent(txt); infoChatMsg(ans||'');
+  const input = qs('#info-chat-input'); 
+  const btn = qs('#info-chat-send');
+  if(!input || !btn) return;
+  const txt = (input.value||'').trim(); 
+  if(!txt) return;
+
+  // UI no bloqueante
+  btn.disabled = true; btn.classList.add('loading');
+  infoChatMsg(txt,'user'); 
+  input.value=''; input.style.height='auto';
+
+  try {
+    const ans = await callInfoAgent(txt);
+    infoChatMsg(ans||'');
+  } finally {
+    btn.disabled = false; btn.classList.remove('loading');
+  }
 }
+
 function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
   const toggleFloating = qs('#info-chat-floating');
@@ -3442,6 +3502,7 @@ function bindInfoChatListeners(){
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
+  // Evita listeners duplicados si se re-renderiza
   toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
@@ -3476,6 +3537,7 @@ function bindInfoChatListeners(){
     });
   }
 
+  // Delegación de clicks por si hay botones duplicados añadidos dinámicamente
   document.addEventListener('click', (e)=>{
     const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
     if(el){ e.preventDefault(); openInfoModal(); }
