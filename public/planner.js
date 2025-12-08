@@ -2290,9 +2290,10 @@ function intentFromText(text){
 /* ==============================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    Base v73 — Ajuste flexible FINAL (quirúrgico)
-   Cambios clave (PATCH 42.4-INFO/PLANNER) + PATCH TABS-SAFE
-   • Doble etapa vía API (info → planner).
+   Cambios clave (PATCH 42.4-INFO/PLANNER) + PATCH TABS-SAFE + FIX INFO-CHAT EXTERNO
+   • Doble etapa vía API (info → planner) con timeout/reintentos.
    • 🆕 Helpers tabs-safe: normalizeDurationLabel / ensureReturnRow / injectDinnerIfMissing
+   • 🆕 callApiChat(): fetch robusto para /api/chat (arregla errores intermitentes del info chat externo).
 ================================= */
 
 /* --- aliasKey para deduplicado por sinónimos comunes --- */
@@ -2427,7 +2428,7 @@ function normalizeAuroraWindow(row){
 // Corrige solapes y aplica buffers mínimos (aceptando cruce post-medianoche)
 // ⚠️ PATCH TABS-SAFE: NO cambia el "day" de la fila; sólo horarios.
 function fixOverlaps(rows){
-  const toMin = t => { const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2]) };
+  const toMin = t => { const m = String(t||'').match(/^(\d{1,2}):(\d{2})$/); if(!m) return null; return parseInt(m[1],10)*60 + parseInt(m[2],10); };
   const toHH  = m => `${String(Math.floor((m%1440)/60)).padStart(2,'0')}:${String((m%1440)%60).padStart(2,'0')}`;
   const durMin = d => {
     if(!d) return 0;
@@ -2579,7 +2580,6 @@ function __sortRowsTabsSafe__(rows){
    🆕 Tabs-safe: inserta retorno a ciudad si detecta day-trip sin retorno
 ---------------------------- */
 function ensureReturnRow(city, rows){
-  // agrupamos por día
   const byDay = {};
   for(const r of rows){
     const d = Number(r.day)||1;
@@ -2593,7 +2593,6 @@ function ensureReturnRow(city, rows){
     const hasOut = list.some(r => isOutOfTownRow(city, r));
     const hasReturn = list.some(r => /regreso\s+a\s+/i.test(String(r.activity||'')) || /hotel/i.test(String(r.to||'')));
     if(hasOut && !hasReturn){
-      // Buscamos hora fin razonable
       const startBase = (cityMeta[city]?.perDay?.find(x=>x.day===day)?.start) || DEFAULT_START;
       const endBase   = (cityMeta[city]?.perDay?.find(x=>x.day===day)?.end)   || DEFAULT_END;
       const lastEnd   = list.reduce((mx,r)=> Math.max(mx, __toMinHHMM__(r.end)||0), __toMinHHMM__(endBase)||1140);
@@ -2633,7 +2632,6 @@ function injectDinnerIfMissing(city, rows){
     const hasDinner = list.some(r => /cena\b/i.test(String(r.activity||'')));
     if(!hasDinner){
       const dayEnd = list.reduce((mx,r)=> Math.max(mx, __toMinHHMM__(r.end)||0), __toMinHHMM__(DEFAULT_END)||1140);
-      // intentar 19:30 si el día termina antes; si no, poner inmediatamente después
       let s = Math.max(__toMinHHMM__('19:00')||1140, Math.min(dayEnd, __toMinHHMM__('21:15')||1275));
       if(s < __toMinHHMM__('19:00')) s = __toMinHHMM__('19:00');
       const start = __toHHMMfromMin__(s);
@@ -2695,12 +2693,93 @@ function __collectPlannerContext__(city, day){
   };
 }
 
+/* ---------------------------
+   🆕 FIX INFO-CHAT EXTERNO: fetch robusto a /api/chat con timeout y reintentos
+   - Centraliza llamadas para INFO y PLANNER (y reutilizable por Info Chat UI).
+---------------------------- */
+async function callApiChat(mode, payload, opt={}){
+  const timeoutMs = Number(opt.timeoutMs)||30000; // 30s
+  const retries   = Number(opt.retries)||1;       // 1 reintento por defecto
+  const endpoint  = '/api/chat';
+
+  let body = { mode, ...payload, source: 'planner', ui: 'itbmo', ts: Date.now() };
+
+  try {
+    if(body.research_json && typeof body.research_json === 'object'){
+      const str = JSON.stringify(body.research_json);
+      if(str.length > 250_000){
+        body.research_json = { ...(body.research_json||{}), _trimmed: true };
+      }
+    }
+  } catch(_) {}
+
+  const doFetch = () => new Promise((resolve, reject)=>{
+    const controller = new AbortController();
+    const t = setTimeout(()=> controller.abort(), timeoutMs);
+    fetch(endpoint, {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'Accept':'application/json',
+        'X-ITBMO-Client':'planner',
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    })
+    .then(async (res)=>{
+      clearTimeout(t);
+      if(!res.ok){
+        const text = await res.text().catch(()=> '');
+        const err  = new Error(`API ${endpoint} ${res.status}`);
+        err.payload = text;
+        throw err;
+      }
+      try {
+        const j = await res.json();
+        resolve(j);
+      } catch(e){
+        const text = await res.text().catch(()=> '');
+        resolve(text ? { text } : {});
+      }
+    })
+    .catch((err)=>{ clearTimeout(t); reject(err); });
+  });
+
+  let attempt = 0;
+  while(true){
+    try{
+      const resp = await doFetch();
+      return resp;
+    }catch(err){
+      attempt++;
+      if(attempt > retries) throw err;
+      await new Promise(r=>setTimeout(r, 400 + Math.random()*600));
+    }
+  }
+}
+
+/* ---------------------------
+   🆕 Limpieza/parseo seguro para respuestas del API
+---------------------------- */
+function safeParseApiText(any){
+  try {
+    if(typeof cleanToJSONPlus === 'function'){
+      return cleanToJSONPlus(any);
+    }
+  } catch(_) {}
+  try {
+    if(typeof any === 'string') return parseJSON(any) || { text: any };
+    if(typeof any === 'object' && any) return any;
+  } catch(_) {}
+  return {};
+}
+
 /* ================= MAIN: optimizeDay (flujo INFO → PLANNER) ================= */
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
-  // Filas "protegidas"
+  // Filas existentes del día (para fallback y protegidas)
   const rows = (data?.byDay?.[day]||[]).map(r=>({
     day,start:r.start||'',end:r.end||'',activity:r.activity||'',
     from:r.from||'',to:r.to||'',transport:r.transport||'',
@@ -2712,24 +2791,16 @@ async function optimizeDay(city, day){
   });
 
   try{
-    // 1) INFO
+    // 1) INFO (robusto)
     const context = __collectPlannerContext__(city, day);
-    const infoResp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode:'info', context })
-    });
-    const infoData = await infoResp.json();
-    const research = cleanToJSONPlus(infoData?.text || infoData);
+    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+    const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw||'') };
+    const research = safeParseApiText(infoData?.text || infoData);
 
-    // 2) PLANNER
-    const plannerResp = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode:'planner', research_json: research })
-    });
-    const plannerData = await plannerResp.json();
-    const structured = cleanToJSONPlus(plannerData?.text || plannerData) || {};
+    // 2) PLANNER (robusto)
+    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
+    const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw||'') };
+    const structured = safeParseApiText(plannerData?.text || plannerData) || {};
 
     // Unificar y normalizar
     const unified = unifyRowsFormat(structured, city);
