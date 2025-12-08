@@ -3650,17 +3650,23 @@ function validateBaseDatesDMY(){
   return true;
 }
 
-/* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
-$save?.addEventListener('click', ()=>{
-  // ejecuta lógica propia de guardado
-  try { saveDestinations(); } catch(_) {}
-
-  // valida y sólo entonces habilita
+/* ===== Guardar destinos: aquí se evalúa y se llama a handleSaveDestinations() ===== */
+$save?.addEventListener('click', async ()=>{
+  // valida y sólo entonces habilita + construye estructura base
   const basicsOK = formHasBasics();
   const datesOK  = validateBaseDatesDMY();
+
   if (basicsOK && datesOK) {
     hasSavedOnce = true;
     if ($start) $start.disabled = false;
+
+    // 🧠 usa el bridge de red 15.2 para armar tabs/tablas y dejar todo listo:
+    try {
+      await handleSaveDestinations();
+    } catch (err) {
+      console.error('Error en handleSaveDestinations:', err);
+      chatMsg('⚠️ Ocurrió un problema al preparar las tablas base. Intenta de nuevo.', 'ai');
+    }
   } else {
     if ($start) $start.disabled = true;
   }
@@ -3907,3 +3913,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
