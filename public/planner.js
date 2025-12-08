@@ -1538,8 +1538,9 @@ function showWOW(on, msg){
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
    Base v60 + injertos v64 + dedupe global con normKey
-   🆕 v75→API42.4: consume /api/chat (mode:"planner") y su contrato JSON
+   🆕 v75→API42.5.1: **primer poblado con doble etapa INFO→PLANNER**
    🆕 Eliminado: bloque de "Aurora Injection" local (la decide INFO→PLANNER)
+   🆕 Inyección segura post-planner: normalización duration / cena / retorno a ciudad
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -1568,12 +1569,29 @@ async function generateCityItinerary(city){
     return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
   };
 
-  // 🆕 helper para invocar /api/chat (planner)
-  async function callPlannerAPI(messages, opts = {}) {
-    const payload = {
-      mode: "planner",
-      messages,
-    };
+  // 🆕 helpers de API
+  async function callPlannerAPI_withResearch(researchJson){
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "planner", research_json: researchJson }),
+    });
+    if (!resp.ok) throw new Error(`API planner HTTP ${resp.status}`);
+    const data = await resp.json();
+    return parseJSON(data?.text || "");
+  }
+  async function callInfoAPI(context){
+    const resp = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "info", context }),
+    });
+    if (!resp.ok) throw new Error(`API info HTTP ${resp.status}`);
+    const data = await resp.json();
+    return cleanToJSONPlus(data?.text || data);
+  }
+  async function callPlannerAPI_legacy(messages, opts = {}) {
+    const payload = { mode: "planner", messages };
     if (opts.itinerary_id) payload.itinerary_id = opts.itinerary_id;
     if (typeof opts.version === 'number') payload.version = opts.version;
 
@@ -1582,9 +1600,7 @@ async function generateCityItinerary(city){
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!resp.ok) {
-      throw new Error(`API planner HTTP ${resp.status}`);
-    }
+    if (!resp.ok) throw new Error(`API planner(legacy) HTTP ${resp.status}`);
     const data = await resp.json();
     const text = data?.text || "";
     return parseJSON(text);
@@ -1609,7 +1625,6 @@ async function generateCityItinerary(city){
     try{
       const coords = getCoordinatesForCity(city);
       const dayTripContext = getHeuristicDayTripContext(city) || {};
-
       heuristicsContext = `
 ───────────────────────────────
 🧭 CONTEXTO HEURÍSTICO GLOBAL
@@ -1623,7 +1638,7 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
-    // NOTA: la decisión, ventana y notas de auroras las define el flujo INFO→PLANNER en el API.
+    // INTAKE (se mantiene para camino legado como fallback)
     const intakeText = `
 ${FORMAT}
 **Genera únicamente ${dest.days} día/s para "${city}"** (tabs y tablas ya existen en UI).
@@ -1652,12 +1667,23 @@ ${buildIntake()}
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
 
-    const apiMessages = [{ role: "user", content: intakeText }];
-    const current = itineraries?.[city] || null;
-    const parsed = await callPlannerAPI(apiMessages, {
-      itinerary_id: current?.itinerary_id,
-      version: typeof current?.version === 'number' ? current.version : undefined,
-    });
+    // 🆕 PRIMER POBLADO → DOBLE ETAPA INFO→PLANNER
+    let parsed = null;
+    try{
+      const context = __collectPlannerContext__(city, 1); // día 1 como ancla
+      const research = await callInfoAPI(context);
+      const structured = await callPlannerAPI_withResearch(research);
+      parsed = structured;
+    }catch(errInfoPlanner){
+      console.warn('[generateCityItinerary] INFO→PLANNER falló, uso LEGACY:', errInfoPlanner);
+      // Fallback LEGACY por mensajes (comportamiento anterior)
+      const apiMessages = [{ role: "user", content: intakeText }];
+      const current = itineraries?.[city] || null;
+      parsed = await callPlannerAPI_legacy(apiMessages, {
+        itinerary_id: current?.itinerary_id,
+        version: typeof current?.version === 'number' ? current.version : undefined,
+      });
+    }
 
     if(parsed && (parsed.rows || parsed.destination)){
       const rowsFromApi = Array.isArray(parsed.rows) ? parsed.rows : [];
@@ -1674,15 +1700,26 @@ ${buildIntake()}
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
+      // 🆕 Normaliza duraciones decimales → “h/m”
+      if(typeof normalizeDurationLabel==='function') tmpRows = tmpRows.map(normalizeDurationLabel);
+
+      // 🆕 Inserta “Regreso a {city}” si detecta day-trip sin retorno explícito (tabs-safe)
+      if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
+
+      // 🆕 Inyecta “Cena” si preferencia global y no existe en franja 19:00–21:30
+      if(plannerState?.preferences?.alwaysIncludeDinner && typeof injectDinnerIfMissing==='function'){
+        tmpRows = injectDinnerIfMissing(city, tmpRows);
+      }
+
       // 🧩 Empuje a estado
       pushRows(city, tmpRows, !!forceReplan);
 
-      // ✅ Asegura días con contenido mínimo
+      // ✅ Asegura días con contenido mínimo **y optimiza todos los días iniciales** (INFO→PLANNER)
       ensureDays(city);
-      for(let d=1; d<=dest.days; d++){
-        if(!(itineraries[city].byDay?.[d]||[]).length){
-          await optimizeDay(city,d);
-        }
+      const totalDays = dest.days||Object.keys(itineraries[city].byDay||{}).length||1;
+      for(let d=1; d<=totalDays; d++){
+        /* eslint-disable no-await-in-loop */
+        await optimizeDay(city,d);
       }
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -1711,13 +1748,11 @@ ${buildIntake()}
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo global por ciudad
-   v69 (base) + FIX: deduplicación robusta sin bloquear comidas/traslados
-   + Fallback de generación por día si el agente no retorna filas útiles
+   v69 (base)  → 🆕 Ruta moderna: usa optimizeDay (INFO→PLANNER) en rango
+   Dedupe robusto y fallback local se conservan cuando aplica
 ================================= */
 
 /* ——— Utilitarios LOCALES (scope de la sección) ——— */
-
-/** Normaliza texto: minúsculas, sin tildes, sin símbolos, colapsa espacios. */
 function __canonTxt__(s){
   return String(s||'')
     .toLowerCase()
@@ -1726,38 +1761,25 @@ function __canonTxt__(s){
     .replace(/\s+/g,' ')
     .trim();
 }
-
-/** Detecta actividades genéricas que NO deben bloquearse al extender días. */
 function __isGenericActivity__(name){
   const t = __canonTxt__(name);
-  // comidas, descansos, traslados, compras sin lugar concreto
   const generic = [
     'desayuno','almuerzo','comida','merienda','cena',
     'descanso','relax','tiempo libre','libre',
     'traslado','transfer','check in','check-in','check out','check-out',
     'shopping','compras'
   ];
-  // si solo contiene una de estas palabras o patrones muy genéricos
   if (generic.some(g => t === g || t.startsWith(g+' ') || (' '+t+' ').includes(' '+g+' '))) return true;
-  // si es extremadamente corto y sin entidad clara
   if (t.split(' ').length <= 2 && /^(almuerzo|cena|desayuno|traslado|descanso)$/i.test(t)) return true;
   return false;
 }
-
-/** Quita algunas palabras poco discriminantes (sin romper nombres propios). */
 function __stripStopWords__(s){
-  const STOP = [
-    'the','la','el','los','las','de','del','da','do','dos','das','di','du',
-    'a','al','en','of','and','y','e'
-  ];
+  const STOP = ['the','la','el','los','las','de','del','da','do','dos','das','di','du','a','al','en','of','and','y','e'];
   const toks = s.split(' ').filter(w=>w && !STOP.includes(w));
   return toks.join(' ').trim() || s;
 }
-
-/** Alias frecuentes (multi-idioma) para POIs de Barcelona y genéricos de ciudad. */
 function __aliasKey__(base){
   const ALIAS = [
-    // Barcelona frecuentes
     ['park guell','parc guell','parque guell','parque güell','park güell','güell park','guell park','guell'],
     ['sagrada familia','basilica sagrada familia','templo expiatorio de la sagrada familia','templo de la sagrada familia'],
     ['casa batllo','casa batlló','batllo','batlló'],
@@ -1766,7 +1788,6 @@ function __aliasKey__(base){
     ['gothic quarter','barrio gotico','barrio gótico','gothic','gotico','gótico'],
     ['ciutadella','parc de la ciutadella','parque de la ciutadella','ciutadella park'],
     ['born','el borne','el born'],
-    // genéricos urbanos frecuentes
     ['old town','ciudad vieja','casco antiguo','centro historico','centro histórico'],
   ];
   for(const group of ALIAS){
@@ -1775,17 +1796,13 @@ function __aliasKey__(base){
   }
   return base;
 }
-
-/** Genera clave canónica para deduplicar POIs (omite genéricos). */
 function __placeKey__(name){
   const raw = String(name||'').trim();
   if(!raw) return '';
-  if(__isGenericActivity__(raw)) return ''; // <- no bloquea genéricos
+  if(__isGenericActivity__(raw)) return '';
   const base = __stripStopWords__(__canonTxt__(raw));
   return __aliasKey__(base);
 }
-
-/** Construye Set de claves previas (días < start) para exclusión de POIs. */
 function __buildPrevActivityKeySet__(byDay, start){
   const keys = new Set();
   const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
@@ -1798,13 +1815,11 @@ function __buildPrevActivityKeySet__(byDay, start){
   }
   return keys;
 }
-
-/** Lista acotada para mostrar al agente como referencia. */
 function __keysToExampleList__(keys, limit=80){
   return Array.from(keys).slice(0, limit);
 }
 
-/* ——— Rebalanceo por rango (manteniendo v69) ——— */
+/* ——— Rebalanceo por rango (ruta moderna) ——— */
 async function rebalanceWholeCity(city, rangeOpt = {}){
   if(!city || !itineraries[city]) return;
 
@@ -1814,105 +1829,33 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
   const allDays  = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   if(!allDays.length) return;
 
-  // v69: rango explícito o completo
   const start = Math.max(1, parseInt(rangeOpt.start||1,10));
   const end   = Math.max(start, parseInt(rangeOpt.end||allDays[allDays.length-1],10));
 
-  // Conjunto de POIs ya cubiertos en n−1 días (NO comidas/traslados)
+  // Conservamos set de exclusión (informativo; las deducciones duras ya las maneja optimizeDay)
   const prevKeySet = __buildPrevActivityKeySet__(byDay, start);
-
-  // Histórico opcional del planner (si existe)
-  try{
-    const extra = plannerState?.existingActs?.[city];
-    if(Array.isArray(extra)){
-      for(const name of extra){
-        const k = __placeKey__(name);
-        if(k) prevKeySet.add(k);
-      }
-    }
-  }catch(_){}
-
   const prevExamples = __keysToExampleList__(prevKeySet);
 
   showWOW(true, `Reequilibrando ${city}…`);
 
-  const prompt = `
-${FORMAT}
-Ciudad: ${city}
-Rango de reequilibrio: Días ${start}–${end}
-Fecha base (Día 1): ${baseDate || 'N/A'}
-
-Objetivo:
-• Mantener intactos los días 1–${start-1}.
-• Reoptimizar el itinerario desde el día ${start} hasta el ${end}.
-
-Reglas duras:
-1) No repitas POIs ya cubiertos en días 1–${start-1} aunque cambien idioma/nombre.
-   Lista de exclusión (normalizada): ${JSON.stringify(prevExamples)}
-   ⚠️ Las actividades genéricas (comidas/traslados/descansos) SÍ se pueden repetir en distintos lugares.
-2) Evita duplicados dentro del mismo día.
-3) Balance energético: si el día ${start-1} fue intenso, el ${start} debe ser más liviano y/o iniciar más tarde.
-4) Mantén coherencia geográfica/temática y huecos razonables.
-5) Devuelve formato C {"rows":[...],"replace":false} o D {"itinerary":{"${city}":{...}}}.
-`.trim();
-
-  const ans = await callAgent(prompt, true, { cityName: city, baseDate });
-  const parsed = parseJSON(ans);
-
-  let appliedRows = 0;
-
-  if(parsed && parsed.itinerary && parsed.itinerary[city]){
-    // Mantiene el merge v69 existente
-    mergeItinerary(city, parsed.itinerary[city], { start, end });
-    // Contamos filas nuevas (si el merge expone byDay)
-    try{
-      const seg = parsed.itinerary[city].byDay || {};
-      appliedRows = Object.values(seg).flat().length;
-    }catch(_){}
-  } else if(parsed && parsed.rows){
-    const merged = { ...(data.byDay || {}) };
-    const newRows = parsed.rows.map(r=>normalizeRow(r));
-
-    // filtro local anti-duplicados dentro del rango y contra prevKeySet
-    const byDayLocal = {};
-    for(const r of newRows){
-      if(!r || !r.day) continue;
-      const key = __placeKey__(r.activity||'');
-      // si es genérico, no bloquea por prevKeySet; igual prevenimos duplicado intra-día por texto
-      const dedupeKey = key || __canonTxt__(r.activity||'');
-      byDayLocal[r.day] = byDayLocal[r.day] || new Set();
-      if(byDayLocal[r.day].has(dedupeKey)) continue;
-      if(key && prevKeySet.has(key)) continue; // excluye solo POIs reales ya vistos
-      byDayLocal[r.day].add(dedupeKey);
-
-      // limpia posibles placeholders generados previamente
-      merged[r.day] = (merged[r.day]||[]).filter(x=> !(x && x.__generated__ && x.day===r.day));
-      merged[r.day] = [...(merged[r.day]||[]), {...r, __generated__: true}];
-      appliedRows++;
+  try{
+    // 🆕 Reequilibrio con **optimizeDay** (INFO→PLANNER) para cada día del rango
+    for(let d=start; d<=end; d++){
+      /* eslint-disable no-await-in-loop */
+      await optimizeDay(city, d);
     }
+  }catch(err){
+    console.warn('[rebalanceWholeCity] optimizeDay rango falló. Intento de salvataje local.', err);
 
-    // orden horario por día (mantiene v69)
+    // ✅ Fallback seguro: ordenar por horario sin tocar "day"
+    const merged = { ...(itineraries[city].byDay || {}) };
     Object.keys(merged).forEach(d=>{
       merged[d] = (merged[d]||[]).map(normalizeRow)
         .sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
     });
-
     itineraries[city].byDay = merged;
   }
 
-  // ✅ Fallback seguro: si no se aplicó nada, generamos por día con 18.optimizeDay
-  if(!appliedRows){
-    try{
-      for(let d=start; d<=end; d++){
-        // evita borrar lo previo; optimizeDay respeta anti-duplicados multi-día
-        // y reequilibra con reglas v66 (balance, buffers, clima/auroras)
-        /* eslint-disable no-await-in-loop */
-        await optimizeDay(city, d);
-      }
-    }catch(_){}
-  }
-
-  // Render y UI (v69 intacto)
   renderCityTabs();
   setActiveCity(city);
   renderCityItinerary(city);
@@ -2348,13 +2291,8 @@ function intentFromText(text){
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
    Base v73 — Ajuste flexible FINAL (quirúrgico)
    Cambios clave (PATCH 42.4-INFO/PLANNER) + PATCH TABS-SAFE
-   • Doble etapa vía API:
-       (1) mode:"info"  → investigación, imperdibles, macro-tours (≤8 sub-paradas),
-           tiempos REALES entre puntos y **tiempos de regreso** (hotel/ciudad).
-       (2) mode:"planner" → estructuración en filas (rows) sin inventar datos.
-   • Respeto estricto de preferencias/condiciones del usuario (prioridad máxima).
-   • Se eliminan **patrones locales** de “fuera de ciudad” (global sin listas por país).
-   • Se conserva validación + pushRows y utilitarios previos (buffers/overlaps, etc.)
+   • Doble etapa vía API (info → planner).
+   • 🆕 Helpers tabs-safe: normalizeDurationLabel / ensureReturnRow / injectDinnerIfMissing
 ================================= */
 
 /* --- aliasKey para deduplicado por sinónimos comunes --- */
@@ -2430,6 +2368,35 @@ function __isNightRow__(row){
   return isAurora || (startM!=null && startM >= 18*60);
 }
 
+// 🆕 Normaliza etiquetas de duración “decimales” → “h/m”
+function normalizeDurationLabel(row){
+  const r = { ...row };
+  const txt = String(r.duration||'').trim();
+  if(!txt) return r;
+
+  // "1.5h", "0.75h", "2h", "90m"
+  const dh = txt.match(/^(\d+(?:\.\d+)?)\s*h$/i);
+  const dm = txt.match(/^(\d+)\s*m$/i);
+
+  if(dh){
+    const hours = parseFloat(dh[1]);
+    const total = Math.round(hours*60);
+    const h = Math.floor(total/60);
+    const m = total%60;
+    r.duration = h>0 ? (m>0 ? `${h}h${m}m` : `${h}h`) : `${m}m`;
+    return r;
+  }
+  if(dm){ return r; }
+
+  // Si vino "1h30" sin "m" normalizamos a "1h30m"
+  const hMix = txt.match(/^(\d+)h(\d{1,2})$/i);
+  if(hMix){
+    r.duration = `${hMix[1]}h${hMix[2]}m`;
+    return r;
+  }
+  return r;
+}
+
 // Normaliza ventana de auroras (si viniera incompleta)
 function normalizeAuroraWindow(row){
   const isAurora = /\baurora\b|\bnorthern\s+lights?\b/i.test(String(row.activity||''));
@@ -2471,7 +2438,6 @@ function fixOverlaps(rows){
     return 0;
   };
 
-  // Ordenar por inicio (no altera day)
   const expanded = rows.map(r=>{
     let s = toMin(r.start||"");
     let e = toMin(r.end||"");
@@ -2512,14 +2478,12 @@ function fixOverlaps(rows){
 
     out.push({
       ...r,
-      // ⚠️ no tocamos r.day
       start: toHH(s),
       end: toHH(e),
       duration: finalDur,
       _crossDay: (r._crossDay || cross || e >= 24*60) ? true : false
     });
   }
-
   return out;
 }
 
@@ -2549,8 +2513,6 @@ function unifyRowsFormat(parsed, preferCity){
 
 /* ---------------------------
    Transporte/“fuera de ciudad” — GLOBAL (sin listas locales)
-   - No sobrescribe si ya viene transport del research/planner.
-   - Considera "fuera de ciudad" cuando el destino 'to' NO contiene el nombre de la ciudad (case-insensitive) y no está vacío.
 ---------------------------- */
 function isOutOfTownRow(city, row){
   const cityLow = String(city||'').toLowerCase();
@@ -2560,7 +2522,7 @@ function isOutOfTownRow(city, row){
 }
 function enforceTransportAndOutOfTown(city, rows){
   return rows.map(r=>{
-    if(r && r.transport) return r; // respetar research/planner
+    if(r && r.transport) return r;
     const out = isOutOfTownRow(city, r);
     if(out){
       return { ...r, transport: 'Vehículo alquilado o Tour guiado' };
@@ -2589,7 +2551,7 @@ function __addMinutesSafe__(hhmm, add){
 }
 
 /* ---------------------------
-   (DEPRECATED) Retornos locales — se mantienen por compatibilidad pero NO se usan ya.
+   (DEPRECATED) Retornos locales — compatibilidad
 ---------------------------- */
 function ensureReturnToCity(city, day, rows){ return rows; }
 function ensureEndReturnToHotel(rows){ return rows; }
@@ -2597,15 +2559,13 @@ function ensureEndReturnToHotel(rows){ return rows; }
 /* ---------------------------
    PATCH TABS-SAFE: Normalizador de día sin alterar tabbing
 ---------------------------- */
-// Asegura day >=1 y numérico; opción de clamp contra days declarados para la ciudad
 function __normalizeDayField__(city, r){
   let d = Number(r.day);
   if(!Number.isFinite(d) || d < 1) d = 1;
   const total = (itineraries[city]?.originalDays) || (cityMeta[city]?.days) || 0;
-  if(total > 0 && d > total) d = total; // clamp defensivo (no forzamos tabs nuevas)
+  if(total > 0 && d > total) d = total;
   return { ...r, day: d };
 }
-// Orden estable: por day asc y por start asc (sin mover day)
 function __sortRowsTabsSafe__(rows){
   return [...rows].sort((a,b)=>{
     const da = Number(a.day)||1, db = Number(b.day)||1;
@@ -2613,6 +2573,87 @@ function __sortRowsTabsSafe__(rows){
     const sa = __toMinHHMM__(a.start)||0, sb = __toMinHHMM__(b.start)||0;
     return sa - sb;
   });
+}
+
+/* ---------------------------
+   🆕 Tabs-safe: inserta retorno a ciudad si detecta day-trip sin retorno
+---------------------------- */
+function ensureReturnRow(city, rows){
+  // agrupamos por día
+  const byDay = {};
+  for(const r of rows){
+    const d = Number(r.day)||1;
+    (byDay[d] = byDay[d] || []).push(r);
+  }
+  const out = [];
+  const cityLbl = String(city||'').trim();
+
+  Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
+    const list = byDay[day].slice();
+    const hasOut = list.some(r => isOutOfTownRow(city, r));
+    const hasReturn = list.some(r => /regreso\s+a\s+/i.test(String(r.activity||'')) || /hotel/i.test(String(r.to||'')));
+    if(hasOut && !hasReturn){
+      // Buscamos hora fin razonable
+      const startBase = (cityMeta[city]?.perDay?.find(x=>x.day===day)?.start) || DEFAULT_START;
+      const endBase   = (cityMeta[city]?.perDay?.find(x=>x.day===day)?.end)   || DEFAULT_END;
+      const lastEnd   = list.reduce((mx,r)=> Math.max(mx, __toMinHHMM__(r.end)||0), __toMinHHMM__(endBase)||1140);
+      const startRet  = __toHHMMfromMin__(Math.max(lastEnd, __toMinHHMM__(endBase)||1140));
+      const endRet    = __addMinutesSafe__(startRet, 45);
+      list.push({
+        day,
+        start: startRet,
+        end: endRet,
+        activity: `Regreso a ${cityLbl}`,
+        from: list[list.length-1]?.to || 'Excursión',
+        to: `Hotel (${cityLbl})`,
+        transport: 'Vehículo alquilado o Tour guiado',
+        duration: '45m',
+        notes: 'Cierre del day trip y retorno al hotel.'
+      });
+    }
+    out.push(...list);
+  });
+  return out;
+}
+
+/* ---------------------------
+   🆕 Tabs-safe: inserta “Cena” si preferencia global y falta slot 19:00–21:30
+---------------------------- */
+function injectDinnerIfMissing(city, rows){
+  if(!plannerState?.preferences?.alwaysIncludeDinner) return rows;
+
+  const byDay = {};
+  for(const r of rows){
+    const d = Number(r.day)||1;
+    (byDay[d] = byDay[d] || []).push(r);
+  }
+  const out = [];
+  Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
+    const list = byDay[day].slice().sort((a,b)=> (__toMinHHMM__(a.start)||0) - (__toMinHHMM__(b.start)||0));
+    const hasDinner = list.some(r => /cena\b/i.test(String(r.activity||'')));
+    if(!hasDinner){
+      const dayEnd = list.reduce((mx,r)=> Math.max(mx, __toMinHHMM__(r.end)||0), __toMinHHMM__(DEFAULT_END)||1140);
+      // intentar 19:30 si el día termina antes; si no, poner inmediatamente después
+      let s = Math.max(__toMinHHMM__('19:00')||1140, Math.min(dayEnd, __toMinHHMM__('21:15')||1275));
+      if(s < __toMinHHMM__('19:00')) s = __toMinHHMM__('19:00');
+      const start = __toHHMMfromMin__(s);
+      const end   = __addMinutesSafe__(start, 75);
+      list.push({
+        day,
+        start,
+        end,
+        activity: 'Cena',
+        from: list[list.length-1]?.to || 'Centro',
+        to: 'Restaurante local',
+        transport: 'A pie',
+        duration: '1h15m',
+        notes: 'Reserva sugerida si es un sitio popular.'
+      });
+      list.sort((a,b)=> (__toMinHHMM__(a.start)||0) - (__toMinHHMM__(b.start)||0));
+    }
+    out.push(...list);
+  });
+  return out;
 }
 
 /* ---------------------------
@@ -2654,7 +2695,7 @@ function __collectPlannerContext__(city, day){
   };
 }
 
-/* ================= MAIN: optimizeDay (nuevo flujo INFO → PLANNER) ================= */
+/* ================= MAIN: optimizeDay (flujo INFO → PLANNER) ================= */
 async function optimizeDay(city, day){
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
@@ -2706,6 +2747,9 @@ async function optimizeDay(city, day){
     // Transporte: sólo rellenamos si vinieron vacíos
     finalRows = enforceTransportAndOutOfTown(city, finalRows);
 
+    // 🆕 Normaliza duraciones “decimales”
+    finalRows = finalRows.map(normalizeDurationLabel);
+
     // Anti-solapes y cruce post-medianoche (sin mover day)
     finalRows = fixOverlaps(finalRows);
 
@@ -2715,6 +2759,12 @@ async function optimizeDay(city, day){
       finalRows = fixOverlaps(finalRows);
     }
 
+    // 🆕 “Regreso a {city}” si aplica (tabs-safe)
+    finalRows = ensureReturnRow(city, finalRows);
+
+    // 🆕 Cena si preferencia global y falta
+    finalRows = injectDinnerIfMissing(city, finalRows);
+
     // Orden estable por day/start para que el renderer v75 cree tabs correctamente
     finalRows = __sortRowsTabsSafe__(finalRows);
 
@@ -2722,7 +2772,6 @@ async function optimizeDay(city, day){
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     pushRows(city, val.allowed, false);
 
-    // 🔔 PATCH TABS-SAFE: notificar (benigno) para refresco de tabs/tablas si hay listeners
     try {
       document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } }));
     } catch(_) {}
@@ -2730,9 +2779,10 @@ async function optimizeDay(city, day){
   }catch(e){
     console.error('optimizeDay INFO→PLANNER error:', e);
 
-    // Reforzar estabilidad en error: normalizar/ordenar sin tocar day
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
     safeRows = __sortRowsTabsSafe__(fixOverlaps(safeRows));
+    safeRows = ensureReturnRow(city, safeRows);
+    safeRows = injectDinnerIfMissing(city, safeRows);
 
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
     pushRows(city, val.allowed, false);
