@@ -1,4 +1,4 @@
-// /api/info-public.js — v1.0.1 (ESM, Vercel)
+// /api/info-public.js — v1.0.2 (ESM, Vercel)
 // Endpoint exclusivo para el Info Chat externo (widget flotante y botón superior).
 // Responde SIEMPRE en formato { text: "..." } para no romper la UI del planner.
 
@@ -14,6 +14,7 @@ function parseBody(reqBody) {
   }
   return reqBody;
 }
+
 function extractMessages(body = {}) {
   const { messages, input, query, history, context } = body;
 
@@ -25,6 +26,7 @@ function extractMessages(body = {}) {
     : typeof query === "string" ? query
     : "";
 
+  // Si viene un "context" (datos del planner), lo anteponemos como system helper
   const ctxMsg = context
     ? [{ role: "system", content: `Contexto del planner (si aplica): ${JSON.stringify(context)}` }]
     : [];
@@ -35,21 +37,28 @@ function extractMessages(body = {}) {
     { role: "user", content: userText }
   ];
 }
-async function callText(messages, temperature = 0.35, max_output_tokens = 700) {
-  const resp = await client.responses.create({
-    model: "gpt-4o-mini",
-    temperature,
-    max_output_tokens,
-    input: messages.map(m =>
-      `${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`
-    ).join("\n\n"),
-  });
 
-  return (
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-    ""
-  );
+async function callText(messages, temperature = 0.35, max_output_tokens = 700) {
+  // ✅ Endurecemos robustez: atrapamos errores y devolvemos string vacío
+  try {
+    const resp = await client.responses.create({
+      model: "gpt-4o-mini",
+      temperature,
+      max_output_tokens,
+      input: messages.map(m =>
+        `${m.role.toUpperCase()}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`
+      ).join("\n\n"),
+    });
+
+    return (
+      resp?.output_text?.trim() ||
+      resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+      ""
+    );
+  } catch (e) {
+    console.error("⚠️ callText error (info-public):", e);
+    return "";
+  }
 }
 
 // ====== Prompt del Info Chat externo ======
@@ -73,11 +82,11 @@ function setCORS(res) {
 export default async function handler(req, res) {
   try {
     setCORS(res);
-    res.setHeader("Content-Type","application/json; charset=utf-8");
 
     if (req.method === "OPTIONS") {
       return res.status(200).end();
     }
+
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
     }
@@ -85,9 +94,11 @@ export default async function handler(req, res) {
     const body = parseBody(req.body);
     const clientMessages = extractMessages(body);
 
+    // ✅ FIX: validar tipo antes de usar .trim() para evitar errores cuando content no es string
     const hasUser = clientMessages.some(
       (m) => m.role === "user" && typeof m.content === "string" && m.content.trim().length > 0
     );
+
     if (!hasUser) {
       return res.status(200).json({
         text: "Escríbeme una pregunta concreta (clima, transporte, costos, auroras, etc.) y te respondo al instante."
