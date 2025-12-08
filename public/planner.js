@@ -3377,7 +3377,7 @@ document.addEventListener('input', (e)=>{
    SECCIÓN 21 · INIT y listeners
    (mantiene v55.1 + FIX: el botón “Iniciar planificación”
     **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
-   🛡️ Nota quirúrgica: se añade un pequeño guard para evitar doble-inicialización si el script se reinyecta.
+   🛡️ Nota quirúrgica: guard anti-doble init + aislamiento total del Info Chat externo.
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -3415,17 +3415,12 @@ function validateBaseDatesDMY(){
 
 /* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
 $save?.addEventListener('click', ()=>{
-  // ejecuta lógica propia de guardado
   try { saveDestinations(); } catch(_) {}
-
-  // valida y sólo entonces habilita
   const basicsOK = formHasBasics();
   const datesOK  = validateBaseDatesDMY();
   if (basicsOK && datesOK) {
     hasSavedOnce = true;
     if ($start) $start.disabled = false;
-
-    // 🔔 PATCH TABS-SAFE: notificar que se guardaron destinos válidos
     try {
       document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
         detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
@@ -3436,7 +3431,6 @@ $save?.addEventListener('click', ()=>{
   }
 });
 
-/* ===== Reglas para habilitación del botón ===== */
 function formHasBasics(){
   const row = qs('.city-row', $cityList);
   if(!row) return false;
@@ -3447,7 +3441,6 @@ function formHasBasics(){
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
-// Ya NO habilitamos al escribir; sólo deshabilitamos si se borran datos
 document.addEventListener('input', (e)=>{
   if(!$start) return;
   if(e.target && (
@@ -3456,7 +3449,6 @@ document.addEventListener('input', (e)=>{
      e.target.classList?.contains('days') ||
      e.target.classList?.contains('baseDate')
   )){
-    // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
     if(!formHasBasics()) $start.disabled = true;
   }
 });
@@ -3503,7 +3495,6 @@ function bindReset(){
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
     confirmReset.addEventListener('click', ()=>{
-      // Estado principal
       $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
       addCityRow();
       if ($start) $start.disabled = true;
@@ -3511,7 +3502,6 @@ function bindReset(){
       $chatBox.style.display='none'; $chatM.innerHTML='';
       session = []; hasSavedOnce=false; pendingChange=null;
 
-      // Flags
       planningStarted = false;
       metaProgressIndex = 0;
       collectingHotels = false;
@@ -3556,10 +3546,7 @@ function bindReset(){
       const firstCity = qs('.city-row .city');
       if (firstCity) firstCity.focus();
 
-      // 🔔 PATCH TABS-SAFE: anunciar reset para que el renderer limpie tabs/tablas
-      try {
-        document.dispatchEvent(new CustomEvent('itbmo:plannerReset'));
-      } catch(_) {}
+      try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
     });
 
     cancelReset.addEventListener('click', ()=>{
@@ -3580,13 +3567,12 @@ function bindReset(){
 // ▶️ Start: valida y ejecuta
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
-  if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
+  if(!hasSavedOnce){
     chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
     return;
   }
   if(!validateBaseDatesDMY()) return;
 
-  // 🔔 PATCH TABS-SAFE: anunciar inicio para que quien renderiza tabs pueda preparar estructura
   try {
     document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
       detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
@@ -3626,30 +3612,58 @@ document.addEventListener('itbmo:addDays', e=>{
   rebalanceWholeCity(city, { start, end, dayTripTo });
 });
 
-/* ====== Info Chat ====== */
-// 🔧 SHIM QUIRÚRGICO: asegura uso del endpoint EXTERNO simple (texto libre)
+/* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
+/* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
 function __ensureInfoAgentClient__(){
-  // Defaults (respetan los ya definidos en el embed/plantilla)
   window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
   window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
 
-  // Si no existe, o si alguien coló un client que manda `context`, lo sobrescribimos con el mínimo.
-  const mustOverride = !window.callInfoAgent || window.callInfoAgent.__usesContext__;
-  if(mustOverride){
+  const wrongClient = (fn)=>{
+    if(typeof fn !== 'function') return true;
+    const src = Function.prototype.toString.call(fn);
+    // Sospechoso si parece enviar context o llamar /api/chat o modos internos
+    if(/\/api\/chat/.test(src)) return true;
+    if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
+    if(/context/.test(src)) return true;
+    // si no está marcado como client público
+    if(fn.__source !== 'external-public-v1') return true;
+    if(fn.__usesContext__ !== false) return true;
+    return false;
+  };
+
+  if(wrongClient(window.callInfoAgent)){
     const simpleInfo = async function(userText){
       const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
-      const resp = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type":"application/json" },
-        // ✅ Sólo mandamos el texto del usuario. Nada de `context`.
-        body: JSON.stringify({ input: String(userText || "") })
-      }).catch(()=>null);
-      if(!resp) return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
-      const data = await resp.json().catch(()=>({text:""}));
-      return data?.text || "⚠️ No se obtuvo respuesta del asistente.";
+      let resp;
+      try{
+        resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type":"application/json", "Accept":"application/json" },
+          body: JSON.stringify({ input: String(userText || "") })
+        });
+      }catch(_){
+        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
+      }
+      // Siempre devolvemos TEXTO plano
+      try{
+        const data = await resp.json();
+        let txt = (typeof data?.text === 'string') ? data.text : '';
+        if(!txt || /^\s*\{/.test(txt)) {
+          // Si accidentalmente llega JSON, lo convertimos a frase corta para el usuario.
+          try {
+            const j = JSON.parse(txt);
+            if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
+            if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
+            txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
+          } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
+        }
+        return txt;
+      }catch{
+        try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
+      }
     };
-    // flag para evitar que otra parte lo vuelva a sustituir por el que añade `context`
     simpleInfo.__usesContext__ = false;
+    simpleInfo.__source = 'external-public-v1';
     window.callInfoAgent = simpleInfo;
   }
 }
@@ -3660,7 +3674,17 @@ async function sendInfoMessage(){
   const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
   if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
   infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
-  const ans = await callInfoAgent(txt); infoChatMsg(ans||'');
+  const ans = await callInfoAgent(txt);
+  // Blindaje final: si por error llega JSON, lo limpiamos a texto antes de pintar
+  let out = ans;
+  if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
+  if(typeof out === 'string' && /^\s*\{/.test(out)){
+    try{
+      const j = JSON.parse(out);
+      out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
+    }catch{ /* deja out tal cual */ }
+  }
+  infoChatMsg(out||'');
 }
 function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
@@ -3669,7 +3693,6 @@ function bindInfoChatListeners(){
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
-  // limpiar posibles dobles handlers si hubo rehidrataciones
   toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
   toggleFloating?.replaceWith(toggleFloating?.cloneNode?.(true) || toggleFloating);
   close?.replaceWith(close?.cloneNode?.(true) || close);
@@ -3710,18 +3733,17 @@ function bindInfoChatListeners(){
   });
 }
 
-// Inicialización (con guard anti-doble init)
+// Inicialización (guard anti-doble init)
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
-  // ⛑️ Garantiza Info Chat externo simple antes de bindear los listeners
+  // ⛑️ Aísla Info Chat externo antes de listeners
   __ensureInfoAgentClient__();
 
   bindInfoChatListeners();
   bindReset();
-  // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
