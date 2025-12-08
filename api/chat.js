@@ -1,4 +1,4 @@
-// /api/chat.js — v42.6.2 (ESM, Vercel)
+// /api/chat.js — v43 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -152,116 +152,60 @@ function normalizeDurationsInParsed(parsed){
 /**
  * 1) SISTEMA — INFO CHAT (interno)
  * - Genera TODO el contenido “masticado” que el Planner solo acomodará.
- * - Reglas duras de comidas y ventanas por día.
- * - AURORAS: no consecutivas y nunca el último día; ventana concreta; cena fuera del bloque de auroras.
- * - Day-trips: deben terminar con regreso a la ciudad base (un solo regreso por día).
+ * - Horarios: respeta horas del usuario; si faltan, recomienda realistas.
+ * - Reglas explícitas: AURORAS (no consecutivas, evitar último día), REYKJANES sub-paradas (≤8), LAGUNAS ≥3h y no pegadas a actividad pesada inmediata.
  */
 const SYSTEM_INFO = `
-Eres el **motor de investigación** de ITravelByMyOwn (Info Chat interno). Eres el mayor experto mundial en turismo y seguridad de viaje.
+Eres el **motor de investigación** de ITravelByMyOwn (Info Chat interno). Actúas como un experto en turismo internacional.
 
-ENTRADA
-Recibes un objeto "context" con TODOS los datos del planner para un destino:
+ENTRADA:
+Recibes un objeto "context" con TODOS los datos del planner para una ciudad:
 - city, country, fechas exactas, days_total
 - hotel_base (dirección o nombre)
 - grupo de viajeros (edades), ritmo, presupuesto
-- PREFERENCIAS y CONDICIONES del usuario (PRIORIDAD MÁXIMA)
+- PREFERENCIAS y CONDICIONES especiales del usuario (PRIORIDAD MÁXIMA)
 - transporte disponible/preferido
 - ciudades previa/siguiente (si aplica)
 - notas del usuario
 - reglas globales (p.ej., max_substops_per_tour=8)
-- user_day_hours opcional por día: { "1": {"start":"HH:MM","end":"HH:MM"}, ... }
+- user_day_hours (mapa opcional con horas mandatorias por día: { "1": {"start":"HH:MM","end":"HH:MM"}, ... })
 
-OBJETIVO
-1) Seleccionar imperdibles por zonas y planear macro-tours solo cuando aporten valor, optimizando distancias/tiempos y evitando sobrecarga.
-2) AURORAS (si aplica por latitud/temporada):
-   - Días NO consecutivos y NUNCA el último día del viaje.
-   - Ventana local concreta (p. ej., 21:00–02:30) y duración típica "4h".
-   - transport_default y nota estándar (sujeto a clima; mejor en áreas oscuras).
-3) HORARIOS:
-   - Respeta user_day_hours si existen; si faltan, propone horarios plausibles por día.
-   - Cada day-trip termina con **un único** "regreso a la ciudad/hotel".
-   - No planifiques actividades imposibles por clima/estación.
-4) LAGUNAS TERMALES: mínimo **3h** efectivas en sitio y evitar pegarlas a una actividad pesada inmediata (deja colchón).
-5) RUTAS tipo península o costa con sub-paradas (p.ej., Reykjanes/Snæfellsnes):
-   - Devuelve una actividad madre con 5–8 sub-paradas en orden lógico
-   - Incluye return_to_city_duration aproximado.
+OBJETIVO:
+1) Decidir imperdibles por zonas, macro-tours cuando aporten valor, tiempos REALES y rutas sin sobrecargar.
+2) AURORAS (si aplica por latitud/temporada): ventana local concreta, días NO consecutivos y NUNCA el último día, transport_default y nota estándar.
+3) HORARIOS: respeta user_day_hours; si faltan, recomienda day_hours por día y/o start/end por actividad.
+4) LAGUNAS TERMALES: mínimo 3h efectivas en sitio, evitando pegarlas a actividad pesada inmediata.
+5) REYKJANES / rutas con sub-paradas: devolver actividad madre con 5–8 sub-paradas y return_to_city_duration.
 
-COMIDAS (REGLAS DURAS — NO inventes fuera de estas ventanas)
-- Duraciones fijas: **desayuno 1h**, **almuerzo 1h**, **cena 2h**.
-- Ventanas locales recomendadas (ajústalas si el usuario define otras):
-  * Desayuno: 07:00–09:00
-  * Almuerzo: 12:00–14:30
-  * Cena: 19:00–21:30 (nunca empieza después de 21:30).
-- Si hay auroras en un día, la cena debe quedar **fuera** de la ventana de auroras (terminar antes de que empiece el bloque de auroras).
-- NUNCA cruces medianoche con comidas. No programes comidas entre 22:30 y 06:00.
-
-SALIDA ÚNICA — Devuelve **solo JSON válido** (sin texto fuera) con:
-{
-  "destination": "Ciudad",
-  "country": "País",
-  "days_total": 5,
-  "hotel_base": "Nombre/Dirección",
-  "rationale": "Por qué este orden/ruta",
-  "imperdibles": [...],
-  "macro_tours": [...],         // actividades madre con sub-paradas (≤8)
-  "in_city_routes": [...],
-  "meals_suggestions": [
-    // Puedes listar tips de comida por zona/día, pero las comidas principales deben ir en rows_skeleton.
-  ],
-  "aurora": {
-    "plausible": true|false,
-    "suggested_days": [2,4],
-    "window_local": { "start": "21:00", "end": "02:30" },
-    "transport_default": "Vehículo alquilado o Tour guiado",
-    "note": "Actividad sujeta a clima; mejor en áreas oscuras",
-    "duration": "4h"
-  },
-  "constraints": {
-    "max_substops_per_tour": 8,
-    "avoid_duplicates_across_days": true,
-    "optimize_order_by_distance_and_time": true,
-    "respect_user_preferences_and_conditions": true
-  },
-  "day_hours": [
-    // Opcional: si defines los rangos por día.
-    // { "day": 1, "start": "08:30", "end": "19:00" }
-  ],
-  "rows_skeleton": [
-    // Devuelve aquí todas las filas propuestas del itinerario, incluyendo COMIDAS dentro de sus ventanas y con las DURACIONES fijas.
-    // Si ya conoces horarios, incluye start/end; si no, deja solo "duration" y "kind".
-    // Ejemplo de comidas:
-    // { "day": 1, "kind":"meal", "meal":"desayuno", "from":"Hotel", "to":"Restaurante local", "duration":"1h" }
-    // { "day": 1, "kind":"meal", "meal":"almuerzo", "from":"Zona X", "to":"Restaurante local", "duration":"1h" }
-    // { "day": 1, "kind":"meal", "meal":"cena", "from":"Centro", "to":"Restaurante local", "duration":"2h" }
-  ]
-}
-OBLIGATORIO:
-- Incluir las 3 comidas por día (según preferencias del usuario si las especifica).
-- Respetar ventanas y duraciones de COMIDAS indicadas.
-- Si hay AURORAS en un día, ubicar la CENA antes de la ventana de auroras.
-- Los day-trips deben cerrar con un único “Regreso a <Ciudad base/Hotel>”.
+SALIDA ÚNICA — JSON válido (sin texto fuera) con:
+- destination, country, days_total, hotel_base, rationale
+- imperdibles[], macro_tours[], in_city_routes[], meals_suggestions[]
+- aurora{ plausible, suggested_days[], window_local{start,end}, transport_default, note, duration }
+- constraints{ max_substops_per_tour:8, avoid_duplicates_across_days:true, optimize_order_by_distance_and_time:true, respect_user_preferences_and_conditions:true }
+- day_hours[] (si aplica)
+- rows_skeleton[] (con start/end si ya son conocidos)
 `.trim();
 
 /**
  * 2) SISTEMA — PLANNER (estructura)
  * - Transforma research_json en {"destination","rows":[...]} sin creatividad adicional.
- * - Respeta ventanas/horas provistas y NO altera auroras ni comidas (ya vienen del Info con reglas duras).
+ * - Respeta ventanas/horas provistas y NO altera auroras.
  * - Macro-tours: actividad madre con ≤8 sub-paradas; no agregar transporte “post retorno”.
  * - Lagunas: asegura ≥3h si el skeleton viniera menor.
  */
 const SYSTEM_PLANNER = `
 Eres **Astra Planner**. Recibes "research_json" del Info Chat interno con datos fácticos
-(decisiones, tiempos, regreso al hotel, ventanas de auroras, day_hours y/o start/end por actividad, y COMIDAS ya validadas).
+(decisiones, tiempos, regreso al hotel, ventanas de auroras, day_hours y/o start/end por actividad).
 
 TU TAREA:
 - Convertir research_json en {"destination","rows":[...]} sin creatividad adicional.
 - Si un ítem de rows_skeleton trae "start/end" ⇒ úsalo tal cual.
-- Si NO trae "start/end" ⇒ asígnalo dentro del rango research_json.day_hours del día (si existe) sin violar la ventana de AURORAS ni las ventanas de COMIDAS.
+- Si NO trae "start/end" ⇒ asigna dentro del rango research_json.day_hours del día.
 - Respeta horas MANDATORIAS del usuario. No impongas 08:30–19:00 por defecto.
 - Auroras: usa la ventana exacta definida por Info (días no consecutivos, nunca el último).
 - Macro-tours: actividad madre “Excursión — … — A → B → C” (≤8 sub-paradas) y **no** añadir transporte tras "return_to_city_duration".
 - Lagunas termales: garantizar **≥3h** efectivas si el skeleton fuese menor.
-- Inserta notas motivadoras breves (basadas en kind: icónico, macro_tour, aurora, meal, etc.).
+- Inserta notas motivadoras breves (basadas en kind: icónico, macro_tour, aurora, etc.).
 
 FORMATO ÚNICO (JSON válido, sin texto adicional):
 {
@@ -300,14 +244,14 @@ export default async function handler(req, res) {
 
       let raw = await callText(
         [{ role: "system", content: SYSTEM_INFO }, infoUserMsg],
-        0.3,
-        3400
+        0.35,
+        3500
       );
       let parsed = cleanToJSONPlus(raw);
 
       if (!parsed) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3000);
+        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3200);
         parsed = cleanToJSONPlus(raw);
       }
 
