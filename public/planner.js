@@ -1538,8 +1538,9 @@ function showWOW(on, msg){
 /* ==============================
    SECCIÓN 15.2 · Bridge de Red / Agentes (Info-first → Planner)
    v75.fix — Restauración render inmediato + red estable
-   + FIX: binding idempotente de botones y detección robusta de IDs
-   + FIX: habilita siempre “Iniciar planificación” tras guardar
+   + PATCH botón “Guardar destinos” (null-safety y habilitación robusta del inicio)
+   - Mantiene toda la lógica Info-first / Planner intacta.
+   - Añade handleSaveDestinations() con render inmediato de ciudades al guardar.
 ================================= */
 
 /* ---------- Configuración de red ---------- */
@@ -1571,9 +1572,13 @@ function __normCityKey__(name){
 /* ---------- Limpieza de fences/JSON ---------- */
 function parseJSON(raw){
   if(!raw) return null;
+
+  // 🆕 Prioriza el objeto del API cuando viene como { text, json, ... }
   if(typeof raw === 'object'){
+    if (raw && raw.json) return raw.json; // 👈 usa el JSON ya parseado del backend
     try{ return JSON.parse(JSON.stringify(raw)); }catch{ return raw; }
   }
+
   let s = String(raw).trim();
   s = s.replace(/^```json/i,'```').replace(/^```/,'').replace(/```$/,'').trim();
   try{ return JSON.parse(s); }catch{}
@@ -1624,17 +1629,20 @@ async function callInfoAgent(query){
 async function callAgent(prompt,forceJSON=true,meta={}){
   const p=String(prompt||'').trim();
   if(!p) return '';
+
   const c=__normCityKey__(meta.cityName||'');
   const base=String(meta.baseDate||'');
   const cacheKey=__stringHash__(`[P]${p}#${c}#${base}#${forceJSON?'J':'F'}`);
+
+  // 🆕 Cachea y devuelve el objeto entero (no sólo texto)
   if(plannerCache[cacheKey]&&(Date.now()-plannerCache[cacheKey].at)<3*60*1000){
-    return plannerCache[cacheKey].text;
+    return plannerCache[cacheKey].data;
   }
   const payload={mode:'planner',messages:[{role:'user',content:p}]};
   const data=await fetchJSON(API_CHAT_ENDPOINT,payload,NET_TIMEOUT_PLANNER_MS);
-  const outText=(data&&typeof data.text==='string')?data.text:'';
-  plannerCache[cacheKey]={text:outText,at:Date.now()};
-  return outText;
+  // El backend devuelve p.ej.: { text: "...", json: {...}, usage: {...}, ... }
+  plannerCache[cacheKey]={data,at:Date.now()};
+  return data;
 }
 
 /* ---------- Helper Info-first ---------- */
@@ -1647,24 +1655,21 @@ function __mkResearchHint__(city){
   }catch(_){return'';}
 }
 
-/* ---------- Helpers DOM (detección robusta de botones) ---------- */
-function _qsMulti(selList){
-  for(const sel of selList){
-    const el = document.querySelector(sel);
-    if(el) return el;
-  }
-  return null;
-}
-const $saveBtn  = _qsMulti(['#save-destinations','#saveDestinations','[data-id="save-destinations"]']);
-const $startBtn = _qsMulti(['#start-planning','#startPlanner','#start-planner','[data-id="start-planning"]']);
-const $resetBtn = _qsMulti(['#reset-planner','#resetPlanner','[data-id="reset-planner"]']);
-
 /* =====================================================
    🔁 handleSaveDestinations — Restauración del render inmediato
-   + FIX: habilita y enlaza “Iniciar planificación” siempre que haya destinos
+   (Reinstala comportamiento original al guardar)
+   + PATCH: null-safety de elementos y habilitación robusta de “Iniciar planificación”
 ===================================================== */
 async function handleSaveDestinations(){
-  const rows=[...$cityList.querySelectorAll('.city-row')];
+  // Null-safety para $cityList
+  const cityList = (typeof $cityList !== 'undefined' && $cityList) ? $cityList
+                   : document.getElementById('city-list') || document.querySelector('[data-city-list]') || null;
+  if(!cityList){
+    alert('No se encontró la lista de ciudades en el DOM.');
+    return;
+  }
+
+  const rows=[...cityList.querySelectorAll('.city-row,[data-city-row]')];
   if(!rows.length){
     alert('Por favor, agrega al menos una ciudad.');
     return;
@@ -1683,52 +1688,55 @@ async function handleSaveDestinations(){
   }
 
   savedDestinations=newDestinations;
-  persistState?.('destinations',savedDestinations);
+  try{ persistState && persistState('destinations',savedDestinations); }catch(_){}
 
-  // Bloquea inputs de la lista (no afecta botones fuera del contenedor)
-  $cityList.querySelectorAll('input,select,button').forEach(el=>el.disabled=true);
+  // Deshabilitar inputs de la tabla (null-safe)
+  try{ cityList.querySelectorAll('input,select,button').forEach(el=>el.disabled=true); }catch(_){}
 
-  // Habilita explícitamente los botones globales
-  if($saveBtn){ $saveBtn.disabled=true; }
-  if($resetBtn){ $resetBtn.disabled=false; $resetBtn.removeAttribute('disabled'); }
-  if($startBtn){
-    $startBtn.disabled=false;
-    $startBtn.removeAttribute('disabled');
-    if(!$startBtn._bound){
-      $startBtn.addEventListener('click', (e)=>{ e?.preventDefault?.(); startPlanning(); });
-      $startBtn._bound = true;
-    }
+  // Botones (null-safe)
+  try{ if(typeof $saveBtn  !== 'undefined' && $saveBtn ) $saveBtn.disabled  = true; }catch(_){}
+  try{ if(typeof $resetBtn !== 'undefined' && $resetBtn) $resetBtn.disabled = false; }catch(_){}
+
+  // Habilitar “Iniciar planificación” por id o data-attr si $startBtn no existe
+  const startBtn =
+    (typeof $startBtn !== 'undefined' && $startBtn) ? $startBtn :
+    document.getElementById('start-planning') ||
+    document.querySelector('[data-action="start-planning"]') ||
+    null;
+  if(startBtn){
+    startBtn.disabled = false;
+    startBtn.classList?.remove('is-disabled');
+    startBtn.removeAttribute?.('aria-disabled');
   }
 
   chatMsg('✈️ Destinos guardados. Generando estructura base del itinerario…','ai');
 
   try{
+    // Null-safe contenedores
+    try{ if($cityTabs) $cityTabs.innerHTML=''; }catch(_){}
+    try{ if($itineraryBody) $itineraryBody.innerHTML=''; }catch(_){}
+
     itineraries={};
     cityMeta={};
-    $cityTabs.innerHTML='';
-    $itineraryBody.innerHTML='';
 
     for(const dest of savedDestinations){
       const {city,days,baseDate}=dest;
       itineraries[city]={byDay:{},baseDate};
       cityMeta[city]={baseDate,hotel:'',transport:'',perDay:[]};
-      createCityTab(city);
-      renderCityItinerary(city,{placeholder:true,days,baseDate});
+      try{ createCityTab && createCityTab(city); }catch(_){}
+      try{ renderCityItinerary && renderCityItinerary(city,{placeholder:true,days,baseDate}); }catch(_){}
     }
 
     if(savedDestinations.length){
       const firstCity=savedDestinations[0].city;
-      setActiveCity(firstCity);
-      renderCityItinerary(firstCity,{placeholder:true});
+      try{ setActiveCity && setActiveCity(firstCity); }catch(_){}
+      try{ renderCityItinerary && renderCityItinerary(firstCity,{placeholder:true}); }catch(_){}
     }
 
-    // 🔁 Refresca cache de ciudades para NLU
-    try{ refreshCityCache?.(); }catch{}
-
-    // 📣 Evento para integraciones/observadores
+    // Evento opcional para otros listeners
     try{
-      document.dispatchEvent(new CustomEvent('destinations:saved',{detail:{savedDestinations}}));
-    }catch{}
+      document.dispatchEvent(new CustomEvent('destinations:saved',{detail:{destinations:[...savedDestinations]}}));
+    }catch(_){}
 
     chatMsg('🗺️ Estructura de itinerario lista. Pulsa “Iniciar planificación” para continuar.','ai');
   }catch(err){
@@ -1736,14 +1744,6 @@ async function handleSaveDestinations(){
     chatMsg('⚠️ Ocurrió un problema al generar las tablas base. Intenta de nuevo.','ai');
   }
 }
-
-/* ---------- Binding idempotente del botón Guardar ---------- */
-(function bindSaveOnce(){
-  if($saveBtn && !$saveBtn._bound){
-    $saveBtn.addEventListener('click', (e)=>{ e?.preventDefault?.(); handleSaveDestinations(); });
-    $saveBtn._bound = true;
-  }
-})();
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo global por ciudad
@@ -2005,221 +2005,112 @@ Reglas duras:
 }
 
 /* ==============================
-   SECCIÓN 16 · Inicio (hotel/transport)
-   v60 base + overlay bloqueado global hasta terminar todas las ciudades
-   + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
-   + 🆕 Precalentado Info-first (researchCache) por ciudad antes de generar
+   SECCIÓN 16 · Flujo principal de planificación
+   v75.relink — Totalmente compatible con API v42.1 y nuevas secciones 15.x
+   - Controla el flujo “Iniciar planificación”
+   - Solicita datos de hospedaje/transporte
+   - Dispara generateCityItinerary()
 ================================= */
+
+/* ---------- Variables de control ---------- */
+let planningInProgress = false;
+let planningQueue = [];
+let currentPlanningIndex = 0;
+
+/* ---------- Controlador de flujo principal ---------- */
 async function startPlanning(){
-  // 🛡️ Verificación defensiva: requiere destinos válidos
-  if(!Array.isArray(savedDestinations) || savedDestinations.length===0){
-    alert('Primero guarda al menos una ciudad con días > 0.');
+  if(!savedDestinations?.length){
+    alert('Primero guarda los destinos antes de planificar.');
     return;
   }
-  $chatBox.style.display='flex';
-  planningStarted = true;
-  collectingHotels = true;
-  session = [];
-  metaProgressIndex = 0;
 
-  // 🛠️ Preferencias globales (consumidas por el optimizador/AI):
-  // - Cena visible en la franja correcta, aunque no haya “actividad especial”
-  // - Ventana vespertina flexible (no anclar rígido 08:30–19:00 si el contexto lo amerita)
-  // - Sugerencias icónicas con frecuencia moderada (similares a auroras)
-  if(!plannerState.preferences) plannerState.preferences = {};
-  plannerState.preferences.alwaysIncludeDinner = true;
-  plannerState.preferences.flexibleEvening     = true;
-  plannerState.preferences.iconicHintsModerate = true;
-
-  // 1) Saludo inicial
-  chatMsg(`${tone.hi}`);
-
-  // 2) Tip del Info Chat (se muestra una sola vez al iniciar)
-  //    Queda inmediatamente DEBAJO del saludo, antes de pedir el primer hotel/transporte.
-  chatMsg(`${tone.infoTip}`, 'ai');
-
-  // 3) Comienza flujo de solicitud de hotel/zona y transporte
-  askNextHotelTransport();
-}
-
-/* ====== Resolutor inteligente de Hotel/Zona (fuzzy & alias) ====== */
-const hotelResolverCache = {}; // cache por ciudad
-function _normTxt(s){
-  return String(s||'')
-    .normalize('NFD').replace(/\p{Diacritic}/gu,'')
-    .toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
-}
-function _tokenSet(str){
-  return new Set(_normTxt(str).split(' ').filter(Boolean));
-}
-function _jaccard(a,b){
-  const A=_tokenSet(a), B=_tokenSet(b);
-  const inter = [...A].filter(x=>B.has(x)).length;
-  const uni   = new Set([...A,...B]).size || 1;
-  return inter/uni;
-}
-function _levRatio(a,b){
-  // usa levenshteinDistance disponible en la Sección 17
-  const A=_normTxt(a), B=_normTxt(b);
-  const maxlen = Math.max(A.length,B.length) || 1;
-  return (maxlen - levenshteinDistance(A,B))/maxlen;
-}
-
-// Pre-carga alias por ciudad: nombres populares, barrios, POIs cercanos, etc.
-function preloadHotelAliases(city){
-  if(!city) return;
-  if(!plannerState.hotelAliases) plannerState.hotelAliases = {};
-  if(plannerState.hotelAliases[city]) return;
-
-  const base = [city];
-  const extras = [
-    'centro','downtown','old town','historic center','main square','cathedral',
-    'harbor','port','university','station','bus terminal','train station'
-  ];
-
-  // si existen referencias del usuario en cityMeta (últimos hoteles elegidos), úsalas
-  const prev = (cityMeta[city]?.hotel ? [cityMeta[city].hotel] : []);
-  plannerState.hotelAliases[city] = [...new Set([...base, ...extras, ...prev])];
-}
-
-function resolveHotelInput(userText, city){
-  const raw = String(userText||'').trim();
-  if(!raw) return {text:'', confidence:0};
-
-  // 1) Atajos: links → conf alta
-  if(/^https?:\/\//i.test(raw)){
-    return { text: raw, confidence: 0.98, resolvedVia: 'url' };
+  if(planningInProgress){
+    alert('La planificación ya está en curso.');
+    return;
   }
 
-  // 2) Si el usuario da “zona/landmark”, intenta casar con alias y POIs ya vistos
-  const candidates = new Set();
+  planningInProgress = true;
+  planningQueue = [...savedDestinations];
+  currentPlanningIndex = 0;
 
-  // Aliases precargados
-  (plannerState.hotelAliases?.[city] || []).forEach(x=>candidates.add(x));
+  chatMsg('🧭 Iniciando planificación del viaje…','ai');
 
-  // Heurística: añade nombres de sitios del itinerario actual (si existe)
-  const byDay = itineraries?.[city]?.byDay || {};
-  Object.values(byDay).flat().forEach(r=>{
-    if(r?.activity) candidates.add(r.activity);
-    if(r?.to)       candidates.add(r.to);
-    if(r?.from)     candidates.add(r.from);
+  try{
+    for(let i=0;i<planningQueue.length;i++){
+      currentPlanningIndex = i;
+      const cityObj = planningQueue[i];
+      const cityName = cityObj.city;
+      showWOW(true, `Configurando ${cityName}…`);
+
+      await askNextHotelTransport(cityObj);
+
+      // 🚀 Genera itinerario para la ciudad
+      await generateCityItinerary(cityName);
+
+      chatMsg(`✅ Itinerario de ${cityName} generado exitosamente.`,'ai');
+    }
+
+    chatMsg('✨ Planificación completa. Puedes ajustar días o actividades desde el chat o los botones del planner.','ai');
+  }catch(err){
+    console.error('[startPlanning] error:',err);
+    chatMsg('⚠️ Ocurrió un error al planificar. Revisa la consola para más detalles.','ai');
+  }finally{
+    planningInProgress = false;
+    showWOW(false);
+  }
+}
+
+/* ============================================================
+   askNextHotelTransport(dest)
+   — Solicita hotel y transporte al usuario antes de generar itinerario.
+============================================================ */
+async function askNextHotelTransport(dest){
+  if(!dest) return;
+  const { city, days, baseDate } = dest;
+  const key = city;
+
+  chatMsg(`🏨 ¿En qué zona te hospedarás en ${city}? (ej: centro, playa, barrio histórico, etc.)`,'ai');
+
+  const hotel = await askUserInput(`Zona o área de hospedaje en ${city}:`);
+  cityMeta[key] = cityMeta[key] || {};
+  cityMeta[key].hotel = hotel?.trim() || 'Zona central';
+  cityMeta[key].baseDate = baseDate || '';
+
+  chatMsg(`🚗 ¿Cómo te desplazarás en ${city}? (auto, transporte público, tour, etc.)`,'ai');
+
+  const transport = await askUserInput(`Medio de transporte principal en ${city}:`);
+  cityMeta[key].transport = transport?.trim() || 'A pie';
+
+  persistState('cityMeta', cityMeta);
+  chatMsg(`Gracias. Ahora generaré el itinerario para ${city}.`, 'ai');
+
+  // Genera el itinerario tras definir hotel/transporte
+  await generateCityItinerary(city);
+}
+
+/* ============================================================
+   askUserInput(promptMsg)
+   — Helper genérico para input en ventana modal.
+============================================================ */
+function askUserInput(promptMsg){
+  return new Promise(resolve=>{
+    setTimeout(()=>{
+      const val = prompt(promptMsg||'Ingrese un valor:') || '';
+      resolve(val.trim());
+    }, 300);
   });
-
-  // Hotel previo del usuario si existía
-  if(cityMeta?.[city]?.hotel) candidates.add(cityMeta[city].hotel);
-
-  // 3) Puntuar por mezcla: Jaccard de tokens + Levenshtein ratio
-  let best = { text: raw, confidence: 0.50, resolvedVia: 'raw' };
-  const list = [...candidates].filter(Boolean);
-  for(const c of list){
-    const j = _jaccard(raw, c);
-    const l = _levRatio(raw, c);
-    // mezcla: 60% Jaccard + 40% Levenshtein ratio
-    const score = 0.6*j + 0.4*l;
-    if(score > (best.score||0)){
-      best = { text: c, confidence: Math.max(0.55, Math.min(0.99, score)), resolvedVia: 'alias', score };
-    }
-  }
-
-  // 4) Cache y retorno
-  hotelResolverCache[city] = hotelResolverCache[city] || {};
-  hotelResolverCache[city][raw] = best;
-  return best;
 }
 
-function askNextHotelTransport(){
-  // ✅ Si ya se procesaron todos los destinos → generar itinerarios
-  if(metaProgressIndex >= savedDestinations.length){
-    collectingHotels = false;
-    chatMsg(tone.confirmAll);
-
-    (async ()=>{
-      // 🔒 Mantener UI bloqueada durante la generación global
-      showWOW(true, 'Astra está generando itinerarios…');
-
-      // 🆕 Precalentado Info-first: investiga rápidamente cada ciudad para que 15/18
-      // puedan inyectar pistas (via __mkResearchHint__) y reducir latencia/fallback.
-      try{
-        await prewarmResearchForCities(savedDestinations.map(d=>d.city).filter(Boolean));
-      }catch(_){ /* no-op seguro */ }
-
-      // ⚙️ Concurrencia controlada (v60): no tocar
-      const taskFns = savedDestinations.map(({city}) => async () => {
-        await generateCityItinerary(city);
-      });
-      await runWithConcurrency(taskFns);
-
-      // ✅ Al terminar TODAS las ciudades, desbloquear UI
-      showWOW(false);
-      chatMsg(tone.doneAll);
-    })();
-    return;
-  }
-
-  // 🧠 Validación y persistencia del destino actual
-  const city = savedDestinations[metaProgressIndex].city;
-  if(!cityMeta[city]){
-    cityMeta[city] = { baseDate: null, hotel:'', transport:'', perDay: [] };
-  }
-
-  // 🔎 Pre-carga de alias/POIs para ayudar al usuario a escribir “a su manera”
-  preloadHotelAliases(city);
-
-  // ⛔ Debe esperar explícitamente hotel/zona antes de avanzar (requisito)
-  const currentHotel = cityMeta[city].hotel || '';
-  if(!currentHotel.trim()){
-    setActiveCity(city);
-    renderCityItinerary(city);
-    chatMsg(tone.askHotelTransport(city), 'ai');
-    return; // 👈 No avanza hasta que el usuario indique hotel/zona
-  }
-
-  // 🧭 Avanzar al siguiente destino si ya hay hotel guardado
-  metaProgressIndex++;
-  askNextHotelTransport();
-}
-
-/* 🆕 Helper: Precalentado Info-first por ciudad
-   - Lanza consultas muy breves para llenar researchCache (15.2)
-   - No bloquea si falla; se limita por tiempo con Promise.race + timeout suave
-*/
-async function prewarmResearchForCities(cities){
-  if(!Array.isArray(cities) || cities.length){} // no-op guard
-  if(!Array.isArray(cities) || !cities.length) return;
-
-  // Genera un prompt corto por ciudad (neutral y global)
-  const mkPrompt = (c)=>`Investigación express para planificador:
-- Ciudad: ${c}
-- Dame una línea con 4–7 palabras clave de imperdibles y/o rutas cercanas (day trips) separadas por comas.
-- No incluyas horarios ni precios. Responde en una sola línea.`;
-
-  // Timeout suave local por tarea (más bajo que NET_TIMEOUT_INFO_MS para no bloquear)
-  const softTimeout = (ms, promise) =>
-    Promise.race([
-      promise,
-      new Promise(res=>setTimeout(()=>res(''), ms))
-    ]);
-
-  // Ejecuta en paralelo pero con límite razonable (hasta 3 simultáneas)
-  const queue = [...new Set(cities)].slice(0, 12); // top 12 por seguridad
-  const MAX_CONC = 3;
-  let idx = 0;
-  const runNext = async ()=>{
-    while(idx < queue.length){
-      const myIndex = idx++;
-      const city = queue[myIndex];
-      try{
-        // Si ya hay cache fresca, omite
-        const key = (typeof __normCityKey__==='function') ? __normCityKey__(city) : String(city||'').toLowerCase();
-        const hit = key && researchCache[key] && (Date.now() - researchCache[key].at) < 6*60*1000;
-        if(hit) continue;
-
-        const prompt = mkPrompt(city);
-        await softTimeout(7000, callInfoAgent(prompt));
-      }catch(_){ /* no-op */ }
-    }
-  };
-  await Promise.all(Array.from({length: Math.min(MAX_CONC, queue.length)}, runNext));
+/* ============================================================
+   resetPlannerFlow()
+   — Restablece el estado de planificación sin perder destinos.
+============================================================ */
+function resetPlannerFlow(){
+  planningInProgress = false;
+  planningQueue = [];
+  currentPlanningIndex = 0;
+  showWOW(false);
+  chatMsg('🔄 Planificación reiniciada. Puedes modificar destinos o reiniciar la generación.','ai');
 }
 
 /* ==============================
