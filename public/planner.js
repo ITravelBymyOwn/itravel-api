@@ -3295,6 +3295,36 @@ async function optimizeDay(city, day) {
    - Rebalanceos y optimizaciones llaman a optimizeDay (que ya usa INFO→PLANNER)
    - Respeta y registra preferencias/condiciones del usuario
 ================================= */
+
+/* Wrapper global para Info Agent usando API v43 (si no existe) */
+if (typeof callInfoAgent !== 'function') {
+  async function callInfoAgent(queryText) {
+    try {
+      const cityCtx = (typeof activeCity !== 'undefined' && activeCity) ? activeCity : (savedDestinations?.[0]?.city || '');
+      const baseContext =
+        (typeof __collectPlannerContext__ === 'function')
+          ? __collectPlannerContext__(cityCtx || '', null, { question: queryText })
+          : {
+              city: cityCtx || '',
+              question: queryText || '',
+              preferences: plannerState?.preferences || {},
+              meta: cityMeta?.[cityCtx] || {}
+            };
+
+      const resp = await callApiChat('info', { context: baseContext }, { timeoutMs: 28000, retries: 1 });
+      const parsed = safeParseApiText(resp?.text ?? resp);
+
+      // Preferimos texto llano si viene; si no, serializamos el JSON de research de forma amigable.
+      if (typeof parsed === 'string') return parsed;
+      if (parsed && typeof parsed.text === 'string') return parsed.text;
+      return 'He obtenido la información. Si quieres, puedo usarla para ajustar tu itinerario.';
+    } catch (e) {
+      console.error('callInfoAgent error:', e);
+      return 'No pude obtener la información en este momento. Intenta nuevamente o especifica más detalles.';
+    }
+  }
+}
+
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
@@ -3506,7 +3536,7 @@ async function onSend(){
       pushRows(city, [{
         day: numericPos,
         start: baseStart,
-        end: addMinutes(baseStart, 60),
+        end: __addMinutesSafe__(baseStart, 60),
         activity: `Traslado a ${destTrip}`,
         from: `Hotel (${city})`,
         to: destTrip,
@@ -3639,12 +3669,12 @@ async function onSend(){
     return;
   }
 
-  // Preguntas informativas → usa Info Agent (independiente del plan)
+  // Preguntas informativas → usa Info Agent (independiente del plan) — ahora vía API v43
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
       const ans = await callInfoAgent(text);
-      chatMsg(ans || '¿Algo más que quieras saber?');
+      chatMsg(ans || '¿Algo más que quieras saber?','ai');
     } finally {
       setChatBusy(false);
     }
@@ -3654,7 +3684,7 @@ async function onSend(){
   // Edición libre
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
-    if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.'); return; }
+    if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.','ai'); return; }
     const day = itineraries[city]?.currentDay || 1;
     showWOW(true,'Aplicando tu cambio…');
 
@@ -3686,33 +3716,51 @@ ${dayRows}
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
-    const ans = await callAgent(prompt, true);
-    const parsed = parseJSON(ans);
+    // Conservamos callAgent/parseJSON/normalizeRow si existen (compatibilidad);
+    // si no existen, hacemos fallback suave a reoptimización del día actual.
+    let usedFallback = false;
+    try {
+      if (typeof callAgent === 'function' && typeof parseJSON === 'function') {
+        const ans = await callAgent(prompt, true);
+        const parsed = parseJSON(ans);
 
-    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-      let rows = [];
-      if(parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
-      else if(parsed.destination===city && parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
-      else if(Array.isArray(parsed.destinations)){
-        const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
-        rows = (dd?.rows||[]).map(r=>normalizeRow(r));
-      }else if(Array.isArray(parsed.itineraries)){
-        const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
-        rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+        if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
+          let rows = [];
+          if(parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
+          else if(parsed.destination===city && parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
+          else if(Array.isArray(parsed.destinations)){
+            const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
+            rows = (dd?.rows||[]).map(r=>normalizeRow(r));
+          }else if(Array.isArray(parsed.itineraries)){
+            const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+            rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+          }
+          const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
+          const val = await validateRowsWithAgent(city, rows, baseDate);
+          pushRows(city, val.allowed, false);
+
+          const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
+          await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
+
+          renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+          showWOW(false);
+          chatMsg('✅ Apliqué el cambio y reoptimicé los días implicados.','ai');
+          return;
+        } else {
+          usedFallback = true;
+        }
+      } else {
+        usedFallback = true;
       }
-      const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
-      const val = await validateRowsWithAgent(city, rows, baseDate);
-      pushRows(city, val.allowed, false);
+    } catch {
+      usedFallback = true;
+    }
 
-      const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
-      await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
-
+    if (usedFallback) {
+      await optimizeDay(city, day);
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Apliqué el cambio y reoptimicé los días implicados.','ai');
-    }else{
-      showWOW(false);
-      chatMsg(parsed?.followup || 'No recibí cambios válidos. ¿Intentamos de otra forma?','ai');
+      chatMsg('⚠️ No pude aplicar la edición libre con el agente actual. Reoptimicé el día visible para mantener coherencia.', 'ai');
     }
     return;
   }
