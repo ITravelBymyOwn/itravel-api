@@ -3768,19 +3768,9 @@ ${dayRows}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
+   FIX v77.2: wrap perezoso/seguro de addCityRow para no romper la fila inicial
 ================================= */
-
-/**
- * Inyecta controles de reordenamiento a una fila de ciudad.
- * Global, no depende del API; tras mover, sincroniza y notifica.
- */
 function addRowReorderControls(row){
-  if (!row) return;
-
-  // Evitar duplicados si ya se inyectaron
-  if (row.__reorderInjected) return;
-  row.__reorderInjected = true;
-
   const ctrlWrap = document.createElement('div');
   ctrlWrap.style.display = 'flex';
   ctrlWrap.style.gap = '.35rem';
@@ -3797,25 +3787,11 @@ function addRowReorderControls(row){
   ctrlWrap.appendChild(down);
   row.appendChild(ctrlWrap);
 
-  // Utilitarios de post-acción: guardar + refrescar UI sin bloquear
-  const afterMove = ()=>{
-    try { saveDestinations && saveDestinations(); } catch (_) {}
-    // Refresco no intrusivo: tabs y ciudad activa preservada
-    try {
-      const current = (typeof activeCity !== 'undefined') ? activeCity : null;
-      if (typeof renderCityTabs === 'function') renderCityTabs();
-      if (current && typeof setActiveCity === 'function') setActiveCity(current);
-      if (current && typeof renderCityItinerary === 'function') renderCityItinerary(current);
-    } catch (_) {}
-    // Notificar a otras secciones (rebalanceos/escuchas opcionales)
-    try { document.dispatchEvent(new CustomEvent('itbmo:citiesReordered')); } catch (_) {}
-  };
-
   // 🆙 Subir ciudad
   up.addEventListener('click', ()=>{
     if(row.previousElementSibling){
       $cityList.insertBefore(row, row.previousElementSibling);
-      afterMove(); // ⚡ sincroniza + refresca
+      saveDestinations(); // ⚡ sincroniza inmediatamente orden
     }
   });
 
@@ -3823,72 +3799,48 @@ function addRowReorderControls(row){
   down.addEventListener('click', ()=>{
     if(row.nextElementSibling){
       $cityList.insertBefore(row.nextElementSibling, row);
-      afterMove(); // ⚡ sincroniza + refresca
+      saveDestinations(); // ⚡ sincroniza inmediatamente orden
     }
   });
 }
 
-/**
- * Parche idempotente de addCityRow para inyectar controles en cada nueva fila.
- * Respeta implementación original; no duplica el parche si ya se aplicó.
- */
-if (typeof addCityRow === 'function' && !addCityRow.__reorderPatched) {
-  const __origAddCityRow__ = addCityRow;
-  addCityRow = function(pref){
-    __origAddCityRow__(pref);
-    const row = $cityList && $cityList.lastElementChild;
-    if(row) addRowReorderControls(row);
-  };
-  addCityRow.__reorderPatched = true;
-}
+/* --- Wrap perezoso y a prueba de orden de carga --- */
+(function ensureSafeAddCityRowWrap(){
+  function doWrap(){
+    if (typeof addCityRow !== 'function') return;
+    if (addCityRow.__wrappedBySection20__) return; // evita doble wrap
 
-/**
- * Al cargar ciudades existentes (por ejemplo, al restaurar estado),
- * intenta inyectar controles a todas las filas ya presentes.
- */
-(function __injectReorderForExistingRows__(){
-  try {
-    if (!$cityList) return;
-    const rows = $cityList.querySelectorAll('.city-row, .city-item, li, .row'); // tolerante a distintas clases
-    rows.forEach(r => addRowReorderControls(r));
-  } catch (_) {}
-})();
-
-/* 🧼 País: permitir letras Unicode y espacios (global, con mantenimiento de cursor) */
-document.addEventListener('input', (e)=>{
-  const el = e.target;
-  if(!el || !el.classList) return;
-  if(!el.classList.contains('country')) return;
-
-  const original = String(el.value || '');
-  // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
-  const filtered = original.replace(/[^\p{L}\s]/gu,'');
-  if(filtered !== original){
-    const posStart = el.selectionStart;
-    const posEnd   = el.selectionEnd;
-    el.value = filtered;
-    // ⚡ Ajuste suave del cursor respetando selección
-    if(typeof posStart === 'number' && typeof posEnd === 'number'){
-      const delta = original.length - filtered.length;
-      const newStart = Math.max(0, posStart - delta);
-      const newEnd   = Math.max(0, posEnd   - delta);
-      try { el.setSelectionRange(newStart, newEnd); } catch (_) {}
-    }
+    const _origAddCityRow = addCityRow;
+    addCityRow = function(pref){
+      // llamamos al original
+      const ret = _origAddCityRow(pref);
+      // tomamos la última fila creada y le inyectamos controles
+      const row = $cityList?.lastElementChild;
+      if (row && !row.__reorderControlsInjected__) {
+        addRowReorderControls(row);
+        row.__reorderControlsInjected__ = true;
+      }
+      return ret;
+    };
+    addCityRow.__wrappedBySection20__ = true;
   }
-});
 
-/* 📣 Listener opcional (no bloqueante) para que otras secciones reaccionen al reorden
-   — Por ejemplo, podrías reequilibrar si así lo decides en otro punto del flujo.
-   Mantenemos esto minimalista para no alterar lógicas existentes. */
-(function(){
-  try {
-    document.addEventListener('itbmo:citiesReordered', ()=>{
-      // No hacemos nada por defecto para evitar costes innecesarios.
-      // Si deseas reequilibrar automáticamente:
-      // const city = (typeof activeCity !== 'undefined') ? activeCity : (savedDestinations?.[0]?.city || '');
-      // if (city && typeof rebalanceWholeCity === 'function') rebalanceWholeCity(city);
-    });
-  } catch(_) {}
+  if (typeof addCityRow === 'function') {
+    doWrap();
+  } else {
+    // Si aún no existe, escuchamos DOMContentLoaded y hacemos un pequeño polling corto
+    document.addEventListener('DOMContentLoaded', doWrap, { once: true });
+
+    let tries = 0;
+    const id = setInterval(()=>{
+      if (typeof addCityRow === 'function') {
+        clearInterval(id);
+        doWrap();
+      } else if (++tries > 60) { // ~3s máx
+        clearInterval(id);
+      }
+    }, 50);
+  }
 })();
 
 /* ==============================
