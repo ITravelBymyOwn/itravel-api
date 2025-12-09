@@ -3856,27 +3856,75 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (mantiene v55.1 + FIX críticos)
-   FIX-1: No llamar addCityRow() hasta que exista → reintentos seguros.
-   FIX-2: Mantiene botón “Iniciar planificación” bloqueado hasta Guardar.
+   (mantiene v55.1 + FIX: el botón “Iniciar planificación”
+    **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
    🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
    💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
+   ✅ Compatibilidad con fecha en tripleta (baseDay/baseMonth/baseYear) — sincroniza .baseDate
 ================================= */
-$addCity?.addEventListener('click', ()=>{ try{ if(typeof addCityRow==='function') addCityRow(); }catch(_){} });
+$addCity?.addEventListener('click', ()=>addCityRow());
 
+/* --- Helpers de fecha (tripleta -> DD/MM/AAAA) --- */
+function __pad2__(n){ n=Number(n)||0; return String(n).padStart(2,'0'); }
+function __year4__(y){ y=String(y||'').trim(); if(/^\d{2}$/.test(y)) return '20'+y; return /^\d{4}$/.test(y)? y : ''; }
+
+function getTripletDateDMYFromRow(row){
+  if(!row) return '';
+  const d = (row.querySelector('.baseDay')   || {}).value;
+  const m = (row.querySelector('.baseMonth') || {}).value;
+  const y = (row.querySelector('.baseYear')  || {}).value;
+  const dd = __pad2__(d), mm = __pad2__(m), yyyy = __year4__(y);
+  if(!dd || !mm || !yyyy) return '';
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function ensureHiddenBaseDateInRow(row){
+  if(!row) return '';
+  let base = (row.querySelector('.baseDate')||null);
+  if(!base){
+    base = document.createElement('input');
+    base.type = 'text';
+    base.className = 'baseDate';
+    base.style.display = 'none'; // oculto, solo para compatibilidad con lógica existente
+    // Insertamos al final de la fila para no alterar layout
+    row.appendChild(base);
+  }
+  // Sincroniza desde tripleta si existe
+  const dmy = getTripletDateDMYFromRow(row);
+  if(dmy) base.value = dmy;
+  return base.value || '';
+}
+
+function syncAllRowsHiddenBaseDate(){
+  const rows = qsa('.city-row', $cityList);
+  rows.forEach(r=> ensureHiddenBaseDateInRow(r));
+}
+
+/* --- Validaciones compatibles (tripleta o .baseDate) --- */
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
+
   for(const r of rows){
-    const el = qs('.baseDate', r);
-    const v  = (el?.value||'').trim();
-    if(!v || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(v) || !parseDMY(v)){
-      firstInvalid = el;
-      el?.classList.add('shake-highlight');
-      setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
+    // Prioridad: tripleta; fallback: .baseDate
+    const dmyTriplet = getTripletDateDMYFromRow(r);
+    let value = dmyTriplet;
+    if(!value){
+      const el = qs('.baseDate', r);
+      value = (el?.value||'').trim();
+    }
+    // Si no hay ni tripleta ni baseDate, inválido
+    if(!value || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(value) || !parseDMY(value)){
+      // Señalar el primer campo problemático (si hay tripleta, marcamos año)
+      firstInvalid = r.querySelector('.baseYear') || r.querySelector('.baseMonth') || r.querySelector('.baseDay') || r.querySelector('.baseDate');
+      if(firstInvalid){
+        firstInvalid.classList?.add('shake-highlight');
+        setTimeout(()=>firstInvalid?.classList?.remove('shake-highlight'), 800);
+      }
       break;
     }
   }
+
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
@@ -3890,15 +3938,42 @@ function validateBaseDatesDMY(){
       tooltip.classList.remove('visible');
       setTimeout(() => tooltip.remove(), 300);
     }, 3500);
-    firstInvalid.focus();
+    firstInvalid.focus?.();
     return false;
   }
   return true;
 }
 
+/* --- Sincronización live tripleta -> .baseDate --- */
+function bindDateTripletSync(){
+  const container = $cityList || document;
+  container.addEventListener('input', (e)=>{
+    const el = e.target;
+    if(!el || !el.classList) return;
+    if(el.classList.contains('baseDay') || el.classList.contains('baseMonth') || el.classList.contains('baseYear')){
+      const row = el.closest('.city-row');
+      if(row){
+        const dmy = getTripletDateDMYFromRow(row);
+        const base = row.querySelector('.baseDate');
+        if(base){
+          base.value = dmy || '';
+        }else{
+          ensureHiddenBaseDateInRow(row);
+        }
+        if($start && !formHasBasics()) $start.disabled = true; // coherencia con regla anterior
+      }
+    }
+  });
+}
+
 /* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
 $save?.addEventListener('click', ()=>{
-  try { saveDestinations(); } catch(_) {}
+  try {
+    // Antes de guardar, aseguremos que todas las filas tengan .baseDate sincronizado
+    syncAllRowsHiddenBaseDate();
+    saveDestinations();
+  } catch(_) {}
+
   const basicsOK = formHasBasics();
   const datesOK  = validateBaseDatesDMY();
   if (basicsOK && datesOK) {
@@ -3914,13 +3989,28 @@ $save?.addEventListener('click', ()=>{
   }
 });
 
+/* --- Reglas de “form basics” compatibles con tripleta --- */
 function formHasBasics(){
   const row = qs('.city-row', $cityList);
   if(!row) return false;
-  const city  = (qs('.city', row)?.value||'').trim();
+
+  const city    = (qs('.city', row)?.value||'').trim();
   const country = (qs('.country', row)?.value||'').trim();
-  const days  = parseInt((qs('.days', row)?.value||'0'), 10);
-  const base  = (qs('.baseDate', row)?.value||'').trim();
+  const daysVal = (qs('.days', row)?.value||'0');
+  const days    = parseInt(daysVal, 10);
+
+  // Fecha: acepta tripleta o .baseDate
+  const dmyTriplet = getTripletDateDMYFromRow(row);
+  let base = dmyTriplet;
+  if(!base){
+    base = (qs('.baseDate', row)?.value||'').trim();
+  }
+
+  // Si hay tripleta y .baseDate no existe, crearlo para compatibilidad downstream
+  if(dmyTriplet && !qs('.baseDate', row)){
+    ensureHiddenBaseDateInRow(row);
+  }
+
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
@@ -3931,7 +4021,10 @@ document.addEventListener('input', (e)=>{
      e.target.classList?.contains('city') ||
      e.target.classList?.contains('country') ||
      e.target.classList?.contains('days') ||
-     e.target.classList?.contains('baseDate')
+     e.target.classList?.contains('baseDate') ||
+     e.target.classList?.contains('baseDay') ||
+     e.target.classList?.contains('baseMonth') ||
+     e.target.classList?.contains('baseYear')
   )){
     if(!formHasBasics()) $start.disabled = true;
   }
@@ -3980,7 +4073,7 @@ function bindReset(){
 
     confirmReset.addEventListener('click', ()=>{
       $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
-      addCityRow?.();
+      addCityRow();
       if ($start) $start.disabled = true;
       $tabs.innerHTML=''; $itWrap.innerHTML='';
       $chatBox.style.display='none'; $chatM.innerHTML='';
@@ -4048,24 +4141,6 @@ function bindReset(){
   });
 }
 
-/* ===== Arranque seguro de la PRIMERA FILA =====
-   Reintenta hasta que addCityRow exista (sin romper si tarda en cargarse) */
-function ensureFirstRowSafely(maxAttempts=60){
-  let tries = 0;
-  const tick = ()=>{
-    tries++;
-    const hasRow = !!document.querySelector('#city-list .city-row');
-    if(hasRow) return; // ya existe, nada que hacer
-    if(typeof window.addCityRow === 'function'){
-      try { window.addCityRow(); } catch(_) {}
-      return;
-    }
-    if(tries < maxAttempts) setTimeout(tick, 50);
-    // si no aparece, no rompemos; otros eventos (click +Agregar ciudad) siguen funcionando
-  };
-  tick();
-}
-
 // ▶️ Start: valida y ejecuta
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
@@ -4073,6 +4148,8 @@ $start?.addEventListener('click', ()=>{
     chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
     return;
   }
+  // Garantiza que .baseDate esté sincronizada desde tripleta antes de validar
+  syncAllRowsHiddenBaseDate();
   if(!validateBaseDatesDMY()) return;
 
   try {
@@ -4117,11 +4194,15 @@ document.addEventListener('itbmo:addDays', e=>{
 /* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
 /* 🔒 SHIM QUIRÚRGICO: define cliente público PROPIO (no toca callInfoAgent del planner) */
 function __ensureInfoAgentClient__(){
+  // Endpoints públicos (no-context) para el Info Chat externo
   window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
   window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
 
+  // Siempre dejamos intacto el callInfoAgent interno del planner (Sección 19).
+  // Creamos/validamos un cliente *independiente* para el modal externo:
   const mustCreate = (fn)=>{
     if(typeof fn !== 'function') return true;
+    // Aceptamos sólo funciones marcadas explícitamente como públicas y sin context
     if(fn.__source !== 'external-public-v1') return true;
     if(fn.__usesContext__ !== false) return true;
     return false;
@@ -4197,6 +4278,7 @@ async function sendInfoMessage(){
 
   __infoTypingOn__();
   try{
+    // Usa SIEMPRE el cliente público aislado
     const ans = await (window.callInfoAgentPublic ? window.callInfoAgentPublic(txt) : Promise.resolve('No hay cliente público configurado.'));
     let out = ans;
     if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
@@ -4248,9 +4330,10 @@ function bindInfoChatListeners(){
     i2.style.overflowY = 'hidden';
     const maxRows = 10;
     i2.addEventListener('input', ()=>{
+      i2.style.height = 'auto';
       const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
       const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${(lh * lines) + 8}px`;
+      i2.style.height = `${lh * lines + 8}px`;
       i2.scrollTop = i2.scrollHeight;
     });
   }
@@ -4266,15 +4349,18 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
-  // Aísla Info Chat externo antes de listeners SIN tocar el interno
+  if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+  // 🔁 Vincula sincronización tripleta -> .baseDate
+  bindDateTripletSync();
+  // 🧷 Primera sincronización por si ya hay valores precargados
+  syncAllRowsHiddenBaseDate();
+
+  // Aísla Info Chat externo antes de listeners SIN sobrescribir callInfoAgent del planner
   __ensureInfoAgentClient__();
 
   bindInfoChatListeners();
   bindReset();
-
-  // FIX-1: crear PRIMERA FILA de forma segura (reintentos si addCityRow aún no existe)
-  ensureFirstRowSafely();
-
-  // Estado del botón Start
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
