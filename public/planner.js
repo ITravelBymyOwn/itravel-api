@@ -3889,13 +3889,10 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (mantiene v55.1 + FIX: el botón “Iniciar planificación”
-    **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
-   🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
-   💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
+   (mantiene v55.1 + FIX inicialización robusta)
 ================================= */
-$addCity?.addEventListener('click', ()=>addCityRow());
 
+// ⛔ Se mueve el listener principal dentro del DOMContentLoaded para garantizar que el botón exista
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
@@ -3956,7 +3953,7 @@ function formHasBasics(){
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
-// Deshabilita start si rompen el formulario (ya no habilita automáticamente)
+// Deshabilita start si rompen el formulario
 document.addEventListener('input', (e)=>{
   if(!$start) return;
   if(e.target && (
@@ -3969,7 +3966,7 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-/* ===== Recuperación/inyector del botón Reset si no existe ===== */
+/* ===== Recuperación/inyector del botón Reset ===== */
 function ensureResetButton(){
   let btn = document.getElementById('reset-planner');
   if(!btn){
@@ -3988,11 +3985,9 @@ function ensureResetButton(){
 function bindReset(){
   const $btn = ensureResetButton();
   $btn.removeAttribute('disabled');
-
   $btn.addEventListener('click', ()=>{
     const overlay = document.createElement('div');
     overlay.className = 'reset-overlay';
-
     const modal = document.createElement('div');
     modal.className = 'reset-modal';
     modal.innerHTML = `
@@ -4006,7 +4001,6 @@ function bindReset(){
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     setTimeout(()=>overlay.classList.add('active'), 10);
-
     const confirmReset = overlay.querySelector('#confirm-reset');
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
@@ -4017,63 +4011,44 @@ function bindReset(){
       $tabs.innerHTML=''; $itWrap.innerHTML='';
       $chatBox.style.display='none'; $chatM.innerHTML='';
       session = []; hasSavedOnce=false; pendingChange=null;
-
-      planningStarted = false;
-      metaProgressIndex = 0;
-      collectingHotels = false;
-      isItineraryLocked = false;
+      planningStarted = false; metaProgressIndex = 0;
+      collectingHotels = false; isItineraryLocked = false;
       activeCity = null;
-
       try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
       qsa('.date-tooltip').forEach(t => t.remove());
-
       const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
-      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
-      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
-      const $in = qs('#p-infants');  if($in) $in.value = '0';
-      const $se = qs('#p-seniors');  if($se) $se.value = '0';
-      const $bu = qs('#budget');     if($bu) $bu.value = '';
-      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
-
-      if (typeof plannerState !== 'undefined') {
-        plannerState.destinations = [];
-        plannerState.specialConditions = '';
-        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
-        plannerState.budget = '';
-        plannerState.currency = 'USD';
-        plannerState.forceReplan = {};
-        plannerState.preferences = {};
-        plannerState.dayTripPending = {};
-        plannerState.existingActs = {};
+      ['#p-adults','#p-young','#p-children','#p-infants','#p-seniors'].forEach((sel,i)=>{
+        const el=qs(sel); if(el) el.value = (i===0?'1':'0');
+      });
+      const $bu=qs('#budget'); if($bu) $bu.value='';
+      const $cu=qs('#currency'); if($cu) $cu.value='USD';
+      if(typeof plannerState!=='undefined'){
+        plannerState.destinations=[]; plannerState.specialConditions='';
+        plannerState.travelers={adults:1,young:0,children:0,infants:0,seniors:0};
+        plannerState.budget=''; plannerState.currency='USD';
+        plannerState.forceReplan={}; plannerState.preferences={};
+        plannerState.dayTripPending={}; plannerState.existingActs={};
       }
-
       overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(), 300);
-
-      if ($sidebar) $sidebar.classList.remove('disabled');
-      if ($infoFloating){
-        $infoFloating.style.pointerEvents = 'auto';
-        $infoFloating.style.opacity = '1';
-        $infoFloating.disabled = false;
+      setTimeout(()=>overlay.remove(),300);
+      if($sidebar) $sidebar.classList.remove('disabled');
+      if($infoFloating){
+        $infoFloating.style.pointerEvents='auto';
+        $infoFloating.style.opacity='1';
+        $infoFloating.disabled=false;
       }
-      if ($resetBtn) $resetBtn.setAttribute('disabled','true');
-
-      const firstCity = qs('.city-row .city');
-      if (firstCity) firstCity.focus();
-
+      if($resetBtn) $resetBtn.setAttribute('disabled','true');
+      const firstCity=qs('.city-row .city'); if(firstCity) firstCity.focus();
       try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
     });
-
     cancelReset.addEventListener('click', ()=>{
       overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(), 300);
+      setTimeout(()=>overlay.remove(),300);
     });
-
     document.addEventListener('keydown', function escHandler(e){
-      if(e.key === 'Escape'){
+      if(e.key==='Escape'){
         overlay.classList.remove('active');
-        setTimeout(()=>overlay.remove(), 300);
+        setTimeout(()=>overlay.remove(),300);
         document.removeEventListener('keydown', escHandler);
       }
     });
@@ -4088,23 +4063,16 @@ $start?.addEventListener('click', ()=>{
     return;
   }
   if(!validateBaseDatesDMY()) return;
-
-  try {
-    document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
-      detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-    }));
-  } catch(_) {}
-
+  try{
+    document.dispatchEvent(new CustomEvent('itbmo:startPlanning',{detail:{destinations:savedDestinations||[]}}));
+  }catch(_){}
   startPlanning();
 });
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
 $chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){
-    e.preventDefault();
-    onSend();
-  }
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onSend(); }
 });
 
 // CTA y upsell
@@ -4118,7 +4086,7 @@ $upsellClose?.addEventListener('click', ()=>{
   if (upsell) upsell.style.display = 'none';
 });
 
-/* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
+/* 🆕 Listener: Rebalanceo inteligente al agregar días */
 document.addEventListener('itbmo:addDays', e=>{
   const { city, extraDays, dayTripTo } = e.detail || {};
   if(!city || !extraDays) return;
@@ -4128,170 +4096,79 @@ document.addEventListener('itbmo:addDays', e=>{
   rebalanceWholeCity(city, { start, end, dayTripTo });
 });
 
-/* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
-/* 🔒 SHIM QUIRÚRGICO: define cliente público PROPIO (no toca callInfoAgent del planner) */
+/* ====== Info Chat (EXTERNO, aislado) ====== */
 function __ensureInfoAgentClient__(){
-  // Endpoints públicos (no-context) para el Info Chat externo
-  window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
-  window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
-
-  // Siempre dejamos intacto el callInfoAgent interno del planner (Sección 19).
-  // Creamos/validamos un cliente *independiente* para el modal externo:
-  const mustCreate = (fn)=>{
-    if(typeof fn !== 'function') return true;
-    // Aceptamos sólo funciones marcadas explícitamente como públicas y sin context
-    if(fn.__source !== 'external-public-v1') return true;
-    if(fn.__usesContext__ !== false) return true;
-    return false;
-  };
-
-  if (mustCreate(window.callInfoAgentPublic)) {
+  window.__ITBMO_API_BASE = window.__ITBMO_API_BASE || "https://itravelbymyown-api.vercel.app";
+  window.__ITBMO_INFO_PUBLIC = window.__ITBMO_INFO_PUBLIC || "/api/info-public";
+  if(typeof window.callInfoAgentPublic!=='function' || window.callInfoAgentPublic.__source!=='external-public-v1'){
     const simpleInfoPublic = async function(userText){
-      const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
-      let resp;
+      const url=`${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
       try{
-        resp = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type":"application/json", "Accept":"application/json" },
-          body: JSON.stringify({ input: String(userText || "") })
-        });
-      }catch(_){
-        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API en Vercel o intenta de nuevo.";
-      }
-      try{
-        const data = await resp.json();
-        let txt = (typeof data?.text === 'string') ? data.text : '';
-        if(!txt || /^\s*\{/.test(txt)) {
-          try {
-            const j = JSON.parse(txt);
-            if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
-            if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
-            txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
-          } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
-        }
+        const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:String(userText||'')})});
+        const data=await resp.json(); let txt=(data?.text||'');
+        if(!txt||/^\s*\{/.test(txt)){ try{const j=JSON.parse(txt);txt=j.rationale||j.summary||'Tengo la información. Pregúntame en lenguaje natural.';}catch{} }
         return txt;
-      }catch{
-        try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
-      }
+      }catch{ return 'No pude obtener la respuesta del Info Chat público.'; }
     };
-    simpleInfoPublic.__usesContext__ = false;
-    simpleInfoPublic.__source = 'external-public-v1';
-    window.callInfoAgentPublic = simpleInfoPublic;
+    simpleInfoPublic.__usesContext__=false; simpleInfoPublic.__source='external-public-v1';
+    window.callInfoAgentPublic=simpleInfoPublic;
   }
 }
 
-function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
-function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+function openInfoModal(){ const m=qs('#info-chat-modal'); if(m){m.style.display='flex';m.classList.add('active');}}
+function closeInfoModal(){ const m=qs('#info-chat-modal'); if(m){m.classList.remove('active');m.style.display='none';}}
 
-/* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
+/* === Typing indicator básico === */
 function __infoTypingOn__(){
-  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
-  if(!box) return;
-  if(document.getElementById('info-typing')) return; // ya existe
-  const b = document.createElement('div');
-  b.id = 'info-typing';
-  b.className = 'bubble ai typing';
-  b.setAttribute('aria-live','polite');
-  b.textContent = '...';
-  box.appendChild(b);
-  let i = 0;
-  b.__timer = setInterval(()=>{
-    i = (i+1)%3;
-    b.textContent = '.'.repeat(i+1);
-  }, 400);
-  box.scrollTop = box.scrollHeight;
+  const box=qs('#info-chat-messages'); if(!box) return;
+  if(document.getElementById('info-typing')) return;
+  const b=document.createElement('div'); b.id='info-typing'; b.className='bubble ai typing'; b.textContent='...';
+  box.appendChild(b); let i=0; b.__timer=setInterval(()=>{i=(i+1)%3;b.textContent='.'.repeat(i+1);},400);
+  box.scrollTop=box.scrollHeight;
 }
 function __infoTypingOff__(){
-  const b = document.getElementById('info-typing');
-  if(!b) return;
-  if(b.__timer) clearInterval(b.__timer);
-  b.remove();
+  const b=document.getElementById('info-typing'); if(b){clearInterval(b.__timer);b.remove();}
 }
 
 async function sendInfoMessage(){
-  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
-  if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
+  const input=qs('#info-chat-input'); if(!input) return;
+  const txt=(input.value||'').trim(); if(!txt) return;
   infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
-
   __infoTypingOn__();
   try{
-    // Usa SIEMPRE el cliente público aislado
-    const ans = await (window.callInfoAgentPublic ? window.callInfoAgentPublic(txt) : Promise.resolve('No hay cliente público configurado.'));
-    let out = ans;
-    if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
-    if(typeof out === 'string' && /^\s*\{/.test(out)){
-      try{
-        const j = JSON.parse(out);
-        out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
-      }catch{}
-    }
-    __infoTypingOff__();
-    infoChatMsg(out || 'No tengo la respuesta exacta. Reformula la pregunta y lo vuelvo a intentar.');
-  }catch(_){
-    __infoTypingOff__();
-    infoChatMsg('No pude obtener respuesta del asistente ahora mismo. Intenta de nuevo.', 'ai');
-  }
+    const ans=await (window.callInfoAgentPublic?window.callInfoAgentPublic(txt):Promise.resolve('No hay cliente público.'));
+    let out=typeof ans==='string'?ans:ans.text||JSON.stringify(ans);
+    if(/^\s*\{/.test(out)){try{const j=JSON.parse(out);out=j.rationale||j.summary||'Tengo la información.';}catch{}}
+    __infoTypingOff__(); infoChatMsg(out||'No tengo la respuesta exacta.');
+  }catch{__infoTypingOff__(); infoChatMsg('No pude obtener respuesta del asistente.', 'ai');}
 }
 
 function bindInfoChatListeners(){
-  const toggleTop = qs('#info-chat-toggle');
-  const toggleFloating = qs('#info-chat-floating');
-  const close  = qs('#info-chat-close');
-  const send   = qs('#info-chat-send');
-  const input  = qs('#info-chat-input');
-
-  // limpiar posibles dobles handlers si hubo rehidrataciones
-  toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
-  toggleFloating?.replaceWith(toggleFloating?.cloneNode?.(true) || toggleFloating);
-  close?.replaceWith(close?.cloneNode?.(true) || close);
-  send?.replaceWith(send?.cloneNode?.(true) || send);
-
-  const tTop = qs('#info-chat-toggle');
-  const tFloat = qs('#info-chat-floating');
-  const c2 = qs('#info-chat-close');
-  const s2 = qs('#info-chat-send');
-  const i2 = qs('#info-chat-input');
-
-  [tTop, tFloat].forEach(btn=>{
-    btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
-  });
-  c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
-  s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
-
-  i2?.addEventListener('keydown', (e)=>{
-    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
-  });
-
-  if(i2){
-    i2.setAttribute('rows','1');
-    i2.style.overflowY = 'hidden';
-    const maxRows = 10;
-    i2.addEventListener('input', ()=>{
-      i2.style.height = 'auto';
-      const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
-      const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${lh * lines + 8}px`;
-      i2.scrollTop = i2.scrollHeight;
-    });
-  }
-
-  document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
-    if(el){ e.preventDefault(); openInfoModal(); }
-  });
+  const toggleTop=qs('#info-chat-toggle'); const toggleFloating=qs('#info-chat-floating');
+  const close=qs('#info-chat-close'); const send=qs('#info-chat-send'); const input=qs('#info-chat-input');
+  [toggleTop,toggleFloating].forEach(btn=>{btn?.addEventListener('click',e=>{e.preventDefault();openInfoModal();});});
+  close?.addEventListener('click',e=>{e.preventDefault();closeInfoModal();});
+  send?.addEventListener('click',e=>{e.preventDefault();sendInfoMessage();});
+  input?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendInfoMessage();}});
 }
 
-// Inicialización (guard anti-doble init)
+/* === INIT principal === */
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
-  window.__ITBMO_SECTION21_READY__ = true;
+  window.__ITBMO_SECTION21_READY__=true;
 
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
+  // 💡 Nuevo: garantizamos que $addCity exista y creamos al menos una fila
+  const btnAdd = qs('#add-city-btn');
+  if(btnAdd) btnAdd.addEventListener('click', ()=>addCityRow());
+  if($cityList && !qs('.city-row', $cityList)) addCityRow();
 
-  // Aísla Info Chat externo antes de listeners SIN sobrescribir callInfoAgent del planner
   __ensureInfoAgentClient__();
-
   bindInfoChatListeners();
   bindReset();
+
   if ($start) $start.disabled = !hasSavedOnce;
+
+  // 🔧 Seguridad adicional: oculta overlay si quedó visible por error previo
+  try { showWOW(false); } catch(_) {}
 });
+
