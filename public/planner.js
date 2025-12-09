@@ -2774,69 +2774,62 @@ function intentFromText(text){
 
 /* ============================================================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.2 (alineado API v43)
-   Cambios clave en este patch:
-   • Doble etapa con el agente: INFO → PLANNER (timeouts/retry).
-   • Auroras: 1 por día, franja nocturna, no consecutivas (cap global).
-   • Overlaps nocturnos tabs-safe (no cambia "day"; respeta cruce).
-   • Limpieza de transporte urbano tras “Regreso a {city}”.
-   • Poda ligera de genéricos (desayuno/almuerzo/cena/día libre).
-   • Ordenamiento tabs-safe ponderando filas post-medianoche.
-   • Llamadas a optimización y validación sólo cuando agrega valor.
-   • Todas las funciones nuevas se registran con guardas para no
-     pisar implementaciones existentes en otras secciones.
-   • Alineado con /api/chat.js v43: validación local (pass-through).
+   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.3
+   Cambios v77.3:
+   • FIX de compatibilidad: funciones en guards convertidas a function expressions (var).
+   • callApiChat usa API_URL global (consistente con el resto del planner).
+   • Resto del pipeline SIN cambios de lógica.
    ============================================================ */
 
 /* ------------------------------------------------------------------
    Utilidades base (si no existen en otras secciones, se definen aquí)
 ------------------------------------------------------------------- */
 if (typeof __toMinHHMM__ !== 'function') {
-  function __toMinHHMM__(t) {
+  var __toMinHHMM__ = function(t) {
     const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
-    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+    const h  = Math.min(23, Math.max(0, parseInt(m[1], 10)));
     const mi = Math.min(59, Math.max(0, parseInt(m[2], 10)));
     return h * 60 + mi;
-  }
+  };
 }
 if (typeof __toHHMMfromMin__ !== 'function') {
-  function __toHHMMfromMin__(mins) {
+  var __toHHMMfromMin__ = function(mins) {
     let m = Math.round(Math.max(0, Number(mins) || 0));
     m = m % (24 * 60);
-    const h = Math.floor(m / 60);
+    const h  = Math.floor(m / 60);
     const mm = m % 60;
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  }
+  };
 }
 if (typeof __addMinutesSafe__ !== 'function') {
-  function __addMinutesSafe__(hhmm, add) {
+  var __addMinutesSafe__ = function(hhmm, add) {
     const base = __toMinHHMM__(hhmm);
     if (base == null) return hhmm || '09:00';
     const target = base + (Number(add) || 0);
     return __toHHMMfromMin__(target);
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
    Detección de nocturnas / auroras / out-of-town
 ------------------------------------------------------------------- */
 if (typeof __isNightRow__ !== 'function') {
-  function __isNightRow__(r) {
-    const act = String(r?.activity || '').toLowerCase();
+  var __isNightRow__ = function(r) {
+    const act   = String(r?.activity || '').toLowerCase();
     const notes = String(r?.notes || '').toLowerCase();
-    const sMin = __toMinHHMM__(r?.start);
-    const eMin = __toMinHHMM__(r?.end);
+    const sMin  = __toMinHHMM__(r?.start);
+    const eMin  = __toMinHHMM__(r?.end);
     if (/auroras?|northern\s*lights/.test(act)) return true;
     if (/noche|nocturn/.test(notes)) return true;
     if (sMin != null && sMin >= 18 * 60) return true;
     if (eMin != null && eMin >= 24 * 60) return true;
     return false;
-  }
+  };
 }
 if (typeof isOutOfTownRow !== 'function') {
   // Fallback conservador: considera out-of-town si hay palabras clave
-  function isOutOfTownRow(city, r) {
+  var isOutOfTownRow = function(city, r) {
     const a = (r?.activity || '').toLowerCase();
     const f = (r?.from || '').toLowerCase();
     const t = (r?.to || '').toLowerCase();
@@ -2844,15 +2837,14 @@ if (typeof isOutOfTownRow !== 'function') {
     const hints = /excursi[oó]n|pen[ií]nsula|costa|glaciar|c[ií]rculo|parque|volc[aá]n|lago|cascada/;
     const notCity = (str) => str && c && !str.includes(c);
     return hints.test(a) || notCity(f) || notCity(t);
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
    Normalizadores (duración y ventana de auroras)
 ------------------------------------------------------------------- */
 if (typeof normalizeDurationLabel !== 'function') {
-  function normalizeDurationLabel(r) {
-    // Acepta "1h30m", "90m", "2 h", "1 h 15 m"...
+  var normalizeDurationLabel = function(r) {
     const raw = String(r?.duration || '').trim();
     let minutes = 0;
     let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
@@ -2871,42 +2863,39 @@ if (typeof normalizeDurationLabel !== 'function') {
     const mm = minutes % 60;
     const label = h ? (mm ? `${h}h${mm}m` : `${h}h`) : `${mm}m`;
     return { ...r, duration: label };
-  }
+  };
 }
 if (typeof normalizeAuroraWindow !== 'function') {
-  function normalizeAuroraWindow(r) {
+  var normalizeAuroraWindow = function(r) {
     const act = String(r?.activity || '');
     if (!/\bauroras?\b|\bnorthern\s+lights?\b/i.test(act)) return r;
 
     // Ventana por defecto 20:15–00:15 (4h) si no hay datos plausibles
     const fallbackStart = '20:15';
-    const fallbackEnd = '00:15';
+    const fallbackEnd   = '00:15';
 
     let s = __toMinHHMM__(r?.start);
     let e = __toMinHHMM__(r?.end);
     let d = String(r?.duration || '').trim();
 
-    // Si no hay tiempos válidos, aplica ventana por defecto
     if (s == null || e == null || e <= s) {
       s = __toMinHHMM__(fallbackStart);
       e = __toMinHHMM__(fallbackEnd) + 24 * 60; // cruza medianoche
     }
 
-    // Duración coherente si viene en blanco
     const dur = (function () {
       const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
       const mm = d.match(/(\d+)\s*m/i);
       if (md) return parseInt(md[1], 10) * 60 + (md[2] ? parseInt(md[2], 10) : 0);
       if (mm) return parseInt(mm[1], 10);
-      return ((e - s) + 24 * 60) % (24 * 60) || 240; // 4h
+      return ((e - s) + 24 * 60) % (24 * 60) || 240;
     })();
 
-    // Ajusta a nocturna y marca _crossDay para sort tabs-safe
     const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
-    const endHH = __toHHMMfromMin__(e % (24 * 60));
-    const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
+    const endHH   = __toHHMMfromMin__(e % (24 * 60));
+    const lbl     = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
     return { ...r, start: startHH, end: endHH, duration: lbl, _crossDay: true };
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
@@ -2923,19 +2912,16 @@ function countAuroraNights(city) {
   }
   return c;
 }
-
 function suggestedAuroraCap(stayDays) {
   if (stayDays >= 5) return 2;
   if (stayDays >= 3) return 1;
   return 1;
 }
-
 function isConsecutiveAurora(city, day) {
   const byDay = itineraries[city]?.byDay || {};
   const prev = byDay[day - 1] || [], next = byDay[day + 1] || [];
   return prev.some(r => __isAuroraName__(r.activity)) || next.some(r => __isAuroraName__(r.activity));
 }
-
 function enforceAuroraCapForDay(city, day, rows, cap) {
   const already = countAuroraNights(city);
   const willAdd = rows.some(r => __isAuroraName__(r.activity));
@@ -2944,7 +2930,6 @@ function enforceAuroraCapForDay(city, day, rows, cap) {
   if (already >= cap) return rows.filter(r => !__isAuroraName__(r.activity));
   return rows;
 }
-
 function enforceOneAuroraPerDay(rows) {
   const byDay = {};
   rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
@@ -2971,22 +2956,21 @@ function pruneGenericPerDay(rows) {
     const dayHasContent = list.filter(r => !/d[ií]a\s*libre/i.test(String(r.activity || ''))).length >= 3;
     for (const r of list) {
       const a = String(r.activity || '').toLowerCase();
-      if (/desayuno\b/.test(a)) { if (seen.desayuno) continue; seen.desayuno = true; }
-      if (/almuerzo\b|comida\b/.test(a)) { if (seen.almuerzo) continue; seen.almuerzo = true; }
-      if (/cena\b/.test(a)) { if (seen.cena) continue; seen.cena = true; }
+      if (/desayuno\b/.test(a))                { if (seen.desayuno) continue; seen.desayuno = true; }
+      if (/almuerzo\b|comida\b/.test(a))       { if (seen.almuerzo) continue; seen.almuerzo = true; }
+      if (/cena\b/.test(a))                     { if (seen.cena) continue; seen.cena = true; }
       if (/d[ií]a\s*libre/.test(a) && dayHasContent) continue;
       out.push(r);
     }
   }
   return out;
 }
-
 function clearTransportAfterReturn(city, rows) {
   const cityLow = String(city || '').toLowerCase();
   let afterReturn = false;
   return rows.map(r => {
     const act = String(r.activity || '').toLowerCase();
-    const to = String(r.to || '').toLowerCase();
+    const to  = String(r.to || '').toLowerCase();
     if (/regreso/.test(act) || (to.includes('hotel') && to.includes(cityLow))) { afterReturn = true; return r; }
     if (afterReturn && !isOutOfTownRow(city, r)) {
       return { ...r, transport: (r.transport && /pie|metro|bus|uber|taxi/i.test(r.transport)) ? r.transport : 'A pie' };
@@ -3000,10 +2984,10 @@ function clearTransportAfterReturn(city, rows) {
 ------------------------------------------------------------------- */
 function fixOverlaps(rows) {
   const toMin = __toMinHHMM__;
-  const toHH = __toHHMMfromMin__;
+  const toHH  = __toHHMMfromMin__;
   const durMin = (d) => {
     if (!d) return 0;
-    const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+    const m  = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
     if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
     const m2 = String(d).match(/(\d+)\s*m/i);
     if (m2) return parseInt(m2[1], 10);
@@ -3012,7 +2996,7 @@ function fixOverlaps(rows) {
 
   const expanded = rows.map(r => {
     let s = toMin(r.start || '');
-    let e = toMin(r.end || '');
+    let e = toMin(r.end   || '');
     const d = durMin(r.duration || '');
     let cross = false;
 
@@ -3051,7 +3035,7 @@ function fixOverlaps(rows) {
     if (isNight && s >= 24 * 60) { e -= 24 * 60; s -= 24 * 60; cross = true; }
 
     const startHH = isNight ? toHH(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59)) : toHH(s);
-    const endHH = toHH(e);
+    const endHH   = toHH(e);
 
     out.push({ ...r, start: startHH, end: endHH, duration: finalDur, _crossDay: (r._crossDay || cross || e >= 24 * 60) ? true : false });
   }
@@ -3090,7 +3074,7 @@ function ensureReturnRow(city, rows) {
     const hasOut = list.some(r => isOutOfTownRow(city, r));
     const hasReturn = list.some(r => {
       const act = String(r.activity || '').toLowerCase();
-      const to = String(r.to || '').toLowerCase();
+      const to  = String(r.to || '').toLowerCase();
       const cty = String(cityLbl || '').toLowerCase();
       return /regreso/.test(act) || (to.includes('hotel') && to.includes(cty));
     });
@@ -3098,7 +3082,7 @@ function ensureReturnRow(city, rows) {
       const endBase = (cityMeta[city]?.perDay?.find(x => x.day === day)?.end) || DEFAULT_END || '19:00';
       const lastEnd = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__(endBase) || 1140);
       const startRet = __toHHMMfromMin__(Math.max(lastEnd, __toMinHHMM__(endBase) || 1140));
-      const endRet = __addMinutesSafe__(startRet, 45);
+      const endRet   = __addMinutesSafe__(startRet, 45);
       list.push({
         day,
         start: startRet,
@@ -3120,7 +3104,7 @@ function ensureReturnRow(city, rows) {
    Inyección de cena (respeta preferencia global)
 ------------------------------------------------------------------- */
 if (typeof injectDinnerIfMissing !== 'function') {
-  function injectDinnerIfMissing(city, rows) {
+  var injectDinnerIfMissing = function(city, rows) {
     const prefer = plannerState?.preferences?.alwaysIncludeDinner;
     if (!prefer) return rows;
     const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
@@ -3130,8 +3114,8 @@ if (typeof injectDinnerIfMissing !== 'function') {
       const hasDinner = list.some(r => /cena\b/i.test(String(r.activity || '')));
       if (!hasDinner) {
         const endMax = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__('19:30'));
-        const start = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
-        const end = __addMinutesSafe__(start, 75);
+        const start  = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
+        const end    = __addMinutesSafe__(start, 75);
         list.push({
           day,
           start,
@@ -3147,51 +3131,50 @@ if (typeof injectDinnerIfMissing !== 'function') {
       out.push(...list);
     });
     return out;
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
    Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
 ------------------------------------------------------------------- */
 if (typeof callApiChat !== 'function') {
-  async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
+  var callApiChat = async function(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const resp = await fetch('/api/chat', {
+      const resp = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({ mode, ...payload })
+        body: JSON.stringify({ mode, ...payload, model: MODEL })
       });
       clearTimeout(id);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      return data; // { text: "..."}
+      return data; // { text: "..." }
     } catch (e) {
       clearTimeout(id);
       if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
       throw e;
     }
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
    Parse seguro de respuestas del API y unificador
 ------------------------------------------------------------------- */
 if (typeof safeParseApiText !== 'function') {
-  function safeParseApiText(txt) {
+  var safeParseApiText = function(txt) {
     if (!txt) return {};
     if (typeof txt === 'object') return txt;
     try { return JSON.parse(String(txt)); } catch { return { text: String(txt) }; }
-  }
+  };
 }
 if (typeof unifyRowsFormat !== 'function') {
-  function unifyRowsFormat(obj, city) {
+  var unifyRowsFormat = function(obj, city) {
     if (!obj) return { rows: [] };
     if (Array.isArray(obj.rows)) return obj;
     if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
-    // a veces viene como {days:[{day:1, rows:[...]}]}
     if (Array.isArray(obj.days)) {
       const rows = [];
       for (const d of obj.days) {
@@ -3201,18 +3184,16 @@ if (typeof unifyRowsFormat !== 'function') {
       return { rows };
     }
     return { rows: [] };
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
    VALIDACIÓN con agente (alineado API v43: pass-through local)
 ------------------------------------------------------------------- */
 if (typeof validateRowsWithAgent !== 'function') {
-  async function validateRowsWithAgent(city, rows, baseDate) {
-    // v43 no implementa validación específica (no reconoce {validate:true}).
-    // Mantenemos firma y devolvemos pass-through para no romper integraciones.
+  var validateRowsWithAgent = async function(city, rows, baseDate) {
     return { allowed: rows, rejected: [] };
-  }
+  };
 }
 
 /* ------------------------------------------------------------------
@@ -3228,7 +3209,6 @@ async function optimizeDay(city, day) {
     duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
   }));
 
-  // Protección de filas “fijas” (ej. Blue Lagoon)
   const protectedRows = rows.filter(r => {
     const act = (r.activity || '').toLowerCase();
     return act.includes('laguna azul') || act.includes('blue lagoon');
@@ -3236,20 +3216,20 @@ async function optimizeDay(city, day) {
 
   try {
     // 1) INFO
-    const context = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
-    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+    const context  = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
+    const infoRaw  = await callApiChat('info', { context },   { timeoutMs: 32000, retries: 1 });
     const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
     const research = safeParseApiText(infoData?.text ?? infoData);
 
     // 2) PLANNER
-    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
+    const plannerRaw  = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
     const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
-    const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
+    const structured  = safeParseApiText(plannerData?.text ?? plannerData) || {};
 
     const unified = unifyRowsFormat(structured, city);
     let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
 
-    // === PIPELINE COHERENTE (mismas transformaciones que en 15.2) ===
+    // === PIPELINE COHERENTE ===
     finalRows = finalRows.map(normalizeDurationLabel);
     finalRows = finalRows.map(normalizeAuroraWindow);
     finalRows = enforceOneAuroraPerDay(finalRows);
@@ -3266,16 +3246,14 @@ async function optimizeDay(city, day) {
     finalRows = pruneGenericPerDay(finalRows);
     finalRows = __sortRowsTabsSafe__(finalRows);
 
-    // VALIDACIÓN (local passthrough)
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
   } catch (e) {
     console.error('optimizeDay INFO→PLANNER error:', e);
-    // Fallback conservador: ordenar/limpiar lo que ya había
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing ? injectDinnerIfMissing(city, safeRows) : safeRows));
+    safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing==='function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
