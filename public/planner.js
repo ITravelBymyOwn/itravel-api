@@ -2774,62 +2774,68 @@ function intentFromText(text){
 
 /* ============================================================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.3
-   Cambios v77.3:
-   • FIX de compatibilidad: funciones en guards convertidas a function expressions (var).
-   • callApiChat usa API_URL global (consistente con el resto del planner).
-   • Resto del pipeline SIN cambios de lógica.
+   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.1
+   Cambios clave en este patch:
+   • Doble etapa con el agente: INFO → PLANNER (timeouts/retry).
+   • Auroras: 1 por día, franja nocturna, no consecutivas (cap global).
+   • Overlaps nocturnos tabs-safe (no cambia "day"; respeta cruce).
+   • Limpieza de transporte urbano tras “Regreso a {city}”.
+   • Poda ligera de genéricos (desayuno/almuerzo/cena/día libre).
+   • Ordenamiento tabs-safe ponderando filas post-medianoche.
+   • Llamadas a optimización y validación sólo cuando agrega valor.
+   • Todas las funciones nuevas se registran con guardas para no
+     pisar implementaciones existentes en otras secciones.
    ============================================================ */
 
 /* ------------------------------------------------------------------
    Utilidades base (si no existen en otras secciones, se definen aquí)
 ------------------------------------------------------------------- */
 if (typeof __toMinHHMM__ !== 'function') {
-  var __toMinHHMM__ = function(t) {
+  function __toMinHHMM__(t) {
     const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
-    const h  = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
     const mi = Math.min(59, Math.max(0, parseInt(m[2], 10)));
     return h * 60 + mi;
-  };
+  }
 }
 if (typeof __toHHMMfromMin__ !== 'function') {
-  var __toHHMMfromMin__ = function(mins) {
+  function __toHHMMfromMin__(mins) {
     let m = Math.round(Math.max(0, Number(mins) || 0));
     m = m % (24 * 60);
-    const h  = Math.floor(m / 60);
+    const h = Math.floor(m / 60);
     const mm = m % 60;
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  };
+  }
 }
 if (typeof __addMinutesSafe__ !== 'function') {
-  var __addMinutesSafe__ = function(hhmm, add) {
+  function __addMinutesSafe__(hhmm, add) {
     const base = __toMinHHMM__(hhmm);
     if (base == null) return hhmm || '09:00';
     const target = base + (Number(add) || 0);
     return __toHHMMfromMin__(target);
-  };
+  }
 }
 
 /* ------------------------------------------------------------------
    Detección de nocturnas / auroras / out-of-town
 ------------------------------------------------------------------- */
 if (typeof __isNightRow__ !== 'function') {
-  var __isNightRow__ = function(r) {
-    const act   = String(r?.activity || '').toLowerCase();
+  function __isNightRow__(r) {
+    const act = String(r?.activity || '').toLowerCase();
     const notes = String(r?.notes || '').toLowerCase();
-    const sMin  = __toMinHHMM__(r?.start);
-    const eMin  = __toMinHHMM__(r?.end);
+    const sMin = __toMinHHMM__(r?.start);
+    const eMin = __toMinHHMM__(r?.end);
     if (/auroras?|northern\s*lights/.test(act)) return true;
     if (/noche|nocturn/.test(notes)) return true;
     if (sMin != null && sMin >= 18 * 60) return true;
     if (eMin != null && eMin >= 24 * 60) return true;
     return false;
-  };
+  }
 }
 if (typeof isOutOfTownRow !== 'function') {
   // Fallback conservador: considera out-of-town si hay palabras clave
-  var isOutOfTownRow = function(city, r) {
+  function isOutOfTownRow(city, r) {
     const a = (r?.activity || '').toLowerCase();
     const f = (r?.from || '').toLowerCase();
     const t = (r?.to || '').toLowerCase();
@@ -2837,14 +2843,15 @@ if (typeof isOutOfTownRow !== 'function') {
     const hints = /excursi[oó]n|pen[ií]nsula|costa|glaciar|c[ií]rculo|parque|volc[aá]n|lago|cascada/;
     const notCity = (str) => str && c && !str.includes(c);
     return hints.test(a) || notCity(f) || notCity(t);
-  };
+  }
 }
 
 /* ------------------------------------------------------------------
    Normalizadores (duración y ventana de auroras)
 ------------------------------------------------------------------- */
 if (typeof normalizeDurationLabel !== 'function') {
-  var normalizeDurationLabel = function(r) {
+  function normalizeDurationLabel(r) {
+    // Acepta "1h30m", "90m", "2 h", "1 h 15 m"...
     const raw = String(r?.duration || '').trim();
     let minutes = 0;
     let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
@@ -2863,39 +2870,42 @@ if (typeof normalizeDurationLabel !== 'function') {
     const mm = minutes % 60;
     const label = h ? (mm ? `${h}h${mm}m` : `${h}h`) : `${mm}m`;
     return { ...r, duration: label };
-  };
+  }
 }
 if (typeof normalizeAuroraWindow !== 'function') {
-  var normalizeAuroraWindow = function(r) {
+  function normalizeAuroraWindow(r) {
     const act = String(r?.activity || '');
     if (!/\bauroras?\b|\bnorthern\s+lights?\b/i.test(act)) return r;
 
     // Ventana por defecto 20:15–00:15 (4h) si no hay datos plausibles
     const fallbackStart = '20:15';
-    const fallbackEnd   = '00:15';
+    const fallbackEnd = '00:15';
 
     let s = __toMinHHMM__(r?.start);
     let e = __toMinHHMM__(r?.end);
     let d = String(r?.duration || '').trim();
 
+    // Si no hay tiempos válidos, aplica ventana por defecto
     if (s == null || e == null || e <= s) {
       s = __toMinHHMM__(fallbackStart);
       e = __toMinHHMM__(fallbackEnd) + 24 * 60; // cruza medianoche
     }
 
+    // Duración coherente si viene en blanco
     const dur = (function () {
       const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
       const mm = d.match(/(\d+)\s*m/i);
       if (md) return parseInt(md[1], 10) * 60 + (md[2] ? parseInt(md[2], 10) : 0);
       if (mm) return parseInt(mm[1], 10);
-      return ((e - s) + 24 * 60) % (24 * 60) || 240;
+      return ((e - s) + 24 * 60) % (24 * 60) || 240; // 4h
     })();
 
+    // Ajusta a nocturna y marca _crossDay para sort tabs-safe
     const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
-    const endHH   = __toHHMMfromMin__(e % (24 * 60));
-    const lbl     = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
+    const endHH = __toHHMMfromMin__(e % (24 * 60));
+    const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
     return { ...r, start: startHH, end: endHH, duration: lbl, _crossDay: true };
-  };
+  }
 }
 
 /* ------------------------------------------------------------------
@@ -2912,16 +2922,19 @@ function countAuroraNights(city) {
   }
   return c;
 }
+
 function suggestedAuroraCap(stayDays) {
   if (stayDays >= 5) return 2;
   if (stayDays >= 3) return 1;
   return 1;
 }
+
 function isConsecutiveAurora(city, day) {
   const byDay = itineraries[city]?.byDay || {};
   const prev = byDay[day - 1] || [], next = byDay[day + 1] || [];
   return prev.some(r => __isAuroraName__(r.activity)) || next.some(r => __isAuroraName__(r.activity));
 }
+
 function enforceAuroraCapForDay(city, day, rows, cap) {
   const already = countAuroraNights(city);
   const willAdd = rows.some(r => __isAuroraName__(r.activity));
@@ -2930,6 +2943,7 @@ function enforceAuroraCapForDay(city, day, rows, cap) {
   if (already >= cap) return rows.filter(r => !__isAuroraName__(r.activity));
   return rows;
 }
+
 function enforceOneAuroraPerDay(rows) {
   const byDay = {};
   rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
@@ -2956,21 +2970,22 @@ function pruneGenericPerDay(rows) {
     const dayHasContent = list.filter(r => !/d[ií]a\s*libre/i.test(String(r.activity || ''))).length >= 3;
     for (const r of list) {
       const a = String(r.activity || '').toLowerCase();
-      if (/desayuno\b/.test(a))                { if (seen.desayuno) continue; seen.desayuno = true; }
-      if (/almuerzo\b|comida\b/.test(a))       { if (seen.almuerzo) continue; seen.almuerzo = true; }
-      if (/cena\b/.test(a))                     { if (seen.cena) continue; seen.cena = true; }
+      if (/desayuno\b/.test(a)) { if (seen.desayuno) continue; seen.desayuno = true; }
+      if (/almuerzo\b|comida\b/.test(a)) { if (seen.almuerzo) continue; seen.almuerzo = true; }
+      if (/cena\b/.test(a)) { if (seen.cena) continue; seen.cena = true; }
       if (/d[ií]a\s*libre/.test(a) && dayHasContent) continue;
       out.push(r);
     }
   }
   return out;
 }
+
 function clearTransportAfterReturn(city, rows) {
   const cityLow = String(city || '').toLowerCase();
   let afterReturn = false;
   return rows.map(r => {
     const act = String(r.activity || '').toLowerCase();
-    const to  = String(r.to || '').toLowerCase();
+    const to = String(r.to || '').toLowerCase();
     if (/regreso/.test(act) || (to.includes('hotel') && to.includes(cityLow))) { afterReturn = true; return r; }
     if (afterReturn && !isOutOfTownRow(city, r)) {
       return { ...r, transport: (r.transport && /pie|metro|bus|uber|taxi/i.test(r.transport)) ? r.transport : 'A pie' };
@@ -2984,10 +2999,10 @@ function clearTransportAfterReturn(city, rows) {
 ------------------------------------------------------------------- */
 function fixOverlaps(rows) {
   const toMin = __toMinHHMM__;
-  const toHH  = __toHHMMfromMin__;
+  const toHH = __toHHMMfromMin__;
   const durMin = (d) => {
     if (!d) return 0;
-    const m  = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+    const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
     if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
     const m2 = String(d).match(/(\d+)\s*m/i);
     if (m2) return parseInt(m2[1], 10);
@@ -2996,7 +3011,7 @@ function fixOverlaps(rows) {
 
   const expanded = rows.map(r => {
     let s = toMin(r.start || '');
-    let e = toMin(r.end   || '');
+    let e = toMin(r.end || '');
     const d = durMin(r.duration || '');
     let cross = false;
 
@@ -3035,7 +3050,7 @@ function fixOverlaps(rows) {
     if (isNight && s >= 24 * 60) { e -= 24 * 60; s -= 24 * 60; cross = true; }
 
     const startHH = isNight ? toHH(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59)) : toHH(s);
-    const endHH   = toHH(e);
+    const endHH = toHH(e);
 
     out.push({ ...r, start: startHH, end: endHH, duration: finalDur, _crossDay: (r._crossDay || cross || e >= 24 * 60) ? true : false });
   }
@@ -3074,7 +3089,7 @@ function ensureReturnRow(city, rows) {
     const hasOut = list.some(r => isOutOfTownRow(city, r));
     const hasReturn = list.some(r => {
       const act = String(r.activity || '').toLowerCase();
-      const to  = String(r.to || '').toLowerCase();
+      const to = String(r.to || '').toLowerCase();
       const cty = String(cityLbl || '').toLowerCase();
       return /regreso/.test(act) || (to.includes('hotel') && to.includes(cty));
     });
@@ -3082,7 +3097,7 @@ function ensureReturnRow(city, rows) {
       const endBase = (cityMeta[city]?.perDay?.find(x => x.day === day)?.end) || DEFAULT_END || '19:00';
       const lastEnd = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__(endBase) || 1140);
       const startRet = __toHHMMfromMin__(Math.max(lastEnd, __toMinHHMM__(endBase) || 1140));
-      const endRet   = __addMinutesSafe__(startRet, 45);
+      const endRet = __addMinutesSafe__(startRet, 45);
       list.push({
         day,
         start: startRet,
@@ -3104,7 +3119,7 @@ function ensureReturnRow(city, rows) {
    Inyección de cena (respeta preferencia global)
 ------------------------------------------------------------------- */
 if (typeof injectDinnerIfMissing !== 'function') {
-  var injectDinnerIfMissing = function(city, rows) {
+  function injectDinnerIfMissing(city, rows) {
     const prefer = plannerState?.preferences?.alwaysIncludeDinner;
     if (!prefer) return rows;
     const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
@@ -3114,8 +3129,8 @@ if (typeof injectDinnerIfMissing !== 'function') {
       const hasDinner = list.some(r => /cena\b/i.test(String(r.activity || '')));
       if (!hasDinner) {
         const endMax = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__('19:30'));
-        const start  = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
-        const end    = __addMinutesSafe__(start, 75);
+        const start = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
+        const end = __addMinutesSafe__(start, 75);
         list.push({
           day,
           start,
@@ -3131,50 +3146,51 @@ if (typeof injectDinnerIfMissing !== 'function') {
       out.push(...list);
     });
     return out;
-  };
+  }
 }
 
 /* ------------------------------------------------------------------
    Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
 ------------------------------------------------------------------- */
 if (typeof callApiChat !== 'function') {
-  var callApiChat = async function(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
+  async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const resp = await fetch(API_URL, {
+      const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: controller.signal,
-        body: JSON.stringify({ mode, ...payload, model: MODEL })
+        body: JSON.stringify({ mode, ...payload })
       });
       clearTimeout(id);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      return data; // { text: "..." }
+      return data; // { text: "..."}
     } catch (e) {
       clearTimeout(id);
       if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
       throw e;
     }
-  };
+  }
 }
 
 /* ------------------------------------------------------------------
    Parse seguro de respuestas del API y unificador
 ------------------------------------------------------------------- */
 if (typeof safeParseApiText !== 'function') {
-  var safeParseApiText = function(txt) {
+  function safeParseApiText(txt) {
     if (!txt) return {};
     if (typeof txt === 'object') return txt;
     try { return JSON.parse(String(txt)); } catch { return { text: String(txt) }; }
-  };
+  }
 }
 if (typeof unifyRowsFormat !== 'function') {
-  var unifyRowsFormat = function(obj, city) {
+  function unifyRowsFormat(obj, city) {
     if (!obj) return { rows: [] };
     if (Array.isArray(obj.rows)) return obj;
     if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
+    // a veces viene como {days:[{day:1, rows:[...]}]}
     if (Array.isArray(obj.days)) {
       const rows = [];
       for (const d of obj.days) {
@@ -3184,16 +3200,23 @@ if (typeof unifyRowsFormat !== 'function') {
       return { rows };
     }
     return { rows: [] };
-  };
+  }
 }
 
 /* ------------------------------------------------------------------
-   VALIDACIÓN con agente (alineado API v43: pass-through local)
+   VALIDACIÓN con agente (si no existe, pasa-through)
 ------------------------------------------------------------------- */
 if (typeof validateRowsWithAgent !== 'function') {
-  var validateRowsWithAgent = async function(city, rows, baseDate) {
-    return { allowed: rows, rejected: [] };
-  };
+  async function validateRowsWithAgent(city, rows, baseDate) {
+    try {
+      const resp = await callApiChat('planner', { validate: true, city, baseDate, rows }, { timeoutMs: 22000, retries: 0 });
+      const parsed = safeParseApiText(resp?.text ?? resp);
+      if (Array.isArray(parsed?.allowed)) return parsed;
+      return { allowed: rows, rejected: [] };
+    } catch {
+      return { allowed: rows, rejected: [] };
+    }
+  }
 }
 
 /* ------------------------------------------------------------------
@@ -3209,6 +3232,7 @@ async function optimizeDay(city, day) {
     duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
   }));
 
+  // Protección de filas “fijas” (ej. Blue Lagoon)
   const protectedRows = rows.filter(r => {
     const act = (r.activity || '').toLowerCase();
     return act.includes('laguna azul') || act.includes('blue lagoon');
@@ -3216,20 +3240,20 @@ async function optimizeDay(city, day) {
 
   try {
     // 1) INFO
-    const context  = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
-    const infoRaw  = await callApiChat('info', { context },   { timeoutMs: 32000, retries: 1 });
+    const context = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
+    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
     const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
     const research = safeParseApiText(infoData?.text ?? infoData);
 
     // 2) PLANNER
-    const plannerRaw  = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
+    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
     const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
-    const structured  = safeParseApiText(plannerData?.text ?? plannerData) || {};
+    const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
 
     const unified = unifyRowsFormat(structured, city);
     let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
 
-    // === PIPELINE COHERENTE ===
+    // === PIPELINE COHERENTE (mismas transformaciones que en 15.2) ===
     finalRows = finalRows.map(normalizeDurationLabel);
     finalRows = finalRows.map(normalizeAuroraWindow);
     finalRows = enforceOneAuroraPerDay(finalRows);
@@ -3246,14 +3270,16 @@ async function optimizeDay(city, day) {
     finalRows = pruneGenericPerDay(finalRows);
     finalRows = __sortRowsTabsSafe__(finalRows);
 
+    // VALIDACIÓN
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
   } catch (e) {
     console.error('optimizeDay INFO→PLANNER error:', e);
+    // Fallback conservador: ordenar/limpiar lo que ya había
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing==='function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
+    safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing(city, safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
@@ -3867,10 +3893,13 @@ document.addEventListener('input', (e)=>{
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (mantiene v55.1 + FIX inicialización robusta)
+   (mantiene v55.1 + FIX: el botón “Iniciar planificación”
+    **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
+   🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
+   💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
 ================================= */
+$addCity?.addEventListener('click', ()=>addCityRow());
 
-// ⛔ Se mueve el listener principal dentro del DOMContentLoaded para garantizar que el botón exista
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
@@ -3926,12 +3955,12 @@ function formHasBasics(){
   if(!row) return false;
   const city  = (qs('.city', row)?.value||'').trim();
   const country = (qs('.country', row)?.value||'').trim();
-  const days  = parseInt((qs('.days', row)?.value||'0'), 10);
+  const days  = parseInt(qs('.days', row)?.value||'0', 10);
   const base  = (qs('.baseDate', row)?.value||'').trim();
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
-// Deshabilita start si rompen el formulario
+// Deshabilita start si rompen el formulario (ya no habilita automáticamente)
 document.addEventListener('input', (e)=>{
   if(!$start) return;
   if(e.target && (
@@ -3944,7 +3973,7 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-/* ===== Recuperación/inyector del botón Reset ===== */
+/* ===== Recuperación/inyector del botón Reset si no existe ===== */
 function ensureResetButton(){
   let btn = document.getElementById('reset-planner');
   if(!btn){
@@ -3963,9 +3992,11 @@ function ensureResetButton(){
 function bindReset(){
   const $btn = ensureResetButton();
   $btn.removeAttribute('disabled');
+
   $btn.addEventListener('click', ()=>{
     const overlay = document.createElement('div');
     overlay.className = 'reset-overlay';
+
     const modal = document.createElement('div');
     modal.className = 'reset-modal';
     modal.innerHTML = `
@@ -3979,6 +4010,7 @@ function bindReset(){
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     setTimeout(()=>overlay.classList.add('active'), 10);
+
     const confirmReset = overlay.querySelector('#confirm-reset');
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
@@ -3989,44 +4021,63 @@ function bindReset(){
       $tabs.innerHTML=''; $itWrap.innerHTML='';
       $chatBox.style.display='none'; $chatM.innerHTML='';
       session = []; hasSavedOnce=false; pendingChange=null;
-      planningStarted = false; metaProgressIndex = 0;
-      collectingHotels = false; isItineraryLocked = false;
+
+      planningStarted = false;
+      metaProgressIndex = 0;
+      collectingHotels = false;
+      isItineraryLocked = false;
       activeCity = null;
+
       try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
       qsa('.date-tooltip').forEach(t => t.remove());
+
       const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-      ['#p-adults','#p-young','#p-children','#p-infants','#p-seniors'].forEach((sel,i)=>{
-        const el=qs(sel); if(el) el.value = (i===0?'1':'0');
-      });
-      const $bu=qs('#budget'); if($bu) $bu.value='';
-      const $cu=qs('#currency'); if($cu) $cu.value='USD';
-      if(typeof plannerState!=='undefined'){
-        plannerState.destinations=[]; plannerState.specialConditions='';
-        plannerState.travelers={adults:1,young:0,children:0,infants:0,seniors:0};
-        plannerState.budget=''; plannerState.currency='USD';
-        plannerState.forceReplan={}; plannerState.preferences={};
-        plannerState.dayTripPending={}; plannerState.existingActs={};
+      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
+      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
+      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
+      const $in = qs('#p-infants');  if($in) $in.value = '0';
+      const $se = qs('#p-seniors');  if($se) $se.value = '0';
+      const $bu = qs('#budget');     if($bu) $bu.value = '';
+      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
+
+      if (typeof plannerState !== 'undefined') {
+        plannerState.destinations = [];
+        plannerState.specialConditions = '';
+        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+        plannerState.budget = '';
+        plannerState.currency = 'USD';
+        plannerState.forceReplan = {};
+        plannerState.preferences = {};
+        plannerState.dayTripPending = {};
+        plannerState.existingActs = {};
       }
+
       overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(),300);
-      if($sidebar) $sidebar.classList.remove('disabled');
-      if($infoFloating){
-        $infoFloating.style.pointerEvents='auto';
-        $infoFloating.style.opacity='1';
-        $infoFloating.disabled=false;
+      setTimeout(()=>overlay.remove(), 300);
+
+      if ($sidebar) $sidebar.classList.remove('disabled');
+      if ($infoFloating){
+        $infoFloating.style.pointerEvents = 'auto';
+        $infoFloating.style.opacity = '1';
+        $infoFloating.disabled = false;
       }
-      if($resetBtn) $resetBtn.setAttribute('disabled','true');
-      const firstCity=qs('.city-row .city'); if(firstCity) firstCity.focus();
+      if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+
+      const firstCity = qs('.city-row .city');
+      if (firstCity) firstCity.focus();
+
       try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
     });
+
     cancelReset.addEventListener('click', ()=>{
       overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(),300);
+      setTimeout(()=>overlay.remove(), 300);
     });
+
     document.addEventListener('keydown', function escHandler(e){
-      if(e.key==='Escape'){
+      if(e.key === 'Escape'){
         overlay.classList.remove('active');
-        setTimeout(()=>overlay.remove(),300);
+        setTimeout(()=>overlay.remove(), 300);
         document.removeEventListener('keydown', escHandler);
       }
     });
@@ -4041,16 +4092,23 @@ $start?.addEventListener('click', ()=>{
     return;
   }
   if(!validateBaseDatesDMY()) return;
-  try{
-    document.dispatchEvent(new CustomEvent('itbmo:startPlanning',{detail:{destinations:savedDestinations||[]}}));
-  }catch(_){}
+
+  try {
+    document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
+      detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+    }));
+  } catch(_) {}
+
   startPlanning();
 });
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
 $chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onSend(); }
+  if(e.key==='Enter' && !e.shiftKey){
+    e.preventDefault();
+    onSend();
+  }
 });
 
 // CTA y upsell
@@ -4064,7 +4122,7 @@ $upsellClose?.addEventListener('click', ()=>{
   if (upsell) upsell.style.display = 'none';
 });
 
-/* 🆕 Listener: Rebalanceo inteligente al agregar días */
+/* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
 document.addEventListener('itbmo:addDays', e=>{
   const { city, extraDays, dayTripTo } = e.detail || {};
   if(!city || !extraDays) return;
@@ -4074,79 +4132,171 @@ document.addEventListener('itbmo:addDays', e=>{
   rebalanceWholeCity(city, { start, end, dayTripTo });
 });
 
-/* ====== Info Chat (EXTERNO, aislado) ====== */
+/* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
+/* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
 function __ensureInfoAgentClient__(){
-  window.__ITBMO_API_BASE = window.__ITBMO_API_BASE || "https://itravelbymyown-api.vercel.app";
-  window.__ITBMO_INFO_PUBLIC = window.__ITBMO_INFO_PUBLIC || "/api/info-public";
-  if(typeof window.callInfoAgentPublic!=='function' || window.callInfoAgentPublic.__source!=='external-public-v1'){
-    const simpleInfoPublic = async function(userText){
-      const url=`${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
+  window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
+  window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
+
+  const wrongClient = (fn)=>{
+    if(typeof fn !== 'function') return true;
+    const src = Function.prototype.toString.call(fn);
+    if(/\/api\/chat/.test(src)) return true;
+    if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
+    if(/context/.test(src)) return true;
+    if(fn.__source !== 'external-public-v1') return true;
+    if(fn.__usesContext__ !== false) return true;
+    return false;
+  };
+
+  if(wrongClient(window.callInfoAgent)){
+    const simpleInfo = async function(userText){
+      const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
+      let resp;
       try{
-        const resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({input:String(userText||'')})});
-        const data=await resp.json(); let txt=(data?.text||'');
-        if(!txt||/^\s*\{/.test(txt)){ try{const j=JSON.parse(txt);txt=j.rationale||j.summary||'Tengo la información. Pregúntame en lenguaje natural.';}catch{} }
+        resp = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type":"application/json", "Accept":"application/json" },
+          body: JSON.stringify({ input: String(userText || "") })
+        });
+      }catch(_){
+        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
+      }
+      try{
+        const data = await resp.json();
+        let txt = (typeof data?.text === 'string') ? data.text : '';
+        if(!txt || /^\s*\{/.test(txt)) {
+          try {
+            const j = JSON.parse(txt);
+            if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
+            if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
+            txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
+          } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
+        }
         return txt;
-      }catch{ return 'No pude obtener la respuesta del Info Chat público.'; }
+      }catch{
+        try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
+      }
     };
-    simpleInfoPublic.__usesContext__=false; simpleInfoPublic.__source='external-public-v1';
-    window.callInfoAgentPublic=simpleInfoPublic;
+    simpleInfo.__usesContext__ = false;
+    simpleInfo.__source = 'external-public-v1';
+    window.callInfoAgent = simpleInfo;
   }
 }
 
-function openInfoModal(){ const m=qs('#info-chat-modal'); if(m){m.style.display='flex';m.classList.add('active');}}
-function closeInfoModal(){ const m=qs('#info-chat-modal'); if(m){m.classList.remove('active');m.style.display='none';}}
+function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
+function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
 
-/* === Typing indicator básico === */
+/* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
 function __infoTypingOn__(){
-  const box=qs('#info-chat-messages'); if(!box) return;
-  if(document.getElementById('info-typing')) return;
-  const b=document.createElement('div'); b.id='info-typing'; b.className='bubble ai typing'; b.textContent='...';
-  box.appendChild(b); let i=0; b.__timer=setInterval(()=>{i=(i+1)%3;b.textContent='.'.repeat(i+1);},400);
-  box.scrollTop=box.scrollHeight;
+  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
+  if(!box) return;
+  if(document.getElementById('info-typing')) return; // ya existe
+  const b = document.createElement('div');
+  b.id = 'info-typing';
+  b.className = 'bubble ai typing';
+  b.setAttribute('aria-live','polite');
+  b.textContent = '...';
+  box.appendChild(b);
+  let i = 0;
+  b.__timer = setInterval(()=>{
+    i = (i+1)%3;
+    b.textContent = '.'.repeat(i+1);
+  }, 400);
+  box.scrollTop = box.scrollHeight;
 }
 function __infoTypingOff__(){
-  const b=document.getElementById('info-typing'); if(b){clearInterval(b.__timer);b.remove();}
+  const b = document.getElementById('info-typing');
+  if(!b) return;
+  if(b.__timer) clearInterval(b.__timer);
+  b.remove();
 }
 
 async function sendInfoMessage(){
-  const input=qs('#info-chat-input'); if(!input) return;
-  const txt=(input.value||'').trim(); if(!txt) return;
+  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
+  if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
   infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
+
   __infoTypingOn__();
   try{
-    const ans=await (window.callInfoAgentPublic?window.callInfoAgentPublic(txt):Promise.resolve('No hay cliente público.'));
-    let out=typeof ans==='string'?ans:ans.text||JSON.stringify(ans);
-    if(/^\s*\{/.test(out)){try{const j=JSON.parse(out);out=j.rationale||j.summary||'Tengo la información.';}catch{}}
-    __infoTypingOff__(); infoChatMsg(out||'No tengo la respuesta exacta.');
-  }catch{__infoTypingOff__(); infoChatMsg('No pude obtener respuesta del asistente.', 'ai');}
+    const ans = await callInfoAgent(txt);
+    let out = ans;
+    if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
+    if(typeof out === 'string' && /^\s*\{/.test(out)){
+      try{
+        const j = JSON.parse(out);
+        out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
+      }catch{}
+    }
+    __infoTypingOff__();
+    infoChatMsg(out || 'No tengo la respuesta exacta. Reformula la pregunta y lo vuelvo a intentar.');
+  }catch(_){
+    __infoTypingOff__();
+    infoChatMsg('No pude obtener respuesta del asistente ahora mismo. Intenta de nuevo.', 'ai');
+  }
 }
 
 function bindInfoChatListeners(){
-  const toggleTop=qs('#info-chat-toggle'); const toggleFloating=qs('#info-chat-floating');
-  const close=qs('#info-chat-close'); const send=qs('#info-chat-send'); const input=qs('#info-chat-input');
-  [toggleTop,toggleFloating].forEach(btn=>{btn?.addEventListener('click',e=>{e.preventDefault();openInfoModal();});});
-  close?.addEventListener('click',e=>{e.preventDefault();closeInfoModal();});
-  send?.addEventListener('click',e=>{e.preventDefault();sendInfoMessage();});
-  input?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendInfoMessage();}});
+  const toggleTop = qs('#info-chat-toggle');
+  const toggleFloating = qs('#info-chat-floating');
+  const close  = qs('#info-chat-close');
+  const send   = qs('#info-chat-send');
+  const input  = qs('#info-chat-input');
+
+  // limpiar posibles dobles handlers si hubo rehidrataciones
+  toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
+  toggleFloating?.replaceWith(toggleFloating?.cloneNode?.(true) || toggleFloating);
+  close?.replaceWith(close?.cloneNode?.(true) || close);
+  send?.replaceWith(send?.cloneNode?.(true) || send);
+
+  const tTop = qs('#info-chat-toggle');
+  const tFloat = qs('#info-chat-floating');
+  const c2 = qs('#info-chat-close');
+  const s2 = qs('#info-chat-send');
+  const i2 = qs('#info-chat-input');
+
+  [tTop, tFloat].forEach(btn=>{
+    btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  });
+  c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
+  s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+
+  i2?.addEventListener('keydown', (e)=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
+  });
+
+  if(i2){
+    i2.setAttribute('rows','1');
+    i2.style.overflowY = 'hidden';
+    const maxRows = 10;
+    i2.addEventListener('input', ()=>{
+      i2.style.height = 'auto';
+      const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
+      const lines = Math.min(i2.value.split('\n').length, maxRows);
+      i2.style.height = `${lh * lines + 8}px`;
+      i2.scrollTop = i2.scrollHeight;
+    });
+  }
+
+  document.addEventListener('click', (e)=>{
+    const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
+    if(el){ e.preventDefault(); openInfoModal(); }
+  });
 }
 
-/* === INIT principal === */
+// Inicialización (guard anti-doble init)
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
-  window.__ITBMO_SECTION21_READY__=true;
+  window.__ITBMO_SECTION21_READY__ = true;
 
-  // 💡 Nuevo: garantizamos que $addCity exista y creamos al menos una fila
-  const btnAdd = qs('#add-city-btn');
-  if(btnAdd) btnAdd.addEventListener('click', ()=>addCityRow());
-  if($cityList && !qs('.city-row', $cityList)) addCityRow();
+  if(!document.querySelector('#city-list .city-row')) addCityRow();
 
+  // Aísla Info Chat externo antes de listeners
   __ensureInfoAgentClient__();
+
   bindInfoChatListeners();
   bindReset();
-
   if ($start) $start.disabled = !hasSavedOnce;
-
-  // 🔧 Seguridad adicional: oculta overlay si quedó visible por error previo
-  try { showWOW(false); } catch(_) {}
 });
+
 
