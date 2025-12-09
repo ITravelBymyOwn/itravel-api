@@ -3768,7 +3768,7 @@ ${dayRows}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
-   FIX v77.2: wrap perezoso/seguro de addCityRow para no romper la fila inicial
+   FIX: No envolver addCityRow hasta que exista (evita undefined en el wrapper).
 ================================= */
 function addRowReorderControls(row){
   const ctrlWrap = document.createElement('div');
@@ -3804,53 +3804,65 @@ function addRowReorderControls(row){
   });
 }
 
-/* --- Wrap perezoso y a prueba de orden de carga --- */
-(function ensureSafeAddCityRowWrap(){
-  function doWrap(){
-    if (typeof addCityRow !== 'function') return;
-    if (addCityRow.__wrappedBySection20__) return; // evita doble wrap
+/* Wrap diferido y con guardas: sólo cuando addCityRow exista */
+(function ensureAddCityRowWrap(){
+  if (window.__ITBMO_WRAP_CITYROW_DONE__) return;
 
-    const _origAddCityRow = addCityRow;
-    addCityRow = function(pref){
-      // llamamos al original
-      const ret = _origAddCityRow(pref);
-      // tomamos la última fila creada y le inyectamos controles
+  function tryWrap(){
+    if (typeof window.addCityRow !== 'function') return false;
+    const __origAddCityRow = window.addCityRow;
+    window.addCityRow = function(pref){
+      const ret = __origAddCityRow(pref);
       const row = $cityList?.lastElementChild;
-      if (row && !row.__reorderControlsInjected__) {
-        addRowReorderControls(row);
-        row.__reorderControlsInjected__ = true;
-      }
+      if(row) addRowReorderControls(row);
       return ret;
     };
-    addCityRow.__wrappedBySection20__ = true;
+    window.__ITBMO_WRAP_CITYROW_DONE__ = true;
+    return true;
   }
 
-  if (typeof addCityRow === 'function') {
-    doWrap();
-  } else {
-    // Si aún no existe, escuchamos DOMContentLoaded y hacemos un pequeño polling corto
-    document.addEventListener('DOMContentLoaded', doWrap, { once: true });
-
+  if (!tryWrap()){
+    // reintentos cortos; no bloquea la app si llega tarde
     let tries = 0;
-    const id = setInterval(()=>{
-      if (typeof addCityRow === 'function') {
-        clearInterval(id);
-        doWrap();
-      } else if (++tries > 60) { // ~3s máx
-        clearInterval(id);
-      }
+    const t = setInterval(()=>{
+      tries++;
+      if (tryWrap() || tries > 60) clearInterval(t);
     }, 50);
+  }
+})();
+
+/* 🧭 NOTA: ya no reasignamos addCityRow de inmediato si no existe; el wrap ocurre
+   apenas esté definido, evitando que llamadas tempranas fallen. */
+
+/* 🧼 País: permitir letras Unicode y espacios (global) */
+document.addEventListener('input', (e)=>{
+  if(e.target && e.target.classList && e.target.classList.contains('country')){
+    const original = e.target.value;
+    // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
+    const filtered = original.replace(/[^\p{L}\s]/gu,'');
+    if(filtered !== original){
+      const pos = e.target.selectionStart;
+      e.target.value = filtered;
+      if(typeof pos === 'number'){
+        // ⚡ Ajuste suave del cursor
+        e.target.setSelectionRange(
+          pos - (original.length - filtered.length),
+          pos - (original.length - filtered.length)
+        );
+      }
+    }
   }
 })();
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (mantiene v55.1 + FIX: el botón “Iniciar planificación”
-    **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
+   (mantiene v55.1 + FIX críticos)
+   FIX-1: No llamar addCityRow() hasta que exista → reintentos seguros.
+   FIX-2: Mantiene botón “Iniciar planificación” bloqueado hasta Guardar.
    🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
    💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
 ================================= */
-$addCity?.addEventListener('click', ()=>addCityRow());
+$addCity?.addEventListener('click', ()=>{ try{ if(typeof addCityRow==='function') addCityRow(); }catch(_){} });
 
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
@@ -3907,7 +3919,7 @@ function formHasBasics(){
   if(!row) return false;
   const city  = (qs('.city', row)?.value||'').trim();
   const country = (qs('.country', row)?.value||'').trim();
-  const days  = parseInt(qs('.days', row)?.value||'0', 10);
+  const days  = parseInt((qs('.days', row)?.value||'0'), 10);
   const base  = (qs('.baseDate', row)?.value||'').trim();
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
@@ -3968,7 +3980,7 @@ function bindReset(){
 
     confirmReset.addEventListener('click', ()=>{
       $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
-      addCityRow();
+      addCityRow?.();
       if ($start) $start.disabled = true;
       $tabs.innerHTML=''; $itWrap.innerHTML='';
       $chatBox.style.display='none'; $chatM.innerHTML='';
@@ -4036,6 +4048,24 @@ function bindReset(){
   });
 }
 
+/* ===== Arranque seguro de la PRIMERA FILA =====
+   Reintenta hasta que addCityRow exista (sin romper si tarda en cargarse) */
+function ensureFirstRowSafely(maxAttempts=60){
+  let tries = 0;
+  const tick = ()=>{
+    tries++;
+    const hasRow = !!document.querySelector('#city-list .city-row');
+    if(hasRow) return; // ya existe, nada que hacer
+    if(typeof window.addCityRow === 'function'){
+      try { window.addCityRow(); } catch(_) {}
+      return;
+    }
+    if(tries < maxAttempts) setTimeout(tick, 50);
+    // si no aparece, no rompemos; otros eventos (click +Agregar ciudad) siguen funcionando
+  };
+  tick();
+}
+
 // ▶️ Start: valida y ejecuta
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
@@ -4085,24 +4115,20 @@ document.addEventListener('itbmo:addDays', e=>{
 });
 
 /* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
-/* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
+/* 🔒 SHIM QUIRÚRGICO: define cliente público PROPIO (no toca callInfoAgent del planner) */
 function __ensureInfoAgentClient__(){
   window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
   window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
 
-  const wrongClient = (fn)=>{
+  const mustCreate = (fn)=>{
     if(typeof fn !== 'function') return true;
-    const src = Function.prototype.toString.call(fn);
-    if(/\/api\/chat/.test(src)) return true;
-    if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
-    if(/context/.test(src)) return true;
     if(fn.__source !== 'external-public-v1') return true;
     if(fn.__usesContext__ !== false) return true;
     return false;
   };
 
-  if(wrongClient(window.callInfoAgent)){
-    const simpleInfo = async function(userText){
+  if (mustCreate(window.callInfoAgentPublic)) {
+    const simpleInfoPublic = async function(userText){
       const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
       let resp;
       try{
@@ -4112,7 +4138,7 @@ function __ensureInfoAgentClient__(){
           body: JSON.stringify({ input: String(userText || "") })
         });
       }catch(_){
-        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
+        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API en Vercel o intenta de nuevo.";
       }
       try{
         const data = await resp.json();
@@ -4130,9 +4156,9 @@ function __ensureInfoAgentClient__(){
         try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
       }
     };
-    simpleInfo.__usesContext__ = false;
-    simpleInfo.__source = 'external-public-v1';
-    window.callInfoAgent = simpleInfo;
+    simpleInfoPublic.__usesContext__ = false;
+    simpleInfoPublic.__source = 'external-public-v1';
+    window.callInfoAgentPublic = simpleInfoPublic;
   }
 }
 
@@ -4171,7 +4197,7 @@ async function sendInfoMessage(){
 
   __infoTypingOn__();
   try{
-    const ans = await callInfoAgent(txt);
+    const ans = await (window.callInfoAgentPublic ? window.callInfoAgentPublic(txt) : Promise.resolve('No hay cliente público configurado.'));
     let out = ans;
     if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
     if(typeof out === 'string' && /^\s*\{/.test(out)){
@@ -4222,10 +4248,9 @@ function bindInfoChatListeners(){
     i2.style.overflowY = 'hidden';
     const maxRows = 10;
     i2.addEventListener('input', ()=>{
-      i2.style.height = 'auto';
       const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
       const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${lh * lines + 8}px`;
+      i2.style.height = `${(lh * lines) + 8}px`;
       i2.scrollTop = i2.scrollHeight;
     });
   }
@@ -4241,12 +4266,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
-
-  // Aísla Info Chat externo antes de listeners
+  // Aísla Info Chat externo antes de listeners SIN tocar el interno
   __ensureInfoAgentClient__();
 
   bindInfoChatListeners();
   bindReset();
+
+  // FIX-1: crear PRIMERA FILA de forma segura (reintentos si addCityRow aún no existe)
+  ensureFirstRowSafely();
+
+  // Estado del botón Start
   if ($start) $start.disabled = !hasSavedOnce;
 });
