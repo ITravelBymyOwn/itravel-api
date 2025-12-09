@@ -4298,5 +4298,3 @@ document.addEventListener('DOMContentLoaded', ()=>{
   bindReset();
   if ($start) $start.disabled = !hasSavedOnce;
 });
-
-
