@@ -2335,10 +2335,21 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
    (concurrencia controlada vía runWithConcurrency)
    + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
    + Patch align v43/API + Sec.18/19 (quirúrgico, sin romper nombres)
+   + HOTFIX v77.3: persistencia y tabs — asegura D1 y pintado del primer tab
 ================================= */
 
 async function startPlanning(){
-  if(savedDestinations.length===0) return;
+  // 🔒 Asegura persistencia y tabs antes de iniciar (hotfix)
+  try {
+    if (!Array.isArray(window.savedDestinations) || !savedDestinations.length) {
+      if (typeof saveDestinations === 'function') window.saveDestinations();
+    }
+    if ($tabs && !$tabs.children.length && typeof renderCityTabs === 'function') {
+      renderCityTabs();
+    }
+  } catch(_) {}
+
+  if(!Array.isArray(window.savedDestinations) || savedDestinations.length===0) return;
 
   // UI inicial
   if ($chatBox) $chatBox.style.display='flex';
@@ -2506,6 +2517,188 @@ function askNextHotelTransport(){
   metaProgressIndex++;
   askNextHotelTransport();
 }
+
+/* ============================================================
+   HOTFIX v77.3 — Persistencia + Tabs (quirúrgico, no rompe nombres)
+   - Sincroniza tripleta de fecha → .baseDate (DD/MM/AAAA)
+   - Asegura itineraries[city].byDay[1] para poder pintar la tabla
+   - Reconstruye y activa el primer tab si no hay uno activo
+============================================================ */
+
+/* Helpers locales de fecha (tripleta → DMY) */
+function __pad2_fix__(n){ n=Number(n)||0; return String(n).padStart(2,'0'); }
+function __year4_fix__(y){ y=String(y||'').trim(); if(/^\d{2}$/.test(y)) return '20'+y; return /^\d{4}$/.test(y)? y : ''; }
+function __tripletToDMY__(row){
+  if(!row) return '';
+  const d = (row.querySelector('.baseDay')   || {}).value;
+  const m = (row.querySelector('.baseMonth') || {}).value;
+  const y = (row.querySelector('.baseYear')  || {}).value;
+  const dd = __pad2_fix__(d), mm = __pad2_fix__(m), yyyy = __year4_fix__(y);
+  if(!dd || !mm || !yyyy) return '';
+  return `${dd}/${mm}/${yyyy}`;
+}
+function __ensureHiddenBaseDate__(row){
+  if(!row) return '';
+  let base = row.querySelector('.baseDate');
+  if(!base){
+    base = document.createElement('input');
+    base.type = 'text';
+    base.className = 'baseDate';
+    base.style.display = 'none';
+    row.appendChild(base);
+  }
+  const dmy = __tripletToDMY__(row);
+  if(dmy) base.value = dmy;
+  return base.value || '';
+}
+
+/* ====== SAVE (override quirúrgico) ======
+   Lee filas garantizando fecha válida y estructura mínima.
+*/
+(function hotfix_saveDestinations_v77_3(){
+  const orig = typeof saveDestinations === 'function' ? saveDestinations : null;
+
+  window.saveDestinations = function(){
+    const rows = qsa('.city-row', $cityList);
+    const out = [];
+
+    rows.forEach((r)=>{
+      const city    = (r.querySelector('.city')    || {}).value?.trim()    || '';
+      const country = (r.querySelector('.country') || {}).value?.trim()    || '';
+      const daysStr = (r.querySelector('.days')    || {}).value?.trim()    || '0';
+      const days    = Math.max(0, parseInt(daysStr, 10) || 0);
+
+      // Fecha: tripleta preferida, fallback .baseDate
+      let baseDate = __tripletToDMY__(r);
+      if(!baseDate){
+        const baseEl = r.querySelector('.baseDate');
+        baseDate = (baseEl?.value || '').trim();
+      }
+      // Sincronizar .baseDate para pipelines que la necesiten
+      if(!r.querySelector('.baseDate')) __ensureHiddenBaseDate__(r);
+      if(!baseDate) baseDate = __ensureHiddenBaseDate__(r);
+
+      if(city && country && days > 0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(baseDate)){
+        out.push({ city, country, days, baseDate });
+      }
+    });
+
+    // Persistir en estado global
+    window.savedDestinations = out;
+
+    // Llamar al original si existe (por side-effects adicionales)
+    if(orig){ try { orig(); } catch(e){ console.warn('[HOTFIX] saveDestinations(orig) error:', e); } }
+
+    // Inicializar estructuras mínimas para pintar el primer tab
+    if(Array.isArray(savedDestinations) && savedDestinations.length){
+      savedDestinations.forEach(({city, days, baseDate})=>{
+        if(!window.itineraries) window.itineraries = {};
+        if(!itineraries[city]) itineraries[city] = { byDay: {}, baseDate, originalDays: Math.max(days||0, 1) };
+        if(!itineraries[city].byDay) itineraries[city].byDay = {};
+        // Asegurar Day 1 con array aunque esté vacío (la tabla se pinta)
+        if(!Array.isArray(itineraries[city].byDay[1])) itineraries[city].byDay[1] = [];
+        // Sincronizar baseDate si aún no está
+        if(!itineraries[city].baseDate && baseDate) itineraries[city].baseDate = baseDate;
+
+        // cityMeta ventanas por día (para overlaps/horas) — mínimo D1
+        if(!window.cityMeta) window.cityMeta = {};
+        if(!cityMeta[city]) cityMeta[city] = { baseDate, hotel:'', transport:'', perDay: [] };
+        if(!Array.isArray(cityMeta[city].perDay)) cityMeta[city].perDay = [];
+        const hasD1 = cityMeta[city].perDay.some(x=>x.day===1);
+        if(!hasD1){
+          cityMeta[city].perDay.push({ day: 1, start: (typeof DEFAULT_START==='string'? DEFAULT_START : '08:30'),
+                                            end: (typeof DEFAULT_END  ==='string'? DEFAULT_END   : '19:00') });
+        }
+      });
+    }
+
+    // Reconstruir tabs inmediatamente tras guardar
+    try { renderCityTabs(); } catch(e){ console.warn('[HOTFIX] renderCityTabs error:', e); }
+
+    return out;
+  };
+})();
+
+/* ====== TABS (override quirúrgico) ======
+   Reconstruye tabs y activa el primero si no hay activo.
+*/
+(function hotfix_renderCityTabs_v77_3(){
+  const orig = typeof renderCityTabs === 'function' ? renderCityTabs : null;
+
+  window.renderCityTabs = function(){
+    if(!$tabs) return;
+    $tabs.innerHTML = '';
+
+    const list = Array.isArray(savedDestinations) ? savedDestinations : [];
+    if(!list.length){
+      // Sin tabs -> limpiar vista
+      if($itWrap) $itWrap.innerHTML = '';
+      if(orig){ try { orig(); } catch(e){} }
+      return;
+    }
+
+    // Crear botones de tabs
+    list.forEach(({city})=>{
+      const btn = document.createElement('button');
+      btn.className = 'city-tab';
+      btn.textContent = city;
+      btn.dataset.city = city;
+      btn.addEventListener('click', ()=>{
+        try { setActiveCity(city); } catch(e){ console.warn('[HOTFIX] setActiveCity click error:', e); }
+      });
+      $tabs.appendChild(btn);
+    });
+
+    // Activar el tab actual o el primero
+    let target = window.activeCity && list.some(d => d.city === window.activeCity)
+      ? window.activeCity
+      : list[0].city;
+
+    try { setActiveCity(target); } catch(e){
+      console.warn('[HOTFIX] setActiveCity init error:', e);
+      // fallback: pinta al menos la tabla del primero si hay renderer
+      if(typeof renderCityItinerary === 'function'){
+        try { renderCityItinerary(target); } catch(_) {}
+      }
+    }
+
+    if(orig){ try { orig(); } catch(e){} }
+  };
+})();
+
+/* ====== setActiveCity (override muy acotado) ======
+   Asegura clase .active en el tab, currentDay=1 y render inmediato.
+*/
+(function hotfix_setActiveCity_v77_3(){
+  const orig = typeof setActiveCity === 'function' ? setActiveCity : null;
+
+  window.setActiveCity = function(city){
+    window.activeCity = city;
+
+    // Marcar visualmente el tab activo
+    if($tabs){
+      qsa('.city-tab', $tabs).forEach(b=>{
+        b.classList.toggle('active', b.dataset.city === city);
+      });
+    }
+
+    // Asegurar estructura mínima
+    if(!window.itineraries) window.itineraries = {};
+    if(!itineraries[city]) itineraries[city] = { byDay: {}, baseDate: (savedDestinations.find(d=>d.city===city)?.baseDate || ''), originalDays: 1 };
+    if(!itineraries[city].byDay) itineraries[city].byDay = {};
+    if(!Array.isArray(itineraries[city].byDay[1])) itineraries[city].byDay[1] = [];
+
+    // Día visible por defecto
+    itineraries[city].currentDay = 1;
+
+    // Pintar tabla del día actual
+    if(typeof renderCityItinerary === 'function'){
+      try { renderCityItinerary(city); } catch(e){ console.warn('[HOTFIX] renderCityItinerary error:', e); }
+    }
+
+    if(orig){ try { orig(city); } catch(e){} }
+  };
+})();
 
 /* ==============================
    SECCIÓN 17 · NLU robusta + Intents
