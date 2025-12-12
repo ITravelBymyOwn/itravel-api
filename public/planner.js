@@ -1707,6 +1707,75 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
+   BOOT · Primera fila segura (v77.15-mini)
+   - No toca tus secciones ni estados existentes.
+   - Reconsulta el DOM al vuelo (no usa $cityList congelado).
+   - Solo crea UNA fila si #city-list existe y no hay .city-row.
+================================= */
+(function bootFirstCityRow(){
+  function ensureFirstRow(){
+    const list = document.querySelector('#city-list');
+    if (!list) { 
+      console.warn('[BOOT] #city-list no existe aún.');
+      return false;
+    }
+    const hasRow = list.querySelector('.city-row');
+    if (hasRow) return true;
+
+    // Usa tu propia API: addCityRow(pref)
+    try {
+      if (typeof addCityRow === 'function') {
+        addCityRow({ city:'', country:'', days:'', baseDate:'', perDay:[] });
+        console.log('[BOOT] Primera .city-row creada vía addCityRow()');
+        return true;
+      } else {
+        // Fallback ultra-simple si addCityRow no está disponible
+        const row = document.createElement('div');
+        row.className = 'city-row';
+        row.innerHTML = `
+          <label>Ciudad<input class="city" placeholder="Ciudad"></label>
+          <label>País<input class="country" placeholder="País"></label>
+          <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+          <label class="date-label">
+            Inicio
+            <div class="date-wrapper">
+              <input class="baseDate" placeholder="__/__/____">
+              <small class="date-format">DD/MM/AAAA</small>
+            </div>
+          </label>
+          <button class="remove" type="button" aria-label="Eliminar ciudad">✕</button>
+        `;
+        list.appendChild(row);
+        const base = row.querySelector('.baseDate');
+        if (typeof autoFormatDMYInput === 'function' && base) autoFormatDMYInput(base);
+        console.log('[BOOT] Primera .city-row creada (fallback).');
+        return true;
+      }
+    } catch(e){
+      console.warn('[BOOT] Error creando la primera fila:', e);
+      return false;
+    }
+  }
+
+  function run(){
+    try {
+      const ok = ensureFirstRow();
+      if (!ok) return;
+      // No hacemos más — el resto del flujo (guardar, tabs, etc.) lo disparas tú cuando corresponda.
+    } catch(e){
+      console.warn('[BOOT] Abortado por error:', e);
+    }
+  }
+
+  if (document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    // Ya hay DOM — ejecutar al final del tick para asegurar que #city-list esté montado
+    setTimeout(run, 0);
+  }
+})();
+
+/* ==============================
    SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
    Base v60 (exacta) + injertos v64 + ⚡ early-exit cuando ENABLE_VALIDATOR=false
    🔧 Alineada con API INFO→PLANNER (v43) y Sec.18/19:
