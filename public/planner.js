@@ -4045,7 +4045,7 @@ document.addEventListener('input', (e)=>{
       }
     }
   }
-})();
+});
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
