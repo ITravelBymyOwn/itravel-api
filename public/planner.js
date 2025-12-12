@@ -4016,6 +4016,11 @@ ${dayRows}
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
    FIX definitivo: sin envolver addCityRow; usamos MutationObserver
    para inyectar controles cuando aparezcan filas en #city-list.
+   Patch v77.4 (quirúrgico):
+   - Inicialización robusta del observer:
+     • Espera a DOMContentLoaded si es necesario.
+     • Reintentos breves si #city-list no está aún en el DOM.
+     • Reinyección segura al recibir destinos guardados o reset.
 ================================= */
 function addRowReorderControls(row){
   if (!row || row.__reorderBound__) return; // evita duplicados
@@ -4039,68 +4044,90 @@ function addRowReorderControls(row){
 
   // 🆙 Subir ciudad
   up.addEventListener('click', ()=>{
+    const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+    if(!list) return;
     if(row.previousElementSibling){
-      $cityList.insertBefore(row, row.previousElementSibling);
+      list.insertBefore(row, row.previousElementSibling);
       try { saveDestinations(); } catch(_) {}
     }
   });
 
   // ⬇️ Bajar ciudad
   down.addEventListener('click', ()=>{
+    const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+    if(!list) return;
     if(row.nextElementSibling){
-      $cityList.insertBefore(row.nextElementSibling, row);
+      list.insertBefore(row.nextElementSibling, row);
       try { saveDestinations(); } catch(_) {}
     }
   });
 }
 
-/* Inicia observador para inyectar controles a cada .city-row nueva */
+/* ---------- Inicializador robusto del observer ---------- */
 (function initCityRowObserver(){
-  if (!window || window.__ITBMO_CITYROW_OBS__) return;
-  const list = (typeof $cityList !== 'undefined') ? $cityList : document.querySelector('#city-list');
-  if (!list) return;
+  // Evita dobles inits
+  if (window.__ITBMO_CITYROW_OBS__) return;
 
-  // Controles para las filas existentes al cargar
-  list.querySelectorAll('.city-row').forEach(addRowReorderControls);
+  const __startObserver__ = ()=>{
+    const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+    if (!list) return false;
 
-  const obs = new MutationObserver((mutations)=>{
-    for (const m of mutations){
-      m.addedNodes && Array.from(m.addedNodes).forEach(node=>{
-        if (node && node.nodeType === 1){
-          if (node.classList && node.classList.contains('city-row')){
-            addRowReorderControls(node);
-          } else {
-            // Si agregan wrappers, busca descendientes .city-row
-            node.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
+    // Controles para las filas existentes al cargar
+    list.querySelectorAll('.city-row').forEach(addRowReorderControls);
+
+    const obs = new MutationObserver((mutations)=>{
+      for (const m of mutations){
+        m.addedNodes && Array.from(m.addedNodes).forEach(node=>{
+          if (node && node.nodeType === 1){
+            if (node.classList && node.classList.contains('city-row')){
+              addRowReorderControls(node);
+            } else {
+              // Si agregan wrappers, busca descendientes .city-row
+              node.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
+            }
           }
-        }
-      });
-    }
-  });
-  obs.observe(list, { childList: true, subtree: true });
-
-  window.__ITBMO_CITYROW_OBS__ = true;
-})();
-
-/* 🧼 País: permitir letras Unicode y espacios (global) */
-document.addEventListener('input', (e)=>{
-  if(e.target && e.target.classList && e.target.classList.contains('country')){
-    const original = e.target.value;
-    // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
-    const filtered = original.replace(/[^\p{L}\s]/gu,'');
-    if(filtered !== original){
-      const pos = e.target.selectionStart;
-      e.target.value = filtered;
-      if(typeof pos === 'number'){
-        // ⚡ Ajuste suave del cursor
-        e.target.setSelectionRange(
-          pos - (original.length - filtered.length),
-          pos - (original.length - filtered.length)
-        );
+        });
       }
-    }
+    });
+
+    obs.observe(list, { childList: true, subtree: true });
+    window.__ITBMO_CITYROW_OBS__ = true;
+
+    /* Reinyecciones seguras ante eventos del planner */
+    try {
+      document.addEventListener('itbmo:destinationsSaved', ()=>{
+        const l = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+        l?.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
+      });
+      document.addEventListener('itbmo:plannerReset', ()=>{
+        const l = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+        l?.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
+      });
+    } catch(_) {}
+
+    return true;
+  };
+
+  const __kickoff__ = ()=>{
+    // 1) Intento inmediato (por si ya existe #city-list)
+    if (__startObserver__()) return;
+
+    // 2) Si aún no existe, reintenta unas veces (carrera con la creación de la primera fila)
+    let tries = 0;
+    const maxTries = 15;     // ~1.8s si interval=120ms
+    const interval = 120;    // ms
+    const timer = setInterval(()=>{
+      if (__startObserver__() || (++tries >= maxTries)) clearInterval(timer);
+    }, interval);
+  };
+
+  if (document.readyState === 'loading') {
+    // Espera a DOM listo
+    document.addEventListener('DOMContentLoaded', __kickoff__, { once: true });
+  } else {
+    __kickoff__();
   }
-});
+})();
 
 
 /* ==============================
