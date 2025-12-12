@@ -3467,6 +3467,14 @@ async function optimizeDay(city, day) {
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
+    // 🔧 Render inmediato si la ciudad optimizada es la activa (asegura visualización de la primera fila)
+    try {
+      if (typeof activeCity !== 'undefined' && activeCity === city) {
+        if (typeof renderCityTabs === 'function') renderCityTabs();
+        if (typeof setActiveCity === 'function') setActiveCity(city);
+        if (typeof renderCityItinerary === 'function') renderCityItinerary(city);
+      }
+    } catch(_) {}
 
   } catch (e) {
     console.error('optimizeDay INFO→PLANNER error:', e);
@@ -3478,6 +3486,14 @@ async function optimizeDay(city, day) {
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
+    // 🔧 Render inmediato también en fallback
+    try {
+      if (typeof activeCity !== 'undefined' && activeCity === city) {
+        if (typeof renderCityTabs === 'function') renderCityTabs();
+        if (typeof setActiveCity === 'function') setActiveCity(city);
+        if (typeof renderCityItinerary === 'function') renderCityItinerary(city);
+      }
+    } catch(_) {}
   }
 }
 
@@ -3725,7 +3741,7 @@ async function onSend(){
     // Semilla opcional si el usuario pidió "para ir a X" — usa __addMinutesSafe__
     if (intent.dayTripTo) {
       const destTrip  = intent.dayTripTo;
-      const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
+      const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START || '09:00';
       pushRows(city, [{
         day: numericPos,
         start: baseStart,
@@ -3734,7 +3750,7 @@ async function onSend(){
         from: `Hotel (${city})`,
         to: destTrip,
         transport: 'Tren/Bus',
-        duration: '≈ 1h',
+        duration: '1h',
         notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`
       }], false);
     }
@@ -3795,7 +3811,7 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
-    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(city);
+    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
     return;
