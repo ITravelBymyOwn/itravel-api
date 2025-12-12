@@ -3536,6 +3536,7 @@ async function optimizeDay(city, day) {
    - Mantiene flujos existentes (add/swap/move/etc.)
    - Rebalanceos y optimizaciones llaman a optimizeDay (que ya usa INFO→PLANNER)
    - Respeta y registra preferencias/condiciones del usuario
+   - Patch v77.3 (quirúrgico): fix en render tras mover actividades
 ================================= */
 
 /* Wrapper global para Info Agent usando API v43 (si no existe) */
@@ -3774,7 +3775,7 @@ async function onSend(){
     // Semilla opcional si el usuario pidió "para ir a X" — usa __addMinutesSafe__
     if (intent.dayTripTo) {
       const destTrip  = intent.dayTripTo;
-      const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START || '09:00';
+      const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
       pushRows(city, [{
         day: numericPos,
         start: baseStart,
@@ -3783,7 +3784,7 @@ async function onSend(){
         from: `Hotel (${city})`,
         to: destTrip,
         transport: 'Tren/Bus',
-        duration: '1h',
+        duration: '≈ 1h',
         notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`
       }], false);
     }
@@ -3844,7 +3845,10 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
-    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
+    renderCityTabs();
+    setActiveCity(intent.city);
+    // 🔧 FIX quirúrgico: antes usaba `renderCityItinerary(city)` con `city` indefinido
+    renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
     return;
