@@ -4024,9 +4024,6 @@ function addRowReorderControls(row){
   }
 })();
 
-/* 🧭 NOTA: ya no reasignamos addCityRow de inmediato si no existe; el wrap ocurre
-   apenas esté definido, evitando que llamadas tempranas fallen. */
-
 /* 🧼 País: permitir letras Unicode y espacios (global) */
 document.addEventListener('input', (e)=>{
   if(e.target && e.target.classList && e.target.classList.contains('country')){
