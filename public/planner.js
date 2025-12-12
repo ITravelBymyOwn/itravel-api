@@ -3722,7 +3722,7 @@ async function onSend(){
     };
     ensureWindow(numericPos);
 
-    // Semilla opcional si el usuario pidió "para ir a X"
+    // Semilla opcional si el usuario pidió "para ir a X" — usa __addMinutesSafe__
     if (intent.dayTripTo) {
       const destTrip  = intent.dayTripTo;
       const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
@@ -3795,7 +3795,7 @@ async function onSend(){
       optimizeDay(intent.city, intent.fromDay),
       optimizeDay(intent.city, intent.toDay)
     ]);
-    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
+    renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
     return;
