@@ -4137,6 +4137,11 @@ function addRowReorderControls(row){
    🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
    💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
    ✅ Compatibilidad con fecha en tripleta (baseDay/baseMonth/baseYear) — sincroniza .baseDate
+   Patch v77.6 (quirúrgico):
+   - Init robusto de la primera fila:
+     • Espera la presencia de #city-list con reintentos breves.
+     • Inserta la primera fila exactamente una vez.
+     • Sincroniza .baseDate desde tripleta tras insertar.
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -4172,13 +4177,15 @@ function ensureHiddenBaseDateInRow(row){
 }
 
 function syncAllRowsHiddenBaseDate(){
-  const rows = qsa('.city-row', $cityList);
-  rows.forEach(r=> ensureHiddenBaseDateInRow(r));
+  const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+  const rows = list ? list.querySelectorAll('.city-row') : [];
+  rows && rows.forEach(r=> ensureHiddenBaseDateInRow(r));
 }
 
 /* --- Validaciones compatibles (tripleta o .baseDate) --- */
 function validateBaseDatesDMY(){
-  const rows = qsa('.city-row', $cityList);
+  const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+  const rows = list ? list.querySelectorAll('.city-row') : [];
   let firstInvalid = null;
 
   for(const r of rows){
@@ -4186,7 +4193,7 @@ function validateBaseDatesDMY(){
     const dmyTriplet = getTripletDateDMYFromRow(r);
     let value = dmyTriplet;
     if(!value){
-      const el = qs('.baseDate', r);
+      const el = r.querySelector('.baseDate');
       value = (el?.value||'').trim();
     }
     // Si no hay ni tripleta ni baseDate, inválido
@@ -4222,7 +4229,7 @@ function validateBaseDatesDMY(){
 
 /* --- Sincronización live tripleta -> .baseDate --- */
 function bindDateTripletSync(){
-  const container = $cityList || document;
+  const container = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document;
   container.addEventListener('input', (e)=>{
     const el = e.target;
     if(!el || !el.classList) return;
@@ -4267,23 +4274,24 @@ $save?.addEventListener('click', ()=>{
 
 /* --- Reglas de “form basics” compatibles con tripleta --- */
 function formHasBasics(){
-  const row = qs('.city-row', $cityList);
+  const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+  const row = list ? list.querySelector('.city-row') : null;
   if(!row) return false;
 
-  const city    = (qs('.city', row)?.value||'').trim();
-  const country = (qs('.country', row)?.value||'').trim();
-  const daysVal = (qs('.days', row)?.value||'0');
+  const city    = (row.querySelector('.city')?.value||'').trim();
+  const country = (row.querySelector('.country')?.value||'').trim();
+  const daysVal = (row.querySelector('.days')?.value||'0');
   const days    = parseInt(daysVal, 10);
 
   // Fecha: acepta tripleta o .baseDate
   const dmyTriplet = getTripletDateDMYFromRow(row);
   let base = dmyTriplet;
   if(!base){
-    base = (qs('.baseDate', row)?.value||'').trim();
+    base = (row.querySelector('.baseDate')?.value||'').trim();
   }
 
   // Si hay tripleta y .baseDate no existe, crearlo para compatibilidad downstream
-  if(dmyTriplet && !qs('.baseDate', row)){
+  if(dmyTriplet && !row.querySelector('.baseDate')){
     ensureHiddenBaseDateInRow(row);
   }
 
@@ -4348,11 +4356,23 @@ function bindReset(){
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
     confirmReset.addEventListener('click', ()=>{
-      $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+      const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+      const tabs = (typeof $tabs !== 'undefined' && $tabs) ? $tabs : document.querySelector('#tabs');
+      const itw  = (typeof $itWrap !== 'undefined' && $itWrap) ? $itWrap : document.querySelector('#itinerary-wrap');
+      const chatBox = (typeof $chatBox !== 'undefined' && $chatBox) ? $chatBox : document.querySelector('#chat-box');
+      const chatM   = (typeof $chatM !== 'undefined' && $chatM) ? $chatM : document.querySelector('#chat-messages');
+      const sidebar = (typeof $sidebar !== 'undefined' && $sidebar) ? $sidebar : document.querySelector('#sidebar');
+      const infoFloating = (typeof $infoFloating !== 'undefined' && $infoFloating) ? $infoFloating : document.querySelector('#info-chat-floating');
+      const resetBtn = (typeof $resetBtn !== 'undefined' && $resetBtn) ? $resetBtn : document.querySelector('#reset-planner');
+
+      if (list) list.innerHTML='';
+      savedDestinations=[]; itineraries={}; cityMeta={};
       addCityRow();
       if ($start) $start.disabled = true;
-      $tabs.innerHTML=''; $itWrap.innerHTML='';
-      $chatBox.style.display='none'; $chatM.innerHTML='';
+      if (tabs) tabs.innerHTML='';
+      if (itw) itw.innerHTML='';
+      if (chatBox) chatBox.style.display='none';
+      if (chatM) chatM.innerHTML='';
       session = []; hasSavedOnce=false; pendingChange=null;
 
       planningStarted = false;
@@ -4362,16 +4382,16 @@ function bindReset(){
       activeCity = null;
 
       try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
-      qsa('.date-tooltip').forEach(t => t.remove());
+      document.querySelectorAll('.date-tooltip').forEach(t => t.remove());
 
-      const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
-      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
-      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
-      const $in = qs('#p-infants');  if($in) $in.value = '0';
-      const $se = qs('#p-seniors');  if($se) $se.value = '0';
-      const $bu = qs('#budget');     if($bu) $bu.value = '';
-      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
+      const $sc = document.querySelector('#special-conditions'); if($sc) $sc.value = '';
+      const $ad = document.querySelector('#p-adults');   if($ad) $ad.value = '1';
+      const $yo = document.querySelector('#p-young');    if($yo) $yo.value = '0';
+      const $ch = document.querySelector('#p-children'); if($ch) $ch.value = '0';
+      const $in = document.querySelector('#p-infants');  if($in) $in.value = '0';
+      const $se = document.querySelector('#p-seniors');  if($se) $se.value = '0';
+      const $bu = document.querySelector('#budget');     if($bu) $bu.value = '';
+      const $cu = document.querySelector('#currency');   if($cu) $cu.value = 'USD';
 
       if (typeof plannerState !== 'undefined') {
         plannerState.destinations = [];
@@ -4388,15 +4408,16 @@ function bindReset(){
       overlay.classList.remove('active');
       setTimeout(()=>overlay.remove(), 300);
 
-      if ($sidebar) $sidebar.classList.remove('disabled');
-      if ($infoFloating){
-        $infoFloating.style.pointerEvents = 'auto';
-        $infoFloating.style.opacity = '1';
-        $infoFloating.disabled = false;
+      if (sidebar) sidebar.classList.remove('disabled');
+      if (infoFloating){
+        infoFloating.style.pointerEvents = 'auto';
+        infoFloating.style.opacity = '1';
+        infoFloating.disabled = false;
       }
-      if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+      if (resetBtn) resetBtn.setAttribute('disabled','true');
 
-      const firstCity = qs('.city-row .city');
+      const list2 = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+      const firstCity = list2 ? list2.querySelector('.city-row .city') : null;
       if (firstCity) firstCity.focus();
 
       try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
@@ -4449,11 +4470,11 @@ $chatI?.addEventListener('keydown', e=>{
 // CTA y upsell
 $confirmCTA?.addEventListener('click', ()=>{ 
   isItineraryLocked = true;
-  const upsell = qs('#monetization-upsell');
+  const upsell = document.querySelector('#monetization-upsell');
   if (upsell) upsell.style.display = 'flex';
 });
 $upsellClose?.addEventListener('click', ()=>{
-  const upsell = qs('#monetization-upsell');
+  const upsell = document.querySelector('#monetization-upsell');
   if (upsell) upsell.style.display = 'none';
 });
 
@@ -4519,12 +4540,12 @@ function __ensureInfoAgentClient__(){
   }
 }
 
-function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
-function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+function openInfoModal(){ const m=document.querySelector('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
+function closeInfoModal(){ const m=document.querySelector('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
 
 /* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
 function __infoTypingOn__(){
-  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
+  const box = document.querySelector('#info-chat-messages') || document.querySelector('#info-chat-modal .messages') || document.querySelector('#info-chat-body');
   if(!box) return;
   if(document.getElementById('info-typing')) return; // ya existe
   const b = document.createElement('div');
@@ -4548,7 +4569,7 @@ function __infoTypingOff__(){
 }
 
 async function sendInfoMessage(){
-  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
+  const input = document.querySelector('#info-chat-input'); const btn = document.querySelector('#info-chat-send');
   if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
   infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
 
@@ -4573,11 +4594,11 @@ async function sendInfoMessage(){
 }
 
 function bindInfoChatListeners(){
-  const toggleTop = qs('#info-chat-toggle');
-  const toggleFloating = qs('#info-chat-floating');
-  const close  = qs('#info-chat-close');
-  const send   = qs('#info-chat-send');
-  const input  = qs('#info-chat-input');
+  const toggleTop = document.querySelector('#info-chat-toggle');
+  const toggleFloating = document.querySelector('#info-chat-floating');
+  const close  = document.querySelector('#info-chat-close');
+  const send   = document.querySelector('#info-chat-send');
+  const input  = document.querySelector('#info-chat-input');
 
   // limpiar posibles dobles handlers si hubo rehidrataciones
   toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
@@ -4585,11 +4606,11 @@ function bindInfoChatListeners(){
   close?.replaceWith(close?.cloneNode?.(true) || close);
   send?.replaceWith(send?.cloneNode?.(true) || send);
 
-  const tTop = qs('#info-chat-toggle');
-  const tFloat = qs('#info-chat-floating');
-  const c2 = qs('#info-chat-close');
-  const s2 = qs('#info-chat-send');
-  const i2 = qs('#info-chat-input');
+  const tTop = document.querySelector('#info-chat-toggle');
+  const tFloat = document.querySelector('#info-chat-floating');
+  const c2 = document.querySelector('#info-chat-close');
+  const s2 = document.querySelector('#info-chat-send');
+  const i2 = document.querySelector('#info-chat-input');
 
   [tTop, tFloat].forEach(btn=>{
     btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
@@ -4620,24 +4641,84 @@ function bindInfoChatListeners(){
   });
 }
 
-// Inicialización (guard anti-doble init)
-document.addEventListener('DOMContentLoaded', ()=>{
-  if(window.__ITBMO_SECTION21_READY__) return;
+/* 🧼 País: permitir letras Unicode y espacios (global) */
+document.addEventListener('input', (e)=>{
+  if(e.target && e.target.classList && e.target.classList.contains('country')){
+    const original = e.target.value;
+    // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
+    const filtered = original.replace(/[^\p{L}\s]/gu,'');
+    if(filtered !== original){
+      const pos = e.target.selectionStart;
+      e.target.value = filtered;
+      if(typeof pos === 'number'){
+        // ⚡ Ajuste suave del cursor
+        e.target.setSelectionRange(
+          pos - (original.length - filtered.length),
+          pos - (original.length - filtered.length)
+        );
+      }
+    }
+  }
+});
+
+/* ===== INIT ROBUSTO (primera fila + listeners) ===== */
+(function initSection21(){
+  if (window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
+  const MAX_TRIES = 20;     // ~2s a 100ms
+  const INTERVAL  = 100;
 
-  // 🔁 Vincula sincronización tripleta -> .baseDate
-  bindDateTripletSync();
-  // 🧷 Primera sincronización por si ya hay valores precargados
-  syncAllRowsHiddenBaseDate();
+  const kickoff = ()=>{
+    const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+    if(!list){
+      return false;
+    }
 
-  // Aísla Info Chat externo antes de listeners SIN sobrescribir callInfoAgent del planner
-  __ensureInfoAgentClient__();
+    // Si no hay filas, crear exactamente UNA
+    if(!list.querySelector('.city-row')){
+      // Defer al próximo frame para evitar carrera con otras secciones
+      requestAnimationFrame(()=>{
+        addCityRow();
+        // Tras crear la fila, sincronizar .baseDate si hay tripleta precargada
+        requestAnimationFrame(()=>{
+          syncAllRowsHiddenBaseDate();
+          // Foco inicial cómodo
+          const firstCity = list.querySelector('.city-row .city');
+          firstCity && firstCity.focus();
+        });
+      });
+    }
 
-  bindInfoChatListeners();
-  bindReset();
-  if ($start) $start.disabled = !hasSavedOnce;
-});
+    // Aísla Info Chat externo y listeners
+    __ensureInfoAgentClient__();
+    bindInfoChatListeners();
+    bindReset();
+
+    // Habilitación de Start depende de hasSavedOnce
+    if (typeof hasSavedOnce !== 'undefined' && $start) {
+      $start.disabled = !hasSavedOnce;
+    }
+
+    return true;
+  };
+
+  const tryInit = ()=>{
+    if (kickoff()) return;
+    let tries = 0;
+    const t = setInterval(()=>{
+      if(kickoff() || (++tries >= MAX_TRIES)){
+        clearInterval(t);
+      }
+    }, INTERVAL);
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', tryInit, { once: true });
+  } else {
+    tryInit();
+  }
+})();
+
 
 
