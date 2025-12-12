@@ -2554,12 +2554,25 @@ function __ensureHiddenBaseDate__(row){
 
 /* ====== SAVE (override quirúrgico) ======
    Lee filas garantizando fecha válida y estructura mínima.
+   ⚠️ FIX: usa un contexto seguro si $cityList aún no existe.
 */
 (function hotfix_saveDestinations_v77_3(){
   const orig = typeof saveDestinations === 'function' ? saveDestinations : null;
 
   window.saveDestinations = function(){
-    const rows = qsa('.city-row', $cityList);
+    // 🔧 Asegurar $cityList si todavía no está seteado
+    try {
+      if (!window.$cityList || !(window.$cityList instanceof Element)) {
+        window.$cityList = document.querySelector('#city-list') || null;
+      }
+    } catch(_) {}
+
+    // ⚠️ Contexto SEGURO para buscar filas aunque $cityList aún no esté listo
+    const ctx = (window.$cityList && window.$cityList.nodeType === 1)
+      ? window.$cityList
+      : (document.querySelector('#city-list') || document);
+
+    const rows = qsa('.city-row', ctx);
     const out = [];
 
     rows.forEach((r)=>{
