@@ -4044,6 +4044,7 @@ document.addEventListener('input', (e)=>{
   }
 });
 
+
 /* ==============================
    SECCIÓN 21 · INIT y listeners
    (mantiene v55.1 + FIX: el botón “Iniciar planificación”
