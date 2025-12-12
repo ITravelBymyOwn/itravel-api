@@ -1707,73 +1707,89 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
-   BOOT · Primera fila segura (v77.15-mini)
-   - No toca tus secciones ni estados existentes.
-   - Reconsulta el DOM al vuelo (no usa $cityList congelado).
-   - Solo crea UNA fila si #city-list existe y no hay .city-row.
+   SECCIÓN 13·C — Diagnóstico/Hardening “primera fila”
+   (drop-in: colócalo tras SECCIÓN 13 y antes de SECCIÓN 14)
 ================================= */
-(function bootFirstCityRow(){
-  function ensureFirstRow(){
-    const list = document.querySelector('#city-list');
-    if (!list) { 
-      console.warn('[BOOT] #city-list no existe aún.');
-      return false;
-    }
-    const hasRow = list.querySelector('.city-row');
-    if (hasRow) return true;
+(function hardenFirstRow(){
+  // Logger + wrapper de pushRows
+  const _pushRows = pushRows;
+  window.__itbmo_debug = window.__itbmo_debug || {};
+  window.__itbmo_debug.events = window.__itbmo_debug.events || [];
 
-    // Usa tu propia API: addCityRow(pref)
-    try {
-      if (typeof addCityRow === 'function') {
-        addCityRow({ city:'', country:'', days:'', baseDate:'', perDay:[] });
-        console.log('[BOOT] Primera .city-row creada vía addCityRow()');
-        return true;
-      } else {
-        // Fallback ultra-simple si addCityRow no está disponible
-        const row = document.createElement('div');
-        row.className = 'city-row';
-        row.innerHTML = `
-          <label>Ciudad<input class="city" placeholder="Ciudad"></label>
-          <label>País<input class="country" placeholder="País"></label>
-          <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-          <label class="date-label">
-            Inicio
-            <div class="date-wrapper">
-              <input class="baseDate" placeholder="__/__/____">
-              <small class="date-format">DD/MM/AAAA</small>
-            </div>
-          </label>
-          <button class="remove" type="button" aria-label="Eliminar ciudad">✕</button>
-        `;
-        list.appendChild(row);
-        const base = row.querySelector('.baseDate');
-        if (typeof autoFormatDMYInput === 'function' && base) autoFormatDMYInput(base);
-        console.log('[BOOT] Primera .city-row creada (fallback).');
-        return true;
+  // No tocar tus helpers existentes:
+  const _normalizeRow = (typeof normalizeRow === 'function') ? normalizeRow : (r)=>r;
+  const _ensureDays   = (typeof ensureDays   === 'function') ? ensureDays   : function(city){
+    if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null};
+    if(!itineraries[city].byDay[1]) itineraries[city].byDay[1]=[];
+  };
+
+  pushRows = function(city, rows, replace=false){
+    try{
+      const before = (itineraries?.[city]?.byDay?.[1] || []).length;
+      window.__itbmo_debug.lastCity = city;
+      window.__itbmo_debug.lastRows = Array.isArray(rows) ? rows.slice(0,3) : rows;
+      window.__itbmo_debug.events.push({ ts: Date.now(), city, replace, before });
+
+      _pushRows(city, rows, replace);
+
+      const after = (itineraries?.[city]?.byDay?.[1] || []).length;
+      window.__itbmo_debug.events.at(-1).after = after;
+
+      // ⚠️ Si había filas entrantes pero sigue en 0, la primera se perdió por dedupe o replace indebido
+      if ((before===0) && (after===0) && Array.isArray(rows) && rows.length){
+        console.warn('⚠️ Primera fila absorbida por merge/dedupe. Reinsertando sin dedupe…');
+        _ensureDays(city);
+        const first = _normalizeRow(rows[0], 1);
+        const d = Math.max(1, parseInt(first.day||1,10));
+        if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
+        // Inserción directa (intencionalmente sin dedupe)
+        itineraries[city].byDay[d].unshift({
+          day: d,
+          start: first.start||'08:30',
+          end: first.end||'19:00',
+          activity: first.activity||'(sin título)',
+          from: first.from||'',
+          to: first.to||'',
+          transport: first.transport||'',
+          duration: first.duration||'',
+          notes: first.notes||'reinserted:first-row'
+        });
+        // Render inmediato del día activo/ciudad relevante
+        if(typeof renderCityItinerary === 'function'){
+          const c = city || (typeof activeCity!=='undefined' ? activeCity : null);
+          if(c) renderCityItinerary(c);
+        }
       }
-    } catch(e){
-      console.warn('[BOOT] Error creando la primera fila:', e);
-      return false;
+    }catch(err){
+      console.error('hardenFirstRow wrapper error:', err);
+      // En caso de fallo, no bloqueamos el flujo original
+      return _pushRows(city, rows, replace);
     }
-  }
+  };
 
-  function run(){
-    try {
-      const ok = ensureFirstRow();
-      if (!ok) return;
-      // No hacemos más — el resto del flujo (guardar, tabs, etc.) lo disparas tú cuando corresponda.
-    } catch(e){
-      console.warn('[BOOT] Abortado por error:', e);
+  // 🚫 CSS safety: impedir que algún theme/tabla oculte la primera fila
+  const style = document.createElement('style');
+  style.setAttribute('data-itbmo-firstrow-guard','true');
+  style.textContent = `
+    #itinerary-container table.itinerary tbody tr:first-child {
+      display: table-row !important;
+      visibility: visible !important;
+      opacity: 1 !important;
     }
-  }
+  `;
+  document.head.appendChild(style);
 
-  if (document.readyState === 'loading'){
-    document.addEventListener('DOMContentLoaded', run);
-  } else {
-    // Ya hay DOM — ejecutar al final del tick para asegurar que #city-list esté montado
-    setTimeout(run, 0);
-  }
+  // Utilidad para inspección rápida desde consola
+  window.__probeFirstRow = (city)=>({
+    incomingFirstRow: (window.__itbmo_debug?.lastRows && window.__itbmo_debug.lastRows[0]) || null,
+    storedFirstRow:   (itineraries?.[city]?.byDay?.[1]?.[0]) || null,
+    counters: {
+      before: window.__itbmo_debug?.events?.at(-1)?.before ?? null,
+      after:  window.__itbmo_debug?.events?.at(-1)?.after  ?? null
+    }
+  });
 })();
+
 
 /* ==============================
    SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
