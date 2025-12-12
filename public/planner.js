@@ -3961,9 +3961,13 @@ ${dayRows}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
-   FIX: No envolver addCityRow hasta que exista (evita undefined en el wrapper).
+   FIX definitivo: sin envolver addCityRow; usamos MutationObserver
+   para inyectar controles cuando aparezcan filas en #city-list.
 ================================= */
 function addRowReorderControls(row){
+  if (!row || row.__reorderBound__) return; // evita duplicados
+  row.__reorderBound__ = true;
+
   const ctrlWrap = document.createElement('div');
   ctrlWrap.style.display = 'flex';
   ctrlWrap.style.gap = '.35rem';
@@ -3984,7 +3988,7 @@ function addRowReorderControls(row){
   up.addEventListener('click', ()=>{
     if(row.previousElementSibling){
       $cityList.insertBefore(row, row.previousElementSibling);
-      saveDestinations(); // ⚡ sincroniza inmediatamente orden
+      try { saveDestinations(); } catch(_) {}
     }
   });
 
@@ -3992,36 +3996,37 @@ function addRowReorderControls(row){
   down.addEventListener('click', ()=>{
     if(row.nextElementSibling){
       $cityList.insertBefore(row.nextElementSibling, row);
-      saveDestinations(); // ⚡ sincroniza inmediatamente orden
+      try { saveDestinations(); } catch(_) {}
     }
   });
 }
 
-/* Wrap diferido y con guardas: sólo cuando addCityRow exista */
-(function ensureAddCityRowWrap(){
-  if (window.__ITBMO_WRAP_CITYROW_DONE__) return;
+/* Inicia observador para inyectar controles a cada .city-row nueva */
+(function initCityRowObserver(){
+  if (!window || window.__ITBMO_CITYROW_OBS__) return;
+  const list = (typeof $cityList !== 'undefined') ? $cityList : document.querySelector('#city-list');
+  if (!list) return;
 
-  function tryWrap(){
-    if (typeof window.addCityRow !== 'function') return false;
-    const __origAddCityRow = window.addCityRow;
-    window.addCityRow = function(pref){
-      const ret = __origAddCityRow(pref);
-      const row = $cityList?.lastElementChild;
-      if(row) addRowReorderControls(row);
-      return ret;
-    };
-    window.__ITBMO_WRAP_CITYROW_DONE__ = true;
-    return true;
-  }
+  // Controles para las filas existentes al cargar
+  list.querySelectorAll('.city-row').forEach(addRowReorderControls);
 
-  if (!tryWrap()){
-    // reintentos cortos; no bloquea la app si llega tarde
-    let tries = 0;
-    const t = setInterval(()=>{
-      tries++;
-      if (tryWrap() || tries > 60) clearInterval(t);
-    }, 50);
-  }
+  const obs = new MutationObserver((mutations)=>{
+    for (const m of mutations){
+      m.addedNodes && Array.from(m.addedNodes).forEach(node=>{
+        if (node && node.nodeType === 1){
+          if (node.classList && node.classList.contains('city-row')){
+            addRowReorderControls(node);
+          } else {
+            // Si agregan wrappers, busca descendientes .city-row
+            node.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
+          }
+        }
+      });
+    }
+  });
+  obs.observe(list, { childList: true, subtree: true });
+
+  window.__ITBMO_CITYROW_OBS__ = true;
 })();
 
 /* 🧼 País: permitir letras Unicode y espacios (global) */
