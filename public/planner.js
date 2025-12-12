@@ -4013,14 +4013,12 @@ ${dayRows}
 }
 
 /* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
-   FIX definitivo: sin envolver addCityRow; usamos MutationObserver
-   para inyectar controles cuando aparezcan filas en #city-list.
-   Patch v77.4 (quirúrgico):
-   - Inicialización robusta del observer:
-     • Espera a DOMContentLoaded si es necesario.
-     • Reintentos breves si #city-list no está aún en el DOM.
-     • Reinyección segura al recibir destinos guardados o reset.
+   SECCIÓN 20 · Orden de ciudades + Eventos — RESTAURADA (patrón viejo)
+   Restauración quirúrgica:
+   - Volvemos a envolver addCityRow en lugar de depender sólo de MutationObserver.
+   - Inyectamos controles de reorden en la fila que se acaba de crear.
+   - Garantizamos la creación de la PRIMERA FILA si #city-list está vacío.
+   - Mantiene API y nombres exactamente como el código viejo.
 ================================= */
 function addRowReorderControls(row){
   if (!row || row.__reorderBound__) return; // evita duplicados
@@ -4044,88 +4042,109 @@ function addRowReorderControls(row){
 
   // 🆙 Subir ciudad
   up.addEventListener('click', ()=>{
-    const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
-    if(!list) return;
     if(row.previousElementSibling){
-      list.insertBefore(row, row.previousElementSibling);
+      $cityList.insertBefore(row, row.previousElementSibling);
       try { saveDestinations(); } catch(_) {}
     }
   });
 
   // ⬇️ Bajar ciudad
   down.addEventListener('click', ()=>{
-    const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
-    if(!list) return;
     if(row.nextElementSibling){
-      list.insertBefore(row.nextElementSibling, row);
+      $cityList.insertBefore(row.nextElementSibling, row);
       try { saveDestinations(); } catch(_) {}
     }
   });
 }
 
-/* ---------- Inicializador robusto del observer ---------- */
-(function initCityRowObserver(){
-  // Evita dobles inits
-  if (window.__ITBMO_CITYROW_OBS__) return;
+/* ========= Envoltorio clásico de addCityRow (como en el código viejo) ========= */
+(function restoreAddCityRowWrapper(){
+  // Si ya restauramos, no repetir
+  if (window.__ITBMO_ADDROW_WRAPPED__) return;
 
-  const __startObserver__ = ()=>{
+  // Guardar referencia a la implementación original
+  const __orig_addCityRow__ = (typeof addCityRow === 'function') ? addCityRow : null;
+
+  // Si no existe aún (orden de carga), reintentar cuando el DOM esté listo
+  function tryWrap(){
+    if (typeof addCityRow !== 'function') return false;
+    if (addCityRow.__wrapped_by_itbmo20__) return true;
+
+    const orig = addCityRow;
+
+    // Envolver manteniendo firma y comportamiento original
+    function addCityRowWrapped(){
+      // 1) Invocar exactamente la lógica original
+      const res = orig.apply(this, arguments);
+
+      // 2) Localizar la última fila creada e inyectar controles
+      try {
+        const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
+        if (list) {
+          // Tomar la última .city-row (es la recién creada por addCityRow)
+          const newRow = list.querySelector('.city-row:last-of-type');
+          if (newRow) addRowReorderControls(newRow);
+        }
+      } catch(_) {}
+
+      return res;
+    }
+    addCityRowWrapped.__wrapped_by_itbmo20__ = true;
+
+    // Reemplazar la referencia global (idéntico al patrón viejo)
+    window.addCityRow = addCityRowWrapped;
+
+    return true;
+  }
+
+  // Intento inmediato
+  let wrapped = tryWrap();
+
+  // Intento diferido en DOMContentLoaded si aún no está
+  if (!wrapped) {
+    document.addEventListener('DOMContentLoaded', ()=>{ tryWrap(); }, { once:true });
+  }
+
+  window.__ITBMO_ADDROW_WRAPPED__ = true;
+})();
+
+/* ========= Garantizar PRIMERA FILA si #city-list está vacío (patrón viejo) ========= */
+(function ensureFirstRowIfEmpty(){
+  // Reintentos breves por si el DOM y variables globales se hidratan asíncronamente
+  const MAX_TRIES = 20;  // ~2s a 100ms
+  const INTERVAL  = 100;
+  let tries = 0;
+
+  function attempt(){
     const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
     if (!list) return false;
 
-    // Controles para las filas existentes al cargar
-    list.querySelectorAll('.city-row').forEach(addRowReorderControls);
+    // Si no hay ninguna fila, creamos exactamente UNA — usando el addCityRow envuelto
+    const hasRow = !!list.querySelector('.city-row');
+    if (!hasRow && typeof addCityRow === 'function') {
+      addCityRow();
+      // Inyección de controles a la fila recién creada (por seguridad)
+      const newRow = list.querySelector('.city-row:last-of-type');
+      if (newRow) addRowReorderControls(newRow);
+    }
 
-    const obs = new MutationObserver((mutations)=>{
-      for (const m of mutations){
-        m.addedNodes && Array.from(m.addedNodes).forEach(node=>{
-          if (node && node.nodeType === 1){
-            if (node.classList && node.classList.contains('city-row')){
-              addRowReorderControls(node);
-            } else {
-              // Si agregan wrappers, busca descendientes .city-row
-              node.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
-            }
-          }
-        });
-      }
-    });
-
-    obs.observe(list, { childList: true, subtree: true });
-    window.__ITBMO_CITYROW_OBS__ = true;
-
-    /* Reinyecciones seguras ante eventos del planner */
-    try {
-      document.addEventListener('itbmo:destinationsSaved', ()=>{
-        const l = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
-        l?.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
-      });
-      document.addEventListener('itbmo:plannerReset', ()=>{
-        const l = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
-        l?.querySelectorAll?.('.city-row')?.forEach(addRowReorderControls);
-      });
-    } catch(_) {}
-
+    // Si ya hay filas (o se acaba de crear la primera), no hacemos nada más
     return true;
-  };
+  }
 
-  const __kickoff__ = ()=>{
-    // 1) Intento inmediato (por si ya existe #city-list)
-    if (__startObserver__()) return;
+  // Intento inmediato
+  if (attempt()) return;
 
-    // 2) Si aún no existe, reintenta unas veces (carrera con la creación de la primera fila)
-    let tries = 0;
-    const maxTries = 15;     // ~1.8s si interval=120ms
-    const interval = 120;    // ms
-    const timer = setInterval(()=>{
-      if (__startObserver__() || (++tries >= maxTries)) clearInterval(timer);
-    }, interval);
-  };
+  // Intentos diferidos
+  const t = setInterval(()=>{
+    if (attempt() || (++tries >= MAX_TRIES)) {
+      clearInterval(t);
+    }
+  }, INTERVAL);
 
+  // También al DOMContentLoaded por si la app hidrata tarde
   if (document.readyState === 'loading') {
-    // Espera a DOM listo
-    document.addEventListener('DOMContentLoaded', __kickoff__, { once: true });
-  } else {
-    __kickoff__();
+    document.addEventListener('DOMContentLoaded', ()=>{ attempt(); }, { once:true });
   }
 })();
 
