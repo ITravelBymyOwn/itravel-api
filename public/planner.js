@@ -2967,17 +2967,14 @@ function intentFromText(text){
 
 /* ============================================================
    SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.1
+   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.2
    Cambios clave en este patch:
-   • Doble etapa con el agente: INFO → PLANNER (timeouts/retry).
-   • Auroras: 1 por día, franja nocturna, no consecutivas (cap global).
-   • Overlaps nocturnos tabs-safe (no cambia "day"; respeta cruce).
-   • Limpieza de transporte urbano tras “Regreso a {city}”.
-   • Poda ligera de genéricos (desayuno/almuerzo/cena/día libre).
-   • Ordenamiento tabs-safe ponderando filas post-medianoche.
-   • Llamadas a optimización y validación sólo cuando agrega valor.
-   • Todas las funciones nuevas se registran con guardas para no
-     pisar implementaciones existentes en otras secciones.
+   • (LEGACY-RESTORE) Inserción de PRIMERA FILA idéntica a la lógica vieja:
+     - Si un día queda/está vacío, se siembra una fila inicial segura
+       antes del pipeline (respetando ventana perDay y defaults).
+     - La semilla NO pisa filas existentes, ni duplica si hay contenido.
+   • Mantengo 100 % la lógica INFO → PLANNER y todo el pipeline posterior.
+   • Resto de funciones intactas respecto a v77.1 (quirúrgico).
    ============================================================ */
 
 /* ------------------------------------------------------------------
@@ -3044,7 +3041,6 @@ if (typeof isOutOfTownRow !== 'function') {
 ------------------------------------------------------------------- */
 if (typeof normalizeDurationLabel !== 'function') {
   function normalizeDurationLabel(r) {
-    // Acepta "1h30m", "90m", "2 h", "1 h 15 m"...
     const raw = String(r?.duration || '').trim();
     let minutes = 0;
     let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
@@ -3070,7 +3066,6 @@ if (typeof normalizeAuroraWindow !== 'function') {
     const act = String(r?.activity || '');
     if (!/\bauroras?\b|\bnorthern\s+lights?\b/i.test(act)) return r;
 
-    // Ventana por defecto 20:15–00:15 (4h) si no hay datos plausibles
     const fallbackStart = '20:15';
     const fallbackEnd = '00:15';
 
@@ -3078,13 +3073,11 @@ if (typeof normalizeAuroraWindow !== 'function') {
     let e = __toMinHHMM__(r?.end);
     let d = String(r?.duration || '').trim();
 
-    // Si no hay tiempos válidos, aplica ventana por defecto
     if (s == null || e == null || e <= s) {
       s = __toMinHHMM__(fallbackStart);
       e = __toMinHHMM__(fallbackEnd) + 24 * 60; // cruza medianoche
     }
 
-    // Duración coherente si viene en blanco
     const dur = (function () {
       const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
       const mm = d.match(/(\d+)\s*m/i);
@@ -3093,7 +3086,6 @@ if (typeof normalizeAuroraWindow !== 'function') {
       return ((e - s) + 24 * 60) % (24 * 60) || 240; // 4h
     })();
 
-    // Ajusta a nocturna y marca _crossDay para sort tabs-safe
     const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
     const endHH = __toHHMMfromMin__(e % (24 * 60));
     const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
@@ -3413,7 +3405,42 @@ if (typeof validateRowsWithAgent !== 'function') {
 }
 
 /* ------------------------------------------------------------------
+   (LEGACY-RESTORE) Semilla de PRIMERA FILA idéntica a la lógica vieja
+   - Si un día está vacío (o sólo tiene placeholders inútiles), se inyecta
+     una fila segura inicial ANTES del pipeline.
+   - Respeta ventana perDay (DEFAULT_START/END) y no duplica si ya hay algo.
+------------------------------------------------------------------- */
+if (typeof __legacySeedFirstRowIfEmpty !== 'function') {
+  function __legacySeedFirstRowIfEmpty(city, day, rows) {
+    const list = Array.isArray(rows) ? rows.slice() : [];
+    // ¿Ya hay contenido real?
+    const hasReal = list.some(r => (r?.activity || '').trim());
+    if (hasReal) return list;
+
+    // Ventana segura
+    const pd = (cityMeta?.[city]?.perDay || []).find(x => x.day === day) || {};
+    const start = pd.start || (typeof DEFAULT_START !== 'undefined' ? DEFAULT_START : '08:30');
+    const end   = __addMinutesSafe__(start, 45);
+
+    // Semilla legacy “Desayuno” (no conflictúa con pipeline; prune mantiene 1 por día)
+    const seed = {
+      day,
+      start,
+      end,
+      activity: 'Desayuno',
+      from: `Hotel (${city})`,
+      to: 'Cafetería local',
+      transport: 'A pie',
+      duration: '45m',
+      notes: 'Semilla inicial (legacy) para arrancar el día.'
+    };
+    return [seed];
+  }
+}
+
+/* ------------------------------------------------------------------
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
+   + LEGACY: aseguro PRIMERA FILA antes del pipeline si el día está vacío
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
   const data = itineraries[city];
@@ -3431,6 +3458,9 @@ async function optimizeDay(city, day) {
     return act.includes('laguna azul') || act.includes('blue lagoon');
   });
 
+  // (LEGACY) Si no hay filas reales, siembra la primera fila antes de cualquier agente
+  let workingRows = __legacySeedFirstRowIfEmpty(city, day, rows);
+
   try {
     // 1) INFO
     const context = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
@@ -3445,6 +3475,9 @@ async function optimizeDay(city, day) {
 
     const unified = unifyRowsFormat(structured, city);
     let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
+
+    // Si el agente devolvió vacío, conservamos la semilla legacy
+    if (!finalRows.length && workingRows.length) finalRows = workingRows.slice();
 
     // === PIPELINE COHERENTE (mismas transformaciones que en 15.2) ===
     finalRows = finalRows.map(normalizeDurationLabel);
@@ -3467,7 +3500,8 @@ async function optimizeDay(city, day) {
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
-    // 🔧 Render inmediato si la ciudad optimizada es la activa (asegura visualización de la primera fila)
+
+    // Render inmediato si la ciudad optimizada es la activa
     try {
       if (typeof activeCity !== 'undefined' && activeCity === city) {
         if (typeof renderCityTabs === 'function') renderCityTabs();
@@ -3478,15 +3512,14 @@ async function optimizeDay(city, day) {
 
   } catch (e) {
     console.error('optimizeDay INFO→PLANNER error:', e);
-    // Fallback conservador: ordenar/limpiar lo que ya había
-    let safeRows = rows.map(r => __normalizeDayField__(city, r));
+    // Fallback conservador:
+    let safeRows = (rows.length ? rows : workingRows).map(r => __normalizeDayField__(city, r));
     safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing(city, safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
-    // 🔧 Render inmediato también en fallback
     try {
       if (typeof activeCity !== 'undefined' && activeCity === city) {
         if (typeof renderCityTabs === 'function') renderCityTabs();
