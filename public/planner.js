@@ -3903,58 +3903,18 @@ ${dayRows}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — RESTAURADA (patrón viejo + hook tardío)
-   Restauración quirúrgica:
-   - Envolvemos addCityRow (como en el código base).
-   - Hook tardío: si otra sección redefine addCityRow luego, lo re-envolvemos.
-   - Inyectamos controles de reorden en la fila recién creada.
+   ✅ Sin mover ni reordenar inputs (respeta el DOM original de addCityRow)
+   - Envolvemos addCityRow como en el código base.
+   - Hook tardío: si otra sección reasigna addCityRow, lo re-envolvemos.
+   - Inyectamos controles de reorden ↑/↓ en la fila recién creada.
    - Garantizamos la PRIMERA FILA si #city-list está vacío (reintentos suaves).
-   - ✅ ENFORCE ORDER: reordenamos los campos a [city, country, days, baseDate]
-     sin tocar la implementación original de addCityRow.
 ================================= */
 
-/* --- Reorden visual/DOM de campos para igualar el código base --- */
-function enforceFieldOrder(row){
-  if(!row || row.__orderEnforced__) return;
-  const city     = row.querySelector('.city');
-  const country  = row.querySelector('.country');
-  const days     = row.querySelector('.days');
-  // Puede existir .baseDate visible o tripleta .baseDay/.baseMonth/.baseYear
-  const baseDate = row.querySelector('.baseDate');
-  const baseDay   = row.querySelector('.baseDay');
-  const baseMonth = row.querySelector('.baseMonth');
-  const baseYear  = row.querySelector('.baseYear');
-
-  // Contenedor objetivo: el propio row
-  const host = row;
-
-  // Orden target: city → country → days → fecha
-  // Movemos en ese orden si existen (appendChild reubica sin clonar).
-  if(city)    host.appendChild(city.closest('.field') || city);
-  if(country) host.appendChild(country.closest('.field') || country);
-  if(days)    host.appendChild(days.closest('.field') || days);
-
-  if (baseDate){
-    // Asegurar placeholder correcto
-    if(!baseDate.placeholder || !/DD\/MM\/\d{0,4}/i.test(baseDate.placeholder)){
-      baseDate.placeholder = 'DD/MM/AAAA';
-    }
-    host.appendChild(baseDate.closest('.field') || baseDate);
-  } else if (baseDay || baseMonth || baseYear){
-    // Si usas tripleta, forzamos su bloque completo al final
-    const dateBlock = (baseDay||baseMonth||baseYear)?.closest('.field-group') ||
-                      (baseDay||baseMonth||baseYear)?.parentElement;
-    if(dateBlock) host.appendChild(dateBlock);
-  }
-
-  row.__orderEnforced__ = true;
-}
-
-/* --- Controles ↑/↓ con ubicación segura --- */
 function addRowReorderControls(row){
   if (!row || row.__reorderBound__) return; // evita duplicados
   row.__reorderBound__ = true;
 
-  // Inserta en .row-actions si existe; si no, crea uno.
+  // Usa contenedor dedicado si existe; si no, crea uno al final de la fila sin tocar inputs.
   let actions = row.querySelector('.row-actions');
   if (!actions) {
     actions = document.createElement('div');
@@ -3965,11 +3925,6 @@ function addRowReorderControls(row){
     actions.style.marginTop = '.25rem';
     row.appendChild(actions);
   }
-
-  const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display = 'flex';
-  ctrlWrap.style.gap = '.35rem';
-  ctrlWrap.style.alignItems = 'center';
 
   const up = document.createElement('button');
   up.textContent = '↑';
@@ -3983,9 +3938,8 @@ function addRowReorderControls(row){
   down.type = 'button';
   down.title = 'Bajar ciudad';
 
-  ctrlWrap.appendChild(up);
-  ctrlWrap.appendChild(down);
-  actions.appendChild(ctrlWrap);
+  actions.appendChild(up);
+  actions.appendChild(down);
 
   // 🆙 Subir ciudad
   up.addEventListener('click', ()=>{
@@ -4023,8 +3977,7 @@ function addRowReorderControls(row){
         if (list) {
           const newRow = list.querySelector('.city-row:last-of-type');
           if (newRow){
-            // ✅ Asegura orden correcto y controles
-            enforceFieldOrder(newRow);
+            // ⛔️ No tocamos el orden ni movemos inputs
             addRowReorderControls(newRow);
           }
         }
@@ -4050,7 +4003,7 @@ function addRowReorderControls(row){
       set(v){ _latest = wrap(v); }
     });
   } catch(_){
-    // Si defineProperty falla, reintentos periódicos:
+    // Si defineProperty falla, reintentos periódicos sin bloquear
     const maxTries = 40, interval = 100;
     let tries = 0, t = setInterval(()=>{
       if (typeof window.addCityRow === 'function') {
@@ -4080,7 +4033,7 @@ function addRowReorderControls(row){
       window.addCityRow();
       const newRow = list.querySelector('.city-row:last-of-type');
       if (newRow){
-        enforceFieldOrder(newRow);
+        // Solo agregamos controles; NO reubicamos inputs
         addRowReorderControls(newRow);
       }
     }
