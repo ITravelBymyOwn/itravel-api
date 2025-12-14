@@ -2939,7 +2939,8 @@ if (typeof __isNightRow__ !== 'function') {
     if (/auroras?|northern\s*lights/.test(act)) return true;
     if (/noche|nocturn/.test(notes)) return true;
     if (sMin != null && sMin >= 18 * 60) return true;
-    if (eMin != null && e >= 24 * 60) return true;
+    // Considera "noche" si el fin cae en madrugada (≤ 05:00)
+    if (eMin != null && eMin <= 5 * 60) return true;
     return false;
   }
 }
