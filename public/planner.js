@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v78
-   Base: v77
+   ITRAVELBYMYOWN · PLANNER v77
+   Base: v76
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -9,7 +9,6 @@
 
 /* ==============================
    SECCIÓN 1 · Helpers / Estado
-   (revisada para coherencia con secciones 3–21 y API /info-planner)
 ================================= */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
@@ -52,14 +51,13 @@ let plannerState = {
 };
 
 // ⚡ Performance toggles (optimizaciones IA)
-const ENABLE_VALIDATOR = false;      // ⬅️ si quieres doble validación IA, pon true (sección 14)
-const MAX_CONCURRENCY  = 2;          // ⬅️ sube a 3 si tu API lo tolera (usado por runWithConcurrency)
+const ENABLE_VALIDATOR = false;      // ⬅️ si quieres doble validación IA, pon true
+const MAX_CONCURRENCY  = 2;          // ⬅️ sube a 3 si tu API lo tolera
 
 // 🧵 Helper: ejecuta tareas con concurrencia limitada
 async function runWithConcurrency(taskFns, limit = MAX_CONCURRENCY){
-  const queue = Array.isArray(taskFns) ? [...taskFns] : [];
-  if(queue.length === 0) return;
-  const workers = Array.from({length: Math.max(1, Math.min(limit, queue.length))}, async ()=>{
+  const queue = [...taskFns];
+  const workers = Array.from({length: Math.min(limit, queue.length)}, async ()=> {
     while (queue.length){
       const fn = queue.shift();
       try { await fn(); } catch(e){ console.warn('Task error:', e); }
@@ -70,7 +68,6 @@ async function runWithConcurrency(taskFns, limit = MAX_CONCURRENCY){
 
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
-   (alineado con flujo de hotel/transporte y Info Chat externo)
 ================================= */
 const tone = {
   hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
@@ -99,9 +96,6 @@ const tone = {
 /* ==============================
    SECCIÓN 3 · Referencias DOM
    (v55.1 añade soporte al botón flotante del Info Chat)
-   + Ajustes quirúrgicos:
-     - normKey más robusto (multi-idioma, sin signos)
-     - Stubs defensivos para funciones heurísticas ausentes
 ================================= */
 const $cityList = qs('#city-list');
 const $addCity  = qs('#add-city-btn');
@@ -158,13 +152,13 @@ function inAuroraSeasonDynamic(baseDateStr){
   try{
     if(!baseDateStr) return true; // sin fecha → asumimos plausible
     // Formato estándar del planner: DD/MM/AAAA
-    const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(String(baseDateStr).trim());
+    const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(baseDateStr.trim());
     if(m){
       const month = parseInt(m[2], 10);
       return AURORA_SEASON_MONTHS.includes(month);
     }
     // Fallback robusto si llegara otro formato: intenta inferir el mes
-    const parts = String(baseDateStr).split(/[\/\-]/).map(x=>parseInt(x,10)).filter(Number.isFinite);
+    const parts = baseDateStr.split(/[\/\-]/).map(x=>parseInt(x,10)).filter(Number.isFinite);
     if(parts.length >= 2){
       const [a,b] = parts;
       const monthGuess = (a > 12 && b >=1 && b<=12) ? b : (a>=1 && a<=12 ? a : b);
@@ -187,85 +181,56 @@ function getHeuristicDayTripContext(city){
   };
 }
 
-// 🧭 Normalizador de claves para dedupe (alineado con secciones 13 y 15)
+// 🧭 Normalizador de claves para dedupe
 function normKey(s){
-  return String(s||'')
-    .normalize('NFD').replace(/\p{Diacritic}/gu,'')
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
-/* ——— Stubs defensivos (evitan rupturas si faltan helpers en el build) ——— */
-if (typeof getCoordinatesForCity !== 'function') {
-  // Devuelve null de forma segura; las secciones 12/15 manejan ausencia de coords.
-  function getCoordinatesForCity(/* city */){ return null; }
+  return String(s||'').normalize('NFD').replace(/\p{Diacritic}/gu,'')
+    .toLowerCase().replace(/\s+/g,' ').trim();
 }
 
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
-   (ajustes quirúrgicos p/ coherencia con secciones 12, 16 y 21)
-   - Resistente a dobles timers / rehidrataciones
-   - Mantiene API de setChatBusy / setInfoChatBusy usada por Astra
-   - Micro-mejoras de accesibilidad (aria-live)
 ================================= */
 function chatMsg(html, who='ai'){
   if(!html) return;
   const div = document.createElement('div');
   div.className = `chat-message ${who==='user'?'user':'ai'}`;
-  div.setAttribute('aria-live','polite');
   div.innerHTML = String(html).replace(/\n/g,'<br>');
-  if($chatM){
-    $chatM.appendChild(div);
-    $chatM.scrollTop = $chatM.scrollHeight;
-  }
+  $chatM.appendChild(div);
+  $chatM.scrollTop = $chatM.scrollHeight;
   return div;
 }
 
 let thinkingTimer = null;
 function showThinking(on){
   if(!$thinkingIndicator) return;
-
-  // Asegura 3 puntos si el markup no está montado
-  if(!$thinkingIndicator.querySelector('span')){
-    $thinkingIndicator.innerHTML = '<span>•</span><span>•</span><span>•</span>';
-  }
-
   if(on){
-    if($thinkingIndicator.style.display==='flex') return; // ya visible
+    if($thinkingIndicator.style.display==='flex') return;
     $thinkingIndicator.style.display = 'flex';
-    const dots = $thinkingIndicator.querySelectorAll('span');
+    let dots = $thinkingIndicator.querySelectorAll('span');
     let idx = 0;
-    if(thinkingTimer) clearInterval(thinkingTimer);
     thinkingTimer = setInterval(()=>{
       dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
       idx = (idx+1)%3;
     }, 400);
   } else {
-    if(thinkingTimer){
-      clearInterval(thinkingTimer);
-      thinkingTimer = null;
-    }
+    clearInterval(thinkingTimer);
     $thinkingIndicator.style.display = 'none';
   }
 }
 
 function setChatBusy(on){
-  if($chatI) $chatI.disabled = !!on;
-  if($send)  $send.disabled  = !!on;
-  showThinking(!!on);
+  if($chatI) $chatI.disabled = on;
+  if($send)  $send.disabled  = on;
+  showThinking(on);
 }
 
 /* ==============================
    SECCIÓN 4B · Info Chat UI (mejorada estilo ChatGPT)
-   (coherente con Sección 21: __ensureInfoAgentClient__/bindInfoChatListeners)
 ================================= */
 function infoChatMsg(html, who='ai'){
   if(!html) return;
   const div = document.createElement('div');
   div.className = `chat-message ${who==='user'?'user':'ai'}`;
-  div.setAttribute('aria-live','polite');
   // ✅ Soporte visual para saltos de línea en el mensaje
   div.innerHTML = String(html).replace(/\n/g,'<br>');
   const container = $infoMessages || qs('#info-chat-messages');
@@ -284,36 +249,32 @@ $infoTyping.innerHTML = `<span class="dot">•</span><span class="dot">•</span
 function setInfoChatBusy(on){
   const input = $infoInput || qs('#info-chat-input');
   const send  = $infoSend  || qs('#info-chat-send');
-  if(input) input.disabled = !!on;
-  if(send)  send.disabled  = !!on;
+  if(input) input.disabled = on;
+  if(send)  send.disabled  = on;
 
   const container = $infoMessages || qs('#info-chat-messages');
-  if(!container) return;
-
-  if(on){
-    if(!container.contains($infoTyping)){
-      container.appendChild($infoTyping);
-      container.scrollTop = container.scrollHeight;
-    }
-    const dots = $infoTyping.querySelectorAll('span.dot');
-    let idx = 0;
-    if(infoTypingTimer) clearInterval(infoTypingTimer);
-    infoTypingTimer = setInterval(()=>{
-      dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
-      idx = (idx+1)%3;
-    }, 400);
-  } else {
-    if(infoTypingTimer){
+  if(container){
+    if(on){
+      if(!container.contains($infoTyping)){
+        container.appendChild($infoTyping);
+        container.scrollTop = container.scrollHeight;
+      }
+      let dots = $infoTyping.querySelectorAll('span.dot');
+      let idx = 0;
+      infoTypingTimer = setInterval(()=>{
+        dots.forEach((d,i)=> d.style.opacity = i===idx ? '1' : '0.3');
+        idx = (idx+1)%3;
+      }, 400);
+    } else {
       clearInterval(infoTypingTimer);
-      infoTypingTimer = null;
-    }
-    if(container.contains($infoTyping)){
-      container.removeChild($infoTyping);
+      if(container.contains($infoTyping)){
+        container.removeChild($infoTyping);
+      }
     }
   }
 }
 
-// ✅ Mejora UX del textarea (coherente con Sección 21)
+// ✅ Mejora UX del textarea
 if($infoInput){
   $infoInput.setAttribute('rows','1');
   $infoInput.style.overflowY = 'hidden';
@@ -339,83 +300,43 @@ if($infoInput){
   });
 }
 
-// Limpieza de timers al salir (defensivo ante SPA / rehidratación)
-window.addEventListener('beforeunload', ()=>{
-  if(thinkingTimer){ clearInterval(thinkingTimer); thinkingTimer = null; }
-  if(infoTypingTimer){ clearInterval(infoTypingTimer); infoTypingTimer = null; }
-});
-
 /* ==============================
    SECCIÓN 5 · Fechas / horas
-   (ajustes quirúrgicos p/ coherencia con 6, 7, 9, 10, 13, 15, 16, 20, 21)
-   - Define DEFAULT_START/END si no existen (fallback 08:30–19:00)
-   - Más robusto el formateo DMY (sin romper caret en inputs básicos)
-   - Utilidades de fecha/hora usadas por render, intake y generación
 ================================= */
-
-// Fallbacks suaves (evita redefinir si ya existen en el bundle)
-if (typeof DEFAULT_START === 'undefined') { var DEFAULT_START = '08:30'; }
-if (typeof DEFAULT_END   === 'undefined') { var DEFAULT_END   = '19:00'; }
-
 function autoFormatDMYInput(el){
   // 🆕 Placeholder visible + tooltip (coherente con todo el planner)
   el.placeholder = 'DD/MM/AAAA';
   el.title = 'Formato: DD/MM/AAAA';
-
   el.addEventListener('input', ()=>{
-    // Conserva sólo dígitos para enmascarar, sin tirar el caret en casos simples
-    const raw = el.value;
-    const digits = raw.replace(/\D/g,'').slice(0,8);
-
-    if(digits.length === 0){
-      el.value = '';
-      return;
+    const v = el.value.replace(/\D/g,'').slice(0,8);
+    if(v.length===8){
+      // DD/MM/AAAA
+      el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
+    } else {
+      el.value = v;
     }
-
-    if(digits.length <= 2){
-      el.value = digits;
-      return;
-    }
-    if(digits.length <= 4){
-      el.value = `${digits.slice(0,2)}/${digits.slice(2)}`;
-      return;
-    }
-    // DD/MM/AAAA
-    el.value = `${digits.slice(0,2)}/${digits.slice(2,4)}/${digits.slice(4,8)}`;
   });
 }
-
 function parseDMY(str){
   if(!str) return null;
-  const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(String(str).trim());
+  const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(str.trim());
   if(!m) return null;
   const d = new Date(+m[3], (+m[2]-1), +m[1]);
-  if(d.getFullYear()!==+m[3] || d.getMonth()!==(+m[2]-1) || d.getDate()!==+m[1]) return null;
+  if(d.getFullYear()!=+m[3] || d.getMonth()!=+m[2]-1 || d.getDate()!=+m[1]) return null;
   return d;
 }
-
 function formatDMY(d){
-  if(!(d instanceof Date)) return '';
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
   const yy = d.getFullYear();
   return `${dd}/${mm}/${yy}`;
 }
-
-function addDays(d, n){
-  const x = new Date(d.getTime());
-  x.setDate(x.getDate()+n);
-  return x;
-}
-
+function addDays(d, n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
 function addMinutes(hhmm, min){
-  const base = (hhmm && /^\d{1,2}:\d{2}$/.test(hhmm)) ? hhmm : DEFAULT_START;
-  const [H,M] = base.split(':').map(n=>parseInt(n||'0',10));
-  const dt = new Date(2000,0,1, isFinite(H)?H:8, isFinite(M)?M:30, 0);
-  dt.setMinutes(dt.getMinutes() + (isFinite(min)?min:0));
-  const h = String(dt.getHours()).padStart(2,'0');
-  const m = String(dt.getMinutes()).padStart(2,'0');
-  return `${h}:${m}`;
+  const [H,M] = (hhmm||DEFAULT_START).split(':').map(n=>parseInt(n||'0',10));
+  const d = new Date(2000,0,1,H||0,M||0,0);
+  d.setMinutes(d.getMinutes()+min);
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
 /* ==============================
@@ -426,20 +347,19 @@ function addMinutes(hhmm, min){
    - Devuelve siempre una lista completa para todos los días.
 ================================= */
 function getEffectivePerDay(city, totalDays){
-  const baseStart = DEFAULT_START || '08:30';
-  const baseEnd   = DEFAULT_END   || '19:00';
+  const baseStart = '08:30';
+  const baseEnd   = '19:00';
   const meta = cityMeta[city] || {};
   const perDay = Array.isArray(meta.perDay) ? meta.perDay.slice() : [];
   const map = new Map(perDay.map(x=>[x.day, {start:x.start||baseStart, end:x.end||baseEnd}]));
 
-  const count = Math.max(0, parseInt(totalDays||0,10)) || 0;
   const result = [];
-  for(let d=1; d<=count; d++){
+  for(let d=1; d<=totalDays; d++){
     if(map.has(d)){
       const val = map.get(d);
-      result.push({day:d, start: val.start || baseStart, end: val.end || baseEnd});
+      result.push({day:d, start:val.start||baseStart, end:val.end||baseEnd});
     } else {
-      result.push({day:d, start: baseStart, end: baseEnd});
+      result.push({day:d, start:baseStart, end:baseEnd});
     }
   }
   return result;
@@ -447,13 +367,8 @@ function getEffectivePerDay(city, totalDays){
 
 /* ==============================
    SECCIÓN 6 · UI ciudades (sidebar)
-   (ajustes quirúrgicos p/ coherencia con 7, 8, 10, 20 y 21)
-   - makeHoursBlock acepta perDay opcional para precargar horarios efectivos
-   - Mantiene placeholders HH:MM y guía de 24h
-   - baseDate con autoFormatDMYInput (DD/MM/AAAA)
-   - Sin validaciones extra aquí (se validan en Sección 21)
 ================================= */
-function makeHoursBlock(days, perDay = []){
+function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
 
@@ -476,20 +391,17 @@ function makeHoursBlock(days, perDay = []){
   for(let d=1; d<=days; d++){
     const row = document.createElement('div');
     row.className = 'hours-day';
-    const preset = perDay.find(x=>x?.day===d) || {};
-    const startVal = preset.start || '';
-    const endVal   = preset.end   || '';
     row.innerHTML = `
       <span>Día ${d}</span>
-      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM" value="${startVal}">
-      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM" value="${endVal}">
+      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM">
+      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM">
     `;
     wrap.appendChild(row);
   }
   return wrap;
 }
 
-function addCityRow(pref={city:'',country:'',days:'',baseDate:'',perDay:[]}){
+function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
@@ -503,14 +415,11 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:'',perDay:[]}){
         <small class="date-format">DD/MM/AAAA</small>
       </div>
     </label>
-    <button class="remove" type="button" aria-label="Eliminar ciudad">✕</button>
+    <button class="remove" type="button">✕</button>
   `;
-
-  // Formato DD/MM/AAAA (coherente con Sección 21)
   const baseDateEl = qs('.baseDate', row);
   autoFormatDMYInput(baseDateEl);
 
-  // Bloque de horarios por día
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
   row.appendChild(hoursWrap);
@@ -518,11 +427,10 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:'',perDay:[]}){
   const daysSelect = qs('.days', row);
   if(pref.days){
     daysSelect.value = String(pref.days);
-    const tmp = makeHoursBlock(pref.days, Array.isArray(pref.perDay)?pref.perDay:[]).children;
+    const tmp = makeHoursBlock(pref.days).children;
     Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
   }
 
-  // Cambio de número de días → reconstruir horarios
   daysSelect.addEventListener('change', ()=>{
     const n = Math.max(0, parseInt(daysSelect.value||0,10));
     hoursWrap.innerHTML='';
@@ -532,38 +440,38 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:'',perDay:[]}){
     }
   });
 
-  // Eliminar fila de ciudad (Sección 7 hará limpieza de estado al guardar)
   qs('.remove',row).addEventListener('click', ()=> row.remove());
-
   $cityList.appendChild(row);
 }
 
+/* =========================================================
+   ITRAVELBYMYOWN · PLANNER v56 (parte 2/3)
+   Base: v55.1
+   Cambios mínimos:
+   - Bloqueo sidebar y botón reset al guardar destinos.
+   - Bloqueo del botón flotante Info Chat.
+========================================================= */
+
 /* ==============================
    SECCIÓN 7 · Guardar destinos
-   (ajustada quirúrgicamente p/ coherencia con 8–21 y API: 
-    • no habilita $start aquí (lo hace Sección 21 tras validar),
-    • país con letras Unicode,
-    • mantiene sync con plannerState y bloqueo de UI)
 ================================= */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const list = [];
 
   rows.forEach(r=>{
-    const city     = (qs('.city',r)?.value||'').trim();
-    // 🔤 Acepta letras Unicode + espacios (coherente con Sección 20)
-    const country  = (qs('.country',r)?.value||'').trim().replace(/[^\p{L}\s]/gu,'');
-    const daysVal  = qs('.days',r)?.value;
+    const city     = qs('.city',r).value.trim();
+    const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
+    const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
-    const baseDate = (qs('.baseDate',r)?.value||'').trim();
+    const baseDate = qs('.baseDate',r).value.trim();
 
     if(!city) return;
 
-    // 🕒 Ventanas por día desde UI (si no hay, default)
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = qs('.start',hd)?.value || DEFAULT_START;
-      const end   = qs('.end',hd)?.value   || DEFAULT_END;
+      const start = qs('.start',hd).value || DEFAULT_START;
+      const end   = qs('.end',hd).value   || DEFAULT_END;
       perDay.push({ day: idx+1, start, end });
     });
     if(perDay.length===0){
@@ -579,10 +487,9 @@ function saveDestinations(){
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate:null };
 
     if(prevDays !== days){
-      // Reconstruir matriz por día para que coincida EXACTAMENTE con "days"
-      const fresh = {};
-      for(let d=1; d<=days; d++){ fresh[d] = []; }
-      itineraries[city].byDay = fresh;
+      // Reconstruir la matriz por día para que coincida EXACTAMENTE con "days"
+      itineraries[city].byDay = {};
+      for(let d=1; d<=days; d++){ itineraries[city].byDay[d] = []; }
 
       // Marcar para que el agente regenere con el nuevo total de días
       if (typeof plannerState !== 'undefined') {
@@ -623,7 +530,7 @@ function saveDestinations(){
     });
   });
 
-  // 🧽 Limpia ciudades eliminadas
+  // Limpia ciudades eliminadas
   Object.keys(itineraries).forEach(c=>{ 
     if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; 
   });
@@ -631,12 +538,11 @@ function saveDestinations(){
     if(!savedDestinations.find(x=>x.city===c)) delete cityMeta[c]; 
   });
 
-  // 🔁 Actualiza Tabs/Itinerario (Sección 8/9)
   renderCityTabs();
 
-  // ⛔ NO habilitar aquí el botón de “Iniciar planificación”.
-  //    Se controla en Sección 21 tras validar datos y fechas.
-  if ($start) $start.disabled = true;
+  // ✅ Activar/desactivar botón de iniciar planificación
+  $start.disabled = savedDestinations.length === 0;
+  hasSavedOnce = true;
 
   // ✅ Habilitar botón "Reiniciar" solo si hay destinos guardados
   if ($resetBtn) {
@@ -650,13 +556,13 @@ function saveDestinations(){
   // ✅ Bloquear sidebar
   if ($sidebar) $sidebar.classList.add('disabled');
 
-  // ✅ Bloquear botón flotante Info Chat (se reactivará tras reset o cuando corresponda)
+  // ✅ Bloquear botón flotante Info Chat
   if ($infoFloating) {
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
   }
 
-  // 🧠 ACTUALIZAR PLANNERSTATE — bloque coherente con 10/12/16/19/21
+  // 🧠 ACTUALIZAR PLANNERSTATE — Bloque ya existente
   if (typeof plannerState !== 'undefined') {
     plannerState.destinations = [...savedDestinations];
     plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
