@@ -3458,6 +3458,7 @@ async function optimizeDay(city, day) {
    - Rebalanceos y optimizaciones llaman a optimizeDay (que ya usa INFO→PLANNER)
    - Respeta y registra preferencias/condiciones del usuario
    - Patch v77.3 (quirúrgico): fix en render tras mover actividades
+   - PATCH v77.4: refrescos de UI tras add/remove city + limpieza de estados residuales
 ================================= */
 
 /* Wrapper global para Info Agent usando API v43 (si no existe) */
@@ -3478,7 +3479,6 @@ if (typeof callInfoAgent !== 'function') {
       const resp = await callApiChat('info', { context: baseContext }, { timeoutMs: 28000, retries: 1 });
       const parsed = safeParseApiText(resp?.text ?? resp);
 
-      // Preferimos texto llano si viene; si no, serializamos el JSON de research de forma amigable.
       if (typeof parsed === 'string') return parsed;
       if (parsed && typeof parsed.text === 'string') return parsed.text;
       return 'He obtenido la información. Si quieres, puedo usarla para ajustar tu itinerario.';
@@ -3818,6 +3818,12 @@ async function onSend(){
     const sel = lastRow?.querySelector('.days');
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
     saveDestinations();
+    // PATCH v77.4 — refresco de UI inmediato tras agregar
+    try {
+      renderCityTabs();
+      setActiveCity(name);
+      renderCityItinerary(name);
+    } catch(_){}
     chatMsg(
       `✅ Añadí <strong>${name}</strong>. Dime tu <strong>hotel/zona</strong> (nombre, zona, dirección o link) y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
       'ai'
@@ -3831,7 +3837,21 @@ async function onSend(){
     savedDestinations = savedDestinations.filter(x=>x.city!==name);
     delete itineraries[name];
     delete cityMeta[name];
-    renderCityTabs();
+
+    // PATCH v77.4 — limpieza de estados residuales coherentes
+    try {
+      if (plannerState?.forceReplan && name in plannerState.forceReplan) delete plannerState.forceReplan[name];
+      if (plannerState?.lightDayTarget && name in plannerState.lightDayTarget) delete plannerState.lightDayTarget[name];
+      if (plannerState?.preferences && plannerState.preferences?.lastAuroraCity === name) delete plannerState.preferences.lastAuroraCity;
+    } catch(_){}
+
+    try {
+      renderCityTabs();
+      const firstCity = savedDestinations?.[0]?.city;
+      if (firstCity) { setActiveCity(firstCity); renderCityItinerary(firstCity); }
+      else if (typeof $itWrap!=='undefined') { $itWrap.innerHTML=''; }
+    } catch(_){}
+
     chatMsg(`🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`, 'ai');
     return;
   }
@@ -4645,5 +4665,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   bindReset();
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
 
 
