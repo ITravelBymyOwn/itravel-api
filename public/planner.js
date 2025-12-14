@@ -50,7 +50,7 @@ function addMinutes(hhmm, add){
   return toHHMM(base + (Number(add)||0));
 }
 
-/* Fechas: DD/MM/AAAA ↔ Date (usado en Sec.21) */
+/* Fechas: DD/MM/AAAA ↔ Date (usado en Sec.9/21) */
 function parseDMY(str){
   const m = String(str||'').match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if(!m) return null;
@@ -64,6 +64,10 @@ function fmtDMY(dt){
   const y = dt.getFullYear();
   return `${d}/${m}/${y}`;
 }
+
+/* 🔧 Aliases seguros para Sec.9 */
+function addDays(dt, n){ const d=new Date(dt); d.setDate(d.getDate()+Number(n||0)); return d; }
+function formatDMY(dt){ return fmtDMY(dt); }
 
 /* Pequeño sistema de tonos (usado por Sec.16 en mensajes de arranque) */
 const tone = window.tone || {
@@ -117,8 +121,8 @@ function __buildCityRow(pref={}){
   row.innerHTML = `
     <input class="city"      type="text"  placeholder="Ciudad" />
     <input class="country"   type="text"  placeholder="País" />
-    <input class="baseDate"  type="text"  placeholder="DD/MM/AAAA" />
     <input class="days"      type="number" min="1" step="1" placeholder="Días" />
+    <input class="baseDate"  type="text"  placeholder="DD/MM/AAAA" />
     <button type="button" class="remove btn ghost" aria-label="Eliminar ciudad">✕</button>
   `;
   // Prefill no bloqueante
@@ -127,12 +131,9 @@ function __buildCityRow(pref={}){
   if(pref.baseDate) row.querySelector('.baseDate').value = pref.baseDate;
   if(pref.days)     row.querySelector('.days').value     = String(pref.days);
 
-  // ⚠️ No añadimos listeners aquí: Sec.21 gobierna habilitación y guardado.
-  // Solo damos remove local para UX básica (no interfiere con Sec.21).
+  // Remove local (no interfiere con Sec.21)
   const $rm = qs('.remove', row);
-  $rm?.addEventListener('click', ()=>{
-    row.remove();
-  });
+  $rm?.addEventListener('click', ()=>{ row.remove(); });
 
   return row;
 }
@@ -152,6 +153,7 @@ function addCityRow(pref={}){
   return row;
 }
 
+
 /* ==============================
    SECCIÓN 4 · Persistencia base + tabs/itinerary (stubs seguros)
    — Mantiene contratos mínimos usados en 16–21
@@ -166,17 +168,44 @@ function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const out = [];
   rows.forEach(r=>{
-    const city  = (qs('.city', r)?.value||'').trim();
+    const city    = (qs('.city', r)?.value||'').trim();
     const country = (qs('.country', r)?.value||'').trim();
-    const days = parseInt((qs('.days', r)?.value||'0'), 10) || 0;
-    const base = (qs('.baseDate', r)?.value||'').trim();
-    if(city){ out.push({ city, country, days, baseDate: base }); __ensureCityScaffold(city); }
+    const days    = parseInt((qs('.days', r)?.value||'0'), 10) || 0;
+    const base    = (qs('.baseDate', r)?.value||'').trim();
+
+    if(city){
+      out.push({ city, country, days, baseDate: base });
+      __ensureCityScaffold(city);
+
+      // 🔐 Sincroniza baseDate en ambos estados
+      if(typeof base === 'string' && base){
+        cityMeta[city].baseDate = base;
+        if(itineraries[city]) itineraries[city].baseDate = base;
+      }
+
+      // 🧱 Asegura estructura de días según “days”
+      if (typeof ensureDays === 'function') {
+        // Algunas definiciones leen savedDestinations, por lo que
+        // pre-sincronizamos un espejo temporal para este city.
+        const tmpSaved = out.map(d=>({ ...d }));
+        const prevSaved = savedDestinations;
+        window.savedDestinations = tmpSaved;
+        ensureDays(city);
+        window.savedDestinations = prevSaved;
+      }
+    }
   });
+
+  // Estado global definitivo
   window.savedDestinations = out;
 
-  // Sincroniza plannerState (no rompe lógicas posteriores)
+  // Sincroniza plannerState
   if(!plannerState) window.plannerState = {};
   plannerState.destinations = out.map(d=>({ city:d.city, country:d.country, baseDate:d.baseDate, days:d.days }));
+
+  // 📣 Notifica a quien escuche (Sec.8/21 re-render tabs, etc.)
+  try { document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', { detail:{ list: out } })); } catch(_){}
+
   return out;
 }
 
@@ -199,6 +228,7 @@ function renderCityTabs(){
 function setActiveCity(city){
   window.activeCity = city || null;
   // marcador visual mínimo (no interfiere con estilos existentes)
+  if(!$tabs) __wireBaseRefs__();
   qsa('#city-tabs .tab').forEach(t=>{
     if(t.textContent === city) t.classList.add('active'); else t.classList.remove('active');
   });
@@ -735,10 +765,12 @@ if (typeof window.buildIntakeLite !== 'function') {
 ================================= */
 function setActiveCity(name){
   if(!name) return;
+  if(!$tabs) __wireBaseRefs__();
+  const elTabs = $tabs;
   activeCity = name;
 
   // Actualiza estado visual + ARIA
-  qsa('.city-tab', $tabs).forEach(b=>{
+  qsa('.city-tab', elTabs).forEach(b=>{
     const isActive = (b.dataset.city === name);
     b.classList.toggle('active', isActive);
     b.setAttribute('aria-selected', isActive ? 'true' : 'false');
@@ -763,6 +795,7 @@ function __renderCityTabButton__(city, isActive){
 
   // Navegación con teclado (← → Home End)
   b.addEventListener('keydown', (e)=>{
+    if(!$tabs) __wireBaseRefs__();
     const tabs = qsa('.city-tab', $tabs);
     const idx = tabs.findIndex(x => x === b);
     if(idx === -1) return;
@@ -786,6 +819,9 @@ function __renderCityTabButton__(city, isActive){
 }
 
 function renderCityTabs(){
+  if(!$tabs) __wireBaseRefs__();
+  if(!$tabs) return;
+
   const prev = activeCity;
 
   // Contenedor con roles ARIA
@@ -808,7 +844,8 @@ function renderCityTabs(){
     renderCityItinerary(valid);
   }else{
     activeCity = null;
-    $itWrap.innerHTML = '';
+    if(!$itWrap) __wireBaseRefs__();
+    if($itWrap) $itWrap.innerHTML = '';
   }
 }
 
@@ -826,6 +863,9 @@ document.addEventListener('itbmo:plannerReset', ()=>{
 ================================= */
 function renderCityItinerary(city){
   if(!city || !itineraries[city]) return;
+  if(!$itWrap) __wireBaseRefs__();
+  if(!$itWrap) return;
+
   const data = itineraries[city];
   const days = Object.keys(data.byDay||{}).map(n=>+n).sort((a,b)=>a-b);
 
@@ -838,7 +878,7 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
-  // 🔎 Utilidades de display (compatibles con normalizaciones de 13–15)
+  // 🔎 Utilidades de display
   function isAuroraActivity(txt){
     return /\b(aurora|northern\s+lights?)\b/i.test(String(txt||''));
   }
@@ -862,16 +902,12 @@ function renderCityItinerary(city){
   function formatDurationForDisplay(val){
     if(val == null) return '';
     const s = String(val).trim();
-
-    // Mantén formatos ya normalizados por el pipeline (e.g., "1h30m", "3h")
-    if (/^\d+h(?:[0-5]\d m?)?$/i.test(s) || /^\d+h$/i.test(s)) return s.replace(/\s+/g,''); // "1h30m", "3h"
+    if (/^\d+h(?:[0-5]\d m?)?$/i.test(s) || /^\d+h$/i.test(s)) return s.replace(/\s+/g,'');
     if (/^\d+m$/i.test(s)) {
       const mins = parseInt(s,10);
       return minutesToHhMmLabel(mins);
     }
-    // Duraciones numéricas "90" → 1h30m
     if (/^\d+$/.test(s)) return minutesToHhMmLabel(parseInt(s,10));
-    // Deja pasar otros (p.ej. "45m", "2h00m", "aprox. 1h")
     return s;
   }
 
@@ -894,23 +930,18 @@ function renderCityItinerary(city){
     const tb = qs('tbody', sec);
 
     (data.byDay[dayNum]||[]).forEach(r=>{
-      // Limpiezas suaves de display (no tocan estado):
       const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i, '').trim();
-
       const { clean: cleanNotes, badge } = splitValidBadge(r.notes||'');
       const tr = document.createElement('tr');
 
-      // 🌌 Highlight visual mínimo para auroras (no intrusivo)
       if (isAuroraActivity(cleanActivity)) tr.classList.add('aurora-row');
 
-      // Badge “valid:” cuando existe
       const notesCell = document.createElement('td');
       notesCell.innerHTML = cleanNotes || '';
       if (badge){
         const b = document.createElement('span');
         b.className = 'badge valid';
         b.textContent = badge;
-        // pequeño separador si ya hay notas
         if (cleanNotes) notesCell.insertAdjacentText('afterbegin', '');
         notesCell.appendChild(document.createTextNode(cleanNotes ? ' ' : ''));
         notesCell.insertAdjacentElement('afterbegin', b);
