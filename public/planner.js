@@ -538,19 +538,6 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:'',perDay:[]}){
   $cityList.appendChild(row);
 }
 
-/* ———— Ajustes quirúrgicos para asegurar la “primera fila” ————
-   - Enlace idempotente del botón + Agregar ciudad
-   - Auto-inserción de una fila inicial si no existe
---------------------------------------------------------------- */
-if ($addCity && !$addCity.dataset.bound) {
-  $addCity.addEventListener('click', ()=> addCityRow());
-  $addCity.dataset.bound = '1';
-}
-if ($cityList && !$cityList.querySelector('.city-row')) {
-  // Crea UNA fila inicial vacía (no duplica si otra sección también lo hace)
-  addCityRow();
-}
-
 /* ==============================
    SECCIÓN 7 · Guardar destinos
    (ajustada quirúrgicamente p/ coherencia con 8–21 y API: 
