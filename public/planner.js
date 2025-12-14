@@ -1441,50 +1441,81 @@ Eres "Astra", asistente informativo de viajes.
 
 /* ==============================
    SECCIÓN 13 · Merge / utilidades
+   (alineada con 15/16/17/18/19/20/21 y API INFO→PLANNER)
 ================================= */
+
+/* Dedupe fuerte por (day|start|end|activity_norm) */
 function dedupeInto(arr, row){
-  // 🔧 Mejora: normalización robusta para evitar duplicados multi-idioma
+  // 🔧 Normalización robusta para evitar duplicados multi-idioma
   const key = o => [
-    o.day,
+    Number(o.day) || 1,
     o.start || '',
     o.end   || '',
-    normKey(o.activity || '')
+    typeof normKey === 'function' ? normKey(o.activity || '') : String(o.activity||'').toLowerCase().trim()
   ].join('|');
-  const has = arr.find(x=>key(x)===key(row));
-  if(!has) arr.push(row);
+
+  const has = arr.find(x => key(x) === key(row));
+  if (!has) arr.push(row);
 }
+
+/* Garantiza que existan todos los días definidos para la ciudad */
 function ensureDays(city){
-  if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null};
+  if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: null };
   const byDay = itineraries[city].byDay || {};
-  const present = Object.keys(byDay).map(n=>+n);
-  const maxPresent = present.length?Math.max(...present):0;
-  const saved = savedDestinations.find(x=>x.city===city)?.days || 0;
+  const presentDays = Object.keys(byDay).map(n=>+n).filter(n=>Number.isFinite(n) && n>0);
+  const maxPresent = presentDays.length ? Math.max(...presentDays) : 0;
+
+  const savedDef = savedDestinations.find(x=>x.city===city);
+  const saved = savedDef ? (Number(savedDef.days)||0) : 0;
+
   const want = Math.max(saved, maxPresent) || 1;
   for(let d=1; d<=want; d++){
-    if(!byDay[d]) byDay[d]=[];
+    if(!byDay[d]) byDay[d] = [];
   }
   itineraries[city].byDay = byDay;
 }
+
+/* Normalizador de filas (acepta alias de campos del API y del agente) */
 function normalizeRow(r = {}, fallbackDay = 1){
-  const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? DEFAULT_START;
-  const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? DEFAULT_END;
+  const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? (typeof DEFAULT_START!=='undefined' ? DEFAULT_START : '08:30');
+  const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? (typeof DEFAULT_END!=='undefined'   ? DEFAULT_END   : '19:00');
   const act     = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
   const from    = r.from ?? r.origin ?? r.origen ?? '';
   const to      = r.to   ?? r.destination ?? r.destino ?? '';
   const trans   = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
   const durRaw  = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes   = r.notes ?? r.nota ?? r.comentarios ?? '';
-  const duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
+
+  const duration = (typeof durRaw === 'number')
+    ? `${durRaw}m`
+    : (String(durRaw)||'');
+
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
-  return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
+
+  // 🧩 Mantener banderas usadas río abajo (p.ej. fixOverlaps/orden tabs-safe)
+  const cross = !!(r._crossDay);
+
+  return {
+    day: d,
+    start: start || (typeof DEFAULT_START!=='undefined' ? DEFAULT_START : '08:30'),
+    end:   end   || (typeof DEFAULT_END!=='undefined'   ? DEFAULT_END   : '19:00'),
+    activity: act || '',
+    from, to,
+    transport: trans || '',
+    duration,
+    notes,
+    _crossDay: cross
+  };
 }
 
+/* Dedupe “suave” en el MISMO día por (activity/from/to) normalizados */
 function dedupeSoftSameDay(rows){
-  // 🔧 Mejora: usar normKey en activity/from/to para evitar duplicados semánticos en el MISMO día
   const seen = new Set();
   const out = [];
-  for(const r of rows.sort((a,b)=> (a.start||'') < (b.start||'') ? -1 : 1)){
-    const k = [normKey(r.activity||''), normKey(r.from||''), normKey(r.to||'')].join('|');
+  const nk = (v)=> typeof normKey === 'function' ? normKey(String(v||'')) : String(v||'').toLowerCase().trim();
+
+  for(const r of [...rows].sort((a,b)=> (a.start||'') < (b.start||'') ? -1 : 1)){
+    const k = [nk(r.activity), nk(r.from), nk(r.to)].join('|');
     if(seen.has(k)) continue;
     seen.add(k);
     out.push(r);
@@ -1492,51 +1523,86 @@ function dedupeSoftSameDay(rows){
   return out;
 }
 
+/**
+ * Inserta/mezcla filas en el estado global.
+ * - replace=false → hace merge incremental con dedupe
+ * - replace=true  → reemplaza por días (solo los afectados)
+ * - Limita a 20 filas/día (coherente con validador/IA)
+ */
 function pushRows(city, rows, replace=false){
   if(!city || !rows) return;
-  if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
+  if(!itineraries[city]) {
+    itineraries[city] = {
+      byDay:{},
+      currentDay:1,
+      baseDate: (cityMeta[city]?.baseDate || null)
+    };
+  }
 
   const byDay = itineraries[city].byDay;
   const daysToReplace = new Set();
 
-  const mapped = rows.map(raw=>normalizeRow(raw, 1));
+  const mapped = rows.map(raw => normalizeRow(raw, 1));
+
   if(replace){
-    mapped.forEach(obj=>{ daysToReplace.add(obj.day); });
-    daysToReplace.forEach(d=>{ byDay[d] = []; });
+    mapped.forEach(obj => { daysToReplace.add(obj.day); });
+    daysToReplace.forEach(d => { byDay[d] = []; });
   }
 
   mapped.forEach(obj=>{
     const d = obj.day;
-    if(!byDay[d]) byDay[d]=[];
+    if(!byDay[d]) byDay[d] = [];
     dedupeInto(byDay[d], obj);
     byDay[d] = dedupeSoftSameDay(byDay[d]);
-    if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
+
+    // 🔒 Límite suave (máx 20 por día)
+    if(byDay[d].length > 20) byDay[d] = byDay[d].slice(0, 20);
   });
 
   itineraries[city].byDay = byDay;
   ensureDays(city);
 }
+
+/* Upsert de metadatos por ciudad (no destruye campos no provistos) */
 function upsertCityMeta(meta){
-  const name = meta.city || activeCity || savedDestinations[0]?.city;
+  const name = meta.city || activeCity || (savedDestinations[0]?.city);
   if(!name) return;
-  if(!cityMeta[name]) cityMeta[name] = { baseDate:null, start:null, end:null, hotel:'', transport:'', perDay:[] };
+
+  if(!cityMeta[name]) {
+    cityMeta[name] = { baseDate:null, start:null, end:null, hotel:'', transport:'', perDay:[] };
+  }
+
   if(meta.baseDate) cityMeta[name].baseDate = meta.baseDate;
   if(meta.start)    cityMeta[name].start    = meta.start;
   if(meta.end)      cityMeta[name].end      = meta.end;
-  if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
-  if(typeof meta.transport==='string') cityMeta[name].transport = meta.transport;
+
+  if(typeof meta.hotel === 'string')     cityMeta[name].hotel     = meta.hotel;
+  if(typeof meta.transport === 'string') cityMeta[name].transport = meta.transport;
+
   if(Array.isArray(meta.perDay)) cityMeta[name].perDay = meta.perDay;
-  if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
+
+  // Mantener espejo en itineraries[name]
+  if(itineraries[name] && meta.baseDate) {
+    itineraries[name].baseDate = meta.baseDate;
+  }
 }
+
+/**
+ * Aplica estructuras provenientes del API/Agente al estado global.
+ * Soporta múltiples formatos: {destination, rows}, {destinations:[...]}, {itineraries:[...]}, {meta}, alias destino/destinos.
+ * Respeta plannerState.forceReplan[city] para forzar replace por ciudad.
+ */
 function applyParsedToState(parsed){
   if(!parsed) return;
+
+  // Alias comunes
   if(parsed.itinerary) parsed = parsed.itinerary;
   if(parsed.destinos)  parsed.destinations = parsed.destinos;
   if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
 
   if(parsed.meta) upsertCityMeta(parsed.meta);
 
-  // 🧠 Detectar forceReplan si aplica y ajustar replace
+  // 🧠 Detectar forceReplan por ciudad (coherente con 15/18/19)
   let forceReplanCity = null;
   if (typeof plannerState !== 'undefined' && plannerState.forceReplan) {
     const candidate = parsed.destination || parsed.city || parsed.meta?.city;
@@ -1545,95 +1611,112 @@ function applyParsedToState(parsed){
     }
   }
 
+  // A) Estructura con múltiples destinos
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
-      const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
+      const name = d.name || d.destination || d.meta?.city || activeCity || (savedDestinations[0]?.city);
       if(!name) return;
+
       const mustReplace = Boolean(d.replace) || (forceReplanCity === name);
 
       if(d.rowsByDay && typeof d.rowsByDay === 'object'){
         Object.entries(d.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
+          const dayNum = +k;
+          pushRows(name, (rows||[]).map(r=>({ ...r, day: dayNum })), mustReplace);
         });
       } else if(Array.isArray(d.rows)){
         pushRows(name, d.rows, mustReplace);
       }
 
-      // ✅ limpiar flag una vez utilizado
-      if(forceReplanCity === name){
+      // Limpiar flag de replan tras aplicar
+      if(forceReplanCity === name && plannerState?.forceReplan){
         delete plannerState.forceReplan[name];
       }
     });
     return;
   }
 
+  // B) Un solo destino con rows
   if(parsed.destination && Array.isArray(parsed.rows)){
     const name = parsed.destination;
     const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
     pushRows(name, parsed.rows, mustReplace);
-    if(forceReplanCity === name){
+
+    if(forceReplanCity === name && plannerState?.forceReplan){
       delete plannerState.forceReplan[name];
     }
     return;
   }
 
+  // C) Lista de itinerarios heterogénea
   if(Array.isArray(parsed.itineraries)){
     parsed.itineraries.forEach(x=>{
-      const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
+      const name = x.city || x.name || x.destination || activeCity || (savedDestinations[0]?.city);
       if(!name) return;
+
       const mustReplace = Boolean(x.replace) || (forceReplanCity === name);
 
       if(x.rowsByDay && typeof x.rowsByDay==='object'){
         Object.entries(x.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
+          const dayNum = +k;
+          pushRows(name, (rows||[]).map(r=>({ ...r, day: dayNum })), mustReplace);
         });
       } else if(Array.isArray(x.rows)) {
         pushRows(name, x.rows, mustReplace);
       }
 
-      if(forceReplanCity === name){
+      if(forceReplanCity === name && plannerState?.forceReplan){
         delete plannerState.forceReplan[name];
       }
     });
     return;
   }
 
+  // D) Fallback: rows sueltos → ciudad activa
   if(Array.isArray(parsed.rows)){
-    const city = activeCity || savedDestinations[0]?.city;
+    const city = activeCity || (savedDestinations[0]?.city);
+    if(!city) return;
     const mustReplace = Boolean(parsed.replace) || (forceReplanCity === city);
     pushRows(city, parsed.rows, mustReplace);
-    if(forceReplanCity === city){
+
+    if(forceReplanCity === city && plannerState?.forceReplan){
       delete plannerState.forceReplan[city];
     }
   }
 }
 
 /* ==============================
-   SECCIÓN 13B · Add Multiple Days (mejorada con rebalanceo inteligente por rango)
+   SECCIÓN 13B · Add Multiple Days
+   (mejorada con rebalanceo inteligente por rango; integra 18/19/21)
 ================================= */
 function addMultipleDaysToCity(city, extraDays){
   if(!city || extraDays <= 0) return;
   ensureDays(city);
 
-  const byDay = itineraries[city].byDay || {};
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  let currentMax = days.length ? Math.max(...days) : 0;
+  const byDay = (itineraries[city].byDay || {});
+  const days  = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+  const currentMax = days.length ? Math.max(...days) : 0;
 
-  // 🧠 Establecer el último día original si no existe
+  // 🧠 Memoriza el “último día original” si no existía (usado por 19/21)
   if (!itineraries[city].originalDays) {
     itineraries[city].originalDays = currentMax;
   }
   const lastOriginalDay = itineraries[city].originalDays;
 
-  // 🆕 Agregar solo los días realmente nuevos
+  // 🆕 Agregar SOLO días nuevos y crear ventana base si falta
   for(let i=1; i<=extraDays; i++){
     const newDay = currentMax + i;
-    if(!byDay[newDay]){  // evita duplicados de días
-      insertDayAt(city, newDay);
+    if(!byDay[newDay]){ // evita duplicar días
+      // insertDayAt se asume global (ya presente en el planner)
+      if (typeof insertDayAt === 'function') {
+        insertDayAt(city, newDay);
+      } else {
+        byDay[newDay] = [];
+      }
 
-      // 🕒 🆕 Horario inteligente base si no hay horario definido
-      const baseStart = '08:30';
-      const baseEnd = '19:00';
+      // Ventanas por defecto si la ciudad no las tiene definidas
+      const baseStart = (typeof DEFAULT_START!=='undefined' ? DEFAULT_START : '08:30');
+      const baseEnd   = (typeof DEFAULT_END!=='undefined'   ? DEFAULT_END   : '19:00');
       const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || baseStart;
       const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || baseEnd;
 
@@ -1644,43 +1727,125 @@ function addMultipleDaysToCity(city, extraDays){
     }
   }
 
-  // 📝 Actualizar cantidad total de días en destino
+  // 📝 Sincroniza cantidad total en savedDestinations
   const dest = savedDestinations.find(x=>x.city===city);
-  let newLastDay = currentMax + extraDays;
-  if(dest){
-    dest.days = newLastDay;
-  }
+  const newLastDay = currentMax + extraDays;
+  if(dest) dest.days = newLastDay;
 
-  // 🧭 Definir rango de rebalanceo: incluye último día original
+  // 🧭 Rango de rebalanceo: desde el último original hasta el nuevo final
   const rebalanceStart = Math.max(1, lastOriginalDay);
-  const rebalanceEnd = newLastDay;
+  const rebalanceEnd   = newLastDay;
 
-  // 🧭 Marcar replanificación para el agente
+  // 🧭 Señal de replan para el agente (leído en 15/18/19)
   if (typeof plannerState !== 'undefined') {
     if (!plannerState.forceReplan) plannerState.forceReplan = {};
     plannerState.forceReplan[city] = true;
   }
 
-  // 🧼 Recolección previa de actividades existentes para evitar duplicados
-  const allExistingActs = Object.values(byDay)
+  // 🧼 Snapshot de actividades existentes (evitar duplicados por agente)
+  const allExistingActs = Object.values(itineraries[city].byDay || {})
     .flat()
-    .map(r => normKey(String(r.activity || '')))
+    .map(r => (typeof normKey === 'function' ? normKey(String(r.activity || '')) : String(r.activity||'').toLowerCase().trim()))
     .filter(Boolean);
+
   if(!plannerState.existingActs) plannerState.existingActs = {};
   plannerState.existingActs[city] = new Set(allExistingActs);
 
-  // 🧠 Rebalanceo automático sólo en el rango afectado, con instrucción de evitar duplicados
-  showWOW(true, 'Astra está reequilibrando la ciudad…');
-  const customOpts = { 
-    start: rebalanceStart, 
-    end: rebalanceEnd, 
-    avoidDuplicates: true 
+  // 🔄 Rebalanceo inteligente sólo en el rango afectado
+  if (typeof showWOW === 'function') showWOW(true, 'Astra está reequilibrando la ciudad…');
+
+  const customOpts = { start: rebalanceStart, end: rebalanceEnd, avoidDuplicates: true };
+  const p = (typeof rebalanceWholeCity === 'function')
+    ? rebalanceWholeCity(city, customOpts)
+    : Promise.resolve();
+
+  p.catch(err => console.error('Error en rebalance automático:', err))
+   .finally(() => { if (typeof showWOW === 'function') showWOW(false); });
+}
+
+/* ==============================
+   SECCIÓN 13·C — Diagnóstico/Hardening “primera fila”
+   (drop-in: colócalo tras SECCIÓN 13 y antes de SECCIÓN 14)
+================================= */
+(function hardenFirstRow(){
+  // Logger + wrapper de pushRows
+  const _pushRows = pushRows;
+  window.__itbmo_debug = window.__itbmo_debug || {};
+  window.__itbmo_debug.events = window.__itbmo_debug.events || [];
+
+  // No tocar tus helpers existentes:
+  const _normalizeRow = (typeof normalizeRow === 'function') ? normalizeRow : (r)=>r;
+  const _ensureDays   = (typeof ensureDays   === 'function') ? ensureDays   : function(city){
+    if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null};
+    if(!itineraries[city].byDay[1]) itineraries[city].byDay[1]=[];
   };
 
-  rebalanceWholeCity(city, customOpts)
-    .catch(err => console.error('Error en rebalance automático:', err))
-    .finally(() => showWOW(false));
-}
+  pushRows = function(city, rows, replace=false){
+    try{
+      const before = (itineraries?.[city]?.byDay?.[1] || []).length;
+      window.__itbmo_debug.lastCity = city;
+      window.__itbmo_debug.lastRows = Array.isArray(rows) ? rows.slice(0,3) : rows;
+      window.__itbmo_debug.events.push({ ts: Date.now(), city, replace, before });
+
+      _pushRows(city, rows, replace);
+
+      const after = (itineraries?.[city]?.byDay?.[1] || []).length;
+      window.__itbmo_debug.events.at(-1).after = after;
+
+      // ⚠️ Si había filas entrantes pero sigue en 0, la primera se perdió por dedupe o replace indebido
+      if ((before===0) && (after===0) && Array.isArray(rows) && rows.length){
+        console.warn('⚠️ Primera fila absorbida por merge/dedupe. Reinsertando sin dedupe…');
+        _ensureDays(city);
+        const first = _normalizeRow(rows[0], 1);
+        const d = Math.max(1, parseInt(first.day||1,10));
+        if(!itineraries[city].byDay[d]) itineraries[city].byDay[d]=[];
+        // Inserción directa (intencionalmente sin dedupe)
+        itineraries[city].byDay[d].unshift({
+          day: d,
+          start: first.start||'08:30',
+          end: first.end||'19:00',
+          activity: first.activity||'(sin título)',
+          from: first.from||'',
+          to: first.to||'',
+          transport: first.transport||'',
+          duration: first.duration||'',
+          notes: first.notes||'reinserted:first-row'
+        });
+        // Render inmediato del día activo/ciudad relevante
+        if(typeof renderCityItinerary === 'function'){
+          const c = city || (typeof activeCity!=='undefined' ? activeCity : null);
+          if(c) renderCityItinerary(c);
+        }
+      }
+    }catch(err){
+      console.error('hardenFirstRow wrapper error:', err);
+      // En caso de fallo, no bloqueamos el flujo original
+      return _pushRows(city, rows, replace);
+    }
+  };
+
+  // 🚫 CSS safety: impedir que algún theme/tabla oculte la primera fila
+  const style = document.createElement('style');
+  style.setAttribute('data-itbmo-firstrow-guard','true');
+  style.textContent = `
+    #itinerary-container table.itinerary tbody tr:first-child {
+      display: table-row !important;
+      visibility: visible !important;
+      opacity: 1 !important;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // Utilidad para inspección rápida desde consola
+  window.__probeFirstRow = (city)=>({
+    incomingFirstRow: (window.__itbmo_debug?.lastRows && window.__itbmo_debug.lastRows[0]) || null,
+    storedFirstRow:   (itineraries?.[city]?.byDay?.[1]?.[0]) || null,
+    counters: {
+      before: window.__itbmo_debug?.events?.at(-1)?.before ?? null,
+      after:  window.__itbmo_debug?.events?.at(-1)?.after  ?? null
+    }
+  });
+})();
 
 /* ==============================
    SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
