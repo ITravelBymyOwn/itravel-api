@@ -3904,16 +3904,67 @@ ${dayRows}
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — RESTAURADA (patrón viejo + hook tardío)
    Restauración quirúrgica:
-   - Volvemos a envolver addCityRow (como en el código viejo).
-   - Hook de asignación tardía: si otra sección redefine addCityRow después,
-     lo volvemos a envolver automáticamente.
+   - Envolvemos addCityRow (como en el código base).
+   - Hook tardío: si otra sección redefine addCityRow luego, lo re-envolvemos.
    - Inyectamos controles de reorden en la fila recién creada.
-   - Garantizamos la creación de la PRIMERA FILA si #city-list está vacío,
-     con reintentos suaves durante la hidratación.
+   - Garantizamos la PRIMERA FILA si #city-list está vacío (reintentos suaves).
+   - ✅ ENFORCE ORDER: reordenamos los campos a [city, country, days, baseDate]
+     sin tocar la implementación original de addCityRow.
 ================================= */
+
+/* --- Reorden visual/DOM de campos para igualar el código base --- */
+function enforceFieldOrder(row){
+  if(!row || row.__orderEnforced__) return;
+  const city     = row.querySelector('.city');
+  const country  = row.querySelector('.country');
+  const days     = row.querySelector('.days');
+  // Puede existir .baseDate visible o tripleta .baseDay/.baseMonth/.baseYear
+  const baseDate = row.querySelector('.baseDate');
+  const baseDay   = row.querySelector('.baseDay');
+  const baseMonth = row.querySelector('.baseMonth');
+  const baseYear  = row.querySelector('.baseYear');
+
+  // Contenedor objetivo: el propio row
+  const host = row;
+
+  // Orden target: city → country → days → fecha
+  // Movemos en ese orden si existen (appendChild reubica sin clonar).
+  if(city)    host.appendChild(city.closest('.field') || city);
+  if(country) host.appendChild(country.closest('.field') || country);
+  if(days)    host.appendChild(days.closest('.field') || days);
+
+  if (baseDate){
+    // Asegurar placeholder correcto
+    if(!baseDate.placeholder || !/DD\/MM\/\d{0,4}/i.test(baseDate.placeholder)){
+      baseDate.placeholder = 'DD/MM/AAAA';
+    }
+    host.appendChild(baseDate.closest('.field') || baseDate);
+  } else if (baseDay || baseMonth || baseYear){
+    // Si usas tripleta, forzamos su bloque completo al final
+    const dateBlock = (baseDay||baseMonth||baseYear)?.closest('.field-group') ||
+                      (baseDay||baseMonth||baseYear)?.parentElement;
+    if(dateBlock) host.appendChild(dateBlock);
+  }
+
+  row.__orderEnforced__ = true;
+}
+
+/* --- Controles ↑/↓ con ubicación segura --- */
 function addRowReorderControls(row){
   if (!row || row.__reorderBound__) return; // evita duplicados
   row.__reorderBound__ = true;
+
+  // Inserta en .row-actions si existe; si no, crea uno.
+  let actions = row.querySelector('.row-actions');
+  if (!actions) {
+    actions = document.createElement('div');
+    actions.className = 'row-actions';
+    actions.style.display = 'flex';
+    actions.style.gap = '.35rem';
+    actions.style.alignItems = 'center';
+    actions.style.marginTop = '.25rem';
+    row.appendChild(actions);
+  }
 
   const ctrlWrap = document.createElement('div');
   ctrlWrap.style.display = 'flex';
@@ -3923,13 +3974,18 @@ function addRowReorderControls(row){
   const up = document.createElement('button');
   up.textContent = '↑';
   up.className = 'btn ghost';
+  up.type = 'button';
+  up.title = 'Subir ciudad';
+
   const down = document.createElement('button');
   down.textContent = '↓';
   down.className = 'btn ghost';
+  down.type = 'button';
+  down.title = 'Bajar ciudad';
 
   ctrlWrap.appendChild(up);
   ctrlWrap.appendChild(down);
-  row.appendChild(ctrlWrap);
+  actions.appendChild(ctrlWrap);
 
   // 🆙 Subir ciudad
   up.addEventListener('click', ()=>{
@@ -3966,7 +4022,11 @@ function addRowReorderControls(row){
         const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
         if (list) {
           const newRow = list.querySelector('.city-row:last-of-type');
-          if (newRow) addRowReorderControls(newRow);
+          if (newRow){
+            // ✅ Asegura orden correcto y controles
+            enforceFieldOrder(newRow);
+            addRowReorderControls(newRow);
+          }
         }
       } catch(_) {}
       return res;
@@ -3987,12 +4047,10 @@ function addRowReorderControls(row){
       configurable: true,
       enumerable: true,
       get(){ return _latest; },
-      set(v){
-        _latest = wrap(v);
-      }
+      set(v){ _latest = wrap(v); }
     });
   } catch(_){
-    // Si el defineProperty falla (propiedad no configurable), haremos reintentos periódicos:
+    // Si defineProperty falla, reintentos periódicos:
     const maxTries = 40, interval = 100;
     let tries = 0, t = setInterval(()=>{
       if (typeof window.addCityRow === 'function') {
@@ -4007,7 +4065,7 @@ function addRowReorderControls(row){
   window.__ITBMO_ADDROW_HOOKED__ = true;
 })();
 
-/* ========= Garantizar PRIMERA FILA si #city-list está vacío (patrón viejo) ========= */
+/* ========= Garantizar PRIMERA FILA si #city-list está vacío ========= */
 (function ensureFirstRowIfEmpty(){
   const MAX_TRIES = 30;  // ~3s a 100ms
   const INTERVAL  = 100;
@@ -4021,7 +4079,10 @@ function addRowReorderControls(row){
     if (!hasRow && typeof window.addCityRow === 'function') {
       window.addCityRow();
       const newRow = list.querySelector('.city-row:last-of-type');
-      if (newRow) addRowReorderControls(newRow);
+      if (newRow){
+        enforceFieldOrder(newRow);
+        addRowReorderControls(newRow);
+      }
     }
     return true;
   }
@@ -4039,6 +4100,7 @@ function addRowReorderControls(row){
   }
 })();
 
+
 /* ==============================
    SECCIÓN 21 · INIT y listeners — RESTAURADA (bootstrap legado 1ª fila)
    Mantiene v55.1 + FIX previos y añade bootstrap robusto
@@ -4047,6 +4109,7 @@ function addRowReorderControls(row){
    - Crea la PRIMERA FILA en frío si no hay ninguna,
      esperando a que addCityRow esté disponible.
    - No rompe la lógica de "Guardar destinos" → habilitar "Iniciar".
+   - FIX: Mensaje al chat tras confirmar reset (como el código base).
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -4266,6 +4329,7 @@ function ensureResetButton(){
 }
 
 // ⛔ Reset con confirmación modal (mantiene patrón viejo + reinsertar primera fila)
+// ✅ FIX: mensaje al chat tras confirmar para reflejar el comportamiento del código base
 function bindReset(){
   const $btn = ensureResetButton();
   $btn.removeAttribute('disabled');
@@ -4294,7 +4358,7 @@ function bindReset(){
     confirmReset.addEventListener('click', ()=>{
       const list = (typeof $cityList !== 'undefined' && $cityList) ? $cityList : document.querySelector('#city-list');
 
-      if (list) list.innerHTML='';
+      if (list) list.innerHTML=''; 
       savedDestinations=[]; itineraries={}; cityMeta={};
       try { addCityRow(); } catch(_){ /* si aún no existe, lo hará el bootstrap */ }
 
@@ -4347,6 +4411,9 @@ function bindReset(){
       if (firstCity) firstCity.focus();
 
       try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
+
+      // ✅ Mensaje como feedback visible al usuario (alerta del chat)
+      try { chatMsg('Plan reiniciado. Puedes ingresar nuevamente tus destinos y fechas.','ai'); } catch(_){}
     });
 
     cancelReset.addEventListener('click', ()=>{
@@ -4593,4 +4660,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   bindReset();
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
 
