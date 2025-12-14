@@ -1850,78 +1850,171 @@ function addMultipleDaysToCity(city, extraDays){
 /* ==============================
    SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
    Base v60 (exacta) + injertos v64 + ⚡ early-exit cuando ENABLE_VALIDATOR=false
+   🔧 Alineada con API INFO→PLANNER (v43) y Sec.18/19:
+      - Usa callApiChat('planner', { validate: true, city, baseDate, rows }) si existe
+      - Fallback local robusto (sin IA) cuando falla o está deshabilitado
+      - Mantiene nombre y firma para no romper integraciones
 ================================= */
-async function validateRowsWithAgent(city, rows, baseDate){
-  // Helpers locales (sin dependencias externas)
-  const toStr = v => (v==null ? '' : String(v));
-  const lc = s => toStr(s).trim().toLowerCase();
-  const isAurora = a => /\baurora|northern\s+light(s)?\b/i.test(toStr(a));
-  const isThermal = a => /(blue\s*lagoon|bláa\s*lón(i|í)d|laguna\s+azul|termal(es)?|hot\s*spring|thermal\s*bath)/i.test(toStr(a));
+if (typeof validateRowsWithAgent !== 'function') {
+  async function validateRowsWithAgent(city, rows, baseDate) {
+    // Helpers locales (sin dependencias externas)
+    const toStr = v => (v == null ? '' : String(v));
+    const lc = s => toStr(s).trim().toLowerCase();
+    const isAurora = a => /\baurora|northern\s+light(s)?\b/i.test(toStr(a));
+    const isThermal = a => /(blue\s*lagoon|bláa\s*lón(i|í)d|laguna\s+azul|termal(es)?|hot\s*spring|thermal\s*bath)/i.test(toStr(a));
 
-  // 📦 Sanitizado local (reutilizado en fast-path y fallback)
-  const localSanitize = (inRows = [])=>{
-    const sanitized = (inRows||[]).map(r => {
-      const notesRaw = toStr(r.notes).trim();
-      const notes = notesRaw && lc(notesRaw)!=='seed'
-        ? notesRaw
-        : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
-      if(isAurora(r.activity)){
-        return {
-          ...r,
-          start: r.start && /^\d{2}:\d{2}$/.test(r.start) ? r.start : '20:30',
-          end:   r.end   && /^\d{2}:\d{2}$/.test(r.end)   ? r.end   : '02:00',
-          transport: r.transport || 'Tour/Bus/Van',
-          notes: /valid:/i.test(notes) ? notes : notes + ' · valid: ventana nocturna auroral (sujeto a clima).'
-        };
-      }
-      if(isThermal(r.activity)){
-        let duration = toStr(r.duration).trim();
-        if(!duration) duration = '3h';
-        return { ...r, duration, notes: /min\s*stay/i.test(notes) ? notes : notes + ' · min stay ~3h (ajustable)' };
-      }
-      return { ...r, notes };
-    });
-
-    // Límite suave de 20 por día + dedupe por actividad canonizada
-    const grouped = {};
-    sanitized.forEach(r=>{
-      const d = Number(r.day)||1;
-      (grouped[d] ||= []).push(r);
-    });
-    const allowed = Object.keys(grouped).flatMap(dStr=>{
-      const d = Number(dStr);
-      let arr = grouped[d];
-
-      // Dedupe fuerte por actividad canonizada para mismo día
-      const seenActs = new Set();
-      arr = arr.filter(x=>{
-        const k = normKey(x.activity || '');
-        if(!k) return false;
-        if(seenActs.has(k)) return false;
-        seenActs.add(k);
-        return true;
+    // 📦 Sanitizado local (reutilizado en fast-path y fallback)
+    const localSanitize = (inRows = [])=>{
+      const sanitized = (inRows||[]).map(r => {
+        const notesRaw = toStr(r.notes).trim();
+        const notes = notesRaw && lc(notesRaw)!=='seed'
+          ? notesRaw
+          : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
+        if(isAurora(r.activity)){
+          return {
+            ...r,
+            start: r.start && /^\d{2}:\d{2}$/.test(r.start) ? r.start : '20:30',
+            end:   r.end   && /^\d{2}:\d{2}$/.test(r.end)   ? r.end   : '02:00',
+            transport: r.transport || 'Tour/Bus/Van',
+            notes: /valid:/i.test(notes) ? notes : notes + ' · valid: ventana nocturna auroral (sujeto a clima).'
+          };
+        }
+        if(isThermal(r.activity)){
+          let duration = toStr(r.duration).trim();
+          if(!duration) duration = '3h';
+          return { ...r, duration, notes: /min\s*stay/i.test(notes) ? notes : notes + ' · min stay ~3h (ajustable)' };
+        }
+        return { ...r, notes };
       });
 
-      if(arr.length <= 20) return arr.map(x=>({...x, day:d}));
-      const out=[]; const seen = new Set();
-      for(const r of arr){
-        const key = normKey(r.activity || '') + '|' + (r.start||'') + '|' + (r.end||'');
-        if(!seen.has(key)){
-          seen.add(key); out.push({...r, day:d});
+      // Límite suave de 20 por día + dedupe por actividad canonizada
+      const grouped = {};
+      sanitized.forEach(r=>{
+        const d = Number(r.day)||1;
+        (grouped[d] ||= []).push(r);
+      });
+      const allowed = Object.keys(grouped).flatMap(dStr=>{
+        const d = Number(dStr);
+        let arr = grouped[d];
+
+        // Dedupe fuerte por actividad canonizada para mismo día
+        const seenActs = new Set();
+        arr = arr.filter(x=>{
+          const k = typeof normKey === 'function' ? normKey(x.activity || '') : (x.activity||'').toLowerCase().trim();
+          if(!k) return false;
+          if(seenActs.has(k)) return false;
+          seenActs.add(k);
+          return true;
+        });
+
+        if(arr.length <= 20) return arr.map(x=>({...x, day:d}));
+        const out=[]; const seen = new Set();
+        for(const r of arr){
+          const key = (typeof normKey === 'function' ? normKey(r.activity || '') : (r.activity||'').toLowerCase().trim())
+                     + '|' + (r.start||'') + '|' + (r.end||'');
+          if(!seen.has(key)){
+            seen.add(key); out.push({...r, day:d});
+          }
+          if(out.length===20) break;
         }
-        if(out.length===20) break;
+        return out;
+      });
+      return { allowed, removed: [] };
+    };
+
+    // ⚡ Fast-path: sin llamada a IA cuando ENABLE_VALIDATOR=false
+    if (typeof ENABLE_VALIDATOR !== 'undefined' && ENABLE_VALIDATOR === false) {
+      return localSanitize(rows);
+    }
+
+    // Post-sanitizado suave para respuestas con IA
+    const postSanitize = (arr=[])=>{
+      const byDay = {};
+      arr.forEach(r=>{
+        const d = Number(r.day)||1;
+        (byDay[d] ||= []).push(r);
+      });
+      const out = [];
+      for(const dStr of Object.keys(byDay)){
+        const d = Number(dStr);
+        let dayRows = byDay[d].map(r=>{
+          let notes = toStr(r.notes).trim();
+          if(!notes || lc(notes)==='seed'){
+            notes = 'Sugerencia: verifica horarios, seguridad y reservas con antelación.';
+          }
+          if(isAurora(r.activity)){
+            const start = r.start && /^\d{2}:\d{2}$/.test(r.start) ? r.start : '20:30';
+            const end   = r.end   && /^\d{2}:\d{2}$/.test(r.end)   ? r.end   : '02:00';
+            const transport = r.transport ? r.transport : 'Tour/Bus/Van';
+            if(!/valid:/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'valid: ventana nocturna auroral (sujeto a clima).';
+            return {...r, day:d, start, end, transport, notes};
+          }
+          if(isThermal(r.activity)){
+            let duration = toStr(r.duration).trim();
+            const isShort =
+              (!duration) ||
+              (/^(\d{1,2})m$/i.test(duration) && Number(RegExp.$1) < 180) ||
+              (/^(\d+(?:\.\d+)?)h$/i.test(duration) && Number(RegExp.$1) < 3);
+            if(isShort) duration = '3h';
+            if(!/min\s*stay|3h/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'min stay ~3h (ajustable)';
+            return {...r, day:d, duration, notes};
+          }
+          return {...r, day:d, notes};
+        });
+
+        // Dedupe por actividad canonizada + límite 20
+        const seenActs = new Set();
+        dayRows = dayRows.filter(x=>{
+          const k = typeof normKey === 'function' ? normKey(x.activity||'') : (x.activity||'').toLowerCase().trim();
+          if(!k) return false;
+          if(seenActs.has(k)) return false;
+          seenActs.add(k);
+          return true;
+        });
+
+        if(dayRows.length > 20){
+          const seen = new Set(); const filtered=[];
+          for(const r of dayRows){
+            const key = (typeof normKey === 'function' ? normKey(r.activity||'') : (r.activity||'').toLowerCase().trim())
+                        + '|' + (r.start||'') + '|' + (r.end||'');
+            if(!seen.has(key)){
+              seen.add(key);
+              filtered.push(r);
+            }
+            if(filtered.length === 20) break;
+          }
+          dayRows = filtered;
+        }
+
+        out.push(...dayRows);
       }
       return out;
-    });
-    return { allowed, removed: [] };
-  };
+    };
 
-  // ⚡ Fast-path: sin llamada a IA cuando ENABLE_VALIDATOR=false
-  if (ENABLE_VALIDATOR === false) {
-    return localSanitize(rows);
-  }
+    // ===== Ruta con IA (planner.validate) alineada al API v43 =====
+    try{
+      if (typeof callApiChat === 'function') {
+        const resp = await callApiChat('planner', { validate: true, city, baseDate, rows }, { timeoutMs: 22000, retries: 0 });
+        // Respeta contratos de Sec.18: { text: "...JSON..." } o objeto
+        const txtOrObj = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
+        let parsed;
+        try {
+          parsed = typeof txtOrObj === 'string' ? JSON.parse(txtOrObj) : txtOrObj;
+        } catch {
+          parsed = {};
+        }
+        if (parsed && Array.isArray(parsed.allowed)) {
+          const allowed = postSanitize(parsed.allowed || []);
+          const removed = Array.isArray(parsed.removed) ? parsed.removed : [];
+          return { allowed, removed };
+        }
+        // Si la estructura no es la esperada, cae al fallback local
+        return localSanitize(rows);
+      }
 
-  const payload = `
+      // Fallback a cliente antiguo si existiera (no obligatorio)
+      if (typeof callAgent === 'function') {
+        const payload = `
 Devuelve SOLO JSON válido:
 {
   "allowed":[
@@ -1937,88 +2030,27 @@ Contexto:
 - Fecha base (Día 1): ${baseDate || 'N/A'}
 - Filas a validar: ${JSON.stringify(rows)}
 `.trim();
-
-  // Post-sanitizado suave para respuestas con IA
-  const postSanitize = (arr=[])=>{
-    const byDay = {};
-    arr.forEach(r=>{
-      const d = Number(r.day)||1;
-      (byDay[d] ||= []).push(r);
-    });
-    const out = [];
-    for(const dStr of Object.keys(byDay)){
-      const d = Number(dStr);
-      let dayRows = byDay[d].map(r=>{
-        let notes = toStr(r.notes).trim();
-        if(!notes || lc(notes)==='seed'){
-          notes = 'Sugerencia: verifica horarios, seguridad y reservas con antelación.';
+        const res = await callAgent(payload, true);
+        let parsed = null;
+        try { parsed = typeof res === 'string' ? JSON.parse(res) : res; } catch {}
+        if(parsed?.allowed){
+          const allowed = postSanitize(parsed.allowed || []);
+          const removed = Array.isArray(parsed.removed) ? parsed.removed : [];
+          return { allowed, removed };
         }
-        if(isAurora(r.activity)){
-          const start = r.start && r.start.match(/^\d{2}:\d{2}$/) ? r.start : '20:30';
-          const end   = r.end   && r.end.match(/^\d{2}:\d{2}$/)   ? r.end   : '02:00';
-          const transport = r.transport ? r.transport : 'Tour/Bus/Van';
-          if(!/valid:/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'valid: ventana nocturna auroral (sujeto a clima).';
-          return {...r, day:d, start, end, transport, notes};
-        }
-        if(isThermal(r.activity)){
-          let duration = toStr(r.duration).trim();
-          const isShort =
-            (!duration) ||
-            /^(\d{1,2})m$/.test(duration) && Number(RegExp.$1) < 180 ||
-            /^(\d+(?:\.\d+)?)h$/.test(duration) && Number(RegExp.$1) < 3;
-          if(isShort) duration = '3h';
-          if(!/min\s*stay|3h/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'min stay ~3h (ajustable)';
-          return {...r, day:d, duration, notes};
-        }
-        return {...r, day:d, notes};
-      });
-
-      // Dedupe por actividad canonizada + límite 20
-      const seenActs = new Set();
-      dayRows = dayRows.filter(x=>{
-        const k = normKey(x.activity||'');
-        if(!k) return false;
-        if(seenActs.has(k)) return false;
-        seenActs.add(k);
-        return true;
-      });
-
-      if(dayRows.length > 20){
-        const seen = new Set(); const filtered=[];
-        for(const r of dayRows){
-          const key = normKey(r.activity||'') + '|' + (r.start||'') + '|' + (r.end||'');
-          if(!seen.has(key)){
-            seen.add(key);
-            filtered.push(r);
-          }
-          if(filtered.length === 20) break;
-        }
-        dayRows = filtered;
       }
-
-      out.push(...dayRows);
+    }catch(e){
+      console.warn('Validator error', e);
     }
-    return out;
-  };
 
-  try{
-    const res = await callAgent(payload, true);
-    const parsed = parseJSON(res);
-    if(parsed?.allowed){
-      const allowed = postSanitize(parsed.allowed || []);
-      const removed = Array.isArray(parsed.removed) ? parsed.removed : [];
-      return { allowed, removed };
-    }
-  }catch(e){
-    console.warn('Validator error', e);
+    // Fallback local
+    return localSanitize(rows);
   }
-
-  // Fallback local
-  return localSanitize(rows);
 }
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad (versión restaurada v65 estable)
+   Patch align v43/API + Sec.18/19/20/21 — quirúrgico (sin romper nombres)
 ================================= */
 
 /* ─────────────────────────────────────────────────────────────
@@ -2074,7 +2106,7 @@ function showWOW(on, msg){
 /* ─────────────────────────────────────────────────────────────
    SECCIÓN 15.2 · Generación principal por ciudad
    Base v60 + injertos v64 + dedupe global con normKey
-   🆕 v75→API42.6.x: primer poblado con doble etapa INFO→PLANNER
+   🆕 v75→API v43: primer poblado con doble etapa INFO→PLANNER
    🆕 Robustez: usa callApiChat (si existe) con timeout/reintentos + caché research
    🆕 Auroras: normalización + tope no consecutivo por día ANTES de pushRows
    🆕 Inyección segura post-planner: duration normalizada / cena / retorno a ciudad
@@ -2153,7 +2185,8 @@ async function generateCityItinerary(city){
     if (!resp.ok) throw new Error(`API planner(legacy) HTTP ${resp.status}`);
     const data = await resp.json();
     const text = data?.text || "";
-    return parseJSON(text);
+    // 🔧 Alineado con v43: tolerante a prólogos/epílogos
+    return cleanToJSONPlus(text) || {};
   }
 
   function hasCoverageForAllDays(rows, totalDays){
@@ -2266,22 +2299,22 @@ ${buildIntake()}
       if(typeof enforceOneAuroraPerDay==='function') tmpRows = enforceOneAuroraPerDay(tmpRows);
       if(typeof enforceAuroraCapForDay==='function' && typeof suggestedAuroraCap==='function'){
         const cap = suggestedAuroraCap(dest.days || tmpRows.reduce((m,r)=>Math.max(m, Number(r.day)||1), 1));
-        const byDay = {}; tmpRows.forEach(r => { const d=Number(r.day)||1; (byDay[d]=byDay[d]||[]).push(r); });
+        const byDayTmp = {}; tmpRows.forEach(r => { const d=Number(r.day)||1; (byDayTmp[d]=byDayTmp[d]||[]).push(r); });
         const rebuilt = [];
-        Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
-          rebuilt.push(...enforceAuroraCapForDay(city, day, byDay[day], cap));
+        Object.keys(byDayTmp).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
+          rebuilt.push(...enforceAuroraCapForDay(city, day, byDayTmp[day], cap));
         });
         tmpRows = rebuilt;
       }
-      // C) transporte (relleno sólo si falta)
+      // C) transporte (relleno sólo si falta / coherencia out-of-town)
       if(typeof enforceTransportAndOutOfTown==='function') tmpRows = enforceTransportAndOutOfTown(city, tmpRows);
-      // D) anti-solapes + cruce nocturno tabs-safe (PATCH dentro de fixOverlaps)
+      // D) anti-solapes + cruce nocturno tabs-safe
       if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
       // E) retorno a ciudad si day-trip
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
       // F) limpiar transporte en actividades urbanas posteriores al regreso
       if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
-      // G) cena si procede
+      // G) cena si procede (preferencia global activada en Sec.16)
       if(plannerState?.preferences?.alwaysIncludeDinner && typeof injectDinnerIfMissing==='function'){
         tmpRows = injectDinnerIfMissing(city, tmpRows);
       }
@@ -2442,29 +2475,42 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
    v60 base + overlay bloqueado global hasta terminar todas las ciudades
    (concurrencia controlada vía runWithConcurrency)
    + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
+   + Patch align v43/API + Sec.18/19 (quirúrgico, sin romper nombres)
+   + HOTFIX v77.3: persistencia y tabs — asegura D1 y pintado del primer tab
 ================================= */
+
 async function startPlanning(){
-  if(savedDestinations.length===0) return;
-  $chatBox.style.display='flex';
+  // 🔒 Asegura persistencia y tabs antes de iniciar (hotfix)
+  try {
+    if (!Array.isArray(window.savedDestinations) || !savedDestinations.length) {
+      if (typeof saveDestinations === 'function') window.saveDestinations();
+    }
+    if ($tabs && !$tabs.children.length && typeof renderCityTabs === 'function') {
+      renderCityTabs();
+    }
+  } catch(_) {}
+
+  if(!Array.isArray(window.savedDestinations) || savedDestinations.length===0) return;
+
+  // UI inicial
+  if ($chatBox) $chatBox.style.display='flex';
   planningStarted = true;
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
 
-  // 🛠️ Preferencias globales (consumidas por el optimizador/AI):
-  // - Cena visible en la franja correcta, aunque no haya “actividad especial”
-  // - Ventana vespertina flexible (no anclar rígido 08:30–19:00 si el contexto lo amerita)
-  // - Sugerencias icónicas con frecuencia moderada (similares a auroras)
+  // 🛠️ Preferencias globales consumidas por optimizador (Sec.18) y Chat (Sec.19)
+  // Mantener claves exactas para compatibilidad:
+  if(!plannerState) window.plannerState = {};
   if(!plannerState.preferences) plannerState.preferences = {};
-  plannerState.preferences.alwaysIncludeDinner = true;
-  plannerState.preferences.flexibleEvening     = true;
-  plannerState.preferences.iconicHintsModerate = true;
+  plannerState.preferences.alwaysIncludeDinner = true;   // cena visible en franja correcta
+  plannerState.preferences.flexibleEvening     = true;   // ventana vespertina flexible
+  plannerState.preferences.iconicHintsModerate = true;   // icónicos con frecuencia moderada
 
   // 1) Saludo inicial
   chatMsg(`${tone.hi}`);
 
-  // 2) Tip del Info Chat (se muestra una sola vez al iniciar)
-  //    Queda inmediatamente DEBAJO del saludo, antes de pedir el primer hotel/transporte.
+  // 2) Tip del Info Chat (una sola vez)
   chatMsg(`${tone.infoTip}`, 'ai');
 
   // 3) Comienza flujo de solicitud de hotel/zona y transporte
@@ -2488,7 +2534,7 @@ function _jaccard(a,b){
   return inter/uni;
 }
 function _levRatio(a,b){
-  // usa levenshteinDistance disponible en la Sección 17
+  // usa levenshteinDistance disponible (Sec.17)
   const A=_normTxt(a), B=_normTxt(b);
   const maxlen = Math.max(A.length,B.length) || 1;
   return (maxlen - levenshteinDistance(A,B))/maxlen;
@@ -2507,7 +2553,7 @@ function preloadHotelAliases(city){
   ];
 
   // si existen referencias del usuario en cityMeta (últimos hoteles elegidos), úsalas
-  const prev = (cityMeta[city]?.hotel ? [cityMeta[city].hotel] : []);
+  const prev = (cityMeta?.[city]?.hotel ? [cityMeta[city].hotel] : []);
   plannerState.hotelAliases[city] = [...new Set([...base, ...extras, ...prev])];
 }
 
@@ -2566,15 +2612,26 @@ function askNextHotelTransport(){
       // 🔒 Mantener UI bloqueada durante la generación global
       showWOW(true, 'Astra está generando itinerarios…');
 
-      // ⚙️ Concurrencia controlada (v60): no tocar
+      // ⚙️ Concurrencia controlada (v60): respeta runWithConcurrency
       const taskFns = savedDestinations.map(({city}) => async () => {
-        await generateCityItinerary(city);
+        // generateCityItinerary debe activar el pipeline INFO→PLANNER mediante Sec.18/19
+        if (typeof generateCityItinerary === 'function') {
+          await generateCityItinerary(city);
+        } else if (typeof ensureDays === 'function' && typeof optimizeDay === 'function') {
+          // Fallback seguro (no cambia nombres): genera días y optimiza cada uno
+          ensureDays(city);
+          const total = Object.keys(itineraries?.[city]?.byDay || {}).length;
+          for (let d = 1; d <= total; d++) {
+            await optimizeDay(city, d);
+          }
+        }
       });
       await runWithConcurrency(taskFns);
 
       // ✅ Al terminar TODAS las ciudades, desbloquear UI
       showWOW(false);
       chatMsg(tone.doneAll);
+      try { document.dispatchEvent(new CustomEvent('itbmo:allCitiesPlanned', { detail: { cities: savedDestinations.map(d=>d.city) } })); } catch(_) {}
     })();
     return;
   }
@@ -2601,6 +2658,201 @@ function askNextHotelTransport(){
   metaProgressIndex++;
   askNextHotelTransport();
 }
+
+/* ============================================================
+   HOTFIX v77.3 — Persistencia + Tabs (quirúrgico, no rompe nombres)
+   - Sincroniza tripleta de fecha → .baseDate (DD/MM/AAAA)
+   - Asegura itineraries[city].byDay[1] para poder pintar la tabla
+   - Reconstruye y activa el primer tab si no hay uno activo
+============================================================ */
+
+/* Helpers locales de fecha (tripleta → DMY) */
+function __pad2_fix__(n){ n=Number(n)||0; return String(n).padStart(2,'0'); }
+function __year4_fix__(y){ y=String(y||'').trim(); if(/^\d{2}$/.test(y)) return '20'+y; return /^\d{4}$/.test(y)? y : ''; }
+function __tripletToDMY__(row){
+  if(!row) return '';
+  const d = (row.querySelector('.baseDay')   || {}).value;
+  const m = (row.querySelector('.baseMonth') || {}).value;
+  const y = (row.querySelector('.baseYear')  || {}).value;
+  const dd = __pad2_fix__(d), mm = __pad2_fix__(m), yyyy = __year4_fix__(y);
+  if(!dd || !mm || !yyyy) return '';
+  return `${dd}/${mm}/${yyyy}`;
+}
+function __ensureHiddenBaseDate__(row){
+  if(!row) return '';
+  let base = row.querySelector('.baseDate');
+  if(!base){
+    base = document.createElement('input');
+    base.type = 'text';
+    base.className = 'baseDate';
+    base.style.display = 'none';
+    row.appendChild(base);
+  }
+  const dmy = __tripletToDMY__(row);
+  if(dmy) base.value = dmy;
+  return base.value || '';
+}
+
+/* ====== SAVE (override quirúrgico) ======
+   Lee filas garantizando fecha válida y estructura mínima.
+   ⚠️ FIX: usa un contexto seguro si $cityList aún no existe.
+*/
+(function hotfix_saveDestinations_v77_3(){
+  const orig = typeof saveDestinations === 'function' ? saveDestinations : null;
+
+  window.saveDestinations = function(){
+    // 🔧 Asegurar $cityList si todavía no está seteado
+    try {
+      if (!window.$cityList || !(window.$cityList instanceof Element)) {
+        window.$cityList = document.querySelector('#city-list') || null;
+      }
+    } catch(_) {}
+
+    // ⚠️ Contexto SEGURO para buscar filas aunque $cityList aún no esté listo
+    const ctx = (window.$cityList && window.$cityList.nodeType === 1)
+      ? window.$cityList
+      : (document.querySelector('#city-list') || document);
+
+    const rows = qsa('.city-row', ctx);
+    const out = [];
+
+    rows.forEach((r)=>{
+      const city    = (r.querySelector('.city')    || {}).value?.trim()    || '';
+      const country = (r.querySelector('.country') || {}).value?.trim()    || '';
+      const daysStr = (r.querySelector('.days')    || {}).value?.trim()    || '0';
+      const days    = Math.max(0, parseInt(daysStr, 10) || 0);
+
+      // Fecha: tripleta preferida, fallback .baseDate
+      let baseDate = __tripletToDMY__(r);
+      if(!baseDate){
+        const baseEl = r.querySelector('.baseDate');
+        baseDate = (baseEl?.value || '').trim();
+      }
+      // Sincronizar .baseDate para pipelines que la necesiten
+      if(!r.querySelector('.baseDate')) __ensureHiddenBaseDate__(r);
+      if(!baseDate) baseDate = __ensureHiddenBaseDate__(r);
+
+      if(city && country && days > 0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(baseDate)){
+        out.push({ city, country, days, baseDate });
+      }
+    });
+
+    // Persistir en estado global
+    window.savedDestinations = out;
+
+    // Llamar al original si existe (por side-effects adicionales)
+    if(orig){ try { orig(); } catch(e){ console.warn('[HOTFIX] saveDestinations(orig) error:', e); } }
+
+    // Inicializar estructuras mínimas para pintar el primer tab
+    if(Array.isArray(savedDestinations) && savedDestinations.length){
+      savedDestinations.forEach(({city, days, baseDate})=>{
+        if(!window.itineraries) window.itineraries = {};
+        if(!itineraries[city]) itineraries[city] = { byDay: {}, baseDate, originalDays: Math.max(days||0, 1) };
+        if(!itineraries[city].byDay) itineraries[city].byDay = {};
+        // Asegurar Day 1 con array aunque esté vacío (la tabla se pinta)
+        if(!Array.isArray(itineraries[city].byDay[1])) itineraries[city].byDay[1] = [];
+        // Sincronizar baseDate si aún no está
+        if(!itineraries[city].baseDate && baseDate) itineraries[city].baseDate = baseDate;
+
+        // cityMeta ventanas por día (para overlaps/horas) — mínimo D1
+        if(!window.cityMeta) window.cityMeta = {};
+        if(!cityMeta[city]) cityMeta[city] = { baseDate, hotel:'', transport:'', perDay: [] };
+        if(!Array.isArray(cityMeta[city].perDay)) cityMeta[city].perDay = [];
+        const hasD1 = cityMeta[city].perDay.some(x=>x.day===1);
+        if(!hasD1){
+          cityMeta[city].perDay.push({ day: 1, start: (typeof DEFAULT_START==='string'? DEFAULT_START : '08:30'),
+                                            end: (typeof DEFAULT_END  ==='string'? DEFAULT_END   : '19:00') });
+        }
+      });
+    }
+
+    // Reconstruir tabs inmediatamente tras guardar
+    try { renderCityTabs(); } catch(e){ console.warn('[HOTFIX] renderCityTabs error:', e); }
+
+    return out;
+  };
+})();
+
+/* ====== TABS (override quirúrgico) ======
+   Reconstruye tabs y activa el primero si no hay activo.
+*/
+(function hotfix_renderCityTabs_v77_3(){
+  const orig = typeof renderCityTabs === 'function' ? renderCityTabs : null;
+
+  window.renderCityTabs = function(){
+    if(!$tabs) return;
+    $tabs.innerHTML = '';
+
+    const list = Array.isArray(savedDestinations) ? savedDestinations : [];
+    if(!list.length){
+      // Sin tabs -> limpiar vista
+      if($itWrap) $itWrap.innerHTML = '';
+      if(orig){ try { orig(); } catch(e){} }
+      return;
+    }
+
+    // Crear botones de tabs
+    list.forEach(({city})=>{
+      const btn = document.createElement('button');
+      btn.className = 'city-tab';
+      btn.textContent = city;
+      btn.dataset.city = city;
+      btn.addEventListener('click', ()=>{
+        try { setActiveCity(city); } catch(e){ console.warn('[HOTFIX] setActiveCity click error:', e); }
+      });
+      $tabs.appendChild(btn);
+    });
+
+    // Activar el tab actual o el primero
+    let target = window.activeCity && list.some(d => d.city === window.activeCity)
+      ? window.activeCity
+      : list[0].city;
+
+    try { setActiveCity(target); } catch(e){
+      console.warn('[HOTFIX] setActiveCity init error:', e);
+      // fallback: pinta al menos la tabla del primero si hay renderer
+      if(typeof renderCityItinerary === 'function'){
+        try { renderCityItinerary(target); } catch(_) {}
+      }
+    }
+
+    if(orig){ try { orig(); } catch(e){} }
+  };
+})();
+
+/* ====== setActiveCity (override muy acotado) ======
+   Asegura clase .active en el tab, currentDay=1 y render inmediato.
+*/
+(function hotfix_setActiveCity_v77_3(){
+  const orig = typeof setActiveCity === 'function' ? setActiveCity : null;
+
+  window.setActiveCity = function(city){
+    window.activeCity = city;
+
+    // Marcar visualmente el tab activo
+    if($tabs){
+      qsa('.city-tab', $tabs).forEach(b=>{
+        b.classList.toggle('active', b.dataset.city === city);
+      });
+    }
+
+    // Asegurar estructura mínima
+    if(!window.itineraries) window.itineraries = {};
+    if(!itineraries[city]) itineraries[city] = { byDay: {}, baseDate: (savedDestinations.find(d=>d.city===city)?.baseDate || ''), originalDays: 1 };
+    if(!itineraries[city].byDay) itineraries[city].byDay = {};
+    if(!Array.isArray(itineraries[city].byDay[1])) itineraries[city].byDay[1] = [];
+
+    // Día visible por defecto
+    itineraries[city].currentDay = 1;
+
+    // Pintar tabla del día actual
+    if(typeof renderCityItinerary === 'function'){
+      try { renderCityItinerary(city); } catch(e){ console.warn('[HOTFIX] renderCityItinerary error:', e); }
+    }
+
+    if(orig){ try { orig(city); } catch(e){} }
+  };
+})();
 
 /* ==============================
    SECCIÓN 17 · NLU robusta + Intents
