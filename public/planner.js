@@ -2020,6 +2020,12 @@ function resolveHotelInput(userText, city){
   return best;
 }
 
+/* ====== Helper mínimo para detectar “no sé / recomiéndame” en transporte ====== */
+function __wantsTransportRecommendation__(txt){
+  const t = String(txt||'').toLowerCase();
+  return /\b(recomiend|no\s*s[eé]|no\s*se|no\s*tengo|da\s*igual|como\s*sea|cualquiera)\b/.test(t);
+}
+
 function askNextHotelTransport(){
   // ✅ Si ya se procesaron todos los destinos → generar itinerarios
   if(metaProgressIndex >= savedDestinations.length){
@@ -2052,7 +2058,7 @@ function askNextHotelTransport(){
   // 🔎 Pre-carga de alias/POIs para ayudar al usuario a escribir “a su manera”
   preloadHotelAliases(city);
 
-  // ⛔ Debe esperar explícitamente hotel/zona antes de avanzar (requisito)
+  // ⛔ Debe esperar explícitamente hotel/zona ANTES de avanzar
   const currentHotel = cityMeta[city].hotel || '';
   if(!currentHotel.trim()){
     setActiveCity(city);
@@ -2061,7 +2067,20 @@ function askNextHotelTransport(){
     return; // 👈 No avanza hasta que el usuario indique hotel/zona
   }
 
-  // 🧭 Avanzar al siguiente destino si ya hay hotel guardado
+  // ⛔ Debe esperar transporte ANTES de avanzar (FIX QUIRÚRGICO)
+  // Nota: si el usuario indica “recomiéndame”, dejamos un default explícito
+  const currentTransport = cityMeta[city].transport || '';
+  if(!currentTransport.trim()){
+    setActiveCity(city);
+    renderCityItinerary(city);
+
+    // Reutilizamos el mismo prompt (no tocamos tone.*); el handler deberá capturar transporte.
+    // Pero aquí bloqueamos avance hasta tenerlo.
+    chatMsg(tone.askHotelTransport(city), 'ai');
+    return;
+  }
+
+  // 🧭 Avanzar al siguiente destino si ya hay hotel + transporte guardados
   metaProgressIndex++;
   askNextHotelTransport();
 }
@@ -2844,10 +2863,12 @@ async function optimizeDay(city, day) {
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
-   v71.fix — Extensión de días estable + integración INFO→PLANNER
-   - Mantiene flujos existentes (add/swap/move/etc.)
-   - Rebalanceos y optimizaciones llaman a optimizeDay (que ya usa INFO→PLANNER)
-   - Respeta y registra preferencias/condiciones del usuario
+   v71.fix — Extensión de días estable
+   - Reequilibra desde el último día original hasta el nuevo final
+   - Define "día suave" en el NUEVO último día
+   - Asegura ventana/optimización completa del día nuevo
+   + Mejora: uso del resolutor de hotel/zona, feedback de confianza,
+     y activación automática de preferAurora cuando aplique
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -2859,7 +2880,7 @@ async function onSend(){
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
 
-    // Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
+    // 🚀 Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
     const res = resolveHotelInput(text, city);
     const resolvedHotel = res.text || text;
 
@@ -2872,7 +2893,7 @@ async function onSend(){
 
     upsertCityMeta({ city, hotel: resolvedHotel, transport });
 
-    // Feedback al usuario según confianza del match
+    // 🗣️ Feedback al usuario según confianza del match
     if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
       chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
     }else if((res.confidence||0) >= 0.65){
@@ -2881,12 +2902,13 @@ async function onSend(){
       chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
     }
 
-    // Activar preferAurora automáticamente si la ciudad es apta
+    // 🌌 Activar preferAurora automáticamente si la ciudad es apta
     try{
       const canon = (typeof normalizeCityForGeo==='function') ? normalizeCityForGeo(city) : city;
       const coords = (typeof getCoordinatesForCity==='function') ? (getCoordinatesForCity(canon) || getCoordinatesForCity(city)) : null;
       const auroraCity = coords && (typeof isAuroraCityDynamic==='function') ? isAuroraCityDynamic(coords.lat, coords.lng) : false;
 
+      // Si no hay coords, usa heurística por nombre (Reykjavik/Tromsø variantes)
       if(!coords){
         const low = String(canon||city||'').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
         if(/\breikj?avik\b|\breikiavik\b|\breykiavik\b|\breykjavik\b/.test(low)) { if(!plannerState.preferences) plannerState.preferences={}; plannerState.preferences.preferAurora = true; }
@@ -2895,7 +2917,7 @@ async function onSend(){
         if(!plannerState.preferences) plannerState.preferences = {};
         plannerState.preferences.preferAurora = true;
       }
-    }catch(_){ /* no-op */ }
+    }catch(_){ /* no-op seguro */ }
 
     metaProgressIndex++;
     askNextHotelTransport();
@@ -2908,7 +2930,7 @@ async function onSend(){
     const newHotelRaw = hotelChangeMatch[1].trim();
     const city = activeCity;
 
-    // Resolver también en cambios de hotel
+    // 🧠 Resolver también en cambios de hotel
     const res = resolveHotelInput(newHotelRaw, city);
     const newHotel = res.text || newHotelRaw;
 
@@ -3005,11 +3027,11 @@ async function onSend(){
     const total = Object.keys(itineraries[city].byDay||{}).length;
     for(let d=prevTotal+1; d<=total; d++) ensureWindow(d);
 
-    // Día suave en el nuevo último día
+    // 👉 Definir "día suave" en el NUEVO último día
     if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
     plannerState.lightDayTarget[city] = total;
 
-    // Reequilibrar rango completo (usa optimizeDay → INFO→PLANNER)
+    // Reequilibrar desde el último día original hasta el nuevo final
     await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total, dayTripTo: intent.dayTripTo||'' });
 
     // Garantía de completitud del último día
@@ -3033,7 +3055,7 @@ async function onSend(){
 
     // total ANTES de insertar (último día ORIGINAL)
     const prevTotal = days.length || 0;
-    itineraries[city].lastOriginalDay = prevTotal;
+    itineraries[city].lastOriginalDay = prevTotal; // histórico
 
     // Forzar replan del rango
     if (!plannerState.forceReplan) plannerState.forceReplan = {};
@@ -3072,11 +3094,11 @@ async function onSend(){
 
     const total = Object.keys(itineraries[city].byDay||{}).length;
 
-    // Día suave en el nuevo último día
+    // 👉 Definir "día suave" en el NUEVO último día
     if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
     plannerState.lightDayTarget[city] = total;
 
-    // Rebalancear desde el último día original hasta el final (optimizeDay nuevo)
+    // Rebalancear desde el último día original hasta el nuevo final
     await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total });
 
     // Garantía de completitud del nuevo día
@@ -3193,7 +3215,7 @@ async function onSend(){
     return;
   }
 
-  // Preguntas informativas → usa Info Agent (independiente del plan)
+  // Preguntas informativas
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
@@ -3380,12 +3402,17 @@ function validateBaseDatesDMY(){
 
 /* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
 $save?.addEventListener('click', ()=>{
+  // ejecuta lógica propia de guardado
   try { saveDestinations(); } catch(_) {}
+
+  // valida y sólo entonces habilita
   const basicsOK = formHasBasics();
   const datesOK  = validateBaseDatesDMY();
   if (basicsOK && datesOK) {
     hasSavedOnce = true;
     if ($start) $start.disabled = false;
+
+    // 🆕 Hook para integraciones internas (no rompe nada)
     try {
       document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
         detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
@@ -3396,6 +3423,7 @@ $save?.addEventListener('click', ()=>{
   }
 });
 
+/* ===== Reglas para habilitación del botón ===== */
 function formHasBasics(){
   const row = qs('.city-row', $cityList);
   if(!row) return false;
@@ -3406,7 +3434,7 @@ function formHasBasics(){
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
-// Deshabilita start si rompen el formulario (ya no habilita automáticamente)
+// Ya NO habilitamos al escribir; sólo deshabilitamos si se borran datos
 document.addEventListener('input', (e)=>{
   if(!$start) return;
   if(e.target && (
@@ -3415,6 +3443,7 @@ document.addEventListener('input', (e)=>{
      e.target.classList?.contains('days') ||
      e.target.classList?.contains('baseDate')
   )){
+    // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
     if(!formHasBasics()) $start.disabled = true;
   }
 });
@@ -3461,6 +3490,7 @@ function bindReset(){
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
     confirmReset.addEventListener('click', ()=>{
+      // Estado principal
       $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
       addCityRow();
       if ($start) $start.disabled = true;
@@ -3468,6 +3498,7 @@ function bindReset(){
       $chatBox.style.display='none'; $chatM.innerHTML='';
       session = []; hasSavedOnce=false; pendingChange=null;
 
+      // Flags
       planningStarted = false;
       metaProgressIndex = 0;
       collectingHotels = false;
@@ -3512,6 +3543,7 @@ function bindReset(){
       const firstCity = qs('.city-row .city');
       if (firstCity) firstCity.focus();
 
+      // 🆕 Hook para integraciones internas (no rompe nada)
       try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
     });
 
@@ -3533,12 +3565,13 @@ function bindReset(){
 // ▶️ Start: valida y ejecuta
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
-  if(!hasSavedOnce){
+  if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
     chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
     return;
   }
   if(!validateBaseDatesDMY()) return;
 
+  // 🆕 Hook para integraciones internas (no rompe nada)
   try {
     document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
       detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
@@ -3689,11 +3722,10 @@ function bindInfoChatListeners(){
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
-  // limpiar posibles dobles handlers si hubo rehidrataciones
-  toggleTop?.replaceWith(toggleTop?.cloneNode?.(true) || toggleTop);
-  toggleFloating?.replaceWith(toggleFloating?.cloneNode?.(true) || toggleFloating);
-  close?.replaceWith(close?.cloneNode?.(true) || close);
-  send?.replaceWith(send?.cloneNode?.(true) || send);
+  toggleTop?.replaceWith(toggleTop.cloneNode(true));
+  toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
+  close?.replaceWith(close.cloneNode(true));
+  send?.replaceWith(send.cloneNode(true));
 
   const tTop = qs('#info-chat-toggle');
   const tFloat = qs('#info-chat-floating');
@@ -3742,5 +3774,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   bindInfoChatListeners();
   bindReset();
+  // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
