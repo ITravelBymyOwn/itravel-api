@@ -1953,9 +1953,19 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
 
   try{
     // 🆕 Reequilibrio con **optimizeDay** (INFO→PLANNER) para cada día del rango
+    // ✅ PATCH QUIRÚRGICO (rendimiento): optimiza solo si hace falta
+    const force = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
+
     for(let d=start; d<=end; d++){
       /* eslint-disable no-await-in-loop */
-      await optimizeDay(city, d);
+      const thin =
+        (typeof dayIsTooThin === 'function')
+          ? dayIsTooThin(city, d, 3)
+          : true; // si no existe helper, conservamos comportamiento anterior (optimiza)
+
+      if(force || thin){
+        await optimizeDay(city, d);
+      }
     }
   }catch(err){
     console.warn('[rebalanceWholeCity] optimizeDay rango falló. Intento de salvataje local.', err);
@@ -2867,6 +2877,44 @@ if (typeof validateRowsWithAgent !== 'function') {
 }
 
 /* ------------------------------------------------------------------
+   ✅ PATCH QUIRÚRGICO: clamp a ventana del día (evita madrugadas absurdas)
+------------------------------------------------------------------- */
+if (typeof __clampRowsToDayWindow__ !== 'function') {
+  function __clampRowsToDayWindow__(city, day, rows) {
+    const pd = (cityMeta[city]?.perDay || []).find(x => Number(x.day) === Number(day));
+    const startW = __toMinHHMM__(pd?.start || DEFAULT_START || '08:30') ?? (8*60+30);
+    const endW   = __toMinHHMM__(pd?.end   || DEFAULT_END   || '19:00') ?? (19*60);
+
+    const out = [];
+    for (const r of rows) {
+      const isNight = __isNightRow__(r);
+      let s = __toMinHHMM__(r.start);
+      let e = __toMinHHMM__(r.end);
+
+      // Si no hay tiempos válidos, deja que fixOverlaps se encargue antes
+      if (s == null || e == null) { out.push(r); continue; }
+
+      // No tocamos nocturnas (auroras / tours nocturnos) porque pueden cruzar medianoche
+      if (isNight) { out.push(r); continue; }
+
+      // Clamp dentro de la ventana
+      if (s < startW) s = startW;
+      if (e > endW) e = endW;
+      if (e <= s) {
+        // si se colapsó, lo omitimos (mejor que dejar basura)
+        continue;
+      }
+
+      const dur = e - s;
+      const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur/60)}h${dur%60}m` : `${Math.floor(dur/60)}h`) : `${dur}m`;
+
+      out.push({ ...r, start: __toHHMMfromMin__(s), end: __toHHMMfromMin__(e), duration: lbl });
+    }
+    return out;
+  }
+}
+
+/* ------------------------------------------------------------------
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
@@ -2886,35 +2934,47 @@ async function optimizeDay(city, day) {
   });
 
   try {
-    /* =========================================================
-       ✅ FIX QUIRÚRGICO (CRÍTICO)
-       - Alinear payload INFO con el contrato que confirmaste:
-         { mode:"info", messages:[{role:"user", content:"<JSON string>"}] }
-       - En vez de { context }, usamos buildIntakeLite(city,{start,end})
-       - Esto evita aborts y que solo se llene el día 1.
-    ========================================================= */
-    const intakeLite =
-      (typeof buildIntakeLite === 'function')
-        ? buildIntakeLite(city, { start: day, end: day })
-        : JSON.stringify({ city, day });
+    // ✅ PATCH QUIRÚRGICO (rendimiento): reutilizar research cache por ciudad
+    window.__researchCache = window.__researchCache || {};
+    let research = window.__researchCache[city] || null;
 
-    // 1) INFO
-    const infoRaw = await callApiChat(
-      'info',
-      { messages: [{ role: 'user', content: intakeLite }] },
-      { timeoutMs: 32000, retries: 1 }
+    // 1) INFO (solo si no hay cache)
+    if (!research) {
+      const context =
+        (typeof __collectPlannerContext__ === 'function')
+          ? __collectPlannerContext__(city, day)
+          : { city, day };
+
+      const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+      const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
+      research = safeParseApiText(infoData?.text ?? infoData);
+      window.__researchCache[city] = research;
+    }
+
+    // ✅ Ventana del día (para acotar el planner)
+    const pd = (cityMeta[city]?.perDay || []).find(x => Number(x.day) === Number(day)) || {};
+    const dayHours = [{ day, start: (pd.start || DEFAULT_START || '08:30'), end: (pd.end || DEFAULT_END || '19:00') }];
+
+    // 2) PLANNER (acotado por día)
+    const plannerRaw = await callApiChat(
+      'planner',
+      {
+        research_json: research,
+        target_day: day,
+        day_hours: dayHours,
+        existing_rows: rows
+      },
+      { timeoutMs: 42000, retries: 1 }
     );
 
-    const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
-    const research = safeParseApiText(infoData?.text ?? infoData);
-
-    // 2) PLANNER
-    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
     const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
     const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
-
     const unified = unifyRowsFormat(structured, city);
-    let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
+
+    // Asegurar day correcto (y filtrar SOLO el día que estamos optimizando)
+    let finalRows = (unified?.rows || [])
+      .map(x => ({ ...x, day: Number(x.day) || day }))
+      .filter(x => Number(x.day) === Number(day));
 
     // === PIPELINE COHERENTE (mismas transformaciones que en 15.2) ===
     finalRows = finalRows.map(normalizeDurationLabel);
@@ -2923,10 +2983,16 @@ async function optimizeDay(city, day) {
     if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
     finalRows = fixOverlaps(finalRows);
     finalRows = finalRows.map(r => __normalizeDayField__(city, r));
+
+    // ✅ Clamp a ventana del día (evita horarios tipo 01:15 para actividades diurnas)
+    finalRows = __clampRowsToDayWindow__(city, day, finalRows);
+
     if (protectedRows.length) {
       finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
       finalRows = fixOverlaps(finalRows);
+      finalRows = __clampRowsToDayWindow__(city, day, finalRows);
     }
+
     finalRows = ensureReturnRow(city, finalRows);
     finalRows = clearTransportAfterReturn(city, finalRows);
     if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
@@ -2944,6 +3010,7 @@ async function optimizeDay(city, day) {
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
     safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing(city, safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
+    safeRows = __clampRowsToDayWindow__(city, day, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
