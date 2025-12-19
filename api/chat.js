@@ -161,9 +161,22 @@ REGLAS:
 - Devuelve **UN ÚNICO JSON VÁLIDO** (sin texto fuera).
 - Decide: actividades, orden, tiempos realistas, transporte, tickets/colas, clusters por zona.
 - Respeta preferencias del usuario y horas mandatorias.
-- Auroras (si aplica): NO consecutivas, NUNCA último día, ventana local exacta, duración y transporte.
-- Lagunas: ≥3h efectivas.
-- Macro-tours: 5–8 sub-paradas + return_to_city_duration.
+- NO generes duplicados bilingües del mismo tour/actividad (ej: "Golden Circle Tour" y "Tour del Círculo Dorado" a la vez).
+- Evita solapes: una actividad no puede ocurrir al mismo tiempo que otra.
+- Notas: deben ser **concretas y útiles** (1–2 frases) con detalles accionables (reserva, duración real, ticket, mejor hora, por qué ese orden).
+- Evita notas genéricas repetitivas tipo "verifica horarios" en todas las filas.
+
+Auroras (si aplica):
+- NO consecutivas, NUNCA último día.
+- ventana local exacta, duración y transporte.
+- si propones aurora, incluye un "note" útil y específico (cómo maximizar probabilidad: tour, cielo despejado, poca contaminación lumínica).
+
+Lagunas:
+- ≥3h efectivas.
+
+Macro-tours:
+- 5–8 sub-paradas + return_to_city_duration.
+- Incluye "Regreso a {ciudad}" como cierre de day-trip si aplica.
 
 SALIDA (JSON):
 {
@@ -218,11 +231,19 @@ SALIDA ÚNICA (JSON):
 
 REGLAS:
 - JSON válido, sin texto fuera.
+- NO inventes tours nuevos. NO dupliques el mismo tour/actividad en dos idiomas.
+- NO generes dos macro-tours grandes en el mismo día si se pisan (evita duplicación y solapes).
+- Si viene "existing_rows" para un día, úsalo como contexto para NO repetir y para mantener coherencia.
 - Si rows_skeleton trae start/end => respétalo.
 - Si no trae start/end => asigna dentro de day_hours del día, con buffers ≥15m.
+- Respeta estrictamente la ventana del día (day_hours). No pongas actividades diurnas a las 01:00–05:00.
 - Auroras: respeta días/ventanas/duración exactas.
-- Macro-tours: madre con ≤8 sub-paradas, no añadas “post retorno”.
+- Macro-tours: madre con ≤8 sub-paradas.
 - Lagunas: asegura ≥3h.
+
+MODO ACOTADO:
+- Si el input incluye "target_day", devuelve **SOLO filas de ese día** (todas con day=target_day).
+- Además, si incluye "day_hours", úsalo para fijar la ventana de ese día.
 `.trim();
 
 /* ============== Handler principal ============== */
@@ -313,7 +334,20 @@ export default async function handler(req, res) {
       }
 
       // Camino nuevo (research_json directo)
-      const plannerUserMsg = { role: "user", content: JSON.stringify({ research_json: research }, null, 2) };
+      // ✅ PATCH QUIRÚRGICO: incluir target_day, day_hours y existing_rows si vienen
+      const plannerUserMsg = {
+        role: "user",
+        content: JSON.stringify(
+          {
+            research_json: research,
+            target_day: body.target_day ?? null,
+            day_hours: body.day_hours ?? null,
+            existing_rows: body.existing_rows ?? null,
+          },
+          null,
+          2
+        ),
+      };
 
       let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3500);
       let parsed = cleanToJSONPlus(raw);
