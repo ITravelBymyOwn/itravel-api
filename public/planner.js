@@ -2755,6 +2755,58 @@ function __sortRowsTabsSafe__(rows) {
 }
 
 /* ------------------------------------------------------------------
+   ✅ INJERTO QUIRÚRGICO: Contexto rico para INFO (si no existe)
+   - Evita duplicados, mejora coherencia, y reduce “inventos” del modelo
+------------------------------------------------------------------- */
+if (typeof __collectPlannerContext__ !== 'function') {
+  function __collectPlannerContext__(city, day) {
+    const totalDays = __getTotalDaysForCity__(city) || (savedDestinations?.find(x=>x.city===city)?.days || 1);
+    const baseDate  = itineraries?.[city]?.baseDate || cityMeta?.[city]?.baseDate || '';
+
+    const perDay = Array.from({ length: totalDays }, (_,i)=>{
+      const d = i+1;
+      const w = (cityMeta?.[city]?.perDay || []).find(x=>Number(x.day)===d) || {};
+      return { day:d, start: w.start || DEFAULT_START || '08:30', end: w.end || DEFAULT_END || '19:00' };
+    });
+
+    const byDay = itineraries?.[city]?.byDay || {};
+    const already = {};
+    Object.keys(byDay).forEach(k=>{
+      const d = Number(k)||1;
+      already[d] = (byDay[k] || []).map(r=>({
+        day:d,
+        start:r.start||'',
+        end:r.end||'',
+        activity:r.activity||'',
+        from:r.from||'',
+        to:r.to||'',
+        transport:r.transport||'',
+        duration:r.duration||'',
+        notes:r.notes||'',
+        _crossDay: !!r._crossDay
+      }));
+    });
+
+    // Lista plana de actividades ya usadas (para evitar duplicación)
+    const flatActs = Object.values(already).flat().map(r=>String(r.activity||'')).filter(Boolean);
+
+    return {
+      city,
+      day_target: Number(day) || 1,
+      days_total: Number(totalDays) || 1,
+      baseDate,
+      hotel_base: cityMeta?.[city]?.hotel || '',
+      transport_preference: cityMeta?.[city]?.transport || '',
+      day_hours: perDay,
+      existing_itinerary_by_day: already,
+      existing_activities: flatActs,
+      preferences: plannerState?.preferences || {},
+      restrictions: (plannerState?.restrictions || plannerState?.conditions || plannerState?.specialConditions || {})
+    };
+  }
+}
+
+/* ------------------------------------------------------------------
    “Regreso a {city}” en day-trips (sin duplicar si ya existe)
 ------------------------------------------------------------------- */
 function ensureReturnRow(city, rows) {
@@ -2958,8 +3010,13 @@ async function optimizeDay(city, day) {
 
     const unified = unifyRowsFormat(structured, city);
 
-    // ✅ Importante: fuerza day objetivo si el modelo olvida day
-    let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
+    // ✅ INJERTO QUIRÚRGICO: optimizeDay ES por día.
+    // 1) Si el modelo devolvió múltiples días, tomamos SOLO el día objetivo.
+    // 2) Si no hay filas para ese día, reasignamos todo al day objetivo para no dejar vacío.
+    const rawRows = (unified?.rows || []);
+    const picked = rawRows.filter(x => (Number(x.day) || day) === day);
+
+    let finalRows = (picked.length ? picked : rawRows).map(x => ({ ...x, day }));
 
     finalRows = finalRows.map(normalizeDurationLabel);
     finalRows = finalRows.map(normalizeAuroraWindow);
