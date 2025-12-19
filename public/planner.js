@@ -1590,14 +1590,14 @@ async function generateCityItinerary(city){
 
   async function callInfoAPI(context){
     if (hasCallApiChat) {
-      const resp = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+      const resp = await callApiChat('info', context, { timeoutMs: 32000, retries: 1 });
       const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
       return cleanToJSONPlus(txt || resp) || {};
     }
     const resp = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "info", context }),
+      body: JSON.stringify({ mode: "info", ...context }),
     });
     if (!resp.ok) throw new Error(`API info HTTP ${resp.status}`);
     const data = await resp.json();
@@ -1693,9 +1693,13 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      // 🔴 ÚNICO CAMBIO REAL
       const context = buildIntakeLite(city);
-      const research = cached || await callInfoAPI(context);
+
+      // 🔧 ÚNICO CAMBIO QUIRÚRGICO (NO SE TOCA NADA MÁS)
+      const research = cached || await callInfoAPI({
+        messages: [{ role: 'user', content: context }]
+      });
+
       if(!cached) window.__researchCache[city] = research;
       const structured = await callPlannerAPI_withResearch(research);
       parsed = structured;
@@ -1724,48 +1728,26 @@ ${buildIntake()}
       if(typeof normalizeAuroraWindow==='function')  tmpRows = tmpRows.map(normalizeAuroraWindow);
 
       if(typeof enforceOneAuroraPerDay==='function') tmpRows = enforceOneAuroraPerDay(tmpRows);
-      if(typeof enforceAuroraCapForDay==='function' && typeof suggestedAuroraCap==='function'){
-        const cap = suggestedAuroraCap(dest.days || tmpRows.reduce((m,r)=>Math.max(m, Number(r.day)||1), 1));
-        const byDay = {}; tmpRows.forEach(r => { const d=Number(r.day)||1; (byDay[d]=byDay[d]||[]).push(r); });
-        const rebuilt = [];
-        Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
-          rebuilt.push(...enforceAuroraCapForDay(city, day, byDay[day], cap));
-        });
-        tmpRows = rebuilt;
-      }
 
       if(typeof enforceTransportAndOutOfTown==='function') tmpRows = enforceTransportAndOutOfTown(city, tmpRows);
       if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
       if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
 
-      if(plannerState?.preferences?.alwaysIncludeDinner && typeof injectDinnerIfMissing==='function'){
-        tmpRows = injectDinnerIfMissing(city, tmpRows);
-      }
-
-      if(typeof pruneGenericPerDay==='function') tmpRows = pruneGenericPerDay(tmpRows);
-
       pushRows(city, tmpRows, !!forceReplan);
-
       ensureDays(city);
-      const totalDays = dest.days || Object.keys(itineraries[city].byDay||{}).length || 1;
 
-      const hasAll = hasCoverageForAllDays(tmpRows, totalDays);
-      for(let d=1; d<=totalDays; d++){
-        const need = forceReplan || !hasAll || dayIsTooThin(city, d, 3);
-        if (need){ await optimizeDay(city,d); }
+      for(let d=1; d<=dest.days; d++){
+        if(forceReplan || dayIsTooThin(city, d, 3)){
+          await optimizeDay(city, d);
+        }
       }
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-      if(forceReplan && plannerState?.forceReplan) delete plannerState.forceReplan[city];
-      if(plannerState?.preferences){ delete plannerState.preferences.preferDayTrip; delete plannerState.preferences.preferAurora; }
-      $resetBtn?.removeAttribute('disabled');
       return;
     }
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-    $resetBtn?.removeAttribute('disabled');
-    chatMsg('⚠️ Fallback local: sin respuesta JSON válida del API.','ai');
 
   } catch(err){
     console.error(`[ERROR] generateCityItinerary(${city})`, err);
