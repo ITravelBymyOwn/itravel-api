@@ -771,7 +771,7 @@ function buildIntake(){
 }
 
 // 🧠 Intake compacto por ciudad y rango de días (para prompts ligeros en rebalance y optimizeDay)
-function buildIntakeLite(city, range = null, opts = null){
+function buildIntakeLite(city, range = null){
   const it = itineraries[city];
   if(!it) return `City: ${city} (no data)`;
 
@@ -801,18 +801,14 @@ function buildIntakeLite(city, range = null, opts = null){
     perDayFull = perDayFull.filter(pd => pd.day >= range.start && pd.day <= range.end);
   }
 
-  // ✅ AJUSTE QUIRÚRGICO (Opción A):
-  // - Para INFO interno: no enviar start/end (liberar horarios); solo day.
-  // - Para el resto (optimize/rebalance/free_edit): mantener ventanas completas.
-  const forInfo = !!(opts && (opts.forInfo === true));
-  const perDayOut = forInfo
-    ? (Array.isArray(perDayFull) ? perDayFull.map(pd=>({ day: pd.day })) : [])
-    : perDayFull;
-
   const meta = {
     baseDate: it.baseDate || cityMeta[city]?.baseDate || null,
     transport: cityMeta[city]?.transport || '',
-    perDay: perDayOut
+    perDay: perDayFull,
+
+    // ✅ QUIRÚRGICO (A1): señales explícitas para el agente INFO/PLANNER
+    days_total: totalDays,
+    allow_ai_schedule: true
   };
 
   return JSON.stringify({ city, meta, days: compact });
@@ -1578,21 +1574,23 @@ async function generateCityItinerary(city){
   };
 
   /* ==================== Helpers API ==================== */
-  const hasCallApiChat = (typeof callApiChat === 'function');
+  // (⚠️ QUIRÚRGICO A1: este flag NO debe quedar congelado antes del shim)
+  let hasCallApiChat = (typeof callApiChat === 'function');
 
   /* =========================================================
      ✅ INJERTO QUIRÚRGICO #1
      - Evita: ReferenceError: callApiChat is not defined (optimizeDay y otros)
      - Crea un shim global SOLO si no existe.
+     - ✅ QUIRÚRGICO A1: sube timeout/retries por defecto (evita AbortError en optimizeDay)
   ========================================================= */
   if (typeof window.callApiChat !== 'function') {
     window.callApiChat = async function(mode, payload = {}, opts = {}) {
-      const timeoutMs = Number(opts.timeoutMs || 30000);
-      const retries   = Number(opts.retries || 0);
+      const timeoutMs = Number(opts.timeoutMs || 65000); // ← A1 (antes 30000)
+      const retries   = Number(opts.retries || 1);       // ← A1 (antes 0)
 
       const doOnce = async ()=>{
         const ctrl = new AbortController();
-        const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+        const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
         try{
           const resp = await fetch("/api/chat", {
             method: "POST",
@@ -1615,6 +1613,9 @@ async function generateCityItinerary(city){
       throw lastErr || new Error("callApiChat failed");
     };
   }
+
+  // ✅ QUIRÚRGICO A1: recalcular después del shim
+  hasCallApiChat = (typeof callApiChat === 'function');
 
   /* =========================================================
      ✅ INJERTO QUIRÚRGICO #2
@@ -1646,7 +1647,7 @@ async function generateCityItinerary(city){
 
   async function callPlannerAPI_withResearch(researchJson){
     if (hasCallApiChat) {
-      const resp = await callApiChat('planner', { research_json: researchJson }, { timeoutMs: 42000, retries: 1 });
+      const resp = await callApiChat('planner', { research_json: researchJson }, { timeoutMs: 90000, retries: 1 });
       const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
       return _safeCleanToJSONPlus(txt || resp) || {};
     }
@@ -1662,7 +1663,7 @@ async function generateCityItinerary(city){
 
   async function callInfoAPI(context){
     if (hasCallApiChat) {
-      const resp = await callApiChat('info', context, { timeoutMs: 32000, retries: 1 });
+      const resp = await callApiChat('info', context, { timeoutMs: 65000, retries: 1 });
       const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
       return _safeCleanToJSONPlus(txt || resp) || {};
     }
@@ -1770,8 +1771,7 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      // ✅ CAMBIO QUIRÚRGICO (Opción A): buildIntakeLite en modo INFO sin start/end
-      const context = buildIntakeLite(city, null, { forInfo: true });
+      const context = buildIntakeLite(city);
 
       const research = cached || await callInfoAPI({
         messages: [{ role: 'user', content: context }]
@@ -1814,9 +1814,34 @@ ${buildIntake()}
       pushRows(city, tmpRows, !!forceReplan);
       ensureDays(city);
 
+      // ✅ QUIRÚRGICO A1: si faltan días o están vacíos, no depender solo de "thin"
+      const totalDays = dest.days;
+      const byDayNow = itineraries[city]?.byDay || {};
+      const missingDays = [];
+      for(let d=1; d<=totalDays; d++){
+        const n = (byDayNow[d] || []).filter(r=>!!r.activity).length;
+        if(n === 0) missingDays.push(d);
+      }
+
+      // Primero: asegurar faltantes
+      for(const d of missingDays){
+        try{
+          await optimizeDay(city, d);
+        }catch(e){
+          console.warn(`[generateCityItinerary] optimizeDay falló en día faltante D${d} (${city})`, e);
+          // continuar sin romper toda la ciudad
+        }
+      }
+
+      // Luego: flacos o replan
       for(let d=1; d<=dest.days; d++){
         if(forceReplan || dayIsTooThin(city, d, 3)){
-          await optimizeDay(city, d);
+          try{
+            await optimizeDay(city, d);
+          }catch(e){
+            console.warn(`[generateCityItinerary] optimizeDay falló en D${d} (${city})`, e);
+            // ✅ QUIRÚRGICO A1: continuar
+          }
         }
       }
 
