@@ -1626,7 +1626,7 @@ async function generateCityItinerary(city){
     for(let d=1; d<=totalDays; d++){ if(!flags.has(d)) return false; }
     return true;
   }
-  // 🆕 umbral de “día flaco”
+
   function dayIsTooThin(city, day, min=3){
     const cur = itineraries[city]?.byDay?.[day] || [];
     return cur.filter(r=>!!r.activity).length < min;
@@ -1693,7 +1693,8 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      const context = __collectPlannerContext__(city, 1);
+      // 🔴 ÚNICO CAMBIO REAL
+      const context = buildIntakeLite(city);
       const research = cached || await callInfoAPI(context);
       if(!cached) window.__researchCache[city] = research;
       const structured = await callPlannerAPI_withResearch(research);
@@ -1710,23 +1711,18 @@ ${buildIntake()}
 
     if(parsed && (parsed.rows || parsed.destination)){
       const rowsFromApi = Array.isArray(parsed.rows) ? parsed.rows : [];
-      // 1 sola pasada de normalización → performance
       let tmpRows = rowsFromApi.map(r=>normalizeRow(r));
 
-      // Dedupe contra lo ya existente
       const existingActs = Object.values(itineraries[city]?.byDay||{}).flat().map(r=>normKey(String(r.activity||'')));
       tmpRows = tmpRows.filter(r=>!existingActs.includes(normKey(String(r.activity||''))));
 
-      // Fixes suaves
       if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      // === PIPELINE COHERENTE (una sola pasada por transformación pesada) ===
-      // A) normalizaciones
       if(typeof normalizeDurationLabel==='function') tmpRows = tmpRows.map(normalizeDurationLabel);
       if(typeof normalizeAuroraWindow==='function')  tmpRows = tmpRows.map(normalizeAuroraWindow);
-      // B) auroras: 1 por día + tope no consecutivo (cap global)
+
       if(typeof enforceOneAuroraPerDay==='function') tmpRows = enforceOneAuroraPerDay(tmpRows);
       if(typeof enforceAuroraCapForDay==='function' && typeof suggestedAuroraCap==='function'){
         const cap = suggestedAuroraCap(dest.days || tmpRows.reduce((m,r)=>Math.max(m, Number(r.day)||1), 1));
@@ -1737,32 +1733,27 @@ ${buildIntake()}
         });
         tmpRows = rebuilt;
       }
-      // C) transporte (relleno sólo si falta)
+
       if(typeof enforceTransportAndOutOfTown==='function') tmpRows = enforceTransportAndOutOfTown(city, tmpRows);
-      // D) anti-solapes + cruce nocturno tabs-safe (PATCH dentro de fixOverlaps)
       if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
-      // E) retorno a ciudad si day-trip
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
-      // F) limpiar transporte en actividades urbanas posteriores al regreso
       if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
-      // G) cena si procede
+
       if(plannerState?.preferences?.alwaysIncludeDinner && typeof injectDinnerIfMissing==='function'){
         tmpRows = injectDinnerIfMissing(city, tmpRows);
       }
-      // H) poda de genéricos redundantes
+
       if(typeof pruneGenericPerDay==='function') tmpRows = pruneGenericPerDay(tmpRows);
 
-      // Empuje a estado
       pushRows(city, tmpRows, !!forceReplan);
 
-      // Render/optimización sólo donde hace falta
       ensureDays(city);
       const totalDays = dest.days || Object.keys(itineraries[city].byDay||{}).length || 1;
 
       const hasAll = hasCoverageForAllDays(tmpRows, totalDays);
       for(let d=1; d<=totalDays; d++){
         const need = forceReplan || !hasAll || dayIsTooThin(city, d, 3);
-        if (need){ /* eslint-disable no-await-in-loop */ await optimizeDay(city,d); }
+        if (need){ await optimizeDay(city,d); }
       }
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -1772,7 +1763,6 @@ ${buildIntake()}
       return;
     }
 
-    // Fallback visual si el API no trajo JSON válido
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     chatMsg('⚠️ Fallback local: sin respuesta JSON válida del API.','ai');
