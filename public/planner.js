@@ -2490,16 +2490,27 @@ if (typeof __isNightRow__ !== 'function') {
     return false;
   }
 }
+
 if (typeof isOutOfTownRow !== 'function') {
-  // Fallback conservador: considera out-of-town si hay palabras clave
+  // ✅ PATCH QUIRÚRGICO: evitar falsos positivos por "from/to no contiene ciudad"
+  // Regla conservadora: out-of-town SOLO si hay señales fuertes en activity/from/to.
   function isOutOfTownRow(city, r) {
     const a = (r?.activity || '').toLowerCase();
     const f = (r?.from || '').toLowerCase();
     const t = (r?.to || '').toLowerCase();
-    const c = String(city || '').toLowerCase();
-    const hints = /excursi[oó]n|pen[ií]nsula|costa|glaciar|c[ií]rculo|parque|volc[aá]n|lago|cascada/;
-    const notCity = (str) => str && c && !str.includes(c);
-    return hints.test(a) || notCity(f) || notCity(t);
+
+    // Señales fuertes de excursión / fuera de ciudad (genéricas, multi-país)
+    const strong =
+      /excursi[oó]n|day\s*trip|tour\s+del|tour\s+de|golden\s+circle|south\s+coast|c[ií]rculo\s+dorado|costa\s+sur|pen[ií]nsula|glaciar|parque\s+nacional|volc[aá]n|cascada|waterfall|crater|geysir|laguna\s+azul|blue\s*lagoon|hot\s*spring|thermal|lago\b|playa\b|black\s+sand|village|island\s+tour/i;
+
+    // Si cualquiera de los campos tiene señal fuerte, se considera out-of-town
+    if (strong.test(a) || strong.test(f) || strong.test(t)) return true;
+
+    // Caso adicional: transporte claramente interurbano
+    const tr = (r?.transport || '').toLowerCase();
+    if (/veh[ií]culo|carro|auto|tour\s+guiado|van|bus\s+tur[ií]stico/i.test(tr) && strong.test(a)) return true;
+
+    return false;
   }
 }
 
@@ -2508,7 +2519,6 @@ if (typeof isOutOfTownRow !== 'function') {
 ------------------------------------------------------------------- */
 if (typeof normalizeDurationLabel !== 'function') {
   function normalizeDurationLabel(r) {
-    // Acepta "1h30m", "90m", "2 h", "1 h 15 m"...
     const raw = String(r?.duration || '').trim();
     let minutes = 0;
     let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
@@ -2534,7 +2544,6 @@ if (typeof normalizeAuroraWindow !== 'function') {
     const act = String(r?.activity || '');
     if (!/\bauroras?\b|\bnorthern\s+lights?\b/i.test(act)) return r;
 
-    // Ventana por defecto 20:15–00:15 (4h) si no hay datos plausibles
     const fallbackStart = '20:15';
     const fallbackEnd = '00:15';
 
@@ -2542,22 +2551,19 @@ if (typeof normalizeAuroraWindow !== 'function') {
     let e = __toMinHHMM__(r?.end);
     let d = String(r?.duration || '').trim();
 
-    // Si no hay tiempos válidos, aplica ventana por defecto
     if (s == null || e == null || e <= s) {
       s = __toMinHHMM__(fallbackStart);
-      e = __toMinHHMM__(fallbackEnd) + 24 * 60; // cruza medianoche
+      e = __toMinHHMM__(fallbackEnd) + 24 * 60;
     }
 
-    // Duración coherente si viene en blanco
     const dur = (function () {
       const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
       const mm = d.match(/(\d+)\s*m/i);
       if (md) return parseInt(md[1], 10) * 60 + (md[2] ? parseInt(md[2], 10) : 0);
       if (mm) return parseInt(mm[1], 10);
-      return ((e - s) + 24 * 60) % (24 * 60) || 240; // 4h
+      return ((e - s) + 24 * 60) % (24 * 60) || 240;
     })();
 
-    // Ajusta a nocturna y marca _crossDay para sort tabs-safe
     const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
     const endHH = __toHHMMfromMin__(e % (24 * 60));
     const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
@@ -2605,7 +2611,7 @@ function enforceOneAuroraPerDay(rows) {
   const byDay = {};
   rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
   const out = [];
-  Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
+  Object.keys(byDay).map(n=>+n).sort((a, b) => a - b).forEach(day => {
     let seen = false;
     for (const r of byDay[day]) {
       if (__isAuroraName__(r.activity)) { if (seen) continue; seen = true; }
@@ -2714,10 +2720,25 @@ function fixOverlaps(rows) {
   return out;
 }
 
+/* ------------------------------------------------------------------
+   ✅ PATCH QUIRÚRGICO: totalDays real (NO usar originalDays como clamp)
+------------------------------------------------------------------- */
+function __getTotalDaysForCity__(city){
+  const saved = savedDestinations?.find(x=>x.city===city)?.days;
+  const meta  = Array.isArray(cityMeta?.[city]?.perDay) ? cityMeta[city].perDay.length : 0;
+  const byDay = itineraries?.[city]?.byDay ? Object.keys(itineraries[city].byDay).map(n=>+n) : [];
+  const maxPresent = byDay.length ? Math.max(...byDay) : 0;
+  const best = Math.max(Number(saved)||0, Number(meta)||0, Number(maxPresent)||0);
+  return best > 0 ? best : 0;
+}
+
 function __normalizeDayField__(city, r) {
   let d = Number(r.day);
   if (!Number.isFinite(d) || d < 1) d = 1;
-  const total = (itineraries[city]?.originalDays) || (cityMeta[city]?.days) || 0;
+
+  // ✅ total real: savedDestinations / perDay / byDay (NO originalDays)
+  const total = __getTotalDaysForCity__(city);
+
   if (total > 0 && d > total) d = total;
   return { ...r, day: d };
 }
@@ -2743,13 +2764,17 @@ function ensureReturnRow(city, rows) {
   const cityLbl = String(city || '').trim();
   Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
     const list = byDay[day].slice();
+
+    // Solo si realmente hay out-of-town con señales fuertes
     const hasOut = list.some(r => isOutOfTownRow(city, r));
+
     const hasReturn = list.some(r => {
       const act = String(r.activity || '').toLowerCase();
       const to = String(r.to || '').toLowerCase();
       const cty = String(cityLbl || '').toLowerCase();
       return /regreso/.test(act) || (to.includes('hotel') && to.includes(cty));
     });
+
     if (hasOut && !hasReturn) {
       const endBase = (cityMeta[city]?.perDay?.find(x => x.day === day)?.end) || DEFAULT_END || '19:00';
       const lastEnd = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__(endBase) || 1140);
@@ -2767,41 +2792,66 @@ function ensureReturnRow(city, rows) {
         notes: 'Cierre del day trip y retorno al hotel.'
       });
     }
+
     out.push(...list);
   });
   return out;
 }
 
 /* ------------------------------------------------------------------
-   Inyección de cena (respeta preferencia global)
+   ✅ PATCH QUIRÚRGICO: Cena en ventana 19:00–21:30 y sin solapes
 ------------------------------------------------------------------- */
 if (typeof injectDinnerIfMissing !== 'function') {
   function injectDinnerIfMissing(city, rows) {
     const prefer = plannerState?.preferences?.alwaysIncludeDinner;
     if (!prefer) return rows;
+
+    const overlaps = (aS, aE, bS, bE) => !(aE <= bS || aS >= bE);
     const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
     const out = [];
+
     Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
       const list = byDay[day].slice();
       const hasDinner = list.some(r => /cena\b/i.test(String(r.activity || '')));
       if (!hasDinner) {
-        const endMax = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__('19:30'));
-        const start = __toHHMMfromMin__(Math.max(endMax, __toMinHHMM__('19:30')));
-        const end = __addMinutesSafe__(start, 75);
-        list.push({
-          day,
-          start,
-          end,
-          activity: 'Cena',
-          from: 'Centro',
-          to: 'Restaurante local',
-          transport: 'A pie',
-          duration: '1h15m',
-          notes: 'Reserva sugerida si es sitio popular.'
-        });
+        const blocks = list
+          .map(r => ({ s: __toMinHHMM__(r.start), e: __toMinHHMM__(r.end) }))
+          .filter(x => x.s != null && x.e != null)
+          .map(x => {
+            let s = x.s, e = x.e;
+            if (e <= s && (__isNightRow__({ start: __toHHMMfromMin__(s), end: __toHHMMfromMin__(e) }) || s >= 18*60)) e += 24*60;
+            return { s, e };
+          });
+
+        const trySlots = [
+          { s: __toMinHHMM__('19:30'), e: __toMinHHMM__('20:45') }, // ideal
+          { s: __toMinHHMM__('18:00'), e: __toMinHHMM__('19:15') }, // pre-aurora/tarde
+          { s: __toMinHHMM__('20:00'), e: __toMinHHMM__('21:15') }, // alternativa
+        ];
+
+        let picked = null;
+        for (const sl of trySlots) {
+          const ok = !blocks.some(b => overlaps(sl.s, sl.e, b.s, b.e));
+          if (ok && sl.e <= __toMinHHMM__('21:30')) { picked = sl; break; }
+        }
+
+        if (picked) {
+          list.push({
+            day,
+            start: __toHHMMfromMin__(picked.s),
+            end: __toHHMMfromMin__(picked.e),
+            activity: 'Cena',
+            from: 'Centro',
+            to: 'Restaurante local',
+            transport: 'A pie',
+            duration: '1h15m',
+            notes: 'Reserva sugerida si es sitio popular.'
+          });
+        }
       }
       out.push(...list);
     });
+
     return out;
   }
 }
@@ -2823,7 +2873,7 @@ if (typeof callApiChat !== 'function') {
       clearTimeout(id);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
-      return data; // { text: "..."}
+      return data;
     } catch (e) {
       clearTimeout(id);
       if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
@@ -2847,7 +2897,6 @@ if (typeof unifyRowsFormat !== 'function') {
     if (!obj) return { rows: [] };
     if (Array.isArray(obj.rows)) return obj;
     if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
-    // a veces viene como {days:[{day:1, rows:[...]}]}
     if (Array.isArray(obj.days)) {
       const rows = [];
       for (const d of obj.days) {
@@ -2877,44 +2926,6 @@ if (typeof validateRowsWithAgent !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   ✅ PATCH QUIRÚRGICO: clamp a ventana del día (evita madrugadas absurdas)
-------------------------------------------------------------------- */
-if (typeof __clampRowsToDayWindow__ !== 'function') {
-  function __clampRowsToDayWindow__(city, day, rows) {
-    const pd = (cityMeta[city]?.perDay || []).find(x => Number(x.day) === Number(day));
-    const startW = __toMinHHMM__(pd?.start || DEFAULT_START || '08:30') ?? (8*60+30);
-    const endW   = __toMinHHMM__(pd?.end   || DEFAULT_END   || '19:00') ?? (19*60);
-
-    const out = [];
-    for (const r of rows) {
-      const isNight = __isNightRow__(r);
-      let s = __toMinHHMM__(r.start);
-      let e = __toMinHHMM__(r.end);
-
-      // Si no hay tiempos válidos, deja que fixOverlaps se encargue antes
-      if (s == null || e == null) { out.push(r); continue; }
-
-      // No tocamos nocturnas (auroras / tours nocturnos) porque pueden cruzar medianoche
-      if (isNight) { out.push(r); continue; }
-
-      // Clamp dentro de la ventana
-      if (s < startW) s = startW;
-      if (e > endW) e = endW;
-      if (e <= s) {
-        // si se colapsó, lo omitimos (mejor que dejar basura)
-        continue;
-      }
-
-      const dur = e - s;
-      const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur/60)}h${dur%60}m` : `${Math.floor(dur/60)}h`) : `${dur}m`;
-
-      out.push({ ...r, start: __toHHMMfromMin__(s), end: __toHHMMfromMin__(e), duration: lbl });
-    }
-    return out;
-  }
-}
-
-/* ------------------------------------------------------------------
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
@@ -2927,91 +2938,63 @@ async function optimizeDay(city, day) {
     duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
   }));
 
-  // Protección de filas “fijas” (ej. Blue Lagoon)
   const protectedRows = rows.filter(r => {
     const act = (r.activity || '').toLowerCase();
     return act.includes('laguna azul') || act.includes('blue lagoon');
   });
 
   try {
-    // ✅ PATCH QUIRÚRGICO (rendimiento): reutilizar research cache por ciudad
-    window.__researchCache = window.__researchCache || {};
-    let research = window.__researchCache[city] || null;
+    const context = (typeof __collectPlannerContext__ === 'function')
+      ? __collectPlannerContext__(city, day)
+      : { city, day };
 
-    // 1) INFO (solo si no hay cache)
-    if (!research) {
-      const context =
-        (typeof __collectPlannerContext__ === 'function')
-          ? __collectPlannerContext__(city, day)
-          : { city, day };
+    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+    const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
+    const research = safeParseApiText(infoData?.text ?? infoData);
 
-      const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
-      const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
-      research = safeParseApiText(infoData?.text ?? infoData);
-      window.__researchCache[city] = research;
-    }
-
-    // ✅ Ventana del día (para acotar el planner)
-    const pd = (cityMeta[city]?.perDay || []).find(x => Number(x.day) === Number(day)) || {};
-    const dayHours = [{ day, start: (pd.start || DEFAULT_START || '08:30'), end: (pd.end || DEFAULT_END || '19:00') }];
-
-    // 2) PLANNER (acotado por día)
-    const plannerRaw = await callApiChat(
-      'planner',
-      {
-        research_json: research,
-        target_day: day,
-        day_hours: dayHours,
-        existing_rows: rows
-      },
-      { timeoutMs: 42000, retries: 1 }
-    );
-
+    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
     const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
     const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
+
     const unified = unifyRowsFormat(structured, city);
 
-    // Asegurar day correcto (y filtrar SOLO el día que estamos optimizando)
-    let finalRows = (unified?.rows || [])
-      .map(x => ({ ...x, day: Number(x.day) || day }))
-      .filter(x => Number(x.day) === Number(day));
+    // ✅ Importante: fuerza day objetivo si el modelo olvida day
+    let finalRows = (unified?.rows || []).map(x => ({ ...x, day: x.day || day }));
 
-    // === PIPELINE COHERENTE (mismas transformaciones que en 15.2) ===
     finalRows = finalRows.map(normalizeDurationLabel);
     finalRows = finalRows.map(normalizeAuroraWindow);
     finalRows = enforceOneAuroraPerDay(finalRows);
+
     if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
+
     finalRows = fixOverlaps(finalRows);
     finalRows = finalRows.map(r => __normalizeDayField__(city, r));
-
-    // ✅ Clamp a ventana del día (evita horarios tipo 01:15 para actividades diurnas)
-    finalRows = __clampRowsToDayWindow__(city, day, finalRows);
 
     if (protectedRows.length) {
       finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
       finalRows = fixOverlaps(finalRows);
-      finalRows = __clampRowsToDayWindow__(city, day, finalRows);
     }
 
     finalRows = ensureReturnRow(city, finalRows);
     finalRows = clearTransportAfterReturn(city, finalRows);
+
     if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
+
     finalRows = pruneGenericPerDay(finalRows);
     finalRows = __sortRowsTabsSafe__(finalRows);
 
-    // VALIDACIÓN
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
   } catch (e) {
     console.error('optimizeDay INFO→PLANNER error:', e);
-    // Fallback conservador: ordenar/limpiar lo que ya había
+
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = fixOverlaps(ensureReturnRow(city, injectDinnerIfMissing(city, safeRows)));
+    safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
-    safeRows = __clampRowsToDayWindow__(city, day, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
+
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
     if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
