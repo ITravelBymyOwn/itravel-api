@@ -2886,9 +2886,25 @@ async function optimizeDay(city, day) {
   });
 
   try {
+    /* =========================================================
+       ✅ FIX QUIRÚRGICO (CRÍTICO)
+       - Alinear payload INFO con el contrato que confirmaste:
+         { mode:"info", messages:[{role:"user", content:"<JSON string>"}] }
+       - En vez de { context }, usamos buildIntakeLite(city,{start,end})
+       - Esto evita aborts y que solo se llene el día 1.
+    ========================================================= */
+    const intakeLite =
+      (typeof buildIntakeLite === 'function')
+        ? buildIntakeLite(city, { start: day, end: day })
+        : JSON.stringify({ city, day });
+
     // 1) INFO
-    const context = (typeof __collectPlannerContext__ === 'function') ? __collectPlannerContext__(city, day) : { city, day };
-    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
+    const infoRaw = await callApiChat(
+      'info',
+      { messages: [{ role: 'user', content: intakeLite }] },
+      { timeoutMs: 32000, retries: 1 }
+    );
+
     const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
     const research = safeParseApiText(infoData?.text ?? infoData);
 
