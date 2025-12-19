@@ -1648,7 +1648,12 @@ async function generateCityItinerary(city){
 
     let heuristicsContext = '';
     try{
-      const coords = getCoordinatesForCity(city);
+      // ✅ CAMBIO QUIRÚRGICO: proteger si getCoordinatesForCity no existe (evita ReferenceError)
+      const coords =
+        (typeof getCoordinatesForCity === 'function')
+          ? getCoordinatesForCity(city)
+          : null;
+
       const dayTripContext = getHeuristicDayTripContext(city) || {};
       heuristicsContext = `
 ───────────────────────────────
