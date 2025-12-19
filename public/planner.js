@@ -1648,7 +1648,6 @@ async function generateCityItinerary(city){
 
     let heuristicsContext = '';
     try{
-      // ✅ CAMBIO QUIRÚRGICO: proteger si getCoordinatesForCity no existe (evita ReferenceError)
       const coords =
         (typeof getCoordinatesForCity === 'function')
           ? getCoordinatesForCity(city)
@@ -1668,26 +1667,6 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
-    const intakeText = `
-${FORMAT}
-**Genera únicamente ${dest.days} día/s para "${city}"** (tabs ya existen en UI).
-Ventanas base por día (UI): ${JSON.stringify(perDay)}.
-Hotel/zona: ${hotel || 'a determinar'} · Transporte preferido: ${transport || 'a determinar'}.
-Requisitos:
-- Cobertura completa días 1–${dest.days} (sin días vacíos).
-- Rutas madre → subparadas; inserta "Regreso a ${city}" en day-trips.
-- Horarios plausibles: base 08:30–19:00; buffers ≥15m.
-- Transporte coherente: urbano a pie/metro; interurbano vehículo/tour si no hay bus local.
-- Duraciones normalizadas ("1h30m", "45m"). Máx 20 filas/día.
-Notas:
-- Breves y útiles (con "valid:" cuando aplique).
-- Si el research trae auroras, respétalas tal cual (ventana/nota/duración).
-Contexto adicional:
-${heuristicsContext}
-INTAKE:
-${buildIntake()}
-`.trim();
-
     if (typeof setOverlayMessage === 'function') {
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
@@ -1699,18 +1678,15 @@ ${buildIntake()}
     let parsed = null;
     try{
       const context = buildIntakeLite(city);
-
-      // 🔧 ÚNICO CAMBIO QUIRÚRGICO (NO SE TOCA NADA MÁS)
       const research = cached || await callInfoAPI({
         messages: [{ role: 'user', content: context }]
       });
 
       if(!cached) window.__researchCache[city] = research;
-      const structured = await callPlannerAPI_withResearch(research);
-      parsed = structured;
+      parsed = await callPlannerAPI_withResearch(research);
     }catch(errInfoPlanner){
       console.warn('[generateCityItinerary] INFO→PLANNER falló, uso LEGACY:', errInfoPlanner);
-      const apiMessages = [{ role: "user", content: intakeText }];
+      const apiMessages = [{ role: "user", content: buildIntake() }];
       const current = itineraries?.[city] || null;
       parsed = await callPlannerAPI_legacy(apiMessages, {
         itinerary_id: current?.itinerary_id,
@@ -1718,8 +1694,14 @@ ${buildIntake()}
       });
     }
 
-    if(parsed && (parsed.rows || parsed.destination)){
-      const rowsFromApi = Array.isArray(parsed.rows) ? parsed.rows : [];
+    if(parsed && (parsed.rows || parsed.rows_skeleton || parsed.destination)){
+      const rowsFromApi =
+        Array.isArray(parsed.rows)
+          ? parsed.rows
+          : Array.isArray(parsed.rows_skeleton)
+            ? parsed.rows_skeleton
+            : [];
+
       let tmpRows = rowsFromApi.map(r=>normalizeRow(r));
 
       const existingActs = Object.values(itineraries[city]?.byDay||{}).flat().map(r=>normKey(String(r.activity||'')));
