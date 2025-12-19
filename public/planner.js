@@ -1572,11 +1572,75 @@ async function generateCityItinerary(city){
   /* ==================== Helpers API ==================== */
   const hasCallApiChat = (typeof callApiChat === 'function');
 
+  /* =========================================================
+     ✅ INJERTO QUIRÚRGICO #1
+     - Evita: ReferenceError: callApiChat is not defined (optimizeDay y otros)
+     - Crea un shim global SOLO si no existe.
+  ========================================================= */
+  if (typeof window.callApiChat !== 'function') {
+    window.callApiChat = async function(mode, payload = {}, opts = {}) {
+      const timeoutMs = Number(opts.timeoutMs || 30000);
+      const retries   = Number(opts.retries || 0);
+
+      const doOnce = async ()=>{
+        const ctrl = new AbortController();
+        const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+        try{
+          const resp = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode, ...payload }),
+            signal: ctrl.signal
+          });
+          if (!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
+          return await resp.json();
+        } finally {
+          clearTimeout(t);
+        }
+      };
+
+      let lastErr = null;
+      for (let i=0; i<=retries; i++){
+        try { return await doOnce(); }
+        catch(e){ lastErr = e; }
+      }
+      throw lastErr || new Error("callApiChat failed");
+    };
+  }
+
+  /* =========================================================
+     ✅ INJERTO QUIRÚRGICO #2
+     - Evita: ReferenceError: cleanToJSONPlus is not defined
+     - Usa cleanToJSONPlus si existe; si no, cae a parseJSON o JSON.parse tolerante.
+  ========================================================= */
+  function _safeCleanToJSONPlus(raw){
+    try{
+      if (typeof cleanToJSONPlus === 'function') return cleanToJSONPlus(raw);
+    }catch(_){}
+    try{
+      if (typeof parseJSON === 'function') return parseJSON(raw);
+    }catch(_){}
+    if (!raw) return null;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return null;
+    try { return JSON.parse(raw); } catch {}
+    try {
+      const first = raw.indexOf("{");
+      const last  = raw.lastIndexOf("}");
+      if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
+    } catch {}
+    try {
+      const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
+      return JSON.parse(cleaned);
+    } catch {}
+    return null;
+  }
+
   async function callPlannerAPI_withResearch(researchJson){
     if (hasCallApiChat) {
       const resp = await callApiChat('planner', { research_json: researchJson }, { timeoutMs: 42000, retries: 1 });
       const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
-      return cleanToJSONPlus(txt || resp) || {};
+      return _safeCleanToJSONPlus(txt || resp) || {};
     }
     const resp = await fetch("/api/chat", {
       method: "POST",
@@ -1585,14 +1649,14 @@ async function generateCityItinerary(city){
     });
     if (!resp.ok) throw new Error(`API planner HTTP ${resp.status}`);
     const data = await resp.json();
-    return cleanToJSONPlus(data?.text || data) || {};
+    return _safeCleanToJSONPlus(data?.text || data) || {};
   }
 
   async function callInfoAPI(context){
     if (hasCallApiChat) {
       const resp = await callApiChat('info', context, { timeoutMs: 32000, retries: 1 });
       const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
-      return cleanToJSONPlus(txt || resp) || {};
+      return _safeCleanToJSONPlus(txt || resp) || {};
     }
     const resp = await fetch("/api/chat", {
       method: "POST",
@@ -1601,7 +1665,7 @@ async function generateCityItinerary(city){
     });
     if (!resp.ok) throw new Error(`API info HTTP ${resp.status}`);
     const data = await resp.json();
-    return cleanToJSONPlus(data?.text || data) || {};
+    return _safeCleanToJSONPlus(data?.text || data) || {};
   }
 
   async function callPlannerAPI_legacy(messages, opts = {}) {
@@ -1648,6 +1712,7 @@ async function generateCityItinerary(city){
 
     let heuristicsContext = '';
     try{
+      // ✅ CAMBIO QUIRÚRGICO: proteger si getCoordinatesForCity no existe (evita ReferenceError)
       const coords =
         (typeof getCoordinatesForCity === 'function')
           ? getCoordinatesForCity(city)
@@ -1667,6 +1732,26 @@ async function generateCityItinerary(city){
       heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
     }
 
+    const intakeText = `
+${FORMAT}
+**Genera únicamente ${dest.days} día/s para "${city}"** (tabs ya existen en UI).
+Ventanas base por día (UI): ${JSON.stringify(perDay)}.
+Hotel/zona: ${hotel || 'a determinar'} · Transporte preferido: ${transport || 'a determinar'}.
+Requisitos:
+- Cobertura completa días 1–${dest.days} (sin días vacíos).
+- Rutas madre → subparadas; inserta "Regreso a ${city}" en day-trips.
+- Horarios plausibles: base 08:30–19:00; buffers ≥15m.
+- Transporte coherente: urbano a pie/metro; interurbano vehículo/tour si no hay bus local.
+- Duraciones normalizadas ("1h30m", "45m"). Máx 20 filas/día.
+Notas:
+- Breves y útiles (con "valid:" cuando aplique).
+- Si el research trae auroras, respétalas tal cual (ventana/nota/duración).
+Contexto adicional:
+${heuristicsContext}
+INTAKE:
+${buildIntake()}
+`.trim();
+
     if (typeof setOverlayMessage === 'function') {
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
@@ -1678,15 +1763,17 @@ async function generateCityItinerary(city){
     let parsed = null;
     try{
       const context = buildIntakeLite(city);
+
       const research = cached || await callInfoAPI({
         messages: [{ role: 'user', content: context }]
       });
 
       if(!cached) window.__researchCache[city] = research;
-      parsed = await callPlannerAPI_withResearch(research);
+      const structured = await callPlannerAPI_withResearch(research);
+      parsed = structured;
     }catch(errInfoPlanner){
       console.warn('[generateCityItinerary] INFO→PLANNER falló, uso LEGACY:', errInfoPlanner);
-      const apiMessages = [{ role: "user", content: buildIntake() }];
+      const apiMessages = [{ role: "user", content: intakeText }];
       const current = itineraries?.[city] || null;
       parsed = await callPlannerAPI_legacy(apiMessages, {
         itinerary_id: current?.itinerary_id,
@@ -1694,14 +1781,8 @@ async function generateCityItinerary(city){
       });
     }
 
-    if(parsed && (parsed.rows || parsed.rows_skeleton || parsed.destination)){
-      const rowsFromApi =
-        Array.isArray(parsed.rows)
-          ? parsed.rows
-          : Array.isArray(parsed.rows_skeleton)
-            ? parsed.rows_skeleton
-            : [];
-
+    if(parsed && (parsed.rows || parsed.destination)){
+      const rowsFromApi = Array.isArray(parsed.rows) ? parsed.rows : [];
       let tmpRows = rowsFromApi.map(r=>normalizeRow(r));
 
       const existingActs = Object.values(itineraries[city]?.byDay||{}).flat().map(r=>normKey(String(r.activity||'')));
