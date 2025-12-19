@@ -771,7 +771,7 @@ function buildIntake(){
 }
 
 // 🧠 Intake compacto por ciudad y rango de días (para prompts ligeros en rebalance y optimizeDay)
-function buildIntakeLite(city, range = null){
+function buildIntakeLite(city, range = null, opts = null){
   const it = itineraries[city];
   if(!it) return `City: ${city} (no data)`;
 
@@ -801,10 +801,18 @@ function buildIntakeLite(city, range = null){
     perDayFull = perDayFull.filter(pd => pd.day >= range.start && pd.day <= range.end);
   }
 
+  // ✅ AJUSTE QUIRÚRGICO (Opción A):
+  // - Para INFO interno: no enviar start/end (liberar horarios); solo day.
+  // - Para el resto (optimize/rebalance/free_edit): mantener ventanas completas.
+  const forInfo = !!(opts && (opts.forInfo === true));
+  const perDayOut = forInfo
+    ? (Array.isArray(perDayFull) ? perDayFull.map(pd=>({ day: pd.day })) : [])
+    : perDayFull;
+
   const meta = {
     baseDate: it.baseDate || cityMeta[city]?.baseDate || null,
     transport: cityMeta[city]?.transport || '',
-    perDay: perDayFull
+    perDay: perDayOut
   };
 
   return JSON.stringify({ city, meta, days: compact });
@@ -1762,7 +1770,8 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      const context = buildIntakeLite(city);
+      // ✅ CAMBIO QUIRÚRGICO (Opción A): buildIntakeLite en modo INFO sin start/end
+      const context = buildIntakeLite(city, null, { forInfo: true });
 
       const research = cached || await callInfoAPI({
         messages: [{ role: 'user', content: context }]
