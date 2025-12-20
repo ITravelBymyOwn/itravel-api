@@ -4,16 +4,33 @@
   <meta charset="utf-8" />
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
+
+  <!-- CSS (local, en -api/public) -->
   <link rel="stylesheet" href="./planner.css?v=57" />
-  <!-- Tipografía -->
-  <link href="https://fonts.googleapis.com" rel="preconnect" />
-  <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous" />
-  <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
+
+  <!-- Tipografía (carga optimizada, sin bloquear) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <!-- Carga Inter por CSS como fallback rápido -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <!-- WebFont loader (opcional). Si falla, NO rompe. -->
+  <script defer src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
   <script>
-    WebFont.load({ google: { families: ["Inter:400,500,600,700"] } });
+    // No bloquea render. Si WebFont no carga, el link CSS de arriba ya cubre.
+    window.addEventListener('DOMContentLoaded', function () {
+      try {
+        if (window.WebFont && typeof window.WebFont.load === 'function') {
+          window.WebFont.load({ google: { families: ["Inter:400,500,600,700"] } });
+        }
+      } catch (_) { /* no-op */ }
+    });
   </script>
 </head>
+
 <body>
   <!-- TOPBAR -->
   <div class="topbar">
@@ -161,6 +178,7 @@
     💬 Info Chat
   </button>
 
+  <!-- JS (local, en -api/public) -->
   <script src="./planner.js?v=57"></script>
 </body>
 </html>
