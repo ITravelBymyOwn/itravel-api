@@ -3493,68 +3493,94 @@ ${dayRows}
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
+   ✅ PATCH QUIRÚRGICO (idempotente):
+   - Evita envolver addCityRow múltiples veces si el script se evalúa de nuevo.
+   - Mantiene exactamente el mismo UI/estructura y flujo.
 ================================= */
-function addRowReorderControls(row){
-  const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display = 'flex';
-  ctrlWrap.style.gap = '.35rem';
-  ctrlWrap.style.alignItems = 'center';
+(function(){
+  // 🛡️ Guard global para evitar doble parche
+  if (window.__ITBMO_SECTION20_REORDER_PATCH__) return;
+  window.__ITBMO_SECTION20_REORDER_PATCH__ = true;
 
-  const up = document.createElement('button');
-  up.textContent = '↑';
-  up.className = 'btn ghost';
-  const down = document.createElement('button');
-  down.textContent = '↓';
-  down.className = 'btn ghost';
+  function addRowReorderControls(row){
+    const ctrlWrap = document.createElement('div');
+    ctrlWrap.style.display = 'flex';
+    ctrlWrap.style.gap = '.35rem';
+    ctrlWrap.style.alignItems = 'center';
 
-  ctrlWrap.appendChild(up);
-  ctrlWrap.appendChild(down);
-  row.appendChild(ctrlWrap);
+    const up = document.createElement('button');
+    up.textContent = '↑';
+    up.className = 'btn ghost';
+    const down = document.createElement('button');
+    down.textContent = '↓';
+    down.className = 'btn ghost';
 
-  // 🆙 Subir ciudad
-  up.addEventListener('click', ()=>{
-    if(row.previousElementSibling){
-      $cityList.insertBefore(row, row.previousElementSibling);
-      saveDestinations(); // ⚡ sincroniza inmediatamente orden
+    ctrlWrap.appendChild(up);
+    ctrlWrap.appendChild(down);
+    row.appendChild(ctrlWrap);
+
+    // 🆙 Subir ciudad
+    up.addEventListener('click', ()=>{
+      if(row.previousElementSibling){
+        $cityList.insertBefore(row, row.previousElementSibling);
+        saveDestinations(); // ⚡ sincroniza inmediatamente orden
+      }
+    });
+
+    // ⬇️ Bajar ciudad
+    down.addEventListener('click', ()=>{
+      if(row.nextElementSibling){
+        $cityList.insertBefore(row.nextElementSibling, row);
+        saveDestinations(); // ⚡ sincroniza inmediatamente orden
+      }
+    });
+  }
+
+  // 🧭 Inyectar controles a filas existentes (si no los tienen)
+  try{
+    const rows = qsa ? qsa('.city-row', $cityList) : ($cityList ? Array.from($cityList.querySelectorAll('.city-row')) : []);
+    rows.forEach(r=>{
+      // evita duplicar si ya existe el wrapper (botones ↑↓)
+      const already = Array.from(r.querySelectorAll('button')).some(b=>b.textContent==='↑' || b.textContent==='↓');
+      if(!already) addRowReorderControls(r);
+    });
+  }catch(_){ /* no-op seguro */ }
+
+  // 🧭 Parchear addCityRow una sola vez (sin re-envolver)
+  if (!window.__ITBMO_ORIG_ADD_CITY_ROW__) {
+    window.__ITBMO_ORIG_ADD_CITY_ROW__ = addCityRow;
+  }
+  const origAddCityRow = window.__ITBMO_ORIG_ADD_CITY_ROW__;
+
+  addCityRow = function(pref){
+    origAddCityRow(pref);
+    const row = $cityList?.lastElementChild;
+    if(row){
+      const already = Array.from(row.querySelectorAll('button')).some(b=>b.textContent==='↑' || b.textContent==='↓');
+      if(!already) addRowReorderControls(row);
     }
-  });
+  };
 
-  // ⬇️ Bajar ciudad
-  down.addEventListener('click', ()=>{
-    if(row.nextElementSibling){
-      $cityList.insertBefore(row.nextElementSibling, row);
-      saveDestinations(); // ⚡ sincroniza inmediatamente orden
-    }
-  });
-}
-
-// 🧭 Inyectar controles de ordenamiento a cada nueva fila de ciudad
-const origAddCityRow = addCityRow;
-addCityRow = function(pref){
-  origAddCityRow(pref);
-  const row = $cityList.lastElementChild;
-  if(row) addRowReorderControls(row);
-};
-
-// 🧼 País: permitir letras Unicode y espacios (global)
-document.addEventListener('input', (e)=>{
-  if(e.target && e.target.classList && e.target.classList.contains('country')){
-    const original = e.target.value;
-    // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
-    const filtered = original.replace(/[^\p{L}\s]/gu,'');
-    if(filtered !== original){
-      const pos = e.target.selectionStart;
-      e.target.value = filtered;
-      if(typeof pos === 'number'){
-        // ⚡ Ajuste suave del cursor
-        e.target.setSelectionRange(
-          pos - (original.length - filtered.length),
-          pos - (original.length - filtered.length)
-        );
+  // 🧼 País: permitir letras Unicode y espacios (global)
+  document.addEventListener('input', (e)=>{
+    if(e.target && e.target.classList && e.target.classList.contains('country')){
+      const original = e.target.value;
+      // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
+      const filtered = original.replace(/[^\p{L}\s]/gu,'');
+      if(filtered !== original){
+        const pos = e.target.selectionStart;
+        e.target.value = filtered;
+        if(typeof pos === 'number'){
+          // ⚡ Ajuste suave del cursor
+          e.target.setSelectionRange(
+            pos - (original.length - filtered.length),
+            pos - (original.length - filtered.length)
+          );
+        }
       }
     }
-  }
-});
+  });
+})();
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
