@@ -2442,7 +2442,54 @@ function intentFromText(text){
    • Llamadas a optimización y validación sólo cuando agrega valor.
    • Todas las funciones nuevas se registran con guardas para no
      pisar implementaciones existentes en otras secciones.
+
+   ✅ INJERTO QUIRÚRGICO (instrumentación):
+   - NO cambia lógica. Solo agrega medición y logs:
+     * conteo de llamadas optimizeDay por ciudad/día
+     * conteo de llamadas API info/planner + latencias + tags
+     * logs consistentes para depuración (console)
    ============================================================ */
+
+/* ------------------------------------------------------------------
+   ✅ Instrumentación global (NO altera comportamiento)
+------------------------------------------------------------------- */
+if (!window.__ITBMO_DIAG__) {
+  window.__ITBMO_DIAG__ = {
+    enabled: true, // ← puedes poner false para silenciar todo
+    apiCalls: { info: 0, planner: 0, other: 0, total: 0 },
+    apiLast: [],
+    optimizeCalls: {},          // { [city]: { [day]: count } }
+    optimizeLast: [],           // últimos eventos
+    pushRowsCalls: {},          // { [city]: count }
+    validateCalls: {},          // { [city]: count }
+    _ts: () => new Date().toISOString()
+  };
+}
+function __diagOn__(){ return !!window.__ITBMO_DIAG__?.enabled; }
+function __diagLog__(...args){
+  if(!__diagOn__()) return;
+  try { console.log('[ITBMO]', ...args); } catch(_) {}
+}
+function __diagWarn__(...args){
+  if(!__diagOn__()) return;
+  try { console.warn('[ITBMO]', ...args); } catch(_) {}
+}
+function __diagErr__(...args){
+  if(!__diagOn__()) return;
+  try { console.error('[ITBMO]', ...args); } catch(_) {}
+}
+function __diagIncNested__(obj, k1, k2){
+  try{
+    obj[k1] = obj[k1] || {};
+    obj[k1][k2] = (obj[k1][k2] || 0) + 1;
+  }catch(_){}
+}
+function __diagPushLast__(arr, item, limit=30){
+  try{
+    arr.push(item);
+    while(arr.length > limit) arr.shift();
+  }catch(_){}
+}
 
 /* ------------------------------------------------------------------
    Utilidades base (si no existen en otras secciones, se definen aquí)
@@ -2910,11 +2957,37 @@ if (typeof injectDinnerIfMissing !== 'function') {
 
 /* ------------------------------------------------------------------
    Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
+   ✅ Instrumentación: conteo + latencia + tags city/day si se proveen
 ------------------------------------------------------------------- */
 if (typeof callApiChat !== 'function') {
   async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(), timeoutMs);
+
+    // ✅ diag meta (NO afecta request)
+    const __diag = window.__ITBMO_DIAG__;
+    const meta = {
+      ts: __diag?._ts?.() || new Date().toISOString(),
+      mode: String(mode || ''),
+      timeoutMs: Number(timeoutMs || 0),
+      retries: Number(retries || 0),
+      city: payload?.city || payload?.context?.city || payload?.context?.city_name || payload?.context?.destination || '',
+      day:  payload?.day || payload?.context?.day_target || payload?.context?.day || payload?.context?.dayNumber || '',
+      hasResearch: !!payload?.research_json,
+      validate: !!payload?.validate
+    };
+
+    if(__diagOn__()){
+      try{
+        __diag.apiCalls.total += 1;
+        if (meta.mode === 'info') __diag.apiCalls.info += 1;
+        else if (meta.mode === 'planner') __diag.apiCalls.planner += 1;
+        else __diag.apiCalls.other += 1;
+      }catch(_){}
+    }
+
+    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
@@ -2925,9 +2998,27 @@ if (typeof callApiChat !== 'function') {
       clearTimeout(id);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
       const data = await resp.json();
+
+      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const ms = Math.round((t1 - t0) || 0);
+
+      if(__diagOn__()){
+        __diagPushLast__(__diag.apiLast, { ...meta, ok:true, ms }, 30);
+        __diagLog__(`API ok`, { mode: meta.mode, city: meta.city || '(n/a)', day: meta.day || '(n/a)', ms });
+      }
+
       return data;
     } catch (e) {
       clearTimeout(id);
+
+      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const ms = Math.round((t1 - t0) || 0);
+
+      if(__diagOn__()){
+        __diagPushLast__(window.__ITBMO_DIAG__.apiLast, { ...meta, ok:false, ms, err: String(e?.message || e) }, 30);
+        __diagWarn__(`API fail`, { mode: meta.mode, city: meta.city || '(n/a)', day: meta.day || '(n/a)', ms, err: String(e?.message || e) });
+      }
+
       if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
       throw e;
     }
@@ -2963,11 +3054,23 @@ if (typeof unifyRowsFormat !== 'function') {
 
 /* ------------------------------------------------------------------
    VALIDACIÓN con agente (si no existe, pasa-through)
+   ✅ Instrumentación: conteo por ciudad
 ------------------------------------------------------------------- */
 if (typeof validateRowsWithAgent !== 'function') {
   async function validateRowsWithAgent(city, rows, baseDate) {
+    if(__diagOn__()){
+      try{
+        const diag = window.__ITBMO_DIAG__;
+        diag.validateCalls[city] = (diag.validateCalls[city] || 0) + 1;
+        __diagLog__('validateRowsWithAgent()', { city, rows: Array.isArray(rows)? rows.length : 0 });
+      }catch(_){}
+    }
     try {
-      const resp = await callApiChat('planner', { validate: true, city, baseDate, rows }, { timeoutMs: 22000, retries: 0 });
+      const resp = await callApiChat(
+        'planner',
+        { validate: true, city, baseDate, rows },
+        { timeoutMs: 22000, retries: 0 }
+      );
       const parsed = safeParseApiText(resp?.text ?? resp);
       if (Array.isArray(parsed?.allowed)) return parsed;
       return { allowed: rows, rejected: [] };
@@ -2979,8 +3082,25 @@ if (typeof validateRowsWithAgent !== 'function') {
 
 /* ------------------------------------------------------------------
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
+   ✅ Instrumentación: conteo optimizeDay por ciudad/día + logs
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
+  // ✅ diag: conteo por city/day + evento
+  if(__diagOn__()){
+    try{
+      const diag = window.__ITBMO_DIAG__;
+      __diagIncNested__(diag.optimizeCalls, city, day);
+      __diagPushLast__(diag.optimizeLast, {
+        ts: diag._ts(),
+        city,
+        day: Number(day)||day,
+        type: 'enter',
+        totalDays: __getTotalDaysForCity__(city) || null
+      }, 30);
+      __diagLog__('optimizeDay ENTER', { city, day: Number(day)||day, calls: diag.optimizeCalls?.[city]?.[day] || 1 });
+    }catch(_){}
+  }
+
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
@@ -2995,11 +3115,14 @@ async function optimizeDay(city, day) {
     return act.includes('laguna azul') || act.includes('blue lagoon');
   });
 
+  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
   try {
     const context = (typeof __collectPlannerContext__ === 'function')
       ? __collectPlannerContext__(city, day)
       : { city, day };
 
+    // ✅ tags explícitos para diag (NO cambia API)
     const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
     const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
     const research = safeParseApiText(infoData?.text ?? infoData);
@@ -3041,20 +3164,66 @@ async function optimizeDay(city, day) {
     finalRows = __sortRowsTabsSafe__(finalRows);
 
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
-    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+
+    if (typeof pushRows === 'function') {
+      if(__diagOn__()){
+        try{
+          const diag = window.__ITBMO_DIAG__;
+          diag.pushRowsCalls[city] = (diag.pushRowsCalls[city] || 0) + 1;
+          __diagLog__('pushRows()', { city, day, rows: Array.isArray(val.allowed)? val.allowed.length : 0, replace:false, source:'optimizeDay' });
+        }catch(_){}
+      }
+      pushRows(city, val.allowed, false);
+    }
+
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
+    const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const ms = Math.round((t1 - t0) || 0);
+
+    if(__diagOn__()){
+      try{
+        __diagPushLast__(window.__ITBMO_DIAG__.optimizeLast, { ts: window.__ITBMO_DIAG__._ts(), city, day: Number(day)||day, type:'exit_ok', ms }, 30);
+        __diagLog__('optimizeDay EXIT OK', { city, day: Number(day)||day, ms, outRows: Array.isArray(val?.allowed)? val.allowed.length : null });
+      }catch(_){}
+    }
+
   } catch (e) {
-    console.error('optimizeDay INFO→PLANNER error:', e);
+    __diagErr__('optimizeDay INFO→PLANNER error:', e);
 
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
+    safeRows = fixOverlaps(
+      ensureReturnRow(
+        city,
+        (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)
+      )
+    );
     safeRows = clearTransportAfterReturn(city, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
 
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
-    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+
+    if (typeof pushRows === 'function') {
+      if(__diagOn__()){
+        try{
+          const diag = window.__ITBMO_DIAG__;
+          diag.pushRowsCalls[city] = (diag.pushRowsCalls[city] || 0) + 1;
+          __diagWarn__('pushRows() fallback', { city, day, rows: Array.isArray(val.allowed)? val.allowed.length : 0, replace:false, source:'optimizeDay.catch' });
+        }catch(_){}
+      }
+      pushRows(city, val.allowed, false);
+    }
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
+
+    const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const ms = Math.round((t1 - t0) || 0);
+
+    if(__diagOn__()){
+      try{
+        __diagPushLast__(window.__ITBMO_DIAG__.optimizeLast, { ts: window.__ITBMO_DIAG__._ts(), city, day: Number(day)||day, type:'exit_fail', ms, err: String(e?.message || e) }, 30);
+        __diagWarn__('optimizeDay EXIT FAIL', { city, day: Number(day)||day, ms, err: String(e?.message || e) });
+      }catch(_){}
+    }
   }
 }
 
