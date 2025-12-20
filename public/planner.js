@@ -2442,54 +2442,110 @@ function intentFromText(text){
    • Llamadas a optimización y validación sólo cuando agrega valor.
    • Todas las funciones nuevas se registran con guardas para no
      pisar implementaciones existentes en otras secciones.
-
-   ✅ INJERTO QUIRÚRGICO (instrumentación):
-   - NO cambia lógica. Solo agrega medición y logs:
-     * conteo de llamadas optimizeDay por ciudad/día
-     * conteo de llamadas API info/planner + latencias + tags
-     * logs consistentes para depuración (console)
    ============================================================ */
 
-/* ------------------------------------------------------------------
-   ✅ Instrumentación global (NO altera comportamiento)
-------------------------------------------------------------------- */
-if (!window.__ITBMO_DIAG__) {
-  window.__ITBMO_DIAG__ = {
-    enabled: true, // ← puedes poner false para silenciar todo
-    apiCalls: { info: 0, planner: 0, other: 0, total: 0 },
-    apiLast: [],
-    optimizeCalls: {},          // { [city]: { [day]: count } }
-    optimizeLast: [],           // últimos eventos
-    pushRowsCalls: {},          // { [city]: count }
-    validateCalls: {},          // { [city]: count }
-    _ts: () => new Date().toISOString()
+/* ============================================================
+   ✅ INJERTO QUIRÚRGICO (DIAGNÓSTICO)
+   - NO cambia lógica del planner.
+   - Solo añade medición de tiempos/counters para encontrar la lentitud.
+   Cómo activar:
+   1) En DevTools Console:
+      window.__ITBMO_DIAG__ && (window.__ITBMO_DIAG__.enabled = true)
+   2) Luego ejecuta acciones (Start / generar / reoptimize).
+   3) Para ver resumen:
+      window.__ITBMO_DIAG__.summary()
+   ============================================================ */
+(function initITBMODiag(){
+  if (window.__ITBMO_DIAG__ && window.__ITBMO_DIAG__.__v === 1) return;
+
+  const now = ()=> (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+  const diag = {
+    __v: 1,
+    enabled: false,     // ← se activa manualmente en console
+    quiet: false,       // si quieres menos logs
+    marks: {},          // { key: [t0, t1, ...] }
+    counters: {},       // { key: n }
+    last: {},           // { key: any }
+    errors: [],         // [{ at, where, msg }]
+    timelines: [],      // [{ at, tag, ms, meta }]
+
+    inc(key, n=1){
+      this.counters[key] = (this.counters[key] || 0) + (Number(n)||1);
+    },
+    set(key, val){
+      this.last[key] = val;
+    },
+    mark(tag, meta){
+      if(!this.enabled) return;
+      const t = now();
+      this.timelines.push({ at: new Date().toISOString(), tag, ms: t, meta: meta || null });
+      if(!this.quiet) console.log(`[DIAG] ${tag}`, meta || '');
+    },
+    timeStart(key, meta){
+      if(!this.enabled) return null;
+      const t0 = now();
+      (this.marks[key] = this.marks[key] || []).push(t0);
+      if(meta) this.set(`meta:${key}`, meta);
+      return t0;
+    },
+    timeEnd(key, t0, meta){
+      if(!this.enabled || t0 == null) return null;
+      const t1 = now();
+      const ms = t1 - t0;
+      this.inc(`time:${key}:count`, 1);
+      this.inc(`time:${key}:msTotal`, ms);
+      this.set(`time:${key}:msLast`, ms);
+      if(meta) this.set(`time:${key}:metaLast`, meta);
+      if(!this.quiet) console.log(`[DIAG] ${key} took ${Math.round(ms)}ms`, meta || '');
+      return ms;
+    },
+    err(where, e){
+      const msg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'Unknown error';
+      this.errors.push({ at: new Date().toISOString(), where, msg });
+      this.inc(`err:${where}`, 1);
+      this.set(`err:last:${where}`, msg);
+      if(!this.quiet) console.warn(`[DIAG][ERR] ${where}:`, msg);
+    },
+    summary(){
+      const c = this.counters || {};
+      const pick = (k)=> c[k] || 0;
+      const t = (k)=>{
+        const total = pick(`time:${k}:msTotal`);
+        const count = pick(`time:${k}:count`);
+        const last  = this.last[`time:${k}:msLast`];
+        const avg   = count ? Math.round(total / count) : 0;
+        return { count, totalMs: Math.round(total), avgMs: avg, lastMs: last != null ? Math.round(last) : null };
+      };
+      return {
+        enabled: this.enabled,
+        calls: {
+          api_info: pick('api:info:count'),
+          api_planner: pick('api:planner:count'),
+          api_validate: pick('api:validate:count'),
+          api_ok: pick('api:ok:count'),
+          api_fail: pick('api:fail:count'),
+          api_timeout: pick('api:timeout:count')
+        },
+        timings: {
+          api_info: t('api:info'),
+          api_planner: t('api:planner'),
+          api_validate: t('api:validate'),
+          optimizeDay: t('optimizeDay')
+        },
+        last: {
+          api_info_ms: this.last['time:api:info:msLast'],
+          api_planner_ms: this.last['time:api:planner:msLast'],
+          optimizeDay_ms: this.last['time:optimizeDay:msLast'],
+          lastApiError: this.last['err:last:api'] || null
+        },
+        errors: this.errors.slice(-10)
+      };
+    }
   };
-}
-function __diagOn__(){ return !!window.__ITBMO_DIAG__?.enabled; }
-function __diagLog__(...args){
-  if(!__diagOn__()) return;
-  try { console.log('[ITBMO]', ...args); } catch(_) {}
-}
-function __diagWarn__(...args){
-  if(!__diagOn__()) return;
-  try { console.warn('[ITBMO]', ...args); } catch(_) {}
-}
-function __diagErr__(...args){
-  if(!__diagOn__()) return;
-  try { console.error('[ITBMO]', ...args); } catch(_) {}
-}
-function __diagIncNested__(obj, k1, k2){
-  try{
-    obj[k1] = obj[k1] || {};
-    obj[k1][k2] = (obj[k1][k2] || 0) + 1;
-  }catch(_){}
-}
-function __diagPushLast__(arr, item, limit=30){
-  try{
-    arr.push(item);
-    while(arr.length > limit) arr.shift();
-  }catch(_){}
-}
+
+  window.__ITBMO_DIAG__ = diag;
+})();
 
 /* ------------------------------------------------------------------
    Utilidades base (si no existen en otras secciones, se definen aquí)
@@ -2957,36 +3013,19 @@ if (typeof injectDinnerIfMissing !== 'function') {
 
 /* ------------------------------------------------------------------
    Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
-   ✅ Instrumentación: conteo + latencia + tags city/day si se proveen
+   ✅ DIAG: mide tiempos y cuenta llamadas/errores/timeouts.
 ------------------------------------------------------------------- */
 if (typeof callApiChat !== 'function') {
   async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
-    const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(), timeoutMs);
-
-    // ✅ diag meta (NO afecta request)
-    const __diag = window.__ITBMO_DIAG__;
-    const meta = {
-      ts: __diag?._ts?.() || new Date().toISOString(),
-      mode: String(mode || ''),
-      timeoutMs: Number(timeoutMs || 0),
-      retries: Number(retries || 0),
-      city: payload?.city || payload?.context?.city || payload?.context?.city_name || payload?.context?.destination || '',
-      day:  payload?.day || payload?.context?.day_target || payload?.context?.day || payload?.context?.dayNumber || '',
-      hasResearch: !!payload?.research_json,
-      validate: !!payload?.validate
-    };
-
-    if(__diagOn__()){
-      try{
-        __diag.apiCalls.total += 1;
-        if (meta.mode === 'info') __diag.apiCalls.info += 1;
-        else if (meta.mode === 'planner') __diag.apiCalls.planner += 1;
-        else __diag.apiCalls.other += 1;
-      }catch(_){}
+    const diag = window.__ITBMO_DIAG__;
+    if (diag?.enabled) {
+      diag.inc(`api:${mode}:count`, 1);
     }
 
-    const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
+
+    const t0 = (diag?.enabled) ? diag.timeStart(`api:${mode}`, { timeoutMs, retries }) : null;
 
     try {
       const resp = await fetch('/api/chat', {
@@ -2996,27 +3035,26 @@ if (typeof callApiChat !== 'function') {
         body: JSON.stringify({ mode, ...payload })
       });
       clearTimeout(id);
+
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
       const data = await resp.json();
 
-      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      const ms = Math.round((t1 - t0) || 0);
-
-      if(__diagOn__()){
-        __diagPushLast__(__diag.apiLast, { ...meta, ok:true, ms }, 30);
-        __diagLog__(`API ok`, { mode: meta.mode, city: meta.city || '(n/a)', day: meta.day || '(n/a)', ms });
+      if (diag?.enabled) {
+        diag.inc(`api:ok:count`, 1);
+        diag.timeEnd(`api:${mode}`, t0, { ok: true, status: resp.status });
       }
 
       return data;
     } catch (e) {
       clearTimeout(id);
 
-      const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-      const ms = Math.round((t1 - t0) || 0);
-
-      if(__diagOn__()){
-        __diagPushLast__(window.__ITBMO_DIAG__.apiLast, { ...meta, ok:false, ms, err: String(e?.message || e) }, 30);
-        __diagWarn__(`API fail`, { mode: meta.mode, city: meta.city || '(n/a)', day: meta.day || '(n/a)', ms, err: String(e?.message || e) });
+      if (diag?.enabled) {
+        const msg = (e && e.message) ? e.message : String(e);
+        if (/timeout/i.test(msg) || /aborted/i.test(msg)) diag.inc('api:timeout:count', 1);
+        diag.inc('api:fail:count', 1);
+        diag.err('api', e);
+        diag.timeEnd(`api:${mode}`, t0, { ok: false, err: msg });
       }
 
       if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
@@ -3054,27 +3092,28 @@ if (typeof unifyRowsFormat !== 'function') {
 
 /* ------------------------------------------------------------------
    VALIDACIÓN con agente (si no existe, pasa-through)
-   ✅ Instrumentación: conteo por ciudad
+   ✅ DIAG: mide tiempos de validación.
 ------------------------------------------------------------------- */
 if (typeof validateRowsWithAgent !== 'function') {
   async function validateRowsWithAgent(city, rows, baseDate) {
-    if(__diagOn__()){
-      try{
-        const diag = window.__ITBMO_DIAG__;
-        diag.validateCalls[city] = (diag.validateCalls[city] || 0) + 1;
-        __diagLog__('validateRowsWithAgent()', { city, rows: Array.isArray(rows)? rows.length : 0 });
-      }catch(_){}
-    }
+    const diag = window.__ITBMO_DIAG__;
+    const t0 = (diag?.enabled) ? diag.timeStart('api:validate', { city, n: (rows||[]).length }) : null;
+
     try {
-      const resp = await callApiChat(
-        'planner',
-        { validate: true, city, baseDate, rows },
-        { timeoutMs: 22000, retries: 0 }
-      );
+      if (diag?.enabled) diag.inc('api:validate:count', 1);
+
+      const resp = await callApiChat('planner', { validate: true, city, baseDate, rows }, { timeoutMs: 22000, retries: 0 });
       const parsed = safeParseApiText(resp?.text ?? resp);
+
+      if (diag?.enabled) diag.timeEnd('api:validate', t0, { ok: true });
+
       if (Array.isArray(parsed?.allowed)) return parsed;
       return { allowed: rows, rejected: [] };
-    } catch {
+    } catch (e) {
+      if (diag?.enabled) {
+        diag.err('validate', e);
+        diag.timeEnd('api:validate', t0, { ok: false });
+      }
       return { allowed: rows, rejected: [] };
     }
   }
@@ -3082,24 +3121,11 @@ if (typeof validateRowsWithAgent !== 'function') {
 
 /* ------------------------------------------------------------------
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
-   ✅ Instrumentación: conteo optimizeDay por ciudad/día + logs
+   ✅ DIAG: mide optimizeDay total + filas
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
-  // ✅ diag: conteo por city/day + evento
-  if(__diagOn__()){
-    try{
-      const diag = window.__ITBMO_DIAG__;
-      __diagIncNested__(diag.optimizeCalls, city, day);
-      __diagPushLast__(diag.optimizeLast, {
-        ts: diag._ts(),
-        city,
-        day: Number(day)||day,
-        type: 'enter',
-        totalDays: __getTotalDaysForCity__(city) || null
-      }, 30);
-      __diagLog__('optimizeDay ENTER', { city, day: Number(day)||day, calls: diag.optimizeCalls?.[city]?.[day] || 1 });
-    }catch(_){}
-  }
+  const diag = window.__ITBMO_DIAG__;
+  const tAll = (diag?.enabled) ? diag.timeStart('optimizeDay', { city, day }) : null;
 
   const data = itineraries[city];
   const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
@@ -3110,19 +3136,18 @@ async function optimizeDay(city, day) {
     duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
   }));
 
+  if (diag?.enabled) diag.set('optimizeDay:lastInputRows', rows.length);
+
   const protectedRows = rows.filter(r => {
     const act = (r.activity || '').toLowerCase();
     return act.includes('laguna azul') || act.includes('blue lagoon');
   });
-
-  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
 
   try {
     const context = (typeof __collectPlannerContext__ === 'function')
       ? __collectPlannerContext__(city, day)
       : { city, day };
 
-    // ✅ tags explícitos para diag (NO cambia API)
     const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
     const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
     const research = safeParseApiText(infoData?.text ?? infoData);
@@ -3165,65 +3190,32 @@ async function optimizeDay(city, day) {
 
     const val = await validateRowsWithAgent(city, finalRows, baseDate);
 
-    if (typeof pushRows === 'function') {
-      if(__diagOn__()){
-        try{
-          const diag = window.__ITBMO_DIAG__;
-          diag.pushRowsCalls[city] = (diag.pushRowsCalls[city] || 0) + 1;
-          __diagLog__('pushRows()', { city, day, rows: Array.isArray(val.allowed)? val.allowed.length : 0, replace:false, source:'optimizeDay' });
-        }catch(_){}
-      }
-      pushRows(city, val.allowed, false);
+    if (diag?.enabled) {
+      diag.set('optimizeDay:lastOutputRows', (val?.allowed || []).length);
     }
 
+    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-    const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const ms = Math.round((t1 - t0) || 0);
-
-    if(__diagOn__()){
-      try{
-        __diagPushLast__(window.__ITBMO_DIAG__.optimizeLast, { ts: window.__ITBMO_DIAG__._ts(), city, day: Number(day)||day, type:'exit_ok', ms }, 30);
-        __diagLog__('optimizeDay EXIT OK', { city, day: Number(day)||day, ms, outRows: Array.isArray(val?.allowed)? val.allowed.length : null });
-      }catch(_){}
-    }
+    if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (val?.allowed||[]).length });
 
   } catch (e) {
-    __diagErr__('optimizeDay INFO→PLANNER error:', e);
+    console.error('optimizeDay INFO→PLANNER error:', e);
+
+    if (diag?.enabled) {
+      diag.err('optimizeDay', e);
+    }
 
     let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = fixOverlaps(
-      ensureReturnRow(
-        city,
-        (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)
-      )
-    );
+    safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
     safeRows = clearTransportAfterReturn(city, safeRows);
     safeRows = __sortRowsTabsSafe__(safeRows);
 
     const val = await validateRowsWithAgent(city, safeRows, baseDate);
-
-    if (typeof pushRows === 'function') {
-      if(__diagOn__()){
-        try{
-          const diag = window.__ITBMO_DIAG__;
-          diag.pushRowsCalls[city] = (diag.pushRowsCalls[city] || 0) + 1;
-          __diagWarn__('pushRows() fallback', { city, day, rows: Array.isArray(val.allowed)? val.allowed.length : 0, replace:false, source:'optimizeDay.catch' });
-        }catch(_){}
-      }
-      pushRows(city, val.allowed, false);
-    }
+    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
     try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-    const t1 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
-    const ms = Math.round((t1 - t0) || 0);
-
-    if(__diagOn__()){
-      try{
-        __diagPushLast__(window.__ITBMO_DIAG__.optimizeLast, { ts: window.__ITBMO_DIAG__._ts(), city, day: Number(day)||day, type:'exit_fail', ms, err: String(e?.message || e) }, 30);
-        __diagWarn__('optimizeDay EXIT FAIL', { city, day: Number(day)||day, ms, err: String(e?.message || e) });
-      }catch(_){}
-    }
+    if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (val?.allowed||[]).length });
   }
 }
 
