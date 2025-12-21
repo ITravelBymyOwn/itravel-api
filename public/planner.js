@@ -3227,6 +3227,9 @@ async function optimizeDay(city, day) {
    - Asegura ventana/optimización completa del día nuevo
    + Mejora: uso del resolutor de hotel/zona, feedback de confianza,
      y activación automática de preferAurora cuando aplique
+   ✅ FIX QUIRÚRGICO (auditoría):
+   - En flujo collectingHotels: NO avanza metaProgressIndex si falta transport.
+   - Si el usuario envía solo hotel/zona, se guarda y se pide transporte sin saltar de ciudad.
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -3249,9 +3252,11 @@ async function onSend(){
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
 
+    // Guardar lo que venga (al menos hotel) para que askNextHotelTransport()
+    // pueda pedir sólo lo faltante en esta misma ciudad.
     upsertCityMeta({ city, hotel: resolvedHotel, transport });
 
-    // 🗣️ Feedback al usuario según confianza del match
+    // 🗣️ Feedback al usuario según confianza del match (hotel/zona)
     if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
       chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
     }else if((res.confidence||0) >= 0.65){
@@ -3277,6 +3282,15 @@ async function onSend(){
       }
     }catch(_){ /* no-op seguro */ }
 
+    // ✅ FIX: NO avanzar a la siguiente ciudad si falta transport.
+    // Deja metaProgressIndex intacto y vuelve a preguntar sólo lo faltante.
+    if(!transport){
+      // askNextHotelTransport() ya decide si pide hotel o transporte según cityMeta
+      askNextHotelTransport();
+      return;
+    }
+
+    // Si hay transport, sí avanzamos.
     metaProgressIndex++;
     askNextHotelTransport();
     return;
