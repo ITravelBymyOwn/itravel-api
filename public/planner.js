@@ -1800,10 +1800,35 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      const context = buildIntakeLite(city);
+      // ✅ FIX QUIRÚRGICO: contexto rico para el INFO (sin depender de buildIntakeLite)
+      // - Incluye perDay, baseDate, hotel, transporte, preferencias y heurística.
+      // - Si el usuario NO definió horarios, se deja day_hours vacío para dar libertad real al INFO/PLANNER.
+      const userProvidedHours = (() => {
+        try {
+          const a = Array.isArray(dest?.perDay) ? dest.perDay : [];
+          const b = Array.isArray(cityMeta?.[city]?.perDay) ? cityMeta[city].perDay : [];
+          const has = (arr)=> arr.some(x => (x && (String(x.start||'').trim() || String(x.end||'').trim())));
+          return has(a) || has(b);
+        } catch(_) { return false; }
+      })();
+
+      const infoContextObj = {
+        city,
+        country: dest?.country || cityMeta?.[city]?.country || '',
+        days_total: dest.days,
+        baseDate,
+        hotel_base: hotel || '',
+        transport_preference: transport || '',
+        // Si el usuario no dio horarios, NO anclamos 08:30–19:00.
+        day_hours: userProvidedHours ? perDay : [],
+        preferences: plannerState?.preferences || {},
+        // Intake (si existe) + heurística
+        intake: (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : '',
+        heuristics: heuristicsContext || ''
+      };
 
       const research = cached || await callInfoAPI({
-        messages: [{ role: 'user', content: context }]
+        messages: [{ role: 'user', content: JSON.stringify(infoContextObj, null, 2) }]
       });
 
       if(!cached) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
@@ -1886,6 +1911,7 @@ ${buildIntake()}
     delete window.__cityLocks[city];
   }
 }
+
 
 /* ==============================
    SECCIÓN 15.3 · Rebalanceo global por ciudad
@@ -2609,6 +2635,60 @@ if (typeof __addMinutesSafe__ !== 'function') {
 }
 
 /* ------------------------------------------------------------------
+   ✅ NUEVO: Duración 2 líneas helpers (Transporte/Actividad)
+   - Mantiene compatibilidad con duraciones antiguas.
+------------------------------------------------------------------- */
+function __parseDuration2Lines__(txt){
+  const s = String(txt ?? '').trim();
+  if(!s) return { transportMin: null, activityMin: null, has2: false };
+
+  // Transporte: X\nActividad: Y
+  const mT = s.match(/Transporte\s*:\s*([^\n\r]+)/i);
+  const mA = s.match(/Actividad\s*:\s*([^\n\r]+)/i);
+
+  const parseOne = (frag)=>{
+    const f = String(frag||'').trim();
+    if(!f) return null;
+    let m = f.match(/(\d+(?:\.\d+)?)\s*h/i);
+    let mins = 0;
+    if(m){
+      mins += Math.round(parseFloat(m[1]) * 60);
+      const m2 = f.match(/(\d+)\s*m/i);
+      if(m2) mins += parseInt(m2[1],10);
+      return mins;
+    }
+    m = f.match(/(\d+)\s*m/i);
+    if(m) return parseInt(m[1],10);
+    // "0" o "0m"
+    if(/^\s*0\s*m?\s*$/i.test(f)) return 0;
+    return null;
+  };
+
+  const tMin = mT ? parseOne(mT[1]) : null;
+  const aMin = mA ? parseOne(mA[1]) : null;
+
+  if(mT || mA) return { transportMin: tMin, activityMin: aMin, has2: true };
+
+  // Formato antiguo (una sola línea)
+  const one = parseOne(s);
+  return { transportMin: null, activityMin: one, has2: false };
+}
+
+function __formatMinutesLabel__(mins){
+  const m = Math.max(0, Math.round(Number(mins)||0));
+  const h = Math.floor(m/60);
+  const mm = m%60;
+  if(h>0) return mm>0 ? `${h}h${mm}m` : `${h}h`;
+  return `${mm}m`;
+}
+
+function __formatDuration2Lines__(transportMin, activityMin){
+  const t = (transportMin == null) ? 0 : transportMin;
+  const a = (activityMin == null) ? 60 : activityMin;
+  return `Transporte: ${__formatMinutesLabel__(t)}\nActividad: ${__formatMinutesLabel__(a)}`;
+}
+
+/* ------------------------------------------------------------------
    Detección de nocturnas / auroras / out-of-town
 ------------------------------------------------------------------- */
 if (typeof __isNightRow__ !== 'function') {
@@ -2635,7 +2715,7 @@ if (typeof isOutOfTownRow !== 'function') {
 
     // Señales fuertes de excursión / fuera de ciudad (genéricas, multi-país)
     const strong =
-      /excursi[oó]n|day\s*trip|tour\s+del|tour\s+de|golden\s+circle|south\s+coast|c[ií]rculo\s+dorado|costa\s+sur|pen[ií]nsula|glaciar|parque\s+nacional|volc[aá]n|cascada|waterfall|crater|geysir|laguna\s+azul|blue\s*lagoon|hot\s*spring|thermal|lago\b|playa\b|black\s+sand|village|island\s+tour/i;
+      /excursi[oó]n|day\s*trip|tour\s+del|tour\s+de|golden\s+circle|south\s+coast|c[ií]rculo\s+dorado|costa\s+sur|pen[ií]nsula|glaciar|parque\s+nacional|volc[aá]n|cascada|waterfall|crater|geysir|laguna\s+azul|blue\s*lagoon|hot\s*spring|thermal|lago\b|playa\b|black\sand|village|island\s+tour/i;
 
     // Si cualquiera de los campos tiene señal fuerte, se considera out-of-town
     if (strong.test(a) || strong.test(f) || strong.test(t)) return true;
@@ -2653,24 +2733,35 @@ if (typeof isOutOfTownRow !== 'function') {
 ------------------------------------------------------------------- */
 if (typeof normalizeDurationLabel !== 'function') {
   function normalizeDurationLabel(r) {
-    const raw = String(r?.duration || '').trim();
-    let minutes = 0;
-    let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-    if (m) {
-      minutes = parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
-    } else {
-      m = raw.match(/(\d+)\s*m/i);
-      if (m) minutes = parseInt(m[1], 10);
+    // ✅ FIX QUIRÚRGICO:
+    // - Si ya viene en 2 líneas (Transporte/Actividad), NO lo aplastamos.
+    // - Si viene en formato viejo, lo convertimos a 2 líneas (Transporte 0m por defecto).
+    const parsed = __parseDuration2Lines__(r?.duration);
+    if (parsed.has2) {
+      // Asegurar que existan ambas líneas aunque una falte
+      const tMin = (parsed.transportMin == null) ? 0 : parsed.transportMin;
+      const aMin = (parsed.activityMin == null) ? (() => {
+        const s = __toMinHHMM__(r?.start), e = __toMinHHMM__(r?.end);
+        if (s != null && e != null) {
+          let span = e - s;
+          if (span < 0) span += 24*60;
+          return Math.max(15, span - tMin);
+        }
+        return 60;
+      })() : parsed.activityMin;
+
+      return { ...r, duration: __formatDuration2Lines__(tMin, aMin) };
     }
+
+    // Formato antiguo: intentamos derivar minutos de duration o de start/end
+    let minutes = parsed.activityMin || 0;
     if (!minutes) {
       const s = __toMinHHMM__(r?.start), e = __toMinHHMM__(r?.end);
       if (s != null && e != null) minutes = ((e - s) + 24 * 60) % (24 * 60);
       if (!minutes) minutes = 60;
     }
-    const h = Math.floor(minutes / 60);
-    const mm = minutes % 60;
-    const label = h ? (mm ? `${h}h${mm}m` : `${h}h`) : `${mm}m`;
-    return { ...r, duration: label };
+
+    return { ...r, duration: __formatDuration2Lines__(0, minutes) };
   }
 }
 if (typeof normalizeAuroraWindow !== 'function') {
@@ -2683,25 +2774,25 @@ if (typeof normalizeAuroraWindow !== 'function') {
 
     let s = __toMinHHMM__(r?.start);
     let e = __toMinHHMM__(r?.end);
-    let d = String(r?.duration || '').trim();
+
+    // Duración: si viene 2 líneas, mantenemos y solo ajustamos actividad si hace falta
+    const dParsed = __parseDuration2Lines__(r?.duration);
+    let tMin = (dParsed.transportMin == null) ? 0 : dParsed.transportMin;
+    let aMin = dParsed.activityMin;
 
     if (s == null || e == null || e <= s) {
       s = __toMinHHMM__(fallbackStart);
       e = __toMinHHMM__(fallbackEnd) + 24 * 60;
     }
-
-    const dur = (function () {
-      const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-      const mm = d.match(/(\d+)\s*m/i);
-      if (md) return parseInt(md[1], 10) * 60 + (md[2] ? parseInt(md[2], 10) : 0);
-      if (mm) return parseInt(mm[1], 10);
-      return ((e - s) + 24 * 60) % (24 * 60) || 240;
-    })();
+    if (aMin == null) {
+      const span = ((e - s) + 24*60) % (24*60) || 240;
+      aMin = Math.max(60, span - tMin);
+    }
 
     const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
     const endHH = __toHHMMfromMin__(e % (24 * 60));
-    const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
-    return { ...r, start: startHH, end: endHH, duration: lbl, _crossDay: true };
+
+    return { ...r, start: startHH, end: endHH, duration: __formatDuration2Lines__(tMin, aMin), _crossDay: true };
   }
 }
 
@@ -2797,7 +2888,16 @@ function clearTransportAfterReturn(city, rows) {
 function fixOverlaps(rows) {
   const toMin = __toMinHHMM__;
   const toHH = __toHHMMfromMin__;
+
   const durMin = (d) => {
+    const p = __parseDuration2Lines__(d);
+    if (p.has2) {
+      const t = (p.transportMin == null) ? 0 : p.transportMin;
+      const a = (p.activityMin == null) ? 0 : p.activityMin;
+      const sum = t + a;
+      return sum > 0 ? sum : 0;
+    }
+    // formato antiguo
     if (!d) return 0;
     const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
     if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
@@ -2841,7 +2941,17 @@ function fixOverlaps(rows) {
     }
     prevEnd = Math.max(prevEnd ?? 0, e);
 
-    const finalDur = d > 0 ? r.duration : `${Math.max(60, e - s)}m`;
+    // ✅ Mantener duración 2 líneas: ajustamos actividad de forma coherente con start/end
+    const parsed2 = __parseDuration2Lines__(r.duration);
+    let tMin = (parsed2.transportMin == null) ? 0 : parsed2.transportMin;
+    let aMin = parsed2.activityMin;
+
+    const span = Math.max(15, e - s);
+    if (aMin == null) aMin = Math.max(15, span - tMin);
+    if (tMin > span) tMin = Math.max(0, Math.round(span * 0.25));
+    if ((tMin + aMin) < span) aMin = Math.max(15, span - tMin);
+
+    const finalDur = __formatDuration2Lines__(tMin, aMin);
 
     const isNight = __isNightRow__(r);
     if (isNight && s >= 24 * 60) { e -= 24 * 60; s -= 24 * 60; cross = true; }
@@ -2974,7 +3084,7 @@ function ensureReturnRow(city, rows) {
         from: list[list.length - 1]?.to || 'Excursión',
         to: `Hotel (${cityLbl})`,
         transport: 'Vehículo alquilado o Tour guiado',
-        duration: '45m',
+        duration: __formatDuration2Lines__(45, 0),
         notes: 'Cierre del day trip y retorno al hotel.'
       });
     }
@@ -3030,7 +3140,7 @@ if (typeof injectDinnerIfMissing !== 'function') {
             from: 'Centro',
             to: 'Restaurante local',
             transport: 'A pie',
-            duration: '1h15m',
+            duration: __formatDuration2Lines__(10, 75),
             notes: 'Reserva sugerida si es sitio popular.'
           });
         }
@@ -3122,11 +3232,17 @@ if (typeof unifyRowsFormat !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   VALIDACIÓN con agente (si no existe, pasa-through)
-   ✅ DIAG: mide tiempos de validación.
+   ✅ VALIDACIÓN: por defecto PASS-THROUGH (sin llamada extra al API)
+   - Reduce latencia fuerte.
+   - Si algún día quieres activarla: plannerState.preferences.validateWithAgent = true
 ------------------------------------------------------------------- */
 if (typeof validateRowsWithAgent !== 'function') {
   async function validateRowsWithAgent(city, rows, baseDate) {
+    const enabled = !!(plannerState?.preferences?.validateWithAgent);
+    if (!enabled) {
+      return { allowed: rows, rejected: [] };
+    }
+
     const diag = window.__ITBMO_DIAG__;
     const t0 = (diag?.enabled) ? diag.timeStart('api:validate', { city, n: (rows||[]).length }) : null;
 
@@ -3215,8 +3331,14 @@ ${JSON.stringify(contextObj, null, 2)}
         if (!window.__researchCache[city]) window.__researchCache[city] = { key: `optimizeDayFallback:${Date.now()}`, research, ts: Date.now() };
       }
 
-      // PLANNER con research (sin volver a llamar INFO por día)
-      const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 90000, retries: 1 });
+      // ✅ FIX QUIRÚRGICO: PLANNER “por día” (tu /api/chat.js ya soporta esto)
+      const plannerRaw = await callApiChat('planner', {
+        research_json: research,
+        target_day: day,
+        day_hours: contextObj?.day_hours || null,
+        existing_rows: rows
+      }, { timeoutMs: 90000, retries: 1 });
+
       const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
       const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
 
