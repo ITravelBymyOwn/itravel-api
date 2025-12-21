@@ -1569,6 +1569,10 @@ function showWOW(on, msg){
    🆕 Inyección segura post-planner: duration normalizada / cena / retorno a ciudad
    🆕 Rendimiento: optimizeDay sólo en días realmente vacíos o “flacos” (≥ umbral)
    🆕 Coherencia: 1 sola aurora por día + limpieza de transporte tras “Regreso”
+   ✅ QUIRÚRGICO (NUEVO): “Quality-gate” global:
+      - Detecta macro-tour largo en 1 sola fila (≥6h) y obliga optimizeDay
+      - Evita placeholders genéricos (museo genérico / parque local / café local)
+      - Esto NO mete creatividad; solo fuerza re-optimización cuando falta detalle
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -1756,6 +1760,48 @@ async function generateCityItinerary(city){
     return real.length < minRows;
   }
 
+  // ✅ NUEVO (quirúrgico): detecta macro-tour largo "en una sola fila" (falta de sub-paradas)
+  function dayNeedsSubstops(city, day){
+    const list = (itineraries[city]?.byDay?.[day] || []).filter(r=>!!r.activity);
+    if(!list.length) return false;
+
+    const toMin = (hhmm)=>{
+      const m = String(hhmm||'').trim().match(/^(\d{1,2}):(\d{2})$/);
+      if(!m) return null;
+      return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
+    };
+
+    // Si ya hay varias filas con "to" y "from" distintas, asumimos que hay sub-paradas
+    if(list.length >= 4) return false;
+
+    // Macro-keywords globales (no Reykjavik-specific)
+    const strong =
+      /excursi[oó]n|day\s*trip|tour\b|ruta\b|circuito|c[ií]rculo|costa|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|cr[aá]ter|lagoon|laguna|thermal|hot\s*spring|geyser|geysir|island\s*tour|road\s*trip/i;
+
+    // Si existe 1 fila que ocupa ≥6h y parece excursión/tour, y el día tiene ≤2 filas útiles → necesita substops
+    for(const r of list){
+      const a = String(r.activity||'').toLowerCase();
+      const s = toMin(r.start), e = toMin(r.end);
+      let dur = 0;
+      if(s!=null && e!=null){
+        dur = e - s;
+        if(dur <= 0) dur += 24*60;
+      }else{
+        dur = 0;
+      }
+      if(strong.test(a) && dur >= 6*60 && list.length <= 2){
+        return true;
+      }
+    }
+
+    // Caso adicional: placeholders típicos y muy genéricos (calidad baja)
+    const genericPlaceholders =
+      /(museo\s+de\s+arte|parque\s+local|cafe\s+local|restaurante\s+local|costa\b|exploraci[oó]n\s+de\s+la\s+costa)/i;
+    if(list.some(r=>genericPlaceholders.test(String(r.activity||'')))) return true;
+
+    return false;
+  }
+
   try {
     const dest  = savedDestinations.find(x=>x.city===city);
     if(!dest) return;
@@ -1830,10 +1876,29 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      const context = buildIntakeLite(city);
+      // ✅ QUIRÚRGICO (GLOBAL): Prompt enriquecido hacia INFO para "pensar como agente experto"
+      // No hardcode por ciudad. Prohíbe placeholders y obliga day-trips con sub-paradas.
+      const context = (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : String(city||'');
+
+      const infoPrompt = `
+${FORMAT}
+Eres el INFO Chat interno de un planificador de viajes.
+Tu trabajo es generar research_json para que el planner produzca un itinerario WOW.
+
+REGLAS GLOBALES (aplican a cualquier ciudad/país):
+1) Sé CONCRETO: evita placeholders genéricos como "Museo de Arte", "Parque Local", "Café Local", "Restaurante Local". Si no sabes un nombre exacto, usa al menos "tipo + barrio/zona + por qué vale la pena".
+2) Para day-trips / macro-tours fuera de ciudad: SIEMPRE define la ruta "Destino → Sub-paradas" (5–8 paradas clave) + una instrucción explícita de "Regreso a la ciudad" al cierre.
+3) Transporte: si el usuario no define transporte o dice "recomiéndame", para salidas fuera de ciudad usa "Vehículo alquilado o Tour guiado" como default.
+4) Horarios realistas: actividades diurnas dentro de la ventana del día; cenas preferiblemente 19:00–21:30 si aparece cena.
+5) Evita repetir imperdibles y distribuye lo icónico durante la estancia (no concentrarlo solo un día).
+6) Entrega SOLO JSON válido (sin texto extra), compatible con el planner.
+
+CONTEXTO (input del usuario / planner):
+${context}
+`.trim();
 
       const research = cached || await callInfoAPI({
-        messages: [{ role: 'user', content: context }]
+        messages: [{ role: 'user', content: infoPrompt }]
       });
 
       if(!cached) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
@@ -1890,12 +1955,29 @@ ${buildIntake()}
         if(n === 0) missingDays.push(d);
       }
 
+      // ✅ NUEVO (quirúrgico): días que vienen como macro-tour largo sin sub-paradas → forzar optimizeDay
+      const needDetailDays = [];
+      for(let d=1; d<=totalDays; d++){
+        try{
+          if(dayNeedsSubstops(city, d)) needDetailDays.push(d);
+        }catch(_){}
+      }
+
       // Primero: asegurar faltantes
       for(const d of missingDays){
         try{
           await optimizeDay(city, d);
         }catch(e){
           console.warn(`[generateCityItinerary] optimizeDay falló en día faltante D${d} (${city})`, e);
+        }
+      }
+
+      // Luego: forzar detalle si detectamos macro-tour en 1 fila / placeholders
+      for(const d of needDetailDays){
+        try{
+          await optimizeDay(city, d);
+        }catch(e){
+          console.warn(`[generateCityItinerary] optimizeDay falló en día sin substops D${d} (${city})`, e);
         }
       }
 
@@ -2510,6 +2592,8 @@ function intentFromText(text){
    • Llamadas a optimización y validación sólo cuando agrega valor.
    • Todas las funciones nuevas se registran con guardas para no
      pisar implementaciones existentes en otras secciones.
+   ✅ QUIRÚRGICO (NUEVO): prompt global enriquecido hacia INFO en optimizeDay
+      para evitar placeholders y obligar sub-paradas en day-trips.
    ============================================================ */
 
 /* ============================================================
@@ -3353,10 +3437,19 @@ async function optimizeDay(city, day) {
 
       // ✅ Si no hay research cacheado, hacemos INFO UNA VEZ (formato correcto: messages)
       if (!research) {
+        // ✅ QUIRÚRGICO (GLOBAL): Prompt enriquecido a INFO para producir research “WOW” sin hardcode
         const infoPrompt = `
 ${FORMAT}
 Eres el INFO Chat interno.
-Devuelve SOLO el JSON de research compatible con el planner.
+Devuelve SOLO JSON válido de research compatible con el planner.
+
+REGLAS GLOBALES (cualquier ciudad/país):
+- Evita placeholders genéricos ("Museo de Arte", "Parque Local", "Café Local", "Restaurante Local"). Sé concreto o al menos "tipo + zona + por qué".
+- Para day-trips/macro-tours fuera de ciudad: define la ruta "Destino → Sub-paradas" (5–8 paradas clave) + "Regreso a la ciudad" al final.
+- Si el usuario no define transporte o pide recomendación: para fuera de ciudad usa "Vehículo alquilado o Tour guiado".
+- Distribuye imperdibles y evita repetición.
+- Horarios realistas; cenas preferiblemente 19:00–21:30 si se incluye cena.
+- Solo JSON (sin texto).
 
 CITY_CONTEXT:
 ${JSON.stringify(contextObj, null, 2)}
