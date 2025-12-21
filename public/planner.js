@@ -1786,9 +1786,17 @@ ${buildIntake()}
       try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
     }
 
-    /* =================== Doble etapa INFO→PLANNER con caché =================== */
+    /* =================== Doble etapa INFO→PLANNER con caché robusto =================== */
     window.__researchCache = window.__researchCache || {};
-    const cached = window.__researchCache[city];
+
+    // ✅ NUEVO: key robusta para no reutilizar research viejo cuando cambia el contexto
+    const _prefKey = (()=>{ try { return JSON.stringify(plannerState?.preferences || {}); } catch(_) { return ''; } })();
+    const _perDayKey = (()=>{ try { return JSON.stringify(perDay || []); } catch(_) { return ''; } })();
+    const _intakeLite = (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : `${city}|${hotel}|${transport}|${baseDate}`;
+    const researchKey = `${city}::${baseDate}::${hotel}::${transport}::${_prefKey}::${_perDayKey}::${_intakeLite}`;
+
+    const cachedEntry = window.__researchCache[city];
+    const cached = (cachedEntry && cachedEntry.key === researchKey) ? cachedEntry.research : null;
 
     let parsed = null;
     try{
@@ -1798,7 +1806,8 @@ ${buildIntake()}
         messages: [{ role: 'user', content: context }]
       });
 
-      if(!cached) window.__researchCache[city] = research;
+      if(!cached) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
+
       const structured = await callPlannerAPI_withResearch(research);
       parsed = structured;
     }catch(errInfoPlanner){
@@ -1850,7 +1859,6 @@ ${buildIntake()}
           await optimizeDay(city, d);
         }catch(e){
           console.warn(`[generateCityItinerary] optimizeDay falló en día faltante D${d} (${city})`, e);
-          // continuar sin romper toda la ciudad
         }
       }
 
@@ -1861,7 +1869,6 @@ ${buildIntake()}
             await optimizeDay(city, d);
           }catch(e){
             console.warn(`[generateCityItinerary] optimizeDay falló en D${d} (${city})`, e);
-            // ✅ QUIRÚRGICO A1: continuar
           }
         }
       }
@@ -3148,99 +3155,138 @@ if (typeof validateRowsWithAgent !== 'function') {
    ✅ DIAG: mide optimizeDay total + filas
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
-  const diag = window.__ITBMO_DIAG__;
-  const tAll = (diag?.enabled) ? diag.timeStart('optimizeDay', { city, day }) : null;
+  // ✅ QUIRÚRGICO: cola por ciudad para evitar paralelismo (reduce timeouts/canceled)
+  window.__optimizeDayChain__ = window.__optimizeDayChain__ || {};
+  const prev = window.__optimizeDayChain__[city] || Promise.resolve();
 
-  const data = itineraries[city];
-  const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
+  const run = async () => {
+    const diag = window.__ITBMO_DIAG__;
+    const tAll = (diag?.enabled) ? diag.timeStart('optimizeDay', { city, day }) : null;
 
-  const rows = (data?.byDay?.[day] || []).map(r => ({
-    day, start: r.start || '', end: r.end || '', activity: r.activity || '',
-    from: r.from || '', to: r.to || '', transport: r.transport || '',
-    duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
-  }));
+    const data = itineraries[city];
+    const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
 
-  if (diag?.enabled) diag.set('optimizeDay:lastInputRows', rows.length);
+    const rows = (data?.byDay?.[day] || []).map(r => ({
+      day, start: r.start || '', end: r.end || '', activity: r.activity || '',
+      from: r.from || '', to: r.to || '', transport: r.transport || '',
+      duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
+    }));
 
-  const protectedRows = rows.filter(r => {
-    const act = (r.activity || '').toLowerCase();
-    return act.includes('laguna azul') || act.includes('blue lagoon');
-  });
+    if (diag?.enabled) diag.set('optimizeDay:lastInputRows', rows.length);
 
-  try {
-    const context = (typeof __collectPlannerContext__ === 'function')
-      ? __collectPlannerContext__(city, day)
-      : { city, day };
+    const protectedRows = rows.filter(r => {
+      const act = (r.activity || '').toLowerCase();
+      return act.includes('laguna azul') || act.includes('blue lagoon');
+    });
 
-    const infoRaw = await callApiChat('info', { context }, { timeoutMs: 32000, retries: 1 });
-    const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
-    const research = safeParseApiText(infoData?.text ?? infoData);
+    try {
+      const contextObj = (typeof __collectPlannerContext__ === 'function')
+        ? __collectPlannerContext__(city, day)
+        : { city, day };
 
-    const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 42000, retries: 1 });
-    const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
-    const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
+      // ✅ QUIRÚRGICO: usa el research cacheado de la ciudad si existe y coincide “key”
+      // (lo crea generateCityItinerary en SECCIÓN 15.2)
+      let research = null;
+      try {
+        const entry = window.__researchCache?.[city];
+        research = entry?.research || null;
+      } catch(_) {}
 
-    const unified = unifyRowsFormat(structured, city);
+      // ✅ Si no hay research cacheado, hacemos INFO UNA VEZ (formato correcto: messages)
+      if (!research) {
+        const infoPrompt = `
+${FORMAT}
+Eres el INFO Chat interno.
+Devuelve SOLO el JSON de research compatible con el planner.
 
-    // ✅ INJERTO QUIRÚRGICO: optimizeDay ES por día.
-    // 1) Si el modelo devolvió múltiples días, tomamos SOLO el día objetivo.
-    // 2) Si no hay filas para ese día, reasignamos todo al day objetivo para no dejar vacío.
-    const rawRows = (unified?.rows || []);
-    const picked = rawRows.filter(x => (Number(x.day) || day) === day);
+CITY_CONTEXT:
+${JSON.stringify(contextObj, null, 2)}
+`.trim();
 
-    let finalRows = (picked.length ? picked : rawRows).map(x => ({ ...x, day }));
+        const infoRaw = await callApiChat('info', {
+          messages: [{ role: 'user', content: infoPrompt }]
+        }, { timeoutMs: 65000, retries: 1 });
 
-    finalRows = finalRows.map(normalizeDurationLabel);
-    finalRows = finalRows.map(normalizeAuroraWindow);
-    finalRows = enforceOneAuroraPerDay(finalRows);
+        const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
+        research = safeParseApiText(infoData?.text ?? infoData);
 
-    if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
+        // Guardar para reutilizar (aunque no tengamos la key “robusta” aquí)
+        window.__researchCache = window.__researchCache || {};
+        if (!window.__researchCache[city]) window.__researchCache[city] = { key: `optimizeDayFallback:${Date.now()}`, research, ts: Date.now() };
+      }
 
-    finalRows = fixOverlaps(finalRows);
-    finalRows = finalRows.map(r => __normalizeDayField__(city, r));
+      // PLANNER con research (sin volver a llamar INFO por día)
+      const plannerRaw = await callApiChat('planner', { research_json: research }, { timeoutMs: 90000, retries: 1 });
+      const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
+      const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
 
-    if (protectedRows.length) {
-      finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
+      const unified = unifyRowsFormat(structured, city);
+
+      // ✅ INJERTO QUIRÚRGICO: optimizeDay ES por día.
+      // 1) Si el modelo devolvió múltiples días, tomamos SOLO el día objetivo.
+      // 2) Si no hay filas para ese día, reasignamos todo al day objetivo para no dejar vacío.
+      const rawRows = (unified?.rows || []);
+      const picked = rawRows.filter(x => (Number(x.day) || day) === day);
+
+      let finalRows = (picked.length ? picked : rawRows).map(x => ({ ...x, day }));
+
+      finalRows = finalRows.map(normalizeDurationLabel);
+      finalRows = finalRows.map(normalizeAuroraWindow);
+      finalRows = enforceOneAuroraPerDay(finalRows);
+
+      if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
+
       finalRows = fixOverlaps(finalRows);
+      finalRows = finalRows.map(r => __normalizeDayField__(city, r));
+
+      if (protectedRows.length) {
+        finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
+        finalRows = fixOverlaps(finalRows);
+      }
+
+      finalRows = ensureReturnRow(city, finalRows);
+      finalRows = clearTransportAfterReturn(city, finalRows);
+
+      if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
+
+      finalRows = pruneGenericPerDay(finalRows);
+      finalRows = __sortRowsTabsSafe__(finalRows);
+
+      const val = await validateRowsWithAgent(city, finalRows, baseDate);
+
+      if (diag?.enabled) {
+        diag.set('optimizeDay:lastOutputRows', (val?.allowed || []).length);
+      }
+
+      if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+      try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
+
+      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (val?.allowed||[]).length });
+
+    } catch (e) {
+      console.error('optimizeDay INFO→PLANNER error:', e);
+
+      if (diag?.enabled) {
+        diag.err('optimizeDay', e);
+      }
+
+      let safeRows = rows.map(r => __normalizeDayField__(city, r));
+      safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
+      safeRows = clearTransportAfterReturn(city, safeRows);
+      safeRows = __sortRowsTabsSafe__(safeRows);
+
+      const val = await validateRowsWithAgent(city, safeRows, baseDate);
+      if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+      try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
+
+      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (val?.allowed||[]).length });
     }
+  };
 
-    finalRows = ensureReturnRow(city, finalRows);
-    finalRows = clearTransportAfterReturn(city, finalRows);
-
-    if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
-
-    finalRows = pruneGenericPerDay(finalRows);
-    finalRows = __sortRowsTabsSafe__(finalRows);
-
-    const val = await validateRowsWithAgent(city, finalRows, baseDate);
-
-    if (diag?.enabled) {
-      diag.set('optimizeDay:lastOutputRows', (val?.allowed || []).length);
-    }
-
-    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
-    try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
-
-    if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (val?.allowed||[]).length });
-
-  } catch (e) {
-    console.error('optimizeDay INFO→PLANNER error:', e);
-
-    if (diag?.enabled) {
-      diag.err('optimizeDay', e);
-    }
-
-    let safeRows = rows.map(r => __normalizeDayField__(city, r));
-    safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
-    safeRows = clearTransportAfterReturn(city, safeRows);
-    safeRows = __sortRowsTabsSafe__(safeRows);
-
-    const val = await validateRowsWithAgent(city, safeRows, baseDate);
-    if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
-    try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
-
-    if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (val?.allowed||[]).length });
-  }
+  // Encadenar (no romper la cadena aunque falle)
+  const chained = prev.then(run, run);
+  window.__optimizeDayChain__[city] = chained.catch(()=>{});
+  return chained;
 }
 
 /* ==============================
@@ -3526,10 +3572,9 @@ async function onSend(){
   if(intent.type==='swap_day' && intent.city){
     showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
-    await Promise.all([
-      optimizeDay(intent.city, intent.from),
-      optimizeDay(intent.city, intent.to)
-    ]);
+   // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
+await optimizeDay(intent.city, intent.from);
+await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
@@ -3540,10 +3585,9 @@ async function onSend(){
   if(intent.type==='move_activity' && intent.city){
     showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
-    await Promise.all([
-      optimizeDay(intent.city, intent.fromDay),
-      optimizeDay(intent.city, intent.toDay)
-    ]);
+    // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
+await optimizeDay(intent.city, intent.fromDay);
+await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
