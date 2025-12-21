@@ -1,4 +1,4 @@
-// /api/chat.js — v43.2 (ESM, Vercel)
+// /api/chat.js — v43.3 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -10,7 +10,11 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 function parseBody(reqBody) {
   if (!reqBody) return {};
   if (typeof reqBody === "string") {
-    try { return JSON.parse(reqBody); } catch { return {}; }
+    try {
+      return JSON.parse(reqBody);
+    } catch {
+      return {};
+    }
   }
   return reqBody;
 }
@@ -30,7 +34,9 @@ function cleanToJSONPlus(raw = "") {
   if (typeof raw !== "string") return null;
 
   // 1) Intento directo
-  try { return JSON.parse(raw); } catch {}
+  try {
+    return JSON.parse(raw);
+  } catch {}
 
   // 2) Primer/último { }
   try {
@@ -74,8 +80,7 @@ function fallbackJSON() {
 async function callText(messages, temperature = 0.35, max_output_tokens = 3200) {
   const inputStr = messages
     .map((m) => {
-      const c =
-        typeof m.content === "string" ? m.content : JSON.stringify(m.content);
+      const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
       return `${String(m.role || "user").toUpperCase()}: ${c}`;
     })
     .join("\n\n");
@@ -87,11 +92,7 @@ async function callText(messages, temperature = 0.35, max_output_tokens = 3200) 
     input: inputStr,
   });
 
-  return (
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-    ""
-  );
+  return resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 }
 
 // Normalizador de duraciones dentro del JSON ya parseado
@@ -132,8 +133,7 @@ function normalizeDurationsInParsed(parsed) {
     return s;
   };
 
-  const touchRows = (rows = []) =>
-    rows.map((r) => ({ ...r, duration: norm(r.duration) }));
+  const touchRows = (rows = []) => rows.map((r) => ({ ...r, duration: norm(r.duration) }));
 
   try {
     if (Array.isArray(parsed.rows)) parsed.rows = touchRows(parsed.rows);
@@ -214,6 +214,19 @@ NOTAS:
 - Deben ser concretas y útiles (1–2 frases), accionables (reserva, ticket, mejor hora, por qué ese orden).
 - Evita “verifica horarios” repetido en todas.
 
+CRÍTICO — SALIDA PARA EVITAR REGRESIONES DEL PLANNER:
+- Debes incluir SIEMPRE un arreglo **rows_draft** con el itinerario COMPLETO (todas las filas de todos los días).
+- rows_draft debe traer ya:
+  - start/end reales,
+  - activity,
+  - from/to,
+  - transport,
+  - duration (2 líneas),
+  - notes,
+  - kind,
+  - zone.
+- El Planner NO debe inventar: solo formatea/valida y renderiza. Por eso rows_draft es obligatorio.
+
 SALIDA (JSON):
 {
   "destination":"Ciudad",
@@ -243,6 +256,9 @@ SALIDA (JSON):
     "thermal_lagoons_min_stay_minutes":180
   },
   "day_hours":[{"day":1,"start":"HH:MM","end":"HH:MM"}],
+  "rows_draft":[
+    {"day":1,"start":"HH:MM","end":"HH:MM","activity":"","from":"","to":"","transport":"","duration":"Transporte: ...\\nActividad: ...","notes":"","kind":"","zone":""}
+  ],
   "rows_skeleton":[
     {"day":1,"start":"","end":"","activity":"","from":"","to":"","transport":"","duration":"","notes":"","kind":"","zone":""}
   ]
@@ -253,9 +269,20 @@ SALIDA (JSON):
    SISTEMA — PLANNER (estructurador)
    ======================= */
 const SYSTEM_PLANNER = `
-Eres **Astra Planner**. Recibes un "research_json" del Info Chat interno con decisiones cerradas.
-Tu trabajo es **estructurar** en el formato final **sin creatividad adicional** (NO inventes actividades nuevas),
-PERO SÍ debes **garantizar consistencia**, evitar duplicados y evitar solapes.
+Eres **Astra Planner**. Recibes un objeto "research_json" del Info Chat interno.
+El Info Chat YA DECIDIÓ: actividades, orden, tiempos, transporte y notas.
+Tu trabajo es **estructurar y validar** para renderizar en tabla. **NO aportes creatividad.**
+
+CONTRATO / FUENTE DE VERDAD:
+- Si research_json incluye **rows_draft** (o rows_final), esas filas son la verdad.
+  → Debes usarlas como base y SOLO:
+    (a) normalizar formato HH:MM,
+    (b) asegurar buffers >=15m cuando falten,
+    (c) corregir solapes pequeños moviendo minutos dentro del día,
+    (d) completar campos faltantes SIN inventar actividades nuevas.
+- Si NO hay rows_draft/rows_final, y solo hay listas (imperdibles, macro_tours, etc.),
+  → devuelve un JSON mínimo con followup pidiendo que el Info Chat provea rows_draft.
+  (NO intentes inventar el itinerario desde cero.)
 
 SALIDA ÚNICA (JSON):
 {
@@ -268,15 +295,19 @@ SALIDA ÚNICA (JSON):
 
 REGLAS:
 - JSON válido, sin texto fuera.
-- NO inventes tours nuevos. NO dupliques el mismo tour/actividad en dos idiomas.
-- NO repitas el mismo “loop” en varios días si days_total>1 (usa la intención del research_json).
-- Evita solapes: si dos filas se pisan en tiempo, debes ajustar/eliminar/reordenar de forma mínima para que NO se solapen.
-- Duración (OBLIGATORIO): el campo "duration" debe venir en 2 líneas:
-  "Transporte: <tiempo>\\nActividad: <tiempo>"
-- Si rows_skeleton trae start/end => respétalo.
-- Si no trae start/end:
-  - Si existe day_hours del día, asigna dentro de esa ventana con buffers ≥15m.
-  - Si NO existe day_hours (usuario no dio horarios), puedes escoger una ventana realista (no fija 08:30–19:00) y luego asignar dentro.
+- NO inventes tours/actividades nuevas (solo usa rows_draft/rows_final).
+- NO dupliques el mismo tour/actividad en dos idiomas.
+- Evita solapes: ninguna actividad puede ocurrir al mismo tiempo que otra.
+- Respeta la ventana del día:
+  - Si el input trae day_hours (global o por día), úsalo como límite.
+  - Si una actividad cae fuera, ajusta dentro de la ventana con buffers, sin cambiar el contenido.
+- No pongas actividades diurnas entre 01:00–05:00.
+- Si existe "Regreso a {ciudad}" (day-trip), debe ser la última fila del day-trip si aplica.
+
+DURACIÓN (2 líneas obligatorias):
+- duration debe ser SIEMPRE un string con dos líneas:
+  "Transporte: Xm\\nActividad: Ym"
+- Si no conoces una parte, usa "Transporte: ~" o "Actividad: ~" (pero no inventes).
 
 MACRO-TOURS / DAY-TRIPS (CRÍTICO):
 - Si el research_json implica un macro-tour para un día, ese bloque domina el día:
@@ -284,13 +315,16 @@ MACRO-TOURS / DAY-TRIPS (CRÍTICO):
   - Debes incluir “Regreso a {ciudad}” al final del day-trip si aplica.
 
 EXISTING_ROWS:
-- Si viene "existing_rows" para un día, úsalo como contexto para NO repetir y para mantener coherencia,
-  pero tienes permiso de **reemplazar/eliminar** filas conflictivas para cumplir el research_json (especialmente con macro-tours).
+- Si viene "existing_rows" para un día, úsalo únicamente para:
+  (a) no repetir actividades,
+  (b) mantener coherencia,
+  (c) respetar decisiones ya tomadas.
+- Tienes permiso de **reemplazar/eliminar** filas conflictivas para cumplir research_json (especialmente con macro-tours).
 - No “concatentes” un tour encima de un día completo ya lleno si eso produce solapes.
 
 MODO ACOTADO:
 - Si el input incluye "target_day", devuelve **SOLO filas de ese día** (todas con day=target_day).
-- Además, si incluye "day_hours", úsalo para fijar la ventana de ese día.
+- Si incluye "day_hours", úsalo para fijar la ventana de ese día.
 `.trim();
 
 /* ============== Handler principal ============== */
@@ -350,6 +384,7 @@ export default async function handler(req, res) {
           },
           constraints: { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
           day_hours: [],
+          rows_draft: [],
           rows_skeleton: [],
         };
       }
