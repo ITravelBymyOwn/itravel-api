@@ -1494,6 +1494,8 @@ Contexto:
    - ✅ Mantiene habilitado solo “reset-planner”
    - 🆕 Bloquea “info-chat-floating”
    - 🆕 Atributo aria-busy + manejo de tabindex (accesibilidad)
+   ✅ FIX QUIRÚRGICO: al desactivar overlay NO re-habilita controles
+      que ya venían disabled por la lógica normal del planner
 ───────────────────────────────────────────────────────────── */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -1513,24 +1515,43 @@ function showWOW(on, msg){
 
     // 🆕 Bloquear también el botón flotante de Info Chat
     if (el.id === 'info-chat-floating') {
-      el.disabled = on;
+      try { el.disabled = on; } catch(_) {}
+      if(on){
+        el._prevTabIndex = el.getAttribute('tabindex');
+        el.setAttribute('tabindex','-1');
+      }else{
+        if(typeof el._prevTabIndex !== 'undefined'){
+          el.setAttribute('tabindex', el._prevTabIndex);
+          delete el._prevTabIndex;
+        }else{
+          el.removeAttribute('tabindex');
+        }
+      }
       return;
     }
 
     if(on){
-      el._prevDisabled = el.disabled;
-      el.disabled = true;
-      el._prevTabIndex = el.getAttribute('tabindex');
+      // Guardar estado previo SOLO la primera vez (evita pisarlo si overlay se re-entra)
+      if(typeof el._prevDisabled === 'undefined') el._prevDisabled = !!el.disabled;
+
+      // disabled no aplica a <a>, pero no rompe; igual cuidamos tabindex
+      try { el.disabled = true; } catch(_) {}
+      if(typeof el._prevTabIndex === 'undefined') el._prevTabIndex = el.getAttribute('tabindex');
       el.setAttribute('tabindex','-1');
+
     }else{
+      // ✅ RESTAURAR solo si sabemos que lo guardamos
       if(typeof el._prevDisabled !== 'undefined'){
-        el.disabled = el._prevDisabled;
+        try { el.disabled = el._prevDisabled; } catch(_) {}
         delete el._prevDisabled;
-      }else{
-        el.disabled = false;
       }
       if(typeof el._prevTabIndex !== 'undefined'){
-        el.setAttribute('tabindex', el._prevTabIndex);
+        // Si venía null, restaurarlo como null real (removeAttribute)
+        if(el._prevTabIndex === null){
+          el.removeAttribute('tabindex');
+        }else{
+          el.setAttribute('tabindex', el._prevTabIndex);
+        }
         delete el._prevTabIndex;
       }else{
         el.removeAttribute('tabindex');
