@@ -2011,6 +2011,7 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
    v60 base + overlay bloqueado global hasta terminar todas las ciudades
    (concurrencia controlada vía runWithConcurrency)
    + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
+   ✅ FIX QUIRÚRGICO: si falta transporte, pedir SOLO transporte (evita confusión)
 ================================= */
 async function startPlanning(){
   if(savedDestinations.length===0) return;
@@ -2172,16 +2173,18 @@ function askNextHotelTransport(){
     return; // 👈 No avanza hasta que el usuario indique hotel/zona
   }
 
-  // ⛔ Debe esperar transporte ANTES de avanzar (FIX QUIRÚRGICO)
-  // Nota: si el usuario indica “recomiéndame”, dejamos un default explícito
+  // ⛔ Debe esperar transporte ANTES de avanzar
   const currentTransport = cityMeta[city].transport || '';
   if(!currentTransport.trim()){
     setActiveCity(city);
     renderCityItinerary(city);
 
-    // Reutilizamos el mismo prompt (no tocamos tone.*); el handler deberá capturar transporte.
-    // Pero aquí bloqueamos avance hasta tenerlo.
-    chatMsg(tone.askHotelTransport(city), 'ai');
+    // ✅ FIX QUIRÚRGICO: pedir SOLO transporte para no confundir al usuario
+    chatMsg(
+      `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover? ` +
+      `(ej: “vehículo alquilado”, “transporte público”, “Uber/taxi”, o escribe “recomiéndame”).`,
+      'ai'
+    );
     return;
   }
 
