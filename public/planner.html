@@ -141,7 +141,8 @@
   </footer>
 
   <!-- Modal Info Chat -->
-  <div id="info-chat-modal" class="info-chat-modal" style="display:none;">
+  <!-- PATCH QUIRÚRGICO: se elimina display:none inline para que .active controle visibilidad sin bloquear -->
+  <div id="info-chat-modal" class="info-chat-modal" aria-hidden="true">
     <div class="info-chat-panel">
       <div class="info-chat-header">
         <h3>Info Chat · Astra 🌍</h3>
@@ -152,6 +153,15 @@
         <textarea id="info-chat-input" placeholder="Hazme cualquier pregunta sobre viajes..." rows="1"></textarea>
         <button id="info-chat-send" class="btn primary">Enviar</button>
       </div>
+    </div>
+  </div>
+
+  <!-- PATCH QUIRÚRGICO: placeholders “upsell” para evitar null refs si planner.js los busca -->
+  <div id="monetization-upsell" class="upsell" style="display:none;">
+    <div class="upsell-card">
+      <h3>Upgrade</h3>
+      <p>Para continuar, desbloquea esta función en Premium.</p>
+      <button id="upsell-close" class="btn primary w-100">Cerrar</button>
     </div>
   </div>
 
