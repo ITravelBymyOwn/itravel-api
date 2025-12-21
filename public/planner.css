@@ -167,8 +167,15 @@ body{
 }
 
 /* ✅ Excepciones: permitir interacción con botones clave incluso si sidebar está bloqueado */
-.sidebar.disabled #reset-planner,
-.sidebar.disabled #start-planning {
+.sidebar.disabled #reset-planner{
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  cursor: pointer;
+}
+
+/* PATCH QUIRÚRGICO: selector correcto (si en algún punto se deshabilita sidebar y se quiere dejar start-planning clickable)
+   Nota: hoy main no queda dentro de sidebar, pero este selector es inocuo si no aplica. */
+.sidebar.disabled ~ .main #start-planning{
   opacity: 1 !important;
   pointer-events: auto !important;
   cursor: pointer;
@@ -283,6 +290,15 @@ body{
   display:none;
 }
 
+/* PATCH QUIRÚRGICO: el planner actual usa input.baseDate (1 campo). Ajustamos solo su “fit” sin tocar lo demás. */
+.city-row input.baseDate{
+  width:100%;
+  padding:.5rem .6rem;
+  border:1px solid #d0d5dd;
+  border-radius:.5rem;
+  font-size:.9rem;
+  background:#fff;
+}
 
 /* ==================== HORAS ==================== */
 .hours-block{
