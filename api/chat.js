@@ -1,4 +1,4 @@
-// /api/chat.js — v43.1 (ESM, Vercel)
+// /api/chat.js — v43.2 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -163,14 +163,28 @@ OBJETIVO CENTRAL:
 - Agrupa por **zonas/barrios** y por “clusters” caminables; usa el orden “más cercano → más cercano”.
 - En day-trips, evita regresos redundantes: una sola salida, ruta lógica y cierre con retorno.
 
+ENTRADA (context) — CÓMO LEERLA:
+- Recibirás un objeto "context" (JSON). Puede incluir:
+  - city / country / destination (si el frontend ya lo resolvió), y/o
+  - hotel_address / hotel_base / area_hint, y/o
+  - messages[] (historial). Allí el usuario puede mencionar ciudad/zonas/landmarks.
+- Si **city/country** no vienen explícitos, dedúcelos de:
+  1) el texto del último mensaje del usuario,
+  2) menciones repetidas en messages[],
+  3) pistas como aeropuerto/código, país/idioma, moneda, atracciones.
+- Si aun así es ambiguo, usa:
+  - destination="Destino" y country="" (pero igual optimiza por clusters y POIs más probables),
+  - registra la ambigüedad en "poi_resolution" con confidence bajo.
+
 COMPRENSIÓN HUMANA DE UBICACIONES (CRÍTICO):
 - El usuario puede describir su hotel/zona con frases vagas (“cerca de la iglesia icónica”, “por el centro histórico”, “junto al puente famoso”, “cerca del estadio”, “frente al puerto”, etc.).
 - Debes **inferir el POI/landmark canónico** más probable para esa ciudad y usarlo como referencia.
   Ejemplo: “iglesia icónica en Reykjavik” → **Hallgrímskirkja**.
 - Esta regla aplica a **cualquier ciudad del mundo**: resuelve referencias a puntos emblemáticos de forma inteligente.
-- Si hay ambigüedad, elige el landmark más “default” y conocido; NO pidas aclaraciones aquí (el Planner no conversa), solo:
-  - Indica tu inferencia en un campo informativo (ver "poi_resolution").
-  - Ajusta la ruta de forma conservadora (sin asumir distancias imposibles).
+- NO pidas aclaraciones aquí (el Planner no conversa).
+  - Elige el landmark más “default” y conocido.
+  - Deja evidencia en "poi_resolution" (input_hint → resolved_poi + why + confidence).
+  - Si hay 2 candidatos fuertes, elige 1 y explica por qué (confidence medio).
 
 REGLAS DE SALIDA:
 - Devuelve **UN ÚNICO JSON VÁLIDO** (sin texto fuera).
