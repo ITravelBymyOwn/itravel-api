@@ -4540,9 +4540,9 @@ ${dayRows}
     **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
    🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
    💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
-   ✅ PATCH QUIRÚRGICO (idempotencia total):
-   - Re-bindeo seguro de botones con cloneNode para evitar múltiples listeners
-   - Guards para document listeners (input, itbmo:addDays)
+   ✅ FIX QUIRÚRGICO (bug):
+   - Bindings de $save/$start/etc. se hacen DENTRO de DOMContentLoaded,
+     porque antes podían ejecutarse con elementos null y NO quedaba listener.
 ================================= */
 (function(){
   // 🛡️ Guard global para evitar doble-ejecución total de la sección
@@ -4550,15 +4550,13 @@ ${dayRows}
   window.__ITBMO_SECTION21_PATCH__ = true;
 
   // Helper: rebind idempotente (quita listeners previos clonando)
-  function rebind(el, handler){
+  function rebindClick(el, handler){
     if(!el) return null;
     const clone = el.cloneNode(true);
     el.replaceWith(clone);
     clone.addEventListener('click', handler);
     return clone;
   }
-
-  // Helper: rebind keydown idempotente
   function rebindKeydown(el, handler){
     if(!el) return null;
     const clone = el.cloneNode(true);
@@ -4566,13 +4564,6 @@ ${dayRows}
     clone.addEventListener('keydown', handler);
     return clone;
   }
-
-  // Mantener tu binding directo pero idempotente:
-  // $addCity?.addEventListener('click', ()=>addCityRow());
-  // -> rebind seguro
-  try{
-    $addCity = rebind($addCity, ()=>addCityRow());
-  }catch(_){}
 
   function validateBaseDatesDMY(){
     const rows = qsa('.city-row', $cityList);
@@ -4606,7 +4597,6 @@ ${dayRows}
     return true;
   }
 
-  /* ===== Reglas para habilitación del botón ===== */
   function formHasBasics(){
     const row = qs('.city-row', $cityList);
     if(!row) return false;
@@ -4615,48 +4605,6 @@ ${dayRows}
     const days  = parseInt(qs('.days', row)?.value||'0', 10);
     const base  = (qs('.baseDate', row)?.value||'').trim();
     return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
-  }
-
-  /* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
-  try{
-    $save = rebind($save, ()=>{
-      // ejecuta lógica propia de guardado
-      try { saveDestinations(); } catch(_) {}
-
-      // valida y sólo entonces habilita
-      const basicsOK = formHasBasics();
-      const datesOK  = validateBaseDatesDMY();
-      if (basicsOK && datesOK) {
-        hasSavedOnce = true;
-        if ($start) $start.disabled = false;
-
-        // 🆕 Hook para integraciones internas (no rompe nada)
-        try {
-          document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
-            detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-          }));
-        } catch(_) {}
-      } else {
-        if ($start) $start.disabled = true;
-      }
-    });
-  }catch(_){}
-
-  // Ya NO habilitamos al escribir; sólo deshabilitamos si se borran datos
-  if(!window.__ITBMO_SECTION21_INPUT_GUARD__){
-    window.__ITBMO_SECTION21_INPUT_GUARD__ = true;
-    document.addEventListener('input', (e)=>{
-      if(!$start) return;
-      if(e.target && (
-         e.target.classList?.contains('city') ||
-         e.target.classList?.contains('country') ||
-         e.target.classList?.contains('days') ||
-         e.target.classList?.contains('baseDate')
-      )){
-        // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
-        if(!formHasBasics()) $start.disabled = true;
-      }
-    });
   }
 
   /* ===== Recuperación/inyector del botón Reset si no existe ===== */
@@ -4777,72 +4725,7 @@ ${dayRows}
     });
   }
 
-  // ▶️ Start: valida y ejecuta (idempotente)
-  try{
-    $start = rebind($start, ()=>{
-      if(!$start) return;
-      if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
-        chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
-        return;
-      }
-      if(!validateBaseDatesDMY()) return;
-
-      // 🆕 Hook para integraciones internas (no rompe nada)
-      try {
-        document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
-          detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-        }));
-      } catch(_) {}
-
-      startPlanning();
-    });
-  }catch(_){}
-
-  // Send planner chat (idempotente)
-  try{
-    $send = rebind($send, onSend);
-  }catch(_){}
-
-  // Chat: Enter envía (sin Shift) — idempotente
-  try{
-    $chatI = rebindKeydown($chatI, (e)=>{
-      if(e.key==='Enter' && !e.shiftKey){
-        e.preventDefault();
-        onSend();
-      }
-    });
-  }catch(_){}
-
-  // CTA y upsell (idempotente)
-  try{
-    $confirmCTA = rebind($confirmCTA, ()=>{ 
-      isItineraryLocked = true;
-      const upsell = qs('#monetization-upsell');
-      if (upsell) upsell.style.display = 'flex';
-    });
-  }catch(_){}
-  try{
-    $upsellClose = rebind($upsellClose, ()=>{
-      const upsell = qs('#monetization-upsell');
-      if (upsell) upsell.style.display = 'none';
-    });
-  }catch(_){}
-
-  /* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
-  if(!window.__ITBMO_SECTION21_ADD_DAYS_GUARD__){
-    window.__ITBMO_SECTION21_ADD_DAYS_GUARD__ = true;
-    document.addEventListener('itbmo:addDays', e=>{
-      const { city, extraDays, dayTripTo } = e.detail || {};
-      if(!city || !extraDays) return;
-      addMultipleDaysToCity(city, extraDays);
-      const start = itineraries[city]?.originalDays || 1;
-      const end   = (itineraries[city]?.originalDays || 0) + extraDays;
-      rebalanceWholeCity(city, { start, end, dayTripTo });
-    });
-  }
-
   /* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
-  /* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
   function __ensureInfoAgentClient__(){
     window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
     window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
@@ -4896,11 +4779,10 @@ ${dayRows}
   function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
   function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
 
-  /* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
   function __infoTypingOn__(){
     const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
     if(!box) return;
-    if(document.getElementById('info-typing')) return; // ya existe
+    if(document.getElementById('info-typing')) return;
     const b = document.createElement('div');
     b.id = 'info-typing';
     b.className = 'bubble ai typing';
@@ -4923,7 +4805,9 @@ ${dayRows}
 
   async function sendInfoMessage(){
     const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
-    if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
+    if(!input || !btn) return;
+    const txt = (input.value||'').trim();
+    if(!txt) return;
     infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
 
     __infoTypingOn__();
@@ -4950,7 +4834,6 @@ ${dayRows}
     const toggleFloating = qs('#info-chat-floating');
     const close  = qs('#info-chat-close');
     const send   = qs('#info-chat-send');
-    const input  = qs('#info-chat-input');
 
     toggleTop?.replaceWith(toggleTop.cloneNode(true));
     toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
@@ -4992,6 +4875,121 @@ ${dayRows}
     });
   }
 
+  // Guards para listeners globales
+  function bindGlobalGuards(){
+    if(!window.__ITBMO_SECTION21_INPUT_GUARD__){
+      window.__ITBMO_SECTION21_INPUT_GUARD__ = true;
+      document.addEventListener('input', (e)=>{
+        if(!$start) return;
+        if(e.target && (
+           e.target.classList?.contains('city') ||
+           e.target.classList?.contains('country') ||
+           e.target.classList?.contains('days') ||
+           e.target.classList?.contains('baseDate')
+        )){
+          if(!formHasBasics()) $start.disabled = true;
+        }
+      });
+    }
+
+    if(!window.__ITBMO_SECTION21_ADD_DAYS_GUARD__){
+      window.__ITBMO_SECTION21_ADD_DAYS_GUARD__ = true;
+      document.addEventListener('itbmo:addDays', e=>{
+        const { city, extraDays, dayTripTo } = e.detail || {};
+        if(!city || !extraDays) return;
+        addMultipleDaysToCity(city, extraDays);
+        const start = itineraries[city]?.originalDays || 1;
+        const end   = (itineraries[city]?.originalDays || 0) + extraDays;
+        rebalanceWholeCity(city, { start, end, dayTripTo });
+      });
+    }
+  }
+
+  // ✅ IMPORTANT: inicializar bindings cuando el DOM ya existe
+  function initPlannerBindings(){
+    // refrescar referencias (por si el DOM cambió / Webflow reinyectó)
+    $addCity = qs('#add-city') || $addCity;
+    $save    = qs('#save-destinations') || $save;
+    $start   = qs('#start-planning') || $start;
+    $send    = qs('#send') || $send;
+    $chatI   = qs('#chat-input') || $chatI;
+    $confirmCTA = qs('#confirm-cta') || $confirmCTA;
+    $upsellClose = qs('#upsell-close') || $upsellClose;
+
+    // Add city (idempotente)
+    try{ $addCity = rebindClick($addCity, ()=>addCityRow()); }catch(_){}
+
+    // Guardar destinos (idempotente) — AQUÍ estaba el bug
+    try{
+      $save = rebindClick($save, ()=>{
+        try { saveDestinations(); } catch(_) {}
+
+        const basicsOK = formHasBasics();
+        const datesOK  = validateBaseDatesDMY();
+        if (basicsOK && datesOK) {
+          hasSavedOnce = true;
+          if ($start) $start.disabled = false;
+
+          try {
+            document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
+              detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+            }));
+          } catch(_) {}
+        } else {
+          if ($start) $start.disabled = true;
+        }
+      });
+    }catch(_){}
+
+    // Start planning (idempotente)
+    try{
+      $start = rebindClick($start, ()=>{
+        if(!$start) return;
+        if(!hasSavedOnce){
+          chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
+          return;
+        }
+        if(!validateBaseDatesDMY()) return;
+
+        try {
+          document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
+            detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+          }));
+        } catch(_) {}
+
+        startPlanning();
+      });
+    }catch(_){}
+
+    // Send planner chat (idempotente)
+    try{ $send = rebindClick($send, onSend); }catch(_){}
+
+    // Enter envía (idempotente)
+    try{
+      $chatI = rebindKeydown($chatI, (e)=>{
+        if(e.key==='Enter' && !e.shiftKey){
+          e.preventDefault();
+          onSend();
+        }
+      });
+    }catch(_){}
+
+    // CTA y upsell (idempotente)
+    try{
+      $confirmCTA = rebindClick($confirmCTA, ()=>{ 
+        isItineraryLocked = true;
+        const upsell = qs('#monetization-upsell');
+        if (upsell) upsell.style.display = 'flex';
+      });
+    }catch(_){}
+    try{
+      $upsellClose = rebindClick($upsellClose, ()=>{
+        const upsell = qs('#monetization-upsell');
+        if (upsell) upsell.style.display = 'none';
+      });
+    }catch(_){}
+  }
+
   // Inicialización (guard anti-doble init)
   document.addEventListener('DOMContentLoaded', ()=>{
     if(window.__ITBMO_SECTION21_READY__) return;
@@ -5001,9 +4999,12 @@ ${dayRows}
 
     // Aísla Info Chat externo antes de listeners
     __ensureInfoAgentClient__();
-
     bindInfoChatListeners();
     bindReset();
+
+    bindGlobalGuards();
+    initPlannerBindings();
+
     // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
     if ($start) $start.disabled = !hasSavedOnce;
   });
