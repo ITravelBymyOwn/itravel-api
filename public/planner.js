@@ -1325,6 +1325,20 @@ async function validateRowsWithAgent(city, rows, baseDate){
   const lc = s => toStr(s).trim().toLowerCase();
   const isAurora = a => /\baurora|northern\s+light(s)?\b/i.test(toStr(a));
   const isThermal = a => /(blue\s*lagoon|bláa\s*lón(i|í)d|laguna\s+azul|termal(es)?|hot\s*spring|thermal\s*bath)/i.test(toStr(a));
+  const isHHMM = t => /^\d{2}:\d{2}$/.test(toStr(t).trim());
+
+  // 🚫 Señales de “placeholder / genérico” que NO ameritan llamada a IA: mejor sanitizar local
+  const isGenericBad = (a)=>{
+    const s = lc(a);
+    if(!s) return true;
+    // genéricos típicos (multi-idioma)
+    if(/\b(museo\s+de\s+arte|parque\s+local|cafe\s+local|restaurante\s+local)\b/i.test(s)) return true;
+    if(/\b(local\s+(cafe|coffee|restaurant|park|museum))\b/i.test(s)) return true;
+    // demasiado corto / vago
+    const toks = s.split(/\s+/).filter(Boolean);
+    if(toks.length <= 2 && /^(museo|museum|parque|park|cafe|coffee|restaurante|restaurant|tour|excursion|excursi[oó]n)$/.test(s)) return true;
+    return false;
+  };
 
   // 📦 Sanitizado local (reutilizado en fast-path y fallback)
   const localSanitize = (inRows = [])=>{
@@ -1386,6 +1400,89 @@ async function validateRowsWithAgent(city, rows, baseDate){
 
   // ⚡ Fast-path: sin llamada a IA cuando ENABLE_VALIDATOR=false
   if (ENABLE_VALIDATOR === false) {
+    return localSanitize(rows);
+  }
+
+  /* =========================================================
+     ✅ NUEVO: QUALITY-GATE agresivo (casi nunca llama a IA)
+     - Si las filas ya están suficientemente “bien formadas”,
+       hacemos sanitizado local y listo.
+     - Esto reduce dramáticamente latencia (especialmente en optimizeDay).
+  ========================================================= */
+  try{
+    const inRows = Array.isArray(rows) ? rows : [];
+    if(!inRows.length) return localSanitize(inRows);
+
+    // Señales claras para NO ir a IA: todo completo, sin seed, sin genéricos, sin duplicados por día
+    let needsIA = false;
+
+    // 1) Requisitos mínimos por fila
+    for(const r of inRows){
+      const act = toStr(r.activity).trim();
+      const notes = toStr(r.notes).trim();
+
+      if(!act) { needsIA = true; break; }
+      if(isGenericBad(act)) { needsIA = true; break; }
+
+      // horas: si faltan o están mal, normalmente el pipeline ya lo arregló;
+      // si aún están mal, NO vamos a IA: sanitizado local es suficiente.
+      if(!isAurora(act)){
+        if(r.start && !isHHMM(r.start)) { /* no forzamos IA */ }
+        if(r.end   && !isHHMM(r.end))   { /* no forzamos IA */ }
+      }
+
+      // notes seed o vacías: mejor sanitizado local (NO IA)
+      if(!notes || lc(notes)==='seed'){ /* no forzamos IA */ }
+
+      // duration vacía en no-aurora/no-thermal: puede ir a IA solo si es masivo
+      // (si es 1–2 casos, sanitizado local basta)
+    }
+
+    // 2) Duplicados por día (actividad canonizada)
+    if(!needsIA){
+      const byDay = {};
+      inRows.forEach(r=>{
+        const d = Number(r.day)||1;
+        (byDay[d] ||= []).push(r);
+      });
+
+      for(const dStr of Object.keys(byDay)){
+        const list = byDay[Number(dStr)] || [];
+        const seen = new Set();
+        for(const r of list){
+          const k = normKey(r.activity || '');
+          if(!k) { needsIA = true; break; }
+          if(seen.has(k)) { needsIA = true; break; }
+          seen.add(k);
+        }
+        if(needsIA) break;
+        // límite duro: si viene demasiado inflado, IA podría recortar/explicar removidos
+        if(list.length > 22) { needsIA = true; break; }
+      }
+    }
+
+    // 3) Duraciones faltantes masivas → IA (si son muchas)
+    if(!needsIA){
+      let missDur = 0;
+      for(const r of inRows){
+        const act = toStr(r.activity);
+        if(isAurora(act) || isThermal(act)) continue;
+        const dur = toStr(r.duration).trim();
+        if(!dur) missDur++;
+      }
+      if(missDur >= 4) needsIA = true; // umbral: 4+ faltantes sí amerita IA
+    }
+
+    // ✅ Si NO necesitamos IA, sanitizamos local y listo
+    if(!needsIA){
+      return localSanitize(inRows);
+    }
+  }catch(_){
+    // si algo falla en el gate, no rompemos: seguimos a pipeline normal
+  }
+
+  // Si no existen herramientas de IA, no romper: fallback local
+  if (typeof callAgent !== 'function' || typeof parseJSON !== 'function') {
     return localSanitize(rows);
   }
 
@@ -3340,20 +3437,69 @@ if (typeof callApiChat !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   Parse seguro de respuestas del API y unificador
+   Parse seguro de respuestas del API y unificador (PATCH QUIRÚRGICO)
+   Objetivo: soportar respuestas tipo { text: "<JSON-string>" } del API v43.x
 ------------------------------------------------------------------- */
 if (typeof safeParseApiText !== 'function') {
   function safeParseApiText(txt) {
     if (!txt) return {};
-    if (typeof txt === 'object') return txt;
-    try { return JSON.parse(String(txt)); } catch { return { text: String(txt) }; }
+
+    // 1) Si viene ya como objeto estructurado (y NO es wrapper {text:...}), úsalo
+    if (typeof txt === 'object') {
+      // Caso crítico: wrapper estándar del API { text: "<json>" }
+      if (txt && typeof txt.text !== 'undefined') {
+        return safeParseApiText(txt.text);
+      }
+      // Si trae rows directo, perfecto
+      if (Array.isArray(txt.rows)) return txt;
+      if (Array.isArray(txt?.itinerary?.rows)) return txt;
+      if (Array.isArray(txt?.days)) return txt;
+      return txt || {};
+    }
+
+    // 2) Si es string: intentar JSON directo
+    const s = String(txt).trim();
+    if (!s) return {};
+
+    try { return JSON.parse(s); } catch {}
+
+    // 3) Intento tolerante: primer/último { }
+    try {
+      const first = s.indexOf("{");
+      const last  = s.lastIndexOf("}");
+      if (first >= 0 && last > first) return JSON.parse(s.slice(first, last + 1));
+    } catch {}
+
+    // 4) Fallback: conservar texto
+    return { text: s };
   }
 }
+
 if (typeof unifyRowsFormat !== 'function') {
   function unifyRowsFormat(obj, city) {
     if (!obj) return { rows: [] };
+
+    // ✅ PATCH QUIRÚRGICO: si viene wrapper {text:"..."} o {text:{...}}, parsearlo
+    if (typeof obj === 'object' && obj && typeof obj.text !== 'undefined') {
+      const parsed = safeParseApiText(obj.text);
+      return unifyRowsFormat(parsed, city);
+    }
+
+    // Si obj es string, parsearlo
+    if (typeof obj === 'string') {
+      const parsed = safeParseApiText(obj);
+      return unifyRowsFormat(parsed, city);
+    }
+
+    // Casos esperados
     if (Array.isArray(obj.rows)) return obj;
+
     if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
+
+    // A veces viene como { destination, rows_draft } desde INFO (no debería aquí, pero toleramos)
+    if (Array.isArray(obj?.rows_draft)) return { rows: obj.rows_draft };
+
+    // Formato por días
     if (Array.isArray(obj.days)) {
       const rows = [];
       for (const d of obj.days) {
@@ -3362,6 +3508,15 @@ if (typeof unifyRowsFormat !== 'function') {
       }
       return { rows };
     }
+
+    // Formato alterno: { itineraries:[{rows:...}] } o { destinations:[{rows:...}] }
+    if (Array.isArray(obj?.itineraries) && obj.itineraries[0] && Array.isArray(obj.itineraries[0].rows)) {
+      return { rows: obj.itineraries[0].rows };
+    }
+    if (Array.isArray(obj?.destinations) && obj.destinations[0] && Array.isArray(obj.destinations[0].rows)) {
+      return { rows: obj.destinations[0].rows };
+    }
+
     return { rows: [] };
   }
 }
