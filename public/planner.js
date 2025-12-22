@@ -3978,6 +3978,8 @@ async function optimizeDay(city, day) {
    ✅ FIX QUIRÚRGICO (auditoría):
    - En flujo collectingHotels: NO avanza metaProgressIndex si falta transport.
    - Si el usuario envía solo hotel/zona, se guarda y se pide transporte sin saltar de ciudad.
+   ✅ FIX QUIRÚRGICO (extra, seguridad):
+   - Si el usuario envía SOLO transporte, NO debe guardarse como hotel/zona.
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -3991,7 +3993,6 @@ async function onSend(){
 
     // 🚀 Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
     const res = resolveHotelInput(text, city);
-    const resolvedHotel = res.text || text;
 
     // Detección de transporte (conserva tu lógica original)
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
@@ -4000,17 +4001,39 @@ async function onSend(){
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
 
+    // ✅ FIX: evitar que mensajes "solo transporte" se guarden como hotel.
+    const onlyTransport =
+      !!transport &&
+      // si el texto ES básicamente transporte (sin señales claras de hotel/zona/link)
+      !(
+        /https?:\/\//i.test(text) ||
+        /\b(hotel|hostel|airbnb|zona|barrio|direcci[oó]n|address|street|st\.|ave\.|avenida|calle|road|rd\.|blvd|boulevard|suite|apt|apto|apartamento|near|cerca|frente a|al lado de)\b/i.test(text)
+      );
+
+    // Hotel propuesto: si es onlyTransport, NO inventamos hotel; preservamos el existente.
+    let resolvedHotel = (res && res.text) ? res.text : text;
+    if(onlyTransport){
+      const prev = (cityMeta?.[city]?.hotel || '');
+      resolvedHotel = prev; // preserva lo ya guardado (si existe)
+    }
+
     // Guardar lo que venga (al menos hotel) para que askNextHotelTransport()
     // pueda pedir sólo lo faltante en esta misma ciudad.
+    // Nota: si onlyTransport y no hay hotel previo, resolvedHotel será '' y pedirá hotel.
     upsertCityMeta({ city, hotel: resolvedHotel, transport });
 
-    // 🗣️ Feedback al usuario según confianza del match (hotel/zona)
-    if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
-      chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
-    }else if((res.confidence||0) >= 0.65){
-      chatMsg(`🏨 Usaré <strong>${resolvedHotel}</strong> como referencia en <strong>${city}</strong> (interpretado por similitud). Si deseas otro, escríbelo con más detalle o pega el link.`, 'ai');
+    // 🗣️ Feedback al usuario según lo recibido
+    if(onlyTransport){
+      chatMsg(`🚗 Perfecto. Tomo <strong>${transport}</strong> como tu transporte en <strong>${city}</strong>. Ahora dime tu <strong>hotel/zona</strong> (nombre, zona, dirección o link) para afinar distancias.`, 'ai');
     }else{
-      chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
+      // 🗣️ Feedback al usuario según confianza del match (hotel/zona)
+      if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
+        chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
+      }else if((res.confidence||0) >= 0.65){
+        chatMsg(`🏨 Usaré <strong>${resolvedHotel}</strong> como referencia en <strong>${city}</strong> (interpretado por similitud). Si deseas otro, escríbelo con más detalle o pega el link.`, 'ai');
+      }else{
+        chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
+      }
     }
 
     // 🌌 Activar preferAurora automáticamente si la ciudad es apta
@@ -4038,7 +4061,15 @@ async function onSend(){
       return;
     }
 
-    // Si hay transport, sí avanzamos.
+    // ✅ FIX: si hay transport pero aún no hay hotel, NO avanzar tampoco (solo pedimos hotel).
+    // (Esto cubre el caso onlyTransport sin hotel previo.)
+    const curHotel = (cityMeta?.[city]?.hotel || '').trim();
+    if(!curHotel){
+      askNextHotelTransport();
+      return;
+    }
+
+    // Si hay transport (y hotel), sí avanzamos.
     metaProgressIndex++;
     askNextHotelTransport();
     return;
@@ -4250,9 +4281,9 @@ async function onSend(){
   if(intent.type==='swap_day' && intent.city){
     showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
-   // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
-await optimizeDay(intent.city, intent.from);
-await optimizeDay(intent.city, intent.to);
+    // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
+    await optimizeDay(intent.city, intent.from);
+    await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
@@ -4264,8 +4295,8 @@ await optimizeDay(intent.city, intent.to);
     showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
     // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
-await optimizeDay(intent.city, intent.fromDay);
-await optimizeDay(intent.city, intent.toDay);
+    await optimizeDay(intent.city, intent.fromDay);
+    await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
@@ -4509,416 +4540,472 @@ ${dayRows}
     **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
    🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
    💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
+   ✅ PATCH QUIRÚRGICO (idempotencia total):
+   - Re-bindeo seguro de botones con cloneNode para evitar múltiples listeners
+   - Guards para document listeners (input, itbmo:addDays)
 ================================= */
-$addCity?.addEventListener('click', ()=>addCityRow());
+(function(){
+  // 🛡️ Guard global para evitar doble-ejecución total de la sección
+  if (window.__ITBMO_SECTION21_PATCH__) return;
+  window.__ITBMO_SECTION21_PATCH__ = true;
 
-function validateBaseDatesDMY(){
-  const rows = qsa('.city-row', $cityList);
-  let firstInvalid = null;
-  for(const r of rows){
-    const el = qs('.baseDate', r);
-    const v  = (el?.value||'').trim();
-    if(!v || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(v) || !parseDMY(v)){
-      firstInvalid = el;
-      el?.classList.add('shake-highlight');
-      setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
-      break;
+  // Helper: rebind idempotente (quita listeners previos clonando)
+  function rebind(el, handler){
+    if(!el) return null;
+    const clone = el.cloneNode(true);
+    el.replaceWith(clone);
+    clone.addEventListener('click', handler);
+    return clone;
+  }
+
+  // Helper: rebind keydown idempotente
+  function rebindKeydown(el, handler){
+    if(!el) return null;
+    const clone = el.cloneNode(true);
+    el.replaceWith(clone);
+    clone.addEventListener('keydown', handler);
+    return clone;
+  }
+
+  // Mantener tu binding directo pero idempotente:
+  // $addCity?.addEventListener('click', ()=>addCityRow());
+  // -> rebind seguro
+  try{
+    $addCity = rebind($addCity, ()=>addCityRow());
+  }catch(_){}
+
+  function validateBaseDatesDMY(){
+    const rows = qsa('.city-row', $cityList);
+    let firstInvalid = null;
+    for(const r of rows){
+      const el = qs('.baseDate', r);
+      const v  = (el?.value||'').trim();
+      if(!v || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(v) || !parseDMY(v)){
+        firstInvalid = el;
+        el?.classList.add('shake-highlight');
+        setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
+        break;
+      }
     }
+    if(firstInvalid){
+      const tooltip = document.createElement('div');
+      tooltip.className = 'date-tooltip';
+      tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
+      document.body.appendChild(tooltip);
+      const rect = firstInvalid.getBoundingClientRect();
+      tooltip.style.left = rect.left + window.scrollX + 'px';
+      tooltip.style.top  = rect.bottom + window.scrollY + 6 + 'px';
+      setTimeout(() => tooltip.classList.add('visible'), 20);
+      setTimeout(() => {
+        tooltip.classList.remove('visible');
+        setTimeout(() => tooltip.remove(), 300);
+      }, 3500);
+      firstInvalid.focus();
+      return false;
+    }
+    return true;
   }
-  if(firstInvalid){
-    const tooltip = document.createElement('div');
-    tooltip.className = 'date-tooltip';
-    tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
-    document.body.appendChild(tooltip);
-    const rect = firstInvalid.getBoundingClientRect();
-    tooltip.style.left = rect.left + window.scrollX + 'px';
-    tooltip.style.top  = rect.bottom + window.scrollY + 6 + 'px';
-    setTimeout(() => tooltip.classList.add('visible'), 20);
-    setTimeout(() => {
-      tooltip.classList.remove('visible');
-      setTimeout(() => tooltip.remove(), 300);
-    }, 3500);
-    firstInvalid.focus();
-    return false;
+
+  /* ===== Reglas para habilitación del botón ===== */
+  function formHasBasics(){
+    const row = qs('.city-row', $cityList);
+    if(!row) return false;
+    const city  = (qs('.city', row)?.value||'').trim();
+    const country = (qs('.country', row)?.value||'').trim();
+    const days  = parseInt(qs('.days', row)?.value||'0', 10);
+    const base  = (qs('.baseDate', row)?.value||'').trim();
+    return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
   }
-  return true;
-}
 
-/* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
-$save?.addEventListener('click', ()=>{
-  // ejecuta lógica propia de guardado
-  try { saveDestinations(); } catch(_) {}
+  /* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
+  try{
+    $save = rebind($save, ()=>{
+      // ejecuta lógica propia de guardado
+      try { saveDestinations(); } catch(_) {}
 
-  // valida y sólo entonces habilita
-  const basicsOK = formHasBasics();
-  const datesOK  = validateBaseDatesDMY();
-  if (basicsOK && datesOK) {
-    hasSavedOnce = true;
-    if ($start) $start.disabled = false;
+      // valida y sólo entonces habilita
+      const basicsOK = formHasBasics();
+      const datesOK  = validateBaseDatesDMY();
+      if (basicsOK && datesOK) {
+        hasSavedOnce = true;
+        if ($start) $start.disabled = false;
 
-    // 🆕 Hook para integraciones internas (no rompe nada)
-    try {
-      document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
-        detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-      }));
-    } catch(_) {}
-  } else {
-    if ($start) $start.disabled = true;
-  }
-});
-
-/* ===== Reglas para habilitación del botón ===== */
-function formHasBasics(){
-  const row = qs('.city-row', $cityList);
-  if(!row) return false;
-  const city  = (qs('.city', row)?.value||'').trim();
-  const country = (qs('.country', row)?.value||'').trim();
-  const days  = parseInt(qs('.days', row)?.value||'0', 10);
-  const base  = (qs('.baseDate', row)?.value||'').trim();
-  return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
-}
-
-// Ya NO habilitamos al escribir; sólo deshabilitamos si se borran datos
-document.addEventListener('input', (e)=>{
-  if(!$start) return;
-  if(e.target && (
-     e.target.classList?.contains('city') ||
-     e.target.classList?.contains('country') ||
-     e.target.classList?.contains('days') ||
-     e.target.classList?.contains('baseDate')
-  )){
-    // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
-    if(!formHasBasics()) $start.disabled = true;
-  }
-});
-
-/* ===== Recuperación/inyector del botón Reset si no existe ===== */
-function ensureResetButton(){
-  let btn = document.getElementById('reset-planner');
-  if(!btn){
-    const bar = document.querySelector('#actions-bar') || document.body;
-    btn = document.createElement('button');
-    btn.id = 'reset-planner';
-    btn.className = 'btn warn';
-    btn.textContent = 'Reiniciar planificación';
-    btn.setAttribute('type','button');
-    (bar || document.body).appendChild(btn);
-  }
-  return btn;
-}
-
-// ⛔ Reset con confirmación modal
-function bindReset(){
-  const $btn = ensureResetButton();
-  $btn.removeAttribute('disabled');
-
-  $btn.addEventListener('click', ()=>{
-    const overlay = document.createElement('div');
-    overlay.className = 'reset-overlay';
-
-    const modal = document.createElement('div');
-    modal.className = 'reset-modal';
-    modal.innerHTML = `
-      <h3>¿Reiniciar planificación? 🧭</h3>
-      <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
-      <div class="reset-actions">
-        <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
-        <button id="cancel-reset" class="btn ghost">Cancelar</button>
-      </div>
-    `;
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    setTimeout(()=>overlay.classList.add('active'), 10);
-
-    const confirmReset = overlay.querySelector('#confirm-reset');
-    const cancelReset  = overlay.querySelector('#cancel-reset');
-
-    confirmReset.addEventListener('click', ()=>{
-      // Estado principal
-      $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
-      addCityRow();
-      if ($start) $start.disabled = true;
-      $tabs.innerHTML=''; $itWrap.innerHTML='';
-      $chatBox.style.display='none'; $chatM.innerHTML='';
-      session = []; hasSavedOnce=false; pendingChange=null;
-
-      // Flags
-      planningStarted = false;
-      metaProgressIndex = 0;
-      collectingHotels = false;
-      isItineraryLocked = false;
-      activeCity = null;
-
-      try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
-      qsa('.date-tooltip').forEach(t => t.remove());
-
-      const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
-      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
-      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
-      const $in = qs('#p-infants');  if($in) $in.value = '0';
-      const $se = qs('#p-seniors');  if($se) $se.value = '0';
-      const $bu = qs('#budget');     if($bu) $bu.value = '';
-      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
-
-      if (typeof plannerState !== 'undefined') {
-        plannerState.destinations = [];
-        plannerState.specialConditions = '';
-        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
-        plannerState.budget = '';
-        plannerState.currency = 'USD';
-        plannerState.forceReplan = {};
-        plannerState.preferences = {};
-        plannerState.dayTripPending = {};
-        plannerState.existingActs = {};
+        // 🆕 Hook para integraciones internas (no rompe nada)
+        try {
+          document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
+            detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+          }));
+        } catch(_) {}
+      } else {
+        if ($start) $start.disabled = true;
       }
+    });
+  }catch(_){}
 
-      overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(), 300);
-
-      if ($sidebar) $sidebar.classList.remove('disabled');
-      if ($infoFloating){
-        $infoFloating.style.pointerEvents = 'auto';
-        $infoFloating.style.opacity = '1';
-        $infoFloating.disabled = false;
+  // Ya NO habilitamos al escribir; sólo deshabilitamos si se borran datos
+  if(!window.__ITBMO_SECTION21_INPUT_GUARD__){
+    window.__ITBMO_SECTION21_INPUT_GUARD__ = true;
+    document.addEventListener('input', (e)=>{
+      if(!$start) return;
+      if(e.target && (
+         e.target.classList?.contains('city') ||
+         e.target.classList?.contains('country') ||
+         e.target.classList?.contains('days') ||
+         e.target.classList?.contains('baseDate')
+      )){
+        // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
+        if(!formHasBasics()) $start.disabled = true;
       }
-      if ($resetBtn) $resetBtn.setAttribute('disabled','true');
-
-      const firstCity = qs('.city-row .city');
-      if (firstCity) firstCity.focus();
-
-      // 🆕 Hook para integraciones internas (no rompe nada)
-      try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
     });
+  }
 
-    cancelReset.addEventListener('click', ()=>{
-      overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(), 300);
-    });
+  /* ===== Recuperación/inyector del botón Reset si no existe ===== */
+  function ensureResetButton(){
+    let btn = document.getElementById('reset-planner');
+    if(!btn){
+      const bar = document.querySelector('#actions-bar') || document.body;
+      btn = document.createElement('button');
+      btn.id = 'reset-planner';
+      btn.className = 'btn warn';
+      btn.textContent = 'Reiniciar planificación';
+      btn.setAttribute('type','button');
+      (bar || document.body).appendChild(btn);
+    }
+    return btn;
+  }
 
-    document.addEventListener('keydown', function escHandler(e){
-      if(e.key === 'Escape'){
+  // ⛔ Reset con confirmación modal
+  function bindReset(){
+    const $btn = ensureResetButton();
+    $btn.removeAttribute('disabled');
+
+    // idempotente: clona el botón para borrar listeners previos si existieran
+    const clone = $btn.cloneNode(true);
+    $btn.replaceWith(clone);
+
+    clone.addEventListener('click', ()=>{
+      const overlay = document.createElement('div');
+      overlay.className = 'reset-overlay';
+
+      const modal = document.createElement('div');
+      modal.className = 'reset-modal';
+      modal.innerHTML = `
+        <h3>¿Reiniciar planificación? 🧭</h3>
+        <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
+        <div class="reset-actions">
+          <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
+          <button id="cancel-reset" class="btn ghost">Cancelar</button>
+        </div>
+      `;
+      overlay.appendChild(modal);
+      document.body.appendChild(overlay);
+      setTimeout(()=>overlay.classList.add('active'), 10);
+
+      const confirmReset = overlay.querySelector('#confirm-reset');
+      const cancelReset  = overlay.querySelector('#cancel-reset');
+
+      confirmReset.addEventListener('click', ()=>{
+        // Estado principal
+        $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+        addCityRow();
+        if ($start) $start.disabled = true;
+        $tabs.innerHTML=''; $itWrap.innerHTML='';
+        $chatBox.style.display='none'; $chatM.innerHTML='';
+        session = []; hasSavedOnce=false; pendingChange=null;
+
+        // Flags
+        planningStarted = false;
+        metaProgressIndex = 0;
+        collectingHotels = false;
+        isItineraryLocked = false;
+        activeCity = null;
+
+        try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
+        qsa('.date-tooltip').forEach(t => t.remove());
+
+        const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
+        const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
+        const $yo = qs('#p-young');    if($yo) $yo.value = '0';
+        const $ch = qs('#p-children'); if($ch) $ch.value = '0';
+        const $in = qs('#p-infants');  if($in) $in.value = '0';
+        const $se = qs('#p-seniors');  if($se) $se.value = '0';
+        const $bu = qs('#budget');     if($bu) $bu.value = '';
+        const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
+
+        if (typeof plannerState !== 'undefined') {
+          plannerState.destinations = [];
+          plannerState.specialConditions = '';
+          plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+          plannerState.budget = '';
+          plannerState.currency = 'USD';
+          plannerState.forceReplan = {};
+          plannerState.preferences = {};
+          plannerState.dayTripPending = {};
+          plannerState.existingActs = {};
+        }
+
         overlay.classList.remove('active');
         setTimeout(()=>overlay.remove(), 300);
-        document.removeEventListener('keydown', escHandler);
-      }
-    });
-  });
-}
 
-// ▶️ Start: valida y ejecuta
-$start?.addEventListener('click', ()=>{
-  if(!$start) return;
-  if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
-    chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
-    return;
-  }
-  if(!validateBaseDatesDMY()) return;
-
-  // 🆕 Hook para integraciones internas (no rompe nada)
-  try {
-    document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
-      detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-    }));
-  } catch(_) {}
-
-  startPlanning();
-});
-$send?.addEventListener('click', onSend);
-
-// Chat: Enter envía (sin Shift)
-$chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){
-    e.preventDefault();
-    onSend();
-  }
-});
-
-// CTA y upsell
-$confirmCTA?.addEventListener('click', ()=>{ 
-  isItineraryLocked = true;
-  const upsell = qs('#monetization-upsell');
-  if (upsell) upsell.style.display = 'flex';
-});
-$upsellClose?.addEventListener('click', ()=>{
-  const upsell = qs('#monetization-upsell');
-  if (upsell) upsell.style.display = 'none';
-});
-
-/* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
-document.addEventListener('itbmo:addDays', e=>{
-  const { city, extraDays, dayTripTo } = e.detail || {};
-  if(!city || !extraDays) return;
-  addMultipleDaysToCity(city, extraDays);
-  const start = itineraries[city]?.originalDays || 1;
-  const end   = (itineraries[city]?.originalDays || 0) + extraDays;
-  rebalanceWholeCity(city, { start, end, dayTripTo });
-});
-
-/* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
-/* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
-function __ensureInfoAgentClient__(){
-  window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
-  window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
-
-  const wrongClient = (fn)=>{
-    if(typeof fn !== 'function') return true;
-    const src = Function.prototype.toString.call(fn);
-    if(/\/api\/chat/.test(src)) return true;
-    if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
-    if(/context/.test(src)) return true;
-    if(fn.__source !== 'external-public-v1') return true;
-    if(fn.__usesContext__ !== false) return true;
-    return false;
-  };
-
-  if(wrongClient(window.callInfoAgent)){
-    const simpleInfo = async function(userText){
-      const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
-      let resp;
-      try{
-        resp = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type":"application/json", "Accept":"application/json" },
-          body: JSON.stringify({ input: String(userText || "") })
-        });
-      }catch(_){
-        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
-      }
-      try{
-        const data = await resp.json();
-        let txt = (typeof data?.text === 'string') ? data.text : '';
-        if(!txt || /^\s*\{/.test(txt)) {
-          try {
-            const j = JSON.parse(txt);
-            if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
-            if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
-            txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
-          } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
+        if ($sidebar) $sidebar.classList.remove('disabled');
+        if ($infoFloating){
+          $infoFloating.style.pointerEvents = 'auto';
+          $infoFloating.style.opacity = '1';
+          $infoFloating.disabled = false;
         }
-        return txt;
-      }catch{
-        try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
-      }
-    };
-    simpleInfo.__usesContext__ = false;
-    simpleInfo.__source = 'external-public-v1';
-    window.callInfoAgent = simpleInfo;
-  }
-}
+        if ($resetBtn) $resetBtn.setAttribute('disabled','true');
 
-function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
-function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+        const firstCity = qs('.city-row .city');
+        if (firstCity) firstCity.focus();
 
-/* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
-function __infoTypingOn__(){
-  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
-  if(!box) return;
-  if(document.getElementById('info-typing')) return; // ya existe
-  const b = document.createElement('div');
-  b.id = 'info-typing';
-  b.className = 'bubble ai typing';
-  b.setAttribute('aria-live','polite');
-  b.textContent = '...';
-  box.appendChild(b);
-  let i = 0;
-  b.__timer = setInterval(()=>{
-    i = (i+1)%3;
-    b.textContent = '.'.repeat(i+1);
-  }, 400);
-  box.scrollTop = box.scrollHeight;
-}
-function __infoTypingOff__(){
-  const b = document.getElementById('info-typing');
-  if(!b) return;
-  if(b.__timer) clearInterval(b.__timer);
-  b.remove();
-}
+        // 🆕 Hook para integraciones internas (no rompe nada)
+        try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
+      });
 
-async function sendInfoMessage(){
-  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
-  if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
-  infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
+      cancelReset.addEventListener('click', ()=>{
+        overlay.classList.remove('active');
+        setTimeout(()=>overlay.remove(), 300);
+      });
 
-  __infoTypingOn__();
-  try{
-    const ans = await callInfoAgent(txt);
-    let out = ans;
-    if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
-    if(typeof out === 'string' && /^\s*\{/.test(out)){
-      try{
-        const j = JSON.parse(out);
-        out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
-      }catch{}
-    }
-    __infoTypingOff__();
-    infoChatMsg(out || 'No tengo la respuesta exacta. Reformula la pregunta y lo vuelvo a intentar.');
-  }catch(_){
-    __infoTypingOff__();
-    infoChatMsg('No pude obtener respuesta del asistente ahora mismo. Intenta de nuevo.', 'ai');
-  }
-}
-
-function bindInfoChatListeners(){
-  const toggleTop = qs('#info-chat-toggle');
-  const toggleFloating = qs('#info-chat-floating');
-  const close  = qs('#info-chat-close');
-  const send   = qs('#info-chat-send');
-  const input  = qs('#info-chat-input');
-
-  toggleTop?.replaceWith(toggleTop.cloneNode(true));
-  toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
-  close?.replaceWith(close.cloneNode(true));
-  send?.replaceWith(send.cloneNode(true));
-
-  const tTop = qs('#info-chat-toggle');
-  const tFloat = qs('#info-chat-floating');
-  const c2 = qs('#info-chat-close');
-  const s2 = qs('#info-chat-send');
-  const i2 = qs('#info-chat-input');
-
-  [tTop, tFloat].forEach(btn=>{
-    btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
-  });
-  c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
-  s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
-
-  i2?.addEventListener('keydown', (e)=>{
-    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
-  });
-
-  if(i2){
-    i2.setAttribute('rows','1');
-    i2.style.overflowY = 'hidden';
-    const maxRows = 10;
-    i2.addEventListener('input', ()=>{
-      i2.style.height = 'auto';
-      const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
-      const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${lh * lines + 8}px`;
-      i2.scrollTop = i2.scrollHeight;
+      document.addEventListener('keydown', function escHandler(e){
+        if(e.key === 'Escape'){
+          overlay.classList.remove('active');
+          setTimeout(()=>overlay.remove(), 300);
+          document.removeEventListener('keydown', escHandler);
+        }
+      });
     });
   }
 
-  document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
-    if(el){ e.preventDefault(); openInfoModal(); }
+  // ▶️ Start: valida y ejecuta (idempotente)
+  try{
+    $start = rebind($start, ()=>{
+      if(!$start) return;
+      if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
+        chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
+        return;
+      }
+      if(!validateBaseDatesDMY()) return;
+
+      // 🆕 Hook para integraciones internas (no rompe nada)
+      try {
+        document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
+          detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+        }));
+      } catch(_) {}
+
+      startPlanning();
+    });
+  }catch(_){}
+
+  // Send planner chat (idempotente)
+  try{
+    $send = rebind($send, onSend);
+  }catch(_){}
+
+  // Chat: Enter envía (sin Shift) — idempotente
+  try{
+    $chatI = rebindKeydown($chatI, (e)=>{
+      if(e.key==='Enter' && !e.shiftKey){
+        e.preventDefault();
+        onSend();
+      }
+    });
+  }catch(_){}
+
+  // CTA y upsell (idempotente)
+  try{
+    $confirmCTA = rebind($confirmCTA, ()=>{ 
+      isItineraryLocked = true;
+      const upsell = qs('#monetization-upsell');
+      if (upsell) upsell.style.display = 'flex';
+    });
+  }catch(_){}
+  try{
+    $upsellClose = rebind($upsellClose, ()=>{
+      const upsell = qs('#monetization-upsell');
+      if (upsell) upsell.style.display = 'none';
+    });
+  }catch(_){}
+
+  /* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
+  if(!window.__ITBMO_SECTION21_ADD_DAYS_GUARD__){
+    window.__ITBMO_SECTION21_ADD_DAYS_GUARD__ = true;
+    document.addEventListener('itbmo:addDays', e=>{
+      const { city, extraDays, dayTripTo } = e.detail || {};
+      if(!city || !extraDays) return;
+      addMultipleDaysToCity(city, extraDays);
+      const start = itineraries[city]?.originalDays || 1;
+      const end   = (itineraries[city]?.originalDays || 0) + extraDays;
+      rebalanceWholeCity(city, { start, end, dayTripTo });
+    });
+  }
+
+  /* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
+  /* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
+  function __ensureInfoAgentClient__(){
+    window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
+    window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
+
+    const wrongClient = (fn)=>{
+      if(typeof fn !== 'function') return true;
+      const src = Function.prototype.toString.call(fn);
+      if(/\/api\/chat/.test(src)) return true;
+      if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
+      if(/context/.test(src)) return true;
+      if(fn.__source !== 'external-public-v1') return true;
+      if(fn.__usesContext__ !== false) return true;
+      return false;
+    };
+
+    if(wrongClient(window.callInfoAgent)){
+      const simpleInfo = async function(userText){
+        const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
+        let resp;
+        try{
+          resp = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type":"application/json", "Accept":"application/json" },
+            body: JSON.stringify({ input: String(userText || "") })
+          });
+        }catch(_){
+          return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
+        }
+        try{
+          const data = await resp.json();
+          let txt = (typeof data?.text === 'string') ? data.text : '';
+          if(!txt || /^\s*\{/.test(txt)) {
+            try {
+              const j = JSON.parse(txt);
+              if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
+              if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
+              txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
+            } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
+          }
+          return txt;
+        }catch{
+          try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
+        }
+      };
+      simpleInfo.__usesContext__ = false;
+      simpleInfo.__source = 'external-public-v1';
+      window.callInfoAgent = simpleInfo;
+    }
+  }
+
+  function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
+  function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+
+  /* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
+  function __infoTypingOn__(){
+    const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
+    if(!box) return;
+    if(document.getElementById('info-typing')) return; // ya existe
+    const b = document.createElement('div');
+    b.id = 'info-typing';
+    b.className = 'bubble ai typing';
+    b.setAttribute('aria-live','polite');
+    b.textContent = '...';
+    box.appendChild(b);
+    let i = 0;
+    b.__timer = setInterval(()=>{
+      i = (i+1)%3;
+      b.textContent = '.'.repeat(i+1);
+    }, 400);
+    box.scrollTop = box.scrollHeight;
+  }
+  function __infoTypingOff__(){
+    const b = document.getElementById('info-typing');
+    if(!b) return;
+    if(b.__timer) clearInterval(b.__timer);
+    b.remove();
+  }
+
+  async function sendInfoMessage(){
+    const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
+    if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
+    infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
+
+    __infoTypingOn__();
+    try{
+      const ans = await callInfoAgent(txt);
+      let out = ans;
+      if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
+      if(typeof out === 'string' && /^\s*\{/.test(out)){
+        try{
+          const j = JSON.parse(out);
+          out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
+        }catch{}
+      }
+      __infoTypingOff__();
+      infoChatMsg(out || 'No tengo la respuesta exacta. Reformula la pregunta y lo vuelvo a intentar.');
+    }catch(_){
+      __infoTypingOff__();
+      infoChatMsg('No pude obtener respuesta del asistente ahora mismo. Intenta de nuevo.', 'ai');
+    }
+  }
+
+  function bindInfoChatListeners(){
+    const toggleTop = qs('#info-chat-toggle');
+    const toggleFloating = qs('#info-chat-floating');
+    const close  = qs('#info-chat-close');
+    const send   = qs('#info-chat-send');
+    const input  = qs('#info-chat-input');
+
+    toggleTop?.replaceWith(toggleTop.cloneNode(true));
+    toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
+    close?.replaceWith(close.cloneNode(true));
+    send?.replaceWith(send.cloneNode(true));
+
+    const tTop = qs('#info-chat-toggle');
+    const tFloat = qs('#info-chat-floating');
+    const c2 = qs('#info-chat-close');
+    const s2 = qs('#info-chat-send');
+    const i2 = qs('#info-chat-input');
+
+    [tTop, tFloat].forEach(btn=>{
+      btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+    });
+    c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
+    s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+
+    i2?.addEventListener('keydown', (e)=>{
+      if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
+    });
+
+    if(i2){
+      i2.setAttribute('rows','1');
+      i2.style.overflowY = 'hidden';
+      const maxRows = 10;
+      i2.addEventListener('input', ()=>{
+        i2.style.height = 'auto';
+        const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
+        const lines = Math.min(i2.value.split('\n').length, maxRows);
+        i2.style.height = `${lh * lines + 8}px`;
+        i2.scrollTop = i2.scrollHeight;
+      });
+    }
+
+    document.addEventListener('click', (e)=>{
+      const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
+      if(el){ e.preventDefault(); openInfoModal(); }
+    });
+  }
+
+  // Inicialización (guard anti-doble init)
+  document.addEventListener('DOMContentLoaded', ()=>{
+    if(window.__ITBMO_SECTION21_READY__) return;
+    window.__ITBMO_SECTION21_READY__ = true;
+
+    if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+    // Aísla Info Chat externo antes de listeners
+    __ensureInfoAgentClient__();
+
+    bindInfoChatListeners();
+    bindReset();
+    // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
+    if ($start) $start.disabled = !hasSavedOnce;
   });
-}
-
-// Inicialización (guard anti-doble init)
-document.addEventListener('DOMContentLoaded', ()=>{
-  if(window.__ITBMO_SECTION21_READY__) return;
-  window.__ITBMO_SECTION21_READY__ = true;
-
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
-
-  // Aísla Info Chat externo antes de listeners
-  __ensureInfoAgentClient__();
-
-  bindInfoChatListeners();
-  bindReset();
-  // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
-  if ($start) $start.disabled = !hasSavedOnce;
-});
+})();
 
