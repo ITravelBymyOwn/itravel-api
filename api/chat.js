@@ -1,7 +1,13 @@
-// /api/chat.js — v43.3 (ESM, Vercel)
+// /api/chat.js — v43.4 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
+//
+// ✅ v43.4 — Ajuste quirúrgico:
+// - Quality Gate interno para evitar el “va y ven” y reducir optimizeDay en frontend.
+// - INFO: valida rows_draft (cobertura, placeholders, duración 2 líneas). Si falla → 1 retry.
+// - PLANNER: valida rows (duración 2 líneas, placeholders, rows vacías). Si falla → 1 retry.
+// - No cambia contratos ni nombres.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -154,6 +160,110 @@ function normalizeDurationsInParsed(parsed) {
   return parsed;
 }
 
+/* ============== Quality Gate (NUEVO - quirúrgico) ============== */
+
+function _canonTxt_(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _isGenericPlaceholderActivity_(activity) {
+  const t = _canonTxt_(activity);
+  if (!t) return true;
+
+  // Placeholders “típicos” que matan calidad (globales)
+  const bad = [
+    "museo de arte",
+    "parque local",
+    "cafe local",
+    "restaurante local",
+    "exploracion de la costa",
+    "exploracion de la ciudad",
+    "paseo por la ciudad",
+    "recorrido por la ciudad",
+  ];
+
+  // Muy corto y genérico
+  if (t.length <= 10 && /^(museo|parque|cafe|restaurante|plaza|mercado)$/i.test(t)) return true;
+
+  // Exact match o “contiene”
+  if (bad.some((b) => t === b || t.includes(b))) return true;
+
+  // “Museo/Parque/Café/Restaurante” sin nombre propio (heurística simple)
+  if (/^(museo|parque|cafe|restaurante)\b/i.test(t) && t.split(" ").length <= 3) return true;
+
+  return false;
+}
+
+function _hasTwoLineDuration_(duration) {
+  const s = String(duration || "");
+  return /Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(s);
+}
+
+function _rowsHaveCoverage_(rows, daysTotal) {
+  if (!Array.isArray(rows) || !rows.length) return false;
+  const maxDay = Math.max(...rows.map((r) => Number(r.day) || 1));
+  const need = Number(daysTotal) || maxDay || 1;
+
+  const present = new Set(rows.map((r) => Number(r.day) || 1));
+  for (let d = 1; d <= need; d++) {
+    if (!present.has(d)) return false;
+  }
+  return true;
+}
+
+function _validateInfoResearch_(parsed, contextHint = {}) {
+  const issues = [];
+
+  const daysTotal = Number(parsed?.days_total || contextHint?.days_total || 1);
+  const rows = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
+
+  if (!rows.length) issues.push("rows_draft vacío o ausente (obligatorio).");
+  if (rows.length && !_rowsHaveCoverage_(rows, daysTotal)) issues.push("rows_draft no cubre todos los días 1..days_total.");
+  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
+  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
+
+  // Macro-tour “en una fila” (señal de baja granularidad)
+  // Heurística: si el día tiene 1 sola fila real y parece day-trip/tour fuerte.
+  try {
+    const byDay = {};
+    for (const r of rows) {
+      const d = Number(r.day) || 1;
+      byDay[d] = byDay[d] || [];
+      if (String(r.activity || "").trim()) byDay[d].push(r);
+    }
+    const strongTour = /excursi[oó]n|day\s*trip|tour\b|circuito|c[ií]rculo|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|lagoon|hot\s*spring|geyser/i;
+    Object.keys(byDay).forEach((k) => {
+      const d = Number(k);
+      const list = byDay[d] || [];
+      if (list.length <= 2) {
+        const a = _canonTxt_(list[0]?.activity || "");
+        if (strongTour.test(a) && list.length === 1) {
+          issues.push(`día ${d} parece macro-tour en 1 sola fila (falta sub-paradas).`);
+        }
+      }
+    });
+  } catch {}
+
+  return { ok: issues.length === 0, issues };
+}
+
+function _validatePlannerOutput_(parsed) {
+  const issues = [];
+  const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+
+  if (!rows.length) issues.push("rows vacío o ausente.");
+  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push("duration no cumple 2 líneas en una o más filas.");
+  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("hay placeholders genéricos en activity (baja calidad).");
+
+  return { ok: issues.length === 0, issues };
+}
+
 /* ============== Prompts del sistema ============== */
 
 /* =======================
@@ -173,46 +283,34 @@ REGLAS BASE:
 
 COMPRENSIÓN DE UBICACIONES “HUMANAS” (CRÍTICO):
 - Si el usuario describe ubicaciones por referencia (“la iglesia icónica”, “el puerto viejo”, “la plaza principal”, “el mirador famoso”, “cerca del estadio”, etc.), debes **inferir el POI más probable** en esa ciudad y usarlo coherentemente en from/to/zone/notes.
-  Ejemplo: en Reykjavik, “la iglesia icónica” => Hallgrímskirkja. Haz lo mismo para cualquier ciudad del mundo.
 
 MULTI-DÍA EN CIUDAD (CRÍTICO):
-- Si days_total > 1, está PROHIBIDO repetir el mismo “loop” base (ej: mismo café + misma calle + mismo museo) en varios días.
+- Si days_total > 1, está PROHIBIDO repetir el mismo “loop” base en varios días.
 - Distribuye imperdibles por días y alterna zonas/barrios.
-- Incluye variedad real: 1 día histórico/céntrico, 1 día arte/museos, 1 día waterfront/arquitectura, 1 día termas o experiencia local, etc. (según ciudad/estación).
-- Mantén 1 bloque “flex” moderado (descanso/compras) si el ritmo lo amerita, pero NO conviertas todos los días en clones.
 
 HORARIOS (CRÍTICO):
-- Si el usuario NO provee horas, tú tienes libertad de proponer day_hours realistas según estación/ciudad/ritmo:
-  - Invierno: inicio más tarde suele ser razonable (p.ej. 09:00–10:00), cena 19:00–21:30 aprox.
-  - Siempre buffers mínimos 15m entre traslados/entradas.
-- NO asumas por defecto 08:30–19:00 si no hay una razón explícita.
+- Si el usuario NO provee horas, tú tienes libertad de proponer day_hours realistas según estación/ciudad/ritmo.
+- Siempre buffers mínimos 15m.
 
-DURACIÓN EN 2 LÍNEAS (NUEVO):
-- En cada fila (row), el campo "duration" debe venir SIEMPRE como 2 líneas:
+DURACIÓN EN 2 LÍNEAS (OBLIGATORIO):
+- duration debe venir SIEMPRE como 2 líneas:
   "Transporte: <tiempo>"
   "Actividad: <tiempo>"
-  Ejemplos:
-  - "Transporte: 15m\\nActividad: 1h30m"
-  - Si es caminando corto: "Transporte: 10m\\nActividad: 45m"
-  - Si no hay traslado (misma zona): "Transporte: 0m\\nActividad: 1h"
 
 Macro-tours / day-trips (CRÍTICO):
-- Si incluyes un macro-tour en un día, ese día debe quedar “ocupado” por el tour:
-  - Puede haber desayuno antes y cena después (cerca de base), pero NO metas visitas dentro del bloque del tour.
+- Si incluyes un macro-tour en un día, ese día debe quedar “ocupado” por el tour.
 - 5–8 sub-paradas + return_to_city_duration.
 - Incluye explícitamente “Regreso a {ciudad}” al cierre del day-trip si aplica.
 
 Auroras (si aplica):
 - NO consecutivas, NUNCA último día.
 - Ventana local exacta, duración y transporte.
-- Si propones aurora, nota específica accionable (tour recomendado, evitar luz, revisar nubosidad/actividad).
 
 Lagunas:
 - ≥3h efectivas (actividad).
 
 NOTAS:
-- Deben ser concretas y útiles (1–2 frases), accionables (reserva, ticket, mejor hora, por qué ese orden).
-- Evita “verifica horarios” repetido en todas.
+- Concretas, accionables (1–2 frases). Evita repetir “verifica horarios”.
 
 CRÍTICO — SALIDA PARA EVITAR REGRESIONES DEL PLANNER:
 - Debes incluir SIEMPRE un arreglo **rows_draft** con el itinerario COMPLETO (todas las filas de todos los días).
@@ -280,7 +378,7 @@ CONTRATO / FUENTE DE VERDAD:
     (b) asegurar buffers >=15m cuando falten,
     (c) corregir solapes pequeños moviendo minutos dentro del día,
     (d) completar campos faltantes SIN inventar actividades nuevas.
-- Si NO hay rows_draft/rows_final, y solo hay listas (imperdibles, macro_tours, etc.),
+- Si NO hay rows_draft/rows_final, y solo hay listas,
   → devuelve un JSON mínimo con followup pidiendo que el Info Chat provea rows_draft.
   (NO intentes inventar el itinerario desde cero.)
 
@@ -295,36 +393,26 @@ SALIDA ÚNICA (JSON):
 
 REGLAS:
 - JSON válido, sin texto fuera.
-- NO inventes tours/actividades nuevas (solo usa rows_draft/rows_final).
-- NO dupliques el mismo tour/actividad en dos idiomas.
-- Evita solapes: ninguna actividad puede ocurrir al mismo tiempo que otra.
-- Respeta la ventana del día:
-  - Si el input trae day_hours (global o por día), úsalo como límite.
-  - Si una actividad cae fuera, ajusta dentro de la ventana con buffers, sin cambiar el contenido.
+- NO inventes tours/actividades nuevas.
+- Evita solapes.
+- Respeta ventana day_hours si viene.
 - No pongas actividades diurnas entre 01:00–05:00.
-- Si existe "Regreso a {ciudad}" (day-trip), debe ser la última fila del day-trip si aplica.
+- "Regreso a {ciudad}" debe ser la última fila del day-trip si aplica.
 
 DURACIÓN (2 líneas obligatorias):
-- duration debe ser SIEMPRE un string con dos líneas:
+- duration debe ser SIEMPRE:
   "Transporte: Xm\\nActividad: Ym"
-- Si no conoces una parte, usa "Transporte: ~" o "Actividad: ~" (pero no inventes).
+- Si no conoces, usa "~" (pero no inventes).
 
-MACRO-TOURS / DAY-TRIPS (CRÍTICO):
-- Si el research_json implica un macro-tour para un día, ese bloque domina el día:
-  - Es válido conservar desayuno antes y cena después, pero debes ELIMINAR cualquier fila existente que caiga dentro del bloque del tour.
-  - Debes incluir “Regreso a {ciudad}” al final del day-trip si aplica.
+MACRO-TOURS / DAY-TRIPS:
+- Si research_json implica un macro-tour, elimina filas que caigan dentro del bloque del tour.
+- Incluye “Regreso a {ciudad}” al final si aplica.
 
 EXISTING_ROWS:
-- Si viene "existing_rows" para un día, úsalo únicamente para:
-  (a) no repetir actividades,
-  (b) mantener coherencia,
-  (c) respetar decisiones ya tomadas.
-- Tienes permiso de **reemplazar/eliminar** filas conflictivas para cumplir research_json (especialmente con macro-tours).
-- No “concatentes” un tour encima de un día completo ya lleno si eso produce solapes.
+- Úsalo solo para no repetir y mantener coherencia; puedes reemplazar/eliminar filas conflictivas.
 
 MODO ACOTADO:
-- Si el input incluye "target_day", devuelve **SOLO filas de ese día** (todas con day=target_day).
-- Si incluye "day_hours", úsalo para fijar la ventana de ese día.
+- Si viene "target_day", devuelve SOLO filas de ese día.
 `.trim();
 
 /* ============== Handler principal ============== */
@@ -339,30 +427,66 @@ export default async function handler(req, res) {
     if (mode === "info") {
       // Soporta:
       //  A) { mode:"info", context:{...} }
-      //  B) { mode:"info", messages:[...] }  (cuando el frontend lo manda así)
-      //  C) { mode:"info", ...contextPlano } (algunos builds)
+      //  B) { mode:"info", messages:[...] }
+      //  C) { mode:"info", ...contextPlano }
       let context = body.context;
 
       if (!context && Array.isArray(body.messages) && body.messages.length) {
         context = { messages: body.messages };
       }
       if (!context && !Array.isArray(body.messages)) {
-        // Si viene plano, tratamos todo el body como contexto menos mode
         const { mode: _m, ...rest } = body || {};
         context = rest;
       }
 
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
 
-      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 3500);
+      // 1) Primer intento
+      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 3800);
       let parsed = cleanToJSONPlus(raw);
 
+      // 2) Si no parsea, intento estricto
       if (!parsed) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3200);
+        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3600);
         parsed = cleanToJSONPlus(raw);
       }
 
+      // 3) Si parsea pero está flojo → Quality Gate + 1 retry (máximo)
+      if (parsed) {
+        const audit = _validateInfoResearch_(parsed, {
+          days_total: context?.days_total || context?.days || context?.daysTotal || 1,
+        });
+
+        if (!audit.ok) {
+          const repairPrompt = `
+${SYSTEM_INFO}
+
+REPARACIÓN OBLIGATORIA (QUALITY GATE):
+Tu JSON anterior falló estas validaciones:
+- ${audit.issues.join("\n- ")}
+
+Corrige SIN texto fuera del JSON.
+REGLAS DE REPARACIÓN:
+1) rows_draft debe cubrir todos los días 1..days_total sin días vacíos.
+2) activity NO puede ser genérica: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
+3) duration debe ser EXACTAMENTE 2 líneas: "Transporte: ...\\nActividad: ..."
+4) Si hay macro-tour/day-trip: 5–8 sub-paradas + "Regreso a {ciudad}" al cierre.
+
+Responde SOLO JSON válido.
+`.trim();
+
+          const repairRaw = await callText(
+            [{ role: "system", content: repairPrompt }, infoUserMsg],
+            0.25,
+            3800
+          );
+          const repaired = cleanToJSONPlus(repairRaw);
+          if (repaired) parsed = repaired;
+        }
+      }
+
+      // 4) Fallback mínimo si nada funcionó
       if (!parsed) {
         parsed = {
           destination: context?.city || "Destino",
@@ -401,12 +525,12 @@ export default async function handler(req, res) {
       if (!research) {
         const clientMessages = extractMessages(body);
 
-        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3500);
+        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3600);
         let parsed = cleanToJSONPlus(raw);
 
         if (!parsed) {
           const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3000);
+          raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3200);
           parsed = cleanToJSONPlus(raw);
         }
 
@@ -416,28 +540,59 @@ export default async function handler(req, res) {
       }
 
       // Camino nuevo (research_json directo)
-      // ✅ PATCH QUIRÚRGICO: incluir target_day, day_hours y existing_rows si vienen
-      const plannerUserMsg = {
-        role: "user",
-        content: JSON.stringify(
-          {
-            research_json: research,
-            target_day: body.target_day ?? null,
-            day_hours: body.day_hours ?? null,
-            existing_rows: body.existing_rows ?? null,
-          },
-          null,
-          2
-        ),
+      const plannerUserPayload = {
+        research_json: research,
+        target_day: body.target_day ?? null,
+        day_hours: body.day_hours ?? null,
+        existing_rows: body.existing_rows ?? null,
       };
 
-      let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3500);
+      const plannerUserMsg = {
+        role: "user",
+        content: JSON.stringify(plannerUserPayload, null, 2),
+      };
+
+      // 1) Primer intento
+      let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3600);
       let parsed = cleanToJSONPlus(raw);
 
+      // 2) Si no parsea, intento estricto
       if (!parsed) {
         const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.2, 3000);
+        raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.2, 3200);
         parsed = cleanToJSONPlus(raw);
+      }
+
+      // 3) Si parsea pero está flojo → Quality Gate + 1 retry (máximo)
+      if (parsed) {
+        const audit = _validatePlannerOutput_(parsed);
+
+        if (!audit.ok) {
+          const repairPlanner = `
+${SYSTEM_PLANNER}
+
+REPARACIÓN OBLIGATORIA (QUALITY GATE):
+Tu JSON anterior falló estas validaciones:
+- ${audit.issues.join("\n- ")}
+
+REGLAS:
+- NO inventes nuevas actividades.
+- Usa research_json.rows_draft como verdad.
+- duration en 2 líneas obligatorias: "Transporte: ...\\nActividad: ..."
+- Elimina placeholders genéricos: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
+- Devuelve SOLO JSON válido.
+
+Devuelve el JSON corregido.
+`.trim();
+
+          const repairRaw = await callText(
+            [{ role: "system", content: repairPlanner }, plannerUserMsg],
+            0.25,
+            3600
+          );
+          const repaired = cleanToJSONPlus(repairRaw);
+          if (repaired) parsed = repaired;
+        }
       }
 
       if (!parsed) parsed = fallbackJSON();
