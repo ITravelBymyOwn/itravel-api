@@ -1681,6 +1681,9 @@ function showWOW(on, msg){
       - Evita placeholders genéricos (museo genérico / parque local / café local)
       - Esto NO mete creatividad; solo fuerza re-optimización cuando falta detalle
    ✅ QUIRÚRGICO (NUEVO vPERF): Budget global de optimizeDay por corrida de ciudad
+   ✅ FIX QUIRÚRGICO (NUEVO): Pipeline coherente:
+      ensureReturnRow + clearTransportAfterReturn + injectDinnerIfMissing
+      ANTES de fixOverlaps, luego clamp final.
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -2033,11 +2036,13 @@ ${context}
       if(typeof enforceOneAuroraPerDay==='function') tmpRows = enforceOneAuroraPerDay(tmpRows);
 
       if(typeof enforceTransportAndOutOfTown==='function') tmpRows = enforceTransportAndOutOfTown(city, tmpRows);
-      if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
+
+      // ✅ FIX QUIRÚRGICO: asegurar retorno/cena ANTES de corregir solapes
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
       if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
-
       if(typeof injectDinnerIfMissing === 'function') tmpRows = injectDinnerIfMissing(city, tmpRows);
+
+      if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
 
       if(typeof __enforceDayWindowAndNoDawn__ === 'function') tmpRows = __enforceDayWindowAndNoDawn__(city, tmpRows);
 
@@ -3146,6 +3151,7 @@ function clearTransportAfterReturn(city, rows) {
 
 /* ------------------------------------------------------------------
    Overlaps & orden tabs-safe (no altera "day")
+   ✅ FIX QUIRÚRGICO: por día + NO reordenar secuencia en out-of-town
 ------------------------------------------------------------------- */
 function fixOverlaps(rows) {
   const toMin = __toMinHHMM__;
@@ -3177,13 +3183,12 @@ function fixOverlaps(rows) {
 
   if (!Array.isArray(rows) || !rows.length) return rows || [];
 
-  // ✅ Tabs-safe: agrupar por día para NO mezclar días
+  // Agrupar por día SIN clonar (preserva referencias)
   const byDay = {};
   rows.forEach((r, idx) => {
     const d = Number(r?.day) || 1;
-    // preserva orden original por si hay empates o faltan horas
-    const rr = (typeof r?._idx === 'undefined') ? { ...r, _idx: idx } : r;
-    (byDay[d] = byDay[d] || []).push(rr);
+    if (typeof r?._idx === 'undefined') r._idx = idx;
+    (byDay[d] = byDay[d] || []).push(r);
   });
 
   const outAll = [];
@@ -3192,49 +3197,57 @@ function fixOverlaps(rows) {
   for (const day of days) {
     const dayRows = byDay[day];
 
+    // Detectar si el día es out-of-town → NO reordenar (mantener secuencia)
+    const hasOut = dayRows.some(r=>{
+      try { return (typeof isOutOfTownRow === 'function') ? isOutOfTownRow(null, r) : false; }
+      catch(_) { return false; }
+    }) || dayRows.some(r=>{
+      const a = String(r?.activity || '').toLowerCase();
+      const tr = String(r?.transport || '').toLowerCase();
+      return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip|golden\s+circle|south\s+coast|c[ií]rculo\s+dorado|costa\s+sur)/i.test(a) ||
+             /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
+    });
+
     const expanded = dayRows.map(r => {
       let s = toMin(r.start || '');
       let e = toMin(r.end || '');
-      const d = durMin(r.duration || '');
+      const dM = durMin(r.duration || '');
       let cross = false;
 
-      // Normalización base start/end usando duración si hace falta
       if (s != null && (e == null || e <= s)) {
-        if (__isNightRow__(r) || (d > 0 && s >= 18 * 60)) {
-          // nocturna/cruce: extendemos el end al "día siguiente"
-          e = (e != null ? e : s + Math.max(d, 60)) + 24 * 60;
+        if (__isNightRow__(r) || (dM > 0 && s >= 18 * 60)) {
+          e = (e != null ? e : s + Math.max(dM, 60)) + 24 * 60;
           cross = true;
         } else {
-          e = (e != null)
-            ? (e <= s ? s + Math.max(d, 60) : e)
-            : (s + Math.max(d, 60));
+          e = e != null ? (e <= s ? s + Math.max(dM, 60) : e) : s + Math.max(dM, 60);
         }
-      } else if (s == null && e != null && d > 0) {
-        s = e - d;
-        if (s < 0) s = 9 * 60;
+      } else if (s == null && e != null && dM > 0) {
+        s = e - dM; if (s < 0) s = 9 * 60;
       } else if (s == null && e == null) {
-        s = 9 * 60;
-        e = s + 60;
+        s = 9 * 60; e = s + 60;
       }
 
-      return { __s: s, __e: e, __d: d, __cross: cross, raw: r };
+      return { __s: s, __e: e, __d: dM, __cross: cross, raw: r };
     });
 
-    // ✅ Orden por start, pero con fallback al orden original _idx
-    expanded.sort((a, b) => {
+    // Orden:
+    // - si NO hay out-of-town: por start (para arreglar overlaps)
+    // - si hay out-of-town: por _idx original (mantener secuencia)
+    expanded.sort((a,b)=>{
+      if (hasOut) return (Number(a.raw?._idx)||0) - (Number(b.raw?._idx)||0);
       const sa = (a.__s == null ? 1e9 : a.__s);
       const sb = (b.__s == null ? 1e9 : b.__s);
       if (sa !== sb) return sa - sb;
       return (Number(a.raw?._idx)||0) - (Number(b.raw?._idx)||0);
     });
 
-    const out = [];
+    const outDay = [];
     let prevEnd = null;
 
     for (const item of expanded) {
-      let { __s: s, __e: e, __d: d, __cross: cross, raw: r } = item;
+      let { __s: s, __e: e, __d: dM, __cross: cross, raw: r } = item;
 
-      // ✅ Shift solo dentro del día
+      // Shift mínimo para evitar solapes (solo dentro del día)
       if (prevEnd != null && s < prevEnd + 15) {
         const shift = (prevEnd + 15) - s;
         s += shift;
@@ -3242,38 +3255,43 @@ function fixOverlaps(rows) {
       }
       prevEnd = Math.max(prevEnd ?? 0, e);
 
-      // Duración final: si ya existe duration (incl 2 líneas), se conserva
+      // Duración: conservar si existe (incl 2-líneas); si no, calcular
       let finalDur = r.duration;
       if (!finalDur) {
-        finalDur = (d > 0) ? `${d}m` : `${Math.max(60, e - s)}m`;
+        finalDur = (dM > 0) ? `${dM}m` : `${Math.max(60, e - s)}m`;
       }
 
       const isNight = __isNightRow__(r);
 
-      // Si es nocturna y quedó en rango extendido, convertir horas manteniendo _crossDay
+      // Normalizar nocturnas extendidas sin clamp agresivo
       let sOut = s;
       let eOut = e;
-      if (isNight && s >= 24 * 60) {
-        sOut = s - 24 * 60;
-        eOut = e - 24 * 60;
-        cross = true;
+      let crossOut = cross;
+
+      if (isNight) {
+        // si quedó extendida a +24h, llevar a rango 0–24 para mostrar,
+        // pero mantener _crossDay true
+        if (sOut >= 24 * 60) { sOut -= 24 * 60; crossOut = true; }
+        if (eOut >= 24 * 60) { eOut = eOut % (24 * 60); crossOut = true; }
+      } else {
+        // diurnas: evitar que end “envuelva” por módulo
+        if (eOut >= 24 * 60) { eOut = eOut % (24 * 60); }
       }
 
-      // ✅ NO clamp agresivo a 18:00; solo formatear
       const startHH = toHH(sOut);
       const endHH   = toHH(eOut);
 
-      out.push({
+      outDay.push({
         ...r,
         day,
         start: startHH,
         end: endHH,
         duration: finalDur,
-        _crossDay: !!(r._crossDay || cross)
+        _crossDay: !!(r._crossDay || crossOut)
       });
     }
 
-    outAll.push(...out);
+    outAll.push(...outDay);
   }
 
   return outAll;
@@ -3710,6 +3728,9 @@ if (typeof validateRowsWithAgent !== 'function') {
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
    ✅ DIAG: mide optimizeDay total + filas
    ✅ PERF QUIRÚRGICO: optimizeDay NO dispara INFO; valida con agente SOLO si hace falta
+   ✅ FIX QUIRÚRGICO: pipeline consistente con 15.2:
+      ensureReturnRow + clearTransportAfterReturn + injectDinnerIfMissing
+      ANTES de fixOverlaps, luego clamp final y sort.
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
   // ✅ QUIRÚRGICO: cola por ciudad para evitar paralelismo (reduce timeouts/canceled)
@@ -3774,7 +3795,6 @@ async function optimizeDay(city, day) {
         const s=_toMin(r.start), e0=_toMin(r.end);
         if(s==null || e0==null) return false;
         let e=e0; if(e<=s) e+=24*60;
-        // Permitir cruce pequeño por buffers lo maneja clamp, pero aquí es gate si se sale fuerte
         return (s < ds) || (e > de);
       });
     };
@@ -3810,7 +3830,6 @@ async function optimizeDay(city, day) {
           aurora: contextObj?.aurora || { plausible: false, suggested_days: [], window_local: { start:"", end:"" }, duration:"~3h–4h", transport_default:"Vehículo alquilado o Tour guiado", note:"" },
           constraints: contextObj?.constraints || { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
           day_hours: dayHoursForTargetFromCtx ? [dayHoursForTargetFromCtx] : (Array.isArray(contextObj?.day_hours) ? contextObj.day_hours : []),
-          // El PLANNER debe usar esto como fuente de verdad (ya viene con tus decisiones actuales)
           rows_draft: rows.map(r=>({
             day,
             start: r.start || "",
@@ -3827,14 +3846,12 @@ async function optimizeDay(city, day) {
           rows_skeleton: []
         };
 
-        // Guardar para reutilizar (aunque no tengamos la key “robusta” aquí)
         window.__researchCache = window.__researchCache || {};
         if (!window.__researchCache[city]) {
           window.__researchCache[city] = { key: `optimizeDayLocal:${Date.now()}`, research, ts: Date.now() };
         }
       }
 
-      // ✅ PATCH QUIRÚRGICO (API v43.3): pedir SOLO el día objetivo con ventana y existing_rows
       const dayHoursForTarget = Array.isArray(contextObj?.day_hours)
         ? (contextObj.day_hours.find(x => Number(x.day) === Number(day)) || null)
         : null;
@@ -3848,10 +3865,8 @@ async function optimizeDay(city, day) {
 
       const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
       const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
-
       const unified = unifyRowsFormat(structured, city);
 
-      // Si el planner obedeció target_day, ya viene solo ese día; igual normalizamos day.
       const rawRows = (unified?.rows || []);
       let finalRows = rawRows.map(x => ({ ...x, day }));
 
@@ -3861,22 +3876,20 @@ async function optimizeDay(city, day) {
 
       if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
 
-      finalRows = fixOverlaps(finalRows);
+      // ✅ pipeline coherente (igual que 15.2)
       finalRows = finalRows.map(r => __normalizeDayField__(city, r));
-
       if (protectedRows.length) {
         finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
-        finalRows = fixOverlaps(finalRows);
       }
 
       finalRows = ensureReturnRow(city, finalRows);
       finalRows = clearTransportAfterReturn(city, finalRows);
-
       if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
 
       finalRows = pruneGenericPerDay(finalRows);
 
-      // ✅ PATCH QUIRÚRGICO: clamp final (no madrugada + day_hours)
+      finalRows = fixOverlaps(finalRows);
+
       if (typeof __enforceDayWindowAndNoDawn__ === 'function') finalRows = __enforceDayWindowAndNoDawn__(city, finalRows);
 
       finalRows = __sortRowsTabsSafe__(finalRows);
@@ -3914,15 +3927,20 @@ async function optimizeDay(city, day) {
       }
 
       let safeRows = rows.map(r => __normalizeDayField__(city, r));
-      safeRows = fixOverlaps(ensureReturnRow(city, (typeof injectDinnerIfMissing === 'function' ? injectDinnerIfMissing(city, safeRows) : safeRows)));
-      safeRows = clearTransportAfterReturn(city, safeRows);
 
-      // ✅ clamp fallback también
+      // ✅ pipeline coherente también en fallback
+      safeRows = ensureReturnRow(city, safeRows);
+      safeRows = clearTransportAfterReturn(city, safeRows);
+      if (typeof injectDinnerIfMissing === 'function') safeRows = injectDinnerIfMissing(city, safeRows);
+
+      safeRows = pruneGenericPerDay(safeRows);
+
+      safeRows = fixOverlaps(safeRows);
+
       if (typeof __enforceDayWindowAndNoDawn__ === 'function') safeRows = __enforceDayWindowAndNoDawn__(city, safeRows);
 
       safeRows = __sortRowsTabsSafe__(safeRows);
 
-      // ✅ PERF: en fallback, validar con agente SOLO si existe (y si hay problemas fuertes)
       let allowedRows = safeRows;
       const needAgentValidation = (() => {
         if (!Array.isArray(safeRows) || safeRows.length === 0) return true;
