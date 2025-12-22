@@ -1107,7 +1107,17 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const trans   = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
   const durRaw  = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes   = r.notes ?? r.nota ?? r.comentarios ?? '';
-  const duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
+
+  let duration = '';
+  if (typeof durRaw === 'number') {
+    duration = `${durRaw}m`;
+  } else {
+    const s = String(durRaw ?? '');
+    // ✅ preservar si ya viene en 2 líneas
+    if (/Transporte\s*:/i.test(s) || /Actividad\s*:/i.test(s)) duration = s;
+    else duration = s;
+  }
+
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
   return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
 }
@@ -2981,9 +2991,21 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
       return 60;
     };
 
+    const isOut = (r)=>{
+      try{
+        if(typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
+      }catch(_){}
+      const act = String(r?.activity || '').toLowerCase();
+      const tr  = String(r?.transport || '').toLowerCase();
+      return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip|costa|pen[ií]nsula|parque\s+nacional|glaciar|volc[aá]n|geyser|lagoon|waterfall|cascada)/i.test(act) ||
+             /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
+    };
+
     const byDay = {};
-    rows.forEach(r=>{
-      const d = Number(r.day) || 1;
+    rows.forEach((r, idx)=>{
+      const d = Number(r?.day) || 1;
+      // preservamos orden original con _idx si no existe
+      if(typeof r?._idx === 'undefined') r._idx = idx;
       (byDay[d] = byDay[d] || []).push(r);
     });
 
@@ -2994,12 +3016,18 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
       const wS = toMin(win.start) ?? (8*60+30);
       const wE = toMin(win.end)   ?? (19*60);
 
-      // Orden preliminar por start si existe
-      list.sort((a,b)=>(toMin(a.start)||0)-(toMin(b.start)||0));
+      const hasOut = list.some(r => isOut(r));
+
+      // ✅ PATCH: si es out-of-town, NO reordenar por start (mantener secuencia)
+      if(!hasOut){
+        list.sort((a,b)=>(toMin(a.start)||0)-(toMin(b.start)||0));
+      }else{
+        list.sort((a,b)=>(Number(a._idx)||0)-(Number(b._idx)||0));
+      }
 
       let cursor = wS;
       for(const r of list){
-        const isNight = __isNightRow__(r);
+        const isNight = (typeof __isNightRow__ === 'function') ? __isNightRow__(r) : false;
         let s = toMin(r.start);
         let e = toMin(r.end);
         const dM = durMin(r);
@@ -3008,12 +3036,10 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
         if(!isNight){
           if(s == null || s < 6*60) s = Math.max(wS, cursor);
           if(s < wS) s = wS;
-          // Respetar buffers con cursor
           if(s < cursor) s = cursor;
 
           e = s + Math.max(30, dM);
 
-          // Si se pasa del final, tratar de encajar
           if(e > wE){
             e = wE;
             s = Math.max(wS, e - Math.max(30, dM));
@@ -3023,7 +3049,6 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
 
           out.push({ ...r, start: toHH(s), end: toHH(e) });
         }else{
-          // Nocturnas: las dejamos como vienen (fixOverlaps ya trata cruce)
           out.push(r);
         }
       }
@@ -3220,12 +3245,48 @@ function __normalizeDayField__(city, r) {
 }
 
 function __sortRowsTabsSafe__(rows) {
-  return [...rows].sort((a, b) => {
-    const da = Number(a.day) || 1, db = Number(b.day) || 1;
+  const isReturn = (r) => /(^|\b)regreso\b/i.test(String(r?.activity || ''));
+  const isNight = (r) => (typeof __isNightRow__ === 'function') ? __isNightRow__(r) : false;
+
+  // Señales out-of-town (fallback) si no existe isOutOfTownRow:
+  const isOutFallback = (city, r) => {
+    try {
+      if (typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
+    } catch (_) {}
+    const act = String(r?.activity || '').toLowerCase();
+    const tr  = String(r?.transport || '').toLowerCase();
+    // Heurística general (no city-specific):
+    return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip)/i.test(act) ||
+           /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
+  };
+
+  // Pre-cálculo: detectar días out-of-town
+  const outDays = new Set();
+  for (const r of (rows || [])) {
+    const d = Number(r?.day) || 1;
+    if (isOutFallback(null, r)) outDays.add(d);
+  }
+
+  return [...(rows || [])].sort((a, b) => {
+    const da = Number(a?.day) || 1, db = Number(b?.day) || 1;
     if (da !== db) return da - db;
-    const sa = __toMinHHMM__(a.start) || 0, sb = __toMinHHMM__(b.start) || 0;
-    const wa = (a._crossDay && sa < 360) ? sa + 24 * 60 : sa;
-    const wb = (b._crossDay && sb < 360) ? sb + 24 * 60 : sb;
+
+    // ✅ PATCH: si el día tiene señales out-of-town, empujar "Regreso" al final
+    if (outDays.has(da)) {
+      const ra = isReturn(a), rb = isReturn(b);
+      if (ra !== rb) return ra ? 1 : -1;
+    }
+
+    const sa = __toMinHHMM__(a?.start) ?? 0;
+    const sb = __toMinHHMM__(b?.start) ?? 0;
+
+    const wa = (a?._crossDay && sa < 360) ? sa + 24 * 60 : sa;
+    const wb = (b?._crossDay && sb < 360) ? sb + 24 * 60 : sb;
+
+    // ✅ Extra: mantener nocturnas al final si compiten con diurnas del mismo día
+    const na = isNight(a), nb = isNight(b);
+    if (na !== nb) return na ? 1 : -1;
+
     return wa - wb;
   });
 }
@@ -3287,42 +3348,79 @@ if (typeof __collectPlannerContext__ !== 'function') {
 ------------------------------------------------------------------- */
 function ensureReturnRow(city, rows) {
   const byDay = {};
-  for (const r of rows) { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); }
+  for (const r of (rows || [])) {
+    const d = Number(r?.day) || 1;
+    (byDay[d] = byDay[d] || []).push(r);
+  }
+
   const out = [];
   const cityLbl = String(city || '').trim();
+
+  const isReturnRow = (r) => /(^|\b)regreso\b/i.test(String(r?.activity || ''));
+  const isOut = (r) => {
+    try {
+      if (typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
+    } catch (_) {}
+    // fallback general
+    const act = String(r?.activity || '').toLowerCase();
+    const tr  = String(r?.transport || '').toLowerCase();
+    return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip|costa|pen[ií]nsula|parque\s+nacional|glaciar|volc[aá]n|geyser|lagoon|waterfall|cascada)/i.test(act) ||
+           /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
+  };
+
   Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
     const list = byDay[day].slice();
 
     // Solo si realmente hay out-of-town con señales fuertes
-    const hasOut = list.some(r => isOutOfTownRow(city, r));
+    const hasOut = list.some(r => isOut(r));
+    if (!hasOut) {
+      out.push(...list);
+      return;
+    }
 
-    const hasReturn = list.some(r => {
-      const act = String(r.activity || '').toLowerCase();
-      const to = String(r.to || '').toLowerCase();
-      const cty = String(cityLbl || '').toLowerCase();
-      return /regreso/.test(act) || (to.includes('hotel') && to.includes(cty));
-    });
+    // Ventana base y “cierre” del día
+    const endBase = (cityMeta?.[city]?.perDay || []).find(x => Number(x.day) === Number(day))?.end || DEFAULT_END || '19:00';
+    const endBaseMin = __toMinHHMM__(endBase) ?? 1140;
 
-    if (hasOut && !hasReturn) {
-      const endBase = (cityMeta[city]?.perDay?.find(x => x.day === day)?.end) || DEFAULT_END || '19:00';
-      const lastEnd = list.reduce((mx, r) => Math.max(mx, __toMinHHMM__(r.end) || 0), __toMinHHMM__(endBase) || 1140);
-      const startRet = __toHHMMfromMin__(Math.max(lastEnd, __toMinHHMM__(endBase) || 1140));
-      const endRet = __addMinutesSafe__(startRet, 45);
-      list.push({
-        day,
-        start: startRet,
-        end: endRet,
-        activity: `Regreso a ${cityLbl}`,
-        from: list[list.length - 1]?.to || 'Excursión',
-        to: `Hotel (${cityLbl})`,
-        transport: 'Vehículo alquilado o Tour guiado',
-        duration: '45m',
-        notes: 'Cierre del day trip y retorno al hotel.'
-      });
+    // Buscar retorno existente
+    const returnIdx = list.findIndex(r => isReturnRow(r));
+    const hasReturn = returnIdx >= 0;
+
+    // Calcular el último end real del día (ignorando el retorno si ya existe)
+    const lastEnd = list.reduce((mx, r, idx) => {
+      if (idx === returnIdx) return mx;
+      const e = __toMinHHMM__(r?.end);
+      return Math.max(mx, (e == null ? 0 : e));
+    }, endBaseMin);
+
+    const startRet = __toHHMMfromMin__(Math.max(lastEnd, endBaseMin));
+    const endRet = __addMinutesSafe__(startRet, 45);
+
+    const retRow = {
+      day,
+      start: startRet,
+      end: endRet,
+      activity: `Regreso a ${cityLbl}`,
+      from: (list[Math.max(0, list.length - 1)]?.to || 'Excursión'),
+      to: `Hotel (${cityLbl})`,
+      transport: 'Vehículo alquilado o Tour guiado',
+      duration: '45m',
+      notes: 'Cierre del day trip y retorno al hotel.',
+      _returnRow: true
+    };
+
+    if (!hasReturn) {
+      // Agregar retorno al final
+      list.push(retRow);
+    } else {
+      // ✅ PATCH: mover el retorno existente al final y fijar su tiempo como cierre
+      const old = list.splice(returnIdx, 1)[0] || {};
+      list.push({ ...old, ...retRow });
     }
 
     out.push(...list);
   });
+
   return out;
 }
 
