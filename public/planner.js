@@ -1573,11 +1573,7 @@ function showWOW(on, msg){
       - Detecta macro-tour largo en 1 sola fila (≥6h) y obliga optimizeDay
       - Evita placeholders genéricos (museo genérico / parque local / café local)
       - Esto NO mete creatividad; solo fuerza re-optimización cuando falta detalle
-
-   ✅ AJUSTE QUIRÚRGICO (NUEVO - EFICIENCIA):
-      - Evita optimizeDay duplicado por día (optimizedDays Set)
-      - Si ya se corrigieron missingDays / needDetailDays, NO re-corre thin loop sobre esos días
-      - Reduce llamadas y tiempo sin cambiar lógica global
+   ✅ QUIRÚRGICO (NUEVO vPERF): Budget global de optimizeDay por corrida de ciudad
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -1776,14 +1772,12 @@ async function generateCityItinerary(city){
       return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
     };
 
-    // Si ya hay varias filas con "to" y "from" distintas, asumimos que hay sub-paradas
+    // Si ya hay varias filas, asumimos que hay sub-paradas
     if(list.length >= 4) return false;
 
-    // Macro-keywords globales (no Reykjavik-specific)
     const strong =
       /excursi[oó]n|day\s*trip|tour\b|ruta\b|circuito|c[ií]rculo|costa|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|cr[aá]ter|lagoon|laguna|thermal|hot\s*spring|geyser|geysir|island\s*tour|road\s*trip/i;
 
-    // Si existe 1 fila que ocupa ≥6h y parece excursión/tour, y el día tiene ≤2 filas útiles → necesita substops
     for(const r of list){
       const a = String(r.activity||'').toLowerCase();
       const s = toMin(r.start), e = toMin(r.end);
@@ -1799,7 +1793,6 @@ async function generateCityItinerary(city){
       }
     }
 
-    // Caso adicional: placeholders típicos y muy genéricos (calidad baja)
     const genericPlaceholders =
       /(museo\s+de\s+arte|parque\s+local|cafe\s+local|restaurante\s+local|costa\b|exploraci[oó]n\s+de\s+la\s+costa)/i;
     if(list.some(r=>genericPlaceholders.test(String(r.activity||'')))) return true;
@@ -1823,7 +1816,6 @@ async function generateCityItinerary(city){
 
     let heuristicsContext = '';
     try{
-      // ✅ CAMBIO QUIRÚRGICO: proteger si getCoordinatesForCity no existe (evita ReferenceError)
       const coords =
         (typeof getCoordinatesForCity === 'function')
           ? getCoordinatesForCity(city)
@@ -1870,7 +1862,6 @@ ${buildIntake()}
     /* =================== Doble etapa INFO→PLANNER con caché robusto =================== */
     window.__researchCache = window.__researchCache || {};
 
-    // ✅ NUEVO: key robusta para no reutilizar research viejo cuando cambia el contexto
     const _prefKey = (()=>{ try { return JSON.stringify(plannerState?.preferences || {}); } catch(_) { return ''; } })();
     const _perDayKey = (()=>{ try { return JSON.stringify(perDay || []); } catch(_) { return ''; } })();
     const _intakeLite = (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : `${city}|${hotel}|${transport}|${baseDate}`;
@@ -1881,8 +1872,6 @@ ${buildIntake()}
 
     let parsed = null;
     try{
-      // ✅ QUIRÚRGICO (GLOBAL): Prompt enriquecido hacia INFO para "pensar como agente experto"
-      // No hardcode por ciudad. Prohíbe placeholders y obliga day-trips con sub-paradas.
       const context = (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : String(city||'');
 
       const infoPrompt = `
@@ -1902,11 +1891,11 @@ CONTEXTO (input del usuario / planner):
 ${context}
 `.trim();
 
-      const research = (forceReplan ? null : cached) || await callInfoAPI({
+      const research = cached || await callInfoAPI({
         messages: [{ role: 'user', content: infoPrompt }]
       });
 
-      if(!cached || forceReplan) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
+      if(!cached) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
 
       const structured = await callPlannerAPI_withResearch(research);
       parsed = structured;
@@ -1931,7 +1920,6 @@ ${context}
       if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
       if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
 
-      // ⚠️ IMPORTANTE: duration 2-líneas se preserva en SECCIÓN 18 (normalizeDurationLabel actualizado)
       if(typeof normalizeDurationLabel==='function') tmpRows = tmpRows.map(normalizeDurationLabel);
       if(typeof normalizeAuroraWindow==='function')  tmpRows = tmpRows.map(normalizeAuroraWindow);
 
@@ -1942,30 +1930,13 @@ ${context}
       if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
       if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
 
-      // ✅ NUEVO (quirúrgico): cena también en el primer render si la preferencia está activa
       if(typeof injectDinnerIfMissing === 'function') tmpRows = injectDinnerIfMissing(city, tmpRows);
 
-      // ✅ NUEVO (quirúrgico): clamp final (no madrugada + respetar day_hours)
       if(typeof __enforceDayWindowAndNoDawn__ === 'function') tmpRows = __enforceDayWindowAndNoDawn__(city, tmpRows);
 
       pushRows(city, tmpRows, !!forceReplan);
       ensureDays(city);
 
-      // ✅ AJUSTE QUIRÚRGICO (EFICIENCIA): evitar optimizeDay duplicado / loops largos
-      const optimizedDays = new Set();
-      const safeOptimizeDayOnce = async (d, reason)=>{
-        if(optimizedDays.has(d)) return false;
-        optimizedDays.add(d);
-        try{
-          await optimizeDay(city, d);
-          return true;
-        }catch(e){
-          console.warn(`[generateCityItinerary] optimizeDay falló (${reason}) D${d} (${city})`, e);
-          return false;
-        }
-      };
-
-      // ✅ QUIRÚRGICO A1: si faltan días o están vacíos, no depender solo de "thin"
       const totalDays = dest.days;
       const byDayNow = itineraries[city]?.byDay || {};
       const missingDays = [];
@@ -1974,7 +1945,6 @@ ${context}
         if(n === 0) missingDays.push(d);
       }
 
-      // ✅ NUEVO (quirúrgico): días que vienen como macro-tour largo sin sub-paradas → forzar optimizeDay
       const needDetailDays = [];
       for(let d=1; d<=totalDays; d++){
         try{
@@ -1982,31 +1952,36 @@ ${context}
         }catch(_){}
       }
 
-      // 1) Asegurar faltantes (máxima prioridad)
-      let anyFixes = false;
+      // ✅ QUIRÚRGICO (PERF): presupuesto de optimizeDay por corrida
+      // - si forceReplan: permite más
+      // - si normal: limita para no disparar 10+ llamadas
+      const maxBudget =
+        forceReplan ? Math.max(4, Math.ceil(totalDays * 0.75)) : Math.max(2, Math.ceil(totalDays * 0.35));
+      let budgetLeft = maxBudget;
+
+      const _runOpt = async (d, reason)=>{
+        if(budgetLeft <= 0) return;
+        budgetLeft--;
+        try { await optimizeDay(city, d); }
+        catch(e){ console.warn(`[generateCityItinerary] optimizeDay falló en D${d} (${city}) reason=${reason}`, e); }
+      };
+
+      // 1) faltantes (máxima prioridad)
       for(const d of missingDays){
-        /* eslint-disable no-await-in-loop */
-        const did = await safeOptimizeDayOnce(d, 'missingDays');
-        if(did) anyFixes = true;
+        await _runOpt(d, 'missingDay');
       }
 
-      // 2) Forzar detalle si detectamos macro-tour en 1 fila / placeholders
+      // 2) macro-tour sin substops / placeholders (calidad)
       for(const d of needDetailDays){
-        /* eslint-disable no-await-in-loop */
-        const did = await safeOptimizeDayOnce(d, 'needDetailDays');
-        if(did) anyFixes = true;
+        if(budgetLeft <= 0) break;
+        await _runOpt(d, 'needSubstops');
       }
 
-      // 3) Solo si NO se hicieron fixes anteriores (o si forceReplan) aplicar thin loop.
-      //    Además: no re-optimizar días ya tocados arriba.
-      if(forceReplan || !anyFixes){
-        for(let d=1; d<=dest.days; d++){
-          if(optimizedDays.has(d)) continue;
-          if(forceReplan || dayIsTooThin(city, d, 3)){
-            /* eslint-disable no-await-in-loop */
-            const did = await safeOptimizeDayOnce(d, 'thin/forceReplan');
-            if(did) anyFixes = true;
-          }
+      // 3) thin (ocupación real) — solo si queda budget
+      for(let d=1; d<=totalDays; d++){
+        if(budgetLeft <= 0) break;
+        if(forceReplan || dayIsTooThin(city, d, 3)){
+          await _runOpt(d, 'thin');
         }
       }
 
@@ -2110,40 +2085,28 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
   const start = Math.max(1, parseInt(rangeOpt.start||1,10));
   const end   = Math.max(start, parseInt(rangeOpt.end||allDays[allDays.length-1],10));
 
-  // Conservamos set de exclusión (informativo; las deducciones duras ya las maneja optimizeDay)
   const prevKeySet = __buildPrevActivityKeySet__(byDay, start);
   const prevExamples = __keysToExampleList__(prevKeySet);
 
   showWOW(true, `Reequilibrando ${city}…`);
 
   try{
-    // 🆕 Reequilibrio con **optimizeDay** (INFO→PLANNER) para cada día del rango
-    // ✅ PATCH QUIRÚRGICO (rendimiento): optimiza solo si hace falta
     const force = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
-
-    // ✅ AJUSTE QUIRÚRGICO (EFICIENCIA): evitar optimizeDay duplicado en rango
-    const optimizedDays = new Set();
-    const safeOptimizeOnce = async (d)=>{
-      if(optimizedDays.has(d)) return;
-      optimizedDays.add(d);
-      await optimizeDay(city, d);
-    };
 
     for(let d=start; d<=end; d++){
       /* eslint-disable no-await-in-loop */
       const thin =
         (typeof dayIsTooThin === 'function')
           ? dayIsTooThin(city, d, 3)
-          : true; // si no existe helper, conservamos comportamiento anterior (optimiza)
+          : true;
 
       if(force || thin){
-        await safeOptimizeOnce(d);
+        await optimizeDay(city, d);
       }
     }
   }catch(err){
     console.warn('[rebalanceWholeCity] optimizeDay rango falló. Intento de salvataje local.', err);
 
-    // ✅ Fallback seguro: ordenar por horario sin tocar "day"
     const merged = { ...(itineraries[city].byDay || {}) };
     Object.keys(merged).forEach(d=>{
       merged[d] = (merged[d]||[]).map(normalizeRow)
@@ -3435,6 +3398,7 @@ if (typeof validateRowsWithAgent !== 'function') {
 /* ------------------------------------------------------------------
    OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
    ✅ DIAG: mide optimizeDay total + filas
+   ✅ PERF QUIRÚRGICO: optimizeDay NO dispara INFO; valida con agente SOLO si hace falta
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
   // ✅ QUIRÚRGICO: cola por ciudad para evitar paralelismo (reduce timeouts/canceled)
@@ -3461,40 +3425,102 @@ async function optimizeDay(city, day) {
       return act.includes('laguna azul') || act.includes('blue lagoon');
     });
 
+    // Helpers locales (quirúrgicos, no rompen dependencias)
+    const _toMin = (hhmm)=>{
+      const m = String(hhmm||'').trim().match(/^(\d{1,2}):(\d{2})$/);
+      if(!m) return null;
+      return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
+    };
+    const _hasHardOverlaps = (list)=>{
+      const xs = (Array.isArray(list)?list:[])
+        .filter(r=>r && r.start && r.end)
+        .map(r=>{
+          const s=_toMin(r.start), e0=_toMin(r.end);
+          if(s==null || e0==null) return null;
+          let e=e0; if(e<=s) e+=24*60;
+          return { s, e };
+        }).filter(Boolean)
+        .sort((a,b)=>a.s-b.s);
+      for(let i=1;i<xs.length;i++){
+        if(xs[i].s < xs[i-1].e) return true;
+      }
+      return false;
+    };
+    const _hasDawnDiurnals = (list)=>{
+      return (Array.isArray(list)?list:[]).some(r=>{
+        const s=_toMin(r.start);
+        if(s==null) return false;
+        // Diurnas 01:00–05:00 prohibidas (si es aurora o regreso nocturno, lo manejan tus reglas; aquí es gate conservador)
+        return (s >= 60 && s <= 300) && !/aurora|northern\s*lights|regreso/i.test(String(r.activity||''));
+      });
+    };
+    const _outsideDayHours = (list, dayHoursForTarget)=>{
+      if(!dayHoursForTarget || !dayHoursForTarget.start || !dayHoursForTarget.end) return false;
+      const ds=_toMin(dayHoursForTarget.start), de0=_toMin(dayHoursForTarget.end);
+      if(ds==null || de0==null) return false;
+      let de=de0; if(de<=ds) de+=24*60;
+      return (Array.isArray(list)?list:[]).some(r=>{
+        const s=_toMin(r.start), e0=_toMin(r.end);
+        if(s==null || e0==null) return false;
+        let e=e0; if(e<=s) e+=24*60;
+        // Permitir cruce pequeño por buffers lo maneja clamp, pero aquí es gate si se sale fuerte
+        return (s < ds) || (e > de);
+      });
+    };
+
     try {
       const contextObj = (typeof __collectPlannerContext__ === 'function')
         ? __collectPlannerContext__(city, day)
         : { city, day };
 
-      // ✅ QUIRÚRGICO: usa el research cacheado de la ciudad si existe y coincide “key”
-      // (lo crea generateCityItinerary en SECCIÓN 15.2)
+      // ✅ QUIRÚRGICO: usa el research cacheado de la ciudad si existe
       let research = null;
       try {
         const entry = window.__researchCache?.[city];
         research = entry?.research || null;
       } catch(_) {}
 
-      // ✅ Si no hay research cacheado, hacemos INFO UNA VEZ (formato correcto: messages)
+      // ✅ PERF QUIRÚRGICO: optimizeDay NO debe disparar INFO.
+      // Si no hay research cacheado, construimos research mínimo local basado en rows_draft (verdad) + day_hours.
       if (!research) {
-        const infoPrompt = `
-${FORMAT}
-Eres el INFO Chat interno.
-Devuelve SOLO el JSON de research compatible con el planner.
+        const dayHoursArr = Array.isArray(contextObj?.day_hours) ? contextObj.day_hours : [];
+        const dayHoursForTargetFromCtx = dayHoursArr.find(x => Number(x.day) === Number(day)) || null;
 
-CITY_CONTEXT:
-${JSON.stringify(contextObj, null, 2)}
-`.trim();
-
-        const infoRaw = await callApiChat('info', {
-          messages: [{ role: 'user', content: infoPrompt }]
-        }, { timeoutMs: 65000, retries: 1 });
-
-        const infoData = (typeof infoRaw === 'object' && infoRaw) ? infoRaw : { text: String(infoRaw || '') };
-        research = safeParseApiText(infoData?.text ?? infoData);
+        research = {
+          destination: city,
+          country: contextObj?.country || "",
+          days_total: contextObj?.days_total || (itineraries?.[city]?.days_total || 1),
+          hotel_base: contextObj?.hotel_base || contextObj?.hotel_address || (cityMeta?.[city]?.hotel || ""),
+          rationale: "optimizeDay local research (sin INFO) — usa rows_draft existentes.",
+          imperdibles: [],
+          macro_tours: [],
+          in_city_routes: [],
+          meals_suggestions: [],
+          aurora: contextObj?.aurora || { plausible: false, suggested_days: [], window_local: { start:"", end:"" }, duration:"~3h–4h", transport_default:"Vehículo alquilado o Tour guiado", note:"" },
+          constraints: contextObj?.constraints || { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
+          day_hours: dayHoursForTargetFromCtx ? [dayHoursForTargetFromCtx] : (Array.isArray(contextObj?.day_hours) ? contextObj.day_hours : []),
+          // El PLANNER debe usar esto como fuente de verdad (ya viene con tus decisiones actuales)
+          rows_draft: rows.map(r=>({
+            day,
+            start: r.start || "",
+            end: r.end || "",
+            activity: r.activity || "",
+            from: r.from || "",
+            to: r.to || "",
+            transport: r.transport || "",
+            duration: r.duration || "",
+            notes: r.notes || "",
+            kind: r.kind || "",
+            zone: r.zone || ""
+          })),
+          rows_skeleton: []
+        };
 
         // Guardar para reutilizar (aunque no tengamos la key “robusta” aquí)
         window.__researchCache = window.__researchCache || {};
-        if (!window.__researchCache[city]) window.__researchCache[city] = { key: `optimizeDayFallback:${Date.now()}`, research, ts: Date.now() };
+        if (!window.__researchCache[city]) {
+          window.__researchCache[city] = { key: `optimizeDayLocal:${Date.now()}`, research, ts: Date.now() };
+        }
       }
 
       // ✅ PATCH QUIRÚRGICO (API v43.3): pedir SOLO el día objetivo con ventana y existing_rows
@@ -3544,16 +3570,30 @@ ${JSON.stringify(contextObj, null, 2)}
 
       finalRows = __sortRowsTabsSafe__(finalRows);
 
-      const val = await validateRowsWithAgent(city, finalRows, baseDate);
+      // ✅ PERF QUIRÚRGICO: validar con agente SOLO si detectamos problemas serios
+      const needAgentValidation = (() => {
+        if (!Array.isArray(finalRows) || finalRows.length === 0) return true;
+        if (_hasHardOverlaps(finalRows)) return true;
+        if (_hasDawnDiurnals(finalRows)) return true;
+        if (_outsideDayHours(finalRows, dayHoursForTarget)) return true;
+        return false;
+      })();
 
-      if (diag?.enabled) {
-        diag.set('optimizeDay:lastOutputRows', (val?.allowed || []).length);
+      let allowedRows = finalRows;
+
+      if (needAgentValidation && typeof validateRowsWithAgent === 'function') {
+        const val = await validateRowsWithAgent(city, finalRows, baseDate);
+        allowedRows = (val?.allowed || []);
       }
 
-      if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+      if (diag?.enabled) {
+        diag.set('optimizeDay:lastOutputRows', (allowedRows || []).length);
+      }
+
+      if (typeof pushRows === 'function') pushRows(city, allowedRows, false);
       try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (val?.allowed||[]).length });
+      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (allowedRows||[]).length });
 
     } catch (e) {
       console.error('optimizeDay INFO→PLANNER error:', e);
@@ -3571,11 +3611,24 @@ ${JSON.stringify(contextObj, null, 2)}
 
       safeRows = __sortRowsTabsSafe__(safeRows);
 
-      const val = await validateRowsWithAgent(city, safeRows, baseDate);
-      if (typeof pushRows === 'function') pushRows(city, val.allowed, false);
+      // ✅ PERF: en fallback, validar con agente SOLO si existe (y si hay problemas fuertes)
+      let allowedRows = safeRows;
+      const needAgentValidation = (() => {
+        if (!Array.isArray(safeRows) || safeRows.length === 0) return true;
+        if (_hasHardOverlaps(safeRows)) return true;
+        if (_hasDawnDiurnals(safeRows)) return true;
+        return false;
+      })();
+
+      if (needAgentValidation && typeof validateRowsWithAgent === 'function') {
+        const val = await validateRowsWithAgent(city, safeRows, baseDate);
+        allowedRows = (val?.allowed || []);
+      }
+
+      if (typeof pushRows === 'function') pushRows(city, allowedRows, false);
       try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (val?.allowed||[]).length });
+      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (allowedRows||[]).length });
     }
   };
 
