@@ -1771,15 +1771,30 @@ async function generateCityItinerary(city){
       return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
     };
 
-    // Si ya hay varias filas con "to" y "from" distintas, asumimos que hay sub-paradas
-    if(list.length >= 4) return false;
+    // ✅ QUIRÚRGICO (FIX REAL): contar solo filas "significativas"
+    // Ignora: comidas genéricas y regresos/traslados, porque inflan list.length
+    const isNonDetailRow = (r)=>{
+      const a = String(r.activity||'').toLowerCase().trim();
+      if(!a) return true;
+      if(/^(cena|almuerzo|desayuno|comida|merienda)\b/.test(a)) return true;
+      if(/^(regreso|retorno)\b/.test(a)) return true;
+      if(/\b(regreso|retorno)\s+a\b/.test(a)) return true;
+      if(/^(traslado|transfer|transporte)\b/.test(a)) return true;
+      if(/\bcheck\s*in\b|\bcheck\s*out\b/.test(a)) return true;
+      return false;
+    };
+
+    const meaningful = list.filter(r=>!isNonDetailRow(r));
+
+    // Si ya hay varias filas significativas, asumimos que hay sub-paradas
+    if(meaningful.length >= 4) return false;
 
     // Macro-keywords globales (no Reykjavik-specific)
     const strong =
       /excursi[oó]n|day\s*trip|tour\b|ruta\b|circuito|c[ií]rculo|costa|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|cr[aá]ter|lagoon|laguna|thermal|hot\s*spring|geyser|geysir|island\s*tour|road\s*trip/i;
 
-    // Si existe 1 fila que ocupa ≥6h y parece excursión/tour, y el día tiene ≤2 filas útiles → necesita substops
-    for(const r of list){
+    // Si existe 1 fila que ocupa ≥6h y parece excursión/tour, y el día tiene pocas filas significativas → necesita substops
+    for(const r of meaningful){
       const a = String(r.activity||'').toLowerCase();
       const s = toMin(r.start), e = toMin(r.end);
       let dur = 0;
@@ -1789,7 +1804,9 @@ async function generateCityItinerary(city){
       }else{
         dur = 0;
       }
-      if(strong.test(a) && dur >= 6*60 && list.length <= 2){
+
+      // ✅ FIX: aquí usamos meaningful.length (no list.length)
+      if(strong.test(a) && dur >= 6*60 && meaningful.length <= 2){
         return true;
       }
     }
@@ -2592,8 +2609,6 @@ function intentFromText(text){
    • Llamadas a optimización y validación sólo cuando agrega valor.
    • Todas las funciones nuevas se registran con guardas para no
      pisar implementaciones existentes en otras secciones.
-   ✅ QUIRÚRGICO (NUEVO): prompt global enriquecido hacia INFO en optimizeDay
-      para evitar placeholders y obligar sub-paradas en day-trips.
    ============================================================ */
 
 /* ============================================================
@@ -2733,15 +2748,30 @@ if (typeof __addMinutesSafe__ !== 'function') {
    Detección de nocturnas / auroras / out-of-town
 ------------------------------------------------------------------- */
 if (typeof __isNightRow__ !== 'function') {
+  // ✅ FIX QUIRÚRGICO CRÍTICO:
+  // Antes: trataba como “night” cualquier cosa desde 18:00 → rompía cenas (ej. 18:00–01:45)
+  // Ahora: “night” SOLO si hay señales reales de nocturno (aurora / notas / cruce / muy tarde).
   function __isNightRow__(r) {
     const act = String(r?.activity || '').toLowerCase();
     const notes = String(r?.notes || '').toLowerCase();
     const sMin = __toMinHHMM__(r?.start);
     const eMin = __toMinHHMM__(r?.end);
+
+    // Auroras siempre nocturnas
     if (/auroras?|northern\s*lights/.test(act)) return true;
+
+    // Notas explícitas
     if (/noche|nocturn/.test(notes)) return true;
-    if (sMin != null && sMin >= 18 * 60) return true;
-    if (eMin != null && eMin >= 24 * 60) return true;
+
+    // Si cruza medianoche (end <= start con ambos presentes), es nocturna
+    if (sMin != null && eMin != null && eMin <= sMin) return true;
+
+    // Si inicia muy tarde, tratar como nocturna
+    if (sMin != null && sMin >= 21 * 60) return true;
+
+    // Si termina muy tarde (>=23:30), tratar como nocturna
+    if (eMin != null && eMin >= (23 * 60 + 30)) return true;
+
     return false;
   }
 }
@@ -3437,19 +3467,10 @@ async function optimizeDay(city, day) {
 
       // ✅ Si no hay research cacheado, hacemos INFO UNA VEZ (formato correcto: messages)
       if (!research) {
-        // ✅ QUIRÚRGICO (GLOBAL): Prompt enriquecido a INFO para producir research “WOW” sin hardcode
         const infoPrompt = `
 ${FORMAT}
 Eres el INFO Chat interno.
-Devuelve SOLO JSON válido de research compatible con el planner.
-
-REGLAS GLOBALES (cualquier ciudad/país):
-- Evita placeholders genéricos ("Museo de Arte", "Parque Local", "Café Local", "Restaurante Local"). Sé concreto o al menos "tipo + zona + por qué".
-- Para day-trips/macro-tours fuera de ciudad: define la ruta "Destino → Sub-paradas" (5–8 paradas clave) + "Regreso a la ciudad" al final.
-- Si el usuario no define transporte o pide recomendación: para fuera de ciudad usa "Vehículo alquilado o Tour guiado".
-- Distribuye imperdibles y evita repetición.
-- Horarios realistas; cenas preferiblemente 19:00–21:30 si se incluye cena.
-- Solo JSON (sin texto).
+Devuelve SOLO el JSON de research compatible con el planner.
 
 CITY_CONTEXT:
 ${JSON.stringify(contextObj, null, 2)}
