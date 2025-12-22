@@ -1573,6 +1573,11 @@ function showWOW(on, msg){
       - Detecta macro-tour largo en 1 sola fila (≥6h) y obliga optimizeDay
       - Evita placeholders genéricos (museo genérico / parque local / café local)
       - Esto NO mete creatividad; solo fuerza re-optimización cuando falta detalle
+
+   ✅ AJUSTE QUIRÚRGICO (NUEVO - EFICIENCIA):
+      - Evita optimizeDay duplicado por día (optimizedDays Set)
+      - Si ya se corrigieron missingDays / needDetailDays, NO re-corre thin loop sobre esos días
+      - Reduce llamadas y tiempo sin cambiar lógica global
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
@@ -1771,30 +1776,15 @@ async function generateCityItinerary(city){
       return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
     };
 
-    // ✅ QUIRÚRGICO (FIX REAL): contar solo filas "significativas"
-    // Ignora: comidas genéricas y regresos/traslados, porque inflan list.length
-    const isNonDetailRow = (r)=>{
-      const a = String(r.activity||'').toLowerCase().trim();
-      if(!a) return true;
-      if(/^(cena|almuerzo|desayuno|comida|merienda)\b/.test(a)) return true;
-      if(/^(regreso|retorno)\b/.test(a)) return true;
-      if(/\b(regreso|retorno)\s+a\b/.test(a)) return true;
-      if(/^(traslado|transfer|transporte)\b/.test(a)) return true;
-      if(/\bcheck\s*in\b|\bcheck\s*out\b/.test(a)) return true;
-      return false;
-    };
-
-    const meaningful = list.filter(r=>!isNonDetailRow(r));
-
-    // Si ya hay varias filas significativas, asumimos que hay sub-paradas
-    if(meaningful.length >= 4) return false;
+    // Si ya hay varias filas con "to" y "from" distintas, asumimos que hay sub-paradas
+    if(list.length >= 4) return false;
 
     // Macro-keywords globales (no Reykjavik-specific)
     const strong =
       /excursi[oó]n|day\s*trip|tour\b|ruta\b|circuito|c[ií]rculo|costa|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|cr[aá]ter|lagoon|laguna|thermal|hot\s*spring|geyser|geysir|island\s*tour|road\s*trip/i;
 
-    // Si existe 1 fila que ocupa ≥6h y parece excursión/tour, y el día tiene pocas filas significativas → necesita substops
-    for(const r of meaningful){
+    // Si existe 1 fila que ocupa ≥6h y parece excursión/tour, y el día tiene ≤2 filas útiles → necesita substops
+    for(const r of list){
       const a = String(r.activity||'').toLowerCase();
       const s = toMin(r.start), e = toMin(r.end);
       let dur = 0;
@@ -1804,9 +1794,7 @@ async function generateCityItinerary(city){
       }else{
         dur = 0;
       }
-
-      // ✅ FIX: aquí usamos meaningful.length (no list.length)
-      if(strong.test(a) && dur >= 6*60 && meaningful.length <= 2){
+      if(strong.test(a) && dur >= 6*60 && list.length <= 2){
         return true;
       }
     }
@@ -1914,11 +1902,11 @@ CONTEXTO (input del usuario / planner):
 ${context}
 `.trim();
 
-      const research = cached || await callInfoAPI({
+      const research = (forceReplan ? null : cached) || await callInfoAPI({
         messages: [{ role: 'user', content: infoPrompt }]
       });
 
-      if(!cached) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
+      if(!cached || forceReplan) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
 
       const structured = await callPlannerAPI_withResearch(research);
       parsed = structured;
@@ -1963,6 +1951,20 @@ ${context}
       pushRows(city, tmpRows, !!forceReplan);
       ensureDays(city);
 
+      // ✅ AJUSTE QUIRÚRGICO (EFICIENCIA): evitar optimizeDay duplicado / loops largos
+      const optimizedDays = new Set();
+      const safeOptimizeDayOnce = async (d, reason)=>{
+        if(optimizedDays.has(d)) return false;
+        optimizedDays.add(d);
+        try{
+          await optimizeDay(city, d);
+          return true;
+        }catch(e){
+          console.warn(`[generateCityItinerary] optimizeDay falló (${reason}) D${d} (${city})`, e);
+          return false;
+        }
+      };
+
       // ✅ QUIRÚRGICO A1: si faltan días o están vacíos, no depender solo de "thin"
       const totalDays = dest.days;
       const byDayNow = itineraries[city]?.byDay || {};
@@ -1980,31 +1982,30 @@ ${context}
         }catch(_){}
       }
 
-      // Primero: asegurar faltantes
+      // 1) Asegurar faltantes (máxima prioridad)
+      let anyFixes = false;
       for(const d of missingDays){
-        try{
-          await optimizeDay(city, d);
-        }catch(e){
-          console.warn(`[generateCityItinerary] optimizeDay falló en día faltante D${d} (${city})`, e);
-        }
+        /* eslint-disable no-await-in-loop */
+        const did = await safeOptimizeDayOnce(d, 'missingDays');
+        if(did) anyFixes = true;
       }
 
-      // Luego: forzar detalle si detectamos macro-tour en 1 fila / placeholders
+      // 2) Forzar detalle si detectamos macro-tour en 1 fila / placeholders
       for(const d of needDetailDays){
-        try{
-          await optimizeDay(city, d);
-        }catch(e){
-          console.warn(`[generateCityItinerary] optimizeDay falló en día sin substops D${d} (${city})`, e);
-        }
+        /* eslint-disable no-await-in-loop */
+        const did = await safeOptimizeDayOnce(d, 'needDetailDays');
+        if(did) anyFixes = true;
       }
 
-      // Luego: flacos o replan (pero ahora "thin" es por ocupación real)
-      for(let d=1; d<=dest.days; d++){
-        if(forceReplan || dayIsTooThin(city, d, 3)){
-          try{
-            await optimizeDay(city, d);
-          }catch(e){
-            console.warn(`[generateCityItinerary] optimizeDay falló en D${d} (${city})`, e);
+      // 3) Solo si NO se hicieron fixes anteriores (o si forceReplan) aplicar thin loop.
+      //    Además: no re-optimizar días ya tocados arriba.
+      if(forceReplan || !anyFixes){
+        for(let d=1; d<=dest.days; d++){
+          if(optimizedDays.has(d)) continue;
+          if(forceReplan || dayIsTooThin(city, d, 3)){
+            /* eslint-disable no-await-in-loop */
+            const did = await safeOptimizeDayOnce(d, 'thin/forceReplan');
+            if(did) anyFixes = true;
           }
         }
       }
@@ -2120,6 +2121,14 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
     // ✅ PATCH QUIRÚRGICO (rendimiento): optimiza solo si hace falta
     const force = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
 
+    // ✅ AJUSTE QUIRÚRGICO (EFICIENCIA): evitar optimizeDay duplicado en rango
+    const optimizedDays = new Set();
+    const safeOptimizeOnce = async (d)=>{
+      if(optimizedDays.has(d)) return;
+      optimizedDays.add(d);
+      await optimizeDay(city, d);
+    };
+
     for(let d=start; d<=end; d++){
       /* eslint-disable no-await-in-loop */
       const thin =
@@ -2128,7 +2137,7 @@ async function rebalanceWholeCity(city, rangeOpt = {}){
           : true; // si no existe helper, conservamos comportamiento anterior (optimiza)
 
       if(force || thin){
-        await optimizeDay(city, d);
+        await safeOptimizeOnce(d);
       }
     }
   }catch(err){
