@@ -3149,76 +3149,134 @@ function clearTransportAfterReturn(city, rows) {
 ------------------------------------------------------------------- */
 function fixOverlaps(rows) {
   const toMin = __toMinHHMM__;
-  const toHH = __toHHMMfromMin__;
+  const toHH  = __toHHMMfromMin__;
+
   const durMin = (d) => {
     if (!d) return 0;
 
-    // Si viene en 2 líneas, tomamos actividad
     const raw = String(d);
+
+    // Si viene en 2 líneas, tomamos "Actividad"
     if (/Transporte\s*:/i.test(raw) || /Actividad\s*:/i.test(raw)) {
       const mAct = raw.match(/Actividad\s*:\s*([^\n]+)/i);
-      if(mAct){
+      if (mAct) {
         const s = mAct[1].trim();
-        const m = s.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-        if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
-        const m2 = s.match(/(\d+)\s*m/i);
-        if (m2) return parseInt(m2[1], 10);
+        const mh = s.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+        if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
+        const mm = s.match(/(\d+)\s*m/i);
+        if (mm) return parseInt(mm[1], 10);
       }
     }
 
-    const m = String(d).match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-    if (m) return parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
-    const m2 = String(d).match(/(\d+)\s*m/i);
-    if (m2) return parseInt(m2[1], 10);
+    const mh = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+    if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
+    const mm = raw.match(/(\d+)\s*m/i);
+    if (mm) return parseInt(mm[1], 10);
     return 0;
   };
 
-  const expanded = rows.map(r => {
-    let s = toMin(r.start || '');
-    let e = toMin(r.end || '');
-    const d = durMin(r.duration || '');
-    let cross = false;
+  if (!Array.isArray(rows) || !rows.length) return rows || [];
 
-    if (s != null && (e == null || e <= s)) {
-      if (__isNightRow__(r) || (d > 0 && s >= 18 * 60)) {
-        e = (e != null ? e : s + Math.max(d, 60)) + 24 * 60;
-        cross = true;
-      } else {
-        e = e != null ? (e <= s ? s + Math.max(d, 60) : e) : s + Math.max(d, 60);
-      }
-    } else if (s == null && e != null && d > 0) {
-      s = e - d; if (s < 0) s = 9 * 60;
-    } else if (s == null && e == null) {
-      s = 9 * 60; e = s + 60;
-    }
-
-    return { __s: s, __e: e, __d: d, __cross: cross, raw: r };
+  // ✅ Tabs-safe: agrupar por día para NO mezclar días
+  const byDay = {};
+  rows.forEach((r, idx) => {
+    const d = Number(r?.day) || 1;
+    // preserva orden original por si hay empates o faltan horas
+    const rr = (typeof r?._idx === 'undefined') ? { ...r, _idx: idx } : r;
+    (byDay[d] = byDay[d] || []).push(rr);
   });
 
-  expanded.sort((a, b) => (a.__s || 0) - (b.__s || 0));
+  const outAll = [];
 
-  const out = [];
-  let prevEnd = null;
-  for (const item of expanded) {
-    let { __s: s, __e: e, __d: d, __cross: cross, raw: r } = item;
+  const days = Object.keys(byDay).map(n => +n).sort((a,b)=>a-b);
+  for (const day of days) {
+    const dayRows = byDay[day];
 
-    if (prevEnd != null && s < prevEnd + 15) {
-      const shift = (prevEnd + 15) - s;
-      s += shift; e += shift;
+    const expanded = dayRows.map(r => {
+      let s = toMin(r.start || '');
+      let e = toMin(r.end || '');
+      const d = durMin(r.duration || '');
+      let cross = false;
+
+      // Normalización base start/end usando duración si hace falta
+      if (s != null && (e == null || e <= s)) {
+        if (__isNightRow__(r) || (d > 0 && s >= 18 * 60)) {
+          // nocturna/cruce: extendemos el end al "día siguiente"
+          e = (e != null ? e : s + Math.max(d, 60)) + 24 * 60;
+          cross = true;
+        } else {
+          e = (e != null)
+            ? (e <= s ? s + Math.max(d, 60) : e)
+            : (s + Math.max(d, 60));
+        }
+      } else if (s == null && e != null && d > 0) {
+        s = e - d;
+        if (s < 0) s = 9 * 60;
+      } else if (s == null && e == null) {
+        s = 9 * 60;
+        e = s + 60;
+      }
+
+      return { __s: s, __e: e, __d: d, __cross: cross, raw: r };
+    });
+
+    // ✅ Orden por start, pero con fallback al orden original _idx
+    expanded.sort((a, b) => {
+      const sa = (a.__s == null ? 1e9 : a.__s);
+      const sb = (b.__s == null ? 1e9 : b.__s);
+      if (sa !== sb) return sa - sb;
+      return (Number(a.raw?._idx)||0) - (Number(b.raw?._idx)||0);
+    });
+
+    const out = [];
+    let prevEnd = null;
+
+    for (const item of expanded) {
+      let { __s: s, __e: e, __d: d, __cross: cross, raw: r } = item;
+
+      // ✅ Shift solo dentro del día
+      if (prevEnd != null && s < prevEnd + 15) {
+        const shift = (prevEnd + 15) - s;
+        s += shift;
+        e += shift;
+      }
+      prevEnd = Math.max(prevEnd ?? 0, e);
+
+      // Duración final: si ya existe duration (incl 2 líneas), se conserva
+      let finalDur = r.duration;
+      if (!finalDur) {
+        finalDur = (d > 0) ? `${d}m` : `${Math.max(60, e - s)}m`;
+      }
+
+      const isNight = __isNightRow__(r);
+
+      // Si es nocturna y quedó en rango extendido, convertir horas manteniendo _crossDay
+      let sOut = s;
+      let eOut = e;
+      if (isNight && s >= 24 * 60) {
+        sOut = s - 24 * 60;
+        eOut = e - 24 * 60;
+        cross = true;
+      }
+
+      // ✅ NO clamp agresivo a 18:00; solo formatear
+      const startHH = toHH(sOut);
+      const endHH   = toHH(eOut);
+
+      out.push({
+        ...r,
+        day,
+        start: startHH,
+        end: endHH,
+        duration: finalDur,
+        _crossDay: !!(r._crossDay || cross)
+      });
     }
-    prevEnd = Math.max(prevEnd ?? 0, e);
 
-    const finalDur = d > 0 ? r.duration : `${Math.max(60, e - s)}m`;
-
-    const isNight = __isNightRow__(r);
-    if (isNight && s >= 24 * 60) { e -= 24 * 60; s -= 24 * 60; cross = true; }
-
-    const startHH = isNight ? toHH(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59)) : toHH(s);
-    const endHH = toHH(e);
-
-    out.push({ ...r, start: startHH, end: endHH, duration: finalDur, _crossDay: (r._crossDay || cross || e >= 24 * 60) ? true : false });
+    outAll.push(...out);
   }
-  return out;
+
+  return outAll;
 }
 
 /* ------------------------------------------------------------------
