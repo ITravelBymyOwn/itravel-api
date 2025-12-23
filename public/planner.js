@@ -1592,66 +1592,6 @@ Contexto:
   return localSanitize(rows);
 }
 
-/* ==============================
-   SECCIÓN 15 · Generación por ciudad
-   LIMPIEZA QUIRÚRGICA FINAL
-   Fuente de verdad: API (INFO → PLANNER)
-================================= */
-
-/* ─────────────────────────────────────────────────────────────
-   [15.0] SHIMS OBLIGATORIOS (NO TOCAR)
-───────────────────────────────────────────────────────────── */
-
-/* ===== callApiChat ===== */
-if (typeof window.callApiChat !== 'function') {
-  window.callApiChat = async function(mode, payload = {}, opts = {}) {
-    const timeoutMs = Number(opts.timeoutMs || 60000);
-    const retries   = Number(opts.retries || 0);
-
-    const doOnce = async ()=>{
-      const ctrl = new AbortController();
-      const t = setTimeout(()=>ctrl.abort(), timeoutMs);
-      try{
-        const resp = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode, ...payload }),
-          signal: ctrl.signal
-        });
-        if (!resp.ok) throw new Error(`API ${mode} ${resp.status}`);
-        return await resp.json();
-      } finally {
-        clearTimeout(t);
-      }
-    };
-
-    let lastErr;
-    for (let i=0; i<=retries; i++){
-      try { return await doOnce(); }
-      catch(e){ lastErr = e; }
-    }
-    throw lastErr;
-  };
-}
-
-/* ===== cleanToJSONPlus ===== */
-if (typeof window.cleanToJSONPlus !== 'function') {
-  window.cleanToJSONPlus = function(input){
-    if (!input) return null;
-    if (typeof input === 'object') return input;
-
-    const txt = String(input).trim();
-
-    try { return JSON.parse(txt); } catch(_) {}
-
-    const m = txt.match(/\{[\s\S]*\}/);
-    if (m) {
-      try { return JSON.parse(m[0]); } catch(_) {}
-    }
-    return null;
-  };
-}
-
 /* ─────────────────────────────────────────────────────────────
    [15.1] Overlay helpers (se conserva)
 ───────────────────────────────────────────────────────────── */
@@ -1681,6 +1621,70 @@ function showWOW(on, msg){
    [15.2] Generación principal por ciudad
    INFO decide → PLANNER estructura → JS renderiza
 ───────────────────────────────────────────────────────────── */
+
+/* ===== INJERTO QUIRÚRGICO #0: seguros mínimos (NO cambia flujo) ===== */
+if (typeof window.callApiChat !== 'function') {
+  window.callApiChat = async function(mode, payload = {}, opts = {}) {
+    const timeoutMs = Number(opts.timeoutMs || 60000);
+    const retries   = Number(opts.retries || 0);
+
+    const doOnce = async ()=>{
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
+      try{
+        const resp = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, ...payload }),
+          signal: ctrl.signal
+        });
+        if (!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
+        return await resp.json();
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
+    let lastErr = null;
+    for (let i=0; i<=retries; i++){
+      try { return await doOnce(); }
+      catch(e){ lastErr = e; }
+    }
+    throw lastErr || new Error("callApiChat failed");
+  };
+}
+
+if (typeof window.cleanToJSONPlus !== 'function') {
+  window.cleanToJSONPlus = function(raw = "") {
+    if (!raw) return null;
+    if (typeof raw === "object") return raw;
+    if (typeof raw !== "string") return null;
+
+    try { return JSON.parse(raw); } catch {}
+    try {
+      const first = raw.indexOf("{");
+      const last  = raw.lastIndexOf("}");
+      if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
+    } catch {}
+    try {
+      const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
+      return JSON.parse(cleaned);
+    } catch {}
+    return null;
+  };
+}
+
+/* ===== INJERTO QUIRÚRGICO #1: cobertura por día (evita “solo día 1”) ===== */
+function __rowsCoverAllDays__(rows, daysTotal){
+  if(!Array.isArray(rows) || !rows.length) return false;
+  const need = Math.max(1, Number(daysTotal) || 1);
+  const present = new Set(rows.map(r => Number(r.day) || 1));
+  for(let d=1; d<=need; d++){
+    if(!present.has(d)) return false;
+  }
+  return true;
+}
+
 async function generateCityItinerary(city){
   if(!city) return;
 
@@ -1690,7 +1694,7 @@ async function generateCityItinerary(city){
   showWOW(true, `Generando itinerario para ${city}…`);
 
   try {
-    /* ===== Horarios por día (scope explícito) ===== */
+    /* ===== Horarios por día (si no hay, el API decide) ===== */
     const perDay = Array.from({ length: dest.days }, (_,i)=>{
       const src = cityMeta[city]?.perDay?.[i] || {};
       return {
@@ -1722,27 +1726,37 @@ async function generateCityItinerary(city){
     );
 
     const research = cleanToJSONPlus(infoResp?.text || infoResp);
-    if (!research || !Array.isArray(research.rows_draft)) {
+    if (!research || !Array.isArray(research.rows_draft) || !research.rows_draft.length) {
       throw new Error('INFO no devolvió rows_draft');
     }
 
-    /* ===== ETAPA 2 — PLANNER (scope BLOQUEADO) ===== */
+    /* ===== ETAPA 2 — PLANNER ===== */
     const plannerResp = await callApiChat(
       'planner',
-      {
-        research_json: research,
-        day_hours: perDay,
-        days_total: dest.days
-      },
+      { research_json: research },
       { timeoutMs: 90000, retries: 1 }
     );
 
     const parsed = cleanToJSONPlus(plannerResp?.text || plannerResp);
-    if (!parsed || !Array.isArray(parsed.rows)) {
-      throw new Error('PLANNER no devolvió rows');
+
+    /* ===== INJERTO QUIRÚRGICO #2: fuente de filas robusta =====
+       - Si PLANNER devuelve rows incompleto (ej. solo día 1),
+         usamos research.rows_draft (INFO es la verdad).
+       - Esto mantiene tu arquitectura y evita días vacíos.
+    */
+    let rowsToRender = null;
+
+    if (parsed && Array.isArray(parsed.rows) && parsed.rows.length) {
+      rowsToRender = parsed.rows;
+      if (!__rowsCoverAllDays__(rowsToRender, dest.days)) {
+        rowsToRender = research.rows_draft;
+      }
+    } else {
+      // Si PLANNER no devolvió rows, renderizamos directamente lo de INFO
+      rowsToRender = research.rows_draft;
     }
 
-    /* ===== Render directo (sin mutar lógica) ===== */
+    /* ===== Render directo (sin modificar datos) ===== */
     itineraries[city] = itineraries[city] || {
       byDay: {},
       originalDays: dest.days
@@ -1750,9 +1764,8 @@ async function generateCityItinerary(city){
 
     itineraries[city].byDay = {};
 
-    parsed.rows.forEach(r=>{
-      const d = Number(r.day);
-      if (!d || d < 1 || d > dest.days) return;
+    rowsToRender.forEach(r=>{
+      const d = Number(r.day) || 1;
       itineraries[city].byDay[d] = itineraries[city].byDay[d] || [];
       itineraries[city].byDay[d].push(normalizeRow(r));
     });
