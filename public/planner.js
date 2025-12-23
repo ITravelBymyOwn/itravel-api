@@ -3626,6 +3626,11 @@ async function onSend(){
 /* ==============================
    SECCIÓN 21 · INIT y listeners
    (RESET restaurado + alineado con API v43.5)
+   FIX QUIRÚRGICO:
+   - __ensureInfoAgentClient__ NO puede romper init si no existe
+   - input listener corregido (antes: classList.matches NO existe)
+   - Reset robusto (guards: no revienta si algo está undefined)
+   - Evita doble-bind del reset
 ================================= */
 
 $addCity?.addEventListener('click', ()=>addCityRow());
@@ -3688,15 +3693,18 @@ $save?.addEventListener('click', ()=>{
 
   if(formHasBasics() && validateBaseDatesDMY()){
     if ($start) $start.disabled = false;
-    document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved'));
+    try { document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved')); } catch(_) {}
   } else {
     if ($start) $start.disabled = true;
   }
 });
 
-document.addEventListener('input', e=>{
+/* FIX: antes estaba mal (classList.matches NO existe). */
+document.addEventListener('input', (e)=>{
   if(!$start) return;
-  if(e.target?.classList?.matches('.city,.country,.days,.baseDate')){
+  const t = e.target;
+  // Solo reacciona a inputs del bloque destinos
+  if(t && typeof t.matches === 'function' && t.matches('.city, .country, .days, .baseDate')){
     if(!formHasBasics()) $start.disabled = true;
   }
 });
@@ -3717,8 +3725,23 @@ function ensureResetButton(){
   return btn;
 }
 
+function _safeClearObject(obj){
+  if(!obj || typeof obj !== 'object') return;
+  try { Object.keys(obj).forEach(k=>delete obj[k]); } catch(_) {}
+}
+function _safeClearArray(arr){
+  if(!arr || !Array.isArray(arr)) return;
+  try { arr.length = 0; } catch(_) {}
+}
+
 function bindReset(){
   const $btn = ensureResetButton();
+  if(!$btn) return;
+
+  // Evita doble bind si por cualquier motivo se llama otra vez
+  if($btn.dataset && $btn.dataset.bound === '1') return;
+  if($btn.dataset) $btn.dataset.bound = '1';
+
   $btn.removeAttribute('disabled');
 
   $btn.addEventListener('click', ()=>{
@@ -3740,57 +3763,80 @@ function bindReset(){
     document.body.appendChild(overlay);
     setTimeout(()=>overlay.classList.add('active'),10);
 
+    const closeOverlay = ()=>{
+      overlay.classList.remove('active');
+      setTimeout(()=>overlay.remove(),300);
+    };
+
     overlay.querySelector('#confirm-reset')?.addEventListener('click', ()=>{
-      /* 🔹 Limpieza SEGURA (sin reasignar consts) */
-      $cityList.innerHTML='';
-      addCityRow();
+      try {
+        /* 🔹 Limpieza SEGURA (sin reasignar consts; con guards) */
+        try { if($cityList) $cityList.innerHTML=''; } catch(_) {}
+        try { addCityRow(); } catch(_) {}
 
-      savedDestinations.length = 0;
-      Object.keys(itineraries).forEach(k=>delete itineraries[k]);
-      Object.keys(cityMeta).forEach(k=>delete cityMeta[k]);
-      session.length = 0;
+        // Arrays/objetos globales (si existen)
+        try { if(typeof savedDestinations !== 'undefined' && Array.isArray(savedDestinations)) savedDestinations.length = 0; } catch(_) {}
+        try { if(typeof itineraries !== 'undefined') _safeClearObject(itineraries); } catch(_) {}
+        try { if(typeof cityMeta !== 'undefined') _safeClearObject(cityMeta); } catch(_) {}
+        try { if(typeof session !== 'undefined' && Array.isArray(session)) session.length = 0; } catch(_) {}
 
-      pendingChange = null;
-      planningStarted = false;
-      metaProgressIndex = 0;
-      collectingHotels = false;
-      isItineraryLocked = false;
-      activeCity = null;
+        // Flags (si existen)
+        try { if(typeof pendingChange !== 'undefined') pendingChange = null; } catch(_) {}
+        try { if(typeof planningStarted !== 'undefined') planningStarted = false; } catch(_) {}
+        try { if(typeof metaProgressIndex !== 'undefined') metaProgressIndex = 0; } catch(_) {}
+        try { if(typeof collectingHotels !== 'undefined') collectingHotels = false; } catch(_) {}
+        try { if(typeof isItineraryLocked !== 'undefined') isItineraryLocked = false; } catch(_) {}
+        try { if(typeof activeCity !== 'undefined') activeCity = null; } catch(_) {}
 
-      if ($start) $start.disabled = true;
-      $tabs.innerHTML='';
-      $itWrap.innerHTML='';
-      $chatBox.style.display='none';
-      $chatM.innerHTML='';
+        // UI
+        try { if ($start) $start.disabled = true; } catch(_) {}
+        try { if ($tabs) $tabs.innerHTML=''; } catch(_) {}
+        try { if ($itWrap) $itWrap.innerHTML=''; } catch(_) {}
+        try { if ($chatBox) $chatBox.style.display='none'; } catch(_) {}
+        try { if ($chatM) $chatM.innerHTML=''; } catch(_) {}
 
-      qsa('.date-tooltip').forEach(t=>t.remove());
-      try { $overlayWOW && ($overlayWOW.style.display='none'); } catch(_){}
+        try { qsa('.date-tooltip').forEach(t=>t.remove()); } catch(_) {}
+        try { $overlayWOW && ($overlayWOW.style.display='none'); } catch(_){}
 
-      if (typeof plannerState !== 'undefined'){
-        plannerState.destinations = [];
-        plannerState.specialConditions = '';
-        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
-        plannerState.budget = '';
-        plannerState.currency = 'USD';
-        plannerState.forceReplan = {};
-        plannerState.preferences = {};
-        plannerState.dayTripPending = {};
-        plannerState.existingActs = {};
+        // plannerState (si existe)
+        try {
+          if (typeof plannerState !== 'undefined' && plannerState) {
+            plannerState.destinations = [];
+            plannerState.specialConditions = '';
+            plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+            plannerState.budget = '';
+            plannerState.currency = 'USD';
+            plannerState.forceReplan = {};
+            plannerState.preferences = {};
+            plannerState.dayTripPending = {};
+            plannerState.existingActs = {};
+          }
+        } catch(_) {}
+
+        // Hooks
+        try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
+
+        closeOverlay();
+
+        const firstCity = qs('.city-row .city');
+        if(firstCity) firstCity.focus();
+      } catch (err) {
+        console.error('[bindReset] reset failed', err);
+        // Si algo explota, igual cerramos modal para que no se “pegue”
+        closeOverlay();
       }
-
-      overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(),300);
-
-      document.dispatchEvent(new CustomEvent('itbmo:plannerReset'));
-
-      const firstCity = qs('.city-row .city');
-      if(firstCity) firstCity.focus();
     });
 
-    overlay.querySelector('#cancel-reset')?.addEventListener('click', ()=>{
-      overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(),300);
-    });
+    overlay.querySelector('#cancel-reset')?.addEventListener('click', closeOverlay);
+
+    // Escape cierra
+    const escHandler = (e)=>{
+      if(e.key === 'Escape'){
+        closeOverlay();
+        document.removeEventListener('keydown', escHandler);
+      }
+    };
+    document.addEventListener('keydown', escHandler);
   });
 }
 
@@ -3802,7 +3848,7 @@ $start?.addEventListener('click', ()=>{
     return;
   }
 
-  document.dispatchEvent(new CustomEvent('itbmo:startPlanning'));
+  try { document.dispatchEvent(new CustomEvent('itbmo:startPlanning')); } catch(_) {}
   startPlanning();
 });
 
@@ -3818,17 +3864,29 @@ $chatI?.addEventListener('keydown', e=>{
 
 /* ================= INIT ================= */
 
+// FIX QUIRÚRGICO: esto NO puede romper el sitio si falta la función
+function _safeEnsureInfoAgentClient(){
+  try {
+    if (typeof __ensureInfoAgentClient__ === 'function') {
+      __ensureInfoAgentClient__();
+      return;
+    }
+  } catch(_) {}
+  // fallback silencioso (no rompe init)
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
   if(!qs('#city-list .city-row')) addCityRow();
-  __ensureInfoAgentClient__();
-  bindInfoChatListeners();
+
+  _safeEnsureInfoAgentClient();
+
+  try { if (typeof bindInfoChatListeners === 'function') bindInfoChatListeners(); } catch(_) {}
   bindReset();
 
   if ($start) $start.disabled = true;
 });
-
 
 
