@@ -1775,178 +1775,90 @@ async function generateCityItinerary(city){
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
-   v60 base + overlay bloqueado global hasta terminar todas las ciudades
-   (concurrencia controlada vía runWithConcurrency)
-   + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
-   ✅ FIX QUIRÚRGICO: si falta transporte, pedir SOLO transporte (evita confusión)
+   MODELO LIMPIO – ALINEADO CON API
+   - NO genera lógica de itinerarios
+   - SOLO orquesta el flujo
 ================================= */
+
+let __planningInProgress = false;
+
 async function startPlanning(){
-  if(savedDestinations.length===0) return;
-  $chatBox.style.display='flex';
+  if (__planningInProgress) {
+    console.warn('[startPlanning] Ya hay una planificación en curso');
+    return;
+  }
+
+  if (!savedDestinations || savedDestinations.length === 0) {
+    console.warn('[startPlanning] No hay destinos guardados');
+    return;
+  }
+
+  __planningInProgress = true;
+
+  $chatBox.style.display = 'flex';
   planningStarted = true;
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
 
-  // 🛠️ Preferencias globales (consumidas por el optimizador/AI):
-  // - Cena visible en la franja correcta, aunque no haya “actividad especial”
-  // - Ventana vespertina flexible (no anclar rígido 08:30–19:00 si el contexto lo amerita)
-  // - Sugerencias icónicas con frecuencia moderada (similares a auroras)
-  if(!plannerState.preferences) plannerState.preferences = {};
+  // Preferencias globales consumidas por el API
+  if (!plannerState.preferences) plannerState.preferences = {};
   plannerState.preferences.alwaysIncludeDinner = true;
-  plannerState.preferences.flexibleEvening     = true;
+  plannerState.preferences.flexibleEvening = true;
   plannerState.preferences.iconicHintsModerate = true;
 
-  // 1) Saludo inicial
   chatMsg(`${tone.hi}`);
-
-  // 2) Tip del Info Chat (se muestra una sola vez al iniciar)
-  //    Queda inmediatamente DEBAJO del saludo, antes de pedir el primer hotel/transporte.
   chatMsg(`${tone.infoTip}`, 'ai');
 
-  // 3) Comienza flujo de solicitud de hotel/zona y transporte
   askNextHotelTransport();
 }
 
-/* ====== Resolutor inteligente de Hotel/Zona (fuzzy & alias) ====== */
-const hotelResolverCache = {}; // cache por ciudad
-function _normTxt(s){
-  return String(s||'')
-    .normalize('NFD').replace(/\p{Diacritic}/gu,'')
-    .toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
-}
-function _tokenSet(str){
-  return new Set(_normTxt(str).split(' ').filter(Boolean));
-}
-function _jaccard(a,b){
-  const A=_tokenSet(a), B=_tokenSet(b);
-  const inter = [...A].filter(x=>B.has(x)).length;
-  const uni   = new Set([...A,...B]).size || 1;
-  return inter/uni;
-}
-function _levRatio(a,b){
-  // usa levenshteinDistance disponible en la Sección 17
-  const A=_normTxt(a), B=_normTxt(b);
-  const maxlen = Math.max(A.length,B.length) || 1;
-  return (maxlen - levenshteinDistance(A,B))/maxlen;
-}
-
-// Pre-carga alias por ciudad: nombres populares, barrios, POIs cercanos, etc.
-function preloadHotelAliases(city){
-  if(!city) return;
-  if(!plannerState.hotelAliases) plannerState.hotelAliases = {};
-  if(plannerState.hotelAliases[city]) return;
-
-  const base = [city];
-  const extras = [
-    'centro','downtown','old town','historic center','main square','cathedral',
-    'harbor','port','university','station','bus terminal','train station'
-  ];
-
-  // si existen referencias del usuario en cityMeta (últimos hoteles elegidos), úsalas
-  const prev = (cityMeta[city]?.hotel ? [cityMeta[city].hotel] : []);
-  plannerState.hotelAliases[city] = [...new Set([...base, ...extras, ...prev])];
-}
-
-function resolveHotelInput(userText, city){
-  const raw = String(userText||'').trim();
-  if(!raw) return {text:'', confidence:0};
-
-  // 1) Atajos: links → conf alta
-  if(/^https?:\/\//i.test(raw)){
-    return { text: raw, confidence: 0.98, resolvedVia: 'url' };
-  }
-
-  // 2) Si el usuario da “zona/landmark”, intenta casar con alias y POIs ya vistos
-  const candidates = new Set();
-
-  // Aliases precargados
-  (plannerState.hotelAliases?.[city] || []).forEach(x=>candidates.add(x));
-
-  // Heurística: añade nombres de sitios del itinerario actual (si existe)
-  const byDay = itineraries?.[city]?.byDay || {};
-  Object.values(byDay).flat().forEach(r=>{
-    if(r?.activity) candidates.add(r.activity);
-    if(r?.to)       candidates.add(r.to);
-    if(r?.from)     candidates.add(r.from);
-  });
-
-  // Hotel previo del usuario si existía
-  if(cityMeta?.[city]?.hotel) candidates.add(cityMeta[city].hotel);
-
-  // 3) Puntuar por mezcla: Jaccard de tokens + Levenshtein ratio
-  let best = { text: raw, confidence: 0.50, resolvedVia: 'raw' };
-  const list = [...candidates].filter(Boolean);
-  for(const c of list){
-    const j = _jaccard(raw, c);
-    const l = _levRatio(raw, c);
-    // mezcla: 60% Jaccard + 40% Levenshtein ratio
-    const score = 0.6*j + 0.4*l;
-    if(score > (best.score||0)){
-      best = { text: c, confidence: Math.max(0.55, Math.min(0.99, score)), resolvedVia: 'alias', score };
-    }
-  }
-
-  // 4) Cache y retorno
-  hotelResolverCache[city] = hotelResolverCache[city] || {};
-  hotelResolverCache[city][raw] = best;
-  return best;
-}
-
-/* ====== Helper mínimo para detectar “no sé / recomiéndame” en transporte ====== */
-function __wantsTransportRecommendation__(txt){
-  const t = String(txt||'').toLowerCase();
-  return /\b(recomiend|no\s*s[eé]|no\s*se|no\s*tengo|da\s*igual|como\s*sea|cualquiera)\b/.test(t);
-}
-
 function askNextHotelTransport(){
-  // ✅ Si ya se procesaron todos los destinos → generar itinerarios
-  if(metaProgressIndex >= savedDestinations.length){
+  if (metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
 
     (async ()=>{
-      // 🔒 Mantener UI bloqueada durante la generación global
       showWOW(true, 'Astra está generando itinerarios…');
 
-      // ⚙️ Concurrencia controlada (v60): no tocar
-      const taskFns = savedDestinations.map(({city}) => async () => {
-        await generateCityItinerary(city);
-      });
-      await runWithConcurrency(taskFns);
+      try {
+        const taskFns = savedDestinations.map(({ city }) => async () => {
+          await generateCityItinerary(city);
+        });
 
-      // ✅ Al terminar TODAS las ciudades, desbloquear UI
-      showWOW(false);
-      chatMsg(tone.doneAll);
+        await runWithConcurrency(taskFns);
+
+        chatMsg(tone.doneAll);
+      } catch (err){
+        console.error('[startPlanning] Error durante generación global', err);
+        chatMsg('⚠️ Ocurrió un problema al generar los itinerarios. Intenta nuevamente.', 'ai');
+      } finally {
+        showWOW(false);
+        __planningInProgress = false;
+      }
     })();
+
     return;
   }
 
-  // 🧠 Validación y persistencia del destino actual
   const city = savedDestinations[metaProgressIndex].city;
-  if(!cityMeta[city]){
-    cityMeta[city] = { baseDate: null, hotel:'', transport:'', perDay: [] };
+
+  if (!cityMeta[city]){
+    cityMeta[city] = { baseDate: null, hotel: '', transport: '', perDay: [] };
   }
 
-  // 🔎 Pre-carga de alias/POIs para ayudar al usuario a escribir “a su manera”
   preloadHotelAliases(city);
 
-  // ⛔ Debe esperar explícitamente hotel/zona ANTES de avanzar
-  const currentHotel = cityMeta[city].hotel || '';
-  if(!currentHotel.trim()){
+  if (!cityMeta[city].hotel){
     setActiveCity(city);
     renderCityItinerary(city);
     chatMsg(tone.askHotelTransport(city), 'ai');
-    return; // 👈 No avanza hasta que el usuario indique hotel/zona
+    return;
   }
 
-  // ⛔ Debe esperar transporte ANTES de avanzar
-  const currentTransport = cityMeta[city].transport || '';
-  if(!currentTransport.trim()){
+  if (!cityMeta[city].transport){
     setActiveCity(city);
     renderCityItinerary(city);
-
-    // ✅ FIX QUIRÚRGICO: pedir SOLO transporte para no confundir al usuario
     chatMsg(
       `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover? ` +
       `(ej: “vehículo alquilado”, “transporte público”, “Uber/taxi”, o escribe “recomiéndame”).`,
@@ -1955,7 +1867,6 @@ function askNextHotelTransport(){
     return;
   }
 
-  // 🧭 Avanzar al siguiente destino si ya hay hotel + transporte guardados
   metaProgressIndex++;
   askNextHotelTransport();
 }
