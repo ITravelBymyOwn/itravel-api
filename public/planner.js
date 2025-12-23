@@ -3470,15 +3470,15 @@ async function optimizeDay(city, day) {
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
-   v71.fix — Extensión de días estable
-   - Reequilibra desde el último día original hasta el nuevo final
-   - Define "día suave" en el NUEVO último día
-   - Asegura ventana/optimización completa del día nuevo
-   + Mejora: uso del resolutor de hotel/zona, feedback de confianza,
-     y activación automática de preferAurora cuando aplique
-   ✅ FIX QUIRÚRGICO (auditoría):
-   - En flujo collectingHotels: NO avanza metaProgressIndex si falta transport.
-   - Si el usuario envía solo hotel/zona, se guarda y se pide transporte sin saltar de ciudad.
+   v71.fix — Post-API (INFO + PLANNER como fuente de verdad)
+   ✅ Mantiene flujos existentes (add/swap/move/etc.)
+   ✅ Mantiene colecta hotel/transporte y reequilibrio
+   ✅ Mantiene info_query (para preguntas informativas dentro del chat del planner)
+   🆕 QUIRÚRGICO: “free_edit” ya NO arma prompts ni llama callAgent.
+      En su lugar:
+      1) guarda la instrucción en plannerState.pendingEdits[city]
+      2) dispara replan/optimize usando el API vía optimizeDay()/rebalanceWholeCity()
+   ⚠️ NO toca el Info Chat EXTERNO (eso vive en SECCIÓN 21 y se mantiene).
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -3648,14 +3648,14 @@ async function onSend(){
     const total = Object.keys(itineraries[city].byDay||{}).length;
     for(let d=prevTotal+1; d<=total; d++) ensureWindow(d);
 
-    // 👉 Definir "día suave" en el NUEVO último día
+    // 👉 Definir "día suave" en el NUEVO último día (solo si existe en tu lógica)
     if(!plannerState.lightDayTarget) plannerState.lightDayTarget = {};
     plannerState.lightDayTarget[city] = total;
 
     // Reequilibrar desde el último día original hasta el nuevo final
     await rebalanceWholeCity(city, { start: Math.max(1, prevTotal), end: total, dayTripTo: intent.dayTripTo||'' });
 
-    // Garantía de completitud del último día
+    // Garantía de completitud del último día (si tu optimizeDay ya está post-API)
     if ((itineraries[city].byDay?.[total]||[]).length < 3) {
       await optimizeDay(city, total);
     }
@@ -3740,6 +3740,7 @@ async function onSend(){
     showWOW(true,'Eliminando día…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
+    // ✅ Secuencial (evita timeouts/paralelismo)
     for(let d=intent.day; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
@@ -3751,9 +3752,9 @@ async function onSend(){
   if(intent.type==='swap_day' && intent.city){
     showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
-   // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
-await optimizeDay(intent.city, intent.from);
-await optimizeDay(intent.city, intent.to);
+    // ✅ Secuencial para evitar paralelismo y timeouts
+    await optimizeDay(intent.city, intent.from);
+    await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
@@ -3764,9 +3765,9 @@ await optimizeDay(intent.city, intent.to);
   if(intent.type==='move_activity' && intent.city){
     showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
-    // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
-await optimizeDay(intent.city, intent.fromDay);
-await optimizeDay(intent.city, intent.toDay);
+    // ✅ Secuencial para evitar paralelismo y timeouts
+    await optimizeDay(intent.city, intent.fromDay);
+    await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
@@ -3834,7 +3835,8 @@ await optimizeDay(intent.city, intent.toDay);
     return;
   }
 
-  // Preguntas informativas
+  // Preguntas informativas (dentro del chat del planner)
+  // ⚠️ Esto NO es el Info Chat EXTERNO; ese se mantiene aparte en SECCIÓN 21.
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
@@ -3846,68 +3848,56 @@ await optimizeDay(intent.city, intent.toDay);
     return;
   }
 
-  // Edición libre
+  // ===========================
+  // Edición libre (post-API)
+  // ===========================
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
     if(!city){ chatMsg('Aún no hay itinerario en pantalla. Inicia la planificación primero.'); return; }
-    const day = itineraries[city]?.currentDay || 1;
+
+    const dayVisible = itineraries[city]?.currentDay || 1;
+
+    // Heurística simple: si el usuario menciona "día X", tratamos como edición del día.
+    let scope = 'city';
+    let editDay = null;
+    const mDay = String(text||'').match(/\b(?:d[ií]a|day)\s*(\d{1,2})\b/i);
+    if(mDay){
+      const d = parseInt(mDay[1],10);
+      if(Number.isFinite(d) && d>0){
+        scope = 'day';
+        editDay = d;
+      }
+    }
+
+    if(!plannerState) window.plannerState = {};
+    if(!plannerState.pendingEdits) plannerState.pendingEdits = {};
+    plannerState.pendingEdits[city] = { scope, day: editDay, text: String(text||'') };
+
     showWOW(true,'Aplicando tu cambio…');
 
-    const data = itineraries[city];
-    const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)';
-    const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
-
-    const prompt = `
-${FORMAT}
-**Contexto (reducido si es posible):**
-${buildIntakeLite(city)}
-
-**Ciudad a editar:** ${city}
-**Día visible:** ${day}
-**Actividades del día:**
-${dayRows}
-
-**Ventanas por día:** ${JSON.stringify(perDay)}
-**Instrucción del usuario (libre):** ${text}
-
-🕒 Horarios:
-- Base 08:30–19:00 si no hay ventana.
-- Se puede extender por cenas/tours/auroras.
-- Evita huecos > 60–75 min sin descanso/almuerzo/traslado.
-- Buffers ≥15 min entre actividades.
-
-- Integra lo pedido SIN borrar lo existente (fusión).
-- Si no se especifica un día concreto, reacomoda toda la ciudad evitando duplicados.
-- Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
-`.trim();
-
-    const ans = await callAgent(prompt, true);
-    const parsed = parseJSON(ans);
-
-    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-      let rows = [];
-      if(parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
-      else if(parsed.destination===city && parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
-      else if(Array.isArray(parsed.destinations)){
-        const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
-        rows = (dd?.rows||[]).map(r=>normalizeRow(r));
-      }else if(Array.isArray(parsed.itineraries)){
-        const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
-        rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+    try{
+      if(scope === 'day' && editDay){
+        await optimizeDay(city, editDay);
+      } else {
+        // Preferimos rebalanceWholeCity si existe (mantiene tu comportamiento global)
+        if(typeof rebalanceWholeCity === 'function'){
+          const total = Object.keys(itineraries[city]?.byDay || {}).length || (savedDestinations.find(x=>x.city===city)?.days || 1);
+          await rebalanceWholeCity(city, { start: 1, end: total });
+        } else {
+          // Fallback secuencial por día
+          const total = Object.keys(itineraries[city]?.byDay || {}).length || 1;
+          for(let d=1; d<=total; d++) await optimizeDay(city, d);
+        }
       }
-      const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
-      const val = await validateRowsWithAgent(city, rows, baseDate);
-      pushRows(city, val.allowed, false);
 
-      const daysChanged = new Set(rows.map(r=>r.day).filter(Boolean));
-      await Promise.all([...daysChanged].map(d=>optimizeDay(city, d)));
-
-      renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+      renderCityTabs();
+      setActiveCity(city);
+      renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Apliqué el cambio y reoptimicé los días implicados.','ai');
-    }else{
+      chatMsg('✅ Apliqué el cambio y reoptimicé el itinerario.','ai');
+    }catch(_){
       showWOW(false);
-      chatMsg(parsed?.followup || 'No recibí cambios válidos. ¿Intentamos de otra forma?','ai');
+      chatMsg('⚠️ No pude aplicar el cambio ahora mismo. Intenta reformularlo o indícame el día exacto (por ejemplo: “Día 3: …”).','ai');
     }
     return;
   }
