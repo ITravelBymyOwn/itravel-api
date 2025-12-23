@@ -1274,13 +1274,13 @@ function addMultipleDaysToCity(city, extraDays){
     if(!byDay[newDay]){  // evita duplicados de días
       insertDayAt(city, newDay);
 
-      // 🕒 🆕 Horario inteligente base si no hay horario definido
-      const baseStart = '08:30';
-      const baseEnd = '19:00';
-      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start || baseStart;
-      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   || baseEnd;
+      // 🕒 ✅ SIN HORARIO PREDEFINIDO: si no hay horario definido, dejar null para que el API decida
+      const start = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.start ?? null;
+      const end   = cityMeta[city]?.perDay?.find(x=>x.day===newDay)?.end   ?? null;
 
       if(!cityMeta[city]) cityMeta[city] = { perDay: [] };
+      if(!Array.isArray(cityMeta[city].perDay)) cityMeta[city].perDay = [];
+
       if(!cityMeta[city].perDay.find(x=>x.day===newDay)){
         cityMeta[city].perDay.push({ day:newDay, start, end });
       }
