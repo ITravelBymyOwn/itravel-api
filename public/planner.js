@@ -4000,6 +4000,11 @@ async function onSend(){
     **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
    🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
    💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
+
+   ✅ QUIRÚRGICO (post-API y coherente con SECCIÓN 19):
+   - NO sobrescribe window.callInfoAgent (planner info interno).
+   - Crea/asegura window.callInfoAgentPublic para el Info Chat EXTERNO.
+   - sendInfoMessage() usa callInfoAgentPublic.
 ================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
@@ -4162,6 +4167,8 @@ function bindReset(){
         plannerState.preferences = {};
         plannerState.dayTripPending = {};
         plannerState.existingActs = {};
+        // ✅ no tocamos pendingEdits: se recrea on demand
+        if(plannerState.pendingEdits) plannerState.pendingEdits = {};
       }
 
       overlay.classList.remove('active');
@@ -4246,15 +4253,25 @@ document.addEventListener('itbmo:addDays', e=>{
   rebalanceWholeCity(city, { start, end, dayTripTo });
 });
 
-/* ====== Info Chat (EXTERNO, totalmente independiente) ====== */
-/* 🔒 SHIM QUIRÚRGICO: fuerza cliente público que NO usa /api/chat ni manda context */
+/* ====== Info Chat (EXTERNO, totalmente independiente) ======
+   ✅ QUIRÚRGICO: ahora NO pisa window.callInfoAgent (interno).
+   Crea window.callInfoAgentPublic (público sin contexto).
+----------------------------------------------------------- */
 function __ensureInfoAgentClient__(){
   window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
   window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
 
-  const wrongClient = (fn)=>{
+  // Preservar el cliente interno si ya existe (planner)
+  try{
+    if(typeof window.callInfoAgent === 'function' && !window.__ITBMO_CALL_INFO_AGENT_INTERNAL__){
+      window.__ITBMO_CALL_INFO_AGENT_INTERNAL__ = window.callInfoAgent;
+    }
+  }catch(_){}
+
+  const wrongPublicClient = (fn)=>{
     if(typeof fn !== 'function') return true;
     const src = Function.prototype.toString.call(fn);
+    // si accidentalmente apunta al /api/chat o menciona context/mode, NO es público
     if(/\/api\/chat/.test(src)) return true;
     if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
     if(/context/.test(src)) return true;
@@ -4263,8 +4280,8 @@ function __ensureInfoAgentClient__(){
     return false;
   };
 
-  if(wrongClient(window.callInfoAgent)){
-    const simpleInfo = async function(userText){
+  if(wrongPublicClient(window.callInfoAgentPublic)){
+    const simpleInfoPublic = async function(userText){
       const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
       let resp;
       try{
@@ -4292,10 +4309,17 @@ function __ensureInfoAgentClient__(){
         try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
       }
     };
-    simpleInfo.__usesContext__ = false;
-    simpleInfo.__source = 'external-public-v1';
-    window.callInfoAgent = simpleInfo;
+    simpleInfoPublic.__usesContext__ = false;
+    simpleInfoPublic.__source = 'external-public-v1';
+    window.callInfoAgentPublic = simpleInfoPublic;
   }
+
+  // ✅ Si el interno existía, lo restauramos por seguridad (evita que alguien lo haya pisado)
+  try{
+    if(window.__ITBMO_CALL_INFO_AGENT_INTERNAL__ && typeof window.__ITBMO_CALL_INFO_AGENT_INTERNAL__ === 'function'){
+      window.callInfoAgent = window.__ITBMO_CALL_INFO_AGENT_INTERNAL__;
+    }
+  }catch(_){}
 }
 
 function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
@@ -4333,7 +4357,10 @@ async function sendInfoMessage(){
 
   __infoTypingOn__();
   try{
-    const ans = await callInfoAgent(txt);
+    // ✅ EXTERNO SIEMPRE usa el cliente público
+    const fn = window.callInfoAgentPublic || window.callInfoAgent; // fallback por si algo raro ocurre
+    const ans = await fn(txt);
+
     let out = ans;
     if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
     if(typeof out === 'string' && /^\s*\{/.test(out)){
@@ -4404,7 +4431,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
-  // Aísla Info Chat externo antes de listeners
+  // Aísla Info Chat externo antes de listeners (sin pisar interno)
   __ensureInfoAgentClient__();
 
   bindInfoChatListeners();
@@ -4412,5 +4439,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
-
 
