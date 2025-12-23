@@ -1594,44 +1594,15 @@ Contexto:
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
-   v75 — LIMPIEZA QUIRÚRGICA FINAL
-   Fuente de verdad: API v43.5 (INFO → PLANNER)
-   El JS NO optimiza ni reestructura itinerarios
+   LIMPIEZA QUIRÚRGICA FINAL
+   Fuente de verdad: API (INFO → PLANNER)
 ================================= */
 
 /* ─────────────────────────────────────────────────────────────
-   [15.1] Overlay helpers (se conserva)
+   [15.0] SHIMS OBLIGATORIOS (NO TOCAR)
 ───────────────────────────────────────────────────────────── */
-function setOverlayMessage(msg='Astra está generando itinerarios…'){
-  const p = $overlayWOW?.querySelector('p');
-  if(p) p.textContent = msg;
-}
 
-function showWOW(on, msg){
-  if(!$overlayWOW) return;
-  if(msg) setOverlayMessage(msg);
-  $overlayWOW.style.display = on ? 'flex' : 'none';
-  $overlayWOW.setAttribute('aria-busy', on ? 'true' : 'false');
-
-  const all = qsa('button, input, select, textarea, a');
-  all.forEach(el=>{
-    if (el.id === 'reset-planner') return;
-    if (el.id === 'info-chat-floating') {
-      try { el.disabled = on; } catch(_) {}
-      return;
-    }
-    try { el.disabled = on; } catch(_) {}
-  });
-}
-
-/* ─────────────────────────────────────────────────────────────
-   [15.2] Generación principal por ciudad
-   MODELO LIMPIO:
-   - INFO (API) decide TODO
-   - PLANNER (API) estructura
-   - JS renderiza
-───────────────────────────────────────────────────────────── */
-/* ===== Shim mínimo para callApiChat (OBLIGATORIO) ===== */
+/* ===== callApiChat ===== */
 if (typeof window.callApiChat !== 'function') {
   window.callApiChat = async function(mode, payload = {}, opts = {}) {
     const timeoutMs = Number(opts.timeoutMs || 60000);
@@ -1663,6 +1634,53 @@ if (typeof window.callApiChat !== 'function') {
   };
 }
 
+/* ===== cleanToJSONPlus ===== */
+if (typeof window.cleanToJSONPlus !== 'function') {
+  window.cleanToJSONPlus = function(input){
+    if (!input) return null;
+    if (typeof input === 'object') return input;
+
+    const txt = String(input).trim();
+
+    try { return JSON.parse(txt); } catch(_) {}
+
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]); } catch(_) {}
+    }
+    return null;
+  };
+}
+
+/* ─────────────────────────────────────────────────────────────
+   [15.1] Overlay helpers (se conserva)
+───────────────────────────────────────────────────────────── */
+function setOverlayMessage(msg='Astra está generando itinerarios…'){
+  const p = $overlayWOW?.querySelector('p');
+  if(p) p.textContent = msg;
+}
+
+function showWOW(on, msg){
+  if(!$overlayWOW) return;
+  if(msg) setOverlayMessage(msg);
+
+  $overlayWOW.style.display = on ? 'flex' : 'none';
+  $overlayWOW.setAttribute('aria-busy', on ? 'true' : 'false');
+
+  qsa('button, input, select, textarea, a').forEach(el=>{
+    if (el.id === 'reset-planner') return;
+    if (el.id === 'info-chat-floating') {
+      try { el.disabled = on; } catch(_) {}
+      return;
+    }
+    try { el.disabled = on; } catch(_) {}
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   [15.2] Generación principal por ciudad
+   INFO decide → PLANNER estructura → JS renderiza
+───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
   if(!city) return;
 
@@ -1672,18 +1690,17 @@ async function generateCityItinerary(city){
   showWOW(true, `Generando itinerario para ${city}…`);
 
   try {
-    /* =======================
-       CONTEXTO PARA INFO CHAT
-       ======================= */
-    const perDay = Array.from({length: dest.days}, (_,i)=>{
+    /* ===== Horarios por día (si no hay, el API decide) ===== */
+    const perDay = Array.from({ length: dest.days }, (_,i)=>{
       const src = cityMeta[city]?.perDay?.[i] || {};
       return {
-        day: i+1,
-        start: src.start || DEFAULT_START,
-        end: src.end || DEFAULT_END
+        day: i + 1,
+        start: src.start || null,
+        end: src.end || null
       };
     });
 
+    /* ===== Contexto para INFO ===== */
     const context = {
       city,
       country: dest.country || '',
@@ -1697,9 +1714,7 @@ async function generateCityItinerary(city){
       special_conditions: plannerState?.specialConditions || ''
     };
 
-    /* =======================
-       ETAPA 1 — INFO
-       ======================= */
+    /* ===== ETAPA 1 — INFO ===== */
     const infoResp = await callApiChat(
       'info',
       { context },
@@ -1707,13 +1722,11 @@ async function generateCityItinerary(city){
     );
 
     const research = cleanToJSONPlus(infoResp?.text || infoResp);
-    if(!research || !research.rows_draft){
+    if (!research || !research.rows_draft) {
       throw new Error('INFO no devolvió rows_draft');
     }
 
-    /* =======================
-       ETAPA 2 — PLANNER
-       ======================= */
+    /* ===== ETAPA 2 — PLANNER ===== */
     const plannerResp = await callApiChat(
       'planner',
       { research_json: research },
@@ -1721,14 +1734,16 @@ async function generateCityItinerary(city){
     );
 
     const parsed = cleanToJSONPlus(plannerResp?.text || plannerResp);
-    if(!parsed || !Array.isArray(parsed.rows)){
+    if (!parsed || !Array.isArray(parsed.rows)) {
       throw new Error('PLANNER no devolvió rows');
     }
 
-    /* =======================
-       RENDER DIRECTO (SIN TOCAR)
-       ======================= */
-    itineraries[city] = itineraries[city] || { byDay:{}, originalDays: dest.days };
+    /* ===== Render directo (sin modificar datos) ===== */
+    itineraries[city] = itineraries[city] || {
+      byDay: {},
+      originalDays: dest.days
+    };
+
     itineraries[city].byDay = {};
 
     parsed.rows.forEach(r=>{
@@ -1742,7 +1757,7 @@ async function generateCityItinerary(city){
     setActiveCity(city);
     renderCityItinerary(city);
 
-  } catch(err){
+  } catch (err) {
     console.error(`[generateCityItinerary] ${city}`, err);
     chatMsg(
       `⚠️ No se pudo generar el itinerario para <strong>${city}</strong>. Intenta nuevamente.`,
@@ -1754,9 +1769,8 @@ async function generateCityItinerary(city){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [15.3] Rebalanceo global
-   ❌ ELIMINADO
-   El rebalanceo ahora vive EXCLUSIVAMENTE en el API
+   [15.3] Rebalanceo / optimización
+   ❌ ELIMINADO — vive 100 % en el API
 ───────────────────────────────────────────────────────────── */
 
 /* ==============================
