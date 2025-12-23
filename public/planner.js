@@ -3625,19 +3625,17 @@ async function onSend(){
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (alineada con API v43.5)
-   FIX QUIRÚRGICO:
-   - El botón “Iniciar planificación” se habilita SOLO tras “Guardar destinos”
-   - Se elimina dependencia frágil de hasSavedOnce como guard duro
-   - Se valida siempre contra estado REAL del formulario
-   🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
-   💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
+   (RESET restaurado + alineado con API v43.5)
 ================================= */
+
 $addCity?.addEventListener('click', ()=>addCityRow());
+
+/* ================= VALIDACIONES ================= */
 
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
+
   for(const r of rows){
     const el = qs('.baseDate', r);
     const v  = (el?.value||'').trim();
@@ -3648,70 +3646,63 @@ function validateBaseDatesDMY(){
       break;
     }
   }
+
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
     tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
     document.body.appendChild(tooltip);
+
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
     tooltip.style.top  = rect.bottom + window.scrollY + 6 + 'px';
-    setTimeout(() => tooltip.classList.add('visible'), 20);
-    setTimeout(() => {
+
+    setTimeout(()=>tooltip.classList.add('visible'), 20);
+    setTimeout(()=>{
       tooltip.classList.remove('visible');
       setTimeout(()=>tooltip.remove(), 300);
     }, 3500);
+
     firstInvalid.focus();
     return false;
   }
   return true;
 }
 
-/* ===== Guardar destinos: ÚNICO punto que habilita “Iniciar planificación” ===== */
+function formHasBasics(){
+  const row = qs('.city-row', $cityList);
+  if(!row) return false;
+
+  const city    = (qs('.city', row)?.value||'').trim();
+  const country = (qs('.country', row)?.value||'').trim();
+  const days    = parseInt(qs('.days', row)?.value||'0', 10);
+  const base    = (qs('.baseDate', row)?.value||'').trim();
+
+  return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
+}
+
+/* ================= GUARDAR DESTINOS ================= */
+
 $save?.addEventListener('click', ()=>{
   try { saveDestinations(); } catch(_) {}
 
-  const basicsOK = formHasBasics();
-  const datesOK  = validateBaseDatesDMY();
-
-  if (basicsOK && datesOK) {
+  if(formHasBasics() && validateBaseDatesDMY()){
     if ($start) $start.disabled = false;
-
-    try {
-      document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
-        detail: { savedDestinations: (typeof savedDestinations!=='undefined' ? savedDestinations : []) }
-      }));
-    } catch(_) {}
+    document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved'));
   } else {
     if ($start) $start.disabled = true;
   }
 });
 
-/* ===== Reglas base del formulario ===== */
-function formHasBasics(){
-  const row = qs('.city-row', $cityList);
-  if(!row) return false;
-  const city    = (qs('.city', row)?.value||'').trim();
-  const country = (qs('.country', row)?.value||'').trim();
-  const days    = parseInt(qs('.days', row)?.value||'0', 10);
-  const base    = (qs('.baseDate', row)?.value||'').trim();
-  return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
-}
-
-// Si el usuario rompe el formulario, se deshabilita Start
-document.addEventListener('input', (e)=>{
+document.addEventListener('input', e=>{
   if(!$start) return;
-  if(e.target && (
-     e.target.classList?.contains('city') ||
-     e.target.classList?.contains('country') ||
-     e.target.classList?.contains('days') ||
-     e.target.classList?.contains('baseDate')
-  )){
+  if(e.target?.classList?.matches('.city,.country,.days,.baseDate')){
     if(!formHasBasics()) $start.disabled = true;
   }
 });
 
-/* ===== Reset ===== */
+/* ================= RESET ================= */
+
 function ensureResetButton(){
   let btn = document.getElementById('reset-planner');
   if(!btn){
@@ -3720,8 +3711,8 @@ function ensureResetButton(){
     btn.id = 'reset-planner';
     btn.className = 'btn warn';
     btn.textContent = 'Reiniciar planificación';
-    btn.setAttribute('type','button');
-    (bar || document.body).appendChild(btn);
+    btn.type = 'button';
+    bar.appendChild(btn);
   }
   return btn;
 }
@@ -3744,58 +3735,94 @@ function bindReset(){
         <button id="cancel-reset" class="btn ghost">Cancelar</button>
       </div>
     `;
+
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
-    setTimeout(()=>overlay.classList.add('active'), 10);
+    setTimeout(()=>overlay.classList.add('active'),10);
 
     overlay.querySelector('#confirm-reset')?.addEventListener('click', ()=>{
-      $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+      /* 🔹 Limpieza SEGURA (sin reasignar consts) */
+      $cityList.innerHTML='';
       addCityRow();
+
+      savedDestinations.length = 0;
+      Object.keys(itineraries).forEach(k=>delete itineraries[k]);
+      Object.keys(cityMeta).forEach(k=>delete cityMeta[k]);
+      session.length = 0;
+
+      pendingChange = null;
+      planningStarted = false;
+      metaProgressIndex = 0;
+      collectingHotels = false;
+      isItineraryLocked = false;
+      activeCity = null;
+
       if ($start) $start.disabled = true;
-      $tabs.innerHTML=''; $itWrap.innerHTML='';
-      $chatBox.style.display='none'; $chatM.innerHTML='';
-      session = []; pendingChange=null;
+      $tabs.innerHTML='';
+      $itWrap.innerHTML='';
+      $chatBox.style.display='none';
+      $chatM.innerHTML='';
 
-      planningStarted=false; metaProgressIndex=0; collectingHotels=false;
-      isItineraryLocked=false; activeCity=null;
-
-      try { $overlayWOW && ($overlayWOW.style.display='none'); } catch(_) {}
       qsa('.date-tooltip').forEach(t=>t.remove());
+      try { $overlayWOW && ($overlayWOW.style.display='none'); } catch(_){}
+
+      if (typeof plannerState !== 'undefined'){
+        plannerState.destinations = [];
+        plannerState.specialConditions = '';
+        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+        plannerState.budget = '';
+        plannerState.currency = 'USD';
+        plannerState.forceReplan = {};
+        plannerState.preferences = {};
+        plannerState.dayTripPending = {};
+        plannerState.existingActs = {};
+      }
+
+      overlay.classList.remove('active');
+      setTimeout(()=>overlay.remove(),300);
 
       document.dispatchEvent(new CustomEvent('itbmo:plannerReset'));
-      overlay.remove();
+
+      const firstCity = qs('.city-row .city');
+      if(firstCity) firstCity.focus();
     });
 
-    overlay.querySelector('#cancel-reset')?.addEventListener('click', ()=>overlay.remove());
+    overlay.querySelector('#cancel-reset')?.addEventListener('click', ()=>{
+      overlay.classList.remove('active');
+      setTimeout(()=>overlay.remove(),300);
+    });
   });
 }
 
-/* ===== Start: validación REAL ===== */
+/* ================= START ================= */
+
 $start?.addEventListener('click', ()=>{
-  if(!$start) return;
   if(!formHasBasics() || !validateBaseDatesDMY()){
     chatMsg('Completa y guarda los destinos antes de continuar.','ai');
     return;
   }
 
-  document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
-    detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-  }));
-
+  document.dispatchEvent(new CustomEvent('itbmo:startPlanning'));
   startPlanning();
 });
 
+/* ================= CHAT ================= */
+
 $send?.addEventListener('click', onSend);
 $chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onSend(); }
+  if(e.key==='Enter' && !e.shiftKey){
+    e.preventDefault();
+    onSend();
+  }
 });
 
-/* ===== INIT ===== */
+/* ================= INIT ================= */
+
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
+  if(!qs('#city-list .city-row')) addCityRow();
   __ensureInfoAgentClient__();
   bindInfoChatListeners();
   bindReset();
