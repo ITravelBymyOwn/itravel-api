@@ -1,12 +1,12 @@
-// /api/chat.js — v43.5 (ESM, Vercel)
-// Doble etapa: (1) INFO (investiga y calcula) → (2) PLANNER (estructura).
+// /api/chat.js — v43.6 (ESM, Vercel)
+// Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ v43.5 — Cambio principal:
-// - Reemplazo/upgrade del SYSTEM_INFO con el “prompt definitivo” (imperdibles + day trips + transporte inteligente + sub-paradas globales + notas high-impact).
-// - Ajuste leve del SYSTEM_PLANNER para preservar el formato “Destino – Sub-parada” y rellenar transporte SOLO si falta (guardrail), sin creatividad.
-// - Mantiene contratos y Quality Gate existente.
+// ✅ v43.6 — Cambios quirúrgicos (Opción A: INFO manda horarios):
+// - Elimina cualquier "ventana por defecto" rígida (08:30–19:00) en fallback.
+// - SYSTEM_INFO: day_hours SOLO si el usuario lo provee; prohibido emitir plantilla fija.
+// - SYSTEM_PLANNER: day_hours se trata como guía/soft constraint; NO inventa ventanas ni sobreescribe horarios válidos.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -65,13 +65,13 @@ function fallbackJSON() {
     rows: [
       {
         day: 1,
-        start: "08:30",
-        end: "19:00",
+        start: "", // ✅ sin horas predefinidas
+        end: "",   // ✅ sin horas predefinidas
         activity: "Itinerario base (fallback)",
         from: "",
         to: "",
         transport: "",
-        duration: "Transporte: \nActividad: ",
+        duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
         notes: "Explora libremente la ciudad.",
         kind: "",
         zone: "",
@@ -273,33 +273,36 @@ Tu objetivo es entregar un plan **impactante, optimizado, realista, secuencial y
 Tu salida será consumida por un Planner que **no inventa nada**: solo estructura y renderiza lo que tú decidas.
 Por eso debes devolver **UN ÚNICO JSON VÁLIDO** (sin texto fuera) listo para usarse en tabla.
 
+✅ ARQUITECTURA (OPCIÓN A):
+- Tú (INFO) eres la **fuente de verdad** de los horarios: start/end por fila en rows_draft.
+- El Planner solo valida/ajusta solapes pequeños; NO genera ventanas ni rellena horarios por defecto.
+
 REGLA MAESTRA 1 — IMPERDIBLES + ALCANCE REAL DEL VIAJE (CRÍTICO):
 - Para cada ciudad base, identifica los **imperdibles reales** (POIs/experiencias icónicas) según temporada, clima probable, perfil del grupo (edades/movilidad), intereses y días disponibles.
-- En estancias de varios días, NO te limites artificialmente a quedarte “cerca”: diseña mezcla óptima de:
+- En estancias de varios días, diseña mezcla óptima de:
   (a) imperdibles urbanos y
   (b) day-trips/macro-rutas imperdibles desde la base,
   siempre sin sacrificar lo esencial de la ciudad.
-- Si un day-trip es un imperdible y el tiempo lo permite, inclúyelo.
 - Los imperdibles deben reflejarse en rows_draft y listarse también en imperdibles.
 - Los day-trips elegidos deben listarse en macro_tours.
 
 REGLA MAESTRA 2 — TRANSPORTE INTELIGENTE (CRÍTICO):
-- Antes de asignar transporte en un day-trip, evalúa si hay medios eficientes y realistas (tren/metro/bus interurbano) y sugiérelos cuando aplique.
-  Ejemplo: desde Madrid, muchos day-trips se resuelven excelente por tren (y algunos por bus).
-- Si no puedes determinar una opción eficiente con confianza, usa EXACTAMENTE: "Vehículo alquilado o Tour guiado".
-- Dentro de ciudad usa transporte coherente (a pie/metro/bus/taxi/uber) según densidad urbana y zonas.
+- Evalúa opciones reales (tren/metro/bus interurbano) y sugiérelas cuando aplique.
+- Si no puedes determinar con confianza, usa EXACTAMENTE: "Vehículo alquilado o Tour guiado".
+- Dentro de ciudad usa transporte coherente (a pie/metro/bus/taxi/uber) según zonas.
 
 REGLA MAESTRA 3 — CLARIDAD TOTAL POR SUB-PARADAS (CRÍTICO, APLICA A TODO):
-- Para CUALQUIER recorrido con múltiples paradas (no solo day-trips), expresa la secuencia como actividades del tipo:
-  "Destino – Sub-parada" (o "Ruta/Área – Sub-parada") tan específico como se pueda.
-- Esto aplica a: macro-tours, rutas urbanas por barrios, circuitos panorámicos, penínsulas, costas, miradores, etc.
-- Cada sub-parada debe ser una fila con start/end, from/to, transport, duration y notes: el usuario debe ver claramente qué visita, en qué orden y cómo se mueve.
+- Para recorridos multi-parada (macro-tours o urbano), expresa secuencia como:
+  "Destino – Sub-parada" o "Ruta/Área – Sub-parada".
+- Cada sub-parada debe ser una fila con start/end, from/to, transport, duration y notes.
 
 HORARIOS (CRÍTICO):
-- Si el usuario define ventanas por día, respétalas como base, pero puedes ajustarlas inteligentemente cuando falten experiencias clave (auroras, espectáculos, cenas con show).
-  Puedes extender el horario nocturno para incluirlas sin solapes.
-- Si el usuario no define horarios, propone day_hours realistas por estación/ciudad/ritmo.
-- El día 1 puede iniciar más tarde si hay señales de llegada/cansancio, pero el resto debe maximizar aprovechamiento.
+- Si el usuario define ventanas por día (day_hours) en el contexto, respétalas como base.
+  Puedes ajustarlas inteligentemente para incluir experiencias clave (auroras/espectáculos/cenas icónicas),
+  extendiendo horario nocturno sin solapes.
+- Si el usuario NO define day_hours:
+  - NO inventes una plantilla rígida repetida (PROHIBIDO 08:30–19:00 fijo para todos).
+  - Genera horarios realistas por filas (rows_draft) según ciudad/estación/ritmo.
 - Buffers mínimos 15m entre bloques.
 - Actividades diurnas NO entre 01:00–05:00.
 
@@ -307,9 +310,9 @@ DURACIÓN EN 2 LÍNEAS (OBLIGATORIO EN TODAS LAS FILAS):
 - duration debe ser SIEMPRE exactamente 2 líneas:
   "Transporte: <tiempo>"
   "Actividad: <tiempo>"
-- Si no puedes estimar un tiempo razonable, NO inventes: usa
+- Si no puedes estimar, NO inventes: usa
   "Transporte: Verificar duración en el Info Chat" o "Actividad: Verificar duración en el Info Chat"
-  y mantén el formato de 2 líneas.
+  manteniendo el formato de 2 líneas.
 
 MACRO-TOURS / DAY-TRIPS (CRÍTICO):
 - Si incluyes un day-trip fuerte, ese día queda dedicado al tour.
@@ -319,37 +322,29 @@ MACRO-TOURS / DAY-TRIPS (CRÍTICO):
 - NO generar duplicados bilingües del mismo tour/actividad.
 
 LAGUNAS TERMALES (CRÍTICO):
-- Cualquier laguna termal (Blue Lagoon, Sky Lagoon, etc.) debe tener mínimo 3 horas de actividad efectiva.
-- Si la laguna puede integrarse coherentemente dentro de una ruta (por ejemplo península/recorrido costero), evalúa esa integración antes de ponerla aislada.
+- Mínimo 3 horas de actividad efectiva.
+- Evalúa integración dentro de una ruta si aplica.
 
 AURORAS (SOLO SI ES PLAUSIBLE):
-- Antes de sugerir auroras, valida plausibilidad por latitud y época del año (oscuridad/temporada).
-- Si NO es plausible, NO las sugieras.
-- Si es plausible: máximo 1 por día, NO consecutivas, NUNCA en el último día, ventana local concreta, transporte coherente (vehículo alquilado o Tour guiado).
+- Valida plausibilidad por latitud y época del año.
+- Si es plausible: máximo 1 por día, NO consecutivas, NUNCA en el último día,
+  ventana local concreta, transporte coherente.
 
 NOCHES: ESPECTÁCULOS Y CENAS CON SHOW:
-- Si el destino tiene experiencias nocturnas icónicas (ej. tango en Buenos Aires), puedes sugerirlas aunque el usuario no lo pida.
-- Ajusta horarios para incluirlas sin solapes.
-- Comidas eficientes: evita bloques largos; incluye solo si aporta valor real (icónico/logística/pausa estratégica).
+- Puedes sugerir experiencias nocturnas icónicas con frecuencia moderada.
+- Comidas eficientes: incluye solo si aporta valor real (icónico/logística/pausa).
 
 CALIDAD PREMIUM (PROHIBIDO GENÉRICO):
-- Prohibido usar actividades genéricas sin identidad: NO "Museo de Arte", NO "Parque local", NO "Café local", NO "Restaurante local" como actividad principal sin especificidad.
+- Prohibido "Museo de Arte", "Parque local", "Café local", "Restaurante local" como actividad principal sin especificidad.
 - Agrupa por zonas; evita “va y ven”.
-- Si el usuario describe ubicaciones por referencia ("la iglesia icónica", "el mirador famoso"), infiere el POI más probable y úsalo coherentemente en from/to/zone.
+- Si el usuario da referencias ("iglesia icónica"), infiere el POI más probable.
 
 CRÍTICO — SALIDA PARA EVITAR REGRESIONES DEL PLANNER:
-- Debes incluir SIEMPRE un arreglo rows_draft con el itinerario COMPLETO (todas las filas de todos los días).
-- rows_draft debe traer ya:
-  - day, start, end,
-  - activity, from, to,
-  - transport,
-  - duration (2 líneas),
-  - notes (1–2 frases de alto impacto, motivadoras y accionables),
-  - kind, zone,
-  - opcional: _crossDay si cruza medianoche.
-- El Planner NO debe inventar: solo formatea/valida y renderiza.
+- Incluye SIEMPRE rows_draft completo (todas las filas de todos los días) con:
+  day, start, end, activity, from, to, transport, duration(2 líneas), notes, kind, zone, opcional _crossDay.
+- El Planner NO debe inventar.
 
-SALIDA (JSON) — ejemplo de estructura (sin texto fuera):
+SALIDA (JSON) — estructura (sin texto fuera):
 {
   "destination":"Ciudad",
   "country":"País",
@@ -377,7 +372,7 @@ SALIDA (JSON) — ejemplo de estructura (sin texto fuera):
     "no_last_day_aurora":true,
     "thermal_lagoons_min_stay_minutes":180
   },
-  "day_hours":[{"day":1,"start":"HH:MM","end":"HH:MM"}],
+  "day_hours":[], 
   "rows_draft":[
     {"day":1,"start":"HH:MM","end":"HH:MM","activity":"Destino – Sub-parada","from":"","to":"","transport":"","duration":"Transporte: ...\\nActividad: ...","notes":"...","kind":"","zone":""}
   ],
@@ -385,6 +380,10 @@ SALIDA (JSON) — ejemplo de estructura (sin texto fuera):
     {"day":1,"start":"","end":"","activity":"","from":"","to":"","transport":"","duration":"","notes":"","kind":"","zone":""}
   ]
 }
+
+NOTA day_hours:
+- Si NO viene en el contexto del usuario, déjalo como [] (no lo inventes).
+- Si SÍ viene, puedes devolverlo reflejando/ajustando (si extendiste noches por auroras/cenas show).
 `.trim();
 
 /* =======================
@@ -403,9 +402,15 @@ CONTRATO / FUENTE DE VERDAD:
     (c) corregir solapes pequeños moviendo minutos dentro del día,
     (d) completar campos faltantes SIN inventar actividades nuevas.
 - NO reescribas el texto de "activity": preserva el formato "Destino – Sub-parada" tal como viene.
-- Si faltan campos:
-  - transport: si no hay nada, usa "A pie" para urbano y "Vehículo alquilado o Tour guiado" para out-of-town cuando sea evidente por la activity/from/to.
-  - notes: si falta, usa 1 frase breve y accionable (sin inventar POIs nuevos).
+
+DAY_HOURS (GUIA / SOFT CONSTRAINT):
+- Si viene day_hours (del usuario), úsalo como guía.
+- NO inventes day_hours si no viene.
+- NO sobreescribas start/end válidos de rows_draft; solo ajusta si hay solape o si una fila cae claramente fuera de una ventana dada y es razonable moverla.
+
+Si faltan campos:
+- transport: si no hay nada, usa "A pie" para urbano y "Vehículo alquilado o Tour guiado" para out-of-town cuando sea evidente por activity/from/to.
+- notes: si falta, usa 1 frase breve y accionable (sin inventar POIs nuevos).
 
 - Si NO hay rows_draft/rows_final y solo hay listas,
   → devuelve un JSON mínimo con followup pidiendo que el Info Chat provea rows_draft.
@@ -424,7 +429,6 @@ REGLAS:
 - JSON válido, sin texto fuera.
 - NO inventes tours/actividades nuevas.
 - Evita solapes.
-- Respeta ventana day_hours si viene.
 - No pongas actividades diurnas entre 01:00–05:00.
 - "Regreso a {ciudad}" debe ser la última fila del day-trip si aplica.
 
@@ -499,6 +503,7 @@ REGLAS DE REPARACIÓN:
 3) duration debe ser EXACTAMENTE 2 líneas: "Transporte: ...\\nActividad: ..."
 4) Si hay macro-tour/day-trip: 5–8 sub-paradas + "Regreso a {ciudad}" al cierre.
 5) Para recorridos multi-parada (urbano o tour), usa "Destino – Sub-parada" en activity.
+6) day_hours: NO lo inventes si no viene en el contexto; si no viene, déjalo como [].
 
 Responde SOLO JSON válido.
 `.trim();
@@ -604,6 +609,7 @@ REGLAS:
 - NO reescribas "activity" (preserva "Destino – Sub-parada").
 - duration en 2 líneas obligatorias: "Transporte: ...\\nActividad: ..."
 - Elimina placeholders genéricos: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
+- day_hours: NO lo inventes ni lo impongas; solo úsalo como guía si viene del usuario.
 - Devuelve SOLO JSON válido.
 
 Devuelve el JSON corregido.
