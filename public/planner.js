@@ -4618,14 +4618,14 @@ function bindReset(){
 
     const modal = document.createElement('div');
     modal.className = 'reset-modal';
-    modal.innerHTML = 
+    modal.innerHTML = `
       <h3>¿Reiniciar planificación? 🧭</h3>
       <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
       <div class="reset-actions">
         <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
         <button id="cancel-reset" class="btn ghost">Cancelar</button>
       </div>
-    ;
+    `;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     setTimeout(()=>overlay.classList.add('active'), 10);
@@ -4774,7 +4774,7 @@ function __ensureInfoAgentClient__(){
 
   if(wrongClient(window.callInfoAgent)){
     const simpleInfo = async function(userText){
-      const url = ${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC};
+      const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
       let resp;
       try{
         resp = await fetch(url, {
@@ -4792,7 +4792,7 @@ function __ensureInfoAgentClient__(){
           try {
             const j = JSON.parse(txt);
             if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
-            if(j && j.destination) return Información de ${j.destination} lista. Pregúntame algo concreto.;
+            if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
             txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
           } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
         }
@@ -4895,7 +4895,7 @@ function bindInfoChatListeners(){
       i2.style.height = 'auto';
       const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
       const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = ${lh * lines + 8}px;
+      i2.style.height = `${lh * lines + 8}px`;
       i2.scrollTop = i2.scrollHeight;
     });
   }
@@ -4921,4 +4921,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
 
