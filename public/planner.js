@@ -3978,8 +3978,6 @@ async function optimizeDay(city, day) {
    ✅ FIX QUIRÚRGICO (auditoría):
    - En flujo collectingHotels: NO avanza metaProgressIndex si falta transport.
    - Si el usuario envía solo hotel/zona, se guarda y se pide transporte sin saltar de ciudad.
-   ✅ FIX QUIRÚRGICO (extra, seguridad):
-   - Si el usuario envía SOLO transporte, NO debe guardarse como hotel/zona.
 ================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
@@ -3993,6 +3991,7 @@ async function onSend(){
 
     // 🚀 Resolver inteligentemente el hotel/zona (tolera typos, idiomas, landmarks)
     const res = resolveHotelInput(text, city);
+    const resolvedHotel = res.text || text;
 
     // Detección de transporte (conserva tu lógica original)
     const transport = (/recom/i.test(text)) ? 'recomiéndame'
@@ -4001,39 +4000,17 @@ async function onSend(){
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
 
-    // ✅ FIX: evitar que mensajes "solo transporte" se guarden como hotel.
-    const onlyTransport =
-      !!transport &&
-      // si el texto ES básicamente transporte (sin señales claras de hotel/zona/link)
-      !(
-        /https?:\/\//i.test(text) ||
-        /\b(hotel|hostel|airbnb|zona|barrio|direcci[oó]n|address|street|st\.|ave\.|avenida|calle|road|rd\.|blvd|boulevard|suite|apt|apto|apartamento|near|cerca|frente a|al lado de)\b/i.test(text)
-      );
-
-    // Hotel propuesto: si es onlyTransport, NO inventamos hotel; preservamos el existente.
-    let resolvedHotel = (res && res.text) ? res.text : text;
-    if(onlyTransport){
-      const prev = (cityMeta?.[city]?.hotel || '');
-      resolvedHotel = prev; // preserva lo ya guardado (si existe)
-    }
-
     // Guardar lo que venga (al menos hotel) para que askNextHotelTransport()
     // pueda pedir sólo lo faltante en esta misma ciudad.
-    // Nota: si onlyTransport y no hay hotel previo, resolvedHotel será '' y pedirá hotel.
     upsertCityMeta({ city, hotel: resolvedHotel, transport });
 
-    // 🗣️ Feedback al usuario según lo recibido
-    if(onlyTransport){
-      chatMsg(`🚗 Perfecto. Tomo <strong>${transport}</strong> como tu transporte en <strong>${city}</strong>. Ahora dime tu <strong>hotel/zona</strong> (nombre, zona, dirección o link) para afinar distancias.`, 'ai');
+    // 🗣️ Feedback al usuario según confianza del match (hotel/zona)
+    if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
+      chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
+    }else if((res.confidence||0) >= 0.65){
+      chatMsg(`🏨 Usaré <strong>${resolvedHotel}</strong> como referencia en <strong>${city}</strong> (interpretado por similitud). Si deseas otro, escríbelo con más detalle o pega el link.`, 'ai');
     }else{
-      // 🗣️ Feedback al usuario según confianza del match (hotel/zona)
-      if(res.resolvedVia==='url' || (res.confidence||0) >= 0.80){
-        chatMsg(`🏨 Tomé <strong>${resolvedHotel}</strong> como tu referencia de hotel/zona en <strong>${city}</strong>.`, 'ai');
-      }else if((res.confidence||0) >= 0.65){
-        chatMsg(`🏨 Usaré <strong>${resolvedHotel}</strong> como referencia en <strong>${city}</strong> (interpretado por similitud). Si deseas otro, escríbelo con más detalle o pega el link.`, 'ai');
-      }else{
-        chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
-      }
+      chatMsg(`🏨 Registré tu referencia para <strong>${city}</strong>. Si tienes el <em>link</em> del lugar exacto o el nombre preciso, compártelo para afinar distancias.`, 'ai');
     }
 
     // 🌌 Activar preferAurora automáticamente si la ciudad es apta
@@ -4061,15 +4038,7 @@ async function onSend(){
       return;
     }
 
-    // ✅ FIX: si hay transport pero aún no hay hotel, NO avanzar tampoco (solo pedimos hotel).
-    // (Esto cubre el caso onlyTransport sin hotel previo.)
-    const curHotel = (cityMeta?.[city]?.hotel || '').trim();
-    if(!curHotel){
-      askNextHotelTransport();
-      return;
-    }
-
-    // Si hay transport (y hotel), sí avanzamos.
+    // Si hay transport, sí avanzamos.
     metaProgressIndex++;
     askNextHotelTransport();
     return;
@@ -4281,9 +4250,9 @@ async function onSend(){
   if(intent.type==='swap_day' && intent.city){
     showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
-    // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
-    await optimizeDay(intent.city, intent.from);
-    await optimizeDay(intent.city, intent.to);
+   // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
+await optimizeDay(intent.city, intent.from);
+await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
@@ -4295,8 +4264,8 @@ async function onSend(){
     showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
     // ✅ QUIRÚRGICO: secuencial para evitar paralelismo y timeouts
-    await optimizeDay(intent.city, intent.fromDay);
-    await optimizeDay(intent.city, intent.toDay);
+await optimizeDay(intent.city, intent.fromDay);
+await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
     chatMsg('✅ Moví la actividad y optimicé los días implicados.','ai');
