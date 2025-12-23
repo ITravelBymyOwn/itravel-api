@@ -1593,16 +1593,14 @@ Contexto:
 }
 
 /* ==============================
-   SECCIÓN 15 · Generación por ciudad (versión restaurada v65 estable)
+   SECCIÓN 15 · Generación por ciudad
+   v75 — LIMPIEZA QUIRÚRGICA FINAL
+   Fuente de verdad: API v43.5 (INFO → PLANNER)
+   El JS NO optimiza ni reestructura itinerarios
 ================================= */
 
 /* ─────────────────────────────────────────────────────────────
-   [15.1] Overlay helpers (mensajes y bloqueo de UI)
-   - ✅ Mantiene habilitado solo “reset-planner”
-   - 🆕 Bloquea “info-chat-floating”
-   - 🆕 Atributo aria-busy + manejo de tabindex (accesibilidad)
-   ✅ FIX QUIRÚRGICO: al desactivar overlay NO re-habilita controles
-      que ya venían disabled por la lógica normal del planner
+   [15.1] Overlay helpers (se conserva)
 ───────────────────────────────────────────────────────────── */
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
@@ -1617,621 +1615,117 @@ function showWOW(on, msg){
 
   const all = qsa('button, input, select, textarea, a');
   all.forEach(el=>{
-    // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
-
-    // 🆕 Bloquear también el botón flotante de Info Chat
     if (el.id === 'info-chat-floating') {
       try { el.disabled = on; } catch(_) {}
-      if(on){
-        el._prevTabIndex = el.getAttribute('tabindex');
-        el.setAttribute('tabindex','-1');
-      }else{
-        if(typeof el._prevTabIndex !== 'undefined'){
-          el.setAttribute('tabindex', el._prevTabIndex);
-          delete el._prevTabIndex;
-        }else{
-          el.removeAttribute('tabindex');
-        }
-      }
       return;
     }
-
-    if(on){
-      // Guardar estado previo SOLO la primera vez (evita pisarlo si overlay se re-entra)
-      if(typeof el._prevDisabled === 'undefined') el._prevDisabled = !!el.disabled;
-
-      // disabled no aplica a <a>, pero no rompe; igual cuidamos tabindex
-      try { el.disabled = true; } catch(_) {}
-      if(typeof el._prevTabIndex === 'undefined') el._prevTabIndex = el.getAttribute('tabindex');
-      el.setAttribute('tabindex','-1');
-
-    }else{
-      // ✅ RESTAURAR solo si sabemos que lo guardamos
-      if(typeof el._prevDisabled !== 'undefined'){
-        try { el.disabled = el._prevDisabled; } catch(_) {}
-        delete el._prevDisabled;
-      }
-      if(typeof el._prevTabIndex !== 'undefined'){
-        // Si venía null, restaurarlo como null real (removeAttribute)
-        if(el._prevTabIndex === null){
-          el.removeAttribute('tabindex');
-        }else{
-          el.setAttribute('tabindex', el._prevTabIndex);
-        }
-        delete el._prevTabIndex;
-      }else{
-        el.removeAttribute('tabindex');
-      }
-    }
+    try { el.disabled = on; } catch(_) {}
   });
 }
 
 /* ─────────────────────────────────────────────────────────────
-   SECCIÓN 15.2 · Generación principal por ciudad
-   Base v60 + injertos v64 + dedupe global con normKey
-   🆕 v75→API42.6.x: primer poblado con doble etapa INFO→PLANNER
-   🆕 Robustez: usa callApiChat (si existe) con timeout/reintentos + caché research
-   🆕 Auroras: normalización + tope no consecutivo por día ANTES de pushRows
-   🆕 Inyección segura post-planner: duration normalizada / cena / retorno a ciudad
-   🆕 Rendimiento: optimizeDay sólo en días realmente vacíos o “flacos” (≥ umbral)
-   🆕 Coherencia: 1 sola aurora por día + limpieza de transporte tras “Regreso”
-   ✅ QUIRÚRGICO (NUEVO): “Quality-gate” global:
-      - Detecta macro-tour largo en 1 sola fila (≥6h) y obliga optimizeDay
-      - Evita placeholders genéricos (museo genérico / parque local / café local)
-      - Esto NO mete creatividad; solo fuerza re-optimización cuando falta detalle
-   ✅ QUIRÚRGICO (NUEVO vPERF): Budget global de optimizeDay por corrida de ciudad
-   ✅ FIX QUIRÚRGICO (NUEVO): Pipeline coherente:
-      ensureReturnRow + clearTransportAfterReturn + injectDinnerIfMissing
-      ANTES de fixOverlaps, luego clamp final.
+   [15.2] Generación principal por ciudad
+   MODELO LIMPIO:
+   - INFO (API) decide TODO
+   - PLANNER (API) estructura
+   - JS renderiza
 ───────────────────────────────────────────────────────────── */
 async function generateCityItinerary(city){
-  window.__cityLocks = window.__cityLocks || {};
-  if (window.__cityLocks[city]) { console.warn(`[Mutex] Generación ya en curso para ${city}`); return; }
-  window.__cityLocks[city] = true;
+  if(!city) return;
 
-  const toHHMM = s => String(s||'').trim();
-  const parseHHMM = (hhmm)=>{
-    const m = /^(\d{1,2}):(\d{2})$/.exec(toHHMM(hhmm));
-    if(!m) return null;
-    const h = Math.min(23, Math.max(0, +m[1]));
-    const min = Math.min(59, Math.max(0, +m[2]));
-    return {h, min};
-  };
-  const addMinutes = (hhmm, mins)=>{
-    const t = parseHHMM(hhmm);
-    if(!t) return null;
-    let total = t.h*60 + t.min + mins;
-    while(total < 0) total += 24*60;
-    total = total % (24*60);
-    const h = Math.floor(total/60);
-    const m = total % 60;
-    return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-  };
+  const dest = savedDestinations.find(d=>d.city===city);
+  if(!dest) return;
 
-  /* ==================== Helpers API ==================== */
-  // (⚠️ QUIRÚRGICO A1: este flag NO debe quedar congelado antes del shim)
-  let hasCallApiChat = (typeof callApiChat === 'function');
-
-  /* =========================================================
-     ✅ INJERTO QUIRÚRGICO #1
-     - Evita: ReferenceError: callApiChat is not defined (optimizeDay y otros)
-     - Crea un shim global SOLO si no existe.
-     - ✅ QUIRÚRGICO A1: sube timeout/retries por defecto (evita AbortError en optimizeDay)
-  ========================================================= */
-  if (typeof window.callApiChat !== 'function') {
-    window.callApiChat = async function(mode, payload = {}, opts = {}) {
-      const timeoutMs = Number(opts.timeoutMs || 65000); // ← A1 (antes 30000)
-      const retries   = Number(opts.retries || 1);       // ← A1 (antes 0)
-
-      const doOnce = async ()=>{
-        const ctrl = new AbortController();
-        const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
-        try{
-          const resp = await fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode, ...payload }),
-            signal: ctrl.signal
-          });
-          if (!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
-          return await resp.json();
-        } finally {
-          clearTimeout(t);
-        }
-      };
-
-      let lastErr = null;
-      for (let i=0; i<=retries; i++){
-        try { return await doOnce(); }
-        catch(e){ lastErr = e; }
-      }
-      throw lastErr || new Error("callApiChat failed");
-    };
-  }
-
-  // ✅ QUIRÚRGICO A1: recalcular después del shim
-  hasCallApiChat = (typeof callApiChat === 'function');
-
-  /* =========================================================
-     ✅ INJERTO QUIRÚRGICO #2
-     - Evita: ReferenceError: cleanToJSONPlus is not defined
-     - Usa cleanToJSONPlus si existe; si no, cae a parseJSON o JSON.parse tolerante.
-  ========================================================= */
-  function _safeCleanToJSONPlus(raw){
-    try{
-      if (typeof cleanToJSONPlus === 'function') return cleanToJSONPlus(raw);
-    }catch(_){}
-    try{
-      if (typeof parseJSON === 'function') return parseJSON(raw);
-    }catch(_){}
-    if (!raw) return null;
-    if (typeof raw === "object") return raw;
-    if (typeof raw !== "string") return null;
-    try { return JSON.parse(raw); } catch {}
-    try {
-      const first = raw.indexOf("{");
-      const last  = raw.lastIndexOf("}");
-      if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
-    } catch {}
-    try {
-      const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
-      return JSON.parse(cleaned);
-    } catch {}
-    return null;
-  }
-
-  async function callPlannerAPI_withResearch(researchJson){
-    if (hasCallApiChat) {
-      const resp = await callApiChat('planner', { research_json: researchJson }, { timeoutMs: 90000, retries: 1 });
-      const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
-      return _safeCleanToJSONPlus(txt || resp) || {};
-    }
-    const resp = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "planner", research_json: researchJson }),
-    });
-    if (!resp.ok) throw new Error(`API planner HTTP ${resp.status}`);
-    const data = await resp.json();
-    return _safeCleanToJSONPlus(data?.text || data) || {};
-  }
-
-  async function callInfoAPI(context){
-    if (hasCallApiChat) {
-      const resp = await callApiChat('info', context, { timeoutMs: 65000, retries: 1 });
-      const txt  = (typeof resp === 'object' && resp) ? (resp.text ?? resp) : resp;
-      return _safeCleanToJSONPlus(txt || resp) || {};
-    }
-    const resp = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "info", ...context }),
-    });
-    if (!resp.ok) throw new Error(`API info HTTP ${resp.status}`);
-    const data = await resp.json();
-    return _safeCleanToJSONPlus(data?.text || data) || {};
-  }
-
-  async function callPlannerAPI_legacy(messages, opts = {}) {
-    const payload = { mode: "planner", messages };
-    if (opts.itinerary_id) payload.itinerary_id = opts.itinerary_id;
-    if (typeof opts.version === 'number') payload.version = opts.version;
-
-    const resp = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!resp.ok) throw new Error(`API planner(legacy) HTTP ${resp.status}`);
-    const data = await resp.json();
-    const text = data?.text || "";
-    return parseJSON(text);
-  }
-
-  function hasCoverageForAllDays(rows, totalDays){
-    if(!Array.isArray(rows) || !rows.length) return false;
-    const flags = new Set(rows.map(r=>Number(r.day)||1));
-    for(let d=1; d<=totalDays; d++){ if(!flags.has(d)) return false; }
-    return true;
-  }
-
-  // ✅ PATCH QUIRÚRGICO (rendimiento): "thin" por ocupación real, no por #filas
-  function dayIsTooThin(city, day, minRows=3){
-    const cur = itineraries[city]?.byDay?.[day] || [];
-    const real = cur.filter(r=>!!r.activity);
-
-    // Si ya hay un macro-bloque de día (tour/actividad larga), NO optimizar por #filas
-    const toMin = (hhmm)=>{
-      const m = String(hhmm||'').trim().match(/^(\d{1,2}):(\d{2})$/);
-      if(!m) return null;
-      return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
-    };
-
-    let occupied = 0;
-    for(const r of real){
-      const s = toMin(r.start), e = toMin(r.end);
-      if(s!=null && e!=null){
-        let dur = e - s;
-        if(dur <= 0) dur += 24*60;
-        occupied += Math.max(0, dur);
-      }else{
-        // fallback: si el nombre sugiere tour y no tenemos horas, asumir que ocupa bastante
-        const a = String(r.activity||'').toLowerCase();
-        if(/tour|excursi[oó]n|day\s*trip|circle|costa|pen[ií]nsula|lagoon|glaciar|volc[aá]n|waterfall|cascada/i.test(a)){
-          occupied += 6*60;
-        }
-      }
-    }
-
-    // Si ocupa ≥6h, consideramos el día suficientemente lleno
-    if(occupied >= 6*60) return false;
-
-    // Si hay pocas filas reales, sí es flaco
-    return real.length < minRows;
-  }
-
-  // ✅ NUEVO (quirúrgico): detecta macro-tour largo "en una sola fila" (falta de sub-paradas)
-  function dayNeedsSubstops(city, day){
-    const list = (itineraries[city]?.byDay?.[day] || []).filter(r=>!!r.activity);
-    if(!list.length) return false;
-
-    const toMin = (hhmm)=>{
-      const m = String(hhmm||'').trim().match(/^(\d{1,2}):(\d{2})$/);
-      if(!m) return null;
-      return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
-    };
-
-    // Si ya hay varias filas, asumimos que hay sub-paradas
-    if(list.length >= 4) return false;
-
-    const strong =
-      /excursi[oó]n|day\s*trip|tour\b|ruta\b|circuito|c[ií]rculo|costa|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|cr[aá]ter|lagoon|laguna|thermal|hot\s*spring|geyser|geysir|island\s*tour|road\s*trip/i;
-
-    for(const r of list){
-      const a = String(r.activity||'').toLowerCase();
-      const s = toMin(r.start), e = toMin(r.end);
-      let dur = 0;
-      if(s!=null && e!=null){
-        dur = e - s;
-        if(dur <= 0) dur += 24*60;
-      }else{
-        dur = 0;
-      }
-      if(strong.test(a) && dur >= 6*60 && list.length <= 2){
-        return true;
-      }
-    }
-
-    const genericPlaceholders =
-      /(museo\s+de\s+arte|parque\s+local|cafe\s+local|restaurante\s+local|costa\b|exploraci[oó]n\s+de\s+la\s+costa)/i;
-    if(list.some(r=>genericPlaceholders.test(String(r.activity||'')))) return true;
-
-    return false;
-  }
+  showWOW(true, `Generando itinerario para ${city}…`);
 
   try {
-    const dest  = savedDestinations.find(x=>x.city===city);
-    if(!dest) return;
-
-    const perDay = Array.from({length:dest.days}, (_,i)=>{
-      const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-      return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
+    /* =======================
+       CONTEXTO PARA INFO CHAT
+       ======================= */
+    const perDay = Array.from({length: dest.days}, (_,i)=>{
+      const src = cityMeta[city]?.perDay?.[i] || {};
+      return {
+        day: i+1,
+        start: src.start || DEFAULT_START,
+        end: src.end || DEFAULT_END
+      };
     });
 
-    const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-    const hotel    = cityMeta[city]?.hotel || '';
-    const transport= cityMeta[city]?.transport || 'recomiéndame';
-    const forceReplan = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
+    const context = {
+      city,
+      country: dest.country || '',
+      days_total: dest.days,
+      baseDate: cityMeta[city]?.baseDate || dest.baseDate || '',
+      hotel_base: cityMeta[city]?.hotel || '',
+      transport_preference: cityMeta[city]?.transport || 'recomiéndame',
+      day_hours: perDay,
+      travelers: plannerState?.travelers || {},
+      preferences: plannerState?.preferences || {},
+      special_conditions: plannerState?.specialConditions || ''
+    };
 
-    let heuristicsContext = '';
-    try{
-      const coords =
-        (typeof getCoordinatesForCity === 'function')
-          ? getCoordinatesForCity(city)
-          : null;
+    /* =======================
+       ETAPA 1 — INFO
+       ======================= */
+    const infoResp = await callApiChat(
+      'info',
+      { context },
+      { timeoutMs: 70000, retries: 1 }
+    );
 
-      const dayTripContext = getHeuristicDayTripContext(city) || {};
-      heuristicsContext = `
-───────────────────────────────
-🧭 CONTEXTO HEURÍSTICO GLOBAL
-───────────────────────────────
-- Ciudad: ${city}
-- Coords: ${coords ? JSON.stringify(coords) : 'N/D'}
-- Day Trip Context: ${JSON.stringify(dayTripContext)}
-      `.trim();
-    }catch(err){
-      console.warn('Heurística no disponible:', city, err);
-      heuristicsContext = '⚠️ Sin contexto heurístico disponible.';
+    const research = cleanToJSONPlus(infoResp?.text || infoResp);
+    if(!research || !research.rows_draft){
+      throw new Error('INFO no devolvió rows_draft');
     }
 
-    const intakeText = `
-${FORMAT}
-**Genera únicamente ${dest.days} día/s para "${city}"** (tabs ya existen en UI).
-Ventanas base por día (UI): ${JSON.stringify(perDay)}.
-Hotel/zona: ${hotel || 'a determinar'} · Transporte preferido: ${transport || 'a determinar'}.
-Requisitos:
-- Cobertura completa días 1–${dest.days} (sin días vacíos).
-- Rutas madre → subparadas; inserta "Regreso a ${city}" en day-trips.
-- Horarios plausibles: base 08:30–19:00; buffers ≥15m.
-- Transporte coherente: urbano a pie/metro; interurbano vehículo/tour si no hay bus local.
-- Duraciones normalizadas ("1h30m", "45m"). Máx 20 filas/día.
-Notas:
-- Breves y útiles (con "valid:" cuando aplique).
-- Si el research trae auroras, respétalas tal cual (ventana/nota/duración).
-Contexto adicional:
-${heuristicsContext}
-INTAKE:
-${buildIntake()}
-`.trim();
+    /* =======================
+       ETAPA 2 — PLANNER
+       ======================= */
+    const plannerResp = await callApiChat(
+      'planner',
+      { research_json: research },
+      { timeoutMs: 90000, retries: 1 }
+    );
 
-    if (typeof setOverlayMessage === 'function') {
-      try { setOverlayMessage(`Generando itinerario para ${city}…`); } catch(_) {}
+    const parsed = cleanToJSONPlus(plannerResp?.text || plannerResp);
+    if(!parsed || !Array.isArray(parsed.rows)){
+      throw new Error('PLANNER no devolvió rows');
     }
 
-    /* =================== Doble etapa INFO→PLANNER con caché robusto =================== */
-    window.__researchCache = window.__researchCache || {};
+    /* =======================
+       RENDER DIRECTO (SIN TOCAR)
+       ======================= */
+    itineraries[city] = itineraries[city] || { byDay:{}, originalDays: dest.days };
+    itineraries[city].byDay = {};
 
-    const _prefKey = (()=>{ try { return JSON.stringify(plannerState?.preferences || {}); } catch(_) { return ''; } })();
-    const _perDayKey = (()=>{ try { return JSON.stringify(perDay || []); } catch(_) { return ''; } })();
-    const _intakeLite = (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : `${city}|${hotel}|${transport}|${baseDate}`;
-    const researchKey = `${city}::${baseDate}::${hotel}::${transport}::${_prefKey}::${_perDayKey}::${_intakeLite}`;
+    parsed.rows.forEach(r=>{
+      const d = Number(r.day) || 1;
+      itineraries[city].byDay[d] = itineraries[city].byDay[d] || [];
+      itineraries[city].byDay[d].push(normalizeRow(r));
+    });
 
-    const cachedEntry = window.__researchCache[city];
-    const cached = (cachedEntry && cachedEntry.key === researchKey) ? cachedEntry.research : null;
-
-    let parsed = null;
-    try{
-      const context = (typeof buildIntakeLite === 'function') ? buildIntakeLite(city) : String(city||'');
-
-      const infoPrompt = `
-${FORMAT}
-Eres el INFO Chat interno de un planificador de viajes.
-Tu trabajo es generar research_json para que el planner produzca un itinerario WOW.
-
-REGLAS GLOBALES (aplican a cualquier ciudad/país):
-1) Sé CONCRETO: evita placeholders genéricos como "Museo de Arte", "Parque Local", "Café Local", "Restaurante Local". Si no sabes un nombre exacto, usa al menos "tipo + barrio/zona + por qué vale la pena".
-2) Para day-trips / macro-tours fuera de ciudad: SIEMPRE define la ruta "Destino → Sub-paradas" (5–8 paradas clave) + una instrucción explícita de "Regreso a la ciudad" al cierre.
-3) Transporte: si el usuario no define transporte o dice "recomiéndame", para salidas fuera de ciudad usa "Vehículo alquilado o Tour guiado" como default.
-4) Horarios realistas: actividades diurnas dentro de la ventana del día; cenas preferiblemente 19:00–21:30 si aparece cena.
-5) Evita repetir imperdibles y distribuye lo icónico durante la estancia (no concentrarlo solo un día).
-6) Entrega SOLO JSON válido (sin texto extra), compatible con el planner.
-
-CONTEXTO (input del usuario / planner):
-${context}
-`.trim();
-
-      const research = cached || await callInfoAPI({
-        messages: [{ role: 'user', content: infoPrompt }]
-      });
-
-      if(!cached) window.__researchCache[city] = { key: researchKey, research, ts: Date.now() };
-
-      const structured = await callPlannerAPI_withResearch(research);
-      parsed = structured;
-    }catch(errInfoPlanner){
-      console.warn('[generateCityItinerary] INFO→PLANNER falló, uso LEGACY:', errInfoPlanner);
-      const apiMessages = [{ role: "user", content: intakeText }];
-      const current = itineraries?.[city] || null;
-      parsed = await callPlannerAPI_legacy(apiMessages, {
-        itinerary_id: current?.itinerary_id,
-        version: typeof current?.version === 'number' ? current.version : undefined,
-      });
-    }
-
-    if(parsed && (parsed.rows || parsed.destination)){
-      const rowsFromApi = Array.isArray(parsed.rows) ? parsed.rows : [];
-      let tmpRows = rowsFromApi.map(r=>normalizeRow(r));
-
-      const existingActs = Object.values(itineraries[city]?.byDay||{}).flat().map(r=>normKey(String(r.activity||'')));
-      tmpRows = tmpRows.filter(r=>!existingActs.includes(normKey(String(r.activity||''))));
-
-      if(typeof applyTransportSmartFixes==='function') tmpRows=applyTransportSmartFixes(tmpRows);
-      if(typeof applyThermalSpaMinDuration==='function') tmpRows=applyThermalSpaMinDuration(tmpRows);
-      if(typeof sanitizeNotes==='function') tmpRows=sanitizeNotes(tmpRows);
-
-      if(typeof normalizeDurationLabel==='function') tmpRows = tmpRows.map(normalizeDurationLabel);
-      if(typeof normalizeAuroraWindow==='function')  tmpRows = tmpRows.map(normalizeAuroraWindow);
-
-      if(typeof enforceOneAuroraPerDay==='function') tmpRows = enforceOneAuroraPerDay(tmpRows);
-
-      if(typeof enforceTransportAndOutOfTown==='function') tmpRows = enforceTransportAndOutOfTown(city, tmpRows);
-
-      // ✅ FIX QUIRÚRGICO: asegurar retorno/cena ANTES de corregir solapes
-      if(typeof ensureReturnRow==='function') tmpRows = ensureReturnRow(city, tmpRows);
-      if(typeof clearTransportAfterReturn==='function') tmpRows = clearTransportAfterReturn(city, tmpRows);
-      if(typeof injectDinnerIfMissing === 'function') tmpRows = injectDinnerIfMissing(city, tmpRows);
-
-      if(typeof fixOverlaps==='function') tmpRows = fixOverlaps(tmpRows);
-
-      if(typeof __enforceDayWindowAndNoDawn__ === 'function') tmpRows = __enforceDayWindowAndNoDawn__(city, tmpRows);
-
-      pushRows(city, tmpRows, !!forceReplan);
-      ensureDays(city);
-
-      const totalDays = dest.days;
-      const byDayNow = itineraries[city]?.byDay || {};
-      const missingDays = [];
-      for(let d=1; d<=totalDays; d++){
-        const n = (byDayNow[d] || []).filter(r=>!!r.activity).length;
-        if(n === 0) missingDays.push(d);
-      }
-
-      const needDetailDays = [];
-      for(let d=1; d<=totalDays; d++){
-        try{
-          if(dayNeedsSubstops(city, d)) needDetailDays.push(d);
-        }catch(_){}
-      }
-
-      // ✅ QUIRÚRGICO (PERF): presupuesto de optimizeDay por corrida
-      // - si forceReplan: permite más
-      // - si normal: limita para no disparar 10+ llamadas
-      const maxBudget =
-        forceReplan ? Math.max(4, Math.ceil(totalDays * 0.75)) : Math.max(2, Math.ceil(totalDays * 0.35));
-      let budgetLeft = maxBudget;
-
-      const _runOpt = async (d, reason)=>{
-        if(budgetLeft <= 0) return;
-        budgetLeft--;
-        try { await optimizeDay(city, d); }
-        catch(e){ console.warn(`[generateCityItinerary] optimizeDay falló en D${d} (${city}) reason=${reason}`, e); }
-      };
-
-      // 1) faltantes (máxima prioridad)
-      for(const d of missingDays){
-        await _runOpt(d, 'missingDay');
-      }
-
-      // 2) macro-tour sin substops / placeholders (calidad)
-      for(const d of needDetailDays){
-        if(budgetLeft <= 0) break;
-        await _runOpt(d, 'needSubstops');
-      }
-
-      // 3) thin (ocupación real) — solo si queda budget
-      for(let d=1; d<=totalDays; d++){
-        if(budgetLeft <= 0) break;
-        if(forceReplan || dayIsTooThin(city, d, 3)){
-          await _runOpt(d, 'thin');
-        }
-      }
-
-      renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-      return;
-    }
-
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    ensureDays(city);
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
 
   } catch(err){
-    console.error(`[ERROR] generateCityItinerary(${city})`, err);
-    chatMsg(`⚠️ No se pudo generar el itinerario para <strong>${city}</strong>.`, 'ai');
+    console.error(`[generateCityItinerary] ${city}`, err);
+    chatMsg(
+      `⚠️ No se pudo generar el itinerario para <strong>${city}</strong>. Intenta nuevamente.`,
+      'ai'
+    );
   } finally {
-    delete window.__cityLocks[city];
+    showWOW(false);
   }
 }
 
-/* ==============================
-   SECCIÓN 15.3 · Rebalanceo global por ciudad
-   v69 (base)  → 🆕 Ruta moderna: usa optimizeDay (INFO→PLANNER) en rango
-   Dedupe robusto y fallback local se conservan cuando aplica
-================================= */
-
-/* ——— Utilitarios LOCALES (scope de la sección) ——— */
-function __canonTxt__(s){
-  return String(s||'')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^\p{L}\p{N}\s]/gu,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-function __isGenericActivity__(name){
-  const t = __canonTxt__(name);
-  const generic = [
-    'desayuno','almuerzo','comida','merienda','cena',
-    'descanso','relax','tiempo libre','libre',
-    'traslado','transfer','check in','check-in','check out','check-out',
-    'shopping','compras'
-  ];
-  if (generic.some(g => t === g || t.startsWith(g+' ') || (' '+t+' ').includes(' '+g+' '))) return true;
-  if (t.split(' ').length <= 2 && /^(almuerzo|cena|desayuno|traslado|descanso)$/i.test(t)) return true;
-  return false;
-}
-function __stripStopWords__(s){
-  const STOP = ['the','la','el','los','las','de','del','da','do','dos','das','di','du','a','al','en','of','and','y','e'];
-  const toks = s.split(' ').filter(w=>w && !STOP.includes(w));
-  return toks.join(' ').trim() || s;
-}
-function __aliasKey__(base){
-  const ALIAS = [
-    ['park guell','parc guell','parque guell','parque güell','park güell','güell park','guell park','guell'],
-    ['sagrada familia','basilica sagrada familia','templo expiatorio de la sagrada familia','templo de la sagrada familia'],
-    ['casa batllo','casa batlló','batllo','batlló'],
-    ['la rambla','las ramblas','rambla'],
-    ['barceloneta','playa de la barceloneta'],
-    ['gothic quarter','barrio gotico','barrio gótico','gothic','gotico','gótico'],
-    ['ciutadella','parc de la ciutadella','parque de la ciutadella','ciutadella park'],
-    ['born','el borne','el born'],
-    ['old town','ciudad vieja','casco antiguo','centro historico','centro histórico'],
-  ];
-  for(const group of ALIAS){
-    const norm = group.map(__canonTxt__);
-    if(norm.some(a=>base.includes(a))) return norm[0];
-  }
-  return base;
-}
-function __placeKey__(name){
-  const raw = String(name||'').trim();
-  if(!raw) return '';
-  if(__isGenericActivity__(raw)) return '';
-  const base = __stripStopWords__(__canonTxt__(raw));
-  return __aliasKey__(base);
-}
-function __buildPrevActivityKeySet__(byDay, start){
-  const keys = new Set();
-  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  for(const d of days){
-    if(d >= start) break;
-    for(const r of (byDay[d]||[])){
-      const k = __placeKey__(r.activity||'');
-      if(k) keys.add(k);
-    }
-  }
-  return keys;
-}
-function __keysToExampleList__(keys, limit=80){
-  return Array.from(keys).slice(0, limit);
-}
-
-/* ——— Rebalanceo por rango (ruta moderna) ——— */
-async function rebalanceWholeCity(city, rangeOpt = {}){
-  if(!city || !itineraries[city]) return;
-
-  const data     = itineraries[city];
-  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
-  const byDay    = data.byDay || {};
-  const allDays  = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
-  if(!allDays.length) return;
-
-  const start = Math.max(1, parseInt(rangeOpt.start||1,10));
-  const end   = Math.max(start, parseInt(rangeOpt.end||allDays[allDays.length-1],10));
-
-  const prevKeySet = __buildPrevActivityKeySet__(byDay, start);
-  const prevExamples = __keysToExampleList__(prevKeySet);
-
-  showWOW(true, `Reequilibrando ${city}…`);
-
-  try{
-    const force = !!(plannerState?.forceReplan && plannerState.forceReplan[city]);
-
-    for(let d=start; d<=end; d++){
-      /* eslint-disable no-await-in-loop */
-      const thin =
-        (typeof dayIsTooThin === 'function')
-          ? dayIsTooThin(city, d, 3)
-          : true;
-
-      if(force || thin){
-        await optimizeDay(city, d);
-      }
-    }
-  }catch(err){
-    console.warn('[rebalanceWholeCity] optimizeDay rango falló. Intento de salvataje local.', err);
-
-    const merged = { ...(itineraries[city].byDay || {}) };
-    Object.keys(merged).forEach(d=>{
-      merged[d] = (merged[d]||[]).map(normalizeRow)
-        .sort((a,b)=>(a.start||'')<(b.start||'')?-1:1);
-    });
-    itineraries[city].byDay = merged;
-  }
-
-  renderCityTabs();
-  setActiveCity(city);
-  renderCityItinerary(city);
-  showWOW(false);
-}
+/* ─────────────────────────────────────────────────────────────
+   [15.3] Rebalanceo global
+   ❌ ELIMINADO
+   El rebalanceo ahora vive EXCLUSIVAMENTE en el API
+───────────────────────────────────────────────────────────── */
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
