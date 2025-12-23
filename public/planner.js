@@ -1690,7 +1690,7 @@ async function generateCityItinerary(city){
   showWOW(true, `Generando itinerario para ${city}…`);
 
   try {
-    /* ===== Horarios por día (si no hay, el API decide) ===== */
+    /* ===== Horarios por día (scope explícito) ===== */
     const perDay = Array.from({ length: dest.days }, (_,i)=>{
       const src = cityMeta[city]?.perDay?.[i] || {};
       return {
@@ -1722,14 +1722,18 @@ async function generateCityItinerary(city){
     );
 
     const research = cleanToJSONPlus(infoResp?.text || infoResp);
-    if (!research || !research.rows_draft) {
+    if (!research || !Array.isArray(research.rows_draft)) {
       throw new Error('INFO no devolvió rows_draft');
     }
 
-    /* ===== ETAPA 2 — PLANNER ===== */
+    /* ===== ETAPA 2 — PLANNER (scope BLOQUEADO) ===== */
     const plannerResp = await callApiChat(
       'planner',
-      { research_json: research },
+      {
+        research_json: research,
+        day_hours: perDay,
+        days_total: dest.days
+      },
       { timeoutMs: 90000, retries: 1 }
     );
 
@@ -1738,7 +1742,7 @@ async function generateCityItinerary(city){
       throw new Error('PLANNER no devolvió rows');
     }
 
-    /* ===== Render directo (sin modificar datos) ===== */
+    /* ===== Render directo (sin mutar lógica) ===== */
     itineraries[city] = itineraries[city] || {
       byDay: {},
       originalDays: dest.days
@@ -1747,7 +1751,8 @@ async function generateCityItinerary(city){
     itineraries[city].byDay = {};
 
     parsed.rows.forEach(r=>{
-      const d = Number(r.day) || 1;
+      const d = Number(r.day);
+      if (!d || d < 1 || d > dest.days) return;
       itineraries[city].byDay[d] = itineraries[city].byDay[d] || [];
       itineraries[city].byDay[d].push(normalizeRow(r));
     });
