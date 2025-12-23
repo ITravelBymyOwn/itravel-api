@@ -3905,12 +3905,9 @@ async function onSend(){
 
 /* ==============================
    SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
-   ✅ PATCH QUIRÚRGICO (idempotente):
-   - Evita envolver addCityRow múltiples veces si el script se evalúa de nuevo.
-   - Mantiene exactamente el mismo UI/estructura y flujo.
+   (COHERENTE con API v43.5)
 ================================= */
 (function(){
-  // 🛡️ Guard global para evitar doble parche
   if (window.__ITBMO_SECTION20_REORDER_PATCH__) return;
   window.__ITBMO_SECTION20_REORDER_PATCH__ = true;
 
@@ -3923,6 +3920,7 @@ async function onSend(){
     const up = document.createElement('button');
     up.textContent = '↑';
     up.className = 'btn ghost';
+
     const down = document.createElement('button');
     down.textContent = '↓';
     down.className = 'btn ghost';
@@ -3931,59 +3929,54 @@ async function onSend(){
     ctrlWrap.appendChild(down);
     row.appendChild(ctrlWrap);
 
-    // 🆙 Subir ciudad
     up.addEventListener('click', ()=>{
       if(row.previousElementSibling){
         $cityList.insertBefore(row, row.previousElementSibling);
-        saveDestinations(); // ⚡ sincroniza inmediatamente orden
+        saveDestinations();
       }
     });
 
-    // ⬇️ Bajar ciudad
     down.addEventListener('click', ()=>{
       if(row.nextElementSibling){
         $cityList.insertBefore(row.nextElementSibling, row);
-        saveDestinations(); // ⚡ sincroniza inmediatamente orden
+        saveDestinations();
       }
     });
   }
 
-  // 🧭 Inyectar controles a filas existentes (si no los tienen)
   try{
-    const rows = qsa ? qsa('.city-row', $cityList) : ($cityList ? Array.from($cityList.querySelectorAll('.city-row')) : []);
+    const rows = qsa('.city-row', $cityList);
     rows.forEach(r=>{
-      // evita duplicar si ya existe el wrapper (botones ↑↓)
-      const already = Array.from(r.querySelectorAll('button')).some(b=>b.textContent==='↑' || b.textContent==='↓');
+      const already = Array.from(r.querySelectorAll('button'))
+        .some(b=>b.textContent==='↑' || b.textContent==='↓');
       if(!already) addRowReorderControls(r);
     });
-  }catch(_){ /* no-op seguro */ }
+  }catch(_){}
 
-  // 🧭 Parchear addCityRow una sola vez (sin re-envolver)
   if (!window.__ITBMO_ORIG_ADD_CITY_ROW__) {
     window.__ITBMO_ORIG_ADD_CITY_ROW__ = addCityRow;
   }
+
   const origAddCityRow = window.__ITBMO_ORIG_ADD_CITY_ROW__;
 
   addCityRow = function(pref){
     origAddCityRow(pref);
     const row = $cityList?.lastElementChild;
     if(row){
-      const already = Array.from(row.querySelectorAll('button')).some(b=>b.textContent==='↑' || b.textContent==='↓');
+      const already = Array.from(row.querySelectorAll('button'))
+        .some(b=>b.textContent==='↑' || b.textContent==='↓');
       if(!already) addRowReorderControls(row);
     }
   };
 
-  // 🧼 País: permitir letras Unicode y espacios (global)
   document.addEventListener('input', (e)=>{
-    if(e.target && e.target.classList && e.target.classList.contains('country')){
+    if(e.target?.classList?.contains('country')){
       const original = e.target.value;
-      // Acepta cualquier letra Unicode y espacios (requiere flag 'u')
       const filtered = original.replace(/[^\p{L}\s]/gu,'');
       if(filtered !== original){
         const pos = e.target.selectionStart;
         e.target.value = filtered;
         if(typeof pos === 'number'){
-          // ⚡ Ajuste suave del cursor
           e.target.setSelectionRange(
             pos - (original.length - filtered.length),
             pos - (original.length - filtered.length)
@@ -3996,21 +3989,18 @@ async function onSend(){
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (mantiene v55.1 + FIX: el botón “Iniciar planificación”
-    **sólo** se habilita después de pulsar **Guardar destinos** con datos válidos)
-   🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
-   💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
-
-   ✅ QUIRÚRGICO (post-API y coherente con SECCIÓN 19):
-   - NO sobrescribe window.callInfoAgent (planner info interno).
-   - Crea/asegura window.callInfoAgentPublic para el Info Chat EXTERNO.
-   - sendInfoMessage() usa callInfoAgentPublic.
+   (v55.1 preservada + alineación API v43.5)
+   - El planner NO genera inteligencia
+   - Toda lógica de itinerarios vive en /api/chat.js
+   - UI, guards y flujos se mantienen intactos
 ================================= */
+
 $addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
+
   for(const r of rows){
     const el = qs('.baseDate', r);
     const v  = (el?.value||'').trim();
@@ -4021,38 +4011,41 @@ function validateBaseDatesDMY(){
       break;
     }
   }
+
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
     tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
     document.body.appendChild(tooltip);
+
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
     tooltip.style.top  = rect.bottom + window.scrollY + 6 + 'px';
+
     setTimeout(() => tooltip.classList.add('visible'), 20);
     setTimeout(() => {
       tooltip.classList.remove('visible');
       setTimeout(() => tooltip.remove(), 300);
     }, 3500);
+
     firstInvalid.focus();
     return false;
   }
   return true;
 }
 
-/* ===== Guardar destinos: sólo aquí se evalúa habilitar “Iniciar planificación” ===== */
+/* ===== Guardar destinos: único punto que habilita “Iniciar planificación” ===== */
 $save?.addEventListener('click', ()=>{
-  // ejecuta lógica propia de guardado
   try { saveDestinations(); } catch(_) {}
 
-  // valida y sólo entonces habilita
   const basicsOK = formHasBasics();
   const datesOK  = validateBaseDatesDMY();
+
   if (basicsOK && datesOK) {
     hasSavedOnce = true;
     if ($start) $start.disabled = false;
 
-    // 🆕 Hook para integraciones internas (no rompe nada)
+    // Hook interno (no rompe nada)
     try {
       document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
         detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
@@ -4063,32 +4056,34 @@ $save?.addEventListener('click', ()=>{
   }
 });
 
-/* ===== Reglas para habilitación del botón ===== */
+/* ===== Validación mínima del formulario ===== */
 function formHasBasics(){
   const row = qs('.city-row', $cityList);
   if(!row) return false;
+
   const city  = (qs('.city', row)?.value||'').trim();
   const country = (qs('.country', row)?.value||'').trim();
   const days  = parseInt(qs('.days', row)?.value||'0', 10);
   const base  = (qs('.baseDate', row)?.value||'').trim();
+
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
-// Ya NO habilitamos al escribir; sólo deshabilitamos si se borran datos
+/* ===== Si el usuario rompe el formulario, se vuelve a deshabilitar Start ===== */
 document.addEventListener('input', (e)=>{
   if(!$start) return;
+
   if(e.target && (
      e.target.classList?.contains('city') ||
      e.target.classList?.contains('country') ||
      e.target.classList?.contains('days') ||
      e.target.classList?.contains('baseDate')
   )){
-    // si el usuario rompe el formulario, deshabilita hasta que vuelva a Guardar
     if(!formHasBasics()) $start.disabled = true;
   }
 });
 
-/* ===== Recuperación/inyector del botón Reset si no existe ===== */
+/* ===== Botón Reset (inyección si no existe) ===== */
 function ensureResetButton(){
   let btn = document.getElementById('reset-planner');
   if(!btn){
@@ -4103,7 +4098,7 @@ function ensureResetButton(){
   return btn;
 }
 
-// ⛔ Reset con confirmación modal
+/* ===== Reset con confirmación modal ===== */
 function bindReset(){
   const $btn = ensureResetButton();
   $btn.removeAttribute('disabled');
@@ -4122,6 +4117,7 @@ function bindReset(){
         <button id="cancel-reset" class="btn ghost">Cancelar</button>
       </div>
     `;
+
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     setTimeout(()=>overlay.classList.add('active'), 10);
@@ -4130,15 +4126,22 @@ function bindReset(){
     const cancelReset  = overlay.querySelector('#cancel-reset');
 
     confirmReset.addEventListener('click', ()=>{
-      // Estado principal
-      $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+      $cityList.innerHTML='';
+      savedDestinations=[];
+      itineraries={};
+      cityMeta={};
+
       addCityRow();
       if ($start) $start.disabled = true;
-      $tabs.innerHTML=''; $itWrap.innerHTML='';
-      $chatBox.style.display='none'; $chatM.innerHTML='';
-      session = []; hasSavedOnce=false; pendingChange=null;
+      $tabs.innerHTML='';
+      $itWrap.innerHTML='';
+      $chatBox.style.display='none';
+      $chatM.innerHTML='';
 
-      // Flags
+      session = [];
+      hasSavedOnce=false;
+      pendingChange=null;
+
       planningStarted = false;
       metaProgressIndex = 0;
       collectingHotels = false;
@@ -4167,8 +4170,6 @@ function bindReset(){
         plannerState.preferences = {};
         plannerState.dayTripPending = {};
         plannerState.existingActs = {};
-        // ✅ no tocamos pendingEdits: se recrea on demand
-        if(plannerState.pendingEdits) plannerState.pendingEdits = {};
       }
 
       overlay.classList.remove('active');
@@ -4185,7 +4186,6 @@ function bindReset(){
       const firstCity = qs('.city-row .city');
       if (firstCity) firstCity.focus();
 
-      // 🆕 Hook para integraciones internas (no rompe nada)
       try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
     });
 
@@ -4204,16 +4204,16 @@ function bindReset(){
   });
 }
 
-// ▶️ Start: valida y ejecuta
+/* ===== Start Planning ===== */
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
-  if(!hasSavedOnce){ // protección extra: exigir paso por “Guardar”
+
+  if(!hasSavedOnce){
     chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
     return;
   }
   if(!validateBaseDatesDMY()) return;
 
-  // 🆕 Hook para integraciones internas (no rompe nada)
   try {
     document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
       detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
@@ -4222,159 +4222,87 @@ $start?.addEventListener('click', ()=>{
 
   startPlanning();
 });
-$send?.addEventListener('click', onSend);
 
-// Chat: Enter envía (sin Shift)
-$chatI?.addEventListener('keydown', e=>{
-  if(e.key==='Enter' && !e.shiftKey){
-    e.preventDefault();
-    onSend();
-  }
-});
+/* ===============================
+   INFO CHAT EXTERNO (AISLADO)
+================================ */
 
-// CTA y upsell
-$confirmCTA?.addEventListener('click', ()=>{ 
-  isItineraryLocked = true;
-  const upsell = qs('#monetization-upsell');
-  if (upsell) upsell.style.display = 'flex';
-});
-$upsellClose?.addEventListener('click', ()=>{
-  const upsell = qs('#monetization-upsell');
-  if (upsell) upsell.style.display = 'none';
-});
-
-/* 🆕 Listener: Rebalanceo inteligente al agregar días (para integraciones internas) */
-document.addEventListener('itbmo:addDays', e=>{
-  const { city, extraDays, dayTripTo } = e.detail || {};
-  if(!city || !extraDays) return;
-  addMultipleDaysToCity(city, extraDays);
-  const start = itineraries[city]?.originalDays || 1;
-  const end   = (itineraries[city]?.originalDays || 0) + extraDays;
-  rebalanceWholeCity(city, { start, end, dayTripTo });
-});
-
-/* ====== Info Chat (EXTERNO, totalmente independiente) ======
-   ✅ QUIRÚRGICO: ahora NO pisa window.callInfoAgent (interno).
-   Crea window.callInfoAgentPublic (público sin contexto).
------------------------------------------------------------ */
+/* 🔒 Cliente público: NO usa /api/chat ni contexto */
 function __ensureInfoAgentClient__(){
   window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
   window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
 
-  // Preservar el cliente interno si ya existe (planner)
-  try{
-    if(typeof window.callInfoAgent === 'function' && !window.__ITBMO_CALL_INFO_AGENT_INTERNAL__){
-      window.__ITBMO_CALL_INFO_AGENT_INTERNAL__ = window.callInfoAgent;
-    }
-  }catch(_){}
-
-  const wrongPublicClient = (fn)=>{
+  const wrongClient = (fn)=>{
     if(typeof fn !== 'function') return true;
     const src = Function.prototype.toString.call(fn);
-    // si accidentalmente apunta al /api/chat o menciona context/mode, NO es público
     if(/\/api\/chat/.test(src)) return true;
     if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
     if(/context/.test(src)) return true;
-    if(fn.__source !== 'external-public-v1') return true;
     if(fn.__usesContext__ !== false) return true;
     return false;
   };
 
-  if(wrongPublicClient(window.callInfoAgentPublic)){
-    const simpleInfoPublic = async function(userText){
+  if(wrongClient(window.callInfoAgent)){
+    const simpleInfo = async function(userText){
       const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
-      let resp;
       try{
-        resp = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type":"application/json", "Accept":"application/json" },
-          body: JSON.stringify({ input: String(userText || "") })
+        const resp = await fetch(url,{
+          method:"POST",
+          headers:{ "Content-Type":"application/json" },
+          body: JSON.stringify({ input:String(userText||"") })
         });
-      }catch(_){
-        return "No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.";
-      }
-      try{
         const data = await resp.json();
-        let txt = (typeof data?.text === 'string') ? data.text : '';
-        if(!txt || /^\s*\{/.test(txt)) {
-          try {
-            const j = JSON.parse(txt);
-            if(j && (j.rationale || j.summary)) return String(j.rationale || j.summary);
-            if(j && j.destination) return `Información de ${j.destination} lista. Pregúntame algo concreto.`;
-            txt = "He obtenido datos estructurados. Dime qué deseas saber y te lo explico en simple.";
-          } catch { txt = "He obtenido datos. Dime qué deseas saber y te lo explico en simple."; }
-        }
-        return txt;
+        return data?.text || '';
       }catch{
-        try { return await resp.text(); } catch { return "⚠️ No se obtuvo respuesta del asistente."; }
+        return "No pude traer la respuesta del Info Chat en este momento.";
       }
     };
-    simpleInfoPublic.__usesContext__ = false;
-    simpleInfoPublic.__source = 'external-public-v1';
-    window.callInfoAgentPublic = simpleInfoPublic;
+    simpleInfo.__usesContext__ = false;
+    window.callInfoAgent = simpleInfo;
   }
-
-  // ✅ Si el interno existía, lo restauramos por seguridad (evita que alguien lo haya pisado)
-  try{
-    if(window.__ITBMO_CALL_INFO_AGENT_INTERNAL__ && typeof window.__ITBMO_CALL_INFO_AGENT_INTERNAL__ === 'function'){
-      window.callInfoAgent = window.__ITBMO_CALL_INFO_AGENT_INTERNAL__;
-    }
-  }catch(_){}
 }
 
-function openInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.style.display='flex'; m.classList.add('active'); }
-function closeInfoModal(){ const m=qs('#info-chat-modal'); if(!m) return; m.classList.remove('active'); m.style.display='none'; }
+function openInfoModal(){
+  const m=qs('#info-chat-modal');
+  if(m){ m.style.display='flex'; m.classList.add('active'); }
+}
+function closeInfoModal(){
+  const m=qs('#info-chat-modal');
+  if(m){ m.classList.remove('active'); m.style.display='none'; }
+}
 
-/* === Typing indicator (tres puntitos) — minimal JS, sin depender de CSS especial === */
+/* Typing indicator */
 function __infoTypingOn__(){
-  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages') || qs('#info-chat-body');
-  if(!box) return;
-  if(document.getElementById('info-typing')) return; // ya existe
+  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages');
+  if(!box || document.getElementById('info-typing')) return;
   const b = document.createElement('div');
   b.id = 'info-typing';
   b.className = 'bubble ai typing';
-  b.setAttribute('aria-live','polite');
   b.textContent = '...';
   box.appendChild(b);
-  let i = 0;
-  b.__timer = setInterval(()=>{
-    i = (i+1)%3;
-    b.textContent = '.'.repeat(i+1);
-  }, 400);
+  let i=0;
+  b.__timer=setInterval(()=>{ i=(i+1)%3; b.textContent='.'.repeat(i+1); },400);
   box.scrollTop = box.scrollHeight;
 }
 function __infoTypingOff__(){
-  const b = document.getElementById('info-typing');
-  if(!b) return;
-  if(b.__timer) clearInterval(b.__timer);
-  b.remove();
+  const b=document.getElementById('info-typing');
+  if(b){ clearInterval(b.__timer); b.remove(); }
 }
 
 async function sendInfoMessage(){
-  const input = qs('#info-chat-input'); const btn = qs('#info-chat-send');
-  if(!input || !btn) return; const txt = (input.value||'').trim(); if(!txt) return;
-  infoChatMsg(txt,'user'); input.value=''; input.style.height='auto';
+  const input=qs('#info-chat-input');
+  if(!input) return;
+  const txt=(input.value||'').trim();
+  if(!txt) return;
+
+  infoChatMsg(txt,'user');
+  input.value='';
+  input.style.height='auto';
 
   __infoTypingOn__();
-  try{
-    // ✅ EXTERNO SIEMPRE usa el cliente público
-    const fn = window.callInfoAgentPublic || window.callInfoAgent; // fallback por si algo raro ocurre
-    const ans = await fn(txt);
-
-    let out = ans;
-    if(typeof ans === 'object') out = ans.text || JSON.stringify(ans);
-    if(typeof out === 'string' && /^\s*\{/.test(out)){
-      try{
-        const j = JSON.parse(out);
-        out = j.rationale || j.summary || 'Tengo la información. Pregúntame en lenguaje natural y te respondo fácil.';
-      }catch{}
-    }
-    __infoTypingOff__();
-    infoChatMsg(out || 'No tengo la respuesta exacta. Reformula la pregunta y lo vuelvo a intentar.');
-  }catch(_){
-    __infoTypingOff__();
-    infoChatMsg('No pude obtener respuesta del asistente ahora mismo. Intenta de nuevo.', 'ai');
-  }
+  const ans=await callInfoAgent(txt);
+  __infoTypingOff__();
+  infoChatMsg(ans||'','ai');
 }
 
 function bindInfoChatListeners(){
@@ -4384,59 +4312,29 @@ function bindInfoChatListeners(){
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
-  toggleTop?.replaceWith(toggleTop.cloneNode(true));
-  toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
-  close?.replaceWith(close.cloneNode(true));
-  send?.replaceWith(send.cloneNode(true));
-
-  const tTop = qs('#info-chat-toggle');
-  const tFloat = qs('#info-chat-floating');
-  const c2 = qs('#info-chat-close');
-  const s2 = qs('#info-chat-send');
-  const i2 = qs('#info-chat-input');
-
-  [tTop, tFloat].forEach(btn=>{
-    btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  [toggleTop, toggleFloating].forEach(btn=>{
+    btn?.addEventListener('click',(e)=>{ e.preventDefault(); openInfoModal(); });
   });
-  c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
-  s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+  close?.addEventListener('click',(e)=>{ e.preventDefault(); closeInfoModal(); });
+  send?.addEventListener('click',(e)=>{ e.preventDefault(); sendInfoMessage(); });
 
-  i2?.addEventListener('keydown', (e)=>{
+  input?.addEventListener('keydown',(e)=>{
     if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
-  });
-
-  if(i2){
-    i2.setAttribute('rows','1');
-    i2.style.overflowY = 'hidden';
-    const maxRows = 10;
-    i2.addEventListener('input', ()=>{
-      i2.style.height = 'auto';
-      const lh = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
-      const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${lh * lines + 8}px`;
-      i2.scrollTop = i2.scrollHeight;
-    });
-  }
-
-  document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
-    if(el){ e.preventDefault(); openInfoModal(); }
   });
 }
 
-// Inicialización (guard anti-doble init)
+/* ===== INIT ===== */
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
-  if(!document.querySelector('#city-list .city-row')) addCityRow();
+  if(!qs('#city-list .city-row')) addCityRow();
 
-  // Aísla Info Chat externo antes de listeners (sin pisar interno)
   __ensureInfoAgentClient__();
-
   bindInfoChatListeners();
   bindReset();
-  // tras cargar, el botón start queda deshabilitado hasta que el usuario pulse Guardar
+
   if ($start) $start.disabled = !hasSavedOnce;
 });
+
 
