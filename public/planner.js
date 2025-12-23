@@ -2681,30 +2681,14 @@ function intentFromText(text){
 }
 
 /* ============================================================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-   Base v73 — Ajuste flexible FINAL (quirúrgico) → Patch v77.1
-   Cambios clave en este patch:
-   • Doble etapa con el agente: INFO → PLANNER (timeouts/retry).
-   • Auroras: 1 por día, franja nocturna, no consecutivas (cap global).
-   • Overlaps nocturnos tabs-safe (no cambia "day"; respeta cruce).
-   • Limpieza de transporte urbano tras “Regreso a {city}”.
-   • Poda ligera de genéricos (desayuno/almuerzo/cena/día libre).
-   • Ordenamiento tabs-safe ponderando filas post-medianoche.
-   • Llamadas a optimización y validación sólo cuando agrega valor.
-   • Todas las funciones nuevas se registran con guardas para no
-     pisar implementaciones existentes en otras secciones.
+   SECCIÓN 18 · Guard rails mínimos (post-API) + Optimización por día
+   Fuente de verdad: API (INFO + PLANNER)
+   Aquí solo: robustez, parseo, clamps, overlaps mínimos, orden tabs-safe.
+   + 🆕 Soporte de "user_instruction" para ediciones (desde SECCIÓN 19).
    ============================================================ */
 
 /* ============================================================
-   ✅ INJERTO QUIRÚRGICO (DIAGNÓSTICO)
-   - NO cambia lógica del planner.
-   - Solo añade medición de tiempos/counters para encontrar la lentitud.
-   Cómo activar:
-   1) En DevTools Console:
-      window.__ITBMO_DIAG__ && (window.__ITBMO_DIAG__.enabled = true)
-   2) Luego ejecuta acciones (Start / generar / reoptimize).
-   3) Para ver resumen:
-      window.__ITBMO_DIAG__.summary()
+   ✅ DIAG QUIRÚRGICO (se mantiene) — NO afecta lógica del planner
    ============================================================ */
 (function initITBMODiag(){
   if (window.__ITBMO_DIAG__ && window.__ITBMO_DIAG__.__v === 1) return;
@@ -2713,13 +2697,13 @@ function intentFromText(text){
 
   const diag = {
     __v: 1,
-    enabled: false,     // ← se activa manualmente en console
-    quiet: false,       // si quieres menos logs
-    marks: {},          // { key: [t0, t1, ...] }
-    counters: {},       // { key: n }
-    last: {},           // { key: any }
-    errors: [],         // [{ at, where, msg }]
-    timelines: [],      // [{ at, tag, ms, meta }]
+    enabled: false,
+    quiet: false,
+    marks: {},
+    counters: {},
+    last: {},
+    errors: [],
+    timelines: [],
 
     inc(key, n=1){
       this.counters[key] = (this.counters[key] || 0) + (Number(n)||1);
@@ -2829,53 +2813,39 @@ if (typeof __addMinutesSafe__ !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   Detección de nocturnas / auroras / out-of-town
+   Detección mínima de nocturnas (solo guard rail de overlaps)
 ------------------------------------------------------------------- */
 if (typeof __isNightRow__ !== 'function') {
-  // ✅ FIX QUIRÚRGICO CRÍTICO:
-  // Antes: trataba como “night” cualquier cosa desde 18:00 → rompía cenas (ej. 18:00–01:45)
-  // Ahora: “night” SOLO si hay señales reales de nocturno (aurora / notas / cruce / muy tarde).
   function __isNightRow__(r) {
     const act = String(r?.activity || '').toLowerCase();
     const notes = String(r?.notes || '').toLowerCase();
     const sMin = __toMinHHMM__(r?.start);
     const eMin = __toMinHHMM__(r?.end);
 
-    // Auroras siempre nocturnas
     if (/auroras?|northern\s*lights/.test(act)) return true;
-
-    // Notas explícitas
     if (/noche|nocturn/.test(notes)) return true;
-
-    // Si cruza medianoche (end <= start con ambos presentes), es nocturna
     if (sMin != null && eMin != null && eMin <= sMin) return true;
-
-    // Si inicia muy tarde, tratar como nocturna
     if (sMin != null && sMin >= 21 * 60) return true;
-
-    // Si termina muy tarde (>=23:30), tratar como nocturna
     if (eMin != null && eMin >= (23 * 60 + 30)) return true;
 
     return false;
   }
 }
 
+/* ------------------------------------------------------------------
+   Señal conservadora de out-of-town (solo para orden tabs-safe)
+------------------------------------------------------------------- */
 if (typeof isOutOfTownRow !== 'function') {
-  // ✅ PATCH QUIRÚRGICO: evitar falsos positivos por "from/to no contiene ciudad"
-  // Regla conservadora: out-of-town SOLO si hay señales fuertes en activity/from/to.
   function isOutOfTownRow(city, r) {
     const a = (r?.activity || '').toLowerCase();
     const f = (r?.from || '').toLowerCase();
     const t = (r?.to || '').toLowerCase();
 
-    // Señales fuertes de excursión / fuera de ciudad (genéricas, multi-país)
     const strong =
-      /excursi[oó]n|day\s*trip|tour\s+del|tour\s+de|golden\s+circle|south\s+coast|c[ií]rculo\s+dorado|costa\s+sur|pen[ií]nsula|glaciar|parque\s+nacional|volc[aá]n|cascada|waterfall|crater|geysir|laguna\s+azul|blue\s*lagoon|hot\s*spring|thermal|lago\b|playa\b|black\s+sand|village|island\s+tour/i;
+      /excursi[oó]n|day\s*trip|tour\b|circuito|ruta|road\s*trip|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|crater|geyser|lagoon|hot\s*spring|thermal|island\s+tour/i;
 
-    // Si cualquiera de los campos tiene señal fuerte, se considera out-of-town
     if (strong.test(a) || strong.test(f) || strong.test(t)) return true;
 
-    // Caso adicional: transporte claramente interurbano
     const tr = (r?.transport || '').toLowerCase();
     if (/veh[ií]culo|carro|auto|tour\s+guiado|van|bus\s+tur[ií]stico/i.test(tr) && strong.test(a)) return true;
 
@@ -2884,73 +2854,7 @@ if (typeof isOutOfTownRow !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   Normalizadores (duración y ventana de auroras)
-------------------------------------------------------------------- */
-if (typeof normalizeDurationLabel !== 'function') {
-  function normalizeDurationLabel(r) {
-    const raw = String(r?.duration || '').trim();
-    if(!raw) return r;
-
-    // ✅ PATCH QUIRÚRGICO: NO aplastar formato 2-líneas del API
-    // "Transporte: Xm\nActividad: Ym"
-    if (/^Transporte\s*:/i.test(raw) || raw.includes('\nActividad:') || /Actividad\s*:/i.test(raw)) {
-      return r;
-    }
-
-    let minutes = 0;
-    let m = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-    if (m) {
-      minutes = parseInt(m[1], 10) * 60 + (m[2] ? parseInt(m[2], 10) : 0);
-    } else {
-      m = raw.match(/(\d+)\s*m/i);
-      if (m) minutes = parseInt(m[1], 10);
-    }
-    if (!minutes) {
-      const s = __toMinHHMM__(r?.start), e = __toMinHHMM__(r?.end);
-      if (s != null && e != null) minutes = ((e - s) + 24 * 60) % (24 * 60);
-      if (!minutes) minutes = 60;
-    }
-    const h = Math.floor(minutes / 60);
-    const mm = minutes % 60;
-    const label = h ? (mm ? `${h}h${mm}m` : `${h}h`) : `${mm}m`;
-    return { ...r, duration: label };
-  }
-}
-if (typeof normalizeAuroraWindow !== 'function') {
-  function normalizeAuroraWindow(r) {
-    const act = String(r?.activity || '');
-    if (!/\bauroras?\b|\bnorthern\s+lights?\b/i.test(act)) return r;
-
-    const fallbackStart = '20:15';
-    const fallbackEnd = '00:15';
-
-    let s = __toMinHHMM__(r?.start);
-    let e = __toMinHHMM__(r?.end);
-    let d = String(r?.duration || '').trim();
-
-    if (s == null || e == null || e <= s) {
-      s = __toMinHHMM__(fallbackStart);
-      e = __toMinHHMM__(fallbackEnd) + 24 * 60;
-    }
-
-    const dur = (function () {
-      const md = d.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-      const mm = d.match(/(\d+)\s*m/i);
-      if (md) return parseInt(md[1], 10) * 60 + (md[2] ? parseInt(md[2], 10) : 0);
-      if (mm) return parseInt(mm[1], 10);
-      return ((e - s) + 24 * 60) % (24 * 60) || 240;
-    })();
-
-    const startHH = __toHHMMfromMin__(Math.min(Math.max(s, 18 * 60), (23 * 60) + 59));
-    const endHH = __toHHMMfromMin__(e % (24 * 60));
-    const lbl = dur >= 60 ? (dur % 60 ? `${Math.floor(dur / 60)}h${dur % 60}m` : `${Math.floor(dur / 60)}h`) : `${dur}m`;
-    return { ...r, start: startHH, end: endHH, duration: lbl, _crossDay: true };
-  }
-}
-
-/* ------------------------------------------------------------------
-   ✅ PATCH QUIRÚRGICO: clamp final a day_hours + NO madrugada para diurnas
-   - Esto evita horarios como 00:15–07:00 para actividades diurnas.
+   Clamp mínimo: ventana diurna + NO madrugada para diurnas (guard rail)
 ------------------------------------------------------------------- */
 if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
   function __enforceDayWindowAndNoDawn__(city, rows) {
@@ -2966,11 +2870,9 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
     const toMin = __toMinHHMM__;
     const toHH  = __toHHMMfromMin__;
 
-    // Duración aproximada desde duration o start/end
     const durMin = (r)=>{
       const raw = String(r?.duration || '').trim();
 
-      // Si viene en 2 líneas, intentamos sacar "Actividad"
       if (/Transporte\s*:/i.test(raw) || /Actividad\s*:/i.test(raw)) {
         const mAct = raw.match(/Actividad\s*:\s*([^\n]+)/i);
         if(mAct){
@@ -2996,20 +2898,9 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
       return 60;
     };
 
-    const isOut = (r)=>{
-      try{
-        if(typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
-      }catch(_){}
-      const act = String(r?.activity || '').toLowerCase();
-      const tr  = String(r?.transport || '').toLowerCase();
-      return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip|costa|pen[ií]nsula|parque\s+nacional|glaciar|volc[aá]n|geyser|lagoon|waterfall|cascada)/i.test(act) ||
-             /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
-    };
-
     const byDay = {};
     rows.forEach((r, idx)=>{
       const d = Number(r?.day) || 1;
-      // preservamos orden original con _idx si no existe
       if(typeof r?._idx === 'undefined') r._idx = idx;
       (byDay[d] = byDay[d] || []).push(r);
     });
@@ -3021,14 +2912,7 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
       const wS = toMin(win.start) ?? (8*60+30);
       const wE = toMin(win.end)   ?? (19*60);
 
-      const hasOut = list.some(r => isOut(r));
-
-      // ✅ PATCH: si es out-of-town, NO reordenar por start (mantener secuencia)
-      if(!hasOut){
-        list.sort((a,b)=>(toMin(a.start)||0)-(toMin(b.start)||0));
-      }else{
-        list.sort((a,b)=>(Number(a._idx)||0)-(Number(b._idx)||0));
-      }
+      list.sort((a,b)=>(toMin(a.start)||0)-(toMin(b.start)||0));
 
       let cursor = wS;
       for(const r of list){
@@ -3037,7 +2921,6 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
         let e = toMin(r.end);
         const dM = durMin(r);
 
-        // Si no es nocturna, prohibimos madrugada (<06:00) y clamp a ventana
         if(!isNight){
           if(s == null || s < 6*60) s = Math.max(wS, cursor);
           if(s < wS) s = wS;
@@ -3064,94 +2947,7 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   Reglas de auroras (cap/no consecutivas/una por día)
-------------------------------------------------------------------- */
-function __isAuroraName__(txt) { return /\bauroras?\b|\bnorthern\s+lights?\b/i.test(String(txt || '')); }
-
-function countAuroraNights(city) {
-  const byDay = itineraries[city]?.byDay || {};
-  let c = 0;
-  for (const d of Object.keys(byDay)) {
-    const rows = byDay[d] || [];
-    if (rows.some(r => __isAuroraName__(r.activity))) c++;
-  }
-  return c;
-}
-
-function suggestedAuroraCap(stayDays) {
-  if (stayDays >= 5) return 2;
-  if (stayDays >= 3) return 1;
-  return 1;
-}
-
-function isConsecutiveAurora(city, day) {
-  const byDay = itineraries[city]?.byDay || {};
-  const prev = byDay[day - 1] || [], next = byDay[day + 1] || [];
-  return prev.some(r => __isAuroraName__(r.activity)) || next.some(r => __isAuroraName__(r.activity));
-}
-
-function enforceAuroraCapForDay(city, day, rows, cap) {
-  const already = countAuroraNights(city);
-  const willAdd = rows.some(r => __isAuroraName__(r.activity));
-  if (!willAdd) return rows;
-  if (isConsecutiveAurora(city, day)) return rows.filter(r => !__isAuroraName__(r.activity));
-  if (already >= cap) return rows.filter(r => !__isAuroraName__(r.activity));
-  return rows;
-}
-
-function enforceOneAuroraPerDay(rows) {
-  const byDay = {};
-  rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
-  const out = [];
-  Object.keys(byDay).map(n=>+n).sort((a, b) => a - b).forEach(day => {
-    let seen = false;
-    for (const r of byDay[day]) {
-      if (__isAuroraName__(r.activity)) { if (seen) continue; seen = true; }
-      out.push(r);
-    }
-  });
-  return out;
-}
-
-/* ------------------------------------------------------------------
-   Poda de genéricos y limpieza de transporte post-Regreso
-------------------------------------------------------------------- */
-function pruneGenericPerDay(rows) {
-  const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
-  const out = [];
-  for (const d of Object.keys(byDay)) {
-    const list = byDay[d];
-    let seen = { desayuno: false, almuerzo: false, cena: false };
-    const dayHasContent = list.filter(r => !/d[ií]a\s*libre/i.test(String(r.activity || ''))).length >= 3;
-    for (const r of list) {
-      const a = String(r.activity || '').toLowerCase();
-      if (/desayuno\b/.test(a)) { if (seen.desayuno) continue; seen.desayuno = true; }
-      if (/almuerzo\b|comida\b/.test(a)) { if (seen.almuerzo) continue; seen.almuerzo = true; }
-      if (/cena\b/.test(a)) { if (seen.cena) continue; seen.cena = true; }
-      if (/d[ií]a\s*libre/.test(a) && dayHasContent) continue;
-      out.push(r);
-    }
-  }
-  return out;
-}
-
-function clearTransportAfterReturn(city, rows) {
-  const cityLow = String(city || '').toLowerCase();
-  let afterReturn = false;
-  return rows.map(r => {
-    const act = String(r.activity || '').toLowerCase();
-    const to = String(r.to || '').toLowerCase();
-    if (/regreso/.test(act) || (to.includes('hotel') && to.includes(cityLow))) { afterReturn = true; return r; }
-    if (afterReturn && !isOutOfTownRow(city, r)) {
-      return { ...r, transport: (r.transport && /pie|metro|bus|uber|taxi/i.test(r.transport)) ? r.transport : 'A pie' };
-    }
-    return r;
-  });
-}
-
-/* ------------------------------------------------------------------
-   Overlaps & orden tabs-safe (no altera "day")
-   ✅ FIX QUIRÚRGICO: por día + NO reordenar secuencia en out-of-town
+   Overlaps mínimos tabs-safe (guard rail) — NO altera “day”
 ------------------------------------------------------------------- */
 function fixOverlaps(rows) {
   const toMin = __toMinHHMM__;
@@ -3162,7 +2958,6 @@ function fixOverlaps(rows) {
 
     const raw = String(d);
 
-    // Si viene en 2 líneas, tomamos "Actividad"
     if (/Transporte\s*:/i.test(raw) || /Actividad\s*:/i.test(raw)) {
       const mAct = raw.match(/Actividad\s*:\s*([^\n]+)/i);
       if (mAct) {
@@ -3183,7 +2978,6 @@ function fixOverlaps(rows) {
 
   if (!Array.isArray(rows) || !rows.length) return rows || [];
 
-  // Agrupar por día SIN clonar (preserva referencias)
   const byDay = {};
   rows.forEach((r, idx) => {
     const d = Number(r?.day) || 1;
@@ -3192,21 +2986,10 @@ function fixOverlaps(rows) {
   });
 
   const outAll = [];
-
   const days = Object.keys(byDay).map(n => +n).sort((a,b)=>a-b);
+
   for (const day of days) {
     const dayRows = byDay[day];
-
-    // Detectar si el día es out-of-town → NO reordenar (mantener secuencia)
-    const hasOut = dayRows.some(r=>{
-      try { return (typeof isOutOfTownRow === 'function') ? isOutOfTownRow(null, r) : false; }
-      catch(_) { return false; }
-    }) || dayRows.some(r=>{
-      const a = String(r?.activity || '').toLowerCase();
-      const tr = String(r?.transport || '').toLowerCase();
-      return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip|golden\s+circle|south\s+coast|c[ií]rculo\s+dorado|costa\s+sur)/i.test(a) ||
-             /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
-    });
 
     const expanded = dayRows.map(r => {
       let s = toMin(r.start || '');
@@ -3230,11 +3013,7 @@ function fixOverlaps(rows) {
       return { __s: s, __e: e, __d: dM, __cross: cross, raw: r };
     });
 
-    // Orden:
-    // - si NO hay out-of-town: por start (para arreglar overlaps)
-    // - si hay out-of-town: por _idx original (mantener secuencia)
     expanded.sort((a,b)=>{
-      if (hasOut) return (Number(a.raw?._idx)||0) - (Number(b.raw?._idx)||0);
       const sa = (a.__s == null ? 1e9 : a.__s);
       const sb = (b.__s == null ? 1e9 : b.__s);
       if (sa !== sb) return sa - sb;
@@ -3247,7 +3026,6 @@ function fixOverlaps(rows) {
     for (const item of expanded) {
       let { __s: s, __e: e, __d: dM, __cross: cross, raw: r } = item;
 
-      // Shift mínimo para evitar solapes (solo dentro del día)
       if (prevEnd != null && s < prevEnd + 15) {
         const shift = (prevEnd + 15) - s;
         s += shift;
@@ -3255,26 +3033,23 @@ function fixOverlaps(rows) {
       }
       prevEnd = Math.max(prevEnd ?? 0, e);
 
-      // Duración: conservar si existe (incl 2-líneas); si no, calcular
       let finalDur = r.duration;
       if (!finalDur) {
-        finalDur = (dM > 0) ? `${dM}m` : `${Math.max(60, e - s)}m`;
+        finalDur = (dM > 0)
+          ? `Transporte: Verificar duración en el Info Chat\nActividad: ${dM}m`
+          : `Transporte: Verificar duración en el Info Chat\nActividad: ${Math.max(60, e - s)}m`;
       }
 
       const isNight = __isNightRow__(r);
 
-      // Normalizar nocturnas extendidas sin clamp agresivo
       let sOut = s;
       let eOut = e;
       let crossOut = cross;
 
       if (isNight) {
-        // si quedó extendida a +24h, llevar a rango 0–24 para mostrar,
-        // pero mantener _crossDay true
         if (sOut >= 24 * 60) { sOut -= 24 * 60; crossOut = true; }
         if (eOut >= 24 * 60) { eOut = eOut % (24 * 60); crossOut = true; }
       } else {
-        // diurnas: evitar que end “envuelva” por módulo
         if (eOut >= 24 * 60) { eOut = eOut % (24 * 60); }
       }
 
@@ -3298,7 +3073,7 @@ function fixOverlaps(rows) {
 }
 
 /* ------------------------------------------------------------------
-   ✅ PATCH QUIRÚRGICO: totalDays real (NO usar originalDays como clamp)
+   totalDays real (guard rail)
 ------------------------------------------------------------------- */
 function __getTotalDaysForCity__(city){
   const saved = savedDestinations?.find(x=>x.city===city)?.days;
@@ -3313,30 +3088,29 @@ function __normalizeDayField__(city, r) {
   let d = Number(r.day);
   if (!Number.isFinite(d) || d < 1) d = 1;
 
-  // ✅ total real: savedDestinations / perDay / byDay (NO originalDays)
   const total = __getTotalDaysForCity__(city);
-
   if (total > 0 && d > total) d = total;
+
   return { ...r, day: d };
 }
 
+/* ------------------------------------------------------------------
+   Orden tabs-safe (guard rail visual)
+------------------------------------------------------------------- */
 function __sortRowsTabsSafe__(rows) {
   const isReturn = (r) => /(^|\b)regreso\b/i.test(String(r?.activity || ''));
   const isNight = (r) => (typeof __isNightRow__ === 'function') ? __isNightRow__(r) : false;
 
-  // Señales out-of-town (fallback) si no existe isOutOfTownRow:
   const isOutFallback = (city, r) => {
     try {
       if (typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
     } catch (_) {}
     const act = String(r?.activity || '').toLowerCase();
     const tr  = String(r?.transport || '').toLowerCase();
-    // Heurística general (no city-specific):
     return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip)/i.test(act) ||
-           /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
+           /(veh[ií]culo|car|auto|van|bus|tour\s+guiado)/i.test(tr);
   };
 
-  // Pre-cálculo: detectar días out-of-town
   const outDays = new Set();
   for (const r of (rows || [])) {
     const d = Number(r?.day) || 1;
@@ -3347,7 +3121,6 @@ function __sortRowsTabsSafe__(rows) {
     const da = Number(a?.day) || 1, db = Number(b?.day) || 1;
     if (da !== db) return da - db;
 
-    // ✅ PATCH: si el día tiene señales out-of-town, empujar "Regreso" al final
     if (outDays.has(da)) {
       const ra = isReturn(a), rb = isReturn(b);
       if (ra !== rb) return ra ? 1 : -1;
@@ -3359,7 +3132,6 @@ function __sortRowsTabsSafe__(rows) {
     const wa = (a?._crossDay && sa < 360) ? sa + 24 * 60 : sa;
     const wb = (b?._crossDay && sb < 360) ? sb + 24 * 60 : sb;
 
-    // ✅ Extra: mantener nocturnas al final si compiten con diurnas del mismo día
     const na = isNight(a), nb = isNight(b);
     if (na !== nb) return na ? 1 : -1;
 
@@ -3368,8 +3140,7 @@ function __sortRowsTabsSafe__(rows) {
 }
 
 /* ------------------------------------------------------------------
-   ✅ INJERTO QUIRÚRGICO: Contexto rico para INFO (si no existe)
-   - Evita duplicados, mejora coherencia, y reduce “inventos” del modelo
+   Contexto mínimo para INFO (solo empaqueta; no “decide” contenido)
 ------------------------------------------------------------------- */
 if (typeof __collectPlannerContext__ !== 'function') {
   function __collectPlannerContext__(city, day) {
@@ -3400,7 +3171,6 @@ if (typeof __collectPlannerContext__ !== 'function') {
       }));
     });
 
-    // Lista plana de actividades ya usadas (para evitar duplicación)
     const flatActs = Object.values(already).flat().map(r=>String(r.activity||'')).filter(Boolean);
 
     return {
@@ -3420,154 +3190,12 @@ if (typeof __collectPlannerContext__ !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   “Regreso a {city}” en day-trips (sin duplicar si ya existe)
-------------------------------------------------------------------- */
-function ensureReturnRow(city, rows) {
-  const byDay = {};
-  for (const r of (rows || [])) {
-    const d = Number(r?.day) || 1;
-    (byDay[d] = byDay[d] || []).push(r);
-  }
-
-  const out = [];
-  const cityLbl = String(city || '').trim();
-
-  const isReturnRow = (r) => /(^|\b)regreso\b/i.test(String(r?.activity || ''));
-  const isOut = (r) => {
-    try {
-      if (typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
-    } catch (_) {}
-    // fallback general
-    const act = String(r?.activity || '').toLowerCase();
-    const tr  = String(r?.transport || '').toLowerCase();
-    return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip|costa|pen[ií]nsula|parque\s+nacional|glaciar|volc[aá]n|geyser|lagoon|waterfall|cascada)/i.test(act) ||
-           /(veh[ií]culo|car|auto|van|bus|tour\s*guiado)/i.test(tr);
-  };
-
-  Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
-    const list = byDay[day].slice();
-
-    // Solo si realmente hay out-of-town con señales fuertes
-    const hasOut = list.some(r => isOut(r));
-    if (!hasOut) {
-      out.push(...list);
-      return;
-    }
-
-    // Ventana base y “cierre” del día
-    const endBase = (cityMeta?.[city]?.perDay || []).find(x => Number(x.day) === Number(day))?.end || DEFAULT_END || '19:00';
-    const endBaseMin = __toMinHHMM__(endBase) ?? 1140;
-
-    // Buscar retorno existente
-    const returnIdx = list.findIndex(r => isReturnRow(r));
-    const hasReturn = returnIdx >= 0;
-
-    // Calcular el último end real del día (ignorando el retorno si ya existe)
-    const lastEnd = list.reduce((mx, r, idx) => {
-      if (idx === returnIdx) return mx;
-      const e = __toMinHHMM__(r?.end);
-      return Math.max(mx, (e == null ? 0 : e));
-    }, endBaseMin);
-
-    const startRet = __toHHMMfromMin__(Math.max(lastEnd, endBaseMin));
-    const endRet = __addMinutesSafe__(startRet, 45);
-
-    const retRow = {
-      day,
-      start: startRet,
-      end: endRet,
-      activity: `Regreso a ${cityLbl}`,
-      from: (list[Math.max(0, list.length - 1)]?.to || 'Excursión'),
-      to: `Hotel (${cityLbl})`,
-      transport: 'Vehículo alquilado o Tour guiado',
-      duration: '45m',
-      notes: 'Cierre del day trip y retorno al hotel.',
-      _returnRow: true
-    };
-
-    if (!hasReturn) {
-      // Agregar retorno al final
-      list.push(retRow);
-    } else {
-      // ✅ PATCH: mover el retorno existente al final y fijar su tiempo como cierre
-      const old = list.splice(returnIdx, 1)[0] || {};
-      list.push({ ...old, ...retRow });
-    }
-
-    out.push(...list);
-  });
-
-  return out;
-}
-
-/* ------------------------------------------------------------------
-   ✅ PATCH QUIRÚRGICO: Cena en ventana 19:00–21:30 y sin solapes
-------------------------------------------------------------------- */
-if (typeof injectDinnerIfMissing !== 'function') {
-  function injectDinnerIfMissing(city, rows) {
-    const prefer = plannerState?.preferences?.alwaysIncludeDinner;
-    if (!prefer) return rows;
-
-    const overlaps = (aS, aE, bS, bE) => !(aE <= bS || aS >= bE);
-    const byDay = {}; rows.forEach(r => { const d = Number(r.day) || 1; (byDay[d] = byDay[d] || []).push(r); });
-    const out = [];
-
-    Object.keys(byDay).map(n => +n).sort((a, b) => a - b).forEach(day => {
-      const list = byDay[day].slice();
-      const hasDinner = list.some(r => /cena\b/i.test(String(r.activity || '')));
-      if (!hasDinner) {
-        const blocks = list
-          .map(r => ({ s: __toMinHHMM__(r.start), e: __toMinHHMM__(r.end) }))
-          .filter(x => x.s != null && x.e != null)
-          .map(x => {
-            let s = x.s, e = x.e;
-            if (e <= s && (__isNightRow__({ start: __toHHMMfromMin__(s), end: __toHHMMfromMin__(e) }) || s >= 18*60)) e += 24*60;
-            return { s, e };
-          });
-
-        const trySlots = [
-          { s: __toMinHHMM__('19:30'), e: __toMinHHMM__('20:45') }, // ideal
-          { s: __toMinHHMM__('18:00'), e: __toMinHHMM__('19:15') }, // pre-aurora/tarde
-          { s: __toMinHHMM__('20:00'), e: __toMinHHMM__('21:15') }, // alternativa
-        ];
-
-        let picked = null;
-        for (const sl of trySlots) {
-          const ok = !blocks.some(b => overlaps(sl.s, sl.e, b.s, b.e));
-          if (ok && sl.e <= __toMinHHMM__('21:30')) { picked = sl; break; }
-        }
-
-        if (picked) {
-          list.push({
-            day,
-            start: __toHHMMfromMin__(picked.s),
-            end: __toHHMMfromMin__(picked.e),
-            activity: 'Cena',
-            from: 'Centro',
-            to: 'Restaurante local',
-            transport: 'A pie',
-            duration: '1h15m',
-            notes: 'Reserva sugerida si es sitio popular.'
-          });
-        }
-      }
-      out.push(...list);
-    });
-
-    return out;
-  }
-}
-
-/* ------------------------------------------------------------------
-   Callers al API (INFO/PLANNER) con fallback robusto (si no existe)
-   ✅ DIAG: mide tiempos y cuenta llamadas/errores/timeouts.
+   Callers al API (INFO/PLANNER) con fallback robusto (se mantiene)
 ------------------------------------------------------------------- */
 if (typeof callApiChat !== 'function') {
   async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
     const diag = window.__ITBMO_DIAG__;
-    if (diag?.enabled) {
-      diag.inc(`api:${mode}:count`, 1);
-    }
+    if (diag?.enabled) diag.inc(`api:${mode}:count`, 1);
 
     const controller = new AbortController();
     const id = setTimeout(() => controller.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
@@ -3611,40 +3239,31 @@ if (typeof callApiChat !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   Parse seguro de respuestas del API y unificador (PATCH QUIRÚRGICO)
-   Objetivo: soportar respuestas tipo { text: "<JSON-string>" } del API v43.x
+   Parse seguro de respuestas del API (se mantiene)
 ------------------------------------------------------------------- */
 if (typeof safeParseApiText !== 'function') {
   function safeParseApiText(txt) {
     if (!txt) return {};
 
-    // 1) Si viene ya como objeto estructurado (y NO es wrapper {text:...}), úsalo
     if (typeof txt === 'object') {
-      // Caso crítico: wrapper estándar del API { text: "<json>" }
-      if (txt && typeof txt.text !== 'undefined') {
-        return safeParseApiText(txt.text);
-      }
-      // Si trae rows directo, perfecto
+      if (txt && typeof txt.text !== 'undefined') return safeParseApiText(txt.text);
       if (Array.isArray(txt.rows)) return txt;
       if (Array.isArray(txt?.itinerary?.rows)) return txt;
       if (Array.isArray(txt?.days)) return txt;
       return txt || {};
     }
 
-    // 2) Si es string: intentar JSON directo
     const s = String(txt).trim();
     if (!s) return {};
 
     try { return JSON.parse(s); } catch {}
 
-    // 3) Intento tolerante: primer/último { }
     try {
       const first = s.indexOf("{");
       const last  = s.lastIndexOf("}");
       if (first >= 0 && last > first) return JSON.parse(s.slice(first, last + 1));
     } catch {}
 
-    // 4) Fallback: conservar texto
     return { text: s };
   }
 }
@@ -3653,27 +3272,20 @@ if (typeof unifyRowsFormat !== 'function') {
   function unifyRowsFormat(obj, city) {
     if (!obj) return { rows: [] };
 
-    // ✅ PATCH QUIRÚRGICO: si viene wrapper {text:"..."} o {text:{...}}, parsearlo
     if (typeof obj === 'object' && obj && typeof obj.text !== 'undefined') {
       const parsed = safeParseApiText(obj.text);
       return unifyRowsFormat(parsed, city);
     }
 
-    // Si obj es string, parsearlo
     if (typeof obj === 'string') {
       const parsed = safeParseApiText(obj);
       return unifyRowsFormat(parsed, city);
     }
 
-    // Casos esperados
     if (Array.isArray(obj.rows)) return obj;
-
     if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
-
-    // A veces viene como { destination, rows_draft } desde INFO (no debería aquí, pero toleramos)
     if (Array.isArray(obj?.rows_draft)) return { rows: obj.rows_draft };
 
-    // Formato por días
     if (Array.isArray(obj.days)) {
       const rows = [];
       for (const d of obj.days) {
@@ -3683,7 +3295,6 @@ if (typeof unifyRowsFormat !== 'function') {
       return { rows };
     }
 
-    // Formato alterno: { itineraries:[{rows:...}] } o { destinations:[{rows:...}] }
     if (Array.isArray(obj?.itineraries) && obj.itineraries[0] && Array.isArray(obj.itineraries[0].rows)) {
       return { rows: obj.itineraries[0].rows };
     }
@@ -3696,8 +3307,7 @@ if (typeof unifyRowsFormat !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   VALIDACIÓN con agente (si no existe, pasa-through)
-   ✅ DIAG: mide tiempos de validación.
+   VALIDACIÓN con agente (guard rail opcional)
 ------------------------------------------------------------------- */
 if (typeof validateRowsWithAgent !== 'function') {
   async function validateRowsWithAgent(city, rows, baseDate) {
@@ -3725,15 +3335,10 @@ if (typeof validateRowsWithAgent !== 'function') {
 }
 
 /* ------------------------------------------------------------------
-   OPTIMIZACIÓN por día: INFO → PLANNER → pipeline coherente
-   ✅ DIAG: mide optimizeDay total + filas
-   ✅ PERF QUIRÚRGICO: optimizeDay NO dispara INFO; valida con agente SOLO si hace falta
-   ✅ FIX QUIRÚRGICO: pipeline consistente con 15.2:
-      ensureReturnRow + clearTransportAfterReturn + injectDinnerIfMissing
-      ANTES de fixOverlaps, luego clamp final y sort.
+   OPTIMIZACIÓN por día (post-API)
+   🆕 user_instruction: viene desde plannerState.pendingEdits[city]
 ------------------------------------------------------------------- */
 async function optimizeDay(city, day) {
-  // ✅ QUIRÚRGICO: cola por ciudad para evitar paralelismo (reduce timeouts/canceled)
   window.__optimizeDayChain__ = window.__optimizeDayChain__ || {};
   const prev = window.__optimizeDayChain__[city] || Promise.resolve();
 
@@ -3747,108 +3352,41 @@ async function optimizeDay(city, day) {
     const rows = (data?.byDay?.[day] || []).map(r => ({
       day, start: r.start || '', end: r.end || '', activity: r.activity || '',
       from: r.from || '', to: r.to || '', transport: r.transport || '',
-      duration: r.duration || '', notes: r.notes || '', _crossDay: !!r._crossDay
+      duration: r.duration || '', notes: r.notes || '', kind: r.kind || '', zone: r.zone || '',
+      _crossDay: !!r._crossDay
     }));
 
     if (diag?.enabled) diag.set('optimizeDay:lastInputRows', rows.length);
 
-    const protectedRows = rows.filter(r => {
-      const act = (r.activity || '').toLowerCase();
-      return act.includes('laguna azul') || act.includes('blue lagoon');
-    });
+    // 🆕 Instrucción pendiente (edición desde chat del planner)
+    // Formato sugerido desde SECCIÓN 19: plannerState.pendingEdits[city] = { scope:'city'|'day', day, text }
+    const pending = (plannerState && plannerState.pendingEdits) ? plannerState.pendingEdits[city] : null;
+    const user_instruction = pending && pending.text ? String(pending.text) : '';
 
-    // Helpers locales (quirúrgicos, no rompen dependencias)
-    const _toMin = (hhmm)=>{
-      const m = String(hhmm||'').trim().match(/^(\d{1,2}):(\d{2})$/);
-      if(!m) return null;
-      return Math.min(23, Math.max(0, +m[1]))*60 + Math.min(59, Math.max(0, +m[2]));
-    };
-    const _hasHardOverlaps = (list)=>{
-      const xs = (Array.isArray(list)?list:[])
-        .filter(r=>r && r.start && r.end)
-        .map(r=>{
-          const s=_toMin(r.start), e0=_toMin(r.end);
-          if(s==null || e0==null) return null;
-          let e=e0; if(e<=s) e+=24*60;
-          return { s, e };
-        }).filter(Boolean)
-        .sort((a,b)=>a.s-b.s);
-      for(let i=1;i<xs.length;i++){
-        if(xs[i].s < xs[i-1].e) return true;
-      }
-      return false;
-    };
-    const _hasDawnDiurnals = (list)=>{
-      return (Array.isArray(list)?list:[]).some(r=>{
-        const s=_toMin(r.start);
-        if(s==null) return false;
-        // Diurnas 01:00–05:00 prohibidas (si es aurora o regreso nocturno, lo manejan tus reglas; aquí es gate conservador)
-        return (s >= 60 && s <= 300) && !/aurora|northern\s*lights|regreso/i.test(String(r.activity||''));
-      });
-    };
-    const _outsideDayHours = (list, dayHoursForTarget)=>{
-      if(!dayHoursForTarget || !dayHoursForTarget.start || !dayHoursForTarget.end) return false;
-      const ds=_toMin(dayHoursForTarget.start), de0=_toMin(dayHoursForTarget.end);
-      if(ds==null || de0==null) return false;
-      let de=de0; if(de<=ds) de+=24*60;
-      return (Array.isArray(list)?list:[]).some(r=>{
-        const s=_toMin(r.start), e0=_toMin(r.end);
-        if(s==null || e0==null) return false;
-        let e=e0; if(e<=s) e+=24*60;
-        return (s < ds) || (e > de);
-      });
-    };
+    const contextObj = (typeof __collectPlannerContext__ === 'function')
+      ? __collectPlannerContext__(city, day)
+      : { city, day_target: Number(day) || 1, days_total: __getTotalDaysForCity__(city) || 1, baseDate };
 
     try {
-      const contextObj = (typeof __collectPlannerContext__ === 'function')
-        ? __collectPlannerContext__(city, day)
-        : { city, day };
+      // Research cache por ciudad
+      window.__researchCache = window.__researchCache || {};
+      let research = window.__researchCache?.[city]?.research || null;
 
-      // ✅ QUIRÚRGICO: usa el research cacheado de la ciudad si existe
-      let research = null;
-      try {
-        const entry = window.__researchCache?.[city];
-        research = entry?.research || null;
-      } catch(_) {}
+      // Si hay user_instruction, pedimos INFO fresco (para que aplique el cambio con el contexto completo)
+      const mustRefreshInfo = !!user_instruction;
 
-      // ✅ PERF QUIRÚRGICO: optimizeDay NO debe disparar INFO.
-      // Si no hay research cacheado, construimos research mínimo local basado en rows_draft (verdad) + day_hours.
-      if (!research) {
-        const dayHoursArr = Array.isArray(contextObj?.day_hours) ? contextObj.day_hours : [];
-        const dayHoursForTargetFromCtx = dayHoursArr.find(x => Number(x.day) === Number(day)) || null;
+      if (!research || mustRefreshInfo) {
+        const infoRaw = await callApiChat('info', {
+          context: contextObj,
+          user_instruction,
+          edit_scope: pending?.scope || '',
+          edit_day: pending?.day || null
+        }, { timeoutMs: 90000, retries: 1 });
 
-        research = {
-          destination: city,
-          country: contextObj?.country || "",
-          days_total: contextObj?.days_total || (itineraries?.[city]?.days_total || 1),
-          hotel_base: contextObj?.hotel_base || contextObj?.hotel_address || (cityMeta?.[city]?.hotel || ""),
-          rationale: "optimizeDay local research (sin INFO) — usa rows_draft existentes.",
-          imperdibles: [],
-          macro_tours: [],
-          in_city_routes: [],
-          meals_suggestions: [],
-          aurora: contextObj?.aurora || { plausible: false, suggested_days: [], window_local: { start:"", end:"" }, duration:"~3h–4h", transport_default:"Vehículo alquilado o Tour guiado", note:"" },
-          constraints: contextObj?.constraints || { max_substops_per_tour: 8, respect_user_preferences_and_conditions: true },
-          day_hours: dayHoursForTargetFromCtx ? [dayHoursForTargetFromCtx] : (Array.isArray(contextObj?.day_hours) ? contextObj.day_hours : []),
-          rows_draft: rows.map(r=>({
-            day,
-            start: r.start || "",
-            end: r.end || "",
-            activity: r.activity || "",
-            from: r.from || "",
-            to: r.to || "",
-            transport: r.transport || "",
-            duration: r.duration || "",
-            notes: r.notes || "",
-            kind: r.kind || "",
-            zone: r.zone || ""
-          })),
-          rows_skeleton: []
-        };
+        research = safeParseApiText(infoRaw?.text ?? infoRaw) || null;
 
-        window.__researchCache = window.__researchCache || {};
-        if (!window.__researchCache[city]) {
-          window.__researchCache[city] = { key: `optimizeDayLocal:${Date.now()}`, research, ts: Date.now() };
+        if (research && typeof research === 'object') {
+          window.__researchCache[city] = { key: `info:${Date.now()}`, research, ts: Date.now() };
         }
       }
 
@@ -3860,7 +3398,10 @@ async function optimizeDay(city, day) {
         research_json: research,
         target_day: day,
         day_hours: dayHoursForTarget ? [dayHoursForTarget] : null,
-        existing_rows: rows
+        existing_rows: rows,
+        user_instruction,
+        edit_scope: pending?.scope || '',
+        edit_day: pending?.day || null
       }, { timeoutMs: 90000, retries: 1 });
 
       const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
@@ -3868,100 +3409,60 @@ async function optimizeDay(city, day) {
       const unified = unifyRowsFormat(structured, city);
 
       const rawRows = (unified?.rows || []);
-      let finalRows = rawRows.map(x => ({ ...x, day }));
+      let finalRows = rawRows.map(x => ({ ...x, day: Number(x.day) || Number(day) || 1 }));
 
-      finalRows = finalRows.map(normalizeDurationLabel);
-      finalRows = finalRows.map(normalizeAuroraWindow);
-      finalRows = enforceOneAuroraPerDay(finalRows);
-
-      if (typeof enforceTransportAndOutOfTown === 'function') finalRows = enforceTransportAndOutOfTown(city, finalRows);
-
-      // ✅ pipeline coherente (igual que 15.2)
+      // Guard rails mínimos
       finalRows = finalRows.map(r => __normalizeDayField__(city, r));
-      if (protectedRows.length) {
-        finalRows = [...finalRows, ...protectedRows].map(r => __normalizeDayField__(city, r));
-      }
-
-      finalRows = ensureReturnRow(city, finalRows);
-      finalRows = clearTransportAfterReturn(city, finalRows);
-      if (typeof injectDinnerIfMissing === 'function') finalRows = injectDinnerIfMissing(city, finalRows);
-
-      finalRows = pruneGenericPerDay(finalRows);
-
       finalRows = fixOverlaps(finalRows);
 
-      if (typeof __enforceDayWindowAndNoDawn__ === 'function') finalRows = __enforceDayWindowAndNoDawn__(city, finalRows);
+      if (typeof __enforceDayWindowAndNoDawn__ === 'function') {
+        finalRows = __enforceDayWindowAndNoDawn__(city, finalRows);
+      }
 
       finalRows = __sortRowsTabsSafe__(finalRows);
 
-      // ✅ PERF QUIRÚRGICO: validar con agente SOLO si detectamos problemas serios
-      const needAgentValidation = (() => {
-        if (!Array.isArray(finalRows) || finalRows.length === 0) return true;
-        if (_hasHardOverlaps(finalRows)) return true;
-        if (_hasDawnDiurnals(finalRows)) return true;
-        if (_outsideDayHours(finalRows, dayHoursForTarget)) return true;
-        return false;
-      })();
-
-      let allowedRows = finalRows;
-
-      if (needAgentValidation && typeof validateRowsWithAgent === 'function') {
+      // Validación opcional SOLO si viene vacío
+      if ((!Array.isArray(finalRows) || finalRows.length === 0) && typeof validateRowsWithAgent === 'function') {
         const val = await validateRowsWithAgent(city, finalRows, baseDate);
-        allowedRows = (val?.allowed || []);
+        finalRows = (val?.allowed || []);
       }
 
-      if (diag?.enabled) {
-        diag.set('optimizeDay:lastOutputRows', (allowedRows || []).length);
-      }
+      if (diag?.enabled) diag.set('optimizeDay:lastOutputRows', (finalRows || []).length);
 
-      if (typeof pushRows === 'function') pushRows(city, allowedRows, false);
+      if (typeof pushRows === 'function') pushRows(city, finalRows, false);
       try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (allowedRows||[]).length });
-
-    } catch (e) {
-      console.error('optimizeDay INFO→PLANNER error:', e);
-
-      if (diag?.enabled) {
-        diag.err('optimizeDay', e);
+      // 🧼 Consumir instrucción pendiente SOLO si era para este día o para ciudad completa
+      if (user_instruction && plannerState?.pendingEdits?.[city]) {
+        const scope = plannerState.pendingEdits[city].scope || '';
+        const dEd  = Number(plannerState.pendingEdits[city].day || 0);
+        if (scope === 'city') delete plannerState.pendingEdits[city];
+        else if (scope === 'day' && dEd === Number(day)) delete plannerState.pendingEdits[city];
       }
 
+      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (finalRows||[]).length });
+
+    } catch (e) {
+      console.error('optimizeDay error (guard-rails-only):', e);
+      if (diag?.enabled) diag.err('optimizeDay', e);
+
+      // Fallback ultra conservador: no inventa contenido; re-push lo que había
       let safeRows = rows.map(r => __normalizeDayField__(city, r));
-
-      // ✅ pipeline coherente también en fallback
-      safeRows = ensureReturnRow(city, safeRows);
-      safeRows = clearTransportAfterReturn(city, safeRows);
-      if (typeof injectDinnerIfMissing === 'function') safeRows = injectDinnerIfMissing(city, safeRows);
-
-      safeRows = pruneGenericPerDay(safeRows);
-
       safeRows = fixOverlaps(safeRows);
 
-      if (typeof __enforceDayWindowAndNoDawn__ === 'function') safeRows = __enforceDayWindowAndNoDawn__(city, safeRows);
+      if (typeof __enforceDayWindowAndNoDawn__ === 'function') {
+        safeRows = __enforceDayWindowAndNoDawn__(city, safeRows);
+      }
 
       safeRows = __sortRowsTabsSafe__(safeRows);
 
-      let allowedRows = safeRows;
-      const needAgentValidation = (() => {
-        if (!Array.isArray(safeRows) || safeRows.length === 0) return true;
-        if (_hasHardOverlaps(safeRows)) return true;
-        if (_hasDawnDiurnals(safeRows)) return true;
-        return false;
-      })();
-
-      if (needAgentValidation && typeof validateRowsWithAgent === 'function') {
-        const val = await validateRowsWithAgent(city, safeRows, baseDate);
-        allowedRows = (val?.allowed || []);
-      }
-
-      if (typeof pushRows === 'function') pushRows(city, allowedRows, false);
+      if (typeof pushRows === 'function') pushRows(city, safeRows, false);
       try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
 
-      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (allowedRows||[]).length });
+      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (safeRows||[]).length });
     }
   };
 
-  // Encadenar (no romper la cadena aunque falle)
   const chained = prev.then(run, run);
   window.__optimizeDayChain__[city] = chained.catch(()=>{});
   return chained;
