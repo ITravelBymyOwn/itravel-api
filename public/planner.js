@@ -1631,6 +1631,38 @@ function showWOW(on, msg){
    - PLANNER (API) estructura
    - JS renderiza
 ───────────────────────────────────────────────────────────── */
+/* ===== Shim mínimo para callApiChat (OBLIGATORIO) ===== */
+if (typeof window.callApiChat !== 'function') {
+  window.callApiChat = async function(mode, payload = {}, opts = {}) {
+    const timeoutMs = Number(opts.timeoutMs || 60000);
+    const retries   = Number(opts.retries || 0);
+
+    const doOnce = async ()=>{
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+      try{
+        const resp = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, ...payload }),
+          signal: ctrl.signal
+        });
+        if (!resp.ok) throw new Error(`API ${mode} ${resp.status}`);
+        return await resp.json();
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
+    let lastErr;
+    for (let i=0; i<=retries; i++){
+      try { return await doOnce(); }
+      catch(e){ lastErr = e; }
+    }
+    throw lastErr;
+  };
+}
+
 async function generateCityItinerary(city){
   if(!city) return;
 
