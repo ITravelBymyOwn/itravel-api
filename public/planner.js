@@ -3148,14 +3148,18 @@ async function onSend(){
 
     addMultipleDaysToCity(city, intent.extraDays);
 
-    // Ventanas seguras para todos los días nuevos
+    // ✅ Ventanas: NO predefinir horas. Si no existen, dejar null para que el API decida.
     if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
     cityMeta[city].perDay = cityMeta[city].perDay || [];
     const ensureWindow = (d)=>{
       let pd = cityMeta[city].perDay.find(x=>x.day===d);
-      if(!pd){ pd = {day:d, start:DEFAULT_START, end:DEFAULT_END}; cityMeta[city].perDay.push(pd); }
-      if(!pd.start) pd.start = DEFAULT_START;
-      if(!pd.end)   pd.end   = DEFAULT_END;
+      if(!pd){
+        pd = { day:d, start:null, end:null };
+        cityMeta[city].perDay.push(pd);
+      }else{
+        if(pd.start == null || String(pd.start).trim()==='') pd.start = null;
+        if(pd.end   == null || String(pd.end).trim()==='')   pd.end   = null;
+      }
     };
     const total = Object.keys(itineraries[city].byDay||{}).length;
     for(let d=prevTotal+1; d<=total; d++) ensureWindow(d);
@@ -3197,25 +3201,33 @@ async function onSend(){
     const numericPos = prevTotal + 1;
     insertDayAt(city, numericPos);
 
-    // Ventanas seguras para {numericPos}
+    // ✅ Ventanas: NO predefinir horas. Si no existen, dejar null.
     if (!cityMeta[city]) cityMeta[city] = { perDay: [] };
     cityMeta[city].perDay = cityMeta[city].perDay || [];
     const ensureWindow = (d)=>{
       let pd = cityMeta[city].perDay.find(x=>x.day===d);
-      if(!pd){ pd = {day:d, start:DEFAULT_START, end:DEFAULT_END}; cityMeta[city].perDay.push(pd); }
-      if(!pd.start) pd.start = DEFAULT_START;
-      if(!pd.end)   pd.end   = DEFAULT_END;
+      if(!pd){
+        pd = { day:d, start:null, end:null };
+        cityMeta[city].perDay.push(pd);
+      }else{
+        if(pd.start == null || String(pd.start).trim()==='') pd.start = null;
+        if(pd.end   == null || String(pd.end).trim()==='')   pd.end   = null;
+      }
     };
     ensureWindow(numericPos);
 
     // Semilla opcional si el usuario pidió "para ir a X"
+    // ✅ QUIRÚRGICO: NO inyectar horarios por defecto. Si no hay start/end, dejamos vacíos y el API decide en optimize/rebalance.
     if (intent.dayTripTo) {
       const destTrip  = intent.dayTripTo;
-      const baseStart = cityMeta[city]?.perDay?.find(x => x.day === numericPos)?.start || DEFAULT_START;
+      const pd = cityMeta[city]?.perDay?.find(x => x.day === numericPos) || {};
+      const seedStart = (pd.start == null || String(pd.start).trim()==='') ? '' : String(pd.start).trim();
+      const seedEnd   = (pd.end   == null || String(pd.end).trim()==='')   ? '' : String(pd.end).trim();
+
       pushRows(city, [{
         day: numericPos,
-        start: baseStart,
-        end: addMinutes(baseStart, 60),
+        start: seedStart,
+        end: seedEnd,
         activity: `Traslado a ${destTrip}`,
         from: `Hotel (${city})`,
         to: destTrip,
@@ -3310,7 +3322,7 @@ async function onSend(){
     const day = itineraries[city]?.currentDay || 1;
     if(!cityMeta[city]) cityMeta[city]={perDay:[]};
     let pd = cityMeta[city].perDay.find(x=>x.day===day);
-    if(!pd){ pd = {day, start:DEFAULT_START, end:DEFAULT_END}; cityMeta[city].perDay.push(pd); }
+    if(!pd){ pd = {day, start:null, end:null}; cityMeta[city].perDay.push(pd); }
     if(intent.range.start) pd.start = intent.range.start;
     if(intent.range.end)   pd.end   = intent.range.end;
     await optimizeDay(city, day);
