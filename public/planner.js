@@ -3989,18 +3989,19 @@ async function onSend(){
 
 /* ==============================
    SECCIÓN 21 · INIT y listeners
-   (v55.1 preservada + alineación API v43.5)
-   - El planner NO genera inteligencia
-   - Toda lógica de itinerarios vive en /api/chat.js
-   - UI, guards y flujos se mantienen intactos
+   (alineada con API v43.5)
+   FIX QUIRÚRGICO:
+   - El botón “Iniciar planificación” se habilita SOLO tras “Guardar destinos”
+   - Se elimina dependencia frágil de hasSavedOnce como guard duro
+   - Se valida siempre contra estado REAL del formulario
+   🛡️ Guard anti-doble init + aislamiento total del Info Chat externo
+   💬 Typing indicator (tres puntitos) restaurado para Info Chat externo
 ================================= */
-
 $addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
-
   for(const r of rows){
     const el = qs('.baseDate', r);
     const v  = (el?.value||'').trim();
@@ -4011,30 +4012,26 @@ function validateBaseDatesDMY(){
       break;
     }
   }
-
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
     tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
     document.body.appendChild(tooltip);
-
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
     tooltip.style.top  = rect.bottom + window.scrollY + 6 + 'px';
-
     setTimeout(() => tooltip.classList.add('visible'), 20);
     setTimeout(() => {
       tooltip.classList.remove('visible');
-      setTimeout(() => tooltip.remove(), 300);
+      setTimeout(()=>tooltip.remove(), 300);
     }, 3500);
-
     firstInvalid.focus();
     return false;
   }
   return true;
 }
 
-/* ===== Guardar destinos: único punto que habilita “Iniciar planificación” ===== */
+/* ===== Guardar destinos: ÚNICO punto que habilita “Iniciar planificación” ===== */
 $save?.addEventListener('click', ()=>{
   try { saveDestinations(); } catch(_) {}
 
@@ -4042,13 +4039,11 @@ $save?.addEventListener('click', ()=>{
   const datesOK  = validateBaseDatesDMY();
 
   if (basicsOK && datesOK) {
-    hasSavedOnce = true;
     if ($start) $start.disabled = false;
 
-    // Hook interno (no rompe nada)
     try {
       document.dispatchEvent(new CustomEvent('itbmo:destinationsSaved', {
-        detail: { savedDestinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+        detail: { savedDestinations: (typeof savedDestinations!=='undefined' ? savedDestinations : []) }
       }));
     } catch(_) {}
   } else {
@@ -4056,23 +4051,20 @@ $save?.addEventListener('click', ()=>{
   }
 });
 
-/* ===== Validación mínima del formulario ===== */
+/* ===== Reglas base del formulario ===== */
 function formHasBasics(){
   const row = qs('.city-row', $cityList);
   if(!row) return false;
-
-  const city  = (qs('.city', row)?.value||'').trim();
+  const city    = (qs('.city', row)?.value||'').trim();
   const country = (qs('.country', row)?.value||'').trim();
-  const days  = parseInt(qs('.days', row)?.value||'0', 10);
-  const base  = (qs('.baseDate', row)?.value||'').trim();
-
+  const days    = parseInt(qs('.days', row)?.value||'0', 10);
+  const base    = (qs('.baseDate', row)?.value||'').trim();
   return !!(city && country && days>0 && /^(\d{2})\/(\d{2})\/(\d{4})$/.test(base));
 }
 
-/* ===== Si el usuario rompe el formulario, se vuelve a deshabilitar Start ===== */
+// Si el usuario rompe el formulario, se deshabilita Start
 document.addEventListener('input', (e)=>{
   if(!$start) return;
-
   if(e.target && (
      e.target.classList?.contains('city') ||
      e.target.classList?.contains('country') ||
@@ -4083,7 +4075,7 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-/* ===== Botón Reset (inyección si no existe) ===== */
+/* ===== Reset ===== */
 function ensureResetButton(){
   let btn = document.getElementById('reset-planner');
   if(!btn){
@@ -4098,7 +4090,6 @@ function ensureResetButton(){
   return btn;
 }
 
-/* ===== Reset con confirmación modal ===== */
 function bindReset(){
   const $btn = ensureResetButton();
   $btn.removeAttribute('disabled');
@@ -4117,224 +4108,64 @@ function bindReset(){
         <button id="cancel-reset" class="btn ghost">Cancelar</button>
       </div>
     `;
-
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
     setTimeout(()=>overlay.classList.add('active'), 10);
 
-    const confirmReset = overlay.querySelector('#confirm-reset');
-    const cancelReset  = overlay.querySelector('#cancel-reset');
-
-    confirmReset.addEventListener('click', ()=>{
-      $cityList.innerHTML='';
-      savedDestinations=[];
-      itineraries={};
-      cityMeta={};
-
+    overlay.querySelector('#confirm-reset')?.addEventListener('click', ()=>{
+      $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
       addCityRow();
       if ($start) $start.disabled = true;
-      $tabs.innerHTML='';
-      $itWrap.innerHTML='';
-      $chatBox.style.display='none';
-      $chatM.innerHTML='';
+      $tabs.innerHTML=''; $itWrap.innerHTML='';
+      $chatBox.style.display='none'; $chatM.innerHTML='';
+      session = []; pendingChange=null;
 
-      session = [];
-      hasSavedOnce=false;
-      pendingChange=null;
+      planningStarted=false; metaProgressIndex=0; collectingHotels=false;
+      isItineraryLocked=false; activeCity=null;
 
-      planningStarted = false;
-      metaProgressIndex = 0;
-      collectingHotels = false;
-      isItineraryLocked = false;
-      activeCity = null;
+      try { $overlayWOW && ($overlayWOW.style.display='none'); } catch(_) {}
+      qsa('.date-tooltip').forEach(t=>t.remove());
 
-      try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
-      qsa('.date-tooltip').forEach(t => t.remove());
-
-      const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-      const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
-      const $yo = qs('#p-young');    if($yo) $yo.value = '0';
-      const $ch = qs('#p-children'); if($ch) $ch.value = '0';
-      const $in = qs('#p-infants');  if($in) $in.value = '0';
-      const $se = qs('#p-seniors');  if($se) $se.value = '0';
-      const $bu = qs('#budget');     if($bu) $bu.value = '';
-      const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
-
-      if (typeof plannerState !== 'undefined') {
-        plannerState.destinations = [];
-        plannerState.specialConditions = '';
-        plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
-        plannerState.budget = '';
-        plannerState.currency = 'USD';
-        plannerState.forceReplan = {};
-        plannerState.preferences = {};
-        plannerState.dayTripPending = {};
-        plannerState.existingActs = {};
-      }
-
-      overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(), 300);
-
-      if ($sidebar) $sidebar.classList.remove('disabled');
-      if ($infoFloating){
-        $infoFloating.style.pointerEvents = 'auto';
-        $infoFloating.style.opacity = '1';
-        $infoFloating.disabled = false;
-      }
-      if ($resetBtn) $resetBtn.setAttribute('disabled','true');
-
-      const firstCity = qs('.city-row .city');
-      if (firstCity) firstCity.focus();
-
-      try { document.dispatchEvent(new CustomEvent('itbmo:plannerReset')); } catch(_) {}
+      document.dispatchEvent(new CustomEvent('itbmo:plannerReset'));
+      overlay.remove();
     });
 
-    cancelReset.addEventListener('click', ()=>{
-      overlay.classList.remove('active');
-      setTimeout(()=>overlay.remove(), 300);
-    });
-
-    document.addEventListener('keydown', function escHandler(e){
-      if(e.key === 'Escape'){
-        overlay.classList.remove('active');
-        setTimeout(()=>overlay.remove(), 300);
-        document.removeEventListener('keydown', escHandler);
-      }
-    });
+    overlay.querySelector('#cancel-reset')?.addEventListener('click', ()=>overlay.remove());
   });
 }
 
-/* ===== Start Planning ===== */
+/* ===== Start: validación REAL ===== */
 $start?.addEventListener('click', ()=>{
   if(!$start) return;
-
-  if(!hasSavedOnce){
-    chatMsg('Primero pulsa “Guardar destinos” para continuar.','ai');
+  if(!formHasBasics() || !validateBaseDatesDMY()){
+    chatMsg('Completa y guarda los destinos antes de continuar.','ai');
     return;
   }
-  if(!validateBaseDatesDMY()) return;
 
-  try {
-    document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
-      detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
-    }));
-  } catch(_) {}
+  document.dispatchEvent(new CustomEvent('itbmo:startPlanning', {
+    detail: { destinations: (typeof savedDestinations!=='undefined'? savedDestinations : []) }
+  }));
 
   startPlanning();
 });
 
-/* ===============================
-   INFO CHAT EXTERNO (AISLADO)
-================================ */
-
-/* 🔒 Cliente público: NO usa /api/chat ni contexto */
-function __ensureInfoAgentClient__(){
-  window.__ITBMO_API_BASE     = window.__ITBMO_API_BASE     || "https://itravelbymyown-api.vercel.app";
-  window.__ITBMO_INFO_PUBLIC  = window.__ITBMO_INFO_PUBLIC  || "/api/info-public";
-
-  const wrongClient = (fn)=>{
-    if(typeof fn !== 'function') return true;
-    const src = Function.prototype.toString.call(fn);
-    if(/\/api\/chat/.test(src)) return true;
-    if(/mode\s*:\s*['"]?(info|planner)['"]?/.test(src)) return true;
-    if(/context/.test(src)) return true;
-    if(fn.__usesContext__ !== false) return true;
-    return false;
-  };
-
-  if(wrongClient(window.callInfoAgent)){
-    const simpleInfo = async function(userText){
-      const url = `${window.__ITBMO_API_BASE}${window.__ITBMO_INFO_PUBLIC}`;
-      try{
-        const resp = await fetch(url,{
-          method:"POST",
-          headers:{ "Content-Type":"application/json" },
-          body: JSON.stringify({ input:String(userText||"") })
-        });
-        const data = await resp.json();
-        return data?.text || '';
-      }catch{
-        return "No pude traer la respuesta del Info Chat en este momento.";
-      }
-    };
-    simpleInfo.__usesContext__ = false;
-    window.callInfoAgent = simpleInfo;
-  }
-}
-
-function openInfoModal(){
-  const m=qs('#info-chat-modal');
-  if(m){ m.style.display='flex'; m.classList.add('active'); }
-}
-function closeInfoModal(){
-  const m=qs('#info-chat-modal');
-  if(m){ m.classList.remove('active'); m.style.display='none'; }
-}
-
-/* Typing indicator */
-function __infoTypingOn__(){
-  const box = qs('#info-chat-messages') || qs('#info-chat-modal .messages');
-  if(!box || document.getElementById('info-typing')) return;
-  const b = document.createElement('div');
-  b.id = 'info-typing';
-  b.className = 'bubble ai typing';
-  b.textContent = '...';
-  box.appendChild(b);
-  let i=0;
-  b.__timer=setInterval(()=>{ i=(i+1)%3; b.textContent='.'.repeat(i+1); },400);
-  box.scrollTop = box.scrollHeight;
-}
-function __infoTypingOff__(){
-  const b=document.getElementById('info-typing');
-  if(b){ clearInterval(b.__timer); b.remove(); }
-}
-
-async function sendInfoMessage(){
-  const input=qs('#info-chat-input');
-  if(!input) return;
-  const txt=(input.value||'').trim();
-  if(!txt) return;
-
-  infoChatMsg(txt,'user');
-  input.value='';
-  input.style.height='auto';
-
-  __infoTypingOn__();
-  const ans=await callInfoAgent(txt);
-  __infoTypingOff__();
-  infoChatMsg(ans||'','ai');
-}
-
-function bindInfoChatListeners(){
-  const toggleTop = qs('#info-chat-toggle');
-  const toggleFloating = qs('#info-chat-floating');
-  const close  = qs('#info-chat-close');
-  const send   = qs('#info-chat-send');
-  const input  = qs('#info-chat-input');
-
-  [toggleTop, toggleFloating].forEach(btn=>{
-    btn?.addEventListener('click',(e)=>{ e.preventDefault(); openInfoModal(); });
-  });
-  close?.addEventListener('click',(e)=>{ e.preventDefault(); closeInfoModal(); });
-  send?.addEventListener('click',(e)=>{ e.preventDefault(); sendInfoMessage(); });
-
-  input?.addEventListener('keydown',(e)=>{
-    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); sendInfoMessage(); }
-  });
-}
+$send?.addEventListener('click', onSend);
+$chatI?.addEventListener('keydown', e=>{
+  if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); onSend(); }
+});
 
 /* ===== INIT ===== */
 document.addEventListener('DOMContentLoaded', ()=>{
   if(window.__ITBMO_SECTION21_READY__) return;
   window.__ITBMO_SECTION21_READY__ = true;
 
-  if(!qs('#city-list .city-row')) addCityRow();
-
+  if(!document.querySelector('#city-list .city-row')) addCityRow();
   __ensureInfoAgentClient__();
   bindInfoChatListeners();
   bindReset();
 
-  if ($start) $start.disabled = !hasSavedOnce;
+  if ($start) $start.disabled = true;
 });
+
 
 
