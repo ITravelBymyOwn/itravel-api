@@ -2491,6 +2491,7 @@ if (typeof isOutOfTownRow !== 'function') {
 
 /* ------------------------------------------------------------------
    Clamp mínimo: ventana diurna + NO madrugada para diurnas (guard rail)
+   ✅ QUIRÚRGICO: si NO hay ventana válida (start/end), NO toca nada.
 ------------------------------------------------------------------- */
 if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
   function __enforceDayWindowAndNoDawn__(city, rows) {
@@ -2498,8 +2499,8 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
 
     const getWindow = (d)=>{
       const w = (cityMeta?.[city]?.perDay || []).find(x=>Number(x.day)===Number(d)) || {};
-      const start = w.start || DEFAULT_START || '08:30';
-      const end   = w.end   || DEFAULT_END   || '19:00';
+      const start = (w.start == null || String(w.start).trim()==='') ? null : String(w.start).trim();
+      const end   = (w.end   == null || String(w.end).trim()==='')   ? null : String(w.end).trim();
       return { start, end };
     };
 
@@ -2545,8 +2546,14 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
     Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
       const list = byDay[day].slice();
       const win = getWindow(day);
-      const wS = toMin(win.start) ?? (8*60+30);
-      const wE = toMin(win.end)   ?? (19*60);
+
+      // ✅ Si no hay ventana válida, NO forzar horarios ni mover filas
+      const wS = (win.start ? toMin(win.start) : null);
+      const wE = (win.end   ? toMin(win.end)   : null);
+      if(wS == null || wE == null){
+        out.push(...list);
+        return;
+      }
 
       list.sort((a,b)=>(toMin(a.start)||0)-(toMin(b.start)||0));
 
@@ -2777,6 +2784,7 @@ function __sortRowsTabsSafe__(rows) {
 
 /* ------------------------------------------------------------------
    Contexto mínimo para INFO (solo empaqueta; no “decide” contenido)
+   ✅ QUIRÚRGICO: NO inyectar horarios por defecto. Si faltan, mandar null.
 ------------------------------------------------------------------- */
 if (typeof __collectPlannerContext__ !== 'function') {
   function __collectPlannerContext__(city, day) {
@@ -2786,7 +2794,9 @@ if (typeof __collectPlannerContext__ !== 'function') {
     const perDay = Array.from({ length: totalDays }, (_,i)=>{
       const d = i+1;
       const w = (cityMeta?.[city]?.perDay || []).find(x=>Number(x.day)===d) || {};
-      return { day:d, start: w.start || DEFAULT_START || '08:30', end: w.end || DEFAULT_END || '19:00' };
+      const start = (w.start == null || String(w.start).trim()==='') ? null : String(w.start).trim();
+      const end   = (w.end   == null || String(w.end).trim()==='')   ? null : String(w.end).trim();
+      return { day:d, start, end };
     });
 
     const byDay = itineraries?.[city]?.byDay || {};
@@ -2968,140 +2978,6 @@ if (typeof validateRowsWithAgent !== 'function') {
       return { allowed: rows, rejected: [] };
     }
   }
-}
-
-/* ------------------------------------------------------------------
-   OPTIMIZACIÓN por día (post-API)
-   🆕 user_instruction: viene desde plannerState.pendingEdits[city]
-------------------------------------------------------------------- */
-async function optimizeDay(city, day) {
-  window.__optimizeDayChain__ = window.__optimizeDayChain__ || {};
-  const prev = window.__optimizeDayChain__[city] || Promise.resolve();
-
-  const run = async () => {
-    const diag = window.__ITBMO_DIAG__;
-    const tAll = (diag?.enabled) ? diag.timeStart('optimizeDay', { city, day }) : null;
-
-    const data = itineraries[city];
-    const baseDate = data?.baseDate || cityMeta[city]?.baseDate || '';
-
-    const rows = (data?.byDay?.[day] || []).map(r => ({
-      day, start: r.start || '', end: r.end || '', activity: r.activity || '',
-      from: r.from || '', to: r.to || '', transport: r.transport || '',
-      duration: r.duration || '', notes: r.notes || '', kind: r.kind || '', zone: r.zone || '',
-      _crossDay: !!r._crossDay
-    }));
-
-    if (diag?.enabled) diag.set('optimizeDay:lastInputRows', rows.length);
-
-    // 🆕 Instrucción pendiente (edición desde chat del planner)
-    // Formato sugerido desde SECCIÓN 19: plannerState.pendingEdits[city] = { scope:'city'|'day', day, text }
-    const pending = (plannerState && plannerState.pendingEdits) ? plannerState.pendingEdits[city] : null;
-    const user_instruction = pending && pending.text ? String(pending.text) : '';
-
-    const contextObj = (typeof __collectPlannerContext__ === 'function')
-      ? __collectPlannerContext__(city, day)
-      : { city, day_target: Number(day) || 1, days_total: __getTotalDaysForCity__(city) || 1, baseDate };
-
-    try {
-      // Research cache por ciudad
-      window.__researchCache = window.__researchCache || {};
-      let research = window.__researchCache?.[city]?.research || null;
-
-      // Si hay user_instruction, pedimos INFO fresco (para que aplique el cambio con el contexto completo)
-      const mustRefreshInfo = !!user_instruction;
-
-      if (!research || mustRefreshInfo) {
-        const infoRaw = await callApiChat('info', {
-          context: contextObj,
-          user_instruction,
-          edit_scope: pending?.scope || '',
-          edit_day: pending?.day || null
-        }, { timeoutMs: 90000, retries: 1 });
-
-        research = safeParseApiText(infoRaw?.text ?? infoRaw) || null;
-
-        if (research && typeof research === 'object') {
-          window.__researchCache[city] = { key: `info:${Date.now()}`, research, ts: Date.now() };
-        }
-      }
-
-      const dayHoursForTarget = Array.isArray(contextObj?.day_hours)
-        ? (contextObj.day_hours.find(x => Number(x.day) === Number(day)) || null)
-        : null;
-
-      const plannerRaw = await callApiChat('planner', {
-        research_json: research,
-        target_day: day,
-        day_hours: dayHoursForTarget ? [dayHoursForTarget] : null,
-        existing_rows: rows,
-        user_instruction,
-        edit_scope: pending?.scope || '',
-        edit_day: pending?.day || null
-      }, { timeoutMs: 90000, retries: 1 });
-
-      const plannerData = (typeof plannerRaw === 'object' && plannerRaw) ? plannerRaw : { text: String(plannerRaw || '') };
-      const structured = safeParseApiText(plannerData?.text ?? plannerData) || {};
-      const unified = unifyRowsFormat(structured, city);
-
-      const rawRows = (unified?.rows || []);
-      let finalRows = rawRows.map(x => ({ ...x, day: Number(x.day) || Number(day) || 1 }));
-
-      // Guard rails mínimos
-      finalRows = finalRows.map(r => __normalizeDayField__(city, r));
-      finalRows = fixOverlaps(finalRows);
-
-      if (typeof __enforceDayWindowAndNoDawn__ === 'function') {
-        finalRows = __enforceDayWindowAndNoDawn__(city, finalRows);
-      }
-
-      finalRows = __sortRowsTabsSafe__(finalRows);
-
-      // Validación opcional SOLO si viene vacío
-      if ((!Array.isArray(finalRows) || finalRows.length === 0) && typeof validateRowsWithAgent === 'function') {
-        const val = await validateRowsWithAgent(city, finalRows, baseDate);
-        finalRows = (val?.allowed || []);
-      }
-
-      if (diag?.enabled) diag.set('optimizeDay:lastOutputRows', (finalRows || []).length);
-
-      if (typeof pushRows === 'function') pushRows(city, finalRows, false);
-      try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
-
-      // 🧼 Consumir instrucción pendiente SOLO si era para este día o para ciudad completa
-      if (user_instruction && plannerState?.pendingEdits?.[city]) {
-        const scope = plannerState.pendingEdits[city].scope || '';
-        const dEd  = Number(plannerState.pendingEdits[city].day || 0);
-        if (scope === 'city') delete plannerState.pendingEdits[city];
-        else if (scope === 'day' && dEd === Number(day)) delete plannerState.pendingEdits[city];
-      }
-
-      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: true, inRows: rows.length, outRows: (finalRows||[]).length });
-
-    } catch (e) {
-      console.error('optimizeDay error (guard-rails-only):', e);
-      if (diag?.enabled) diag.err('optimizeDay', e);
-
-      // Fallback ultra conservador: no inventa contenido; re-push lo que había
-      let safeRows = rows.map(r => __normalizeDayField__(city, r));
-      safeRows = fixOverlaps(safeRows);
-
-      if (typeof __enforceDayWindowAndNoDawn__ === 'function') {
-        safeRows = __enforceDayWindowAndNoDawn__(city, safeRows);
-      }
-
-      safeRows = __sortRowsTabsSafe__(safeRows);
-
-      if (typeof pushRows === 'function') pushRows(city, safeRows, false);
-      try { document.dispatchEvent(new CustomEvent('itbmo:rowsUpdated', { detail: { city } })); } catch (_) {}
-
-      if (diag?.enabled) diag.timeEnd('optimizeDay', tAll, { ok: false, inRows: rows.length, outRows: (safeRows||[]).length });
-    }
-  };
-
-  const chained = prev.then(run, run);
-  window.__optimizeDayChain__[city] = chained.catch(()=>{});
-  return chained;
 }
 
 /* ==============================
