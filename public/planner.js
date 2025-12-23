@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v77
-   Base: v76
+   ITRAVELBYMYOWN · PLANNER v79
+   Base: v78
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
