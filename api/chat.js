@@ -1,12 +1,13 @@
-// /api/chat.js — v43.6 (ESM, Vercel)
+// /api/chat.js — v43.6.1 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ v43.6 — Cambios quirúrgicos (Opción A: INFO manda horarios):
-// - Elimina cualquier "ventana por defecto" rígida (08:30–19:00) en fallback.
-// - SYSTEM_INFO: day_hours SOLO si el usuario lo provee; prohibido emitir plantilla fija.
-// - SYSTEM_PLANNER: day_hours se trata como guía/soft constraint; NO inventa ventanas ni sobreescribe horarios válidos.
+// ✅ v43.6.1 — Cambios quirúrgicos (GLOBAL: eliminar rigidez 08:30–19:00):
+// - Sanitiza context.day_hours: si parece plantilla automática repetida (08:30–19:00 uniforme), se elimina antes de llamar al Info Chat.
+// - SYSTEM_INFO: day_hours es guía suave; si detectas patrón plantilla, ignóralo aunque venga.
+// - Comidas: consideradas como parte del plan, pero NO mandatorias; solo si aportan valor/logística.
+// - No rompe planner / contratos JSON / fallback.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -159,6 +160,53 @@ function normalizeDurationsInParsed(parsed) {
   return parsed;
 }
 
+/* ============== Sanitización de day_hours (quirúrgico) ============== */
+
+// Heurística: detecta patrón de plantilla automática repetida (ej. 08:30–19:00 todos los días)
+// Si parece auto-plantilla, lo eliminamos del contexto para que INFO no lo trate como "restricción del usuario".
+function looksLikeAutoTemplateDayHours(day_hours, days_total) {
+  try {
+    if (!Array.isArray(day_hours) || !day_hours.length) return false;
+
+    const n = Number(days_total) || day_hours.length || 0;
+    if (n && day_hours.length !== n) {
+      // Si no calza, puede ser parcial (probablemente usuario) → NO tocar.
+      return false;
+    }
+
+    const norm = (t) => String(t || "").trim();
+    const first = day_hours[0] || {};
+    const s0 = norm(first.start);
+    const e0 = norm(first.end);
+    if (!s0 || !e0) return false;
+
+    // Si todos son exactamente iguales
+    const allSame = day_hours.every((d) => norm(d?.start) === s0 && norm(d?.end) === e0);
+    if (!allSame) return false;
+
+    // Patrón típico rígido que queremos evitar (pero mantenemos generalidad):
+    // Si es una ventana diurna uniforme para todos los días, es MUY probable que venga de default del planner.
+    // (No lo limitamos solo a 08:30–19:00; cualquier uniforme total se considera plantilla).
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sanitizeInfoContext(context = {}) {
+  const c = context && typeof context === "object" ? { ...context } : {};
+
+  // days_total puede venir en distintas claves
+  const daysTotal = Number(c?.days_total || c?.days || c?.daysTotal || 0) || 0;
+
+  // Si day_hours parece plantilla, lo eliminamos (soft fix global)
+  if (looksLikeAutoTemplateDayHours(c?.day_hours, daysTotal)) {
+    delete c.day_hours;
+  }
+
+  return c;
+}
+
 /* ============== Quality Gate (existente - quirúrgico) ============== */
 
 function _canonTxt_(s) {
@@ -296,12 +344,15 @@ REGLA MAESTRA 3 — CLARIDAD TOTAL POR SUB-PARADAS (CRÍTICO, APLICA A TODO):
   "Destino – Sub-parada" o "Ruta/Área – Sub-parada".
 - Cada sub-parada debe ser una fila con start/end, from/to, transport, duration y notes.
 
-HORARIOS (CRÍTICO):
-- Si el usuario define ventanas por día (day_hours) en el contexto, respétalas como base.
-  Puedes ajustarlas inteligentemente para incluir experiencias clave (auroras/espectáculos/cenas icónicas),
+HORARIOS (CRÍTICO, PERO FLEXIBLE):
+- day_hours es una **guía suave** y solo aplica si fue realmente definida por el usuario.
+- Si day_hours viene en el contexto pero luce como una **plantilla repetida uniforme** (misma ventana para todos los días),
+  trátalo como NO provisto y trabaja con horarios realistas por filas.
+- Si el usuario define ventanas por día (day_hours) de forma específica, respétalas como base,
+  pero puedes ajustarlas inteligentemente para incluir experiencias clave (auroras/espectáculos/cenas icónicas),
   extendiendo horario nocturno sin solapes.
 - Si el usuario NO define day_hours:
-  - NO inventes una plantilla rígida repetida (PROHIBIDO 08:30–19:00 fijo para todos).
+  - NO inventes una plantilla rígida repetida (PROHIBIDO repetir una misma ventana fija para todos los días).
   - Genera horarios realistas por filas (rows_draft) según ciudad/estación/ritmo.
 - Buffers mínimos 15m entre bloques.
 - Actividades diurnas NO entre 01:00–05:00.
@@ -320,6 +371,7 @@ MACRO-TOURS / DAY-TRIPS (CRÍTICO):
 - Incluye explícitamente al cierre una fila: "Regreso a {ciudad base}" (con duración 2 líneas).
 - No colocar day-trips duros el último día.
 - NO generar duplicados bilingües del mismo tour/actividad.
+- CRÍTICO: NO generes una fila “tapón” que ocupe todo el día (ej. 08:30–19:00) si también hay sub-paradas ese mismo día.
 
 LAGUNAS TERMALES (CRÍTICO):
 - Mínimo 3 horas de actividad efectiva.
@@ -332,7 +384,8 @@ AURORAS (SOLO SI ES PLAUSIBLE):
 
 NOCHES: ESPECTÁCULOS Y CENAS CON SHOW:
 - Puedes sugerir experiencias nocturnas icónicas con frecuencia moderada.
-- Comidas eficientes: incluye solo si aporta valor real (icónico/logística/pausa).
+- Comidas eficientes: considéralas como pausas/logística/experiencia, pero NO son mandatorias;
+  incluye solo si aportan valor real (icónico, muy conveniente, o necesario por ritmo).
 
 CALIDAD PREMIUM (PROHIBIDO GENÉRICO):
 - Prohibido "Museo de Arte", "Parque local", "Café local", "Restaurante local" como actividad principal sin especificidad.
@@ -372,7 +425,7 @@ SALIDA (JSON) — estructura (sin texto fuera):
     "no_last_day_aurora":true,
     "thermal_lagoons_min_stay_minutes":180
   },
-  "day_hours":[], 
+  "day_hours":[],
   "rows_draft":[
     {"day":1,"start":"HH:MM","end":"HH:MM","activity":"Destino – Sub-parada","from":"","to":"","transport":"","duration":"Transporte: ...\\nActividad: ...","notes":"...","kind":"","zone":""}
   ],
@@ -382,8 +435,8 @@ SALIDA (JSON) — estructura (sin texto fuera):
 }
 
 NOTA day_hours:
-- Si NO viene en el contexto del usuario, déjalo como [] (no lo inventes).
-- Si SÍ viene, puedes devolverlo reflejando/ajustando (si extendiste noches por auroras/cenas show).
+- Si NO viene realmente del usuario, déjalo como [] (no lo inventes).
+- Si SÍ viene, puedes devolverlo reflejando/ajustando solo si extendiste noches por auroras/cenas show.
 `.trim();
 
 /* =======================
@@ -469,6 +522,9 @@ export default async function handler(req, res) {
         context = rest;
       }
 
+      // ✅ FIX GLOBAL: si day_hours parece plantilla automática, lo eliminamos antes de enviar al modelo
+      context = sanitizeInfoContext(context);
+
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
 
       // 1) Primer intento
@@ -503,7 +559,8 @@ REGLAS DE REPARACIÓN:
 3) duration debe ser EXACTAMENTE 2 líneas: "Transporte: ...\\nActividad: ..."
 4) Si hay macro-tour/day-trip: 5–8 sub-paradas + "Regreso a {ciudad}" al cierre.
 5) Para recorridos multi-parada (urbano o tour), usa "Destino – Sub-parada" en activity.
-6) day_hours: NO lo inventes si no viene en el contexto; si no viene, déjalo como [].
+6) day_hours: NO lo inventes si no viene realmente del usuario; si no viene, déjalo como [].
+7) PROHIBIDO una fila “tapón” que ocupe todo el día si hay sub-paradas ese día.
 
 Responde SOLO JSON válido.
 `.trim();
