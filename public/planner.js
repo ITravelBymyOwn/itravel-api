@@ -1649,6 +1649,7 @@ function showWOW(on, msg){
    - Si PLANNER devuelve cobertura incompleta (ej. solo día 1):
      → pedir por día usando target_day y mergear
    - Si falla: lanzar error para que SECCIÓN 16 no “finja éxito”
+   - ✅ NUEVO (quirúrgico): NO enviar day_hours si parece plantilla rígida (misma ventana todos los días)
 ───────────────────────────────────────────────────────────── */
 
 /* ===== Shim mínimo para callApiChat (OBLIGATORIO) ===== */
@@ -1720,6 +1721,39 @@ function __rowsHaveCoverage__(rows, totalDays){
   return true;
 }
 
+/* ===== day_hours sanitización client-side (quirúrgico) =====
+   - Si no hay horas reales -> no enviar day_hours (undefined)
+   - Si todos los días tienen la MISMA ventana -> tratar como plantilla rígida -> no enviar
+   - Si hay variación real / parcial del usuario -> sí enviar (guía suave)
+*/
+function __sanitizeDayHours__(day_hours, totalDays){
+  try{
+    if(!Array.isArray(day_hours) || !day_hours.length) return undefined;
+
+    const need = Math.max(1, Number(totalDays)||day_hours.length||1);
+
+    // Si length no coincide, probablemente hay intención del usuario (parcial) -> enviar tal cual
+    if(day_hours.length !== need) return day_hours;
+
+    const norm = (t)=> String(t||'').trim();
+    const hasAny = day_hours.some(d => norm(d?.start) || norm(d?.end));
+    if(!hasAny) return undefined; // todo null/empty
+
+    // Si TODOS los días tienen start/end definidos y son idénticos -> plantilla rígida
+    const allHave = day_hours.every(d => norm(d?.start) && norm(d?.end));
+    if(allHave){
+      const s0 = norm(day_hours[0]?.start);
+      const e0 = norm(day_hours[0]?.end);
+      const allSame = day_hours.every(d => norm(d?.start)===s0 && norm(d?.end)===e0);
+      if(allSame) return undefined;
+    }
+
+    return day_hours;
+  }catch(_){
+    return day_hours;
+  }
+}
+
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
   if(!city) return;
@@ -1743,6 +1777,9 @@ async function generateCityItinerary(city){
       return { day: i + 1, start: s, end: e };
     });
 
+    // ✅ NUEVO: no enviar plantillas rígidas al Info Chat
+    const safeDayHours = __sanitizeDayHours__(perDay, dest.days);
+
     /* ===== Contexto para INFO ===== */
     const context = {
       city,
@@ -1751,7 +1788,7 @@ async function generateCityItinerary(city){
       baseDate: cityMeta[city]?.baseDate || dest.baseDate || '',
       hotel_base: cityMeta[city]?.hotel || '',
       transport_preference: cityMeta[city]?.transport || 'recomiéndame',
-      day_hours: perDay,
+      day_hours: safeDayHours, // undefined => no se incluye en JSON.stringify
       travelers: plannerState?.travelers || {},
       preferences: plannerState?.preferences || {},
       special_conditions: plannerState?.specialConditions || ''
