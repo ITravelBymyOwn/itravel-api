@@ -1642,7 +1642,6 @@ function showWOW(on, msg){
    [15.2] Generación principal por ciudad
    INFO decide → PLANNER estructura → JS integra usando pipeline estable
    FIXES:
-   - Shim obligatorio callApiChat
    - Parse seguro (si cleanToJSONPlus no existe en global)
    - NO reescribir itineraries[city].byDay “a mano” (eso rompe render/pipeline)
      → usar pushRows + ensureDays (como en tu flujo estable)
@@ -1650,38 +1649,6 @@ function showWOW(on, msg){
      → pedir por día usando target_day y mergear
    - Si falla: lanzar error para que SECCIÓN 16 no “finja éxito”
 ───────────────────────────────────────────────────────────── */
-
-/* ===== Shim mínimo para callApiChat (OBLIGATORIO) ===== */
-if (typeof window.callApiChat !== 'function') {
-  window.callApiChat = async function(mode, payload = {}, opts = {}) {
-    const timeoutMs = Number(opts.timeoutMs || 65000);
-    const retries   = Number(opts.retries || 0);
-
-    const doOnce = async ()=>{
-      const ctrl = new AbortController();
-      const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
-      try{
-        const resp = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode, ...payload }),
-          signal: ctrl.signal
-        });
-        if (!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
-        return await resp.json();
-      } finally {
-        clearTimeout(t);
-      }
-    };
-
-    let lastErr = null;
-    for (let i=0; i<=retries; i++){
-      try { return await doOnce(); }
-      catch(e){ lastErr = e; }
-    }
-    throw lastErr || new Error("callApiChat failed");
-  };
-}
 
 /* ===== Parse seguro: usa cleanToJSONPlus si existe; si no, tolerante ===== */
 function __safeParseJSON__(raw){
