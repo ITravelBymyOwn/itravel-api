@@ -29,6 +29,8 @@ let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
+// ✅ QUIRÚRGICO: estos defaults quedan SOLO como fallback interno/legacy,
+// pero NO deben forzar ventanas por día cuando el usuario no las definió.
 const DEFAULT_START = '08:30';
 const DEFAULT_END   = '19:00';
 
@@ -342,24 +344,35 @@ function addMinutes(hhmm, min){
 /* ==============================
    🧭 Helper global para ventanas horarias por día
    - Si el usuario definió horario para un día → usarlo.
-   - Si no definió → usar 08:30–19:00 como base.
+   - Si NO definió → devolver null (INFO decide; NO forzar 08:30–19:00).
    - No hereda horarios entre días.
    - Devuelve siempre una lista completa para todos los días.
 ================================= */
 function getEffectivePerDay(city, totalDays){
-  const baseStart = '08:30';
-  const baseEnd   = '19:00';
   const meta = cityMeta[city] || {};
   const perDay = Array.isArray(meta.perDay) ? meta.perDay.slice() : [];
-  const map = new Map(perDay.map(x=>[x.day, {start:x.start||baseStart, end:x.end||baseEnd}]));
+
+  const norm = (v)=>{
+    const s = (v==null ? '' : String(v)).trim();
+    return s ? s : null;
+  };
+
+  // Mapa por día: solo conserva si hay algo definido
+  const map = new Map(
+    perDay.map(x=>[
+      x.day,
+      { start: norm(x.start), end: norm(x.end) }
+    ])
+  );
 
   const result = [];
   for(let d=1; d<=totalDays; d++){
     if(map.has(d)){
-      const val = map.get(d);
-      result.push({day:d, start:val.start||baseStart, end:val.end||baseEnd});
+      const val = map.get(d) || {};
+      result.push({ day:d, start: norm(val.start), end: norm(val.end) });
     } else {
-      result.push({day:d, start:baseStart, end:baseEnd});
+      // ✅ NO default: INFO decide
+      result.push({ day:d, start: null, end: null });
     }
   }
   return result;
@@ -468,14 +481,28 @@ function saveDestinations(){
 
     if(!city) return;
 
+    const normTime = (v)=>{
+      const s = (v==null ? '' : String(v)).trim();
+      return s ? s : null; // ✅ null = no definido → INFO decide
+    };
+
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
-      const start = qs('.start',hd).value || DEFAULT_START;
-      const end   = qs('.end',hd).value   || DEFAULT_END;
+      const start = normTime(qs('.start',hd).value);
+      const end   = normTime(qs('.end',hd).value);
       perDay.push({ day: idx+1, start, end });
     });
+
+    // ✅ Si no hay inputs de horas (o días sin bloque), NO forzar defaults
     if(perDay.length===0){
-      for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
+      for(let d=1; d<=days; d++) perDay.push({day:d, start:null, end:null});
+    } else {
+      // ✅ Alinear tamaño a days: rellena con nulls si faltan días (no hereda)
+      for(let d=perDay.length+1; d<=days; d++){
+        perDay.push({day:d, start:null, end:null});
+      }
+      // ✅ Truncar si sobran
+      if(perDay.length > days) perDay.length = days;
     }
 
     list.push({ city, country, days, baseDate, perDay });
@@ -508,11 +535,13 @@ function saveDestinations(){
       cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay:[...perDay] };
     }else{
       cityMeta[city].baseDate = baseDate||null;
-      // Alinear perDay al número de días (rellenar o truncar)
+      // Alinear perDay al número de días (rellenar o truncar) — SIN DEFAULTS
       const aligned = [];
       for(let d=1; d<=days; d++){
-        const src = perDay[d-1] || cityMeta[city].perDay?.find(x=>x.day===d) || { day:d, start:DEFAULT_START, end:DEFAULT_END };
-        aligned.push({ day:d, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END });
+        const src = perDay[d-1]
+          || cityMeta[city].perDay?.find(x=>x.day===d)
+          || { day:d, start:null, end:null };
+        aligned.push({ day:d, start: (src.start==null?null:src.start), end: (src.end==null?null:src.end) });
       }
       cityMeta[city].perDay = aligned;
     }
@@ -955,10 +984,11 @@ Eres "Astra", planificador internacional experto. Respondes con itinerarios y ed
 8) **Auroras** (si plausible por ciudad/fecha): horario nocturno 20:00–02:30, con \`valid:\` en notas, transporte coherente; puede repetirse varias noches **si** agrega valor.
 9) **Notas útiles siempre**: jamás dejes \`notes\` vacío ni \`seed\`; incluye tips de reserva, accesibilidad o contexto.
 
-🕒 HORARIOS:
-- Usa ventanas definidas por el usuario si existen; si no, asume base **08:30–19:00**.
-- Puedes ampliar para cenas/tours nocturnos/auroras y **compensar el inicio del día siguiente** si corresponde.
-- Nunca propongas auroras de día.
+🕒 HORARIOS (ALINEADO A API NUEVO):
+- Si el usuario define ventanas por día (perDay/day_hours), respétalas como guía.
+- Si el usuario NO define ventanas:
+  ✅ NO impongas una plantilla rígida (PROHIBIDO asumir 08:30–19:00 por defecto).
+  ✅ Genera horarios realistas por ciudad/estación/ritmo (INFO decide).
 
 🌦️ CLIMA/ESTACIONALIDAD (nivel general):
 - Ten en cuenta plausibilidad por estación (sin consultar en vivo); si una actividad es muy sensible al clima, sugiere plan B razonable.
@@ -1002,73 +1032,6 @@ ${heuristicsContext}
   } finally{
     clearTimeout(timer);
     showThinking?.(false);
-  }
-}
-
-function parseJSON(s){
-  if(!s) return null;
-  try{ return JSON.parse(s); }catch(_){}
-  const m1 = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```([\s\S]*?)```/i);
-  if(m1 && m1[1]){ try{ return JSON.parse(m1[1]); }catch(_){ } }
-  const m2 = s.match(/<json>\s*([\s\S]*?)\s*<\/json>/i);
-  if(m2 && m2[1]){ try{ return JSON.parse(m2[1]); }catch(_){ } }
-  try{
-    const cleaned = s.replace(/^[^\{]+/,'').replace(/[^\}]+$/,'');
-    return JSON.parse(cleaned);
-  }catch(_){ return null; }
-}
-
-/* Info Chat: respuesta breve, factual y accionable (sin JSON) */
-async function callInfoAgent(text){
-  const history = Array.isArray(infoSession) ? infoSession.slice(Math.max(0, infoSession.length - 12)) : [];
-  const globalStyle = `
-Eres "Astra", asistente informativo de viajes.
-- SOLO respondes preguntas informativas (clima histórico aproximado, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, normas básicas) de forma breve, clara y accionable.
-- Considera factores de seguridad básicos y estacionalidad de forma general (sin consultar fuentes en vivo).
-- NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
-`.trim();
-
-  try{
-    setInfoChatBusy?.(true);
-
-    const res = await fetch(API_URL,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({
-        model: MODEL,
-        input: `${globalStyle}\n\n${text}`,
-        history,
-        mode: 'info'
-      })
-    });
-
-    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
-    const answer = (data?.text || '').trim();
-
-    // Persistimos historial compacto
-    if(Array.isArray(infoSession)){
-      infoSession.push({ role:'user',      content: text });
-      infoSession.push({ role:'assistant', content: answer });
-      // Recorte suave para no crecer infinito
-      if(infoSession.length > 24) infoSession.splice(0, infoSession.length - 24);
-    }
-
-    // Protección por si el modelo devuelve JSON por error
-    if (/^\s*\{/.test(answer)) {
-      try {
-        const j = JSON.parse(answer);
-        if (j?.destination || j?.rows || j?.followup) {
-          return 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
-        }
-      } catch { /* no-op */ }
-    }
-
-    return answer || '¿Algo más que quieras saber?';
-  }catch(e){
-    console.error("Fallo Info Chat:", e);
-    return tone?.fail || 'No se pudo obtener información en este momento.';
-  }finally{
-    setInfoChatBusy?.(false);
   }
 }
 
