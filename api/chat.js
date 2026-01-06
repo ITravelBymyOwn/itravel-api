@@ -1,4 +1,4 @@
-// /api/chat.js — v43.6.2 (ESM, Vercel)
+// /api/chat.js — v43.6.3 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -14,6 +14,9 @@
 //
 // ✅ QUIRÚRGICO v43.6.2:
 // - Soporte de validate=true en modo planner: NO llama al modelo. Devuelve {allowed,rejected} para evitar cargas/timeout.
+//
+// ✅ QUIRÚRGICO v43.6.3:
+// - FIX CRÍTICO: faltaba _validatePlannerOutput_ (ReferenceError → fallback → rows=1). Se agrega función mínima y segura.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -355,6 +358,26 @@ function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
   } catch {
     return null;
   }
+}
+
+/* ============== ✅ FIX CRÍTICO v43.6.3: faltaba _validatePlannerOutput_ ============== */
+function _validatePlannerOutput_(parsed) {
+  const issues = [];
+  const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+
+  if (!rows.length) issues.push("rows vacío o ausente (planner debe devolver rows).");
+
+  // duration 2 líneas en todas las filas (si hay filas)
+  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) {
+    issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
+  }
+
+  // placeholders genéricos (si hay filas)
+  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) {
+    issues.push("hay placeholders genéricos en activity (planner).");
+  }
+
+  return { ok: issues.length === 0, issues };
 }
 
 /* ============== Prompts del sistema ============== */
