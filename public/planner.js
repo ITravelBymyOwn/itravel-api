@@ -2360,6 +2360,10 @@ function intentFromText(text){
    ✅ QUIRÚRGICO (enero 2026):
    - Se elimina VALIDACIÓN legacy “con agente” dentro de esta sección.
    - La validación de filas {allowed/rejected} ahora vive en SECCIÓN 14 (local, sin legacy).
+
+   ✅ FIX QUIRÚRGICO (enero 2026):
+   - Guards anti-ReferenceError si cityMeta/savedDestinations/itineraries/plannerState aún no existen.
+     (No cambia lógica; solo evita que el sitio "reviente" si el orden de carga cambia.)
    ============================================================ */
 
 /* ============================================================
@@ -2537,7 +2541,9 @@ if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
     if(!Array.isArray(rows) || !rows.length) return rows;
 
     const getWindow = (d)=>{
-      const w = (cityMeta?.[city]?.perDay || []).find(x=>Number(x.day)===Number(d)) || {};
+      const hasCityMeta = (typeof cityMeta !== 'undefined' && cityMeta && cityMeta[city]);
+      const per = (hasCityMeta && Array.isArray(cityMeta[city].perDay)) ? cityMeta[city].perDay : [];
+      const w = per.find(x=>Number(x.day)===Number(d)) || {};
       const start = (w.start == null || String(w.start).trim()==='') ? null : String(w.start).trim();
       const end   = (w.end   == null || String(w.end).trim()==='')   ? null : String(w.end).trim();
       return { start, end };
@@ -2653,11 +2659,8 @@ function fixOverlaps(rows) {
 
     const mh = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
     if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
-
     const mm = raw.match(/(\d+)\s*m/i);
-    // ✅ FIX QUIRÚRGICO: si viene "Xm", devolver X (minutos) directamente
-    if (mm) return parseInt(mm[1], 10);
-
+    if (mm) return parseInt(mh ? 0 : (mm ? parseInt(mm[1],10) : 0), 10) || (mm ? parseInt(mm[1],10) : 0);
     return 0;
   };
 
@@ -2761,11 +2764,29 @@ function fixOverlaps(rows) {
    totalDays real (guard rail)
 ------------------------------------------------------------------- */
 function __getTotalDaysForCity__(city){
-  const saved = savedDestinations?.find(x=>x.city===city)?.days;
-  const meta  = Array.isArray(cityMeta?.[city]?.perDay) ? cityMeta[city].perDay.length : 0;
-  const byDay = itineraries?.[city]?.byDay ? Object.keys(itineraries[city].byDay).map(n=>+n) : [];
-  const maxPresent = byDay.length ? Math.max(...byDay) : 0;
-  const best = Math.max(Number(saved)||0, Number(meta)||0, Number(maxPresent)||0);
+  let saved = 0;
+  try {
+    if (typeof savedDestinations !== 'undefined' && Array.isArray(savedDestinations)) {
+      saved = Number(savedDestinations?.find(x=>x.city===city)?.days) || 0;
+    }
+  } catch(_) {}
+
+  let meta = 0;
+  try {
+    if (typeof cityMeta !== 'undefined' && cityMeta && cityMeta[city] && Array.isArray(cityMeta?.[city]?.perDay)) {
+      meta = cityMeta[city].perDay.length || 0;
+    }
+  } catch(_) {}
+
+  let maxPresent = 0;
+  try {
+    if (typeof itineraries !== 'undefined' && itineraries && itineraries?.[city]?.byDay) {
+      const byDay = Object.keys(itineraries[city].byDay).map(n=>+n);
+      maxPresent = byDay.length ? Math.max(...byDay) : 0;
+    }
+  } catch(_) {}
+
+  const best = Math.max(saved||0, meta||0, maxPresent||0);
   return best > 0 ? best : 0;
 }
 
@@ -2830,18 +2851,29 @@ function __sortRowsTabsSafe__(rows) {
 ------------------------------------------------------------------- */
 if (typeof __collectPlannerContext__ !== 'function') {
   function __collectPlannerContext__(city, day) {
-    const totalDays = __getTotalDaysForCity__(city) || (savedDestinations?.find(x=>x.city===city)?.days || 1);
-    const baseDate  = itineraries?.[city]?.baseDate || cityMeta?.[city]?.baseDate || '';
+    const hasSaved = (typeof savedDestinations !== 'undefined' && Array.isArray(savedDestinations));
+    const hasCityMeta = (typeof cityMeta !== 'undefined' && cityMeta && cityMeta[city]);
+    const hasIt = (typeof itineraries !== 'undefined' && itineraries && itineraries[city]);
+
+    const totalDays =
+      __getTotalDaysForCity__(city) ||
+      (hasSaved ? (savedDestinations?.find(x=>x.city===city)?.days || 1) : 1);
+
+    const baseDate =
+      (hasIt && itineraries?.[city]?.baseDate) ||
+      (hasCityMeta && cityMeta?.[city]?.baseDate) ||
+      '';
 
     const perDay = Array.from({ length: totalDays }, (_,i)=>{
       const d = i+1;
-      const w = (cityMeta?.[city]?.perDay || []).find(x=>Number(x.day)===d) || {};
+      const per = (hasCityMeta && Array.isArray(cityMeta?.[city]?.perDay)) ? cityMeta[city].perDay : [];
+      const w = per.find(x=>Number(x.day)===d) || {};
       const start = (w.start == null || String(w.start).trim()==='') ? null : String(w.start).trim();
       const end   = (w.end   == null || String(w.end).trim()==='')   ? null : String(w.end).trim();
       return { day:d, start, end };
     });
 
-    const byDay = itineraries?.[city]?.byDay || {};
+    const byDay = (hasIt && itineraries?.[city]?.byDay) ? itineraries[city].byDay : {};
     const already = {};
     Object.keys(byDay).forEach(k=>{
       const d = Number(k)||1;
@@ -2861,18 +2893,23 @@ if (typeof __collectPlannerContext__ !== 'function') {
 
     const flatActs = Object.values(already).flat().map(r=>String(r.activity||'')).filter(Boolean);
 
+    const prefs = (typeof plannerState !== 'undefined' && plannerState?.preferences) ? plannerState.preferences : {};
+    const restr = (typeof plannerState !== 'undefined')
+      ? (plannerState?.restrictions || plannerState?.conditions || plannerState?.specialConditions || {})
+      : {};
+
     return {
       city,
       day_target: Number(day) || 1,
       days_total: Number(totalDays) || 1,
       baseDate,
-      hotel_base: cityMeta?.[city]?.hotel || '',
-      transport_preference: cityMeta?.[city]?.transport || '',
+      hotel_base: (hasCityMeta ? (cityMeta?.[city]?.hotel || '') : ''),
+      transport_preference: (hasCityMeta ? (cityMeta?.[city]?.transport || '') : ''),
       day_hours: perDay,
       existing_itinerary_by_day: already,
       existing_activities: flatActs,
-      preferences: plannerState?.preferences || {},
-      restrictions: (plannerState?.restrictions || plannerState?.conditions || plannerState?.specialConditions || {})
+      preferences: prefs,
+      restrictions: restr
     };
   }
 }
