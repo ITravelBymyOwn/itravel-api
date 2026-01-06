@@ -2356,6 +2356,10 @@ function intentFromText(text){
    Fuente de verdad: API (INFO + PLANNER)
    Aquí solo: robustez, parseo, clamps, overlaps mínimos, orden tabs-safe.
    + 🆕 Soporte de "user_instruction" para ediciones (desde SECCIÓN 19).
+
+   ✅ QUIRÚRGICO (enero 2026):
+   - Se elimina VALIDACIÓN legacy “con agente” dentro de esta sección.
+   - La validación de filas {allowed/rejected} ahora vive en SECCIÓN 14 (local, sin legacy).
    ============================================================ */
 
 /* ============================================================
@@ -2650,7 +2654,7 @@ function fixOverlaps(rows) {
     const mh = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
     if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
     const mm = raw.match(/(\d+)\s*m/i);
-    if (mm) return parseInt(mm[1], 10);
+    if (mm) return parseInt(mh ? 0 : (mm ? parseInt(mm[1],10) : 0), 10) || (mm ? parseInt(mm[1],10) : 0);
     return 0;
   };
 
@@ -2984,34 +2988,6 @@ if (typeof unifyRowsFormat !== 'function') {
     }
 
     return { rows: [] };
-  }
-}
-
-/* ------------------------------------------------------------------
-   VALIDACIÓN con agente (guard rail opcional)
-------------------------------------------------------------------- */
-if (typeof validateRowsWithAgent !== 'function') {
-  async function validateRowsWithAgent(city, rows, baseDate) {
-    const diag = window.__ITBMO_DIAG__;
-    const t0 = (diag?.enabled) ? diag.timeStart('api:validate', { city, n: (rows||[]).length }) : null;
-
-    try {
-      if (diag?.enabled) diag.inc('api:validate:count', 1);
-
-      const resp = await callApiChat('planner', { validate: true, city, baseDate, rows }, { timeoutMs: 22000, retries: 0 });
-      const parsed = safeParseApiText(resp?.text ?? resp);
-
-      if (diag?.enabled) diag.timeEnd('api:validate', t0, { ok: true });
-
-      if (Array.isArray(parsed?.allowed)) return parsed;
-      return { allowed: rows, rejected: [] };
-    } catch (e) {
-      if (diag?.enabled) {
-        diag.err('validate', e);
-        diag.timeEnd('api:validate', t0, { ok: false });
-      }
-      return { allowed: rows, rejected: [] };
-    }
   }
 }
 
