@@ -1,4 +1,4 @@
-// /api/chat.js — v43.6.2 (ESM, Vercel)
+// /api/chat.js — v43.6 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -12,8 +12,11 @@
 // - Sanitiza context.day_hours entrante: si parece plantilla rígida repetida (misma start/end todos los días), se elimina antes de llamar al modelo.
 //   Esto evita que el INFO se amarre a 08:30–19:00 cuando viene "prellenado" desde el Planner UI.
 //
-// ✅ QUIRÚRGICO v43.6.2:
-// - Soporte de validate=true en modo planner: NO llama al modelo. Devuelve {allowed,rejected} para evitar cargas/timeout.
+// ✅ QUIRÚRGICO v43.6.2 (QUALITY GATE reforzado):
+// - Detecta macro-tours en 1 sola fila aunque existan filas de cena/auroras ese mismo día.
+// - Valida reglas de auroras: no consecutivas, no último día, max 1 por día.
+// - Si alwaysIncludeDinner=true, exige una fila tipo cena por día (heurística conservadora).
+// - Si hay day-trip fuerte, exige fila "Regreso a {ciudad base}" en ese día.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -223,6 +226,30 @@ function _rowsHaveCoverage_(rows, daysTotal) {
   return true;
 }
 
+/* ===== helpers QUIRÚRGICOS (v43.6.2) ===== */
+function _isMealRow_(r){
+  const a = _canonTxt_(r?.activity || "");
+  if(!a) return false;
+  return /\b(cena|almuerzo|desayuno|brunch|comida)\b/i.test(a);
+}
+
+function _isAuroraRow_(r){
+  const a = _canonTxt_(r?.activity || "");
+  const n = _canonTxt_(r?.notes || "");
+  return /\baurora\b|\bnorthern lights\b/i.test(a) || /\baurora\b|\bnorthern lights\b/i.test(n);
+}
+
+function _isReturnRow_(r){
+  const a = _canonTxt_(r?.activity || "");
+  return /\bregreso\b/i.test(a) || /\breturn\b/i.test(a);
+}
+
+function _isStrongTourRow_(r){
+  const a = _canonTxt_(r?.activity || "");
+  const strongTour = /excursion|day trip|tour\b|circuito|circulo|peninsula|parque nacional|volcan|glaciar|cascada|waterfall|lagoon|hot spring|geyser/i;
+  return strongTour.test(a);
+}
+
 function _validateInfoResearch_(parsed, contextHint = {}) {
   const issues = [];
 
@@ -234,7 +261,8 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
   if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
 
-  // Macro-tour “en una fila” (señal de baja granularidad)
+  // Macro-tour “en una fila” (mejorado v43.6.2):
+  // - Detecta tour fuerte en 1 sola fila aunque haya cena/aurora como filas extra.
   try {
     const byDay = {};
     for (const r of rows) {
@@ -242,17 +270,69 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
       byDay[d] = byDay[d] || [];
       if (String(r.activity || "").trim()) byDay[d].push(r);
     }
-    const strongTour = /excursi[oó]n|day\s*trip|tour\b|circuito|c[ií]rculo|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|lagoon|hot\s*spring|geyser/i;
+
     Object.keys(byDay).forEach((k) => {
       const d = Number(k);
       const list = byDay[d] || [];
-      if (list.length <= 2) {
-        const a = _canonTxt_(list[0]?.activity || "");
-        if (strongTour.test(a) && list.length === 1) {
-          issues.push(`día ${d} parece macro-tour en 1 sola fila (falta sub-paradas).`);
-        }
+
+      const nonMeal = list.filter(r => !_isMealRow_(r));
+      const strongTourRows = nonMeal.filter(r => _isStrongTourRow_(r));
+
+      // Si hay tour fuerte pero solo 1 fila "tour" en el día → falta sub-paradas
+      if (strongTourRows.length === 1) {
+        // Permite otras filas no-meal tipo aurora, pero igual es macro-tour colapsado
+        issues.push(`día ${d} parece macro-tour en 1 sola fila (falta sub-paradas).`);
+      }
+
+      // Si hay tour fuerte, exigir "Regreso a {ciudad}" (fila de regreso) en el mismo día
+      if (strongTourRows.length >= 1) {
+        const hasReturn = nonMeal.some(r => _isReturnRow_(r));
+        if (!hasReturn) issues.push(`día ${d} incluye day-trip pero falta fila "Regreso a {ciudad base}".`);
       }
     });
+  } catch {}
+
+  // Auroras (v43.6.2): no consecutivas, no último día, max 1 por día
+  try {
+    const auroraDays = {};
+    for (const r of rows) {
+      const d = Number(r?.day) || 1;
+      if (_isAuroraRow_(r)) auroraDays[d] = (auroraDays[d] || 0) + 1;
+    }
+    const daysWithAurora = Object.keys(auroraDays).map(n=>+n).sort((a,b)=>a-b);
+
+    // max 1 por día
+    daysWithAurora.forEach(d=>{
+      if ((auroraDays[d] || 0) > 1) issues.push(`auroras: hay más de 1 fila en el día ${d} (máximo 1 por día).`);
+    });
+
+    // no último día
+    if (daysWithAurora.includes(daysTotal)) issues.push("auroras: aparece en el último día (prohibido).");
+
+    // no consecutivas
+    for (let i=1; i<daysWithAurora.length; i++){
+      if (daysWithAurora[i] === daysWithAurora[i-1] + 1) {
+        issues.push(`auroras: días consecutivos (${daysWithAurora[i-1]} y ${daysWithAurora[i]}) (prohibido).`);
+        break;
+      }
+    }
+  } catch {}
+
+  // Cena obligatoria si viene preferencia (v43.6.2, conservador)
+  try {
+    const alwaysDinner = !!(contextHint?.preferences?.alwaysIncludeDinner);
+    if (alwaysDinner && rows.length) {
+      const byDay = {};
+      for (const r of rows) {
+        const d = Number(r?.day) || 1;
+        (byDay[d] = byDay[d] || []).push(r);
+      }
+      for (let d=1; d<=daysTotal; d++){
+        const list = byDay[d] || [];
+        const hasDinner = list.some(r => /\bcena\b/i.test(_canonTxt_(r?.activity || "")));
+        if (!hasDinner) issues.push(`alwaysIncludeDinner: falta una fila de "Cena" en el día ${d}.`);
+      }
+    }
   } catch {}
 
   return { ok: issues.length === 0, issues };
@@ -544,6 +624,7 @@ export default async function handler(req, res) {
       if (parsed) {
         const audit = _validateInfoResearch_(parsed, {
           days_total: context?.days_total || context?.days || context?.daysTotal || 1,
+          preferences: context?.preferences || {},
         });
 
         if (!audit.ok) {
@@ -605,15 +686,6 @@ Responde SOLO JSON válido.
 
     /* --------- MODO PLANNER (estructurador) --------- */
     if (mode === "planner") {
-
-      // ✅ QUIRÚRGICO v43.6.2: VALIDATE no debe llamar al modelo
-      try {
-        if (body && body.validate === true && Array.isArray(body.rows)) {
-          const out = { allowed: body.rows, rejected: [] };
-          return res.status(200).json({ text: JSON.stringify(out) });
-        }
-      } catch {}
-
       const research = body.research_json || null;
 
       // Camino legado (mensajes del cliente, sin research_json)
