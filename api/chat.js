@@ -1,4 +1,4 @@
-// /api/chat.js — v43.6.3 (ESM, Vercel)
+// /api/chat.js — v43.6.2 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -14,9 +14,6 @@
 //
 // ✅ QUIRÚRGICO v43.6.2:
 // - Soporte de validate=true en modo planner: NO llama al modelo. Devuelve {allowed,rejected} para evitar cargas/timeout.
-//
-// ✅ QUIRÚRGICO v43.6.3:
-// - FIX CRÍTICO: faltaba _validatePlannerOutput_ (ReferenceError → fallback → rows=1). Se agrega función mínima y segura.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -246,9 +243,9 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
      🆕 GUARD SEMÁNTICO — AURORAS
      ========================================================= */
   const auroraDays = rows
-    .filter(r => /auroras?|northern\s*lights/i.test(r.activity))
-    .map(r => Number(r.day))
-    .sort((a,b)=>a-b);
+    .filter((r) => /auroras?|northern\s*lights/i.test(r.activity))
+    .map((r) => Number(r.day))
+    .sort((a, b) => a - b);
 
   for (let i = 1; i < auroraDays.length; i++) {
     if (auroraDays[i] === auroraDays[i - 1] + 1) {
@@ -265,15 +262,15 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
      🆕 GUARD SEMÁNTICO — MACRO-TOURS ÚNICOS
      ========================================================= */
   const macroCanon = (s) =>
-    String(s || '')
+    String(s || "")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/–.*$/, '')
+      .replace(/–.*$/, "")
       .trim();
 
   const macroDays = {};
-  rows.forEach(r => {
+  rows.forEach((r) => {
     const key = macroCanon(r.activity);
     if (/golden\s*circle|circulo\s*dorado|day\s*trip|excursion|tour\b/i.test(key)) {
       macroDays[key] = macroDays[key] || new Set();
@@ -283,7 +280,7 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
 
   Object.entries(macroDays).forEach(([k, days]) => {
     if (days.size > 1) {
-      issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(', ')}).`);
+      issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(", ")}).`);
     }
   });
 
@@ -291,28 +288,28 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
      🆕 GUARD SEMÁNTICO — DURACIÓN VS BLOQUE HORARIO
      ========================================================= */
   const toMin = (hhmm) => {
-    const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
-    return parseInt(m[1],10)*60 + parseInt(m[2],10);
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
   };
 
   const durFromText = (txt) => {
-    const s = String(txt || '');
+    const s = String(txt || "");
     let total = 0;
     const mh = s.match(/Actividad\s*:\s*(\d+)\s*h/i);
     const mm = s.match(/Actividad\s*:\s*(\d+)\s*m/i);
-    if (mh) total += parseInt(mh[1],10)*60;
-    if (mm) total += parseInt(mm[1],10);
+    if (mh) total += parseInt(mh[1], 10) * 60;
+    if (mm) total += parseInt(mm[1], 10);
     return total;
   };
 
-  rows.forEach(r => {
+  rows.forEach((r) => {
     const s = toMin(r.start);
     const e = toMin(r.end);
     if (s == null || e == null) return;
 
     let block = e - s;
-    if (block <= 0) block += 24*60;
+    if (block <= 0) block += 24 * 60;
 
     const dur = durFromText(r.duration);
     if (dur && dur < block * 0.7) {
@@ -333,7 +330,7 @@ function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
     // Normalizar
     const norm = (t) => String(t || "").trim();
     const cleaned = day_hours.map((d, idx) => ({
-      day: Number(d?.day) || (idx + 1),
+      day: Number(d?.day) || idx + 1,
       start: norm(d?.start) || "",
       end: norm(d?.end) || "",
     }));
@@ -360,24 +357,33 @@ function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
   }
 }
 
-/* ============== ✅ FIX CRÍTICO v43.6.3: faltaba _validatePlannerOutput_ ============== */
+/* ============== ✅ FIX QUIRÚRGICO: evitar crash en planner por función faltante ============== */
 function _validatePlannerOutput_(parsed) {
-  const issues = [];
-  const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+  try {
+    const issues = [];
 
-  if (!rows.length) issues.push("rows vacío o ausente (planner debe devolver rows).");
+    const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+    if (!rows.length) issues.push("rows vacío o ausente (obligatorio).");
 
-  // duration 2 líneas en todas las filas (si hay filas)
-  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) {
-    issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
+    // Si hay filas, chequeos básicos (no destructivos)
+    if (rows.length) {
+      if (rows.some((r) => !_hasTwoLineDuration_(r?.duration))) {
+        issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
+      }
+      if (rows.some((r) => _isGenericPlaceholderActivity_(r?.activity))) {
+        issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
+      }
+      // day debe ser >=1 si viene
+      if (rows.some((r) => Number(r?.day) < 1 || !Number.isFinite(Number(r?.day)))) {
+        issues.push("hay filas con 'day' inválido (<1 o no numérico).");
+      }
+    }
+
+    return { ok: issues.length === 0, issues };
+  } catch (e) {
+    // Nunca rompas el API por validación
+    return { ok: true, issues: [] };
   }
-
-  // placeholders genéricos (si hay filas)
-  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) {
-    issues.push("hay placeholders genéricos en activity (planner).");
-  }
-
-  return { ok: issues.length === 0, issues };
 }
 
 /* ============== Prompts del sistema ============== */
