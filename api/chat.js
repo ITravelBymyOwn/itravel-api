@@ -230,41 +230,92 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   const rows = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
 
   if (!rows.length) issues.push("rows_draft vacío o ausente (obligatorio).");
-  if (rows.length && !_rowsHaveCoverage_(rows, daysTotal)) issues.push("rows_draft no cubre todos los días 1..days_total.");
-  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
-  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
+  if (rows.length && !_rowsHaveCoverage_(rows, daysTotal))
+    issues.push("rows_draft no cubre todos los días 1..days_total.");
 
-  // Macro-tour “en una fila” (señal de baja granularidad)
-  try {
-    const byDay = {};
-    for (const r of rows) {
-      const d = Number(r.day) || 1;
-      byDay[d] = byDay[d] || [];
-      if (String(r.activity || "").trim()) byDay[d].push(r);
+  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration)))
+    issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
+
+  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity)))
+    issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
+
+  /* =========================================================
+     🆕 GUARD SEMÁNTICO — AURORAS
+     ========================================================= */
+  const auroraDays = rows
+    .filter(r => /auroras?|northern\s*lights/i.test(r.activity))
+    .map(r => Number(r.day))
+    .sort((a,b)=>a-b);
+
+  for (let i = 1; i < auroraDays.length; i++) {
+    if (auroraDays[i] === auroraDays[i - 1] + 1) {
+      issues.push("auroras programadas en días consecutivos (no permitido).");
+      break;
     }
-    const strongTour = /excursi[oó]n|day\s*trip|tour\b|circuito|c[ií]rculo|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|lagoon|hot\s*spring|geyser/i;
-    Object.keys(byDay).forEach((k) => {
-      const d = Number(k);
-      const list = byDay[d] || [];
-      if (list.length <= 2) {
-        const a = _canonTxt_(list[0]?.activity || "");
-        if (strongTour.test(a) && list.length === 1) {
-          issues.push(`día ${d} parece macro-tour en 1 sola fila (falta sub-paradas).`);
-        }
-      }
-    });
-  } catch {}
+  }
 
-  return { ok: issues.length === 0, issues };
-}
+  if (auroraDays.includes(daysTotal)) {
+    issues.push("auroras programadas en el último día (no permitido).");
+  }
 
-function _validatePlannerOutput_(parsed) {
-  const issues = [];
-  const rows = Array.isArray(parsed?.rows) ? parsed.rows : [];
+  /* =========================================================
+     🆕 GUARD SEMÁNTICO — MACRO-TOURS ÚNICOS
+     ========================================================= */
+  const macroCanon = (s) =>
+    String(s || '')
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/–.*$/, '')
+      .trim();
 
-  if (!rows.length) issues.push("rows vacío o ausente.");
-  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push("duration no cumple 2 líneas en una o más filas.");
-  if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("hay placeholders genéricos en activity (baja calidad).");
+  const macroDays = {};
+  rows.forEach(r => {
+    const key = macroCanon(r.activity);
+    if (/golden\s*circle|circulo\s*dorado|day\s*trip|excursion|tour\b/i.test(key)) {
+      macroDays[key] = macroDays[key] || new Set();
+      macroDays[key].add(Number(r.day));
+    }
+  });
+
+  Object.entries(macroDays).forEach(([k, days]) => {
+    if (days.size > 1) {
+      issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(', ')}).`);
+    }
+  });
+
+  /* =========================================================
+     🆕 GUARD SEMÁNTICO — DURACIÓN VS BLOQUE HORARIO
+     ========================================================= */
+  const toMin = (hhmm) => {
+    const m = String(hhmm || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return null;
+    return parseInt(m[1],10)*60 + parseInt(m[2],10);
+  };
+
+  const durFromText = (txt) => {
+    const s = String(txt || '');
+    let total = 0;
+    const mh = s.match(/Actividad\s*:\s*(\d+)\s*h/i);
+    const mm = s.match(/Actividad\s*:\s*(\d+)\s*m/i);
+    if (mh) total += parseInt(mh[1],10)*60;
+    if (mm) total += parseInt(mm[1],10);
+    return total;
+  };
+
+  rows.forEach(r => {
+    const s = toMin(r.start);
+    const e = toMin(r.end);
+    if (s == null || e == null) return;
+
+    let block = e - s;
+    if (block <= 0) block += 24*60;
+
+    const dur = durFromText(r.duration);
+    if (dur && dur < block * 0.7) {
+      issues.push(`duración inconsistente en día ${r.day} (${r.activity}).`);
+    }
+  });
 
   return { ok: issues.length === 0, issues };
 }
