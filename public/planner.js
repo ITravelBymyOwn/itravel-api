@@ -2360,6 +2360,13 @@ function intentFromText(text){
    ✅ QUIRÚRGICO (enero 2026):
    - Se elimina VALIDACIÓN legacy “con agente” dentro de esta sección.
    - La validación de filas {allowed/rejected} ahora vive en SECCIÓN 14 (local, sin legacy).
+
+   ✅ QUIRÚRGICO (enero 2026 · FIX semántico NO-invasivo):
+   - Se añade auditoría post-API (sin IA, sin inventar nada) para detectar:
+     (a) auroras consecutivas / en último día,
+     (b) macro-tour partido en múltiples días,
+     (c) duración vs bloque horario incoherente.
+   - Esta auditoría SOLO registra en DIAG (no reescribe filas).
    ============================================================ */
 
 /* ============================================================
@@ -2447,7 +2454,8 @@ function intentFromText(text){
           api_info_ms: this.last['time:api:info:msLast'],
           api_planner_ms: this.last['time:api:planner:msLast'],
           optimizeDay_ms: this.last['time:optimizeDay:msLast'],
-          lastApiError: this.last['err:last:api'] || null
+          lastApiError: this.last['err:last:api'] || null,
+          semantic_issues_last: this.last['semantic:last'] || null
         },
         errors: this.errors.slice(-10)
       };
@@ -2654,7 +2662,7 @@ function fixOverlaps(rows) {
     const mh = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
     if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
     const mm = raw.match(/(\d+)\s*m/i);
-    if (mm) return parseInt(mh ? 0 : (mm ? parseInt(mm[1],10) : 0), 10) || (mm ? parseInt(mm[1],10) : 0);
+    if (mm) return parseInt(mm[1],10);
     return 0;
   };
 
@@ -2750,6 +2758,9 @@ function fixOverlaps(rows) {
 
     outAll.push(...outDay);
   }
+
+  // ✅ QUIRÚRGICO: auditoría semántica NO-invasiva (solo DIAG)
+  try { __auditSemanticRowsPostAPI__(outAll); } catch(_) {}
 
   return outAll;
 }
@@ -2988,6 +2999,101 @@ if (typeof unifyRowsFormat !== 'function') {
     }
 
     return { rows: [] };
+  }
+}
+
+/* ============================================================
+   🆕 Auditoría semántica post-API (NO-invasiva; SOLO DIAG)
+   - No inventa ni reescribe.
+   - Sirve para detectar (y ver en DIAG) los casos como:
+     auroras consecutivas, golden circle partido, duración vs bloque.
+============================================================ */
+function __auditSemanticRowsPostAPI__(rows){
+  try{
+    const diag = window.__ITBMO_DIAG__;
+    if(!diag?.enabled) return;
+
+    if(!Array.isArray(rows) || !rows.length){
+      diag.set('semantic:last', { ok:true, issues: [] });
+      return;
+    }
+
+    const issues = [];
+
+    const days = rows.map(r=>Number(r?.day)||1);
+    const daysTotal = days.length ? Math.max(...days) : 1;
+
+    // Auroras days
+    const auroraDays = [...new Set(
+      rows
+        .filter(r=>/auroras?|northern\s*lights/i.test(String(r?.activity||'')))
+        .map(r=>Number(r?.day)||1)
+    )].sort((a,b)=>a-b);
+
+    for(let i=1;i<auroraDays.length;i++){
+      if(auroraDays[i] === auroraDays[i-1] + 1){
+        issues.push('auroras_consecutivas');
+        break;
+      }
+    }
+    if(auroraDays.includes(daysTotal)){
+      issues.push('auroras_ultimo_dia');
+    }
+
+    // Macro split (heurística muy conservadora: solo detecta "Golden Circle" y "Círculo Dorado" por día)
+    const macroKeyFor = (act)=>{
+      const s = String(act||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      if(/\bgolden\s*circle\b|\bcirculo\s*dorado\b/.test(s)) return 'golden_circle';
+      return '';
+    };
+    const macroDays = {};
+    for(const r of rows){
+      const k = macroKeyFor(r?.activity);
+      if(!k) continue;
+      const d = Number(r?.day)||1;
+      macroDays[k] = macroDays[k] || new Set();
+      macroDays[k].add(d);
+    }
+    Object.keys(macroDays).forEach(k=>{
+      if(macroDays[k].size > 1) issues.push(`macro_split:${k}`);
+    });
+
+    // Duración vs bloque horario (solo si tiene start/end HH:MM y duration con "Actividad:")
+    const toMin = __toMinHHMM__;
+    const parseActMin = (dur)=>{
+      const raw = String(dur||'');
+      const mAct = raw.match(/Actividad\s*:\s*([^\n]+)/i);
+      if(!mAct) return null;
+      const s = mAct[1].trim();
+      const mh = s.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
+      const mm = s.match(/(\d+)\s*m/i);
+      if(mh) return parseInt(mh[1],10)*60 + (mh[2]?parseInt(mh[2],10):0);
+      if(mm) return parseInt(mm[1],10);
+      return null;
+    };
+
+    for(const r of rows){
+      const s = toMin(r?.start);
+      const e = toMin(r?.end);
+      const aMin = parseActMin(r?.duration);
+      if(s==null || e==null || aMin==null) continue;
+      let block = e - s;
+      if(block <= 0) block += 24*60;
+      if(aMin < block * 0.70){
+        issues.push('duracion_vs_bloque_inconsistente');
+        break;
+      }
+    }
+
+    diag.set('semantic:last', { ok: issues.length===0, issues, auroraDays, daysTotal });
+    if(issues.length){
+      diag.mark('semantic:issues', { issues, auroraDays, daysTotal });
+    }
+  }catch(e){
+    try{
+      const diag = window.__ITBMO_DIAG__;
+      diag?.err('semantic', e);
+    }catch(_){}
   }
 }
 
