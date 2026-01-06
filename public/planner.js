@@ -2351,685 +2351,225 @@ function intentFromText(text){
   return { type:'free_edit', details: text };
 }
 
-/* ============================================================
-   SECCIÓN 18 · Guard rails mínimos (post-API) + Optimización por día
+/* ===========================================================
+   SECCIÓN 18 · Guard rails + Validación flexible FINAL (v79)
+   Objetivo: robustez sin romper lo estable.
    Fuente de verdad: API (INFO + PLANNER)
-   Aquí solo: robustez, parseo, clamps, overlaps mínimos, orden tabs-safe.
-   + 🆕 Soporte de "user_instruction" para ediciones (desde SECCIÓN 19).
+   Aquí solo: robustez, normalización, retries controlados, anti-regresiones.
+=========================================================== */
 
-   ✅ QUIRÚRGICO (enero 2026):
-   - Se elimina VALIDACIÓN legacy “con agente” dentro de esta sección.
-   - La validación de filas {allowed/rejected} ahora vive en SECCIÓN 14 (local, sin legacy).
+/* ─────────────────────────────────────────────────────────────
+   [18.1] Helper: Canonización + normalización de strings
+───────────────────────────────────────────────────────────── */
+function canonTxt(s){
+  return String(s||'')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\p{L}\p{N}\s]/gu,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
 
-   ✅ FIX QUIRÚRGICO (enero 2026):
-   - Guards anti-ReferenceError si cityMeta/savedDestinations/itineraries/plannerState aún no existen.
-     (No cambia lógica; solo evita que el sitio "reviente" si el orden de carga cambia.)
-   ============================================================ */
+/* ─────────────────────────────────────────────────────────────
+   [18.2] Helper: HH:MM validator + normalizer
+───────────────────────────────────────────────────────────── */
+function isHHMM(v){
+  return /^(\d{1,2}):(\d{2})$/.test(String(v||'').trim());
+}
+function pad2(n){ return String(n).padStart(2,'0'); }
+function normHHMM(v){
+  const m = String(v||'').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return String(v||'').trim();
+  let hh = Math.min(23, Math.max(0, parseInt(m[1],10)));
+  let mm = Math.min(59, Math.max(0, parseInt(m[2],10)));
+  return `${pad2(hh)}:${pad2(mm)}`;
+}
 
-/* ============================================================
-   ✅ DIAG QUIRÚRGICO (se mantiene) — NO afecta lógica del planner
-   ============================================================ */
-(function initITBMODiag(){
-  if (window.__ITBMO_DIAG__ && window.__ITBMO_DIAG__.__v === 1) return;
+/* ─────────────────────────────────────────────────────────────
+   [18.3] Helper: Duración (2 líneas) guard
+───────────────────────────────────────────────────────────── */
+function hasTwoLineDuration(s){
+  const t = String(s||'');
+  return /Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(t);
+}
+function forceTwoLineDuration(duration){
+  const d = String(duration||'').trim();
+  if(hasTwoLineDuration(d)) return d;
+  // Si viene vacío o no cumple, lo forzamos al placeholder estándar.
+  return "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat";
+}
 
-  const now = ()=> (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+/* ─────────────────────────────────────────────────────────────
+   [18.4] Helper: Normalizar filas (contrato tabla)
+───────────────────────────────────────────────────────────── */
+function normalizeRow(r){
+  const out = { ...(r||{}) };
+  out.day = Number(out.day||1) || 1;
 
-  const diag = {
-    __v: 1,
-    enabled: false,
-    quiet: false,
-    marks: {},
-    counters: {},
-    last: {},
-    errors: [],
-    timelines: [],
+  // start/end: normaliza si están presentes
+  if(out.start && isHHMM(out.start)) out.start = normHHMM(out.start);
+  if(out.end && isHHMM(out.end)) out.end = normHHMM(out.end);
 
-    inc(key, n=1){
-      this.counters[key] = (this.counters[key] || 0) + (Number(n)||1);
-    },
-    set(key, val){
-      this.last[key] = val;
-    },
-    mark(tag, meta){
-      if(!this.enabled) return;
-      const t = now();
-      this.timelines.push({ at: new Date().toISOString(), tag, ms: t, meta: meta || null });
-      if(!this.quiet) console.log(`[DIAG] ${tag}`, meta || '');
-    },
-    timeStart(key, meta){
-      if(!this.enabled) return null;
-      const t0 = now();
-      (this.marks[key] = this.marks[key] || []).push(t0);
-      if(meta) this.set(`meta:${key}`, meta);
-      return t0;
-    },
-    timeEnd(key, t0, meta){
-      if(!this.enabled || t0 == null) return null;
-      const t1 = now();
-      const ms = t1 - t0;
-      this.inc(`time:${key}:count`, 1);
-      this.inc(`time:${key}:msTotal`, ms);
-      this.set(`time:${key}:msLast`, ms);
-      if(meta) this.set(`time:${key}:metaLast`, meta);
-      if(!this.quiet) console.log(`[DIAG] ${key} took ${Math.round(ms)}ms`, meta || '');
-      return ms;
-    },
-    err(where, e){
-      const msg = (e && (e.message || String(e))) ? (e.message || String(e)) : 'Unknown error';
-      this.errors.push({ at: new Date().toISOString(), where, msg });
-      this.inc(`err:${where}`, 1);
-      this.set(`err:last:${where}`, msg);
-      if(!this.quiet) console.warn(`[DIAG][ERR] ${where}:`, msg);
-    },
-    summary(){
-      const c = this.counters || {};
-      const pick = (k)=> c[k] || 0;
-      const t = (k)=>{
-        const total = pick(`time:${k}:msTotal`);
-        const count = pick(`time:${k}:count`);
-        const last  = this.last[`time:${k}:msLast`];
-        const avg   = count ? Math.round(total / count) : 0;
-        return { count, totalMs: Math.round(total), avgMs: avg, lastMs: last != null ? Math.round(last) : null };
-      };
-      return {
-        enabled: this.enabled,
-        calls: {
-          api_info: pick('api:info:count'),
-          api_planner: pick('api:planner:count'),
-          api_validate: pick('api:validate:count'),
-          api_ok: pick('api:ok:count'),
-          api_fail: pick('api:fail:count'),
-          api_timeout: pick('api:timeout:count')
-        },
-        timings: {
-          api_info: t('api:info'),
-          api_planner: t('api:planner'),
-          api_validate: t('api:validate'),
-          optimizeDay: t('optimizeDay')
-        },
-        last: {
-          api_info_ms: this.last['time:api:info:msLast'],
-          api_planner_ms: this.last['time:api:planner:msLast'],
-          optimizeDay_ms: this.last['time:optimizeDay:msLast'],
-          lastApiError: this.last['err:last:api'] || null
-        },
-        errors: this.errors.slice(-10)
-      };
+  out.activity = String(out.activity||'').trim();
+  out.from = String(out.from||'').trim();
+  out.to = String(out.to||'').trim();
+  out.transport = String(out.transport||'').trim();
+  out.notes = String(out.notes||'').trim();
+  out.kind = String(out.kind||'').trim();
+  out.zone = String(out.zone||'').trim();
+
+  out.duration = forceTwoLineDuration(out.duration);
+
+  // _crossDay opcional
+  if(out._crossDay != null) out._crossDay = !!out._crossDay;
+
+  return out;
+}
+function normalizeRows(rows){
+  if(!Array.isArray(rows)) return [];
+  return rows.map(normalizeRow).filter(r => r.activity || r.notes || r.transport);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   [18.5] Helper: Dedupe básico (misma activity+start+day)
+───────────────────────────────────────────────────────────── */
+function dedupeRows(rows){
+  const seen = new Set();
+  const out = [];
+  for(const r of (rows||[])){
+    const key = `${r.day}__${String(r.start||'')}__${canonTxt(r.activity)}`;
+    if(seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   [18.6] Helper: Extraer JSON del API { text:"..." }
+───────────────────────────────────────────────────────────── */
+function parseApiTextToJSON(apiText){
+  try{
+    if(!apiText) return null;
+    if(typeof apiText === 'object') return apiText;
+    const raw = String(apiText||'');
+    // intento directo
+    try{ return JSON.parse(raw); }catch(_){}
+    // recorte tolerante
+    const first = raw.indexOf('{');
+    const last = raw.lastIndexOf('}');
+    if(first>=0 && last>first){
+      try{ return JSON.parse(raw.slice(first,last+1)); }catch(_){}
     }
-  };
-
-  window.__ITBMO_DIAG__ = diag;
-})();
-
-/* ------------------------------------------------------------------
-   Utilidades base (si no existen en otras secciones, se definen aquí)
-------------------------------------------------------------------- */
-if (typeof __toMinHHMM__ !== 'function') {
-  function __toMinHHMM__(t) {
-    const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
-    if (!m) return null;
-    const h = Math.min(23, Math.max(0, parseInt(m[1], 10)));
-    const mi = Math.min(59, Math.max(0, parseInt(m[2], 10)));
-    return h * 60 + mi;
-  }
-}
-if (typeof __toHHMMfromMin__ !== 'function') {
-  function __toHHMMfromMin__(mins) {
-    let m = Math.round(Math.max(0, Number(mins) || 0));
-    m = m % (24 * 60);
-    const h = Math.floor(m / 60);
-    const mm = m % 60;
-    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-  }
-}
-if (typeof __addMinutesSafe__ !== 'function') {
-  function __addMinutesSafe__(hhmm, add) {
-    const base = __toMinHHMM__(hhmm);
-    if (base == null) return hhmm || '09:00';
-    const target = base + (Number(add) || 0);
-    return __toHHMMfromMin__(target);
-  }
+  }catch(_){}
+  return null;
 }
 
-/* ------------------------------------------------------------------
-   Detección mínima de nocturnas (solo guard rail de overlaps)
-------------------------------------------------------------------- */
-if (typeof __isNightRow__ !== 'function') {
-  function __isNightRow__(r) {
-    const act = String(r?.activity || '').toLowerCase();
-    const notes = String(r?.notes || '').toLowerCase();
-    const sMin = __toMinHHMM__(r?.start);
-    const eMin = __toMinHHMM__(r?.end);
-
-    if (/auroras?|northern\s*lights/.test(act)) return true;
-    if (/noche|nocturn/.test(notes)) return true;
-    if (sMin != null && eMin != null && eMin <= sMin) return true;
-    if (sMin != null && sMin >= 21 * 60) return true;
-    if (eMin != null && eMin >= (23 * 60 + 30)) return true;
-
-    return false;
-  }
-}
-
-/* ------------------------------------------------------------------
-   Señal conservadora de out-of-town (solo para orden tabs-safe)
-------------------------------------------------------------------- */
-if (typeof isOutOfTownRow !== 'function') {
-  function isOutOfTownRow(city, r) {
-    const a = (r?.activity || '').toLowerCase();
-    const f = (r?.from || '').toLowerCase();
-    const t = (r?.to || '').toLowerCase();
-
-    const strong =
-      /excursi[oó]n|day\s*trip|tour\b|circuito|ruta|road\s*trip|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|crater|geyser|lagoon|hot\s*spring|thermal|island\s+tour/i;
-
-    if (strong.test(a) || strong.test(f) || strong.test(t)) return true;
-
-    const tr = (r?.transport || '').toLowerCase();
-    if (/veh[ií]culo|carro|auto|tour\s+guiado|van|bus\s+tur[ií]stico/i.test(tr) && strong.test(a)) return true;
-
-    return false;
-  }
-}
-
-/* ------------------------------------------------------------------
-   Clamp mínimo: ventana diurna + NO madrugada para diurnas (guard rail)
-   ✅ QUIRÚRGICO: si NO hay ventana válida (start/end), NO toca nada.
-------------------------------------------------------------------- */
-if (typeof __enforceDayWindowAndNoDawn__ !== 'function') {
-  function __enforceDayWindowAndNoDawn__(city, rows) {
-    if(!Array.isArray(rows) || !rows.length) return rows;
-
-    const getWindow = (d)=>{
-      const hasCityMeta = (typeof cityMeta !== 'undefined' && cityMeta && cityMeta[city]);
-      const per = (hasCityMeta && Array.isArray(cityMeta[city].perDay)) ? cityMeta[city].perDay : [];
-      const w = per.find(x=>Number(x.day)===Number(d)) || {};
-      const start = (w.start == null || String(w.start).trim()==='') ? null : String(w.start).trim();
-      const end   = (w.end   == null || String(w.end).trim()==='')   ? null : String(w.end).trim();
-      return { start, end };
-    };
-
-    const toMin = __toMinHHMM__;
-    const toHH  = __toHHMMfromMin__;
-
-    const durMin = (r)=>{
-      const raw = String(r?.duration || '').trim();
-
-      if (/Transporte\s*:/i.test(raw) || /Actividad\s*:/i.test(raw)) {
-        const mAct = raw.match(/Actividad\s*:\s*([^\n]+)/i);
-        if(mAct){
-          const s = mAct[1].trim();
-          const mh = s.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-          const mm = s.match(/(\d+)\s*m/i);
-          if(mh) return parseInt(mh[1],10)*60 + (mh[2]?parseInt(mh[2],10):0);
-          if(mm) return parseInt(mm[1],10);
-        }
-      }
-
-      const mh = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-      const mm = raw.match(/(\d+)\s*m/i);
-      if(mh) return parseInt(mh[1],10)*60 + (mh[2]?parseInt(mh[2],10):0);
-      if(mm) return parseInt(mm[1],10);
-
-      const sMin = toMin(r?.start), eMin = toMin(r?.end);
-      if(sMin!=null && eMin!=null){
-        let d = eMin - sMin;
-        if(d<=0) d += 24*60;
-        return d || 60;
-      }
-      return 60;
-    };
-
-    const byDay = {};
-    rows.forEach((r, idx)=>{
-      const d = Number(r?.day) || 1;
-      if(typeof r?._idx === 'undefined') r._idx = idx;
-      (byDay[d] = byDay[d] || []).push(r);
-    });
-
-    const out = [];
-    Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b).forEach(day=>{
-      const list = byDay[day].slice();
-      const win = getWindow(day);
-
-      // ✅ Si no hay ventana válida, NO forzar horarios ni mover filas
-      const wS = (win.start ? toMin(win.start) : null);
-      const wE = (win.end   ? toMin(win.end)   : null);
-      if(wS == null || wE == null){
-        out.push(...list);
-        return;
-      }
-
-      list.sort((a,b)=>(toMin(a.start)||0)-(toMin(b.start)||0));
-
-      let cursor = wS;
-      for(const r of list){
-        const isNight = (typeof __isNightRow__ === 'function') ? __isNightRow__(r) : false;
-        let s = toMin(r.start);
-        let e = toMin(r.end);
-        const dM = durMin(r);
-
-        if(!isNight){
-          if(s == null || s < 6*60) s = Math.max(wS, cursor);
-          if(s < wS) s = wS;
-          if(s < cursor) s = cursor;
-
-          e = s + Math.max(30, dM);
-
-          if(e > wE){
-            e = wE;
-            s = Math.max(wS, e - Math.max(30, dM));
-          }
-
-          cursor = Math.min(wE, e + 15);
-
-          out.push({ ...r, start: toHH(s), end: toHH(e) });
-        }else{
-          out.push(r);
-        }
-      }
-    });
-
-    return out;
-  }
-}
-
-/* ------------------------------------------------------------------
-   Overlaps mínimos tabs-safe (guard rail) — NO altera “day”
-------------------------------------------------------------------- */
-function fixOverlaps(rows) {
-  const toMin = __toMinHHMM__;
-  const toHH  = __toHHMMfromMin__;
-
-  const durMin = (d) => {
-    if (!d) return 0;
-
-    const raw = String(d);
-
-    if (/Transporte\s*:/i.test(raw) || /Actividad\s*:/i.test(raw)) {
-      const mAct = raw.match(/Actividad\s*:\s*([^\n]+)/i);
-      if (mAct) {
-        const s = mAct[1].trim();
-        const mh = s.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-        if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
-        const mm = s.match(/(\d+)\s*m/i);
-        if (mm) return parseInt(mm[1], 10);
-      }
-    }
-
-    const mh = raw.match(/(\d+)\s*h(?:\s*(\d+)\s*m)?/i);
-    if (mh) return parseInt(mh[1], 10) * 60 + (mh[2] ? parseInt(mh[2], 10) : 0);
-    const mm = raw.match(/(\d+)\s*m/i);
-    if (mm) return parseInt(mh ? 0 : (mm ? parseInt(mm[1],10) : 0), 10) || (mm ? parseInt(mm[1],10) : 0);
-    return 0;
-  };
-
-  if (!Array.isArray(rows) || !rows.length) return rows || [];
-
-  const byDay = {};
-  rows.forEach((r, idx) => {
-    const d = Number(r?.day) || 1;
-    if (typeof r?._idx === 'undefined') r._idx = idx;
-    (byDay[d] = byDay[d] || []).push(r);
-  });
-
-  const outAll = [];
-  const days = Object.keys(byDay).map(n => +n).sort((a,b)=>a-b);
-
-  for (const day of days) {
-    const dayRows = byDay[day];
-
-    const expanded = dayRows.map(r => {
-      let s = toMin(r.start || '');
-      let e = toMin(r.end || '');
-      const dM = durMin(r.duration || '');
-      let cross = false;
-
-      if (s != null && (e == null || e <= s)) {
-        if (__isNightRow__(r) || (dM > 0 && s >= 18 * 60)) {
-          e = (e != null ? e : s + Math.max(dM, 60)) + 24 * 60;
-          cross = true;
-        } else {
-          e = e != null ? (e <= s ? s + Math.max(dM, 60) : e) : s + Math.max(dM, 60);
-        }
-      } else if (s == null && e != null && dM > 0) {
-        s = e - dM; if (s < 0) s = 9 * 60;
-      } else if (s == null && e == null) {
-        s = 9 * 60; e = s + 60;
-      }
-
-      return { __s: s, __e: e, __d: dM, __cross: cross, raw: r };
-    });
-
-    expanded.sort((a,b)=>{
-      const sa = (a.__s == null ? 1e9 : a.__s);
-      const sb = (b.__s == null ? 1e9 : b.__s);
-      if (sa !== sb) return sa - sb;
-      return (Number(a.raw?._idx)||0) - (Number(b.raw?._idx)||0);
-    });
-
-    const outDay = [];
-    let prevEnd = null;
-
-    for (const item of expanded) {
-      let { __s: s, __e: e, __d: dM, __cross: cross, raw: r } = item;
-
-      if (prevEnd != null && s < prevEnd + 15) {
-        const shift = (prevEnd + 15) - s;
-        s += shift;
-        e += shift;
-      }
-      prevEnd = Math.max(prevEnd ?? 0, e);
-
-      let finalDur = r.duration;
-      if (!finalDur) {
-        finalDur = (dM > 0)
-          ? `Transporte: Verificar duración en el Info Chat\nActividad: ${dM}m`
-          : `Transporte: Verificar duración en el Info Chat\nActividad: ${Math.max(60, e - s)}m`;
-      }
-
-      const isNight = __isNightRow__(r);
-
-      let sOut = s;
-      let eOut = e;
-      let crossOut = cross;
-
-      if (isNight) {
-        if (sOut >= 24 * 60) { sOut -= 24 * 60; crossOut = true; }
-        if (eOut >= 24 * 60) { eOut = eOut % (24 * 60); crossOut = true; }
-      } else {
-        if (eOut >= 24 * 60) { eOut = eOut % (24 * 60); }
-      }
-
-      const startHH = toHH(sOut);
-      const endHH   = toHH(eOut);
-
-      outDay.push({
-        ...r,
-        day,
-        start: startHH,
-        end: endHH,
-        duration: finalDur,
-        _crossDay: !!(r._crossDay || crossOut)
-      });
-    }
-
-    outAll.push(...outDay);
-  }
-
-  return outAll;
-}
-
-/* ------------------------------------------------------------------
-   totalDays real (guard rail)
-------------------------------------------------------------------- */
-function __getTotalDaysForCity__(city){
-  let saved = 0;
-  try {
-    if (typeof savedDestinations !== 'undefined' && Array.isArray(savedDestinations)) {
-      saved = Number(savedDestinations?.find(x=>x.city===city)?.days) || 0;
-    }
-  } catch(_) {}
-
-  let meta = 0;
-  try {
-    if (typeof cityMeta !== 'undefined' && cityMeta && cityMeta[city] && Array.isArray(cityMeta?.[city]?.perDay)) {
-      meta = cityMeta[city].perDay.length || 0;
-    }
-  } catch(_) {}
-
-  let maxPresent = 0;
-  try {
-    if (typeof itineraries !== 'undefined' && itineraries && itineraries?.[city]?.byDay) {
-      const byDay = Object.keys(itineraries[city].byDay).map(n=>+n);
-      maxPresent = byDay.length ? Math.max(...byDay) : 0;
-    }
-  } catch(_) {}
-
-  const best = Math.max(saved||0, meta||0, maxPresent||0);
-  return best > 0 ? best : 0;
-}
-
-function __normalizeDayField__(city, r) {
-  let d = Number(r.day);
-  if (!Number.isFinite(d) || d < 1) d = 1;
-
-  const total = __getTotalDaysForCity__(city);
-  if (total > 0 && d > total) d = total;
-
-  return { ...r, day: d };
-}
-
-/* ------------------------------------------------------------------
-   Orden tabs-safe (guard rail visual)
-------------------------------------------------------------------- */
-function __sortRowsTabsSafe__(rows) {
-  const isReturn = (r) => /(^|\b)regreso\b/i.test(String(r?.activity || ''));
-  const isNight = (r) => (typeof __isNightRow__ === 'function') ? __isNightRow__(r) : false;
-
-  const isOutFallback = (city, r) => {
-    try {
-      if (typeof isOutOfTownRow === 'function') return isOutOfTownRow(city, r);
-    } catch (_) {}
-    const act = String(r?.activity || '').toLowerCase();
-    const tr  = String(r?.transport || '').toLowerCase();
-    return /(tour|excursi[oó]n|day\s*trip|circuito|ruta|road\s*trip)/i.test(act) ||
-           /(veh[ií]culo|car|auto|van|bus|tour\s+guiado)/i.test(tr);
-  };
-
-  const outDays = new Set();
-  for (const r of (rows || [])) {
-    const d = Number(r?.day) || 1;
-    if (isOutFallback(null, r)) outDays.add(d);
-  }
-
-  return [...(rows || [])].sort((a, b) => {
-    const da = Number(a?.day) || 1, db = Number(b?.day) || 1;
-    if (da !== db) return da - db;
-
-    if (outDays.has(da)) {
-      const ra = isReturn(a), rb = isReturn(b);
-      if (ra !== rb) return ra ? 1 : -1;
-    }
-
-    const sa = __toMinHHMM__(a?.start) ?? 0;
-    const sb = __toMinHHMM__(b?.start) ?? 0;
-
-    const wa = (a?._crossDay && sa < 360) ? sa + 24 * 60 : sa;
-    const wb = (b?._crossDay && sb < 360) ? sb + 24 * 60 : sb;
-
-    const na = isNight(a), nb = isNight(b);
-    if (na !== nb) return na ? 1 : -1;
-
-    return wa - wb;
-  });
-}
-
-/* ------------------------------------------------------------------
-   Contexto mínimo para INFO (solo empaqueta; no “decide” contenido)
-   ✅ QUIRÚRGICO: NO inyectar horarios por defecto. Si faltan, mandar null.
-------------------------------------------------------------------- */
-if (typeof __collectPlannerContext__ !== 'function') {
-  function __collectPlannerContext__(city, day) {
-    const hasSaved = (typeof savedDestinations !== 'undefined' && Array.isArray(savedDestinations));
-    const hasCityMeta = (typeof cityMeta !== 'undefined' && cityMeta && cityMeta[city]);
-    const hasIt = (typeof itineraries !== 'undefined' && itineraries && itineraries[city]);
-
-    const totalDays =
-      __getTotalDaysForCity__(city) ||
-      (hasSaved ? (savedDestinations?.find(x=>x.city===city)?.days || 1) : 1);
-
-    const baseDate =
-      (hasIt && itineraries?.[city]?.baseDate) ||
-      (hasCityMeta && cityMeta?.[city]?.baseDate) ||
-      '';
-
-    const perDay = Array.from({ length: totalDays }, (_,i)=>{
-      const d = i+1;
-      const per = (hasCityMeta && Array.isArray(cityMeta?.[city]?.perDay)) ? cityMeta[city].perDay : [];
-      const w = per.find(x=>Number(x.day)===d) || {};
-      const start = (w.start == null || String(w.start).trim()==='') ? null : String(w.start).trim();
-      const end   = (w.end   == null || String(w.end).trim()==='')   ? null : String(w.end).trim();
-      return { day:d, start, end };
-    });
-
-    const byDay = (hasIt && itineraries?.[city]?.byDay) ? itineraries[city].byDay : {};
-    const already = {};
-    Object.keys(byDay).forEach(k=>{
-      const d = Number(k)||1;
-      already[d] = (byDay[k] || []).map(r=>({
-        day:d,
-        start:r.start||'',
-        end:r.end||'',
-        activity:r.activity||'',
-        from:r.from||'',
-        to:r.to||'',
-        transport:r.transport||'',
-        duration:r.duration||'',
-        notes:r.notes||'',
-        _crossDay: !!r._crossDay
-      }));
-    });
-
-    const flatActs = Object.values(already).flat().map(r=>String(r.activity||'')).filter(Boolean);
-
-    const prefs = (typeof plannerState !== 'undefined' && plannerState?.preferences) ? plannerState.preferences : {};
-    const restr = (typeof plannerState !== 'undefined')
-      ? (plannerState?.restrictions || plannerState?.conditions || plannerState?.specialConditions || {})
-      : {};
-
-    return {
-      city,
-      day_target: Number(day) || 1,
-      days_total: Number(totalDays) || 1,
-      baseDate,
-      hotel_base: (hasCityMeta ? (cityMeta?.[city]?.hotel || '') : ''),
-      transport_preference: (hasCityMeta ? (cityMeta?.[city]?.transport || '') : ''),
-      day_hours: perDay,
-      existing_itinerary_by_day: already,
-      existing_activities: flatActs,
-      preferences: prefs,
-      restrictions: restr
-    };
-  }
-}
-
-/* ------------------------------------------------------------------
-   Callers al API (INFO/PLANNER) con fallback robusto (se mantiene)
-------------------------------------------------------------------- */
+/* ─────────────────────────────────────────────────────────────
+   [18.7] Helper: Call API (INFO/PLANNER) con timeout + abort
+   ⚠️ FIX QUIRÚRGICO v79: respeta apiBase si existe (query ?apiBase=...)
+───────────────────────────────────────────────────────────── */
 if (typeof callApiChat !== 'function') {
-  async function callApiChat(mode, payload = {}, { timeoutMs = 32000, retries = 0 } = {}) {
-    const diag = window.__ITBMO_DIAG__;
-    if (diag?.enabled) diag.inc(`api:${mode}:count`, 1);
+  function __getApiBase__(){
+    try{
+      // 1) Global explícito (si existe)
+      const g = (typeof window !== 'undefined') ? (window.apiBase || window.__ITBMO_API_BASE__) : '';
+      if (typeof g === 'string' && g.trim()) return g.trim().replace(/\/$/, '');
+      // 2) Query param ?apiBase=...
+      const p = (typeof window !== 'undefined') ? (new URLSearchParams(window.location.search).get('apiBase') || '') : '';
+      if (p && typeof p === 'string') return p.trim().replace(/\/$/, '');
+    }catch(_){}
+    // 3) Fallback: misma origin
+    return '';
+  }
 
+  async function callApiChat(payload, { timeoutMs=32000 }={}){
     const controller = new AbortController();
-    const id = setTimeout(() => controller.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
-
-    const t0 = (diag?.enabled) ? diag.timeStart(`api:${mode}`, { timeoutMs, retries }) : null;
-
-    try {
-      const resp = await fetch('/api/chat', {
+    const t = setTimeout(()=>controller.abort(), timeoutMs);
+    try{
+      const resp = await fetch(`${__getApiBase__()}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({ mode, ...payload })
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
       });
-      clearTimeout(id);
-
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-
-      const data = await resp.json();
-
-      if (diag?.enabled) {
-        diag.inc(`api:ok:count`, 1);
-        diag.timeEnd(`api:${mode}`, t0, { ok: true, status: resp.status });
-      }
-
+      const data = await resp.json().catch(()=>null);
       return data;
-    } catch (e) {
-      clearTimeout(id);
-
-      if (diag?.enabled) {
-        const msg = (e && e.message) ? e.message : String(e);
-        if (/timeout/i.test(msg) || /aborted/i.test(msg)) diag.inc('api:timeout:count', 1);
-        diag.inc('api:fail:count', 1);
-        diag.err('api', e);
-        diag.timeEnd(`api:${mode}`, t0, { ok: false, err: msg });
-      }
-
-      if (retries > 0) return callApiChat(mode, payload, { timeoutMs, retries: retries - 1 });
-      throw e;
+    } finally {
+      clearTimeout(t);
     }
   }
 }
 
-/* ------------------------------------------------------------------
-   Parse seguro de respuestas del API (se mantiene)
-------------------------------------------------------------------- */
-if (typeof safeParseApiText !== 'function') {
-  function safeParseApiText(txt) {
-    if (!txt) return {};
-
-    if (typeof txt === 'object') {
-      if (txt && typeof txt.text !== 'undefined') return safeParseApiText(txt.text);
-      if (Array.isArray(txt.rows)) return txt;
-      if (Array.isArray(txt?.itinerary?.rows)) return txt;
-      if (Array.isArray(txt?.days)) return txt;
-      return txt || {};
-    }
-
-    const s = String(txt).trim();
-    if (!s) return {};
-
-    try { return JSON.parse(s); } catch {}
-
-    try {
-      const first = s.indexOf("{");
-      const last  = s.lastIndexOf("}");
-      if (first >= 0 && last > first) return JSON.parse(s.slice(first, last + 1));
-    } catch {}
-
-    return { text: s };
-  }
+/* ─────────────────────────────────────────────────────────────
+   [18.8] Guard: detectar placeholders de baja calidad (global)
+───────────────────────────────────────────────────────────── */
+function isGenericPlaceholderActivity(activity){
+  const t = canonTxt(activity);
+  if(!t) return true;
+  const bad = [
+    "museo de arte",
+    "parque local",
+    "cafe local",
+    "restaurante local",
+    "exploracion de la costa",
+    "exploracion de la ciudad",
+    "paseo por la ciudad",
+    "recorrido por la ciudad"
+  ];
+  if(t.length <= 10 && /^(museo|parque|cafe|restaurante|plaza|mercado)$/i.test(t)) return true;
+  if(bad.some(b => t===b || t.includes(b))) return true;
+  if(/^(museo|parque|cafe|restaurante)\b/i.test(t) && t.split(' ').length <= 3) return true;
+  return false;
 }
 
-if (typeof unifyRowsFormat !== 'function') {
-  function unifyRowsFormat(obj, city) {
-    if (!obj) return { rows: [] };
+/* ─────────────────────────────────────────────────────────────
+   [18.9] Validación flexible FINAL (no rompe lo estable)
+───────────────────────────────────────────────────────────── */
+function softValidateRows(rows, { daysTotal=1 }={}){
+  const issues = [];
+  const clean = normalizeRows(rows);
 
-    if (typeof obj === 'object' && obj && typeof obj.text !== 'undefined') {
-      const parsed = safeParseApiText(obj.text);
-      return unifyRowsFormat(parsed, city);
-    }
-
-    if (typeof obj === 'string') {
-      const parsed = safeParseApiText(obj);
-      return unifyRowsFormat(parsed, city);
-    }
-
-    if (Array.isArray(obj.rows)) return obj;
-    if (Array.isArray(obj?.itinerary?.rows)) return { rows: obj.itinerary.rows };
-    if (Array.isArray(obj?.rows_draft)) return { rows: obj.rows_draft };
-
-    if (Array.isArray(obj.days)) {
-      const rows = [];
-      for (const d of obj.days) {
-        const dayNum = Number(d.day) || 1;
-        (d.rows || []).forEach(r => rows.push({ ...r, day: r.day || dayNum }));
-      }
-      return { rows };
-    }
-
-    if (Array.isArray(obj?.itineraries) && obj.itineraries[0] && Array.isArray(obj.itineraries[0].rows)) {
-      return { rows: obj.itineraries[0].rows };
-    }
-    if (Array.isArray(obj?.destinations) && obj.destinations[0] && Array.isArray(obj.destinations[0].rows)) {
-      return { rows: obj.destinations[0].rows };
-    }
-
-    return { rows: [] };
+  if(!clean.length) issues.push("rows vacío.");
+  // Cobertura por día (soft)
+  const need = Math.max(1, Number(daysTotal)||1);
+  const present = new Set(clean.map(r=>Number(r.day)||1));
+  for(let d=1; d<=need; d++){
+    if(!present.has(d)) issues.push(`falta día ${d}.`);
   }
+
+  // duration 2 líneas (hard-enforced por normalizeRow)
+  // placeholders (soft)
+  if(clean.some(r => isGenericPlaceholderActivity(r.activity))){
+    issues.push("hay activity genérica (placeholder).");
+  }
+
+  return { ok: issues.length===0, issues, rows: clean };
 }
+
+/* ─────────────────────────────────────────────────────────────
+   [18.10] Normalización final de respuesta API Planner
+───────────────────────────────────────────────────────────── */
+function normalizePlannerResponse(parsed, { daysTotal=1 }={}){
+  if(!parsed) return { destination:"", rows:[], followup:"" };
+
+  let rows = [];
+  if(Array.isArray(parsed.rows)) rows = parsed.rows;
+  else if(Array.isArray(parsed.rows_final)) rows = parsed.rows_final;
+  else if(Array.isArray(parsed.rows_draft)) rows = parsed.rows_draft;
+
+  rows = dedupeRows(normalizeRows(rows));
+
+  const destination = String(parsed.destination || parsed.city || parsed.place || '').trim();
+  const followup = String(parsed.followup || '').trim();
+
+  const audit = softValidateRows(rows, { daysTotal });
+  return { destination, rows: audit.rows, followup, _audit: audit };
+}
+
+/* ===========================================================
+   FIN SECCIÓN 18
+=========================================================== */
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
