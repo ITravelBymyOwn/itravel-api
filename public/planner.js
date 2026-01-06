@@ -1613,19 +1613,47 @@ function showWOW(on, msg){
      → pedir por día usando target_day y mergear
    - Si falla: lanzar error para que SECCIÓN 16 no “finja éxito”
    - ✅ NUEVO (quirúrgico): NO enviar day_hours si parece plantilla rígida (misma ventana todos los días)
+   - ✅ NUEVO (quirúrgico): callApiChat usa endpoint ABS del iframe si existe (chatApiAbs/apiBase)
 ───────────────────────────────────────────────────────────── */
+
+/* ===== Resolver endpoint del API desde querystring (iframe-safe) ===== */
+function __getChatEndpoint__(){
+  try{
+    const qs = new URLSearchParams(window.location.search || '');
+    const abs = (qs.get('chatApiAbs') || '').trim();
+    if(abs) return abs;
+
+    const apiBase = (qs.get('apiBase') || '').trim();
+    const chatApi = (qs.get('chatApi') || '/api/chat').trim() || '/api/chat';
+    if(apiBase){
+      return apiBase.replace(/\/+$/,'') + (chatApi.startsWith('/') ? chatApi : `/${chatApi}`);
+    }
+  }catch(_){}
+  return "/api/chat";
+}
 
 /* ===== Shim mínimo para callApiChat (OBLIGATORIO) ===== */
 if (typeof window.callApiChat !== 'function') {
   window.callApiChat = async function(mode, payload = {}, opts = {}) {
-    const timeoutMs = Number(opts.timeoutMs || 65000);
     const retries   = Number(opts.retries || 0);
+
+    // Timeouts por modo (quirúrgico)
+    const modeLc = String(mode || '').toLowerCase();
+    const defaultTimeout =
+      (modeLc === 'info')    ? 120000 :
+      (modeLc === 'planner') ? 120000 :
+      (modeLc === 'validate')? 30000  :
+      90000;
+
+    const timeoutMs = Number(opts.timeoutMs || defaultTimeout);
+
+    const url = __getChatEndpoint__();
 
     const doOnce = async ()=>{
       const ctrl = new AbortController();
       const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
       try{
-        const resp = await fetch("/api/chat", {
+        const resp = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ mode, ...payload }),
@@ -1758,7 +1786,7 @@ async function generateCityItinerary(city){
     };
 
     /* ===== ETAPA 1 — INFO ===== */
-    const infoResp = await callApiChat('info', { context }, { timeoutMs: 75000, retries: 1 });
+    const infoResp = await callApiChat('info', { context }, { timeoutMs: 120000, retries: 1 });
     const research = __safeParseJSON__(infoResp?.text ?? infoResp);
 
     if (!research || !Array.isArray(research.rows_draft) || research.rows_draft.length === 0) {
@@ -1766,7 +1794,7 @@ async function generateCityItinerary(city){
     }
 
     /* ===== ETAPA 2 — PLANNER ===== */
-    const plannerResp = await callApiChat('planner', { research_json: research }, { timeoutMs: 90000, retries: 1 });
+    const plannerResp = await callApiChat('planner', { research_json: research }, { timeoutMs: 120000, retries: 1 });
     let parsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
 
     if (!parsed || !Array.isArray(parsed.rows) || parsed.rows.length === 0) {
@@ -1799,7 +1827,7 @@ async function generateCityItinerary(city){
         const respD = await callApiChat(
           'planner',
           { research_json: research, target_day: d },
-          { timeoutMs: 90000, retries: 1 }
+          { timeoutMs: 120000, retries: 1 }
         );
         const parsedD = __safeParseJSON__(respD?.text ?? respD);
         if(parsedD && Array.isArray(parsedD.rows) && parsedD.rows.length){
