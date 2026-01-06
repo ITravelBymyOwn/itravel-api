@@ -1,4 +1,4 @@
-// /api/chat.js — v43.6 (ESM, Vercel)
+// /api/chat.js — v43.6.2 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
@@ -11,6 +11,9 @@
 // ✅ QUIRÚRGICO v43.6.1:
 // - Sanitiza context.day_hours entrante: si parece plantilla rígida repetida (misma start/end todos los días), se elimina antes de llamar al modelo.
 //   Esto evita que el INFO se amarre a 08:30–19:00 cuando viene "prellenado" desde el Planner UI.
+//
+// ✅ QUIRÚRGICO v43.6.2:
+// - Soporte de validate=true en modo planner: NO llama al modelo. Devuelve {allowed,rejected} para evitar cargas/timeout.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -602,6 +605,15 @@ Responde SOLO JSON válido.
 
     /* --------- MODO PLANNER (estructurador) --------- */
     if (mode === "planner") {
+
+      // ✅ QUIRÚRGICO v43.6.2: VALIDATE no debe llamar al modelo
+      try {
+        if (body && body.validate === true && Array.isArray(body.rows)) {
+          const out = { allowed: body.rows, rejected: [] };
+          return res.status(200).json({ text: JSON.stringify(out) });
+        }
+      } catch {}
+
       const research = body.research_json || null;
 
       // Camino legado (mensajes del cliente, sin research_json)
