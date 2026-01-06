@@ -1289,270 +1289,272 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
-   Base v60 (exacta) + injertos v64 + ⚡ early-exit cuando ENABLE_VALIDATOR=false
+   SECCIÓN 14 · Validación GLOBAL (2º paso) — LIMPIA (SIN LEGACY)
+   ✅ Fuente de verdad: API (INFO→rows_draft, PLANNER→rows)
+   ✅ Este validador es SOLO “guardián” local: estructura, formato y guard rails.
+   🚫 Eliminado TODO legacy: callAgent / parseJSON / ENABLE_VALIDATOR / prompts internos.
+   ✅ Salida compatible: { allowed:[...], rejected:[...] } (+ alias removed)
 ================================= */
-async function validateRowsWithAgent(city, rows, baseDate){
-  // Helpers locales (sin dependencias externas)
-  const toStr = v => (v==null ? '' : String(v));
-  const lc = s => toStr(s).trim().toLowerCase();
-  const isAurora = a => /\baurora|northern\s+light(s)?\b/i.test(toStr(a));
-  const isThermal = a => /(blue\s*lagoon|bláa\s*lón(i|í)d|laguna\s+azul|termal(es)?|hot\s*spring|thermal\s*bath)/i.test(toStr(a));
-  const isHHMM = t => /^\d{2}:\d{2}$/.test(toStr(t).trim());
 
-  // 🚫 Señales de “placeholder / genérico” que NO ameritan llamada a IA: mejor sanitizar local
-  const isGenericBad = (a)=>{
-    const s = lc(a);
-    if(!s) return true;
-    // genéricos típicos (multi-idioma)
-    if(/\b(museo\s+de\s+arte|parque\s+local|cafe\s+local|restaurante\s+local)\b/i.test(s)) return true;
-    if(/\b(local\s+(cafe|coffee|restaurant|park|museum))\b/i.test(s)) return true;
-    // demasiado corto / vago
-    const toks = s.split(/\s+/).filter(Boolean);
-    if(toks.length <= 2 && /^(museo|museum|parque|park|cafe|coffee|restaurante|restaurant|tour|excursion|excursi[oó]n)$/.test(s)) return true;
+async function validateRowsWithAgent(city, rows, baseDate){
+  // =========================
+  // Helpers locales (no dependen de nada externo)
+  // =========================
+  const toStr = v => (v == null ? '' : String(v));
+  const lc = s => toStr(s).trim().toLowerCase();
+
+  const canon = (s) => toStr(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\p{L}\p{N}\s\-–—]/gu,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+
+  const isHHMM = (t)=> /^\d{2}:\d{2}$/.test(toStr(t).trim());
+
+  const toMin = (hhmm)=>{
+    const m = toStr(hhmm).trim().match(/^(\d{1,2}):(\d{2})$/);
+    if(!m) return null;
+    const h = Math.min(23, Math.max(0, parseInt(m[1],10)));
+    const mi = Math.min(59, Math.max(0, parseInt(m[2],10)));
+    return h*60 + mi;
+  };
+
+  const toHH = (mins)=>{
+    let m = Math.round(Math.max(0, Number(mins)||0)) % (24*60);
+    const h = Math.floor(m/60);
+    const mm = m%60;
+    return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  };
+
+  const addMin = (hhmm, add)=>{
+    const b = toMin(hhmm);
+    if(b == null) return hhmm || '09:00';
+    return toHH(b + (Number(add)||0));
+  };
+
+  const hasTwoLineDuration = (duration)=>{
+    const s = toStr(duration);
+    return /Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(s);
+  };
+
+  const ensureTwoLineDuration = (duration)=>{
+    const s = toStr(duration).trim();
+    if(hasTwoLineDuration(s)) return s;
+
+    // Si viene "2h" / "90m", lo usamos como Actividad y dejamos transporte “verificar”
+    if(/^\~?\s*\d+(\.\d+)?\s*h(\d+\s*m)?$/i.test(s) || /^\~?\s*\d+\s*m$/i.test(s) || /^\~?\s*\d+\s*h$/i.test(s)){
+      return `Transporte: Verificar duración en el Info Chat\nActividad: ${s.replace(/\s+/g,'')}`;
+    }
+
+    // default (no inventar)
+    return `Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat`;
+  };
+
+  const strongTour = /(excursi[oó]n|day\s*trip|tour\b|circuito|ruta|road\s*trip|pen[ií]nsula|parque\s+nacional|volc[aá]n|glaciar|cascada|waterfall|crater|geyser|lagoon|hot\s*spring|thermal|island\s+tour)/i;
+
+  const isAurora = (act)=> /\baurora|northern\s+light(s)?\b/i.test(toStr(act));
+  const isReturnRow = (r)=> /(^|\b)regreso\b/i.test(toStr(r?.activity)) || /\breturn\b/i.test(toStr(r?.activity));
+
+  const isOutOfTownLike = (r)=>{
+    const a = toStr(r?.activity).toLowerCase();
+    const f = toStr(r?.from).toLowerCase();
+    const t = toStr(r?.to).toLowerCase();
+    const tr = toStr(r?.transport).toLowerCase();
+
+    if (strongTour.test(a) || strongTour.test(f) || strongTour.test(t)) return true;
+    if (/(veh[ií]culo|carro|auto|car|van|tour\s+guiado|bus\s+tur[ií]stico)/i.test(tr) && strongTour.test(a)) return true;
     return false;
   };
 
-  // 📦 Sanitizado local (reutilizado en fast-path y fallback)
-  const localSanitize = (inRows = [])=>{
-    const sanitized = (inRows||[]).map(r => {
-      const notesRaw = toStr(r.notes).trim();
-      const notes = notesRaw && lc(notesRaw)!=='seed'
-        ? notesRaw
-        : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
-      if(isAurora(r.activity)){
-        return {
-          ...r,
-          start: r.start && /^\d{2}:\d{2}$/.test(r.start) ? r.start : '20:30',
-          end:   r.end   && /^\d{2}:\d{2}$/.test(r.end)   ? r.end   : '02:00',
-          transport: r.transport || 'Tour/Bus/Van',
-          notes: /valid:/i.test(notes) ? notes : notes + ' · valid: ventana nocturna auroral (sujeto a clima).'
-        };
-      }
-      if(isThermal(r.activity)){
-        let duration = toStr(r.duration).trim();
-        if(!duration) duration = '3h';
-        return { ...r, duration, notes: /min\s*stay/i.test(notes) ? notes : notes + ' · min stay ~3h (ajustable)' };
-      }
-      return { ...r, notes };
-    });
+  const normalizeRowSafe = (r, fallbackDay=1)=>{
+    const day = Math.max(1, parseInt(r?.day ?? fallbackDay, 10) || 1);
 
-    // Límite suave de 20 por día + dedupe por actividad canonizada
-    const grouped = {};
-    sanitized.forEach(r=>{
-      const d = Number(r.day)||1;
-      (grouped[d] ||= []).push(r);
-    });
-    const allowed = Object.keys(grouped).flatMap(dStr=>{
-      const d = Number(dStr);
-      let arr = grouped[d];
+    // No inventamos ventanas; solo normalizamos HH:MM si es posible
+    let start = toStr(r?.start).trim();
+    let end   = toStr(r?.end).trim();
 
-      // Dedupe fuerte por actividad canonizada para mismo día
-      const seenActs = new Set();
-      arr = arr.filter(x=>{
-        const k = normKey(x.activity || '');
-        if(!k) return false;
-        if(seenActs.has(k)) return false;
-        seenActs.add(k);
-        return true;
-      });
-
-      if(arr.length <= 20) return arr.map(x=>({...x, day:d}));
-      const out=[]; const seen = new Set();
-      for(const r of arr){
-        const key = normKey(r.activity || '') + '|' + (r.start||'') + '|' + (r.end||'');
-        if(!seen.has(key)){
-          seen.add(key); out.push({...r, day:d});
-        }
-        if(out.length===20) break;
-      }
-      return out;
-    });
-    return { allowed, removed: [] };
-  };
-
-  // ⚡ Fast-path: sin llamada a IA cuando ENABLE_VALIDATOR=false
-  if (ENABLE_VALIDATOR === false) {
-    return localSanitize(rows);
-  }
-
-  /* =========================================================
-     ✅ NUEVO: QUALITY-GATE agresivo (casi nunca llama a IA)
-     - Si las filas ya están suficientemente “bien formadas”,
-       hacemos sanitizado local y listo.
-     - Esto reduce dramáticamente latencia (especialmente en optimizeDay).
-  ========================================================= */
-  try{
-    const inRows = Array.isArray(rows) ? rows : [];
-    if(!inRows.length) return localSanitize(inRows);
-
-    // Señales claras para NO ir a IA: todo completo, sin seed, sin genéricos, sin duplicados por día
-    let needsIA = false;
-
-    // 1) Requisitos mínimos por fila
-    for(const r of inRows){
-      const act = toStr(r.activity).trim();
-      const notes = toStr(r.notes).trim();
-
-      if(!act) { needsIA = true; break; }
-      if(isGenericBad(act)) { needsIA = true; break; }
-
-      // horas: si faltan o están mal, normalmente el pipeline ya lo arregló;
-      // si aún están mal, NO vamos a IA: sanitizado local es suficiente.
-      if(!isAurora(act)){
-        if(r.start && !isHHMM(r.start)) { /* no forzamos IA */ }
-        if(r.end   && !isHHMM(r.end))   { /* no forzamos IA */ }
-      }
-
-      // notes seed o vacías: mejor sanitizado local (NO IA)
-      if(!notes || lc(notes)==='seed'){ /* no forzamos IA */ }
-
-      // duration vacía en no-aurora/no-thermal: puede ir a IA solo si es masivo
-      // (si es 1–2 casos, sanitizado local basta)
+    // Si vienen vacíos, los dejamos vacíos (la API/otros guard-rails podrán llenarlo)
+    if(start && !isHHMM(start)){
+      const m = start.match(/(\d{1,2}):(\d{2})/);
+      start = m ? `${String(Math.min(23, Math.max(0, parseInt(m[1],10)))).padStart(2,'0')}:${String(Math.min(59, Math.max(0, parseInt(m[2],10)))).padStart(2,'0')}` : start;
+    }
+    if(end && !isHHMM(end)){
+      const m = end.match(/(\d{1,2}):(\d{2})/);
+      end = m ? `${String(Math.min(23, Math.max(0, parseInt(m[1],10)))).padStart(2,'0')}:${String(Math.min(59, Math.max(0, parseInt(m[2],10)))).padStart(2,'0')}` : end;
     }
 
-    // 2) Duplicados por día (actividad canonizada)
-    if(!needsIA){
-      const byDay = {};
-      inRows.forEach(r=>{
-        const d = Number(r.day)||1;
-        (byDay[d] ||= []).push(r);
-      });
+    const activity = toStr(r?.activity).trim();
+    const from = toStr(r?.from).trim();
+    const to   = toStr(r?.to).trim();
+    const transport = toStr(r?.transport).trim();
+    const notes = toStr(r?.notes).trim();
 
-      for(const dStr of Object.keys(byDay)){
-        const list = byDay[Number(dStr)] || [];
-        const seen = new Set();
-        for(const r of list){
-          const k = normKey(r.activity || '');
-          if(!k) { needsIA = true; break; }
-          if(seen.has(k)) { needsIA = true; break; }
-          seen.add(k);
-        }
-        if(needsIA) break;
-        // límite duro: si viene demasiado inflado, IA podría recortar/explicar removidos
-        if(list.length > 22) { needsIA = true; break; }
-      }
-    }
+    // duration SIEMPRE 2 líneas
+    const duration = ensureTwoLineDuration(r?.duration);
 
-    // 3) Duraciones faltantes masivas → IA (si son muchas)
-    if(!needsIA){
-      let missDur = 0;
-      for(const r of inRows){
-        const act = toStr(r.activity);
-        if(isAurora(act) || isThermal(act)) continue;
-        const dur = toStr(r.duration).trim();
-        if(!dur) missDur++;
-      }
-      if(missDur >= 4) needsIA = true; // umbral: 4+ faltantes sí amerita IA
-    }
+    const kind = toStr(r?.kind).trim();
+    const zone = toStr(r?.zone).trim();
 
-    // ✅ Si NO necesitamos IA, sanitizamos local y listo
-    if(!needsIA){
-      return localSanitize(inRows);
-    }
-  }catch(_){
-    // si algo falla en el gate, no rompemos: seguimos a pipeline normal
-  }
+    const out = {
+      day,
+      start,
+      end,
+      activity,
+      from,
+      to,
+      transport,
+      duration,
+      notes,
+      kind,
+      zone
+    };
 
-  // Si no existen herramientas de IA, no romper: fallback local
-  if (typeof callAgent !== 'function' || typeof parseJSON !== 'function') {
-    return localSanitize(rows);
-  }
+    // preservar _crossDay si existe
+    if(typeof r?._crossDay !== 'undefined') out._crossDay = !!r._crossDay;
 
-  const payload = `
-Devuelve SOLO JSON válido:
-{
-  "allowed":[
-    {"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}
-  ],
-  "removed":[
-    {"reason":"..","row":{"day":..,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}}
-  ]
-}
-...
-Contexto:
-- Ciudad: "${city}"
-- Fecha base (Día 1): ${baseDate || 'N/A'}
-- Filas a validar: ${JSON.stringify(rows)}
-`.trim();
-
-  // Post-sanitizado suave para respuestas con IA
-  const postSanitize = (arr=[])=>{
-    const byDay = {};
-    arr.forEach(r=>{
-      const d = Number(r.day)||1;
-      (byDay[d] ||= []).push(r);
-    });
-    const out = [];
-    for(const dStr of Object.keys(byDay)){
-      const d = Number(dStr);
-      let dayRows = byDay[d].map(r=>{
-        let notes = toStr(r.notes).trim();
-        if(!notes || lc(notes)==='seed'){
-          notes = 'Sugerencia: verifica horarios, seguridad y reservas con antelación.';
-        }
-        if(isAurora(r.activity)){
-          const start = r.start && r.start.match(/^\d{2}:\d{2}$/) ? r.start : '20:30';
-          const end   = r.end   && r.end.match(/^\d{2}:\d{2}$/)   ? r.end   : '02:00';
-          const transport = r.transport ? r.transport : 'Tour/Bus/Van';
-          if(!/valid:/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'valid: ventana nocturna auroral (sujeto a clima).';
-          return {...r, day:d, start, end, transport, notes};
-        }
-        if(isThermal(r.activity)){
-          let duration = toStr(r.duration).trim();
-          const isShort =
-            (!duration) ||
-            /^(\d{1,2})m$/.test(duration) && Number(RegExp.$1) < 180 ||
-            /^(\d+(?:\.\d+)?)h$/.test(duration) && Number(RegExp.$1) < 3;
-          if(isShort) duration = '3h';
-          if(!/min\s*stay|3h/i.test(notes)) notes = (notes ? notes+' · ' : '') + 'min stay ~3h (ajustable)';
-          return {...r, day:d, duration, notes};
-        }
-        return {...r, day:d, notes};
-      });
-
-      // Dedupe por actividad canonizada + límite 20
-      const seenActs = new Set();
-      dayRows = dayRows.filter(x=>{
-        const k = normKey(x.activity||'');
-        if(!k) return false;
-        if(seenActs.has(k)) return false;
-        seenActs.add(k);
-        return true;
-      });
-
-      if(dayRows.length > 20){
-        const seen = new Set(); const filtered=[];
-        for(const r of dayRows){
-          const key = normKey(r.activity||'') + '|' + (r.start||'') + '|' + (r.end||'');
-          if(!seen.has(key)){
-            seen.add(key);
-            filtered.push(r);
-          }
-          if(filtered.length === 20) break;
-        }
-        dayRows = filtered;
-      }
-
-      out.push(...dayRows);
-    }
     return out;
   };
 
-  try{
-    const res = await callAgent(payload, true);
-    const parsed = parseJSON(res);
-    if(parsed?.allowed){
-      const allowed = postSanitize(parsed.allowed || []);
-      const removed = Array.isArray(parsed.removed) ? parsed.removed : [];
-      return { allowed, removed };
+  // =========================
+  // Inicio
+  // =========================
+  const inRows = Array.isArray(rows) ? rows : [];
+  if(!inRows.length) return { allowed: [], rejected: [], removed: [] };
+
+  // Normalización base + filtros mínimos (sin inventar POIs)
+  const rejected = [];
+  let norm = inRows.map((r, i)=>{
+    const rr = normalizeRowSafe(r, 1);
+    rr._idx = (typeof r?._idx !== 'undefined') ? r._idx : i;
+    return rr;
+  });
+
+  // Rechazar solo casos realmente inválidos (activity vacía)
+  norm = norm.filter(r=>{
+    if(!r.activity){
+      rejected.push({ reason:'Fila sin activity (vacía).', row:r });
+      return false;
     }
-  }catch(e){
-    console.warn('Validator error', e);
+    return true;
+  });
+
+  // Agrupar por día
+  const byDay = {};
+  for(const r of norm){
+    const d = Number(r.day)||1;
+    (byDay[d] ||= []).push(r);
   }
 
-  // Fallback local
-  return localSanitize(rows);
+  // =========================
+  // Guard rails estructurales (sin creatividad)
+  // =========================
+  const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+  for(const d of days){
+    let list = byDay[d] || [];
+
+    // Orden estable por start (si existe) y luego por índice
+    list.sort((a,b)=>{
+      const sa = toMin(a.start) ?? 1e9;
+      const sb = toMin(b.start) ?? 1e9;
+      if(sa !== sb) return sa - sb;
+      return (Number(a._idx)||0) - (Number(b._idx)||0);
+    });
+
+    // 1) “No diurnas 01:00–05:00” (guard rail, NO inventa actividades)
+    // - Si una fila NO es aurora y tiene start entre 01–05, la movemos a 09:00 y preservamos duración aproximada
+    for(let i=0; i<list.length; i++){
+      const r = list[i];
+      if(isAurora(r.activity)) continue;
+      const s = toMin(r.start);
+      if(s != null && s >= 60 && s <= 300){
+        // Mantener duración si podemos (a partir de end-start)
+        const e = toMin(r.end);
+        let dur = 60;
+        if(e != null){
+          let dd = e - s;
+          if(dd <= 0) dd += 24*60;
+          if(dd >= 30) dur = dd;
+        }
+        r.start = '09:00';
+        r.end   = addMin(r.start, dur);
+      }
+    }
+
+    // 2) Detectar “día con macro-tour/out-of-town”
+    const tourLike = list.some(r=> isOutOfTownLike(r) || strongTour.test(toStr(r.activity)));
+    if(tourLike){
+      // 2a) En días tour: reforzar formato "Destino – Sub-parada" SOLO si no tiene "–" y NO es Regreso
+      // (No inventa POIs; solo etiqueta como sub-parada)
+      for(const r of list){
+        if(isReturnRow(r)) continue;
+        const a = toStr(r.activity).trim();
+        if(!a) continue;
+        // ya tiene dash “–” o “-”
+        if(/[–-]/.test(a) && a.split(/[–-]/).length >= 2) continue;
+
+        // Evitar tocar cosas claramente “simples” como “Check-in”, “Almuerzo”, etc.
+        const ca = canon(a);
+        if(/^(check in|checkin|check-out|checkout|almuerzo|cena|desayuno|comida|lunch|dinner|breakfast)\b/i.test(ca)) continue;
+
+        // Etiqueta neutra (no inventa)
+        r.activity = `Tour – ${a}`;
+      }
+
+      // 2b) Asegurar “Regreso a {ciudad}” al final del día tour si no existe
+      const hasReturn = list.some(r=> isReturnRow(r) && new RegExp(canon(city||''),'i').test(canon(r.activity)));
+      const hasAnyReturn = list.some(r=> isReturnRow(r));
+
+      if(!hasReturn && !hasAnyReturn){
+        // Hora final: si hay end válido, usarlo; si no, dejar vacío (no inventar ventana)
+        const last = [...list].reverse().find(r=>toStr(r.end).trim());
+        const endGuess = last ? toStr(last.end).trim() : '';
+        const startGuess = endGuess ? addMin(endGuess, -45) : ''; // buffer simple
+        const transportGuess = toStr(last?.transport).trim() || 'Vehículo alquilado o Tour guiado';
+
+        list.push({
+          day: d,
+          start: startGuess,
+          end: endGuess,
+          activity: `Regreso a ${city}`,
+          from: toStr(last?.to).trim() || toStr(last?.from).trim() || '',
+          to: city,
+          transport: transportGuess,
+          duration: ensureTwoLineDuration(`Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat`),
+          notes: 'Cierre del day-trip y regreso a la ciudad base.',
+          kind: 'return',
+          zone: toStr(last?.zone).trim() || ''
+        });
+      }
+    }
+
+    // 3) Duración 2 líneas (doble-check)
+    for(const r of list){
+      r.duration = ensureTwoLineDuration(r.duration);
+    }
+
+    // 4) Límite duro (no reventar UI)
+    if(list.length > 20) list = list.slice(0,20);
+
+    // Guardar
+    byDay[d] = list;
+  }
+
+  // Aplanar en orden día
+  const allowed = [];
+  for(const d of Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b)){
+    allowed.push(...(byDay[d]||[]).map(r=>{
+      const rr = { ...r };
+      delete rr._idx;
+      return rr;
+    }));
+  }
+
+  // Compat alias (por si algún caller espera "removed")
+  const removed = rejected.map(x=>({ reason:x.reason, row:x.row }));
+
+  return { allowed, rejected, removed };
 }
 
 /* ==============================
