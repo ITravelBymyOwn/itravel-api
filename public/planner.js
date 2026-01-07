@@ -1637,6 +1637,8 @@ function showWOW(on, msg){
    - Si falla: lanzar error para que SECCIÓN 16 no “finja éxito”
    - ✅ NUEVO (quirúrgico): NO enviar day_hours si parece plantilla rígida (misma ventana todos los días)
    - ✅ NUEVO (quirúrgico): callApiChat usa endpoint ABS del iframe si existe (chatApiAbs/apiBase)
+   - ✅ NUEVO (quirúrgico v79.x): Enriquecer Desde/Hacia cuando falten (cadena por día)
+   - ✅ NUEVO (quirúrgico v79.x): Insertar "Regreso al hotel" al final del día si falta (cierre logístico)
 ───────────────────────────────────────────────────────────── */
 
 /* ===== Resolver endpoint del API desde querystring (iframe-safe) ===== */
@@ -1768,6 +1770,147 @@ function __sanitizeDayHours__(day_hours, totalDays){
   }
 }
 
+/* ===== ✅ NUEVO (quirúrgico): enriquecer Desde/Hacia y cierre "Regreso al hotel" ===== */
+function __canon15_2__(s){
+  return String(s||'')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^\p{L}\p{N}\s]/gu,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+function __inferToFromActivity__(activity){
+  const a = String(activity||'').trim();
+  // Formato típico: "Destino – Sub-parada"
+  const parts = a.split('–').map(x=>String(x||'').trim()).filter(Boolean);
+  if(parts.length >= 2){
+    return { left: parts[0], right: parts.slice(1).join(' – ').trim() };
+  }
+  // fallback: guion normal
+  const parts2 = a.split('-').map(x=>String(x||'').trim()).filter(Boolean);
+  if(parts2.length >= 2){
+    return { left: parts2[0], right: parts2.slice(1).join(' - ').trim() };
+  }
+  return { left:'', right:'' };
+}
+
+function __looksLikeReturnRow__(row){
+  const t = __canon15_2__(row?.activity);
+  if(!t) return false;
+  return (
+    t.includes('regreso al hotel') ||
+    t.includes('regreso a ') ||
+    t.includes('volver al hotel') ||
+    t.includes('return to ') ||
+    t.includes('back to ')
+  );
+}
+
+function __enrichRowsFromToAndReturn__(rows, { city='', hotelBase='', daysTotal=1 }={}){
+  if(!Array.isArray(rows) || !rows.length) return rows || [];
+  const out = rows.map(r=>normalizeRow(r));
+
+  // ordenar por day + start (si hay HH:MM)
+  out.sort((a,b)=>{
+    const da = Number(a.day)||1, db = Number(b.day)||1;
+    if(da!==db) return da-db;
+    return String(a.start||'').localeCompare(String(b.start||''));
+  });
+
+  const byDay = new Map();
+  for(const r of out){
+    const d = Number(r.day)||1;
+    if(!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(r);
+  }
+
+  const final = [];
+
+  for(let d=1; d<=Math.max(1, Number(daysTotal)||1); d++){
+    const dayRows = byDay.get(d) || [];
+    if(!dayRows.length) continue;
+
+    let prevTo = ''; // última "to" válida del día
+    for(const r of dayRows){
+      const { left, right } = __inferToFromActivity__(r.activity);
+
+      // Enriquecer to si falta
+      if(!r.to){
+        if(right) r.to = right;
+        else if(left && left !== city) r.to = left; // fallback suave
+      }
+
+      // Enriquecer from si falta
+      if(!r.from){
+        if(prevTo) r.from = prevTo;
+        else r.from = city || left || '';
+      }
+
+      // Normalizar si viene "from=city" siempre pero ya hay prevTo y falta lógica:
+      // (solo si from es exactamente city y el row no es el primero real del día)
+      if(prevTo && __canon15_2__(r.from) === __canon15_2__(city) && !__looksLikeReturnRow__(r)){
+        // si el usuario venía de un to concreto, esto mejora "secuencia"
+        r.from = prevTo;
+      }
+
+      // transport default ultra suave si quedó vacío
+      if(!r.transport){
+        // Si parece urbano (activity empieza con city o zona centro) → a pie
+        const actCanon = __canon15_2__(r.activity);
+        const isUrban = city && (actCanon.startsWith(__canon15_2__(city)) || __canon15_2__(r.zone).includes('centro'));
+        r.transport = isUrban ? 'A pie' : 'Vehículo alquilado o Tour guiado';
+      }
+
+      if(r.to) prevTo = r.to;
+
+      final.push(r);
+    }
+
+    // Insertar cierre "Regreso al hotel" si:
+    // - NO es el último día
+    // - hay hotelBase (el usuario dio contexto)
+    // - no existe ya una fila de regreso
+    if(d < Math.max(1, Number(daysTotal)||1) && hotelBase){
+      const hasReturn = dayRows.some(__looksLikeReturnRow__);
+      if(!hasReturn){
+        // ponerlo 15 min después del último bloque si hay hora; si no, sin horas (el render lo acepta)
+        const last = dayRows[dayRows.length - 1];
+        const start = String(last?.end || '').trim();
+        let end = '';
+
+        // sumar 30m si HH:MM
+        const m = start.match(/^(\d{1,2}):(\d{2})$/);
+        if(m){
+          const hh = Math.min(23, Math.max(0, parseInt(m[1],10)));
+          const mm = Math.min(59, Math.max(0, parseInt(m[2],10)));
+          const base = hh*60+mm;
+          const eMin = base + 30;
+          const eh = Math.floor((eMin%(24*60))/60);
+          const em = (eMin%(24*60))%60;
+          end = `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`;
+        }
+
+        final.push(normalizeRow({
+          day: d,
+          start: start || '',
+          end: end || '',
+          activity: `${city} – Regreso al hotel`,
+          from: prevTo || city,
+          to: 'Hotel',
+          transport: 'A pie',
+          duration: 'Transporte: Verificar duración en el Info Chat\nActividad: 15m',
+          notes: 'Cierre logístico del día y regreso a la base para descansar.',
+          kind: 'transport',
+          zone: ''
+        }));
+      }
+    }
+  }
+
+  return final;
+}
+
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
   if(!city) return;
@@ -1807,11 +1950,6 @@ async function generateCityItinerary(city){
       preferences: plannerState?.preferences || {},
       special_conditions: plannerState?.specialConditions || ''
     };
-
-    // ✅ AJUSTE QUIRÚRGICO v15.2.1: si no hay day_hours reales, borrar la clave explícitamente
-    if (typeof safeDayHours === 'undefined' && context && typeof context === 'object' && 'day_hours' in context) {
-      delete context.day_hours;
-    }
 
     /* ===== ETAPA 1 — INFO ===== */
     const infoResp = await callApiChat('info', { context }, { timeoutMs: 120000, retries: 1 });
@@ -1871,7 +2009,14 @@ async function generateCityItinerary(city){
     }
 
     /* ===== Integración usando pipeline estable (NO sobrescribir byDay a mano) ===== */
-    const tmpRows = parsed.rows.map(r=>normalizeRow(r));
+    let tmpRows = parsed.rows.map(r=>normalizeRow(r));
+
+    // ✅ NUEVO (quirúrgico): enriquecer Desde/Hacia + cierre Regreso al hotel cuando falte
+    tmpRows = __enrichRowsFromToAndReturn__(tmpRows, {
+      city,
+      hotelBase: String(context.hotel_base || '').trim(),
+      daysTotal: dest.days
+    });
 
     // Asegura estructura city en itineraries (sin romper contratos existentes)
     itineraries[city] = itineraries[city] || {};
@@ -2378,7 +2523,7 @@ function intentFromText(text){
 }
 
 /* ===========================================================
-   SECCIÓN 18 · Guard rails + Validación flexible FINAL (v79)
+   SECCIÓN 18 · Guard rails + Validación flexible FINAL (v79.x)
    Objetivo: robustez sin romper lo estable.
    Fuente de verdad: API (INFO + PLANNER)
    Aquí solo: robustez, normalización, retries controlados, anti-regresiones.
@@ -2493,37 +2638,73 @@ function parseApiTextToJSON(apiText){
 
 /* ─────────────────────────────────────────────────────────────
    [18.7] Helper: Call API (INFO/PLANNER) con timeout + abort
-   ⚠️ FIX QUIRÚRGICO v79: respeta apiBase si existe (query ?apiBase=...)
+   ✅ QUIRÚRGICO v79.x: NO colisionar firmas con la Sección 15.2
+   - Si ya existe window.callApiChat (firma mode,payload,opts), no redefinir.
+   - Si no existe, definimos un shim COMPATIBLE con 15.2.
 ───────────────────────────────────────────────────────────── */
-if (typeof callApiChat !== 'function') {
-  function __getApiBase__(){
-    try{
-      // 1) Global explícito (si existe)
-      const g = (typeof window !== 'undefined') ? (window.apiBase || window.__ITBMO_API_BASE__) : '';
-      if (typeof g === 'string' && g.trim()) return g.trim().replace(/\/$/, '');
-      // 2) Query param ?apiBase=...
-      const p = (typeof window !== 'undefined') ? (new URLSearchParams(window.location.search).get('apiBase') || '') : '';
-      if (p && typeof p === 'string') return p.trim().replace(/\/$/, '');
-    }catch(_){}
-    // 3) Fallback: misma origin
-    return '';
-  }
+function __getChatEndpoint18__(){
+  try{
+    const qs = new URLSearchParams(window.location.search || '');
+    const abs = (qs.get('chatApiAbs') || '').trim();
+    if(abs) return abs;
 
-  async function callApiChat(payload, { timeoutMs=32000 }={}){
-    const controller = new AbortController();
-    const t = setTimeout(()=>controller.abort(), timeoutMs);
-    try{
-      const resp = await fetch(`${__getApiBase__()}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json' },
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
-      const data = await resp.json().catch(()=>null);
-      return data;
-    } finally {
-      clearTimeout(t);
+    const apiBase = (qs.get('apiBase') || '').trim();
+    const chatApi = (qs.get('chatApi') || '/api/chat').trim() || '/api/chat';
+    if(apiBase){
+      return apiBase.replace(/\/+$/,'') + (chatApi.startsWith('/') ? chatApi : `/${chatApi}`);
     }
+  }catch(_){}
+  return "/api/chat";
+}
+
+if (typeof window !== 'undefined' && typeof window.callApiChat !== 'function' && typeof callApiChat !== 'function') {
+  window.callApiChat = async function(mode, payload = {}, opts = {}) {
+    const retries   = Number(opts.retries || 0);
+
+    const modeLc = String(mode || '').toLowerCase();
+    const defaultTimeout =
+      (modeLc === 'info')    ? 120000 :
+      (modeLc === 'planner') ? 120000 :
+      (modeLc === 'validate')? 30000  :
+      90000;
+
+    const timeoutMs = Number(opts.timeoutMs || defaultTimeout);
+    const url = __getChatEndpoint18__();
+
+    const doOnce = async ()=>{
+      const ctrl = new AbortController();
+      const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
+      try{
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ mode, ...payload }),
+          signal: ctrl.signal
+        });
+        const data = await resp.json().catch(()=>null);
+        if(!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
+        return data;
+      } finally {
+        clearTimeout(t);
+      }
+    };
+
+    let lastErr = null;
+    for (let i=0; i<=retries; i++){
+      try { return await doOnce(); }
+      catch(e){ lastErr = e; }
+    }
+    throw lastErr || new Error("callApiChat failed");
+  };
+
+  // exponer símbolo (sin window.) si alguien lo usa así
+  if (typeof callApiChat !== 'function') {
+    var callApiChat = window.callApiChat;
+  }
+} else {
+  // Si existe window.callApiChat, aseguramos alias global
+  if (typeof callApiChat !== 'function' && typeof window !== 'undefined' && typeof window.callApiChat === 'function') {
+    var callApiChat = window.callApiChat;
   }
 }
 
