@@ -8,7 +8,7 @@
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
 
   <!-- CSS (local, en -api/public) -->
-  <link id="itbmo-css" rel="stylesheet" href="./planner.css?v=57" />
+  <link rel="stylesheet" href="./planner.css?v=57" />
 
   <!-- Tipografía (carga optimizada, sin bloquear) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
@@ -189,21 +189,6 @@
   </button>
 
   <!-- JS (local, en -api/public) -->
-  <!-- JS (local, en -api/public) -->
-<script>
-  (function(){
-    var qs = new URLSearchParams(location.search);
-    var v  = (qs.get('v') || '').trim() || '57'; // fallback si no viene v
-
-    // CSS cache-bust coherente (sin romper layout)
-    var css = document.getElementById('itbmo-css');
-    if (css) css.href = './planner.css?v=' + encodeURIComponent(v);
-
-    // ✅ Clave: cargar planner.js como "parser-inserted" (evita perder DOMContentLoaded)
-    document.write(
-      '<script src="./planner.js?v=' + encodeURIComponent(v) + '"><\/script>'
-    );
-  })();
-</script>
+  <script src="./planner.js?v=57"></script>
 </body>
 </html>
