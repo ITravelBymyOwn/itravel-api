@@ -170,8 +170,6 @@ async function runWithConcurrency(tasks, limit=3){
   return results;
 }
 
-/* ============================== */
-
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
