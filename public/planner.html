@@ -8,8 +8,7 @@
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
 
   <!-- CSS (local, en -api/public) -->
-  <!-- ✅ FIX: le damos id para reescritura segura + evitamos que Webflow/iframe resuelva mal -->
-  <link id="itbmo-css" rel="stylesheet" href="./planner.css?v=79.30" />
+  <link rel="stylesheet" href="./planner.css?v=79.30" />
 
   <!-- Tipografía (carga optimizada, sin bloquear) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
@@ -189,54 +188,7 @@
     💬 Info Chat
   </button>
 
-  <!-- ✅ FIX DEFINITIVO: Loader de assets (evita que Webflow/iframe resuelva al dominio equivocado) -->
-  <script>
-    (function () {
-      try {
-        var qs = new URLSearchParams(location.search);
-
-        // version cache-bust: si viene ?v=... úsala, si no, deja el fallback actual
-        var v = (qs.get('v') || '').trim() || '79.30';
-
-        // Base de assets:
-        // 1) Si viene ?assetsBase=https://... úsala (sin trailing slash)
-        // 2) Si no, usa el mismo origen donde vive este planner.html
-        var assetsBase = (qs.get('assetsBase') || '').trim();
-        if (assetsBase) assetsBase = assetsBase.replace(/\/+$/, '');
-        else assetsBase = location.origin; // ✅ blindado
-
-        // CSS (siempre reescribe)
-        var css = document.getElementById('itbmo-css');
-        if (css) {
-          css.href = assetsBase + '/planner.css?v=' + encodeURIComponent(v);
-        }
-
-        // Evita doble carga de planner.js si Webflow inyectó algo
-        try {
-          var existing = document.querySelectorAll('script[src*="planner.js"]');
-          if (existing && existing.length) {
-            for (var i = 0; i < existing.length; i++) {
-              try { existing[i].parentNode && existing[i].parentNode.removeChild(existing[i]); } catch (_) {}
-            }
-          }
-        } catch (_) {}
-
-        // JS (carga única)
-        var s = document.createElement('script');
-        s.src = assetsBase + '/planner.js?v=' + encodeURIComponent(v);
-        s.defer = true;
-        document.body.appendChild(s);
-      } catch (e) {
-        // fallback ultra defensivo
-        try {
-          var s2 = document.createElement('script');
-          s2.src = './planner.js?v=79.30';
-          s2.defer = true;
-          document.body.appendChild(s2);
-        } catch (_) {}
-      }
-    })();
-  </script>
-
+  <!-- JS (local, en -api/public) -->
+  <script src="./planner.js?v=79.30"></script>
 </body>
 </html>
