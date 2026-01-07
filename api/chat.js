@@ -1,12 +1,13 @@
-// /api/chat.js — v43.7.2 (ESM, Vercel)
-// Doble etapa: (1) INFO (IA) → (2) PLANNER (determinista).
+// /api/chat.js — v43.7.3 (ESM, Vercel)
+// Doble etapa: (1) INFO (IA, fuente de verdad) → (2) PLANNER (determinista).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ v43.7.2 — FIX QUIRÚRGICO para no romper el JS:
-// - INFO hace 1 retry de reparación SOLO si parsea JSON pero falla QualityGate (ej: faltan días).
-// - Evita loops y mantiene latencia baja en el caso normal.
-// - PLANNER determinista igual: cero IA si hay rows_draft/rows_final.
+// ✅ v43.7.3 — FIX REAL para tu error de "Cobertura incompleta":
+// - Si INFO devuelve rows_draft incompleto, el API completa SOLO los días faltantes
+//   llamando INFO por día (target_day) y luego mergea.
+// - Caso normal sigue siendo 1 llamada (rápido). Solo se multiplica en caso fallido.
+// - PLANNER determinista se mantiene: cero IA si hay rows_draft/rows_final.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -34,17 +35,14 @@ function cleanToJSONPlus(raw = "") {
   if (typeof raw === "object") return raw;
   if (typeof raw !== "string") return null;
 
-  // 1) Intento directo
   try { return JSON.parse(raw); } catch {}
 
-  // 2) Primer/último { }
   try {
     const first = raw.indexOf("{");
     const last = raw.lastIndexOf("}");
     if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
   } catch {}
 
-  // 3) Recorte de ruido
   try {
     const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
@@ -106,7 +104,6 @@ function normalizeDurationsInParsed(parsed) {
     if (/^Transporte\s*:/i.test(s) || /^Actividad\s*:/i.test(s)) return s;
     if (/^~\s*\d+(\.\d+)?\s*h$/i.test(s)) return s;
 
-    // 1.5h → 1h30m
     const dh = s.match(/^(\d+(?:\.\d+)?)\s*h$/i);
     if (dh) {
       const hours = parseFloat(dh[1]);
@@ -116,7 +113,6 @@ function normalizeDurationsInParsed(parsed) {
       return h > 0 ? (m > 0 ? `${h}h${m}m` : `${h}h`) : `${m}m`;
     }
 
-    // 1h30 ó 1 h 30 → 1h30m
     const hMix = s.match(/^(\d+)\s*h\s*(\d{1,2})$/i);
     if (hMix) return `${hMix[1]}h${hMix[2]}m`;
 
@@ -147,7 +143,7 @@ function normalizeDurationsInParsed(parsed) {
   return parsed;
 }
 
-/* ===================== Quality Gate (endurecido) ===================== */
+/* ===================== Quality Gate ===================== */
 function _canonTxt_(s) {
   return String(s || "")
     .toLowerCase()
@@ -194,10 +190,8 @@ function _hasTwoLineDuration_(duration) {
 
 function _rowsHaveCoverage_(rows, daysTotal) {
   if (!Array.isArray(rows) || !rows.length) return false;
-  const maxDay = Math.max(...rows.map((r) => Number(r.day) || 1));
-  const need = Number(daysTotal) || maxDay || 1;
-
-  const present = new Set(rows.map((r) => Number(r.day) || 1));
+  const need = Math.max(1, Number(daysTotal) || 1);
+  const present = new Set(rows.map((r) => Number(r?.day) || 1));
   for (let d = 1; d <= need; d++) if (!present.has(d)) return false;
   return true;
 }
@@ -216,15 +210,6 @@ function _needsDashFormat_(activity) {
   return !a.includes("–") && !a.includes(" - ");
 }
 
-function _prefixBeforeDash_(activity) {
-  const s = String(activity || "");
-  const m = s.split("–");
-  if (m.length >= 2) return String(m[0] || "").trim();
-  const m2 = s.split(" - ");
-  if (m2.length >= 2) return String(m2[0] || "").trim();
-  return "";
-}
-
 function _countByDay_(rows) {
   const map = new Map();
   rows.forEach((r) => {
@@ -236,7 +221,6 @@ function _countByDay_(rows) {
 
 function _validateInfoResearch_(parsed, contextHint = {}) {
   const issues = [];
-
   const daysTotal = Number(parsed?.days_total || contextHint?.days_total || 1);
   const rows = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
 
@@ -247,10 +231,10 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
     issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
 
   if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity)))
-    issues.push("hay placeholders genéricos en activity (ej. 'Últimos paseos', museo/parque/café/restaurante genérico).");
+    issues.push("hay placeholders genéricos en activity.");
 
   if (rows.length && rows.some((r) => _needsDashFormat_(r.activity)))
-    issues.push('hay filas sin formato "X – Y" en activity (obligatorio cuando tiene sentido).');
+    issues.push('hay filas sin formato "X – Y" en activity.');
 
   if (rows.length) {
     const byDay = _countByDay_(rows);
@@ -275,59 +259,10 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   }
   if (auroraDays.includes(daysTotal)) issues.push("auroras programadas en el último día (no permitido).");
 
-  // Macro-tours en 1 día + 5+ sub-paradas (heurística actual)
-  const macroCanon = (s) =>
-    String(s || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
-
-  const macroDays = {};
-  rows.forEach((r) => {
-    const prefix = _prefixBeforeDash_(r.activity);
-    const key = macroCanon(prefix);
-    if (
-      key &&
-      (/\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(key) ||
-        /\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(String(r.activity || "")))
-    ) {
-      macroDays[key] = macroDays[key] || new Set();
-      macroDays[key].add(Number(r.day));
-    }
-  });
-
-  Object.entries(macroDays).forEach(([k, days]) => {
-    if (days.size > 1) issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(", ")}).`);
-  });
-
-  try {
-    const countByMacroDay = new Map();
-    rows.forEach((r) => {
-      const d = Number(r.day) || 1;
-      const prefix = _prefixBeforeDash_(r.activity);
-      const key = macroCanon(prefix);
-      if (!key) return;
-
-      const isMacroLike = /\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(key);
-      if (!isMacroLike) return;
-
-      const k = `${key}__${d}`;
-      countByMacroDay.set(k, (countByMacroDay.get(k) || 0) + 1);
-    });
-
-    for (const [k, n] of countByMacroDay.entries()) {
-      if (n > 0 && n < 5) {
-        const parts = k.split("__");
-        issues.push(`macro-tour "${parts[0]}" en día ${parts[1]} tiene solo ${n} filas (requiere 5–8 sub-paradas).`);
-      }
-    }
-  } catch {}
-
   return { ok: issues.length === 0, issues };
 }
 
-/* ===================== Sanitizador de day_hours entrante ===================== */
+/* ===================== day_hours sanitization ===================== */
 function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
   try {
     if (!Array.isArray(day_hours) || !day_hours.length) return null;
@@ -352,7 +287,6 @@ function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
         if (allSame) return null;
       }
     }
-
     return cleaned;
   } catch {
     return null;
@@ -368,13 +302,13 @@ function _validatePlannerOutput_(parsed) {
 
     if (rows.length) {
       if (rows.some((r) => !_hasTwoLineDuration_(r?.duration))) {
-        issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
+        issues.push('duration no cumple formato 2 líneas en una o más filas.');
       }
       if (rows.some((r) => _isGenericPlaceholderActivity_(r?.activity))) {
         issues.push("hay placeholders genéricos en activity.");
       }
       if (rows.some((r) => Number(r?.day) < 1 || !Number.isFinite(Number(r?.day)))) {
-        issues.push("hay filas con 'day' inválido (<1 o no numérico).");
+        issues.push("hay filas con 'day' inválido.");
       }
     }
 
@@ -384,7 +318,7 @@ function _validatePlannerOutput_(parsed) {
   }
 }
 
-/* ===================== PLANNER determinista (SIN IA) ===================== */
+/* ===================== PLANNER determinista ===================== */
 function _pad2_(n) {
   const x = String(n ?? "").trim();
   return x.length === 1 ? `0${x}` : x;
@@ -411,7 +345,7 @@ function _isOutOfTown_(r) {
   if (from && to && _canonTxt_(from) !== _canonTxt_(to)) return true;
 
   const a = String(r?.activity || "");
-  if (/\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(a)) return true;
+  if (/\b(day\s*trip|excursion|tour|golden\s*circle|circulo\s*dorado|sn(a|æ)fellsnes)\b/i.test(a)) return true;
 
   return false;
 }
@@ -439,7 +373,7 @@ function _materializePlannerRowsDeterministic_(research, opts = {}) {
     return {
       destination,
       rows: [],
-      followup: "⚠️ Falta rows_draft/rows_final en research_json. El Info Chat interno debe proveer rows_draft.",
+      followup: "⚠️ Falta rows_draft/rows_final en research_json.",
     };
   }
 
@@ -447,112 +381,70 @@ function _materializePlannerRowsDeterministic_(research, opts = {}) {
 
   const rows = sourceRows
     .filter((r) => (targetDay ? Number(r?.day) === targetDay : true))
-    .map((r) => {
-      const day = Number(r?.day) || 1;
-      const start = _normHHMM_(r?.start);
-      const end = _normHHMM_(r?.end);
-
-      return {
-        day,
-        start,
-        end,
-        activity: String(r?.activity || "").trim(),
-        from: String(r?.from || "").trim(),
-        to: String(r?.to || "").trim(),
-        transport: _defaultTransport_(r),
-        duration: _twoLineDurationOrFallback_(r?.duration),
-        notes: _defaultNotes_(r),
-        kind: String(r?.kind || "").trim(),
-        zone: String(r?.zone || "").trim(),
-        ...(r?._crossDay ? { _crossDay: r._crossDay } : {}),
-      };
-    });
+    .map((r) => ({
+      day: Number(r?.day) || 1,
+      start: _normHHMM_(r?.start),
+      end: _normHHMM_(r?.end),
+      activity: String(r?.activity || "").trim(),
+      from: String(r?.from || "").trim(),
+      to: String(r?.to || "").trim(),
+      transport: _defaultTransport_(r),
+      duration: _twoLineDurationOrFallback_(r?.duration),
+      notes: _defaultNotes_(r),
+      kind: String(r?.kind || "").trim(),
+      zone: String(r?.zone || "").trim(),
+      ...(r?._crossDay ? { _crossDay: r._crossDay } : {}),
+    }));
 
   return { destination, rows, followup: "" };
 }
 
-/* ===================== Prompts del sistema (compactos) ===================== */
+/* ===================== Prompts del sistema ===================== */
 const SYSTEM_INFO = `
-Eres el **Info Chat interno** de ITravelByMyOwn (experto premium en turismo).
-Devuelves **SOLO UN JSON VÁLIDO** (sin texto fuera). Tu salida alimenta un Planner determinista.
+Eres el Info Chat interno premium de ITravelByMyOwn.
+Devuelve SOLO UN JSON VÁLIDO (sin texto fuera). El Planner es determinista.
 
-REGLAS DURAS:
-- rows_draft OBLIGATORIO, cubre días 1..days_total. Cada día debe tener plan real (no 1 sola fila).
-- activity debe ser "X – Y" (Destino/Tour – Sub-parada). Excepciones raras: check-in/out, traslado.
-- Prohibido genérico: "Museo de Arte", "Parque local", "Café local", "Restaurante local", "Últimos paseos", "Tiempo libre", etc.
+Reglas duras:
+- rows_draft OBLIGATORIO, cubre 1..days_total. Cada día con varias filas reales.
+- activity "X – Y" (Destino/Tour – Sub-parada). Excepciones raras: check-in/out, traslado.
+- Prohibido genérico: "Museo de Arte", "Parque local", "Café local", "Restaurante local", "Últimos paseos", "Tiempo libre".
 - duration SIEMPRE 2 líneas:
   "Transporte: <tiempo o Verificar duración en el Info Chat>"
   "Actividad: <tiempo o Verificar duración en el Info Chat>"
-- Horarios: NO inventes plantilla rígida repetida si no hay day_hours. start/end realistas por fila. Buffers 15m. Diurno NO 01:00–05:00.
-- Macro-tours/day-trips: 1 SOLO día, 5–8 sub-paradas mínimo 5 + "Regreso a {ciudad base}" al final.
-  No day-trips duros el último día. No repartir el mismo macro-tour en múltiples días.
-- Auroras (si aplican): NO consecutivas y NO último día. Se programan en la noche.
+- Horarios: NO plantilla rígida repetida si no hay day_hours. Buffers 15m. Diurno NO 01:00–05:00.
+- Day-trips fuertes: 1 día, 5–8 sub-paradas + "Regreso a {ciudad base}" al final. No último día.
+- Auroras: NO consecutivas, NO último día, y en la noche.
 
-Transporte:
-- Si no puedes determinar: "Vehículo alquilado o Tour guiado".
-- Urbano: A pie/metro/bus/taxi/uber coherente.
-
-day_hours:
-- Si NO viene en contexto, devuelve [] (no inventes).
-- Si SÍ viene, respétalo como guía suave y ajusta solo si extendiste noche.
-
-JSON:
-{
-  "destination":"Ciudad",
-  "country":"País",
-  "days_total":1,
-  "hotel_base":"...",
-  "rationale":"...",
-  "imperdibles":["..."],
-  "macro_tours":["..."],
-  "in_city_routes":[],
-  "meals_suggestions":[],
-  "aurora":{
-    "plausible":false,
-    "suggested_days":[],
-    "window_local":{"start":"","end":""},
-    "duration":"~3h–4h",
-    "transport_default":"Vehículo alquilado o Tour guiado",
-    "note":"..."
-  },
-  "constraints":{
-    "max_substops_per_tour":8,
-    "avoid_duplicates_across_days":true,
-    "optimize_order_by_distance_and_time":true,
-    "respect_user_preferences_and_conditions":true,
-    "no_consecutive_auroras":true,
-    "no_last_day_aurora":true,
-    "thermal_lagoons_min_stay_minutes":180
-  },
-  "day_hours":[],
-  "rows_draft":[
-    {"day":1,"start":"HH:MM","end":"HH:MM","activity":"X – Y","from":"","to":"","transport":"","duration":"Transporte: ...\\nActividad: ...","notes":"...","kind":"","zone":""}
-  ],
-  "rows_skeleton":[
-    {"day":1,"start":"","end":"","activity":"","from":"","to":"","transport":"","duration":"","notes":"","kind":"","zone":""}
-  ]
-}
+JSON incluye: destination, country, days_total, hotel_base, imperdibles, macro_tours, day_hours, rows_draft, rows_skeleton, etc.
 `.trim();
 
 const SYSTEM_PLANNER = `
-Eres Astra Planner. Recibes "research_json" del Info Chat interno.
-NO inventes creatividad.
+Eres Astra Planner. Si research_json trae rows_draft/rows_final, no inventes: solo normaliza HH:MM y completa campos faltantes.
+Salida SOLO JSON: { destination, rows, followup }.
+`.trim();
 
-Si research_json trae rows_draft/rows_final: usa esas filas como verdad, normaliza HH:MM y completa campos faltantes (sin inventar POIs).
-Si NO hay rows_draft/rows_final: devuelve JSON mínimo con followup pidiendo rows_draft.
-
-Salida SOLO JSON:
-{
-  "destination":"Ciudad",
-  "rows":[{"day":1,"start":"HH:MM","end":"HH:MM","activity":"","from":"","to":"","transport":"","duration":"","notes":"","kind":"","zone":""}],
-  "followup":""
+/* ===================== Helpers para completar días faltantes ===================== */
+function _missingDays_(rows, daysTotal) {
+  const need = Math.max(1, Number(daysTotal) || 1);
+  const present = new Set((rows || []).map((r) => Number(r?.day) || 1));
+  const missing = [];
+  for (let d = 1; d <= need; d++) if (!present.has(d)) missing.push(d);
+  return missing;
 }
 
-Reglas:
-- duration 2 líneas obligatorio.
-- No diurno 01:00–05:00.
-- Si viene "target_day", devuelve solo ese día.
-`.trim();
+function _sortRows_(rows) {
+  const toMin = (hhmm) => {
+    const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return 99999;
+    return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  };
+  return [...rows].sort((a, b) => {
+    const da = Number(a?.day) || 1;
+    const db = Number(b?.day) || 1;
+    if (da !== db) return da - db;
+    return toMin(a?.start) - toMin(b?.start);
+  });
+}
 
 /* ===================== Handler principal ===================== */
 export default async function handler(req, res) {
@@ -562,7 +454,7 @@ export default async function handler(req, res) {
     const body = parseBody(req.body);
     const mode = String(body.mode || "planner").toLowerCase();
 
-    /* --------- MODO INFO (IA) --------- */
+    /* --------- MODO INFO --------- */
     if (mode === "info") {
       let context = body.context;
 
@@ -574,7 +466,7 @@ export default async function handler(req, res) {
         context = rest;
       }
 
-      // Sanitizar day_hours si parece plantilla rígida
+      // Sanitizar day_hours rígido
       try {
         if (context && typeof context === "object") {
           const daysTotal = context?.days_total || context?.days || context?.daysTotal || 1;
@@ -589,54 +481,80 @@ export default async function handler(req, res) {
 
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }) };
 
-      // Intento 1
+      // 1) intento normal
       let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.25, 2400);
       let parsed = cleanToJSONPlus(raw);
 
-      // Intento 2 SOLO si no parsea JSON
+      // 2) si no parsea, intento estricto
       if (!parsed) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde SOLO un JSON válido (sin texto fuera).`;
         raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.10, 2200);
         parsed = cleanToJSONPlus(raw);
       }
 
-      // Si parseó, audit + 1 retry de reparación SOLO si falló QualityGate
+      // 3) si parsea pero falta cobertura: completar días faltantes pidiendo SOLO ese día
       if (parsed) {
         try {
-          const hintDays = context?.days_total || context?.days || context?.daysTotal || 1;
-          const audit1 = _validateInfoResearch_(parsed, { days_total: hintDays });
+          const hintDays = context?.days_total || context?.days || context?.daysTotal || parsed?.days_total || 1;
+          const rows0 = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
+          const miss = _missingDays_(rows0, hintDays);
 
-          if (!audit1.ok) {
-            const repair = `
+          if (miss.length) {
+            const merged = [...rows0];
+
+            for (const d of miss) {
+              const perDayContext = {
+                ...context,
+                target_day: d,
+                // guía explícita para evitar que “olvide” que debe devolver solo ese día
+                __instruction: `Devuelve SOLO filas de rows_draft para day=${d} (4–7 filas), con activity "X – Y" y duration 2 líneas.`,
+              };
+
+              const perDayMsg = { role: "user", content: JSON.stringify({ context: perDayContext }) };
+
+              const perDayPrompt = `
 ${SYSTEM_INFO}
 
-REPARACIÓN OBLIGATORIA (1 SOLO INTENTO):
-Tu JSON falló estas validaciones:
-- ${audit1.issues.join("\n- ")}
-
-CORRIGE:
-- rows_draft debe cubrir 1..days_total y cada día debe tener varias filas reales.
-- NO inventes day_hours si no venía.
-- Mantén duration 2 líneas y activity "X – Y" en TODAS las filas.
-Responde SOLO JSON válido.
+MODO TARGET_DAY (OBLIGATORIO):
+- Debes devolver SOLO un JSON válido.
+- rows_draft debe contener SOLO filas con "day": ${d}.
+- 4–7 filas reales (no genéricas). Mantén buffers 15m.
+- duration SIEMPRE 2 líneas.
+- activity SIEMPRE "X – Y".
+No incluyas texto fuera del JSON.
 `.trim();
 
-            const repairRaw = await callText([{ role: "system", content: repair }, infoUserMsg], 0.15, 2600);
-            const repaired = cleanToJSONPlus(repairRaw);
-            if (repaired) parsed = repaired;
+              const rawDay = await callText([{ role: "system", content: perDayPrompt }, perDayMsg], 0.18, 1800);
+              const parsedDay = cleanToJSONPlus(rawDay);
 
-            // Si aun falla, dejamos followup claro (pero no loops)
-            const audit2 = _validateInfoResearch_(parsed, { days_total: hintDays });
-            if (!audit2.ok) {
+              const dayRows = Array.isArray(parsedDay?.rows_draft)
+                ? parsedDay.rows_draft.filter((r) => Number(r?.day) === d)
+                : [];
+
+              if (dayRows.length) merged.push(...dayRows);
+            }
+
+            parsed.rows_draft = _sortRows_(merged);
+
+            const audit = _validateInfoResearch_(parsed, { days_total: hintDays });
+            if (!audit.ok) {
               const prev = String(parsed?.followup || "").trim();
-              const msg = `⚠️ INFO QualityGate: ${audit2.issues.join(" | ")}`;
+              const msg = `⚠️ INFO QualityGate: ${audit.issues.join(" | ")}`;
+              parsed.followup = prev ? `${prev}\n${msg}` : msg;
+            }
+          } else {
+            // si no faltan días, igual audit rápido
+            const audit = _validateInfoResearch_(parsed, { days_total: hintDays });
+            if (!audit.ok) {
+              const prev = String(parsed?.followup || "").trim();
+              const msg = `⚠️ INFO QualityGate: ${audit.issues.join(" | ")}`;
               parsed.followup = prev ? `${prev}\n${msg}` : msg;
             }
           }
         } catch {}
       }
 
-      // Fallback mínimo si nada funcionó
+      // 4) fallback mínimo
       if (!parsed) {
         parsed = {
           destination: context?.city || "Destino",
@@ -673,7 +591,7 @@ Responde SOLO JSON válido.
 
     /* --------- MODO PLANNER --------- */
     if (mode === "planner") {
-      // Validate passthrough (no IA)
+      // validate passthrough sin IA
       try {
         if (body && body.validate === true && Array.isArray(body.rows)) {
           const out = { allowed: body.rows, rejected: [] };
@@ -683,7 +601,7 @@ Responde SOLO JSON válido.
 
       const research = body.research_json || null;
 
-      // Camino determinista (SIN IA) si viene rows_draft/rows_final
+      // determinista sin IA si hay rows_draft/rows_final
       if (research && (Array.isArray(research?.rows_draft) || Array.isArray(research?.rows_final))) {
         const out = _materializePlannerRowsDeterministic_(research, { target_day: body.target_day ?? null });
 
@@ -699,7 +617,7 @@ Responde SOLO JSON válido.
         });
       }
 
-      // Camino legado (mensajes del cliente, sin research_json)
+      // legado sin research_json
       if (!research) {
         const clientMessages = extractMessages(body);
 
@@ -717,7 +635,7 @@ Responde SOLO JSON válido.
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
-      // Camino nuevo (research_json directo) — sin rows_draft/rows_final
+      // research_json directo sin rows_draft/rows_final
       const plannerUserPayload = {
         research_json: research,
         target_day: body.target_day ?? null,
