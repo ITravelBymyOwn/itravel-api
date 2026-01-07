@@ -13,161 +13,59 @@
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
-/* ========= CONFIG ========= */
-// ✅ CAMBIO QUIRÚRGICO: API_URL deja de estar hardcodeado a un dominio.
-// Se usa como fallback, porque la llamada real se resuelve por querystring en SECCIÓN 12.
-const API_URL = '/api/chat'; // fallback; endpoint real se resuelve por querystring en SECCIÓN 12
+const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
+const MODEL   = 'gpt-4o-mini';
 
-/* ========= DOM CACHE ========= */
-const $cityList           = qs('#city-list');
-const $addCityBtn         = qs('#add-city-btn');
-const $saveDestinations   = qs('#save-destinations');
-const $resetPlanner       = qs('#reset-planner');
-const $startPlanning      = qs('#start-planning');
-const $specialConditions  = qs('#special-conditions');
-const $itineraryContainer = qs('#itinerary-container');
-const $cityTabs           = qs('#city-tabs');
+let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
+// 🧠 itineraries ahora soporta originalDays para rebalanceos selectivos
+let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate, originalDays } }
+let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
+let session = [];                // historial para el agente principal
+let infoSession = [];            // historial separado para Info Chat
+let activeCity = null;
 
-const $loadingOverlay     = qs('#loading-overlay');
-const $thinkingIndicator  = qs('#thinking-indicator');
-const $thinkingInfo       = qs('#thinking-indicator-info');
+let planningStarted = false;
+let metaProgressIndex = 0;
+let collectingHotels = false;
+let isItineraryLocked = false;
 
-/* ========= INFO CHAT (WOW) ========= */
-const $infoChatToggle     = qs('#info-chat-toggle');
-const $infoChatFloating   = qs('#info-chat-floating');
-const $infoChatModal      = qs('#info-chat-modal');
-const $infoChatClose      = qs('#info-chat-close');
-const $infoChatMessages   = qs('#info-chat-messages');
-const $infoChatInput      = qs('#info-chat-input');
-const $infoChatSend       = qs('#info-chat-send');
-
-/* ========= MONETIZATION placeholders ========= */
-const $upsell             = qs('#monetization-upsell');
-const $upsellClose        = qs('#upsell-close');
-
-/* ========= STATE ========= */
-let cityRows = [];              // [{ city, country, days, baseDate, hotel }]
-let itineraryByCity = {};       // { "Reykjavik|Iceland": { rows:[], meta:{} } }
-let activeCityKey = null;
-
-let session = { messages: [] };      // planner internal chat/session
-let infoSession = { messages: [] };  // info chat external session
-
-// Control de cambios / seguridad
-const DEFAULT_START = '09:00';
-const DEFAULT_END   = '18:00';
-const DEFAULT_ADULT_START = '09:00';
-const DEFAULT_ADULT_END   = '19:00';
+// ✅ QUIRÚRGICO: estos defaults quedan SOLO como fallback interno/legacy,
+// pero NO deben forzar ventanas por día cuando el usuario no las definió.
+const DEFAULT_START = '08:30';
+const DEFAULT_END   = '19:00';
 
 let pendingChange = null;
-let hasSaved = false;
-let isPlanning = false;
-let doneAll = false;
+let hasSavedOnce = false;
 
-/* ========= Travelers / Budget ========= */
-const $pAdults   = qs('#p-adults');
-const $pYoung    = qs('#p-young');
-const $pChildren = qs('#p-children');
-const $pInfants  = qs('#p-infants');
-const $pSeniors  = qs('#p-seniors');
+// 🧠 Estado global para persistir configuración del planner
+let plannerState = {
+  destinations: [],
+  specialConditions: '',
+  travelers: {
+    adults: 0,
+    young: 0,
+    children: 0,
+    infants: 0,
+    seniors: 0
+  },
+  budget: '',
+  currency: 'USD'
+};
 
-const $budget    = qs('#budget');
-const $currency  = qs('#currency');
+// ⚡ Performance toggles (optimizaciones IA)
+const ENABLE_VALIDATOR = false;      // ⬅️ si quieres doble validación IA, pon true
+const MAX_CONCURRENCY  = 2;          // ⬅️ sube a 3 si tu API lo tolera
 
-/* ========= Model ========= */
-const MODEL = "gpt-4o-mini";
-
-/* ========= Utilities ========= */
-function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
-
-function safeTrim(v){ return (v||'').toString().trim(); }
-
-function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
-
-function showThinking(on){
-  if($thinkingIndicator) $thinkingIndicator.style.display = on ? 'flex' : 'none';
-}
-
-function showThinkingInfo(on){
-  if($thinkingInfo) $thinkingInfo.style.display = on ? 'flex' : 'none';
-}
-
-function showLoading(on){
-  if($loadingOverlay) $loadingOverlay.style.display = on ? 'flex' : 'none';
-}
-
-function toneMsg(key){
-  const t = {
-    ok:   "Listo ✅",
-    fail: "Algo falló. Intenta de nuevo.",
-    wait: "Astra está trabajando…"
-  };
-  return t[key] || "";
-}
-
-function getTravelers(){
-  return {
-    adults:   Number($pAdults?.value || 0),
-    young:    Number($pYoung?.value || 0),
-    children: Number($pChildren?.value || 0),
-    infants:  Number($pInfants?.value || 0),
-    seniors:  Number($pSeniors?.value || 0)
-  };
-}
-
-function getBudget(){
-  return {
-    amount: Number($budget?.value || 0),
-    currency: safeTrim($currency?.value || 'USD')
-  };
-}
-
-function normalizeKey(city, country){
-  return `${safeTrim(city)}|${safeTrim(country)}`;
-}
-
-function isValidDMY(s){
-  if(!s) return false;
-  const m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if(!m) return false;
-  const dd = Number(m[1]), mm = Number(m[2]), yy = Number(m[3]);
-  if(mm<1||mm>12||dd<1||dd>31||yy<1900) return false;
-  const dt = new Date(yy, mm-1, dd);
-  return dt && dt.getFullYear()===yy && dt.getMonth()===(mm-1) && dt.getDate()===dd;
-}
-
-function parseDMY(s){
-  if(!isValidDMY(s)) return null;
-  const [dd, mm, yy] = s.split('/').map(Number);
-  return new Date(yy, mm-1, dd);
-}
-
-function formatDMY(d){
-  const dd = String(d.getDate()).padStart(2,'0');
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const yy = String(d.getFullYear());
-  return `${dd}/${mm}/${yy}`;
-}
-
-function addDays(d, n){
-  const out = new Date(d);
-  out.setDate(out.getDate()+n);
-  return out;
-}
-
-/* ========= Concurrency helper (si se usa en secciones posteriores) ========= */
-async function runWithConcurrency(tasks, limit=3){
-  const results = [];
-  const queue = tasks.slice();
-  const workers = Array.from({length: limit}, async ()=>{
-    while(queue.length){
+// 🧵 Helper: ejecuta tareas con concurrencia limitada
+async function runWithConcurrency(taskFns, limit = MAX_CONCURRENCY){
+  const queue = [...taskFns];
+  const workers = Array.from({length: Math.min(limit, queue.length)}, async ()=> {
+    while (queue.length){
       const fn = queue.shift();
-      try{ results.push(await fn()); }
-      catch(e){ results.push(null); }
+      try { await fn(); } catch(e){ console.warn('Task error:', e); }
     }
   });
   await Promise.all(workers);
-  return results;
 }
 
 /* ==============================
