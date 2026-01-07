@@ -8,8 +8,7 @@
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
 
   <!-- CSS (local, en -api/public) -->
-  <!-- ✅ CAMBIO QUIRÚRGICO: quitar v=57 hardcode y poner id para setear v desde querystring -->
-  <link id="itbmo-css" rel="stylesheet" href="./planner.css" />
+  <link rel="stylesheet" href="./planner.css?v=57" />
 
   <!-- Tipografía (carga optimizada, sin bloquear) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
@@ -189,28 +188,7 @@
     💬 Info Chat
   </button>
 
-  <!-- ✅ CAMBIO QUIRÚRGICO: loader de CSS/JS usando v desde querystring (en vez de v=57 fijo) -->
-  <script>
-    (function(){
-      try{
-        var qs = new URLSearchParams(location.search);
-        var v = (qs.get('v') || '').trim();
-
-        // CSS: aplica cache-bust coherente con el iframe
-        var css = document.getElementById('itbmo-css');
-        if(css && v) css.href = './planner.css?v=' + encodeURIComponent(v);
-
-        // JS: inyecta planner.js con v coherente
-        var s = document.createElement('script');
-        s.src = v ? ('./planner.js?v=' + encodeURIComponent(v)) : './planner.js';
-        document.body.appendChild(s);
-      }catch(_){
-        var s = document.createElement('script');
-        s.src = './planner.js';
-        document.body.appendChild(s);
-      }
-    })();
-  </script>
-
+  <!-- JS (local, en -api/public) -->
+  <script src="./planner.js?v=57"></script>
 </body>
 </html>
