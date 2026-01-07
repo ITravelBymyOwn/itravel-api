@@ -7,11 +7,11 @@
 
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
 
-  <!-- CSS (local, en -api/public) -->
-  <link rel="stylesheet" href="./planner.css?v=57" />
+  <!-- CSS LOCAL del planner -->
+  <link id="itbmo-css" rel="stylesheet" href="./planner.css" />
 
-  <!-- Tipografía (carga optimizada, sin bloquear) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <!-- Tipografía -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 
   <!-- Carga Inter por CSS como fallback rápido -->
@@ -32,163 +32,151 @@
 </head>
 
 <body>
-  <!-- TOPBAR -->
-  <div class="topbar">
-    <div class="brand">ITravelByMyOwn Planner</div>
-    <div class="lang">
-      <a href="#" class="active">ES</a>
-      <a href="#">EN</a>
-      <a href="#">FR</a>
-      <a href="#">PT</a>
+
+  <!-- =========================
+       TOP BAR
+  ========================== -->
+  <div class="planner-topbar">
+    <div class="planner-brand">
+      <span class="planner-brand-title">ITravelByMyOwn Planner</span>
+      <span id="planner-version-pill" class="planner-pill">v—</span>
     </div>
-    <!-- Botón Info Chat WOW ✨ -->
-    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Abrir Info Chat">💬 Info Chat</button>
+
+    <div class="planner-topbar-actions">
+      <button id="info-chat-floating" class="planner-btn planner-btn-ghost" type="button">
+        💬 Info Chat
+      </button>
+      <button id="reset-planner" class="planner-btn planner-btn-danger" type="button">
+        Reset
+      </button>
+    </div>
   </div>
 
-  <div id="planner-grid">
-    <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <h2>Planificador</h2>
+  <!-- =========================
+       GRID LAYOUT
+  ========================== -->
+  <div class="planner-grid">
 
-      <section class="box">
-        <h3>Destinos</h3>
-        <div id="city-list"></div>
-        <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+    <!-- =========================
+         SIDEBAR
+    ========================== -->
+    <aside class="planner-sidebar">
+      <div class="planner-card">
+        <h2 class="planner-h2">Destinos</h2>
+        <p class="planner-muted">
+          Ingresa tus ciudades, días y fecha base. Luego pulsa <b>Guardar destinos</b>.
+        </p>
+
+        <div id="city-list" class="planner-city-list"></div>
+
+        <div class="planner-row planner-row-gap">
+          <button id="add-city" class="planner-btn" type="button">+ Agregar ciudad</button>
+          <button id="save-destinations" class="planner-btn planner-btn-primary" type="button">Guardar destinos</button>
         </div>
-        <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
-        <!-- 🆕 Botón de reinicio reubicado -->
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-          Reiniciar planificación
-        </button>
-      </section>
+      </div>
 
-      <section class="box special-conditions">
-        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje. Esta información permitirá crear un itinerario 100 % alineado contigo. 🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.” 🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.” 🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.” 🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.” ⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.” 👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.” 📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
-      </section>
+      <div class="planner-card">
+        <h2 class="planner-h2">Preferencias</h2>
 
-      <section class="box">
-        <h3>Viajeros</h3>
-        <div id="traveler-grid">
-          <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
-          <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
-          <label>Infantes (0–5)<input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
+        <div class="planner-field">
+          <label class="planner-label">Condiciones especiales</label>
+          <textarea id="special-conditions" class="planner-textarea" placeholder="Ej. movilidad limitada, ritmo relajado, cenas icónicas, auroras, etc."></textarea>
         </div>
-      </section>
 
-      <section class="box budget-box">
-        <h3>Presupuesto total</h3>
-        <div class="grid-2">
-          <label>Monto<input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
-          <label>Moneda
-            <select id="currency">
-              <option value="USD" selected>$ USD</option>
-              <option value="EUR">€ EUR</option>
-              <option value="GBP">£ GBP</option>
-              <option value="CRC">₡ CRC</option>
-            </select>
-          </label>
+        <div class="planner-row">
+          <button id="start-planning" class="planner-btn planner-btn-primary" type="button" disabled>
+            Iniciar planificación
+          </button>
         </div>
-      </section>
+      </div>
+
+      <div class="planner-card planner-card-note">
+        <p class="planner-muted">
+          <b>Regla clave:</b> El itinerario lo decide el <b>Info Chat interno</b>. El Planner solo protege la estructura.
+        </p>
+      </div>
     </aside>
 
-    <!-- MAIN -->
-    <main class="main">
-      <section class="box itinerary-section">
-        <h2>Itinerario</h2>
-
-        <!-- 🧹 Se eliminó la guía de horarios de esta sección -->
-
-        <div class="itinerary-actions">
-          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
-        </div>
-
-        <div id="chat-container" class="chat" style="display:none;">
-          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
-          <div class="chat-input">
-            <input id="chat-input" type="text" placeholder="Escribe tu mensaje..." />
-            <button id="send-btn" class="btn primary">Enviar</button>
-          </div>
-        </div>
-
-        <div class="city-tabs" id="city-tabs"></div>
-        <div id="itinerary-container"></div>
-
-        <div class="toolbar">
-          <button class="btn" id="btn-pdf">Exportar PDF</button>
-          <button class="btn" id="btn-email">Enviar por Email</button>
-          <button class="btn" id="btn-maps">Mapas</button>
-          <button class="btn" id="btn-transport">Transporte</button>
-          <button class="btn" id="btn-weather">Clima</button>
-          <button class="btn" id="btn-clothing">Ropa</button>
-          <button class="btn" id="btn-restaurants">Restaurantes</button>
-          <button class="btn" id="btn-gas">Gasolineras</button>
-          <button class="btn" id="btn-bathrooms">Baños</button>
-          <button class="btn" id="btn-lodging">Hospedaje</button>
-          <button class="btn" id="btn-localinfo">Info Local</button>
-        </div>
-
-        <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button>
-      </section>
+    <!-- =========================
+         MAIN
+    ========================== -->
+    <main class="planner-main">
+      <div class="planner-card">
+        <h2 class="planner-h2">Itinerario</h2>
+        <div id="itinerary-container" class="planner-itinerary"></div>
+      </div>
     </main>
+
   </div>
 
-  <footer class="footer">
-    © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
-  </footer>
-
-  <!-- Modal Info Chat -->
-  <!-- PATCH QUIRÚRGICO: se elimina display:none inline para que .active controle visibilidad sin bloquear -->
-  <div id="info-chat-modal" class="info-chat-modal" aria-hidden="true">
-    <div class="info-chat-panel">
-      <div class="info-chat-header">
-        <h3>Info Chat · Astra 🌍</h3>
-        <button id="info-chat-close" class="btn ghost">✖</button>
-      </div>
-      <div id="info-chat-messages" class="chat-messages"></div>
-      <div class="chat-input">
-        <textarea id="info-chat-input" placeholder="Hazme cualquier pregunta sobre viajes..." rows="1"></textarea>
-        <button id="info-chat-send" class="btn primary">Enviar</button>
-      </div>
+  <!-- =========================
+       OVERLAY WOW
+  ========================== -->
+  <div id="overlay-wow" class="planner-overlay" style="display:none;">
+    <div class="planner-overlay-card">
+      <div class="planner-spinner"></div>
+      <p>Astra está generando itinerarios…</p>
     </div>
   </div>
 
-  <!-- PATCH QUIRÚRGICO: placeholders “upsell” para evitar null refs si planner.js los busca -->
-  <div id="monetization-upsell" class="upsell" style="display:none;">
-    <div class="upsell-card">
-      <h3>Upgrade</h3>
-      <p>Para continuar, desbloquea esta función en Premium.</p>
-      <button id="upsell-close" class="btn primary w-100">Cerrar</button>
+  <!-- =========================
+       INFO CHAT PANEL (Floating)
+  ========================== -->
+  <div id="info-chat-panel" class="info-chat-panel" style="display:none;">
+    <div class="info-chat-header">
+      <div class="info-chat-title">Info Chat</div>
+      <button id="info-chat-close" class="planner-btn planner-btn-ghost" type="button">✕</button>
+    </div>
+
+    <div id="info-chat-messages" class="info-chat-messages"></div>
+
+    <!-- Typing Indicator (Planner) -->
+    <div id="thinking-indicator">
+      <span></span><span></span><span></span>
+    </div>
+
+    <div class="info-chat-inputbar">
+      <input id="info-chat-input" class="info-chat-input" placeholder="Pregúntame cualquier cosa del destino…" />
+      <button id="info-chat-send" class="planner-btn planner-btn-primary" type="button">Enviar</button>
     </div>
   </div>
 
-  <!-- Overlay de carga -->
-  <div id="loading-overlay" style="display:none;">
-    <div class="loader">
-      <div class="hourglass"></div>
-      <p>Astra está generando itinerarios...</p>
-    </div>
-  </div>
+  <!-- =========================
+       PATCH QUIRÚRGICO: placeholders “upsell” para evitar null refs si planner.js los busca
+  ========================== -->
+  <div id="upsell-modal" style="display:none;"></div>
+  <div id="upsell-overlay" style="display:none;"></div>
 
-  <!-- 🧠 Indicador estilo ChatGPT (Planner) -->
-  <div id="thinking-indicator">
-    <span></span><span></span><span></span>
-  </div>
+  <!-- =========================
+       JS LOADER (v desde querystring)
+       - Elimina hardcode v=57
+       - Mantiene coherencia con Embed v=79.xx
+  ========================== -->
+  <script>
+    (function(){
+      try{
+        const qs = new URLSearchParams(location.search);
+        const v = (qs.get('v')||'').trim();
 
-  <!-- 🧠 Indicador estilo ChatGPT (Info Chat) -->
-  <div id="thinking-indicator-info">
-    <span></span><span></span><span></span>
-  </div>
+        // CSS cache-bust coherente con el iframe
+        const css = document.getElementById('itbmo-css');
+        if(css && v) css.href = './planner.css?v=' + encodeURIComponent(v);
 
-  <!-- 🆕 Botón flotante Info Chat -->
-  <button id="info-chat-floating" class="info-chat-floating pulse" title="Abrir Info Chat">
-    💬 Info Chat
-  </button>
+        // Badge visible
+        const pill = document.getElementById('planner-version-pill');
+        if(pill) pill.textContent = v ? ('v' + v) : 'v—';
 
-  <!-- JS (local, en -api/public) -->
-  <script src="./planner.js?v=57"></script>
+        // JS cache-bust coherente con el iframe
+        const s = document.createElement('script');
+        s.src = v ? ('./planner.js?v=' + encodeURIComponent(v)) : './planner.js';
+        document.body.appendChild(s);
+      }catch(_){
+        const s = document.createElement('script');
+        s.src = './planner.js';
+        document.body.appendChild(s);
+      }
+    })();
+  </script>
+
 </body>
 </html>
