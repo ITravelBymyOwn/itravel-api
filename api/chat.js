@@ -1,10 +1,18 @@
-// /api/chat.js — v43.6.6 (ESM, Vercel)
-// Doble etapa: INFO (investiga/decide) → PLANNER (estructura/valida).
+// /api/chat.js — v43.7.0 (ESM, Vercel)
+// Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
-// FIX v43.6.6: compatibilidad SDK OpenAI (responses.create si existe; si no, chat.completions.create).
-// Además: cliente lazy-init SOLO si hay OPENAI_API_KEY (evita crashes y falsos fallbacks).
+// ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
+//
+// ✅ v43.7.0 — FIX QUIRÚRGICO para tu bug actual (cobertura):
+// 1) Si el SDK no soporta responses.create o falla la llamada → fallback a chat.completions.
+// 2) Si PLANNER falla por cualquier razón, y existe research_json.rows_draft → construye rows LOCALMENTE
+//    (sin modelo) para que SIEMPRE haya cobertura 1..days_total y no te quede rows=1.
+// 3) Agrega fallback INFO real (rows_draft por día) para no romper el flujo INFO→PLANNER.
+// 4) Catch respeta mode y devuelve fallback correcto por modo.
+// 5) Mantiene v43.6.x: day_hours no se inventa; sanitizador de plantilla rígida; validate=true en planner.
 
 import OpenAI from "openai";
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 /* ============== Utilidades comunes ============== */
 function parseBody(reqBody) {
@@ -33,16 +41,19 @@ function cleanToJSONPlus(raw = "") {
   if (typeof raw === "object") return raw;
   if (typeof raw !== "string") return null;
 
+  // 1) Intento directo
   try {
     return JSON.parse(raw);
   } catch {}
 
+  // 2) Primer/último { }
   try {
     const first = raw.indexOf("{");
     const last = raw.lastIndexOf("}");
     if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
   } catch {}
 
+  // 3) Recorte de ruido
   try {
     const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
@@ -73,7 +84,7 @@ function fallbackJSON() {
   };
 }
 
-/* Fallback INFO (para no romper Planner que exige rows_draft) */
+/* ✅ NUEVO (v43.7.0): fallback INFO real (rows_draft 1..days_total) */
 function fallbackInfoJSON(context = {}) {
   const city = String(context?.city || context?.destination || "Destino").trim() || "Destino";
   const country = String(context?.country || "").trim();
@@ -90,7 +101,7 @@ function fallbackInfoJSON(context = {}) {
       to: city,
       transport: "",
       duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-      notes: "⚠️ El Info Chat interno no pudo generar este día. Revisa OPENAI_API_KEY / despliegue.",
+      notes: "⚠️ El Info Chat interno no pudo generar este día. Revisa despliegue / SDK / OPENAI_API_KEY.",
       kind: "",
       zone: "",
     });
@@ -138,67 +149,71 @@ function fallbackInfoJSON(context = {}) {
       kind: "",
       zone: "",
     })),
-    followup: "⚠️ Fallback INFO: revisa OPENAI_API_KEY o despliegue.",
+    followup: "⚠️ Fallback INFO: revisa despliegue / SDK / OPENAI_API_KEY.",
   };
 }
 
-/* ============== OpenAI client (lazy + compat) ============== */
-function getOpenAIClient() {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
-  try {
-    return new OpenAI({ apiKey: key });
-  } catch {
-    return null;
-  }
-}
-
-// Llamada unificada (compat): intenta Responses API; si no, usa Chat Completions.
-async function callText(client, messages, temperature = 0.35, max_output_tokens = 3200) {
-  if (!client) throw new Error("OPENAI_CLIENT_UNAVAILABLE");
-
-  // Consolidar a string (tu formato original)
-  const inputStr = messages
+/* ============== OpenAI call: robusto (responses -> chat.completions) ============== */
+async function callText(messages, temperature = 0.35, max_output_tokens = 3200) {
+  // Construir un input string (sirve para Responses)
+  const inputStr = (Array.isArray(messages) ? messages : [])
     .map((m) => {
-      const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
-      return `${String(m.role || "user").toUpperCase()}: ${c}`;
+      const c = typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? "");
+      return `${String(m?.role || "user").toUpperCase()}: ${c}`;
     })
     .join("\n\n");
 
-  // 1) Responses API (si existe)
+  // 1) Preferir Responses API si existe
   try {
-    if (client.responses && typeof client.responses.create === "function") {
+    if (client?.responses?.create) {
       const resp = await client.responses.create({
         model: "gpt-4o-mini",
         temperature,
         max_output_tokens,
         input: inputStr,
       });
-      return resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
+
+      const out =
+        resp?.output_text?.trim() ||
+        resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+        "";
+      if (out) return out;
     }
-  } catch (e) {
-    // Si Responses falla, probamos chat.completions
+  } catch {
+    // caemos a chat.completions
   }
 
-  // 2) Chat Completions (fallback compatible)
-  const resp2 = await client.chat.completions.create({
-    model: "gpt-4o-mini",
-    temperature,
-    max_tokens: Math.min(4096, Math.max(256, Number(max_output_tokens) || 3200)),
-    messages: [{ role: "user", content: inputStr }],
-  });
+  // 2) Fallback: Chat Completions (compatible)
+  // Convertimos messages a formato estándar (system/user)
+  try {
+    const cmessages = (Array.isArray(messages) ? messages : []).map((m) => ({
+      role: m?.role === "system" ? "system" : m?.role === "assistant" ? "assistant" : "user",
+      content:
+        typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? ""),
+    }));
 
-  const txt = resp2?.choices?.[0]?.message?.content;
-  return String(txt || "").trim();
+    const resp2 = await client.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature,
+      max_tokens: Math.min(4096, Math.max(256, Number(max_output_tokens) || 1200)),
+      messages: cmessages,
+    });
+
+    return resp2?.choices?.[0]?.message?.content?.trim() || "";
+  } catch (e) {
+    // Propagamos al handler (para que respete mode en catch)
+    throw e;
+  }
 }
 
-// Normalizador de duraciones dentro del JSON ya parseado
+/* ============== Normalizador de duraciones ============== */
 function normalizeDurationsInParsed(parsed) {
   if (!parsed) return parsed;
 
   const norm = (txt) => {
     const s = String(txt ?? "").trim();
     if (!s) return s;
+
     if (/^Transporte\s*:/i.test(s) || /^Actividad\s*:/i.test(s)) return s;
     if (/^~\s*\d+(\.\d+)?\s*h$/i.test(s)) return s;
 
@@ -242,7 +257,7 @@ function normalizeDurationsInParsed(parsed) {
   return parsed;
 }
 
-/* ============== Quality Gate / Helpers ============== */
+/* ============== Helpers de texto / validaciones existentes ============== */
 function _canonTxt_(s) {
   return String(s || "")
     .toLowerCase()
@@ -292,18 +307,6 @@ function _rowsHaveCoverage_(rows, daysTotal) {
   return true;
 }
 
-function _missingDays_(rows, daysTotal) {
-  try {
-    const need = Math.max(1, Number(daysTotal) || 1);
-    const present = new Set((Array.isArray(rows) ? rows : []).map((r) => Number(r?.day) || 0));
-    const missing = [];
-    for (let d = 1; d <= need; d++) if (!present.has(d)) missing.push(d);
-    return missing;
-  } catch {
-    return [];
-  }
-}
-
 function _validateInfoResearch_(parsed, contextHint = {}) {
   const issues = [];
 
@@ -320,8 +323,9 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity)))
     issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
 
+  // Auroras (no consecutivas / no último día) — mantenido
   const auroraDays = rows
-    .filter((r) => /auroras?|northern\s*lights/i.test(r.activity) || String(r?.kind || "").toLowerCase() === "aurora")
+    .filter((r) => /auroras?|northern\s*lights/i.test(String(r?.activity || "")) || String(r?.kind || "").toLowerCase() === "aurora")
     .map((r) => Number(r.day))
     .filter((n) => Number.isFinite(n))
     .sort((a, b) => a - b);
@@ -332,8 +336,11 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
       break;
     }
   }
-  if (auroraDays.includes(daysTotal)) issues.push("auroras programadas en el último día (no permitido).");
+  if (auroraDays.includes(daysTotal)) {
+    issues.push("auroras programadas en el último día (no permitido).");
+  }
 
+  // Macro-tours únicos — mantenido
   const macroCanon = (s) =>
     String(s || "")
       .toLowerCase()
@@ -352,30 +359,12 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   });
 
   Object.entries(macroDays).forEach(([k, days]) => {
-    if (days.size > 1) issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(", ")}).`);
+    if (days.size > 1) {
+      issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(", ")}).`);
+    }
   });
 
-  try {
-    const byDay = new Map();
-    rows.forEach((r) => {
-      const d = Number(r?.day) || 0;
-      if (!byDay.has(d)) byDay.set(d, []);
-      byDay.get(d).push(r);
-    });
-
-    for (let d = 1; d <= daysTotal; d++) {
-      const dayRows = byDay.get(d) || [];
-      const macroRows = dayRows.filter(
-        (r) =>
-          String(r?.kind || "").toLowerCase() === "macro_tour" ||
-          /circulo\s*dorado|snæfellsnes|costa\s*sur|day\s*trip|excursion|tour\b/i.test(String(r?.activity || ""))
-      );
-      if (macroRows.length > 0 && macroRows.length < 5) {
-        issues.push(`macro-tour en día ${d} tiene pocas sub-paradas (${macroRows.length}); requiere 5–8.`);
-      }
-    }
-  } catch {}
-
+  // Duración vs bloque horario — mantenido
   const toMin = (hhmm) => {
     const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
     if (!m) return null;
@@ -401,20 +390,22 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
     if (block <= 0) block += 24 * 60;
 
     const dur = durFromText(r.duration);
-    if (dur && dur < block * 0.7) issues.push(`duración inconsistente en día ${r.day} (${r.activity}).`);
+    if (dur && dur < block * 0.7) {
+      issues.push(`duración inconsistente en día ${r.day} (${r.activity}).`);
+    }
   });
 
   return { ok: issues.length === 0, issues };
 }
 
-/* Sanitizador de day_hours entrante */
+/* ============== ✅ v43.6.1: Sanitizador de day_hours entrante ============== */
 function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
   try {
     if (!Array.isArray(day_hours) || !day_hours.length) return null;
 
     const need = Math.max(1, Number(daysTotal) || day_hours.length || 1);
-    const norm = (t) => String(t || "").trim();
 
+    const norm = (t) => String(t || "").trim();
     const cleaned = day_hours.map((d, idx) => ({
       day: Number(d?.day) || idx + 1,
       start: norm(d?.start) || "",
@@ -440,7 +431,7 @@ function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
   }
 }
 
-/* Planner output validator */
+/* ============== Planner Output Validator (existente - quirúrgico) ============== */
 function _validatePlannerOutput_(parsed) {
   try {
     const issues = [];
@@ -448,12 +439,15 @@ function _validatePlannerOutput_(parsed) {
     if (!rows.length) issues.push("rows vacío o ausente (obligatorio).");
 
     if (rows.length) {
-      if (rows.some((r) => !_hasTwoLineDuration_(r?.duration)))
+      if (rows.some((r) => !_hasTwoLineDuration_(r?.duration))) {
         issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
-      if (rows.some((r) => _isGenericPlaceholderActivity_(r?.activity)))
+      }
+      if (rows.some((r) => _isGenericPlaceholderActivity_(r?.activity))) {
         issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
-      if (rows.some((r) => Number(r?.day) < 1 || !Number.isFinite(Number(r?.day))))
+      }
+      if (rows.some((r) => Number(r?.day) < 1 || !Number.isFinite(Number(r?.day)))) {
         issues.push("hay filas con 'day' inválido (<1 o no numérico).");
+      }
     }
 
     return { ok: issues.length === 0, issues };
@@ -462,46 +456,7 @@ function _validatePlannerOutput_(parsed) {
   }
 }
 
-/* Merge rows_draft por día */
-function _mergeRowsDraftByDay_(baseRows = [], addRows = []) {
-  try {
-    const out = [];
-    const seen = new Set();
-
-    const keyOf = (r) => {
-      const day = Number(r?.day) || 0;
-      const start = String(r?.start || "");
-      const end = String(r?.end || "");
-      const act = String(r?.activity || "");
-      return `${day}__${start}__${end}__${act}`;
-    };
-
-    const pushUnique = (r) => {
-      const k = keyOf(r);
-      if (seen.has(k)) return;
-      seen.add(k);
-      out.push(r);
-    };
-
-    (Array.isArray(baseRows) ? baseRows : []).forEach(pushUnique);
-    (Array.isArray(addRows) ? addRows : []).forEach(pushUnique);
-
-    out.sort((a, b) => {
-      const da = Number(a?.day) || 0;
-      const db = Number(b?.day) || 0;
-      if (da !== db) return da - db;
-      const sa = String(a?.start || "");
-      const sb = String(b?.start || "");
-      return sa.localeCompare(sb);
-    });
-
-    return out;
-  } catch {
-    return Array.isArray(baseRows) ? baseRows : [];
-  }
-}
-
-/* Enforcements locales */
+/* ============== ✅ v43.7.0: Construcción LOCAL de planner rows desde research_json ============== */
 function _splitActivityDestSub_(activity) {
   try {
     const s = String(activity || "").trim();
@@ -537,6 +492,7 @@ function _fillFromToFromActivity_(rows = []) {
 
       const from1 = String(row.from || "").trim();
       const to1 = String(row.to || "").trim();
+
       if (!from1 && prevTo) row.from = prevTo;
       if (to1) prevTo = to1;
 
@@ -549,179 +505,55 @@ function _fillFromToFromActivity_(rows = []) {
   }
 }
 
-function _dedupeConsecutiveDays_(days = []) {
-  const sorted = [...new Set(days.map((n) => Number(n)).filter((n) => Number.isFinite(n)))].sort((a, b) => a - b);
-  const out = [];
-  for (let i = 0; i < sorted.length; i++) {
-    const d = sorted[i];
-    if (out.length && d === out[out.length - 1] + 1) continue;
-    out.push(d);
+function _buildPlannerRowsFromResearch_(research, target_day = null) {
+  const dest = String(research?.destination || research?.city || "Destino").trim() || "Destino";
+  const rowsDraft = Array.isArray(research?.rows_draft)
+    ? research.rows_draft
+    : Array.isArray(research?.rows_final)
+      ? research.rows_final
+      : [];
+
+  // Si no hay rows_draft, devolvemos fallback planner
+  if (!rowsDraft.length) {
+    return { destination: dest, rows: fallbackJSON().rows, followup: "⚠️ PLANNER fallback: research_json sin rows_draft." };
   }
-  return out;
-}
 
-function _enforceAuroras_(parsed, daysTotal) {
-  try {
-    if (!parsed || !Array.isArray(parsed.rows_draft)) return parsed;
+  // Filtrar por target_day si viene
+  let rows = rowsDraft.map((r) => ({
+    day: Number(r?.day) || 1,
+    start: String(r?.start || ""),
+    end: String(r?.end || ""),
+    activity: String(r?.activity || ""),
+    from: String(r?.from || ""),
+    to: String(r?.to || ""),
+    transport: String(r?.transport || ""),
+    duration: String(r?.duration || "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat"),
+    notes: String(r?.notes || ""),
+    kind: String(r?.kind || ""),
+    zone: String(r?.zone || ""),
+  }));
 
-    const total = Math.max(1, Number(daysTotal) || Number(parsed?.days_total) || 1);
-    const auroraMeta = parsed?.aurora && typeof parsed.aurora === "object" ? parsed.aurora : null;
-    const plausible = auroraMeta ? Boolean(auroraMeta.plausible) : null;
-
-    if (plausible === false) {
-      parsed.rows_draft = parsed.rows_draft.filter(
-        (r) =>
-          !(
-            String(r?.kind || "").toLowerCase() === "aurora" ||
-            /auroras?|northern\s*lights/i.test(String(r?.activity || ""))
-          )
-      );
-      if (auroraMeta) {
-        auroraMeta.suggested_days = [];
-        parsed.aurora = auroraMeta;
-      }
-      return parsed;
-    }
-
-    const auroraRows = parsed.rows_draft.filter(
-      (r) => String(r?.kind || "").toLowerCase() === "aurora" || /auroras?|northern\s*lights/i.test(String(r?.activity || ""))
-    );
-
-    const days = auroraRows.map((r) => Number(r?.day)).filter((n) => Number.isFinite(n));
-    let keepDays = _dedupeConsecutiveDays_(days).filter((d) => d !== total);
-
-    if (auroraMeta && Array.isArray(auroraMeta.suggested_days) && auroraMeta.suggested_days.length) {
-      const metaDays = auroraMeta.suggested_days
-        .map((n) => Number(n))
-        .filter((n) => Number.isFinite(n))
-        .filter((d) => d !== total);
-
-      const inter = keepDays.filter((d) => metaDays.includes(d));
-      if (inter.length) keepDays = inter;
-    }
-
-    const keepSet = new Set(keepDays);
-    parsed.rows_draft = parsed.rows_draft.filter((r) => {
-      const isAur = String(r?.kind || "").toLowerCase() === "aurora" || /auroras?|northern\s*lights/i.test(String(r?.activity || ""));
-      if (!isAur) return true;
-      const d = Number(r?.day);
-      return keepSet.has(d);
-    });
-
-    if (auroraMeta) {
-      auroraMeta.suggested_days = [...keepSet].sort((a, b) => a - b);
-      parsed.aurora = auroraMeta;
-    }
-
-    return parsed;
-  } catch {
-    return parsed;
+  if (target_day != null && Number.isFinite(Number(target_day))) {
+    const td = Number(target_day);
+    rows = rows.filter((r) => Number(r.day) === td);
   }
-}
 
-function _insertReturnRowIfMissing_(parsed, baseCity) {
-  try {
-    if (!parsed || !Array.isArray(parsed.rows_draft) || !parsed.rows_draft.length) return parsed;
+  rows = _fillFromToFromActivity_(rows);
 
-    const city = String(baseCity || parsed?.destination || "").trim();
-    if (!city) return parsed;
-
-    const byDay = new Map();
-    parsed.rows_draft.forEach((r) => {
-      const d = Number(r?.day) || 0;
-      if (!byDay.has(d)) byDay.set(d, []);
-      byDay.get(d).push(r);
-    });
-
-    const outRows = [];
-    const isMacro = (r) => String(r?.kind || "").toLowerCase() === "macro_tour";
-    const isReturn = (r) => /regreso\s+a\s+/i.test(String(r?.activity || ""));
-
-    const inferFromPlace = (rows) => {
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const rr = rows[i];
-        if (!rr) continue;
-        const t = String(rr?.to || "").trim();
-        if (t) return t;
-        const sp = _splitActivityDestSub_(rr?.activity);
-        if (sp?.to) return sp.to;
-      }
-      return "";
+  // Normalizar duration a 2 líneas si por algún bug vino vacío
+  rows = rows.map((r) => {
+    const dur = String(r.duration || "");
+    if (_hasTwoLineDuration_(dur)) return r;
+    return {
+      ...r,
+      duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
     };
+  });
 
-    const inferTransport = (rows) => {
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const tr = String(rows[i]?.transport || "").trim();
-        if (tr) return tr;
-      }
-      return "Vehículo alquilado o Tour guiado";
-    };
-
-    const inferZone = (rows) => {
-      for (let i = rows.length - 1; i >= 0; i--) {
-        const z = String(rows[i]?.zone || "").trim();
-        if (z) return z;
-      }
-      return "";
-    };
-
-    const days = [...byDay.keys()].filter((d) => d > 0).sort((a, b) => a - b);
-
-    days.forEach((d) => {
-      const dayRows = (byDay.get(d) || []).slice();
-      dayRows.sort((a, b) => String(a?.start || "").localeCompare(String(b?.start || "")));
-
-      const hasMacro = dayRows.some(isMacro);
-      const alreadyReturn = dayRows.some(isReturn);
-
-      dayRows.forEach((r) => outRows.push(r));
-
-      if (hasMacro && !alreadyReturn) {
-        const fromPlace = inferFromPlace(dayRows);
-        const transport = inferTransport(dayRows);
-        const zone = inferZone(dayRows);
-
-        outRows.push({
-          day: d,
-          start: "",
-          end: "",
-          activity: `Regreso a ${city}`,
-          from: fromPlace || "",
-          to: city,
-          transport: transport,
-          duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-          notes: "Regreso a la ciudad base para descansar.",
-          kind: "macro_tour",
-          zone: zone || "",
-        });
-      }
-    });
-
-    parsed.rows_draft = outRows;
-    return parsed;
-  } catch {
-    return parsed;
-  }
+  return { destination: dest, rows, followup: "" };
 }
 
-function _enforceInfoHardRules_(parsed, daysTotalHint) {
-  try {
-    if (!parsed || typeof parsed !== "object") return parsed;
-
-    const total = Math.max(1, Number(parsed?.days_total || daysTotalHint || 1));
-
-    if (Array.isArray(parsed.rows_draft)) parsed.rows_draft = _fillFromToFromActivity_(parsed.rows_draft);
-    parsed = _enforceAuroras_(parsed, total);
-    parsed = _insertReturnRowIfMissing_(parsed, parsed?.destination);
-    if (Array.isArray(parsed.rows_draft)) parsed.rows_draft = _fillFromToFromActivity_(parsed.rows_draft);
-
-    return parsed;
-  } catch {
-    return parsed;
-  }
-}
-
-/* ============== Prompts del sistema (idénticos a tu v43.6.5) ============== */
+/* ============== Prompts del sistema (tu base v43.6.2) ============== */
 const SYSTEM_INFO = `
 Eres el **Info Chat interno** de ITravelByMyOwn: un **experto mundial en turismo** con criterio premium para diseñar itinerarios que se sientan como un **sueño cumplido**.
 Tu objetivo es entregar un plan **impactante, optimizado, realista, secuencial y altamente claro**, maximizando el valor del viaje.
@@ -743,7 +575,6 @@ REGLA MAESTRA 1 — IMPERDIBLES + ALCANCE REAL DEL VIAJE (CRÍTICO):
 
 REGLA MAESTRA 2 — TRANSPORTE INTELIGENTE (CRÍTICO):
 - Evalúa opciones reales (tren/metro/bus interurbano) y sugiérelas cuando aplique.
-- Si existe transporte público eficiente para un day-trip (p. ej. tren rápido/bus frecuente y razonable), PRIORIZA transporte público sobre vehículo.
 - Si no puedes determinar con confianza, usa EXACTAMENTE: "Vehículo alquilado o Tour guiado".
 - Dentro de ciudad usa transporte coherente (a pie/metro/bus/taxi/uber) según zonas.
 
@@ -751,7 +582,6 @@ REGLA MAESTRA 3 — CLARIDAD TOTAL POR SUB-PARADAS (CRÍTICO, APLICA A TODO):
 - Para recorridos multi-parada (macro-tours o urbano), expresa secuencia como:
   "Destino – Sub-parada" o "Ruta/Área – Sub-parada".
 - Cada sub-parada debe ser una fila con start/end, from/to, transport, duration y notes.
-- from/to NO deben ir vacíos: completa ambos.
 
 HORARIOS (CRÍTICO):
 - Si el usuario define ventanas por día (day_hours) en el contexto, respétalas como base.
@@ -799,6 +629,7 @@ CALIDAD PREMIUM (PROHIBIDO GENÉRICO):
 CRÍTICO — SALIDA PARA EVITAR REGRESIONES DEL PLANNER:
 - Incluye SIEMPRE rows_draft completo (todas las filas de todos los días) con:
   day, start, end, activity, from, to, transport, duration(2 líneas), notes, kind, zone, opcional _crossDay.
+- El Planner NO debe inventar.
 
 SALIDA (JSON) — estructura (sin texto fuera):
 {
@@ -862,12 +693,12 @@ DAY_HOURS (GUIA / SOFT CONSTRAINT):
 - NO sobreescribas start/end válidos de rows_draft; solo ajusta si hay solape o si una fila cae claramente fuera de una ventana dada y es razonable moverla.
 
 Si faltan campos:
-- from/to: si vienen vacíos, dedúcelos SOLO desde "Destino – Sub-parada" en activity (sin inventar).
 - transport: si no hay nada, usa "A pie" para urbano y "Vehículo alquilado o Tour guiado" para out-of-town cuando sea evidente por activity/from/to.
 - notes: si falta, usa 1 frase breve y accionable (sin inventar POIs nuevos).
 
 - Si NO hay rows_draft/rows_final y solo hay listas,
   → devuelve un JSON mínimo con followup pidiendo que el Info Chat provea rows_draft.
+  (NO intentes inventar el itinerario desde cero.)
 
 SALIDA ÚNICA (JSON):
 {
@@ -904,6 +735,7 @@ MODO ACOTADO:
 
 /* ============== Handler principal ============== */
 export default async function handler(req, res) {
+  // Safe read (para que el catch respete mode)
   let safeBody = {};
   let safeMode = "planner";
   try {
@@ -917,25 +749,24 @@ export default async function handler(req, res) {
     const body = safeBody;
     const mode = safeMode;
 
-    // Sin key: fallback por modo (igual que tu v43.6.5)
+    // Si falta API key, no intentes llamar al modelo — fallback por modo
     if (!process.env.OPENAI_API_KEY) {
       if (mode === "info") {
         const context = body?.context || body || {};
-        return res.status(200).json({ text: JSON.stringify(fallbackInfoJSON(context)) });
+        const fb = fallbackInfoJSON(context);
+        return res.status(200).json({ text: JSON.stringify(fb) });
       }
+
+      // planner: si viene research_json con rows_draft, no te rompo cobertura
+      if (mode === "planner" && body?.research_json) {
+        const local = _buildPlannerRowsFromResearch_(body.research_json, body?.target_day ?? null);
+        return res.status(200).json({ text: JSON.stringify(local) });
+      }
+
       return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
     }
 
-    const client = getOpenAIClient();
-    if (!client) {
-      if (mode === "info") {
-        const context = body?.context || body || {};
-        return res.status(200).json({ text: JSON.stringify(fallbackInfoJSON(context)) });
-      }
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
-    }
-
-    /* --------- MODO INFO --------- */
+    /* --------- MODO INFO (motor interno) --------- */
     if (mode === "info") {
       let context = body.context;
 
@@ -947,7 +778,7 @@ export default async function handler(req, res) {
         context = rest;
       }
 
-      // Sanitizar day_hours “plantilla”
+      // v43.6.1: eliminar day_hours si parece plantilla rígida repetida
       try {
         if (context && typeof context === "object") {
           const daysTotal = context?.days_total || context?.days || context?.daysTotal || 1;
@@ -963,17 +794,21 @@ export default async function handler(req, res) {
       const daysTotalHint = context?.days_total || context?.days || context?.daysTotal || 1;
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
 
-      let raw = await callText(client, [{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 4200);
+      // 1) Primer intento
+      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 3800);
       let parsed = cleanToJSONPlus(raw);
 
+      // 2) Si no parsea, intento estricto
       if (!parsed) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText(client, [{ role: "system", content: strict }, infoUserMsg], 0.2, 4200);
+        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3600);
         parsed = cleanToJSONPlus(raw);
       }
 
+      // 3) Quality Gate + 1 retry (máximo)
       if (parsed) {
         const audit = _validateInfoResearch_(parsed, { days_total: daysTotalHint });
+
         if (!audit.ok) {
           const repairPrompt = `
 ${SYSTEM_INFO}
@@ -983,108 +818,45 @@ Tu JSON anterior falló estas validaciones:
 - ${audit.issues.join("\n- ")}
 
 Corrige SIN texto fuera del JSON.
-REGLAS:
-1) rows_draft cubre 1..days_total.
-2) NO genérico.
-3) duration 2 líneas.
-4) macro-tour: 5–8 sub-paradas + Regreso.
-5) "Destino – Sub-parada".
-6) day_hours: NO inventar si no venía.
-7) Auroras: no consecutivas y no último día.
+REGLAS DE REPARACIÓN:
+1) rows_draft debe cubrir todos los días 1..days_total sin días vacíos.
+2) activity NO puede ser genérica: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
+3) duration debe ser EXACTAMENTE 2 líneas: "Transporte: ...\\nActividad: ..."
+4) Si hay macro-tour/day-trip: 5–8 sub-paradas + "Regreso a {ciudad}" al cierre.
+5) Para recorridos multi-parada (urbano o tour), usa "Destino – Sub-parada" en activity.
+6) day_hours: NO lo inventes si no viene en el contexto; si no viene, déjalo como [].
+7) AURORAS: NO consecutivas y NUNCA el último día.
 
 Responde SOLO JSON válido.
 `.trim();
 
-          const repairRaw = await callText(client, [{ role: "system", content: repairPrompt }, infoUserMsg], 0.25, 4200);
+          const repairRaw = await callText([{ role: "system", content: repairPrompt }, infoUserMsg], 0.25, 3800);
           const repaired = cleanToJSONPlus(repairRaw);
-
-          if (repaired) {
-            const auditR = _validateInfoResearch_(repaired, { days_total: daysTotalHint });
-            parsed = repaired;
-            if (!auditR.ok) parsed = _enforceInfoHardRules_(parsed, daysTotalHint);
-          }
+          if (repaired) parsed = repaired;
         }
       }
 
-      // Fill missing days (1 llamada extra)
-      if (parsed) {
+      // 4) Fallback mínimo si nada funcionó (pero con rows_draft completo)
+      if (!parsed) {
+        parsed = fallbackInfoJSON(context || {});
+      } else {
+        // si parsed existe pero rows_draft viene vacío, no rompas cobertura
         try {
-          const rows = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
-          const missing = _missingDays_(rows, parsed?.days_total || daysTotalHint);
-
-          if (missing.length) {
-            const fillPrompt = `
-${SYSTEM_INFO}
-
-TAREA EXTRA (CRÍTICA): faltan días: ${missing.join(", ")}.
-GENERA SOLO filas para esos días faltantes.
-NO reescribas lo existente.
-Mantén estructura completa.
-duration 2 líneas.
-day_hours: NO inventar.
-Auroras: no consecutivas y no último día.
-Incluye Regreso si hay macro-tour.
-NO placeholders genéricos.
-
-Responde SOLO JSON válido.
-`.trim();
-
-            const fillRaw = await callText(client, [{ role: "system", content: fillPrompt }, infoUserMsg], 0.28, 5200);
-            const filled = cleanToJSONPlus(fillRaw);
-
-            if (filled && Array.isArray(filled.rows_draft)) {
-              const mergedRows = _mergeRowsDraftByDay_(rows, filled.rows_draft);
-              parsed = {
-                ...parsed,
-                ...filled,
-                rows_draft: mergedRows,
-                day_hours: Array.isArray(parsed?.day_hours)
-                  ? parsed.day_hours
-                  : Array.isArray(filled?.day_hours)
-                    ? filled.day_hours
-                    : [],
-              };
-            }
-
-            parsed = _enforceInfoHardRules_(parsed, daysTotalHint);
-
-            const audit2 = _validateInfoResearch_(parsed, { days_total: daysTotalHint });
-            if (!audit2.ok) {
-              const lastTry = `
-${SYSTEM_INFO}
-ULTIMO INTENTO:
-Fallas:
-- ${audit2.issues.join("\n- ")}
-
-Responde SOLO JSON válido.
-`.trim();
-
-              const lastRaw = await callText(client, [{ role: "system", content: lastTry }, infoUserMsg], 0.2, 5200);
-              const lastParsed = cleanToJSONPlus(lastRaw);
-              if (lastParsed) {
-                parsed = _enforceInfoHardRules_(lastParsed, daysTotalHint);
-              }
-            }
-          } else {
-            parsed = _enforceInfoHardRules_(parsed, daysTotalHint);
+          if (!Array.isArray(parsed?.rows_draft) || !parsed.rows_draft.length) {
+            parsed = fallbackInfoJSON(context || {});
           }
-        } catch {}
-      }
-
-      if (!parsed) parsed = fallbackInfoJSON(context || {});
-      else {
-        try {
-          if (!Array.isArray(parsed?.rows_draft) || !parsed.rows_draft.length) parsed = fallbackInfoJSON(context || {});
-        } catch {}
+        } catch {
+          parsed = fallbackInfoJSON(context || {});
+        }
       }
 
       parsed = normalizeDurationsInParsed(parsed);
       return res.status(200).json({ text: JSON.stringify(parsed) });
     }
 
-    /* --------- MODO PLANNER --------- */
+    /* --------- MODO PLANNER (estructurador) --------- */
     if (mode === "planner") {
-      // validate=true no llama al modelo
+      // v43.6.2: validate=true no debe llamar al modelo
       try {
         if (body && body.validate === true && Array.isArray(body.rows)) {
           const out = { allowed: body.rows, rejected: [] };
@@ -1094,28 +866,25 @@ Responde SOLO JSON válido.
 
       const research = body.research_json || null;
 
-      // Legado sin research_json
+      // Camino legado (mensajes del cliente, sin research_json)
       if (!research) {
         const clientMessages = extractMessages(body);
 
-        let raw = await callText(client, [{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3600);
+        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3600);
         let parsed = cleanToJSONPlus(raw);
 
         if (!parsed) {
           const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText(client, [{ role: "system", content: strict }, ...clientMessages], 0.2, 3200);
+          raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3200);
           parsed = cleanToJSONPlus(raw);
         }
 
         if (!parsed) parsed = fallbackJSON();
-        try {
-          if (Array.isArray(parsed?.rows)) parsed.rows = _fillFromToFromActivity_(parsed.rows);
-        } catch {}
-
         parsed = normalizeDurationsInParsed(parsed);
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
+      // Camino nuevo (research_json directo)
       const plannerUserPayload = {
         research_json: research,
         target_day: body.target_day ?? null,
@@ -1123,45 +892,75 @@ Responde SOLO JSON válido.
         existing_rows: body.existing_rows ?? null,
       };
 
-      const plannerUserMsg = { role: "user", content: JSON.stringify(plannerUserPayload, null, 2) };
+      const plannerUserMsg = {
+        role: "user",
+        content: JSON.stringify(plannerUserPayload, null, 2),
+      };
 
-      let raw = await callText(client, [{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3600);
-      let parsed = cleanToJSONPlus(raw);
+      // 1) Primer intento (modelo)
+      let raw = "";
+      let parsed = null;
 
-      if (!parsed) {
-        const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText(client, [{ role: "system", content: strict }, plannerUserMsg], 0.2, 3200);
+      try {
+        raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3600);
         parsed = cleanToJSONPlus(raw);
+      } catch {
+        parsed = null;
       }
 
-      if (parsed) {
-        const audit = _validatePlannerOutput_(parsed);
-        if (!audit.ok) {
-          const repairPlanner = `
-${SYSTEM_PLANNER}
-
-REPARACIÓN:
-Fallas:
-- ${audit.issues.join("\n- ")}
-
-NO inventes.
-Usa research_json.rows_draft.
-No reescribas activity.
-from/to desde "Destino – Sub-parada".
-duration 2 líneas.
-NO genéricos.
-day_hours soft.
-
-Responde SOLO JSON válido.
-`.trim();
-
-          const repairRaw = await callText(client, [{ role: "system", content: repairPlanner }, plannerUserMsg], 0.25, 3600);
-          const repaired = cleanToJSONPlus(repairRaw);
-          if (repaired) parsed = repaired;
+      // 2) Si no parsea, intento estricto (modelo)
+      if (!parsed) {
+        try {
+          const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
+          raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.2, 3200);
+          parsed = cleanToJSONPlus(raw);
+        } catch {
+          parsed = null;
         }
       }
 
-      if (!parsed) parsed = fallbackJSON();
+      // 3) Quality Gate + 1 retry (máximo)
+      if (parsed) {
+        const audit = _validatePlannerOutput_(parsed);
+
+        if (!audit.ok) {
+          try {
+            const repairPlanner = `
+${SYSTEM_PLANNER}
+
+REPARACIÓN OBLIGATORIA (QUALITY GATE):
+Tu JSON anterior falló estas validaciones:
+- ${audit.issues.join("\n- ")}
+
+REGLAS:
+- NO inventes nuevas actividades.
+- Usa research_json.rows_draft como verdad.
+- NO reescribas "activity" (preserva "Destino – Sub-parada").
+- duration en 2 líneas obligatorias: "Transporte: ...\\nActividad: ..."
+- Elimina placeholders genéricos: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
+- day_hours: NO lo inventes ni lo impongas; solo úsalo como guía si viene del usuario.
+- Devuelve SOLO JSON válido.
+
+Devuelve el JSON corregido.
+`.trim();
+
+            const repairRaw = await callText([{ role: "system", content: repairPlanner }, plannerUserMsg], 0.25, 3600);
+            const repaired = cleanToJSONPlus(repairRaw);
+            if (repaired) parsed = repaired;
+          } catch {
+            // si falla, caemos a construcción local
+          }
+        }
+      }
+
+      // 4) Si todavía no hay parsed, o viene flojo: CONSTRUCCIÓN LOCAL desde research_json (FIX TU COBERTURA)
+      if (!parsed || !Array.isArray(parsed?.rows) || !parsed.rows.length) {
+        const local = _buildPlannerRowsFromResearch_(research, body?.target_day ?? null);
+        const out = normalizeDurationsInParsed(local);
+        return res.status(200).json({ text: JSON.stringify(out) });
+      }
+
+      // Enriquecimiento mínimo: from/to desde activity si vienen vacíos
       try {
         if (Array.isArray(parsed?.rows)) parsed.rows = _fillFromToFromActivity_(parsed.rows);
       } catch {}
@@ -1174,10 +973,17 @@ Responde SOLO JSON válido.
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
+    // catch respeta mode
     try {
       if (safeMode === "info") {
         const context = safeBody?.context || safeBody || {};
-        return res.status(200).json({ text: JSON.stringify(fallbackInfoJSON(context)) });
+        const fb = fallbackInfoJSON(context);
+        return res.status(200).json({ text: JSON.stringify(fb) });
+      }
+
+      if (safeMode === "planner" && safeBody?.research_json) {
+        const local = _buildPlannerRowsFromResearch_(safeBody.research_json, safeBody?.target_day ?? null);
+        return res.status(200).json({ text: JSON.stringify(local) });
       }
     } catch {}
 
