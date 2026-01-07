@@ -8,7 +8,7 @@
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
 
   <!-- CSS (local, en -api/public) -->
-  <link rel="stylesheet" href="./planner.css?v=57" />
+  <link id="itbmo-css" rel="stylesheet" href="./planner.css?v=__V__" />
 
   <!-- Tipografía (carga optimizada, sin bloquear) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
@@ -189,6 +189,22 @@
   </button>
 
   <!-- JS (local, en -api/public) -->
-  <script src="./planner.js?v=57"></script>
+  <script>
+  (function(){
+    var qs = new URLSearchParams(location.search);
+    var v  = (qs.get('v') || '').trim() || '57'; // fallback solo si no viene v
+
+    // CSS cache-bust coherente
+    var css = document.getElementById('itbmo-css');
+    if (css) css.href = './planner.css?v=' + encodeURIComponent(v);
+
+    // Carga ÚNICA de planner.js (evita doble init)
+    var s = document.createElement('script');
+    s.src = './planner.js?v=' + encodeURIComponent(v);
+    s.defer = true;
+    document.body.appendChild(s);
+  })();
+</script>
+
 </body>
 </html>
