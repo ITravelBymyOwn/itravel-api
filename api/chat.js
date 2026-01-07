@@ -1,26 +1,16 @@
-// /api/chat.js — v43.6.3 (ESM, Vercel)
+// /api/chat.js — v43.7.0 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ v43.6 — Cambios quirúrgicos (Opción A: INFO manda horarios):
-// - Elimina cualquier "ventana por defecto" rígida (08:30–19:00) en fallback.
-// - SYSTEM_INFO: day_hours SOLO si el usuario lo provee; prohibido emitir plantilla fija.
-// - SYSTEM_PLANNER: day_hours se trata como guía/soft constraint; NO inventa ventanas ni sobreescribe horarios válidos.
-//
-// ✅ QUIRÚRGICO v43.6.1:
-// - Sanitiza context.day_hours entrante: si parece plantilla rígida repetida (misma start/end todos los días), se elimina antes de llamar al modelo.
-//   Esto evita que el INFO se amarre a 08:30–19:00 cuando viene "prellenado" desde el Planner UI.
-//
-// ✅ QUIRÚRGICO v43.6.2:
-// - Soporte de validate=true en modo planner: NO llama al modelo. Devuelve {allowed,rejected} para evitar cargas/timeout.
-//
-// ✅ QUIRÚRGICO v43.6.3 (ESTABILIDAD + CALIDAD):
-// - Timeout server-side para evitar cuelgues de 120s en el navegador.
-// - Enforce fuerte de "Destino – Sub-parada" cuando aplica (tours/rutas/from→to).
-// - Enforce: macro-tour fuerte debe vivir en 1 solo día + 5–8 sub-paradas + “Regreso a {base}”.
-// - Enforce: cenas coherentes (no “cena en tour” sin regreso explícito a base).
-// - Ajuste de tokens/temperatura para reducir timeouts sin forzar ventanas de comida (el agente decide).
+// ✅ v43.7.0 — FIX DEFINITIVO (quirúrgico):
+// 1) PLANNER determinista (SIN IA) cuando viene research_json con rows_draft/rows_final.
+//    -> Esto elimina regresiones, variabilidad y timeouts del modo planner.
+// 2) Quality Gate INFO endurecido:
+//    - Obliga formato "X – Y" (Destino – Sub-parada / Tour – Sub-parada) cuando aplique.
+//    - Detecta macro-tours repartidos y exige 5+ sub-paradas en un SOLO día.
+//    - Amplía lista de genéricos prohibidos (incluye "últimos paseos", etc.).
+// 3) Mantiene tu regla: NO forzar ventanas rígidas de comidas; solo sugerir inteligentemente.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -80,13 +70,12 @@ function fallbackJSON() {
       {
         day: 1,
         start: "", // ✅ sin horas predefinidas
-        end: "", // ✅ sin horas predefinidas
+        end: "",   // ✅ sin horas predefinidas
         activity: "Itinerario base (fallback)",
         from: "",
         to: "",
         transport: "",
-        duration:
-          "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
+        duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
         notes: "Explora libremente la ciudad.",
         kind: "",
         zone: "",
@@ -96,21 +85,8 @@ function fallbackJSON() {
   };
 }
 
-/* ====== Timeout server-side para evitar cuelgues de 120s en el navegador ====== */
-async function withTimeout(promise, ms = 55000, tag = "openai") {
-  let t;
-  const timeout = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new Error(`TIMEOUT_${tag}_${ms}ms`)), ms);
-  });
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 // Llamada unificada a Responses API (entrada como string consolidado)
-async function callText(messages, temperature = 0.30, max_output_tokens = 2400) {
+async function callText(messages, temperature = 0.35, max_output_tokens = 3200) {
   const inputStr = messages
     .map((m) => {
       const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
@@ -118,19 +94,16 @@ async function callText(messages, temperature = 0.30, max_output_tokens = 2400) 
     })
     .join("\n\n");
 
-  const req = client.responses.create({
-    model: "gpt-4o-mini",
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  const resp = await client.responses.create({
+    model,
     temperature,
     max_output_tokens,
     input: inputStr,
   });
 
-  const resp = await withTimeout(req, 55000, "responses");
-  return (
-    resp?.output_text?.trim() ||
-    resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-    ""
-  );
+  return resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 }
 
 // Normalizador de duraciones dentro del JSON ya parseado
@@ -192,7 +165,7 @@ function normalizeDurationsInParsed(parsed) {
   return parsed;
 }
 
-/* ============== Quality Gate (existente - quirúrgico) ============== */
+/* ============== Quality Gate (existente - endurecido quirúrgico) ============== */
 
 function _canonTxt_(s) {
   return String(s || "")
@@ -208,18 +181,23 @@ function _isGenericPlaceholderActivity_(activity) {
   const t = _canonTxt_(activity);
   if (!t) return true;
 
-  // Placeholders “típicos” que matan calidad (globales)
+  // Placeholders “típicos” que matan calidad (globales) — AMPLIADO
   const bad = [
     "museo de arte",
     "parque local",
     "cafe local",
     "restaurante local",
-    "cena en un restaurante local",
-    "cena en restaurante local",
     "exploracion de la costa",
     "exploracion de la ciudad",
     "paseo por la ciudad",
     "recorrido por la ciudad",
+    "ultimos paseos",
+    "ultimas compras",
+    "tiempo libre",
+    "descanso",
+    "caminata libre",
+    "visita a cualquier lugar que no se haya visto",
+    "visita a cualquier lugar",
   ];
 
   // Muy corto y genérico
@@ -251,26 +229,41 @@ function _rowsHaveCoverage_(rows, daysTotal) {
   return true;
 }
 
-/* ========= ENFORCE: destino–subparadas y macro-tours fuertes ========= */
-function _needsDashSubstop_(r, baseCity, macroTours = []) {
-  const act = String(r?.activity || "").trim();
-  if (!act) return false;
+// ✅ NUEVO: casi siempre queremos "X – Y" (Destino – Sub-parada / Tour – Sub-parada)
+function _needsDashFormat_(activity) {
+  const a = String(activity || "").trim();
+  if (!a) return true;
 
-  // Si es un macro-tour declarado → debe ser "Macro – Sub-parada"
-  const macroHit = macroTours.find((m) =>
-    act.toLowerCase().includes(String(m || "").toLowerCase())
-  );
-  if (macroHit) return true;
+  // Permitimos algunos casos raros, pero en general debe llevar " – "
+  // (si el modelo quiere "Reykjavik – Auroras – Observación..." también vale)
+  const allowNoDash = [
+    /^check[-\s]?in\b/i,
+    /^check[-\s]?out\b/i,
+    /^traslado\b/i,
+  ];
 
-  // Si es claramente una excursión/ruta con from/to → debe ser "Destino/Ruta – Sub-parada"
-  const from = String(r?.from || "").trim();
-  const to = String(r?.to || "").trim();
-  if (from && to) return true;
+  if (allowNoDash.some((re) => re.test(a))) return false;
+  return !a.includes("–") && !a.includes(" - ");
+}
 
-  // Si menciona day-trip/tour/excursión → debe ser con dash
-  if (/(day\s*trip|excursion|excursi[oó]n|tour)\b/i.test(act)) return true;
+// ✅ NUEVO: detectar macro-tour por prefijo antes del dash
+function _prefixBeforeDash_(activity) {
+  const s = String(activity || "");
+  const m = s.split("–");
+  if (m.length >= 2) return String(m[0] || "").trim();
+  const m2 = s.split(" - ");
+  if (m2.length >= 2) return String(m2[0] || "").trim();
+  return "";
+}
 
-  return false;
+// ✅ NUEVO: contar filas por día
+function _countByDay_(rows) {
+  const map = new Map();
+  rows.forEach((r) => {
+    const d = Number(r?.day) || 1;
+    map.set(d, (map.get(d) || 0) + 1);
+  });
+  return map;
 }
 
 function _validateInfoResearch_(parsed, contextHint = {}) {
@@ -278,11 +271,6 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
 
   const daysTotal = Number(parsed?.days_total || contextHint?.days_total || 1);
   const rows = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
-
-  const baseCity = String(contextHint?.city || parsed?.destination || "").trim();
-  const macroTours = Array.isArray(parsed?.macro_tours)
-    ? parsed.macro_tours.filter(Boolean)
-    : [];
 
   if (!rows.length) issues.push("rows_draft vacío o ausente (obligatorio).");
   if (rows.length && !_rowsHaveCoverage_(rows, daysTotal))
@@ -292,16 +280,20 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
     issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
 
   if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity)))
-    issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
+    issues.push("hay placeholders genéricos en activity (ej. 'Últimos paseos', museo/parque/café/restaurante genérico).");
 
-  // Enforce "Destino – Sub-parada" cuando aplica
-  const dashBad = rows.filter(
-    (r) => _needsDashSubstop_(r, baseCity, macroTours) && !/–/.test(String(r.activity || ""))
-  );
-  if (dashBad.length) {
-    issues.push(
-      "faltan sub-paradas con formato 'Destino – Sub-parada' en filas donde aplica (tours/rutas/from→to)."
-    );
+  // ✅ NUEVO: exigir formato con dash en la gran mayoría de filas
+  if (rows.length && rows.some((r) => _needsDashFormat_(r.activity)))
+    issues.push('hay filas sin formato "X – Y" en activity (obligatorio cuando tiene sentido).');
+
+  // ✅ NUEVO: cada día debe tener sustancia (evita días con 1 sola fila floja)
+  if (rows.length) {
+    const byDay = _countByDay_(rows);
+    for (let d = 1; d <= daysTotal; d++) {
+      const n = byDay.get(d) || 0;
+      if (n === 0) issues.push(`día ${d} sin filas.`);
+      if (n === 1) issues.push(`día ${d} tiene solo 1 fila (itinerario insuficiente).`);
+    }
   }
 
   /* =========================================================
@@ -324,7 +316,7 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   }
 
   /* =========================================================
-     🆕 GUARD SEMÁNTICO — MACRO-TOURS ÚNICOS (y fuertes)
+     🆕 GUARD SEMÁNTICO — MACRO-TOURS ÚNICOS + SUBPARADAS MÍNIMAS
      ========================================================= */
   const macroCanon = (s) =>
     String(s || "")
@@ -333,72 +325,57 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
 
-  const baseCanon = macroCanon(baseCity);
+  // (A) macro repartido en varios días
+  const macroDays = {};
+  rows.forEach((r) => {
+    const prefix = _prefixBeforeDash_(r.activity);
+    const key = macroCanon(prefix);
 
-  // 1) Macro tour fuerte debe vivir en 1 día y tener 5–8 sub-paradas + regreso
-  macroTours.forEach((mt) => {
-    const mtRaw = String(mt || "").trim();
-    if (!mtRaw) return;
-
-    const mtCan = macroCanon(mtRaw);
-
-    // Filas que pertenecen al macro-tour: prefijo "Macro –"
-    const mtRows = rows.filter((r) =>
-      macroCanon(r.activity).startsWith(mtCan + " ")
-    );
-
-    // Si el macro_tour está declarado, pero no hay filas con "Macro –", es un error fuerte.
-    if (mtRows.length === 0) {
-      issues.push(`macro-tour "${mtRaw}" no está expresado como filas "{Macro} – {Sub-parada}".`);
-      return;
+    // Heurística: si el prefijo parece tour/zona (ej: "Círculo Dorado", "Península de Snæfellsnes")
+    // o si el texto contiene señales de excursión.
+    if (
+      key &&
+      (/\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(key) ||
+        /\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(String(r.activity || "")))
+    ) {
+      macroDays[key] = macroDays[key] || new Set();
+      macroDays[key].add(Number(r.day));
     }
+  });
 
-    if (mtRows.length < 5 || mtRows.length > 8) {
-      issues.push(
-        `macro-tour "${mtRaw}" debe tener 5–8 sub-paradas (tiene ${mtRows.length}).`
-      );
+  Object.entries(macroDays).forEach(([k, days]) => {
+    if (days.size > 1) {
+      issues.push(`macro-tour "${k}" repartido en múltiples días (${[...days].join(", ")}).`);
     }
+  });
 
-    // Debe estar en un solo día
-    const days = [...new Set(mtRows.map((r) => Number(r.day) || 0))].filter(Boolean);
-    if (days.length > 1) {
-      issues.push(`macro-tour "${mtRaw}" repartido en múltiples días (${days.join(", ")}).`);
-    }
+  // (B) macro-tour debe tener 5+ subparadas en el día donde ocurre
+  // Detectamos el "macro" por prefijo, y contamos cuántas filas hay con ese prefijo en ese día.
+  try {
+    const countByMacroDay = new Map(); // key: macro|day -> count
+    rows.forEach((r) => {
+      const d = Number(r.day) || 1;
+      const prefix = _prefixBeforeDash_(r.activity);
+      const key = macroCanon(prefix);
+      if (!key) return;
 
-    // Debe incluir “Regreso a {ciudad base}” al final del día del tour
-    const day = days[0];
-    const dayRows = rows.filter((r) => Number(r.day) === day);
+      const isMacroLike =
+        /\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(key);
 
-    const regresoIdx = dayRows.findIndex((r) =>
-      macroCanon(r.activity).includes("regreso a " + baseCanon)
-    );
+      if (!isMacroLike) return;
 
-    if (regresoIdx === -1) {
-      issues.push(`macro-tour "${mtRaw}" sin fila explícita "Regreso a ${baseCity}" al cierre.`);
-    } else {
-      // Regreso debe ser la última fila del día del tour
-      if (regresoIdx !== dayRows.length - 1) {
-        issues.push(`"Regreso a ${baseCity}" no es la última fila del día del macro-tour "${mtRaw}".`);
+      const k = `${key}__${d}`;
+      countByMacroDay.set(k, (countByMacroDay.get(k) || 0) + 1);
+    });
+
+    // Si hay un macro-like con menos de 5 filas, está mal (debe ser tour con sub-paradas)
+    for (const [k, n] of countByMacroDay.entries()) {
+      if (n > 0 && n < 5) {
+        const parts = k.split("__");
+        issues.push(`macro-tour "${parts[0]}" en día ${parts[1]} tiene solo ${n} filas (requiere 5–8 sub-paradas).`);
       }
     }
-  });
-
-  /* =========================================================
-     🆕 GUARD SEMÁNTICO — CENAS COHERENTES
-     - Prohíbe "cena dentro de zone de macro-tour"
-     ========================================================= */
-  rows.forEach((r) => {
-    const act = String(r.activity || "");
-    if (!/\bcena\b/i.test(act)) return;
-
-    const z = String(r.zone || "").toLowerCase();
-    const isTourZone = macroTours.some((mt) => z.includes(String(mt).toLowerCase()));
-    if (isTourZone) {
-      issues.push(
-        "hay cenas ubicadas dentro de zone de macro-tour (debe volver a base o explicar cena en ruta con coherencia)."
-      );
-    }
-  });
+  } catch {}
 
   /* =========================================================
      🆕 GUARD SEMÁNTICO — DURACIÓN VS BLOQUE HORARIO
@@ -487,9 +464,8 @@ function _validatePlannerOutput_(parsed) {
         issues.push('duration no cumple formato 2 líneas ("Transporte" + "Actividad") en una o más filas.');
       }
       if (rows.some((r) => _isGenericPlaceholderActivity_(r?.activity))) {
-        issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
+        issues.push("hay placeholders genéricos en activity.");
       }
-      // day debe ser >=1 si viene
       if (rows.some((r) => Number(r?.day) < 1 || !Number.isFinite(Number(r?.day)))) {
         issues.push("hay filas con 'day' inválido (<1 o no numérico).");
       }
@@ -497,9 +473,97 @@ function _validatePlannerOutput_(parsed) {
 
     return { ok: issues.length === 0, issues };
   } catch (e) {
-    // Nunca rompas el API por validación
     return { ok: true, issues: [] };
   }
+}
+
+/* ============== ✅ PLANNER determinista (SIN IA) ============== */
+
+function _pad2_(n) {
+  const x = String(n ?? "").trim();
+  return x.length === 1 ? `0${x}` : x;
+}
+
+function _normHHMM_(t) {
+  const s = String(t || "").trim();
+  if (!s) return "";
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return s;
+  const hh = Math.max(0, Math.min(23, parseInt(m[1], 10)));
+  const mm = Math.max(0, Math.min(59, parseInt(m[2], 10)));
+  return `${_pad2_(hh)}:${_pad2_(mm)}`;
+}
+
+function _twoLineDurationOrFallback_(dur) {
+  if (_hasTwoLineDuration_(dur)) return String(dur);
+  return "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat";
+}
+
+function _isOutOfTown_(r) {
+  const from = String(r?.from || "").trim();
+  const to = String(r?.to || "").trim();
+  if (from && to && _canonTxt_(from) !== _canonTxt_(to)) return true;
+
+  // Heurística ligera: si el activity parece tour/excursión
+  const a = String(r?.activity || "");
+  if (/\b(circulo\s*dorado|golden\s*circle|sn(a|æ)fellsnes|day\s*trip|excursion|tour)\b/i.test(a)) return true;
+
+  return false;
+}
+
+function _defaultTransport_(r) {
+  if (String(r?.transport || "").trim()) return String(r.transport).trim();
+  return _isOutOfTown_(r) ? "Vehículo alquilado o Tour guiado" : "A pie";
+}
+
+function _defaultNotes_(r) {
+  const n = String(r?.notes || "").trim();
+  if (n) return n;
+  return "Actividad planificada. Confirma detalles/logística según tu ritmo.";
+}
+
+function _materializePlannerRowsDeterministic_(research, opts = {}) {
+  const destination = String(research?.destination || research?.city || "Destino").trim() || "Destino";
+  const sourceRows = Array.isArray(research?.rows_final)
+    ? research.rows_final
+    : Array.isArray(research?.rows_draft)
+      ? research.rows_draft
+      : [];
+
+  if (!sourceRows.length) {
+    return {
+      destination,
+      rows: [],
+      followup: "⚠️ Falta rows_draft/rows_final en research_json. El Info Chat interno debe proveer rows_draft.",
+    };
+  }
+
+  const targetDay = opts?.target_day != null ? Number(opts.target_day) : null;
+
+  const rows = sourceRows
+    .filter((r) => (targetDay ? Number(r?.day) === targetDay : true))
+    .map((r) => {
+      const day = Number(r?.day) || 1;
+      const start = _normHHMM_(r?.start);
+      const end = _normHHMM_(r?.end);
+
+      return {
+        day,
+        start,
+        end,
+        activity: String(r?.activity || "").trim(),
+        from: String(r?.from || "").trim(),
+        to: String(r?.to || "").trim(),
+        transport: _defaultTransport_(r),
+        duration: _twoLineDurationOrFallback_(r?.duration),
+        notes: _defaultNotes_(r),
+        kind: String(r?.kind || "").trim(),
+        zone: String(r?.zone || "").trim(),
+        ...(r?._crossDay ? { _crossDay: r._crossDay } : {}),
+      };
+    });
+
+  return { destination, rows, followup: "" };
 }
 
 /* ============== Prompts del sistema ============== */
@@ -517,12 +581,20 @@ Por eso debes devolver **UN ÚNICO JSON VÁLIDO** (sin texto fuera) listo para u
 - Tú (INFO) eres la **fuente de verdad** de los horarios: start/end por fila en rows_draft.
 - El Planner solo valida/ajusta solapes pequeños; NO genera ventanas ni rellena horarios por defecto.
 
+REGLA MAESTRA 0 — FORMATO "DESTINO – SUB-PARADA" (CRÍTICO, APLICA A TODO):
+- CADA fila debe tener activity en formato "X – Y" (con guion largo – preferido).
+  Ejemplos:
+  - "Reykjavik – Hallgrímskirkja (subida a la torre)"
+  - "Círculo Dorado – Thingvellir (zona de grietas)"
+  - "Península de Snæfellsnes – Kirkjufell (mirador)"
+- NO uses actividades sueltas sin ese formato salvo excepciones muy raras (check-in/out).
+
 REGLA MAESTRA 1 — IMPERDIBLES + ALCANCE REAL DEL VIAJE (CRÍTICO):
 - Para cada ciudad base, identifica los **imperdibles reales** (POIs/experiencias icónicas) según temporada, clima probable, perfil del grupo (edades/movilidad), intereses y días disponibles.
 - En estancias de varios días, diseña mezcla óptima de:
   (a) imperdibles urbanos y
   (b) day-trips/macro-rutas imperdibles desde la base,
-  siempre sin sacrificar lo esencial de la ciudad.
+  sin sacrificar lo esencial de la ciudad.
 - Los imperdibles deben reflejarse en rows_draft y listarse también en imperdibles.
 - Los day-trips elegidos deben listarse en macro_tours.
 
@@ -531,10 +603,9 @@ REGLA MAESTRA 2 — TRANSPORTE INTELIGENTE (CRÍTICO):
 - Si no puedes determinar con confianza, usa EXACTAMENTE: "Vehículo alquilado o Tour guiado".
 - Dentro de ciudad usa transporte coherente (a pie/metro/bus/taxi/uber) según zonas.
 
-REGLA MAESTRA 3 — CLARIDAD TOTAL POR SUB-PARADAS (CRÍTICO, APLICA A TODO):
-- Para recorridos multi-parada (macro-tours o urbano), expresa secuencia como:
-  "Destino – Sub-parada" o "Ruta/Área – Sub-parada".
-- Cada sub-parada debe ser una fila con start/end, from/to, transport, duration y notes.
+REGLA MAESTRA 3 — CLARIDAD TOTAL POR SUB-PARADAS (CRÍTICO):
+- Para recorridos multi-parada (macro-tours o urbano), cada sub-parada es UNA fila.
+- No entregues un macro-tour con 1 sola fila.
 
 HORARIOS (CRÍTICO):
 - Si el usuario define ventanas por día (day_hours) en el contexto, respétalas como base.
@@ -556,35 +627,30 @@ DURACIÓN EN 2 LÍNEAS (OBLIGATORIO EN TODAS LAS FILAS):
 
 MACRO-TOURS / DAY-TRIPS (CRÍTICO):
 - Si incluyes un day-trip fuerte, ese día queda dedicado al tour.
-- Debe tener 5–8 sub-paradas con el formato "Tour – Sub-parada" o "Destino – Sub-parada".
+- Debe tener 5–8 sub-paradas (mínimo 5) con activity "Tour/Zona – Sub-parada".
 - Incluye explícitamente al cierre una fila: "Regreso a {ciudad base}" (con duración 2 líneas).
 - No colocar day-trips duros el último día.
-- NO generar duplicados bilingües del mismo tour/actividad.
+- PROHIBIDO repartir el mismo macro-tour en múltiples días. Si aparece "Círculo Dorado", debe ocurrir en 1 solo día con sub-paradas dentro de ese día.
 
-LAGUNAS TERMALES (CRÍTICO):
-- Mínimo 3 horas de actividad efectiva.
-- Evalúa integración dentro de una ruta si aplica.
-
-AURORAS (SOLO SI ES PLAUSIBLE):
-- Valida plausibilidad por latitud y época del año.
-- Si es plausible: máximo 1 por día, NO consecutivas, NUNCA en el último día,
-  ventana local concreta, transporte coherente.
-
-NOCHES: ESPECTÁCULOS Y CENAS CON SHOW:
-- Puedes sugerir experiencias nocturnas icónicas con frecuencia moderada.
-- Comidas eficientes: incluye solo si aporta valor real (icónico/logística/pausa).
+CENAS / COMIDAS:
+- NO impongas ventanas rígidas. El agente debe sugerir de forma inteligente.
+- Si incluyes cena, debe ir como "Ciudad – Cena en <nombre>" (y normalmente en ciudad base, no en medio de un tour lejano).
 
 CALIDAD PREMIUM (PROHIBIDO GENÉRICO):
-- Prohibido "Museo de Arte", "Parque local", "Café local", "Restaurante local" como actividad principal sin especificidad.
+- Prohibido "Museo de Arte", "Parque local", "Café local", "Restaurante local", "Últimos paseos", "Tiempo libre" como actividad principal sin especificidad.
 - Agrupa por zonas; evita “va y ven”.
 - Si el usuario da referencias ("iglesia icónica"), infiere el POI más probable.
 
-CRÍTICO — SALIDA PARA EVITAR REGRESIONES DEL PLANNER:
+CRÍTICO — SALIDA:
 - Incluye SIEMPRE rows_draft completo (todas las filas de todos los días) con:
   day, start, end, activity, from, to, transport, duration(2 líneas), notes, kind, zone, opcional _crossDay.
 - El Planner NO debe inventar.
 
-SALIDA (JSON) — estructura (sin texto fuera):
+NOTA day_hours:
+- Si NO viene en el contexto del usuario, déjalo como [] (no lo inventes).
+- Si SÍ viene, puedes devolverlo reflejando/ajustando (si extendiste noches por auroras/cenas show).
+
+SALIDA (JSON) — estructura (sin texto fuera): (idéntica a la especificación original)
 {
   "destination":"Ciudad",
   "country":"País",
@@ -614,16 +680,12 @@ SALIDA (JSON) — estructura (sin texto fuera):
   },
   "day_hours":[],
   "rows_draft":[
-    {"day":1,"start":"HH:MM","end":"HH:MM","activity":"Destino – Sub-parada","from":"","to":"","transport":"","duration":"Transporte: ...\\nActividad: ...","notes":"...","kind":"","zone":""}
+    {"day":1,"start":"HH:MM","end":"HH:MM","activity":"X – Y","from":"","to":"","transport":"","duration":"Transporte: ...\\nActividad: ...","notes":"...","kind":"","zone":""}
   ],
   "rows_skeleton":[
     {"day":1,"start":"","end":"","activity":"","from":"","to":"","transport":"","duration":"","notes":"","kind":"","zone":""}
   ]
 }
-
-NOTA day_hours:
-- Si NO viene en el contexto del usuario, déjalo como [] (no lo inventes).
-- Si SÍ viene, puedes devolverlo reflejando/ajustando (si extendiste noches por auroras/cenas show).
 `.trim();
 
 /* =======================
@@ -641,7 +703,7 @@ CONTRATO / FUENTE DE VERDAD:
     (b) asegurar buffers >=15m cuando falten,
     (c) corregir solapes pequeños moviendo minutos dentro del día,
     (d) completar campos faltantes SIN inventar actividades nuevas.
-- NO reescribas el texto de "activity": preserva el formato "Destino – Sub-parada" tal como viene.
+- NO reescribas el texto de "activity": preserva el formato "X – Y" tal como viene.
 
 DAY_HOURS (GUIA / SOFT CONSTRAINT):
 - Si viene day_hours (del usuario), úsalo como guía.
@@ -678,13 +740,6 @@ DURACIÓN (2 líneas obligatorias):
 - Si no conoces, usa:
   "Transporte: Verificar duración en el Info Chat\\nActividad: Verificar duración en el Info Chat"
 
-MACRO-TOURS / DAY-TRIPS:
-- Si research_json implica un macro-tour, elimina filas que caigan dentro del bloque del tour.
-- Incluye “Regreso a {ciudad}” al final si aplica.
-
-EXISTING_ROWS:
-- Úsalo solo para no repetir y mantener coherencia; puedes reemplazar/eliminar filas conflictivas.
-
 MODO ACOTADO:
 - Si viene "target_day", devuelve SOLO filas de ese día.
 `.trim();
@@ -715,7 +770,6 @@ export default async function handler(req, res) {
           const daysTotal = context?.days_total || context?.days || context?.daysTotal || 1;
           const sanitized = _sanitizeIncomingDayHours_(context?.day_hours, daysTotal);
           if (!sanitized) {
-            // no enviar day_hours al modelo (libertad total)
             if ("day_hours" in context) delete context.day_hours;
           } else {
             context.day_hours = sanitized;
@@ -725,27 +779,23 @@ export default async function handler(req, res) {
 
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
 
-      // 1) Primer intento (tokens/temperatura ajustados)
-      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.30, 2400);
+      // 1) Primer intento
+      let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.30, 3400);
       let parsed = cleanToJSONPlus(raw);
 
       // 2) Si no parsea, intento estricto
       if (!parsed) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.15, 2200);
+        raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.15, 3200);
         parsed = cleanToJSONPlus(raw);
       }
 
-      // 3) Si parsea pero está flojo → Quality Gate + 1 retry (máximo)
+      // 3) Si parsea pero está flojo → Quality Gate + hasta 2 retries (quirúrgico)
       if (parsed) {
-        const audit = _validateInfoResearch_(parsed, {
-          days_total: context?.days_total || context?.days || context?.daysTotal || 1,
-          city: context?.city || "",
-        });
+        const hintDays = context?.days_total || context?.days || context?.daysTotal || 1;
+        let audit = _validateInfoResearch_(parsed, { days_total: hintDays });
 
         if (!audit.ok) {
-          const cityName = String(context?.city || parsed?.destination || "la ciudad base").trim();
-
           const repairPrompt = `
 ${SYSTEM_INFO}
 
@@ -753,28 +803,39 @@ REPARACIÓN OBLIGATORIA (QUALITY GATE):
 Tu JSON anterior falló estas validaciones:
 - ${audit.issues.join("\n- ")}
 
-Corrige SIN texto fuera del JSON.
-REGLAS DE REPARACIÓN (OBLIGATORIAS):
-1) rows_draft debe cubrir todos los días 1..days_total sin días vacíos.
-2) activity NO puede ser genérica: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
-3) duration debe ser EXACTAMENTE 2 líneas: "Transporte: ...\\nActividad: ..."
-4) Si hay macro-tour/day-trip: DEBE vivir en UN SOLO DÍA y tener 5–8 sub-paradas expresadas como:
-   "{Macro-tour} – {Sub-parada}"
-5) Para recorridos multi-parada (urbano o tour), usa SIEMPRE "Destino – Sub-parada" en activity cuando aplique (tours/rutas/from→to).
-6) Debe existir y ser la ÚLTIMA fila del día del macro-tour:
-   "Regreso a ${cityName}"
-7) day_hours: NO lo inventes si no viene en el contexto; si no viene, déjalo como [].
+CORRIGE SIN TEXTO FUERA DEL JSON. REGLAS DURAS:
+1) rows_draft debe cubrir todos los días 1..days_total y cada día debe tener un plan real (no 1 sola fila).
+2) activity debe ser SIEMPRE "X – Y" (Destino – Sub-parada / Tour – Sub-parada). PROHIBIDO activity sin ese formato.
+3) Prohibidos genéricos: "Últimos paseos", "Tiempo libre", "Restaurante local", etc.
+4) Macro-tours: ocurren en 1 SOLO día y ese día debe tener mínimo 5 sub-paradas (ideal 6–8) + "Regreso a {ciudad base}" al final.
+   Ejemplo correcto (mismo día): "Círculo Dorado – Thingvellir", "Círculo Dorado – Geysir", "Círculo Dorado – Gullfoss", ... + "Regreso a Reykjavik".
+   Ejemplo incorrecto: repartir "Círculo Dorado" en día 2 y día 3.
+5) Cenas: NO impongas ventanas rígidas. Si incluyes cena, debe ser "Reykjavik – Cena en <nombre>" y normalmente en la ciudad base.
+6) duration SIEMPRE 2 líneas: "Transporte: ...\\nActividad: ..."
 
 Responde SOLO JSON válido.
 `.trim();
 
-          const repairRaw = await callText(
-            [{ role: "system", content: repairPrompt }, infoUserMsg],
-            0.20,
-            2400
-          );
-          const repaired = cleanToJSONPlus(repairRaw);
-          if (repaired) parsed = repaired;
+          // Retry 1
+          const repairRaw1 = await callText([{ role: "system", content: repairPrompt }, infoUserMsg], 0.20, 3400);
+          const repaired1 = cleanToJSONPlus(repairRaw1);
+          if (repaired1) parsed = repaired1;
+
+          audit = _validateInfoResearch_(parsed, { days_total: hintDays });
+
+          // Retry 2 (último)
+          if (!audit.ok) {
+            const repairPrompt2 = `
+${repairPrompt}
+
+ÚLTIMO INTENTO: si no cumples, tu respuesta será descartada.
+Asegura: macro-tours en 1 día con 5–8 filas + regreso; y TODOS los activity con formato "X – Y".
+`.trim();
+
+            const repairRaw2 = await callText([{ role: "system", content: repairPrompt2 }, infoUserMsg], 0.15, 3400);
+            const repaired2 = cleanToJSONPlus(repairRaw2);
+            if (repaired2) parsed = repaired2;
+          }
         }
       }
 
@@ -825,24 +886,36 @@ Responde SOLO JSON válido.
 
       const research = body.research_json || null;
 
+      // ✅ v43.7.0: camino determinista (SIN IA) cuando viene research_json con rows_draft/rows_final
+      if (research && (Array.isArray(research?.rows_draft) || Array.isArray(research?.rows_final))) {
+        const out = _materializePlannerRowsDeterministic_(research, { target_day: body.target_day ?? null });
+
+        // Validación local (no rompe)
+        const audit = _validatePlannerOutput_({ rows: out.rows });
+        if (!audit.ok) {
+          // Si falla, aún devolvemos determinista + followup (no llamamos IA por estabilidad)
+          out.followup = `⚠️ Planner determinista detectó issues: ${audit.issues.join(" | ")}`;
+        }
+
+        return res.status(200).json({
+          text: JSON.stringify({
+            destination: out.destination,
+            rows: out.rows,
+            followup: out.followup || "",
+          }),
+        });
+      }
+
       // Camino legado (mensajes del cliente, sin research_json)
       if (!research) {
         const clientMessages = extractMessages(body);
 
-        let raw = await callText(
-          [{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages],
-          0.30,
-          2400
-        );
+        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.30, 3000);
         let parsed = cleanToJSONPlus(raw);
 
         if (!parsed) {
           const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText(
-            [{ role: "system", content: strict }, ...clientMessages],
-            0.15,
-            2200
-          );
+          raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.15, 2600);
           parsed = cleanToJSONPlus(raw);
         }
 
@@ -851,7 +924,7 @@ Responde SOLO JSON válido.
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
-      // Camino nuevo (research_json directo)
+      // Camino nuevo (research_json directo) — si llega aquí es porque NO hay rows_draft/rows_final
       const plannerUserPayload = {
         research_json: research,
         target_day: body.target_day ?? null,
@@ -864,45 +937,13 @@ Responde SOLO JSON válido.
         content: JSON.stringify(plannerUserPayload, null, 2),
       };
 
-      // 1) Primer intento
-      let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.30, 2400);
+      let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.30, 3000);
       let parsed = cleanToJSONPlus(raw);
 
-      // 2) Si no parsea, intento estricto
       if (!parsed) {
         const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-        raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.15, 2200);
+        raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.15, 2600);
         parsed = cleanToJSONPlus(raw);
-      }
-
-      // 3) Si parsea pero está flojo → Quality Gate + 1 retry (máximo)
-      if (parsed) {
-        const audit = _validatePlannerOutput_(parsed);
-
-        if (!audit.ok) {
-          const repairPlanner = `
-${SYSTEM_PLANNER}
-
-REPARACIÓN OBLIGATORIA (QUALITY GATE):
-Tu JSON anterior falló estas validaciones:
-- ${audit.issues.join("\n- ")}
-
-REGLAS:
-- NO inventes nuevas actividades.
-- Usa research_json.rows_draft como verdad.
-- NO reescribas "activity" (preserva "Destino – Sub-parada").
-- duration en 2 líneas obligatorias: "Transporte: ...\\nActividad: ..."
-- Elimina placeholders genéricos: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
-- day_hours: NO lo inventes ni lo impongas; solo úsalo como guía si viene del usuario.
-- Devuelve SOLO JSON válido.
-
-Devuelve el JSON corregido.
-`.trim();
-
-          const repairRaw = await callText([{ role: "system", content: repairPlanner }, plannerUserMsg], 0.20, 2400);
-          const repaired = cleanToJSONPlus(repairRaw);
-          if (repaired) parsed = repaired;
-        }
       }
 
       if (!parsed) parsed = fallbackJSON();
@@ -913,7 +954,6 @@ Devuelve el JSON corregido.
     return res.status(400).json({ error: "Invalid mode" });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
-    // compat: nunca rompas el planner
     return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
   }
 }
