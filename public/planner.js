@@ -1,5 +1,5 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v79.3
+   ITRAVELBYMYOWN · PLANNER v79
    Base: v78
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
@@ -657,25 +657,16 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
-  function escapeHTML(s){
-    return String(s ?? '')
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;')
-      .replace(/'/g,'&#39;');
-  }
-
-  // ✅ Alineado con API: duration suele venir en 2 líneas:
-  // "Transporte: ...\nActividad: ..."
   function formatDurationForDisplay(val){
     if(!val) return '';
     const s = String(val).trim();
-    if(!s) return '';
-
-    // Render seguro + respeta saltos de línea del contrato
-    const safe = escapeHTML(s).replace(/\n/g, '<br>');
-    return safe;
+    const m = s.match(/^(\d+(?:\.\d+)?)\s*m$/i);
+    if(m){
+      const minutes = parseFloat(m[1]);
+      const hours = minutes / 60;
+      return (Number.isInteger(hours) ? `${hours}h` : `${hours}h`);
+    }
+    return s;
   }
 
   days.forEach(dayNum=>{
@@ -700,14 +691,14 @@ function renderCityItinerary(city){
       const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i, '').trim();
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${escapeHTML(r.start||'')}</td>
-        <td>${escapeHTML(r.end||'')}</td>
-        <td>${escapeHTML(cleanActivity)}</td>
-        <td>${escapeHTML(r.from||'')}</td>
-        <td>${escapeHTML(r.to||'')}</td>
-        <td>${escapeHTML(r.transport||'')}</td>
+        <td>${r.start||''}</td>
+        <td>${r.end||''}</td>
+        <td>${cleanActivity}</td>
+        <td>${r.from||''}</td>
+        <td>${r.to||''}</td>
+        <td>${r.transport||''}</td>
         <td>${formatDurationForDisplay(r.duration||'')}</td>
-        <td>${escapeHTML(cleanNotes)}</td>
+        <td>${cleanNotes}</td>
       `;
       tb.appendChild(tr);
     });
@@ -927,70 +918,40 @@ Reglas:
    ────────────────────────────────────────────────────────────
    🔍 v66 — Sección 12 reforzada con inteligencia contextual global
 ================================= */
-
-function resolveChatApiUrl(fallback){
-  try{
-    const qs = new URLSearchParams(location.search);
-
-    // 1) Prefer absolute explicit param (embed -> iframe qs)
-    const abs = (qs.get('chatApiAbs') || qs.get('chatApiABS') || '').trim();
-    if(abs) return decodeURIComponent(abs);
-
-    // 2) Build from apiBase + chatApi if present
-    const apiBase = (qs.get('apiBase') || '').trim();
-    const chatApi = (qs.get('chatApi') || '').trim();
-    if(apiBase && chatApi) return apiBase.replace(/\/$/,'') + chatApi;
-
-    // 3) Fallback to same-origin /api/chat if no explicit config
-    return fallback || '/api/chat';
-  }catch(_){
-    return fallback || '/api/chat';
-  }
-}
-
 async function callAgent(text, useHistory = true, opts = {}){
   // ⏳ Timeout ligeramente más agresivo para mejorar percepción de velocidad
   const { timeoutMs = 45000, cityName = null, baseDate = null } = opts;
 
   // 🧠 Historial compacto: últimas 6 interacciones para reducir tokens pero mantener contexto
-  const history = (() => {
-    if(!useHistory || !session?.messages?.length) return [];
-    try{
-      const msgs = session.messages;
-      const tail = msgs.slice(Math.max(0, msgs.length - 12)); // 6 pares aprox
-      return tail.map(m => ({ role: m.role, content: m.content }));
-    }catch(_){
-      return [];
-    }
-  })();
+  const history = useHistory
+    ? (Array.isArray(session) ? session.slice(Math.max(0, session.length - 12)) : [])
+    : [];
 
-  // ───────────────── Heurística dinámica global (sin romper si no está) ─────────────────
+  // ───────────────── Heurísticas dinámicas (no bloqueantes) ────────────────
   let heuristicsContext = '';
-  try{
-    if(cityName && typeof getHeuristicDayTripContext === 'function'){
-      const stayDaysForCity = (() => {
-        try{
-          // intenta derivar de planner state si existe
-          const rows = (typeof qsa === 'function' ? qsa('.city-row') : []);
-          if(rows?.length){
-            const r = rows.find(rr => {
-              const c = rr.querySelector?.('.city')?.value?.trim();
-              return c && c.toLowerCase() === String(cityName).toLowerCase();
-            }) || rows[0];
-            const d = Number(r?.querySelector?.('.days')?.value || 0);
-            return d || null;
-          }
-        }catch(_){}
-        return null;
-      })();
-
-      const auroraCity   = (typeof isAuroraCityDynamic === 'function') ? !!isAuroraCityDynamic(cityName) : null;
-      const auroraSeason = (typeof inAuroraSeasonDynamic === 'function') ? !!inAuroraSeasonDynamic(baseDate) : null;
-
-      const auroraWindow = (typeof AURORA_DEFAULT_WINDOW !== 'undefined' && AURORA_DEFAULT_WINDOW) ? AURORA_DEFAULT_WINDOW : null;
-      const dayTripCtx   = await getHeuristicDayTripContext(cityName, stayDaysForCity);
+  let auroraCity = false;
+  let auroraSeason = false;
+  let dayTripCtx = {};
+  let stayDaysForCity = 0; // usado para regla ≤3h si >5 días
+  try {
+    if (cityName) {
+      const coords = getCoordinatesForCity(cityName);
+      if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
+        auroraCity = isAuroraCityDynamic(coords.lat, coords.lng);
+      }
+      auroraSeason = inAuroraSeasonDynamic(baseDate);
+      dayTripCtx = getHeuristicDayTripContext(cityName) || {};
+      // Detecta días de estancia actuales (si existen estructuras globales)
+      if (typeof itineraries !== 'undefined' && itineraries[cityName]?.byDay) {
+        stayDaysForCity = Object.keys(itineraries[cityName].byDay).length;
+      } else if (Array.isArray(savedDestinations)) {
+        const d = savedDestinations.find(x => x.city === cityName);
+        stayDaysForCity = d?.days || 0;
+      }
+      const auroraWindow = AURORA_DEFAULT_WINDOW;
 
       heuristicsContext = `
+───────────────────────────────
 🧭 CONTEXTO HEURÍSTICO GLOBAL
 ───────────────────────────────
 - Ciudad: ${cityName}
@@ -1007,17 +968,35 @@ async function callAgent(text, useHistory = true, opts = {}){
 
   // ───────────────── Estilo / Reglas globales reforzadas (v66) ─────────────
   const globalStyle = `
-REGLAS CRÍTICAS (NO NEGOCIABLES):
-- El itinerario se decide en INFO (tú). El planner solo ordena/corrige choques pequeños.
-- No inventes ventanas rígidas si el usuario no las dio.
-- Cenas en horario adecuado (19:00–21:30 aprox.) aunque no haya show.
-- Tours / day trips deben desglosarse en paradas clave.
-- Siempre “Regreso a la ciudad” al final de excursiones fuera de la ciudad.
-- Auroras: si aplican, distribúyelas (no consecutivas, no solo el último día).
-- Duración SIEMPRE en 2 líneas:
-  Transporte: ...
-  Actividad: ...
-  Si no sabes: “Verificar duración en el Info Chat”.
+Eres "Astra", planificador internacional experto. Respondes con itinerarios y ediciones **realistas, optimizados y accionables**.
+
+📌 PRIORIDADES (v66):
+1) **Imperdibles primero**: identifica y coloca los atractivos icónicos de cada ciudad antes que el resto.
+2) **Secuencia lógica y sin estrés**: agrupa por zonas, reduce traslados, incluye buffers (≥15 min).
+3) **Sin duplicados**: evita repetir actividades entre días, salvo excepciones de temporada/nocturnas justificadas (e.g., auroras).
+4) **Ritmo/Energía**: balancea caminatas, comidas y descansos; evita jornadas maratónicas.
+5) **Experiencia local**: incluye gastronomía relevante y momentos fotogénicos cuando aporte valor.
+6) **Day trips**: solo si **aportan gran valor** y
+   • ≤ 2 h por trayecto (ida) por defecto; 
+   • ≤ 3 h por trayecto (ida) si la estancia en la ciudad **es > 5 días** (aplica a esta ciudad).
+   Siempre ida y vuelta el mismo día, con traslados claros y agenda secuencial (origen → visitas → regreso).
+7) **Sensibilidad costera**: si la ciudad es costera (p.ej. Barcelona), considera paseo marítimo/puerto/playa icónica cuando el tiempo lo permita, sin forzar clima.
+8) **Auroras** (si plausible por ciudad/fecha): horario nocturno 20:00–02:30, con \`valid:\` en notas, transporte coherente; puede repetirse varias noches **si** agrega valor.
+9) **Notas útiles siempre**: jamás dejes \`notes\` vacío ni \`seed\`; incluye tips de reserva, accesibilidad o contexto.
+
+🕒 HORARIOS (ALINEADO A API NUEVO):
+- Si el usuario define ventanas por día (perDay/day_hours), respétalas como guía.
+- Si el usuario NO define ventanas:
+  ✅ NO impongas una plantilla rígida (PROHIBIDO asumir 08:30–19:00 por defecto).
+  ✅ Genera horarios realistas por ciudad/estación/ritmo (INFO decide).
+
+🌦️ CLIMA/ESTACIONALIDAD (nivel general):
+- Ten en cuenta plausibilidad por estación (sin consultar en vivo); si una actividad es muy sensible al clima, sugiere plan B razonable.
+
+🛡️ SEGURIDAD/RESTRICCIONES:
+- Evita zonas con riesgos evidentes y marca alternativas seguras cuando aplique (breve, sin alarmismo).
+
+📄 FORMATO (estricto):
 - Usa el contrato JSON que se provee en el prompt de llamada (FORMAT). Nada de markdown ni texto fuera del JSON.
 - No excedas 20 filas por día.
 
@@ -1037,7 +1016,7 @@ ${heuristicsContext}
       history
     };
 
-    const res = await fetch(resolveChatApiUrl(API_URL), {
+    const res = await fetch(API_URL, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(payload),
@@ -1637,8 +1616,6 @@ function showWOW(on, msg){
    - Si falla: lanzar error para que SECCIÓN 16 no “finja éxito”
    - ✅ NUEVO (quirúrgico): NO enviar day_hours si parece plantilla rígida (misma ventana todos los días)
    - ✅ NUEVO (quirúrgico): callApiChat usa endpoint ABS del iframe si existe (chatApiAbs/apiBase)
-   - ✅ NUEVO (quirúrgico v79.x): Enriquecer Desde/Hacia cuando falten (cadena por día)
-   - ✅ NUEVO (quirúrgico v79.x): Insertar "Regreso al hotel" al final del día si falta (cierre logístico)
 ───────────────────────────────────────────────────────────── */
 
 /* ===== Resolver endpoint del API desde querystring (iframe-safe) ===== */
@@ -1770,147 +1747,6 @@ function __sanitizeDayHours__(day_hours, totalDays){
   }
 }
 
-/* ===== ✅ NUEVO (quirúrgico): enriquecer Desde/Hacia y cierre "Regreso al hotel" ===== */
-function __canon15_2__(s){
-  return String(s||'')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^\p{L}\p{N}\s]/gu,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
-function __inferToFromActivity__(activity){
-  const a = String(activity||'').trim();
-  // Formato típico: "Destino – Sub-parada"
-  const parts = a.split('–').map(x=>String(x||'').trim()).filter(Boolean);
-  if(parts.length >= 2){
-    return { left: parts[0], right: parts.slice(1).join(' – ').trim() };
-  }
-  // fallback: guion normal
-  const parts2 = a.split('-').map(x=>String(x||'').trim()).filter(Boolean);
-  if(parts2.length >= 2){
-    return { left: parts2[0], right: parts2.slice(1).join(' - ').trim() };
-  }
-  return { left:'', right:'' };
-}
-
-function __looksLikeReturnRow__(row){
-  const t = __canon15_2__(row?.activity);
-  if(!t) return false;
-  return (
-    t.includes('regreso al hotel') ||
-    t.includes('regreso a ') ||
-    t.includes('volver al hotel') ||
-    t.includes('return to ') ||
-    t.includes('back to ')
-  );
-}
-
-function __enrichRowsFromToAndReturn__(rows, { city='', hotelBase='', daysTotal=1 }={}){
-  if(!Array.isArray(rows) || !rows.length) return rows || [];
-  const out = rows.map(r=>normalizeRow(r));
-
-  // ordenar por day + start (si hay HH:MM)
-  out.sort((a,b)=>{
-    const da = Number(a.day)||1, db = Number(b.day)||1;
-    if(da!==db) return da-db;
-    return String(a.start||'').localeCompare(String(b.start||''));
-  });
-
-  const byDay = new Map();
-  for(const r of out){
-    const d = Number(r.day)||1;
-    if(!byDay.has(d)) byDay.set(d, []);
-    byDay.get(d).push(r);
-  }
-
-  const final = [];
-
-  for(let d=1; d<=Math.max(1, Number(daysTotal)||1); d++){
-    const dayRows = byDay.get(d) || [];
-    if(!dayRows.length) continue;
-
-    let prevTo = ''; // última "to" válida del día
-    for(const r of dayRows){
-      const { left, right } = __inferToFromActivity__(r.activity);
-
-      // Enriquecer to si falta
-      if(!r.to){
-        if(right) r.to = right;
-        else if(left && left !== city) r.to = left; // fallback suave
-      }
-
-      // Enriquecer from si falta
-      if(!r.from){
-        if(prevTo) r.from = prevTo;
-        else r.from = city || left || '';
-      }
-
-      // Normalizar si viene "from=city" siempre pero ya hay prevTo y falta lógica:
-      // (solo si from es exactamente city y el row no es el primero real del día)
-      if(prevTo && __canon15_2__(r.from) === __canon15_2__(city) && !__looksLikeReturnRow__(r)){
-        // si el usuario venía de un to concreto, esto mejora "secuencia"
-        r.from = prevTo;
-      }
-
-      // transport default ultra suave si quedó vacío
-      if(!r.transport){
-        // Si parece urbano (activity empieza con city o zona centro) → a pie
-        const actCanon = __canon15_2__(r.activity);
-        const isUrban = city && (actCanon.startsWith(__canon15_2__(city)) || __canon15_2__(r.zone).includes('centro'));
-        r.transport = isUrban ? 'A pie' : 'Vehículo alquilado o Tour guiado';
-      }
-
-      if(r.to) prevTo = r.to;
-
-      final.push(r);
-    }
-
-    // Insertar cierre "Regreso al hotel" si:
-    // - NO es el último día
-    // - hay hotelBase (el usuario dio contexto)
-    // - no existe ya una fila de regreso
-    if(d < Math.max(1, Number(daysTotal)||1) && hotelBase){
-      const hasReturn = dayRows.some(__looksLikeReturnRow__);
-      if(!hasReturn){
-        // ponerlo 15 min después del último bloque si hay hora; si no, sin horas (el render lo acepta)
-        const last = dayRows[dayRows.length - 1];
-        const start = String(last?.end || '').trim();
-        let end = '';
-
-        // sumar 30m si HH:MM
-        const m = start.match(/^(\d{1,2}):(\d{2})$/);
-        if(m){
-          const hh = Math.min(23, Math.max(0, parseInt(m[1],10)));
-          const mm = Math.min(59, Math.max(0, parseInt(m[2],10)));
-          const base = hh*60+mm;
-          const eMin = base + 30;
-          const eh = Math.floor((eMin%(24*60))/60);
-          const em = (eMin%(24*60))%60;
-          end = `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}`;
-        }
-
-        final.push(normalizeRow({
-          day: d,
-          start: start || '',
-          end: end || '',
-          activity: `${city} – Regreso al hotel`,
-          from: prevTo || city,
-          to: 'Hotel',
-          transport: 'A pie',
-          duration: 'Transporte: Verificar duración en el Info Chat\nActividad: 15m',
-          notes: 'Cierre logístico del día y regreso a la base para descansar.',
-          kind: 'transport',
-          zone: ''
-        }));
-      }
-    }
-  }
-
-  return final;
-}
-
 async function generateCityItinerary(city){
   window.__cityLocks = window.__cityLocks || {};
   if(!city) return;
@@ -2009,14 +1845,7 @@ async function generateCityItinerary(city){
     }
 
     /* ===== Integración usando pipeline estable (NO sobrescribir byDay a mano) ===== */
-    let tmpRows = parsed.rows.map(r=>normalizeRow(r));
-
-    // ✅ NUEVO (quirúrgico): enriquecer Desde/Hacia + cierre Regreso al hotel cuando falte
-    tmpRows = __enrichRowsFromToAndReturn__(tmpRows, {
-      city,
-      hotelBase: String(context.hotel_base || '').trim(),
-      daysTotal: dest.days
-    });
+    const tmpRows = parsed.rows.map(r=>normalizeRow(r));
 
     // Asegura estructura city en itineraries (sin romper contratos existentes)
     itineraries[city] = itineraries[city] || {};
@@ -2523,7 +2352,7 @@ function intentFromText(text){
 }
 
 /* ===========================================================
-   SECCIÓN 18 · Guard rails + Validación flexible FINAL (v79.x)
+   SECCIÓN 18 · Guard rails + Validación flexible FINAL (v79)
    Objetivo: robustez sin romper lo estable.
    Fuente de verdad: API (INFO + PLANNER)
    Aquí solo: robustez, normalización, retries controlados, anti-regresiones.
@@ -2638,73 +2467,37 @@ function parseApiTextToJSON(apiText){
 
 /* ─────────────────────────────────────────────────────────────
    [18.7] Helper: Call API (INFO/PLANNER) con timeout + abort
-   ✅ QUIRÚRGICO v79.x: NO colisionar firmas con la Sección 15.2
-   - Si ya existe window.callApiChat (firma mode,payload,opts), no redefinir.
-   - Si no existe, definimos un shim COMPATIBLE con 15.2.
+   ⚠️ FIX QUIRÚRGICO v79: respeta apiBase si existe (query ?apiBase=...)
 ───────────────────────────────────────────────────────────── */
-function __getChatEndpoint18__(){
-  try{
-    const qs = new URLSearchParams(window.location.search || '');
-    const abs = (qs.get('chatApiAbs') || '').trim();
-    if(abs) return abs;
-
-    const apiBase = (qs.get('apiBase') || '').trim();
-    const chatApi = (qs.get('chatApi') || '/api/chat').trim() || '/api/chat';
-    if(apiBase){
-      return apiBase.replace(/\/+$/,'') + (chatApi.startsWith('/') ? chatApi : `/${chatApi}`);
-    }
-  }catch(_){}
-  return "/api/chat";
-}
-
-if (typeof window !== 'undefined' && typeof window.callApiChat !== 'function' && typeof callApiChat !== 'function') {
-  window.callApiChat = async function(mode, payload = {}, opts = {}) {
-    const retries   = Number(opts.retries || 0);
-
-    const modeLc = String(mode || '').toLowerCase();
-    const defaultTimeout =
-      (modeLc === 'info')    ? 120000 :
-      (modeLc === 'planner') ? 120000 :
-      (modeLc === 'validate')? 30000  :
-      90000;
-
-    const timeoutMs = Number(opts.timeoutMs || defaultTimeout);
-    const url = __getChatEndpoint18__();
-
-    const doOnce = async ()=>{
-      const ctrl = new AbortController();
-      const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
-      try{
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ mode, ...payload }),
-          signal: ctrl.signal
-        });
-        const data = await resp.json().catch(()=>null);
-        if(!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
-        return data;
-      } finally {
-        clearTimeout(t);
-      }
-    };
-
-    let lastErr = null;
-    for (let i=0; i<=retries; i++){
-      try { return await doOnce(); }
-      catch(e){ lastErr = e; }
-    }
-    throw lastErr || new Error("callApiChat failed");
-  };
-
-  // exponer símbolo (sin window.) si alguien lo usa así
-  if (typeof callApiChat !== 'function') {
-    var callApiChat = window.callApiChat;
+if (typeof callApiChat !== 'function') {
+  function __getApiBase__(){
+    try{
+      // 1) Global explícito (si existe)
+      const g = (typeof window !== 'undefined') ? (window.apiBase || window.__ITBMO_API_BASE__) : '';
+      if (typeof g === 'string' && g.trim()) return g.trim().replace(/\/$/, '');
+      // 2) Query param ?apiBase=...
+      const p = (typeof window !== 'undefined') ? (new URLSearchParams(window.location.search).get('apiBase') || '') : '';
+      if (p && typeof p === 'string') return p.trim().replace(/\/$/, '');
+    }catch(_){}
+    // 3) Fallback: misma origin
+    return '';
   }
-} else {
-  // Si existe window.callApiChat, aseguramos alias global
-  if (typeof callApiChat !== 'function' && typeof window !== 'undefined' && typeof window.callApiChat === 'function') {
-    var callApiChat = window.callApiChat;
+
+  async function callApiChat(payload, { timeoutMs=32000 }={}){
+    const controller = new AbortController();
+    const t = setTimeout(()=>controller.abort(), timeoutMs);
+    try{
+      const resp = await fetch(`${__getApiBase__()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      const data = await resp.json().catch(()=>null);
+      return data;
+    } finally {
+      clearTimeout(t);
+    }
   }
 }
 
@@ -3022,7 +2815,6 @@ async function onSend(){
       const seedStart = (pd.start == null || String(pd.start).trim()==='') ? '' : String(pd.start).trim();
       const seedEnd   = (pd.end   == null || String(pd.end).trim()==='')   ? '' : String(pd.end).trim();
 
-      // ✅ FIX QUIRÚRGICO (alineado con API): duration SIEMPRE 2 líneas
       pushRows(city, [{
         day: numericPos,
         start: seedStart,
@@ -3031,7 +2823,7 @@ async function onSend(){
         from: `Hotel (${city})`,
         to: destTrip,
         transport: 'Tren/Bus',
-        duration: "Transporte: ~1h\nActividad: 0m",
+        duration: '≈ 1h',
         notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`
       }], false);
     }
@@ -3575,5 +3367,3 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   if ($start) $start.disabled = true;
 });
-
-
