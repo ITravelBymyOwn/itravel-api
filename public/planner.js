@@ -1808,6 +1808,11 @@ async function generateCityItinerary(city){
       special_conditions: plannerState?.specialConditions || ''
     };
 
+    // ✅ AJUSTE QUIRÚRGICO v15.2.1: si no hay day_hours reales, borrar la clave explícitamente
+    if (typeof safeDayHours === 'undefined' && context && typeof context === 'object' && 'day_hours' in context) {
+      delete context.day_hours;
+    }
+
     /* ===== ETAPA 1 — INFO ===== */
     const infoResp = await callApiChat('info', { context }, { timeoutMs: 120000, retries: 1 });
     const research = __safeParseJSON__(infoResp?.text ?? infoResp);
