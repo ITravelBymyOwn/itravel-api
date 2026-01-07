@@ -1,19 +1,15 @@
-// /api/chat.js — v43.6.2 (ESM, Vercel)
+// /api/chat.js — v43.6.3 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ v43.6 — Cambios quirúrgicos (Opción A: INFO manda horarios):
-// - Elimina cualquier "ventana por defecto" rígida (08:30–19:00) en fallback.
-// - SYSTEM_INFO: day_hours SOLO si el usuario lo provee; prohibido emitir plantilla fija.
-// - SYSTEM_PLANNER: day_hours se trata como guía/soft constraint; NO inventa ventanas ni sobreescribe horarios válidos.
-//
-// ✅ QUIRÚRGICO v43.6.1:
-// - Sanitiza context.day_hours entrante: si parece plantilla rígida repetida (misma start/end todos los días), se elimina antes de llamar al modelo.
-//   Esto evita que el INFO se amarre a 08:30–19:00 cuando viene "prellenado" desde el Planner UI.
-//
-// ✅ QUIRÚRGICO v43.6.2:
-// - Soporte de validate=true en modo planner: NO llama al modelo. Devuelve {allowed,rejected} para evitar cargas/timeout.
+// ✅ QUIRÚRGICO v43.6.3 (sobre v43.6.2):
+// - INFO Quality Gate ahora SÍ es "gate": revalida post-repair y permite 2 repairs máx.
+// - Nuevas validaciones INFO (sin inventar ventanas rígidas):
+//   (A) Si aurora.plausible=true y suggested_days no vacío → debe existir al menos 1 fila "Auroras" en rows_draft.
+//   (B) Macro-tour debe tener >=5 sub-paradas y NO repartirse en varios días.
+//   (C) Días de macro-tour deben incluir "Regreso a {ciudad base}" al final del mismo día.
+// - No fuerza ventanas de comidas; el agente solo sugiere.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -223,11 +219,58 @@ function _rowsHaveCoverage_(rows, daysTotal) {
   return true;
 }
 
+/* ============== helpers QUIRÚRGICOS para guards semánticos INFO ============== */
+
+function _macroCanonKey_(s) {
+  // Canon: "Círculo Dorado – Geysir" -> "circulo dorado"
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/–.*$/, "") // elimina " – sub-parada"
+    .replace(/-.*$/, "") // por si viene con "-"
+    .trim();
+}
+
+function _looksLikeMacroKey_(k) {
+  return /golden\s*circle|circulo\s*dorado|day\s*trip|excursion|tour\b/i.test(String(k || ""));
+}
+
+function _parseHHMMToMin_(hhmm) {
+  const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+}
+
+function _rowEndMinutes_(r) {
+  const s = _parseHHMMToMin_(r?.start);
+  const e = _parseHHMMToMin_(r?.end);
+  if (s == null || e == null) return null;
+  let block = e - s;
+  if (block <= 0) block += 24 * 60;
+  // para ordenar: usamos "start" como base y sumamos block
+  return s + block;
+}
+
+function _rowsByDay_(rows) {
+  const by = new Map();
+  (rows || []).forEach((r) => {
+    const d = Number(r?.day) || 1;
+    if (!by.has(d)) by.set(d, []);
+    by.get(d).push(r);
+  });
+  return by;
+}
+
 function _validateInfoResearch_(parsed, contextHint = {}) {
   const issues = [];
 
   const daysTotal = Number(parsed?.days_total || contextHint?.days_total || 1);
   const rows = Array.isArray(parsed?.rows_draft) ? parsed.rows_draft : [];
+
+  const cityBase =
+    String(contextHint?.city || parsed?.destination || parsed?.city || "")
+      .trim();
 
   if (!rows.length) issues.push("rows_draft vacío o ausente (obligatorio).");
   if (rows.length && !_rowsHaveCoverage_(rows, daysTotal))
@@ -240,12 +283,21 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
     issues.push("hay placeholders genéricos en activity (ej. museo/parque/café/restaurante genérico).");
 
   /* =========================================================
-     🆕 GUARD SEMÁNTICO — AURORAS
+     GUARD SEMÁNTICO — AURORAS
      ========================================================= */
-  const auroraDays = rows
-    .filter((r) => /auroras?|northern\s*lights/i.test(r.activity))
+  const auroraMetaPlausible = !!parsed?.aurora?.plausible;
+  const auroraSuggested = Array.isArray(parsed?.aurora?.suggested_days) ? parsed.aurora.suggested_days.map(Number).filter(Boolean) : [];
+  const auroraRows = rows.filter((r) => /auroras?|northern\s*lights/i.test(String(r?.activity || "")));
+
+  const auroraDays = auroraRows
     .map((r) => Number(r.day))
+    .filter(Boolean)
     .sort((a, b) => a - b);
+
+  // Si el modelo declara auroras plausibles y sugiere días, debe materializarlas como filas
+  if (auroraMetaPlausible && auroraSuggested.length > 0 && auroraRows.length === 0) {
+    issues.push("aurora.plausible=true con suggested_days, pero no hay ninguna fila de Auroras en rows_draft.");
+  }
 
   for (let i = 1; i < auroraDays.length; i++) {
     if (auroraDays[i] === auroraDays[i - 1] + 1) {
@@ -259,24 +311,25 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   }
 
   /* =========================================================
-     🆕 GUARD SEMÁNTICO — MACRO-TOURS ÚNICOS
+     GUARD SEMÁNTICO — MACRO-TOURS ÚNICOS
+     + mín. sub-paradas
+     + retorno el mismo día al final
      ========================================================= */
-  const macroCanon = (s) =>
-    String(s || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/–.*$/, "")
-      .trim();
 
+  // Detecta macro keys por actividades
   const macroDays = {};
+  const macroCount = {};
   rows.forEach((r) => {
-    const key = macroCanon(r.activity);
-    if (/golden\s*circle|circulo\s*dorado|day\s*trip|excursion|tour\b/i.test(key)) {
+    const key = _macroCanonKey_(r.activity);
+    if (_looksLikeMacroKey_(key)) {
       macroDays[key] = macroDays[key] || new Set();
       macroDays[key].add(Number(r.day));
+      macroCount[key] = (macroCount[key] || 0) + 1;
     }
   });
+
+  // Si hay lista macro_tours explícita, la usamos como "esperable" (fallback suave)
+  const macroToursList = Array.isArray(parsed?.macro_tours) ? parsed.macro_tours.map(_macroCanonKey_).filter(Boolean) : [];
 
   Object.entries(macroDays).forEach(([k, days]) => {
     if (days.size > 1) {
@@ -284,8 +337,62 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
     }
   });
 
+  // Mínimo de sub-paradas (5) para macro-tours detectados o declarados
+  const allMacroKeys = new Set([...Object.keys(macroCount), ...macroToursList]);
+  allMacroKeys.forEach((k) => {
+    if (!k) return;
+    // Solo aplicamos si "parece macro" o viene declarado en macro_tours
+    if (!_looksLikeMacroKey_(k) && !macroToursList.includes(k)) return;
+
+    const c = Number(macroCount[k] || 0);
+    if (c > 0 && c < 5) {
+      issues.push(`macro-tour "${k}" tiene solo ${c} sub-paradas (mínimo 5 requerido).`);
+    }
+  });
+
+  // Retorno el mismo día al final para macro-tours que ocurren en un día
+  // Regla: Si un día tiene filas macro, debe terminar con "Regreso a {ciudad base}" (misma day)
+  if (rows.length) {
+    const byDay = _rowsByDay_(rows);
+
+    // Para cada macroKey con day único
+    Object.entries(macroDays).forEach(([k, daysSet]) => {
+      const daysArr = [...daysSet];
+      if (daysArr.length !== 1) return; // si está repartido, ya está marcado
+      const d = daysArr[0];
+      if (d === daysTotal) {
+        issues.push(`macro-tour "${k}" cae en el último día (no permitido para day-trips duros).`);
+        return;
+      }
+
+      const dayRows = (byDay.get(d) || []).slice();
+      if (!dayRows.length) return;
+
+      // Ordena por "end" si existe, si no por índice
+      dayRows.sort((a, b) => {
+        const ea = _rowEndMinutes_(a);
+        const eb = _rowEndMinutes_(b);
+        if (ea == null && eb == null) return 0;
+        if (ea == null) return -1;
+        if (eb == null) return 1;
+        return ea - eb;
+      });
+
+      const last = dayRows[dayRows.length - 1];
+      const lastAct = _canonTxt_(last?.activity || "");
+
+      const expectsCity = cityBase ? _canonTxt_(cityBase) : "";
+      const hasReturn = /regreso a\s+/i.test(String(last?.activity || ""));
+      const returnMentionsCity = expectsCity ? lastAct.includes(expectsCity) : true;
+
+      if (!hasReturn || !returnMentionsCity) {
+        issues.push(`macro-tour "${k}" en día ${d} no termina con "Regreso a ${cityBase || "la ciudad base"}" como última fila del día.`);
+      }
+    });
+  }
+
   /* =========================================================
-     🆕 GUARD SEMÁNTICO — DURACIÓN VS BLOQUE HORARIO
+     GUARD SEMÁNTICO — DURACIÓN VS BLOQUE HORARIO (existente)
      ========================================================= */
   const toMin = (hhmm) => {
     const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
@@ -453,10 +560,12 @@ AURORAS (SOLO SI ES PLAUSIBLE):
 - Valida plausibilidad por latitud y época del año.
 - Si es plausible: máximo 1 por día, NO consecutivas, NUNCA en el último día,
   ventana local concreta, transporte coherente.
+- Si declaras aurora.plausible=true y suggested_days tiene días, debes crear al menos 1 fila "Auroras – ..." en rows_draft.
 
 NOCHES: ESPECTÁCULOS Y CENAS CON SHOW:
 - Puedes sugerir experiencias nocturnas icónicas con frecuencia moderada.
-- Comidas eficientes: incluye solo si aporta valor real (icónico/logística/pausa).
+- Comidas eficientes: sugiere cenas cuando aporte valor real (icónico/logística/pausa).
+  NO impongas ventanas rígidas; sugiere horarios razonables si corresponde.
 
 CALIDAD PREMIUM (PROHIBIDO GENÉRICO):
 - Prohibido "Museo de Arte", "Parque local", "Café local", "Restaurante local" como actividad principal sin especificidad.
@@ -620,13 +729,20 @@ export default async function handler(req, res) {
         parsed = cleanToJSONPlus(raw);
       }
 
-      // 3) Si parsea pero está flojo → Quality Gate + 1 retry (máximo)
+      // 3) Si parsea pero está flojo → Quality Gate + repairs (máximo 2) ✅ v43.6.3
       if (parsed) {
-        const audit = _validateInfoResearch_(parsed, {
-          days_total: context?.days_total || context?.days || context?.daysTotal || 1,
-        });
+        const daysHint = context?.days_total || context?.days || context?.daysTotal || 1;
+
+        const runAudit = (p) =>
+          _validateInfoResearch_(p, {
+            days_total: daysHint,
+            city: context?.city || "",
+          });
+
+        let audit = runAudit(parsed);
 
         if (!audit.ok) {
+          // Repair #1
           const repairPrompt = `
 ${SYSTEM_INFO}
 
@@ -635,20 +751,56 @@ Tu JSON anterior falló estas validaciones:
 - ${audit.issues.join("\n- ")}
 
 Corrige SIN texto fuera del JSON.
+
 REGLAS DE REPARACIÓN:
 1) rows_draft debe cubrir todos los días 1..days_total sin días vacíos.
 2) activity NO puede ser genérica: NO "Museo de Arte", NO "Parque Local", NO "Café Local", NO "Restaurante Local".
 3) duration debe ser EXACTAMENTE 2 líneas: "Transporte: ...\\nActividad: ..."
-4) Si hay macro-tour/day-trip: 5–8 sub-paradas + "Regreso a {ciudad}" al cierre.
-5) Para recorridos multi-parada (urbano o tour), usa "Destino – Sub-parada" en activity.
+4) Si hay macro-tour/day-trip: NO repartirlo en varios días.
+   Debe tener 5–8 sub-paradas + "Regreso a {ciudad base}" al cierre DEL MISMO DÍA como última fila.
+   No colocar day-trips duros el último día.
+5) Auroras: si aurora.plausible=true y suggested_days no vacío, agrega al menos 1 fila "Auroras – ..." en rows_draft.
+   NO consecutivas, NUNCA en último día.
 6) day_hours: NO lo inventes si no viene en el contexto; si no viene, déjalo como [].
+7) NO fuerces ventanas rígidas de comidas: si sugieres cenas, sugiere horarios razonables sin imponer plantillas repetidas.
 
 Responde SOLO JSON válido.
 `.trim();
 
-          const repairRaw = await callText([{ role: "system", content: repairPrompt }, infoUserMsg], 0.25, 3800);
-          const repaired = cleanToJSONPlus(repairRaw);
-          if (repaired) parsed = repaired;
+          const repairRaw1 = await callText([{ role: "system", content: repairPrompt }, infoUserMsg], 0.25, 3800);
+          const repaired1 = cleanToJSONPlus(repairRaw1);
+          if (repaired1) parsed = repaired1;
+
+          // ✅ Re-auditar post-repair (antes no se hacía)
+          audit = runAudit(parsed);
+
+          if (!audit.ok) {
+            // Repair #2 (más estricto y frío)
+            const repairPrompt2 = `
+${SYSTEM_INFO}
+
+REPARACIÓN FINAL (SEGUNDO INTENTO):
+AÚN FALLA por:
+- ${audit.issues.join("\n- ")}
+
+OBLIGATORIO:
+- Responde SOLO JSON válido.
+- No inventes day_hours si no viene.
+- No repartas macro-tours en días distintos.
+- Macro-tour: mínimo 5 sub-paradas.
+- Debe existir "Regreso a ${String(context?.city || "la ciudad base").trim()}" al FINAL del día del macro-tour.
+- Si aurora.plausible=true y suggested_days no vacío: crea filas "Auroras – ..." cumpliendo reglas.
+
+Entrega un JSON correcto.
+`.trim();
+
+            const repairRaw2 = await callText([{ role: "system", content: repairPrompt2 }, infoUserMsg], 0.15, 3800);
+            const repaired2 = cleanToJSONPlus(repairRaw2);
+            if (repaired2) parsed = repaired2;
+
+            // Re-auditar final (si todavía falla, devolvemos lo mejor logrado; evitamos romper el flujo)
+            audit = runAudit(parsed);
+          }
         }
       }
 
