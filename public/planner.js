@@ -1,5 +1,5 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v79
+   ITRAVELBYMYOWN · PLANNER v79.3
    Base: v78
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
@@ -918,40 +918,70 @@ Reglas:
    ────────────────────────────────────────────────────────────
    🔍 v66 — Sección 12 reforzada con inteligencia contextual global
 ================================= */
+
+function resolveChatApiUrl(fallback){
+  try{
+    const qs = new URLSearchParams(location.search);
+
+    // 1) Prefer absolute explicit param (embed -> iframe qs)
+    const abs = (qs.get('chatApiAbs') || qs.get('chatApiABS') || '').trim();
+    if(abs) return decodeURIComponent(abs);
+
+    // 2) Build from apiBase + chatApi if present
+    const apiBase = (qs.get('apiBase') || '').trim();
+    const chatApi = (qs.get('chatApi') || '').trim();
+    if(apiBase && chatApi) return apiBase.replace(/\/$/,'') + chatApi;
+
+    // 3) Fallback to same-origin /api/chat if no explicit config
+    return fallback || '/api/chat';
+  }catch(_){
+    return fallback || '/api/chat';
+  }
+}
+
 async function callAgent(text, useHistory = true, opts = {}){
   // ⏳ Timeout ligeramente más agresivo para mejorar percepción de velocidad
   const { timeoutMs = 45000, cityName = null, baseDate = null } = opts;
 
   // 🧠 Historial compacto: últimas 6 interacciones para reducir tokens pero mantener contexto
-  const history = useHistory
-    ? (Array.isArray(session) ? session.slice(Math.max(0, session.length - 12)) : [])
-    : [];
+  const history = (() => {
+    if(!useHistory || !session?.messages?.length) return [];
+    try{
+      const msgs = session.messages;
+      const tail = msgs.slice(Math.max(0, msgs.length - 12)); // 6 pares aprox
+      return tail.map(m => ({ role: m.role, content: m.content }));
+    }catch(_){
+      return [];
+    }
+  })();
 
-  // ───────────────── Heurísticas dinámicas (no bloqueantes) ────────────────
+  // ───────────────── Heurística dinámica global (sin romper si no está) ─────────────────
   let heuristicsContext = '';
-  let auroraCity = false;
-  let auroraSeason = false;
-  let dayTripCtx = {};
-  let stayDaysForCity = 0; // usado para regla ≤3h si >5 días
-  try {
-    if (cityName) {
-      const coords = getCoordinatesForCity(cityName);
-      if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number') {
-        auroraCity = isAuroraCityDynamic(coords.lat, coords.lng);
-      }
-      auroraSeason = inAuroraSeasonDynamic(baseDate);
-      dayTripCtx = getHeuristicDayTripContext(cityName) || {};
-      // Detecta días de estancia actuales (si existen estructuras globales)
-      if (typeof itineraries !== 'undefined' && itineraries[cityName]?.byDay) {
-        stayDaysForCity = Object.keys(itineraries[cityName].byDay).length;
-      } else if (Array.isArray(savedDestinations)) {
-        const d = savedDestinations.find(x => x.city === cityName);
-        stayDaysForCity = d?.days || 0;
-      }
-      const auroraWindow = AURORA_DEFAULT_WINDOW;
+  try{
+    if(cityName && typeof getHeuristicDayTripContext === 'function'){
+      const stayDaysForCity = (() => {
+        try{
+          // intenta derivar de planner state si existe
+          const rows = (typeof qsa === 'function' ? qsa('.city-row') : []);
+          if(rows?.length){
+            const r = rows.find(rr => {
+              const c = rr.querySelector?.('.city')?.value?.trim();
+              return c && c.toLowerCase() === String(cityName).toLowerCase();
+            }) || rows[0];
+            const d = Number(r?.querySelector?.('.days')?.value || 0);
+            return d || null;
+          }
+        }catch(_){}
+        return null;
+      })();
+
+      const auroraCity   = (typeof isAuroraCityDynamic === 'function') ? !!isAuroraCityDynamic(cityName) : null;
+      const auroraSeason = (typeof inAuroraSeasonDynamic === 'function') ? !!inAuroraSeasonDynamic(baseDate) : null;
+
+      const auroraWindow = (typeof AURORA_DEFAULT_WINDOW !== 'undefined' && AURORA_DEFAULT_WINDOW) ? AURORA_DEFAULT_WINDOW : null;
+      const dayTripCtx   = await getHeuristicDayTripContext(cityName, stayDaysForCity);
 
       heuristicsContext = `
-───────────────────────────────
 🧭 CONTEXTO HEURÍSTICO GLOBAL
 ───────────────────────────────
 - Ciudad: ${cityName}
@@ -968,35 +998,17 @@ async function callAgent(text, useHistory = true, opts = {}){
 
   // ───────────────── Estilo / Reglas globales reforzadas (v66) ─────────────
   const globalStyle = `
-Eres "Astra", planificador internacional experto. Respondes con itinerarios y ediciones **realistas, optimizados y accionables**.
-
-📌 PRIORIDADES (v66):
-1) **Imperdibles primero**: identifica y coloca los atractivos icónicos de cada ciudad antes que el resto.
-2) **Secuencia lógica y sin estrés**: agrupa por zonas, reduce traslados, incluye buffers (≥15 min).
-3) **Sin duplicados**: evita repetir actividades entre días, salvo excepciones de temporada/nocturnas justificadas (e.g., auroras).
-4) **Ritmo/Energía**: balancea caminatas, comidas y descansos; evita jornadas maratónicas.
-5) **Experiencia local**: incluye gastronomía relevante y momentos fotogénicos cuando aporte valor.
-6) **Day trips**: solo si **aportan gran valor** y
-   • ≤ 2 h por trayecto (ida) por defecto; 
-   • ≤ 3 h por trayecto (ida) si la estancia en la ciudad **es > 5 días** (aplica a esta ciudad).
-   Siempre ida y vuelta el mismo día, con traslados claros y agenda secuencial (origen → visitas → regreso).
-7) **Sensibilidad costera**: si la ciudad es costera (p.ej. Barcelona), considera paseo marítimo/puerto/playa icónica cuando el tiempo lo permita, sin forzar clima.
-8) **Auroras** (si plausible por ciudad/fecha): horario nocturno 20:00–02:30, con \`valid:\` en notas, transporte coherente; puede repetirse varias noches **si** agrega valor.
-9) **Notas útiles siempre**: jamás dejes \`notes\` vacío ni \`seed\`; incluye tips de reserva, accesibilidad o contexto.
-
-🕒 HORARIOS (ALINEADO A API NUEVO):
-- Si el usuario define ventanas por día (perDay/day_hours), respétalas como guía.
-- Si el usuario NO define ventanas:
-  ✅ NO impongas una plantilla rígida (PROHIBIDO asumir 08:30–19:00 por defecto).
-  ✅ Genera horarios realistas por ciudad/estación/ritmo (INFO decide).
-
-🌦️ CLIMA/ESTACIONALIDAD (nivel general):
-- Ten en cuenta plausibilidad por estación (sin consultar en vivo); si una actividad es muy sensible al clima, sugiere plan B razonable.
-
-🛡️ SEGURIDAD/RESTRICCIONES:
-- Evita zonas con riesgos evidentes y marca alternativas seguras cuando aplique (breve, sin alarmismo).
-
-📄 FORMATO (estricto):
+REGLAS CRÍTICAS (NO NEGOCIABLES):
+- El itinerario se decide en INFO (tú). El planner solo ordena/corrige choques pequeños.
+- No inventes ventanas rígidas si el usuario no las dio.
+- Cenas en horario adecuado (19:00–21:30 aprox.) aunque no haya show.
+- Tours / day trips deben desglosarse en paradas clave.
+- Siempre “Regreso a la ciudad” al final de excursiones fuera de la ciudad.
+- Auroras: si aplican, distribúyelas (no consecutivas, no solo el último día).
+- Duración SIEMPRE en 2 líneas:
+  Transporte: ...
+  Actividad: ...
+  Si no sabes: “Verificar duración en el Info Chat”.
 - Usa el contrato JSON que se provee en el prompt de llamada (FORMAT). Nada de markdown ni texto fuera del JSON.
 - No excedas 20 filas por día.
 
@@ -1016,7 +1028,7 @@ ${heuristicsContext}
       history
     };
 
-    const res = await fetch(API_URL, {
+    const res = await fetch(resolveChatApiUrl(API_URL), {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(payload),
