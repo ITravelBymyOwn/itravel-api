@@ -1,16 +1,12 @@
-// /api/chat.js — v43.7.1 (ESM, Vercel)
+// /api/chat.js — v43.7.2 (ESM, Vercel)
 // Doble etapa: (1) INFO (IA) → (2) PLANNER (determinista).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ Objetivo v43.7.1 (simplificación SIN romper integración):
-// - Reducir latencia: INFO hace 1 intento + 1 retry SOLO si no parsea JSON.
-// - Elimina bucles de “repair/quality gate retries” (eran el gran costo).
-// - Mantiene TODAS las reglas/contratos clave de itinerarios (dash, 2-line duration, macro-tours, no auroras consecutivas, etc.)
-// - PLANNER determinista se mantiene igual (cero IA cuando hay rows_draft/rows_final).
-//
-// Nota: seguimos auditando (quality gate) pero ya NO re-llamamos al modelo.
-//       Si falla, devolvemos el JSON con followup indicando issues (para depurar rápido).
+// ✅ v43.7.2 — FIX QUIRÚRGICO para no romper el JS:
+// - INFO hace 1 retry de reparación SOLO si parsea JSON pero falla QualityGate (ej: faltan días).
+// - Evita loops y mantiene latencia baja en el caso normal.
+// - PLANNER determinista igual: cero IA si hay rows_draft/rows_final.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -151,7 +147,7 @@ function normalizeDurationsInParsed(parsed) {
   return parsed;
 }
 
-/* ===================== Quality Gate (sin retries) ===================== */
+/* ===================== Quality Gate (endurecido) ===================== */
 function _canonTxt_(s) {
   return String(s || "")
     .toLowerCase()
@@ -279,7 +275,7 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   }
   if (auroraDays.includes(daysTotal)) issues.push("auroras programadas en el último día (no permitido).");
 
-  // Macro-tours en 1 día + 5+ sub-paradas (heurística)
+  // Macro-tours en 1 día + 5+ sub-paradas (heurística actual)
   const macroCanon = (s) =>
     String(s || "")
       .toLowerCase()
@@ -475,32 +471,32 @@ function _materializePlannerRowsDeterministic_(research, opts = {}) {
   return { destination, rows, followup: "" };
 }
 
-/* ===================== Prompts del sistema (compactos, mismas reglas) ===================== */
+/* ===================== Prompts del sistema (compactos) ===================== */
 const SYSTEM_INFO = `
 Eres el **Info Chat interno** de ITravelByMyOwn (experto premium en turismo).
 Devuelves **SOLO UN JSON VÁLIDO** (sin texto fuera). Tu salida alimenta un Planner determinista.
 
-REGLAS DURAS (aplican SIEMPRE):
+REGLAS DURAS:
 - rows_draft OBLIGATORIO, cubre días 1..days_total. Cada día debe tener plan real (no 1 sola fila).
 - activity debe ser "X – Y" (Destino/Tour – Sub-parada). Excepciones raras: check-in/out, traslado.
 - Prohibido genérico: "Museo de Arte", "Parque local", "Café local", "Restaurante local", "Últimos paseos", "Tiempo libre", etc.
-- duration SIEMPRE 2 líneas exactas:
+- duration SIEMPRE 2 líneas:
   "Transporte: <tiempo o Verificar duración en el Info Chat>"
   "Actividad: <tiempo o Verificar duración en el Info Chat>"
-- Horarios: NO inventes plantilla rígida repetida si no hay day_hours. Genera start/end realistas por fila. Buffers 15m. Diurno NO 01:00–05:00.
-- Macro-tours/day-trips: ocurren en 1 SOLO día, 5–8 sub-paradas mínimo 5, y al final incluye "Regreso a {ciudad base}".
+- Horarios: NO inventes plantilla rígida repetida si no hay day_hours. start/end realistas por fila. Buffers 15m. Diurno NO 01:00–05:00.
+- Macro-tours/day-trips: 1 SOLO día, 5–8 sub-paradas mínimo 5 + "Regreso a {ciudad base}" al final.
   No day-trips duros el último día. No repartir el mismo macro-tour en múltiples días.
-- Auroras (si aplican): NO consecutivas y NO último día.
+- Auroras (si aplican): NO consecutivas y NO último día. Se programan en la noche.
 
 Transporte:
-- Si no puedes determinar con confianza: "Vehículo alquilado o Tour guiado".
-- Urbano: a pie/metro/bus/taxi/uber coherente con ciudad.
+- Si no puedes determinar: "Vehículo alquilado o Tour guiado".
+- Urbano: A pie/metro/bus/taxi/uber coherente.
 
-NOTA day_hours:
+day_hours:
 - Si NO viene en contexto, devuelve [] (no inventes).
-- Si SÍ viene, respétalo como guía suave y puedes ajustarlo si extendiste noches por auroras/cenas.
+- Si SÍ viene, respétalo como guía suave y ajusta solo si extendiste noche.
 
-JSON (sin texto fuera), estructura:
+JSON:
 {
   "destination":"Ciudad",
   "country":"País",
@@ -540,9 +536,9 @@ JSON (sin texto fuera), estructura:
 
 const SYSTEM_PLANNER = `
 Eres Astra Planner. Recibes "research_json" del Info Chat interno.
-Tu trabajo es estructurar/validar para tabla. NO inventes creatividad.
+NO inventes creatividad.
 
-Si research_json trae rows_draft/rows_final: usa esas filas como verdad, solo normaliza HH:MM y completa campos faltantes (sin inventar POIs).
+Si research_json trae rows_draft/rows_final: usa esas filas como verdad, normaliza HH:MM y completa campos faltantes (sin inventar POIs).
 Si NO hay rows_draft/rows_final: devuelve JSON mínimo con followup pidiendo rows_draft.
 
 Salida SOLO JSON:
@@ -555,7 +551,7 @@ Salida SOLO JSON:
 Reglas:
 - duration 2 líneas obligatorio.
 - No diurno 01:00–05:00.
-- MODO ACOTADO: si viene "target_day", devuelve solo ese día.
+- Si viene "target_day", devuelve solo ese día.
 `.trim();
 
 /* ===================== Handler principal ===================== */
@@ -591,7 +587,6 @@ export default async function handler(req, res) {
         }
       } catch {}
 
-      // ✅ Compacto (menos tokens/latencia): NO pretty print
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }) };
 
       // Intento 1
@@ -603,6 +598,42 @@ export default async function handler(req, res) {
         const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde SOLO un JSON válido (sin texto fuera).`;
         raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.10, 2200);
         parsed = cleanToJSONPlus(raw);
+      }
+
+      // Si parseó, audit + 1 retry de reparación SOLO si falló QualityGate
+      if (parsed) {
+        try {
+          const hintDays = context?.days_total || context?.days || context?.daysTotal || 1;
+          const audit1 = _validateInfoResearch_(parsed, { days_total: hintDays });
+
+          if (!audit1.ok) {
+            const repair = `
+${SYSTEM_INFO}
+
+REPARACIÓN OBLIGATORIA (1 SOLO INTENTO):
+Tu JSON falló estas validaciones:
+- ${audit1.issues.join("\n- ")}
+
+CORRIGE:
+- rows_draft debe cubrir 1..days_total y cada día debe tener varias filas reales.
+- NO inventes day_hours si no venía.
+- Mantén duration 2 líneas y activity "X – Y" en TODAS las filas.
+Responde SOLO JSON válido.
+`.trim();
+
+            const repairRaw = await callText([{ role: "system", content: repair }, infoUserMsg], 0.15, 2600);
+            const repaired = cleanToJSONPlus(repairRaw);
+            if (repaired) parsed = repaired;
+
+            // Si aun falla, dejamos followup claro (pero no loops)
+            const audit2 = _validateInfoResearch_(parsed, { days_total: hintDays });
+            if (!audit2.ok) {
+              const prev = String(parsed?.followup || "").trim();
+              const msg = `⚠️ INFO QualityGate: ${audit2.issues.join(" | ")}`;
+              parsed.followup = prev ? `${prev}\n${msg}` : msg;
+            }
+          }
+        } catch {}
       }
 
       // Fallback mínimo si nada funcionó
@@ -634,17 +665,6 @@ export default async function handler(req, res) {
           rows_draft: [],
           rows_skeleton: [],
         };
-      } else {
-        // Audit local (sin re-llamar IA): si falla, devolvemos followup para diagnóstico rápido
-        try {
-          const hintDays = context?.days_total || context?.days || context?.daysTotal || 1;
-          const audit = _validateInfoResearch_(parsed, { days_total: hintDays });
-          if (!audit.ok) {
-            const prev = String(parsed.followup || "").trim();
-            const msg = `⚠️ INFO QualityGate: ${audit.issues.join(" | ")}`;
-            parsed.followup = prev ? `${prev}\n${msg}` : msg;
-          }
-        } catch {}
       }
 
       parsed = normalizeDurationsInParsed(parsed);
