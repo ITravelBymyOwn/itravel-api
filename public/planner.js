@@ -657,16 +657,25 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
+  function escapeHTML(s){
+    return String(s ?? '')
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;')
+      .replace(/'/g,'&#39;');
+  }
+
+  // ✅ Alineado con API: duration suele venir en 2 líneas:
+  // "Transporte: ...\nActividad: ..."
   function formatDurationForDisplay(val){
     if(!val) return '';
     const s = String(val).trim();
-    const m = s.match(/^(\d+(?:\.\d+)?)\s*m$/i);
-    if(m){
-      const minutes = parseFloat(m[1]);
-      const hours = minutes / 60;
-      return (Number.isInteger(hours) ? `${hours}h` : `${hours}h`);
-    }
-    return s;
+    if(!s) return '';
+
+    // Render seguro + respeta saltos de línea del contrato
+    const safe = escapeHTML(s).replace(/\n/g, '<br>');
+    return safe;
   }
 
   days.forEach(dayNum=>{
@@ -691,14 +700,14 @@ function renderCityItinerary(city){
       const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i, '').trim();
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td>${r.start||''}</td>
-        <td>${r.end||''}</td>
-        <td>${cleanActivity}</td>
-        <td>${r.from||''}</td>
-        <td>${r.to||''}</td>
-        <td>${r.transport||''}</td>
+        <td>${escapeHTML(r.start||'')}</td>
+        <td>${escapeHTML(r.end||'')}</td>
+        <td>${escapeHTML(cleanActivity)}</td>
+        <td>${escapeHTML(r.from||'')}</td>
+        <td>${escapeHTML(r.to||'')}</td>
+        <td>${escapeHTML(r.transport||'')}</td>
         <td>${formatDurationForDisplay(r.duration||'')}</td>
-        <td>${cleanNotes}</td>
+        <td>${escapeHTML(cleanNotes)}</td>
       `;
       tb.appendChild(tr);
     });
