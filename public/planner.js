@@ -3022,6 +3022,7 @@ async function onSend(){
       const seedStart = (pd.start == null || String(pd.start).trim()==='') ? '' : String(pd.start).trim();
       const seedEnd   = (pd.end   == null || String(pd.end).trim()==='')   ? '' : String(pd.end).trim();
 
+      // ✅ FIX QUIRÚRGICO (alineado con API): duration SIEMPRE 2 líneas
       pushRows(city, [{
         day: numericPos,
         start: seedStart,
@@ -3030,7 +3031,7 @@ async function onSend(){
         from: `Hotel (${city})`,
         to: destTrip,
         transport: 'Tren/Bus',
-        duration: '≈ 1h',
+        duration: "Transporte: ~1h\nActividad: 0m",
         notes: `Inicio del day trip desde el hotel en ${city} hacia ${destTrip}.`
       }], false);
     }
