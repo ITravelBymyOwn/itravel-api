@@ -1,35 +1,67 @@
-// /api/chat.js — v43.7.1 (ESM, Vercel)
-// Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
-// Respuestas SIEMPRE como { text: "<JSON|texto>" }.
-// ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
+// /api/chat.js — v42.2 (render-ready, fallback blindado, coherente con planner.js v75)
+// Cambios clave vs v42.1:
+// 1) Inserción automática de “Regreso a {Ciudad}” si falta en day-trips (con heurística).
+// 2) Límite duro de 20 actividades por día (compactación soft de excedentes).
+// 3) Normalización robusta de duraciones a patrón "HhMm" / "Xm" (corrige 'about 1 hr', '90 min', etc.).
+// 4) Uso de other_hints (ventanas horarias y notas) en post-proceso.
+// 5) Heurística de respaldo cuando facts.daytrip_patterns esté incompleto.
 //
-// ✅ v43.7.1 — FIX QUIRÚRGICO (tu error actual):
-// - INFO SIEMPRE entrega rows_draft (no vacío) con cobertura 1..days_total.
-//   Aunque el modelo falle, devuelva "rows" o devuelva un JSON incompleto.
-//
-// (Mantiene v43.7.0)
-// 1) Respuestas API robusto: responses.create -> chat.completions.
-// 2) PLANNER si falla: construye rows LOCALMENTE desde research_json.rows_draft.
-// 3) Fallback INFO real (rows_draft por día).
-// 4) Catch respeta mode y devuelve fallback correcto por modo.
-// 5) validate=true en planner: no llama al modelo.
+// Mantiene compatibilidad con el render de tablas y con las secciones 15–21 actuales.
+// Devuelve { text: JSON.stringify(finalJSON) } con estructura completa.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-/* ============== Utilidades comunes ============== */
-function parseBody(reqBody) {
-  if (!reqBody) return {};
-  if (typeof reqBody === "string") {
-    try {
-      return JSON.parse(reqBody);
-    } catch {
-      return {};
-    }
+/* ======================================================
+   REDIS CACHE OPCIONAL (estado temporal de itinerarios)
+====================================================== */
+let _redis = null;
+async function getRedis() {
+  if (_redis !== null) return _redis;
+  const has =
+    !!process.env.UPSTASH_REDIS_REST_URL &&
+    !!process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!has) return (_redis = false);
+  try {
+    const { Redis } = await import("@upstash/redis");
+    _redis = new Redis({
+      url: process.env.UPSTASH_REDIS_REST_URL,
+      token: process.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+  } catch {
+    _redis = false;
   }
-  return reqBody;
+  return _redis;
+}
+const K = (id) => `itbmo:itinerary:${id}`;
+async function storeLoad(id) {
+  const r = await getRedis();
+  if (!r || !id) return null;
+  try {
+    return await r.get(K(id));
+  } catch {
+    return null;
+  }
+}
+async function storeSave(obj) {
+  const r = await getRedis();
+  if (!r) return;
+  try {
+    await r.set(K(obj.itinerary_id), obj, { ex: 60 * 60 * 24 });
+  } catch {}
 }
 
+/* ======================================================
+   UTILIDADES GENERALES
+====================================================== */
+function uuid() {
+  if (typeof crypto?.randomUUID === "function") return crypto.randomUUID();
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0,
+      v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 function extractMessages(body = {}) {
   const { messages, input, history } = body;
   if (Array.isArray(messages) && messages.length) return messages;
@@ -37,678 +69,550 @@ function extractMessages(body = {}) {
   const userText = typeof input === "string" ? input : "";
   return [...prev, { role: "user", content: userText }];
 }
-
-function cleanToJSONPlus(raw = "") {
+function cleanToJSONPlus(raw) {
   if (!raw) return null;
-  if (typeof raw === "object") return raw;
-  if (typeof raw !== "string") return null;
-
+  if (typeof raw === "object") return JSON.parse(JSON.stringify(raw));
+  let s = String(raw).trim();
+  s = s.replace(/^```json/i, "```").replace(/^```/, "").replace(/```$/, "").trim();
+  try { return JSON.parse(s); } catch {}
   try {
-    return JSON.parse(raw);
+    const first = s.indexOf("{");
+    const last = s.lastIndexOf("}");
+    if (first >= 0 && last > first) return JSON.parse(s.slice(first, last + 1));
   } catch {}
-
   try {
-    const first = raw.indexOf("{");
-    const last = raw.lastIndexOf("}");
-    if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
-  } catch {}
-
-  try {
-    const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
+    const cleaned = s.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
     return JSON.parse(cleaned);
   } catch {}
-
   return null;
 }
-
-function fallbackJSON() {
+function fallbackJSON(city = "Destino") {
   return {
-    destination: "Desconocido",
+    itinerary_id: uuid(),
+    version: 1,
+    destination: city,
     rows: [
       {
         day: 1,
-        start: "",
-        end: "",
+        start: "08:30",
+        end: "19:00",
         activity: "Itinerario base (fallback)",
         from: "",
         to: "",
-        transport: "",
-        duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-        notes: "Explora libremente la ciudad.",
-        kind: "",
-        zone: "",
+        transport: "A pie",
+        duration: "2h",
+        notes: "Explora los imperdibles del centro. Reajusta desde el chat.",
       },
     ],
-    followup: "⚠️ Fallback local: revisa OPENAI_API_KEY o despliegue.",
+    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
-/* ✅ Fallback INFO real (rows_draft 1..days_total) */
-function fallbackInfoJSON(context = {}) {
-  const city = String(context?.city || context?.destination || "Destino").trim() || "Destino";
-  const country = String(context?.country || "").trim();
-  const daysTotal = Math.max(1, Number(context?.days_total || context?.days || context?.daysTotal || 1));
+/* ======================================================
+   DURACIONES: normalización robusta
+====================================================== */
+function stripApproxDuration(d = "") {
+  return d ? String(d).replace(/[~≈≈]/g, "").trim() : d;
+}
+function normalizeDurationToken(token) {
+  if (!token) return "";
+  let s = String(token).toLowerCase().trim();
+  s = s.replace(/[~≈]/g, "").replace(/\b(about|around|aprox\.?|aprox|approximately|approx)\b/g, "").trim();
+  s = s.replace(/hours?\b/g, "h").replace(/hrs?\b/g, "h").replace(/\bhr\b/g, "h");
+  s = s.replace(/minutes?\b/g, "m").replace(/\bmins?\b/g, "m").replace(/\bmin\b/g, "m");
+  s = s.replace(/\s+/g, "");
+  // patterns: "1h30m", "90m", "1.5h", "1:30"
+  const mColon = s.match(/^(\d+):(\d{1,2})$/);
+  if (mColon) {
+    const h = parseInt(mColon[1], 10);
+    const m = parseInt(mColon[2], 10);
+    return h > 0 ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
+  }
+  const mHourDec = s.match(/^(\d+(?:\.\d+)?)h$/);
+  if (mHourDec) {
+    const dec = parseFloat(mHourDec[1]);
+    const h = Math.floor(dec);
+    const m = Math.round((dec - h) * 60);
+    return h > 0 ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
+  }
+  const mH = s.match(/^(\d+)h(?:((\d+)m)?)$/);
+  if (mH) return `${parseInt(mH[1], 10)}h${mH[2] ? mH[2] : ""}`;
+  const mM = s.match(/^(\d+)m$/);
+  if (mM) return `${parseInt(mM[1], 10)}m`;
+  const mMix = s.match(/^(\d+)h(\d{1,2})$/); // "1h30"
+  if (mMix) return `${parseInt(mMix[1], 10)}h${parseInt(mMix[2], 10)}m`;
+  const justNum = s.match(/^(\d+)$/); // assume minutes
+  if (justNum) {
+    const mins = parseInt(justNum[1], 10);
+    if (mins >= 60) {
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return h > 0 ? `${h}h${m ? `${m}m` : ""}` : `${m}m`;
+    }
+    return `${mins}m`;
+  }
+  return ""; // indeterminado -> se resolverá luego
+}
+function normalizeDurations(rows) {
+  return rows.map((r) => {
+    const raw = r.duration ?? "";
+    const cleaned = stripApproxDuration(raw);
+    const norm = normalizeDurationToken(cleaned);
+    return { ...r, duration: norm || (cleaned || "").replace(/\s+/g, "") || "" };
+  });
+}
 
-  const rows_draft = [];
-  for (let d = 1; d <= daysTotal; d++) {
-    rows_draft.push({
-      day: d,
-      start: "",
-      end: "",
-      activity: `Fallback – Planificación pendiente (Día ${d})`,
-      from: city,
-      to: city,
-      transport: "",
-      duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-      notes: "⚠️ El Info Chat interno no pudo generar este día. Revisa despliegue / SDK / OPENAI_API_KEY.",
-      kind: "",
-      zone: "",
+/* ======================================================
+   TRANSPORTE, SUBPARADAS, HEURÍSTICAS Y FACTS
+====================================================== */
+const NO_BUS_TOPICS = [
+  "círculo dorado","thingvellir","þingvellir","geysir","geyser","gullfoss",
+  "seljalandsfoss","skógafoss","reynisfjara","vik","vík","snaefellsnes",
+  "snæfellsnes","blue lagoon","reykjanes","krýsuvík","arnarstapi","hellnar",
+  "djúpalónssandur","djupalonssandur","kirkjufell","puente entre continentes"
+];
+function needsVehicleOrTour(r) {
+  const a = (r.activity || "").toLowerCase();
+  const to = (r.to || "").toLowerCase();
+  if (/^regreso a/i.test(a)) return false;
+  return NO_BUS_TOPICS.some((k) => a.includes(k) || to.includes(k));
+}
+function coerceTransport(rows) {
+  return rows.map((r) =>
+    (!r.transport || /bus/i.test(r.transport)) && needsVehicleOrTour(r)
+      ? { ...r, transport: "Vehículo alquilado o Tour guiado" }
+      : r
+  );
+}
+function enforceMotherSubstopFormat(rows) {
+  const out = [...rows];
+  for (let i = 0; i < out.length; i++) {
+    const r = out[i];
+    const act = (r.activity || "").toLowerCase();
+    const isExc = /excursión/.test(act) || /day\s*trip/i.test(act);
+    if (!isExc) continue;
+    const base = (r.activity || "").replace(/^excursión\s*(a|al)?\s*/i, "").split("—")[0].trim();
+    let count = 0;
+    for (let j = i + 1; j < out.length && count < 8; j++) {
+      const rj = out[j];
+      const aj = (rj?.activity || "").toLowerCase();
+      const isSub =
+        aj.startsWith("visita") ||
+        aj.includes("cascada") ||
+        aj.includes("playa") ||
+        aj.includes("geysir") ||
+        aj.includes("thingvellir") ||
+        aj.includes("gullfoss") ||
+        aj.includes("kirkjufell") ||
+        aj.includes("arnarstapi") ||
+        aj.includes("hellnar") ||
+        aj.includes("djúpalónssandur") ||
+        aj.includes("vik") ||
+        aj.includes("reynisfjara");
+      if (!isSub) break;
+      const pretty = (rj.to || rj.activity || "")
+        .replace(/^visita\s+(a|al)\s*/i, "")
+        .trim();
+      rj.activity = `Excursión — ${base || "Ruta"} — ${pretty}`;
+      if (!rj.notes) rj.notes = "Parada dentro de la ruta.";
+      count++;
+    }
+  }
+  return out;
+}
+
+/* ======================================================
+   HEURÍSTICA: inserción de “Regreso a {Ciudad}” y duraciones
+====================================================== */
+function inferBaseCity(facts, fallback) {
+  const b = (facts?.base_city || "").trim();
+  return b || (fallback || "Ciudad");
+}
+function hasReturnRowForDay(rows, day, baseCity) {
+  const bc = baseCity.toLowerCase();
+  return rows.some(
+    (r) =>
+      r.day === day &&
+      /^regreso a/i.test(String(r.activity || "")) &&
+      String(r.to || "").toLowerCase().includes(bc)
+  );
+}
+function guessLastStopOfDay(rows, day) {
+  // Último 'to' no vacío del día
+  const sameDay = rows.filter((r) => r.day === day);
+  for (let i = sameDay.length - 1; i >= 0; i--) {
+    const to = (sameDay[i].to || "").trim();
+    if (to) return to;
+  }
+  return "";
+}
+function durationFromFacts(facts, fromPlace, baseCity) {
+  const patterns = Array.isArray(facts?.daytrip_patterns)
+    ? facts.daytrip_patterns
+    : [];
+  const key = `${fromPlace}→${baseCity}`;
+  for (const p of patterns) {
+    const dur = p?.durations?.[key];
+    if (dur) return normalizeDurationToken(dur) || dur;
+  }
+  return ""; // desconocido
+}
+function looksLikeDayTrip(rows, day, baseCity) {
+  // Si hay "Excursión —" o movimientos fuera de base y no hay regreso
+  const bc = baseCity.toLowerCase();
+  const sameDay = rows.filter((r) => r.day === day);
+  const excursion = sameDay.some((r) => /excursión|day\s*trip/i.test(String(r.activity || "")));
+  const leavesBase = sameDay.some((r) => String(r.to || "").toLowerCase() && !String(r.to || "").toLowerCase().includes(bc));
+  return excursion || leavesBase;
+}
+function ensureReturnToBase(rows, facts, destination) {
+  const baseCity = inferBaseCity(facts, destination);
+  const out = [...rows];
+  const days = Array.from(new Set(out.map((r) => r.day))).filter((d) => d != null);
+  for (const day of days) {
+    if (!looksLikeDayTrip(out, day, baseCity)) continue;
+    if (hasReturnRowForDay(out, day, baseCity)) continue;
+    // insertar regreso al final del día
+    const lastStop = guessLastStopOfDay(out, day) || "Última parada";
+    let dur = durationFromFacts(facts, lastStop, baseCity);
+    if (!dur) {
+      // heurística de respaldo si no hay facts.durations
+      // 60m si es cercano; 90m si hay palabras clave largas
+      const longish = /gullfoss|seljalandsfoss|skógafoss|reynisfjara|snaefellsnes|blue lagoon|kirkjufell/i.test(lastStop);
+      dur = longish ? "90m" : "60m";
+    }
+    out.push({
+      day,
+      start: "18:00",
+      end: "19:00",
+      activity: `Regreso a ${baseCity}`,
+      from: lastStop,
+      to: baseCity,
+      transport: "Vehículo alquilado o Tour guiado",
+      duration: dur,
+      notes: "Retorno a la ciudad base para cerrar el day-trip.",
     });
   }
+  return out;
+}
 
+/* ======================================================
+   REGLAS DE VENTANAS HORARIAS (other_hints)
+====================================================== */
+const DEFAULT_WINDOW = { start: "08:30", end: "19:00" };
+function parseWindowFromHints(other_hints) {
+  if (!Array.isArray(other_hints)) return DEFAULT_WINDOW;
+  // Buscar patrones tipo "08:30–19:00"
+  for (const h of other_hints) {
+    const m = String(h || "").match(/(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})/);
+    if (m) return { start: m[1], end: m[2] };
+  }
+  return DEFAULT_WINDOW;
+}
+function clampTime(t) {
+  // retorna HH:MM si válido, si no, null
+  const m = String(t || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  let H = parseInt(m[1], 10);
+  let M = parseInt(m[2], 10);
+  if (H < 0 || H > 23 || M < 0 || M > 59) return null;
+  return `${H.toString().padStart(2, "0")}:${M.toString().padStart(2, "0")}`;
+}
+function enforceWindow(rows, window) {
+  const wStart = clampTime(window.start) || DEFAULT_WINDOW.start;
+  const wEnd = clampTime(window.end) || DEFAULT_WINDOW.end;
+  return rows.map((r) => {
+    const s = clampTime(r.start) || wStart;
+    const e = clampTime(r.end) || wEnd;
+    return { ...r, start: s, end: e };
+  });
+}
+
+/* ======================================================
+   LÍMITE DE 20 FILAS POR DÍA (compactación soft)
+====================================================== */
+function enforceMaxPerDay(rows, max = 20) {
+  const out = [];
+  const byDay = new Map();
+  for (const r of rows) {
+    const d = r.day ?? 1;
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(r);
+  }
+  for (const [day, list] of byDay.entries()) {
+    if (list.length <= max) {
+      out.push(...list);
+      continue;
+    }
+    const head = list.slice(0, max - 1);
+    const tail = list.slice(max - 1);
+    const summary = {
+      day,
+      start: "17:30",
+      end: "19:00",
+      activity: "Continuación — Compactación de actividades",
+      from: head.at(-1)?.to || "",
+      to: head.at(-1)?.to || "",
+      transport: "A pie",
+      duration: "90m",
+      notes: `Se agruparon ${tail.length} actividades adicionales para mantener el límite máximo diario.`,
+    };
+    out.push(...head, summary);
+  }
+  // Reordenar por day y por hora (simple)
+  out.sort((a, b) => (a.day - b.day) || String(a.start).localeCompare(String(b.start)));
+  return out;
+}
+
+/* ======================================================
+   CONTRATO FINAL
+====================================================== */
+function normalizeShapeContract(parsed, rows, prev = null) {
+  const dest = parsed?.destination || prev?.destination || "Destino";
+  const id = parsed?.itinerary_id || prev?.itinerary_id || uuid();
+  const ver =
+    typeof parsed?.version === "number"
+      ? parsed.version
+      : typeof prev?.version === "number"
+      ? prev.version + 1
+      : 1;
   return {
-    destination: city,
-    country,
-    days_total: daysTotal,
-    hotel_base: String(context?.hotel_address || context?.hotel_base || "").trim(),
-    rationale: "Fallback mínimo (INFO).",
-    imperdibles: [],
-    macro_tours: [],
-    in_city_routes: [],
-    meals_suggestions: [],
-    aurora: {
-      plausible: false,
-      suggested_days: [],
-      window_local: { start: "", end: "" },
-      duration: "~3h–4h",
-      transport_default: "",
-      note: "Fallback: depende de clima/latitud y del tour.",
-    },
-    constraints: {
-      max_substops_per_tour: 8,
-      avoid_duplicates_across_days: true,
-      optimize_order_by_distance_and_time: true,
-      respect_user_preferences_and_conditions: true,
-      no_consecutive_auroras: true,
-      no_last_day_aurora: true,
-      thermal_lagoons_min_stay_minutes: 180,
-    },
-    day_hours: [],
-    rows_draft,
-    rows_skeleton: rows_draft.map((r) => ({
-      day: r.day,
-      start: "",
-      end: "",
-      activity: "",
-      from: "",
-      to: "",
-      transport: "",
-      duration: "",
-      notes: "",
-      kind: "",
-      zone: "",
-    })),
-    followup: "⚠️ Fallback INFO: revisa despliegue / SDK / OPENAI_API_KEY.",
+    itinerary_id: id,
+    version: ver,
+    destination: dest,
+    rows,
+    followup: parsed?.followup || "",
   };
 }
 
-/* ============== OpenAI call robusto ============== */
-async function callText(messages, temperature = 0.35, max_output_tokens = 3200) {
-  const inputStr = (Array.isArray(messages) ? messages : [])
-    .map((m) => {
-      const c = typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? "");
-      return `${String(m?.role || "user").toUpperCase()}: ${c}`;
-    })
-    .join("\n\n");
+/* ======================================================
+   PROMPTS BASE
+====================================================== */
+const PRE_INFO_PROMPT = `
+Eres un asistente turístico experto (MODO INVESTIGACIÓN RÁPIDA).
+Devuelve solo JSON:
+{
+  "facts":{"base_city":"<ciudad>","daytrip_patterns":[{"route":"<ruta>","stops":["<sub1>"],"return_to_base_from":"<última>","durations":{"<A→B>":"<tiempo>"}}],"other_hints":[]},
+  "seed":{"destination":"<Ciudad>","rows":[{"day":1,"start":"09:00","end":"10:30","activity":"Actividad","from":"Inicio","to":"Destino","transport":"A pie","duration":"90m","notes":"Contexto"}]}
+}`.trim();
 
-  try {
-    if (client?.responses?.create) {
-      const resp = await client.responses.create({
+const SYSTEM_PROMPT = `
+Eres Astra, el planificador de viajes de ITravelByMyOwn.
+Responde exclusivamente JSON válido:
+{"destination":"City","rows":[{...}],"followup":"texto breve"}
+Reglas:
+- Siempre >=1 fila; 08:30–19:00 si no hay datos.
+- "duration" limpio ("1h30m" / "45m").
+- Day-trip fuera de ciudad → agrega "Regreso a {Ciudad}" coherente.
+- Máx 8 subparadas por ruta "Excursión — Ruta — Subparada".
+- Máx 20 actividades por día (si tienes más, resume al final).
+- Si no hay datos, genera contenido plausible y seguro.
+`.trim();
+
+/* ======================================================
+   LLAMADAS OPENAI
+====================================================== */
+async function chatJSON(messages, temperature = 0.4, tries = 2) {
+  for (let k = 0; k < tries; k++) {
+    try {
+      const r = await client.chat.completions.create({
         model: "gpt-4o-mini",
         temperature,
-        max_output_tokens,
-        input: inputStr,
+        response_format: { type: "json_object" },
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: String(m.content || ""),
+        })),
+        max_tokens: 2600,
       });
-
-      const out =
-        resp?.output_text?.trim() ||
-        resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-        "";
-      if (out) return out;
+      const txt = r?.choices?.[0]?.message?.content?.trim();
+      if (txt) return txt;
+    } catch (e) {
+      if (k === tries - 1) throw e;
     }
-  } catch {}
-
+  }
+  return "";
+}
+async function chatFree(messages, temperature = 0.6) {
   try {
-    const cmessages = (Array.isArray(messages) ? messages : []).map((m) => ({
-      role: m?.role === "system" ? "system" : m?.role === "assistant" ? "assistant" : "user",
-      content: typeof m?.content === "string" ? m.content : JSON.stringify(m?.content ?? ""),
-    }));
-
-    const resp2 = await client.chat.completions.create({
+    const r = await client.chat.completions.create({
       model: "gpt-4o-mini",
       temperature,
-      max_tokens: Math.min(4096, Math.max(256, Number(max_output_tokens) || 1200)),
-      messages: cmessages,
+      messages: messages.map((m) => ({
+        role: m.role,
+        content: String(m.content || ""),
+      })),
+      max_tokens: 2000,
     });
-
-    return resp2?.choices?.[0]?.message?.content?.trim() || "";
-  } catch (e) {
-    throw e;
-  }
-}
-
-/* ============== Normalizador de duraciones ============== */
-function normalizeDurationsInParsed(parsed) {
-  if (!parsed) return parsed;
-
-  const norm = (txt) => {
-    const s = String(txt ?? "").trim();
-    if (!s) return s;
-
-    if (/^Transporte\s*:/i.test(s) || /^Actividad\s*:/i.test(s)) return s;
-    if (/^~\s*\d+(\.\d+)?\s*h$/i.test(s)) return s;
-
-    const dh = s.match(/^(\d+(?:\.\d+)?)\s*h$/i);
-    if (dh) {
-      const hours = parseFloat(dh[1]);
-      const total = Math.round(hours * 60);
-      const h = Math.floor(total / 60);
-      const m = total % 60;
-      return h > 0 ? (m > 0 ? `${h}h${m}m` : `${h}h`) : `${m}m`;
-    }
-
-    const hMix = s.match(/^(\d+)\s*h\s*(\d{1,2})$/i);
-    if (hMix) return `${hMix[1]}h${hMix[2]}m`;
-
-    if (/^\d+\s*m$/i.test(s)) return s;
-    if (/^\d+\s*h$/i.test(s)) return s;
-
-    return s;
-  };
-
-  const touchRows = (rows = []) => rows.map((r) => ({ ...r, duration: norm(r.duration) }));
-
-  try {
-    if (Array.isArray(parsed.rows)) parsed.rows = touchRows(parsed.rows);
-    if (Array.isArray(parsed.rows_draft)) parsed.rows_draft = touchRows(parsed.rows_draft);
-  } catch {}
-
-  return parsed;
-}
-
-/* ============== Helpers / validaciones ============== */
-function _hasTwoLineDuration_(duration) {
-  const s = String(duration || "");
-  return /Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(s);
-}
-
-function _rowsHaveCoverage_(rows, daysTotal) {
-  if (!Array.isArray(rows) || !rows.length) return false;
-  const need = Math.max(1, Number(daysTotal) || 1);
-  const present = new Set(rows.map((r) => Number(r?.day) || 1));
-  for (let d = 1; d <= need; d++) {
-    if (!present.has(d)) return false;
-  }
-  return true;
-}
-
-/* ============== v43.6.1: Sanitizador de day_hours entrante ============== */
-function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
-  try {
-    if (!Array.isArray(day_hours) || !day_hours.length) return null;
-
-    const need = Math.max(1, Number(daysTotal) || day_hours.length || 1);
-    const norm = (t) => String(t || "").trim();
-    const cleaned = day_hours.map((d, idx) => ({
-      day: Number(d?.day) || idx + 1,
-      start: norm(d?.start) || "",
-      end: norm(d?.end) || "",
-    }));
-
-    const hasAny = cleaned.some((d) => d.start || d.end);
-    if (!hasAny) return null;
-
-    if (cleaned.length === need) {
-      const allHave = cleaned.every((d) => d.start && d.end);
-      if (allHave) {
-        const s0 = cleaned[0].start;
-        const e0 = cleaned[0].end;
-        const allSame = cleaned.every((d) => d.start === s0 && d.end === e0);
-        if (allSame) return null;
-      }
-    }
-
-    return cleaned;
+    return r?.choices?.[0]?.message?.content?.trim() || "";
   } catch {
-    return null;
+    return "";
   }
 }
 
-/* =======================
-   ✅ v43.7.1: ENFORCER rows_draft SIEMPRE
-   ======================= */
-function _ensureInfoRowsDraft_(parsed, context = {}) {
-  const ctx = context && typeof context === "object" ? context : {};
-  const city = String(parsed?.destination || ctx?.city || ctx?.destination || "Destino").trim() || "Destino";
-  const country = String(parsed?.country || ctx?.country || "").trim();
-  const daysTotal = Math.max(1, Number(parsed?.days_total || ctx?.days_total || ctx?.days || ctx?.daysTotal || 1));
-
-  // 1) Si no hay parsed, fallback total
-  if (!parsed || typeof parsed !== "object") {
-    return fallbackInfoJSON({ city, country, days_total: daysTotal });
-  }
-
-  // 2) Si el modelo devolvió "rows" en vez de "rows_draft", lo convertimos
-  if ((!Array.isArray(parsed.rows_draft) || !parsed.rows_draft.length) && Array.isArray(parsed.rows) && parsed.rows.length) {
-    parsed.rows_draft = parsed.rows.map((r) => ({
-      day: Number(r?.day) || 1,
-      start: String(r?.start || ""),
-      end: String(r?.end || ""),
-      activity: String(r?.activity || ""),
-      from: String(r?.from || ""),
-      to: String(r?.to || ""),
-      transport: String(r?.transport || ""),
-      duration: String(r?.duration || "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat"),
-      notes: String(r?.notes || ""),
-      kind: String(r?.kind || ""),
-      zone: String(r?.zone || ""),
-    }));
-  }
-
-  // 3) Si sigue vacío/ausente, lo construimos mínimo por día
-  if (!Array.isArray(parsed.rows_draft) || !parsed.rows_draft.length) {
-    const fb = fallbackInfoJSON({ city, country, days_total: daysTotal });
-    // conservamos algunos campos si existen
-    return {
-      ...fb,
-      destination: city,
-      country,
-      days_total: daysTotal,
-      hotel_base: String(parsed?.hotel_base || fb.hotel_base || ""),
-      rationale: String(parsed?.rationale || fb.rationale || "Fallback mínimo (INFO)."),
-      imperdibles: Array.isArray(parsed?.imperdibles) ? parsed.imperdibles : fb.imperdibles,
-      macro_tours: Array.isArray(parsed?.macro_tours) ? parsed.macro_tours : fb.macro_tours,
-      in_city_routes: Array.isArray(parsed?.in_city_routes) ? parsed.in_city_routes : fb.in_city_routes,
-      meals_suggestions: Array.isArray(parsed?.meals_suggestions) ? parsed.meals_suggestions : fb.meals_suggestions,
-      aurora: parsed?.aurora && typeof parsed.aurora === "object" ? parsed.aurora : fb.aurora,
-      constraints: parsed?.constraints && typeof parsed.constraints === "object" ? parsed.constraints : fb.constraints,
-      day_hours: Array.isArray(parsed?.day_hours) ? parsed.day_hours : [],
-      followup: String(parsed?.followup || fb.followup || ""),
-    };
-  }
-
-  // 4) Forzar days_total y cobertura 1..daysTotal
-  parsed.destination = city;
-  parsed.country = country;
-  parsed.days_total = daysTotal;
-
-  // Normalizar duration a 2 líneas siempre
-  parsed.rows_draft = parsed.rows_draft.map((r) => {
-    const dur = String(r?.duration || "");
-    return {
-      day: Number(r?.day) || 1,
-      start: String(r?.start || ""),
-      end: String(r?.end || ""),
-      activity: String(r?.activity || ""),
-      from: String(r?.from || city),
-      to: String(r?.to || ""),
-      transport: String(r?.transport || ""),
-      duration: _hasTwoLineDuration_(dur)
-        ? dur
-        : "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-      notes: String(r?.notes || ""),
-      kind: String(r?.kind || ""),
-      zone: String(r?.zone || ""),
-    };
-  });
-
-  // Si faltan días, añadimos 1 fila por día faltante (mínimo renderizable)
-  if (!_rowsHaveCoverage_(parsed.rows_draft, daysTotal)) {
-    const present = new Set(parsed.rows_draft.map((r) => Number(r?.day) || 1));
-    for (let d = 1; d <= daysTotal; d++) {
-      if (!present.has(d)) {
-        parsed.rows_draft.push({
-          day: d,
-          start: "",
-          end: "",
-          activity: `Fallback – Día ${d} pendiente`,
-          from: city,
-          to: city,
-          transport: "",
-          duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-          notes: "⚠️ Día faltante generado por enforcer (INFO).",
-          kind: "",
-          zone: "",
-        });
-      }
-    }
-  }
-
-  // rows_skeleton mínimo coherente
-  if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
-  if (!parsed.rows_skeleton.length) {
-    parsed.rows_skeleton = parsed.rows_draft.map((r) => ({
-      day: r.day,
-      start: "",
-      end: "",
-      activity: "",
-      from: "",
-      to: "",
-      transport: "",
-      duration: "",
-      notes: "",
-      kind: "",
-      zone: "",
-    }));
-  }
-
-  // day_hours: NO inventar
-  if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
-
-  return parsed;
-}
-
-/* ============== Prompts (idénticos a tu base) ============== */
-const SYSTEM_INFO = `
-Eres el **Info Chat interno** de ITravelByMyOwn: un **experto mundial en turismo** con criterio premium para diseñar itinerarios que se sientan como un **sueño cumplido**.
-Tu objetivo es entregar un plan **impactante, optimizado, realista, secuencial y altamente claro**, maximizando el valor del viaje.
-Tu salida será consumida por un Planner que **no inventa nada**: solo estructura y renderiza lo que tú decidas.
-Por eso debes devolver **UN ÚNICO JSON VÁLIDO** (sin texto fuera) listo para usarse en tabla.
-
-✅ ARQUITECTURA (OPCIÓN A):
-- Tú (INFO) eres la **fuente de verdad** de los horarios: start/end por fila en rows_draft.
-- El Planner solo valida/ajusta solapes pequeños; NO genera ventanas ni rellena horarios por defecto.
-
-CRÍTICO — SALIDA PARA EVITAR REGRESIONES DEL PLANNER:
-- Incluye SIEMPRE rows_draft completo (todas las filas de todos los días) con:
-  day, start, end, activity, from, to, transport, duration(2 líneas), notes, kind, zone, opcional _crossDay.
-
-NOTA day_hours:
-- Si NO viene en el contexto del usuario, déjalo como [] (no lo inventes).
-`.trim();
-
-const SYSTEM_PLANNER = `
-Eres **Astra Planner**. Recibes un objeto "research_json" del Info Chat interno.
-El Info Chat YA DECIDIÓ: actividades, orden, tiempos, transporte y notas.
-Tu trabajo es **estructurar y validar** para renderizar en tabla. **NO aportes creatividad.**
-
-SALIDA ÚNICA (JSON):
-{
-  "destination":"Ciudad",
-  "rows":[
-    {"day":1,"start":"HH:MM","end":"HH:MM","activity":"","from":"","to":"","transport":"","duration":"","notes":"","kind":"","zone":""}
-  ],
-  "followup":""
-}
-`.trim();
-
-/* ============== Local planner builder (igual que v43.7.0) ============== */
-function _splitActivityDestSub_(activity) {
-  try {
-    const s = String(activity || "").trim();
-    if (!s) return null;
-    const m = s.match(/^(.+?)\s[–-]\s(.+?)$/);
-    if (!m) return null;
-    const left = String(m[1] || "").trim();
-    const right = String(m[2] || "").trim();
-    if (!left || !right) return null;
-    return { from: left, to: right };
-  } catch {
-    return null;
-  }
-}
-
-function _fillFromToFromActivity_(rows = []) {
-  try {
-    if (!Array.isArray(rows) || !rows.length) return rows;
-
-    let prevTo = "";
-    const out = rows.map((r) => {
-      const row = { ...(r || {}) };
-      const from0 = String(row.from || "").trim();
-      const to0 = String(row.to || "").trim();
-
-      if (!from0 || !to0) {
-        const sp = _splitActivityDestSub_(row.activity);
-        if (sp) {
-          if (!from0) row.from = sp.from;
-          if (!to0) row.to = sp.to;
-        }
-      }
-
-      const from1 = String(row.from || "").trim();
-      const to1 = String(row.to || "").trim();
-
-      if (!from1 && prevTo) row.from = prevTo;
-      if (to1) prevTo = to1;
-
-      return row;
-    });
-
-    return out;
-  } catch {
-    return rows;
-  }
-}
-
-function _buildPlannerRowsFromResearch_(research, target_day = null) {
-  const dest = String(research?.destination || research?.city || "Destino").trim() || "Destino";
-  const rowsDraft = Array.isArray(research?.rows_draft)
-    ? research.rows_draft
-    : Array.isArray(research?.rows_final)
-      ? research.rows_final
-      : [];
-
-  if (!rowsDraft.length) {
-    return { destination: dest, rows: fallbackJSON().rows, followup: "⚠️ PLANNER fallback: research_json sin rows_draft." };
-  }
-
-  let rows = rowsDraft.map((r) => ({
-    day: Number(r?.day) || 1,
-    start: String(r?.start || ""),
-    end: String(r?.end || ""),
-    activity: String(r?.activity || ""),
-    from: String(r?.from || ""),
-    to: String(r?.to || ""),
-    transport: String(r?.transport || ""),
-    duration: String(r?.duration || "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat"),
-    notes: String(r?.notes || ""),
-    kind: String(r?.kind || ""),
-    zone: String(r?.zone || ""),
-  }));
-
-  if (target_day != null && Number.isFinite(Number(target_day))) {
-    const td = Number(target_day);
-    rows = rows.filter((r) => Number(r.day) === td);
-  }
-
-  rows = _fillFromToFromActivity_(rows);
-
-  rows = rows.map((r) => {
-    const dur = String(r.duration || "");
-    if (_hasTwoLineDuration_(dur)) return r;
-    return { ...r, duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat" };
-  });
-
-  return { destination: dest, rows, followup: "" };
-}
-
-/* ============== Handler principal ============== */
+/* ======================================================
+   HANDLER PRINCIPAL
+====================================================== */
 export default async function handler(req, res) {
-  let safeBody = {};
-  let safeMode = "planner";
   try {
-    safeBody = parseBody(req?.body);
-    safeMode = String(safeBody?.mode || "planner").toLowerCase();
-  } catch {}
+    if (req.method !== "POST")
+      return res.status(405).json({ error: "Method not allowed" });
 
-  try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+    const body = req.body || {};
+    const mode = body.mode || "planner";
+    const clientMessages = extractMessages(body);
 
-    const body = safeBody;
-    const mode = safeMode;
-
-    if (!process.env.OPENAI_API_KEY) {
-      if (mode === "info") {
-        const context = body?.context || body || {};
-        const fb = fallbackInfoJSON(context);
-        return res.status(200).json({ text: JSON.stringify(fb) });
-      }
-
-      if (mode === "planner" && body?.research_json) {
-        const local = _buildPlannerRowsFromResearch_(body.research_json, body?.target_day ?? null);
-        return res.status(200).json({ text: JSON.stringify(local) });
-      }
-
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
-    }
-
-    /* --------- INFO --------- */
+    // ----- INFO CHAT -----
     if (mode === "info") {
-      let context = body.context;
-
-      if (!context && Array.isArray(body.messages) && body.messages.length) {
-        context = { messages: body.messages };
-      }
-      if (!context && !Array.isArray(body.messages)) {
-        const { mode: _m, ...rest } = body || {};
-        context = rest;
-      }
-
-      // v43.6.1: day_hours sanitizado
-      try {
-        if (context && typeof context === "object") {
-          const daysTotal = context?.days_total || context?.days || context?.daysTotal || 1;
-          const sanitized = _sanitizeIncomingDayHours_(context?.day_hours, daysTotal);
-          if (!sanitized) {
-            if ("day_hours" in context) delete context.day_hours;
-          } else {
-            context.day_hours = sanitized;
-          }
-        }
-      } catch {}
-
-      const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
-
-      let raw = "";
-      let parsed = null;
-
-      // 1) intento normal
-      try {
-        raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.35, 3800);
-        parsed = cleanToJSONPlus(raw);
-      } catch {
-        parsed = null;
-      }
-
-      // 2) intento estricto si no parsea
-      if (!parsed) {
-        try {
-          const strict = SYSTEM_INFO + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText([{ role: "system", content: strict }, infoUserMsg], 0.2, 3600);
-          parsed = cleanToJSONPlus(raw);
-        } catch {
-          parsed = null;
-        }
-      }
-
-      // 3) ENFORCER: SIEMPRE rows_draft + cobertura
-      parsed = _ensureInfoRowsDraft_(parsed, context || {});
-      parsed = normalizeDurationsInParsed(parsed);
-
-      return res.status(200).json({ text: JSON.stringify(parsed) });
+      const txt = await chatFree(clientMessages, 0.5);
+      return res.status(200).json({ text: txt || "⚠️ Sin respuesta." });
     }
 
-    /* --------- PLANNER --------- */
-    if (mode === "planner") {
-      // validate=true no llama al modelo
-      try {
-        if (body && body.validate === true && Array.isArray(body.rows)) {
-          const out = { allowed: body.rows, rejected: [] };
-          return res.status(200).json({ text: JSON.stringify(out) });
-        }
-      } catch {}
+    const incomingId = typeof body.itinerary_id === "string" ? body.itinerary_id : null;
+    const incomingVersion =
+      typeof body.version === "number" ? body.version : null;
+    const prevState = incomingId ? await storeLoad(incomingId) : null;
 
-      const research = body.research_json || null;
-
-      if (!research) {
-        const clientMessages = extractMessages(body);
-
-        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.35, 3600);
-        let parsed = cleanToJSONPlus(raw);
-
-        if (!parsed) {
-          const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText([{ role: "system", content: strict }, ...clientMessages], 0.2, 3200);
-          parsed = cleanToJSONPlus(raw);
-        }
-
-        if (!parsed) parsed = fallbackJSON();
-        parsed = normalizeDurationsInParsed(parsed);
-        return res.status(200).json({ text: JSON.stringify(parsed) });
-      }
-
-      const plannerUserPayload = {
-        research_json: research,
-        target_day: body.target_day ?? null,
-        day_hours: body.day_hours ?? null,
-        existing_rows: body.existing_rows ?? null,
-      };
-
-      const plannerUserMsg = { role: "user", content: JSON.stringify(plannerUserPayload, null, 2) };
-
-      let raw = "";
-      let parsed = null;
-
-      try {
-        raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, plannerUserMsg], 0.35, 3600);
-        parsed = cleanToJSONPlus(raw);
-      } catch {
-        parsed = null;
-      }
-
-      if (!parsed) {
-        try {
-          const strict = SYSTEM_PLANNER + `\nOBLIGATORIO: responde solo un JSON válido.`;
-          raw = await callText([{ role: "system", content: strict }, plannerUserMsg], 0.2, 3200);
-          parsed = cleanToJSONPlus(raw);
-        } catch {
-          parsed = null;
-        }
-      }
-
-      // Si el modelo falla o rows viene vacío => builder local desde research_json
-      if (!parsed || !Array.isArray(parsed?.rows) || !parsed.rows.length) {
-        const local = _buildPlannerRowsFromResearch_(research, body?.target_day ?? null);
-        const out = normalizeDurationsInParsed(local);
-        return res.status(200).json({ text: JSON.stringify(out) });
-      }
-
-      try {
-        if (Array.isArray(parsed?.rows)) parsed.rows = _fillFromToFromActivity_(parsed.rows);
-      } catch {}
-
-      parsed = normalizeDurationsInParsed(parsed);
-      return res.status(200).json({ text: JSON.stringify(parsed) });
-    }
-
-    return res.status(400).json({ error: "Invalid mode" });
-  } catch (err) {
-    console.error("❌ /api/chat error:", err);
-
+    // ----- PRE-INFO -----
+    let pre = null;
     try {
-      if (safeMode === "info") {
-        const context = safeBody?.context || safeBody || {};
-        const fb = fallbackInfoJSON(context);
+      const raw = await chatJSON(
+        [{ role: "system", content: PRE_INFO_PROMPT }, ...clientMessages],
+        0.35
+      );
+      pre = cleanToJSONPlus(raw);
+    } catch {}
+    const facts = pre?.facts || { base_city: "", daytrip_patterns: [], other_hints: [] };
+    const seed = pre?.seed || null;
+
+    const FACTS = JSON.stringify(facts);
+    const SEED = seed ? JSON.stringify(seed) : "";
+
+    // Derivar ventana horaria desde other_hints (o default)
+    const WINDOW = parseWindowFromHints(facts.other_hints);
+
+    // ----- PATCH -----
+    if (mode === "patch") {
+      if (!incomingId || incomingVersion == null) {
+        const fb = fallbackJSON(seed?.destination || "Destino");
         return res.status(200).json({ text: JSON.stringify(fb) });
       }
+      const baseRows =
+        Array.isArray(body.rows) && body.rows.length
+          ? body.rows
+          : prevState?.rows || [];
+      const opText =
+        body.operation ||
+        clientMessages[clientMessages.length - 1]?.content ||
+        "";
+      const patchSys = `
+Eres Astra (PATCH). Ajusta la tabla existente según la instrucción.
+Devuelve solo JSON {"destination":"...","rows":[...],"followup":""}
+Mantén formato, horas plausibles y coherencia.
+`;
+      const patchUser = `
+DESTINO: ${seed?.destination || prevState?.destination || "Destino"}
+TABLA_ACTUAL:
+${JSON.stringify(baseRows, null, 2)}
 
-      if (safeMode === "planner" && safeBody?.research_json) {
-        const local = _buildPlannerRowsFromResearch_(safeBody.research_json, safeBody?.target_day ?? null);
-        return res.status(200).json({ text: JSON.stringify(local) });
-      }
+INSTRUCCIÓN:
+${opText}
+`.trim();
+
+      let patched = null;
+      try {
+        const raw = await chatJSON(
+          [
+            { role: "system", content: patchSys },
+            { role: "system", content: `FACTS=${FACTS}` },
+            ...(SEED ? [{ role: "system", content: `SEED=${SEED}` }] : []),
+            { role: "user", content: patchUser },
+          ],
+          0.35
+        );
+        patched = cleanToJSONPlus(raw);
+      } catch {}
+      if (!patched)
+        patched = { destination: prevState?.destination, rows: baseRows, followup: "⚠️ Patch sin cambios" };
+
+      let rows = Array.isArray(patched.rows) ? patched.rows : [];
+      // Normalizaciones y reglas
+      rows = normalizeDurations(rows);
+      rows = coerceTransport(enforceMotherSubstopFormat(rows));
+      rows = ensureReturnToBase(rows, facts, seed?.destination || prevState?.destination || "Destino");
+      rows = enforceWindow(rows, WINDOW);
+      rows = enforceMaxPerDay(rows, 20);
+
+      if (!rows.length)
+        rows.push({
+          day: 1,
+          start: WINDOW.start,
+          end: WINDOW.end,
+          activity: "Ajuste mínimo aplicado",
+          transport: "A pie",
+          duration: "90m",
+          notes: "Fila sintética.",
+        });
+      const final = normalizeShapeContract(patched, rows, prevState);
+      await storeSave(final);
+      return res.status(200).json({ text: JSON.stringify(final) });
+    }
+
+    // ----- PLANNER -----
+    let parsed = null;
+    try {
+      const raw = await chatJSON(
+        [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: `FACTS=${FACTS}` },
+          ...(SEED ? [{ role: "system", content: `SEED=${SEED}` }] : []),
+          ...clientMessages,
+        ],
+        0.35
+      );
+      parsed = cleanToJSONPlus(raw);
     } catch {}
 
-    return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
+    if (!parsed)
+      parsed = { destination: seed?.destination || "Destino", rows: seed?.rows || [] };
+
+    let rows = Array.isArray(parsed.rows)
+      ? parsed.rows
+      : parsed.destinations?.[0]?.rows || [];
+
+    // Normalizaciones y reglas
+    rows = normalizeDurations(rows);
+    rows = coerceTransport(enforceMotherSubstopFormat(rows));
+    rows = ensureReturnToBase(rows, facts, parsed?.destination || seed?.destination || "Destino");
+    rows = enforceWindow(rows, WINDOW);
+    rows = enforceMaxPerDay(rows, 20);
+
+    if (!rows.length)
+      rows.push({
+        day: 1,
+        start: WINDOW.start,
+        end: WINDOW.end,
+        activity: "Inicio de exploración",
+        transport: "A pie",
+        duration: "90m",
+        notes: "Fila sintética para render.",
+      });
+
+    const prevForContract =
+      prevState ||
+      (incomingId && {
+        itinerary_id: incomingId,
+        version: incomingVersion ?? 0,
+        destination: seed?.destination || "Destino",
+      }) ||
+      null;
+
+    const finalJSON = normalizeShapeContract(parsed, rows, prevForContract);
+    await storeSave(finalJSON);
+    return res.status(200).json({ text: JSON.stringify(finalJSON) });
+  } catch (err) {
+    console.error("❌ /api/chat error:", err);
+    const fb = fallbackJSON("Destino");
+    return res.status(200).json({ text: JSON.stringify(fb) });
   }
 }
