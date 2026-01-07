@@ -1,13 +1,14 @@
-// /api/chat.js — v43.6.6 (ESM, Vercel)
+// /api/chat.js — v43.6.7 (ESM, Vercel)
 // Doble etapa: (1) INFO (investiga y decide) → (2) PLANNER (estructura/valida).
 // Respuestas SIEMPRE como { text: "<JSON|texto>" }.
 // ⚠️ Sin lógica del Info Chat EXTERNO (vive en /api/info-public.js).
 //
-// ✅ v43.6.6 (QUIRÚRGICO):
-// - FIX CRÍTICO: callText usa roles reales (system/user) con Chat Completions (NO string "SYSTEM: ...").
-// - Prompt SYSTEM_INFO: agrega regla operativa de CENAS (19:00–21:30) sin genéricos.
+// ✅ v43.6.7 (QUIRÚRGICO):
+// - FIX CRÍTICO: PLANNER determinístico cuando viene research_json.rows_draft (evita fallback por JSON/LLM).
+// - SYSTEM_INFO: elimina ambigüedad de “último día light” (NO es regla) y obliga a estimar tiempos de transporte;
+//   "Verificar..." solo como último recurso y con baja frecuencia.
 //
-// Mantiene TODO lo demás intacto de v43.6.5.
+// Mantiene TODO lo demás intacto de v43.6.6.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -730,7 +731,7 @@ function _insertReturnRowIfMissing_(parsed, baseCity) {
           transport: transport,
           duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
           notes: "Regreso a la ciudad base para descansar.",
-          kind: "macro_tour", // ✅ lo menos disruptivo, como pediste
+          kind: "macro_tour", // ✅ lo menos disruptivo
           zone: zone || "",
         });
       }
@@ -771,6 +772,76 @@ function _enforceInfoHardRules_(parsed, daysTotalHint) {
   }
 }
 
+/* ============== ✅ NUEVO v43.6.7: Planner determinístico con research_json ============== */
+
+function _ensureTwoLineDuration_(dur) {
+  const s = String(dur || "").trim();
+  if (_hasTwoLineDuration_(s)) return s || "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat";
+  // Si viene algo suelto, no inventamos: preservamos y completamos formato mínimo
+  if (s) return `Transporte: Verificar duración en el Info Chat\nActividad: ${s}`;
+  return "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat";
+}
+
+function _isUrbanLikely_(row, baseCity) {
+  const city = String(baseCity || "").trim().toLowerCase();
+  const from = String(row?.from || "").trim().toLowerCase();
+  const to = String(row?.to || "").trim().toLowerCase();
+  if (!city) return false;
+  // Heurística suave: ambos contienen la ciudad o están vacíos (urbano)
+  const fOk = !from || from.includes(city);
+  const tOk = !to || to.includes(city);
+  return fOk && tOk;
+}
+
+function _normalizePlannerRow_(r, baseCity) {
+  const row = { ...(r || {}) };
+  row.day = Number(row.day) || 1;
+  row.start = String(row.start || "").trim();
+  row.end = String(row.end || "").trim();
+  row.activity = String(row.activity || "").trim();
+  row.from = String(row.from || "").trim();
+  row.to = String(row.to || "").trim();
+  row.transport = String(row.transport || "").trim();
+  row.notes = String(row.notes || "").trim();
+  row.kind = String(row.kind || "").trim();
+  row.zone = String(row.zone || "").trim();
+
+  // duration en 2 líneas obligatorias
+  row.duration = _ensureTwoLineDuration_(row.duration);
+
+  // transport mínimo (sin inventar POIs): solo si viene vacío
+  if (!row.transport) {
+    if (_isUrbanLikely_(row, baseCity)) row.transport = "A pie";
+    else row.transport = "Vehículo alquilado o Tour guiado";
+  }
+
+  return row;
+}
+
+function _plannerDeterministicFromResearch_(research, target_day) {
+  try {
+    const baseCity = String(research?.destination || research?.city || "").trim();
+    const rowsDraft = Array.isArray(research?.rows_draft) ? research.rows_draft : [];
+    if (!rowsDraft.length) return null;
+
+    const td = target_day == null ? null : Number(target_day);
+    const filtered = td ? rowsDraft.filter((r) => Number(r?.day) === td) : rowsDraft.slice();
+
+    // Normaliza y completa
+    let outRows = filtered.map((r) => _normalizePlannerRow_(r, baseCity));
+    // Completa from/to desde activity si aplica
+    outRows = _fillFromToFromActivity_(outRows);
+
+    return {
+      destination: baseCity || String(research?.destination || "Destino"),
+      rows: outRows,
+      followup: "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 /* ============== Prompts del sistema ============== */
 
 /* =======================
@@ -798,8 +869,10 @@ REGLA MAESTRA 1 — IMPERDIBLES + ALCANCE REAL DEL VIAJE (CRÍTICO):
 REGLA MAESTRA 2 — TRANSPORTE INTELIGENTE (CRÍTICO):
 - Evalúa opciones reales (tren/metro/bus interurbano) y sugiérelas cuando aplique.
 - Si existe transporte público eficiente para un day-trip (p. ej. tren rápido/bus frecuente y razonable), PRIORIZA transporte público sobre vehículo.
-- Si no puedes determinar con confianza, usa EXACTAMENTE: "Vehículo alquilado o Tour guiado".
 - Dentro de ciudad usa transporte coherente (a pie/metro/bus/taxi/uber) según zonas.
+- TIEMPOS DE TRANSPORTE (OBLIGATORIO):
+  Debes estimar tiempos realistas de transporte (minutos/horas) para cada tramo.
+  Solo usa "Verificar duración en el Info Chat" como ÚLTIMO recurso y con baja frecuencia (ideal < 10–15% de filas).
 
 REGLA MAESTRA 3 — CLARIDAD TOTAL POR SUB-PARADAS (CRÍTICO, APLICA A TODO):
 - Para recorridos multi-parada (macro-tours o urbano), expresa secuencia como:
@@ -817,11 +890,11 @@ HORARIOS (CRÍTICO):
 - Buffers mínimos 15m entre bloques.
 - Actividades diurnas NO entre 01:00–05:00.
 
-✅ CENAS (REGLA OPERATIVA):
-- Cada día debe contemplar un bloque de cena en horario local razonable (ideal 19:00–21:30 aprox.).
-- Si no hay experiencia icónica, igual incluye una fila simple de cena (con lugar específico, NO genérico).
-- No uses "Restaurante local" genérico: debe ser un sitio recomendado con nombre o, si no es posible,
-  una opción claramente identificable (p.ej. "Food Hall X" / "Street Y con opciones").
+✅ COMIDAS (GUÍA FLEXIBLE, NO PRIORITARIA):
+- Las comidas NO son prioridad por defecto: inclúyelas solo cuando aporten valor real (logística, descanso, experiencia icónica o encaje natural en la ruta).
+- Si el itinerario incluye comida, sugiere horarios locales razonables según el ritmo del día (desayuno/almuerzo/cena) y el tipo de actividad, sin imponer un bloque fijo diario.
+- Evita placeholders genéricos como "Restaurante local" o "Café local": si recomiendas un lugar, debe ser identificable (nombre, food hall, calle/área clara con opciones).
+- Si no puedes recomendar un lugar específico con confianza, omite la fila de comida y deja que el usuario la decida.
 
 DURACIÓN EN 2 LÍNEAS (OBLIGATORIO EN TODAS LAS FILAS):
 - duration debe ser SIEMPRE exactamente 2 líneas:
@@ -836,7 +909,8 @@ MACRO-TOURS / DAY-TRIPS (CRÍTICO):
 - Debe tener 5–8 sub-paradas con el formato "Tour – Sub-parada" o "Destino – Sub-parada".
 - Incluye explícitamente al cierre una fila: "Regreso a {ciudad base}" (con duración 2 líneas).
 - No colocar day-trips duros el último día.
-- NO generar duplicados bilingües del mismo tour/actividad.
+- IMPORTANTE: El último día NO debe ser "light" por defecto. Si no hay vuelo temprano/check-out restrictivo,
+  diseña un día urbano completo con imperdibles y buen ritmo.
 
 LAGUNAS TERMALES (CRÍTICO):
 - Mínimo 3 horas de actividad efectiva.
@@ -1054,6 +1128,7 @@ REGLAS DE REPARACIÓN:
 5) Para recorridos multi-parada (urbano o tour), usa "Destino – Sub-parada" en activity.
 6) day_hours: NO lo inventes si no viene en el contexto; si no viene, déjalo como [].
 7) AURORAS: NO consecutivas y NUNCA el último día.
+8) ÚLTIMO DÍA: NO hacerlo "light" por defecto (solo evita day-trips duros).
 
 Responde SOLO JSON válido.
 `.trim();
@@ -1094,10 +1169,12 @@ REGLAS:
   usando "Destino – Sub-parada" cuando tenga sentido.
 - from/to NO deben quedar vacíos.
 - duration siempre 2 líneas.
+- TIEMPOS TRANSPORTE: estima tiempos realistas; "Verificar..." solo último recurso y baja frecuencia.
 - AURORAS: NO consecutivas y NUNCA el último día.
 - Incluye "Regreso a {ciudad base}" al cierre de macro-tours.
 - NO inventes day_hours si no venía en el contexto (déjalo []).
 - NO uses placeholders genéricos.
+- ÚLTIMO DÍA: NO hacerlo "light" por defecto (solo evita day-trips duros).
 
 Responde SOLO JSON válido.
 `.trim();
@@ -1179,6 +1256,16 @@ Responde SOLO JSON válido, sin texto fuera.
 
       const research = body.research_json || null;
 
+      // ✅ v43.6.7: Camino determinístico si research_json trae rows_draft
+      if (research && Array.isArray(research?.rows_draft) && research.rows_draft.length) {
+        const det = _plannerDeterministicFromResearch_(research, body.target_day ?? null);
+        if (det && Array.isArray(det.rows) && det.rows.length) {
+          const out = normalizeDurationsInParsed(det);
+          return res.status(200).json({ text: JSON.stringify(out) });
+        }
+        // si algo raro pasa, caer al camino LLM como backup
+      }
+
       // Camino legado (mensajes del cliente, sin research_json)
       if (!research) {
         const clientMessages = extractMessages(body);
@@ -1203,7 +1290,7 @@ Responde SOLO JSON válido, sin texto fuera.
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
-      // Camino nuevo (research_json directo)
+      // Camino nuevo (research_json directo) - backup vía LLM
       const plannerUserPayload = {
         research_json: research,
         target_day: body.target_day ?? null,
