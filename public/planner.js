@@ -1618,9 +1618,13 @@ function showWOW(on, msg){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [15.2] Generación principal por ciudad (SECUENCIAL Y BLINDADA)
+   [15.2] Generación principal por ciudad
+   MODELO:
+   INFO → PLANNER → rows → JS MONTA
+   FIX CRÍTICO: ejecución SECUENCIAL (no concurrencia)
 ───────────────────────────────────────────────────────────── */
 
+/* ===== Resolver endpoint API (iframe-safe) ===== */
 function __getChatEndpoint__(){
   try{
     const qs = new URLSearchParams(window.location.search || '');
@@ -1632,6 +1636,7 @@ function __getChatEndpoint__(){
   return '/api/chat';
 }
 
+/* ===== Shim callApiChat ===== */
 if (typeof window.callApiChat !== 'function') {
   window.callApiChat = async function(mode, payload = {}, opts = {}) {
     const timeoutMs = opts.timeoutMs || 120000;
@@ -1654,6 +1659,7 @@ if (typeof window.callApiChat !== 'function') {
 }
 var callApiChat = window.callApiChat;
 
+/* ===== Parse JSON seguro ===== */
 function __safeParseJSON__(raw){
   if(!raw) return null;
   if(typeof raw === 'object') return raw;
@@ -1666,6 +1672,7 @@ function __safeParseJSON__(raw){
   return null;
 }
 
+/* ===== Generación por ciudad (SECUENCIAL) ===== */
 async function generateCityItinerary(city){
   if(!city) return;
 
@@ -1675,6 +1682,7 @@ async function generateCityItinerary(city){
   showWOW(true, `Generando itinerario para ${city}…`);
 
   try{
+    /* ========= INFO ========= */
     const context = {
       city,
       country: dest.country || '',
@@ -1689,12 +1697,14 @@ async function generateCityItinerary(city){
 
     const infoResp = await callApiChat('info', { context });
     const research = __safeParseJSON__(infoResp?.text ?? infoResp);
-    if(!research) throw new Error('INFO inválido');
+    if(!research) throw new Error('INFO no devolvió JSON válido');
 
+    /* ========= PLANNER ========= */
     const plannerResp = await callApiChat('planner', { research_json: research });
     const parsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
-    if(!parsed || !Array.isArray(parsed.rows)) throw new Error('PLANNER sin rows');
+    if(!parsed || !Array.isArray(parsed.rows)) throw new Error('PLANNER no devolvió rows');
 
+    /* ========= INTEGRACIÓN ========= */
     itineraries[city] = { byDay:{} };
     itineraries[city].originalDays = dest.days;
 
@@ -1704,39 +1714,52 @@ async function generateCityItinerary(city){
       itineraries[city].byDay[day].push(normalizeRow(r));
     });
 
-    ensureDays?.(city);
-    renderCityTabs?.();
-    setActiveCity?.(city);
-    renderCityItinerary?.(city);
+    if(typeof ensureDays === 'function') ensureDays(city);
+    if(typeof renderCityTabs === 'function') renderCityTabs();
+    if(typeof setActiveCity === 'function') setActiveCity(city);
+    if(typeof renderCityItinerary === 'function') renderCityItinerary(city);
+
+    return true;
 
   }catch(err){
     console.error(`[generateCityItinerary] ${city}`, err);
-    chatMsg?.(`⚠️ Error generando ${city}. Revisa consola.`, 'ai');
+    if(typeof chatMsg === 'function'){
+      chatMsg(`⚠️ Error generando itinerario para ${city}. Revisa consola.`, 'ai');
+    }
     throw err;
   }finally{
     showWOW(false);
   }
 }
 
+/* ─────────────────────────────────────────────────────────────
+   [15.3] Rebalanceo
+   ❌ Eliminado — vive 100% en el API
+───────────────────────────────────────────────────────────── */
+
+
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
-   EJECUCIÓN SECUENCIAL (FIX CRÍTICO)
+   EJECUCIÓN SECUENCIAL BLINDADA
 ================================= */
 
 async function startPlanning(){
   if(!Array.isArray(savedDestinations) || savedDestinations.length === 0) return;
 
+  // UI base
   $chatBox.style.display = 'flex';
   planningStarted   = true;
   collectingHotels  = true;
   session           = [];
   metaProgressIndex = 0;
 
+  // Preferencias globales (solo AI / API)
   plannerState.preferences ||= {};
   plannerState.preferences.alwaysIncludeDinner = true;
   plannerState.preferences.flexibleEvening     = true;
   plannerState.preferences.iconicHintsModerate = true;
 
+  // Mensajes iniciales
   chatMsg(tone.hi);
   chatMsg(tone.infoTip, 'ai');
 
@@ -1745,32 +1768,42 @@ async function startPlanning(){
 
 function askNextHotelTransport(){
 
+  // ✅ Todos los destinos listos → generar (SECUENCIAL)
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
 
     (async()=>{
       showWOW(true,'Astra está generando itinerarios…');
+
       try{
-        for(const {city} of savedDestinations){
+        for(const { city } of savedDestinations){
           await generateCityItinerary(city); // ← FIX CLAVE
         }
         chatMsg(tone.doneAll);
       }catch(err){
-        console.error('[startPlanning]', err);
-        chatMsg('⚠️ Error generando itinerarios. Revisa consola.', 'ai');
+        console.error('[startPlanning] Error global:', err);
+        chatMsg(
+          '⚠️ Hubo un error generando uno o más itinerarios. Revisa la consola (F12).',
+          'ai'
+        );
       }finally{
         showWOW(false);
       }
     })();
+
     return;
   }
 
+  // =====================================================
+  // Recolección hotel / transporte por ciudad
+  // =====================================================
   const city = savedDestinations[metaProgressIndex].city;
   cityMeta[city] ||= { baseDate:null, hotel:'', transport:'', perDay:[] };
 
   preloadHotelAliases(city);
 
+  // 1) HOTEL / ZONA
   if(!String(cityMeta[city].hotel||'').trim()){
     setActiveCity(city);
     renderCityItinerary(city);
@@ -1778,19 +1811,21 @@ function askNextHotelTransport(){
     return;
   }
 
+  // 2) TRANSPORTE
   if(!String(cityMeta[city].transport||'').trim()){
     setActiveCity(city);
     renderCityItinerary(city);
     chatMsg(
-      `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover?`,
+      `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover? ` +
+      `(vehículo alquilado, transporte público, Uber/taxi o “recomiéndame”).`,
       'ai'
     );
     return;
   }
 
+  // 3) Avanzar
   metaProgressIndex++;
   askNextHotelTransport();
- }
 }
 
 /* ==============================
