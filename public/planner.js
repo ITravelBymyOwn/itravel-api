@@ -1619,8 +1619,9 @@ function showWOW(on, msg){
 
 /* ─────────────────────────────────────────────────────────────
    [15.2] Generación principal por ciudad
-   MODELO NUEVO:
-   INFO decide → PLANNER devuelve rows → JS SOLO MONTA
+   MODELO NUEVO (AJUSTE QUIRÚRGICO):
+   INFO devuelve city_day → PLANNER devuelve city_day → JS SOLO MONTA
+   (Compat: si PLANNER no trae city_day, usamos research.city_day)
 ───────────────────────────────────────────────────────────── */
 
 /* ===== Resolver endpoint API (iframe-safe) ===== */
@@ -1721,26 +1722,43 @@ async function generateCityItinerary(city){
     if(!research){
       throw new Error('INFO no devolvió JSON válido');
     }
+    if(!Array.isArray(research.city_day) || research.city_day.length === 0){
+      throw new Error('INFO no devolvió city_day');
+    }
 
     /* ========= PLANNER ========= */
     const plannerResp = await __callApiWithRetry__('planner', { research_json: research }, { timeoutMs: 180000, tries: 2 });
     const parsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
 
-    if(!parsed || !Array.isArray(parsed.rows)){
-      throw new Error('PLANNER no devolvió rows');
+    // ✅ NUEVO: usar SOLO city_day (preferimos PLANNER; fallback a INFO)
+    const cityDay = (parsed && Array.isArray(parsed.city_day) && parsed.city_day.length)
+      ? parsed.city_day
+      : (Array.isArray(research.city_day) ? research.city_day : []);
+
+    if(!Array.isArray(cityDay) || cityDay.length === 0){
+      throw new Error('PLANNER no devolvió city_day (y no hay fallback en INFO)');
     }
 
     /* ========= INTEGRACIÓN ========= */
     itineraries[city] = itineraries[city] || { byDay:{} };
     itineraries[city].originalDays = dest.days;
 
-    parsed.rows.forEach(r=>{
-      const day = Number(r.day || 1);
-      if(!itineraries[city].byDay[day]){
-        itineraries[city].byDay[day] = [];
-      }
-      itineraries[city].byDay[day].push(normalizeRow(r));
-    });
+    // ✅ NUEVO: reset limpio por ciudad para evitar basura previa
+    itineraries[city].byDay = {};
+
+    // Normaliza/ordena bloques por día y monta rows
+    cityDay
+      .slice()
+      .sort((a,b)=> Number(a?.day||1) - Number(b?.day||1))
+      .forEach(block=>{
+        const day = Number(block?.day || 1);
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        if(!itineraries[city].byDay[day]) itineraries[city].byDay[day] = [];
+        rows.forEach(r=>{
+          const rr = Object.assign({}, r, { day });
+          itineraries[city].byDay[day].push(normalizeRow(rr));
+        });
+      });
 
     if(typeof ensureDays === 'function') ensureDays(city);
     if(typeof renderCityTabs === 'function') renderCityTabs();
@@ -1759,11 +1777,6 @@ async function generateCityItinerary(city){
     showWOW(false);
   }
 }
-
-/* ─────────────────────────────────────────────────────────────
-   [15.3] Rebalanceo
-   ❌ Eliminado — vive 100% en el API
-───────────────────────────────────────────────────────────── */
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
