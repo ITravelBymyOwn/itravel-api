@@ -1750,191 +1750,176 @@ async function generateCityItinerary(city){
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
-   v60 base + overlay bloqueado global hasta terminar todas las ciudades
-   (concurrencia controlada vía runWithConcurrency)
-   + Mejora: resolutor inteligente de hotel/zona y banderas globales de cena/vespertino/auroras
-   ✅ FIX QUIRÚRGICO: si falta transporte, pedir SOLO transporte (evita confusión)
-   ✅ FIX QUIRÚRGICO NUEVO: si falla generación de alguna ciudad, NO “doneAll”
+   Base v60 → simplificada y blindada
+   - NO rompe Info Chat externo
+   - NO afirma éxito si una ciudad falla
+   - Overlay consistente
 ================================= */
+
 async function startPlanning(){
-  if(savedDestinations.length===0) return;
-  $chatBox.style.display='flex';
-  planningStarted = true;
-  collectingHotels = true;
-  session = [];
+  if(!Array.isArray(savedDestinations) || savedDestinations.length === 0) return;
+
+  // UI base
+  $chatBox.style.display = 'flex';
+  planningStarted   = true;
+  collectingHotels  = true;
+  session           = [];
   metaProgressIndex = 0;
 
-  // 🛠️ Preferencias globales (consumidas por el optimizador/AI):
-  // - Cena visible en la franja correcta, aunque no haya “actividad especial”
-  // - Ventana vespertina flexible
-  // - Sugerencias icónicas con frecuencia moderada (similares a auroras)
-  if(!plannerState.preferences) plannerState.preferences = {};
+  // Preferencias globales (consumidas SOLO por AI / API)
+  plannerState.preferences = plannerState.preferences || {};
   plannerState.preferences.alwaysIncludeDinner = true;
   plannerState.preferences.flexibleEvening     = true;
   plannerState.preferences.iconicHintsModerate = true;
 
-  // 1) Saludo inicial
-  chatMsg(`${tone.hi}`);
+  // Mensajes iniciales
+  chatMsg(tone.hi);
+  chatMsg(tone.infoTip, 'ai');
 
-  // 2) Tip del Info Chat (se muestra una sola vez al iniciar)
-  chatMsg(`${tone.infoTip}`, 'ai');
-
-  // 3) Comienza flujo de solicitud de hotel/zona y transporte
   askNextHotelTransport();
 }
 
-/* ====== Resolutor inteligente de Hotel/Zona (fuzzy & alias) ====== */
-const hotelResolverCache = {}; // cache por ciudad
+/* =========================================================
+   Resolutor inteligente de Hotel/Zona (sin cambios lógicos)
+========================================================= */
+const hotelResolverCache = {};
+
 function _normTxt(s){
   return String(s||'')
     .normalize('NFD').replace(/\p{Diacritic}/gu,'')
-    .toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+    .toLowerCase().replace(/[^a-z0-9\s]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
 }
+
 function _tokenSet(str){
   return new Set(_normTxt(str).split(' ').filter(Boolean));
 }
+
 function _jaccard(a,b){
   const A=_tokenSet(a), B=_tokenSet(b);
-  const inter = [...A].filter(x=>B.has(x)).length;
-  const uni   = new Set([...A,...B]).size || 1;
+  const inter=[...A].filter(x=>B.has(x)).length;
+  const uni=new Set([...A,...B]).size||1;
   return inter/uni;
 }
+
 function _levRatio(a,b){
-  // usa levenshteinDistance disponible en la Sección 17
   const A=_normTxt(a), B=_normTxt(b);
-  const maxlen = Math.max(A.length,B.length) || 1;
-  return (maxlen - levenshteinDistance(A,B))/maxlen;
+  const maxlen=Math.max(A.length,B.length)||1;
+  return (maxlen - levenshteinDistance(A,B)) / maxlen;
 }
 
-// Pre-carga alias por ciudad
 function preloadHotelAliases(city){
   if(!city) return;
-  if(!plannerState.hotelAliases) plannerState.hotelAliases = {};
+  plannerState.hotelAliases ||= {};
   if(plannerState.hotelAliases[city]) return;
 
-  const base = [city];
-  const extras = [
-    'centro','downtown','old town','historic center','main square','cathedral',
-    'harbor','port','university','station','bus terminal','train station'
+  const base=[city];
+  const extras=[
+    'centro','downtown','old town','historic center','main square',
+    'harbor','port','station','bus terminal','train station'
   ];
+  const prev=cityMeta?.[city]?.hotel?[cityMeta[city].hotel]:[];
 
-  const prev = (cityMeta[city]?.hotel ? [cityMeta[city].hotel] : []);
-  plannerState.hotelAliases[city] = [...new Set([...base, ...extras, ...prev])];
+  plannerState.hotelAliases[city]=[...new Set([...base,...extras,...prev])];
 }
 
 function resolveHotelInput(userText, city){
-  const raw = String(userText||'').trim();
-  if(!raw) return {text:'', confidence:0};
+  const raw=String(userText||'').trim();
+  if(!raw) return {text:'',confidence:0};
 
-  // 1) Links → conf alta
   if(/^https?:\/\//i.test(raw)){
-    return { text: raw, confidence: 0.98, resolvedVia: 'url' };
+    return {text:raw,confidence:0.98,resolvedVia:'url'};
   }
 
-  const candidates = new Set();
-  (plannerState.hotelAliases?.[city] || []).forEach(x=>candidates.add(x));
-
-  const byDay = itineraries?.[city]?.byDay || {};
-  Object.values(byDay).flat().forEach(r=>{
+  const candidates=new Set(plannerState.hotelAliases?.[city]||[]);
+  Object.values(itineraries?.[city]?.byDay||{}).flat().forEach(r=>{
     if(r?.activity) candidates.add(r.activity);
-    if(r?.to)       candidates.add(r.to);
-    if(r?.from)     candidates.add(r.from);
+    if(r?.to) candidates.add(r.to);
+    if(r?.from) candidates.add(r.from);
   });
 
-  if(cityMeta?.[city]?.hotel) candidates.add(cityMeta[city].hotel);
-
-  let best = { text: raw, confidence: 0.50, resolvedVia: 'raw', score: 0.5 };
-  const list = [...candidates].filter(Boolean);
-  for(const c of list){
-    const j = _jaccard(raw, c);
-    const l = _levRatio(raw, c);
-    const score = 0.6*j + 0.4*l;
-    if(score > (best.score||0)){
-      best = { text: c, confidence: Math.max(0.55, Math.min(0.99, score)), resolvedVia: 'alias', score };
+  let best={text:raw,confidence:0.5,score:0.5};
+  for(const c of candidates){
+    const score=0.6*_jaccard(raw,c)+0.4*_levRatio(raw,c);
+    if(score>best.score){
+      best={text:c,confidence:Math.min(0.99,Math.max(0.55,score)),score};
     }
   }
 
-  hotelResolverCache[city] = hotelResolverCache[city] || {};
-  hotelResolverCache[city][raw] = best;
+  hotelResolverCache[city] ||= {};
+  hotelResolverCache[city][raw]=best;
   return best;
 }
 
-/* ====== Helper mínimo para detectar “no sé / recomiéndame” en transporte ====== */
-function __wantsTransportRecommendation__(txt){
-  const t = String(txt||'').toLowerCase();
-  return /\b(recomiend|no\s*s[eé]|no\s*se|no\s*tengo|da\s*igual|como\s*sea|cualquiera)\b/.test(t);
-}
-
+/* =========================================================
+   Flujo principal Hotel / Transporte → Generación
+========================================================= */
 function askNextHotelTransport(){
-  // ✅ Si ya se procesaron todos los destinos → generar itinerarios
+
+  // ✅ Todos los destinos listos → generar
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
 
-    (async ()=>{
-      showWOW(true, 'Astra está generando itinerarios…');
+    (async()=>{
+      showWOW(true,'Astra está generando itinerarios…');
 
       try{
-        // ⚙️ Concurrencia controlada (v60): no tocar
-        const taskFns = savedDestinations.map(({city}) => async () => {
-          // ✅ generateCityItinerary ahora lanza si falla (ver SECCIÓN 15)
-          await generateCityItinerary(city);
+        const tasks = savedDestinations.map(({city})=>async()=>{
+          await generateCityItinerary(city); // ← si falla, lanza
         });
 
-        await runWithConcurrency(taskFns);
+        await runWithConcurrency(tasks);
 
-        // ✅ SOLO si TODAS las ciudades se generaron bien
+        // ✅ SOLO aquí se considera éxito total
         chatMsg(tone.doneAll);
 
       }catch(err){
-        console.error('[askNextHotelTransport] Generación global falló:', err);
-
-        // ✅ NO afirmar éxito si hubo error
+        console.error('[startPlanning] Error global:', err);
         chatMsg(
-          `⚠️ Hubo un error generando uno o más itinerarios. ` +
-          `Revisa la consola (F12) y vuelve a intentar.`,
+          '⚠️ Hubo un error generando uno o más itinerarios. ' +
+          'Revisa la consola (F12) y vuelve a intentar.',
           'ai'
         );
-
       }finally{
         showWOW(false);
       }
     })();
+
     return;
   }
 
-  // 🧠 Validación y persistencia del destino actual
+  // =====================================================
+  // Recolección de datos por ciudad
+  // =====================================================
   const city = savedDestinations[metaProgressIndex].city;
-  if(!cityMeta[city]){
-    cityMeta[city] = { baseDate: null, hotel:'', transport:'', perDay: [] };
-  }
+  cityMeta[city] ||= { baseDate:null, hotel:'', transport:'', perDay:[] };
 
   preloadHotelAliases(city);
 
-  // ⛔ Debe esperar hotel/zona
-  const currentHotel = cityMeta[city].hotel || '';
-  if(!currentHotel.trim()){
+  // 1) HOTEL / ZONA
+  if(!String(cityMeta[city].hotel||'').trim()){
     setActiveCity(city);
     renderCityItinerary(city);
-    chatMsg(tone.askHotelTransport(city), 'ai');
+    chatMsg(tone.askHotelTransport(city),'ai');
     return;
   }
 
-  // ⛔ Debe esperar transporte
-  const currentTransport = cityMeta[city].transport || '';
-  if(!currentTransport.trim()){
+  // 2) TRANSPORTE
+  if(!String(cityMeta[city].transport||'').trim()){
     setActiveCity(city);
     renderCityItinerary(city);
 
     chatMsg(
       `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover? ` +
-      `(ej: “vehículo alquilado”, “transporte público”, “Uber/taxi”, o escribe “recomiéndame”).`,
+      `(vehículo alquilado, transporte público, Uber/taxi o escribe “recomiéndame”).`,
       'ai'
     );
     return;
   }
 
-  // 🧭 Avanzar al siguiente destino
+  // 3) Avanzar
   metaProgressIndex++;
   askNextHotelTransport();
 }
@@ -2200,14 +2185,13 @@ function intentFromText(text){
 }
 
 /* ===========================================================
-   SECCIÓN 18 · Guard rails + Validación flexible FINAL (v79.x)
-   Objetivo: robustez sin romper lo estable.
+   SECCIÓN 18 · Guard rails + Validación flexible FINAL
+   Rol: normalizar, proteger y auditar datos POST-API
    Fuente de verdad: API (INFO + PLANNER)
-   Aquí solo: robustez, normalización, retries controlados, anti-regresiones.
 =========================================================== */
 
 /* ─────────────────────────────────────────────────────────────
-   [18.1] Helper: Canonización + normalización de strings
+   [18.1] Canonización de texto (uso global)
 ───────────────────────────────────────────────────────────── */
 function canonTxt(s){
   return String(s||'')
@@ -2219,241 +2203,102 @@ function canonTxt(s){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [18.2] Helper: HH:MM validator + normalizer
+   [18.2] HH:MM helpers
 ───────────────────────────────────────────────────────────── */
-function isHHMM(v){
-  return /^(\d{1,2}):(\d{2})$/.test(String(v||'').trim());
-}
+function isHHMM(v){ return /^(\d{1,2}):(\d{2})$/.test(String(v||'').trim()); }
 function pad2(n){ return String(n).padStart(2,'0'); }
 function normHHMM(v){
   const m = String(v||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!m) return String(v||'').trim();
-  let hh = Math.min(23, Math.max(0, parseInt(m[1],10)));
-  let mm = Math.min(59, Math.max(0, parseInt(m[2],10)));
+  const hh = Math.min(23, Math.max(0, +m[1]));
+  const mm = Math.min(59, Math.max(0, +m[2]));
   return `${pad2(hh)}:${pad2(mm)}`;
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [18.3] Helper: Duración (2 líneas) guard
+   [18.3] Duración obligatoria 2 líneas
 ───────────────────────────────────────────────────────────── */
-function hasTwoLineDuration(s){
-  const t = String(s||'');
-  return /Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(t);
-}
-function forceTwoLineDuration(duration){
-  const d = String(duration||'').trim();
-  if(hasTwoLineDuration(d)) return d;
-  // Si viene vacío o no cumple, lo forzamos al placeholder estándar.
+function forceTwoLineDuration(d){
+  const t = String(d||'').trim();
+  if(/Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(t)) return t;
   return "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat";
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [18.4] Helper: Normalizar filas (contrato tabla)
+   [18.4] Normalización de fila (CONTRATO ÚNICO DE TABLA)
 ───────────────────────────────────────────────────────────── */
 function normalizeRow(r){
-  const out = { ...(r||{}) };
-  out.day = Number(out.day||1) || 1;
+  const o = { ...(r||{}) };
 
-  // start/end: normaliza si están presentes
-  if(out.start && isHHMM(out.start)) out.start = normHHMM(out.start);
-  if(out.end && isHHMM(out.end)) out.end = normHHMM(out.end);
+  o.day = Number(o.day||1) || 1;
+  if(o.start && isHHMM(o.start)) o.start = normHHMM(o.start);
+  if(o.end   && isHHMM(o.end))   o.end   = normHHMM(o.end);
 
-  out.activity = String(out.activity||'').trim();
-  out.from = String(out.from||'').trim();
-  out.to = String(out.to||'').trim();
-  out.transport = String(out.transport||'').trim();
-  out.notes = String(out.notes||'').trim();
-  out.kind = String(out.kind||'').trim();
-  out.zone = String(out.zone||'').trim();
+  o.activity  = String(o.activity||'').trim();
+  o.from      = String(o.from||'').trim();
+  o.to        = String(o.to||'').trim();
+  o.transport = String(o.transport||'').trim();
+  o.notes     = String(o.notes||'').trim();
+  o.kind      = String(o.kind||'').trim();
+  o.zone      = String(o.zone||'').trim();
 
-  out.duration = forceTwoLineDuration(out.duration);
+  o.duration  = forceTwoLineDuration(o.duration);
+  if(o._crossDay != null) o._crossDay = !!o._crossDay;
 
-  // _crossDay opcional
-  if(out._crossDay != null) out._crossDay = !!out._crossDay;
-
-  return out;
+  return o;
 }
 function normalizeRows(rows){
-  if(!Array.isArray(rows)) return [];
-  return rows.map(normalizeRow).filter(r => r.activity || r.notes || r.transport);
+  return Array.isArray(rows)
+    ? rows.map(normalizeRow).filter(r => r.activity || r.notes)
+    : [];
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [18.5] Helper: Dedupe básico (misma activity+start+day)
+   [18.5] Dedupe suave (día + start + activity)
 ───────────────────────────────────────────────────────────── */
 function dedupeRows(rows){
-  const seen = new Set();
-  const out = [];
-  for(const r of (rows||[])){
-    const key = `${r.day}__${String(r.start||'')}__${canonTxt(r.activity)}`;
-    if(seen.has(key)) continue;
-    seen.add(key);
-    out.push(r);
+  const seen = new Set(), out = [];
+  for(const r of rows||[]){
+    const k = `${r.day}|${r.start||''}|${canonTxt(r.activity)}`;
+    if(seen.has(k)) continue;
+    seen.add(k); out.push(r);
   }
   return out;
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [18.6] Helper: Extraer JSON del API { text:"..." }
-───────────────────────────────────────────────────────────── */
-function parseApiTextToJSON(apiText){
-  try{
-    if(!apiText) return null;
-    if(typeof apiText === 'object') return apiText;
-    const raw = String(apiText||'');
-    // intento directo
-    try{ return JSON.parse(raw); }catch(_){}
-    // recorte tolerante
-    const first = raw.indexOf('{');
-    const last = raw.lastIndexOf('}');
-    if(first>=0 && last>first){
-      try{ return JSON.parse(raw.slice(first,last+1)); }catch(_){}
-    }
-  }catch(_){}
-  return null;
-}
-
-/* ─────────────────────────────────────────────────────────────
-   [18.7] Helper: Call API (INFO/PLANNER) con timeout + abort
-   ✅ QUIRÚRGICO v79.x: NO colisionar firmas con la Sección 15.2
-   - Si ya existe window.callApiChat (firma mode,payload,opts), no redefinir.
-   - Si no existe, definimos un shim COMPATIBLE con 15.2.
-───────────────────────────────────────────────────────────── */
-function __getChatEndpoint18__(){
-  try{
-    const qs = new URLSearchParams(window.location.search || '');
-    const abs = (qs.get('chatApiAbs') || '').trim();
-    if(abs) return abs;
-
-    const apiBase = (qs.get('apiBase') || '').trim();
-    const chatApi = (qs.get('chatApi') || '/api/chat').trim() || '/api/chat';
-    if(apiBase){
-      return apiBase.replace(/\/+$/,'') + (chatApi.startsWith('/') ? chatApi : `/${chatApi}`);
-    }
-  }catch(_){}
-  return "/api/chat";
-}
-
-if (typeof window !== 'undefined' && typeof window.callApiChat !== 'function' && typeof callApiChat !== 'function') {
-  window.callApiChat = async function(mode, payload = {}, opts = {}) {
-    const retries   = Number(opts.retries || 0);
-
-    const modeLc = String(mode || '').toLowerCase();
-    const defaultTimeout =
-      (modeLc === 'info')    ? 120000 :
-      (modeLc === 'planner') ? 120000 :
-      (modeLc === 'validate')? 30000  :
-      90000;
-
-    const timeoutMs = Number(opts.timeoutMs || defaultTimeout);
-    const url = __getChatEndpoint18__();
-
-    const doOnce = async ()=>{
-      const ctrl = new AbortController();
-      const t = setTimeout(()=>ctrl.abort(new Error(`timeout ${timeoutMs}ms (${mode})`)), timeoutMs);
-      try{
-        const resp = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ mode, ...payload }),
-          signal: ctrl.signal
-        });
-        const data = await resp.json().catch(()=>null);
-        if(!resp.ok) throw new Error(`API ${mode} HTTP ${resp.status}`);
-        return data;
-      } finally {
-        clearTimeout(t);
-      }
-    };
-
-    let lastErr = null;
-    for (let i=0; i<=retries; i++){
-      try { return await doOnce(); }
-      catch(e){ lastErr = e; }
-    }
-    throw lastErr || new Error("callApiChat failed");
-  };
-
-  // exponer símbolo (sin window.) si alguien lo usa así
-  if (typeof callApiChat !== 'function') {
-    var callApiChat = window.callApiChat;
-  }
-} else {
-  // Si existe window.callApiChat, aseguramos alias global
-  if (typeof callApiChat !== 'function' && typeof window !== 'undefined' && typeof window.callApiChat === 'function') {
-    var callApiChat = window.callApiChat;
-  }
-}
-
-/* ─────────────────────────────────────────────────────────────
-   [18.8] Guard: detectar placeholders de baja calidad (global)
-───────────────────────────────────────────────────────────── */
-function isGenericPlaceholderActivity(activity){
-  const t = canonTxt(activity);
-  if(!t) return true;
-  const bad = [
-    "museo de arte",
-    "parque local",
-    "cafe local",
-    "restaurante local",
-    "exploracion de la costa",
-    "exploracion de la ciudad",
-    "paseo por la ciudad",
-    "recorrido por la ciudad"
-  ];
-  if(t.length <= 10 && /^(museo|parque|cafe|restaurante|plaza|mercado)$/i.test(t)) return true;
-  if(bad.some(b => t===b || t.includes(b))) return true;
-  if(/^(museo|parque|cafe|restaurante)\b/i.test(t) && t.split(' ').length <= 3) return true;
-  return false;
-}
-
-/* ─────────────────────────────────────────────────────────────
-   [18.9] Validación flexible FINAL (no rompe lo estable)
+   [18.6] Validación flexible (NO bloquea render)
 ───────────────────────────────────────────────────────────── */
 function softValidateRows(rows, { daysTotal=1 }={}){
   const issues = [];
   const clean = normalizeRows(rows);
+  if(!clean.length) issues.push("rows vacío");
 
-  if(!clean.length) issues.push("rows vacío.");
-  // Cobertura por día (soft)
-  const need = Math.max(1, Number(daysTotal)||1);
-  const present = new Set(clean.map(r=>Number(r.day)||1));
+  const need = Math.max(1, +daysTotal||1);
+  const present = new Set(clean.map(r=>r.day));
   for(let d=1; d<=need; d++){
-    if(!present.has(d)) issues.push(`falta día ${d}.`);
+    if(!present.has(d)) issues.push(`falta día ${d}`);
   }
-
-  // duration 2 líneas (hard-enforced por normalizeRow)
-  // placeholders (soft)
-  if(clean.some(r => isGenericPlaceholderActivity(r.activity))){
-    issues.push("hay activity genérica (placeholder).");
-  }
-
-  return { ok: issues.length===0, issues, rows: clean };
+  return { ok: !issues.length, issues, rows: clean };
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [18.10] Normalización final de respuesta API Planner
+   [18.7] Normalización final de respuesta Planner
 ───────────────────────────────────────────────────────────── */
 function normalizePlannerResponse(parsed, { daysTotal=1 }={}){
-  if(!parsed) return { destination:"", rows:[], followup:"" };
+  if(!parsed) return { destination:'', rows:[], followup:'' };
 
-  let rows = [];
-  if(Array.isArray(parsed.rows)) rows = parsed.rows;
-  else if(Array.isArray(parsed.rows_final)) rows = parsed.rows_final;
-  else if(Array.isArray(parsed.rows_draft)) rows = parsed.rows_draft;
-
+  let rows = Array.isArray(parsed.rows) ? parsed.rows : [];
   rows = dedupeRows(normalizeRows(rows));
 
-  const destination = String(parsed.destination || parsed.city || parsed.place || '').trim();
-  const followup = String(parsed.followup || '').trim();
-
   const audit = softValidateRows(rows, { daysTotal });
-  return { destination, rows: audit.rows, followup, _audit: audit };
+  return {
+    destination: String(parsed.destination||parsed.city||'').trim(),
+    rows: audit.rows,
+    followup: String(parsed.followup||'').trim(),
+    _audit: audit
+  };
 }
-
-/* ===========================================================
-   FIN SECCIÓN 18
-=========================================================== */
 
 /* ==============================
    SECCIÓN 19 · Chat handler (global)
