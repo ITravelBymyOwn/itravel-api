@@ -1578,6 +1578,100 @@ async function validateRowsWithAgent(city, rows, baseDate){
   return { allowed, rejected, removed };
 }
 
+/* ==============================
+   SECCIÓN 15 · Generación por ciudad (alineada a API Ciudad-Día)
+================================= */
+
+/* ─────────────────────────────────────────────────────────────
+   [15.1] Overlay helpers (SIN CAMBIOS FUNCIONALES)
+───────────────────────────────────────────────────────────── */
+function setOverlayMessage(msg='Astra está generando itinerarios…'){
+  const p = $overlayWOW?.querySelector('p');
+  if(p) p.textContent = msg;
+}
+
+function showWOW(on, msg){
+  if(!$overlayWOW) return;
+  if(msg) setOverlayMessage(msg);
+
+  $overlayWOW.style.display = on ? 'flex' : 'none';
+  $overlayWOW.setAttribute('aria-busy', on ? 'true' : 'false');
+
+  qsa('button, input, select, textarea, a').forEach(el=>{
+    if (el.id === 'reset-planner') return;
+    if (el.id === 'info-chat-floating') {
+      try { el.disabled = on; } catch(_) {}
+      return;
+    }
+    if(on){
+      if(typeof el._prevDisabled === 'undefined'){
+        try { el._prevDisabled = !!el.disabled; } catch(_) {}
+      }
+      try { el.disabled = true; } catch(_) {}
+    }else{
+      if(typeof el._prevDisabled !== 'undefined'){
+        try { el.disabled = el._prevDisabled; } catch(_) {}
+        delete el._prevDisabled;
+      }
+    }
+  });
+}
+
+/* ─────────────────────────────────────────────────────────────
+   [15.2] Generación principal por ciudad
+   MODELO NUEVO:
+   INFO decide → PLANNER devuelve rows → JS SOLO MONTA
+───────────────────────────────────────────────────────────── */
+
+/* ===== Resolver endpoint API (iframe-safe) ===== */
+function __getChatEndpoint__(){
+  try{
+    const qs = new URLSearchParams(window.location.search || '');
+    if(qs.get('chatApiAbs')) return qs.get('chatApiAbs').trim();
+    if(qs.get('apiBase')){
+      return qs.get('apiBase').replace(/\/+$/,'') + '/api/chat';
+    }
+  }catch(_){}
+  return '/api/chat';
+}
+
+/* ===== Shim callApiChat (se conserva) ===== */
+if (typeof window.callApiChat !== 'function') {
+  window.callApiChat = async function(mode, payload = {}, opts = {}) {
+    const timeoutMs = opts.timeoutMs || 120000;
+    const ctrl = new AbortController();
+    const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+
+    try{
+      const res = await fetch(__getChatEndpoint__(), {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ mode, ...payload }),
+        signal: ctrl.signal
+      });
+      if(!res.ok) throw new Error(`API ${mode} ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(t);
+    }
+  };
+}
+var callApiChat = window.callApiChat;
+
+/* ===== Parse JSON seguro ===== */
+function __safeParseJSON__(raw){
+  if(!raw) return null;
+  if(typeof raw === 'object') return raw;
+  try{ return JSON.parse(raw); }catch{}
+  try{
+    const a = raw.indexOf('{');
+    const b = raw.lastIndexOf('}');
+    if(a>=0 && b>a) return JSON.parse(raw.slice(a,b+1));
+  }catch{}
+  return null;
+}
+
+/* ===== Generación por ciudad ===== */
 async function generateCityItinerary(city){
   if(!city) return;
 
@@ -1603,15 +1697,15 @@ async function generateCityItinerary(city){
     const infoResp = await callApiChat('info', { context });
     const research = __safeParseJSON__(infoResp?.text ?? infoResp);
 
-    if(!research || !Array.isArray(research.city_day)){
-      throw new Error('INFO no devolvió city_day');
+    if(!research){
+      throw new Error('INFO no devolvió JSON válido');
     }
 
     /* ========= PLANNER ========= */
     const plannerResp = await callApiChat('planner', { research_json: research });
-    const plannerParsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
+    const parsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
 
-    if(!plannerParsed || !Array.isArray(plannerParsed.rows)){
+    if(!parsed || !Array.isArray(parsed.rows)){
       throw new Error('PLANNER no devolvió rows');
     }
 
@@ -1619,25 +1713,12 @@ async function generateCityItinerary(city){
     itineraries[city] = itineraries[city] || { byDay:{} };
     itineraries[city].originalDays = dest.days;
 
-    // Indexar filas del planner por día
-    const rowsByDay = {};
-    plannerParsed.rows.forEach(r=>{
-      const d = Number(r.day)||1;
-      rowsByDay[d] ||= [];
-      rowsByDay[d].push(normalizeRow(r));
-    });
-
-    // Montar estructura usando CITY_DAY del INFO
-    research.city_day.forEach(block=>{
-      const day = Number(block.day);
-      if(!day) return;
-
-      const rows = rowsByDay[day] || [];
-      if(typeof pushRows === 'function'){
-        pushRows(city, rows);
-      }else{
-        itineraries[city].byDay[day] = rows;
+    parsed.rows.forEach(r=>{
+      const day = Number(r.day || 1);
+      if(!itineraries[city].byDay[day]){
+        itineraries[city].byDay[day] = [];
       }
+      itineraries[city].byDay[day].push(normalizeRow(r));
     });
 
     if(typeof ensureDays === 'function') ensureDays(city);
@@ -1657,6 +1738,11 @@ async function generateCityItinerary(city){
     showWOW(false);
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   [15.3] Rebalanceo
+   ❌ Eliminado — vive 100% en el API
+───────────────────────────────────────────────────────────── */
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
