@@ -1618,12 +1618,9 @@ function showWOW(on, msg){
 }
 
 /* ─────────────────────────────────────────────────────────────
-   [15.2] Generación principal por ciudad
-   MODELO NUEVO:
-   INFO decide → PLANNER devuelve rows → JS SOLO MONTA
+   [15.2] Generación principal por ciudad (SECUENCIAL Y BLINDADA)
 ───────────────────────────────────────────────────────────── */
 
-/* ===== Resolver endpoint API (iframe-safe) ===== */
 function __getChatEndpoint__(){
   try{
     const qs = new URLSearchParams(window.location.search || '');
@@ -1635,7 +1632,6 @@ function __getChatEndpoint__(){
   return '/api/chat';
 }
 
-/* ===== Shim callApiChat (se conserva) ===== */
 if (typeof window.callApiChat !== 'function') {
   window.callApiChat = async function(mode, payload = {}, opts = {}) {
     const timeoutMs = opts.timeoutMs || 120000;
@@ -1658,7 +1654,6 @@ if (typeof window.callApiChat !== 'function') {
 }
 var callApiChat = window.callApiChat;
 
-/* ===== Parse JSON seguro ===== */
 function __safeParseJSON__(raw){
   if(!raw) return null;
   if(typeof raw === 'object') return raw;
@@ -1671,7 +1666,6 @@ function __safeParseJSON__(raw){
   return null;
 }
 
-/* ===== Generación por ciudad ===== */
 async function generateCityItinerary(city){
   if(!city) return;
 
@@ -1681,7 +1675,6 @@ async function generateCityItinerary(city){
   showWOW(true, `Generando itinerario para ${city}…`);
 
   try{
-    /* ========= INFO ========= */
     const context = {
       city,
       country: dest.country || '',
@@ -1696,205 +1689,88 @@ async function generateCityItinerary(city){
 
     const infoResp = await callApiChat('info', { context });
     const research = __safeParseJSON__(infoResp?.text ?? infoResp);
+    if(!research) throw new Error('INFO inválido');
 
-    if(!research){
-      throw new Error('INFO no devolvió JSON válido');
-    }
-
-    /* ========= PLANNER ========= */
     const plannerResp = await callApiChat('planner', { research_json: research });
     const parsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
+    if(!parsed || !Array.isArray(parsed.rows)) throw new Error('PLANNER sin rows');
 
-    if(!parsed || !Array.isArray(parsed.rows)){
-      throw new Error('PLANNER no devolvió rows');
-    }
-
-    /* ========= INTEGRACIÓN ========= */
-    itineraries[city] = itineraries[city] || { byDay:{} };
+    itineraries[city] = { byDay:{} };
     itineraries[city].originalDays = dest.days;
 
     parsed.rows.forEach(r=>{
       const day = Number(r.day || 1);
-      if(!itineraries[city].byDay[day]){
-        itineraries[city].byDay[day] = [];
-      }
+      itineraries[city].byDay[day] ||= [];
       itineraries[city].byDay[day].push(normalizeRow(r));
     });
 
-    if(typeof ensureDays === 'function') ensureDays(city);
-    if(typeof renderCityTabs === 'function') renderCityTabs();
-    if(typeof setActiveCity === 'function') setActiveCity(city);
-    if(typeof renderCityItinerary === 'function') renderCityItinerary(city);
-
-    return true;
+    ensureDays?.(city);
+    renderCityTabs?.();
+    setActiveCity?.(city);
+    renderCityItinerary?.(city);
 
   }catch(err){
     console.error(`[generateCityItinerary] ${city}`, err);
-    if(typeof chatMsg === 'function'){
-      chatMsg(`⚠️ Error generando itinerario para ${city}. Revisa consola.`, 'ai');
-    }
+    chatMsg?.(`⚠️ Error generando ${city}. Revisa consola.`, 'ai');
     throw err;
   }finally{
     showWOW(false);
   }
 }
 
-/* ─────────────────────────────────────────────────────────────
-   [15.3] Rebalanceo
-   ❌ Eliminado — vive 100% en el API
-───────────────────────────────────────────────────────────── */
-
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
-   Base v60 → simplificada y blindada
-   - NO rompe Info Chat externo
-   - NO afirma éxito si una ciudad falla
-   - Overlay consistente
+   EJECUCIÓN SECUENCIAL (FIX CRÍTICO)
 ================================= */
 
 async function startPlanning(){
   if(!Array.isArray(savedDestinations) || savedDestinations.length === 0) return;
 
-  // UI base
   $chatBox.style.display = 'flex';
   planningStarted   = true;
   collectingHotels  = true;
   session           = [];
   metaProgressIndex = 0;
 
-  // Preferencias globales (consumidas SOLO por AI / API)
-  plannerState.preferences = plannerState.preferences || {};
+  plannerState.preferences ||= {};
   plannerState.preferences.alwaysIncludeDinner = true;
   plannerState.preferences.flexibleEvening     = true;
   plannerState.preferences.iconicHintsModerate = true;
 
-  // Mensajes iniciales
   chatMsg(tone.hi);
   chatMsg(tone.infoTip, 'ai');
 
   askNextHotelTransport();
 }
 
-/* =========================================================
-   Resolutor inteligente de Hotel/Zona (sin cambios lógicos)
-========================================================= */
-const hotelResolverCache = {};
-
-function _normTxt(s){
-  return String(s||'')
-    .normalize('NFD').replace(/\p{Diacritic}/gu,'')
-    .toLowerCase().replace(/[^a-z0-9\s]/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
-function _tokenSet(str){
-  return new Set(_normTxt(str).split(' ').filter(Boolean));
-}
-
-function _jaccard(a,b){
-  const A=_tokenSet(a), B=_tokenSet(b);
-  const inter=[...A].filter(x=>B.has(x)).length;
-  const uni=new Set([...A,...B]).size||1;
-  return inter/uni;
-}
-
-function _levRatio(a,b){
-  const A=_normTxt(a), B=_normTxt(b);
-  const maxlen=Math.max(A.length,B.length)||1;
-  return (maxlen - levenshteinDistance(A,B)) / maxlen;
-}
-
-function preloadHotelAliases(city){
-  if(!city) return;
-  plannerState.hotelAliases ||= {};
-  if(plannerState.hotelAliases[city]) return;
-
-  const base=[city];
-  const extras=[
-    'centro','downtown','old town','historic center','main square',
-    'harbor','port','station','bus terminal','train station'
-  ];
-  const prev=cityMeta?.[city]?.hotel?[cityMeta[city].hotel]:[];
-
-  plannerState.hotelAliases[city]=[...new Set([...base,...extras,...prev])];
-}
-
-function resolveHotelInput(userText, city){
-  const raw=String(userText||'').trim();
-  if(!raw) return {text:'',confidence:0};
-
-  if(/^https?:\/\//i.test(raw)){
-    return {text:raw,confidence:0.98,resolvedVia:'url'};
-  }
-
-  const candidates=new Set(plannerState.hotelAliases?.[city]||[]);
-  Object.values(itineraries?.[city]?.byDay||{}).flat().forEach(r=>{
-    if(r?.activity) candidates.add(r.activity);
-    if(r?.to) candidates.add(r.to);
-    if(r?.from) candidates.add(r.from);
-  });
-
-  let best={text:raw,confidence:0.5,score:0.5};
-  for(const c of candidates){
-    const score=0.6*_jaccard(raw,c)+0.4*_levRatio(raw,c);
-    if(score>best.score){
-      best={text:c,confidence:Math.min(0.99,Math.max(0.55,score)),score};
-    }
-  }
-
-  hotelResolverCache[city] ||= {};
-  hotelResolverCache[city][raw]=best;
-  return best;
-}
-
-/* =========================================================
-   Flujo principal Hotel / Transporte → Generación
-========================================================= */
 function askNextHotelTransport(){
 
-  // ✅ Todos los destinos listos → generar
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
     chatMsg(tone.confirmAll);
 
     (async()=>{
       showWOW(true,'Astra está generando itinerarios…');
-
       try{
-        const tasks = savedDestinations.map(({city})=>async()=>{
-          await generateCityItinerary(city); // ← si falla, lanza
-        });
-
-        await runWithConcurrency(tasks);
-
-        // ✅ SOLO aquí se considera éxito total
+        for(const {city} of savedDestinations){
+          await generateCityItinerary(city); // ← FIX CLAVE
+        }
         chatMsg(tone.doneAll);
-
       }catch(err){
-        console.error('[startPlanning] Error global:', err);
-        chatMsg(
-          '⚠️ Hubo un error generando uno o más itinerarios. ' +
-          'Revisa la consola (F12) y vuelve a intentar.',
-          'ai'
-        );
+        console.error('[startPlanning]', err);
+        chatMsg('⚠️ Error generando itinerarios. Revisa consola.', 'ai');
       }finally{
         showWOW(false);
       }
     })();
-
     return;
   }
 
-  // =====================================================
-  // Recolección de datos por ciudad
-  // =====================================================
   const city = savedDestinations[metaProgressIndex].city;
   cityMeta[city] ||= { baseDate:null, hotel:'', transport:'', perDay:[] };
 
   preloadHotelAliases(city);
 
-  // 1) HOTEL / ZONA
   if(!String(cityMeta[city].hotel||'').trim()){
     setActiveCity(city);
     renderCityItinerary(city);
@@ -1902,20 +1778,16 @@ function askNextHotelTransport(){
     return;
   }
 
-  // 2) TRANSPORTE
   if(!String(cityMeta[city].transport||'').trim()){
     setActiveCity(city);
     renderCityItinerary(city);
-
     chatMsg(
-      `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover? ` +
-      `(vehículo alquilado, transporte público, Uber/taxi o escribe “recomiéndame”).`,
+      `Perfecto. Para <strong>${city}</strong>, ¿cómo te vas a mover?`,
       'ai'
     );
     return;
   }
 
-  // 3) Avanzar
   metaProgressIndex++;
   askNextHotelTransport();
 }
