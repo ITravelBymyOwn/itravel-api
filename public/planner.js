@@ -1790,6 +1790,7 @@ function askNextHotelTransport(){
 
   metaProgressIndex++;
   askNextHotelTransport();
+ }
 }
 
 /* ==============================
