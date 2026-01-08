@@ -1,5 +1,5 @@
-// /api/chat.js — v51.1 (ESM, Vercel)
-// FIX quirúrgico: si INFO devuelve city_day, también generamos rows_draft (compat con planner.js actual).
+// /api/chat.js — v51.2 (ESM, Vercel)
+// FIX definitivo: usar SOLO city_day en INFO y en PLANNER.
 // Mantiene: { text: "<JSON>" } siempre.
 
 import OpenAI from "openai";
@@ -52,19 +52,25 @@ function cleanToJSONPlus(raw = "") {
 function fallbackJSON() {
   return {
     destination: "Desconocido",
-    rows: [
+    city_day: [
       {
+        city: "Desconocido",
         day: 1,
-        start: "",
-        end: "",
-        activity: "Itinerario base (fallback)",
-        from: "",
-        to: "",
-        transport: "",
-        duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-        notes: "Explora libremente la ciudad.",
-        kind: "",
-        zone: "",
+        rows: [
+          {
+            day: 1,
+            start: "",
+            end: "",
+            activity: "Desconocido – Itinerario base (fallback)",
+            from: "",
+            to: "",
+            transport: "",
+            duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
+            notes: "Explora libremente la ciudad.",
+            kind: "",
+            zone: "",
+          },
+        ],
       },
     ],
     followup: "⚠️ Fallback local: revisa OPENAI_API_KEY o despliegue.",
@@ -134,7 +140,6 @@ function normalizeDurationsInParsed(parsed) {
 
   try {
     if (Array.isArray(parsed.rows)) parsed.rows = touchRows(parsed.rows);
-    if (Array.isArray(parsed.rows_draft)) parsed.rows_draft = touchRows(parsed.rows_draft);
 
     if (Array.isArray(parsed.city_day)) {
       parsed.city_day = parsed.city_day.map((b) => ({
@@ -147,7 +152,6 @@ function normalizeDurationsInParsed(parsed) {
       parsed.destinations = parsed.destinations.map((d) => ({
         ...d,
         rows: Array.isArray(d.rows) ? touchRows(d.rows) : d.rows,
-        rows_draft: Array.isArray(d.rows_draft) ? touchRows(d.rows_draft) : d.rows_draft,
         city_day: Array.isArray(d.city_day)
           ? d.city_day.map((b) => ({ ...b, rows: Array.isArray(b.rows) ? touchRows(b.rows) : b.rows }))
           : d.city_day,
@@ -253,15 +257,27 @@ function _sanitizeIncomingDayHours_(day_hours, daysTotal) {
     const need = Math.max(1, Number(daysTotal) || day_hours.length || 1);
     const norm = (t) => String(t || "").trim();
 
-    const cleaned = day_hours.map((d, idx) => ({
-      day: Number(d?.day) || idx + 1,
-      start: norm(d?.start) || "",
-      end: norm(d?.end) || "",
-    }));
+    // Acepta formato objeto [{day,start,end}] y también string ["09:00-18:00", ...]
+    const cleaned = day_hours.map((d, idx) => {
+      if (typeof d === "string") {
+        const m = d.match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+        return {
+          day: idx + 1,
+          start: m ? m[1] : "",
+          end: m ? m[2] : "",
+        };
+      }
+      return {
+        day: Number(d?.day) || idx + 1,
+        start: norm(d?.start) || "",
+        end: norm(d?.end) || "",
+      };
+    });
 
     const hasAny = cleaned.some((d) => d.start || d.end);
     if (!hasAny) return null;
 
+    // Si vienen todos iguales, lo consideramos "no aportante" (deja que AI decida)
     if (cleaned.length === need) {
       const allHave = cleaned.every((d) => d.start && d.end);
       if (allHave) {
@@ -295,23 +311,37 @@ function _flattenCityDayBlocks_(city_day) {
   return out;
 }
 
-/* ===================== Quality Gate INFO (valida city_day o rows_draft) ===================== */
+function _normalizeCityDayShape_(city_day, destinationFallback = "") {
+  const blocks = Array.isArray(city_day) ? city_day : [];
+  const out = blocks
+    .map((b, idx) => ({
+      city: String(b?.city || b?.destination || destinationFallback || "").trim(),
+      day: Number(b?.day) || idx + 1,
+      rows: Array.isArray(b?.rows) ? b.rows : [],
+    }))
+    .sort((a, b) => a.day - b.day);
+
+  // Asegura que cada row tenga day
+  out.forEach((b) => {
+    b.rows = (Array.isArray(b.rows) ? b.rows : []).map((r) => ({ ...r, day: Number(r?.day) || b.day }));
+  });
+
+  return out;
+}
+
+/* ===================== Quality Gate INFO (valida SOLO city_day) ===================== */
 function _validateInfoResearch_(parsed, contextHint = {}) {
   const issues = [];
   const daysTotal = Math.max(1, Number(parsed?.days_total || contextHint?.days_total || 1));
   const destination = String(parsed?.destination || contextHint?.destination || contextHint?.city || "").trim();
 
-  let rows = [];
-  if (Array.isArray(parsed?.city_day) && parsed.city_day.length) {
-    rows = _flattenCityDayBlocks_(parsed.city_day);
-  } else if (Array.isArray(parsed?.rows_draft)) {
-    rows = parsed.rows_draft;
-  }
+  const hasCityDay = Array.isArray(parsed?.city_day) && parsed.city_day.length;
+  if (!hasCityDay) issues.push("city_day vacío o ausente (obligatorio).");
 
-  if (!rows.length) issues.push("rows_draft/city_day vacío o ausente (obligatorio).");
+  const rows = hasCityDay ? _flattenCityDayBlocks_(parsed.city_day) : [];
   if (rows.length && !_rowsHaveCoverage_(rows, daysTotal)) issues.push("No cubre todos los días 1..days_total.");
 
-  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push('duration no cumple 2 líneas.');
+  if (rows.length && rows.some((r) => !_hasTwoLineDuration_(r.duration))) issues.push("duration no cumple 2 líneas.");
   if (rows.length && rows.some((r) => _hasZeroTransport_(r.duration))) issues.push('hay "Transporte: 0m".');
   if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("placeholders genéricos en activity.");
   if (rows.length && rows.some((r) => !_activityHasDestDash_(r.activity))) issues.push('activity sin "Destino – Sub-parada".');
@@ -343,7 +373,9 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
     const hasMacro = dayRows.some((r) => _isMacroTourKey_(r.activity));
     if (!hasMacro) continue;
 
-    const macroishCount = dayRows.filter((r) => _isMacroTourKey_(r.activity) || _canonTxt_(r.zone).includes("circulo") || _canonTxt_(r.zone).includes("golden")).length;
+    const macroishCount = dayRows.filter(
+      (r) => _isMacroTourKey_(r.activity) || _canonTxt_(r.zone).includes("circulo") || _canonTxt_(r.zone).includes("golden")
+    ).length;
     if (macroishCount < 5) issues.push(`macro-tour en día ${d} con <5 sub-paradas.`);
 
     const hasReturn = dayRows.some((r) => {
@@ -365,11 +397,7 @@ Debes devolver **UN ÚNICO JSON VÁLIDO** (sin texto fuera).
 
 OBJETIVO:
 1) Planifica el itinerario completo (evita repeticiones/contradicciones).
-2) Devuelve city_day[] (Ciudad–Día) ORDENADO.
-
-IMPORTANTE (COMPAT):
-- Además de city_day, DEBES incluir rows_draft (flatten) para compat con el Planner actual.
-- rows_draft debe ser la concatenación ordenada de todos los rows de city_day.
+2) Devuelve city_day[] (Ciudad–Día) ORDENADO y COMPLETO 1..days_total.
 
 CONTRATO filas:
 - activity: "DESTINO – SUB-PARADA" (– o - con espacios)
@@ -404,7 +432,6 @@ SALIDA mínima:
   "constraints":{"max_substops_per_tour":8,"no_consecutive_auroras":true,"no_last_day_aurora":true,"thermal_lagoons_min_stay_minutes":180},
   "day_hours":[],
   "city_day":[{"city":"Ciudad","day":1,"rows":[...]}],
-  "rows_draft":[...],
   "rows_skeleton":[]
 }
 Responde SOLO JSON válido.
@@ -413,14 +440,14 @@ Responde SOLO JSON válido.
 const SYSTEM_PLANNER = `
 Eres **Astra Planner**. Recibes "research_json".
 Fuente de verdad: research_json (NO inventes POIs).
-Estructura y normaliza para tabla.
+Tu tarea es devolver city_day limpio y utilizable por el frontend.
 
-Preferencia:
-1) Si research_json.rows_draft existe, úsalo.
-2) Si no, si research_json.city_day existe, aplánalo.
+REGLA:
+- Usa SOLO research_json.city_day como fuente.
+- NO uses rows_draft ni rows, aunque existan.
 
 Salida:
-{ "destination":"Ciudad", "rows":[...], "followup":"" }
+{ "destination":"Ciudad", "city_day":[...], "followup":"" }
 `.trim();
 
 /* ===================== Handler ===================== */
@@ -481,7 +508,7 @@ REPARACIÓN OBLIGATORIA:
 Fallos:
 - ${audit.issues.join("\n- ")}
 
-Devuelve city_day + rows_draft (flatten) cumpliendo contrato.
+Devuelve city_day cumpliendo contrato.
 Responde SOLO JSON válido.
 `.trim();
 
@@ -517,26 +544,25 @@ Responde SOLO JSON válido.
           },
           day_hours: [],
           city_day: [],
-          rows_draft: [],
           rows_skeleton: [],
         };
       }
 
-      // ✅ FIX: compat total con planner.js actual
+      // ✅ Asegurar forma city_day (y limpiar campos legacy que ya no usamos)
       try {
-        if (Array.isArray(parsed.city_day) && parsed.city_day.length) {
-          const flat = _flattenCityDayBlocks_(parsed.city_day);
-          if (!Array.isArray(parsed.rows_draft) || parsed.rows_draft.length === 0) {
-            parsed.rows_draft = flat;
-          }
-        }
-        if (!Array.isArray(parsed.rows_draft)) parsed.rows_draft = [];
+        const destinationFallback = String(parsed?.destination || context?.city || "").trim();
+        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFallback);
         if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
         if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
+        // Eliminamos cualquier rows_draft/rows accidental que venga del modelo
+        if ("rows_draft" in parsed) delete parsed.rows_draft;
+        if ("rows" in parsed) delete parsed.rows;
       } catch {
-        if (!Array.isArray(parsed.rows_draft)) parsed.rows_draft = [];
+        if (!Array.isArray(parsed.city_day)) parsed.city_day = [];
         if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
         if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
+        if ("rows_draft" in parsed) delete parsed.rows_draft;
+        if ("rows" in parsed) delete parsed.rows;
       }
 
       parsed = normalizeDurationsInParsed(parsed);
@@ -545,13 +571,7 @@ Responde SOLO JSON válido.
 
     /* ===================== PLANNER ===================== */
     if (mode === "planner") {
-      try {
-        if (body && body.validate === true && Array.isArray(body.rows)) {
-          const out = { allowed: body.rows, rejected: [] };
-          return res.status(200).json({ text: JSON.stringify(out) });
-        }
-      } catch {}
-
+      // Compat: endpoint alternativo sin research_json
       const research = body.research_json || null;
 
       if (!research) {
@@ -559,21 +579,39 @@ Responde SOLO JSON válido.
         let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.25, 2400, 45000);
         let parsed = cleanToJSONPlus(raw);
         if (!parsed) parsed = fallbackJSON();
+
+        // Normaliza y fuerza city_day
+        const destinationFallback = String(parsed?.destination || "").trim();
+        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFallback);
+        if ("rows_draft" in parsed) delete parsed.rows_draft;
+        if ("rows" in parsed) delete parsed.rows;
+
         parsed = normalizeDurationsInParsed(parsed);
         return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
-      // Mantener compat: preferir rows_draft si existe; si no, aplanar city_day
       const destination = String(research?.destination || research?.city || body?.destination || "").trim() || "Destino";
-      let rowsDraft = Array.isArray(research?.rows_draft) ? research.rows_draft : [];
-      if (!rowsDraft.length && Array.isArray(research?.city_day) && research.city_day.length) {
-        rowsDraft = _flattenCityDayBlocks_(research.city_day);
+
+      // ✅ SOLO city_day como fuente de verdad
+      let city_day = _normalizeCityDayShape_(research?.city_day, destination);
+
+      // Si por alguna razón viene vacío, intentamos reconstruir desde rows (legacy) como último recurso
+      if ((!Array.isArray(city_day) || !city_day.length) && Array.isArray(research?.rows) && research.rows.length) {
+        const byDay = new Map();
+        research.rows.forEach((r) => {
+          const d = Number(r?.day) || 1;
+          if (!byDay.has(d)) byDay.set(d, []);
+          byDay.get(d).push({ ...r, day: d });
+        });
+        city_day = [...byDay.entries()]
+          .sort((a, b) => a[0] - b[0])
+          .map(([day, rows]) => ({ city: destination, day, rows }));
+        city_day = _normalizeCityDayShape_(city_day, destination);
       }
 
-      // Devolver tal cual (tu planner.js actual hace el render)
       const out = {
         destination,
-        rows: rowsDraft,
+        city_day,
         followup: "",
       };
 
