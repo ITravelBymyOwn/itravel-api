@@ -2405,18 +2405,15 @@ async function onSend(){
 }
 
 /* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos — optimizada
-   (COHERENTE con API v43.5)
+   SECCIÓN 20 · Orden de ciudades (MVP estable)
 ================================= */
 (function(){
-  if (window.__ITBMO_SECTION20_REORDER_PATCH__) return;
-  window.__ITBMO_SECTION20_REORDER_PATCH__ = true;
+  if (window.__ITBMO_SECTION20__) return;
+  window.__ITBMO_SECTION20__ = true;
 
-  function addRowReorderControls(row){
-    const ctrlWrap = document.createElement('div');
-    ctrlWrap.style.display = 'flex';
-    ctrlWrap.style.gap = '.35rem';
-    ctrlWrap.style.alignItems = 'center';
+  function addReorderButtons(row){
+    const wrap = document.createElement('div');
+    wrap.className = 'reorder-controls';
 
     const up = document.createElement('button');
     up.textContent = '↑';
@@ -2426,64 +2423,43 @@ async function onSend(){
     down.textContent = '↓';
     down.className = 'btn ghost';
 
-    ctrlWrap.appendChild(up);
-    ctrlWrap.appendChild(down);
-    row.appendChild(ctrlWrap);
+    wrap.appendChild(up);
+    wrap.appendChild(down);
+    row.appendChild(wrap);
 
-    up.addEventListener('click', ()=>{
+    up.onclick = ()=>{
       if(row.previousElementSibling){
         $cityList.insertBefore(row, row.previousElementSibling);
         saveDestinations();
       }
-    });
-
-    down.addEventListener('click', ()=>{
+    };
+    down.onclick = ()=>{
       if(row.nextElementSibling){
         $cityList.insertBefore(row.nextElementSibling, row);
         saveDestinations();
       }
-    });
+    };
   }
 
-  try{
-    const rows = qsa('.city-row', $cityList);
-    rows.forEach(r=>{
-      const already = Array.from(r.querySelectorAll('button'))
-        .some(b=>b.textContent==='↑' || b.textContent==='↓');
-      if(!already) addRowReorderControls(r);
-    });
-  }catch(_){}
-
-  if (!window.__ITBMO_ORIG_ADD_CITY_ROW__) {
-    window.__ITBMO_ORIG_ADD_CITY_ROW__ = addCityRow;
+  function patchRow(row){
+    if(!row) return;
+    const has = Array.from(row.querySelectorAll('button'))
+      .some(b=>b.textContent==='↑'||b.textContent==='↓');
+    if(!has) addReorderButtons(row);
   }
 
-  const origAddCityRow = window.__ITBMO_ORIG_ADD_CITY_ROW__;
+  qsa('.city-row',$cityList).forEach(patchRow);
 
+  const _origAddCityRow = addCityRow;
   addCityRow = function(pref){
-    origAddCityRow(pref);
-    const row = $cityList?.lastElementChild;
-    if(row){
-      const already = Array.from(row.querySelectorAll('button'))
-        .some(b=>b.textContent==='↑' || b.textContent==='↓');
-      if(!already) addRowReorderControls(row);
-    }
+    _origAddCityRow(pref);
+    patchRow($cityList.lastElementChild);
   };
 
-  document.addEventListener('input', (e)=>{
+  // Limpieza de input país (solo letras)
+  document.addEventListener('input', e=>{
     if(e.target?.classList?.contains('country')){
-      const original = e.target.value;
-      const filtered = original.replace(/[^\p{L}\s]/gu,'');
-      if(filtered !== original){
-        const pos = e.target.selectionStart;
-        e.target.value = filtered;
-        if(typeof pos === 'number'){
-          e.target.setSelectionRange(
-            pos - (original.length - filtered.length),
-            pos - (original.length - filtered.length)
-          );
-        }
-      }
+      e.target.value = e.target.value.replace(/[^\p{L}\s]/gu,'');
     }
   });
 })();
