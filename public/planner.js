@@ -1703,6 +1703,14 @@ function __safeParseJSON__(raw){
   return null;
 }
 
+/* ===== NUEVO: Parse respuesta API robusto (doble JSON + text wrapper) ===== */
+function __parseApiResponse__(resp){
+  // resp puede ser: {text:"{...}"} o "{...}" o {text:{...}} o incluso text doble-serializado
+  const first = __safeParseJSON__(resp?.text ?? resp);
+  const second = __safeParseJSON__(first); // <- clave: si first es string JSON, lo parsea de nuevo
+  return second || first || null;
+}
+
 /* ===== helpers: retry AbortError ===== */
 async function __callApiWithRetry__(mode, payload, opts){
   const timeoutMs = opts?.timeoutMs || 180000; // ✅ un poco más largo para INFO/PLANNER
@@ -1748,7 +1756,7 @@ async function generateCityItinerary(city){
     };
 
     const infoResp = await __callApiWithRetry__('info', { context }, { timeoutMs: 180000, tries: 2 });
-    const research = __safeParseJSON__(infoResp?.text ?? infoResp);
+    const research = __parseApiResponse__(infoResp);
 
     if(!research){
       throw new Error('INFO no devolvió JSON válido');
@@ -1759,9 +1767,9 @@ async function generateCityItinerary(city){
 
     /* ========= PLANNER ========= */
     const plannerResp = await __callApiWithRetry__('planner', { research_json: research }, { timeoutMs: 180000, tries: 2 });
-    const parsed = __safeParseJSON__(plannerResp?.text ?? plannerResp);
+    const parsed = __parseApiResponse__(plannerResp);
 
-    // ✅ NUEVO: usar SOLO city_day (preferimos PLANNER; fallback a INFO)
+    // ✅ usar SOLO city_day (preferimos PLANNER; fallback a INFO)
     const cityDay = (parsed && Array.isArray(parsed.city_day) && parsed.city_day.length)
       ? parsed.city_day
       : (Array.isArray(research.city_day) ? research.city_day : []);
@@ -1774,7 +1782,7 @@ async function generateCityItinerary(city){
     itineraries[city] = itineraries[city] || { byDay:{} };
     itineraries[city].originalDays = dest.days;
 
-    // ✅ NUEVO: reset limpio por ciudad para evitar basura previa
+    // ✅ reset limpio por ciudad para evitar basura previa
     itineraries[city].byDay = {};
 
     // Normaliza/ordena bloques por día y monta rows
