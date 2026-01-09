@@ -1,12 +1,9 @@
-// /api/chat.js — v52.3 (ESM, Vercel)
-// FIX CRÍTICO vs v52.2:
-// 1) NO reemplazar city_day por skeleton cuando el audit falla.
-//    -> Se devuelve el itinerario tal como venga + followup con issues.
-// 2) Repair REAL: cuando falla el audit, se envía el JSON actual al modelo para corregirlo,
-//    no solo el context.
-// 3) Skeleton solo se usa cuando:
-//    - No se pudo parsear JSON en absoluto, o
-//    - city_day viene vacío/inexistente (caso extremo).
+// /api/chat.js — v52.4 (ESM, Vercel)
+// FIXES vs v52.3:
+// A) Parse robusto: soporta JSON doble (text: "\"{...}\"") y wrappers.
+// B) Quality gate NO bloqueante: nunca reemplaza itinerario por skeleton si hay city_day.
+// C) Repair + Auto-fix determinístico (macro return, auroras, comidas) antes de rendir.
+// D) Skeleton solo si: no hay JSON parseable o city_day vacío/inexistente.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -32,29 +29,81 @@ function extractMessages(body = {}) {
   return [...prev, { role: "user", content: userText }];
 }
 
+/* ---------- Robust JSON parse (incl. doble JSON) ---------- */
+function _tryJSON_(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+// Intenta: objeto -> ok
+// string -> JSON.parse
+// si el parse devuelve string, intenta parsear otra vez (doble JSON)
 function cleanToJSONPlus(raw = "") {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
   if (typeof raw !== "string") return null;
 
-  try {
-    return JSON.parse(raw);
-  } catch {}
+  // 1) parse directo
+  let v = _tryJSON_(raw);
+  if (v != null) {
+    if (typeof v === "string") {
+      const v2 = _tryJSON_(v);
+      return v2 != null ? v2 : v;
+    }
+    return v;
+  }
 
+  // 2) si viene con comillas extra (doble serializado) tipo "\"{...}\""
+  const trimmed = raw.trim();
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    const unq = trimmed.slice(1, -1).replace(/\\"/g, '"');
+    v = _tryJSON_(unq);
+    if (v != null) {
+      if (typeof v === "string") {
+        const v2 = _tryJSON_(v);
+        return v2 != null ? v2 : v;
+      }
+      return v;
+    }
+  }
+
+  // 3) extraer primer { ... último }
   try {
     const first = raw.indexOf("{");
     const last = raw.lastIndexOf("}");
-    if (first >= 0 && last > first) return JSON.parse(raw.slice(first, last + 1));
+    if (first >= 0 && last > first) {
+      const slice = raw.slice(first, last + 1);
+      v = _tryJSON_(slice);
+      if (v != null) {
+        if (typeof v === "string") {
+          const v2 = _tryJSON_(v);
+          return v2 != null ? v2 : v;
+        }
+        return v;
+      }
+    }
   } catch {}
 
+  // 4) limpiar extremos
   try {
     const cleaned = raw.replace(/^[^{]+/, "").replace(/[^}]+$/, "");
-    return JSON.parse(cleaned);
+    v = _tryJSON_(cleaned);
+    if (v != null) {
+      if (typeof v === "string") {
+        const v2 = _tryJSON_(v);
+        return v2 != null ? v2 : v;
+      }
+      return v;
+    }
   } catch {}
 
   return null;
 }
 
+/* ===================== Fallback/Skeleton ===================== */
 function fallbackJSON() {
   return {
     destination: "Desconocido",
@@ -96,13 +145,13 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1) {
           day: d,
           start: "09:30",
           end: "11:00",
-          activity: `${city} – Reintentar generación (itinerario pendiente)`,
+          activity: `${city} – Itinerario pendiente (skeleton)`,
           from: "Hotel",
           to: "Centro",
           transport: "A pie o Transporte local (según ubicación)",
           duration: "Transporte: Depende del lugar\nActividad: ~1h",
           notes:
-            "⚠️ INFO no logró generar un itinerario válido en este intento. Reintenta; cuando funcione, aquí verás el plan final.",
+            "⚠️ No se pudo generar un itinerario completo en este intento. Reintenta; si persiste, revisa logs/timeout/API key.",
           kind: "",
           zone: "",
         },
@@ -491,7 +540,7 @@ REGLA DE ORO:
 CONTRATO de cada row (OBLIGATORIO):
 - day: número
 - start/end: HH:MM (hora local realista).
-- activity: DEBE empezar con "CIUDAD – ..." (– o - con espacios). Ej: "Reykjavik – Hallgrímskirkja".
+- activity: DEBE empezar con "CIUDAD – ..." (– o - con espacios).
 - from/to: NO vacíos y NO genéricos en actividades reales.
 - transport: NO vacío (realista)
 - duration: 2 líneas EXACTAS con salto \\n:
@@ -644,6 +693,135 @@ Responde SOLO JSON válido.
   return repaired || null;
 }
 
+/* ===================== Auto-fix determinístico (sin IA) ===================== */
+function _ensureAuroraNotes_(row, destinationFinal) {
+  const latHint = "valid: lat/temporada";
+  const baseValid = `valid: ${destinationFinal || "destino"} | clima/nubosidad variable`;
+  const alt = "Alternativa low-cost: mirador oscuro cercano / zona oscura gratis.";
+
+  let n = String(row?.notes || "").trim();
+  const low = n.toLowerCase();
+
+  const hasValid = low.includes("valid:");
+  const hasClimate = /clima|nubosidad|nubes|cloud|weather/.test(low);
+  const hasAlt = /alternativa|mirador|cerca|oscuro|dark|low cost|gratis|free/.test(low);
+
+  // agrega piezas faltantes sin destruir el texto existente
+  if (!n) n = "Una experiencia mágica bajo el cielo nocturno.";
+  if (!hasValid) n += (n.endsWith(".") ? " " : ". ") + baseValid;
+  if (!hasClimate) n += (n.endsWith(".") ? " " : ". ") + "Nota: la nubosidad puede afectar la visibilidad.";
+  if (!hasAlt) n += (n.endsWith(".") ? " " : ". ") + alt;
+
+  return n;
+}
+
+function _autoFixInfo_(parsed, contextHint = {}) {
+  try {
+    const daysTotal = Math.max(1, Number(parsed?.days_total || contextHint?.days_total || 1));
+    const destinationFinal = String(parsed?.destination || contextHint?.destination || contextHint?.city || "Destino").trim() || "Destino";
+
+    if (!Array.isArray(parsed.city_day)) return parsed;
+    parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFinal);
+
+    // fix por día
+    parsed.city_day.forEach((block) => {
+      const day = Number(block?.day) || 1;
+      const rows = Array.isArray(block?.rows) ? block.rows : [];
+
+      // 1) Macro: asegurar regreso
+      const isMacroDay = rows.some((r) => _isMacroTourKey_(r?.activity));
+      if (isMacroDay) {
+        const hasReturn = rows.some((r) => {
+          const a = _canonTxt_(r?.activity);
+          return a.includes("regreso") && a.includes(_canonTxt_(destinationFinal));
+        });
+
+        if (!hasReturn) {
+          // intenta crear regreso al final del día usando última ubicación "to"
+          const last = rows[rows.length - 1] || {};
+          const start = "17:30";
+          const end = "19:00";
+          rows.push({
+            day,
+            start,
+            end,
+            activity: `${destinationFinal} – Regreso a ${destinationFinal}`,
+            from: String(last?.to || "Ruta").trim() || "Ruta",
+            to: destinationFinal,
+            transport: "Vehículo alquilado (por cuenta propia) o Tour guiado (según duración/pickup)",
+            duration: "Transporte: ~45m–2h\nActividad: ~0.5h",
+            notes: "Cierra el day-trip regresando a la ciudad base para descansar y cenar con calma.",
+            kind: "",
+            zone: "",
+          });
+        }
+      }
+
+      // 2) Auroras: asegurar to + notes
+      rows.forEach((r) => {
+        if (_isAurora_(r?.activity)) {
+          const to = String(r?.to || "").trim();
+          if (!_auroraToLooksValid_(to)) {
+            r.to = "Zona oscura cercana (mirador oscuro)";
+          }
+          r.transport =
+            r.transport ||
+            "Vehículo alquilado (por cuenta propia) o Tour guiado (según duración/pickup)";
+          r.notes = _ensureAuroraNotes_(r, destinationFinal);
+        }
+      });
+
+      // 3) Comidas: to genérico si demasiado específico
+      rows.forEach((r) => {
+        if (_looksLikeMealRow_(r?.activity) && _mealToIsTooSpecific_(r)) {
+          r.to = "Zona gastronómica (a elección)";
+          if (String(r?.notes || "").trim().length < 20) {
+            r.notes = "Elige un buen lugar según tu antojo y horario. Opciones: 1) Sandholt 2) Brauð & Co 3) Café Loki.";
+          }
+        }
+      });
+
+      // reasignar
+      block.rows = rows.map((r) => ({
+        ...r,
+        day,
+        duration: _normalizeDurationText_(r?.duration),
+      }));
+    });
+
+    // asegurar cobertura mínima de city_day 1..daysTotal (si falta un día, lo duplicamos “light” sin skeleton)
+    const haveDays = new Set(parsed.city_day.map((b) => Number(b?.day) || 1));
+    for (let d = 1; d <= daysTotal; d++) {
+      if (!haveDays.has(d)) {
+        parsed.city_day.push({
+          city: destinationFinal,
+          day: d,
+          rows: [
+            {
+              day: d,
+              start: "09:30",
+              end: "12:00",
+              activity: `${destinationFinal} – Paseo icónico por el centro`,
+              from: "Hotel",
+              to: "Centro",
+              transport: "Caminando",
+              duration: "Transporte: ~10m\nActividad: ~2h",
+              notes: "Explora a tu ritmo un barrio icónico y ajusta según clima y energía. Tip: lleva capas por el viento.",
+              kind: "",
+              zone: "",
+            },
+          ],
+        });
+      }
+    }
+    parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFinal);
+
+    return parsed;
+  } catch {
+    return parsed;
+  }
+}
+
 /* ===================== Handler ===================== */
 export default async function handler(req, res) {
   try {
@@ -767,7 +945,13 @@ export default async function handler(req, res) {
         audit = _validateInfoResearch_(parsed, { days_total: daysTotal, destination: destinationFinal, city: destinationFinal });
       }
 
-      // 6) Si aun falla, NO skeleton: devolver lo que hay + followup con issues (esto es el FIX)
+      // 6) Auto-fix determinístico antes de rendir (sin skeleton)
+      if (!audit.ok) {
+        parsed = _autoFixInfo_(parsed, { days_total: daysTotal, destination: destinationFinal, city: destinationFinal });
+        audit = _validateInfoResearch_(parsed, { days_total: daysTotal, destination: destinationFinal, city: destinationFinal });
+      }
+
+      // 7) Si aun falla, NO skeleton: devolver lo que hay + followup con issues
       if (!audit.ok) {
         parsed.followup =
           "⚠️ Itinerario generado, pero con issues detectados (NO bloqueé el render): " + audit.issues.join(" | ");
