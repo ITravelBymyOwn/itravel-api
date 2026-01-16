@@ -1667,22 +1667,63 @@ function __getChatEndpoint__(){
   return '/api/chat';
 }
 
-/* ===== Shim callApiChat (se conserva) ===== */
+/* ===== Shim callApiChat (se conserva, pero MÁS robusto) ===== */
 if (typeof window.callApiChat !== 'function') {
   window.callApiChat = async function(mode, payload = {}, opts = {}) {
-    const timeoutMs = opts.timeoutMs || 120000;
+    const timeoutMs = Number(opts.timeoutMs || 240000); // ✅ antes 120000, muy justo para INFO/PLANNER
+    const endpoint = __getChatEndpoint__();
+
     const ctrl = new AbortController();
-    const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+    let didTimeout = false;
+
+    // ✅ Timeout controlado (y claramente identificable)
+    const t = setTimeout(()=>{
+      didTimeout = true;
+      try { ctrl.abort(); } catch(_) {}
+    }, Math.max(1, timeoutMs));
 
     try{
-      const res = await fetch(__getChatEndpoint__(), {
+      const res = await fetch(endpoint, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ mode, ...payload }),
         signal: ctrl.signal
       });
-      if(!res.ok) throw new Error(`API ${mode} ${res.status}`);
-      return await res.json();
+
+      // leer body con cuidado para debug (sin romper JSON normal)
+      const text = await res.text();
+      if(!res.ok){
+        // devolvemos error con contexto útil
+        const err = new Error(`API ${mode} ${res.status} ${res.statusText || ''}`.trim());
+        err._apiStatus = res.status;
+        err._apiBody = text?.slice(0, 1200) || '';
+        throw err;
+      }
+
+      // la API normalmente responde JSON {text:"..."}; pero a veces puede venir texto/otro
+      try{
+        return JSON.parse(text);
+      }catch(_){
+        // si no es JSON válido, devolvemos wrapper para que __parseApiResponse__ lo intente
+        return { text };
+      }
+
+    } catch(e){
+      // ✅ Si fue abort por timeout, lo marcamos explícitamente
+      const msg = String(e?.name || '') + ' ' + String(e?.message || '');
+      const isAbort = /AbortError|aborted|signal is aborted/i.test(msg);
+
+      if(isAbort && didTimeout){
+        const err = new Error(`API ${mode} timeout after ${timeoutMs}ms`);
+        err.name = 'AbortError';
+        err._timeout = true;
+        err._timeoutMs = timeoutMs;
+        err._endpoint = endpoint;
+        throw err;
+      }
+
+      throw e;
+
     } finally {
       clearTimeout(t);
     }
@@ -1711,24 +1752,41 @@ function __parseApiResponse__(resp){
   return second || first || null;
 }
 
-/* ===== helpers: retry AbortError ===== */
+/* ===== helpers: retry AbortError (mejorado) ===== */
 async function __callApiWithRetry__(mode, payload, opts){
-  const timeoutMs = opts?.timeoutMs || 180000; // ✅ un poco más largo para INFO/PLANNER
-  const tries = opts?.tries || 2;
+  const tries = Math.max(1, Number(opts?.tries || 2));
+
+  // ✅ Estrategia: 1er intento “normal”, 2do intento con más tiempo
+  const baseTimeout = Number(opts?.timeoutMs || 240000);
+  const timeoutPlan = [];
+  for(let i=0;i<tries;i++){
+    // backoff + timeout creciente (pero no absurdo)
+    const t = Math.min(360000, baseTimeout + i * 90000); // +90s por reintento, cap 6min
+    timeoutPlan.push(t);
+  }
 
   let lastErr = null;
+
   for(let i=0;i<tries;i++){
+    const timeoutMs = timeoutPlan[i];
+
     try{
       return await callApiChat(mode, payload, { timeoutMs });
     }catch(e){
       lastErr = e;
+
       const msg = String(e?.name || '') + ' ' + String(e?.message || '');
       const isAbort = /AbortError|aborted|signal is aborted/i.test(msg);
-      if(!isAbort) break;
-      // micro backoff
-      await new Promise(r=>setTimeout(r, 250 + i*350));
+      const isTimeout = !!e?._timeout || /timeout/i.test(String(e?.message || ''));
+
+      // Si no es abort/timeout, no tiene sentido reintentar
+      if(!(isAbort || isTimeout)) break;
+
+      // micro backoff (un poquito más en cada round)
+      await new Promise(r=>setTimeout(r, 450 + i*650));
     }
   }
+
   throw lastErr || new Error(`API ${mode} failed`);
 }
 
@@ -1755,7 +1813,8 @@ async function generateCityItinerary(city){
       special_conditions: plannerState?.specialConditions || ''
     };
 
-    const infoResp = await __callApiWithRetry__('info', { context }, { timeoutMs: 180000, tries: 2 });
+    // ✅ subimos tiempo base para INFO y dejamos retry inteligente
+    const infoResp = await __callApiWithRetry__('info', { context }, { timeoutMs: 240000, tries: 2 });
     const research = __parseApiResponse__(infoResp);
 
     if(!research){
@@ -1766,7 +1825,7 @@ async function generateCityItinerary(city){
     }
 
     /* ========= PLANNER ========= */
-    const plannerResp = await __callApiWithRetry__('planner', { research_json: research }, { timeoutMs: 180000, tries: 2 });
+    const plannerResp = await __callApiWithRetry__('planner', { research_json: research }, { timeoutMs: 240000, tries: 2 });
     const parsed = __parseApiResponse__(plannerResp);
 
     // ✅ usar SOLO city_day (preferimos PLANNER; fallback a INFO)
@@ -1808,8 +1867,18 @@ async function generateCityItinerary(city){
 
   }catch(err){
     console.error(`[generateCityItinerary] ${city}`, err);
+
+    // Mensaje más útil si fue timeout/abort
+    const msg = String(err?.message || '');
+    const isTimeout = /timeout/i.test(msg) || !!err?._timeout;
+    const isAbort = /AbortError|aborted|signal is aborted/i.test(String(err?.name || '') + ' ' + msg);
+
     if(typeof chatMsg === 'function'){
-      chatMsg(`⚠️ Error generando itinerario para ${city}. Revisa consola.`, 'ai');
+      if(isTimeout || isAbort){
+        chatMsg(`⚠️ ${city}: la generación tardó más de lo esperado y se canceló (timeout). Reintenta; si persiste, ajustamos el límite o revisamos el rendimiento del endpoint.`, 'ai');
+      }else{
+        chatMsg(`⚠️ Error generando itinerario para ${city}. Revisa consola.`, 'ai');
+      }
     }
     throw err;
   }finally{
