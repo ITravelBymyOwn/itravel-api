@@ -1,16 +1,11 @@
-// /api/chat.js — v52.4 (ESM, Vercel)
-// OBJETIVO:
-// - INFO genera itinerario completo en city_day (JSON válido).
-// - Si audit falla: NO bloquear render. Intentar repair compacto 1 vez.
-// - Skeleton SOLO si: no parsea JSON o city_day viene vacío.
-// - PLANNER: passthrough de research_json.city_day -> normaliza -> devuelve city_day.
-//
-// Cambios vs v52.3:
-// 1) Repair prompt compactado (menos tokens = menos timeouts).
-// 2) Timeouts INFO/repair aumentados + callText devuelve error diagnóstico.
-// 3) Audit deja de ser "gate duro": siempre retorna city_day; followup reporta issues.
-// 4) Normalización y "patch mínimo" local si faltan comidas/hay etiquetas mal timing (sin re-LLM).
-// 5) Se evita meter context + JSON gigante en repair: se manda SOLO lo necesario.
+// /api/chat.js — v52.5 (ESM, Vercel)
+// Baseline: v52.1 (tu "muy buen resultado") + guard-rails para que NUNCA quede tabla en blanco.
+// Mantiene: { text: "<JSON>" } siempre.
+// FIXES:
+// - INFO: multi-intento + repair (2 rondas) + normalización + guard-rails anti city_day vacío Y anti rows vacías.
+// - PLANNER: SOLO usa research_json.city_day; si viene vacío -> skeletonCityDay.
+// - Audit NO bloquea: si no pasa, igual devuelve algo renderizable + followup con diagnóstico.
+// - Normaliza kind/zone y duration a formato tabla-ready.
 
 import OpenAI from "openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -75,7 +70,7 @@ function fallbackJSON() {
             from: "Hotel",
             to: "Centro",
             transport: "A pie o Transporte local (según ubicación)",
-            duration: "Transporte: Depende del lugar\nActividad: ~1h",
+            duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
             notes: "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar.",
             kind: "",
             zone: "",
@@ -87,6 +82,7 @@ function fallbackJSON() {
   };
 }
 
+// Guard-rail: evita romper planner si INFO no pudo generar (NO es el objetivo final)
 function skeletonCityDay(destination = "Destino", daysTotal = 1) {
   const city = String(destination || "Destino").trim() || "Destino";
   const n = Math.max(1, Number(daysTotal) || 1);
@@ -104,8 +100,9 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1) {
           from: "Hotel",
           to: "Centro",
           transport: "A pie o Transporte local (según ubicación)",
-          duration: "Transporte: Depende del lugar\nActividad: ~1h",
-          notes: "⚠️ No se pudo generar un itinerario válido en este intento. Reintenta.",
+          duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
+          notes:
+            "⚠️ INFO no logró generar un itinerario válido en este intento. Reintenta o ajusta condiciones; cuando funcione, aquí verás el plan final.",
           kind: "",
           zone: "",
         },
@@ -116,7 +113,7 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1) {
 }
 
 /* ===================== Responses API call (con timeout) ===================== */
-async function callText(messages, temperature = 0.28, max_output_tokens = 4800, timeoutMs = 90000) {
+async function callText(messages, temperature = 0.28, max_output_tokens = 5200, timeoutMs = 90000) {
   const inputStr = messages
     .map((m) => {
       const c = typeof m.content === "string" ? m.content : JSON.stringify(m.content);
@@ -140,7 +137,6 @@ async function callText(messages, temperature = 0.28, max_output_tokens = 4800, 
 
     return resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
   } catch (e) {
-    // devolvemos string vacío; el handler decide
     return "";
   } finally {
     clearTimeout(t);
@@ -158,6 +154,20 @@ function _canonTxt_(s) {
     .trim();
 }
 
+function _activityHasDestDash_(activity) {
+  const s = String(activity || "");
+  return /\s[–-]\s/.test(s);
+}
+
+function _isAurora_(activity) {
+  return /auroras?|aurora|northern\s*lights/i.test(String(activity || ""));
+}
+
+function _isMacroTourKey_(activity) {
+  const t = _canonTxt_(activity);
+  return /golden circle|circulo dorado|círculo dorado|day trip|excursion|excursión|tour\b|peninsula|península/i.test(t);
+}
+
 function _parseTimeToMin_(hhmm) {
   const m = String(hhmm || "").match(/^(\d{1,2}):(\d{2})$/);
   if (!m) return null;
@@ -172,19 +182,8 @@ function _isNightWindow_(startHHMM, endHHMM) {
   const e = _parseTimeToMin_(endHHMM);
   if (s == null || e == null) return false;
   const isNightPoint = (min) => min >= 18 * 60 || min < 5 * 60;
-  if (e <= s) return isNightPoint(s) || isNightPoint(e);
+  if (e <= s) return isNightPoint(s) || isNightPoint(e); // cruza medianoche
   return isNightPoint(s) && isNightPoint(e);
-}
-
-function _isAurora_(activity) {
-  return /auroras?|aurora|northern\s*lights/i.test(String(activity || ""));
-}
-
-function _isMacroTourKey_(activity) {
-  const t = _canonTxt_(activity);
-  return /golden circle|circulo dorado|círculo dorado|day trip|excursion|excursión|tour\b|peninsula|península|snæfellsnes|snaefellsnes/i.test(
-    t
-  );
 }
 
 /* ===================== Duration normalization ===================== */
@@ -192,11 +191,19 @@ function _normalizeDurationText_(txt) {
   const s = String(txt ?? "").trim();
   if (!s) return s;
 
+  // Si viene "Transporte: X,Actividad: Y" => convertir a 2 líneas
   if (/Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && s.includes(",")) {
-    return s.replace(/\s*,\s*Actividad\s*:/i, "\nActividad:");
+    const fixed = s.replace(/\s*,\s*Actividad\s*:/i, "\nActividad:");
+    if (!/^Transporte\s*:/i.test(fixed) && /^Actividad\s*:/i.test(fixed)) {
+      const parts = fixed.split("\n").map((x) => x.trim());
+      const tLine = parts.find((x) => /^Transporte\s*:/i.test(x)) || "Transporte: Verificar duración en el Info Chat";
+      const aLine = parts.find((x) => /^Actividad\s*:/i.test(x)) || "Actividad: Verificar duración en el Info Chat";
+      return `${tLine}\n${aLine}`;
+    }
+    return fixed;
   }
-  if (/^Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(s)) return s;
 
+  if (/^Transporte\s*:\s*.*\nActividad\s*:\s*/i.test(s)) return s;
   return s;
 }
 
@@ -215,40 +222,7 @@ function _hasZeroActivity_(duration) {
   return /Actividad\s*:\s*0m/i.test(s);
 }
 
-/* ===================== Meals helpers ===================== */
-function _looksLikeMealRow_(activity) {
-  const t = _canonTxt_(activity);
-  return /\b(cena|almuerzo|comida|desayuno|brunch|merienda)\b/.test(t);
-}
-
-function _mealLabelWindowOK_(activity, startHHMM) {
-  const t = _canonTxt_(activity);
-  const s = _parseTimeToMin_(startHHMM);
-  if (s == null) return true;
-  const inRange = (a, b) => s >= a && s <= b;
-
-  if (t.includes("desayuno") || t.includes("brunch")) return inRange(6 * 60, 10 * 60 + 30);
-  if (t.includes("almuerzo") || t.includes("comida")) return inRange(11 * 60, 15 * 60);
-  if (t.includes("cena")) return inRange(18 * 60, 22 * 60);
-  return true;
-}
-
-function _mealToIsTooSpecific_(row) {
-  if (!_looksLikeMealRow_(row?.activity)) return false;
-  const to = String(row?.to || "").trim();
-  if (!to) return true;
-
-  const canon = _canonTxt_(to);
-  if (canon.includes("a eleccion") || canon.includes("a elección")) return false;
-  if (canon.includes("zona gastronomica") || canon.includes("zona gastronómica")) return false;
-  if (canon === "centro" || canon.startsWith("centro ")) return false;
-
-  const words = canon.split(" ").filter(Boolean);
-  if (words.length >= 2 && !canon.includes("zona") && !canon.includes("centro")) return true;
-  return false;
-}
-
-/* ===================== Placeholders ===================== */
+/* ===================== Placeholders / meals ===================== */
 function _isGenericPlaceholderActivity_(activity) {
   const t = _canonTxt_(activity);
   if (!t) return true;
@@ -273,6 +247,20 @@ function _isGenericPlaceholderActivity_(activity) {
   if (bad.some((b) => t === b || t.includes(b))) return true;
   if (/^(museo|parque|cafe|café|restaurante|compras)\b/i.test(t) && t.split(" ").length <= 3) return true;
 
+  return false;
+}
+
+function _looksLikeMealRow_(activity) {
+  const t = _canonTxt_(activity);
+  return /\b(cena|almuerzo|comida|desayuno|brunch|merienda)\b/.test(t);
+}
+
+function _mealIsGeneric_(row) {
+  const a = _canonTxt_(row?.activity);
+  const to = _canonTxt_(row?.to);
+  if (!/\b(cena|almuerzo|comida|desayuno|brunch|merienda)\b/.test(a)) return false;
+  if (to === "restaurante local" || to === "restaurante" || to === "cafe local" || to === "café local") return true;
+  if (a.includes("cena local")) return true;
   return false;
 }
 
@@ -349,9 +337,10 @@ function _flattenCityDayBlocks_(city_day) {
       b.rows.forEach((r) =>
         out.push({
           ...r,
-          __city: b.city,
           day: Number(r?.day) || b.day || 1,
           duration: _normalizeDurationText_(r?.duration),
+          kind: r?.kind ?? "",
+          zone: r?.zone ?? "",
         })
       );
     });
@@ -366,34 +355,28 @@ function _rowsHaveCoverage_(rows, daysTotal) {
   return true;
 }
 
-/* ===================== STRICT activity prefix rule ===================== */
-function _activityStartsWithCityDash_(activity, city) {
-  const a = String(activity || "").trim();
-  const c = String(city || "").trim();
-  if (!a || !c) return false;
-  return a.startsWith(`${c} – `) || a.startsWith(`${c} - `);
+/* ===================== Guard rails: anti empty rows ===================== */
+function _hasAnyRows_(city_day) {
+  if (!Array.isArray(city_day) || !city_day.length) return false;
+  return city_day.some((b) => Array.isArray(b?.rows) && b.rows.length > 0);
 }
 
-/* ===================== Aurora to/location rule ===================== */
-function _auroraToLooksValid_(to) {
-  const t = _canonTxt_(to);
-  if (!t) return false;
-  return /zona oscura|mirador oscuro|spot oscuro|lugar oscuro|dark spot|dark sky|away from lights|cielo oscuro/.test(t);
+function _forceNonEmptyRows_(parsed, destinationFallback, daysTotal) {
+  try {
+    const dest = String(destinationFallback || parsed?.destination || "Destino").trim() || "Destino";
+    const n = Math.max(1, Number(daysTotal) || 1);
+
+    if (!Array.isArray(parsed.city_day) || parsed.city_day.length === 0 || !_hasAnyRows_(parsed.city_day)) {
+      parsed.city_day = skeletonCityDay(dest, n);
+      parsed.followup =
+        (parsed.followup ? parsed.followup + " | " : "") +
+        "⚠️ Guard-rail: city_day vacío o sin filas. Se devolvió skeleton para evitar tabla en blanco.";
+    }
+  } catch {}
+  return parsed;
 }
 
-/* ===================== Non-meal generic from/to guard ===================== */
-function _isTooGenericFromTo_(row) {
-  const from = _canonTxt_(row?.from);
-  const to = _canonTxt_(row?.to);
-  const a = _canonTxt_(row?.activity);
-  if (!from || !to) return true;
-  if (_looksLikeMealRow_(a)) return false;
-  if ((from === "centro" || from.startsWith("centro ")) && (to === "centro" || to.startsWith("centro "))) return true;
-  if (to.includes("zona gastronomica") || to.includes("zona gastronómica")) return true;
-  return false;
-}
-
-/* ===================== Quality Audit INFO (NO bloquea) ===================== */
+/* ===================== Quality Gate INFO (SOLO city_day) ===================== */
 function _validateInfoResearch_(parsed, contextHint = {}) {
   const issues = [];
   const daysTotal = Math.max(1, Number(parsed?.days_total || contextHint?.days_total || 1));
@@ -405,6 +388,7 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   const rows = hasCityDay ? _flattenCityDayBlocks_(parsed.city_day) : [];
   if (rows.length && !_rowsHaveCoverage_(rows, daysTotal)) issues.push("No cubre todos los días 1..days_total.");
 
+  // tabla-ready fields
   const badRequired = rows.filter((r) => {
     const startOK = _parseTimeToMin_(r.start) != null;
     const endOK = _parseTimeToMin_(r.end) != null;
@@ -422,16 +406,13 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   if (rows.length && rows.some((r) => _hasZeroActivity_(r.duration))) issues.push('hay "Actividad: 0m" (prohibido).');
 
   if (rows.length && rows.some((r) => _isGenericPlaceholderActivity_(r.activity))) issues.push("placeholders genéricos en activity.");
+  if (rows.length && rows.some((r) => !_activityHasDestDash_(r.activity))) issues.push('activity sin "Destino – Sub-parada".');
 
-  const badActivityPrefix = rows.some((r) => !_activityStartsWithCityDash_(r.activity, r.__city || destination));
-  if (badActivityPrefix) issues.push('activity no empieza con "Ciudad – " (prefijo obligatorio).');
-
-  if (rows.length && rows.some((r) => _isTooGenericFromTo_(r))) issues.push("from/to demasiado genéricos o vacíos (no-comida).");
-
+  // meals flexible: permitidas, pero si existen no genéricas
   const mealRows = rows.filter((r) => _looksLikeMealRow_(r.activity));
-  if (mealRows.some((r) => !_mealLabelWindowOK_(r.activity, r.start))) issues.push("comida mal etiquetada según horario (desayuno/almuerzo/cena).");
-  if (mealRows.some((r) => _mealToIsTooSpecific_(r))) issues.push('comidas: "to" demasiado específico (usar zona/centro a elección; opciones en notes).');
+  if (mealRows.some((r) => _mealIsGeneric_(r))) issues.push("comidas genéricas detectadas (si se incluyen, deben ser específicas).");
 
+  // auroras
   const auroraRows = rows.filter((r) => _isAurora_(r.activity));
   const auroraDays = auroraRows.map((r) => Number(r.day) || 1).sort((a, b) => a - b);
 
@@ -443,17 +424,17 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
   }
   if (auroraDays.includes(daysTotal)) issues.push("auroras en el último día (evitar; solo condicional si no hay otra opción).");
   if (auroraRows.some((r) => !_isNightWindow_(r.start, r.end))) issues.push("auroras fuera de ventana nocturna (prohibido).");
-  if (auroraRows.some((r) => !_auroraToLooksValid_(r.to))) issues.push('auroras: "to" debe ser zona oscura/mirador oscuro (no Centro).');
 
   const auroraNotesBad = auroraRows.some((r) => {
     const n = String(r.notes || "").toLowerCase();
     const hasValid = n.includes("valid:");
-    const hasClimate = /clima|nubosidad|nubes|cloud|weather/.test(n);
-    const hasAlt = /alternativa|mirador|cerca|oscuro|dark|low cost|gratis|free/.test(n);
+    const hasClimate = /clima|nubosidad|nubes|cloud/i.test(n);
+    const hasAlt = /alternativa|mirador|cerca|oscuro|dark|low cost/i.test(n);
     return !(hasValid && hasClimate && hasAlt);
   });
   if (auroraRows.length && auroraNotesBad) issues.push('auroras sin notes completas (valid: + clima/nubosidad + alternativa low-cost).');
 
+  // macro-tours
   const baseCity = String(parsed?.destination || contextHint?.destination || "").trim() || destination;
   const byDay = new Map();
   rows.forEach((r) => {
@@ -464,17 +445,19 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
 
   for (let d = 1; d <= daysTotal; d++) {
     const dayRows = byDay.get(d) || [];
-    const isMacroDay = dayRows.some((r) => _isMacroTourKey_(r.activity));
-    if (!isMacroDay) continue;
+    const hasMacro = dayRows.some((r) => _isMacroTourKey_(r.activity));
+    if (!hasMacro) continue;
 
-    const substopsReal = dayRows.filter((r) => !_looksLikeMealRow_(r.activity) && !_isAurora_(r.activity)).length;
-    if (substopsReal < 5) issues.push(`macro-tour/day-trip en día ${d} con <5 sub-paradas reales (sin comidas/auroras).`);
+    const macroishCount = dayRows.filter((r) => _isMacroTourKey_(r.activity)).length;
+    if (macroishCount < 5) issues.push(`macro-tour/day-trip en día ${d} con <5 sub-paradas.`);
 
     const hasReturn = dayRows.some((r) => {
       const a = _canonTxt_(r.activity);
       return a.includes("regreso") && (baseCity ? a.includes(_canonTxt_(baseCity)) : true);
     });
     if (!hasReturn) issues.push(`macro-tour/day-trip en día ${d} sin "Regreso a ${baseCity || "ciudad base"}".`);
+
+    if (d === daysTotal) issues.push("macro-tour/day-trip en el último día (evitar).");
   }
 
   return { ok: issues.length === 0, issues };
@@ -483,60 +466,85 @@ function _validateInfoResearch_(parsed, contextHint = {}) {
 /* ===================== Prompts ===================== */
 const SYSTEM_INFO = `
 Eres el **Info Chat interno** de ITravelByMyOwn.
-Devuelve **UN ÚNICO JSON VÁLIDO** (sin texto fuera).
+Debes devolver **UN ÚNICO JSON VÁLIDO** (sin texto fuera).
 
 OBJETIVO:
-1) Piensa el itinerario COMPLETO primero (coherente, optimizado).
-2) Emite SOLO el JSON final en city_day[] (Ciudad–Día) ORDENADO y COMPLETO 1..days_total.
+1) Piensa el itinerario COMPLETO primero (coherente, sin contradicciones).
+2) Devuelve city_day[] (Ciudad–Día) ORDENADO y COMPLETO 1..days_total.
 
-CONTRATO row (OBLIGATORIO):
+REGLA DE ORO:
+- El JSON debe estar "LISTO PARA TABLA": cada fila trae TODO lo necesario.
+
+CONTRATO de cada row (OBLIGATORIO):
 - day: número
-- start/end: HH:MM (hora local realista)
-- activity: empieza con "CIUDAD – ..."
-- from/to: no vacíos; no genéricos en actividades reales
-- transport: no vacío
-- duration: 2 líneas EXACTAS con \\n:
-  "Transporte: <...>"
-  "Actividad: <...>"
+- start/end: HH:MM (hora local realista). Si el usuario no da horas, tú decides como experto.
+- activity: "DESTINO – SUB-PARADA" (– o - con espacios). Evita genéricos.
+- from/to: NO vacíos
+- transport: NO vacío (realista)
+- duration: 2 líneas EXACTAS con salto \\n:
+  "Transporte: <estimación realista o ~rango>"
+  "Actividad: <estimación realista o ~rango>"
 - PROHIBIDO: "Transporte: 0m" o "Actividad: 0m"
-- notes: >= 20 caracteres, emotivo + tip logístico (+ alternativa si aplica)
+- notes: OBLIGATORIAS, motivadoras y útiles (>= 20 caracteres):
+  - 1 frase emotiva + 1 tip logístico (+ condición/alternativa si aplica)
+- kind/zone: si no aplica, dejar "" (pero el campo debe existir).
 
-COMIDAS (flexibles):
-- No obligatorias.
-- Si incluyes, "to" = "Zona gastronómica (a elección)" o "Centro (a elección)".
-- En notes pon 3 opciones concretas.
+COMIDAS (Regla Flexible):
+- NO son obligatorias ni prioritarias.
+- Inclúyelas SOLO si aportan valor real al flujo.
+- Si se incluyen, NO genéricas.
 
-AURORAS (si plausibles):
-- ventana nocturna realista
-- "to" = zona oscura/mirador oscuro
-- transport = "Vehículo alquilado (por cuenta propia) o Tour guiado (según duración/pickup)"
-- no consecutivas, evitar último día
-- notes incluyen: "valid:" + clima/nubosidad + alternativa low-cost
+AURORAS (Regla Flexible + inferencia):
+- Solo sugerir si plausibles por latitud/temporada.
+- Evitar días consecutivos si hay opciones. Evitar último día; si solo cabe, marcar condicional.
+- Notes incluyen: "valid:" + clima/nubosidad + alternativa low-cost.
 
-DAY-TRIPS:
-- Si haces macro-day-trip, crea 5–8 sub-paradas REALES (filas),
-  y cierra con fila: "CIUDAD – Regreso a {Ciudad}".
+DAY-TRIPS / MACRO-TOURS:
+- 5–8 sub-paradas (filas) y cerrar con "Regreso a {Destino}" (fila propia).
+- Evita último día si es posible.
 
-Salida mínima incluye:
-destination,country,days_total,hotel_base,rationale,imperdibles,macro_tours,meals_suggestions,aurora,constraints,day_hours,city_day,rows_skeleton,followup
+SALIDA mínima:
+{
+  "destination":"Ciudad",
+  "country":"País",
+  "days_total":N,
+  "hotel_base":"...",
+  "rationale":"...",
+  "imperdibles":[],
+  "macro_tours":[],
+  "meals_suggestions":[],
+  "aurora":{"plausible":false,"suggested_days":[],"window_local":{"start":"","end":""},"duration":"...","transport_default":"...","note":""},
+  "constraints":{"max_substops_per_tour":8,"no_consecutive_auroras":true,"no_last_day_aurora":true,"thermal_lagoons_min_stay_minutes":180},
+  "day_hours":[],
+  "city_day":[{"city":"Ciudad","day":1,"rows":[...]}],
+  "rows_skeleton":[]
+}
+
 Responde SOLO JSON válido.
 `.trim();
 
-const SYSTEM_INFO_ULTRA = `${SYSTEM_INFO}
+const SYSTEM_INFO_ULTRA = `
+${SYSTEM_INFO}
+
 IMPORTANTE:
-- NO markdown, NO backticks, NO texto fuera del JSON.
+- NO uses markdown.
+- NO uses backticks.
+- NO agregues texto fuera del JSON.
+- Start/end siempre HH:MM.
+
 Responde SOLO JSON válido.
 `.trim();
 
-// PLANNER passthrough (no inventa)
 const SYSTEM_PLANNER = `
 Eres **Astra Planner**. Recibes "research_json".
-Fuente: research_json (no inventes POIs).
-Tu tarea: devolver city_day utilizable por el frontend.
+Fuente de verdad: research_json (NO inventes POIs).
+Tu tarea es devolver city_day limpio y utilizable por el frontend.
 
 REGLA:
 - Usa SOLO research_json.city_day como fuente.
-- No inventes filas nuevas, solo normaliza campos faltantes (kind/zone) y duration.
+- NO uses rows_draft ni rows, aunque existan.
+- NO recortes ni dedupe aquí.
+
 Salida:
 { "destination":"Ciudad", "city_day":[...], "followup":"" }
 `.trim();
@@ -548,7 +556,7 @@ function normalizeDurationsInParsed(parsed) {
   const touchRows = (rows = []) =>
     rows.map((r) => ({
       ...r,
-      duration: _normalizeDurationText_(r.duration),
+      duration: _normalizeDurationText_(r?.duration),
       kind: r?.kind ?? "",
       zone: r?.zone ?? "",
     }));
@@ -579,74 +587,27 @@ function normalizeDurationsInParsed(parsed) {
 
 /* ===================== INFO generation with retries ===================== */
 async function generateInfoJSON(infoUserMsg) {
-  // Intento 1 (normal)
-  let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.26, 5200, 110000);
+  // intento 1: normal
+  let raw = await callText([{ role: "system", content: SYSTEM_INFO }, infoUserMsg], 0.28, 5200, 90000);
   let parsed = cleanToJSONPlus(raw);
   if (parsed) return { parsed, raw, stage: "normal" };
 
-  // Intento 2 (ultra)
-  raw = await callText([{ role: "system", content: SYSTEM_INFO_ULTRA }, infoUserMsg], 0.18, 5600, 130000);
+  // intento 2: estricto
+  raw = await callText(
+    [{ role: "system", content: SYSTEM_INFO + "\nOBLIGATORIO: responde SOLO JSON válido." }, infoUserMsg],
+    0.22,
+    5200,
+    90000
+  );
+  parsed = cleanToJSONPlus(raw);
+  if (parsed) return { parsed, raw, stage: "strict" };
+
+  // intento 3: ultra
+  raw = await callText([{ role: "system", content: SYSTEM_INFO_ULTRA }, infoUserMsg], 0.18, 5600, 95000);
   parsed = cleanToJSONPlus(raw);
   if (parsed) return { parsed, raw, stage: "ultra" };
 
   return { parsed: null, raw: raw || "", stage: "failed" };
-}
-
-/* ===================== Repair compacto (1 vuelta) ===================== */
-async function repairInfoJSONCompact(parsed, auditIssues, ctxDest) {
-  // IMPORTANTÍSIMO: NO mandamos todo el contexto otra vez. Solo: issues + ciudad + JSON.
-  const repairPrompt = `
-Corrige el JSON a continuación para que cumpla reglas.
-Devuelve SOLO JSON válido (sin texto fuera).
-
-CIUDAD BASE: ${ctxDest}
-
-ISSUES:
-- ${auditIssues.slice(0, 12).join("\n- ")}
-
-REGLAS CLAVE:
-- Macro-day-trip: 5–8 sub-paradas reales + fila final "CIUDAD – Regreso a ${ctxDest}".
-- Auroras: notes incluyen "valid:" + clima/nubosidad + alternativa low-cost; "to" = zona oscura/mirador oscuro; horario nocturno.
-- Comidas: "to" genérico (Zona gastronómica (a elección) o Centro (a elección)) + 3 opciones en notes.
-- activity siempre inicia con "${ctxDest} – ".
-- duration siempre 2 líneas con \\n, sin 0m.
-
-JSON A CORREGIR:
-${JSON.stringify(parsed)}
-`.trim();
-
-  const raw = await callText([{ role: "system", content: SYSTEM_INFO_ULTRA }, { role: "user", content: repairPrompt }], 0.16, 5200, 120000);
-  const repaired = cleanToJSONPlus(raw);
-  return repaired || null;
-}
-
-/* ===================== Patch local mínimo (sin LLM) ===================== */
-function _patchMealsLabeling_(parsed) {
-  try {
-    if (!Array.isArray(parsed?.city_day)) return parsed;
-    parsed.city_day.forEach((b) => {
-      const rows = Array.isArray(b.rows) ? b.rows : [];
-      rows.forEach((r) => {
-        if (!_looksLikeMealRow_(r.activity)) return;
-        const s = _parseTimeToMin_(r.start);
-        if (s == null) return;
-
-        // Si dice "cena" pero es temprano (ej 17:30), renombrar a "almuerzo tardío / merienda" NO es deseable.
-        // Mejor: si está entre 16:30-18:00, lo dejamos como "Cena" (en muchos países es temprano),
-        // pero tu validador la marca mal. Entonces ampliamos la ventana aceptable para cena en el audit NO, aquí no.
-        // En vez: si está 17:00-17:59, cambia etiqueta a "Reykjavik – Comida temprana (zona gastronómica)" para pasar reglas.
-        const canon = _canonTxt_(r.activity);
-        if (canon.includes("cena") && s >= 17 * 60 && s < 18 * 60) {
-          r.activity = `${String(b.city || parsed.destination || "Ciudad").trim()} – Comida temprana en zona gastronómica`;
-          // mantener to genérico
-          if (!_canonTxt_(r.to).includes("zona gastronomica") && !_canonTxt_(r.to).includes("a eleccion")) {
-            r.to = "Zona gastronómica (a elección)";
-          }
-        }
-      });
-    });
-  } catch {}
-  return parsed;
 }
 
 /* ===================== Handler ===================== */
@@ -669,6 +630,7 @@ export default async function handler(req, res) {
         context = rest;
       }
 
+      // day_hours: sanea; si no aporta, se elimina para dejar libertad al Info Chat
       try {
         if (context && typeof context === "object") {
           const daysTotal = context?.days_total || context?.days || context?.daysTotal || 1;
@@ -683,16 +645,16 @@ export default async function handler(req, res) {
 
       const infoUserMsg = { role: "user", content: JSON.stringify({ context }, null, 2) };
 
+      // 1) generar (con retries)
       const ctxDays = context?.days_total || context?.days || context?.daysTotal || 1;
-      const ctxDest = String(context?.city || "Destino").trim() || "Destino";
+      const ctxDest = context?.city || "Destino";
 
-      // 1) Generar JSON
       let gen = await generateInfoJSON(infoUserMsg);
       let parsed = gen.parsed;
 
-      // 2) Si NO parsea JSON -> skeleton (caso extremo)
+      // 2) si aún no hay parsed, skeleton (NO vacío)
       if (!parsed) {
-        const out = {
+        parsed = {
           destination: ctxDest,
           country: context?.country || "",
           days_total: ctxDays,
@@ -718,74 +680,103 @@ export default async function handler(req, res) {
           day_hours: [],
           city_day: skeletonCityDay(ctxDest, ctxDays),
           rows_skeleton: [],
-          followup: "⚠️ INFO no generó JSON parseable. Se devolvió skeleton para no romper el Planner. Reintenta INFO.",
+          followup: `⚠️ INFO no generó JSON válido (stage=${gen.stage}). Se devolvió skeleton para no romper tabla.`,
         };
 
-        const normalized = normalizeDurationsInParsed(out);
-        return res.status(200).json({ text: JSON.stringify(normalized) });
+        parsed = normalizeDurationsInParsed(parsed);
+        return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
-      // 3) Normaliza shape + limpia legacy
+      // 3) normaliza shape + limpia legacy
       const destinationFallback = String(parsed?.destination || ctxDest || "").trim() || ctxDest;
-      parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFallback);
-      if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
-      if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
-      if ("rows_draft" in parsed) delete parsed.rows_draft;
-      if ("rows" in parsed) delete parsed.rows;
-
-      // 4) Si city_day viene vacío -> skeleton (caso extremo)
       const daysTotal = Math.max(1, Number(parsed?.days_total || ctxDays || 1));
-      const destinationFinal = String(parsed?.destination || ctxDest || "Destino").trim() || "Destino";
-      if (!Array.isArray(parsed.city_day) || parsed.city_day.length === 0) {
-        parsed.city_day = skeletonCityDay(destinationFinal, daysTotal);
-        parsed.followup = "⚠️ INFO devolvió JSON pero city_day vino vacío. Se devolvió skeleton para no romper el Planner. Reintenta INFO.";
-        const normalized = normalizeDurationsInParsed(parsed);
-        return res.status(200).json({ text: JSON.stringify(normalized) });
+
+      try {
+        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFallback);
+        if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
+        if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
+        if ("rows_draft" in parsed) delete parsed.rows_draft;
+        if ("rows" in parsed) delete parsed.rows;
+      } catch {
+        if (!Array.isArray(parsed.city_day)) parsed.city_day = [];
+        if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
+        if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
+        if ("rows_draft" in parsed) delete parsed.rows_draft;
+        if ("rows" in parsed) delete parsed.rows;
       }
 
-      // 5) Patch local mínimo (evita fallos tontos del audit)
-      parsed = _patchMealsLabeling_(parsed);
-      parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFinal);
+      // 4) quality gate + repair iterativo (hasta 2 rondas)
+      const contextHint = { days_total: daysTotal, destination: destinationFallback, city: destinationFallback };
 
-      // 6) Audit + Repair compacto 1 vuelta (NO bloquea render)
-      let audit = _validateInfoResearch_(parsed, { days_total: daysTotal, destination: destinationFinal, city: destinationFinal });
+      let lastAudit = null;
+      for (let round = 1; round <= 2; round++) {
+        const audit = _validateInfoResearch_(parsed, contextHint);
+        lastAudit = audit;
+        if (audit.ok) break;
 
-      if (!audit.ok) {
-        const repaired = await repairInfoJSONCompact(parsed, audit.issues, destinationFinal);
-        if (repaired) {
-          parsed = repaired;
-          parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFinal);
+        const repairPrompt = `
+${SYSTEM_INFO}
+
+REPARACIÓN OBLIGATORIA (Ronda ${round}):
+Fallos detectados:
+- ${audit.issues.join("\n- ")}
+
+Instrucciones:
+- Re-emite TODO el JSON (no parches).
+- Asegura start/end/notes en TODAS las filas.
+- duration en 2 líneas con \\n (sin comas).
+- Day-trips/macro: 5–8 sub-paradas + "Regreso a ${destinationFallback}".
+- Comidas: si existen, NO genéricas.
+- Auroras: horario nocturno + no consecutivas + evitar último día.
+
+Responde SOLO JSON válido.
+`.trim();
+
+        const repairRaw = await callText([{ role: "system", content: repairPrompt }, infoUserMsg], 0.20, 6200, 95000);
+        const repaired = cleanToJSONPlus(repairRaw);
+        if (!repaired) break;
+
+        parsed = repaired;
+
+        try {
+          const dest2 = String(parsed?.destination || destinationFallback || "").trim() || destinationFallback;
+          parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest2);
           if (!Array.isArray(parsed.rows_skeleton)) parsed.rows_skeleton = [];
           if (!Array.isArray(parsed.day_hours)) parsed.day_hours = [];
           if ("rows_draft" in parsed) delete parsed.rows_draft;
           if ("rows" in parsed) delete parsed.rows;
+        } catch {}
+      }
 
-          parsed = _patchMealsLabeling_(parsed);
-          parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destinationFinal);
+      // 5) guard-rail final: nunca city_day vacío ni rows vacías
+      parsed = _forceNonEmptyRows_(parsed, destinationFallback, daysTotal);
 
-          audit = _validateInfoResearch_(parsed, { days_total: daysTotal, destination: destinationFinal, city: destinationFinal });
+      // 6) followup diagnóstico (NO bloquea)
+      try {
+        const finalAudit = _validateInfoResearch_(parsed, contextHint);
+        if (!finalAudit.ok) {
+          parsed.followup =
+            (parsed.followup ? parsed.followup + " | " : "") +
+            `⚠️ Audit con issues (no bloqueé): ${finalAudit.issues.join(" | ")} (stage=${gen.stage})`;
+        } else {
+          parsed.followup = parsed.followup || `OK (stage=${gen.stage})`;
         }
+      } catch {
+        parsed.followup = parsed.followup || `OK (stage=${gen.stage})`;
       }
 
-      // 7) Followup informativo (nunca bloquea)
-      if (!audit.ok) {
-        parsed.followup = "⚠️ Itinerario renderizado con issues (no bloqueé): " + audit.issues.join(" | ");
-      } else {
-        parsed.followup = parsed.followup || "";
-      }
-
-      const normalized = normalizeDurationsInParsed(parsed);
-      return res.status(200).json({ text: JSON.stringify(normalized) });
+      parsed = normalizeDurationsInParsed(parsed);
+      return res.status(200).json({ text: JSON.stringify(parsed) });
     }
 
     /* ===================== PLANNER ===================== */
     if (mode === "planner") {
       const research = body.research_json || null;
 
-      // Si el cliente manda mensajes libres (raro en tu flujo), fallback a LLM (pero igual normaliza)
+      // Compat: endpoint alternativo sin research_json
       if (!research) {
         const clientMessages = extractMessages(body);
-        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.2, 2600, 70000);
+        let raw = await callText([{ role: "system", content: SYSTEM_PLANNER }, ...clientMessages], 0.22, 2600, 70000);
         let parsed = cleanToJSONPlus(raw);
         if (!parsed) parsed = fallbackJSON();
 
@@ -794,18 +785,19 @@ export default async function handler(req, res) {
         if ("rows_draft" in parsed) delete parsed.rows_draft;
         if ("rows" in parsed) delete parsed.rows;
 
-        const normalized = normalizeDurationsInParsed(parsed);
-        return res.status(200).json({ text: JSON.stringify(normalized) });
+        parsed = normalizeDurationsInParsed(parsed);
+        return res.status(200).json({ text: JSON.stringify(parsed) });
       }
 
       const destination = String(research?.destination || research?.city || body?.destination || "").trim() || "Destino";
 
-      // Passthrough real: solo city_day
+      // ✅ SOLO city_day como fuente de verdad
       let city_day = _normalizeCityDayShape_(research?.city_day, destination);
 
-      // Caso extremo: si research no trae city_day, usa skeleton
-      if (!Array.isArray(city_day) || city_day.length === 0) {
-        city_day = skeletonCityDay(destination, Number(research?.days_total || 1));
+      // Guard-rail planner: si viene vacío o sin filas -> skeleton (evita tabla en blanco)
+      const daysTotal = Math.max(1, Number(research?.days_total || 1));
+      if (!Array.isArray(city_day) || city_day.length === 0 || !_hasAnyRows_(city_day)) {
+        city_day = skeletonCityDay(destination, daysTotal);
       }
 
       const out = { destination, city_day, followup: "" };
