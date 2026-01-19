@@ -1,6 +1,6 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v57 (parte 1/3)
-   Base: v56
+   ITRAVELBYMYOWN · PLANNER v58 (parte 1/3)
+   Base: v57
    Cambios mínimos:
    - Bloqueo sidebar y botón reset al guardar destinos.
    - Overlay bloquea botón flotante Info Chat.
@@ -17,7 +17,8 @@ const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
-let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate } }
+// 🧠 itineraries ahora soporta originalDays para rebalanceos selectivos
+let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate, originalDays } }
 let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
 let session = [];                // historial para el agente principal
 let infoSession = [];            // historial separado para Info Chat
@@ -260,7 +261,13 @@ function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
 
-  // Agregar encabezado único de horas
+  // 🆕 Guía de horarios
+  const guide = document.createElement('p');
+  guide.className = 'time-hint';
+  guide.textContent = '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)';
+  wrap.appendChild(guide);
+
+  // Encabezado único de horas
   const header = document.createElement('div');
   header.className = 'hours-header';
   header.innerHTML = `
@@ -340,6 +347,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const list = [];
+
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
     const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
@@ -348,6 +356,7 @@ function saveDestinations(){
     const baseDate = qs('.baseDate',r).value.trim();
 
     if(!city) return;
+
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
       const start = qs('.start',hd).value || DEFAULT_START;
@@ -357,7 +366,25 @@ function saveDestinations(){
     if(perDay.length===0){
       for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
     }
+
     list.push({ city, country, days, baseDate, perDay });
+  });
+
+  // 🧠 Detección de aumento de días y limpieza itinerario
+  list.forEach(({city, days})=>{
+    const prevDays = itineraries[city] ? Object.keys(itineraries[city].byDay).length : 0;
+    if(prevDays && days > prevDays){
+      // Limpiar estructura existente para evitar duplicados
+      itineraries[city].byDay = {};
+      for(let d=1; d<=days; d++){
+        itineraries[city].byDay[d] = [];
+      }
+      // Marcar para regenerar en startPlanning
+      if (typeof plannerState !== 'undefined') {
+        if (!plannerState.forceReplan) plannerState.forceReplan = {};
+        plannerState.forceReplan[city] = true;
+      }
+    }
   });
 
   savedDestinations = list;
@@ -405,7 +432,7 @@ function saveDestinations(){
     $infoFloating.style.opacity = '0.6';
   }
 
-  // 🧠 ACTUALIZAR PLANNERSTATE — Bloque quirúrgico añadido
+  // 🧠 ACTUALIZAR PLANNERSTATE — Bloque ya existente
   if (typeof plannerState !== 'undefined') {
     plannerState.destinations = [...savedDestinations];
     plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
@@ -834,45 +861,80 @@ function applyParsedToState(parsed){
 
   if(parsed.meta) upsertCityMeta(parsed.meta);
 
+  // 🧠 Detectar forceReplan si aplica y ajustar replace
+  let forceReplanCity = null;
+  if (typeof plannerState !== 'undefined' && plannerState.forceReplan) {
+    const candidate = parsed.destination || parsed.city || parsed.meta?.city;
+    if (candidate && plannerState.forceReplan[candidate]) {
+      forceReplanCity = candidate;
+    }
+  }
+
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
       if(!name) return;
+      const mustReplace = Boolean(d.replace) || (forceReplanCity === name);
 
       if(d.rowsByDay && typeof d.rowsByDay === 'object'){
         Object.entries(d.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), Boolean(d.replace));
+          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
         });
-        return;
+      } else if(Array.isArray(d.rows)){
+        pushRows(name, d.rows, mustReplace);
       }
-      if(Array.isArray(d.rows)) pushRows(name, d.rows, Boolean(d.replace));
+
+      // ✅ limpiar flag una vez utilizado
+      if(forceReplanCity === name){
+        delete plannerState.forceReplan[name];
+      }
     });
     return;
   }
+
   if(parsed.destination && Array.isArray(parsed.rows)){
-    pushRows(parsed.destination, parsed.rows, Boolean(parsed.replace));
+    const name = parsed.destination;
+    const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
+    pushRows(name, parsed.rows, mustReplace);
+    if(forceReplanCity === name){
+      delete plannerState.forceReplan[name];
+    }
     return;
   }
+
   if(Array.isArray(parsed.itineraries)){
     parsed.itineraries.forEach(x=>{
       const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
       if(!name) return;
+      const mustReplace = Boolean(x.replace) || (forceReplanCity === name);
+
       if(x.rowsByDay && typeof x.rowsByDay==='object'){
         Object.entries(x.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), Boolean(x.replace));
+          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
         });
-      }else if(Array.isArray(x.rows)) pushRows(name, x.rows, Boolean(x.replace));
+      } else if(Array.isArray(x.rows)) {
+        pushRows(name, x.rows, mustReplace);
+      }
+
+      if(forceReplanCity === name){
+        delete plannerState.forceReplan[name];
+      }
     });
     return;
   }
+
   if(Array.isArray(parsed.rows)){
     const city = activeCity || savedDestinations[0]?.city;
-    pushRows(city, parsed.rows, Boolean(parsed.replace));
+    const mustReplace = Boolean(parsed.replace) || (forceReplanCity === city);
+    pushRows(city, parsed.rows, mustReplace);
+    if(forceReplanCity === city){
+      delete plannerState.forceReplan[city];
+    }
   }
 }
 
 /* ==============================
-   SECCIÓN 13B · Add Multiple Days (mejorada con rebalanceo automático)
+   SECCIÓN 13B · Add Multiple Days (mejorada con rebalanceo inteligente por rango)
 ================================= */
 function addMultipleDaysToCity(city, extraDays){
   if(!city || extraDays <= 0) return;
@@ -882,7 +944,13 @@ function addMultipleDaysToCity(city, extraDays){
   const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
   let currentMax = days.length ? Math.max(...days) : 0;
 
-  // Corregido: solo agregar los días realmente nuevos
+  // 🧠 Establecer el último día original si no existe
+  if (!itineraries[city].originalDays) {
+    itineraries[city].originalDays = currentMax;
+  }
+  const lastOriginalDay = itineraries[city].originalDays;
+
+  // 🆕 Agregar solo los días realmente nuevos
   for(let i=1; i<=extraDays; i++){
     const newDay = currentMax + i;
     if(!byDay[newDay]){  // evita duplicados
@@ -898,17 +966,26 @@ function addMultipleDaysToCity(city, extraDays){
     }
   }
 
-  // Corregido: dest.days refleja el total correcto
+  // 📝 Actualizar cantidad total de días en destino
   const dest = savedDestinations.find(x=>x.city===city);
+  let newLastDay = currentMax + extraDays;
   if(dest){
-    const totalExisting = currentMax;
-    const totalAdded = extraDays;
-    dest.days = totalExisting + totalAdded;
+    dest.days = newLastDay;
   }
 
-  // 🧠 Rebalanceo automático tras agregar días (con reglas globales y seguridad)
+  // 🧭 Definir rango de rebalanceo: incluye último día original
+  const rebalanceStart = Math.max(1, lastOriginalDay);
+  const rebalanceEnd = newLastDay;
+
+  // 🧭 Marcar replanificación para el agente
+  if (typeof plannerState !== 'undefined') {
+    if (!plannerState.forceReplan) plannerState.forceReplan = {};
+    plannerState.forceReplan[city] = true;
+  }
+
+  // 🧠 Rebalanceo automático sólo en el rango afectado
   showWOW(true, 'Astra está reequilibrando la ciudad…');
-  rebalanceWholeCity(city)
+  rebalanceWholeCity(city, { start: rebalanceStart, end: rebalanceEnd })
     .catch(err => console.error('Error en rebalance automático:', err))
     .finally(() => showWOW(false));
 }
@@ -1020,10 +1097,13 @@ async function generateCityItinerary(city){
   const hotel    = cityMeta[city]?.hotel || '';
   const transport= cityMeta[city]?.transport || 'recomiéndame';
 
+  // 🧭 Detectar si se debe forzar replanificación
+  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
   const instructions = `
 ${FORMAT}
 **ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
-- Formato B {"destination":"${city}","rows":[...],"replace": false}.
+- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 - Revisa IMPERDIBLES diurnos y nocturnos.
 - ⚡ Para fenómenos como auroras (Reykjavik / Tromsø), sugiere 1 tour en un día + alternativas locales en otros días.
 - Respetar ventanas horarias por día: ${JSON.stringify(perDay)}.
@@ -1054,22 +1134,19 @@ ${FORMAT}
       tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
-    // Validación semántica global
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-    if(Array.isArray(val.allowed) && val.allowed.length){
-      pushRows(tmpCity, val.allowed, false);
-      renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
-      showWOW(false);
+    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 si hay replanificación → replace=true
+    renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
+    showWOW(false);
 
-      // 🛠 Habilita el botón de reset tras generar al menos un itinerario
-      $resetBtn?.removeAttribute('disabled');
-      return;
-    }
+    $resetBtn?.removeAttribute('disabled');
+    if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
+    return;
   }
 
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   showWOW(false);
-  // 🛠 Asegura habilitar el reset también en fallback
   $resetBtn?.removeAttribute('disabled');
   chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
 }
@@ -1085,14 +1162,26 @@ async function rebalanceWholeCity(city, opts={}){
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
+  // 🆕 Determinar rango de rebalanceo
+  const startDay = opts.start || 1;
+  const endDay = opts.end || totalDays;
+  const lockedDaysText = startDay > 1 
+    ? `Mantén intactos los días 1 a ${startDay - 1}.`
+    : '';
+
+  // 🧭 Detectar si se debe forzar replanificación
+  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
   const prompt = `
 ${FORMAT}
-**ROL:** Reequilibra COMPLETAMENTE la ciudad "${city}" (${totalDays} día/s) manteniendo lo ya plausible y completando huecos.
-- Formato B {"destination":"${city}","rows":[...],"replace": false}.
-- Respeta ventanas: ${JSON.stringify(perDay)}.
+**ROL:** Reequilibra la ciudad "${city}" entre los días ${startDay} y ${endDay}, manteniendo lo ya plausible y completando huecos.
+${lockedDaysText}
+- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+- Respeta ventanas: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
 - Considera IMPERDIBLES y actividades distribuidas sin duplicar.
 - Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
 ${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
+- El último día debe ser más liviano, respetando lógica de preparación de regreso.
 - Valida plausibilidad y seguridad global:
   • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
   • Si hay alerta razonable, sustitúyelo por alternativa más segura o indica brevemente en notes.
@@ -1117,19 +1206,19 @@ ${buildIntake()}
     }
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
-    pushRows(city, val.allowed, false);
+    pushRows(city, val.allowed, forceReplan);
 
-    // Reoptimiza TODOS los días para coherencia fina
-    for(let d=1; d<=totalDays; d++) await optimizeDay(city, d);
+    // 🧠 Optimiza solo el rango de días afectado
+    for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-
-    // 🛠 Asegura habilitar el reset tras cualquier rebalanceo
     $resetBtn?.removeAttribute('disabled');
+
+    if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
   }else{
     showWOW(false);
-    // 🛠 También habilita reset en caso de no cambios válidos
     $resetBtn?.removeAttribute('disabled');
     chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
   }
@@ -1395,6 +1484,20 @@ async function optimizeDay(city, day){
   const perDay = (cityMeta[city]?.perDay||[]).find(x=>x.day===day) || {start:DEFAULT_START,end:DEFAULT_END};
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
 
+  // 🧠 Bloque adicional si la ciudad está marcada para replanificación
+  let forceReplanBlock = '';
+  if (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) {
+    forceReplanBlock = `
+👉 IMPORTANTE: El usuario ha extendido su estadía en ${city}.
+- Debes RECONSTRUIR COMPLETAMENTE el itinerario de ${city}.
+- Considera el NUEVO total de días y redistribuye las actividades.
+- Evalúa la posibilidad de realizar excursiones de 1 día a ciudades cercanas (máx. 2h de trayecto por sentido).
+- Si las excursiones aportan más valor turístico que actividades locales adicionales, inclúyelas en el itinerario.
+- Prioriza imperdibles y balancea las actividades entre los días.
+- Evita duplicar cualquier actividad ya existente.
+- Devuelve una planificación clara y optimizada.`;
+  }
+
   const prompt = `
 ${FORMAT}
 Ciudad: ${city}
@@ -1403,6 +1506,7 @@ Fecha base (d1): ${baseDate||'N/A'}
 Ventanas definidas: ${JSON.stringify(perDay)}
 Filas actuales:
 ${JSON.stringify(rows)}
+${forceReplanBlock}
 Instrucción:
 - Reordena y optimiza (min traslados; agrupa por zonas).
 - Sustituye huecos por opciones realistas (sin duplicar otros días).
@@ -1828,6 +1932,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
       plannerState.budget = '';
       plannerState.currency = 'USD';
+      plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
     }
 
     overlay.classList.remove('active');
@@ -1886,6 +1991,21 @@ $confirmCTA?.addEventListener('click', ()=>{
   qs('#monetization-upsell').style.display='flex'; 
 });
 $upsellClose?.addEventListener('click', ()=> qs('#monetization-upsell').style.display='none');
+
+/* 🆕 Listener: Rebalanceo inteligente al agregar días */
+document.addEventListener('itbmo:addDays', e=>{
+  const { city, extraDays, dayTripTo } = e.detail || {};
+  if(!city || !extraDays) return;
+  // Usa la misma lógica de addMultipleDaysToCity
+  addMultipleDaysToCity(city, extraDays);
+
+  // 🧠 Determinar rango de rebalanceo dinámico
+  const start = itineraries[city]?.originalDays || 1;
+  const end = (itineraries[city]?.originalDays || 0) + extraDays;
+
+  // ⚡ Ejecutar rebalanceo selectivo
+  rebalanceWholeCity(city, { start, end, dayTripTo });
+});
 
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
 function openInfoModal(){
