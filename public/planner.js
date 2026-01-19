@@ -1202,29 +1202,39 @@ async function generateCityItinerary(city){
 
   const instructions = `
 ${FORMAT}
+**ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
+- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-ROL: Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
+REGLAS CLAVE (OBLIGATORIAS):
+- "activity" SIEMPRE debe ser: "${city} – <Sub-parada específica>" (con espacios alrededor del guion).
+  • Esto aplica a TODAS las filas, incluyendo traslados y regresos.
+  • Ejemplo correcto: "${city} – Regreso a ${city}" (NO "REGRESO A ${city}" a secas).
+- "from", "to", "transport" y "notes" NUNCA pueden ir vacíos.
+- Evita genéricos: prohibido "tour", "museo", "restaurante local" sin nombre/identificador claro.
 
-Devuelve Formato B:
-{"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
+AURORAS (si son plausibles por ciudad/temporada/latitud):
+- Debes incluir AL MENOS 1 (una) noche de auroras en el itinerario.
+- Debe ser horario NOCTURNO realista (aprox. 20:00–02:00 local).
+- Evita días consecutivos si hay margen y evita dejarlo SOLO para el último día (si solo cabe ahí, hazlo condicional en notes).
+- Incluye 1 opción tipo "Tour/Van" y 1 alternativa low-cost cercana (mirador/área oscura cercana) en "notes" con "valid:".
 
-Reglas adicionales:
+DAY TRIPS / MACRO-TOURS:
+- Si propones excursión de día (day trip), debe ser COMPLETA:
+  • 5–8 sub-paradas (filas) con nombres claros, secuencia lógica y traslados realistas.
+  • Debe incluir una fila final propia: "${city} – Regreso a ${city}".
+  • Si es una ruta clásica (ej. “Costa Sur”), llega al hito final lógico de la ruta (p.ej., el pueblo/hito icónico final) antes de regresar.
+- Puedes proponer más de un day trip si aporta valor (sin regla fija). Usa criterio experto y evita saturar.
+
+CALIDAD / APROVECHAMIENTO:
+- Revisa IMPERDIBLES diurnos y nocturnos.
+- Si un día queda muy corto o termina demasiado temprano, completa con 1–3 sub-paradas icónicas cercanas y realistas (sin inventar cosas raras).
+- Agrupar por zonas, evitar solapamientos.
+- Validar plausibilidad global y seguridad.
+  • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
+  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
+  • Sustituir por alternativas seguras cuando aplique.
+- Respetar ventanas horarias por día como referencia (no rígidas): ${JSON.stringify(perDay)}.
 - Nada de texto fuera del JSON.
-- Respeta ventanas horarias por día: ${JSON.stringify(perDay)}.
-- Agrupar por zonas, evitar solapamientos y traslados absurdos.
-- Campos NO vacíos: activity/from/to/transport/duration/notes (prohibido "seed").
-- duration obligatoria en 2 líneas con \\n: "Transporte: ...\\nActividad: ..." (prohibido 0m y sin comas).
-- Cenas/vida nocturna: 19:00–23:30 aprox. (si se incluyen).
-- Plausibilidad y seguridad global:
-  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes; sustituir por alternativas seguras cuando aplique.
-- Auroras: incluir SOLO si plausibles; evitar días consecutivos; evitar último día; notes con "valid:" + clima/nubosidad + alternativa low-cost; horario nocturno típico local.
-- Macro-tours/day trips: si incluyes excursión, 5–8 sub-paradas + fila final "Regreso a ${city}" y evitar último día si hay opciones.
-- Si quedan días sin contenido, distribuye actividades plausibles y/o UN (1) day trip máximo (≤2 h por trayecto, ida y vuelta el mismo día) sin duplicar otras noches.
-
-Contexto (si existe):
-- Hotel/zona: ${hotel || 'N/A'}
-- Transporte preferido: ${transport || 'recomiéndame'}
-
 `.trim();
 
   showWOW(true, 'Astra está generando itinerarios…');
@@ -1245,11 +1255,7 @@ Contexto (si existe):
     }
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-
-    // ✅ allowed puede venir como rows (itinerario) o como allowed[]
-    const allowedRows = Array.isArray(val?.allowed) ? val.allowed : (Array.isArray(val?.rows) ? val.rows : tmpRows);
-
-    pushRows(tmpCity, allowedRows, forceReplan); // 🧠 si hay replanificación → replace=true
+    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 si hay replanificación → replace=true
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
 
@@ -1288,26 +1294,32 @@ async function rebalanceWholeCity(city, opts={}){
 
   const prompt = `
 ${FORMAT}
-
-ROL: Reequilibra la ciudad "${city}" entre los días ${startDay} y ${endDay}, manteniendo lo ya plausible y completando huecos.
+**ROL:** Reequilibra la ciudad "${city}" entre los días ${startDay} y ${endDay}, manteniendo lo ya plausible y completando huecos.
 ${lockedDaysText}
+- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-Devuelve Formato B:
-{"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
+REGLAS CLAVE (OBLIGATORIAS):
+- "activity" SIEMPRE: "${city} – <Sub-parada específica>" (incluye regresos/traslados).
+- from/to/transport/notes: NUNCA vacíos. Evita genéricos sin nombre claro.
 
-- Respeta ventanas: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
-- Considera IMPERDIBLES y actividades distribuidas sin duplicar.
-- Campos NO vacíos: activity/from/to/transport/duration/notes (prohibido "seed").
-- duration obligatoria en 2 líneas con \\n (prohibido 0m y sin comas).
-- Comidas: no obligatorias; si existen, no genéricas.
-- Auroras: solo si plausibles; evitar consecutivas; evitar último día; horario nocturno; notes con "valid:" + clima/nubosidad + alternativa low-cost.
-- Macro-tours/day trips: 5–8 sub-paradas + "Regreso a ${city}" (fila final). Evitar último día si hay opciones.
-- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
-${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
-- El último día debe ser más liviano, respetando lógica de preparación de regreso.
-- Valida plausibilidad y seguridad global:
-  • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
-  • Si hay alerta razonable, sustitúyelo por alternativa más segura o indica brevemente en notes.
+AURORAS (si plausibles):
+- Incluye al menos 1 noche de auroras en horario nocturno realista (20:00–02:00 aprox.).
+- Evita consecutivas si hay margen; evita dejarlo solo al final (si solo cabe ahí, marcar condicional).
+- En notes incluye "valid:" + alternativa low-cost cercana.
+
+DAY TRIPS / MACRO-TOURS:
+- Puedes incluir day trips si aportan valor (sin regla fija). Si incluyes uno:
+  • 5–8 sub-paradas (filas) con secuencia realista.
+  • Debe terminar con "${city} – Regreso a ${city}".
+  • Si es ruta clásica, llega al hito final lógico antes de regresar.
+
+CALIDAD:
+- Respeta ventanas como referencia: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Considera IMPERDIBLES y distribuye sin duplicar.
+${wantedTrip ? `- Preferencia del usuario: day trip a "${wantedTrip}". Si es razonable, intégralo (macro-tour completo) y cierra con regreso.` : ''}
+- El último día puede ser más liviano, pero no lo dejes “vacío” si hay imperdibles pendientes.
+- Valida plausibilidad y seguridad global; sustituye por alternativas seguras si aplica.
+- Notes SIEMPRE útiles (nunca vacías ni "seed").
 
 Contexto actual (para fusionar sin borrar): 
 ${buildIntake()}
@@ -1329,10 +1341,7 @@ ${buildIntake()}
     }
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
-
-    const allowedRows = Array.isArray(val?.allowed) ? val.allowed : (Array.isArray(val?.rows) ? val.rows : rows);
-
-    pushRows(city, allowedRows, forceReplan);
+    pushRows(city, val.allowed, forceReplan);
 
     // 🧠 Optimiza solo el rango de días afectado
     for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
@@ -1349,7 +1358,6 @@ ${buildIntake()}
     chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
   }
 }
-
 
 /* =========================================================
    ITRAVELBYMYOWN · PLANNER v55.1 (parte 3/3)
