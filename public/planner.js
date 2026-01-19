@@ -647,31 +647,58 @@ function buildIntake(){
 }
 
 /* ==============================
-   SECCIÓN 11 · Contrato JSON / LLM (reforzado v49)
+   SECCIÓN 11 · Contrato JSON / LLM (reforzado v49) — v58 robustecido (reglas API v52.5)
 ================================= */
 const FORMAT = `
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
+
 A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
+
 B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+
 C) {"rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+
 D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Texto","transport":"Texto"},"followup":"Pregunta breve"}
-Reglas:
+
+Reglas (obligatorias, alineadas con API v52.5):
+
+- Devuelve SIEMPRE al menos 1 fila renderizable en "rows". Nada de texto fuera del JSON.
+- Máximo 20 filas por día.
 - Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
-- Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre).
+- Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre). No solapes.
 - Valida PLAUSIBILIDAD GLOBAL (geografía, temporada, clima aproximado, logística).
 - Seguridad y restricciones:
   • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
-  • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o, si es improcedente, exclúyelo.
-- Day trips: cuando se agregan días, evalúa imperdibles cercanos (≤2 h por trayecto, regreso mismo día) y proponlos 1 día si encajan.
-- Notas: NUNCA dejes "notes" vacío ni "seed"; escribe una nota breve y útil (p. ej., por qué es especial, tip de entrada, reserva sugerida).
-- Para actividades estacionales/nocturnas (p. ej. auroras):
-  • Inclúyelas SOLO si plausibles para ciudad/fechas aproximadas.
-  • Añade en "notes" marcador "valid: <justificación breve>" y hora aproximada típica de inicio local.
-  • Propón 1 tour recomendado si tiene sentido y alternativas locales de bajo costo.
-- Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
-- Máximo 20 filas por día. Nada de texto fuera del JSON.
-- Evita campos vacíos: "activity","transport","notes" siempre con texto útil. ("from"/"to" si no aplica, usa el nombre del área/zona o "Centro" en lugar de vacío).
-- Cenas/vida nocturna: 19:00–23:30 aprox.
+  • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o sustituye por alternativa segura.
+
+Campos obligatorios por fila (NO vacíos):
+- "activity","from","to","transport","duration","notes" deben tener texto útil. Prohibido "seed" y notes vacías.
+
+Formato de activity (obligatorio cuando aplique a itinerario):
+- "DESTINO – SUB-PARADA" (– o - con espacios). Evita genéricos tipo "museo", "parque", "restaurante local", "paseo por la ciudad".
+
+Formato de duration (obligatorio, tabla-ready):
+- 2 líneas EXACTAS con salto \\n:
+  "Transporte: <estimación realista o ~rango>"
+  "Actividad: <estimación realista o ~rango>"
+- PROHIBIDO: "Transporte: 0m" o "Actividad: 0m"
+- NO usar comas para separar Transporte/Actividad.
+
+Comidas (regla flexible):
+- NO son obligatorias. Si se incluyen, NO genéricas ("restaurante local" prohibido). Deben aportar valor.
+
+Auroras (solo si plausibles por latitud/temporada):
+- Evitar días consecutivos si hay opciones. Evitar el último día; si SOLO cabe ahí, marcar condicional.
+- Debe ser nocturno típico local.
+- En notes incluir: "valid: <justificación breve>" + referencia a clima/nubosidad + alternativa low-cost cercana.
+
+Day trips / Macro-tours:
+- Si propones excursión/day trip, desglosa en 5–8 sub-paradas (filas).
+- Cierra con fila propia: "Regreso a {Ciudad base}".
+- Evitar macro-tours en el último día si hay opciones.
+
+Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
+
 `;
 
 /* ==============================
@@ -679,14 +706,50 @@ Reglas:
 ================================= */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
+  const globalStyle = `
+Eres "Astra", agente de viajes internacional.
+
+REGLA CRÍTICA:
+- Devuelve SOLO JSON válido cuando se te pida itinerario (nunca texto fuera del JSON).
+
+Calidad y coherencia:
+- RAZONA con sentido común global: geografía, temporadas, ventanas horarias, distancias y logística básica.
+- Identifica IMPERDIBLES diurnos y nocturnos; si el tiempo es limitado, prioriza lo esencial.
+- Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
+
+Reglas de itinerario (alineadas con API v52.5):
+- Máximo 20 filas por día.
+- Campos NO vacíos: activity/from/to/transport/duration/notes (prohibido "seed").
+- activity preferida: "DESTINO – SUB-PARADA" (evita genéricos).
+- duration obligatoria en 2 líneas con \\n:
+  "Transporte: ...\\nActividad: ..."
+  (prohibido 0m, y no usar comas para separar).
+- Comidas: NO obligatorias; si se incluyen, NO genéricas.
+- Day trips: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
+- Macro-tours/day trips: 5–8 sub-paradas + fila final "Regreso a {Ciudad base}". Evitar último día si hay opciones.
+
+Auroras (solo si plausibles por latitud/temporada):
+- Evitar días consecutivos si hay opciones. Evitar último día; si SOLO cabe ahí, marcar condicional.
+- Debe ser nocturno típico local.
+- Notes incluyen: "valid:" + clima/nubosidad + alternativa low-cost cercana.
+
+Seguridad:
+- No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
+- Prioriza siempre rutas y experiencias seguras y razonables.
+- Si hay una alerta razonable, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
+
+Ediciones:
+- Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
+
+`.trim();
+
   try{
     showThinking(true);
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      // ✅ QUIRÚRGICO: enviar SOLO el texto (sin "globalStyle" extra),
-      // porque el /api/chat.js ya aplica su SYSTEM_PROMPT para modo planner.
-      body: JSON.stringify({ model: MODEL, input: String(text||''), history, mode: 'planner' })
+      // ✅ QUIRÚRGICO: fuerza modo planner (API v58 default planner, pero lo fijamos para robustez)
+      body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history, mode: 'planner' })
     });
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     return data?.text || '';
@@ -712,15 +775,17 @@ function parseJSON(s){
 }
 
 async function callInfoAgent(text){
-   const history = infoSession;
+  const history = infoSession;
   const globalStyle = `
 Eres "Astra", asistente informativo de viajes.
 - SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
 - Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes o restricciones evidentes.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
 `.trim();
+
   try{
     setInfoChatBusy(true);
+
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -734,8 +799,10 @@ Eres "Astra", asistente informativo de viajes.
 
     const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     const answer = (data?.text || '').trim();
+
     infoSession.push({ role:'user',      content: text });
     infoSession.push({ role:'assistant', content: answer });
+
     if (/^\s*\{/.test(answer)) {
       try {
         const j = JSON.parse(answer);
@@ -744,6 +811,7 @@ Eres "Astra", asistente informativo de viajes.
         }
       } catch { /* no-op */ }
     }
+
     return answer || '¿Algo más que quieras saber?';
   }catch(e){
     console.error("Fallo Info Chat:", e);
@@ -782,9 +850,25 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const trans   = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
   const durRaw  = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes   = r.notes ?? r.nota ?? r.comentarios ?? '';
-  const duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
+
+  // ✅ QUIRÚRGICO: normaliza duration a 2 líneas si viene "Transporte: X, Actividad: Y"
+  let duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
+  if (duration && /Transporte\s*:/i.test(duration) && /Actividad\s*:/i.test(duration) && duration.includes(',')) {
+    duration = duration.replace(/\s*,\s*Actividad\s*:/i, '\nActividad:');
+  }
+
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
-  return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:act||'', from, to, transport:trans||'', duration, notes };
+
+  // ✅ QUIRÚRGICO: guard-rails locales anti-campos-vacíos (fail-open)
+  const safeActivity  = (String(act||'').trim() || 'Actividad por definir');
+  const safeFrom      = (String(from||'').trim() || 'Hotel');
+  const safeTo        = (String(to||'').trim() || 'Centro');
+  const safeTransport = (String(trans||'').trim() || 'A pie o Transporte local');
+  const n0 = String(notes||'').trim();
+  const safeNotes = (n0 && n0.toLowerCase()!=='seed') ? n0 : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
+  const safeDuration = (String(duration||'').trim() || 'Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat');
+
+  return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:safeActivity, from:safeFrom, to:safeTo, transport:safeTransport, duration:safeDuration, notes:safeNotes };
 }
 
 function dedupeSoftSameDay(rows){
@@ -802,13 +886,16 @@ function dedupeSoftSameDay(rows){
 function pushRows(city, rows, replace=false){
   if(!city || !rows) return;
   if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
+
   const byDay = itineraries[city].byDay;
   const daysToReplace = new Set();
+
   const mapped = rows.map(raw=>normalizeRow(raw, 1));
   if(replace){
     mapped.forEach(obj=>{ daysToReplace.add(obj.day); });
     daysToReplace.forEach(d=>{ byDay[d] = []; });
   }
+
   mapped.forEach(obj=>{
     const d = obj.day;
     if(!byDay[d]) byDay[d]=[];
@@ -832,12 +919,12 @@ function upsertCityMeta(meta){
   if(Array.isArray(meta.perDay)) cityMeta[name].perDay = meta.perDay;
   if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
 }
-
 function applyParsedToState(parsed){
   if(!parsed) return;
   if(parsed.itinerary) parsed = parsed.itinerary;
   if(parsed.destinos)  parsed.destinations = parsed.destinos;
   if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
+
   if(parsed.meta) upsertCityMeta(parsed.meta);
 
   // 🧠 Detectar forceReplan si aplica y ajustar replace
@@ -854,6 +941,7 @@ function applyParsedToState(parsed){
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
       if(!name) return;
       const mustReplace = Boolean(d.replace) || (forceReplanCity === name);
+
       if(d.rowsByDay && typeof d.rowsByDay === 'object'){
         Object.entries(d.rowsByDay).forEach(([k,rows])=>{
           pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
@@ -867,7 +955,6 @@ function applyParsedToState(parsed){
         delete plannerState.forceReplan[name];
       }
     });
-
     return;
   }
 
@@ -886,11 +973,11 @@ function applyParsedToState(parsed){
       const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
       if(!name) return;
       const mustReplace = Boolean(x.replace) || (forceReplanCity === name);
+
       if(x.rowsByDay && typeof x.rowsByDay==='object'){
         Object.entries(x.rowsByDay).forEach(([k,rows])=>{
           pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
         });
-
       } else if(Array.isArray(x.rows)) {
         pushRows(name, x.rows, mustReplace);
       }
@@ -899,7 +986,6 @@ function applyParsedToState(parsed){
         delete plannerState.forceReplan[name];
       }
     });
-
     return;
   }
 
@@ -912,6 +998,8 @@ function applyParsedToState(parsed){
     }
   }
 }
+
+/* ==============================
    SECCIÓN 13B · Add Multiple Days (mejorada con rebalanceo inteligente por rango)
 ================================= */
 function addMultipleDaysToCity(city, extraDays){
@@ -944,15 +1032,12 @@ function addMultipleDaysToCity(city, extraDays){
     }
   }
 
-  // ✅ Actualizar días en savedDestinations (si existe)
+  // 📝 Actualizar cantidad total de días en destino
   const dest = savedDestinations.find(x=>x.city===city);
-  if(dest) dest.days = (dest.days || currentMax) + extraDays;
-
-  // 🧠 Asegurar days_total coherente para rebalance
-  ensureDays(city);
-
-  // 🧠 Definir el nuevo último día
-  const newLastDay = (dest?.days) || (currentMax + extraDays);
+  let newLastDay = currentMax + extraDays;
+  if(dest){
+    dest.days = newLastDay;
+  }
 
   // 🧭 Definir rango de rebalanceo: incluye último día original
   const rebalanceStart = Math.max(1, lastOriginalDay);
@@ -973,89 +1058,99 @@ function addMultipleDaysToCity(city, extraDays){
 
 /* ==============================
    SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
-   (fusión de criterios fuertes v55)
+   (fusión de criterios fuertes v55 + compat con API planner que devuelve itinerario)
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
-  // ✅ QUIRÚRGICO: tu /api/chat.js en modo planner SIEMPRE devuelve itinerario (contrato rows),
-  // así que pedimos el MISMO JSON del itinerario corregido (no "allowed/removed").
   const payload = `
 ${FORMAT}
-Devuelve Formato B SOLO para "${city}" con filas corregidas (mismas filas, pero ajustadas a criterios):
+
+Devuelve SOLO JSON válido en UNO de estos formatos:
+
+1) Formato validación:
+{
+  "allowed":[
+    {"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"Transporte: ...\\nActividad: ...","notes":".."}
+  ],
+  "removed":[
+    {"reason":"..","row":{"day":..,"activity":".."}}
+  ]
+}
+
+2) O Formato itinerario (Contrato B):
+{"destination":"${city}","rows":[...],"replace":false,"followup":""}
+
 CRITERIOS GLOBALES:
-- Corrige horas plausibles (sin solapes). Mantén el día correcto.
+- Corrige horas plausibles (sin solapes).
 - Transporte lógico según actividad (barco para whale watching; tour/bus para excursiones; tren/bus/auto interurbano; a pie/metro en zona).
-- Day trips ≤ 2 h por trayecto; si algo no cabe, sustitúyelo por alternativa más cercana o reubícalo a un día plausible.
+- Day trips ≤ 2 h por trayecto; si no, "removed" con reason "distance:" + alternativa.
 - Seguridad/restricciones:
-  • Si hay riesgo evidente, restricción oficial, alerta razonable o ventana horaria insegura, sustituye por alternativa más segura o indícalo brevemente en notes (sin alarmismo).
+  • Si hay riesgo evidente, restricción oficial, alerta razonable o ventana horaria insegura, "removed" con reason "risk:" + sugerencia segura o reubicación alternativa.
   • Prioriza siempre opciones plausibles, seguras y razonables.
 - Notas NUNCA vacías ni "seed"; añade tip breve útil.
-- Si duración en minutos, permite "90m" o "1.5h".
+- duration obligatoria en 2 líneas con \\n (prohibido 0m y sin comas para separar).
 - Máx. 20 filas/día; prioriza icónicas y no redundantes.
 
 CASOS ESPECIALES:
-
 1) Whale watching: "Barco", salida desde puerto local, 3–4h aprox., incluir "valid:" por temporada si aplica.
-2) Auroras: nocturno (20:00–02:00 aprox.), "Tour"/"Bus/Van tour" o "Auto" si procede; "valid:" con justificación.
-3) Rutas en coche (círculo dorado/costas): 3–6h conducción total con paradas clave; si sin coche ni tour viable, sugiere tour.
+2) Auroras: nocturno (20:00–02:00 aprox.), "Tour"/"Bus/Van tour" o "Auto" si procede; "valid:" + clima/nubosidad + alternativa low-cost.
+3) Rutas en coche (círculo dorado/costas): 3–6h conducción total con paradas clave; si sin coche ni tour viable, marca "logistics" o "risk" y sugiere tour.
 4) Museos/monumentos: horario diurno.
 5) Cenas/vida nocturna: 19:00–23:30 aprox.
+6) Macro-tours/day trips: 5–8 sub-paradas + fila final "Regreso a ${city}".
+
+REGLAS DE FUSIÓN:
+- Devuelve "allowed" ya corregidas; solo pasa a "removed" lo incompatible.
 
 Contexto:
 - Ciudad: "${city}"
 - Fecha base (Día 1): ${baseDate || 'N/A'}
-- Filas a corregir: ${JSON.stringify(rows)}
-
+- Filas a validar: ${JSON.stringify(rows)}
 `.trim();
-
   try{
-
     const res = await callAgent(payload, true);
     const parsed = parseJSON(res);
 
-    // ✅ Si el API devuelve itinerary JSON (rows), lo adaptamos al formato esperado por el flujo existente.
+    // ✅ Formato allowed/removed
+    if(parsed?.allowed && Array.isArray(parsed.allowed)) return parsed;
+
+    // ✅ Compat: si devuelve itinerario (destination/rows), lo mapeamos a allowed
     if(parsed?.rows && Array.isArray(parsed.rows)){
-
-      const allowed = parsed.rows.map(r=>normalizeRow(r));
-      return { allowed, removed: [] };
-
+      return { allowed: parsed.rows, removed: [] };
     }
 
-    // ✅ También soporta destinos[]
+    // ✅ Compat: destinos[]
     if(Array.isArray(parsed?.destinations)){
       const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
       if(dd?.rows && Array.isArray(dd.rows)){
-        const allowed = dd.rows.map(r=>normalizeRow(r));
-        return { allowed, removed: [] };
+        return { allowed: dd.rows, removed: [] };
       }
     }
 
   }catch(e){ console.warn('Validator error', e); }
 
-  // Fail-open con sanitización mínima de notes
-
+  // Fail-open con sanitización mínima de notes (normalizeRow ya aplica guard-rails al merge)
   const sanitized = (rows||[]).map(r => {
     const notes = (r.notes||'').trim();
     return { ...r, notes: notes && notes.toLowerCase()!=='seed' ? notes : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.' };
   });
-
   return { allowed: sanitized, removed: [] };
 }
 
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
 ================================= */
-
 function setOverlayMessage(msg='Astra está generando itinerarios…'){
   const p = $overlayWOW?.querySelector('p');
   if(p) p.textContent = msg;
 }
+
 function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
   $overlayWOW.style.display = on ? 'flex' : 'none';
+
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
-
     // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
 
@@ -1082,6 +1177,7 @@ function showWOW(on, msg){
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
+
   const perDay = Array.from({length:dest.days}, (_,i)=>{
     const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
     return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
@@ -1092,36 +1188,39 @@ async function generateCityItinerary(city){
   const transport= cityMeta[city]?.transport || 'recomiéndame';
 
   // 🧭 Detectar si se debe forzar replanificación
-
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
   const instructions = `
 ${FORMAT}
 
-ROL: Astra. Genera itinerario completo SOLO para "${city}" (${dest.days} día/s).
+ROL: Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
 
 Devuelve Formato B:
 {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
 
-Reglas adicionales (alineadas con el API):
+Reglas adicionales:
 - Nada de texto fuera del JSON.
-- 20 actividades máximo por día.
-- Usa horas realistas y respeta ventanas por día EXACTAS: ${JSON.stringify(perDay)}.
-- Incluye siempre "activity","transport","notes" con texto útil. Evita "seed". Evita campos vacíos.
-- Cenas/vida nocturna: 19:00–23:30 aprox. (si aplica).
-- Revisa imperdibles diurnos y nocturnos; agrupa por zonas; evita solapes y traslados absurdos.
-- Plaisibilidad y seguridad global:
-  • Si una actividad especial es plausible, añade en notes "valid: <justificación breve>" + hora típica local.
-  • Evita zonas/franjas con alertas, riesgos o restricciones evidentes; sustituye por alternativas seguras.
-- Si hay días con poco contenido, completa con actividades plausibles y/o UN (1) day trip máximo (≤2 h por trayecto, ida y vuelta el mismo día).
+- Respeta ventanas horarias por día: ${JSON.stringify(perDay)}.
+- Agrupar por zonas, evitar solapamientos y traslados absurdos.
+- Campos NO vacíos: activity/from/to/transport/duration/notes (prohibido "seed").
+- duration obligatoria en 2 líneas con \\n: "Transporte: ...\\nActividad: ..." (prohibido 0m y sin comas).
+- Cenas/vida nocturna: 19:00–23:30 aprox. (si se incluyen).
+- Plausibilidad y seguridad global:
+  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes; sustituir por alternativas seguras cuando aplique.
+- Auroras: incluir SOLO si plausibles; evitar días consecutivos; evitar último día; notes con "valid:" + clima/nubosidad + alternativa low-cost; horario nocturno típico local.
+- Macro-tours/day trips: si incluyes excursión, 5–8 sub-paradas + fila final "Regreso a ${city}" y evitar último día si hay opciones.
+- Si quedan días sin contenido, distribuye actividades plausibles y/o UN (1) day trip máximo (≤2 h por trayecto, ida y vuelta el mismo día) sin duplicar otras noches.
 
-Contexto de hotel/zona y transporte (si existe):
+Contexto (si existe):
 - Hotel/zona: ${hotel || 'N/A'}
 - Transporte preferido: ${transport || 'recomiéndame'}
 
 `.trim();
+
   showWOW(true, 'Astra está generando itinerarios…');
   const text = await callAgent(instructions, false);
   const parsed = parseJSON(text);
+
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     let tmpCity = city;
     let tmpRows = [];
@@ -1136,18 +1235,111 @@ Contexto de hotel/zona y transporte (si existe):
     }
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 si hay replanificación → replace=true
+
+    // ✅ allowed puede venir como rows (itinerario) o como allowed[]
+    const allowedRows = Array.isArray(val?.allowed) ? val.allowed : (Array.isArray(val?.rows) ? val.rows : tmpRows);
+
+    pushRows(tmpCity, allowedRows, forceReplan); // 🧠 si hay replanificación → replace=true
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
+
     $resetBtn?.removeAttribute('disabled');
     if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
     return;
   }
+
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   showWOW(false);
   $resetBtn?.removeAttribute('disabled');
   chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
 }
+
+/* 🆕 Rebalanceo masivo tras cambios (agregar días / day trip pedido) */
+async function rebalanceWholeCity(city, opts={}){
+  const data = itineraries[city];
+  const totalDays = Object.keys(data.byDay||{}).length;
+  const perDay = Array.from({length: totalDays}, (_,i)=>{
+    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:DEFAULT_START,end:DEFAULT_END};
+    return { day:i+1, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END };
+  });
+  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
+  const wantedTrip = (opts.dayTripTo||'').trim();
+
+  // 🆕 Determinar rango de rebalanceo
+  const startDay = opts.start || 1;
+  const endDay = opts.end || totalDays;
+  const lockedDaysText = startDay > 1 
+    ? `Mantén intactos los días 1 a ${startDay - 1}.`
+    : '';
+
+  // 🧭 Detectar si se debe forzar replanificación
+  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
+  const prompt = `
+${FORMAT}
+
+ROL: Reequilibra la ciudad "${city}" entre los días ${startDay} y ${endDay}, manteniendo lo ya plausible y completando huecos.
+${lockedDaysText}
+
+Devuelve Formato B:
+{"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
+
+- Respeta ventanas: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Considera IMPERDIBLES y actividades distribuidas sin duplicar.
+- Campos NO vacíos: activity/from/to/transport/duration/notes (prohibido "seed").
+- duration obligatoria en 2 líneas con \\n (prohibido 0m y sin comas).
+- Comidas: no obligatorias; si existen, no genéricas.
+- Auroras: solo si plausibles; evitar consecutivas; evitar último día; horario nocturno; notes con "valid:" + clima/nubosidad + alternativa low-cost.
+- Macro-tours/day trips: 5–8 sub-paradas + "Regreso a ${city}" (fila final). Evitar último día si hay opciones.
+- Day trips (opcional): si es viable y/o solicitado, añade UN (1) día de excursión (≤2 h por trayecto, ida y vuelta el mismo día) a un imperdible cercano con traslado + actividades + regreso.
+${wantedTrip ? `- El usuario indicó preferencia de day trip a: "${wantedTrip}". Si es razonable, úsalo exactamente 1 día.` : ''}
+- El último día debe ser más liviano, respetando lógica de preparación de regreso.
+- Valida plausibilidad y seguridad global:
+  • No propongas actividades en zonas con riesgos relevantes o restricciones evidentes.
+  • Si hay alerta razonable, sustitúyelo por alternativa más segura o indica brevemente en notes.
+
+Contexto actual (para fusionar sin borrar): 
+${buildIntake()}
+`.trim();
+
+  showWOW(true,'Reequilibrando la ciudad…');
+  const ans = await callAgent(prompt, true);
+  const parsed = parseJSON(ans);
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
+    let rows = [];
+    if(parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
+    else if(parsed.destination===city && parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
+    else if(Array.isArray(parsed.destinations)){
+      const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
+      rows = (dd?.rows||[]).map(r=>normalizeRow(r));
+    }else if(Array.isArray(parsed.itineraries)){
+      const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+      rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+    }
+
+    const val = await validateRowsWithAgent(city, rows, baseDate);
+
+    const allowedRows = Array.isArray(val?.allowed) ? val.allowed : (Array.isArray(val?.rows) ? val.rows : rows);
+
+    pushRows(city, allowedRows, forceReplan);
+
+    // 🧠 Optimiza solo el rango de días afectado
+    for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
+
+    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
+
+    if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
+  }else{
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
+    chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
+  }
+}
+
 
 /* =========================================================
    ITRAVELBYMYOWN · PLANNER v55.1 (parte 3/3)
