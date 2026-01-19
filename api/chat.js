@@ -1,4 +1,4 @@
-// /api/chat.js — v30.0 (ESM compatible en Vercel)
+// /api/chat.js — v58 (ESM compatible en Vercel)
 import OpenAI from "openai";
 
 const client = new OpenAI({
