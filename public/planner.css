@@ -1,4 +1,17 @@
-:root{ --brand-500:#0EA47A; --brand-600:#0B8664; --ink:#101828; --muted:#667085; --surface:#F8FAFC; --white:#FFF; --radius:.8rem; --shadow:0 4px 16px rgba(16,24,40,.08); --chat-bg:#F6F9FC; --chat-user:#0EA47A15; --chat-ai:#FFFFFF; }
+:root{
+  --brand-500:#0EA47A; 
+  --brand-600:#0B8664;
+  --ink:#101828; 
+  --muted:#667085;
+  --surface:#F8FAFC; 
+  --white:#FFF;
+  --radius:.8rem; 
+  --shadow:0 4px 16px rgba(16,24,40,.08);
+  --chat-bg:#F6F9FC;
+  --chat-user:#0EA47A15;
+  --chat-ai:#FFFFFF;
+}
+
 *{box-sizing:border-box}
 body{
   margin:0;
@@ -33,110 +46,26 @@ body{
 }
 .topbar .lang a.active{color:var(--brand-600)}
 
-/* ✨ Botón Info Chat (Topbar) */
+/* 🆕 Botón Info Chat en topbar */
 .info-chat-btn{
   background:var(--brand-600);
   color:#fff;
   border:none;
-  border-radius:999px;
-  padding:.85rem 1.6rem;
-  font-weight:700;
-  font-size:1rem;
+  border-radius:var(--radius);
+  padding:.5rem .9rem;
+  font-weight:600;
   cursor:pointer;
-  transition:all .25s ease;
+  transition:.2s ease;
   margin-left:1rem;
-  display:flex;
-  align-items:center;
-  gap:.5rem;
-  box-shadow:0 4px 14px rgba(0,0,0,0.15);
-  position:relative;
 }
 .info-chat-btn:hover{
   background:var(--brand-500);
-  transform:scale(1.08);
-  box-shadow:0 6px 20px rgba(0,0,0,0.25);
-}
-.info-chat-btn:active{
-  transform:scale(.96);
-}
-@media(max-width:768px){
-  .info-chat-btn{
-    padding:.7rem 1.2rem;
-    font-size:.9rem;
-  }
-}
-
-/* 🫧 Animación pulse */
-.pulse{
-  position: relative;
-  overflow: visible;
-}
-.pulse::after{
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 100%;
-  height: 100%;
-  border-radius: 999px;
-  background: var(--brand-600);
-  opacity: 0.45;
-  animation: pulseAnim 1.8s ease-out infinite;
-  z-index: -1;
-  pointer-events: none;
-  will-change: transform, opacity;
-}
-@keyframes pulseAnim {
-  0% { transform: translate(-50%, -50%) scale(1); opacity: 0.45; }
-  50% { transform: translate(-50%, -50%) scale(1.25); opacity: 0; }
-  100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
-}
-
-/* 💬 Botón Info Chat flotante */
-.info-chat-floating{
-  position:fixed;
-  bottom:24px;
-  right:24px;
-  background:var(--brand-600);
-  color:#fff;
-  border:none;
-  border-radius:999px;
-  padding:1rem 1.8rem; /* 🆕 área clic ligeramente más amplia */
-  font-weight:700;
-  font-size:1rem;
-  display:flex;
-  align-items:center;
-  gap:.5rem;
-  box-shadow:0 6px 20px rgba(0,0,0,0.25);
-  cursor:pointer;
-  transition:all .3s ease;
-  z-index:1200;
-}
-.info-chat-floating:hover{
-  background:var(--brand-500);
-  transform:scale(1.08);
-  box-shadow:0 8px 26px rgba(0,0,0,0.35);
-}
-.info-chat-floating:active{
-  transform:scale(.96);
-}
-.info-chat-floating.pulse::after{
-  background:var(--brand-500);
-}
-@media(max-width:768px){
-  .info-chat-floating{
-    padding:.8rem 1.2rem;
-    font-size:.9rem;
-    bottom:18px;
-    right:18px;
-  }
 }
 
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns: 50% 50%;   /* ⬅️ Sidebar más ancho para que quepa la fecha */
+  grid-template-columns: 42% 58%;
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -153,34 +82,9 @@ body{
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:1rem;
-
   max-height:calc(100vh - 120px);
   overflow:auto;
 }
-
-/* 🆕 Permitir scroll global aunque sidebar esté bloqueado */
-.sidebar.disabled{
-  opacity:.55;
-  filter:grayscale(.05);
-  pointer-events:none;
-  overflow:auto;
-}
-
-/* ✅ Excepciones: permitir interacción con botones clave incluso si sidebar está bloqueado */
-.sidebar.disabled #reset-planner{
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  cursor: pointer;
-}
-
-/* PATCH QUIRÚRGICO: selector correcto (si en algún punto se deshabilita sidebar y se quiere dejar start-planning clickable)
-   Nota: hoy main no queda dentro de sidebar, pero este selector es inocuo si no aplica. */
-.sidebar.disabled ~ .main #start-planning{
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  cursor: pointer;
-}
-
 .box{
   background:#fff;
   border:1px solid #eef2f7;
@@ -189,7 +93,6 @@ body{
   margin-bottom:1rem;
   box-shadow:0 1px 6px rgba(0,0,0,0.03);
 }
-
 .row-actions{
   display:flex;
   gap:.5rem;
@@ -199,19 +102,17 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .5fr 1.6fr auto; /* ⬅️ Ajuste fino para dar más espacio a la fecha */
+  grid-template-columns:1.2fr 1fr .6fr 1fr auto;
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
   animation:fadeIn .4s ease;
-  position:relative;
 }
 .city-row label{
   display:flex;
   flex-direction:column;
   gap:.25rem;
   font-size:.9rem;
-  position:relative;
 }
 .city-row input,
 .city-row select{
@@ -232,72 +133,9 @@ body{
   background:#ef4444;
   color:#fff;
   border:none;
-
-  /* ✕ aún más compacta */
-  border-radius:.35rem;
-  padding:.3rem .45rem;
-  font-size:.7rem;
-
+  border-radius:.5rem;
+  padding:.55rem .7rem;
   cursor:pointer;
-}
-
-/* 🆕 Ajustes para nuevo sistema de fecha (día / mes / año) */
-.city-row .date-wrapper{
-  display:flex;
-  align-items:center;
-  gap:0.25rem;         /* ⬇️ más compacto aún */
-  min-width:165px;     /* ⬇️ más estrecho */
-}
-.city-row .date-label{
-  display:flex;
-  flex-direction:column;
-  align-items:flex-start;
-}
-
-/* Día */
-.city-row .date-wrapper select.baseDay{
-  width:45px;               /* ⬇️ reducido */
-  padding:.35rem .28rem;
-  font-size:.78rem;
-}
-
-/* Mes */
-.city-row .date-wrapper select.baseMonth{
-  width:75px;               /* ⬇️ reducido */
-  padding:.35rem .28rem;
-  font-size:.78rem;
-  border:1px solid #d0d5dd;
-  border-radius:.5rem;
-  background:#fff;
-}
-
-/* Año */
-.city-row .date-wrapper input.baseYear{
-  width:50px;               /* ⬇️ reducido */
-  text-align:center;
-  padding:.35rem .28rem;
-  border:1px solid #d0d5dd;
-  border-radius:.5rem;
-  font-size:.78rem;
-  background:#fff;
-}
-
-/* 🧹 Se elimina el hint flotante anterior */
-.city-row .date-wrapper .date-format{
-  display:none;
-}
-.city-row label:has(> .baseDate)::after{
-  display:none;
-}
-
-/* PATCH QUIRÚRGICO: el planner actual usa input.baseDate (1 campo). Ajustamos solo su “fit” sin tocar lo demás. */
-.city-row input.baseDate{
-  width:100%;
-  padding:.5rem .6rem;
-  border:1px solid #d0d5dd;
-  border-radius:.5rem;
-  font-size:.9rem;
-  background:#fff;
 }
 
 /* ==================== HORAS ==================== */
@@ -308,91 +146,30 @@ body{
   margin-top:.6rem;
   grid-column:1 / -1;
 }
-/* 🆕 Encabezado global de horas */
-.hours-header{
-  display:grid;
-  grid-template-columns:.8fr .6fr .6fr;  /* ⬇️ menos ancho para horas */
-  gap:.5rem;                             /* ⬇️ menos separación */
-  font-size:.85rem;
-  font-weight:600;
-  color:#475467;
-  padding-bottom:.2rem;
-}
 .hours-day{
   display:grid;
-  grid-template-columns:.8fr .6fr .6fr;
+  grid-template-columns:.8fr .7fr .7fr;
   gap:.5rem;
   align-items:center;
   font-size:.9rem;
 }
-
-/* 🆕 Inputs de hora manual (reemplazan dropdowns) */
-input.start,
-input.end {
-  text-align:center;
-  padding:.5rem .6rem;
+.hours-day input{
+  padding:.45rem .55rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.9rem;
-  background:#fff;
-  width:100%;
-}
-
-input.start.invalid,
-input.end.invalid {
-  border-color:#e63946;
-  background:#ffe5e5;
-}
-
-/* 🆕 Guía visual para el formato 24 h (con fade-in) */
-.time-hint {
-  display: block;
-  font-size: 0.85rem;
-  color: #555;
-  margin: 0.25rem 0 0.5rem 0;
-  font-style: italic;
-  opacity: 0;
-  transform: translateY(-4px);
-  animation: fadeInHint 0.4s ease forwards;
-}
-.time-hint strong {
-  color: var(--brand-600);
-}
-
-@keyframes fadeInHint {
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* 🆕 Responsive horas */
-@media(max-width:640px){
-  .hours-header,
-  .hours-day{
-    grid-template-columns:1fr 1fr;
-  }
-  input.start,
-  input.end{
-    width:100%;
-  }
+  max-width:95px;
 }
 
 /* ==================== TEXTAREA ==================== */
 .special-conditions textarea{
   width:100%;
-  min-height:380px;
-  padding:.8rem;
+  min-height:70px;
+  padding:.6rem;
   border:1px solid #d0d5dd;
   border-radius:.5rem;
   font-size:.9rem;
   resize:vertical;
-  white-space:pre-wrap;
-}
-@media (max-width:768px){
-  .special-conditions textarea{
-    min-height:420px;
-  }
 }
 
 /* ==================== VIAJEROS ==================== */
@@ -457,23 +234,6 @@ input.end.invalid {
 .btn.warn:hover{background:#ffd9d9}
 .w-100{width:100%}
 .btn[disabled]{opacity:.6;cursor:not-allowed}
-
-#reset-planner{
-  display:block;
-  width:100%;
-  margin-top:.5rem;
-  background:#fff0f0;
-  color:#b42318;
-  border:1px solid #f3b3b3;
-  border-radius:.55rem;
-  padding:.6rem .9rem;
-  font-weight:600;
-  cursor:pointer;
-  transition:.2s ease;
-}
-#reset-planner:hover{
-  background:#ffd9d9;
-}
 
 /* ==================== CHAT ==================== */
 .chat{
@@ -669,7 +429,7 @@ table.itinerary th{
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:1300;
+  z-index:100;
   pointer-events:all;
 }
 .loader{text-align:center;}
@@ -732,7 +492,7 @@ table.itinerary th{
   100% { opacity: 0.3; transform: translateY(0); }
 }
 
-/* ==================== INFO CHAT MODAL ==================== */
+/* 🆕 ==================== INFO CHAT MODAL ==================== */
 .info-chat-modal{
   position:fixed;
   top:0;
@@ -745,12 +505,6 @@ table.itinerary th{
   z-index:9999;
   display:flex;
   flex-direction:column;
-  visibility:hidden;
-  pointer-events:none;
-}
-.info-chat-modal.active{
-  visibility:visible;
-  pointer-events:auto;
 }
 .info-chat-panel{
   display:flex;
@@ -780,74 +534,18 @@ table.itinerary th{
   display:flex;
   gap:.5rem;
 }
-/* 🆕 Multilínea: reemplaza input por textarea en info chat */
-.info-chat-modal .chat-input textarea{
+.info-chat-modal .chat-input input{
   flex:1;
   padding:.5rem;
   border-radius:var(--radius);
   border:1px solid #d0d5dd;
-  resize:none;
-  font-family:inherit;
-  line-height:1.4;
-  min-height:42px;
-  max-height:220px; /* 🆕 aumentada para interacción más fluida */
-  overflow-y:auto;
+}
+.info-chat-modal .btn.primary{
+  white-space:nowrap;
 }
 
-/* 🆕 Typing dots más grandes en Info Chat */
-.chat-message.ai.typing .dot{
-  display:inline-block;
-  font-size:2rem;
-  line-height:1;
-  margin:0 3px;
-  color:#777;
-  opacity:0.3;
-  animation: thinkingDots 1.5s infinite;
-  transition:opacity .2s ease;
-}
-.chat-message.ai.typing .dot:nth-child(2){
-  animation-delay:0.3s;
-}
-.chat-message.ai.typing .dot:nth-child(3){
-  animation-delay:0.6s;
-}
-
-/* ==================== MODAL REINICIO ==================== */
-.reset-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.4);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.3s ease;
-  z-index: 10000;
-}
-
-.reset-overlay.active {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.reset-modal {
-  background: #fff;
-  padding: 2rem;
-  border-radius: 1rem;
-  max-width: 400px;
-  width: 90%;
-  text-align: center;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.2);
-  animation: fadeIn 0.3s ease;
-}
-
-.reset-modal h3 {
-  margin-bottom: 1rem;
-  color: var(--ink);
-}
-
-.reset-modal .btn {
-  margin-top: 1rem;
-  width: 100%;
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 900px){
+  #planner-grid{grid-template-columns:1fr}
+  .info-chat-modal{width:100%}
 }
