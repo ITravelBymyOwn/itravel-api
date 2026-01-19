@@ -4,33 +4,17 @@
   <meta charset="utf-8" />
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
+  <link rel="stylesheet" href="./planner.css?v=50" />
 
-  <!-- CSS (local, en -api/public) -->
-  <link rel="stylesheet" href="./planner.css?v=79.31" />
-
-  <!-- Tipografía (carga optimizada, sin bloquear) -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-  <!-- Carga Inter por CSS como fallback rápido -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-
-  <!-- WebFont loader (opcional). Si falla, NO rompe. -->
-  <script defer src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
+  <!-- Tipografía -->
+  <link href="https://fonts.googleapis.com" rel="preconnect" />
+  <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous" />
+  <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
   <script>
-    // No bloquea render. Si WebFont no carga, el link CSS de arriba ya cubre.
-    window.addEventListener('DOMContentLoaded', function () {
-      try {
-        if (window.WebFont && typeof window.WebFont.load === 'function') {
-          window.WebFont.load({ google: { families: ["Inter:400,500,600,700"] } });
-        }
-      } catch (_) { /* no-op */ }
-    });
+    WebFont.load({ google: { families: ["Inter:400,500,600,700"] } });
   </script>
 </head>
-
 <body>
   <!-- TOPBAR -->
   <div class="topbar">
@@ -41,8 +25,8 @@
       <a href="#">FR</a>
       <a href="#">PT</a>
     </div>
-    <!-- Botón Info Chat WOW ✨ -->
-    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Abrir Info Chat">💬 Info Chat</button>
+    <!-- Botón Info Chat -->
+    <button id="info-chat-toggle" class="btn info-chat-btn" title="Abrir Info Chat">💬 Info Chat</button>
   </div>
 
   <div id="planner-grid">
@@ -57,25 +41,21 @@
           <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
         </div>
         <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
-        <!-- 🆕 Botón de reinicio reubicado -->
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-          Reiniciar planificación
-        </button>
       </section>
 
       <section class="box special-conditions">
-        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje. Esta información permitirá crear un itinerario 100 % alineado contigo. 🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.” 🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.” 🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.” 🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.” ⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.” 👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.” 📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
+        <h3>Restricciones / Condiciones especiales</h3>
+        <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
       </section>
 
       <section class="box">
         <h3>Viajeros</h3>
         <div id="traveler-grid">
-          <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
-          <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
-          <label>Infantes (0–5)<input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
+          <label>Adultos<input id="p-adults" type="number" min="0" value="1"></label>
+          <label>Jóvenes<input id="p-young" type="number" min="0" value="0"></label>
+          <label>Niños<input id="p-children" type="number" min="0" value="0"></label>
+          <label>Infantes<input id="p-infants" type="number" min="0" value="0"></label>
+          <label>Mayores<input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
 
@@ -99,12 +79,7 @@
     <main class="main">
       <section class="box itinerary-section">
         <h2>Itinerario</h2>
-
-        <!-- 🧹 Se eliminó la guía de horarios de esta sección -->
-
-        <div class="itinerary-actions">
-          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
-        </div>
+        <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
 
         <div id="chat-container" class="chat" style="display:none;">
           <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
@@ -141,8 +116,7 @@
   </footer>
 
   <!-- Modal Info Chat -->
-  <!-- PATCH QUIRÚRGICO: se elimina display:none inline para que .active controle visibilidad sin bloquear -->
-  <div id="info-chat-modal" class="info-chat-modal" aria-hidden="true">
+  <div id="info-chat-modal" class="info-chat-modal" style="display:none;">
     <div class="info-chat-panel">
       <div class="info-chat-header">
         <h3>Info Chat · Astra 🌍</h3>
@@ -150,18 +124,9 @@
       </div>
       <div id="info-chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <textarea id="info-chat-input" placeholder="Hazme cualquier pregunta sobre viajes..." rows="1"></textarea>
+        <input id="info-chat-input" type="text" placeholder="Hazme cualquier pregunta sobre viajes..." />
         <button id="info-chat-send" class="btn primary">Enviar</button>
       </div>
-    </div>
-  </div>
-
-  <!-- PATCH QUIRÚRGICO: placeholders “upsell” para evitar null refs si planner.js los busca -->
-  <div id="monetization-upsell" class="upsell" style="display:none;">
-    <div class="upsell-card">
-      <h3>Upgrade</h3>
-      <p>Para continuar, desbloquea esta función en Premium.</p>
-      <button id="upsell-close" class="btn primary w-100">Cerrar</button>
     </div>
   </div>
 
@@ -183,13 +148,6 @@
     <span></span><span></span><span></span>
   </div>
 
-  <!-- 🆕 Botón flotante Info Chat -->
-  <button id="info-chat-floating" class="info-chat-floating pulse" title="Abrir Info Chat">
-    💬 Info Chat
-  </button>
-
-  <!-- JS (local, en -api/public) -->
-  <script src="./planner.js?v=79.31"></script>
+  <script src="./planner.js?v=50"></script>
 </body>
 </html>
- 
