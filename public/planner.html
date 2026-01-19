@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=50" />
+  <link rel="stylesheet" href="./planner.css?v=57" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -25,8 +25,8 @@
       <a href="#">FR</a>
       <a href="#">PT</a>
     </div>
-    <!-- Botón Info Chat -->
-    <button id="info-chat-toggle" class="btn info-chat-btn" title="Abrir Info Chat">💬 Info Chat</button>
+    <!-- Botón Info Chat WOW ✨ -->
+    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Abrir Info Chat">💬 Info Chat</button>
   </div>
 
   <div id="planner-grid">
@@ -41,21 +41,35 @@
           <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
         </div>
         <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
+        <!-- 🆕 Botón de reinicio reubicado -->
+        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
+          Reiniciar planificación
+        </button>
       </section>
 
       <section class="box special-conditions">
-        <h3>Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="Ej: movilidad reducida, dieta especial, alergias, etc."></textarea>
+        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
+        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
+Esta información permitirá crear un itinerario 100 % alineado contigo.
+
+🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
+🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
+🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
+🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
+⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
+👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
+
+📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
       </section>
 
       <section class="box">
         <h3>Viajeros</h3>
         <div id="traveler-grid">
-          <label>Adultos<input id="p-adults" type="number" min="0" value="1"></label>
-          <label>Jóvenes<input id="p-young" type="number" min="0" value="0"></label>
-          <label>Niños<input id="p-children" type="number" min="0" value="0"></label>
-          <label>Infantes<input id="p-infants" type="number" min="0" value="0"></label>
-          <label>Mayores<input id="p-seniors" type="number" min="0" value="0"></label>
+          <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
+          <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
+          <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
+          <label>Infantes (0–5)<input id="p-infants" type="number" min="0" value="0"></label>
+          <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
 
@@ -79,7 +93,10 @@
     <main class="main">
       <section class="box itinerary-section">
         <h2>Itinerario</h2>
-        <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+
+        <div class="itinerary-actions">
+          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+        </div>
 
         <div id="chat-container" class="chat" style="display:none;">
           <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
@@ -124,7 +141,7 @@
       </div>
       <div id="info-chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <input id="info-chat-input" type="text" placeholder="Hazme cualquier pregunta sobre viajes..." />
+        <textarea id="info-chat-input" placeholder="Hazme cualquier pregunta sobre viajes..." rows="1"></textarea>
         <button id="info-chat-send" class="btn primary">Enviar</button>
       </div>
     </div>
@@ -148,6 +165,11 @@
     <span></span><span></span><span></span>
   </div>
 
-  <script src="./planner.js?v=50"></script>
+  <!-- 🆕 Botón flotante Info Chat -->
+  <button id="info-chat-floating" class="info-chat-floating pulse" title="Abrir Info Chat">
+    💬 Info Chat
+  </button>
+
+  <script src="./planner.js?v=57"></script>
 </body>
 </html>
