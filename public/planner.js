@@ -29,8 +29,10 @@ let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
-const DEFAULT_START = '08:30';
-const DEFAULT_END   = '19:00';
+// ✅ Defaults técnicos NO rígidos: solo fallback si el agente NO trae horas
+// (deja libertad al planner para proponer horarios reales sin “forzar” 08:30–19:00)
+const DEFAULT_START = '';
+const DEFAULT_END   = '';
 
 let pendingChange = null;
 let hasSavedOnce = false;
