@@ -1097,7 +1097,9 @@ CRITERIOS GLOBALES (flexibles):
   • Si viene en minutos, permite "90m" o "1.5h".
 - Máx. 20 filas por día; prioriza icónicas y evita redundancias.
 - Activity (guía suave):
-  • Prefiere el formato "${city} – Sub-parada específica" si aplica.
+  • Prefiere el formato "<Destino> – Sub-parada específica" si aplica (no necesariamente la ciudad base).
+  • En urbano dentro de la ciudad base, el destino puede ser "${city}".
+  • En day trips / macro-rutas, usa como destino la ruta/lugar (ej. "Círculo Dorado", "Costa Sur", "Toledo", etc.).
   • Evita genéricos tipo "tour" o "museo" sin especificar, cuando sea fácil concretar.
 
 CASOS ESPECIALES (guía, no bloqueo):
@@ -1211,9 +1213,13 @@ ${FORMAT}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 REGLAS CLAVE (OBLIGATORIAS):
-- "activity" SIEMPRE debe ser: "${city} – <Sub-parada específica>" (con espacios alrededor del guion).
+- "activity" SIEMPRE debe ser: "<Destino> – <Sub-parada específica>" (con espacios alrededor del guion).
+  • En urbano dentro de la ciudad base, el destino puede ser "${city}".
+  • En day trips / macro-rutas, el destino debe ser el lugar/ruta (ej. "Círculo Dorado", "Costa Sur", "Toledo", etc.), NO la ciudad base.
   • Esto aplica a TODAS las filas, incluyendo traslados y regresos.
-  • Ejemplo correcto: "${city} – Regreso a ${city}" (NO "REGRESO A ${city}" a secas).
+  • Ejemplo correcto urbano: "${city} – Hallgrímskirkja"
+  • Ejemplo correcto day trip: "Círculo Dorado – Geysir"
+  • Ejemplo correcto regreso day trip: "Círculo Dorado – Regreso a ${city}"
 - "from", "to", "transport" y "notes" NUNCA pueden ir vacíos.
 - Evita genéricos: prohibido "tour", "museo", "restaurante local" sin nombre/identificador claro.
 
@@ -1235,7 +1241,7 @@ DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
 - Restricción guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, compensa reduciendo paradas o ajustando ventana.
 - Si propones excursión de día (day trip), debe ser COMPLETA:
   • 5–8 sub-paradas (filas) con nombres claros, secuencia lógica y traslados realistas.
-  • Debe incluir una fila final propia: "${city} – Regreso a ${city}".
+  • Debe incluir una fila final propia: "<Destino day trip> – Regreso a ${city}".
   • Si es una ruta clásica (ej. “Costa Sur”), llega al hito final lógico de la ruta (p.ej. Vík o hito final icónico) antes de regresar.
   • Los tiempos de regreso NO deben ser optimistas: usa estimaciones conservadoras si hay clima/temporada de invierno o noche.
 
@@ -1313,7 +1319,11 @@ ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 REGLAS CLAVE (OBLIGATORIAS):
-- "activity" SIEMPRE: "${city} – <Sub-parada específica>" (incluye regresos/traslados).
+- "activity" SIEMPRE: "<Destino> – <Sub-parada específica>" (incluye regresos/traslados).
+  • En urbano dentro de la ciudad base, el destino puede ser "${city}".
+  • En day trips / macro-rutas, el destino debe ser el lugar/ruta (ej. "Círculo Dorado", "Costa Sur", "Toledo", etc.), NO la ciudad base.
+  • Ejemplo correcto day trip: "Costa Sur – Reynisfjara"
+  • Ejemplo correcto regreso day trip: "Costa Sur – Regreso a ${city}"
 - from/to/transport/notes: NUNCA vacíos. Evita genéricos sin nombre claro.
 
 TRANSPORTE (prioridad inteligente, sin inventar):
@@ -1333,7 +1343,7 @@ DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
 - Guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, ajusta paradas/ventana.
 - Si incluyes un day trip:
   • 5–8 sub-paradas (filas) con secuencia realista.
-  • Debe terminar con "${city} – Regreso a ${city}".
+  • Debe terminar con "<Destino day trip> – Regreso a ${city}".
   • Si es ruta clásica, llega al hito final lógico antes de regresar.
   • Evita regresos optimistas: usa estimaciones conservadoras si hay invierno o noche.
 
