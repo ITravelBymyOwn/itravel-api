@@ -1079,17 +1079,14 @@ CRITERIOS GLOBALES (flexibles):
 - Transporte lógico según actividad:
   • Barco para whale watching (puerto local).
   • Tour/bus/van para excursiones extensas.
-  • Transporte público (bus/tren) cuando sea factible y realmente disponible.
-  • Si NO es factible el transporte público, usa "Vehículo alquilado o Tour guiado".
+  • Tren/bus/auto interurbano cuando aplique.
   • A pie/metro en zonas urbanas.
-- Day trips / macro-tours:
+- Day trips:
   • Evalúa con criterio experto si son razonables por distancia, duración total y experiencia real.
-  • No impongas un límite fijo por horas; usa sentido común turístico.
+  • Permite hasta ~3h por trayecto (ida) como guía; usa sentido común turístico.
+  • No limites la cantidad de day trips; decide según calidad/valor y tiempo total.
   • Si un day trip NO es razonable, muévelo a "removed" con reason "distance:" + alternativa viable.
-- Nomenclatura "ETIQUETA – Sub-parada" (sin bloquear creatividad, pero sí consistencia):
-  • Si la fila es de ciudad (zona urbana/base), usa: "${city} – <Sub-parada>".
-  • Si la fila pertenece a un macro-tour/daytrip (p.ej. Círculo Dorado / Costa Sur / Toledo / etc.),
-    usa: "<Nombre del macro-tour> – <Sub-parada>" (NO "${city} – ...").
+  • Para el REGRESO del último punto del day trip hacia la ciudad base, evita estimaciones optimistas: usa tiempos realistas y conservadores (más aún en invierno/noche).
 - Seguridad y restricciones:
   • Si hay riesgo evidente, restricción oficial o ventana horaria claramente insegura, usa "removed" con reason "risk:".
   • Prioriza siempre opciones plausibles, seguras y razonables.
@@ -1100,6 +1097,11 @@ CRITERIOS GLOBALES (flexibles):
   • Acepta rangos realistas (ej. "~90m", "~2–3h").
   • Si viene en minutos, permite "90m" o "1.5h".
 - Máx. 20 filas por día; prioriza icónicas y evita redundancias.
+- Activity (guía suave):
+  • Prefiere el formato "<Destino/Macro-tour> – Sub-parada específica" cuando aplique.
+  • Si detectas que una fila pertenece claramente a un day trip/macro-tour (p.ej. “Círculo Dorado”, “Costa Sur”, “Snaefellsnes”, “Toledo”),
+    usa ese destino/macro-tour como prefijo en "activity" en lugar de la ciudad base.
+  • Evita genéricos tipo "tour" o "museo" sin especificar, cuando sea fácil concretar.
 
 CASOS ESPECIALES (guía, no bloqueo):
 1) Whale watching:
@@ -1109,7 +1111,7 @@ CASOS ESPECIALES (guía, no bloqueo):
 2) Auroras:
    - Actividad nocturna (horario local aproximado).
    - Transporte: Tour/Van o Auto si procede.
-   - Duración típica total: 3–5h (NO 2h salvo caso excepcional y justificado).
+   - Duración típica total: ~3–4h (si ves 2h, corrige a un rango más realista salvo justificación explícita en notes).
    - Incluir "valid:" con justificación breve (latitud/temporada/clima).
    - Si hay varias noches posibles, evita duplicar sin motivo.
 3) Rutas escénicas en coche:
@@ -1123,6 +1125,7 @@ CASOS ESPECIALES (guía, no bloqueo):
 REGLAS DE FUSIÓN:
 - Devuelve en "allowed" las filas ya corregidas.
 - Mueve a "removed" SOLO lo claramente inviable o inseguro.
+- Para excursiones extensas (day trips), si detectas un regreso claramente subestimado, corrige la duración/ventana de tiempo de forma realista.
 
 Contexto:
 - Ciudad: "${city}"
@@ -1212,35 +1215,37 @@ ${FORMAT}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 REGLAS CLAVE (OBLIGATORIAS):
-- Nomenclatura "ETIQUETA – Sub-parada" (con espacios alrededor del guion) en TODAS las filas:
-  A) Filas dentro de la ciudad base (urbano): "${city} – <Sub-parada específica>".
-  B) Filas de excursión/daytrip/macro-tour: "<Nombre del macro-tour> – <Sub-parada específica>".
-     • Ejemplos: "Círculo Dorado – Þingvellir", "Costa Sur – Skógafoss", "Toledo – Catedral Primada".
-     • NO uses "${city} – ..." para sub-paradas de un macro-tour.
-  C) Regreso: usa la ETIQUETA correcta:
-     • Si es un macro-tour: "<Macro-tour> – Regreso a ${city}".
-     • Si es urbano: "${city} – Regreso al hotel / centro" (si aplica).
+- "activity" debe seguir el patrón "<Destino> – <Sub-parada específica>" (con espacios alrededor del guion).
+  • En actividades URBANAS dentro de la ciudad base, usa: "${city} – <Sub-parada>".
+  • En DAY TRIPS / MACRO-TOURS, el prefijo NO debe ser la ciudad base:
+     - Usa el nombre del destino/macro-tour como prefijo: "Círculo Dorado – <Sub-parada>", "Costa Sur – <Sub-parada>", "Snaefellsnes – <Sub-parada>", "Toledo – <Sub-parada>", etc.
+     - La fila final de regreso debe respetar el prefijo del macro-tour: "<Macro-tour> – Regreso a ${city}".
+  • Evita títulos genéricos como "Tour" sin destino. Si es una ruta, nómbrala por la ruta/destino.
 - "from", "to", "transport" y "notes" NUNCA pueden ir vacíos.
 - Evita genéricos: prohibido "tour", "museo", "restaurante local" sin nombre/identificador claro.
 
-TRANSPORTE (prioridad inteligente):
-- Si existe transporte público REAL y conveniente para esa salida (bus/tren con horarios razonables), úsalo: "Transporte público (Bus/Tren)".
-- Si NO es conveniente o NO existe transporte público adecuado, usa: "Vehículo alquilado o Tour guiado" (y especifica Bus/Van si es tour).
-- En ciudad: "A pie" / "Metro" / "Bus" según corresponda.
+TRANSPORTE (prioridad inteligente, sin inventar):
+- En ciudad: A pie/Metro/Bus/Tranvía según disponibilidad real.
+- Para DAY TRIPS:
+  1) Si existe una opción razonable de transporte público que sea “la mejor opción” para ese recorrido, úsala (ej. tren/bus interurbano realista).
+  2) Si NO es claramente viable/mejor (múltiples paradas dispersas, horarios pobres, temporada difícil), usa EXACTAMENTE: "Vehículo alquilado o Tour Guiado".
+- Evita "Bus" genérico como etiqueta de day trip si en realidad es tour: usa "Tour Guiado (Bus/Van)" o el fallback anterior.
 
 AURORAS (si son plausibles por ciudad/temporada/latitud):
 - Debes incluir AL MENOS 1 (una) noche de auroras en el itinerario.
 - Debe ser horario NOCTURNO realista (aprox. 20:00–02:00 local).
-- Duración típica total: 3–5h (NO 2h salvo caso excepcional y explicado en notes).
+- Duración típica total: ~3–4h (evita 2h salvo caso excepcional y explicado en notes).
 - Evita días consecutivos si hay margen y evita dejarlo SOLO para el último día (si solo cabe ahí, hazlo condicional en notes).
 - Incluye 1 opción tipo "Tour/Van" y 1 alternativa low-cost cercana (mirador/área oscura cercana) en "notes" con "valid:".
 
-DAY TRIPS / MACRO-TOURS:
+DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
+- Puedes proponer day trips si aportan valor (sin límite fijo). Decide inteligentemente según lo “mejor de lo mejor”.
+- Restricción guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, compensa reduciendo paradas o ajustando ventana.
 - Si propones excursión de día (day trip), debe ser COMPLETA:
   • 5–8 sub-paradas (filas) con nombres claros, secuencia lógica y traslados realistas.
   • Debe incluir una fila final propia: "<Macro-tour> – Regreso a ${city}".
-  • Si es una ruta clásica (ej. “Costa Sur”), llega al hito final lógico de la ruta (p.ej., Vík u otro hito icónico final) antes de regresar.
-- Puedes proponer más de un day trip si aporta valor (sin regla fija). Usa criterio experto y evita saturar.
+  • Si es una ruta clásica, llega al hito final lógico antes de regresar.
+  • Los tiempos de transporte deben ser realistas (no optimistas), especialmente el REGRESO del último punto del day trip hacia ${city}.
 
 CALIDAD / APROVECHAMIENTO:
 - Revisa IMPERDIBLES diurnos y nocturnos.
@@ -1316,27 +1321,31 @@ ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 REGLAS CLAVE (OBLIGATORIAS):
-- Nomenclatura "ETIQUETA – Sub-parada" en TODAS las filas:
-  A) Urbano: "${city} – <Sub-parada>".
-  B) Macro-tour/daytrip: "<Macro-tour> – <Sub-parada>" (p.ej. Círculo Dorado / Costa Sur / Toledo / etc.).
-  C) Cierres: "<Macro-tour> – Regreso a ${city}" cuando aplique.
+- "activity" debe seguir "<Destino> – <Sub-parada>":
+  • Urbano: "${city} – <Sub-parada>".
+  • Day trip/macro-tour: "<Macro-tour/Destino> – <Sub-parada>" (p.ej. Círculo Dorado / Costa Sur / Toledo / etc.).
+  • Regreso day trip: "<Macro-tour/Destino> – Regreso a ${city}".
 - from/to/transport/notes: NUNCA vacíos. Evita genéricos sin nombre claro.
 
-TRANSPORTE (prioridad inteligente):
-- Prioriza "Transporte público (Bus/Tren)" si existe y es realmente conveniente.
-- Si no, usa "Vehículo alquilado o Tour guiado" (y especifica Bus/Van si es tour).
-- En ciudad: A pie/Metro/Bus según corresponda.
+TRANSPORTE (prioridad inteligente, sin inventar):
+- En ciudad: A pie/Metro/Bus/Tranvía según disponibilidad real.
+- Para DAY TRIPS:
+  1) Si existe transporte público claramente viable/mejor, úsalo (tren/bus interurbano realista).
+  2) Si no, usa EXACTAMENTE: "Vehículo alquilado o Tour Guiado".
+- Evita regresos optimistas: especialmente desde el último punto del day trip hacia ${city}, usa tiempos realistas.
 
 AURORAS (si plausibles):
 - Incluye al menos 1 noche de auroras en horario nocturno realista (20:00–02:00 aprox.).
-- Duración típica total: 3–5h (evita 2h).
+- Duración típica total: ~3–4h (evita 2h salvo justificación).
 - Evita consecutivas si hay margen; evita dejarlo solo al final (si solo cabe ahí, marcar condicional).
 - En notes incluye "valid:" + alternativa low-cost cercana.
 
-DAY TRIPS / MACRO-TOURS:
-- Puedes incluir day trips si aportan valor (sin regla fija). Si incluyes uno:
+DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
+- Puedes incluir day trips si aportan valor (sin regla fija). Decide inteligentemente.
+- Guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, ajusta paradas/ventana.
+- Si incluyes un day trip:
   • 5–8 sub-paradas (filas) con secuencia realista.
-  • Debe terminar con "<Macro-tour> – Regreso a ${city}".
+  • Debe terminar con "<Macro-tour/Destino> – Regreso a ${city}".
   • Si es ruta clásica, llega al hito final lógico antes de regresar.
 
 CALIDAD:
