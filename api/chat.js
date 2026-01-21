@@ -102,53 +102,6 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1) {
   return blocks;
 }
 
-/* ===================== Small canon helpers (quirúrgico) ===================== */
-function _canonTxt_(s) {
-  return String(s || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function _isAuroraText_(t) {
-  return /auroras?|aurora|northern\s*lights/i.test(String(t || ""));
-}
-
-function _extractMonthFromAnyText_(txt) {
-  const s = String(txt || "");
-
-  // dd/mm/yyyy or d/m/yyyy
-  const m1 = s.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
-  if (m1) {
-    const mm = parseInt(m1[2], 10);
-    if (mm >= 1 && mm <= 12) return mm;
-  }
-
-  // yyyy-mm-dd
-  const m2 = s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-  if (m2) {
-    const mm = parseInt(m2[2], 10);
-    if (mm >= 1 && mm <= 12) return mm;
-  }
-
-  // dd-mm-yyyy
-  const m3 = s.match(/\b(\d{1,2})-(\d{1,2})-(\d{4})\b/);
-  if (m3) {
-    const mm = parseInt(m3[2], 10);
-    if (mm >= 1 && mm <= 12) return mm;
-  }
-
-  return null;
-}
-
-function _isAuroraSeasonMonth_(month) {
-  // Sep–Apr
-  return month === 9 || month === 10 || month === 11 || month === 12 || month === 1 || month === 2 || month === 3 || month === 4;
-}
-
 function _normalizeDurationText_(txt) {
   const s = String(txt ?? "").trim();
   if (!s) return s;
@@ -199,11 +152,13 @@ function normalizeParsed(parsed) {
   if (!parsed) return parsed;
 
   try {
+    // Prefer city_day; si llega rows legacy, lo dejamos para compat pero el frontend idealmente usa city_day
     if (Array.isArray(parsed.city_day)) {
       const dest = String(parsed?.destination || "").trim();
       parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
     }
 
+    // Si por alguna razón el modelo devolvió "rows" legacy, normaliza duración/kind/zone también
     if (Array.isArray(parsed.rows)) {
       parsed.rows = parsed.rows.map((r) => ({
         ...r,
@@ -232,134 +187,8 @@ function normalizeParsed(parsed) {
   return parsed;
 }
 
-/* ===================== Aurora guard-rail (quirúrgico) ===================== */
-function _cityDayHasAurora_(city_day) {
-  if (!Array.isArray(city_day)) return false;
-  return city_day.some((b) => (Array.isArray(b?.rows) ? b.rows.some((r) => _isAuroraText_(r?.activity)) : false));
-}
-
-// 🆕 ultra-quirúrgico: identifica destinos “zona auroral” por heurística simple (sin web)
-function _isLikelyAuroraRegion_(destinationCanon) {
-  const s = String(destinationCanon || "");
-  // Lista corta (segura) + palabras clave de regiones típicas
-  if (
-    s.includes("reykjavik") ||
-    s.includes("reikiavik") ||
-    s.includes("tromso") ||
-    s.includes("tromsø") ||
-    s.includes("alta") || // Alta, Norway
-    s.includes("rovaniemi") ||
-    s.includes("lapland") ||
-    s.includes("laponia") ||
-    s.includes("abisko") ||
-    s.includes("kiruna") ||
-    s.includes("lofoten") ||
-    s.includes("svalbard") ||
-    s.includes("iceland") ||
-    s.includes("islandia") ||
-    s.includes("finland") ||
-    s.includes("finlandia") ||
-    s.includes("norway") ||
-    s.includes("noruega") ||
-    s.includes("sweden") ||
-    s.includes("suecia")
-  ) {
-    return true;
-  }
-
-  // Negativos obvios (evitar falsos positivos como Budapest, etc.)
-  if (
-    s.includes("budapest") ||
-    s.includes("hungary") ||
-    s.includes("hungria") ||
-    s.includes("madrid") ||
-    s.includes("toledo") ||
-    s.includes("rome") ||
-    s.includes("roma") ||
-    s.includes("cairo") ||
-    s.includes("el cairo") ||
-    s.includes("luxor") ||
-    s.includes("athens") ||
-    s.includes("atenas") ||
-    s.includes("istanbul") ||
-    s.includes("estambul")
-  ) {
-    return false;
-  }
-
-  return false;
-}
-
-function _injectOneAuroraRow_(parsed, destination, daysTotal) {
-  try {
-    if (!Array.isArray(parsed.city_day) || parsed.city_day.length === 0) return parsed;
-    // elige un día medio (evita el último)
-    const day = Math.min(Math.max(1, Math.ceil(daysTotal / 2)), Math.max(1, daysTotal - 1));
-    const block = parsed.city_day.find((b) => Number(b?.day) === day) || parsed.city_day[0];
-    if (!block || !Array.isArray(block.rows)) return parsed;
-
-    const cityBase = String(destination || block.city || "Ciudad").trim() || "Ciudad";
-
-    block.rows.push({
-      day,
-      start: "21:00",
-      end: "23:30",
-      activity: `${cityBase} – Caza de auroras (condicional)`,
-      from: "Centro / Hotel",
-      to: "Mirador oscuro cercano",
-      transport: "Auto (si aplica) o Tour/Van nocturno",
-      duration: "Transporte: ~20m–45m\nActividad: ~2h–3h",
-      notes:
-        "Siente la magia del cielo ártico si hay claridad. valid: temporada de auroras (Sep–Abr) + requiere baja nubosidad; alternativa low-cost: salir a un mirador oscuro cerca de la ciudad si no quieres tour.",
-      kind: "",
-      zone: "",
-    });
-
-    parsed.followup =
-      (parsed.followup ? parsed.followup + " | " : "") +
-      "✅ Guard-rail: se añadió 1 noche de auroras (condicional) por temporada detectada.";
-  } catch {}
-  return parsed;
-}
-
-// 🆕 ultra-quirúrgico: elimina auroras si el destino NO es zona auroral o si NO es temporada (cuando hay fecha)
-function _removeAuroraRowsEverywhere_(parsed, reasonTag = "🧹 Guard-rail: se removieron auroras por latitud/temporada.") {
-  try {
-    if (!parsed) return parsed;
-
-    if (Array.isArray(parsed.city_day)) {
-      parsed.city_day = parsed.city_day.map((b) => {
-        const rows = Array.isArray(b?.rows) ? b.rows : [];
-        const filtered = rows.filter((r) => !_isAuroraText_(r?.activity));
-        return { ...b, rows: filtered };
-      });
-    }
-
-    if (Array.isArray(parsed.rows)) {
-      parsed.rows = parsed.rows.filter((r) => !_isAuroraText_(r?.activity));
-    }
-
-    if (Array.isArray(parsed.destinations)) {
-      parsed.destinations = parsed.destinations.map((d) => {
-        const dd = { ...d };
-        if (Array.isArray(dd.rows)) dd.rows = dd.rows.filter((r) => !_isAuroraText_(r?.activity));
-        if (Array.isArray(dd.city_day)) {
-          dd.city_day = dd.city_day.map((b) => {
-            const rows = Array.isArray(b?.rows) ? b.rows : [];
-            return { ...b, rows: rows.filter((r) => !_isAuroraText_(r?.activity)) };
-          });
-        }
-        return dd;
-      });
-    }
-
-    parsed.followup = (parsed.followup ? parsed.followup + " | " : "") + reasonTag;
-  } catch {}
-  return parsed;
-}
-
 // ==============================
-// Prompt base mejorado ✨ (PLANNER) — Ajustado a reglas v52.5 + FIX auroras/macro-tours
+// Prompt base mejorado ✨ (PLANNER) — Ajustado a reglas v52.5
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -398,7 +227,7 @@ REGLA DE ORO:
 - Devuelve SIEMPRE al menos 1 fila renderizable (nunca tabla en blanco).
 - Nada de texto fuera del JSON.
 
-REGLAS GENERALES (hard):
+REGLAS GENERALES:
 - Máximo 20 filas por día.
 - Horas realistas locales; si el usuario no da horas, decide como experto.
 - Las horas deben estar ordenadas y NO superponerse.
@@ -409,9 +238,13 @@ CONTRATO OBLIGATORIO DE CADA ROW:
 - day (número)
 - start/end en HH:MM (hora local)
 - activity: SIEMPRE "DESTINO – SUB-PARADA" (– o - con espacios). Prohibido genérico tipo "museo", "parque", "restaurante local".
-- IMPORTANTÍSIMO (Destinos correctos):
-  • Si la fila es parte de un MACRO-TOUR / DAY TRIP, entonces DESTINO = nombre del tour/ruta (ej. "Círculo Dorado", "Costa Sur", "Sintra", "Toledo", "Versalles", etc.), y SUB-PARADA = parada específica.
-  • Si la fila NO es macro-tour (es dentro de la ciudad base), entonces DESTINO = ciudad base (ej. "Budapest", "Reykjavík") y SUB-PARADA = lugar específico.
+  IMPORTANTE (GLOBAL):
+  - "DESTINO" NO es siempre la ciudad:
+    • Si la fila pertenece a un DAY TRIP / MACRO-TOUR, "DESTINO" debe ser el NOMBRE del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo", "Sinaí", "Giza").
+    • Si NO es day trip, "DESTINO" puede ser la ciudad base.
+  - Esto aplica también a traslados y regresos:
+    • Ejemplo day trip: "Costa Sur – Regreso a Reykjavik"
+    • Ejemplo ciudad: "Budapest – Regreso a hotel"
 - duration: 2 líneas EXACTAS con salto \\n:
   "Transporte: <estimación realista o ~rango>"
   "Actividad: <estimación realista o ~rango>"
@@ -420,36 +253,38 @@ CONTRATO OBLIGATORIO DE CADA ROW:
   1) 1 frase emotiva (Admira/Descubre/Siente…)
   2) 1 tip logístico (mejor hora, reservas, tickets, vista, etc.)
   + condición/alternativa si aplica
+  + (cuando aplique) agrega "Relacionado: <spot cercano/pareja lógica>" para no omitir imperdibles relacionados
+    • Ejemplo: "Castillo de Buda" -> Relacionado: "Bastión de los Pescadores"
 
-HORARIOS / CIERRES (hard, global):
-- NO programes visitas en horarios probablemente cerrados.
-  • Museos/atracciones: usa franjas diurnas plausibles.
-  • Si puede haber día de cierre (p.ej. lunes), evita sugerirlo ese día; si no puedes asegurar el día, añade en notes: "Horario: verificar horas y día de cierre".
-- Si hay un conflicto claro por cierre/horario, reemplaza por una alternativa plausible.
-
-EXPERIENCIAS NOCTURNAS (soft-global, cuando aplique):
-- Si el destino tiene una experiencia nocturna famosa y realista (crucero nocturno, show/cena, mirador iluminado, paseo nocturno icónico),
-  incluye al menos 1 en todo el itinerario con horario nocturno plausible y notes con tip + "Horario: verificar".
-
-COMIDAS (soft):
+COMIDAS (Regla flexible):
 - NO son obligatorias.
 - Inclúyelas SOLO si aportan valor real al flujo.
 - Si se incluyen, NO genéricas (ej. "cena en restaurante local" prohibido).
 
-AURORAS (FIX fuerte, global):
-- SOLO sugerir auroras si el destino está en ZONA AURORAL (alta latitud, típicamente Islandia/Noruega/Suecia/Finlandia/Laponia/Ártico).
-- Si el destino NO está en zona auroral (ej. Budapest), está PROHIBIDO sugerir auroras, aunque el usuario no lo note.
-- Si el destino es zona auroral Y el viaje cae en temporada Sep–Abr (si hay fecha en el input), incluye al menos 1 noche de auroras en city_day.
-- Evita días consecutivos si hay opciones.
-- Evita el último día; si SOLO cabe ahí, marcarlo como condicional en notes.
-- Debe ser horario nocturno típico local.
+HORARIOS / CIERRES (GLOBAL, anti-horarios imposibles):
+- Para lugares con horario típico (museos, castillos, monumentos interiores, termas, mercados), NO programes visitas fuera de un rango diurno razonable.
+  Guía si no estás 100% seguro: 10:00–17:00 para interiores / museos.
+- Si el lugar puede estar cerrado ciertos días (p.ej. lunes) y NO estás seguro, evita programarlo en franja extrema y agrega en notes: "Horario exacto a confirmar (puede cerrar algunos días)".
+- Para miradores/puentes/zonas exteriores, puedes ser más flexible.
+
+TOURS NOCTURNOS (GLOBAL, cuando aplique):
+- Si el destino tiene un ícono que brilla de noche o experiencia nocturna clásica, incluye AL MENOS 1 actividad nocturna icónica:
+  • Ejemplos: "Danubio – Crucero nocturno (Parlamento iluminado)" / "Nilo – Crucero con show" / mirador panorámico nocturno.
+- Mantén horarios realistas (p.ej. 19:00–23:30) y notes con tip logístico.
+
+AURORAS (Regla flexible + NEGATIVA fuerte):
+- SOLO sugerir auroras si SON plausibles por latitud/temporada.
+  Guía: normalmente se observan en latitudes altas (aprox. 60–75°) y zonas aurorales típicas.
+- Si el destino NO es de alta latitud o NO es zona auroral típica, NO las sugieras (ej.: Budapest / El Cairo / Madrid / Roma / etc.).
+- Si son plausibles: evitar días consecutivos si hay opciones; evitar el último día; horario nocturno típico local.
 - Notes deben incluir: "valid:" + (clima/nubosidad) + alternativa low-cost cercana.
 
-DAY-TRIPS / MACRO-TOURS (FIX fuerte):
-- Si haces una excursión/“day trip”, debes desglosarla en 5–8 sub-paradas (filas) + 1 fila final propia "Regreso a {Ciudad base}".
-- Las excursiones deben ser "completas y usuales" para el destino (no recortes ilógicos).
-  • Ejemplo guía: en Islandia, "Costa Sur" normalmente llega hasta Vík (si es excursión de día completo), y luego regreso.
+DAY-TRIPS / MACRO-TOURS:
+- Si haces una excursión/“day trip”, debes desglosarla en 5–8 sub-paradas (filas).
+- Siempre cerrar con una fila propia de regreso:
+  • Usa el "DESTINO" del macro-tour: "<Macro-tour> – Regreso a {Ciudad base}".
 - Evitar último día si hay opciones.
+- En day trips, evita tiempos optimistas: el regreso desde el ÚLTIMO punto debe ser realista/conservador.
 
 SEGURIDAD / COHERENCIA GLOBAL:
 - No propongas cosas inviables por distancia/tiempo/temporada o riesgos evidentes.
@@ -533,8 +368,7 @@ export default async function handler(req, res) {
 OBLIGATORIO:
 - Responde SOLO JSON válido.
 - Debe traer city_day (preferido) o rows (legacy) con al menos 1 fila.
-- Nada de meta ni texto fuera.
-- Auroras SOLO si el destino es zona auroral y (si hay fecha) es Sep–Abr.`; // 🆕 (quirúrgico)
+- Nada de meta ni texto fuera.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 3400, 95000);
       parsed = cleanToJSON(raw);
     }
@@ -563,56 +397,22 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
 
     // 3) Normalización + guard-rails anti-tabla-en-blanco
     if (!parsed) parsed = fallbackJSON();
+
+    // Prefer city_day: si el modelo devolvió rows legacy, lo dejamos; pero si devolvió city_day, lo normalizamos.
     parsed = normalizeParsed(parsed);
 
     // Guard-rail final: si city_day existe pero viene vacío/sin filas, inyecta skeleton
-    let destination = "Destino";
-    let daysTotal = 1;
-
     try {
-      destination = String(parsed?.destination || "Destino").trim() || "Destino";
-      daysTotal = Math.max(1, Number(parsed?.days_total || 1));
+      const dest = String(parsed?.destination || "Destino").trim() || "Destino";
+      const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
 
       if (Array.isArray(parsed.city_day)) {
-        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, destination);
+        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
         if (!_hasAnyRows_(parsed.city_day)) {
-          parsed.city_day = skeletonCityDay(destination, daysTotal);
+          parsed.city_day = skeletonCityDay(dest, daysTotal);
           parsed.followup =
             (parsed.followup ? parsed.followup + " | " : "") +
             "⚠️ Guard-rail: city_day vacío o sin filas. Se devolvió skeleton para evitar tabla en blanco.";
-        }
-      }
-    } catch {}
-
-    // ✅ Guard-rail AURORAS (inyección + remoción por latitud/temporada)
-    try {
-      const destCanon = _canonTxt_(destination);
-      const inputAll = clientMessages.map((m) => String(m?.content || "")).join("\n");
-      const month = _extractMonthFromAnyText_(inputAll);
-      const inSeason = month ? _isAuroraSeasonMonth_(month) : false;
-
-      const isAuroraRegion = _isLikelyAuroraRegion_(destCanon);
-
-      // 1) Si NO es zona auroral => elimina cualquier aurora que el modelo haya inventado
-      if (!isAuroraRegion) {
-        const had = Array.isArray(parsed.city_day) ? _cityDayHasAurora_(parsed.city_day) : false;
-        const hadLegacy = Array.isArray(parsed.rows) ? parsed.rows.some((r) => _isAuroraText_(r?.activity)) : false;
-        if (had || hadLegacy) {
-          parsed = _removeAuroraRowsEverywhere_(parsed, "🧹 Guard-rail: se removieron auroras (destino fuera de zona auroral).");
-        }
-      } else {
-        // 2) Es zona auroral: si hay fecha fuera de temporada => elimina auroras
-        if (month && !inSeason) {
-          const had = Array.isArray(parsed.city_day) ? _cityDayHasAurora_(parsed.city_day) : false;
-          const hadLegacy = Array.isArray(parsed.rows) ? parsed.rows.some((r) => _isAuroraText_(r?.activity)) : false;
-          if (had || hadLegacy) {
-            parsed = _removeAuroraRowsEverywhere_(parsed, "🧹 Guard-rail: se removieron auroras (fuera de temporada Sep–Abr).");
-          }
-        }
-
-        // 3) Es zona auroral y en temporada: inyecta 1 si faltan (misma lógica previa, sin romper)
-        if (inSeason && Array.isArray(parsed.city_day) && !_cityDayHasAurora_(parsed.city_day) && daysTotal >= 3) {
-          parsed = _injectOneAuroraRow_(parsed, destination, daysTotal);
         }
       }
     } catch {}
