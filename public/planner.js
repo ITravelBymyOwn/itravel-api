@@ -1089,6 +1089,10 @@ CRITERIOS GLOBALES (flexibles):
 - Seguridad y restricciones:
   • Si hay riesgo evidente, restricción oficial o ventana horaria claramente insegura, usa "removed" con reason "risk:".
   • Prioriza siempre opciones plausibles, seguras y razonables.
+- Horarios y cierres (OBLIGATORIO, global):
+  • Asume que algunos lugares cierran ciertos días/horas. Si una visita cae en una franja típicamente cerrada (muy temprano, muy tarde, día de cierre común), AJUSTA la ventana a un horario plausible.
+  • Si hay duda razonable de horario (p.ej. museo/atracción), añade en notes: "Horario: verificar horas y día de cierre antes de ir" y evita sugerir hora claramente inadecuada.
+  • Para restaurantes/cenas: evita horarios anormalmente tempranos; prioriza rangos nocturnos razonables.
 - Notes:
   • NUNCA vacías ni "seed".
   • Añade siempre al menos un tip útil o contexto breve.
@@ -1097,9 +1101,7 @@ CRITERIOS GLOBALES (flexibles):
   • Si viene en minutos, permite "90m" o "1.5h".
 - Máx. 20 filas por día; prioriza icónicas y evita redundancias.
 - Activity (guía suave):
-  • Prefiere el formato "Destino – Sub-parada específica" si aplica.
-    - "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-    - Si NO es day trip, "Destino" puede ser la ciudad.
+  • Prefiere el formato "${city} – Sub-parada específica" si aplica.
   • Evita genéricos tipo "tour" o "museo" sin especificar, cuando sea fácil concretar.
 
 CASOS ESPECIALES (guía, no bloqueo):
@@ -1116,14 +1118,17 @@ CASOS ESPECIALES (guía, no bloqueo):
    - Considera conducción + paradas como experiencia integrada.
    - Si no hay coche ni tour viable, usa "risk" o "logistics" y sugiere alternativa.
 4) Museos/monumentos:
-   - Horario diurno realista.
+   - Horario diurno realista (evita primeras/últimas horas extremas).
 5) Cenas/vida nocturna:
    - Horarios nocturnos razonables (flexibles según destino).
+6) Experiencias nocturnas icónicas (global, si aplica al destino):
+   - Si aparece una actividad nocturna típica del destino (crucero nocturno, show/cena, mirador iluminado), asegúrate de que su horario sea nocturno plausible y que notes incluya "Horario: verificar" si aplica.
 
 REGLAS DE FUSIÓN:
 - Devuelve en "allowed" las filas ya corregidas.
 - Mueve a "removed" SOLO lo claramente inviable o inseguro.
 - Para excursiones extensas (day trips), si detectas un regreso claramente subestimado, corrige la duración/ventana de tiempo de forma realista.
+- Si una visita parece caer en horario/día de cierre probable y no se puede ajustar de forma plausible, muévela a "removed" con reason "hours:" + alternativa.
 
 Contexto:
 - Ciudad: "${city}"
@@ -1213,14 +1218,18 @@ ${FORMAT}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 REGLAS CLAVE (OBLIGATORIAS):
-- "activity" SIEMPRE debe ser: "Destino – <Sub-parada específica>" (con espacios alrededor del guion).
-  • "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-  • Si NO es day trip, "Destino" puede ser "${city}".
+- "activity" SIEMPRE debe ser: "${city} – <Sub-parada específica>" (con espacios alrededor del guion).
   • Esto aplica a TODAS las filas, incluyendo traslados y regresos.
-  • Ejemplo correcto (day trip): "Círculo Dorado – Regreso a ${city}" (NO "REGRESO A ${city}" a secas).
-  • Ejemplo correcto (ciudad): "${city} – Regreso a hotel".
+  • Ejemplo correcto: "${city} – Regreso a ${city}" (NO "REGRESO A ${city}" a secas).
 - "from", "to", "transport" y "notes" NUNCA pueden ir vacíos.
 - Evita genéricos: prohibido "tour", "museo", "restaurante local" sin nombre/identificador claro.
+
+HORARIOS / CIERRES (OBLIGATORIO, global):
+- NO sugieras visitas en horarios inadecuados o probablemente cerrados.
+  • Museos/atracciones: evita primeras/últimas horas extremas; coloca en franja diurna plausible.
+  • Si un lugar puede cerrar cierto día (p.ej. lunes), evita programarlo ese día; si no puedes asegurar el día, ajusta a una franja plausible y añade en notes: "Horario: verificar horas y día de cierre".
+  • Para restaurantes/cenas: prioriza horarios nocturnos razonables.
+- Si hay conflicto claro (imposible por cierre), reemplaza por alternativa plausible.
 
 TRANSPORTE (prioridad inteligente, sin inventar):
 - En ciudad: A pie/Metro/Bus/Tranvía según disponibilidad real.
@@ -1228,6 +1237,11 @@ TRANSPORTE (prioridad inteligente, sin inventar):
   1) Si existe una opción razonable de transporte público que sea “la mejor opción” para ese recorrido, úsala (ej. tren/bus interurbano realista).
   2) Si NO es claramente viable/mejor (múltiples paradas dispersas, horarios pobres, temporada difícil), usa EXACTAMENTE: "Vehículo alquilado o Tour Guiado".
 - Evita "Bus" genérico como etiqueta de day trip si en realidad es tour: usa "Tour Guiado (Bus/Van)" o el fallback anterior.
+
+EXPERIENCIAS NOCTURNAS ICÓNICAS (global, cuando aplique al destino):
+- Si el destino tiene una experiencia nocturna famosa y realista (p.ej. crucero nocturno para ver monumentos iluminados, show/cena, paseo nocturno por barrio icónico),
+  incluye AL MENOS 1 en todo el itinerario, con horario nocturno plausible.
+- En notes: añade "Horario: verificar" + 1 tip útil (mejor hora, lado del río, reservar, etc.).
 
 AURORAS (si son plausibles por ciudad/temporada/latitud):
 - Debes incluir AL MENOS 1 (una) noche de auroras en el itinerario.
@@ -1240,7 +1254,7 @@ DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
 - Restricción guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, compensa reduciendo paradas o ajustando ventana.
 - Si propones excursión de día (day trip), debe ser COMPLETA:
   • 5–8 sub-paradas (filas) con nombres claros, secuencia lógica y traslados realistas.
-  • Debe incluir una fila final propia usando Destino del macro-tour: "<Macro-tour> – Regreso a ${city}".
+  • Debe incluir una fila final propia: "${city} – Regreso a ${city}".
   • Si es una ruta clásica (ej. “Costa Sur”), llega al hito final lógico de la ruta (p.ej. Vík o hito final icónico) antes de regresar.
   • Los tiempos de regreso NO deben ser optimistas: usa estimaciones conservadoras si hay clima/temporada de invierno o noche.
 
@@ -1318,10 +1332,13 @@ ${lockedDaysText}
 - Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 REGLAS CLAVE (OBLIGATORIAS):
-- "activity" SIEMPRE: "Destino – <Sub-parada específica>" (incluye regresos/traslados).
-  • "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-  • Si NO es day trip, "Destino" puede ser "${city}".
+- "activity" SIEMPRE: "${city} – <Sub-parada específica>" (incluye regresos/traslados).
 - from/to/transport/notes: NUNCA vacíos. Evita genéricos sin nombre claro.
+
+HORARIOS / CIERRES (OBLIGATORIO, global):
+- Evita programar atracciones en horarios probablemente cerrados.
+- Si hay duda razonable de horario o día de cierre, ajusta a franja plausible y añade en notes: "Horario: verificar horas y día de cierre".
+- Si detectas un caso claramente inviable por cierre, sustitúyelo por una alternativa plausible.
 
 TRANSPORTE (prioridad inteligente, sin inventar):
 - En ciudad: A pie/Metro/Bus/Tranvía según disponibilidad real.
@@ -1329,6 +1346,10 @@ TRANSPORTE (prioridad inteligente, sin inventar):
   1) Si existe una opción razonable de transporte público que sea “la mejor opción” para ese recorrido, úsala (tren/bus interurbano realista).
   2) Si NO es claramente viable/mejor (múltiples paradas dispersas, horarios pobres, temporada difícil), usa EXACTAMENTE: "Vehículo alquilado o Tour Guiado".
 - Evita "Bus" genérico como etiqueta de day trip si en realidad es tour: usa "Tour Guiado (Bus/Van)" o el fallback anterior.
+
+EXPERIENCIAS NOCTURNAS ICÓNICAS (global, cuando aplique):
+- Si el destino tiene una experiencia nocturna famosa y realista, incluye al menos 1 en el itinerario total de la ciudad.
+- Debe ser en horario nocturno plausible y notes con "Horario: verificar" + tip útil.
 
 AURORAS (si plausibles):
 - Incluye al menos 1 noche de auroras en horario nocturno realista (20:00–02:00 aprox.).
@@ -1340,7 +1361,7 @@ DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
 - Guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, ajusta paradas/ventana.
 - Si incluyes un day trip:
   • 5–8 sub-paradas (filas) con secuencia realista.
-  • Debe terminar con una fila final usando Destino del macro-tour: "<Macro-tour> – Regreso a ${city}".
+  • Debe terminar con "${city} – Regreso a ${city}".
   • Si es ruta clásica, llega al hito final lógico antes de regresar.
   • Evita regresos optimistas: usa estimaciones conservadoras si hay invierno o noche.
 
