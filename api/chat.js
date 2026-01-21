@@ -238,6 +238,58 @@ function _cityDayHasAurora_(city_day) {
   return city_day.some((b) => (Array.isArray(b?.rows) ? b.rows.some((r) => _isAuroraText_(r?.activity)) : false));
 }
 
+// 🆕 ultra-quirúrgico: identifica destinos “zona auroral” por heurística simple (sin web)
+function _isLikelyAuroraRegion_(destinationCanon) {
+  const s = String(destinationCanon || "");
+  // Lista corta (segura) + palabras clave de regiones típicas
+  if (
+    s.includes("reykjavik") ||
+    s.includes("reikiavik") ||
+    s.includes("tromso") ||
+    s.includes("tromsø") ||
+    s.includes("alta") || // Alta, Norway
+    s.includes("rovaniemi") ||
+    s.includes("lapland") ||
+    s.includes("laponia") ||
+    s.includes("abisko") ||
+    s.includes("kiruna") ||
+    s.includes("lofoten") ||
+    s.includes("svalbard") ||
+    s.includes("iceland") ||
+    s.includes("islandia") ||
+    s.includes("finland") ||
+    s.includes("finlandia") ||
+    s.includes("norway") ||
+    s.includes("noruega") ||
+    s.includes("sweden") ||
+    s.includes("suecia")
+  ) {
+    return true;
+  }
+
+  // Negativos obvios (evitar falsos positivos como Budapest, etc.)
+  if (
+    s.includes("budapest") ||
+    s.includes("hungary") ||
+    s.includes("hungria") ||
+    s.includes("madrid") ||
+    s.includes("toledo") ||
+    s.includes("rome") ||
+    s.includes("roma") ||
+    s.includes("cairo") ||
+    s.includes("el cairo") ||
+    s.includes("luxor") ||
+    s.includes("athens") ||
+    s.includes("atenas") ||
+    s.includes("istanbul") ||
+    s.includes("estambul")
+  ) {
+    return false;
+  }
+
+  return false;
+}
+
 function _injectOneAuroraRow_(parsed, destination, daysTotal) {
   try {
     if (!Array.isArray(parsed.city_day) || parsed.city_day.length === 0) return parsed;
@@ -266,6 +318,42 @@ function _injectOneAuroraRow_(parsed, destination, daysTotal) {
     parsed.followup =
       (parsed.followup ? parsed.followup + " | " : "") +
       "✅ Guard-rail: se añadió 1 noche de auroras (condicional) por temporada detectada.";
+  } catch {}
+  return parsed;
+}
+
+// 🆕 ultra-quirúrgico: elimina auroras si el destino NO es zona auroral o si NO es temporada (cuando hay fecha)
+function _removeAuroraRowsEverywhere_(parsed, reasonTag = "🧹 Guard-rail: se removieron auroras por latitud/temporada.") {
+  try {
+    if (!parsed) return parsed;
+
+    if (Array.isArray(parsed.city_day)) {
+      parsed.city_day = parsed.city_day.map((b) => {
+        const rows = Array.isArray(b?.rows) ? b.rows : [];
+        const filtered = rows.filter((r) => !_isAuroraText_(r?.activity));
+        return { ...b, rows: filtered };
+      });
+    }
+
+    if (Array.isArray(parsed.rows)) {
+      parsed.rows = parsed.rows.filter((r) => !_isAuroraText_(r?.activity));
+    }
+
+    if (Array.isArray(parsed.destinations)) {
+      parsed.destinations = parsed.destinations.map((d) => {
+        const dd = { ...d };
+        if (Array.isArray(dd.rows)) dd.rows = dd.rows.filter((r) => !_isAuroraText_(r?.activity));
+        if (Array.isArray(dd.city_day)) {
+          dd.city_day = dd.city_day.map((b) => {
+            const rows = Array.isArray(b?.rows) ? b.rows : [];
+            return { ...b, rows: rows.filter((r) => !_isAuroraText_(r?.activity)) };
+          });
+        }
+        return dd;
+      });
+    }
+
+    parsed.followup = (parsed.followup ? parsed.followup + " | " : "") + reasonTag;
   } catch {}
   return parsed;
 }
@@ -321,6 +409,9 @@ CONTRATO OBLIGATORIO DE CADA ROW:
 - day (número)
 - start/end en HH:MM (hora local)
 - activity: SIEMPRE "DESTINO – SUB-PARADA" (– o - con espacios). Prohibido genérico tipo "museo", "parque", "restaurante local".
+- IMPORTANTÍSIMO (Destinos correctos):
+  • Si la fila es parte de un MACRO-TOUR / DAY TRIP, entonces DESTINO = nombre del tour/ruta (ej. "Círculo Dorado", "Costa Sur", "Sintra", "Toledo", "Versalles", etc.), y SUB-PARADA = parada específica.
+  • Si la fila NO es macro-tour (es dentro de la ciudad base), entonces DESTINO = ciudad base (ej. "Budapest", "Reykjavík") y SUB-PARADA = lugar específico.
 - duration: 2 líneas EXACTAS con salto \\n:
   "Transporte: <estimación realista o ~rango>"
   "Actividad: <estimación realista o ~rango>"
@@ -330,13 +421,25 @@ CONTRATO OBLIGATORIO DE CADA ROW:
   2) 1 tip logístico (mejor hora, reservas, tickets, vista, etc.)
   + condición/alternativa si aplica
 
+HORARIOS / CIERRES (hard, global):
+- NO programes visitas en horarios probablemente cerrados.
+  • Museos/atracciones: usa franjas diurnas plausibles.
+  • Si puede haber día de cierre (p.ej. lunes), evita sugerirlo ese día; si no puedes asegurar el día, añade en notes: "Horario: verificar horas y día de cierre".
+- Si hay un conflicto claro por cierre/horario, reemplaza por una alternativa plausible.
+
+EXPERIENCIAS NOCTURNAS (soft-global, cuando aplique):
+- Si el destino tiene una experiencia nocturna famosa y realista (crucero nocturno, show/cena, mirador iluminado, paseo nocturno icónico),
+  incluye al menos 1 en todo el itinerario con horario nocturno plausible y notes con tip + "Horario: verificar".
+
 COMIDAS (soft):
 - NO son obligatorias.
 - Inclúyelas SOLO si aportan valor real al flujo.
 - Si se incluyen, NO genéricas (ej. "cena en restaurante local" prohibido).
 
-AURORAS (FIX fuerte):
-- Si el destino es de alta latitud (p.ej. Reykjavik/Tromsø) Y el viaje cae en temporada Sep–Abr (si hay fecha en el input), incluye al menos 1 noche de auroras en city_day.
+AURORAS (FIX fuerte, global):
+- SOLO sugerir auroras si el destino está en ZONA AURORAL (alta latitud, típicamente Islandia/Noruega/Suecia/Finlandia/Laponia/Ártico).
+- Si el destino NO está en zona auroral (ej. Budapest), está PROHIBIDO sugerir auroras, aunque el usuario no lo note.
+- Si el destino es zona auroral Y el viaje cae en temporada Sep–Abr (si hay fecha en el input), incluye al menos 1 noche de auroras en city_day.
 - Evita días consecutivos si hay opciones.
 - Evita el último día; si SOLO cabe ahí, marcarlo como condicional en notes.
 - Debe ser horario nocturno típico local.
@@ -431,7 +534,7 @@ OBLIGATORIO:
 - Responde SOLO JSON válido.
 - Debe traer city_day (preferido) o rows (legacy) con al menos 1 fila.
 - Nada de meta ni texto fuera.
-- Si hay fecha en el input y estás en Sep–Abr para Reykjavik/Tromsø, incluye al menos 1 noche de auroras.`;
+- Auroras SOLO si el destino es zona auroral y (si hay fecha) es Sep–Abr.`; // 🆕 (quirúrgico)
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 3400, 95000);
       parsed = cleanToJSON(raw);
     }
@@ -481,16 +584,36 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
       }
     } catch {}
 
-    // ✅ NUEVO: guard-rail auroras (solo si destino y temporada detectada)
+    // ✅ Guard-rail AURORAS (inyección + remoción por latitud/temporada)
     try {
       const destCanon = _canonTxt_(destination);
-      const isHighLatCity = destCanon.includes("reykjavik") || destCanon.includes("reikiavik") || destCanon.includes("tromso") || destCanon.includes("tromsø");
       const inputAll = clientMessages.map((m) => String(m?.content || "")).join("\n");
       const month = _extractMonthFromAnyText_(inputAll);
       const inSeason = month ? _isAuroraSeasonMonth_(month) : false;
 
-      if (isHighLatCity && inSeason && Array.isArray(parsed.city_day) && !_cityDayHasAurora_(parsed.city_day) && daysTotal >= 3) {
-        parsed = _injectOneAuroraRow_(parsed, destination, daysTotal);
+      const isAuroraRegion = _isLikelyAuroraRegion_(destCanon);
+
+      // 1) Si NO es zona auroral => elimina cualquier aurora que el modelo haya inventado
+      if (!isAuroraRegion) {
+        const had = Array.isArray(parsed.city_day) ? _cityDayHasAurora_(parsed.city_day) : false;
+        const hadLegacy = Array.isArray(parsed.rows) ? parsed.rows.some((r) => _isAuroraText_(r?.activity)) : false;
+        if (had || hadLegacy) {
+          parsed = _removeAuroraRowsEverywhere_(parsed, "🧹 Guard-rail: se removieron auroras (destino fuera de zona auroral).");
+        }
+      } else {
+        // 2) Es zona auroral: si hay fecha fuera de temporada => elimina auroras
+        if (month && !inSeason) {
+          const had = Array.isArray(parsed.city_day) ? _cityDayHasAurora_(parsed.city_day) : false;
+          const hadLegacy = Array.isArray(parsed.rows) ? parsed.rows.some((r) => _isAuroraText_(r?.activity)) : false;
+          if (had || hadLegacy) {
+            parsed = _removeAuroraRowsEverywhere_(parsed, "🧹 Guard-rail: se removieron auroras (fuera de temporada Sep–Abr).");
+          }
+        }
+
+        // 3) Es zona auroral y en temporada: inyecta 1 si faltan (misma lógica previa, sin romper)
+        if (inSeason && Array.isArray(parsed.city_day) && !_cityDayHasAurora_(parsed.city_day) && daysTotal >= 3) {
+          parsed = _injectOneAuroraRow_(parsed, destination, daysTotal);
+        }
       }
     } catch {}
 
