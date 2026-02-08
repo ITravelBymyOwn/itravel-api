@@ -8,34 +8,41 @@
 /* ==============================
    SECCIÓN 1 · Helpers / Estado
 ================================= */
+
+/* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
+/* ---------- Config API ---------- */
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
+/* ---------- Estado principal ---------- */
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
-// 🧠 itineraries ahora soporta originalDays para rebalanceos selectivos
+
+// 🧠 itineraries soporta originalDays para rebalanceos selectivos
 let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate, originalDays } }
 let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
+
 let session = [];                // historial para el agente principal
 let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
+/* ---------- Flags de flujo ---------- */
 let planningStarted = false;
 let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
-// ✅ Defaults técnicos NO rígidos: solo fallback si el agente NO trae horas
-// (deja libertad al planner para proponer horarios reales sin “forzar” 08:30–19:00)
-const DEFAULT_START = '';
-const DEFAULT_END   = '';
-
 let pendingChange = null;
 let hasSavedOnce = false;
 
-// 🧠 Estado global para persistir configuración del planner
+/* ---------- Defaults técnicos (NO rígidos) ---------- */
+// Fallback solo si el agente no trae horas
+const DEFAULT_START = '';
+const DEFAULT_END   = '';
+
+/* ---------- Estado persistente del planner ---------- */
 let plannerState = {
   destinations: [],
   specialConditions: '',
@@ -47,22 +54,28 @@ let plannerState = {
     seniors: 0
   },
   budget: '',
-  currency: 'USD'
+  currency: 'USD',
+  lang: 'en' // se setea abajo
 };
 
+/* =========================================================
+   🌐 Idioma del planner — Opción B (MVP)
+   - Fuente primaria: <html lang="en|es">
+   - Fallback: pathname (/en /es)
+   - Default seguro: en
+========================================================= */
 (function initPlannerLang(){
   const normalize = (v)=>{
     const s = String(v || '').trim().toLowerCase();
     if(!s) return '';
-    // acepta "en", "en-us", "en_US", etc.
     const base = s.split(/[-_]/)[0];
     return (base === 'es' || base === 'en') ? base : '';
   };
 
-  // 1) Primary: <html lang="...">
+  // 1) <html lang="">
   let lang = normalize(document?.documentElement?.getAttribute('lang'));
 
-  // 2) Fallback: pathname (/es, /es/, /es/..., /en, /en/...)
+  // 2) URL fallback (/es o /en)
   if(!lang){
     try{
       const p = String(window?.location?.pathname || '').toLowerCase();
@@ -71,7 +84,7 @@ let plannerState = {
     }catch(_){}
   }
 
-  // 3) Default MVP: EN
+  // 3) Default MVP
   if(!lang) lang = 'en';
 
   plannerState.lang = lang;
