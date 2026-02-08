@@ -263,23 +263,44 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
-  // 🆕 Placeholder visible + tooltip
-  el.placeholder = 'MM/DD/AAAA';
-  el.title = 'Formato: MM/DD/AAAA';
+  // 🆕 Placeholder visible + tooltip (UI consistente con DD/MM/AAAA)
+  el.placeholder = 'DD/MM/AAAA';
+  el.title = 'Formato: DD/MM/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
     if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
     else el.value = v;
   });
 }
+
+// ✅ Parser flexible (quirúrgico): acepta DD/MM/YYYY y MM/DD/YYYY sin romper el flujo.
+// - Se prefiere DD/MM cuando ambos son válidos.
 function parseDMY(str){
   if(!str) return null;
   const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(str.trim());
   if(!m) return null;
-  const d = new Date(+m[3], (+m[2]-1), +m[1]);
-  if(d.getFullYear()!=+m[3] || d.getMonth()!=+m[2]-1 || d.getDate()!=+m[1]) return null;
-  return d;
+
+  const a = parseInt(m[1],10);
+  const b = parseInt(m[2],10);
+  const y = parseInt(m[3],10);
+
+  // Intento 1: DD/MM
+  const d1 = new Date(y, (b-1), a);
+  const ok1 = (d1.getFullYear()===y && d1.getMonth()===(b-1) && d1.getDate()===a);
+
+  // Intento 2: MM/DD
+  const d2 = new Date(y, (a-1), b);
+  const ok2 = (d2.getFullYear()===y && d2.getMonth()===(a-1) && d2.getDate()===b);
+
+  if(ok1 && ok2){
+    // Ambos válidos (ej. 02/03/2026). Preferimos DD/MM por UI (LatAm).
+    return d1;
+  }
+  if(ok1) return d1;
+  if(ok2) return d2;
+  return null;
 }
+
 function formatDMY(d){
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
