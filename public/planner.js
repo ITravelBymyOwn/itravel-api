@@ -746,8 +746,15 @@ Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucci
 ================================= */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
+  const lang = getLang();
+  const langLine = (lang === 'es')
+    ? 'IDIOMA DE SALIDA: Español. Todo el contenido de activity/notes/followup debe estar en Español.'
+    : 'OUTPUT LANGUAGE: English. All content in activity/notes/followup must be in English.';
+
   const globalStyle = `
 Eres "Astra", agente de viajes internacional.
+
+${langLine}
 
 REGLA CRÍTICA:
 - Devuelve SOLO JSON válido cuando se te pida itinerario (nunca texto fuera del JSON).
@@ -816,8 +823,14 @@ function parseJSON(s){
 
 async function callInfoAgent(text){
   const history = infoSession;
+  const lang = getLang();
+  const langLine = (lang === 'es')
+    ? 'Responde SIEMPRE en Español.'
+    : 'Always respond in English.';
+
   const globalStyle = `
 Eres "Astra", asistente informativo de viajes.
+${langLine}
 - SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
 - Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes o restricciones evidentes.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
@@ -847,12 +860,14 @@ Eres "Astra", asistente informativo de viajes.
       try {
         const j = JSON.parse(answer);
         if (j?.destination || j?.rows || j?.followup) {
-          return 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
+          return (getLang()==='es')
+            ? 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.'
+            : 'I could not fetch the Info Chat response correctly. Check your API Key/URL in Vercel or try again.';
         }
       } catch { /* no-op */ }
     }
 
-    return answer || '¿Algo más que quieras saber?';
+    return answer || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?');
   }catch(e){
     console.error("Fallo Info Chat:", e);
     return tone.fail;
