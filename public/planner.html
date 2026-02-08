@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>ITravelByMyOwn · Planner</title>
@@ -18,15 +18,15 @@
 <body>
   <!-- TOPBAR -->
   <div class="topbar">
-    <div class="brand">ITravelByMyOwn Planner</div>
-    <div class="lang">
-      <a href="#" class="active">ES</a>
-      <a href="#">EN</a>
-      <a href="#">FR</a>
-      <a href="#">PT</a>
+    <!-- ✅ Brand estilo logo (2 líneas) -->
+    <div class="brand brand-logo" aria-label="I Travel By My Own">
+      <div class="brand-line-1">I Travel</div>
+      <div class="brand-line-2">By My Own</div>
     </div>
+
+    <!-- ✅ Se quitaron los botones de idiomas del código Vercel -->
     <!-- Botón Info Chat WOW ✨ -->
-    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Abrir Info Chat">💬 Info Chat</button>
+    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button>
   </div>
 
   <div id="planner-grid">
@@ -73,20 +73,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         </div>
       </section>
 
-      <section class="box budget-box">
-        <h3>Presupuesto total</h3>
-        <div class="grid-2">
-          <label>Monto<input id="budget" type="number" min="0" placeholder="ej. 1500"></label>
-          <label>Moneda
-            <select id="currency">
-              <option value="USD" selected>$ USD</option>
-              <option value="EUR">€ EUR</option>
-              <option value="GBP">£ GBP</option>
-              <option value="CRC">₡ CRC</option>
-            </select>
-          </label>
-        </div>
-      </section>
+      <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
     </aside>
 
     <!-- MAIN -->
@@ -143,8 +130,8 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
       </div>
       <div id="info-chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <textarea id="info-chat-input" placeholder="Hazme cualquier pregunta sobre viajes..." rows="1"></textarea>
-        <button id="info-chat-send" class="btn primary">Enviar</button>
+        <textarea id="info-chat-input" placeholder="Ask me anything about travel..." rows="1"></textarea>
+        <button id="info-chat-send" class="btn primary">Send</button>
       </div>
     </div>
   </div>
@@ -168,9 +155,53 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
   </div>
 
   <!-- 🆕 Botón flotante Info Chat -->
-  <button id="info-chat-floating" class="info-chat-floating pulse" title="Abrir Info Chat">
+  <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
     💬 Info Chat
   </button>
+
+  <script>
+    (function () {
+      // ✅ Idioma: por ahora EN primero, luego ES con &lang=es en el iframe src.
+      const params = new URLSearchParams(window.location.search);
+      const lang = (params.get("lang") || "en").toLowerCase().slice(0, 2);
+      document.documentElement.setAttribute("lang", lang);
+      window.ITBMO_LANG = lang;
+
+      // ✅ Auto-height: emite la altura al parent (Webflow) para que el iframe se ajuste
+      function postHeight() {
+        try {
+          const h = Math.max(
+            document.documentElement.scrollHeight || 0,
+            document.body.scrollHeight || 0
+          );
+          window.parent && window.parent.postMessage(
+            { type: "ITBMO_PLANNER_HEIGHT", height: h },
+            "*"
+          );
+        } catch (_) {}
+      }
+
+      // ResizeObserver para cambios dinámicos (itinerario, chat, etc.)
+      try {
+        const ro = new ResizeObserver(function () {
+          postHeight();
+        });
+        ro.observe(document.body);
+      } catch (_) {
+        // fallback
+        window.addEventListener("load", postHeight);
+        window.addEventListener("resize", postHeight);
+        setInterval(postHeight, 1500);
+      }
+
+      // Primera medición rápida
+      window.addEventListener("load", function () {
+        postHeight();
+        setTimeout(postHeight, 300);
+        setTimeout(postHeight, 900);
+      });
+    })();
+  </script>
 
   <script src="./planner.js?v=57"></script>
 </body>
