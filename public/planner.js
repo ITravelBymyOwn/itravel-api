@@ -304,9 +304,7 @@ function makeHoursBlock(days){
   // 🆕 Guía de horarios
   const guide = document.createElement('p');
   guide.className = 'time-hint';
-  guide.textContent = (getLang()==='es')
-    ? '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)'
-    : '⏰ Use 24h time — e.g., 08:30 (morning) · 21:00 (night)';
+  guide.textContent = '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)';
   wrap.appendChild(guide);
 
   // Encabezado único de horas
@@ -314,8 +312,8 @@ function makeHoursBlock(days){
   header.className = 'hours-header';
   header.innerHTML = `
     <span></span>
-    <span class="header-start">${getLang()==='es' ? 'Hora Inicio' : 'Start time'}</span>
-    <span class="header-end">${getLang()==='es' ? 'Hora Final' : 'End time'}</span>
+    <span class="header-start">Hora Inicio</span>
+    <span class="header-end">Hora Final</span>
   `;
   wrap.appendChild(header);
 
@@ -323,9 +321,9 @@ function makeHoursBlock(days){
     const row = document.createElement('div');
     row.className = 'hours-day';
     row.innerHTML = `
-      <span>${getLang()==='es' ? 'Día' : 'Day'} ${d}</span>
-      <input class="start" type="time" aria-label="${getLang()==='es' ? 'Hora inicio' : 'Start time'}" placeholder="HH:MM">
-      <input class="end"   type="time" aria-label="${getLang()==='es' ? 'Hora final' : 'End time'}"  placeholder="HH:MM">
+      <span>Día ${d}</span>
+      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM">
+      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM">
     `;
     wrap.appendChild(row);
   }
@@ -333,23 +331,34 @@ function makeHoursBlock(days){
 }
 
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
+  // ✅ QUIRÚRGICO: evita que el planner “reviente” si #city-list no existe
+  if(!$cityList){
+    console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
+    return;
+  }
+
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
-    <label>${getLang()==='es' ? 'Ciudad' : 'City'}<input class="city" placeholder="${getLang()==='es' ? 'Ciudad' : 'City'}" value="${pref.city||''}"></label>
-    <label>${getLang()==='es' ? 'País' : 'Country'}<input class="country" placeholder="${getLang()==='es' ? 'País' : 'Country'}" value="${pref.country||''}"></label>
-    <label>${getLang()==='es' ? 'Días' : 'Days'}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+    <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
+    <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
+    <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
-      ${getLang()==='es' ? 'Inicio' : 'Start'}
+      Inicio
       <div class="date-wrapper">
         <input class="baseDate" placeholder="__/__/____" value="${pref.baseDate||''}">
-        <small class="date-format">${getLang()==='es' ? 'DD/MM/AAAA' : 'DD/MM/YYYY'}</small>
+        <small class="date-format">DD/MM/AAAA</small>
       </div>
     </label>
     <button class="remove" type="button">✕</button>
   `;
+
   const baseDateEl = qs('.baseDate', row);
-  autoFormatDMYInput(baseDateEl);
+
+  // ✅ QUIRÚRGICO: si .baseDate no existe (HTML cambió), NO romper addCityRow()
+  if(baseDateEl){
+    autoFormatDMYInput(baseDateEl);
+  }
 
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
