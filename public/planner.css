@@ -1,14 +1,27 @@
 :root{
-  --brand-500:#0EA47A; 
-  --brand-600:#0B8664;
-  --ink:#101828; 
-  --muted:#667085;
-  --surface:#F8FAFC; 
+  /* ====================
+     Webflow Color Scheme mapping (Relume variables)
+     Text = Blue Navy #0b1f3b
+     Foreground = Indigo 300 #a5b4fc
+     Border = Neutral Lighter #ccc
+     Accent = Indigo Primary #818cf8
+  ==================== */
+  --brand-500:#a5b4fc;         /* Indigo 300 (lighter) */
+  --brand-600:#818cf8;         /* Indigo Primary (accent) */
+
+  --ink:#0b1f3b;               /* Blue Navy */
+  --muted:rgba(11,31,59,.68);  /* Muted Blue Navy */
+
+  --surface:#ffffff;           /* Background (White) */
   --white:#FFF;
-  --radius:.8rem; 
-  --shadow:0 4px 16px rgba(16,24,40,.08);
-  --chat-bg:#F6F9FC;
-  --chat-user:#0EA47A15;
+
+  --border:#ccc;               /* Neutral Lighter */
+  --radius:.8rem;
+  --shadow:0 4px 16px rgba(11,31,59,.10);
+
+  /* Chat surfaces aligned */
+  --chat-bg:#f7f8ff;
+  --chat-user:rgba(129,140,248,.14); /* accent tint */
   --chat-ai:#FFFFFF;
 }
 
@@ -26,25 +39,49 @@ body{
   justify-content:space-between;
   align-items:center;
   background:#fff;
-  border-bottom:1px solid #e5e7eb;
+  border-bottom:1px solid var(--border);
   padding:.8rem 1.25rem;
   position:sticky;
   top:0;
   z-index:50;
   box-shadow:var(--shadow);
 }
+
+/* Brand (default fallback) */
 .topbar .brand{
   font-weight:700;
-  color:var(--brand-600);
+  color:var(--ink);
   font-size:1.2rem;
 }
+
+/* ✅ Brand estilo logo (2 líneas) */
+.topbar .brand.brand-logo{
+  display:flex;
+  flex-direction:column;
+  line-height:1.05;
+  gap:.15rem;
+}
+.topbar .brand.brand-logo .brand-line-1{
+  font-weight:800;
+  font-size:1.25rem;
+  letter-spacing:.2px;
+  color:var(--ink);
+}
+.topbar .brand.brand-logo .brand-line-2{
+  font-weight:700;
+  font-size:.85rem;
+  letter-spacing:.2px;
+  color:rgba(11,31,59,.78);
+}
+
+/* (Se mantiene por compatibilidad si existiera aún en algún build) */
 .topbar .lang a{
   margin-left:.6rem;
   text-decoration:none;
   color:var(--muted);
   font-weight:600;
 }
-.topbar .lang a.active{color:var(--brand-600)}
+.topbar .lang a.active{color:var(--ink)}
 
 /* ✨ Botón Info Chat (Topbar) */
 .info-chat-btn{
@@ -61,13 +98,14 @@ body{
   display:flex;
   align-items:center;
   gap:.5rem;
-  box-shadow:0 4px 14px rgba(0,0,0,0.15);
+  box-shadow:0 6px 18px rgba(11,31,59,.18);
   position:relative;
 }
 .info-chat-btn:hover{
-  background:var(--brand-500);
-  transform:scale(1.08);
-  box-shadow:0 6px 20px rgba(0,0,0,0.25);
+  background:var(--brand-600);
+  filter:brightness(.96);
+  transform:scale(1.06);
+  box-shadow:0 10px 26px rgba(11,31,59,.22);
 }
 .info-chat-btn:active{
   transform:scale(.96);
@@ -94,7 +132,7 @@ body{
   height: 100%;
   border-radius: 999px;
   background: var(--brand-600);
-  opacity: 0.45;
+  opacity: 0.35;
   animation: pulseAnim 1.8s ease-out infinite;
   z-index: -1;
   pointer-events: none;
@@ -103,10 +141,10 @@ body{
 @keyframes pulseAnim {
   0% {
     transform: translate(-50%, -50%) scale(1);
-    opacity: 0.45;
+    opacity: 0.35;
   }
   50% {
-    transform: translate(-50%, -50%) scale(1.25);
+    transform: translate(-50%, -50%) scale(1.22);
     opacity: 0;
   }
   100% {
@@ -130,21 +168,22 @@ body{
   display:flex;
   align-items:center;
   gap:.5rem;
-  box-shadow:0 6px 20px rgba(0,0,0,0.25);
+  box-shadow:0 10px 28px rgba(11,31,59,.22);
   cursor:pointer;
   transition:all .3s ease;
   z-index:1200;
 }
 .info-chat-floating:hover{
-  background:var(--brand-500);
-  transform:scale(1.08);
-  box-shadow:0 8px 26px rgba(0,0,0,0.35);
+  background:var(--brand-600);
+  filter:brightness(.96);
+  transform:scale(1.06);
+  box-shadow:0 14px 34px rgba(11,31,59,.26);
 }
 .info-chat-floating:active{
   transform:scale(.96);
 }
 .info-chat-floating.pulse::after{
-  background:var(--brand-500);
+  background:var(--brand-600);
 }
 @media(max-width:768px){
   .info-chat-floating{
@@ -171,13 +210,15 @@ body{
 /* ==================== SIDEBAR ==================== */
 .sidebar{
   background:#fff;
-  border:1px solid #e5e7eb;
+  border:1px solid var(--border);
   border-radius:var(--radius);
   box-shadow:var(--shadow);
   padding:1rem;
 
-  max-height:calc(100vh - 120px);
-  overflow:auto;
+  /* ✅ QUITAR SCROLL INTERNO: dejar crecer con el contenido
+     (antes: max-height + overflow:auto) */
+  max-height:none;
+  overflow:visible;
 }
 
 /* 🆕 Permitir scroll global aunque sidebar esté bloqueado */
@@ -185,7 +226,9 @@ body{
   opacity:.55;
   filter:grayscale(.05);
   pointer-events:none;
-  overflow:auto;
+
+  /* mantener consistente con scroll global */
+  overflow:visible;
 }
 
 /* ✅ Excepciones: permitir interacción con botones clave incluso si sidebar está bloqueado */
@@ -198,11 +241,11 @@ body{
 
 .box{
   background:#fff;
-  border:1px solid #eef2f7;
+  border:1px solid var(--border);
   border-radius:var(--radius);
   padding:1rem;
   margin-bottom:1rem;
-  box-shadow:0 1px 6px rgba(0,0,0,0.03);
+  box-shadow:0 1px 8px rgba(11,31,59,.05);
 }
 
 .row-actions{
@@ -232,11 +275,12 @@ body{
 .city-row select{
   width:100%;
   padding:.5rem .6rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
   font-size:.9rem;
   background:#fff;
   min-width:0;
+  color:var(--ink);
 }
 .city-row select{
   appearance:none;
@@ -281,7 +325,7 @@ body{
   width:75px;               /* ⬇️ reducido */
   padding:.35rem .28rem;
   font-size:.78rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
   background:#fff;
 }
@@ -291,7 +335,7 @@ body{
   width:50px;               /* ⬇️ reducido */
   text-align:center;
   padding:.35rem .28rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
   font-size:.78rem;
   background:#fff;
@@ -321,7 +365,7 @@ body{
   gap:.5rem;                             /* ⬇️ menos separación */
   font-size:.85rem;
   font-weight:600;
-  color:#475467;
+  color:rgba(11,31,59,.72);
   padding-bottom:.2rem;
 }
 .hours-day{
@@ -337,11 +381,12 @@ input.start,
 input.end {
   text-align:center;
   padding:.5rem .6rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
   font-size:.9rem;
   background:#fff;
   width:100%;
+  color:var(--ink);
 }
 
 input.start.invalid,
@@ -354,7 +399,7 @@ input.end.invalid {
 .time-hint {
   display: block;
   font-size: 0.85rem;
-  color: #555;
+  color: rgba(11,31,59,.68);
   margin: 0.25rem 0 0.5rem 0;
   font-style: italic;
   opacity: 0;
@@ -389,11 +434,12 @@ input.end.invalid {
   width:100%;
   min-height:380px;
   padding:.8rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
   font-size:.9rem;
   resize:vertical;
   white-space:pre-wrap;
+  color:var(--ink);
 }
 @media (max-width:768px){
   .special-conditions textarea{
@@ -418,10 +464,11 @@ input.end.invalid {
 #traveler-grid input[type="number"]{
   margin-top:.25rem;
   padding:.5rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
   font-size:.9rem;
   width:100%;
+  color:var(--ink);
 }
 @media (max-width:640px){
   #traveler-grid{grid-template-columns:1fr}
@@ -429,18 +476,18 @@ input.end.invalid {
 
 /* ==================== BOTONES ==================== */
 .btn{
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   background:#fff;
-  color:var(--brand-600);
+  color:var(--ink);
   border-radius:.55rem;
   padding:.6rem .9rem;
   cursor:pointer;
   transition:.2s ease;
 }
 .btn:hover{
-  background:var(--brand-500);
-  border-color:var(--brand-500);
-  color:#fff;
+  background:rgba(129,140,248,.10);
+  border-color:var(--brand-600);
+  color:var(--ink);
   transform:translateY(-1px);
 }
 .btn.primary{
@@ -449,11 +496,13 @@ input.end.invalid {
   border-color:var(--brand-600);
   font-weight:700;
 }
-.btn.primary:hover{ filter:brightness(.95); }
+.btn.primary:hover{
+  filter:brightness(.96);
+}
 .btn.ghost{
-  background:#f0fdf4;
+  background:rgba(165,180,252,.18);
   border:1px dashed var(--brand-600);
-  color:var(--brand-600);
+  color:var(--ink);
 }
 .btn.warn{
   background:#fff0f0;
@@ -483,7 +532,7 @@ input.end.invalid {
 
 /* ==================== CHAT ==================== */
 .chat{
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   background:var(--chat-bg);
   border-radius:var(--radius);
   margin:.8rem 0 1rem 0;
@@ -507,13 +556,13 @@ input.end.invalid {
   border-radius:1rem;
   font-size:.9rem;
   line-height:1.35;
-  box-shadow:0 1px 4px rgba(0,0,0,0.05);
+  box-shadow:0 1px 6px rgba(11,31,59,.06);
   animation:fadeIn .3s ease;
 }
 .chat-message.user{
   align-self:flex-end;
   background:var(--chat-user);
-  color:var(--brand-600);
+  color:var(--ink);
 }
 .chat-message.ai{
   align-self:flex-start;
@@ -525,15 +574,16 @@ input.end.invalid {
   gap:.5rem;
   padding:.6rem;
   background:#fff;
-  border-top:1px solid #d0d5dd;
+  border-top:1px solid var(--border);
   border-bottom-left-radius:var(--radius);
   border-bottom-right-radius:var(--radius);
 }
 .chat-input input{
   flex:1;
   padding:.6rem;
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   border-radius:.5rem;
+  color:var(--ink);
 }
 
 /* ==================== ITINERARIO ==================== */
@@ -544,17 +594,17 @@ input.end.invalid {
   margin:.75rem 0;
 }
 .city-tab{
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   background:#fff;
-  color:var(--brand-600);
+  color:var(--ink);
   border-radius:999px;
   padding:.45rem .8rem;
   cursor:pointer;
   transition:.2s ease;
 }
 .city-tab.active{
-  background:var(--brand-500);
-  border-color:var(--brand-500);
+  background:var(--brand-600);
+  border-color:var(--brand-600);
   color:#fff;
 }
 table.itinerary{
@@ -565,14 +615,15 @@ table.itinerary{
 }
 table.itinerary th,
 table.itinerary td{
-  border:1px solid #e5e7eb;
+  border:1px solid var(--border);
   padding:.55rem;
   text-align:center;
   vertical-align:middle;
 }
 table.itinerary th{
-  background:#f1f5f9;
+  background:rgba(165,180,252,.18);
   font-weight:600;
+  color:var(--ink);
 }
 
 .pager{
@@ -582,16 +633,17 @@ table.itinerary th{
   margin:.75rem 0;
 }
 .pager button{
-  border:1px solid #d0d5dd;
+  border:1px solid var(--border);
   background:#fff;
   border-radius:.4rem;
   padding:.35rem .6rem;
   cursor:pointer;
+  color:var(--ink);
 }
 .pager button.active{
-  background:var(--brand-500);
+  background:var(--brand-600);
   color:#fff;
-  border-color:var(--brand-500);
+  border-color:var(--brand-600);
 }
 .pager .ghost{
   opacity:.5;
@@ -626,14 +678,14 @@ table.itinerary th{
   transition:.25s;
 }
 #confirm-itinerary:hover{
-  background:var(--brand-500);
+  filter:brightness(.96);
   transform:translateY(-2px);
 }
 
 /* ==================== FOOTER ==================== */
 .footer{
   background:#fff;
-  border-top:1px solid #e5e7eb;
+  border-top:1px solid var(--border);
   padding:1rem;
   text-align:center;
   color:var(--muted);
@@ -641,7 +693,7 @@ table.itinerary th{
   margin-top:1rem;
 }
 .footer a{
-  color:var(--brand-600);
+  color:var(--ink);
   text-decoration:none;
   margin:0 .25rem;
 }
@@ -683,7 +735,7 @@ table.itinerary th{
   display:inline-block;
   width:50px;
   height:50px;
-  border:5px solid var(--brand-500);
+  border:5px solid var(--brand-600);
   border-radius:50%;
   border-top-color:transparent;
   animation:spin 1s linear infinite;
@@ -692,7 +744,7 @@ table.itinerary th{
 #loading-overlay p {
   margin-top:1rem;
   font-weight:600;
-  color:var(--brand-600);
+  color:var(--ink);
 }
 
 /* ==================== ANIMACIONES ==================== */
@@ -707,8 +759,8 @@ table.itinerary th{
   position: fixed;
   right: 20px;
   bottom: 20px;
-  background: rgba(0,0,0,0.85);
-  border-radius: 8px;
+  background: rgba(11,31,59,0.92);
+  border-radius: 10px;
   display: none;
   padding: 10px 14px;
   z-index: 3000;
@@ -739,65 +791,102 @@ table.itinerary th{
 }
 
 /* ==================== INFO CHAT MODAL ==================== */
+/* ✅ Emulación tipo ChatGPT: panel flotante (no 100vh) */
 .info-chat-modal{
   position:fixed;
-  top:0;
-  right:0;
-  height:100vh;
-  width:420px;
-  max-width:100%;
+  right:24px;
+  bottom:24px;
+  top:auto;
+  height:auto;
+
+  width:380px;
+  max-width:calc(100% - 48px);
+
+  max-height:min(72vh, 640px);
+
   background:#fff;
-  box-shadow:-3px 0 8px rgba(0,0,0,0.15);
+  border:1px solid var(--border);
+  border-radius:16px;
+
+  box-shadow:0 18px 46px rgba(11,31,59,.22);
   z-index:9999;
+
   display:flex;
   flex-direction:column;
+
   visibility:hidden;
   pointer-events:none;
+  overflow:hidden;
 }
 .info-chat-modal.active{
   visibility:visible;
   pointer-events:auto;
 }
+@media (max-width:768px){
+  .info-chat-modal{
+    right:14px;
+    bottom:14px;
+    width:calc(100% - 28px);
+    max-height:78vh;
+    border-radius:16px;
+  }
+}
+
 .info-chat-panel{
   display:flex;
   flex-direction:column;
   height:100%;
+  min-height:420px;
 }
+
 .info-chat-header{
   display:flex;
   justify-content:space-between;
   align-items:center;
-  padding:1rem;
+  padding:.8rem .9rem;
   background:var(--brand-600);
   color:#fff;
 }
 .info-chat-header h3{
   margin:0;
-  font-weight:600;
+  font-weight:700;
+  font-size:.95rem;
 }
+
+/* Mensajes */
 .info-chat-modal .chat-messages{
   flex:1;
   overflow-y:auto;
-  padding:1rem;
+  padding:.85rem .9rem;
+  background:#fff;
 }
+
+/* Input */
 .info-chat-modal .chat-input{
-  border-top:1px solid #d0d5dd;
-  padding:.75rem;
+  border-top:1px solid var(--border);
+  padding:.65rem;
   display:flex;
   gap:.5rem;
+  background:#fff;
 }
 /* 🆕 Multilínea: reemplaza input por textarea en info chat */
 .info-chat-modal .chat-input textarea{
   flex:1;
-  padding:.5rem;
-  border-radius:var(--radius);
-  border:1px solid #d0d5dd;
+  padding:.55rem .65rem;
+  border-radius:12px;
+  border:1px solid var(--border);
   resize:none;
   font-family:inherit;
   line-height:1.4;
   min-height:42px;
-  max-height:220px; /* 🆕 aumentada para interacción más fluida */
+  max-height:160px;
   overflow-y:auto;
+  color:var(--ink);
+}
+
+/* Botón enviar del info chat dentro del modal: que no se “dispare” con hover claro */
+.info-chat-modal #info-chat-send.btn.primary:hover{
+  filter:brightness(.96);
 }
 
 /* 🆕 Typing dots más grandes en Info Chat */
@@ -806,7 +895,7 @@ table.itinerary th{
   font-size:2rem;
   line-height:1;
   margin:0 3px;
-  color:#777;
+  color:rgba(11,31,59,.55);
   opacity:0.3;
   animation: thinkingDots 1.5s infinite;
   transition:opacity .2s ease;
