@@ -778,6 +778,8 @@ Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucci
 
 `;
 
+/* ==============================
+   SECCIÓN 12 · Llamada a Astra (estilo global)
 ================================= */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
