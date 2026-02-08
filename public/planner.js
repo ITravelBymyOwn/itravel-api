@@ -820,20 +820,38 @@ Ediciones:
 
 `.trim();
 
+  // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
+  const controller = new AbortController();
+  const timeoutMs = 75000; // 75s (ajustable)
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+
   try{
     showThinking(true);
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
+      signal: controller.signal,
       // ✅ QUIRÚRGICO: fuerza modo planner (API v58 default planner, pero lo fijamos para robustez)
       body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history, mode: 'planner' })
     });
-    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
+
+    if(!res.ok){
+      const raw = await res.text().catch(()=> '');
+      console.error('API error (planner):', res.status, res.statusText, raw);
+      return `{"followup":"${tone.fail}"}`;
+    }
+
+    const data = await res.json().catch(()=>({text:''}));
     return data?.text || '';
   }catch(e){
+    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Fallo al contactar la API:", e);
+    if(isAbort){
+      return `{"followup":"⚠️ El asistente tardó demasiado en responder (timeout). Intenta de nuevo o reduce el número de días/ciudades."}`;
+    }
     return `{"followup":"${tone.fail}"}`;
   }finally{
+    clearTimeout(timer);
     showThinking(false);
   }
 }
@@ -860,12 +878,18 @@ Eres "Astra", asistente informativo de viajes.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
 `.trim();
 
+  // ✅ QUIRÚRGICO: timeout también para Info Chat (evita cuelgues)
+  const controller = new AbortController();
+  const timeoutMs = 45000; // 45s (ajustable)
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+
   try{
     setInfoChatBusy(true);
 
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
+      signal: controller.signal,
       body: JSON.stringify({
         model: MODEL,
         input: `${globalStyle}\n\n${text}`,
@@ -874,7 +898,13 @@ Eres "Astra", asistente informativo de viajes.
       })
     });
 
-    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
+    if(!res.ok){
+      const raw = await res.text().catch(()=> '');
+      console.error('API error (info):', res.status, res.statusText, raw);
+      return tone.fail;
+    }
+
+    const data = await res.json().catch(()=>({text:''}));
     const answer = (data?.text || '').trim();
 
     infoSession.push({ role:'user',      content: text });
@@ -891,9 +921,12 @@ Eres "Astra", asistente informativo de viajes.
 
     return answer || '¿Algo más que quieras saber?';
   }catch(e){
+    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Fallo Info Chat:", e);
+    if(isAbort) return '⚠️ El Info Chat tardó demasiado (timeout). Intenta de nuevo.';
     return tone.fail;
   }finally{
+    clearTimeout(timer);
     setInfoChatBusy(false);
   }
 }
