@@ -1,10 +1,8 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v58 (parte 1/3)
-   Base: v57
-   Cambios mínimos:
-   - Bloqueo sidebar y botón reset al guardar destinos.
-   - Overlay bloquea botón flotante Info Chat.
-   - Placeholder visible y tooltip para inputs de fecha.
+   ✅ v59 (quirúrgico) — Idioma (Opción B)
+   - Fuente primaria: <html lang="en|es">
+   - Fallback: ruta URL (/es o /en) si el lang no está definido o es raro
+   - Guarda idioma normalizado en plannerState.lang
 ========================================================= */
 
 /* ==============================
@@ -52,23 +50,92 @@ let plannerState = {
   currency: 'USD'
 };
 
+(function initPlannerLang(){
+  const normalize = (v)=>{
+    const s = String(v || '').trim().toLowerCase();
+    if(!s) return '';
+    // acepta "en", "en-us", "en_US", etc.
+    const base = s.split(/[-_]/)[0];
+    return (base === 'es' || base === 'en') ? base : '';
+  };
+
+  // 1) Primary: <html lang="...">
+  let lang = normalize(document?.documentElement?.getAttribute('lang'));
+
+  // 2) Fallback: pathname (/es, /es/, /es/..., /en, /en/...)
+  if(!lang){
+    try{
+      const p = String(window?.location?.pathname || '').toLowerCase();
+      if(/^\/es(\/|$)/.test(p)) lang = 'es';
+      else if(/^\/en(\/|$)/.test(p)) lang = 'en';
+    }catch(_){}
+  }
+
+  // 3) Default MVP: EN
+  if(!lang) lang = 'en';
+
+  plannerState.lang = lang;
+})();
+
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
-const tone = {
-  hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
-  askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
-  confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
-  doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
-  fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
-  askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
-  humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
-  humanCancelled: 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂',
-  cityAdded: (c)=>`✅ Añadí <strong>${c}</strong> y generé su itinerario.`,
-  cityRemoved: (c)=>`🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`,
-  cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
-  thinking: 'Astra está pensando…'
-};
+function buildTone(lang){
+  const isES = (lang === 'es');
+
+  return {
+    hi: isES
+      ? '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍'
+      : 'Hi! I’m Astra ✨, your travel concierge. Let’s create an unforgettable trip 🌍',
+
+    askHotelTransport: (city)=> isES
+      ? `Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`
+      : `For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental car, public transit, taxi/uber, mixed, or “recommend”).`,
+
+    confirmAll: isES
+      ? '✨ Listo. Empiezo a generar tus itinerarios…'
+      : '✨ Great. I’m starting to generate your itineraries…',
+
+    doneAll: isES
+      ? '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.'
+      : '🎉 Itineraries generated. If you want to change anything, just tell me and I’ll adjust it ✨ For specific details—weather, transport, clothing, safety, and more—open the Info Chat 🌐 and I’ll help you.',
+
+    fail: isES
+      ? '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).'
+      : '⚠️ I couldn’t reach the assistant. Check console/Vercel (API Key, URL).',
+
+    askConfirm: (summary)=> isES
+      ? `¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`
+      : `Confirm? ${summary}<br><small>Reply “yes” to apply or “no” to cancel.</small>`,
+
+    humanOk: isES
+      ? 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨'
+      : 'Perfect 🙌 I adjusted your itinerary so you can make the most of your time. It will be great! ✨',
+
+    humanCancelled: isES
+      ? 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂'
+      : 'Got it, I didn’t apply changes. Want to try another idea? 🙂',
+
+    cityAdded: (c)=> isES
+      ? `✅ Añadí <strong>${c}</strong> y generé su itinerario.`
+      : `✅ I added <strong>${c}</strong> and generated its itinerary.`,
+
+    cityRemoved: (c)=> isES
+      ? `🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`
+      : `🗑️ I removed <strong>${c}</strong> from your plan and re-optimized the tabs.`,
+
+    cannotFindCity: isES
+      ? 'No identifiqué la ciudad. Dímela con exactitud, por favor.'
+      : 'I couldn’t identify the city. Please tell me the exact name.',
+
+    thinking: isES
+      ? 'Astra está pensando…'
+      : 'Astra is thinking…'
+  };
+}
+
+// ✅ Mantener API existente: tone.hi, tone.fail, etc.
+let tone = buildTone(getLang());
 
 /* ==============================
    SECCIÓN 3 · Referencias DOM
@@ -225,23 +292,44 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
-  // 🆕 Placeholder visible + tooltip
-  el.placeholder = 'MM/DD/AAAA';
-  el.title = 'Formato: MM/DD/AAAA';
+  // 🆕 Placeholder visible + tooltip (UI consistente con DD/MM/AAAA)
+  el.placeholder = 'DD/MM/AAAA';
+  el.title = 'Formato: DD/MM/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
     if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
     else el.value = v;
   });
 }
+
+// ✅ Parser flexible (quirúrgico): acepta DD/MM/YYYY y MM/DD/YYYY sin romper el flujo.
+// - Se prefiere DD/MM cuando ambos son válidos.
 function parseDMY(str){
   if(!str) return null;
   const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(str.trim());
   if(!m) return null;
-  const d = new Date(+m[3], (+m[2]-1), +m[1]);
-  if(d.getFullYear()!=+m[3] || d.getMonth()!=+m[2]-1 || d.getDate()!=+m[1]) return null;
-  return d;
+
+  const a = parseInt(m[1],10);
+  const b = parseInt(m[2],10);
+  const y = parseInt(m[3],10);
+
+  // Intento 1: DD/MM
+  const d1 = new Date(y, (b-1), a);
+  const ok1 = (d1.getFullYear()===y && d1.getMonth()===(b-1) && d1.getDate()===a);
+
+  // Intento 2: MM/DD
+  const d2 = new Date(y, (a-1), b);
+  const ok2 = (d2.getFullYear()===y && d2.getMonth()===(a-1) && d2.getDate()===b);
+
+  if(ok1 && ok2){
+    // Ambos válidos (ej. 02/03/2026). Preferimos DD/MM por UI (LatAm).
+    return d1;
+  }
+  if(ok1) return d1;
+  if(ok2) return d2;
+  return null;
 }
+
 function formatDMY(d){
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
@@ -266,7 +354,9 @@ function makeHoursBlock(days){
   // 🆕 Guía de horarios
   const guide = document.createElement('p');
   guide.className = 'time-hint';
-  guide.textContent = '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)';
+  guide.textContent = (getLang()==='es')
+    ? '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)'
+    : '⏰ Use 24h time — e.g., 08:30 (morning) · 21:00 (night)';
   wrap.appendChild(guide);
 
   // Encabezado único de horas
@@ -274,8 +364,8 @@ function makeHoursBlock(days){
   header.className = 'hours-header';
   header.innerHTML = `
     <span></span>
-    <span class="header-start">Hora Inicio</span>
-    <span class="header-end">Hora Final</span>
+    <span class="header-start">${getLang()==='es' ? 'Hora Inicio' : 'Start time'}</span>
+    <span class="header-end">${getLang()==='es' ? 'Hora Final' : 'End time'}</span>
   `;
   wrap.appendChild(header);
 
@@ -283,9 +373,9 @@ function makeHoursBlock(days){
     const row = document.createElement('div');
     row.className = 'hours-day';
     row.innerHTML = `
-      <span>Día ${d}</span>
-      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM">
-      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM">
+      <span>${getLang()==='es' ? 'Día' : 'Day'} ${d}</span>
+      <input class="start" type="time" aria-label="${getLang()==='es' ? 'Hora inicio' : 'Start time'}" placeholder="HH:MM">
+      <input class="end"   type="time" aria-label="${getLang()==='es' ? 'Hora final' : 'End time'}"  placeholder="HH:MM">
     `;
     wrap.appendChild(row);
   }
@@ -296,14 +386,14 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
-    <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
-    <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
-    <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+    <label>${getLang()==='es' ? 'Ciudad' : 'City'}<input class="city" placeholder="${getLang()==='es' ? 'Ciudad' : 'City'}" value="${pref.city||''}"></label>
+    <label>${getLang()==='es' ? 'País' : 'Country'}<input class="country" placeholder="${getLang()==='es' ? 'País' : 'Country'}" value="${pref.country||''}"></label>
+    <label>${getLang()==='es' ? 'Días' : 'Days'}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
-      Inicio
+      ${getLang()==='es' ? 'Inicio' : 'Start'}
       <div class="date-wrapper">
         <input class="baseDate" placeholder="__/__/____" value="${pref.baseDate||''}">
-        <small class="date-format">DD/MM/AAAA</small>
+        <small class="date-format">${getLang()==='es' ? 'DD/MM/AAAA' : 'DD/MM/YYYY'}</small>
       </div>
     </label>
     <button class="remove" type="button">✕</button>
@@ -640,6 +730,7 @@ function buildIntake(){
   }).join(' | ');
 
   return [
+    `Language: ${getLang()}`,
     `Destinations: ${list}`,
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
@@ -708,8 +799,15 @@ Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucci
 ================================= */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
+  const lang = getLang();
+  const langLine = (lang === 'es')
+    ? 'IDIOMA DE SALIDA: Español. Todo el contenido de activity/notes/followup debe estar en Español.'
+    : 'OUTPUT LANGUAGE: English. All content in activity/notes/followup must be in English.';
+
   const globalStyle = `
 Eres "Astra", agente de viajes internacional.
+
+${langLine}
 
 REGLA CRÍTICA:
 - Devuelve SOLO JSON válido cuando se te pida itinerario (nunca texto fuera del JSON).
@@ -778,8 +876,14 @@ function parseJSON(s){
 
 async function callInfoAgent(text){
   const history = infoSession;
+  const lang = getLang();
+  const langLine = (lang === 'es')
+    ? 'Responde SIEMPRE en Español.'
+    : 'Always respond in English.';
+
   const globalStyle = `
 Eres "Astra", asistente informativo de viajes.
+${langLine}
 - SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
 - Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes o restricciones evidentes.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
@@ -809,12 +913,14 @@ Eres "Astra", asistente informativo de viajes.
       try {
         const j = JSON.parse(answer);
         if (j?.destination || j?.rows || j?.followup) {
-          return 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
+          return (getLang()==='es')
+            ? 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.'
+            : 'I could not fetch the Info Chat response correctly. Check your API Key/URL in Vercel or try again.';
         }
       } catch { /* no-op */ }
     }
 
-    return answer || '¿Algo más que quieras saber?';
+    return answer || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?');
   }catch(e){
     console.error("Fallo Info Chat:", e);
     return tone.fail;
@@ -1748,18 +1854,23 @@ async function onSend(){
   // Agregar varios días (con rebalanceo global)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
-    showWOW(true,'Agregando días y reoptimizando…');
+    showWOW(true, getLang()==='es' ? 'Agregando días y reoptimizando…' : 'Adding days and re-optimizing…');
     addMultipleDaysToCity(city, intent.extraDays);
     await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`, 'ai');
+    chatMsg(
+      (getLang()==='es')
+        ? `✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`
+        : `✅ I added ${intent.extraDays} day(s) to ${city} and re-optimized the itinerary.`,
+      'ai'
+    );
     return;
   }
 
   // 1) Agregar día al FINAL — ⬅️ AJUSTE CLAVE AQUÍ
   if(intent.type==='add_day_end' && intent.city){
     const city = intent.city;
-    showWOW(true,'Insertando día y optimizando…');
+    showWOW(true, getLang()==='es' ? 'Insertando día y optimizando…' : 'Adding a day and optimizing…');
 
     ensureDays(city);
     const byDay = itineraries[city].byDay || {};
@@ -1782,43 +1893,43 @@ async function onSend(){
     renderCityItinerary(city);
 
     showWOW(false);
-    chatMsg('✅ Día agregado y plan reoptimizado inteligentemente.','ai');
+    chatMsg(getLang()==='es' ? '✅ Día agregado y plan reoptimizado inteligentemente.' : '✅ Day added and plan re-optimized intelligently.','ai');
     return;
   }
 
   // 2) Quitar día
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
-    showWOW(true,'Eliminando día…');
+    showWOW(true, getLang()==='es' ? 'Eliminando día…' : 'Removing day…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
     for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    chatMsg('✅ Día eliminado y plan reequilibrado.','ai');
+    chatMsg(getLang()==='es' ? '✅ Día eliminado y plan reequilibrado.' : '✅ Day removed and plan re-balanced.','ai');
     return;
   }
 
   // 3) Swap de días
   if(intent.type==='swap_day' && intent.city){
-    showWOW(true,'Intercambiando días…');
+    showWOW(true, getLang()==='es' ? 'Intercambiando días…' : 'Swapping days…');
     swapDays(intent.city, intent.from, intent.to);
     await optimizeDay(intent.city, intent.from);
     if(intent.to!==intent.from) await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
+    chatMsg(getLang()==='es' ? '✅ Intercambié el orden y optimicé ambos días.' : '✅ I swapped the order and optimized both days.','ai');
     return;
   }
 
   // 4) Mover actividad
   if(intent.type==='move_activity' && intent.city){
-    showWOW(true,'Moviendo actividad…');
+    showWOW(true, getLang()==='es' ? 'Moviendo actividad…' : 'Moving activity…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
     await optimizeDay(intent.city, intent.fromDay);
     await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    chatMsg('✅ Moví la actividad y reoptimicé los días implicados.','ai');
+    chatMsg(getLang()==='es' ? '✅ Moví la actividad y reoptimicé los días implicados.' : '✅ I moved the activity and re-optimized the affected days.','ai');
     return;
   }
 
@@ -1826,7 +1937,7 @@ async function onSend(){
   if(intent.type==='swap_activity' && intent.city){
     const city = intent.city;
     const day  = itineraries[city]?.currentDay || 1;
-    showWOW(true,'Ajustando actividades…');
+    showWOW(true, getLang()==='es' ? 'Ajustando actividades…' : 'Adjusting activities…');
     const q = intent.target ? intent.target.toLowerCase() : '';
     if(q){
       const before = itineraries[city].byDay[day]||[];
@@ -1836,13 +1947,13 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Sustituí la actividad y reoptimicé el día.','ai');
+    chatMsg(getLang()==='es' ? '✅ Sustituí la actividad y reoptimicé el día.' : '✅ I replaced the activity and re-optimized the day.','ai');
     return;
   }
 
   // 6) Cambiar horas
   if(intent.type==='change_hours' && intent.city){
-    showWOW(true,'Ajustando horarios…');
+    showWOW(true, getLang()==='es' ? 'Ajustando horarios…' : 'Adjusting times…');
     const city = intent.city;
     const day = itineraries[city]?.currentDay || 1;
     if(!cityMeta[city]) cityMeta[city]={perDay:[]};
@@ -1853,7 +1964,7 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Ajusté los horarios y reoptimicé tu día.','ai');
+    chatMsg(getLang()==='es' ? '✅ Ajusté los horarios y reoptimicé tu día.' : '✅ I adjusted the times and re-optimized your day.','ai');
     return;
   }
 
@@ -1866,7 +1977,12 @@ async function onSend(){
     const sel = lastRow?.querySelector('.days');
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
     saveDestinations();
-    chatMsg(`✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`, 'ai');
+    chatMsg(
+      (getLang()==='es')
+        ? `✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`
+        : `✅ I added <strong>${name}</strong>. Tell me your hotel/area and transport to generate the plan.`,
+      'ai'
+    );
     return;
   }
 
@@ -1877,7 +1993,12 @@ async function onSend(){
     delete itineraries[name];
     delete cityMeta[name];
     renderCityTabs();
-    chatMsg(`🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`, 'ai');
+    chatMsg(
+      (getLang()==='es')
+        ? `🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`
+        : `🗑️ I removed <strong>${name}</strong> from your itinerary.`,
+      'ai'
+    );
     return;
   }
 
@@ -1886,9 +2007,11 @@ async function onSend(){
     try{
       setChatBusy(true);
       const ans = await callAgent(
-`Responde en texto claro y conciso (sin JSON):
-"${text}"`, true);
-      chatMsg(ans || '¿Algo más que quieras saber?');
+(getLang()==='es'
+  ? `Responde en texto claro y conciso (sin JSON):\n"${text}"`
+  : `Reply in clear, concise text (no JSON):\n"${text}"`
+), true);
+      chatMsg(ans || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
     } finally {
       setChatBusy(false);
     }
@@ -1898,9 +2021,9 @@ async function onSend(){
   // 10) Edición libre
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
-    if(!city){ chatMsg('Aún no hay itinerario en pantalla.'); return; }
+    if(!city){ chatMsg(getLang()==='es' ? 'Aún no hay itinerario en pantalla.' : 'There is no itinerary on screen yet.'); return; }
     const day = itineraries[city]?.currentDay || 1;
-    showWOW(true,'Aplicando tu cambio…');
+    showWOW(true, getLang()==='es' ? 'Aplicando tu cambio…' : 'Applying your change…');
 
     const data = itineraries[city];
     const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)';
@@ -1955,10 +2078,10 @@ Instrucción del usuario: ${text}
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Cambio aplicado y ciudad reoptimizada.','ai');
+      chatMsg(getLang()==='es' ? '✅ Cambio aplicado y ciudad reoptimizada.' : '✅ Change applied and city re-optimized.','ai');
     }else{
       showWOW(false);
-      chatMsg(parsed?.followup || 'No recibí cambios válidos.','ai');
+      chatMsg(parsed?.followup || (getLang()==='es' ? 'No recibí cambios válidos.' : 'I did not receive valid changes.'),'ai');
     }
     return;
   }
@@ -2029,7 +2152,9 @@ function validateBaseDatesDMY(){
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
-    tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
+    tooltip.textContent = (getLang()==='es')
+      ? 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️'
+      : 'Please enter the start date (DD/MM/YYYY) for each city 🗓️';
     document.body.appendChild(tooltip);
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
@@ -2055,11 +2180,13 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const modal = document.createElement('div');
   modal.className = 'reset-modal';
   modal.innerHTML = `
-    <h3>¿Reiniciar planificación? 🧭</h3>
-    <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
+    <h3>${getLang()==='es' ? '¿Reiniciar planificación? 🧭' : 'Reset planning? 🧭'}</h3>
+    <p>${getLang()==='es'
+      ? 'Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong>'
+      : 'This will remove all destinations, itineraries, and current data.<br><strong>This cannot be undone.</strong>'}</p>
     <div class="reset-actions">
-      <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
-      <button id="cancel-reset" class="btn ghost">Cancelar</button>
+      <button id="confirm-reset" class="btn warn">${getLang()==='es' ? 'Sí, reiniciar' : 'Yes, reset'}</button>
+      <button id="cancel-reset" class="btn ghost">${getLang()==='es' ? 'Cancelar' : 'Cancel'}</button>
     </div>
   `;
   overlay.appendChild(modal);
@@ -2107,6 +2234,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.budget = '';
       plannerState.currency = 'USD';
       plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
+      // mantener lang intacto
     }
 
     overlay.classList.remove('active');
@@ -2187,12 +2315,18 @@ function openInfoModal(){
   if(!modal) return;
   modal.style.display = 'flex';
   modal.classList.add('active');
+
+  // 🆕 Hook para CSS tipo ChatGPT (sin forzar estilos globales)
+  document.body.classList.add('itbmo-info-open');
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
   modal.classList.remove('active');
   modal.style.display = 'none';
+
+  // 🆕 Hook para CSS tipo ChatGPT
+  document.body.classList.remove('itbmo-info-open');
 }
 async function sendInfoMessage(){
   const input = qs('#info-chat-input');
