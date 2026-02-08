@@ -93,62 +93,24 @@ let plannerState = {
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
-function buildTone(lang){
-  const isES = (lang === 'es');
+// ✅ QUIRÚRGICO: evita que el planner reviente si el JS se carga más de una vez en Webflow
+// (const tone redeclarado => "Identifier 'tone' has already been declared")
+var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
+  hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
+  askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
+  confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
+  doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
+  fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
+  askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
+  humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
+  humanCancelled: 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂',
+  cityAdded: (c)=>`✅ Añadí <strong>${c}</strong> y generé su itinerario.`,
+  cityRemoved: (c)=>`🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`,
+  cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
+  thinking: 'Astra está pensando…'
+};
 
-  return {
-    hi: isES
-      ? '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍'
-      : 'Hi! I’m Astra ✨, your travel concierge. Let’s create an unforgettable trip 🌍',
-
-    askHotelTransport: (city)=> isES
-      ? `Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`
-      : `For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental car, public transit, taxi/uber, mixed, or “recommend”).`,
-
-    confirmAll: isES
-      ? '✨ Listo. Empiezo a generar tus itinerarios…'
-      : '✨ Great. I’m starting to generate your itineraries…',
-
-    doneAll: isES
-      ? '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.'
-      : '🎉 Itineraries generated. If you want to change anything, just tell me and I’ll adjust it ✨ For specific details—weather, transport, clothing, safety, and more—open the Info Chat 🌐 and I’ll help you.',
-
-    fail: isES
-      ? '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).'
-      : '⚠️ I couldn’t reach the assistant. Check console/Vercel (API Key, URL).',
-
-    askConfirm: (summary)=> isES
-      ? `¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`
-      : `Confirm? ${summary}<br><small>Reply “yes” to apply or “no” to cancel.</small>`,
-
-    humanOk: isES
-      ? 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨'
-      : 'Perfect 🙌 I adjusted your itinerary so you can make the most of your time. It will be great! ✨',
-
-    humanCancelled: isES
-      ? 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂'
-      : 'Got it, I didn’t apply changes. Want to try another idea? 🙂',
-
-    cityAdded: (c)=> isES
-      ? `✅ Añadí <strong>${c}</strong> y generé su itinerario.`
-      : `✅ I added <strong>${c}</strong> and generated its itinerary.`,
-
-    cityRemoved: (c)=> isES
-      ? `🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`
-      : `🗑️ I removed <strong>${c}</strong> from your plan and re-optimized the tabs.`,
-
-    cannotFindCity: isES
-      ? 'No identifiqué la ciudad. Dímela con exactitud, por favor.'
-      : 'I couldn’t identify the city. Please tell me the exact name.',
-
-    thinking: isES
-      ? 'Astra está pensando…'
-      : 'Astra is thinking…'
-  };
-}
-
-// ✅ Mantener API existente: tone.hi, tone.fail, etc.
-let tone = buildTone(getLang());
+if (typeof window !== 'undefined') window.tone = tone;
 
 /* ==============================
    SECCIÓN 3 · Referencias DOM
