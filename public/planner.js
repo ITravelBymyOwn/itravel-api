@@ -4178,9 +4178,7 @@ function validateBaseDatesDMY(){
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
-    tooltip.textContent = (getLang()==='es')
-      ? 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️'
-      : 'Please enter the start date (DD/MM/YYYY) for each city 🗓️';
+    tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
     document.body.appendChild(tooltip);
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
@@ -4206,13 +4204,11 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const modal = document.createElement('div');
   modal.className = 'reset-modal';
   modal.innerHTML = `
-    <h3>${getLang()==='es' ? '¿Reiniciar planificación? 🧭' : 'Reset planning? 🧭'}</h3>
-    <p>${getLang()==='es'
-      ? 'Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong>'
-      : 'This will remove all destinations, itineraries, and current data.<br><strong>This cannot be undone.</strong>'}</p>
+    <h3>¿Reiniciar planificación? 🧭</h3>
+    <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
     <div class="reset-actions">
-      <button id="confirm-reset" class="btn warn">${getLang()==='es' ? 'Sí, reiniciar' : 'Yes, reset'}</button>
-      <button id="cancel-reset" class="btn ghost">${getLang()==='es' ? 'Cancelar' : 'Cancel'}</button>
+      <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
+      <button id="cancel-reset" class="btn ghost">Cancelar</button>
     </div>
   `;
   overlay.appendChild(modal);
@@ -4260,7 +4256,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.budget = '';
       plannerState.currency = 'USD';
       plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
-      // mantener lang intacto
     }
 
     overlay.classList.remove('active');
@@ -4341,18 +4336,12 @@ function openInfoModal(){
   if(!modal) return;
   modal.style.display = 'flex';
   modal.classList.add('active');
-
-  // 🆕 Hook para CSS tipo ChatGPT (sin forzar estilos globales)
-  document.body.classList.add('itbmo-info-open');
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
   modal.classList.remove('active');
   modal.style.display = 'none';
-
-  // 🆕 Hook para CSS tipo ChatGPT
-  document.body.classList.remove('itbmo-info-open');
 }
 async function sendInfoMessage(){
   const input = qs('#info-chat-input');
