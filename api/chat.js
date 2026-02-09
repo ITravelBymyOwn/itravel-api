@@ -46,29 +46,34 @@ function cleanToJSON(raw = "") {
 
 function fallbackJSON() {
   return {
-    destination: "Desconocido",
+    destination: "Unknown / Desconocido",
     city_day: [
       {
-        city: "Desconocido",
+        city: "Unknown / Desconocido",
         day: 1,
         rows: [
           {
             day: 1,
             start: "09:30",
             end: "11:00",
-            activity: "Desconocido – Itinerario base (fallback)",
+            activity: "Unknown – Base itinerary (fallback) / Desconocido – Itinerario base (fallback)",
             from: "Hotel",
-            to: "Centro",
-            transport: "A pie o Transporte local (según ubicación)",
-            duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-            notes: "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar.",
+            to: "Center / Centro",
+            transport: "Walk or local transport (depending on location) / A pie o Transporte local (según ubicación)",
+            duration:
+              "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat\n\n" +
+              "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
+            notes:
+              "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again. / " +
+              "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar.",
             kind: "",
             zone: "",
           },
         ],
       },
     ],
-    followup: "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
+    followup:
+      "⚠️ Local fallback: check your Vercel config or API key. / ⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
@@ -193,6 +198,12 @@ function normalizeParsed(parsed) {
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
 Tu salida debe ser EXCLUSIVAMENTE un JSON válido (sin markdown, sin backticks, sin texto fuera).
+
+IDIOMA (CRÍTICO):
+- Responde SIEMPRE en el mismo idioma del ÚLTIMO mensaje del usuario.
+- Esto aplica a TODOS los campos de salida: activity, notes, followup, destination/city (si corresponde) y cualquier texto dentro del JSON.
+- NO traduzcas al idioma del sitio (EN/ES) ni al idioma del sistema, a menos que el usuario explícitamente pida traducción.
+- Si el usuario mezcla idiomas, prioriza el idioma dominante del mensaje.
 
 FORMATO PREFERIDO (nuevo, tabla-ready):
 A) {
