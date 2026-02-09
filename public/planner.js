@@ -714,6 +714,7 @@ function buildIntake(){
   }).join(' | ');
 
   return [
+    `Language: ${getLang()}`,
     `Destinations: ${list}`,
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
