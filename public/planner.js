@@ -1,48 +1,43 @@
 /* =========================================================
-   ✅ v59 (quirúrgico) — Idioma (Opción B)
-   - Fuente primaria: <html lang="en|es">
-   - Fallback: ruta URL (/es o /en) si el lang no está definido o es raro
-   - Guarda idioma normalizado en plannerState.lang
+   ITRAVELBYMYOWN · PLANNER v58 (parte 1/3)
+   Base: v57
+   Cambios mínimos:
+   - Bloqueo sidebar y botón reset al guardar destinos.
+   - Overlay bloquea botón flotante Info Chat.
+   - Placeholder visible y tooltip para inputs de fecha.
 ========================================================= */
 
 /* ==============================
    SECCIÓN 1 · Helpers / Estado
 ================================= */
-
-/* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
-/* ---------- Config API ---------- */
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
-/* ---------- Estado principal ---------- */
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
-
-// 🧠 itineraries soporta originalDays para rebalanceos selectivos
+// 🧠 itineraries ahora soporta originalDays para rebalanceos selectivos
 let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate, originalDays } }
 let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
-
 let session = [];                // historial para el agente principal
 let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
-/* ---------- Flags de flujo ---------- */
 let planningStarted = false;
 let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
-let pendingChange = null;
-let hasSavedOnce = false;
-
-/* ---------- Defaults técnicos (NO rígidos) ---------- */
-// Fallback solo si el agente no trae horas
+// ✅ Defaults técnicos NO rígidos: solo fallback si el agente NO trae horas
+// (deja libertad al planner para proponer horarios reales sin “forzar” 08:30–19:00)
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
 
-/* ---------- Estado persistente del planner ---------- */
+let pendingChange = null;
+let hasSavedOnce = false;
+
+// 🧠 Estado global para persistir configuración del planner
 let plannerState = {
   destinations: [],
   specialConditions: '',
@@ -54,48 +49,13 @@ let plannerState = {
     seniors: 0
   },
   budget: '',
-  currency: 'USD',
-  lang: 'en' // se setea abajo
+  currency: 'USD'
 };
-
-/* =========================================================
-   🌐 Idioma del planner — Opción B (MVP)
-   - Fuente primaria: <html lang="en|es">
-   - Fallback: pathname (/en /es)
-   - Default seguro: en
-========================================================= */
-(function initPlannerLang(){
-  const normalize = (v)=>{
-    const s = String(v || '').trim().toLowerCase();
-    if(!s) return '';
-    const base = s.split(/[-_]/)[0];
-    return (base === 'es' || base === 'en') ? base : '';
-  };
-
-  // 1) <html lang="">
-  let lang = normalize(document?.documentElement?.getAttribute('lang'));
-
-  // 2) URL fallback (/es o /en)
-  if(!lang){
-    try{
-      const p = String(window?.location?.pathname || '').toLowerCase();
-      if(/^\/es(\/|$)/.test(p)) lang = 'es';
-      else if(/^\/en(\/|$)/.test(p)) lang = 'en';
-    }catch(_){}
-  }
-
-  // 3) Default MVP
-  if(!lang) lang = 'en';
-
-  plannerState.lang = lang;
-})();
 
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
-// ✅ QUIRÚRGICO: evita que el planner reviente si el JS se carga más de una vez en Webflow
-// (const tone redeclarado => "Identifier 'tone' has already been declared")
-var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
+const tone = {
   hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
   askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
   confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
@@ -109,8 +69,6 @@ var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
   cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
   thinking: 'Astra está pensando…'
 };
-
-if (typeof window !== 'undefined') window.tone = tone;
 
 /* ==============================
    SECCIÓN 3 · Referencias DOM
@@ -267,44 +225,23 @@ if($infoInput){
    SECCIÓN 5 · Fechas / horas
 ================================= */
 function autoFormatDMYInput(el){
-  // 🆕 Placeholder visible + tooltip (UI consistente con DD/MM/AAAA)
-  el.placeholder = 'DD/MM/AAAA';
-  el.title = 'Formato: DD/MM/AAAA';
+  // 🆕 Placeholder visible + tooltip
+  el.placeholder = 'MM/DD/AAAA';
+  el.title = 'Formato: MM/DD/AAAA';
   el.addEventListener('input', ()=>{
     const v = el.value.replace(/\D/g,'').slice(0,8);
     if(v.length===8) el.value = `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4,8)}`;
     else el.value = v;
   });
 }
-
-// ✅ Parser flexible (quirúrgico): acepta DD/MM/YYYY y MM/DD/YYYY sin romper el flujo.
-// - Se prefiere DD/MM cuando ambos son válidos.
 function parseDMY(str){
   if(!str) return null;
   const m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(str.trim());
   if(!m) return null;
-
-  const a = parseInt(m[1],10);
-  const b = parseInt(m[2],10);
-  const y = parseInt(m[3],10);
-
-  // Intento 1: DD/MM
-  const d1 = new Date(y, (b-1), a);
-  const ok1 = (d1.getFullYear()===y && d1.getMonth()===(b-1) && d1.getDate()===a);
-
-  // Intento 2: MM/DD
-  const d2 = new Date(y, (a-1), b);
-  const ok2 = (d2.getFullYear()===y && d2.getMonth()===(a-1) && d2.getDate()===b);
-
-  if(ok1 && ok2){
-    // Ambos válidos (ej. 02/03/2026). Preferimos DD/MM por UI (LatAm).
-    return d1;
-  }
-  if(ok1) return d1;
-  if(ok2) return d2;
-  return null;
+  const d = new Date(+m[3], (+m[2]-1), +m[1]);
+  if(d.getFullYear()!=+m[3] || d.getMonth()!=+m[2]-1 || d.getDate()!=+m[1]) return null;
+  return d;
 }
-
 function formatDMY(d){
   const dd = String(d.getDate()).padStart(2,'0');
   const mm = String(d.getMonth()+1).padStart(2,'0');
@@ -356,12 +293,6 @@ function makeHoursBlock(days){
 }
 
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
-  // ✅ QUIRÚRGICO: evita que el planner “reviente” si #city-list no existe
-  if(!$cityList){
-    console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
-    return;
-  }
-
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
@@ -377,13 +308,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     </label>
     <button class="remove" type="button">✕</button>
   `;
-
   const baseDateEl = qs('.baseDate', row);
-
-  // ✅ QUIRÚRGICO: si .baseDate no existe (HTML cambió), NO romper addCityRow()
-  if(baseDateEl){
-    autoFormatDMYInput(baseDateEl);
-  }
+  autoFormatDMYInput(baseDateEl);
 
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
@@ -714,7 +640,6 @@ function buildIntake(){
   }).join(' | ');
 
   return [
-    `Language: ${getLang()}`,
     `Destinations: ${list}`,
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
@@ -820,38 +745,20 @@ Ediciones:
 
 `.trim();
 
-  // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
-  const controller = new AbortController();
-  const timeoutMs = 75000; // 75s (ajustable)
-  const timer = setTimeout(()=>controller.abort(), timeoutMs);
-
   try{
     showThinking(true);
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      signal: controller.signal,
       // ✅ QUIRÚRGICO: fuerza modo planner (API v58 default planner, pero lo fijamos para robustez)
       body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history, mode: 'planner' })
     });
-
-    if(!res.ok){
-      const raw = await res.text().catch(()=> '');
-      console.error('API error (planner):', res.status, res.statusText, raw);
-      return `{"followup":"${tone.fail}"}`;
-    }
-
-    const data = await res.json().catch(()=>({text:''}));
+    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     return data?.text || '';
   }catch(e){
-    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Fallo al contactar la API:", e);
-    if(isAbort){
-      return `{"followup":"⚠️ El asistente tardó demasiado en responder (timeout). Intenta de nuevo o reduce el número de días/ciudades."}`;
-    }
     return `{"followup":"${tone.fail}"}`;
   }finally{
-    clearTimeout(timer);
     showThinking(false);
   }
 }
@@ -878,18 +785,12 @@ Eres "Astra", asistente informativo de viajes.
 - NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
 `.trim();
 
-  // ✅ QUIRÚRGICO: timeout también para Info Chat (evita cuelgues)
-  const controller = new AbortController();
-  const timeoutMs = 45000; // 45s (ajustable)
-  const timer = setTimeout(()=>controller.abort(), timeoutMs);
-
   try{
     setInfoChatBusy(true);
 
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      signal: controller.signal,
       body: JSON.stringify({
         model: MODEL,
         input: `${globalStyle}\n\n${text}`,
@@ -898,13 +799,7 @@ Eres "Astra", asistente informativo de viajes.
       })
     });
 
-    if(!res.ok){
-      const raw = await res.text().catch(()=> '');
-      console.error('API error (info):', res.status, res.statusText, raw);
-      return tone.fail;
-    }
-
-    const data = await res.json().catch(()=>({text:''}));
+    const data = res.ok ? await res.json().catch(()=>({text:''})) : {text:''};
     const answer = (data?.text || '').trim();
 
     infoSession.push({ role:'user',      content: text });
@@ -921,12 +816,9 @@ Eres "Astra", asistente informativo de viajes.
 
     return answer || '¿Algo más que quieras saber?';
   }catch(e){
-    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Fallo Info Chat:", e);
-    if(isAbort) return '⚠️ El Info Chat tardó demasiado (timeout). Intenta de nuevo.';
     return tone.fail;
   }finally{
-    clearTimeout(timer);
     setInfoChatBusy(false);
   }
 }
@@ -1856,25 +1748,18 @@ async function onSend(){
   // Agregar varios días (con rebalanceo global)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
-    showWOW(true, getLang()==='es' ? 'Agregando días y reoptimizando…' : 'Adding days and re-optimizing…');
+    showWOW(true,'Agregando días y reoptimizando…');
     addMultipleDaysToCity(city, intent.extraDays);
     await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(
-      (getLang()==='es')
-        ? `✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`
-        : `✅ I added ${intent.extraDays} day(s) to ${city} and re-optimized the itinerary.`,
-      'ai'
-    );
+    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`, 'ai');
     return;
   }
 
   // 1) Agregar día al FINAL — ⬅️ AJUSTE CLAVE AQUÍ
   if(intent.type==='add_day_end' && intent.city){
     const city = intent.city;
-    showWOW(true, getLang()==='es' ? 'Insertando día y optimizando…' : 'Adding a day and optimizing…');
+    showWOW(true,'Insertando día y optimizando…');
 
     ensureDays(city);
     const byDay = itineraries[city].byDay || {};
@@ -1897,51 +1782,43 @@ async function onSend(){
     renderCityItinerary(city);
 
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(getLang()==='es' ? '✅ Día agregado y plan reoptimizado inteligentemente.' : '✅ Day added and plan re-optimized intelligently.','ai');
+    chatMsg('✅ Día agregado y plan reoptimizado inteligentemente.','ai');
     return;
   }
 
   // 2) Quitar día
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
-    showWOW(true, getLang()==='es' ? 'Eliminando día…' : 'Removing day…');
+    showWOW(true,'Eliminando día…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
     for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(getLang()==='es' ? '✅ Día eliminado y plan reequilibrado.' : '✅ Day removed and plan re-balanced.','ai');
+    chatMsg('✅ Día eliminado y plan reequilibrado.','ai');
     return;
   }
 
   // 3) Swap de días
   if(intent.type==='swap_day' && intent.city){
-    showWOW(true, getLang()==='es' ? 'Intercambiando días…' : 'Swapping days…');
+    showWOW(true,'Intercambiando días…');
     swapDays(intent.city, intent.from, intent.to);
     await optimizeDay(intent.city, intent.from);
     if(intent.to!==intent.from) await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(getLang()==='es' ? '✅ Intercambié el orden y optimicé ambos días.' : '✅ I swapped the order and optimized both days.','ai');
+    chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
     return;
   }
 
   // 4) Mover actividad
   if(intent.type==='move_activity' && intent.city){
-    showWOW(true, getLang()==='es' ? 'Moviendo actividad…' : 'Moving activity…');
+    showWOW(true,'Moviendo actividad…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
     await optimizeDay(intent.city, intent.fromDay);
     await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(getLang()==='es' ? '✅ Moví la actividad y reoptimicé los días implicados.' : '✅ I moved the activity and re-optimized the affected days.','ai');
+    chatMsg('✅ Moví la actividad y reoptimicé los días implicados.','ai');
     return;
   }
 
@@ -1949,7 +1826,7 @@ async function onSend(){
   if(intent.type==='swap_activity' && intent.city){
     const city = intent.city;
     const day  = itineraries[city]?.currentDay || 1;
-    showWOW(true, getLang()==='es' ? 'Ajustando actividades…' : 'Adjusting activities…');
+    showWOW(true,'Ajustando actividades…');
     const q = intent.target ? intent.target.toLowerCase() : '';
     if(q){
       const before = itineraries[city].byDay[day]||[];
@@ -1959,15 +1836,13 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(getLang()==='es' ? '✅ Sustituí la actividad y reoptimicé el día.' : '✅ I replaced the activity and re-optimized the day.','ai');
+    chatMsg('✅ Sustituí la actividad y reoptimicé el día.','ai');
     return;
   }
 
   // 6) Cambiar horas
   if(intent.type==='change_hours' && intent.city){
-    showWOW(true, getLang()==='es' ? 'Ajustando horarios…' : 'Adjusting times…');
+    showWOW(true,'Ajustando horarios…');
     const city = intent.city;
     const day = itineraries[city]?.currentDay || 1;
     if(!cityMeta[city]) cityMeta[city]={perDay:[]};
@@ -1978,9 +1853,7 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-    chatMsg(getLang()==='es' ? '✅ Ajusté los horarios y reoptimicé tu día.' : '✅ I adjusted the times and re-optimized your day.','ai');
+    chatMsg('✅ Ajusté los horarios y reoptimicé tu día.','ai');
     return;
   }
 
@@ -1993,12 +1866,7 @@ async function onSend(){
     const sel = lastRow?.querySelector('.days');
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
     saveDestinations();
-    chatMsg(
-      (getLang()==='es')
-        ? `✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`
-        : `✅ I added <strong>${name}</strong>. Tell me your hotel/area and transport to generate the plan.`,
-      'ai'
-    );
+    chatMsg(`✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`, 'ai');
     return;
   }
 
@@ -2009,12 +1877,7 @@ async function onSend(){
     delete itineraries[name];
     delete cityMeta[name];
     renderCityTabs();
-    chatMsg(
-      (getLang()==='es')
-        ? `🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`
-        : `🗑️ I removed <strong>${name}</strong> from your itinerary.`,
-      'ai'
-    );
+    chatMsg(`🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`, 'ai');
     return;
   }
 
@@ -2023,11 +1886,9 @@ async function onSend(){
     try{
       setChatBusy(true);
       const ans = await callAgent(
-(getLang()==='es'
-  ? `Responde en texto claro y conciso (sin JSON):\n"${text}"`
-  : `Reply in clear, concise text (no JSON):\n"${text}"`
-), true);
-      chatMsg(ans || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
+`Responde en texto claro y conciso (sin JSON):
+"${text}"`, true);
+      chatMsg(ans || '¿Algo más que quieras saber?');
     } finally {
       setChatBusy(false);
     }
@@ -2037,9 +1898,9 @@ async function onSend(){
   // 10) Edición libre
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
-    if(!city){ chatMsg(getLang()==='es' ? 'Aún no hay itinerario en pantalla.' : 'There is no itinerary on screen yet.'); return; }
+    if(!city){ chatMsg('Aún no hay itinerario en pantalla.'); return; }
     const day = itineraries[city]?.currentDay || 1;
-    showWOW(true, getLang()==='es' ? 'Aplicando tu cambio…' : 'Applying your change…');
+    showWOW(true,'Aplicando tu cambio…');
 
     const data = itineraries[city];
     const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)';
@@ -2094,14 +1955,10 @@ Instrucción del usuario: ${text}
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-      chatMsg(getLang()==='es' ? '✅ Cambio aplicado y ciudad reoptimizada.' : '✅ Change applied and city re-optimized.','ai');
+      chatMsg('✅ Cambio aplicado y ciudad reoptimizada.','ai');
     }else{
       showWOW(false);
-      const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
-
-      chatMsg(parsed?.followup || (getLang()==='es' ? 'No recibí cambios válidos.' : 'I did not receive valid changes.'),'ai');
+      chatMsg(parsed?.followup || 'No recibí cambios válidos.','ai');
     }
     return;
   }
@@ -2172,9 +2029,7 @@ function validateBaseDatesDMY(){
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
-    tooltip.textContent = (getLang()==='es')
-      ? 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️'
-      : 'Please enter the start date (DD/MM/YYYY) for each city 🗓️';
+    tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
     document.body.appendChild(tooltip);
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
@@ -2200,13 +2055,11 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const modal = document.createElement('div');
   modal.className = 'reset-modal';
   modal.innerHTML = `
-    <h3>${getLang()==='es' ? '¿Reiniciar planificación? 🧭' : 'Reset planning? 🧭'}</h3>
-    <p>${getLang()==='es'
-      ? 'Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong>'
-      : 'This will remove all destinations, itineraries, and current data.<br><strong>This cannot be undone.</strong>'}</p>
+    <h3>¿Reiniciar planificación? 🧭</h3>
+    <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
     <div class="reset-actions">
-      <button id="confirm-reset" class="btn warn">${getLang()==='es' ? 'Sí, reiniciar' : 'Yes, reset'}</button>
-      <button id="cancel-reset" class="btn ghost">${getLang()==='es' ? 'Cancelar' : 'Cancel'}</button>
+      <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
+      <button id="cancel-reset" class="btn ghost">Cancelar</button>
     </div>
   `;
   overlay.appendChild(modal);
@@ -2254,7 +2107,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.budget = '';
       plannerState.currency = 'USD';
       plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
-      // mantener lang intacto
     }
 
     overlay.classList.remove('active');
@@ -2335,18 +2187,12 @@ function openInfoModal(){
   if(!modal) return;
   modal.style.display = 'flex';
   modal.classList.add('active');
-
-  // 🆕 Hook para CSS tipo ChatGPT (sin forzar estilos globales)
-  document.body.classList.add('itbmo-info-open');
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
   modal.classList.remove('active');
   modal.style.display = 'none';
-
-  // 🆕 Hook para CSS tipo ChatGPT
-  document.body.classList.remove('itbmo-info-open');
 }
 async function sendInfoMessage(){
   const input = qs('#info-chat-input');
