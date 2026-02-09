@@ -1,43 +1,48 @@
 /* =========================================================
-   ITRAVELBYMYOWN · PLANNER v58 (parte 1/3)
-   Base: v57
-   Cambios mínimos:
-   - Bloqueo sidebar y botón reset al guardar destinos.
-   - Overlay bloquea botón flotante Info Chat.
-   - Placeholder visible y tooltip para inputs de fecha.
+   ✅ v59 (quirúrgico) — Idioma (Opción B)
+   - Fuente primaria: <html lang="en|es">
+   - Fallback: ruta URL (/es o /en) si el lang no está definido o es raro
+   - Guarda idioma normalizado en plannerState.lang
 ========================================================= */
 
 /* ==============================
    SECCIÓN 1 · Helpers / Estado
 ================================= */
+
+/* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
+/* ---------- Config API ---------- */
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
+/* ---------- Estado principal ---------- */
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
-// 🧠 itineraries ahora soporta originalDays para rebalanceos selectivos
+
+// 🧠 itineraries soporta originalDays para rebalanceos selectivos
 let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate, originalDays } }
 let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
+
 let session = [];                // historial para el agente principal
 let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
+/* ---------- Flags de flujo ---------- */
 let planningStarted = false;
 let metaProgressIndex = 0;
 let collectingHotels = false;
 let isItineraryLocked = false;
 
-// ✅ Defaults técnicos NO rígidos: solo fallback si el agente NO trae horas
-// (deja libertad al planner para proponer horarios reales sin “forzar” 08:30–19:00)
-const DEFAULT_START = '';
-const DEFAULT_END   = '';
-
 let pendingChange = null;
 let hasSavedOnce = false;
 
-// 🧠 Estado global para persistir configuración del planner
+/* ---------- Defaults técnicos (NO rígidos) ---------- */
+// Fallback solo si el agente no trae horas
+const DEFAULT_START = '';
+const DEFAULT_END   = '';
+
+/* ---------- Estado persistente del planner ---------- */
 let plannerState = {
   destinations: [],
   specialConditions: '',
@@ -49,13 +54,48 @@ let plannerState = {
     seniors: 0
   },
   budget: '',
-  currency: 'USD'
+  currency: 'USD',
+  lang: 'en' // se setea abajo
 };
+
+/* =========================================================
+   🌐 Idioma del planner — Opción B (MVP)
+   - Fuente primaria: <html lang="en|es">
+   - Fallback: pathname (/en /es)
+   - Default seguro: en
+========================================================= */
+(function initPlannerLang(){
+  const normalize = (v)=>{
+    const s = String(v || '').trim().toLowerCase();
+    if(!s) return '';
+    const base = s.split(/[-_]/)[0];
+    return (base === 'es' || base === 'en') ? base : '';
+  };
+
+  // 1) <html lang="">
+  let lang = normalize(document?.documentElement?.getAttribute('lang'));
+
+  // 2) URL fallback (/es o /en)
+  if(!lang){
+    try{
+      const p = String(window?.location?.pathname || '').toLowerCase();
+      if(/^\/es(\/|$)/.test(p)) lang = 'es';
+      else if(/^\/en(\/|$)/.test(p)) lang = 'en';
+    }catch(_){}
+  }
+
+  // 3) Default MVP
+  if(!lang) lang = 'en';
+
+  plannerState.lang = lang;
+})();
 
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
 ================================= */
-const tone = {
+// ✅ QUIRÚRGICO: evita que el planner reviente si el JS se carga más de una vez en Webflow
+// (const tone redeclarado => "Identifier 'tone' has already been declared")
+var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
   hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
   askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
   confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
@@ -69,6 +109,8 @@ const tone = {
   cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
   thinking: 'Astra está pensando…'
 };
+
+if (typeof window !== 'undefined') window.tone = tone;
 
 /* ==============================
    SECCIÓN 3 · Referencias DOM
