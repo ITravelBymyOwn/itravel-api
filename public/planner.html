@@ -100,6 +100,10 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
+
+          <!-- 🆕 MVP: CSV para Excel (inserción quirúrgica) -->
+          <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
+
           <button class="btn" id="btn-email">Enviar por Email</button>
           <button class="btn" id="btn-maps">Mapas</button>
           <button class="btn" id="btn-transport">Transporte</button>
@@ -140,7 +144,11 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
   <div id="loading-overlay" style="display:none;">
     <div class="loader">
       <div class="hourglass"></div>
-      <p>Astra está generando itinerarios...</p>
+
+      <!-- ✅ Mensaje aprobado (cambio quirúrgico) -->
+      <p>✨ Astra está creando tu itinerario completo…<br>
+        Esto puede tardar varios minutos.<br>
+        No cierres esta pestaña: estás ahorrando horas de planificación.</p>
     </div>
   </div>
 
