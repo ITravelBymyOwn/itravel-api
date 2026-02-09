@@ -356,6 +356,12 @@ function makeHoursBlock(days){
 }
 
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
+  // ✅ QUIRÚRGICO: evita que el planner “reviente” si #city-list no existe
+  if(!$cityList){
+    console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
+    return;
+  }
+
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
@@ -371,8 +377,13 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     </label>
     <button class="remove" type="button">✕</button>
   `;
+
   const baseDateEl = qs('.baseDate', row);
-  autoFormatDMYInput(baseDateEl);
+
+  // ✅ QUIRÚRGICO: si .baseDate no existe (HTML cambió), NO romper addCityRow()
+  if(baseDateEl){
+    autoFormatDMYInput(baseDateEl);
+  }
 
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
