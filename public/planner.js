@@ -1856,18 +1856,25 @@ async function onSend(){
   // Agregar varios días (con rebalanceo global)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
-    showWOW(true,'Agregando días y reoptimizando…');
+    showWOW(true, getLang()==='es' ? 'Agregando días y reoptimizando…' : 'Adding days and re-optimizing…');
     addMultipleDaysToCity(city, intent.extraDays);
     await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
     showWOW(false);
-    chatMsg(`✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`, 'ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(
+      (getLang()==='es')
+        ? `✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`
+        : `✅ I added ${intent.extraDays} day(s) to ${city} and re-optimized the itinerary.`,
+      'ai'
+    );
     return;
   }
 
   // 1) Agregar día al FINAL — ⬅️ AJUSTE CLAVE AQUÍ
   if(intent.type==='add_day_end' && intent.city){
     const city = intent.city;
-    showWOW(true,'Insertando día y optimizando…');
+    showWOW(true, getLang()==='es' ? 'Insertando día y optimizando…' : 'Adding a day and optimizing…');
 
     ensureDays(city);
     const byDay = itineraries[city].byDay || {};
@@ -1890,43 +1897,51 @@ async function onSend(){
     renderCityItinerary(city);
 
     showWOW(false);
-    chatMsg('✅ Día agregado y plan reoptimizado inteligentemente.','ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(getLang()==='es' ? '✅ Día agregado y plan reoptimizado inteligentemente.' : '✅ Day added and plan re-optimized intelligently.','ai');
     return;
   }
 
   // 2) Quitar día
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
-    showWOW(true,'Eliminando día…');
+    showWOW(true, getLang()==='es' ? 'Eliminando día…' : 'Removing day…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
     for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    chatMsg('✅ Día eliminado y plan reequilibrado.','ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(getLang()==='es' ? '✅ Día eliminado y plan reequilibrado.' : '✅ Day removed and plan re-balanced.','ai');
     return;
   }
 
   // 3) Swap de días
   if(intent.type==='swap_day' && intent.city){
-    showWOW(true,'Intercambiando días…');
+    showWOW(true, getLang()==='es' ? 'Intercambiando días…' : 'Swapping days…');
     swapDays(intent.city, intent.from, intent.to);
     await optimizeDay(intent.city, intent.from);
     if(intent.to!==intent.from) await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    chatMsg('✅ Intercambié el orden y optimicé ambos días.','ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(getLang()==='es' ? '✅ Intercambié el orden y optimicé ambos días.' : '✅ I swapped the order and optimized both days.','ai');
     return;
   }
 
   // 4) Mover actividad
   if(intent.type==='move_activity' && intent.city){
-    showWOW(true,'Moviendo actividad…');
+    showWOW(true, getLang()==='es' ? 'Moviendo actividad…' : 'Moving activity…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
     await optimizeDay(intent.city, intent.fromDay);
     await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
-    chatMsg('✅ Moví la actividad y reoptimicé los días implicados.','ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(getLang()==='es' ? '✅ Moví la actividad y reoptimicé los días implicados.' : '✅ I moved the activity and re-optimized the affected days.','ai');
     return;
   }
 
@@ -1934,7 +1949,7 @@ async function onSend(){
   if(intent.type==='swap_activity' && intent.city){
     const city = intent.city;
     const day  = itineraries[city]?.currentDay || 1;
-    showWOW(true,'Ajustando actividades…');
+    showWOW(true, getLang()==='es' ? 'Ajustando actividades…' : 'Adjusting activities…');
     const q = intent.target ? intent.target.toLowerCase() : '';
     if(q){
       const before = itineraries[city].byDay[day]||[];
@@ -1944,13 +1959,15 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Sustituí la actividad y reoptimicé el día.','ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(getLang()==='es' ? '✅ Sustituí la actividad y reoptimicé el día.' : '✅ I replaced the activity and re-optimized the day.','ai');
     return;
   }
 
   // 6) Cambiar horas
   if(intent.type==='change_hours' && intent.city){
-    showWOW(true,'Ajustando horarios…');
+    showWOW(true, getLang()==='es' ? 'Ajustando horarios…' : 'Adjusting times…');
     const city = intent.city;
     const day = itineraries[city]?.currentDay || 1;
     if(!cityMeta[city]) cityMeta[city]={perDay:[]};
@@ -1961,7 +1978,9 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
-    chatMsg('✅ Ajusté los horarios y reoptimicé tu día.','ai');
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+    chatMsg(getLang()==='es' ? '✅ Ajusté los horarios y reoptimicé tu día.' : '✅ I adjusted the times and re-optimized your day.','ai');
     return;
   }
 
@@ -1974,7 +1993,12 @@ async function onSend(){
     const sel = lastRow?.querySelector('.days');
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
     saveDestinations();
-    chatMsg(`✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`, 'ai');
+    chatMsg(
+      (getLang()==='es')
+        ? `✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`
+        : `✅ I added <strong>${name}</strong>. Tell me your hotel/area and transport to generate the plan.`,
+      'ai'
+    );
     return;
   }
 
@@ -1985,7 +2009,12 @@ async function onSend(){
     delete itineraries[name];
     delete cityMeta[name];
     renderCityTabs();
-    chatMsg(`🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`, 'ai');
+    chatMsg(
+      (getLang()==='es')
+        ? `🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`
+        : `🗑️ I removed <strong>${name}</strong> from your itinerary.`,
+      'ai'
+    );
     return;
   }
 
@@ -1994,9 +2023,11 @@ async function onSend(){
     try{
       setChatBusy(true);
       const ans = await callAgent(
-`Responde en texto claro y conciso (sin JSON):
-"${text}"`, true);
-      chatMsg(ans || '¿Algo más que quieras saber?');
+(getLang()==='es'
+  ? `Responde en texto claro y conciso (sin JSON):\n"${text}"`
+  : `Reply in clear, concise text (no JSON):\n"${text}"`
+), true);
+      chatMsg(ans || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
     } finally {
       setChatBusy(false);
     }
@@ -2006,9 +2037,9 @@ async function onSend(){
   // 10) Edición libre
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
-    if(!city){ chatMsg('Aún no hay itinerario en pantalla.'); return; }
+    if(!city){ chatMsg(getLang()==='es' ? 'Aún no hay itinerario en pantalla.' : 'There is no itinerary on screen yet.'); return; }
     const day = itineraries[city]?.currentDay || 1;
-    showWOW(true,'Aplicando tu cambio…');
+    showWOW(true, getLang()==='es' ? 'Aplicando tu cambio…' : 'Applying your change…');
 
     const data = itineraries[city];
     const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)';
@@ -2063,10 +2094,14 @@ Instrucción del usuario: ${text}
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
-      chatMsg('✅ Cambio aplicado y ciudad reoptimizada.','ai');
+      const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+      chatMsg(getLang()==='es' ? '✅ Cambio aplicado y ciudad reoptimizada.' : '✅ Change applied and city re-optimized.','ai');
     }else{
       showWOW(false);
-      chatMsg(parsed?.followup || 'No recibí cambios válidos.','ai');
+      const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
+      chatMsg(parsed?.followup || (getLang()==='es' ? 'No recibí cambios válidos.' : 'I did not receive valid changes.'),'ai');
     }
     return;
   }
