@@ -2172,7 +2172,11 @@ function validateBaseDatesDMY(){
   return true;
 }
 
-$save?.addEventListener('click', saveDestinations);
+// ✅ QUIRÚRGICO: asegurar que el botón Reset se re-habilite al guardar destinos
+$save?.addEventListener('click', ()=>{
+  saveDestinations();
+  try { qs('#reset-planner')?.removeAttribute('disabled'); } catch(_) {}
+});
 
 // ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
@@ -2277,6 +2281,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 // ▶️ Start: valida fechas (formato v54) y luego ejecuta startPlanning()
 $start?.addEventListener('click', ()=>{
   if(!validateBaseDatesDMY()) return;
+  // ✅ QUIRÚRGICO: por seguridad, mantener Reset habilitado al iniciar (si ya guardó destinos)
+  try { qs('#reset-planner')?.removeAttribute('disabled'); } catch(_) {}
   startPlanning();
 });
 $send?.addEventListener('click', onSend);
