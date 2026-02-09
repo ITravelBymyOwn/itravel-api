@@ -662,6 +662,33 @@ table.itinerary th{
   .toolbar{grid-template-columns:repeat(2,1fr)}
 }
 
+/* =========================================================
+   ✅ MVP: Inhabilitar (NO eliminar) botones extra del toolbar
+   - Activos: PDF + Email + (próximo) CSV
+   - Inactivos: Maps/Transport/Weather/Clothing/Restaurants/Gas/Bathrooms/Lodging/Localinfo
+   (Se dejan en el DOM pero no clickeables)
+========================================================= */
+.toolbar #btn-maps,
+.toolbar #btn-transport,
+.toolbar #btn-weather,
+.toolbar #btn-clothing,
+.toolbar #btn-restaurants,
+.toolbar #btn-gas,
+.toolbar #btn-bathrooms,
+.toolbar #btn-lodging,
+.toolbar #btn-localinfo{
+  opacity:.35;
+  filter:grayscale(.15);
+  pointer-events:none;
+  cursor:not-allowed;
+  transform:none !important;
+}
+
+/* Preparado para el nuevo botón CSV (cuando exista en el HTML) */
+.toolbar #btn-csv{
+  /* queda activo por default (sin pointer-events:none) */
+}
+
 /* ==================== CTA ==================== */
 #confirm-itinerary{
   display:block;
@@ -722,12 +749,12 @@ table.itinerary th{
 #loading-overlay{
   position:fixed;
   inset:0;
-  background:rgba(255,255,255,0.8);
+  background:rgba(255,255,255,0.88);
   display:flex;
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:1300;
+  z-index:30000;           /* ✅ más alto para que siempre quede encima */
   pointer-events:all;
 }
 .loader{text-align:center;}
@@ -743,8 +770,11 @@ table.itinerary th{
 @keyframes spin { to { transform: rotate(360deg); } }
 #loading-overlay p {
   margin-top:1rem;
-  font-weight:600;
+  font-weight:700;         /* ✅ un poco más visible */
   color:var(--ink);
+  max-width:520px;
+  padding:0 1rem;
+  line-height:1.35;
 }
 
 /* ==================== ANIMACIONES ==================== */
@@ -793,10 +823,11 @@ table.itinerary th{
 /* ==================== INFO CHAT MODAL ==================== */
 /* ✅ Emulación tipo ChatGPT: panel flotante (no 100vh) */
 .info-chat-modal{
-  position:fixed;
+  position:fixed !important;      /* ✅ refuerzo */
   right:24px;
   bottom:24px;
   top:auto;
+  left:auto;
   height:auto;
 
   width:380px;
@@ -809,8 +840,7 @@ table.itinerary th{
   border-radius:16px;
 
   box-shadow:0 18px 46px rgba(11,31,59,.22);
-  z-index:9999;
-
+  z-index:20000;                  /* ✅ por encima del layout */
   display:flex;
   flex-direction:column;
 
