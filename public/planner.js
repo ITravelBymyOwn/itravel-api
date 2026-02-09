@@ -1860,6 +1860,8 @@ async function onSend(){
     addMultipleDaysToCity(city, intent.extraDays);
     await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(
       (getLang()==='es')
         ? `✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`
@@ -1895,6 +1897,8 @@ async function onSend(){
     renderCityItinerary(city);
 
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(getLang()==='es' ? '✅ Día agregado y plan reoptimizado inteligentemente.' : '✅ Day added and plan re-optimized intelligently.','ai');
     return;
   }
@@ -1907,6 +1911,8 @@ async function onSend(){
     for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(getLang()==='es' ? '✅ Día eliminado y plan reequilibrado.' : '✅ Day removed and plan re-balanced.','ai');
     return;
   }
@@ -1919,6 +1925,8 @@ async function onSend(){
     if(intent.to!==intent.from) await optimizeDay(intent.city, intent.to);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(getLang()==='es' ? '✅ Intercambié el orden y optimicé ambos días.' : '✅ I swapped the order and optimized both days.','ai');
     return;
   }
@@ -1931,6 +1939,8 @@ async function onSend(){
     await optimizeDay(intent.city, intent.toDay);
     renderCityTabs(); setActiveCity(intent.city); renderCityItinerary(intent.city);
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(getLang()==='es' ? '✅ Moví la actividad y reoptimicé los días implicados.' : '✅ I moved the activity and re-optimized the affected days.','ai');
     return;
   }
@@ -1949,6 +1959,8 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(getLang()==='es' ? '✅ Sustituí la actividad y reoptimicé el día.' : '✅ I replaced the activity and re-optimized the day.','ai');
     return;
   }
@@ -1966,6 +1978,8 @@ async function onSend(){
     await optimizeDay(city, day);
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
     showWOW(false);
+    const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
     chatMsg(getLang()==='es' ? '✅ Ajusté los horarios y reoptimicé tu día.' : '✅ I adjusted the times and re-optimized your day.','ai');
     return;
   }
@@ -2080,9 +2094,13 @@ Instrucción del usuario: ${text}
 
       renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
       showWOW(false);
+      const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
       chatMsg(getLang()==='es' ? '✅ Cambio aplicado y ciudad reoptimizada.' : '✅ Change applied and city re-optimized.','ai');
     }else{
       showWOW(false);
+      const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
+
       chatMsg(parsed?.followup || (getLang()==='es' ? 'No recibí cambios válidos.' : 'I did not receive valid changes.'),'ai');
     }
     return;
