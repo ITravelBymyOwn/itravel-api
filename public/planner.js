@@ -2247,31 +2247,11 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 
     // 🔄 Restaurar formulario lateral a valores por defecto
     const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
-
-    // ✅ NUEVO (MVP): limpiar UI compacta de viajeros si existe (sin romper si no está)
-    const $travMode = qs('#traveler-mode');
-    const $soloPanel = qs('#traveler-solo-panel');
-    const $groupPanel = qs('#traveler-group-panel');
-    const $soloGender = qs('#traveler-solo-gender');
-    const $soloAge = qs('#traveler-solo-age');
-    const $groupCount = qs('#traveler-group-count');
-    const $groupWrap = qs('#traveler-group-profiles');
-
-    if ($travMode) $travMode.value = '';
-    if ($soloPanel) $soloPanel.style.display = 'none';
-    if ($groupPanel) $groupPanel.style.display = 'none';
-    if ($soloGender) $soloGender.value = '';
-    if ($soloAge) $soloAge.value = '';
-    if ($groupCount) $groupCount.value = '';
-    if ($groupWrap) $groupWrap.innerHTML = '';
-
-    // ✅ Compatibilidad: si todavía existen los inputs viejos, resetearlos también
     const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
     const $yo = qs('#p-young');    if($yo) $yo.value = '0';
     const $ch = qs('#p-children'); if($ch) $ch.value = '0';
     const $in = qs('#p-infants');  if($in) $in.value = '0';
     const $se = qs('#p-seniors');  if($se) $se.value = '0';
-
     const $bu = qs('#budget');     if($bu) $bu.value = '';
     const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
 
@@ -2279,17 +2259,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     if (typeof plannerState !== 'undefined') {
       plannerState.destinations = [];
       plannerState.specialConditions = '';
-
-      // ✅ Mantener compatibilidad con estructura actual del plannerState.travelers
-      // (la nueva estructura por perfiles la conectamos cuando hagamos la lógica en JS)
       plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
-
-      // (Si ya existiera una estructura nueva, la limpiamos sin romper)
-      try{
-        if(plannerState.travelerMode) plannerState.travelerMode = '';
-        if(plannerState.travelerProfiles) plannerState.travelerProfiles = [];
-      }catch(_){}
-
       plannerState.budget = '';
       plannerState.currency = 'USD';
       plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
@@ -2367,7 +2337,7 @@ document.addEventListener('itbmo:addDays', e=>{
   rebalanceWholeCity(city, { start, end, dayTripTo });
 });
 
-/* ====== Info Chat: ahora SOLO botón flotante + modal ====== */
+/* ====== Info Chat: IDs #info-chat-* + control de display ====== */
 function openInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
@@ -2399,22 +2369,27 @@ async function sendInfoMessage(){
   infoChatMsg(ans||'');
 }
 function bindInfoChatListeners(){
-  const toggleFloating = qs('#info-chat-floating'); // ✅ ÚNICO toggle
+  const toggleTop = qs('#info-chat-toggle');
+  const toggleFloating = qs('#info-chat-floating'); // 🆕 soporte flotante
   const close  = qs('#info-chat-close');
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
   // Limpieza previa por si se re-vincula
+  toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
   send?.replaceWith(send.cloneNode(true));
 
+  const tTop = qs('#info-chat-toggle');
   const tFloat = qs('#info-chat-floating');
   const c2 = qs('#info-chat-close');
   const s2 = qs('#info-chat-send');
   const i2 = qs('#info-chat-input');
 
-  tFloat?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  [tTop, tFloat].forEach(btn=>{
+    btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
+  });
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
   s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
 
@@ -2440,9 +2415,9 @@ function bindInfoChatListeners(){
     });
   }
 
-  // Delegación de respaldo SOLO para el flotante
+  // Delegación de respaldo por si el toggle cambia internamente
   document.addEventListener('click', (e)=>{
-    const el = e.target.closest('#info-chat-floating');
+    const el = e.target.closest('#info-chat-toggle, #info-chat-floating');
     if(el){
       e.preventDefault();
       openInfoModal();
