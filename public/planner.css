@@ -155,10 +155,9 @@ body{
   }
 }
 
-/* ==================== INFO CHAT FLOATING (ÚNICO BOTÓN) ==================== */
+/* ==================== INFO CHAT (BASE) ==================== */
 .info-chat-floating{
   position:fixed;
-  /* ✅ Mejor sitio: esquina inferior derecha (consistente con UX + no tapa CTA principal) */
   bottom:22px;
   right:22px;
 
@@ -178,7 +177,6 @@ body{
   transition:all .28s ease;
   z-index:1200;
 
-  /* WOW */
   transform:translateZ(0);
   will-change: transform, box-shadow, filter;
 }
@@ -254,7 +252,7 @@ body{
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns: 50% 50%;   /* ⬅️ Sidebar más ancho para que quepa la fecha */
+  grid-template-columns: 50% 50%;
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -272,23 +270,15 @@ body{
   box-shadow:var(--shadow);
   padding:1rem;
 
-  /* ✅ QUITAR SCROLL INTERNO: dejar crecer con el contenido
-     (antes: max-height + overflow:auto) */
   max-height:none;
   overflow:visible;
 }
-
-/* 🆕 Permitir scroll global aunque sidebar esté bloqueado */
 .sidebar.disabled{
   opacity:.55;
   filter:grayscale(.05);
   pointer-events:none;
-
-  /* mantener consistente con scroll global */
   overflow:visible;
 }
-
-/* ✅ Excepciones: permitir interacción con botones clave incluso si sidebar está bloqueado */
 .sidebar.disabled #reset-planner,
 .sidebar.disabled #start-planning {
   opacity: 1 !important;
@@ -314,7 +304,7 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .5fr 1.6fr auto; /* ⬅️ Ajuste fino para dar más espacio a la fecha */
+  grid-template-columns:1.2fr 1fr .5fr 1.6fr auto;
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -348,12 +338,9 @@ body{
   background:#ef4444;
   color:#fff;
   border:none;
-
-  /* ✕ aún más compacta */
   border-radius:.35rem;
   padding:.3rem .45rem;
   font-size:.7rem;
-
   cursor:pointer;
 }
 
@@ -361,35 +348,29 @@ body{
 .city-row .date-wrapper{
   display:flex;
   align-items:center;
-  gap:0.25rem;         /* ⬇️ más compacto aún */
-  min-width:165px;     /* ⬇️ más estrecho */
+  gap:0.25rem;
+  min-width:165px;
 }
 .city-row .date-label{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
 }
-
-/* Día */
 .city-row .date-wrapper select.baseDay{
-  width:45px;               /* ⬇️ reducido */
+  width:45px;
   padding:.35rem .28rem;
   font-size:.78rem;
 }
-
-/* Mes */
 .city-row .date-wrapper select.baseMonth{
-  width:75px;               /* ⬇️ reducido */
+  width:75px;
   padding:.35rem .28rem;
   font-size:.78rem;
   border:1px solid var(--border);
   border-radius:.5rem;
   background:#fff;
 }
-
-/* Año */
 .city-row .date-wrapper input.baseYear{
-  width:50px;               /* ⬇️ reducido */
+  width:50px;
   text-align:center;
   padding:.35rem .28rem;
   border:1px solid var(--border);
@@ -397,15 +378,12 @@ body{
   font-size:.78rem;
   background:#fff;
 }
-
-/* 🧹 Se elimina el hint flotante anterior */
 .city-row .date-wrapper .date-format{
   display:none;
 }
 .city-row label:has(> .baseDate)::after{
   display:none;
 }
-
 
 /* ==================== HORAS ==================== */
 .hours-block{
@@ -415,11 +393,10 @@ body{
   margin-top:.6rem;
   grid-column:1 / -1;
 }
-/* 🆕 Encabezado global de horas */
 .hours-header{
   display:grid;
-  grid-template-columns:.8fr .6fr .6fr;  /* ⬇️ menos ancho para horas */
-  gap:.5rem;                             /* ⬇️ menos separación */
+  grid-template-columns:.8fr .6fr .6fr;
+  gap:.5rem;
   font-size:.85rem;
   font-weight:600;
   color:rgba(11,31,59,.72);
@@ -432,8 +409,6 @@ body{
   align-items:center;
   font-size:.9rem;
 }
-
-/* 🆕 Inputs de hora manual (reemplazan dropdowns) */
 input.start,
 input.end {
   text-align:center;
@@ -445,14 +420,11 @@ input.end {
   width:100%;
   color:var(--ink);
 }
-
 input.start.invalid,
 input.end.invalid {
   border-color:#e63946;
   background:#ffe5e5;
 }
-
-/* 🆕 Guía visual para el formato 24 h (con fade-in) */
 .time-hint {
   display: block;
   font-size: 0.85rem;
@@ -466,15 +438,12 @@ input.end.invalid {
 .time-hint strong {
   color: var(--brand-600);
 }
-
 @keyframes fadeInHint {
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
-
-/* 🆕 Responsive horas */
 @media(max-width:640px){
   .hours-header,
   .hours-day{
@@ -505,7 +474,6 @@ input.end.invalid {
 }
 
 /* ==================== VIAJEROS (MVP compacto) ==================== */
-/* Nota: mantiene #traveler-grid (compatibilidad) pero ahora se usa el nuevo bloque */
 #traveler-mode{
   border:1px solid var(--border);
   background:#fff;
@@ -727,12 +695,6 @@ table.itinerary th{
 @media (max-width:960px){
   .toolbar{grid-template-columns:repeat(2,1fr)}
 }
-
-/* =========================================================
-   ✅ MVP: OCULTAR (NO solo inhabilitar) botones extra del toolbar
-   - Visibles: PDF + CSV + Email
-   - Ocultos: Maps/Transport/Weather/Clothing/Restaurants/Gas/Bathrooms/Lodging/Localinfo
-========================================================= */
 .toolbar #btn-maps,
 .toolbar #btn-transport,
 .toolbar #btn-weather,
@@ -744,8 +706,6 @@ table.itinerary th{
 .toolbar #btn-localinfo{
   display:none !important;
 }
-
-/* ✅ Asegurar 3 columnas en desktop para los 3 botones MVP */
 .toolbar{
   grid-template-columns:repeat(3, 1fr);
 }
@@ -820,18 +780,10 @@ table.itinerary th{
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:30000;           /* ✅ más alto para que siempre quede encima */
+  z-index:30000;
   pointer-events:all;
 }
-
-/* ✅ (quirúrgico) Mejorar contenedor del loader para lectura + WOW */
-#loading-overlay .loader{
-  text-align:center;
-  width:min(980px, calc(100% - 48px));
-  padding: 1.1rem 1rem;
-  position:relative;
-}
-
+.loader{text-align:center;}
 .hourglass {
   display:inline-block;
   width:50px;
@@ -841,147 +793,33 @@ table.itinerary th{
   border-top-color:transparent;
   animation:spin 1s linear infinite;
 }
-
-/* ✅ (quirúrgico) WOW: halo suave detrás del loader */
-#loading-overlay .loader::before{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform:translate(-50%,-52%);
-  width:min(720px, 92vw);
-  height:min(420px, 58vh);
-  background:
-    radial-gradient(circle at 30% 40%, rgba(129,140,248,.16), transparent 60%),
-    radial-gradient(circle at 70% 55%, rgba(165,180,252,.14), transparent 62%),
-    radial-gradient(circle at 50% 80%, rgba(11,31,59,.06), transparent 60%);
-  filter: blur(0.2px);
-  opacity:1;
-  z-index:-1;
-  pointer-events:none;
-  animation: itbmoLoaderAura 2.8s ease-in-out infinite;
-  border-radius: 24px;
-}
-
-@keyframes itbmoLoaderAura{
-  0%   { transform:translate(-50%,-52%) scale(1); opacity:.85; }
-  50%  { transform:translate(-50%,-52%) scale(1.03); opacity:1; }
-  100% { transform:translate(-50%,-52%) scale(1); opacity:.85; }
-}
-
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ✅ (quirúrgico) Texto: que SIEMPRE se vea completo + WOW súper */
+/* ✅ QUIRÚRGICO: asegurar visibilidad completa SIEMPRE */
+#loading-overlay .loader{
+  width:min(980px, calc(100% - 40px));
+  padding: 0 8px;
+}
 #loading-overlay p {
   margin-top:1rem;
-  font-weight:900;         /* ⬆️ más visible */
+  font-weight:900;
   color:var(--ink);
 
-  /* ✅ lectura y visibilidad */
+  /* ✅ clave para que no se “corte” */
   width:100%;
-  max-width:none;          /* ✅ elimina el límite que podía “apretar” el texto */
-  padding:0 1rem;
-  line-height:1.32;
+  max-width:none;
+  white-space:normal;
+  overflow:visible;
+  word-break:normal;
+  overflow-wrap:anywhere;
+
+  padding:0 10px;
+  line-height:1.35;
   text-align:center;
 
-  /* ✅ tamaño responsivo y mejor presencia */
+  /* wow suave, sin depender de background-clip (para evitar “texto pálido”) */
   font-size: clamp(1.05rem, 1.2vw + 0.85rem, 1.45rem);
-  letter-spacing: .1px;
-
-  /* ✅ WOW */
-  text-shadow:
-    0 2px 10px rgba(129,140,248,.16),
-    0 1px 0 rgba(255,255,255,.6);
-  position:relative;
-  animation: itbmoLoaderTextIn .38s ease-out both;
-}
-
-/* ✅ shimmer sutil en el texto (no agresivo) */
-#loading-overlay p{
-  background: linear-gradient(90deg,
-    rgba(11,31,59,1) 0%,
-    rgba(11,31,59,1) 35%,
-    rgba(129,140,248,.95) 50%,
-    rgba(11,31,59,1) 65%,
-    rgba(11,31,59,1) 100%);
-  -webkit-background-clip:text;
-  background-clip:text;
-  color:transparent;
-  background-size: 220% 100%;
-  animation: itbmoLoaderTextIn .38s ease-out both, itbmoLoaderShimmer 2.6s ease-in-out infinite;
-}
-
-@keyframes itbmoLoaderTextIn{
-  from{ opacity:0; transform: translateY(8px) scale(.985); filter: blur(.2px); }
-  to{ opacity:1; transform: translateY(0) scale(1); filter: blur(0); }
-}
-@keyframes itbmoLoaderShimmer{
-  0%   { background-position: 0% 50%; opacity: .96; }
-  50%  { background-position: 100% 50%; opacity: 1; }
-  100% { background-position: 0% 50%; opacity: .96; }
-}
-
-/* ✅ Estrellitas IA alrededor del texto (solo CSS, quirúrgico) */
-#loading-overlay p::before{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform:translate(-50%,-50%);
-  width:min(880px, 92vw);
-  height:calc(100% + 48px);
-  pointer-events:none;
-  z-index:-1;
-  border-radius: 999px;
-  background:
-    radial-gradient(circle at 14% 30%, rgba(165,180,252,.90) 0 2px, transparent 3px),
-    radial-gradient(circle at 26% 72%, rgba(255,255,255,.95) 0 1.6px, transparent 3px),
-    radial-gradient(circle at 48% 18%, rgba(165,180,252,.75) 0 1.8px, transparent 3px),
-    radial-gradient(circle at 66% 74%, rgba(255,255,255,.95) 0 1.5px, transparent 3px),
-    radial-gradient(circle at 84% 34%, rgba(165,180,252,.85) 0 2px, transparent 3px),
-    radial-gradient(circle at 56% 46%, rgba(255,255,255,.90) 0 1.4px, transparent 3px);
-  opacity:.85;
-  filter: blur(.12px);
-  animation: itbmoLoaderStars 3.4s ease-in-out infinite;
-}
-
-#loading-overlay p::after{
-  content:"";
-  position:absolute;
-  left:50%;
-  top:50%;
-  transform:translate(-50%,-50%);
-  width:min(760px, 88vw);
-  height:calc(100% + 36px);
-  pointer-events:none;
-  z-index:-1;
-  border-radius: 999px;
-  background: radial-gradient(circle, rgba(129,140,248,.22), transparent 62%);
-  opacity:.55;
-  animation: itbmoLoaderGlow 2.2s ease-in-out infinite;
-}
-
-@keyframes itbmoLoaderStars{
-  0%   { transform:translate(-50%,-50%) translateY(0) scale(1); opacity:.72; }
-  50%  { transform:translate(-50%,-50%) translateY(-6px) scale(1.02); opacity:.98; }
-  100% { transform:translate(-50%,-50%) translateY(0) scale(1); opacity:.72; }
-}
-@keyframes itbmoLoaderGlow{
-  0%   { transform:translate(-50%,-50%) scale(1); opacity:.42; }
-  50%  { transform:translate(-50%,-50%) scale(1.06); opacity:.62; }
-  100% { transform:translate(-50%,-50%) scale(1); opacity:.42; }
-}
-
-/* ✅ móvil: más aire para que no se “coma” el texto */
-@media (max-width:640px){
-  #loading-overlay .loader{
-    width: calc(100% - 26px);
-    padding: 1rem .75rem;
-  }
-  #loading-overlay p{
-    padding: 0 .5rem;
-    line-height: 1.28;
-  }
+  text-shadow: 0 2px 10px rgba(129,140,248,.18);
 }
 
 /* ==================== ANIMACIONES ==================== */
@@ -1028,9 +866,8 @@ table.itinerary th{
 }
 
 /* ==================== INFO CHAT MODAL ==================== */
-/* ✅ Emulación tipo ChatGPT: panel flotante (no 100vh) */
 .info-chat-modal{
-  position:fixed !important;      /* ✅ refuerzo */
+  position:fixed !important;
   right:24px;
   bottom:24px;
   top:auto;
@@ -1047,7 +884,7 @@ table.itinerary th{
   border-radius:16px;
 
   box-shadow:0 18px 46px rgba(11,31,59,.22);
-  z-index:20000;                  /* ✅ por encima del layout */
+  z-index:20000;
   display:flex;
   flex-direction:column;
 
@@ -1090,7 +927,6 @@ table.itinerary th{
   font-size:.95rem;
 }
 
-/* Mensajes */
 .info-chat-modal .chat-messages{
   flex:1;
   overflow-y:auto;
@@ -1098,7 +934,6 @@ table.itinerary th{
   background:#fff;
 }
 
-/* Input */
 .info-chat-modal .chat-input{
   border-top:1px solid var(--border);
   padding:.65rem;
@@ -1106,7 +941,6 @@ table.itinerary th{
   gap:.5rem;
   background:#fff;
 }
-/* 🆕 Multilínea: reemplaza input por textarea en info chat */
 .info-chat-modal .chat-input textarea{
   flex:1;
   padding:.55rem .65rem;
@@ -1120,13 +954,10 @@ table.itinerary th{
   overflow-y:auto;
   color:var(--ink);
 }
-
-/* Botón enviar del info chat dentro del modal: que no se “dispare” con hover claro */
 .info-chat-modal #info-chat-send.btn.primary:hover{
   filter:brightness(.96);
 }
 
-/* 🆕 Typing dots más grandes en Info Chat */
 .chat-message.ai.typing .dot{
   display:inline-block;
   font-size:2rem;
@@ -1182,4 +1013,37 @@ table.itinerary th{
 .reset-modal .btn {
   margin-top: 1rem;
   width: 100%;
+}
+
+/* =========================================================
+   ✅ NUEVO (quirúrgico): Header Itinerario + botón Info Chat arriba
+========================================================= */
+.itinerary-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+  margin-bottom:.6rem;
+}
+
+/* Override: cuando el botón está arriba, deja de ser fixed */
+.info-chat-floating.info-chat-top{
+  position:relative;
+  bottom:auto;
+  right:auto;
+  z-index:10;
+  padding: .95rem 1.35rem;  /* un poco más “header friendly” */
+  font-size: 1rem;
+}
+
+/* Mobile: header apila si hace falta */
+@media (max-width:640px){
+  .itinerary-header{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .info-chat-floating.info-chat-top{
+    width:100%;
+    justify-content:center;
+  }
 }
