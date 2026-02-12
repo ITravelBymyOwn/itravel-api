@@ -24,7 +24,7 @@
       <div class="brand-line-2">By My Own</div>
     </div>
 
-    <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
+    <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el del Itinerario -->
     <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
 
@@ -93,11 +93,14 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
               Rango de edad
               <select id="solo-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
                 <option value="" selected disabled></option>
-                <option value="18-64">Adulto (18–64)</option>
-                <option value="13-17">Joven (13–17)</option>
+                <option value="0-5">Infante / Preescolar (0–5)</option>
                 <option value="6-12">Niño (6–12)</option>
-                <option value="0-5">Infante (0–5)</option>
-                <option value="65+">Mayor (65+)</option>
+                <option value="13-17">Joven (13–17)</option>
+                <option value="18-29">Adulto joven (18–29)</option>
+                <option value="30-44">Adulto (30–44)</option>
+                <option value="45-59">Adulto (45–59)</option>
+                <option value="60-69">Adulto mayor (60–69)</option>
+                <option value="70+">Mayor (70+)</option>
               </select>
             </label>
           </div>
@@ -108,6 +111,8 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <div class="box" style="margin:0; padding:.9rem; border-style:dashed;">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem;">
               <strong style="font-size:.95rem;">Perfiles de viajeros</strong>
+              <!-- MVP: el JS luego generará perfiles automáticamente.
+                   Por ahora dejamos contenedor + botones opcionales para futuro -->
               <div style="display:flex; gap:.4rem;">
                 <button id="traveler-add" class="btn ghost" type="button" style="padding:.45rem .7rem;">+ Agregar</button>
                 <button id="traveler-remove" class="btn ghost" type="button" style="padding:.45rem .7rem;">− Quitar</button>
@@ -137,11 +142,14 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
                     Rango de edad
                     <select class="traveler-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
                       <option value="" selected disabled></option>
-                      <option value="18-64">Adulto (18–64)</option>
-                      <option value="13-17">Joven (13–17)</option>
+                      <option value="0-5">Infante / Preescolar (0–5)</option>
                       <option value="6-12">Niño (6–12)</option>
-                      <option value="0-5">Infante (0–5)</option>
-                      <option value="65+">Mayor (65+)</option>
+                      <option value="13-17">Joven (13–17)</option>
+                      <option value="18-29">Adulto joven (18–29)</option>
+                      <option value="30-44">Adulto (30–44)</option>
+                      <option value="45-59">Adulto (45–59)</option>
+                      <option value="60-69">Adulto mayor (60–69)</option>
+                      <option value="70+">Mayor (70+)</option>
                     </select>
                   </label>
                 </div>
@@ -164,19 +172,21 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
+
+      <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
     </aside>
 
     <!-- MAIN -->
     <main class="main">
       <section class="box itinerary-section">
 
-        <!-- ✅ QUIRÚRGICO: header con botón Info Chat arriba -->
-        <div class="itinerary-header">
+        <!-- ✅ Header: Título + botón Info Chat arriba -->
+        <div class="itinerary-head">
           <h2>Itinerario</h2>
 
-          <!-- ✅ MISMO ID para no romper JS + nueva clase para override -->
-          <button id="info-chat-floating" class="info-chat-floating info-chat-top pulse" title="Open Info Chat">
-            ✨ 💬 Info Chat
+          <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
+          <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
+            ✨💬 Info Chat
           </button>
         </div>
 
@@ -197,8 +207,24 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
+
+          <!-- 🆕 MVP: CSV para Excel -->
           <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
+
           <button class="btn" id="btn-email">Enviar por Email</button>
+
+          <!-- ✅ MVP: ocultos (se reactivan después) -->
+          <!--
+          <button class="btn" id="btn-maps">Mapas</button>
+          <button class="btn" id="btn-transport">Transporte</button>
+          <button class="btn" id="btn-weather">Clima</button>
+          <button class="btn" id="btn-clothing">Ropa</button>
+          <button class="btn" id="btn-restaurants">Restaurantes</button>
+          <button class="btn" id="btn-gas">Gasolineras</button>
+          <button class="btn" id="btn-bathrooms">Baños</button>
+          <button class="btn" id="btn-lodging">Hospedaje</button>
+          <button class="btn" id="btn-localinfo">Info Local</button>
+          -->
         </div>
 
         <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button>
@@ -230,7 +256,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <div class="loader">
       <div class="hourglass"></div>
 
-      <!-- ✅ Mensaje EXACTO solicitado -->
+      <!-- ✅ Mensaje solicitado (nota: si el JS lo pisa, hay que cambiar el string en JS) -->
       <p>✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
     </div>
   </div>
@@ -247,11 +273,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
   <script>
     (function () {
+      // ✅ Idioma: por ahora EN primero, luego ES con &lang=es en el iframe src.
       const params = new URLSearchParams(window.location.search);
       const lang = (params.get("lang") || "en").toLowerCase().slice(0, 2);
       document.documentElement.setAttribute("lang", lang);
       window.ITBMO_LANG = lang;
 
+      // ✅ Auto-height: emite la altura al parent (Webflow) para que el iframe se ajuste
       function postHeight() {
         try {
           const h = Math.max(
@@ -265,23 +293,32 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         } catch (_) {}
       }
 
+      // ResizeObserver para cambios dinámicos (itinerario, chat, etc.)
       try {
         const ro = new ResizeObserver(function () {
           postHeight();
         });
         ro.observe(document.body);
       } catch (_) {
+        // fallback
         window.addEventListener("load", postHeight);
         window.addEventListener("resize", postHeight);
         setInterval(postHeight, 1500);
       }
 
+      // Primera medición rápida
       window.addEventListener("load", function () {
         postHeight();
         setTimeout(postHeight, 300);
         setTimeout(postHeight, 900);
       });
 
+      /* =========================================================
+         ✅ MVP: UI viajeros (solo HTML/CSS por ahora)
+         - Solo: muestra panel solo
+         - Acompañado: muestra panel grupo
+         (La integración con el intake del planner se hace luego en JS)
+      ========================================================= */
       const modeSel = document.getElementById("traveler-mode");
       const soloPanel = document.getElementById("traveler-solo-panel");
       const groupPanel = document.getElementById("traveler-group-panel");
