@@ -155,39 +155,35 @@ body{
   }
 }
 
-/* ==================== INFO CHAT (BASE) ==================== */
+/* ==================== INFO CHAT BUTTON (MVP) ==================== */
+/* 🔁 Se mantiene la clase para compatibilidad, pero ahora se usa “inline” en el header de Itinerario */
 .info-chat-floating{
-  position:fixed;
-  bottom:22px;
-  right:22px;
-
   background:var(--brand-600);
   color:#fff;
   border:none;
   border-radius:999px;
-  padding:1.05rem 1.95rem; /* ⬆️ más grande y llamativo */
-  font-weight:800;
+  padding:1.05rem 1.95rem;
+  font-weight:900;
   font-size:1.05rem;
   display:flex;
   align-items:center;
   gap:.55rem;
-
   box-shadow:0 12px 32px rgba(11,31,59,.24);
   cursor:pointer;
   transition:all .28s ease;
   z-index:1200;
-
   transform:translateZ(0);
   will-change: transform, box-shadow, filter;
+  position:relative;
 }
 .info-chat-floating:hover{
   background:var(--brand-600);
   filter:brightness(.96);
-  transform:scale(1.07);
+  transform:scale(1.05);
   box-shadow:0 16px 38px rgba(11,31,59,.28);
 }
 .info-chat-floating:active{
-  transform:scale(.96);
+  transform:scale(.97);
 }
 .info-chat-floating.pulse::after{
   background:var(--brand-600);
@@ -204,8 +200,6 @@ body{
   border-radius:999px;
   opacity:0;
 }
-
-/* capa de estrellitas */
 .info-chat-floating::before{
   opacity:1;
   inset:-34px;
@@ -220,15 +214,12 @@ body{
   animation: itbmoStarsFloat 3.6s ease-in-out infinite;
   opacity:.75;
 }
-
-/* brillo suave */
 .info-chat-floating::after{
   opacity:.45;
   inset:-26px;
   background: radial-gradient(circle, rgba(129,140,248,.35), transparent 60%);
   animation: itbmoGlow 2.4s ease-in-out infinite;
 }
-
 @keyframes itbmoStarsFloat{
   0%   { transform: translateY(0) scale(1); opacity:.65; }
   50%  { transform: translateY(-6px) scale(1.02); opacity:.95; }
@@ -240,19 +231,49 @@ body{
   100% { transform: scale(1); opacity:.35; }
 }
 
+/* ✅ Header de Itinerario: título + botón */
+.itinerary-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+  margin-bottom:.35rem;
+}
+.itinerary-head h2{
+  margin:0;
+}
+
+/* ✅ Botón en el header: MÁS LARGO + más “premium” */
+.itinerary-head .info-chat-floating{
+  /* “más largo” como pediste */
+  padding:1.05rem 2.35rem;
+  min-width:240px;
+  justify-content:center;
+  letter-spacing:.2px;
+  box-shadow:0 14px 36px rgba(11,31,59,.26);
+}
+.itinerary-head .info-chat-floating:hover{
+  transform:scale(1.06);
+}
+
+/* Responsive: no romper el layout */
 @media(max-width:768px){
-  .info-chat-floating{
-    padding:.9rem 1.35rem;
-    font-size:.95rem;
-    bottom:16px;
-    right:16px;
+  .itinerary-head{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+  .itinerary-head .info-chat-floating{
+    width:100%;
+    min-width:unset;
+    padding:.95rem 1.35rem;
+    font-size:.98rem;
   }
 }
 
 /* ==================== GRID ==================== */
 #planner-grid{
   display:grid;
-  grid-template-columns: 50% 50%;
+  grid-template-columns: 50% 50%;   /* ⬅️ Sidebar más ancho para que quepa la fecha */
   gap:1.25rem;
   padding:1rem 1.25rem;
   max-width:1600px;
@@ -270,15 +291,23 @@ body{
   box-shadow:var(--shadow);
   padding:1rem;
 
+  /* ✅ QUITAR SCROLL INTERNO: dejar crecer con el contenido
+     (antes: max-height + overflow:auto) */
   max-height:none;
   overflow:visible;
 }
+
+/* 🆕 Permitir scroll global aunque sidebar esté bloqueado */
 .sidebar.disabled{
   opacity:.55;
   filter:grayscale(.05);
   pointer-events:none;
+
+  /* mantener consistente con scroll global */
   overflow:visible;
 }
+
+/* ✅ Excepciones: permitir interacción con botones clave incluso si sidebar está bloqueado */
 .sidebar.disabled #reset-planner,
 .sidebar.disabled #start-planning {
   opacity: 1 !important;
@@ -304,7 +333,7 @@ body{
 /* ==================== CITY ROW ==================== */
 .city-row{
   display:grid;
-  grid-template-columns:1.2fr 1fr .5fr 1.6fr auto;
+  grid-template-columns:1.2fr 1fr .5fr 1.6fr auto; /* ⬅️ Ajuste fino para dar más espacio a la fecha */
   gap:.6rem;
   align-items:end;
   margin-bottom:.6rem;
@@ -338,9 +367,12 @@ body{
   background:#ef4444;
   color:#fff;
   border:none;
+
+  /* ✕ aún más compacta */
   border-radius:.35rem;
   padding:.3rem .45rem;
   font-size:.7rem;
+
   cursor:pointer;
 }
 
@@ -348,29 +380,35 @@ body{
 .city-row .date-wrapper{
   display:flex;
   align-items:center;
-  gap:0.25rem;
-  min-width:165px;
+  gap:0.25rem;         /* ⬇️ más compacto aún */
+  min-width:165px;     /* ⬇️ más estrecho */
 }
 .city-row .date-label{
   display:flex;
   flex-direction:column;
   align-items:flex-start;
 }
+
+/* Día */
 .city-row .date-wrapper select.baseDay{
-  width:45px;
+  width:45px;               /* ⬇️ reducido */
   padding:.35rem .28rem;
   font-size:.78rem;
 }
+
+/* Mes */
 .city-row .date-wrapper select.baseMonth{
-  width:75px;
+  width:75px;               /* ⬇️ reducido */
   padding:.35rem .28rem;
   font-size:.78rem;
   border:1px solid var(--border);
   border-radius:.5rem;
   background:#fff;
 }
+
+/* Año */
 .city-row .date-wrapper input.baseYear{
-  width:50px;
+  width:50px;               /* ⬇️ reducido */
   text-align:center;
   padding:.35rem .28rem;
   border:1px solid var(--border);
@@ -378,6 +416,8 @@ body{
   font-size:.78rem;
   background:#fff;
 }
+
+/* 🧹 Se elimina el hint flotante anterior */
 .city-row .date-wrapper .date-format{
   display:none;
 }
@@ -393,10 +433,11 @@ body{
   margin-top:.6rem;
   grid-column:1 / -1;
 }
+/* 🆕 Encabezado global de horas */
 .hours-header{
   display:grid;
-  grid-template-columns:.8fr .6fr .6fr;
-  gap:.5rem;
+  grid-template-columns:.8fr .6fr .6fr;  /* ⬇️ menos ancho para horas */
+  gap:.5rem;                             /* ⬇️ menos separación */
   font-size:.85rem;
   font-weight:600;
   color:rgba(11,31,59,.72);
@@ -409,6 +450,8 @@ body{
   align-items:center;
   font-size:.9rem;
 }
+
+/* 🆕 Inputs de hora manual (reemplazan dropdowns) */
 input.start,
 input.end {
   text-align:center;
@@ -420,11 +463,14 @@ input.end {
   width:100%;
   color:var(--ink);
 }
+
 input.start.invalid,
 input.end.invalid {
   border-color:#e63946;
   background:#ffe5e5;
 }
+
+/* 🆕 Guía visual para el formato 24 h (con fade-in) */
 .time-hint {
   display: block;
   font-size: 0.85rem;
@@ -438,12 +484,15 @@ input.end.invalid {
 .time-hint strong {
   color: var(--brand-600);
 }
+
 @keyframes fadeInHint {
   to {
     opacity: 1;
     transform: translateY(0);
   }
 }
+
+/* 🆕 Responsive horas */
 @media(max-width:640px){
   .hours-header,
   .hours-day{
@@ -474,6 +523,7 @@ input.end.invalid {
 }
 
 /* ==================== VIAJEROS (MVP compacto) ==================== */
+/* Nota: mantiene #traveler-grid (compatibilidad) pero ahora se usa el nuevo bloque */
 #traveler-mode{
   border:1px solid var(--border);
   background:#fff;
@@ -695,6 +745,12 @@ table.itinerary th{
 @media (max-width:960px){
   .toolbar{grid-template-columns:repeat(2,1fr)}
 }
+
+/* =========================================================
+   ✅ MVP: OCULTAR (NO solo inhabilitar) botones extra del toolbar
+   - Visibles: PDF + CSV + Email
+   - Ocultos: Maps/Transport/Weather/Clothing/Restaurants/Gas/Bathrooms/Lodging/Localinfo
+========================================================= */
 .toolbar #btn-maps,
 .toolbar #btn-transport,
 .toolbar #btn-weather,
@@ -706,6 +762,8 @@ table.itinerary th{
 .toolbar #btn-localinfo{
   display:none !important;
 }
+
+/* ✅ Asegurar 3 columnas en desktop para los 3 botones MVP */
 .toolbar{
   grid-template-columns:repeat(3, 1fr);
 }
@@ -775,51 +833,49 @@ table.itinerary th{
 #loading-overlay{
   position:fixed;
   inset:0;
-  background:rgba(255,255,255,0.88);
+  background:rgba(255,255,255,0.90);
+  backdrop-filter: blur(6px);
   display:flex;
   flex-direction:column;
   justify-content:center;
   align-items:center;
-  z-index:30000;
+  z-index:30000;           /* ✅ más alto para que siempre quede encima */
   pointer-events:all;
 }
 .loader{text-align:center;}
+
+/* ✅ Loader más “premium” */
 .hourglass {
   display:inline-block;
-  width:50px;
-  height:50px;
-  border:5px solid var(--brand-600);
+  width:58px;
+  height:58px;
+  border:6px solid var(--brand-600);
   border-radius:50%;
   border-top-color:transparent;
   animation:spin 1s linear infinite;
+  box-shadow:0 10px 24px rgba(11,31,59,.16);
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ✅ QUIRÚRGICO: asegurar visibilidad completa SIEMPRE */
-#loading-overlay .loader{
-  width:min(980px, calc(100% - 40px));
-  padding: 0 8px;
-}
+/* ✅ Texto SIEMPRE visible completo (wrapping real) */
 #loading-overlay p {
   margin-top:1rem;
   font-weight:900;
   color:var(--ink);
-
-  /* ✅ clave para que no se “corte” */
-  width:100%;
-  max-width:none;
-  white-space:normal;
-  overflow:visible;
-  word-break:normal;
-  overflow-wrap:anywhere;
-
-  padding:0 10px;
+  width:min(92vw, 840px);
+  max-width:840px;
+  padding:0 1.25rem;
   line-height:1.35;
   text-align:center;
 
-  /* wow suave, sin depender de background-clip (para evitar “texto pálido”) */
-  font-size: clamp(1.05rem, 1.2vw + 0.85rem, 1.45rem);
-  text-shadow: 0 2px 10px rgba(129,140,248,.18);
+  /* clave para que NO “corte” */
+  white-space:normal;
+  word-break:break-word;
+  overflow-wrap:anywhere;
+
+  /* más legible */
+  font-size:1.05rem;
+  text-shadow:0 2px 10px rgba(11,31,59,.10);
 }
 
 /* ==================== ANIMACIONES ==================== */
@@ -866,24 +922,25 @@ table.itinerary th{
 }
 
 /* ==================== INFO CHAT MODAL ==================== */
+/* ✅ Panel flotante arriba (no abajo) + WOW */
 .info-chat-modal{
   position:fixed !important;
   right:24px;
-  bottom:24px;
-  top:auto;
+  top:110px;              /* ✅ sube el panel */
+  bottom:auto;
   left:auto;
   height:auto;
 
-  width:380px;
+  width:420px;
   max-width:calc(100% - 48px);
 
-  max-height:min(72vh, 640px);
+  max-height:min(72vh, 680px);
 
   background:#fff;
   border:1px solid var(--border);
-  border-radius:16px;
+  border-radius:18px;
 
-  box-shadow:0 18px 46px rgba(11,31,59,.22);
+  box-shadow:0 22px 56px rgba(11,31,59,.26);
   z-index:20000;
   display:flex;
   flex-direction:column;
@@ -891,15 +948,46 @@ table.itinerary th{
   visibility:hidden;
   pointer-events:none;
   overflow:hidden;
+
+  /* animación WOW */
+  transform: translateY(-10px) scale(.985);
+  opacity:0;
+  transition: opacity .22s ease, transform .22s ease;
 }
 .info-chat-modal.active{
   visibility:visible;
   pointer-events:auto;
+  opacity:1;
+  transform: translateY(0) scale(1);
 }
+
+/* Glow + “IA stars” alrededor del panel */
+.info-chat-modal::before{
+  content:"";
+  position:absolute;
+  inset:-26px;
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(165,180,252,.55) 0 2px, transparent 3px),
+    radial-gradient(circle at 82% 18%, rgba(255,255,255,.85) 0 1.8px, transparent 3px),
+    radial-gradient(circle at 76% 72%, rgba(165,180,252,.45) 0 2px, transparent 3px),
+    radial-gradient(circle at 22% 78%, rgba(255,255,255,.8) 0 1.6px, transparent 3px),
+    radial-gradient(circle, rgba(129,140,248,.22), transparent 62%);
+  z-index:-1;
+  opacity:.9;
+  filter: blur(.2px);
+  animation: itbmoPanelFloat 3.2s ease-in-out infinite;
+}
+@keyframes itbmoPanelFloat{
+  0% { transform: translateY(0); opacity:.75; }
+  50%{ transform: translateY(-6px); opacity:1; }
+  100%{ transform: translateY(0); opacity:.75; }
+}
+
 @media (max-width:768px){
   .info-chat-modal{
     right:14px;
-    bottom:14px;
+    top:90px;
     width:calc(100% - 28px);
     max-height:78vh;
     border-radius:16px;
@@ -923,10 +1011,11 @@ table.itinerary th{
 }
 .info-chat-header h3{
   margin:0;
-  font-weight:700;
-  font-size:.95rem;
+  font-weight:800;
+  font-size:1rem;
 }
 
+/* Mensajes */
 .info-chat-modal .chat-messages{
   flex:1;
   overflow-y:auto;
@@ -934,6 +1023,7 @@ table.itinerary th{
   background:#fff;
 }
 
+/* Input */
 .info-chat-modal .chat-input{
   border-top:1px solid var(--border);
   padding:.65rem;
@@ -941,6 +1031,7 @@ table.itinerary th{
   gap:.5rem;
   background:#fff;
 }
+/* 🆕 Multilínea: reemplaza input por textarea en info chat */
 .info-chat-modal .chat-input textarea{
   flex:1;
   padding:.55rem .65rem;
@@ -954,10 +1045,13 @@ table.itinerary th{
   overflow-y:auto;
   color:var(--ink);
 }
+
+/* Botón enviar del info chat dentro del modal */
 .info-chat-modal #info-chat-send.btn.primary:hover{
   filter:brightness(.96);
 }
 
+/* 🆕 Typing dots más grandes en Info Chat */
 .chat-message.ai.typing .dot{
   display:inline-block;
   font-size:2rem;
@@ -1013,37 +1107,4 @@ table.itinerary th{
 .reset-modal .btn {
   margin-top: 1rem;
   width: 100%;
-}
-
-/* =========================================================
-   ✅ NUEVO (quirúrgico): Header Itinerario + botón Info Chat arriba
-========================================================= */
-.itinerary-header{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:1rem;
-  margin-bottom:.6rem;
-}
-
-/* Override: cuando el botón está arriba, deja de ser fixed */
-.info-chat-floating.info-chat-top{
-  position:relative;
-  bottom:auto;
-  right:auto;
-  z-index:10;
-  padding: .95rem 1.35rem;  /* un poco más “header friendly” */
-  font-size: 1rem;
-}
-
-/* Mobile: header apila si hace falta */
-@media (max-width:640px){
-  .itinerary-header{
-    flex-direction:column;
-    align-items:flex-start;
-  }
-  .info-chat-floating.info-chat-top{
-    width:100%;
-    justify-content:center;
-  }
 }
