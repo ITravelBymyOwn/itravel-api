@@ -2255,6 +2255,60 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     const $bu = qs('#budget');     if($bu) $bu.value = '';
     const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
 
+    // ✅🧼 NUEVO (quirúrgico): limpiar UI de Viajeros (dropdown + panels + selects)
+    const $tm = qs('#traveler-mode');
+    const $soloP = qs('#traveler-solo-panel');
+    const $groupP = qs('#traveler-group-panel');
+
+    if ($tm){
+      $tm.value = ''; // vuelve al placeholder (option disabled)
+      // por si el browser no refleja bien value='', fuerza el selectedIndex
+      try { $tm.selectedIndex = 0; } catch(_) {}
+    }
+    if ($soloP) $soloP.style.display = 'none';
+    if ($groupP) $groupP.style.display = 'none';
+
+    // Reset selects SOLO
+    const $soloGender = qs('#solo-gender');
+    const $soloAge = qs('#solo-age-range');
+    if ($soloGender){
+      $soloGender.value = '';
+      try { $soloGender.selectedIndex = 0; } catch(_) {}
+    }
+    if ($soloAge){
+      $soloAge.value = '';
+      try { $soloAge.selectedIndex = 0; } catch(_) {}
+    }
+
+    // Reset perfiles ACOMPAÑADO (mantener solo 1 perfil base y limpiar selects)
+    const $profiles = qs('#traveler-profiles');
+    if ($profiles){
+      const allProfiles = qsa('.traveler-profile', $profiles);
+      // Dejar solo el primero si existen múltiples
+      if (allProfiles.length > 1){
+        allProfiles.slice(1).forEach(n => {
+          try { n.remove(); } catch(_) {}
+        });
+      }
+      // Limpiar selects del perfil 1
+      const p1 = qs('.traveler-profile', $profiles);
+      if (p1){
+        const g = qs('.traveler-gender', p1);
+        const a = qs('.traveler-age-range', p1);
+        if (g){
+          g.value = '';
+          try { g.selectedIndex = 0; } catch(_) {}
+        }
+        if (a){
+          a.value = '';
+          try { a.selectedIndex = 0; } catch(_) {}
+        }
+      }
+      // Ajustar título “Viajero 1” si hiciera falta
+      const t1 = qs('.traveler-profile strong', $profiles);
+      if (t1) t1.textContent = 'Viajero 1';
+    }
+
     // 🔄 Sincronizar plannerState (definido en Sección 1)
     if (typeof plannerState !== 'undefined') {
       plannerState.destinations = [];
