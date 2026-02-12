@@ -1283,7 +1283,7 @@ Contexto:
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
 ================================= */
-function setOverlayMessage(msg='Astra está generando itinerarios…'){
+function setOverlayMessage(msg='✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.'){
   const p = $overlayWOW?.querySelector('p');
   if(p) p.textContent = msg;
 }
@@ -1388,7 +1388,7 @@ CALIDAD / APROVECHAMIENTO:
 - Nada de texto fuera del JSON.
 `.trim();
 
-  showWOW(true, 'Astra está generando itinerarios…');
+  showWOW(true, '✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.');
   const text = await callAgent(instructions, false);
   const parsed = parseJSON(text);
 
@@ -1492,7 +1492,7 @@ Contexto actual (para fusionar sin borrar):
 ${buildIntake()}
 `.trim();
 
-  showWOW(true,'Reequilibrando la ciudad…');
+  showWOW(true,'✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.');
   const ans = await callAgent(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
