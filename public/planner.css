@@ -823,7 +823,15 @@ table.itinerary th{
   z-index:30000;           /* ✅ más alto para que siempre quede encima */
   pointer-events:all;
 }
-.loader{text-align:center;}
+
+/* ✅ (quirúrgico) Mejorar contenedor del loader para lectura + WOW */
+#loading-overlay .loader{
+  text-align:center;
+  width:min(980px, calc(100% - 48px));
+  padding: 1.1rem 1rem;
+  position:relative;
+}
+
 .hourglass {
   display:inline-block;
   width:50px;
@@ -833,15 +841,147 @@ table.itinerary th{
   border-top-color:transparent;
   animation:spin 1s linear infinite;
 }
+
+/* ✅ (quirúrgico) WOW: halo suave detrás del loader */
+#loading-overlay .loader::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-52%);
+  width:min(720px, 92vw);
+  height:min(420px, 58vh);
+  background:
+    radial-gradient(circle at 30% 40%, rgba(129,140,248,.16), transparent 60%),
+    radial-gradient(circle at 70% 55%, rgba(165,180,252,.14), transparent 62%),
+    radial-gradient(circle at 50% 80%, rgba(11,31,59,.06), transparent 60%);
+  filter: blur(0.2px);
+  opacity:1;
+  z-index:-1;
+  pointer-events:none;
+  animation: itbmoLoaderAura 2.8s ease-in-out infinite;
+  border-radius: 24px;
+}
+
+@keyframes itbmoLoaderAura{
+  0%   { transform:translate(-50%,-52%) scale(1); opacity:.85; }
+  50%  { transform:translate(-50%,-52%) scale(1.03); opacity:1; }
+  100% { transform:translate(-50%,-52%) scale(1); opacity:.85; }
+}
+
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ✅ (quirúrgico) Texto: que SIEMPRE se vea completo + WOW súper */
 #loading-overlay p {
   margin-top:1rem;
-  font-weight:800;         /* ✅ un poco más visible */
+  font-weight:900;         /* ⬆️ más visible */
   color:var(--ink);
-  max-width:640px;         /* ✅ mejor lectura (una sola línea si cabe) */
+
+  /* ✅ lectura y visibilidad */
+  width:100%;
+  max-width:none;          /* ✅ elimina el límite que podía “apretar” el texto */
   padding:0 1rem;
-  line-height:1.35;
+  line-height:1.32;
   text-align:center;
+
+  /* ✅ tamaño responsivo y mejor presencia */
+  font-size: clamp(1.05rem, 1.2vw + 0.85rem, 1.45rem);
+  letter-spacing: .1px;
+
+  /* ✅ WOW */
+  text-shadow:
+    0 2px 10px rgba(129,140,248,.16),
+    0 1px 0 rgba(255,255,255,.6);
+  position:relative;
+  animation: itbmoLoaderTextIn .38s ease-out both;
+}
+
+/* ✅ shimmer sutil en el texto (no agresivo) */
+#loading-overlay p{
+  background: linear-gradient(90deg,
+    rgba(11,31,59,1) 0%,
+    rgba(11,31,59,1) 35%,
+    rgba(129,140,248,.95) 50%,
+    rgba(11,31,59,1) 65%,
+    rgba(11,31,59,1) 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  background-size: 220% 100%;
+  animation: itbmoLoaderTextIn .38s ease-out both, itbmoLoaderShimmer 2.6s ease-in-out infinite;
+}
+
+@keyframes itbmoLoaderTextIn{
+  from{ opacity:0; transform: translateY(8px) scale(.985); filter: blur(.2px); }
+  to{ opacity:1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes itbmoLoaderShimmer{
+  0%   { background-position: 0% 50%; opacity: .96; }
+  50%  { background-position: 100% 50%; opacity: 1; }
+  100% { background-position: 0% 50%; opacity: .96; }
+}
+
+/* ✅ Estrellitas IA alrededor del texto (solo CSS, quirúrgico) */
+#loading-overlay p::before{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:min(880px, 92vw);
+  height:calc(100% + 48px);
+  pointer-events:none;
+  z-index:-1;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 14% 30%, rgba(165,180,252,.90) 0 2px, transparent 3px),
+    radial-gradient(circle at 26% 72%, rgba(255,255,255,.95) 0 1.6px, transparent 3px),
+    radial-gradient(circle at 48% 18%, rgba(165,180,252,.75) 0 1.8px, transparent 3px),
+    radial-gradient(circle at 66% 74%, rgba(255,255,255,.95) 0 1.5px, transparent 3px),
+    radial-gradient(circle at 84% 34%, rgba(165,180,252,.85) 0 2px, transparent 3px),
+    radial-gradient(circle at 56% 46%, rgba(255,255,255,.90) 0 1.4px, transparent 3px);
+  opacity:.85;
+  filter: blur(.12px);
+  animation: itbmoLoaderStars 3.4s ease-in-out infinite;
+}
+
+#loading-overlay p::after{
+  content:"";
+  position:absolute;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:min(760px, 88vw);
+  height:calc(100% + 36px);
+  pointer-events:none;
+  z-index:-1;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(129,140,248,.22), transparent 62%);
+  opacity:.55;
+  animation: itbmoLoaderGlow 2.2s ease-in-out infinite;
+}
+
+@keyframes itbmoLoaderStars{
+  0%   { transform:translate(-50%,-50%) translateY(0) scale(1); opacity:.72; }
+  50%  { transform:translate(-50%,-50%) translateY(-6px) scale(1.02); opacity:.98; }
+  100% { transform:translate(-50%,-50%) translateY(0) scale(1); opacity:.72; }
+}
+@keyframes itbmoLoaderGlow{
+  0%   { transform:translate(-50%,-50%) scale(1); opacity:.42; }
+  50%  { transform:translate(-50%,-50%) scale(1.06); opacity:.62; }
+  100% { transform:translate(-50%,-50%) scale(1); opacity:.42; }
+}
+
+/* ✅ móvil: más aire para que no se “coma” el texto */
+@media (max-width:640px){
+  #loading-overlay .loader{
+    width: calc(100% - 26px);
+    padding: 1rem .75rem;
+  }
+  #loading-overlay p{
+    padding: 0 .5rem;
+    line-height: 1.28;
+  }
 }
 
 /* ==================== ANIMACIONES ==================== */
