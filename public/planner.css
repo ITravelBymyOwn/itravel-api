@@ -58,19 +58,21 @@ body{
 .topbar .brand.brand-logo{
   display:flex;
   flex-direction:column;
-  line-height:1.05;
-  gap:.15rem;
+  line-height:1.03;
+  gap:.12rem;
 }
+
+/* ✅ MÁS GRANDE y llamativo (MVP) */
 .topbar .brand.brand-logo .brand-line-1{
-  font-weight:800;
-  font-size:1.25rem;
-  letter-spacing:.2px;
+  font-weight:900;
+  font-size:1.65rem;          /* ⬅️ más grande */
+  letter-spacing:.3px;
   color:var(--ink);
 }
 .topbar .brand.brand-logo .brand-line-2{
-  font-weight:700;
-  font-size:.85rem;
-  letter-spacing:.2px;
+  font-weight:800;
+  font-size:1.05rem;          /* ⬅️ más grande */
+  letter-spacing:.25px;
   color:rgba(11,31,59,.78);
 }
 
@@ -83,7 +85,7 @@ body{
 }
 .topbar .lang a.active{color:var(--ink)}
 
-/* ✨ Botón Info Chat (Topbar) */
+/* ✨ Botón Info Chat (Topbar) — se mantiene por compatibilidad aunque ya no se use */
 .info-chat-btn{
   background:var(--brand-600);
   color:#fff;
@@ -153,31 +155,38 @@ body{
   }
 }
 
-/* 💬 Botón Info Chat flotante */
+/* ==================== INFO CHAT FLOATING (ÚNICO BOTÓN) ==================== */
 .info-chat-floating{
   position:fixed;
-  bottom:24px;
-  right:24px;
+  /* ✅ Mejor sitio: esquina inferior derecha (consistente con UX + no tapa CTA principal) */
+  bottom:22px;
+  right:22px;
+
   background:var(--brand-600);
   color:#fff;
   border:none;
   border-radius:999px;
-  padding:1rem 1.8rem; /* 🆕 área clic ligeramente más amplia */
-  font-weight:700;
-  font-size:1rem;
+  padding:1.05rem 1.95rem; /* ⬆️ más grande y llamativo */
+  font-weight:800;
+  font-size:1.05rem;
   display:flex;
   align-items:center;
-  gap:.5rem;
-  box-shadow:0 10px 28px rgba(11,31,59,.22);
+  gap:.55rem;
+
+  box-shadow:0 12px 32px rgba(11,31,59,.24);
   cursor:pointer;
-  transition:all .3s ease;
+  transition:all .28s ease;
   z-index:1200;
+
+  /* WOW */
+  transform:translateZ(0);
+  will-change: transform, box-shadow, filter;
 }
 .info-chat-floating:hover{
   background:var(--brand-600);
   filter:brightness(.96);
-  transform:scale(1.06);
-  box-shadow:0 14px 34px rgba(11,31,59,.26);
+  transform:scale(1.07);
+  box-shadow:0 16px 38px rgba(11,31,59,.28);
 }
 .info-chat-floating:active{
   transform:scale(.96);
@@ -185,12 +194,60 @@ body{
 .info-chat-floating.pulse::after{
   background:var(--brand-600);
 }
+
+/* ✨🟣 Efecto extra WOW: estrellitas IA (solo CSS) */
+.info-chat-floating::before,
+.info-chat-floating::after{
+  content:"";
+  position:absolute;
+  pointer-events:none;
+  z-index:-1;
+  inset:-18px;
+  border-radius:999px;
+  opacity:0;
+}
+
+/* capa de estrellitas */
+.info-chat-floating::before{
+  opacity:1;
+  inset:-34px;
+  background:
+    radial-gradient(circle at 18% 30%, rgba(165,180,252,.85) 0 2px, transparent 3px),
+    radial-gradient(circle at 30% 78%, rgba(255,255,255,.95) 0 1.6px, transparent 3px),
+    radial-gradient(circle at 58% 22%, rgba(165,180,252,.75) 0 1.8px, transparent 3px),
+    radial-gradient(circle at 74% 62%, rgba(255,255,255,.95) 0 1.5px, transparent 3px),
+    radial-gradient(circle at 86% 34%, rgba(165,180,252,.8) 0 2px, transparent 3px),
+    radial-gradient(circle at 44% 40%, rgba(255,255,255,.9) 0 1.4px, transparent 3px);
+  filter: blur(.15px);
+  animation: itbmoStarsFloat 3.6s ease-in-out infinite;
+  opacity:.75;
+}
+
+/* brillo suave */
+.info-chat-floating::after{
+  opacity:.45;
+  inset:-26px;
+  background: radial-gradient(circle, rgba(129,140,248,.35), transparent 60%);
+  animation: itbmoGlow 2.4s ease-in-out infinite;
+}
+
+@keyframes itbmoStarsFloat{
+  0%   { transform: translateY(0) scale(1); opacity:.65; }
+  50%  { transform: translateY(-6px) scale(1.02); opacity:.95; }
+  100% { transform: translateY(0) scale(1); opacity:.65; }
+}
+@keyframes itbmoGlow{
+  0%   { transform: scale(1); opacity:.35; }
+  50%  { transform: scale(1.08); opacity:.55; }
+  100% { transform: scale(1); opacity:.35; }
+}
+
 @media(max-width:768px){
   .info-chat-floating{
-    padding:.8rem 1.2rem;
-    font-size:.9rem;
-    bottom:18px;
-    right:18px;
+    padding:.9rem 1.35rem;
+    font-size:.95rem;
+    bottom:16px;
+    right:16px;
   }
 }
 
@@ -447,31 +504,40 @@ input.end.invalid {
   }
 }
 
-/* ==================== VIAJEROS ==================== */
-#traveler-grid{
-  display:grid;
-  grid-template-columns:repeat(2,1fr);
-  gap:.75rem;
-  margin-top:.5rem;
-}
-#traveler-grid label{
-  display:flex;
-  flex-direction:column;
-  font-size:.9rem;
-  font-weight:600;
-  color:var(--ink);
-}
-#traveler-grid input[type="number"]{
-  margin-top:.25rem;
-  padding:.5rem;
+/* ==================== VIAJEROS (MVP compacto) ==================== */
+/* Nota: mantiene #traveler-grid (compatibilidad) pero ahora se usa el nuevo bloque */
+#traveler-mode{
   border:1px solid var(--border);
-  border-radius:.5rem;
-  font-size:.9rem;
-  width:100%;
+  background:#fff;
   color:var(--ink);
+  width:100%;
+}
+#traveler-solo-panel,
+#traveler-group-panel{
+  animation:fadeIn .25s ease;
+}
+#traveler-solo-panel select,
+#traveler-group-panel select{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:.55rem;
+  background:#fff;
+  color:var(--ink);
+}
+#traveler-group-panel .traveler-profile{
+  background:#fff;
+  box-shadow:0 1px 8px rgba(11,31,59,.05);
+}
+#traveler-group-panel #traveler-add,
+#traveler-group-panel #traveler-remove{
+  border-radius:999px;
 }
 @media (max-width:640px){
-  #traveler-grid{grid-template-columns:1fr}
+  #traveler-solo-panel label,
+  #traveler-group-panel label{
+    min-width:unset !important;
+    width:100%;
+  }
 }
 
 /* ==================== BOTONES ==================== */
@@ -663,10 +729,9 @@ table.itinerary th{
 }
 
 /* =========================================================
-   ✅ MVP: Inhabilitar (NO eliminar) botones extra del toolbar
-   - Activos: PDF + Email + (próximo) CSV
-   - Inactivos: Maps/Transport/Weather/Clothing/Restaurants/Gas/Bathrooms/Lodging/Localinfo
-   (Se dejan en el DOM pero no clickeables)
+   ✅ MVP: OCULTAR (NO solo inhabilitar) botones extra del toolbar
+   - Visibles: PDF + CSV + Email
+   - Ocultos: Maps/Transport/Weather/Clothing/Restaurants/Gas/Bathrooms/Lodging/Localinfo
 ========================================================= */
 .toolbar #btn-maps,
 .toolbar #btn-transport,
@@ -677,16 +742,17 @@ table.itinerary th{
 .toolbar #btn-bathrooms,
 .toolbar #btn-lodging,
 .toolbar #btn-localinfo{
-  opacity:.35;
-  filter:grayscale(.15);
-  pointer-events:none;
-  cursor:not-allowed;
-  transform:none !important;
+  display:none !important;
 }
 
-/* Preparado para el nuevo botón CSV (cuando exista en el HTML) */
-.toolbar #btn-csv{
-  /* queda activo por default (sin pointer-events:none) */
+/* ✅ Asegurar 3 columnas en desktop para los 3 botones MVP */
+.toolbar{
+  grid-template-columns:repeat(3, 1fr);
+}
+@media (max-width:960px){
+  .toolbar{
+    grid-template-columns:1fr;
+  }
 }
 
 /* ==================== CTA ==================== */
@@ -770,11 +836,12 @@ table.itinerary th{
 @keyframes spin { to { transform: rotate(360deg); } }
 #loading-overlay p {
   margin-top:1rem;
-  font-weight:700;         /* ✅ un poco más visible */
+  font-weight:800;         /* ✅ un poco más visible */
   color:var(--ink);
-  max-width:520px;
+  max-width:640px;         /* ✅ mejor lectura (una sola línea si cabe) */
   padding:0 1rem;
   line-height:1.35;
+  text-align:center;
 }
 
 /* ==================== ANIMACIONES ==================== */
