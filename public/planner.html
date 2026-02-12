@@ -24,9 +24,8 @@
       <div class="brand-line-2">By My Own</div>
     </div>
 
-    <!-- ✅ Se quitaron los botones de idiomas del código Vercel -->
-    <!-- Botón Info Chat WOW ✨ -->
-    <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button>
+    <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
+    <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
 
   <div id="planner-grid">
@@ -62,9 +61,104 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
       </section>
 
+      <!-- ✅ NUEVO: Viajeros (compacto con dropdown) -->
       <section class="box">
         <h3>Viajeros</h3>
-        <div id="traveler-grid">
+
+        <!-- Dropdown tipo “número de días” (referencia visual en el UI) -->
+        <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+          ¿Con quién viajas?
+          <select id="traveler-mode" class="btn" style="padding:.55rem .7rem; border-radius:.55rem; background:#fff; text-align:left;">
+            <option value="" selected disabled></option>
+            <option value="solo">Viajo solamente yo</option>
+            <option value="group">Viajo acompañado</option>
+          </select>
+        </label>
+
+        <!-- Panel SOLO -->
+        <div id="traveler-solo-panel" style="display:none; margin-top:.85rem;">
+          <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
+            <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+              Género
+              <select id="solo-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                <option value="" selected disabled></option>
+                <option value="female">Femenino</option>
+                <option value="male">Masculino</option>
+                <option value="other">Otro</option>
+                <option value="na">Prefiero no decirlo</option>
+              </select>
+            </label>
+
+            <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+              Rango de edad
+              <select id="solo-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                <option value="" selected disabled></option>
+                <option value="18-64">Adulto (18–64)</option>
+                <option value="13-17">Joven (13–17)</option>
+                <option value="6-12">Niño (6–12)</option>
+                <option value="0-5">Infante (0–5)</option>
+                <option value="65+">Mayor (65+)</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <!-- Panel ACOMPAÑADO -->
+        <div id="traveler-group-panel" style="display:none; margin-top:.85rem;">
+          <div class="box" style="margin:0; padding:.9rem; border-style:dashed;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem;">
+              <strong style="font-size:.95rem;">Perfiles de viajeros</strong>
+              <!-- MVP: el JS luego generará perfiles automáticamente.
+                   Por ahora dejamos contenedor + botones opcionales para futuro -->
+              <div style="display:flex; gap:.4rem;">
+                <button id="traveler-add" class="btn ghost" type="button" style="padding:.45rem .7rem;">+ Agregar</button>
+                <button id="traveler-remove" class="btn ghost" type="button" style="padding:.45rem .7rem;">− Quitar</button>
+              </div>
+            </div>
+
+            <div id="traveler-profiles" style="display:grid; grid-template-columns:1fr; gap:.75rem; margin-top:.75rem;">
+              <!-- Perfil 1 -->
+              <div class="traveler-profile" style="border:1px solid #ccc; border-radius:.8rem; padding:.75rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+                  <strong style="font-size:.9rem;">Viajero 1</strong>
+                  <span style="font-size:.85rem; color:rgba(11,31,59,.65);">Acompañante</span>
+                </div>
+                <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
+                  <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+                    Género
+                    <select class="traveler-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                      <option value="" selected disabled></option>
+                      <option value="female">Femenino</option>
+                      <option value="male">Masculino</option>
+                      <option value="other">Otro</option>
+                      <option value="na">Prefiero no decirlo</option>
+                    </select>
+                  </label>
+
+                  <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+                    Rango de edad
+                    <select class="traveler-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                      <option value="" selected disabled></option>
+                      <option value="18-64">Adulto (18–64)</option>
+                      <option value="13-17">Joven (13–17)</option>
+                      <option value="6-12">Niño (6–12)</option>
+                      <option value="0-5">Infante (0–5)</option>
+                      <option value="65+">Mayor (65+)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <!-- /Perfil 1 -->
+            </div>
+
+            <p style="margin:.75rem 0 0; font-size:.85rem; color:rgba(11,31,59,.68);">
+              *En el MVP, estos perfiles se usarán para personalizar el itinerario. La lógica se conecta en JS después.
+            </p>
+          </div>
+        </div>
+
+        <!-- ✅ Compatibilidad: mantenemos el grid original oculto (por ahora) para no romper JS actual -->
+        <div id="traveler-grid" style="display:none;">
           <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
           <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
           <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
@@ -80,8 +174,6 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <main class="main">
       <section class="box itinerary-section">
         <h2>Itinerario</h2>
-
-        <!-- 🧹 Se eliminó la guía de horarios de esta sección -->
 
         <div class="itinerary-actions">
           <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
@@ -101,10 +193,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
 
-          <!-- 🆕 MVP: CSV para Excel (inserción quirúrgica) -->
+          <!-- 🆕 MVP: CSV para Excel -->
           <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
 
           <button class="btn" id="btn-email">Enviar por Email</button>
+
+          <!-- ✅ MVP: ocultos (se reactivan después) -->
+          <!--
           <button class="btn" id="btn-maps">Mapas</button>
           <button class="btn" id="btn-transport">Transporte</button>
           <button class="btn" id="btn-weather">Clima</button>
@@ -114,6 +209,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <button class="btn" id="btn-bathrooms">Baños</button>
           <button class="btn" id="btn-lodging">Hospedaje</button>
           <button class="btn" id="btn-localinfo">Info Local</button>
+          -->
         </div>
 
         <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button>
@@ -122,7 +218,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
   </div>
 
   <footer class="footer">
-    © 2025 ITravelByMyOwn — <a href="#">Términos</a> · <a href="#">Privacidad</a>
+    © 2026 ITravelByMyOwn
   </footer>
 
   <!-- Modal Info Chat -->
@@ -145,10 +241,8 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <div class="loader">
       <div class="hourglass"></div>
 
-      <!-- ✅ Mensaje aprobado (cambio quirúrgico) -->
-      <p>✨ Astra está creando tu itinerario completo…<br>
-        Esto puede tardar varios minutos.<br>
-        No cierres esta pestaña: estás ahorrando horas de planificación.</p>
+      <!-- ✅ Mensaje EXACTO solicitado -->
+      <p>✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
     </div>
   </div>
 
@@ -162,7 +256,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <span></span><span></span><span></span>
   </div>
 
-  <!-- 🆕 Botón flotante Info Chat -->
+  <!-- ✅ ÚNICO botón flotante Info Chat (WOW) -->
   <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
     💬 Info Chat
   </button>
@@ -208,6 +302,33 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         setTimeout(postHeight, 300);
         setTimeout(postHeight, 900);
       });
+
+      /* =========================================================
+         ✅ MVP: UI viajeros (solo HTML/CSS por ahora)
+         - Solo: muestra panel solo
+         - Acompañado: muestra panel grupo
+         (La integración con el intake del planner se hace luego en JS)
+      ========================================================= */
+      const modeSel = document.getElementById("traveler-mode");
+      const soloPanel = document.getElementById("traveler-solo-panel");
+      const groupPanel = document.getElementById("traveler-group-panel");
+
+      if (modeSel && soloPanel && groupPanel) {
+        modeSel.addEventListener("change", () => {
+          const v = (modeSel.value || "").toLowerCase();
+          if (v === "solo") {
+            soloPanel.style.display = "block";
+            groupPanel.style.display = "none";
+          } else if (v === "group") {
+            soloPanel.style.display = "none";
+            groupPanel.style.display = "block";
+          } else {
+            soloPanel.style.display = "none";
+            groupPanel.style.display = "none";
+          }
+          postHeight();
+        });
+      }
     })();
   </script>
 
