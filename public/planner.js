@@ -2203,6 +2203,170 @@ function validateBaseDatesDMY(){
 
 $save?.addEventListener('click', saveDestinations);
 
+/* =========================================================
+   🧍‍♂️🧍‍♀️ MVP — Viajeros (UI compacto)
+   - Máximo: 10 perfiles (acompañado)
+   - Permitir 0 (cero) perfiles
+   - No integra aún con intake; solo UI
+========================================================= */
+const MAX_TRAVELERS = 10;
+
+function travelerCount(){
+  if(!$travelerProfiles) return 0;
+  return qsa('.traveler-profile', $travelerProfiles).length;
+}
+
+function renumberTravelerProfiles(){
+  if(!$travelerProfiles) return;
+  const items = qsa('.traveler-profile', $travelerProfiles);
+  items.forEach((card, idx)=>{
+    const n = idx + 1;
+    const title = qs('.traveler-title', card);
+    if(title) title.textContent = `Viajero ${n}`;
+  });
+}
+
+function setTravelerButtonsState(){
+  if(!$travelerAdd || !$travelerRemove) return;
+
+  const mode = String($travelerMode?.value || '').toLowerCase();
+  if(mode !== 'group'){
+    // fuera de "acompañado": botones no aplican
+    $travelerAdd.disabled = true;
+    $travelerRemove.disabled = true;
+    return;
+  }
+
+  const n = travelerCount();
+  $travelerAdd.disabled = (n >= MAX_TRAVELERS);
+  $travelerRemove.disabled = (n <= 0); // permitir 0 → si no hay perfiles, no hay nada que quitar
+}
+
+function createTravelerProfileCard(index1){
+  // index1 = 1..N (solo para etiqueta visible)
+  const wrap = document.createElement('div');
+  wrap.className = 'traveler-profile';
+  wrap.style.border = '1px solid #ccc';
+  wrap.style.borderRadius = '.8rem';
+  wrap.style.padding = '.75rem';
+
+  wrap.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+      <strong class="traveler-title" style="font-size:.9rem;">Viajero ${index1}</strong>
+      <span style="font-size:.85rem; color:rgba(11,31,59,.65);">Acompañante</span>
+    </div>
+    <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
+      <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+        Género
+        <select class="traveler-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+          <option value="" selected disabled></option>
+          <option value="female">Femenino</option>
+          <option value="male">Masculino</option>
+          <option value="other">Otro</option>
+          <option value="na">Prefiero no decirlo</option>
+        </select>
+      </label>
+
+      <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+        Rango de edad
+        <select class="traveler-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+          <option value="" selected disabled></option>
+          <option value="0-2">Bebé (0–2)</option>
+          <option value="3-5">Preescolar (3–5)</option>
+          <option value="6-12">Niño (6–12)</option>
+          <option value="13-17">Adolescente (13–17)</option>
+          <option value="18-24">Joven adulto (18–24)</option>
+          <option value="25-39">Adulto (25–39)</option>
+          <option value="40-54">Adulto (40–54)</option>
+          <option value="55-64">Adulto (55–64)</option>
+          <option value="65+">Mayor (65+)</option>
+        </select>
+      </label>
+    </div>
+  `;
+  return wrap;
+}
+
+function addTravelerProfile(){
+  if(!$travelerProfiles) return;
+  const mode = String($travelerMode?.value || '').toLowerCase();
+  if(mode !== 'group') return;
+
+  const n = travelerCount();
+  if(n >= MAX_TRAVELERS) return;
+
+  const card = createTravelerProfileCard(n + 1);
+  $travelerProfiles.appendChild(card);
+  renumberTravelerProfiles();
+  setTravelerButtonsState();
+}
+
+function removeTravelerProfile(){
+  if(!$travelerProfiles) return;
+  const mode = String($travelerMode?.value || '').toLowerCase();
+  if(mode !== 'group') return;
+
+  const items = qsa('.traveler-profile', $travelerProfiles);
+  if(items.length <= 0) return;
+
+  items[items.length - 1].remove();
+  renumberTravelerProfiles();
+  setTravelerButtonsState();
+}
+
+function resetTravelersUI(){
+  // Dropdown + panels
+  if($travelerMode){
+    $travelerMode.value = '';
+  }
+  if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
+  if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
+
+  // Solo selects
+  if($soloGender) $soloGender.value = '';
+  if($soloAgeRange) $soloAgeRange.value = '';
+
+  // Group profiles: permitir 0 → dejamos vacío
+  if($travelerProfiles){
+    $travelerProfiles.innerHTML = '';
+  }
+
+  // botones
+  setTravelerButtonsState();
+}
+
+function bindTravelersListeners(){
+  if($travelerMode){
+    $travelerMode.addEventListener('change', ()=>{
+      const v = String($travelerMode.value || '').toLowerCase();
+      if(v === 'solo'){
+        if($travelerSoloPanel) $travelerSoloPanel.style.display = 'block';
+        if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
+      }else if(v === 'group'){
+        if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
+        if($travelerGroupPanel) $travelerGroupPanel.style.display = 'block';
+      }else{
+        if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
+        if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
+      }
+      setTravelerButtonsState();
+    });
+  }
+
+  $travelerAdd?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    addTravelerProfile();
+  });
+
+  $travelerRemove?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    removeTravelerProfile();
+  });
+
+  // Estado inicial
+  setTravelerButtonsState();
+}
+
 // ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
@@ -2255,59 +2419,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     const $bu = qs('#budget');     if($bu) $bu.value = '';
     const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
 
-    // ✅🧼 NUEVO (quirúrgico): limpiar UI de Viajeros (dropdown + panels + selects)
-    const $tm = qs('#traveler-mode');
-    const $soloP = qs('#traveler-solo-panel');
-    const $groupP = qs('#traveler-group-panel');
-
-    if ($tm){
-      $tm.value = ''; // vuelve al placeholder (option disabled)
-      // por si el browser no refleja bien value='', fuerza el selectedIndex
-      try { $tm.selectedIndex = 0; } catch(_) {}
-    }
-    if ($soloP) $soloP.style.display = 'none';
-    if ($groupP) $groupP.style.display = 'none';
-
-    // Reset selects SOLO
-    const $soloGender = qs('#solo-gender');
-    const $soloAge = qs('#solo-age-range');
-    if ($soloGender){
-      $soloGender.value = '';
-      try { $soloGender.selectedIndex = 0; } catch(_) {}
-    }
-    if ($soloAge){
-      $soloAge.value = '';
-      try { $soloAge.selectedIndex = 0; } catch(_) {}
-    }
-
-    // Reset perfiles ACOMPAÑADO (mantener solo 1 perfil base y limpiar selects)
-    const $profiles = qs('#traveler-profiles');
-    if ($profiles){
-      const allProfiles = qsa('.traveler-profile', $profiles);
-      // Dejar solo el primero si existen múltiples
-      if (allProfiles.length > 1){
-        allProfiles.slice(1).forEach(n => {
-          try { n.remove(); } catch(_) {}
-        });
-      }
-      // Limpiar selects del perfil 1
-      const p1 = qs('.traveler-profile', $profiles);
-      if (p1){
-        const g = qs('.traveler-gender', p1);
-        const a = qs('.traveler-age-range', p1);
-        if (g){
-          g.value = '';
-          try { g.selectedIndex = 0; } catch(_) {}
-        }
-        if (a){
-          a.value = '';
-          try { a.selectedIndex = 0; } catch(_) {}
-        }
-      }
-      // Ajustar título “Viajero 1” si hiciera falta
-      const t1 = qs('.traveler-profile strong', $profiles);
-      if (t1) t1.textContent = 'Viajero 1';
-    }
+    // ✅ NUEVO: reset UI de viajeros (modo/paneles/selects/perfiles)
+    resetTravelersUI();
 
     // 🔄 Sincronizar plannerState (definido en Sección 1)
     if (typeof plannerState !== 'undefined') {
@@ -2483,4 +2596,7 @@ function bindInfoChatListeners(){
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
+
+  // ✅ NUEVO: bind de viajeros (UI compacto MVP)
+  bindTravelersListeners();
 });
