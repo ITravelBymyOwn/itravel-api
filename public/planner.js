@@ -137,18 +137,31 @@ const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
 
 // 📌 Info Chat (IDs según tu HTML)
+// Nota: en el MVP quitamos el botón #info-chat-toggle del HTML (queda null y NO rompe).
 const $infoToggle   = qs('#info-chat-toggle');
 const $infoModal    = qs('#info-chat-modal');
 const $infoInput    = qs('#info-chat-input');
 const $infoSend     = qs('#info-chat-send');
 const $infoClose    = qs('#info-chat-close');
 const $infoMessages = qs('#info-chat-messages');
-// 🆕 Botón flotante adicional (v55)
+// 🆕 Botón flotante (se mantiene como ÚNICO botón en el MVP)
 const $infoFloating = qs('#info-chat-floating');
 
 // 🆕 Sidebar y botón reset
 const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
+
+/* 🆕 Viajeros (nuevo UI compacto MVP) */
+const $travelerMode      = qs('#traveler-mode');
+const $travelerSoloPanel = qs('#traveler-solo-panel');
+const $travelerGroupPanel= qs('#traveler-group-panel');
+
+const $soloGender   = qs('#solo-gender');
+const $soloAgeRange = qs('#solo-age-range');
+
+const $travelerProfiles = qs('#traveler-profiles');
+const $travelerAdd      = qs('#traveler-add');
+const $travelerRemove   = qs('#traveler-remove');
 
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
