@@ -2605,4 +2605,8 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   // ✅ NUEVO: bind de viajeros (UI compacto MVP)
   bindTravelersListeners();
+
+  // ✅ NUEVO (quirúrgico): sincroniza el perfil inicial que viene en el HTML
+  renumberTravelerProfiles();
+  setTravelerButtonsState();
 });
