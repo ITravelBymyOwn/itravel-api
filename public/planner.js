@@ -2326,6 +2326,12 @@ function resetTravelersUI(){
   if($soloGender) $soloGender.value = '';
   if($soloAgeRange) $soloAgeRange.value = '';
 
+  // ✅ NUEVO (quirúrgico): "Tu información" en modo acompañado
+  const $meGender = qs('#me-gender');
+  if($meGender) $meGender.value = '';
+  const $meAge = qs('#me-age-range');
+  if($meAge) $meAge.value = '';
+
   // Group profiles: permitir 0 → dejamos vacío
   if($travelerProfiles){
     $travelerProfiles.innerHTML = '';
