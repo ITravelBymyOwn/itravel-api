@@ -24,7 +24,7 @@
       <div class="brand-line-2">By My Own</div>
     </div>
 
-    <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
+    <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el del Itinerario -->
     <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
 
@@ -93,15 +93,14 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
               Rango de edad
               <select id="solo-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
                 <option value="" selected disabled></option>
-                <option value="0-2">Bebé (0–2)</option>
-                <option value="3-5">Preescolar (3–5)</option>
+                <option value="0-5">Infante / Preescolar (0–5)</option>
                 <option value="6-12">Niño (6–12)</option>
-                <option value="13-17">Adolescente (13–17)</option>
-                <option value="18-24">Joven adulto (18–24)</option>
-                <option value="25-39">Adulto (25–39)</option>
-                <option value="40-54">Adulto (40–54)</option>
-                <option value="55-64">Adulto (55–64)</option>
-                <option value="65+">Mayor (65+)</option>
+                <option value="13-17">Joven (13–17)</option>
+                <option value="18-29">Adulto joven (18–29)</option>
+                <option value="30-44">Adulto (30–44)</option>
+                <option value="45-59">Adulto (45–59)</option>
+                <option value="60-69">Adulto mayor (60–69)</option>
+                <option value="70+">Mayor (70+)</option>
               </select>
             </label>
           </div>
@@ -143,15 +142,14 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
                     Rango de edad
                     <select class="traveler-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
                       <option value="" selected disabled></option>
-                      <option value="0-2">Bebé (0–2)</option>
-                      <option value="3-5">Preescolar (3–5)</option>
+                      <option value="0-5">Infante / Preescolar (0–5)</option>
                       <option value="6-12">Niño (6–12)</option>
-                      <option value="13-17">Adolescente (13–17)</option>
-                      <option value="18-24">Joven adulto (18–24)</option>
-                      <option value="25-39">Adulto (25–39)</option>
-                      <option value="40-54">Adulto (40–54)</option>
-                      <option value="55-64">Adulto (55–64)</option>
-                      <option value="65+">Mayor (65+)</option>
+                      <option value="13-17">Joven (13–17)</option>
+                      <option value="18-29">Adulto joven (18–29)</option>
+                      <option value="30-44">Adulto (30–44)</option>
+                      <option value="45-59">Adulto (45–59)</option>
+                      <option value="60-69">Adulto mayor (60–69)</option>
+                      <option value="70+">Mayor (70+)</option>
                     </select>
                   </label>
                 </div>
@@ -181,7 +179,16 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <!-- MAIN -->
     <main class="main">
       <section class="box itinerary-section">
-        <h2>Itinerario</h2>
+
+        <!-- ✅ Header: Título + botón Info Chat arriba -->
+        <div class="itinerary-head">
+          <h2>Itinerario</h2>
+
+          <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
+          <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
+            ✨💬 Info Chat
+          </button>
+        </div>
 
         <div class="itinerary-actions">
           <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
@@ -249,7 +256,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
     <div class="loader">
       <div class="hourglass"></div>
 
-      <!-- ✅ Mensaje EXACTO solicitado -->
+      <!-- ✅ Mensaje solicitado (nota: si el JS lo pisa, hay que cambiar el string en JS) -->
       <p>✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
     </div>
   </div>
@@ -263,11 +270,6 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
   <div id="thinking-indicator-info">
     <span></span><span></span><span></span>
   </div>
-
-  <!-- ✅ ÚNICO botón flotante Info Chat (WOW) -->
-  <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
-    💬 Info Chat
-  </button>
 
   <script>
     (function () {
