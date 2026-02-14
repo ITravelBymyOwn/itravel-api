@@ -318,6 +318,332 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
       document.documentElement.setAttribute("lang", lang);
       window.ITBMO_LANG = lang;
 
+      // ✅ i18n (quirúrgico): UI EN/ES sin reescribir HTML ni tocar planner.js aún
+      const I18N = {
+        en: {
+          planner_title: "Planner",
+          destinations: "Destinations",
+          add_city: "+ Add city",
+          save_destinations: "Save destinations",
+          reset_planning: "Reset planning",
+          special_title: "Preferences / Restrictions / Special conditions",
+          travelers_title: "Travelers",
+          who_travel: "Who are you traveling with?",
+          mode_solo: "Just me",
+          mode_group: "With others",
+          gender: "Gender",
+          age_range: "Age range",
+          female: "Female",
+          male: "Male",
+          other: "Other",
+          na: "Prefer not to say",
+          baby: "Baby (0–2)",
+          preschool: "Preschool (3–5)",
+          child: "Child (6–12)",
+          teen: "Teen (13–17)",
+          young_adult: "Young adult (18–24)",
+          adult_25_39: "Adult (25–39)",
+          adult_40_54: "Adult (40–54)",
+          adult_55_64: "Adult (55–64)",
+          senior: "Senior (65+)",
+          your_info: "Your info",
+          traveler_profiles: "Traveler profiles",
+          add: "+ Add",
+          remove: "− Remove",
+          traveler_1: "Traveler 1",
+          companion: "Companion",
+          mvp_note: "*In the MVP, these profiles will be used to personalize the itinerary. The logic connects in JS later.",
+          itinerary_title: "Itinerary",
+          open_info_chat: "Open Info Chat",
+          start_planning: "Start planning",
+          type_message: "Type your message...",
+          send: "Send",
+          export_pdf: "Export PDF",
+          export_csv: "Export CSV (Excel)",
+          email: "Send by Email",
+          choose_itinerary: "Choose this itinerary",
+          info_header: "Info Chat · Astra 🌍",
+          info_placeholder: "Ask me anything...",
+          loading_text: "✨ Astra is creating your full itinerary… This may take several minutes. Don’t close this tab: you’re saving hours of planning.",
+          special_placeholder:
+`✨ Tell Astra exactly how you want to live your trip.
+This will help create an itinerary that truly matches you.
+
+🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”
+🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”
+🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”
+🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”
+⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”
+👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”
+
+📝 The more details you share, the more precise, smooth and personalized your itinerary will be.`
+        },
+        es: {
+          planner_title: "Planificador",
+          destinations: "Destinos",
+          add_city: "+ Agregar ciudad",
+          save_destinations: "Guardar destinos",
+          reset_planning: "Reiniciar planificación",
+          special_title: "Preferencias / Restricciones / Condiciones especiales",
+          travelers_title: "Viajeros",
+          who_travel: "¿Con quién viajas?",
+          mode_solo: "Viajo solamente yo",
+          mode_group: "Viajo acompañado",
+          gender: "Género",
+          age_range: "Rango de edad",
+          female: "Femenino",
+          male: "Masculino",
+          other: "Otro",
+          na: "Prefiero no decirlo",
+          baby: "Bebé (0–2)",
+          preschool: "Preescolar (3–5)",
+          child: "Niño (6–12)",
+          teen: "Adolescente (13–17)",
+          young_adult: "Joven adulto (18–24)",
+          adult_25_39: "Adulto (25–39)",
+          adult_40_54: "Adulto (40–54)",
+          adult_55_64: "Adulto (55–64)",
+          senior: "Mayor (65+)",
+          your_info: "Tu información",
+          traveler_profiles: "Perfiles de viajeros",
+          add: "+ Agregar",
+          remove: "− Quitar",
+          traveler_1: "Viajero 1",
+          companion: "Acompañante",
+          mvp_note: "*En el MVP, estos perfiles se usarán para personalizar el itinerario. La lógica se conecta en JS después.",
+          itinerary_title: "Itinerario",
+          open_info_chat: "Open Info Chat",
+          start_planning: "Iniciar planificación",
+          type_message: "Escribe tu mensaje...",
+          send: "Enviar",
+          export_pdf: "Exportar PDF",
+          export_csv: "Exportar CSV (Excel)",
+          email: "Enviar por Email",
+          choose_itinerary: "Elijo este itinerario",
+          info_header: "Info Chat · Astra 🌍",
+          info_placeholder: "Pregúntame lo que quieras…",
+          loading_text: "✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.",
+          special_placeholder:
+`✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
+Esta información permitirá crear un itinerario 100 % alineado contigo.
+
+🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
+🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
+🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
+🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
+⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
+👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
+
+📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.`
+        }
+      };
+
+      function t(key) {
+        const pack = I18N[lang] || I18N.en;
+        return (pack && pack[key]) || (I18N.en && I18N.en[key]) || "";
+      }
+
+      function setText(el, value) {
+        if (!el) return;
+        el.textContent = value;
+      }
+
+      function setTitle(el, value) {
+        if (!el) return;
+        el.setAttribute("title", value);
+      }
+
+      function setPlaceholder(el, value) {
+        if (!el) return;
+        el.setAttribute("placeholder", value);
+      }
+
+      function setLabelLeadingTextForControl(controlId, value) {
+        const control = document.getElementById(controlId);
+        const label = control && control.closest("label");
+        if (!label) return;
+
+        // intenta reemplazar el primer nodo de texto "no vacío" dentro del label
+        for (let i = 0; i < label.childNodes.length; i++) {
+          const n = label.childNodes[i];
+          if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
+            n.textContent = value + "\n";
+            return;
+          }
+        }
+        // si no encontró, lo inserta al inicio
+        label.insertBefore(document.createTextNode(value + "\n"), label.firstChild);
+      }
+
+      function setSelectOptionText(selectEl, value, labelText) {
+        if (!selectEl) return;
+        const opt = selectEl.querySelector(`option[value="${CSS.escape(value)}"]`);
+        if (opt) opt.textContent = labelText;
+      }
+
+      function applyI18n() {
+        // Sidebar titles
+        setText(document.querySelector(".sidebar h2"), t("planner_title"));
+        setText(document.querySelector(".sidebar section.box h3"), t("destinations"));
+        setText(document.getElementById("add-city-btn"), t("add_city"));
+        setText(document.getElementById("save-destinations"), t("save_destinations"));
+        setText(document.getElementById("reset-planner"), t("reset_planning"));
+
+        // Special conditions
+        setText(document.querySelector(".special-conditions h3"), t("special_title"));
+        setPlaceholder(document.getElementById("special-conditions"), t("special_placeholder"));
+
+        // Travelers section
+        // (título del section: el primer h3 después del special-conditions ya existe en HTML: "Viajeros")
+        // lo seleccionamos de forma segura por ubicación: el h3 dentro del section que contiene #traveler-mode
+        const travelerMode = document.getElementById("traveler-mode");
+        const travelerSection = travelerMode ? travelerMode.closest("section.box") : null;
+        if (travelerSection) {
+          const h3 = travelerSection.querySelector("h3");
+          setText(h3, t("travelers_title"));
+        }
+
+        setLabelLeadingTextForControl("traveler-mode", t("who_travel"));
+        if (travelerMode) {
+          setSelectOptionText(travelerMode, "solo", t("mode_solo"));
+          setSelectOptionText(travelerMode, "group", t("mode_group"));
+        }
+
+        // SOLO panel labels
+        setLabelLeadingTextForControl("solo-gender", t("gender"));
+        setLabelLeadingTextForControl("solo-age-range", t("age_range"));
+
+        // SOLO options
+        const soloGender = document.getElementById("solo-gender");
+        if (soloGender) {
+          setSelectOptionText(soloGender, "female", t("female"));
+          setSelectOptionText(soloGender, "male", t("male"));
+          setSelectOptionText(soloGender, "other", t("other"));
+          setSelectOptionText(soloGender, "na", t("na"));
+        }
+        const soloAge = document.getElementById("solo-age-range");
+        if (soloAge) {
+          setSelectOptionText(soloAge, "0-2", t("baby"));
+          setSelectOptionText(soloAge, "3-5", t("preschool"));
+          setSelectOptionText(soloAge, "6-12", t("child"));
+          setSelectOptionText(soloAge, "13-17", t("teen"));
+          setSelectOptionText(soloAge, "18-24", t("young_adult"));
+          setSelectOptionText(soloAge, "25-39", t("adult_25_39"));
+          setSelectOptionText(soloAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(soloAge, "55-64", t("adult_55_64"));
+          setSelectOptionText(soloAge, "65+", t("senior"));
+        }
+
+        // GROUP: "Tu información"
+        const yourInfoStrong = document.querySelector("#traveler-group-panel .box strong");
+        setText(yourInfoStrong, t("your_info"));
+        setLabelLeadingTextForControl("me-gender", t("gender"));
+        setLabelLeadingTextForControl("me-age-range", t("age_range"));
+
+        const meGender = document.getElementById("me-gender");
+        if (meGender) {
+          setSelectOptionText(meGender, "female", t("female"));
+          setSelectOptionText(meGender, "male", t("male"));
+          setSelectOptionText(meGender, "other", t("other"));
+          setSelectOptionText(meGender, "na", t("na"));
+        }
+        const meAge = document.getElementById("me-age-range");
+        if (meAge) {
+          setSelectOptionText(meAge, "0-2", t("baby"));
+          setSelectOptionText(meAge, "3-5", t("preschool"));
+          setSelectOptionText(meAge, "6-12", t("child"));
+          setSelectOptionText(meAge, "13-17", t("teen"));
+          setSelectOptionText(meAge, "18-24", t("young_adult"));
+          setSelectOptionText(meAge, "25-39", t("adult_25_39"));
+          setSelectOptionText(meAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(meAge, "55-64", t("adult_55_64"));
+          setSelectOptionText(meAge, "65+", t("senior"));
+        }
+
+        // GROUP: Perfiles de viajeros + botones
+        const profilesHeader = document.querySelector("#traveler-group-panel .box strong[style*='font-size:.95rem']");
+        // Nota: el selector anterior también puede pegarle a "Tu información"; por eso el de arriba ya se setea y acá buscamos el segundo
+        if (travelerSection) {
+          const strongs = travelerSection.querySelectorAll("#traveler-group-panel strong");
+          if (strongs && strongs.length >= 2) setText(strongs[1], t("traveler_profiles"));
+        }
+        setText(document.getElementById("traveler-add"), t("add"));
+        setText(document.getElementById("traveler-remove"), t("remove"));
+
+        // Perfil 1 labels (texto visible)
+        const traveler1Strong = document.querySelector("#traveler-profiles .traveler-profile strong");
+        setText(traveler1Strong, t("traveler_1"));
+        const companionSpan = document.querySelector("#traveler-profiles .traveler-profile span");
+        setText(companionSpan, t("companion"));
+
+        // Perfil 1 selects (labels)
+        const profGender = document.querySelector("#traveler-profiles .traveler-profile select.traveler-gender");
+        const profAge = document.querySelector("#traveler-profiles .traveler-profile select.traveler-age-range");
+        if (profGender) {
+          const lbl = profGender.closest("label");
+          if (lbl) {
+            // reemplaza "Género"
+            for (let i = 0; i < lbl.childNodes.length; i++) {
+              const n = lbl.childNodes[i];
+              if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
+                n.textContent = t("gender") + "\n";
+                break;
+              }
+            }
+          }
+          setSelectOptionText(profGender, "female", t("female"));
+          setSelectOptionText(profGender, "male", t("male"));
+          setSelectOptionText(profGender, "other", t("other"));
+          setSelectOptionText(profGender, "na", t("na"));
+        }
+        if (profAge) {
+          const lbl = profAge.closest("label");
+          if (lbl) {
+            for (let i = 0; i < lbl.childNodes.length; i++) {
+              const n = lbl.childNodes[i];
+              if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
+                n.textContent = t("age_range") + "\n";
+                break;
+              }
+            }
+          }
+          setSelectOptionText(profAge, "0-2", t("baby"));
+          setSelectOptionText(profAge, "3-5", t("preschool"));
+          setSelectOptionText(profAge, "6-12", t("child"));
+          setSelectOptionText(profAge, "13-17", t("teen"));
+          setSelectOptionText(profAge, "18-24", t("young_adult"));
+          setSelectOptionText(profAge, "25-39", t("adult_25_39"));
+          setSelectOptionText(profAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(profAge, "55-64", t("adult_55_64"));
+          setSelectOptionText(profAge, "65+", t("senior"));
+        }
+
+        // Nota MVP (p final dentro del box de perfiles)
+        const mvpP = document.querySelector("#traveler-group-panel p");
+        setText(mvpP, t("mvp_note"));
+
+        // Main titles/buttons
+        setText(document.querySelector(".itinerary-head h2"), t("itinerary_title"));
+        setTitle(document.getElementById("info-chat-floating"), t("open_info_chat"));
+        setText(document.getElementById("start-planning"), t("start_planning"));
+        setPlaceholder(document.getElementById("chat-input"), t("type_message"));
+        setText(document.getElementById("send-btn"), t("send"));
+
+        setText(document.getElementById("btn-pdf"), t("export_pdf"));
+        setText(document.getElementById("btn-csv"), t("export_csv"));
+        setText(document.getElementById("btn-email"), t("email"));
+        setText(document.getElementById("confirm-itinerary"), t("choose_itinerary"));
+
+        // Info Chat modal texts
+        setText(document.querySelector("#info-chat-modal .info-chat-header h3"), t("info_header"));
+        setPlaceholder(document.getElementById("info-chat-input"), t("info_placeholder"));
+        setText(document.getElementById("info-chat-send"), t("send"));
+
+        // Loading overlay text
+        const loadingP = document.querySelector("#loading-overlay p");
+        setText(loadingP, t("loading_text"));
+      }
+
       // ✅ Auto-height: emite la altura al parent (Webflow) para que el iframe se ajuste
       function postHeight() {
         try {
@@ -347,6 +673,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
       // Primera medición rápida
       window.addEventListener("load", function () {
+        applyI18n();
         postHeight();
         setTimeout(postHeight, 300);
         setTimeout(postHeight, 900);
