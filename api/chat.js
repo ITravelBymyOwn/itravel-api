@@ -2,7 +2,7 @@
 // ✅ Mantiene interfaz v58: recibe {mode, input/history/messages} y responde { text: "<string>" }.
 // ✅ NO rompe modo "info": devuelve texto libre.
 // ✅ Ajusta SOLO el prompt del planner + parse/guardrails para cumplir reglas fuertes (city_day preferido, duración 2 líneas, auroras, macro-tours, etc.).
-// ✅ AJUSTE QUIRÚRGICO (nuevo): "info" completamente libre (cualquier tema) + planner/info responden en el idioma del usuario (EN/ES).
+// ✅ AJUSTE QUIRÚRGICO (nuevo): "info" completamente libre (cualquier tema) + planner/info responden en el idioma REAL del contenido del usuario (cualquier idioma).
 // ✅ AJUSTE QUIRÚRGICO (nuevo): Info Chat "como ChatGPT": mantiene contexto usando messages/history y responde conversacionalmente.
 // ✅ AJUSTE QUIRÚRGICO (nuevo): Planner: obliga a usar TODA la info del tab Planner, en especial Preferencias/Restricciones/Condiciones especiales + Viajeros (si vienen).
 
@@ -35,8 +35,8 @@ function _lastUserText_(messages = []) {
   return "";
 }
 
-// Detección simple ES/EN (quirúrgica): para fallback/guardrails cuando el modelo no responde.
-// Nota: NO afecta el contenido normal (el modelo ya sigue "responde en el idioma del último mensaje").
+// Detección simple multi-idioma (quirúrgica): SOLO para fallback/guardrails cuando el modelo no responde.
+// Nota: NO afecta el contenido normal (el modelo decide idioma por prompt).
 function detectUserLang(messages = []) {
   const t = _lastUserText_(messages).trim();
   if (!t) return "es";
@@ -50,8 +50,35 @@ function detectUserLang(messages = []) {
   // Señales fuertes de inglés
   const enHits = (s.match(/\b(the|and|for|with|to|from|what|which|how|where|when|please)\b/g) || []).length;
 
-  if (enHits > esHits) return "en";
-  return "es";
+  // Señales fuertes de francés
+  const frHits = (s.match(/\b(le|la|les|des|de|du|et|pour|avec|sans|où|quoi|quel|quelle|quels|quelles|s\'il|vous)\b/g) || []).length;
+
+  // Señales fuertes de italiano
+  const itHits = (s.match(/\b(il|lo|la|i|gli|le|di|che|e|per|con|senza|dove|cosa|quale|quali|grazie)\b/g) || []).length;
+
+  // Señales fuertes de alemán
+  const deHits = (s.match(/\b(der|die|das|und|für|mit|ohne|wo|was|welche|welcher|bitte|danke)\b/g) || []).length;
+
+  // Señales fuertes de portugués
+  const ptHits = (s.match(/\b(o|a|os|as|de|que|e|para|com|sem|onde|qual|quais|obrigado|por favor)\b/g) || []).length;
+
+  const scores = [
+    ["en", enHits],
+    ["es", esHits],
+    ["fr", frHits],
+    ["it", itHits],
+    ["de", deHits],
+    ["pt", ptHits],
+  ];
+
+  scores.sort((a, b) => (b?.[1] || 0) - (a?.[1] || 0));
+  const top = scores[0];
+  const topLang = String(top?.[0] || "es");
+  const topScore = Number(top?.[1] || 0);
+
+  // Si no hay señales claras, conserva default ES (para tu fallback actual)
+  if (!topScore) return "es";
+  return topLang;
 }
 
 // v52.5-style robust JSON extraction (quirúrgico: reemplaza cleanToJSON sin cambiar uso externo)
@@ -79,48 +106,54 @@ function cleanToJSON(raw = "") {
 }
 
 function fallbackJSON(lang = "es") {
-  const isEN = String(lang || "").toLowerCase() === "en";
+  const L = String(lang || "").toLowerCase();
+  const isES = L === "es";
+  const isEN = L === "en";
+  // Para otros idiomas: fallback en inglés (quirúrgico; no inventamos traducciones aquí)
+  const useEN = !isES;
 
   return {
-    destination: isEN ? "Unknown" : "Desconocido",
+    destination: isES ? "Desconocido" : "Unknown",
     city_day: [
       {
-        city: isEN ? "Unknown" : "Desconocido",
+        city: isES ? "Desconocido" : "Unknown",
         day: 1,
         rows: [
           {
             day: 1,
             start: "09:30",
             end: "11:00",
-            activity: isEN ? "Unknown – Base itinerary (fallback)" : "Desconocido – Itinerario base (fallback)",
+            activity: isES ? "Desconocido – Itinerario base (fallback)" : "Unknown – Base itinerary (fallback)",
             from: "Hotel",
-            to: isEN ? "Center" : "Centro",
-            transport: isEN
-              ? "Walk or local transport (depending on location)"
-              : "A pie o Transporte local (según ubicación)",
-            duration: isEN
-              ? "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat"
-              : "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-            notes: isEN
-              ? "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again."
-              : "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar.",
+            to: isES ? "Centro" : "Center",
+            transport: isES ? "A pie o Transporte local (según ubicación)" : "Walk or local transport (depending on location)",
+            duration: isES
+              ? "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat"
+              : "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
+            notes: isES
+              ? "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar."
+              : "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again.",
             kind: "",
             zone: "",
           },
         ],
       },
     ],
-    followup: isEN
-      ? "⚠️ Local fallback: check your Vercel config or API key."
-      : "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
+    followup: isES
+      ? "⚠️ Fallback local: revisa configuración de Vercel o API Key."
+      : "⚠️ Local fallback: check your Vercel config or API key.",
   };
 }
 
 // Guard-rail: evita tabla en blanco si el modelo falla en planner
 function skeletonCityDay(destination = "Destino", daysTotal = 1, lang = "es") {
-  const isEN = String(lang || "").toLowerCase() === "en";
+  const L = String(lang || "").toLowerCase();
+  const isES = L === "es";
+  // Para otros idiomas: skeleton en inglés (quirúrgico)
+  const useEN = !isES;
+
   const city =
-    String(destination || (isEN ? "Destination" : "Destino")).trim() || (isEN ? "Destination" : "Destino");
+    String(destination || (isES ? "Destino" : "Destination")).trim() || (isES ? "Destino" : "Destination");
   const n = Math.max(1, Number(daysTotal) || 1);
   const blocks = [];
 
@@ -133,20 +166,20 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1, lang = "es") {
           day: d,
           start: "09:30",
           end: "11:00",
-          activity: isEN
-            ? `${city} – Retry generation (itinerary pending)`
-            : `${city} – Reintentar generación (itinerario pendiente)`,
+          activity: isES
+            ? `${city} – Reintentar generación (itinerario pendiente)`
+            : `${city} – Retry generation (itinerary pending)`,
           from: "Hotel",
-          to: isEN ? "Center" : "Centro",
-          transport: isEN
-            ? "Walk or local transport (depending on location)"
-            : "A pie o Transporte local (según ubicación)",
-          duration: isEN
-            ? "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat"
-            : "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-          notes: isEN
-            ? "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here."
-            : "⚠️ No se obtuvo un itinerario válido en este intento. Reintenta o ajusta condiciones; cuando funcione, aquí verás el plan final.",
+          to: isES ? "Centro" : "Center",
+          transport: isES
+            ? "A pie o Transporte local (según ubicación)"
+            : "Walk or local transport (depending on location)",
+          duration: isES
+            ? "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat"
+            : "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
+          notes: isES
+            ? "⚠️ No se obtuvo un itinerario válido en este intento. Reintenta o ajusta condiciones; cuando funcione, aquí verás el plan final."
+            : "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here.",
           kind: "",
           zone: "",
         },
@@ -251,11 +284,15 @@ const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
 Tu salida debe ser EXCLUSIVAMENTE un JSON válido (sin markdown, sin backticks, sin texto fuera).
 
-IDIOMA (CRÍTICO):
-- Responde SIEMPRE en el mismo idioma del ÚLTIMO mensaje del usuario.
-- Esto aplica a TODOS los campos de salida: activity, notes, followup, destination/city (si corresponde) y cualquier texto dentro del JSON.
-- NO traduzcas al idioma del sitio (EN/ES) ni al idioma del sistema, a menos que el usuario explícitamente pida traducción.
-- Si el usuario mezcla idiomas, prioriza el idioma dominante del mensaje.
+IDIOMA (CRÍTICO, MULTI-IDIOMA REAL):
+- Responde SIEMPRE en el idioma REAL en el que el usuario escribió su información (cualquier idioma).
+- En Planner, el mensaje del usuario puede incluir texto de plantilla/labels del sistema (por ejemplo: "Preferencias", "Restricciones", "Start time", etc.).
+  Esos labels NO deben determinar el idioma de salida.
+- Determina el idioma objetivo por el contenido escrito por el usuario (sus frases, restricciones, gustos, condiciones, etc.) y úsalo en TODO el JSON.
+- Si el usuario mezcla idiomas:
+  • Prioriza el idioma dominante del contenido escrito por el usuario.
+  • Si no hay dominante claro, usa el idioma del último párrafo/entrada del usuario.
+- NO traduzcas al idioma del sitio ni al idioma del sistema, a menos que el usuario explícitamente pida traducción.
 
 USO DE CONTEXTO (CRÍTICO):
 - Debes usar TODA la información provista por el usuario en el tab del Planner.
@@ -368,7 +405,7 @@ Responde SOLO JSON válido.
 `.trim();
 
 // ==============================
-// Prompt base ✨ (INFO CHAT LIBRE) — como ChatGPT: cualquier tema + contexto + mismo idioma del usuario
+// Prompt base ✨ (INFO CHAT LIBRE) — como ChatGPT: cualquier tema + contexto + idioma real del usuario
 // ==============================
 const SYSTEM_PROMPT_INFO = `
 Eres Astra, un asistente conversacional general (como ChatGPT) dentro de ITravelByMyOwn.
@@ -379,10 +416,10 @@ OBJETIVO:
 - Si falta información para responder bien, pregunta 1–2 cosas clave (no hagas 10 preguntas).
 - No inventes datos; si algo no es seguro, dilo.
 
-IDIOMA (CRÍTICO):
-- Responde SIEMPRE en el mismo idioma del ÚLTIMO mensaje del usuario.
-- Si el usuario mezcla idiomas, prioriza el idioma dominante del mensaje.
-- NO traduzcas automáticamente al idioma del sitio (EN/ES) ni al idioma del sistema, a menos que el usuario pida traducción.
+IDIOMA (CRÍTICO, MULTI-IDIOMA REAL):
+- Responde SIEMPRE en el idioma REAL del contenido del último mensaje del usuario (cualquier idioma).
+- Si el mensaje incluye texto de plantilla/labels del sistema, NO uses esos labels para decidir el idioma.
+- Si el usuario mezcla idiomas, prioriza el idioma dominante del contenido escrito por el usuario.
 
 FORMATO:
 - Responde en texto natural (no JSON).
@@ -434,9 +471,8 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner"; // 👈 parámetro existente
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const isEN = String(lang || "").toLowerCase() === "en";
 
-    // 🧭 MODO INFO CHAT — texto libre (como ChatGPT: libre + contexto + idioma del usuario)
+    // 🧭 MODO INFO CHAT — texto libre (como ChatGPT: libre + contexto + idioma real del usuario)
     if (mode === "info") {
       const raw = await callStructured(
         [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
@@ -444,7 +480,7 @@ export default async function handler(req, res) {
         2600,
         70000
       );
-      const text = raw || (isEN ? "⚠️ No response was obtained from the assistant." : "⚠️ No se obtuvo respuesta del asistente.");
+      const text = raw || "⚠️ No response was obtained from the assistant.";
       return res.status(200).json({ text });
     }
 
@@ -497,8 +533,7 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
 
     // Guard-rail final: si city_day existe pero viene vacío/sin filas, inyecta skeleton
     try {
-      const dest =
-        String(parsed?.destination || (isEN ? "Destination" : "Destino")).trim() || (isEN ? "Destination" : "Destino");
+      const dest = String(parsed?.destination || "Destination").trim() || "Destination";
       const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
 
       if (Array.isArray(parsed.city_day)) {
@@ -507,9 +542,7 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
           parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
           parsed.followup =
             (parsed.followup ? parsed.followup + " | " : "") +
-            (isEN
-              ? "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table."
-              : "⚠️ Guard-rail: city_day vacío o sin filas. Se devolvió skeleton para evitar tabla en blanco.");
+            "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table.";
         }
       }
     } catch {}
@@ -518,7 +551,7 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
-    // En caso de excepción, intentamos responder en el idioma del usuario (EN/ES) basándonos en el body.
+    // En caso de excepción, intentamos responder en el idioma del usuario basándonos en el body (solo para fallback).
     try {
       const body = req?.body || {};
       const clientMessages = extractMessages(body);
