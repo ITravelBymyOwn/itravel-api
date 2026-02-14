@@ -272,18 +272,18 @@ function t(key, ...args){
 // ✅ QUIRÚRGICO: evita que el planner reviente si el JS se carga más de una vez en Webflow
 // (const tone redeclarado => "Identifier 'tone' has already been declared")
 var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
-  hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
-  askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
-  confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
-  doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
-  fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
-  askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
-  humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
-  humanCancelled: 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂',
-  cityAdded: (c)=>`✅ Añadí <strong>${c}</strong> y generé su itinerario.`,
-  cityRemoved: (c)=>`🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`,
-  cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
-  thinking: 'Astra está pensando…'
+  hi: t('hi'),
+  askHotelTransport: (city)=>t('askHotelTransport', city),
+  confirmAll: t('confirmAll'),
+  doneAll: t('doneAll'),
+  fail: t('fail'),
+  askConfirm: (summary)=>t('askConfirm', summary),
+  humanOk: t('humanOk'),
+  humanCancelled: t('humanCancelled'),
+  cityAdded: (c)=>t('cityAdded', c),
+  cityRemoved: (c)=>t('cityRemoved', c),
+  cannotFindCity: t('cannotFindCity'),
+  thinking: t('thinking')
 };
 
 if (typeof window !== 'undefined') window.tone = tone;
@@ -518,7 +518,7 @@ function makeHoursBlock(days){
   // 🆕 Guía de horarios
   const guide = document.createElement('p');
   guide.className = 'time-hint';
-  guide.textContent = '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)';
+  guide.textContent = t('uiTimeHint');
   wrap.appendChild(guide);
 
   // Encabezado único de horas
@@ -526,8 +526,8 @@ function makeHoursBlock(days){
   header.className = 'hours-header';
   header.innerHTML = `
     <span></span>
-    <span class="header-start">Hora Inicio</span>
-    <span class="header-end">Hora Final</span>
+    <span class="header-start">${t('uiStartTime')}</span>
+    <span class="header-end">${t('uiEndTime')}</span>
   `;
   wrap.appendChild(header);
 
@@ -535,9 +535,9 @@ function makeHoursBlock(days){
     const row = document.createElement('div');
     row.className = 'hours-day';
     row.innerHTML = `
-      <span>Día ${d}</span>
-      <input class="start" type="time" aria-label="Hora inicio" placeholder="HH:MM">
-      <input class="end"   type="time" aria-label="Hora final"  placeholder="HH:MM">
+      <span>${t('uiDay', d)}</span>
+      <input class="start" type="time" aria-label="${t('uiAriaStart')}" placeholder="HH:MM">
+      <input class="end"   type="time" aria-label="${t('uiAriaEnd')}"  placeholder="HH:MM">
     `;
     wrap.appendChild(row);
   }
@@ -554,14 +554,14 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
-    <label>Ciudad<input class="city" placeholder="Ciudad" value="${pref.city||''}"></label>
-    <label>País<input class="country" placeholder="País" value="${pref.country||''}"></label>
-    <label>Días<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+    <label>${t('uiCity')}<input class="city" placeholder="${t('uiCity')}" value="${pref.city||''}"></label>
+    <label>${t('uiCountry')}<input class="country" placeholder="${t('uiCountry')}" value="${pref.country||''}"></label>
+    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
-      Inicio
+      ${t('uiStart')}
       <div class="date-wrapper">
         <input class="baseDate" placeholder="__/__/____" value="${pref.baseDate||''}">
-        <small class="date-format">DD/MM/AAAA</small>
+        <small class="date-format">${t('uiDateFormatSmall')}</small>
       </div>
     </label>
     <button class="remove" type="button">✕</button>
