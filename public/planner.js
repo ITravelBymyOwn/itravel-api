@@ -1016,12 +1016,21 @@ Ediciones:
 
   try{
     showThinking(true);
+
+    // ✅ QUIRÚRGICO (CRÍTICO): no mezclar globalStyle dentro del "user input"
+    // para no forzar idioma. globalStyle va como "system".
+    const messages = [
+      { role:'system', content: globalStyle },
+      ...(Array.isArray(history) ? history : []),
+      { role:'user', content: String(text || '') }
+    ];
+
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
       // ✅ QUIRÚRGICO: fuerza modo planner (API v58 default planner, pero lo fijamos para robustez)
-      body: JSON.stringify({ model: MODEL, input: `${globalStyle}\n\n${text}`, history, mode: 'planner' })
+      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
     });
 
     if(!res.ok){
@@ -1075,14 +1084,20 @@ Eres "Astra", asistente informativo de viajes.
   try{
     setInfoChatBusy(true);
 
+    // ✅ QUIRÚRGICO (CRÍTICO): system separado para no forzar idioma
+    const messages = [
+      { role:'system', content: globalStyle },
+      ...(Array.isArray(history) ? history : []),
+      { role:'user', content: String(text || '') }
+    ];
+
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
       body: JSON.stringify({
         model: MODEL,
-        input: `${globalStyle}\n\n${text}`,
-        history,
+        messages,
         mode: 'info'
       })
     });
