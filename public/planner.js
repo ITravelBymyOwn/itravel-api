@@ -756,7 +756,7 @@ function renderCityItinerary(city){
 
   $itWrap.innerHTML = '';
   if(!days.length){
-    $itWrap.innerHTML = '<p>No hay actividades aún. El asistente las generará aquí.</p>';
+    $itWrap.innerHTML = `<p>${t('uiNoActivities')}</p>`;
     return;
   }
 
@@ -780,12 +780,12 @@ function renderCityItinerary(city){
     sec.className = 'day-section';
     const dateLabel = base ? ` (${formatDMY(addDays(base, dayNum-1))})` : '';
     sec.innerHTML = `
-      <div class="day-title"><strong>Día ${dayNum}</strong>${dateLabel}</div>
+      <div class="day-title"><strong>${t('uiDayTitle', dayNum)}</strong>${dateLabel}</div>
       <table class="itinerary">
         <thead>
           <tr>
-            <th>Hora inicio</th><th>Hora final</th><th>Actividad</th><th>Desde</th>
-            <th>Hacia</th><th>Transporte</th><th>Duración</th><th>Notas</th>
+            <th>${t('thStart')}</th><th>${t('thEnd')}</th><th>${t('thActivity')}</th><th>${t('thFrom')}</th>
+            <th>${t('thTo')}</th><th>${t('thTransport')}</th><th>${t('thDuration')}</th><th>${t('thNotes')}</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -836,10 +836,10 @@ function renderCityItinerary(city){
     itineraries[city].currentDay = n;
   }
   pager.addEventListener('click', e=>{
-    const t = e.target;
-    if(t===prev)      show(Math.max(days[0], (itineraries[city].currentDay||days[0])-1));
-    else if(t===next) show(Math.min(days.at(-1), (itineraries[city].currentDay||days[0])+1));
-    else if(t.dataset.day) show(+t.dataset.day);
+    const t0 = e.target;
+    if(t0===prev)      show(Math.max(days[0], (itineraries[city].currentDay||days[0])-1));
+    else if(t0===next) show(Math.min(days.at(-1), (itineraries[city].currentDay||days[0])+1));
+    else if(t0.dataset.day) show(+t0.dataset.day);
   });
   show(itineraries[city].currentDay || days[0]);
 }
@@ -1459,7 +1459,7 @@ Contexto:
 /* ==============================
    SECCIÓN 15 · Generación por ciudad
 ================================= */
-function setOverlayMessage(msg='✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.'){
+function setOverlayMessage(msg=t('overlayDefault')){
   const p = $overlayWOW?.querySelector('p');
   if(p) p.textContent = msg;
 }
@@ -1564,7 +1564,7 @@ CALIDAD / APROVECHAMIENTO:
 - Nada de texto fuera del JSON.
 `.trim();
 
-  showWOW(true, '✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.');
+  showWOW(true, t('overlayDefault'));
   const text = await callAgent(instructions, false);
   const parsed = parseJSON(text);
 
@@ -1595,7 +1595,7 @@ CALIDAD / APROVECHAMIENTO:
   renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
   showWOW(false);
   $resetBtn?.removeAttribute('disabled');
-  chatMsg('⚠️ Fallback local: revisa configuración de Vercel o API Key.', 'ai');
+  chatMsg(t('fallbackLocal'), 'ai');
 }
 
 /* 🆕 Rebalanceo masivo tras cambios (agregar días / day trip pedido) */
@@ -1668,7 +1668,7 @@ Contexto actual (para fusionar sin borrar):
 ${buildIntake()}
 `.trim();
 
-  showWOW(true,'✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.');
+  showWOW(true, t('overlayDefault'));
   const ans = await callAgent(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
@@ -1698,7 +1698,7 @@ ${buildIntake()}
   }else{
     showWOW(false);
     $resetBtn?.removeAttribute('disabled');
-    chatMsg('No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?','ai');
+    chatMsg(getLang()==='es' ? 'No recibí cambios válidos para el rebalanceo. ¿Intentamos de otra forma?' : 'I did not receive valid changes for rebalancing. Want to try another way?','ai');
   }
 }
 
