@@ -2,6 +2,9 @@
 // ✅ Mantiene interfaz v58: recibe {mode, input/history/messages} y responde { text: "<string>" }.
 // ✅ NO rompe modo "info": devuelve texto libre.
 // ✅ Ajusta SOLO el prompt del planner + parse/guardrails para cumplir reglas fuertes (city_day preferido, duración 2 líneas, auroras, macro-tours, etc.).
+// ✅ AJUSTE QUIRÚRGICO (nuevo): "info" completamente libre (cualquier tema) + planner/info responden en el idioma del usuario (EN/ES).
+// ✅ AJUSTE QUIRÚRGICO (nuevo): Info Chat "como ChatGPT": mantiene contexto usando messages/history y responde conversacionalmente.
+// ✅ AJUSTE QUIRÚRGICO (nuevo): Planner: obliga a usar TODA la info del tab Planner, en especial Preferencias/Restricciones/Condiciones especiales + Viajeros (si vienen).
 
 import OpenAI from "openai";
 
@@ -18,6 +21,37 @@ function extractMessages(body = {}) {
   const prev = Array.isArray(history) ? history : [];
   const userText = typeof input === "string" ? input : "";
   return [...prev, { role: "user", content: userText }];
+}
+
+function _lastUserText_(messages = []) {
+  try {
+    for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (String(m?.role || "").toLowerCase() === "user") {
+        return String(m?.content || "");
+      }
+    }
+  } catch {}
+  return "";
+}
+
+// Detección simple ES/EN (quirúrgica): para fallback/guardrails cuando el modelo no responde.
+// Nota: NO afecta el contenido normal (el modelo ya sigue "responde en el idioma del último mensaje").
+function detectUserLang(messages = []) {
+  const t = _lastUserText_(messages).trim();
+  if (!t) return "es";
+
+  const s = t.toLowerCase();
+
+  // Señales fuertes de español
+  if (/[¿¡ñáéíóúü]/i.test(t)) return "es";
+  const esHits = (s.match(/\b(el|la|los|las|de|que|y|para|con|por|una|un|como|donde|qué|cuál|cuáles|cómo)\b/g) || []).length;
+
+  // Señales fuertes de inglés
+  const enHits = (s.match(/\b(the|and|for|with|to|from|what|which|how|where|when|please)\b/g) || []).length;
+
+  if (enHits > esHits) return "en";
+  return "es";
 }
 
 // v52.5-style robust JSON extraction (quirúrgico: reemplaza cleanToJSON sin cambiar uso externo)
@@ -44,44 +78,52 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
-function fallbackJSON() {
+function fallbackJSON(lang = "es") {
+  const isEN = String(lang || "").toLowerCase() === "en";
+
   return {
-    destination: "Unknown / Desconocido",
+    destination: isEN ? "Unknown" : "Desconocido",
     city_day: [
       {
-        city: "Unknown / Desconocido",
+        city: isEN ? "Unknown" : "Desconocido",
         day: 1,
         rows: [
           {
             day: 1,
             start: "09:30",
             end: "11:00",
-            activity: "Unknown – Base itinerary (fallback) / Desconocido – Itinerario base (fallback)",
+            activity: isEN ? "Unknown – Base itinerary (fallback)" : "Desconocido – Itinerario base (fallback)",
             from: "Hotel",
-            to: "Center / Centro",
-            transport: "Walk or local transport (depending on location) / A pie o Transporte local (según ubicación)",
-            duration:
-              "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat\n\n" +
-              "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-            notes:
-              "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again. / " +
-              "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar.",
+            to: isEN ? "Center" : "Centro",
+            transport: isEN
+              ? "Walk or local transport (depending on location)"
+              : "A pie o Transporte local (según ubicación)",
+            duration: isEN
+              ? "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat"
+              : "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
+            notes: isEN
+              ? "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again."
+              : "⚠️ No pude generar el itinerario. Revisa API key/despliegue y vuelve a intentar.",
             kind: "",
             zone: "",
           },
         ],
       },
     ],
-    followup:
-      "⚠️ Local fallback: check your Vercel config or API key. / ⚠️ Fallback local: revisa configuración de Vercel o API Key.",
+    followup: isEN
+      ? "⚠️ Local fallback: check your Vercel config or API key."
+      : "⚠️ Fallback local: revisa configuración de Vercel o API Key.",
   };
 }
 
 // Guard-rail: evita tabla en blanco si el modelo falla en planner
-function skeletonCityDay(destination = "Destino", daysTotal = 1) {
-  const city = String(destination || "Destino").trim() || "Destino";
+function skeletonCityDay(destination = "Destino", daysTotal = 1, lang = "es") {
+  const isEN = String(lang || "").toLowerCase() === "en";
+  const city =
+    String(destination || (isEN ? "Destination" : "Destino")).trim() || (isEN ? "Destination" : "Destino");
   const n = Math.max(1, Number(daysTotal) || 1);
   const blocks = [];
+
   for (let d = 1; d <= n; d++) {
     blocks.push({
       city,
@@ -91,19 +133,27 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1) {
           day: d,
           start: "09:30",
           end: "11:00",
-          activity: `${city} – Reintentar generación (itinerario pendiente)`,
+          activity: isEN
+            ? `${city} – Retry generation (itinerary pending)`
+            : `${city} – Reintentar generación (itinerario pendiente)`,
           from: "Hotel",
-          to: "Centro",
-          transport: "A pie o Transporte local (según ubicación)",
-          duration: "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
-          notes:
-            "⚠️ No se obtuvo un itinerario válido en este intento. Reintenta o ajusta condiciones; cuando funcione, aquí verás el plan final.",
+          to: isEN ? "Center" : "Centro",
+          transport: isEN
+            ? "Walk or local transport (depending on location)"
+            : "A pie o Transporte local (según ubicación)",
+          duration: isEN
+            ? "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat"
+            : "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat",
+          notes: isEN
+            ? "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here."
+            : "⚠️ No se obtuvo un itinerario válido en este intento. Reintenta o ajusta condiciones; cuando funcione, aquí verás el plan final.",
           kind: "",
           zone: "",
         },
       ],
     });
   }
+
   return blocks;
 }
 
@@ -184,7 +234,9 @@ function normalizeParsed(parsed) {
               zone: r?.zone ?? "",
             }))
           : d.rows,
-        city_day: Array.isArray(d?.city_day) ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "") : d.city_day,
+        city_day: Array.isArray(d?.city_day)
+          ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "")
+          : d.city_day,
       }));
     }
   } catch {}
@@ -204,6 +256,13 @@ IDIOMA (CRÍTICO):
 - Esto aplica a TODOS los campos de salida: activity, notes, followup, destination/city (si corresponde) y cualquier texto dentro del JSON.
 - NO traduzcas al idioma del sitio (EN/ES) ni al idioma del sistema, a menos que el usuario explícitamente pida traducción.
 - Si el usuario mezcla idiomas, prioriza el idioma dominante del mensaje.
+
+USO DE CONTEXTO (CRÍTICO):
+- Debes usar TODA la información provista por el usuario en el tab del Planner.
+- ESPECIALMENTE: Preferencias / Restricciones / Condiciones especiales (aplícalas en cada decisión: ritmo, horarios, movilidad, presupuesto, comidas, accesibilidad, intereses, seguridad, etc.).
+- Si el usuario provee información de viajeros (edades, niños, adultos mayores, movilidad, intereses), incorpórala activamente en: horarios, descansos, duración de bloques, transporte, tipo de actividades y notas.
+- Si hay conflicto entre preferencias (por ejemplo, “cero caminata” pero “tour de senderismo”), prioriza seguridad/viabilidad y ofrece alternativa equivalente.
+- Si falta un dato crítico para cumplir una restricción, asume lo mínimo posible y refleja la condición en notes (ej.: "Confirmar horarios/entradas") sin romper el itinerario.
 
 FORMATO PREFERIDO (nuevo, tabla-ready):
 A) {
@@ -309,6 +368,28 @@ Responde SOLO JSON válido.
 `.trim();
 
 // ==============================
+// Prompt base ✨ (INFO CHAT LIBRE) — como ChatGPT: cualquier tema + contexto + mismo idioma del usuario
+// ==============================
+const SYSTEM_PROMPT_INFO = `
+Eres Astra, un asistente conversacional general (como ChatGPT) dentro de ITravelByMyOwn.
+
+OBJETIVO:
+- Responder de forma útil, honesta y completa sobre CUALQUIER tema.
+- Mantener el contexto de la conversación usando el historial provisto (messages/history).
+- Si falta información para responder bien, pregunta 1–2 cosas clave (no hagas 10 preguntas).
+- No inventes datos; si algo no es seguro, dilo.
+
+IDIOMA (CRÍTICO):
+- Responde SIEMPRE en el mismo idioma del ÚLTIMO mensaje del usuario.
+- Si el usuario mezcla idiomas, prioriza el idioma dominante del mensaje.
+- NO traduzcas automáticamente al idioma del sitio (EN/ES) ni al idioma del sistema, a menos que el usuario pida traducción.
+
+FORMATO:
+- Responde en texto natural (no JSON).
+- Usa estructura clara (párrafos cortos, listas cuando convenga).
+`.trim();
+
+// ==============================
 // Llamada al modelo (con timeout suave)
 // ==============================
 async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
@@ -328,10 +409,7 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
       { signal: controller.signal }
     );
 
-    const text =
-      resp?.output_text?.trim() ||
-      resp?.output?.[0]?.content?.[0]?.text?.trim() ||
-      "";
+    const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 
     console.log("🛰️ RAW RESPONSE:", text);
     return text;
@@ -355,11 +433,18 @@ export default async function handler(req, res) {
     const body = req.body || {};
     const mode = body.mode || "planner"; // 👈 parámetro existente
     const clientMessages = extractMessages(body);
+    const lang = detectUserLang(clientMessages);
+    const isEN = String(lang || "").toLowerCase() === "en";
 
-    // 🧭 MODO INFO CHAT — texto libre (NO rompemos v58)
+    // 🧭 MODO INFO CHAT — texto libre (como ChatGPT: libre + contexto + idioma del usuario)
     if (mode === "info") {
-      const raw = await callStructured(clientMessages, 0.25, 1400, 70000);
-      const text = raw || "⚠️ No se obtuvo respuesta del asistente.";
+      const raw = await callStructured(
+        [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
+        0.45,
+        2600,
+        70000
+      );
+      const text = raw || (isEN ? "⚠️ No response was obtained from the assistant." : "⚠️ No se obtuvo respuesta del asistente.");
       return res.status(200).json({ text });
     }
 
@@ -368,8 +453,7 @@ export default async function handler(req, res) {
     let parsed = cleanToJSON(raw);
 
     // 1) Retry: strict (si no parsea o no trae city_day/rows/destinations)
-    const hasSome =
-      parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
+    const hasSome = parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
 
     if (!hasSome) {
       const strictPrompt =
@@ -385,8 +469,7 @@ OBLIGATORIO:
     }
 
     // 2) Retry: ultra con ejemplo mínimo (solo si aún falla)
-    const stillBad =
-      !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
+    const stillBad = !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
 
     if (stillBad) {
       const ultraPrompt =
@@ -407,23 +490,26 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
     }
 
     // 3) Normalización + guard-rails anti-tabla-en-blanco
-    if (!parsed) parsed = fallbackJSON();
+    if (!parsed) parsed = fallbackJSON(lang);
 
     // Prefer city_day: si el modelo devolvió rows legacy, lo dejamos; pero si devolvió city_day, lo normalizamos.
     parsed = normalizeParsed(parsed);
 
     // Guard-rail final: si city_day existe pero viene vacío/sin filas, inyecta skeleton
     try {
-      const dest = String(parsed?.destination || "Destino").trim() || "Destino";
+      const dest =
+        String(parsed?.destination || (isEN ? "Destination" : "Destino")).trim() || (isEN ? "Destination" : "Destino");
       const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
 
       if (Array.isArray(parsed.city_day)) {
         parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
         if (!_hasAnyRows_(parsed.city_day)) {
-          parsed.city_day = skeletonCityDay(dest, daysTotal);
+          parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
           parsed.followup =
             (parsed.followup ? parsed.followup + " | " : "") +
-            "⚠️ Guard-rail: city_day vacío o sin filas. Se devolvió skeleton para evitar tabla en blanco.";
+            (isEN
+              ? "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table."
+              : "⚠️ Guard-rail: city_day vacío o sin filas. Se devolvió skeleton para evitar tabla en blanco.");
         }
       }
     } catch {}
@@ -431,6 +517,15 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
-    return res.status(200).json({ text: JSON.stringify(fallbackJSON()) });
+
+    // En caso de excepción, intentamos responder en el idioma del usuario (EN/ES) basándonos en el body.
+    try {
+      const body = req?.body || {};
+      const clientMessages = extractMessages(body);
+      const lang = detectUserLang(clientMessages);
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON(lang)) });
+    } catch {
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON("es")) });
+    }
   }
 }
