@@ -2361,7 +2361,7 @@ function validateBaseDatesDMY(){
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
-    tooltip.textContent = 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️';
+    tooltip.textContent = t('tooltipDateMissing');
     document.body.appendChild(tooltip);
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
@@ -2398,7 +2398,7 @@ function renumberTravelerProfiles(){
   items.forEach((card, idx)=>{
     const n = idx + 1;
     const title = qs('.traveler-title', card);
-    if(title) title.textContent = `Viajero ${n}`;
+    if(title) title.textContent = t('travelerLabel', n);
   });
 }
 
@@ -2428,34 +2428,34 @@ function createTravelerProfileCard(index1){
 
   wrap.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
-      <strong class="traveler-title" style="font-size:.9rem;">Viajero ${index1}</strong>
-      <span style="font-size:.85rem; color:rgba(11,31,59,.65);">Acompañante</span>
+      <strong class="traveler-title" style="font-size:.9rem;">${t('travelerLabel', index1)}</strong>
+      <span style="font-size:.85rem; color:rgba(11,31,59,.65);">${t('travelerCompanion')}</span>
     </div>
     <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
       <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
-        Género
+        ${t('travelerGender')}
         <select class="traveler-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
           <option value="" selected disabled></option>
-          <option value="female">Femenino</option>
-          <option value="male">Masculino</option>
-          <option value="other">Otro</option>
-          <option value="na">Prefiero no decirlo</option>
+          <option value="female">${t('genderFemale')}</option>
+          <option value="male">${t('genderMale')}</option>
+          <option value="other">${t('genderOther')}</option>
+          <option value="na">${t('genderNA')}</option>
         </select>
       </label>
 
       <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
-        Rango de edad
+        ${t('travelerAgeRange')}
         <select class="traveler-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
           <option value="" selected disabled></option>
-          <option value="0-2">Bebé (0–2)</option>
-          <option value="3-5">Preescolar (3–5)</option>
-          <option value="6-12">Niño (6–12)</option>
-          <option value="13-17">Adolescente (13–17)</option>
-          <option value="18-24">Joven adulto (18–24)</option>
-          <option value="25-39">Adulto (25–39)</option>
-          <option value="40-54">Adulto (40–54)</option>
-          <option value="55-64">Adulto (55–64)</option>
-          <option value="65+">Mayor (65+)</option>
+          <option value="0-2">${t('ageBaby')}</option>
+          <option value="3-5">${t('agePreschool')}</option>
+          <option value="6-12">${t('ageChild')}</option>
+          <option value="13-17">${t('ageTeen')}</option>
+          <option value="18-24">${t('ageYoungAdult')}</option>
+          <option value="25-39">${t('ageAdult2539')}</option>
+          <option value="40-54">${t('ageAdult4054')}</option>
+          <option value="55-64">${t('ageAdult5564')}</option>
+          <option value="65+">${t('ageSenior')}</option>
         </select>
       </label>
     </div>
@@ -2557,11 +2557,11 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const modal = document.createElement('div');
   modal.className = 'reset-modal';
   modal.innerHTML = `
-    <h3>¿Reiniciar planificación? 🧭</h3>
-    <p>Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong></p>
+    <h3>${t('resetTitle')}</h3>
+    <p>${t('resetBody')}</p>
     <div class="reset-actions">
-      <button id="confirm-reset" class="btn warn">Sí, reiniciar</button>
-      <button id="cancel-reset" class="btn ghost">Cancelar</button>
+      <button id="confirm-reset" class="btn warn">${t('resetConfirm')}</button>
+      <button id="cancel-reset" class="btn ghost">${t('resetCancel')}</button>
     </div>
   `;
   overlay.appendChild(modal);
@@ -2589,7 +2589,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 
     // 🔄 Limpiar overlays/tooltips si están activos
     try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
-    qsa('.date-tooltip').forEach(t => t.remove());
+    qsa('.date-tooltip').forEach(t0 => t0.remove());
 
     // 🔄 Restaurar formulario lateral a valores por defecto
     const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
