@@ -1509,6 +1509,88 @@ function showWOW(on, msg){
   });
 }
 
+/* =========================================================
+   ✅ QUIRÚRGICO (CRÍTICO): mantener idioma del usuario
+   - NO enviamos instrucciones largas (en ES) como "user".
+   - Enviamos las reglas/prompt como "system".
+   - El último mensaje "user" será un ANCLA con texto real del usuario
+     para que el API responda en ese idioma (aunque el sitio esté EN/ES).
+========================================================= */
+function _lastUserFromSession_(){
+  try{
+    for(let i=(session?.length||0)-1; i>=0; i--){
+      const m = session[i];
+      if(String(m?.role||'').toLowerCase()==='user'){
+        const s = String(m?.content||'').trim();
+        if(s) return s;
+      }
+    }
+  }catch(_){}
+  return '';
+}
+
+function _userLanguageAnchor_(){
+  // Prioridad: condiciones especiales (lo más “idiomático” y representativo)
+  const sc = String(plannerState?.specialConditions || '').trim();
+  if(sc) return sc;
+
+  // Siguiente: último texto escrito por el usuario en el chat del planner (si existe)
+  const last = _lastUserFromSession_();
+  if(last) return last;
+
+  // Fallback seguro (solo si no hay texto del usuario para inferir idioma)
+  return (getLang()==='es') ? 'Por favor genera el itinerario.' : 'Please generate the itinerary.';
+}
+
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
+  const history = useHistory ? session : [];
+
+  // timeout para evitar cuelgues (igual patrón que SECCIÓN 12)
+  const controller = new AbortController();
+  const timeoutMs = 75000;
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+
+  try{
+    showThinking(true);
+
+    const anchor = _userLanguageAnchor_();
+
+    // ✅ Importante: el ÚLTIMO mensaje user debe ser el "anchor" (idioma real del usuario)
+    // y el system debe contener las reglas y el pedido estructurado.
+    const messages = [
+      { role:'system', content: String(systemPrompt || '') },
+      ...(Array.isArray(history) ? history : []),
+      { role:'user', content: String(anchor || '') }
+    ];
+
+    const res = await fetch(API_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      signal: controller.signal,
+      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
+    });
+
+    if(!res.ok){
+      const raw = await res.text().catch(()=> '');
+      console.error('API error (planner):', res.status, res.statusText, raw);
+      return `{"followup":"${tone.fail}"}`;
+    }
+
+    const data = await res.json().catch(()=>({text:''}));
+    return data?.text || '';
+  }catch(e){
+    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
+    console.error("Fallo al contactar la API:", e);
+    if(isAbort){
+      return `{"followup":"⚠️ El asistente tardó demasiado en responder (timeout). Intenta de nuevo o reduce el número de días/ciudades."}`;
+    }
+    return `{"followup":"${tone.fail}"}`;
+  }finally{
+    clearTimeout(timer);
+    showThinking(false);
+  }
+}
+
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -1580,7 +1662,9 @@ CALIDAD / APROVECHAMIENTO:
 `.trim();
 
   showWOW(true, t('overlayDefault'));
-  const text = await callAgent(instructions, false);
+
+  // ✅ QUIRÚRGICO (CRÍTICO): instrucciones como SYSTEM, ancla de idioma como USER
+  const text = await _callPlannerSystemPrompt_(instructions, false);
   const parsed = parseJSON(text);
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
@@ -1684,7 +1768,9 @@ ${buildIntake()}
 `.trim();
 
   showWOW(true, t('overlayDefault'));
-  const ans = await callAgent(prompt, true);
+
+  // ✅ QUIRÚRGICO (CRÍTICO): prompt como SYSTEM, ancla de idioma como USER
+  const ans = await _callPlannerSystemPrompt_(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     let rows = [];
