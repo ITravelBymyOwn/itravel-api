@@ -2074,8 +2074,17 @@ async function optimizeDay(city, day){
 `;
   }
 
+  // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): fuerza que la salida use el idioma del CONTENIDO del usuario (no labels del sistema)
+  const langDirective = `
+LANGUAGE (CRITICAL):
+- Output MUST be in the same language as the user's own content found in "Contexto" (preferences/restrictions/travelers) and any user-written text.
+- Ignore the language of system labels/templates in this prompt (e.g., "Ciudad", "Día", "Filas", etc.).
+- If mixed languages, use the dominant user language; if unclear, use the language of the most recent user-written paragraph in "Contexto".
+`.trim();
+
   const prompt = `
 ${FORMAT}
+${langDirective}
 Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
@@ -2312,11 +2321,13 @@ async function onSend(){
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
+
+      // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): NO forzar ES/EN por getLang(); responder en el idioma real del mensaje del usuario
       const ans = await callAgent(
-(getLang()==='es'
-  ? `Responde en texto claro y conciso (sin JSON):\n"${text}"`
-  : `Reply in clear, concise text (no JSON):\n"${text}"`
-), true);
+`Reply in the SAME language as the user's message (no JSON):\n"${text}"`,
+        true
+      );
+
       chatMsg(ans || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
     } finally {
       setChatBusy(false);
@@ -2339,8 +2350,16 @@ async function onSend(){
     }).join('\n\n');
     const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
 
+    // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): instrucción explícita para usar el idioma del texto del usuario
+    const langDirective = `
+LANGUAGE (CRITICAL):
+- Output MUST be in the same language as the user's instruction text below (any language).
+- Ignore any system/template labels (e.g., "Día", "Contexto", "Resumen") when choosing the output language.
+`.trim();
+
     const prompt = `
 ${FORMAT}
+${langDirective}
 Contexto:
 ${buildIntake()}
 
