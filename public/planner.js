@@ -1530,6 +1530,9 @@ function showWOW(on, msg){
 ========================================================= */
 function _lastUserFromSession_(){
   try{
+    // ✅ FIX ultraquirúrgico: evitar ReferenceError si session no existe todavía
+    if(typeof session === 'undefined' || !session) return '';
+
     for(let i=(session?.length||0)-1; i>=0; i--){
       const m = session[i];
       if(String(m?.role||'').toLowerCase()==='user'){
@@ -1542,12 +1545,16 @@ function _lastUserFromSession_(){
 }
 
 function _userLanguageAnchor_(){
-  // Prioridad: condiciones especiales (lo más “idiomático” y representativo)
-  const sc = String(plannerState?.specialConditions || '').trim();
+  // ✅ FIX ultraquirúrgico: evitar ReferenceError si plannerState no existe todavía
+  const sc = (typeof plannerState !== 'undefined' && plannerState)
+    ? String(plannerState?.specialConditions || '').trim()
+    : '';
   if(sc) return sc;
 
   // ✅ QUIRÚRGICO: usar también el textarea real si plannerState aún no está poblado
-  const sc2 = String(qs('#special-conditions')?.value || '').trim();
+  const sc2 = (typeof qs !== 'undefined')
+    ? String(qs('#special-conditions')?.value || '').trim()
+    : '';
   if(sc2) return sc2;
 
   // Siguiente: último texto escrito por el usuario en el chat del planner (si existe)
