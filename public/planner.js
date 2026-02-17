@@ -870,6 +870,7 @@ function getFrontendSnapshot(){
     )
   );
 }
+
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -897,13 +898,13 @@ function buildIntake(){
     });
   });
 
+  // ✅ QUIRÚRGICO: evitar texto en ES/EN que sesgue el idioma del modelo
   const list = savedDestinations.map(x=>{
     const dates = x.baseDate ? `, start=${x.baseDate}` : '';
-    return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
+    return `${x.city} (${x.country||'—'} · ${x.days} days${dates})`;
   }).join(' | ');
 
   return [
-    `Language: ${getLang()}`,
     `Destinations: ${list}`,
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
@@ -916,55 +917,60 @@ function buildIntake(){
    SECCIÓN 11 · Contrato JSON / LLM (reforzado v49) — v58 robustecido (reglas API v52.5)
 ================================= */
 const FORMAT = `
-Devuelve SOLO JSON válido (sin markdown) en uno de estos:
+Return ONLY valid JSON (no markdown) in one of these shapes:
 
-A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
+A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Short question"}
 
-B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Short question"}
 
-C) {"rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+C) {"rows":[{...}],"replace":false,"followup":"Short question"}
 
-D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Texto","transport":"Texto"},"followup":"Pregunta breve"}
+D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Text","transport":"Text"},"followup":"Short question"}
 
-Reglas (obligatorias, alineadas con API v52.5):
+CRITICAL LANGUAGE RULE (mandatory):
+- ALL human-readable strings must be written in the SAME language as the user's latest message (the last user "anchor").
+  This includes: activity/from/to/transport/duration/notes/followup/hotel/transport fields.
+- Do NOT translate proper nouns (place names) unless they commonly have an established translation.
 
-- Devuelve SIEMPRE al menos 1 fila renderizable en "rows". Nada de texto fuera del JSON.
-- Máximo 20 filas por día.
-- Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
-- Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre). No solapes.
-- Valida PLAUSIBILIDAD GLOBAL (geografía, temporada, clima aproximado, logística).
-- Seguridad y restricciones:
-  • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
-  • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o sustituye por alternativa segura.
+General rules (mandatory):
+- Always return at least 1 renderable row in "rows". No extra text outside JSON.
+- Max 20 rows per day.
+- Optimize affected day(s): minimize backtracking, group by area, respect time windows.
+- Use user's per-day time windows when available; if missing, choose realistic local hours. No overlaps.
+- Global plausibility: geography, season, basic logistics.
 
-Campos obligatorios por fila (NO vacíos):
-- "activity","from","to","transport","duration","notes" deben tener texto útil. Prohibido "seed" y notes vacías.
+Safety & restrictions:
+- Avoid clearly risky/forbidden areas or unrealistic timing; prefer safe alternatives.
+- If there is a reasonable caution, add a brief note (not alarmist) OR replace with a safer option.
 
-Formato de activity (obligatorio cuando aplique a itinerario):
-- "DESTINO – SUB-PARADA" (– o - con espacios). Evita genéricos tipo "museo", "parque", "restaurante local", "paseo por la ciudad".
+Row required fields (must be non-empty):
+- "activity","from","to","transport","duration","notes" must be useful. "seed" is forbidden, notes cannot be empty.
 
-Formato de duration (obligatorio, tabla-ready):
-- 2 líneas EXACTAS con salto \\n:
-  "Transporte: <estimación realista o ~rango>"
-  "Actividad: <estimación realista o ~rango>"
-- PROHIBIDO: "Transporte: 0m" o "Actividad: 0m"
-- NO usar comas para separar Transporte/Actividad.
+Activity format (when applicable):
+- "DESTINATION – SUB-STOP" (dash with spaces). Avoid generic labels like "museum", "city walk", "local restaurant" without specifics.
 
-Comidas (regla flexible):
-- NO son obligatorias. Si se incluyen, NO genéricas ("restaurante local" prohibido). Deben aportar valor.
+Duration format (mandatory, table-ready):
+- EXACTLY 2 lines with a \\n line break:
+  "Transport: <realistic estimate or ~range>"
+  "Activity: <realistic estimate or ~range>"
+- Forbidden: "Transport: 0m" or "Activity: 0m"
+- Do NOT use commas to separate Transport/Activity.
 
-Auroras (solo si plausibles por latitud/temporada):
-- Evitar días consecutivos si hay opciones. Evitar el último día; si SOLO cabe ahí, marcar condicional.
-- Debe ser nocturno típico local.
-- En notes incluir: "valid: <justificación breve>" + referencia a clima/nubosidad + alternativa low-cost cercana.
+Meals (flexible):
+- Not required. If included, must be specific (no generic "local restaurant").
 
-Day trips / Macro-tours:
-- Si propones excursión/day trip, desglosa en 5–8 sub-paradas (filas).
-- Cierra con fila propia: "Regreso a {Ciudad base}".
-- Evitar macro-tours en el último día si hay opciones.
+Auroras (only if plausible by latitude/season):
+- Avoid consecutive nights if possible. Avoid "only last day"; if it must be last day, mark as conditional.
+- Must be at a realistic local night time.
+- Notes must include: "valid: <brief justification>" + weather/cloudiness mention + a nearby low-cost alternative.
 
-Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
+Day trips / macro-tours:
+- If proposing a day trip, break into 5–8 sub-stops (rows).
+- End with a dedicated row: "Return to {Base City}".
+- Avoid scheduling a macro-tour only on the very last day if there are alternatives.
 
+Default behavior:
+- Preserve existing rows (merge). Do NOT delete unless explicitly requested (replace=true).
 `;
 
 /* ==============================
@@ -972,53 +978,51 @@ Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucci
 ================================= */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
+
+  // ✅ QUIRÚRGICO (CRÍTICO): neutral system prompt + hard language mirroring rule
   const globalStyle = `
-Eres "Astra", agente de viajes internacional.
+You are "Astra", an international travel planning agent.
 
-REGLA CRÍTICA:
-- Devuelve SOLO JSON válido cuando se te pida itinerario (nunca texto fuera del JSON).
+ABSOLUTE RULES:
+1) When asked for an itinerary, return ONLY valid JSON (no extra text).
+2) LANGUAGE: Always write ALL human-readable strings in the SAME language as the user's latest message.
+   - This includes activity/from/to/transport/duration/notes/followup/meta strings.
+   - Do not translate proper nouns unless there is a standard/common translation.
 
-Calidad y coherencia:
-- RAZONA con sentido común global: geografía, temporadas, ventanas horarias, distancias y logística básica.
-- Identifica IMPERDIBLES diurnos y nocturnos; si el tiempo es limitado, prioriza lo esencial.
-- Si el usuario NO especifica un día concreto, REVISA y reacomoda el ITINERARIO COMPLETO de la ciudad evitando duplicados y absurdos.
+QUALITY & COHERENCE:
+- Use global common sense: geography, seasons, opening hours, distances, basic logistics.
+- If the user doesn't specify a day, revise the full city itinerary to remove duplicates and fix inconsistencies.
 
-Reglas de itinerario (alineadas con API v52.5):
-- Máximo 20 filas por día.
-- Campos NO vacíos: activity/from/to/transport/duration/notes (prohibido "seed").
-- activity preferida: "DESTINO – SUB-PARADA" (evita genéricos).
-- duration obligatoria en 2 líneas con \\n:
-  "Transporte: ...\\nActividad: ..."
-  (prohibido 0m, y no usar comas para separar).
-- Comidas: NO obligatorias; si se incluyen, NO genéricas.
-- Day trips: cuando se agregan días, evalúa excursiones de 1 día a imperdibles cercanos (≤2 h por trayecto) y proponlas si encajan, con regreso a la ciudad base.
-- Macro-tours/day trips: 5–8 sub-paradas + fila final "Regreso a {Ciudad base}". Evitar último día si hay opciones.
+ITINERARY RULES:
+- Max 20 rows per day.
+- Required non-empty fields: activity/from/to/transport/duration/notes (no "seed").
+- Prefer activity as "DESTINATION – SUB-STOP" (avoid generic labels when you can be specific).
+- Duration must be EXACTLY 2 lines with \\n:
+  "Transport: ...\\nActivity: ..."
+  (no 0m; no comma separation)
+- Meals are optional; if included, be specific.
 
-Auroras (solo si plausibles por latitud/temporada):
-- Evitar días consecutivos si hay opciones. Evitar último día; si SOLO cabe ahí, marcar condicional.
-- Debe ser nocturno típico local.
-- Notes incluyen: "valid:" + clima/nubosidad + alternativa low-cost cercana.
+DAY TRIPS / MACRO-TOURS:
+- If you add a macro-tour/day trip: 5–8 sub-stops + final row returning to base city.
+- Avoid placing macro-tours only on the last day when alternatives exist.
 
-Seguridad:
-- No propongas actividades en zonas con riesgos relevantes, horarios inviables o restricciones evidentes.
-- Prioriza siempre rutas y experiencias seguras y razonables.
-- Si hay una alerta razonable, sustituye por una alternativa más segura o indícalo brevemente en “notes” (sin alarmismo).
+AURORAS (only if plausible by latitude/season):
+- Avoid consecutive nights if possible; avoid only last day unless necessary (mark conditional).
+- Use realistic night window.
+- Notes must include "valid:" + brief plausibility + low-cost alternative nearby.
 
-Ediciones:
-- Para EDICIONES: entrega directamente el JSON según contrato y por defecto FUSIONA (replace=false).
-
+SAFETY:
+- Avoid clearly risky/forbidden areas or unrealistic timing. Prefer safer alternatives.
+- If a caution is needed, keep it brief and non-alarmist in notes.
 `.trim();
 
-  // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
   const controller = new AbortController();
-  const timeoutMs = 75000; // 75s (ajustable)
+  const timeoutMs = 75000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
     showThinking(true);
 
-    // ✅ QUIRÚRGICO (CRÍTICO): no mezclar globalStyle dentro del "user input"
-    // para no forzar idioma. globalStyle va como "system".
     const messages = [
       { role:'system', content: globalStyle },
       ...(Array.isArray(history) ? history : []),
@@ -1029,7 +1033,6 @@ Ediciones:
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      // ✅ QUIRÚRGICO: fuerza modo planner (API v58 default planner, pero lo fijamos para robustez)
       body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
     });
 
@@ -1054,37 +1057,25 @@ Ediciones:
   }
 }
 
-function parseJSON(s){
-  if(!s) return null;
-  try{ return JSON.parse(s); }catch(_){}
-  const m1 = s.match(/```json\s*([\s\S]*?)```/i) || s.match(/```([\s\S]*?)```/i);
-  if(m1 && m1[1]){ try{ return JSON.parse(m1[1]); }catch(_){ } }
-  const m2 = s.match(/<json>\s*([\s\S]*?)\s*<\/json>/i);
-  if(m2 && m2[1]){ try{ return JSON.parse(m2[1]); }catch(_){ } }
-  try{
-    const cleaned = s.replace(/^[^\{]+/,'').replace(/[^\}]+$/,'');
-    return JSON.parse(cleaned);
-  }catch(_){ return null; }
-}
-
 async function callInfoAgent(text){
   const history = infoSession;
+
+  // ✅ QUIRÚRGICO (CRÍTICO): neutral + language mirroring (cualquier idioma)
   const globalStyle = `
-Eres "Astra", asistente informativo de viajes.
-- SOLO respondes preguntas informativas (clima, visados, movilidad, seguridad, presupuesto, enchufes, mejor época, etc.) de forma breve, clara y accionable.
-- Considera factores de seguridad básicos al responder: advierte si hay riesgos relevantes o restricciones evidentes.
-- NO propones ediciones de itinerario ni devuelves JSON. Respondes en texto directo.
+You are "Astra", a travel information assistant.
+- You answer informational questions (weather, visas, mobility, safety, budget, plugs, best time, etc.) in brief, clear, actionable text.
+- SAFETY: mention relevant safety/logistics constraints when appropriate (brief, non-alarmist).
+- LANGUAGE: reply in the SAME language as the user's latest message. Do not translate proper nouns unless standard.
+- Do NOT return JSON. Do NOT propose itinerary edits.
 `.trim();
 
-  // ✅ QUIRÚRGICO: timeout también para Info Chat (evita cuelgues)
   const controller = new AbortController();
-  const timeoutMs = 45000; // 45s (ajustable)
+  const timeoutMs = 45000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
     setInfoChatBusy(true);
 
-    // ✅ QUIRÚRGICO (CRÍTICO): system separado para no forzar idioma
     const messages = [
       { role:'system', content: globalStyle },
       ...(Array.isArray(history) ? history : []),
@@ -1118,16 +1109,18 @@ Eres "Astra", asistente informativo de viajes.
       try {
         const j = JSON.parse(answer);
         if (j?.destination || j?.rows || j?.followup) {
-          return 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
+          return (getLang()==='es')
+            ? 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.'
+            : 'I could not fetch the Info Chat answer correctly. Check your Vercel API Key/URL or try again.';
         }
       } catch { /* no-op */ }
     }
 
-    return answer || '¿Algo más que quieras saber?';
+    return answer || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?');
   }catch(e){
     const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Fallo Info Chat:", e);
-    if(isAbort) return '⚠️ El Info Chat tardó demasiado (timeout). Intenta de nuevo.';
+    if(isAbort) return (getLang()==='es') ? '⚠️ El Info Chat tardó demasiado (timeout). Intenta de nuevo.' : '⚠️ The Info Chat took too long (timeout). Please try again.';
     return tone.fail;
   }finally{
     clearTimeout(timer);
@@ -1376,7 +1369,7 @@ function addMultipleDaysToCity(city, extraDays){
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
-Devuelve SOLO JSON válido:
+Return ONLY valid JSON:
 {
   "allowed":[
     {"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}
@@ -1386,67 +1379,59 @@ Devuelve SOLO JSON válido:
   ]
 }
 
-CRITERIOS GLOBALES (flexibles):
-- Corrige horas solo si hay solapes evidentes o incoherencias claras.
-- Transporte lógico según actividad:
-  • Barco para whale watching (puerto local).
-  • Tour/bus/van para excursiones extensas.
-  • Tren/bus/auto interurbano cuando aplique.
-  • A pie/metro en zonas urbanas.
+CRITICAL LANGUAGE RULE (mandatory):
+- Keep ALL strings in the SAME language as the user's latest message.
+- Do not translate proper nouns unless standard/common.
+
+GLOBAL CRITERIA (flexible):
+- Only fix times if there are obvious overlaps or clear incoherences.
+- Use logical transport per activity:
+  • Boat for whale watching (local harbor).
+  • Tour/bus/van for extensive excursions.
+  • Train/bus/car for intercity when appropriate.
+  • Walk/metro inside dense cities.
 - Day trips:
-  • Evalúa con criterio experto si son razonables por distancia, duración total y experiencia real.
-  • Permite hasta ~3h por trayecto (ida) como guía; usa sentido común turístico.
-  • No limites la cantidad de day trips; decide según calidad/valor y tiempo total.
-  • Si un day trip NO es razonable, muévelo a "removed" con reason "distance:" + alternativa viable.
-- Seguridad y restricciones:
-  • Si hay riesgo evidente, restricción oficial o ventana horaria claramente insegura, usa "removed" con reason "risk:".
-  • Prioriza siempre opciones plausibles, seguras y razonables.
+  • Use expert judgment: distance, total duration, real experience.
+  • Up to ~3h one-way is a guideline; use common sense.
+  • If not reasonable, move to "removed" with reason "distance:" + suggest a viable alternative by adjusting the row(s).
+- Safety & restrictions:
+  • If there is a clear risk/official restriction/unsafe time window, use "removed" with reason "risk:".
+  • Prefer plausible, safe, reasonable alternatives.
 - Notes:
-  • NUNCA vacías ni "seed".
-  • Añade siempre al menos un tip útil o contexto breve.
-- Duraciones:
-  • Acepta rangos realistas (ej. "~90m", "~2–3h").
-  • Si viene en minutos, permite "90m" o "1.5h".
-- Máx. 20 filas por día; prioriza icónicas y evita redundancias.
-- Activity (guía suave):
-  • Prefiere el formato "Destino – Sub-parada específica" si aplica.
-    - "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-    - Si NO es day trip, "Destino" puede ser la ciudad.
-  • Evita genéricos tipo "tour" o "museo" sin especificar, cuando sea fácil concretar.
-- From/To (muy importante):
-  • "from" y "to" deben ser LUGARES reales (Hotel/Centro/atracción/pueblo/mirador), NUNCA el nombre del macro-tour.
-    - Ejemplo incorrecto: to="Costa Sur" / from="Círculo Dorado".
-    - Si detectas eso, corrígelo a un lugar real (p.ej., la primera/última sub-parada o el hotel/centro).
-  • Evita filas tipo "<Ciudad> – Excursión a <Macro-tour>" sin sub-parada real.
-    - Si existe una fila así, conviértela a "<Macro-tour> – Salida de <Ciudad>" y ajusta from/to a: from="Hotel/Centro en <Ciudad>" → to="<Primera sub-parada real>".
+  • Never empty and never "seed".
+  • Always include at least one useful tip/context.
+- Durations:
+  • Accept realistic ranges ("~90m", "~2–3h").
+  • If minutes, allow "90m" or "1.5h".
+- Max 20 rows/day; prioritize iconic, avoid redundancies.
+- Activity (soft guideline):
+  • Prefer "DESTINATION – SUB-STOP".
+    - If a row belongs to a macro-tour, DESTINATION must be the macro-tour name (not the base city).
+- From/To (very important):
+  • "from" and "to" must be REAL places (hotel/center/attraction/town/viewpoint), never a macro-tour name.
+  • If you detect to="<macro-tour>", fix it to the first/last real stop or hotel/center as appropriate.
 
-CASOS ESPECIALES (guía, no bloqueo):
+SPECIAL CASES (guidance, not a blocker):
 1) Whale watching:
-   - Transporte: Barco.
-   - Duración típica total: 3–4h.
-   - Añade en notes: "valid:" con referencia breve a temporada si aplica.
+   - Transport: Boat.
+   - Typical duration: 3–4h total.
+   - Notes include "valid:" with season hint if relevant.
 2) Auroras:
-   - Actividad nocturna (horario local aproximado).
-   - Transporte: Tour/Van o Auto si procede.
-   - Incluir "valid:" con justificación breve (latitud/temporada/clima).
-   - Si hay varias noches posibles, evita duplicar sin motivo.
-3) Rutas escénicas en coche:
-   - Considera conducción + paradas como experiencia integrada.
-   - Si no hay coche ni tour viable, usa "risk" o "logistics" y sugiere alternativa.
-4) Museos/monumentos:
-   - Horario diurno realista.
-5) Cenas/vida nocturna:
-   - Horarios nocturnos razonables (flexibles según destino).
+   - Nighttime activity (approx local night hours).
+   - Transport: Tour/Van or Car if appropriate.
+   - Notes include "valid:" (latitude/season/weather) + low-cost nearby alternative.
+3) Scenic driving routes:
+   - Driving + stops as an integrated experience.
+   - If no car/tour makes sense, mark "risk" or "logistics" and suggest alternatives.
 
-REGLAS DE FUSIÓN:
-- Devuelve en "allowed" las filas ya corregidas.
-- Mueve a "removed" SOLO lo claramente inviable o inseguro.
-- Para excursiones extensas (day trips), si detectas un regreso claramente subestimado, corrige la duración/ventana de tiempo de forma realista.
+MERGE RULES:
+- Return corrected rows in "allowed".
+- Move to "removed" only what is clearly unworkable/unsafe.
 
-Contexto:
-- Ciudad: "${city}"
-- Fecha base (Día 1): ${baseDate || 'N/A'}
-- Filas a validar: ${JSON.stringify(rows)}
+Context:
+- City: "${city}"
+- Base date (Day 1): ${baseDate || 'N/A'}
+- Rows to validate: ${JSON.stringify(rows)}
 `.trim();
 
   try{
@@ -1464,7 +1449,7 @@ Contexto:
       ...r,
       notes: notes && notes.toLowerCase()!=='seed'
         ? notes
-        : 'Tip: revisa horarios locales, logística real y reserva con antelación si aplica.'
+        : 'Tip: check local opening hours, realistic logistics, and book ahead when needed.'
     };
   });
 
@@ -1486,10 +1471,8 @@ function showWOW(on, msg){
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
-    // ✅ Mantener habilitado solo el botón de reset
     if (el.id === 'reset-planner') return;
 
-    // 🆕 Bloquear también el botón flotante de Info Chat
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
       return;
@@ -1511,10 +1494,8 @@ function showWOW(on, msg){
 
 /* =========================================================
    ✅ QUIRÚRGICO (CRÍTICO): mantener idioma del usuario
-   - NO enviamos instrucciones largas (en ES) como "user".
-   - Enviamos las reglas/prompt como "system".
-   - El último mensaje "user" será un ANCLA con texto real del usuario
-     para que el API responda en ese idioma (aunque el sitio esté EN/ES).
+   - System prompts neutrales + regla explícita de "mirror language"
+   - Último mensaje user = ANCLA (texto real del usuario)
 ========================================================= */
 function _lastUserFromSession_(){
   try{
@@ -1530,22 +1511,18 @@ function _lastUserFromSession_(){
 }
 
 function _userLanguageAnchor_(){
-  // Prioridad: condiciones especiales (lo más “idiomático” y representativo)
   const sc = String(plannerState?.specialConditions || '').trim();
   if(sc) return sc;
 
-  // Siguiente: último texto escrito por el usuario en el chat del planner (si existe)
   const last = _lastUserFromSession_();
   if(last) return last;
 
-  // Fallback seguro (solo si no hay texto del usuario para inferir idioma)
   return (getLang()==='es') ? 'Por favor genera el itinerario.' : 'Please generate the itinerary.';
 }
 
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
-  // timeout para evitar cuelgues (igual patrón que SECCIÓN 12)
   const controller = new AbortController();
   const timeoutMs = 75000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
@@ -1555,8 +1532,6 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
     const anchor = _userLanguageAnchor_();
 
-    // ✅ Importante: el ÚLTIMO mensaje user debe ser el "anchor" (idioma real del usuario)
-    // y el system debe contener las reglas y el pedido estructurado.
     const messages = [
       { role:'system', content: String(systemPrompt || '') },
       ...(Array.isArray(history) ? history : []),
@@ -1602,68 +1577,68 @@ async function generateCityItinerary(city){
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
-  const transport= cityMeta[city]?.transport || 'recomiéndame';
+  const transport= cityMeta[city]?.transport || 'recommend';
 
-  // 🧭 Detectar si se debe forzar replanificación
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
+  // ✅ QUIRÚRGICO (CRÍTICO): instrucciones neutrales + idioma = idioma del ANCLA del usuario
   const instructions = `
 ${FORMAT}
-**ROL:** Planificador “Astra”. Crea itinerario completo SOLO para "${city}" (${dest.days} día/s).
-- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-REGLAS CLAVE (OBLIGATORIAS):
-- "activity" SIEMPRE debe ser: "Destino – <Sub-parada específica>" (con espacios alrededor del guion).
-  • "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-  • Si NO es day trip, "Destino" puede ser "${city}".
-  • Esto aplica a TODAS las filas, incluyendo traslados y regresos.
-  • Ejemplo correcto (macro-tour, primera fila): "Costa Sur – Salida de ${city}".
-  • Ejemplo correcto (macro-tour, última fila): "Costa Sur – Regreso a ${city}".
-  • Ejemplo correcto (ciudad): "${city} – Regreso a hotel".
-- "from", "to", "transport" y "notes" NUNCA pueden ir vacíos.
-- Evita genéricos: prohibido "tour", "museo", "restaurante local" sin nombre/identificador claro.
-- MUY IMPORTANTE (para evitar errores como "to=Costa Sur"):
-  • "from" y "to" deben ser LUGARES reales (Hotel/Centro/atracción/pueblo/mirador), NUNCA el nombre del macro-tour.
-  • Prohibido crear filas tipo "${city} – Excursión a <Macro-tour>" donde "to" sea el macro-tour. En su lugar, inicia el macro-tour con: "<Macro-tour> – Salida de ${city}" y "to" debe ser la PRIMERA sub-parada real.
+You are generating a FULL itinerary ONLY for "${city}" (${dest.days} day(s)).
+Return format B: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-TRANSPORTE (prioridad inteligente, sin inventar):
-- En ciudad: A pie/Metro/Bus/Tranvía según disponibilidad real.
-- Para DAY TRIPS:
-  1) Si existe una opción razonable de transporte público que sea “la mejor opción” para ese recorrido, úsala (ej. tren/bus interurbano realista).
-  2) Si NO es claramente viable/mejor (múltiples paradas dispersas, horarios pobres, temporada difícil), usa EXACTAMENTE: "Vehículo alquilado o Tour Guiado".
-- Evita "Bus" genérico como etiqueta de day trip si en realidad es tour: usa "Tour Guiado (Bus/Van)" o el fallback anterior.
+CRITICAL LANGUAGE RULE:
+- Write ALL strings in the SAME language as the user's latest message (the last user anchor).
+- Do not translate proper nouns unless standard/common.
 
-AURORAS (si son plausibles por ciudad/temporada/latitud):
-- Debes incluir AL MENOS 1 (una) noche de auroras en el itinerario.
-- Debe ser horario NOCTURNO realista (aprox. 20:00–02:00 local).
-- Evita días consecutivos si hay margen y evita dejarlo SOLO para el último día (si solo cabe ahí, hazlo condicional en notes).
-- Incluye 1 opción tipo "Tour/Van" y 1 alternativa low-cost cercana (mirador/área oscura cercana) en "notes" con "valid:".
+REQUIRED FIELDS (never empty):
+- activity, from, to, transport, duration, notes.
 
-DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
-- Puedes proponer day trips si aportan valor (sin límite fijo). Decide inteligentemente según lo “mejor de lo mejor”.
-- Restricción guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, compensa reduciendo paradas o ajustando ventana.
-- Si propones excursión de día (day trip), debe ser COMPLETA:
-  • 5–8 sub-paradas (filas) con nombres claros, secuencia lógica y traslados realistas.
-  • La PRIMERA fila del macro-tour debe ser: "<Macro-tour> – Salida de ${city}" (y "to" = primera sub-parada real).
-  • Debe incluir una fila final propia usando Destino del macro-tour: "<Macro-tour> – Regreso a ${city}".
-  • Si es una ruta clásica (ej. “Costa Sur”), llega al hito final lógico de la ruta (p.ej. Vík o hito final icónico) antes de regresar.
-  • Los tiempos de regreso NO deben ser optimistas: usa estimaciones conservadoras si hay clima/temporada de invierno o noche.
+ACTIVITY FORMAT (mandatory):
+- "DESTINATION – SUB-STOP" (spaces around the dash).
+  • DESTINATION is not always the base city: if a row belongs to a macro-tour/day trip, DESTINATION must be the macro-tour name.
+  • If not a day trip, DESTINATION can be "${city}".
+  • Applies to ALL rows including departures/returns.
+  • Macro-tour first row should be like: "<Macro-tour> – Departure from ${city}".
+  • Macro-tour last row should be like: "<Macro-tour> – Return to ${city}".
 
-CALIDAD / APROVECHAMIENTO:
-- Revisa IMPERDIBLES diurnos y nocturnos.
-- Si un día queda muy corto o termina demasiado temprano, completa con 1–3 sub-paradas icónicas cercanas y realistas (sin inventar cosas raras).
-- Agrupar por zonas, evitar solapamientos.
-- Validar plausibilidad global y seguridad.
-  • Si actividad especial es plausible, añadir "notes" con "valid: <justificación>".
-  • Evitar actividades en zonas o franjas horarias con alertas, riesgos o restricciones evidentes.
-  • Sustituir por alternativas seguras cuando aplique.
-- Respetar ventanas horarias por día como referencia (no rígidas): ${JSON.stringify(perDay)}.
-- Nada de texto fuera del JSON.
+FROM/TO STRICTNESS (to avoid errors like to="<macro-tour>"):
+- from/to must be REAL places (Hotel/Center/attraction/town/viewpoint), never the macro-tour name.
+- Do not create rows like "${city} – Excursion to <Macro-tour>" with to="<macro-tour>".
+  Instead: "<Macro-tour> – Departure from ${city}" and to=the FIRST real stop.
+
+TRANSPORT (smart, no inventing):
+- In city: Walk/Metro/Bus/Tram depending on real-world plausibility.
+- For day trips:
+  1) If there is a clearly best public option, use it realistically.
+  2) Otherwise use EXACTLY: "Rental car or Guided tour".
+- Avoid generic "Bus" if it’s really a tour: use "Guided tour (Bus/Van)" or the fallback above.
+
+AURORAS (only if plausible by latitude/season):
+- Include at least 1 aurora night in a realistic local night window (~20:00–02:00).
+- Avoid consecutive nights if possible; avoid "only last day" unless necessary (mark conditional in notes).
+- Notes must include: "valid:" + brief plausibility + a low-cost nearby alternative.
+
+DAY TRIPS / MACRO-TOURS:
+- You may include day trips if they add strong value.
+- Guideline: ideally ≤ ~3h one-way (use common sense).
+- If you include a day trip:
+  • 5–8 sub-stops (rows) with logical sequence and realistic travel.
+  • Must start with "<Macro-tour> – Departure from ${city}".
+  • Must end with "<Macro-tour> – Return to ${city}".
+  • Avoid optimistic returns; be conservative if winter/night.
+
+QUALITY:
+- Prioritize iconic highlights (day + night).
+- If a day ends too early, add 1–3 realistic iconic nearby stops.
+- Group by area, avoid overlaps, validate global plausibility & basic safety.
+- Respect time windows as a reference (not rigid): ${JSON.stringify(perDay)}.
+- Return ONLY JSON.
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
-  // ✅ QUIRÚRGICO (CRÍTICO): instrucciones como SYSTEM, ancla de idioma como USER
   const text = await _callPlannerSystemPrompt_(instructions, false);
   const parsed = parseJSON(text);
 
@@ -1681,7 +1656,7 @@ CALIDAD / APROVECHAMIENTO:
     }
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 si hay replanificación → replace=true
+    pushRows(tmpCity, val.allowed, forceReplan);
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
 
@@ -1708,68 +1683,50 @@ async function rebalanceWholeCity(city, opts={}){
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
-  // 🆕 Determinar rango de rebalanceo
   const startDay = opts.start || 1;
   const endDay = opts.end || totalDays;
-  const lockedDaysText = startDay > 1 
-    ? `Mantén intactos los días 1 a ${startDay - 1}.`
+  const lockedDaysText = startDay > 1
+    ? `Keep days 1 to ${startDay - 1} intact.`
     : '';
 
-  // 🧭 Detectar si se debe forzar replanificación
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
+  // ✅ QUIRÚRGICO: prompt neutral + idioma = idioma del ANCLA del usuario
   const prompt = `
 ${FORMAT}
-**ROL:** Reequilibra la ciudad "${city}" entre los días ${startDay} y ${endDay}, manteniendo lo ya plausible y completando huecos.
+
+Rebalance "${city}" between days ${startDay} and ${endDay}, keeping what is already plausible and filling gaps.
 ${lockedDaysText}
-- Formato B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+Return format B: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-REGLAS CLAVE (OBLIGATORIAS):
-- "activity" SIEMPRE: "Destino – <Sub-parada específica>" (incluye regresos/traslados).
-  • "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-  • Si NO es day trip, "Destino" puede ser "${city}".
-- from/to/transport/notes: NUNCA vacíos. Evita genéricos sin nombre claro.
-- MUY IMPORTANTE:
-  • "from" y "to" deben ser LUGARES reales, NUNCA el nombre del macro-tour.
-  • Evita filas tipo "${city} – Excursión a <Macro-tour>" donde "to" sea el macro-tour. Si hay macro-tour, la primera fila debe ser "<Macro-tour> – Salida de ${city}" con "to" = primera sub-parada real.
+CRITICAL LANGUAGE RULE:
+- Write ALL strings in the SAME language as the user's latest message (the last user anchor).
+- Do not translate proper nouns unless standard/common.
 
-TRANSPORTE (prioridad inteligente, sin inventar):
-- En ciudad: A pie/Metro/Bus/Tranvía según disponibilidad real.
-- Para DAY TRIPS:
-  1) Si existe una opción razonable de transporte público que sea “la mejor opción” para ese recorrido, úsala (tren/bus interurbano realista).
-  2) Si NO es claramente viable/mejor (múltiples paradas dispersas, horarios pobres, temporada difícil), usa EXACTAMENTE: "Vehículo alquilado o Tour Guiado".
-- Evita "Bus" genérico como etiqueta de day trip si en realidad es tour: usa "Tour Guiado (Bus/Van)" o el fallback anterior.
+RULES:
+- activity ALWAYS "DESTINATION – SUB-STOP" (including returns/transfers).
+  • If a row belongs to a macro-tour, DESTINATION must be the macro-tour name.
+- from/to/transport/notes never empty. Avoid generic labels without specifics.
+- from/to must be REAL places, never the macro-tour name.
+- City transport: walk/metro/bus/tram as realistic.
+- Day trips:
+  1) Use public transport only if clearly best and realistic.
+  2) Else use EXACTLY: "Rental car or Guided tour".
+- Auroras only if plausible: include at least 1 night, realistic time, avoid consecutive if possible, include "valid:" + low-cost alternative.
 
-AURORAS (si plausibles):
-- Incluye al menos 1 noche de auroras en horario nocturno realista (20:00–02:00 aprox.).
-- Evita consecutivas si hay margen; evita dejarlo solo al final (si solo cabe ahí, marcar condicional).
-- En notes incluye "valid:" + alternativa low-cost cercana.
+Time windows reference (only for the rebalance range):
+${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}
 
-DAY TRIPS / MACRO-TOURS (sin límites duros, con criterio):
-- Puedes incluir day trips si aportan valor (sin regla fija). Decide inteligentemente.
-- Guía: idealmente ≤ ~3h por trayecto (ida). Si está cerca del límite, ajusta paradas/ventana.
-- Si incluyes un day trip:
-  • 5–8 sub-paradas (filas) con secuencia realista.
-  • La PRIMERA fila del macro-tour debe ser: "<Macro-tour> – Salida de ${city}" (y "to" = primera sub-parada real).
-  • Debe terminar con una fila final usando Destino del macro-tour: "<Macro-tour> – Regreso a ${city}".
-  • Si es ruta clásica, llega al hito final lógico antes de regresar.
-  • Evita regresos optimistas: usa estimaciones conservadoras si hay invierno o noche.
+${wantedTrip ? `User preference: include a day trip to "${wantedTrip}" if reasonable (full macro-tour with return).` : ''}
 
-CALIDAD:
-- Respeta ventanas como referencia: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
-- Considera IMPERDIBLES y distribuye sin duplicar.
-${wantedTrip ? `- Preferencia del usuario: day trip a "${wantedTrip}". Si es razonable, intégralo (macro-tour completo) y cierra con regreso.` : ''}
-- El último día puede ser más liviano, pero no lo dejes “vacío” si hay imperdibles pendientes.
-- Valida plausibilidad y seguridad global; sustituye por alternativas seguras si aplica.
-- Notes SIEMPRE útiles (nunca vacías ni "seed").
-
-Contexto actual (para fusionar sin borrar): 
+Current context to merge (do not delete unless replace=true):
 ${buildIntake()}
+
+Return ONLY JSON.
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
-  // ✅ QUIRÚRGICO (CRÍTICO): prompt como SYSTEM, ancla de idioma como USER
   const ans = await _callPlannerSystemPrompt_(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
@@ -1787,7 +1744,6 @@ ${buildIntake()}
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
 
-    // 🧠 Optimiza solo el rango de días afectado
     for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
