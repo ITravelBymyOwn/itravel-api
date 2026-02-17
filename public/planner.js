@@ -915,10 +915,6 @@ function buildIntake(){
    SECCIÓN 11 · Contrato JSON / LLM (reforzado v49) — v58 robustecido (reglas API v52.5)
 ================================= */
 const FORMAT = `
-LANGUAGE (CRITICAL):
-- Output MUST be in the same language as the user's own content (preferences/restrictions/special conditions/chat text).
-- Ignore system/template labels in this prompt when choosing the output language.
-
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
 
 A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
@@ -931,6 +927,7 @@ D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...
 
 Reglas (obligatorias, alineadas con API v52.5):
 
+- Responde SIEMPRE en el MISMO idioma del texto real del usuario (lo que el usuario escribió), independientemente del idioma del sitio (EN/ES).
 - Devuelve SIEMPRE al menos 1 fila renderizable en "rows". Nada de texto fuera del JSON.
 - Máximo 20 filas por día.
 - Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
