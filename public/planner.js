@@ -1546,6 +1546,10 @@ function _userLanguageAnchor_(){
   const sc = String(plannerState?.specialConditions || '').trim();
   if(sc) return sc;
 
+  // ✅ QUIRÚRGICO: usar también el textarea real si plannerState aún no está poblado
+  const sc2 = String(qs('#special-conditions')?.value || '').trim();
+  if(sc2) return sc2;
+
   // Siguiente: último texto escrito por el usuario en el chat del planner (si existe)
   const last = _lastUserFromSession_();
   if(last) return last;
