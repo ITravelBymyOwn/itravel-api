@@ -915,6 +915,10 @@ function buildIntake(){
    SECCIÓN 11 · Contrato JSON / LLM (reforzado v49) — v58 robustecido (reglas API v52.5)
 ================================= */
 const FORMAT = `
+LANGUAGE (CRITICAL):
+- Output MUST be in the same language as the user's own content (preferences/restrictions/special conditions/chat text).
+- Ignore system/template labels in this prompt when choosing the output language.
+
 Devuelve SOLO JSON válido (sin markdown) en uno de estos:
 
 A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
