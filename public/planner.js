@@ -55,9 +55,7 @@ let plannerState = {
   },
   budget: '',
   currency: 'USD',
-  lang: 'en', // se setea abajo
-  // ✅ QUIRÚRGICO: etiquetas de tabla (vienen del API en el idioma real del usuario)
-  uiLabels: null
+  lang: 'en' // se setea abajo
 };
 
 /* =========================================================
@@ -91,6 +89,182 @@ let plannerState = {
 
   plannerState.lang = lang;
 })();
+
+/* =========================================================
+   🌐 i18n (EN/ES) — QUIRÚRGICO
+   - Usa plannerState.lang como fuente
+   - t(key) con fallback a EN
+========================================================= */
+const I18N = {
+  es: {
+    hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
+    askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
+    confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
+    doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
+    fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
+    askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
+    humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
+    humanCancelled: 'Anotado, no apliqué cambios. ¿Probamos otra idea? 🙂',
+    cityAdded: (c)=>`✅ Añadí <strong>${c}</strong> y generé su itinerario.`,
+    cityRemoved: (c)=>`🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`,
+    cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
+    thinking: 'Astra está pensando…',
+
+    // UI / Sidebar cities
+    uiCity: 'Ciudad',
+    uiCountry: 'País',
+    uiDays: 'Días',
+    uiStart: 'Inicio',
+    uiDateFormatSmall: 'DD/MM/AAAA',
+    uiTimeHint: '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)',
+    uiStartTime: 'Hora Inicio',
+    uiEndTime: 'Hora Final',
+    uiDay: (d)=>`Día ${d}`,
+    uiAriaStart: 'Hora inicio',
+    uiAriaEnd: 'Hora final',
+
+    // Itinerary
+    uiNoActivities: 'No hay actividades aún. El asistente las generará aquí.',
+    uiDayTitle: (n)=>`Día ${n}`,
+    thStart: 'Hora inicio',
+    thEnd: 'Hora final',
+    thActivity: 'Actividad',
+    thFrom: 'Desde',
+    thTo: 'Hacia',
+    thTransport: 'Transporte',
+    thDuration: 'Duración',
+    thNotes: 'Notas',
+
+    // Overlay
+    overlayDefault: '✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.',
+    overlayGenerating: 'Astra está generando itinerarios…',
+    overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
+    overlayRebalancing: 'Agregando días y reoptimizando…',
+
+    // Tooltip fechas
+    tooltipDateMissing: 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️',
+
+    // Reset modal
+    resetTitle: '¿Reiniciar planificación? 🧭',
+    resetBody: 'Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong>',
+    resetConfirm: 'Sí, reiniciar',
+    resetCancel: 'Cancelar',
+
+    // Travelers UI
+    travelerLabel: (n)=>`Viajero ${n}`,
+    travelerCompanion: 'Acompañante',
+    travelerGender: 'Género',
+    travelerAgeRange: 'Rango de edad',
+    genderFemale: 'Femenino',
+    genderMale: 'Masculino',
+    genderOther: 'Otro',
+    genderNA: 'Prefiero no decirlo',
+    ageBaby: 'Bebé (0–2)',
+    agePreschool: 'Preescolar (3–5)',
+    ageChild: 'Niño (6–12)',
+    ageTeen: 'Adolescente (13–17)',
+    ageYoungAdult: 'Joven adulto (18–24)',
+    ageAdult2539: 'Adulto (25–39)',
+    ageAdult4054: 'Adulto (40–54)',
+    ageAdult5564: 'Adulto (55–64)',
+    ageSenior: 'Mayor (65+)',
+
+    // Fallback local
+    fallbackLocal: '⚠️ Fallback local: revisa configuración de Vercel o API Key.'
+  },
+
+  en: {
+    hi: 'Hi! I’m Astra ✨, your travel concierge. Let’s build unforgettable itineraries 🌍',
+    askHotelTransport: (city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental, public transit, taxi/uber, mixed, or “recommend”).`,
+    confirmAll: '✨ Great. I’m starting to generate your itineraries…',
+    doneAll: '🎉 Itineraries generated. If you want to change anything, just tell me and I’ll adjust it ✨ For any specific details—weather, transport, clothing, safety and more—open the Info Chat 🌐 and I’ll help you with everything you need.',
+    fail: '⚠️ Could not reach the assistant. Check console/Vercel (API Key, URL).',
+    askConfirm: (summary)=>`Do you confirm? ${summary}<br><small>Reply “yes” to apply or “no” to cancel.</small>`,
+    humanOk: 'Perfect 🙌 I adjusted your itinerary so you can use your time better. It’s going to be great! ✨',
+    humanCancelled: 'Got it — I didn’t apply changes. Want to try another idea? 🙂',
+    cityAdded: (c)=>`✅ I added <strong>${c}</strong> and generated its itinerary.`,
+    cityRemoved: (c)=>`🗑️ I removed <strong>${c}</strong> from your plan and re-optimized the tabs.`,
+    cannotFindCity: 'I couldn’t identify the city. Please tell me the exact name.',
+    thinking: 'Astra is thinking…',
+
+    // UI / Sidebar cities
+    uiCity: 'City',
+    uiCountry: 'Country',
+    uiDays: 'Days',
+    uiStart: 'Start',
+    uiDateFormatSmall: 'DD/MM/YYYY',
+    uiTimeHint: '⏰ Use 24h time — e.g., 08:30 (morning) · 21:00 (night)',
+    uiStartTime: 'Start time',
+    uiEndTime: 'End time',
+    uiDay: (d)=>`Day ${d}`,
+    uiAriaStart: 'Start time',
+    uiAriaEnd: 'End time',
+
+    // Itinerary
+    uiNoActivities: 'No activities yet. The assistant will generate them here.',
+    uiDayTitle: (n)=>`Day ${n}`,
+    thStart: 'Start time',
+    thEnd: 'End time',
+    thActivity: 'Activity',
+    thFrom: 'From',
+    thTo: 'To',
+    thTransport: 'Transport',
+    thDuration: 'Duration',
+    thNotes: 'Notes',
+
+    // Overlay
+    overlayDefault: '✨ Astra is creating your full itinerary… This may take a few minutes. Don’t close this tab: you’re saving hours of planning.',
+    overlayGenerating: 'Astra is generating itineraries…',
+    overlayRebalancingCity: 'Astra is rebalancing the city…',
+    overlayRebalancing: 'Adding days and re-optimizing…',
+
+    // Tooltip fechas
+    tooltipDateMissing: 'Please enter the start date (DD/MM/YYYY) for each city 🗓️',
+
+    // Reset modal
+    resetTitle: 'Reset planning? 🧭',
+    resetBody: 'This will delete all destinations, itineraries, and current data.<br><strong>This cannot be undone.</strong>',
+    resetConfirm: 'Yes, reset',
+    resetCancel: 'Cancel',
+
+    // Travelers UI
+    travelerLabel: (n)=>`Traveler ${n}`,
+    travelerCompanion: 'Companion',
+    travelerGender: 'Gender',
+    travelerAgeRange: 'Age range',
+    genderFemale: 'Female',
+    genderMale: 'Male',
+    genderOther: 'Other',
+    genderNA: 'Prefer not to say',
+    ageBaby: 'Baby (0–2)',
+    agePreschool: 'Preschool (3–5)',
+    ageChild: 'Child (6–12)',
+    ageTeen: 'Teen (13–17)',
+    ageYoungAdult: 'Young adult (18–24)',
+    ageAdult2539: 'Adult (25–39)',
+    ageAdult4054: 'Adult (40–54)',
+    ageAdult5564: 'Adult (55–64)',
+    ageSenior: 'Senior (65+)',
+
+    // Fallback local
+    fallbackLocal: '⚠️ Local fallback: check your Vercel configuration or API Key.'
+  }
+};
+
+function getLang(){
+  return (plannerState && (plannerState.lang === 'es' || plannerState.lang === 'en')) ? plannerState.lang : 'en';
+}
+function t(key, ...args){
+  const lang = getLang();
+  const pack = I18N[lang] || I18N.en;
+  const v = pack[key];
+  if(typeof v === 'function') return v(...args);
+  if(typeof v === 'string') return v;
+  const fb = (I18N.en && I18N.en[key]);
+  if(typeof fb === 'function') return fb(...args);
+  if(typeof fb === 'string') return fb;
+  return '';
+}
 
 /* ==============================
    SECCIÓN 2 · Tono / Mensajería
@@ -589,27 +763,6 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
-  // ✅ QUIRÚRGICO: UI labels dinámicos (idioma real del usuario desde API)
-  function uiLabel(key){
-    const u = (plannerState && plannerState.uiLabels && typeof plannerState.uiLabels === 'object') ? plannerState.uiLabels : null;
-    const v = u ? String(u[key] || '').trim() : '';
-    if(v) return v;
-
-    // Fallback a i18n EN/ES existente
-    const map = {
-      start: 'thStart',
-      end: 'thEnd',
-      activity: 'thActivity',
-      from: 'thFrom',
-      to: 'thTo',
-      transport: 'thTransport',
-      duration: 'thDuration',
-      notes: 'thNotes'
-    };
-    const k = map[key];
-    return k ? t(k) : '';
-  }
-
   function formatDurationForDisplay(val){
     if(!val) return '';
     const s = String(val).trim();
@@ -631,14 +784,8 @@ function renderCityItinerary(city){
       <table class="itinerary">
         <thead>
           <tr>
-            <th>${uiLabel('start')}</th>
-            <th>${uiLabel('end')}</th>
-            <th>${uiLabel('activity')}</th>
-            <th>${uiLabel('from')}</th>
-            <th>${uiLabel('to')}</th>
-            <th>${uiLabel('transport')}</th>
-            <th>${uiLabel('duration')}</th>
-            <th>${uiLabel('notes')}</th>
+            <th>${t('thStart')}</th><th>${t('thEnd')}</th><th>${t('thActivity')}</th><th>${t('thFrom')}</th>
+            <th>${t('thTo')}</th><th>${t('thTransport')}</th><th>${t('thDuration')}</th><th>${t('thNotes')}</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -1093,29 +1240,6 @@ function applyParsedToState(parsed){
   if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
 
   if(parsed.meta) upsertCityMeta(parsed.meta);
-
-  // ✅ QUIRÚRGICO: capturar ui_labels globales (si vienen)
-  // Nota: el API ahora los devuelve en el idioma real del usuario.
-  try{
-    if(parsed.ui_labels && typeof parsed.ui_labels==='object'){
-      const ul = parsed.ui_labels || {};
-      const required = ['day','start','end','activity','from','to','transport','duration','notes'];
-      const hasAny = required.some(k=> String(ul?.[k]||'').trim());
-      if(hasAny){
-        plannerState.uiLabels = {
-          day: String(ul.day||'').trim(),
-          start: String(ul.start||'').trim(),
-          end: String(ul.end||'').trim(),
-          activity: String(ul.activity||'').trim(),
-          from: String(ul.from||'').trim(),
-          to: String(ul.to||'').trim(),
-          transport: String(ul.transport||'').trim(),
-          duration: String(ul.duration||'').trim(),
-          notes: String(ul.notes||'').trim(),
-        };
-      }
-    }
-  }catch(_){}
 
   // 🧠 Detectar forceReplan si aplica y ajustar replace
   let forceReplanCity = null;
