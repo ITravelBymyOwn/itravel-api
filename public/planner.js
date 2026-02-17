@@ -2074,8 +2074,15 @@ async function optimizeDay(city, day){
 `;
   }
 
+  // ✅ NUEVO (quirúrgico): Hint de idioma basado en lo que el usuario escribió (sin imponer idioma del sitio)
+  // Nota: si no existe __itbmoUserLangHint, no forzamos nada.
+  const langHintBlock = (typeof window !== 'undefined' && window.__itbmoUserLangHint)
+    ? `\nIDIOMA OBJETIVO:\n- Responde en este idioma: ${window.__itbmoUserLangHint}\n- Usa ese idioma en activity/notes/duration (labels incluidos).`
+    : '';
+
   const prompt = `
 ${FORMAT}
+${langHintBlock}
 Ciudad: ${city}
 Día: ${day}
 Fecha base (d1): ${baseDate||'N/A'}
@@ -2112,6 +2119,52 @@ ${buildIntake()}
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
+
+  // ✅ NUEVO (quirúrgico): detectar idioma del texto REAL del usuario (sin usar getLang del sitio)
+  // Guardamos un hint simple para que prompts posteriores no se contaminen por ES/EN del UI.
+  function _itbmoDetectUserLangFromText_(t0=''){
+    const t = String(t0||'').trim();
+    if(!t) return '';
+    const s = t.toLowerCase();
+
+    // Señales fuertes por caracteres
+    if (/[¿¡ñáéíóúü]/i.test(t)) return 'es';
+
+    const esHits = (s.match(/\b(el|la|los|las|de|que|y|para|con|por|una|un|como|donde|qué|cuál|cuáles|cómo)\b/g) || []).length;
+    const enHits = (s.match(/\b(the|and|for|with|to|from|what|which|how|where|when|please)\b/g) || []).length;
+    const frHits = (s.match(/\b(le|la|les|des|de|du|et|pour|avec|sans|où|quoi|quel|quelle|quels|quelles|s\'il|vous)\b/g) || []).length;
+    const itHits = (s.match(/\b(il|lo|la|i|gli|le|di|che|e|per|con|senza|dove|cosa|quale|quali|grazie)\b/g) || []).length;
+    const deHits = (s.match(/\b(der|die|das|und|für|mit|ohne|wo|was|welche|welcher|bitte|danke)\b/g) || []).length;
+    const ptHits = (s.match(/\b(o|a|os|as|de|que|e|para|com|sem|onde|qual|quais|obrigado|por favor)\b/g) || []).length;
+
+    const scores = [
+      ['en', enHits],
+      ['es', esHits],
+      ['fr', frHits],
+      ['it', itHits],
+      ['de', deHits],
+      ['pt', ptHits],
+    ].sort((a,b)=>(b?.[1]||0)-(a?.[1]||0));
+
+    const topLang = String(scores?.[0]?.[0]||'');
+    const topScore = Number(scores?.[0]?.[1]||0);
+    return topScore ? topLang : '';
+  }
+
+  // Persistimos hint global (sin romper nada si no hay window)
+  try{
+    const lh = _itbmoDetectUserLangFromText_(text);
+    if(lh && typeof window !== 'undefined') window.__itbmoUserLangHint = lh;
+  } catch(_) {}
+
+  // Helper UI: si existe hint, úsalo; si no, cae al idioma del sitio
+  function _itbmoUILang_(){
+    try{
+      if(typeof window !== 'undefined' && window.__itbmoUserLangHint) return String(window.__itbmoUserLangHint);
+    } catch(_) {}
+    return (typeof getLang === 'function') ? getLang() : 'es';
+  }
+
   chatMsg(text,'user');
   $chatI.value='';
 
@@ -2146,14 +2199,14 @@ async function onSend(){
   // Agregar varios días (con rebalanceo global)
   if(intent.type==='add_days' && intent.city && intent.extraDays>0){
     const city = intent.city;
-    showWOW(true, getLang()==='es' ? 'Agregando días y reoptimizando…' : 'Adding days and re-optimizing…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Agregando días y reoptimizando…' : 'Adding days and re-optimizing…');
     addMultipleDaysToCity(city, intent.extraDays);
     await rebalanceWholeCity(city, { dayTripTo: intent.dayTripTo||'' });
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
     chatMsg(
-      (getLang()==='es')
+      (_itbmoUILang_()==='es')
         ? `✅ Agregué ${intent.extraDays} día(s) a ${city} y reoptimicé el itinerario.`
         : `✅ I added ${intent.extraDays} day(s) to ${city} and re-optimized the itinerary.`,
       'ai'
@@ -2164,7 +2217,7 @@ async function onSend(){
   // 1) Agregar día al FINAL — ⬅️ AJUSTE CLAVE AQUÍ
   if(intent.type==='add_day_end' && intent.city){
     const city = intent.city;
-    showWOW(true, getLang()==='es' ? 'Insertando día y optimizando…' : 'Adding a day and optimizing…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Insertando día y optimizando…' : 'Adding a day and optimizing…');
 
     ensureDays(city);
     const byDay = itineraries[city].byDay || {};
@@ -2189,13 +2242,13 @@ async function onSend(){
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-    chatMsg(getLang()==='es' ? '✅ Día agregado y plan reoptimizado inteligentemente.' : '✅ Day added and plan re-optimized intelligently.','ai');
+    chatMsg(_itbmoUILang_()==='es' ? '✅ Día agregado y plan reoptimizado inteligentemente.' : '✅ Day added and plan re-optimized intelligently.','ai');
     return;
   }
 
   // 2) Quitar día
   if(intent.type==='remove_day' && intent.city && Number.isInteger(intent.day)){
-    showWOW(true, getLang()==='es' ? 'Eliminando día…' : 'Removing day…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Eliminando día…' : 'Removing day…');
     removeDayAt(intent.city, intent.day);
     const totalDays = Object.keys(itineraries[intent.city].byDay||{}).length;
     for(let d=1; d<=totalDays; d++) await optimizeDay(intent.city, d);
@@ -2203,13 +2256,13 @@ async function onSend(){
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-    chatMsg(getLang()==='es' ? '✅ Día eliminado y plan reequilibrado.' : '✅ Day removed and plan re-balanced.','ai');
+    chatMsg(_itbmoUILang_()==='es' ? '✅ Día eliminado y plan reequilibrado.' : '✅ Day removed and plan re-balanced.','ai');
     return;
   }
 
   // 3) Swap de días
   if(intent.type==='swap_day' && intent.city){
-    showWOW(true, getLang()==='es' ? 'Intercambiando días…' : 'Swapping days…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Intercambiando días…' : 'Swapping days…');
     swapDays(intent.city, intent.from, intent.to);
     await optimizeDay(intent.city, intent.from);
     if(intent.to!==intent.from) await optimizeDay(intent.city, intent.to);
@@ -2217,13 +2270,13 @@ async function onSend(){
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-    chatMsg(getLang()==='es' ? '✅ Intercambié el orden y optimicé ambos días.' : '✅ I swapped the order and optimized both days.','ai');
+    chatMsg(_itbmoUILang_()==='es' ? '✅ Intercambié el orden y optimicé ambos días.' : '✅ I swapped the order and optimized both days.','ai');
     return;
   }
 
   // 4) Mover actividad
   if(intent.type==='move_activity' && intent.city){
-    showWOW(true, getLang()==='es' ? 'Moviendo actividad…' : 'Moving activity…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Moviendo actividad…' : 'Moving activity…');
     moveActivities(intent.city, intent.fromDay, intent.toDay, intent.query||'');
     await optimizeDay(intent.city, intent.fromDay);
     await optimizeDay(intent.city, intent.toDay);
@@ -2231,7 +2284,7 @@ async function onSend(){
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-    chatMsg(getLang()==='es' ? '✅ Moví la actividad y reoptimicé los días implicados.' : '✅ I moved the activity and re-optimized the affected days.','ai');
+    chatMsg(_itbmoUILang_()==='es' ? '✅ Moví la actividad y reoptimicé los días implicados.' : '✅ I moved the activity and re-optimized the affected days.','ai');
     return;
   }
 
@@ -2239,7 +2292,7 @@ async function onSend(){
   if(intent.type==='swap_activity' && intent.city){
     const city = intent.city;
     const day  = itineraries[city]?.currentDay || 1;
-    showWOW(true, getLang()==='es' ? 'Ajustando actividades…' : 'Adjusting activities…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Ajustando actividades…' : 'Adjusting activities…');
     const q = intent.target ? intent.target.toLowerCase() : '';
     if(q){
       const before = itineraries[city].byDay[day]||[];
@@ -2251,13 +2304,13 @@ async function onSend(){
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-    chatMsg(getLang()==='es' ? '✅ Sustituí la actividad y reoptimicé el día.' : '✅ I replaced the activity and re-optimized the day.','ai');
+    chatMsg(_itbmoUILang_()==='es' ? '✅ Sustituí la actividad y reoptimicé el día.' : '✅ I replaced the activity and re-optimized the day.','ai');
     return;
   }
 
   // 6) Cambiar horas
   if(intent.type==='change_hours' && intent.city){
-    showWOW(true, getLang()==='es' ? 'Ajustando horarios…' : 'Adjusting times…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Ajustando horarios…' : 'Adjusting times…');
     const city = intent.city;
     const day = itineraries[city]?.currentDay || 1;
     if(!cityMeta[city]) cityMeta[city]={perDay:[]};
@@ -2270,7 +2323,7 @@ async function onSend(){
     showWOW(false);
     const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-    chatMsg(getLang()==='es' ? '✅ Ajusté los horarios y reoptimicé tu día.' : '✅ I adjusted the times and re-optimized your day.','ai');
+    chatMsg(_itbmoUILang_()==='es' ? '✅ Ajusté los horarios y reoptimicé tu día.' : '✅ I adjusted the times and re-optimized your day.','ai');
     return;
   }
 
@@ -2284,7 +2337,7 @@ async function onSend(){
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
     saveDestinations();
     chatMsg(
-      (getLang()==='es')
+      (_itbmoUILang_()==='es')
         ? `✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`
         : `✅ I added <strong>${name}</strong>. Tell me your hotel/area and transport to generate the plan.`,
       'ai'
@@ -2300,7 +2353,7 @@ async function onSend(){
     delete cityMeta[name];
     renderCityTabs();
     chatMsg(
-      (getLang()==='es')
+      (_itbmoUILang_()==='es')
         ? `🗑️ Eliminé <strong>${name}</strong> de tu itinerario.`
         : `🗑️ I removed <strong>${name}</strong> from your itinerary.`,
       'ai'
@@ -2312,12 +2365,17 @@ async function onSend(){
   if(intent.type==='info_query'){
     try{
       setChatBusy(true);
+
+      // ✅ CAMBIO CLAVE: no forzar ES/EN por getLang(); pedir respuesta en el idioma REAL del usuario
+      const langHint = (typeof window !== 'undefined' && window.__itbmoUserLangHint) ? String(window.__itbmoUserLangHint) : '';
+      const langLine = langHint ? `\nIdioma objetivo (crítico): ${langHint}\n- Responde en ese idioma.` : '';
+
       const ans = await callAgent(
-(getLang()==='es'
-  ? `Responde en texto claro y conciso (sin JSON):\n"${text}"`
-  : `Reply in clear, concise text (no JSON):\n"${text}"`
-), true);
-      chatMsg(ans || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
+`Responde en texto claro y conciso (sin JSON).${langLine}\n\n"${text}"`,
+        true
+      );
+
+      chatMsg(ans || (_itbmoUILang_()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
     } finally {
       setChatBusy(false);
     }
@@ -2327,9 +2385,9 @@ async function onSend(){
   // 10) Edición libre
   if(intent.type==='free_edit'){
     const city = activeCity || savedDestinations[0]?.city;
-    if(!city){ chatMsg(getLang()==='es' ? 'Aún no hay itinerario en pantalla.' : 'There is no itinerary on screen yet.'); return; }
+    if(!city){ chatMsg(_itbmoUILang_()==='es' ? 'Aún no hay itinerario en pantalla.' : 'There is no itinerary on screen yet.'); return; }
     const day = itineraries[city]?.currentDay || 1;
-    showWOW(true, getLang()==='es' ? 'Aplicando tu cambio…' : 'Applying your change…');
+    showWOW(true, _itbmoUILang_()==='es' ? 'Aplicando tu cambio…' : 'Applying your change…');
 
     const data = itineraries[city];
     const dayRows = (data?.byDay?.[day]||[]).map(r=>`• ${r.start||''}-${r.end||''} ${r.activity}`).join('\n') || '(vacío)';
@@ -2339,8 +2397,13 @@ async function onSend(){
     }).join('\n\n');
     const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
 
+    // ✅ NUEVO (quirúrgico): hint de idioma para la edición libre (sin imponer idioma del sitio)
+    const langHint = (typeof window !== 'undefined' && window.__itbmoUserLangHint) ? String(window.__itbmoUserLangHint) : '';
+    const langBlock = langHint ? `\nIDIOMA OBJETIVO:\n- Responde en este idioma: ${langHint}\n- Usa ese idioma en activity/notes/duration (labels incluidos).\n` : '';
+
     const prompt = `
 ${FORMAT}
+${langBlock}
 Contexto:
 ${buildIntake()}
 
@@ -2386,12 +2449,12 @@ Instrucción del usuario: ${text}
       showWOW(false);
       const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-      chatMsg(getLang()==='es' ? '✅ Cambio aplicado y ciudad reoptimizada.' : '✅ Change applied and city re-optimized.','ai');
+      chatMsg(_itbmoUILang_()==='es' ? '✅ Cambio aplicado y ciudad reoptimizada.' : '✅ Change applied and city re-optimized.','ai');
     }else{
       showWOW(false);
       const _rb = qs('#reset-planner'); if(_rb) _rb.disabled = false;
 
-      chatMsg(parsed?.followup || (getLang()==='es' ? 'No recibí cambios válidos.' : 'I did not receive valid changes.'),'ai');
+      chatMsg(parsed?.followup || (_itbmoUILang_()==='es' ? 'No recibí cambios válidos.' : 'I did not receive valid changes.'),'ai');
     }
     return;
   }
