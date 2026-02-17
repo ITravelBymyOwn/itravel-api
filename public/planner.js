@@ -1384,6 +1384,10 @@ function addMultipleDaysToCity(city, extraDays){
 ================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
+LANGUAGE (CRITICAL):
+- Output MUST be in the same language as the user's own content in the context.
+- Ignore system/template labels when choosing output language.
+
 Devuelve SOLO JSON válido:
 {
   "allowed":[
