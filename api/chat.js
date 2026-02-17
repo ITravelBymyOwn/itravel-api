@@ -5,6 +5,7 @@
 // ✅ AJUSTE QUIRÚRGICO (nuevo): "info" completamente libre (cualquier tema) + planner/info responden en el idioma REAL del contenido del usuario (cualquier idioma).
 // ✅ AJUSTE QUIRÚRGICO (nuevo): Info Chat "como ChatGPT": mantiene contexto usando messages/history y responde conversacionalmente.
 // ✅ AJUSTE QUIRÚRGICO (nuevo): Planner: obliga a usar TODA la info del tab Planner, en especial Preferencias/Restricciones/Condiciones especiales + Viajeros (si vienen).
+// ✅ AJUSTE QUIRÚRGICO (nuevo): Soporta override explícito de idioma vía body.target_lang (o body.lang) para forzar salida (cualquier idioma).
 
 import OpenAI from "openai";
 
@@ -81,6 +82,65 @@ function detectUserLang(messages = []) {
   return topLang;
 }
 
+// ✅ QUIRÚRGICO: normaliza override de idioma (acepta códigos o nombres)
+function normalizeLangOverride(v) {
+  const s = String(v || "").trim();
+  if (!s) return "";
+  const low = s.toLowerCase();
+
+  // códigos comunes
+  const base = low.split(/[-_]/)[0];
+
+  // acepta cualquier idioma "conocido por el modelo" si viene como nombre (ej: "italian", "français", "deutsch", "日本語")
+  // pero para prompts usamos una forma “segura”:
+  // - si parece código (2-5 chars alfanum), usamos base
+  // - si no, usamos el texto tal cual (recortado) como nombre
+  if (/^[a-z]{2,5}$/.test(base)) return base;
+
+  // nombres
+  if (s.length > 40) return s.slice(0, 40); // guardrail mínimo
+  return s;
+}
+
+// ✅ QUIRÚRGICO: convierte override a instrucción humana para el prompt
+function langLabelForPrompt(lang) {
+  const L = String(lang || "").trim();
+  if (!L) return "";
+
+  const low = L.toLowerCase();
+  const map = {
+    en: "English",
+    es: "Spanish",
+    fr: "French",
+    it: "Italian",
+    de: "German",
+    pt: "Portuguese",
+    nl: "Dutch",
+    sv: "Swedish",
+    no: "Norwegian",
+    da: "Danish",
+    fi: "Finnish",
+    pl: "Polish",
+    cs: "Czech",
+    hu: "Hungarian",
+    tr: "Turkish",
+    el: "Greek",
+    ru: "Russian",
+    uk: "Ukrainian",
+    ar: "Arabic",
+    he: "Hebrew",
+    ja: "Japanese",
+    ko: "Korean",
+    zh: "Chinese",
+  };
+
+  if (map[low]) return map[low];
+
+  // si es un nombre (“italiano”, “français”, “Deutsch”), lo usamos como nombre
+  // (el modelo lo entiende)
+  return L;
+}
+
 // v52.5-style robust JSON extraction (quirúrgico: reemplaza cleanToJSON sin cambiar uso externo)
 function cleanToJSON(raw = "") {
   if (!raw) return null;
@@ -108,7 +168,6 @@ function cleanToJSON(raw = "") {
 function fallbackJSON(lang = "es") {
   const L = String(lang || "").toLowerCase();
   const isES = L === "es";
-  const isEN = L === "en";
   // Para otros idiomas: fallback en inglés (quirúrgico; no inventamos traducciones aquí)
   const useEN = !isES;
 
@@ -149,11 +208,8 @@ function fallbackJSON(lang = "es") {
 function skeletonCityDay(destination = "Destino", daysTotal = 1, lang = "es") {
   const L = String(lang || "").toLowerCase();
   const isES = L === "es";
-  // Para otros idiomas: skeleton en inglés (quirúrgico)
-  const useEN = !isES;
 
-  const city =
-    String(destination || (isES ? "Destino" : "Destination")).trim() || (isES ? "Destino" : "Destination");
+  const city = String(destination || (isES ? "Destino" : "Destination")).trim() || (isES ? "Destino" : "Destination");
   const n = Math.max(1, Number(daysTotal) || 1);
   const blocks = [];
 
@@ -166,20 +222,16 @@ function skeletonCityDay(destination = "Destino", daysTotal = 1, lang = "es") {
           day: d,
           start: "09:30",
           end: "11:00",
-          activity: isES
-            ? `${city} – Reintentar generación (itinerario pendiente)`
-            : `${city} – Retry generation (itinerary pending)`,
+          activity: isES ? `${city} – Reintentar generación (itinerario pendiente)` : `${city} – Retry generation (itinerary pending)`,
           from: "Hotel",
           to: isES ? "Centro" : "Center",
-          transport: isES
-            ? "A pie o Transporte local (según ubicación)"
-            : "Walk or local transport (depending on location)",
+          transport: isES ? "A pie o Transporte local (según ubicación)" : "Walk or local transport (depending on location)",
           duration: isES
             ? "Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat"
             : "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
           notes: isES
             ? "⚠️ No se obtuvo un itinerario válido en este intento. Reintenta o ajusta condiciones; cuando funcione, aquí verás el plan final."
-            : "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here.",
+            : "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan final here.",
           kind: "",
           zone: "",
         },
@@ -267,9 +319,7 @@ function normalizeParsed(parsed) {
               zone: r?.zone ?? "",
             }))
           : d.rows,
-        city_day: Array.isArray(d?.city_day)
-          ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "")
-          : d.city_day,
+        city_day: Array.isArray(d?.city_day) ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "") : d.city_day,
       }));
     }
   } catch {}
@@ -375,21 +425,18 @@ HORARIOS / CIERRES (GLOBAL, anti-horarios imposibles):
 - Para miradores/puentes/zonas exteriores, puedes ser más flexible.
 
 TOURS NOCTURNOS (GLOBAL, cuando aplique):
-- Si el destino tiene un ícono que brilla de noche o experiencia nocturna clásica, incluye AL MENOS 1 actividad nocturna icónica:
-  • Ejemplos: "Danubio – Crucero nocturno (Parlamento iluminado)" / "Nilo – Crucero con show" / mirador panorámico nocturno.
+- Si el destino tiene un ícono que brilla de noche o experiencia nocturna clásica, incluye AL MENOS 1 actividad nocturna icónica.
 - Mantén horarios realistas (p.ej. 19:00–23:30) y notes con tip logístico.
 
 AURORAS (Regla flexible + NEGATIVA fuerte):
 - SOLO sugerir auroras si SON plausibles por latitud/temporada.
-  Guía: normalmente se observan en latitudes altas (aprox. 60–75°) y zonas aurorales típicas.
-- Si el destino NO es de alta latitud o NO es zona auroral típica, NO las sugieras (ej.: Budapest / El Cairo / Madrid / Roma / etc.).
-- Si son plausibles: evitar días consecutivos si hay opciones; evitar el último día; horario nocturno típico local.
+- Si NO es zona auroral típica, NO las sugieras.
+- Si son plausibles: evitar días consecutivos; evitar el último día; horario nocturno típico local.
 - Notes deben incluir: "valid:" + (clima/nubosidad) + alternativa low-cost cercana.
 
 DAY-TRIPS / MACRO-TOURS:
 - Si haces una excursión/“day trip”, debes desglosarla en 5–8 sub-paradas (filas).
-- Siempre cerrar con una fila propia de regreso:
-  • Usa el "DESTINO" del macro-tour: "<Macro-tour> – Regreso a {Ciudad base}".
+- Siempre cerrar con una fila propia de regreso: "<Macro-tour> – Regreso a {Ciudad base}".
 - Evitar último día si hay opciones.
 - En day trips, evita tiempos optimistas: el regreso desde el ÚLTIMO punto debe ser realista/conservador.
 
@@ -425,6 +472,24 @@ FORMATO:
 - Responde en texto natural (no JSON).
 - Usa estructura clara (párrafos cortos, listas cuando convenga).
 `.trim();
+
+// ✅ QUIRÚRGICO: inyecta override de idioma en un prompt dado (sin reescribir SYSTEM_PROMPT)
+function applyLangOverrideToPrompt(basePrompt, langOverride = "") {
+  const L = normalizeLangOverride(langOverride);
+  if (!L) return basePrompt;
+
+  const label = langLabelForPrompt(L);
+  if (!label) return basePrompt;
+
+  const injection = `
+IDIOMA OVERRIDE (CRÍTICO):
+- El cliente ha especificado el idioma objetivo: ${label}.
+- Debes responder COMPLETAMENTE en ${label} (incluye destination/city/activity/notes/followup y cualquier texto).
+- Ignora el idioma de labels/plantillas del sistema si entran en otro idioma.
+`.trim();
+
+  return `${basePrompt}\n\n${injection}`;
+}
 
 // ==============================
 // Llamada al modelo (con timeout suave)
@@ -470,22 +535,25 @@ export default async function handler(req, res) {
     const body = req.body || {};
     const mode = body.mode || "planner"; // 👈 parámetro existente
     const clientMessages = extractMessages(body);
-    const lang = detectUserLang(clientMessages);
+
+    // ✅ QUIRÚRGICO: override explícito de idioma (opcional) desde frontend
+    // - body.target_lang recomendado (nuevo)
+    // - body.lang permitido (compat)
+    const langOverride = normalizeLangOverride(body?.target_lang || body?.lang || "");
+    const langFallback = detectUserLang(clientMessages);
 
     // 🧭 MODO INFO CHAT — texto libre (como ChatGPT: libre + contexto + idioma real del usuario)
     if (mode === "info") {
-      const raw = await callStructured(
-        [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
-        0.45,
-        2600,
-        70000
-      );
-      const text = raw || "⚠️ No response was obtained from the assistant.";
+      const sys = applyLangOverrideToPrompt(SYSTEM_PROMPT_INFO, langOverride);
+      const raw = await callStructured([{ role: "system", content: sys }, ...clientMessages], 0.45, 2600, 70000);
+      const text = (raw || "").trim() || "⚠️ No response was obtained from the assistant.";
       return res.status(200).json({ text });
     }
 
     // 🧭 MODO PLANNER — con reglas fuertes del v52.5 (solo via prompt + guardrails)
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages], 0.28, 3200, 90000);
+    const sysPlanner = applyLangOverrideToPrompt(SYSTEM_PROMPT, langOverride);
+
+    let raw = await callStructured([{ role: "system", content: sysPlanner }, ...clientMessages], 0.28, 3200, 90000);
     let parsed = cleanToJSON(raw);
 
     // 1) Retry: strict (si no parsea o no trae city_day/rows/destinations)
@@ -493,7 +561,7 @@ export default async function handler(req, res) {
 
     if (!hasSome) {
       const strictPrompt =
-        SYSTEM_PROMPT +
+        sysPlanner +
         `
 
 OBLIGATORIO:
@@ -509,7 +577,7 @@ OBLIGATORIO:
 
     if (stillBad) {
       const ultraPrompt =
-        SYSTEM_PROMPT +
+        sysPlanner +
         `
 
 Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
@@ -526,7 +594,10 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
     }
 
     // 3) Normalización + guard-rails anti-tabla-en-blanco
-    if (!parsed) parsed = fallbackJSON(lang);
+    // ✅ QUIRÚRGICO: si hay override, úsalo para fallback; si no, usa detección previa
+    const fbLang = langOverride || langFallback;
+
+    if (!parsed) parsed = fallbackJSON(fbLang);
 
     // Prefer city_day: si el modelo devolvió rows legacy, lo dejamos; pero si devolvió city_day, lo normalizamos.
     parsed = normalizeParsed(parsed);
@@ -539,7 +610,7 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
       if (Array.isArray(parsed.city_day)) {
         parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
         if (!_hasAnyRows_(parsed.city_day)) {
-          parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
+          parsed.city_day = skeletonCityDay(dest, daysTotal, fbLang);
           parsed.followup =
             (parsed.followup ? parsed.followup + " | " : "") +
             "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table.";
@@ -555,8 +626,10 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
     try {
       const body = req?.body || {};
       const clientMessages = extractMessages(body);
-      const lang = detectUserLang(clientMessages);
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON(lang)) });
+      const langFallback = detectUserLang(clientMessages);
+      const langOverride = normalizeLangOverride(body?.target_lang || body?.lang || "");
+      const fbLang = langOverride || langFallback;
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON(fbLang)) });
     } catch {
       return res.status(200).json({ text: JSON.stringify(fallbackJSON("es")) });
     }
