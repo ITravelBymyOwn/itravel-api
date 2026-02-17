@@ -1,11 +1,9 @@
-// /api/chat.js — v58 (ajustado quirúrgicamente según reglas v52.5) — ESM compatible en Vercel
+// /api/chat.js — v58.1 (quirúrgico) — añade ui_labels table headers multi-idioma
 // ✅ Mantiene interfaz v58: recibe {mode, input/history/messages} y responde { text: "<string>" }.
 // ✅ NO rompe modo "info": devuelve texto libre.
-// ✅ Ajusta SOLO el prompt del planner + parse/guardrails para cumplir reglas fuertes (city_day preferido, duración 2 líneas, auroras, macro-tours, etc.).
-// ✅ AJUSTE QUIRÚRGICO (nuevo): "info" completamente libre (cualquier tema) + planner/info responden en el idioma REAL del contenido del usuario (cualquier idioma).
-// ✅ AJUSTE QUIRÚRGICO (nuevo): Info Chat "como ChatGPT": mantiene contexto usando messages/history y responde conversacionalmente.
-// ✅ AJUSTE QUIRÚRGICO (nuevo): Planner: obliga a usar TODA la info del tab Planner, en especial Preferencias/Restricciones/Condiciones especiales + Viajeros (si vienen).
-// ✅ AJUSTE QUIRÚRGICO (nuevo): Soporta override explícito de idioma vía body.target_lang (o body.lang) para forzar salida (cualquier idioma).
+// ✅ Planner/Info responden en idioma REAL del usuario (cualquier idioma).
+// ✅ Nuevo: Planner devuelve ui_labels (etiquetas tabla) en el mismo idioma real del usuario.
+// ✅ Soporta override explícito vía body.target_lang (o body.lang).
 
 import OpenAI from "openai";
 
@@ -137,7 +135,6 @@ function langLabelForPrompt(lang) {
   if (map[low]) return map[low];
 
   // si es un nombre (“italiano”, “français”, “Deutsch”), lo usamos como nombre
-  // (el modelo lo entiende)
   return L;
 }
 
@@ -165,6 +162,36 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
+// ✅ QUIRÚRGICO: fallback mínimo de ui_labels (EN/ES; otros -> EN)
+function fallbackUILabels(lang = "en") {
+  const L = String(lang || "").toLowerCase();
+  const useES = L === "es";
+  if (useES) {
+    return {
+      day: "Día",
+      start: "Hora inicio",
+      end: "Hora final",
+      activity: "Actividad",
+      from: "Desde",
+      to: "Hacia",
+      transport: "Transporte",
+      duration: "Duración",
+      notes: "Notas",
+    };
+  }
+  return {
+    day: "Day",
+    start: "Start time",
+    end: "End time",
+    activity: "Activity",
+    from: "From",
+    to: "To",
+    transport: "Transport",
+    duration: "Duration",
+    notes: "Notes",
+  };
+}
+
 function fallbackJSON(lang = "es") {
   const L = String(lang || "").toLowerCase();
   const isES = L === "es";
@@ -173,6 +200,7 @@ function fallbackJSON(lang = "es") {
 
   return {
     destination: isES ? "Desconocido" : "Unknown",
+    ui_labels: fallbackUILabels(isES ? "es" : "en"),
     city_day: [
       {
         city: isES ? "Desconocido" : "Unknown",
@@ -292,13 +320,13 @@ function normalizeParsed(parsed) {
   if (!parsed) return parsed;
 
   try {
-    // Prefer city_day; si llega rows legacy, lo dejamos para compat pero el frontend idealmente usa city_day
+    // Prefer city_day
     if (Array.isArray(parsed.city_day)) {
       const dest = String(parsed?.destination || "").trim();
       parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
     }
 
-    // Si por alguna razón el modelo devolvió "rows" legacy, normaliza duración/kind/zone también
+    // rows legacy
     if (Array.isArray(parsed.rows)) {
       parsed.rows = parsed.rows.map((r) => ({
         ...r,
@@ -322,13 +350,29 @@ function normalizeParsed(parsed) {
         city_day: Array.isArray(d?.city_day) ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "") : d.city_day,
       }));
     }
+
+    // ✅ QUIRÚRGICO: normaliza ui_labels si viene (sin imponer idioma)
+    if (parsed.ui_labels && typeof parsed.ui_labels === "object") {
+      const o = parsed.ui_labels || {};
+      parsed.ui_labels = {
+        day: String(o.day ?? "").trim(),
+        start: String(o.start ?? "").trim(),
+        end: String(o.end ?? "").trim(),
+        activity: String(o.activity ?? "").trim(),
+        from: String(o.from ?? "").trim(),
+        to: String(o.to ?? "").trim(),
+        transport: String(o.transport ?? "").trim(),
+        duration: String(o.duration ?? "").trim(),
+        notes: String(o.notes ?? "").trim(),
+      };
+    }
   } catch {}
 
   return parsed;
 }
 
 // ==============================
-// Prompt base mejorado ✨ (PLANNER) — Ajustado a reglas v52.5
+// Prompt base mejorado ✨ (PLANNER) — Ajustado a reglas v52.5 + ui_labels
 // ==============================
 const SYSTEM_PROMPT = `
 Eres Astra, el planificador de viajes inteligente de ITravelByMyOwn.
@@ -344,6 +388,11 @@ IDIOMA (CRÍTICO, MULTI-IDIOMA REAL):
   • Si no hay dominante claro, usa el idioma del último párrafo/entrada del usuario.
 - NO traduzcas al idioma del sitio ni al idioma del sistema, a menos que el usuario explícitamente pida traducción.
 
+ETIQUETAS DE TABLA (CRÍTICO):
+- Además del itinerario, debes incluir SIEMPRE un objeto "ui_labels" con las etiquetas de la tabla en el MISMO idioma objetivo.
+- "ui_labels" debe contener EXACTAMENTE estas llaves: day, start, end, activity, from, to, transport, duration, notes.
+- Los valores deben ser traducciones naturales y cortas (1–3 palabras), en el idioma objetivo.
+
 USO DE CONTEXTO (CRÍTICO):
 - Debes usar TODA la información provista por el usuario en el tab del Planner.
 - ESPECIALMENTE: Preferencias / Restricciones / Condiciones especiales (aplícalas en cada decisión: ritmo, horarios, movilidad, presupuesto, comidas, accesibilidad, intereses, seguridad, etc.).
@@ -351,10 +400,11 @@ USO DE CONTEXTO (CRÍTICO):
 - Si hay conflicto entre preferencias (por ejemplo, “cero caminata” pero “tour de senderismo”), prioriza seguridad/viabilidad y ofrece alternativa equivalente.
 - Si falta un dato crítico para cumplir una restricción, asume lo mínimo posible y refleja la condición en notes (ej.: "Confirmar horarios/entradas") sin romper el itinerario.
 
-FORMATO PREFERIDO (nuevo, tabla-ready):
+FORMATO PREFERIDO (tabla-ready):
 A) {
   "destination":"Ciudad",
   "days_total":N,
+  "ui_labels":{"day":"..","start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."},
   "city_day":[
     {"city":"Ciudad","day":1,"rows":[
       {
@@ -376,12 +426,13 @@ A) {
 }
 
 FORMATOS LEGACY (solo si te lo piden / por compat):
-B) {"destination":"City","rows":[{...}],"followup":"texto breve"}
-C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"texto breve"}
+B) {"destination":"City","ui_labels":{...},"rows":[{...}],"followup":"texto breve"}
+C) {"destinations":[{"name":"City","ui_labels":{...},"rows":[{...}]}],"followup":"texto breve"}
 
 REGLA DE ORO:
 - Debe ser LISTO PARA TABLA: cada fila trae TODO lo necesario.
 - Devuelve SIEMPRE al menos 1 fila renderizable (nunca tabla en blanco).
+- Incluye SIEMPRE "ui_labels".
 - Nada de texto fuera del JSON.
 
 REGLAS GENERALES:
@@ -411,7 +462,6 @@ CONTRATO OBLIGATORIO DE CADA ROW:
   2) 1 tip logístico (mejor hora, reservas, tickets, vista, etc.)
   + condición/alternativa si aplica
   + (cuando aplique) agrega "Relacionado: <spot cercano/pareja lógica>" para no omitir imperdibles relacionados
-    • Ejemplo: "Castillo de Buda" -> Relacionado: "Bastión de los Pescadores"
 
 COMIDAS (Regla flexible):
 - NO son obligatorias.
@@ -484,7 +534,7 @@ function applyLangOverrideToPrompt(basePrompt, langOverride = "") {
   const injection = `
 IDIOMA OVERRIDE (CRÍTICO):
 - El cliente ha especificado el idioma objetivo: ${label}.
-- Debes responder COMPLETAMENTE en ${label} (incluye destination/city/activity/notes/followup y cualquier texto).
+- Debes responder COMPLETAMENTE en ${label} (incluye destination/city/activity/notes/followup, ui_labels y cualquier texto).
 - Ignora el idioma de labels/plantillas del sistema si entran en otro idioma.
 `.trim();
 
@@ -537,12 +587,10 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
 
     // ✅ QUIRÚRGICO: override explícito de idioma (opcional) desde frontend
-    // - body.target_lang recomendado (nuevo)
-    // - body.lang permitido (compat)
     const langOverride = normalizeLangOverride(body?.target_lang || body?.lang || "");
     const langFallback = detectUserLang(clientMessages);
 
-    // 🧭 MODO INFO CHAT — texto libre (como ChatGPT: libre + contexto + idioma real del usuario)
+    // 🧭 MODO INFO CHAT — texto libre
     if (mode === "info") {
       const sys = applyLangOverrideToPrompt(SYSTEM_PROMPT_INFO, langOverride);
       const raw = await callStructured([{ role: "system", content: sys }, ...clientMessages], 0.45, 2600, 70000);
@@ -550,13 +598,13 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
 
-    // 🧭 MODO PLANNER — con reglas fuertes del v52.5 (solo via prompt + guardrails)
+    // 🧭 MODO PLANNER — reglas fuertes
     const sysPlanner = applyLangOverrideToPrompt(SYSTEM_PROMPT, langOverride);
 
     let raw = await callStructured([{ role: "system", content: sysPlanner }, ...clientMessages], 0.28, 3200, 90000);
     let parsed = cleanToJSON(raw);
 
-    // 1) Retry: strict (si no parsea o no trae city_day/rows/destinations)
+    // 1) Retry: strict
     const hasSome = parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
 
     if (!hasSome) {
@@ -567,12 +615,13 @@ export default async function handler(req, res) {
 OBLIGATORIO:
 - Responde SOLO JSON válido.
 - Debe traer city_day (preferido) o rows (legacy) con al menos 1 fila.
+- Debe incluir ui_labels.
 - Nada de meta ni texto fuera.`;
       raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 3400, 95000);
       parsed = cleanToJSON(raw);
     }
 
-    // 2) Retry: ultra con ejemplo mínimo (solo si aún falla)
+    // 2) Retry: ultra con ejemplo mínimo
     const stillBad = !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
 
     if (stillBad) {
@@ -584,8 +633,9 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
 {
   "destination":"CITY",
   "days_total":1,
+  "ui_labels":{"day":"Day","start":"Start time","end":"End time","activity":"Activity","from":"From","to":"To","transport":"Transport","duration":"Duration","notes":"Notes"},
   "city_day":[{"city":"CITY","day":1,"rows":[
-    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Punto icónico","from":"Hotel","to":"Centro","transport":"A pie","duration":"Transporte: ~10m\\nActividad: ~90m","notes":"Descubre un rincón emblemático y llega temprano para evitar filas. Tip: lleva agua y revisa horarios.","kind":"","zone":""}
+    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Punto icónico","from":"Hotel","to":"Center","transport":"Walk","duration":"Transporte: ~10m\\nActividad: ~90m","notes":"Descubre un rincón emblemático y llega temprano para evitar filas. Tip: lleva agua y revisa horarios.","kind":"","zone":""}
   ]}],
   "followup":""
 }`;
@@ -594,13 +644,25 @@ Ejemplo válido mínimo (NO lo copies literal; solo guía de formato):
     }
 
     // 3) Normalización + guard-rails anti-tabla-en-blanco
-    // ✅ QUIRÚRGICO: si hay override, úsalo para fallback; si no, usa detección previa
     const fbLang = langOverride || langFallback;
 
     if (!parsed) parsed = fallbackJSON(fbLang);
 
-    // Prefer city_day: si el modelo devolvió rows legacy, lo dejamos; pero si devolvió city_day, lo normalizamos.
     parsed = normalizeParsed(parsed);
+
+    // ✅ QUIRÚRGICO: si faltan ui_labels, inyecta fallback mínimo para que el front pueda renderizar headers
+    try {
+      const ul = parsed?.ui_labels;
+      const hasAll =
+        ul &&
+        typeof ul === "object" &&
+        ["day", "start", "end", "activity", "from", "to", "transport", "duration", "notes"].every((k) => String(ul?.[k] || "").trim());
+      if (!hasAll) {
+        parsed.ui_labels = fallbackUILabels(fbLang === "es" ? "es" : "en");
+      }
+    } catch {
+      parsed.ui_labels = fallbackUILabels(fbLang === "es" ? "es" : "en");
+    }
 
     // Guard-rail final: si city_day existe pero viene vacío/sin filas, inyecta skeleton
     try {
