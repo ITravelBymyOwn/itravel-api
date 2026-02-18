@@ -1,10 +1,10 @@
 // /api/chat.js — v58 (surgically adjusted per v52.5 rules) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
-// ✅ Adjusts ONLY the planner prompt + parse/guardrails to comply with strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
-// ✅ SURGICAL ADJUSTMENT (new): "info" fully free (any topic) + planner/info respond in the REAL language of the user's content (any language).
+// ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
+// ✅ SURGICAL ADJUSTMENT (new): "info" fully open (any topic) + planner/info respond in the REAL language of the user's content (any language).
 // ✅ SURGICAL ADJUSTMENT (new): Info Chat "like ChatGPT": keeps context using messages/history and responds conversationally.
-// ✅ SURGICAL ADJUSTMENT (new): Planner: forces using ALL info from the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
+// ✅ SURGICAL ADJUSTMENT (new): Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
 
 import OpenAI from "openai";
 
@@ -36,10 +36,10 @@ function _lastUserText_(messages = []) {
 }
 
 // Simple multi-language detection (surgical): ONLY for fallback/guardrails when the model doesn't respond.
-// Note: does NOT affect normal content (the model chooses language by prompt).
+// Note: does NOT affect normal content (the model decides language via prompt).
 function detectUserLang(messages = []) {
   const t = _lastUserText_(messages).trim();
-  if (!t) return "en";
+  if (!t) return "es";
 
   const s = t.toLowerCase();
 
@@ -73,11 +73,11 @@ function detectUserLang(messages = []) {
 
   scores.sort((a, b) => (b?.[1] || 0) - (a?.[1] || 0));
   const top = scores[0];
-  const topLang = String(top?.[0] || "en");
+  const topLang = String(top?.[0] || "es");
   const topScore = Number(top?.[1] || 0);
 
-  // If there are no clear signals, keep default EN (for your current fallback)
-  if (!topScore) return "en";
+  // If there are no clear signals, keep default ES (for your current fallback)
+  if (!topScore) return "es";
   return topLang;
 }
 
@@ -105,7 +105,7 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
-function fallbackJSON(lang = "en") {
+function fallbackJSON(lang = "es") {
   const L = String(lang || "").toLowerCase();
   const isES = L === "es";
   const isEN = L === "en";
@@ -145,8 +145,8 @@ function fallbackJSON(lang = "en") {
   };
 }
 
-// Guard-rail: prevents a blank table if the model fails in planner
-function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "en") {
+// Guard-rail: avoids a blank table if the model fails in planner
+function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "es") {
   const L = String(lang || "").toLowerCase();
   const isES = L === "es";
   // For other languages: skeleton in English (surgical)
@@ -194,15 +194,15 @@ function _normalizeDurationText_(txt) {
   const s = String(txt ?? "").trim();
   if (!s) return s;
 
-  // "Transport: X, Activity: Y" => 2 lines (keeps ES labels too if they come that way)
-  if (/Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && s.includes(",")) {
-    return s.replace(/\s*,\s*Actividad\s*:/i, "\nActividad:");
+  // "Transport: X, Activity: Y" => 2 lines
+  if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(",")) {
+    return s.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
   }
 
-  // if it comes in one line without breaks but has both labels, try to split using common separators
-  if (/Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && !s.includes("\n")) {
+  // if it comes in a single line without line breaks but has both labels, try forcing split with common separators
+  if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && !s.includes("\n")) {
     const tmp = s.replace(/\s*\|\s*/g, ", ").replace(/\s*;\s*/g, ", ");
-    if (tmp.includes(",")) return tmp.replace(/\s*,\s*Actividad\s*:/i, "\nActividad:");
+    if (tmp.includes(",")) return tmp.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
   }
 
   return s;
@@ -240,13 +240,13 @@ function normalizeParsed(parsed) {
   if (!parsed) return parsed;
 
   try {
-    // Prefer city_day; if legacy rows arrive, keep for compat but frontend should ideally use city_day
+    // Prefer city_day; if legacy rows arrive, keep them for compat but the frontend ideally uses city_day
     if (Array.isArray(parsed.city_day)) {
       const dest = String(parsed?.destination || "").trim();
       parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
     }
 
-    // If for some reason the model returned legacy "rows", normalize duration/kind/zone too
+    // If the model returned legacy "rows", normalize duration/kind/zone too
     if (Array.isArray(parsed.rows)) {
       parsed.rows = parsed.rows.map((r) => ({
         ...r,
@@ -282,24 +282,24 @@ function normalizeParsed(parsed) {
 // ==============================
 const SYSTEM_PROMPT = `
 You are Astra, the smart travel planner of ITravelByMyOwn.
-Your output must be EXCLUSIVELY valid JSON (no markdown, no backticks, no text outside).
+Your output must be EXCLUSIVELY a valid JSON (no markdown, no backticks, no extra text).
 
 LANGUAGE (CRITICAL, TRUE MULTI-LANGUAGE):
-- ALWAYS respond in the REAL language the user wrote their information in (any language).
-- In Planner, the user's message may include system template text/labels (e.g., "Preferences", "Restrictions", "Start time", etc.).
+- ALWAYS respond in the REAL language in which the user wrote their information (any language).
+- In Planner, the user's message may include template/system labels (for example: "Preferences", "Restrictions", "Start time", etc.).
   Those labels must NOT determine the output language.
-- Determine the target language from the content written by the user (their phrases, restrictions, likes, conditions, etc.) and use it in the ENTIRE JSON.
+- Determine the target language from the content written by the user (their phrases, restrictions, tastes, conditions, etc.) and use it throughout the JSON.
 - If the user mixes languages:
   • Prioritize the dominant language of the user's written content.
-  • If there is no clear dominant language, use the language of the last paragraph/user entry.
-- Do NOT translate to the site's language or the system language unless the user explicitly asks for translation.
+  • If there is no clear dominant language, use the language of the user's last paragraph/entry.
+- Do NOT translate into the site/system language unless the user explicitly asks for translation.
 
 CONTEXT USAGE (CRITICAL):
 - You must use ALL information provided by the user in the Planner tab.
-- ESPECIALLY: Preferences / Restrictions / Special conditions (apply them in every decision: pace, times, mobility, budget, meals, accessibility, interests, safety, etc.).
-- If the user provides traveler info (ages, kids, seniors, mobility, interests), incorporate it actively into: schedules, breaks, block durations, transport, activity types and notes.
-- If preferences conflict (e.g., “no walking” but “hiking tour”), prioritize safety/feasibility and offer an equivalent alternative.
-- If a critical datum is missing to comply with a restriction, assume the minimum possible and reflect it in notes (e.g., "Confirm opening hours/tickets") without breaking the itinerary.
+- ESPECIALLY: Preferences / Restrictions / Special conditions (apply them in every decision: pace, schedules, mobility, budget, meals, accessibility, interests, safety, etc.).
+- If the user provides traveler info (ages, kids, seniors, mobility, interests), actively incorporate it into: schedules, breaks, block durations, transport, activity types, and notes.
+- If there is a conflict between preferences (for example, “no walking” but “hiking tour”), prioritize safety/feasibility and offer an equivalent alternative.
+- If a critical detail is missing to satisfy a restriction, assume the minimum and reflect the condition in notes (e.g., "Confirm hours/tickets") without breaking the itinerary.
 
 PREFERRED FORMAT (new, table-ready):
 A) {
@@ -316,7 +316,7 @@ A) {
         "to":"Destination place",
         "transport":"Realistic transport",
         "duration":"Transport: ...\\nActivity: ...",
-        "notes":"(>=20 chars) 1 emotional sentence + 1 logistics tip (+ alternative/condition if applicable)",
+        "notes":"(>=20 chars) 1 emotional sentence + 1 logistical tip (+ alternative/condition if applicable)",
         "kind":"",
         "zone":""
       }
@@ -325,31 +325,31 @@ A) {
   "followup":"short text"
 }
 
-LEGACY FORMATS (only if requested / for compatibility):
+LEGACY FORMATS (only if requested / for compat):
 B) {"destination":"City","rows":[{...}],"followup":"short text"}
 C) {"destinations":[{"name":"City","rows":[{...}]}],"followup":"short text"}
 
 GOLDEN RULE:
-- It must be TABLE-READY: each row includes EVERYTHING needed.
+- MUST BE TABLE-READY: every row includes everything needed.
 - ALWAYS return at least 1 renderable row (never a blank table).
 - No text outside the JSON.
 
 GENERAL RULES:
 - Max 20 rows per day.
-- Realistic local times; if the user doesn't provide hours, decide as an expert.
-- Times must be ordered and MUST NOT overlap.
-- from/to/transport: MUST NEVER be empty.
-- Do NOT output "seed" or empty notes.
+- Local times must be realistic; if the user doesn't provide hours, decide as an expert.
+- Times must be ordered and NOT overlap.
+- from/to/transport: NEVER empty.
+- Do NOT return "seed" or empty notes.
 
 MANDATORY ROW CONTRACT:
 - day (number)
 - start/end in HH:MM (local time)
-- activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Forbidden generic like "museum", "park", "local restaurant".
+- activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
-  - "DESTINATION" is NOT always the city:
+  - "DESTINATION" is NOT always the base city:
     • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
-    • If NOT a day trip, "DESTINATION" can be the base city.
-  - This also applies to transfers and returns:
+    • If it's NOT a day trip, "DESTINATION" can be the base city.
+  - This also applies to transfers/returns:
     • Day trip example: "South Coast – Return to Reykjavik"
     • City example: "Budapest – Return to hotel"
 - duration: EXACTLY 2 lines with \\n:
@@ -358,48 +358,48 @@ MANDATORY ROW CONTRACT:
   FORBIDDEN: "Transport: 0m" or "Activity: 0m"
 - notes: required (>=20 chars), motivating and useful:
   1) 1 emotional sentence (Admire/Discover/Feel…)
-  2) 1 logistics tip (best time, reservations, tickets, viewpoint, etc.)
+  2) 1 logistical tip (best time, reservations, tickets, view, etc.)
   + condition/alternative if applicable
-  + (when applicable) add "Related: <nearby spot/logical pair>" so you don't omit closely-related must-sees
-    • Example: "Buda Castle" -> Related: "Fisherman's Bastion"
+  + (when relevant) add "Related: <nearby spot/logical pair>" to avoid missing key paired highlights
+    • Example: "Buda Castle" -> Related: "Fisherman’s Bastion"
 
 MEALS (Flexible rule):
-- NOT required.
+- NOT mandatory.
 - Include ONLY if they add real value to the flow.
-- If included, NOT generic (e.g., "dinner at a local restaurant" is forbidden).
+- If included, NOT generic ("dinner at a local restaurant" forbidden).
 
-OPENING HOURS / CLOSURES (GLOBAL, anti-impossible times):
-- For places with typical opening hours (museums, castles, indoor monuments, thermal baths, markets), do NOT schedule visits outside a reasonable daytime range.
-  Guideline if you're not 100% sure: 10:00–17:00 for indoor places / museums.
-- If a place can be closed on certain days (e.g., Mondays) and you're not sure, avoid extreme times and add in notes: "Confirm exact opening hours (may be closed on some days)".
+HOURS / CLOSURES (GLOBAL, anti-impossible schedules):
+- For places with typical hours (museums, castles, indoor monuments, baths/spas, markets), do NOT schedule visits outside a reasonable daytime window.
+  Guideline if not 100% sure: 10:00–17:00 for indoor/museums.
+- If the place may be closed on certain days (e.g., Mondays) and you are not sure, avoid extreme times and add in notes: "Exact hours to confirm (may be closed some days)".
 - For viewpoints/bridges/outdoor areas, you can be more flexible.
 
 NIGHT TOURS (GLOBAL, when applicable):
-- If the destination has a classic night icon/experience, include AT LEAST 1 iconic nighttime activity:
-  • Examples: "Danube – Night cruise (Illuminated Parliament)" / "Nile – Dinner cruise with show" / panoramic night viewpoint.
-- Keep realistic times (e.g., 19:00–23:30) and notes with a logistics tip.
+- If the destination has an iconic night highlight or classic night experience, include AT LEAST 1 iconic night activity:
+  • Examples: "Danube – Night cruise (Parliament lights)" / "Nile – Cruise with show" / panoramic night viewpoint.
+- Keep realistic times (e.g., 19:00–23:30) and include a logistical tip in notes.
 
 AURORAS (Flexible rule + strong negative):
 - ONLY suggest auroras if they are plausible by latitude/season.
-  Guideline: typically seen at high latitudes (approx. 60–75°) and typical auroral zones.
+  Guideline: typically seen at higher latitudes (approx. 60–75°) in common auroral zones.
 - If the destination is NOT high latitude or NOT a typical auroral zone, do NOT suggest them (e.g., Budapest / Cairo / Madrid / Rome / etc.).
-- If plausible: avoid consecutive nights if possible; avoid the last day; typical local nighttime.
+- If plausible: avoid consecutive days if possible; avoid the last day; typical local night hours.
 - Notes must include: "valid:" + (weather/cloudiness) + a nearby low-cost alternative.
 
 DAY TRIPS / MACRO-TOURS:
-- If you create an excursion/day trip, you must break it into 5–8 sub-stops (rows).
+- If you create a day trip, you must break it down into 5–8 sub-stops (rows).
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
-- Avoid the last day if possible.
-- In day trips, avoid optimistic timing: the return from the LAST point must be realistic/conservative.
+- Avoid the last day if there are options.
+- For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
 
 SAFETY / GLOBAL COHERENCE:
-- Do not propose things that are infeasible by distance/time/season or obvious risks.
-- Prioritize plausible, safe and reasonable options.
+- Do not propose things that are infeasible due to distance/time/season or obvious risks.
+- Prioritize plausible, safe, and reasonable options.
 
 SMART EDITING:
-- If the user asks to add/remove/adjust times, return updated consistent JSON.
-- By default, keep global itinerary coherence.
+- If the user asks to add/remove/adjust schedules, return updated JSON that remains consistent.
+- By default, preserve the itinerary's global coherence.
 
 Respond with valid JSON only.
 `.trim();
@@ -411,14 +411,14 @@ const SYSTEM_PROMPT_INFO = `
 You are Astra, a general conversational assistant (like ChatGPT) inside ITravelByMyOwn.
 
 GOAL:
-- Respond usefully, honestly, and thoroughly about ANY topic.
+- Respond in a helpful, honest, and complete way about ANY topic.
 - Maintain conversation context using the provided history (messages/history).
-- If information is missing to answer well, ask 1–2 key questions (don't ask 10).
-- Do not invent facts; if something is uncertain, say so.
+- If key information is missing, ask 1–2 key questions (not 10).
+- Do not invent data; if something isn't certain, say so.
 
 LANGUAGE (CRITICAL, TRUE MULTI-LANGUAGE):
 - ALWAYS respond in the REAL language of the user's last message content (any language).
-- If the message includes system template text/labels, do NOT use those labels to decide language.
+- If the message includes template/system labels, do NOT use those labels to decide the language.
 - If the user mixes languages, prioritize the dominant language of the user's written content.
 
 FORMAT:
@@ -472,7 +472,7 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
-    // 🧭 INFO CHAT MODE — free text (like ChatGPT: free + context + user's real language)
+    // 🧭 INFO CHAT MODE — free text (like ChatGPT: open + context + user's real language)
     if (mode === "info") {
       const raw = await callStructured(
         [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
@@ -504,7 +504,7 @@ MANDATORY:
       parsed = cleanToJSON(raw);
     }
 
-    // 2) Retry: ultra with a minimal example (only if it still fails)
+    // 2) Retry: ultra with minimal example (only if still failing)
     const stillBad = !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
 
     if (stillBad) {
@@ -517,7 +517,7 @@ Minimal valid example (DO NOT copy it literally; format guide only):
   "destination":"CITY",
   "days_total":1,
   "city_day":[{"city":"CITY","day":1,"rows":[
-    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Iconic spot","from":"Hotel","to":"Center","transport":"Walk","duration":"Transport: ~10m\\nActivity: ~90m","notes":"Discover a landmark corner and arrive early to avoid queues. Tip: bring water and check hours.","kind":"","zone":""}
+    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Iconic spot","from":"Hotel","to":"Center","transport":"Walk","duration":"Transport: ~10m\\nActivity: ~90m","notes":"Discover a landmark corner and arrive early to avoid lines. Tip: bring water and check hours.","kind":"","zone":""}
   ]}],
   "followup":""
 }`;
@@ -525,13 +525,13 @@ Minimal valid example (DO NOT copy it literally; format guide only):
       parsed = cleanToJSON(raw);
     }
 
-    // 3) Normalization + anti-blank-table guard-rails
+    // 3) Normalization + anti-blank-table guardrails
     if (!parsed) parsed = fallbackJSON(lang);
 
-    // Prefer city_day: if the model returned legacy rows, keep it; but if city_day exists, normalize it.
+    // Prefer city_day: if the model returned legacy rows, keep them; but if it returned city_day, normalize it.
     parsed = normalizeParsed(parsed);
 
-    // Final guard-rail: if city_day exists but is empty/has no rows, inject skeleton
+    // Final guard-rail: if city_day exists but is empty/no rows, inject skeleton
     try {
       const dest = String(parsed?.destination || "Destination").trim() || "Destination";
       const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
@@ -551,14 +551,14 @@ Minimal valid example (DO NOT copy it literally; format guide only):
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
-    // If there is an exception, try to respond in the user's language based on the body (fallback only).
+    // In case of exception, try responding in the user's language based on body (fallback only).
     try {
       const body = req?.body || {};
       const clientMessages = extractMessages(body);
       const lang = detectUserLang(clientMessages);
       return res.status(200).json({ text: JSON.stringify(fallbackJSON(lang)) });
     } catch {
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON("en")) });
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON("es")) });
     }
   }
 }
