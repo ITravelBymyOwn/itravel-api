@@ -1914,18 +1914,21 @@ async function startPlanning(){
 function askNextHotelTransport(){
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
-    chatMsg(tone.confirmAll);
 
-    (async ()=>{
-      showWOW(true, 'Astra está generando itinerarios…');
-      for(const {city} of savedDestinations){
-        await generateCityItinerary(city);
-      }
-      showWOW(false);
-      chatMsg(tone.doneAll);
-    })();
+    // ✅ NUEVO (quirúrgico): preguntar idioma global antes de generar
+    if (typeof plannerState !== 'undefined' && plannerState) {
+      plannerState.collectingItineraryLang = true;
+    }
+
+    chatMsg(
+      (getLang()==='es')
+        ? 'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
+        : 'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
+    , 'ai');
+
     return;
   }
+
   const city = savedDestinations[metaProgressIndex].city;
   setActiveCity(city); renderCityItinerary(city);
   chatMsg(tone.askHotelTransport(city),'ai');
