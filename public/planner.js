@@ -2230,6 +2230,25 @@ async function onSend(){
     return;
   }
 
+  // ✅ NUEVO (quirúrgico): capturar idioma global antes de generar itinerarios
+  if (typeof plannerState !== 'undefined' && plannerState && plannerState.collectingItineraryLang) {
+    plannerState.collectingItineraryLang = false;
+    plannerState.itineraryLang = String(text || '').trim();
+
+    chatMsg(tone.confirmAll, 'ai');
+
+    (async ()=>{
+      showWOW(true, t('overlayGenerating'));
+      for(const {city} of savedDestinations){
+        await generateCityItinerary(city);
+      }
+      showWOW(false);
+      chatMsg(tone.doneAll, 'ai');
+    })();
+
+    return;
+  }
+
   const intent = intentFromText(text);
 
   // Normaliza "un día más" → add_day_end
