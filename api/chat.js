@@ -2,9 +2,9 @@
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
-// ✅ SURGICAL ADJUSTMENT (new): "info" fully open (any topic) + planner/info respond in the REAL language of the user's content (any language).
-// ✅ SURGICAL ADJUSTMENT (new): Info Chat "like ChatGPT": keeps context using messages/history and responds conversationally.
-// ✅ SURGICAL ADJUSTMENT (new): Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
+// ✅ SURGICAL ADJUSTMENT: "info" fully open (any topic) + planner/info respond in the REAL language of the user's content (any language).
+// ✅ SURGICAL ADJUSTMENT: Info Chat "like ChatGPT": keeps context using messages/history and responds conversationally.
+// ✅ SURGICAL ADJUSTMENT: Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
 
 import OpenAI from "openai";
 
@@ -39,19 +39,21 @@ function _lastUserText_(messages = []) {
 // Note: does NOT affect normal content (the model decides language via prompt).
 function detectUserLang(messages = []) {
   const t = _lastUserText_(messages).trim();
-  if (!t) return "es";
+  if (!t) return "en";
 
   const s = t.toLowerCase();
 
   // Strong Spanish signals
   if (/[¿¡ñáéíóúü]/i.test(t)) return "es";
-  const esHits = (s.match(/\b(el|la|los|las|de|que|y|para|con|por|una|un|como|donde|qué|cuál|cuáles|cómo)\b/g) || []).length;
+  const esHits = (s.match(/\b(el|la|los|las|de|que|y|para|con|por|una|un|como|donde|qué|cuál|cuáles|cómo)\b/g) || [])
+    .length;
 
   // Strong English signals
   const enHits = (s.match(/\b(the|and|for|with|to|from|what|which|how|where|when|please)\b/g) || []).length;
 
   // Strong French signals
-  const frHits = (s.match(/\b(le|la|les|des|de|du|et|pour|avec|sans|où|quoi|quel|quelle|quels|quelles|s\'il|vous)\b/g) || []).length;
+  const frHits = (s.match(/\b(le|la|les|des|de|du|et|pour|avec|sans|où|quoi|quel|quelle|quels|quelles|s\'il|vous)\b/g) || [])
+    .length;
 
   // Strong Italian signals
   const itHits = (s.match(/\b(il|lo|la|i|gli|le|di|che|e|per|con|senza|dove|cosa|quale|quali|grazie)\b/g) || []).length;
@@ -73,11 +75,11 @@ function detectUserLang(messages = []) {
 
   scores.sort((a, b) => (b?.[1] || 0) - (a?.[1] || 0));
   const top = scores[0];
-  const topLang = String(top?.[0] || "es");
+  const topLang = String(top?.[0] || "en");
   const topScore = Number(top?.[1] || 0);
 
-  // If there are no clear signals, keep default ES (for your current fallback)
-  if (!topScore) return "es";
+  // If there are no clear signals, default to EN (so your fallback is consistent)
+  if (!topScore) return "en";
   return topLang;
 }
 
@@ -105,55 +107,39 @@ function cleanToJSON(raw = "") {
   return null;
 }
 
-function fallbackJSON(lang = "es") {
-  const L = String(lang || "").toLowerCase();
-  const isES = L === "es";
-  const isEN = L === "en";
-  // For other languages: fallback in English (surgical; we don't invent translations here)
-  const useEN = !isES;
-
+function fallbackJSON(lang = "en") {
+  // Fallback is always English (surgical: avoid partial translations here)
   return {
-    destination: isES ? "Unknown" : "Unknown",
+    destination: "Unknown",
     city_day: [
       {
-        city: isES ? "Unknown" : "Unknown",
+        city: "Unknown",
         day: 1,
         rows: [
           {
             day: 1,
             start: "09:30",
             end: "11:00",
-            activity: isES ? "Unknown – Base itinerary (fallback)" : "Unknown – Base itinerary (fallback)",
+            activity: "Unknown – Base itinerary (fallback)",
             from: "Hotel",
-            to: isES ? "Center" : "Center",
-            transport: isES ? "Walk or local transport (depending on location)" : "Walk or local transport (depending on location)",
-            duration: isES
-              ? "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat"
-              : "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
-            notes: isES
-              ? "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again."
-              : "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again.",
+            to: "Center",
+            transport: "Walk or local transport (depending on location)",
+            duration: "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
+            notes: "⚠️ I couldn't generate the itinerary. Check your API key/deployment and try again.",
             kind: "",
             zone: "",
           },
         ],
       },
     ],
-    followup: isES
-      ? "⚠️ Local fallback: check your Vercel config or API key."
-      : "⚠️ Local fallback: check your Vercel config or API key.",
+    followup: "⚠️ Local fallback: check your Vercel config or API key.",
   };
 }
 
 // Guard-rail: avoids a blank table if the model fails in planner
-function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "es") {
-  const L = String(lang || "").toLowerCase();
-  const isES = L === "es";
-  // For other languages: skeleton in English (surgical)
-  const useEN = !isES;
-
-  const city =
-    String(destination || (isES ? "Destination" : "Destination")).trim() || (isES ? "Destination" : "Destination");
+function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "en") {
+  // Skeleton is always English (surgical: avoid partial translations here)
+  const city = String(destination || "Destination").trim() || "Destination";
   const n = Math.max(1, Number(daysTotal) || 1);
   const blocks = [];
 
@@ -166,20 +152,13 @@ function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "es"
           day: d,
           start: "09:30",
           end: "11:00",
-          activity: isES
-            ? `${city} – Retry generation (itinerary pending)`
-            : `${city} – Retry generation (itinerary pending)`,
+          activity: `${city} – Retry generation (itinerary pending)`,
           from: "Hotel",
-          to: isES ? "Center" : "Center",
-          transport: isES
-            ? "Walk or local transport (depending on location)"
-            : "Walk or local transport (depending on location)",
-          duration: isES
-            ? "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat"
-            : "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
-          notes: isES
-            ? "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here."
-            : "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here.",
+          to: "Center",
+          transport: "Walk or local transport (depending on location)",
+          duration: "Transport: Check duration in Info Chat\nActivity: Check duration in Info Chat",
+          notes:
+            "⚠️ No valid itinerary was produced in this attempt. Retry or adjust conditions; when it works, you’ll see the final plan here.",
           kind: "",
           zone: "",
         },
@@ -199,7 +178,7 @@ function _normalizeDurationText_(txt) {
     return s.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
   }
 
-  // if it comes in a single line without line breaks but has both labels, try forcing split with common separators
+  // If it comes in a single line without line breaks but has both labels, try forcing split with common separators
   if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && !s.includes("\n")) {
     const tmp = s.replace(/\s*\|\s*/g, ", ").replace(/\s*;\s*/g, ", ");
     if (tmp.includes(",")) return tmp.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
@@ -267,9 +246,7 @@ function normalizeParsed(parsed) {
               zone: r?.zone ?? "",
             }))
           : d.rows,
-        city_day: Array.isArray(d?.city_day)
-          ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "")
-          : d.city_day,
+        city_day: Array.isArray(d?.city_day) ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "") : d.city_day,
       }));
     }
   } catch {}
@@ -474,12 +451,7 @@ export default async function handler(req, res) {
 
     // 🧭 INFO CHAT MODE — free text (like ChatGPT: open + context + user's real language)
     if (mode === "info") {
-      const raw = await callStructured(
-        [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
-        0.45,
-        2600,
-        70000
-      );
+      const raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages], 0.45, 2600, 70000);
       const text = raw || "⚠️ No response was obtained from the assistant.";
       return res.status(200).json({ text });
     }
@@ -489,7 +461,8 @@ export default async function handler(req, res) {
     let parsed = cleanToJSON(raw);
 
     // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
-    const hasSome = parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
+    const hasSome =
+      parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
 
     if (!hasSome) {
       const strictPrompt =
@@ -505,7 +478,8 @@ MANDATORY:
     }
 
     // 2) Retry: ultra with minimal example (only if still failing)
-    const stillBad = !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
+    const stillBad =
+      !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
 
     if (stillBad) {
       const ultraPrompt =
@@ -558,7 +532,7 @@ Minimal valid example (DO NOT copy it literally; format guide only):
       const lang = detectUserLang(clientMessages);
       return res.status(200).json({ text: JSON.stringify(fallbackJSON(lang)) });
     } catch {
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON("es")) });
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON("en")) });
     }
   }
 }
