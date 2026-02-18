@@ -1544,25 +1544,91 @@ function _lastUserFromSession_(){
   return '';
 }
 
+// ✅ NEW (deterministic): detect and ignore the exact prefilled example text in Special Conditions
+function _isExamplePrefill_(text){
+  const s0 = String(text || '').trim();
+  if(!s0) return false;
+
+  const normalize = (x)=>{
+    return String(x || '')
+      // unify line breaks
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      // normalize smart quotes to plain quotes
+      .replace(/[“”]/g, '"')
+      .replace(/[‘’]/g, "'")
+      // normalize arrows and spacing variants
+      .replace(/\s*→\s*/g, ' → ')
+      // collapse whitespace (including new lines) to single spaces
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const EXAMPLE_PREFILL_EN = `
+✨ Tell Astra exactly how you want to live your trip.
+This will help create an itinerary that truly matches you.
+
+🖼️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”
+🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”
+⛰️ Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”
+🌌 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”
+🩺 Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”
+🧳 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”
+
+📝 The more details you share, the more precise, smooth and personalized your itinerary will be.
+`.trim();
+
+  const s = normalize(s0);
+  const ex = normalize(EXAMPLE_PREFILL_EN);
+
+  // Exact-match (normalized) — deterministic
+  if(s === ex) return true;
+
+  // Safety net (still deterministic, but tolerant to tiny copy tweaks):
+  // If all of these unique anchor phrases are present, treat it as the example.
+  const mustHave = [
+    'Tell Astra exactly how you want to live your trip.',
+    'This will help create an itinerary that truly matches you.',
+    'Style & activities',
+    'Transportation',
+    'Pace & adventure level',
+    'Must-dos',
+    'Health & restrictions',
+    'Other important details',
+    'The more details you share, the more precise, smooth and personalized your itinerary will be.'
+  ];
+
+  for(const p of mustHave){
+    if(!s.includes(normalize(p))) return false;
+  }
+  return true;
+}
+
 function _userLanguageAnchor_(){
   // ✅ Ultra-surgical FIX: avoid ReferenceError if plannerState does not exist yet
   const sc = (typeof plannerState !== 'undefined' && plannerState)
     ? String(plannerState?.specialConditions || '').trim()
     : '';
-  if(sc) return sc;
+  if(sc){
+    // Ignore the prefilled example (must not drive language)
+    if(!_isExamplePrefill_(sc)) return sc;
+  }
 
   // ✅ SURGICAL: also use the real textarea if plannerState isn't populated yet
   const sc2 = (typeof qs !== 'undefined')
     ? String(qs('#special-conditions')?.value || '').trim()
     : '';
-  if(sc2) return sc2;
+  if(sc2){
+    if(!_isExamplePrefill_(sc2)) return sc2;
+  }
 
   // Next: last text written by the user in the planner chat (if exists)
   const last = _lastUserFromSession_();
   if(last) return last;
 
   // Safe fallback (only if there is no user text to infer language)
-  return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
+  // ✅ FIX: fallback matches site language (EN/ES)
+  return (getLang()==='es') ? 'Por favor genera el itinerario.' : 'Please generate the itinerary.';
 }
 
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
@@ -1784,7 +1850,7 @@ QUALITY:
 ${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
 - The last day can be lighter, but don’t leave it “empty” if key highlights remain.
 - Validate plausibility and safety; replace with safe alternatives when needed.
-- Notes must ALWAYS be useful (never empty or "seed").
+- Notes should ALWAYS be useful (never empty or "seed").
 
 Current context (to merge without deleting): 
 ${buildIntake()}
