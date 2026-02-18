@@ -1484,7 +1484,7 @@ Contexto:
 }
 
 /* ==============================
-   SECCIÓN 15 · Generación por ciudad
+   SECTION 15 · City generation
 ================================= */
 function setOverlayMessage(msg=t('overlayDefault')){
   const p = $overlayWOW?.querySelector('p');
@@ -1501,7 +1501,7 @@ function showWOW(on, msg){
     // ✅ Keep only the reset button enabled
     if (el.id === 'reset-planner') return;
 
-    // 🆕 Also block the floating Info Chat button
+    // 🆕 Also lock the floating Info Chat button
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
       return;
@@ -1522,15 +1522,15 @@ function showWOW(on, msg){
 }
 
 /* =========================================================
-   ✅ QUIRÚRGICO (CRITICAL): keep the user's language
-   - Do NOT send long instructions (in ES) as "user".
-   - Send rules/prompt as "system".
-   - The last "user" message will be a REAL-TEXT ANCHOR
-     so the API responds in that language (even if the site is EN/ES).
+   ✅ SURGICAL (CRITICAL): preserve user's language
+   - We do NOT send long instructions (in ES) as "user".
+   - We send rules/prompt as "system".
+   - The last "user" message will be an ANCHOR with real user text
+     so the API answers in that language (even if site is EN/ES).
 ========================================================= */
 function _lastUserFromSession_(){
   try{
-    // ✅ Ultra-surgical FIX: avoid ReferenceError if session doesn't exist yet
+    // ✅ Ultra-surgical FIX: avoid ReferenceError if session does not exist yet
     if(typeof session === 'undefined' || !session) return '';
 
     for(let i=(session?.length||0)-1; i>=0; i--){
@@ -1545,30 +1545,30 @@ function _lastUserFromSession_(){
 }
 
 function _userLanguageAnchor_(){
-  // ✅ Ultra-surgical FIX: avoid ReferenceError if plannerState doesn't exist yet
+  // ✅ Ultra-surgical FIX: avoid ReferenceError if plannerState does not exist yet
   const sc = (typeof plannerState !== 'undefined' && plannerState)
     ? String(plannerState?.specialConditions || '').trim()
     : '';
   if(sc) return sc;
 
-  // ✅ QUIRÚRGICO: also use the real textarea if plannerState isn't populated yet
+  // ✅ SURGICAL: also use the real textarea if plannerState isn't populated yet
   const sc2 = (typeof qs !== 'undefined')
     ? String(qs('#special-conditions')?.value || '').trim()
     : '';
   if(sc2) return sc2;
 
-  // Next: last text written by the user in the planner chat (if any)
+  // Next: last text written by the user in the planner chat (if exists)
   const last = _lastUserFromSession_();
   if(last) return last;
 
-  // Safe fallback (only if there's no user text to infer language)
+  // Safe fallback (only if there is no user text to infer language)
   return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
 }
 
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
-  // timeout to avoid hanging (same pattern as SECTION 12)
+  // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
   const timeoutMs = 75000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
@@ -1578,8 +1578,8 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
     const anchor = _userLanguageAnchor_();
 
-    // ✅ Important: the LAST user message must be the "anchor" (user's real language)
-    // and the system must contain the rules and the structured request.
+    // ✅ Important: the LAST user message must be the "anchor" (real user language)
+    // and the system must contain the rules and structured request.
     const messages = [
       { role:'system', content: String(systemPrompt || '') },
       ...(Array.isArray(history) ? history : []),
@@ -1627,66 +1627,66 @@ async function generateCityItinerary(city){
   const hotel    = cityMeta[city]?.hotel || '';
   const transport= cityMeta[city]?.transport || 'recommend me';
 
-  // 🧭 Detect whether we must force replanning
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const instructions = `
 ${FORMAT}
-**ROLE:** "Astra" planner. Create a complete itinerary ONLY for "${city}" (${dest.days} day(s)).
+**ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
 - Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
   • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
-  • If it is NOT a day trip, "Destination" can be "${city}".
+  • If it's NOT a day trip, "Destination" can be "${city}".
   • This applies to ALL rows, including transfers and returns.
-  • Correct example (macro-tour, first row): "South Coast – Departing from ${city}".
+  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
   • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
   • Correct example (city): "${city} – Return to hotel".
-- "from", "to", "transport" and "notes" MUST NEVER be empty.
-- Avoid generic labels: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
+- "from", "to", "transport" and "notes" can NEVER be empty.
+- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
-  • "from" and "to" must be REAL places (Hotel/Center/attraction/town/viewpoint), NEVER the macro-tour name.
-  • Forbidden to create rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departing from ${city}" and "to" must be the FIRST real sub-stop.
+  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
+  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
 
-TRANSPORT (smart priority, do not invent):
-- In the city: Walking/Metro/Bus/Tram depending on real availability.
+TRANSPORT (smart priority, no invention):
+- In city: Walk/Metro/Bus/Tram depending on real availability.
 - For DAY TRIPS:
-  1) If there is a clearly reasonable public-transport option that is “the best option” for that route, use it (realistic train/intercity bus).
-  2) If it is NOT clearly viable/best (many dispersed stops, poor schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
-- Avoid generic "Bus" for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
-AURORAS (only if plausible by city/season/latitude):
-- You MUST include AT LEAST 1 aurora night in the itinerary.
-- It must be a realistic NIGHT timeframe (approx. 20:00–02:00 local).
-- Avoid consecutive nights if possible and avoid leaving it ONLY for the last day (if it only fits there, make it conditional in notes).
-- Include 1 option like "Tour/Van" and 1 nearby low-cost alternative (viewpoint/dark area) in "notes" with "valid:".
+AURORAS (if plausible by city/season/latitude):
+- You must include AT LEAST 1 aurora night in the itinerary.
+- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
+- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
+- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
 
-DAY TRIPS / MACRO-TOURS (no hard limits, use judgement):
-- You may propose day trips if they add value (no fixed limit). Decide intelligently based on “best of the best”.
-- Guideline: ideally ≤ ~3h per one-way leg. If near the limit, compensate by reducing stops or adjusting the time window.
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
 - If you propose a day trip, it must be COMPLETE:
   • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
-  • The FIRST row of the macro-tour must be: "<Macro-tour> – Departing from ${city}" (and "to" = first real sub-stop).
-  • Include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route (e.g., "South Coast"), reach the logical final highlight (e.g., Vík or an iconic endpoint) before returning.
-  • Return times must NOT be optimistic: use conservative estimates if winter/night or harsh season.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 
-QUALITY / VALUE:
-- Review daytime and nighttime MUST-SEES.
-- If a day is too short or ends too early, fill it with 1–3 iconic nearby sub-stops that are realistic (no weird inventions).
-- Group by areas, avoid overlaps.
-- Validate global plausibility and safety.
-  • If a special activity is plausible, add "notes" with "valid: <brief justification>".
-  • Avoid activities in areas/timeframes with obvious alerts, risks, or restrictions.
+QUALITY / MAXIMIZE EXPERIENCE:
+- Cover key daytime and nighttime highlights.
+- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
+- Group by areas, avoid backtracking.
+- Validate overall plausibility and safety.
+  • If a special activity is plausible, add "notes" with "valid: <justification>".
+  • Avoid activities in clearly risky/restricted areas or time windows.
   • Replace with safer alternatives when applicable.
-- Respect the time windows per day as a reference (not rigid): ${JSON.stringify(perDay)}.
-- No text outside the JSON.
+- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
+- No text outside JSON.
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
-  // ✅ QUIRÚRGICO (CRITICAL): instructions as SYSTEM, language anchor as USER
+  // ✅ SURGICAL (CRITICAL): instructions as SYSTEM, language anchor as USER
   const text = await _callPlannerSystemPrompt_(instructions, false);
   const parsed = parseJSON(text);
 
@@ -1720,7 +1720,7 @@ QUALITY / VALUE:
   chatMsg(t('fallbackLocal'), 'ai');
 }
 
-/* 🆕 Mass rebalance after changes (add days / requested day trip) */
+/* 🆕 Bulk rebalance after changes (add days / requested day trip) */
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
@@ -1738,53 +1738,53 @@ async function rebalanceWholeCity(city, opts={}){
     ? `Keep days 1 to ${startDay - 1} intact.`
     : '';
 
-  // 🧭 Detect whether we must force replanning
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const prompt = `
 ${FORMAT}
-**ROLE:** Rebalance the city "${city}" between days ${startDay} and ${endDay}, keeping what is already plausible and filling gaps.
+**ROLE:** Rebalance the city "${city}" between days ${startDay} and ${endDay}, keeping what is plausible and filling gaps.
 ${lockedDaysText}
 - Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 KEY RULES (MANDATORY):
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (includes returns/transfers).
+- "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
   • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
-  • If it is NOT a day trip, "Destination" can be "${city}".
-- from/to/transport/notes: MUST NEVER be empty. Avoid generic items without a clear name.
+  • If it's NOT a day trip, "Destination" can be "${city}".
+- from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
-  • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departing from ${city}" with "to" = first real sub-stop.
+  • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
 
-TRANSPORT (smart priority, do not invent):
-- In the city: Walking/Metro/Bus/Tram depending on real availability.
+TRANSPORT (smart priority, no invention):
+- In city: Walk/Metro/Bus/Tram depending on real availability.
 - For DAY TRIPS:
-  1) If there is a clearly reasonable public-transport option that is “the best option” for that route, use it (realistic train/intercity bus).
-  2) If it is NOT clearly viable/best (many dispersed stops, poor schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
-- Avoid generic "Bus" as a day-trip label if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible):
-- Include at least 1 aurora night in a realistic nighttime window (approx. 20:00–02:00).
-- Avoid consecutive nights if possible; avoid leaving it only to the end (if only fits there, mark conditional).
-- In notes include "valid:" + a nearby low-cost alternative.
+- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
+- Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
+- Notes must include "valid:" + a nearby low-cost alternative.
 
-DAY TRIPS / MACRO-TOURS (no hard limits, use judgement):
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
-- Guideline: ideally ≤ ~3h per one-way leg. If near the limit, adjust stops/window.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, adjust stops/window.
 - If you include a day trip:
   • 5–8 sub-stops (rows) with realistic sequence.
-  • The FIRST row of the macro-tour must be: "<Macro-tour> – Departing from ${city}" (and "to" = first real sub-stop).
-  • It must end with a dedicated final row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route, reach the logical final highlight before returning.
-  • Avoid optimistic returns: use conservative estimates if winter/night.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route, reach the logical end highlight before returning.
+  • Avoid optimistic returns: use conservative estimates in winter or at night.
 
 QUALITY:
-- Respect windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
-- Consider MUST-SEES and distribute without duplicates.
-${wantedTrip ? `- User preference: a day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with the return.` : ''}
-- The last day can be lighter, but do not leave it “empty” if there are key highlights pending.
-- Validate global plausibility and safety; replace with safer alternatives if needed.
-- Notes MUST ALWAYS be useful (never empty or "seed").
+- Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Consider key highlights and distribute without duplication.
+${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
+- The last day can be lighter, but don’t leave it “empty” if key highlights remain.
+- Validate plausibility and safety; replace with safe alternatives when needed.
+- Notes must ALWAYS be useful (never empty or "seed").
 
 Current context (to merge without deleting): 
 ${buildIntake()}
@@ -1792,7 +1792,7 @@ ${buildIntake()}
 
   showWOW(true, t('overlayDefault'));
 
-  // ✅ QUIRÚRGICO (CRITICAL): prompt as SYSTEM, language anchor as USER
+  // ✅ SURGICAL (CRITICAL): prompt as SYSTEM, language anchor as USER
   const ans = await _callPlannerSystemPrompt_(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
@@ -1810,7 +1810,7 @@ ${buildIntake()}
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
 
-    // 🧠 Optimize only the affected day range
+    // 🧠 Optimize only affected range
     for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
