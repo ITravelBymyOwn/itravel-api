@@ -387,6 +387,15 @@ GENERAL RULES:
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
 
+TRANSPORT OPTIMIZATION (GLOBAL, ULTRA-IMPORTANT):
+- For EVERY row, choose the MOST EFFICIENT and REALISTIC transport for that exact from->to pair.
+- Use your internal knowledge of each city/region's common mobility options (metro/subway, bus, tram, urban rail, commuter rail, funicular, cable car, ferries, etc.).
+- Do NOT default to "Walk" unless it is genuinely optimal (very short distance / same neighborhood / clearly pedestrian-friendly).
+- If public transport is clearly faster/reliable, prefer it (e.g., Metro/Subway, Tram, Bus, Urban Rail).
+- When needed, allow combined modes (e.g., "Metro + Funicular", "Metro + Cable car", "Metro + Bus").
+- For DAY TRIPS from major cities, prefer the most efficient common option (often Train/Regional rail) unless the user explicitly prefers a guided tour or car.
+- Never leave transport blank; never use vague transport. If not 100% sure, still pick the best option and add a short notes tip: "Confirm best route in Info Chat".
+
 MANDATORY ROW CONTRACT:
 - day (number)
 - start/end in HH:MM (local time)
@@ -425,12 +434,10 @@ NIGHT TOURS (GLOBAL, when applicable):
   • Examples: "Danube – Night cruise (Parliament lights)" / "Nile – Cruise with show" / panoramic night viewpoint.
 - Keep realistic times (e.g., 19:00–23:30) and include a logistical tip in notes.
 
-AURORAS (Flexible rule + strong negative):
-- ONLY suggest auroras if they are plausible by latitude/season.
-  Guideline: typically seen at higher latitudes (approx. 60–75°) in common auroral zones.
-- If the destination is NOT high latitude or NOT a typical auroral zone, do NOT suggest them (e.g., Budapest / Cairo / Madrid / Rome / etc.).
-- If plausible: avoid consecutive days if possible; avoid the last day; typical local night hours.
-- Notes must include: "valid:" + (weather/cloudiness) + a nearby low-cost alternative.
+AURORAS (HARD RULE + REPLACEMENT):
+- FORBIDDEN unless they are truly plausible by latitude/season (high-latitude auroral zones) AND the itinerary context supports it.
+- If the destination is NOT a typical auroral zone (e.g., Barcelona/Madrid/Rome/Budapest/Cairo/etc.), you MUST NOT include any aurora-related rows or wording (not even as a suggestion).
+- If auroras are NOT plausible and you need a night highlight, you MUST replace it with a real iconic night experience for that city (night viewpoint, show, night cruise, illuminated landmark walk, etc.).
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–8 sub-stops (rows).
