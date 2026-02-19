@@ -35,6 +35,73 @@ function _lastUserText_(messages = []) {
   return "";
 }
 
+// ✅ NEW (ULTRA-SURGICAL): detect explicit language choice in the last user message.
+// This is used ONLY to override output language when the user explicitly selects a language
+// (e.g., "Português", "Espanol", "English", "Deutsch", "pt", "es", etc.).
+function detectLanguageOverride(messages = []) {
+  const raw = _lastUserText_(messages);
+  const t = String(raw || "").trim();
+  if (!t) return null;
+
+  // Normalize: lowercase + remove accents + keep letters/spaces only
+  const noAccents = t
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  const cleaned = noAccents.replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return null;
+
+  // Only treat as "language pick" if it's short-ish (prevents normal sentences from triggering)
+  // e.g., "Português", "pt", "Español", "English", "francais"
+  const tokens = cleaned.split(" ").filter(Boolean);
+  const joined = cleaned;
+
+  // If user writes a long sentence, don't override
+  if (joined.length > 28 && tokens.length > 2) return null;
+
+  // Common language name / code aliases (include misspellings)
+  const map = [
+    { code: "en", names: ["en", "eng", "english", "ingles", "ingl", "anglais"] },
+    { code: "es", names: ["es", "spa", "spanish", "espanol", "español", "castellano"] },
+    { code: "pt", names: ["pt", "por", "portuguese", "portugues", "português", "portuges", "portugez"] },
+    { code: "fr", names: ["fr", "fre", "french", "francais", "français", "frances", "francese"] },
+    { code: "de", names: ["de", "ger", "german", "deutsch", "alemán", "aleman", "allemand"] },
+    { code: "it", names: ["it", "ita", "italian", "italiano", "italienne"] },
+  ];
+
+  const isMatch = (val, candidate) => {
+    if (!val || !candidate) return false;
+    if (val === candidate) return true;
+    // tolerate small typos by prefix match (safe because we limit length)
+    if (val.length >= 3 && candidate.startsWith(val)) return true;
+    if (candidate.length >= 3 && val.startsWith(candidate)) return true;
+    return false;
+  };
+
+  // Check single token first (most common)
+  if (tokens.length === 1) {
+    const w = tokens[0];
+    for (const entry of map) {
+      for (const n of entry.names) {
+        if (isMatch(w, n)) return entry.code;
+      }
+    }
+    return null;
+  }
+
+  // If 2 tokens, allow things like "portuguese brazil" (still counts as pt)
+  if (tokens.length === 2) {
+    for (const entry of map) {
+      for (const n of entry.names) {
+        if (isMatch(tokens[0], n) || isMatch(tokens[1], n)) return entry.code;
+      }
+    }
+  }
+
+  return null;
+}
+
 // Simple multi-language detection (surgical): ONLY for fallback/guardrails when the model doesn't respond.
 // Note: does NOT affect normal content (the model decides language via prompt).
 function detectUserLang(messages = []) {
@@ -246,7 +313,9 @@ function normalizeParsed(parsed) {
               zone: r?.zone ?? "",
             }))
           : d.rows,
-        city_day: Array.isArray(d?.city_day) ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "") : d.city_day,
+        city_day: Array.isArray(d?.city_day)
+          ? _normalizeCityDayShape_(d.city_day, d?.name || d?.destination || "")
+          : d.city_day,
       }));
     }
   } catch {}
@@ -456,8 +525,16 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
 
+    // ✅ NEW (ULTRA-SURGICAL): language override if user explicitly selected a language (e.g., "Português")
+    const override = detectLanguageOverride(clientMessages);
+    const overrideLine = override
+      ? `LANGUAGE OVERRIDE (USER-SELECTED, HIGHEST PRIORITY): Output MUST be in ${override.toUpperCase()}.\n- Ignore earlier mixed-language content.\n- Keep ALL JSON keys/shape the same.\n`
+      : "";
+
+    const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT).trim();
+
     // 🧭 PLANNER MODE — with strong v52.5 rules (only via prompt + guardrails)
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT }, ...clientMessages], 0.28, 3200, 90000);
+    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 3200, 90000);
     let parsed = cleanToJSON(raw);
 
     // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
@@ -466,7 +543,7 @@ export default async function handler(req, res) {
 
     if (!hasSome) {
       const strictPrompt =
-        SYSTEM_PROMPT +
+        SYSTEM_PROMPT_EFFECTIVE +
         `
 
 MANDATORY:
@@ -483,7 +560,7 @@ MANDATORY:
 
     if (stillBad) {
       const ultraPrompt =
-        SYSTEM_PROMPT +
+        SYSTEM_PROMPT_EFFECTIVE +
         `
 
 Minimal valid example (DO NOT copy it literally; format guide only):
