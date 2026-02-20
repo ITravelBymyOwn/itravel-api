@@ -2837,19 +2837,16 @@ $chatI?.addEventListener('keydown', e=>{
   }
 });
 
-/* =========================================================
-   ✅ MVP: Botón "Choose this itinerary" NO se usa por ahora
-   - Se deja el handler protegido para evitar errores si vuelve a existir.
-   - Se evita romper si NO existe #monetization-upsell.
-========================================================= */
+// CTA y upsell
 $confirmCTA?.addEventListener('click', ()=>{
   isItineraryLocked = true;
-  const up = qs('#monetization-upsell');
-  if(up) up.style.display = 'flex';
+
+  // ✅ QUIRÚRGICO: evitar crash si no existe el upsell en el DOM
+  if($upsell) $upsell.style.display='flex';
 });
 $upsellClose?.addEventListener('click', ()=>{
-  const up = qs('#monetization-upsell');
-  if(up) up.style.display = 'none';
+  // ✅ QUIRÚRGICO: evitar crash si no existe el upsell en el DOM
+  if($upsell) $upsell.style.display='none';
 });
 
 /* 🆕 Listener: Rebalanceo inteligente al agregar días */
