@@ -2734,15 +2734,6 @@ function bindTravelersListeners(){
    - itineraries[city].byDay (filas por día)
 ========================================================= */
 
-/* ✅ QUIRÚRGICO: Assets embebidos (logo + watermark) para PDF
-   - Logo: PNG (transparente)
-   - Watermark: JPG (comprimido, liviano)
-*/
-const ITBMO_PDF_LOGO_DATAURL =
-'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAlgAAAE4CAYAAADG8qk6AAAACXBIWXMAAAsSAAALEgHS3X78AAAgAElEQVR4nO3deXRU1f7/8ddk0s0mEwqQmGkqgQwzAq0o7y2WkK2wqgqk0kYxqZlZbWm2tq3bVbW2u2vQ0lJbQb5q8pQqEoQzQmGgk0gEJmQxk8z+f8x0QY4mQk0y8f3+eG8e2fO3vOe+7zn3vOe8z0iAAA...'; // (string completa ya incluida en tu build)
-const ITBMO_PDF_WATERMARK_DATAURL =
-'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wCEAAoHBwgHBgoICAoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoK...'; // (string completa ya incluida en tu build)
-
 function safeFilePart(s){
   return String(s || '')
     .trim()
@@ -2764,9 +2755,25 @@ function downloadBlob(blob, filename){
   }, 0);
 }
 
-function csvEscape(v){
+/* ✅ NUEVO (quirúrgico): detecta delimitador para Excel según locale
+   - Muchos Excel en ES usan ";" cuando el separador decimal es ","
+*/
+function detectCsvDelimiter(){
+  try{
+    const dec = (new Intl.NumberFormat().format(1.1) || '');
+    return dec.includes(',') ? ';' : ',';
+  }catch(_){
+    return ',';
+  }
+}
+
+/* ✅ AJUSTE (quirúrgico): escape depende del delimitador */
+function csvEscape(v, delim){
   const s = String(v ?? '');
-  if(/[",\n\r]/.test(s)){
+  const d = String(delim || ',');
+  // escapamos si hay comillas, saltos, o el delimitador
+  const re = new RegExp(`[\"\\n\\r${d.replace(/[-/\\^$*+?.()|[\]{}]/g,'\\$&')}]`);
+  if(re.test(s)){
     return `"${s.replace(/"/g,'""')}"`;
   }
   return s;
@@ -2810,21 +2817,35 @@ function getOrderedDaysForCity(city){
   return days;
 }
 
+/* ✅ AJUSTE (quirúrgico): normaliza para Excel y PDF
+   - Quita emojis/surrogates (causan PDFs corruptos en Acrobat)
+   - Reemplaza comillas/dashes unicode problemáticos
+   - Evita saltos de línea reales dentro de celdas (CSV) y reduce riesgo PDF
+*/
 function normalizeCellText(v){
-  // Excel-friendly: nunca dejar saltos de línea reales dentro de una celda
-  return String(v ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\n+/g, ' | ')
-    .trim();
-}
+  let s = String(v ?? '');
 
-/* ✅ QUIRÚRGICO: para PDF sí permitimos saltos de línea (autoTable los envuelve mejor) */
-function normalizeCellTextPDF(v){
-  return String(v ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .trim();
+  // normaliza saltos
+  s = s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+  // reemplazos unicode comunes a ASCII/Latin1-friendly
+  s = s
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[—–]/g, '-');
+
+  // quitar emojis / surrogate pairs
+  s = s.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]/g, '');
+
+  // quitar otros chars no Latin-1 (mantiene acentos Latin1, elimina símbolos raros)
+  s = s.replace(/[^\x00-\xFF]/g, '');
+
+  // Excel-friendly: no saltos de línea dentro de celda
+  s = s.replace(/\n+/g, ' | ');
+
+  // compactar espacios
+  s = s.replace(/\s+/g, ' ').trim();
+  return s;
 }
 
 function exportItineraryToCSV(){
@@ -2844,11 +2865,13 @@ function exportItineraryToCSV(){
     return;
   }
 
+  const delim = detectCsvDelimiter();
   const lines = [];
+
   // Header fijo (Excel-friendly)
   lines.push([
     'City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'
-  ].map(csvEscape).join(','));
+  ].map(x=>csvEscape(x, delim)).join(delim));
 
   cities.forEach(city=>{
     const days = getOrderedDaysForCity(city);
@@ -2857,7 +2880,6 @@ function exportItineraryToCSV(){
       const dateLabel = getDayDateLabel(city, dayNum);
 
       rows.forEach(r=>{
-        // Mantener el texto tal cual, pero seguro para CSV
         const row = [
           city,
           dayNum,
@@ -2871,14 +2893,15 @@ function exportItineraryToCSV(){
           normalizeCellText(r.duration),
           normalizeCellText(r.notes)
         ];
-        lines.push(row.map(csvEscape).join(','));
+        lines.push(row.map(x=>csvEscape(x, delim)).join(delim));
       });
 
-      // Si un día no tiene filas, igual lo dejamos sin filas (honesto) — Excel no necesita "día vacío"
+      // Si un día no tiene filas, igual lo dejamos sin filas (honesto)
     });
   });
 
-  const csv = lines.join('\n');
+  // ✅ BOM + CRLF para Excel (quirúrgico)
+  const csv = '\uFEFF' + lines.join('\r\n');
   const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
 
   const d = new Date();
@@ -2927,90 +2950,46 @@ function exportItineraryToPDF(){
   const mm = String(now.getMonth()+1).padStart(2,'0');
   const dd = String(now.getDate()).padStart(2,'0');
 
-  function tryAddWatermark(){
-    try{
-      if(!ITBMO_PDF_WATERMARK_DATAURL) return;
-
-      const pageW = doc.internal.pageSize.getWidth();
-      const pageH = doc.internal.pageSize.getHeight();
-
-      // Opacidad suave si está disponible (jsPDF 2.x)
-      const hasGState = (typeof doc.GState === 'function' && typeof doc.setGState === 'function');
-      let old = null;
-      if(hasGState){
-        old = new doc.GState({ opacity: 0.08 });
-        doc.setGState(old);
-      }
-
-      // Cover (centrado)
-      doc.addImage(
-        ITBMO_PDF_WATERMARK_DATAURL,
-        'JPEG',
-        0,
-        0,
-        pageW,
-        pageH
-      );
-
-      // reset opacity
-      if(hasGState){
-        const reset = new doc.GState({ opacity: 1 });
-        doc.setGState(reset);
-      }
-    }catch(_){}
-  }
-
-  function tryAddLogo(){
-    try{
-      if(!ITBMO_PDF_LOGO_DATAURL) return;
-
-      const pageW = doc.internal.pageSize.getWidth();
-      const logoW = 120; // tamaño “pro” (no gigante)
-      const logoH = 34;  // proporción aproximada visual (quirúrgico)
-      const x = pageW - 40 - logoW;
-      const y = 18;
-
-      doc.addImage(
-        ITBMO_PDF_LOGO_DATAURL,
-        'PNG',
-        x,
-        y,
-        logoW,
-        logoH
-      );
-    }catch(_){}
-  }
+  /* =========================================================
+     ⚠️ Logo / Watermark (ABORTADO por ahora)
+     Razón honesta:
+     - Para hacerlo perfecto en Webflow, necesito DataURL (base64) real
+       o URLs con CORS permitido para poder rasterizar e insertar.
+     - Si no, es inestable y puede romper en producción.
+     ✅ Hook opcional seguro:
+       - Si en el futuro defines:
+         window.ITBMO_PDF_LOGO_DATAURL = 'data:image/png;base64,...'
+         window.ITBMO_PDF_WATERMARK_DATAURL = 'data:image/png;base64,...'
+       entonces se podría activar de forma controlada.
+     - En este parche NO lo dibujamos.
+  ========================================================= */
 
   // helper: encabezado por página
   function pageHeader(city, dayNum){
     const left = 40;
 
-    // ✅ QUIRÚRGICO: watermark + logo por página (sin romper si falla)
-    tryAddWatermark();
-    tryAddLogo();
-
     doc.setFontSize(14);
-    doc.text(String(city || 'Itinerary'), left, 56);
+    doc.text(String(normalizeCellText(city || 'Itinerary')), left, 46);
 
     const dateLabel = getDayDateLabel(city, dayNum);
     doc.setFontSize(11);
-    const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${dateLabel})` : `${t('uiDayTitle', dayNum)}`;
-    doc.text(dayLine, left, 76);
+    const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${normalizeCellText(dateLabel)})` : `${t('uiDayTitle', dayNum)}`;
+    doc.text(normalizeCellText(dayLine), left, 66);
 
     doc.setFontSize(9);
-    doc.text(`${yyyy}-${mm}-${dd}`, left, 94);
+    doc.text(`${yyyy}-${mm}-${dd}`, left, 84);
   }
 
   // Encabezados de la tabla (usa i18n del UI si existe)
   const head = [[
-    t('thStart'),
-    t('thEnd'),
-    t('thActivity'),
-    t('thFrom'),
-    t('thTo'),
-    t('thTransport'),
-    t('thDuration'),
-    t('thNotes')
+    normalizeCellText(t('thStart')),
+    normalizeCellText(t('thEnd')),
+    normalizeCellText(t('thActivity')),
+    normalizeCellText(t('thFrom')),
+    normalizeCellText(t('thTo')),
+    normalizeCellText(t('thTransport')),
+    normalizeCellText(t('thDuration')),
+    normalizeCellText(t('thNotes'))
   ]];
 
   let isFirstPage = true;
@@ -3029,20 +3008,20 @@ function exportItineraryToPDF(){
 
       // body
       const body = rows.map(r => ([
-        normalizeCellTextPDF(r.start),
-        normalizeCellTextPDF(r.end),
-        normalizeCellTextPDF(r.activity),
-        normalizeCellTextPDF(r.from),
-        normalizeCellTextPDF(r.to),
-        normalizeCellTextPDF(r.transport),
-        normalizeCellTextPDF(r.duration),
-        normalizeCellTextPDF(r.notes)
+        normalizeCellText(r.start),
+        normalizeCellText(r.end),
+        normalizeCellText(r.activity),
+        normalizeCellText(r.from),
+        normalizeCellText(r.to),
+        normalizeCellText(r.transport),
+        normalizeCellText(r.duration),
+        normalizeCellText(r.notes)
       ]));
 
       // Si no hay filas, ponemos nota (honesto) y seguimos
       if(!body.length){
         doc.setFontSize(10);
-        doc.text(t('uiNoActivities'), 40, 140);
+        doc.text(normalizeCellText(t('uiNoActivities')), 40, 120);
         return;
       }
 
@@ -3050,7 +3029,7 @@ function exportItineraryToPDF(){
         doc.autoTable({
           head,
           body,
-          startY: 120, // ✅ QUIRÚRGICO: deja espacio real para logo+header
+          startY: 98,
           margin: { left: 40, right: 40 },
           styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
           headStyles: { fontSize: 8 },
@@ -3058,7 +3037,7 @@ function exportItineraryToPDF(){
         });
       }catch(err){
         doc.setFontSize(10);
-        doc.text('⚠️ No se pudo generar la tabla en PDF para este día.', 40, 140);
+        doc.text('No se pudo generar la tabla en PDF para este dia.', 40, 120);
       }
     });
   });
