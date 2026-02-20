@@ -2802,7 +2802,12 @@ function getOrderedDaysForCity(city){
 }
 
 function normalizeCellText(v){
-  return String(v ?? '').replace(/\s+\n/g, '\n').trim();
+  // Excel-friendly: nunca dejar saltos de línea reales dentro de una celda
+  return String(v ?? '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\n+/g, ' | ')
+    .trim();
 }
 
 function exportItineraryToCSV(){
