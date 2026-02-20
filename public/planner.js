@@ -339,6 +339,11 @@ const $travelerProfiles = qs('#traveler-profiles');
 const $travelerAdd      = qs('#traveler-add');
 const $travelerRemove   = qs('#traveler-remove');
 
+/* 🆕 Export buttons (PDF / CSV / Email) */
+const $btnPDF   = qs('#btn-pdf');
+const $btnCSV   = qs('#btn-csv');
+const $btnEmail = qs('#btn-email');
+
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
 ================================= */
@@ -2722,6 +2727,233 @@ function bindTravelersListeners(){
   setTravelerButtonsState();
 }
 
+/* =========================================================
+   🧾 MVP — Export (PDF / CSV / Email)
+   ✅ Quirúrgico y honesto: NO asume estructura de "itineraries".
+   Exporta desde lo que YA está renderizado en el DOM:
+   - tablas HTML: table.itinerary dentro de #itinerary-container
+========================================================= */
+function getRenderedItineraryTables(){
+  const root = $itWrap || document;
+  const tables = Array.from(root.querySelectorAll('table.itinerary'));
+  return tables;
+}
+
+function getActiveCityLabel(){
+  // Intenta: tab activo → texto
+  try{
+    const active = document.querySelector('.city-tab.active');
+    const txt = (active?.textContent || '').trim();
+    if(txt) return txt;
+  }catch(_){}
+
+  // fallback suave
+  return 'Itinerary';
+}
+
+function safeFilePart(s){
+  return String(s || '')
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .slice(0, 80);
+}
+
+function downloadBlob(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(()=>{
+    URL.revokeObjectURL(url);
+    a.remove();
+  }, 0);
+}
+
+function csvEscape(v){
+  const s = String(v ?? '');
+  if(/[",\n\r]/.test(s)){
+    return `"${s.replace(/"/g,'""')}"`;
+  }
+  return s;
+}
+
+function exportItineraryToCSV(){
+  const tables = getRenderedItineraryTables();
+  if(!tables.length){
+    alert('No hay itinerario renderizado todavía para exportar.');
+    return;
+  }
+
+  // Construimos un CSV por TODAS las tablas renderizadas (si hay varias ciudades/páginas).
+  // Columnas: City + las columnas existentes del table (headers).
+  const lines = [];
+  let headerWritten = false;
+
+  tables.forEach((tbl, idx)=>{
+    const city = getActiveCityLabel(); // honesto: no tengo mapeo tabla→ciudad sin tu estructura interna
+
+    const thead = tbl.querySelector('thead');
+    const headerCells = thead ? Array.from(thead.querySelectorAll('th')) : [];
+    const headers = headerCells.map(th => (th.textContent || '').trim()).filter(Boolean);
+
+    // Si no hay thead, intenta primera fila como header
+    let effectiveHeaders = headers;
+    const rows = Array.from(tbl.querySelectorAll('tbody tr'));
+    if(!effectiveHeaders.length){
+      const firstRow = rows[0];
+      if(firstRow){
+        const tds = Array.from(firstRow.querySelectorAll('td'));
+        effectiveHeaders = tds.map(td => (td.textContent || '').trim());
+      }
+    }
+
+    if(!headerWritten){
+      lines.push(['City', ...effectiveHeaders].map(csvEscape).join(','));
+      headerWritten = true;
+    }
+
+    rows.forEach(tr=>{
+      const cells = Array.from(tr.querySelectorAll('td')).map(td => (td.textContent || '').trim());
+      if(!cells.length) return;
+      lines.push([city, ...cells].map(csvEscape).join(','));
+    });
+
+    // Separador visual opcional entre tablas (línea en blanco)
+    if(idx < tables.length - 1){
+      lines.push('');
+    }
+  });
+
+  const csv = lines.join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
+
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`;
+
+  downloadBlob(blob, filename);
+}
+
+function exportItineraryToPDF(){
+  // Verificaciones mínimas
+  if(!window.jspdf || !window.jspdf.jsPDF){
+    alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');
+    return;
+  }
+  const tables = getRenderedItineraryTables();
+  if(!tables.length){
+    alert('No hay itinerario renderizado todavía para exportar.');
+    return;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'a4' });
+
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+
+  const title = `ITravelByMyOwn · Itinerary`;
+  doc.setFontSize(14);
+  doc.text(title, 40, 48);
+  doc.setFontSize(10);
+  doc.text(`${yyyy}-${mm}-${dd}`, 40, 64);
+
+  let y = 86;
+
+  tables.forEach((tbl, idx)=>{
+    const city = getActiveCityLabel(); // honesto: sin estructura interna, no puedo asignar tabla→ciudad con 100% certeza
+    doc.setFontSize(12);
+    doc.text(`${city}`, 40, y);
+    y += 10;
+
+    // AutoTable desde HTML
+    try{
+      doc.autoTable({
+        html: tbl,
+        startY: y + 6,
+        margin: { left: 40, right: 40 },
+        styles: { fontSize: 8, cellPadding: 3 }
+      });
+      y = (doc.lastAutoTable?.finalY || (y + 40)) + 18;
+    }catch(err){
+      // Si AutoTable falla por alguna tabla rara, no rompemos todo
+      doc.setFontSize(9);
+      doc.text('⚠️ No se pudo exportar una tabla automáticamente.', 40, y + 14);
+      y += 34;
+    }
+
+    // Si se va muy abajo, nueva página
+    const pageH = doc.internal.pageSize.getHeight();
+    if(y > pageH - 80 && idx < tables.length - 1){
+      doc.addPage();
+      y = 56;
+    }
+  });
+
+  const cityPart = safeFilePart(getActiveCityLabel());
+  const filename = `ITBMO-${cityPart || 'Itinerary'}-${yyyy}-${mm}-${dd}.pdf`;
+  doc.save(filename);
+}
+
+function sendItineraryByEmail(){
+  const tables = getRenderedItineraryTables();
+  if(!tables.length){
+    alert('No hay itinerario renderizado todavía para enviar por email.');
+    return;
+  }
+
+  // MVP honesto: mailto sin adjuntos
+  const subject = encodeURIComponent('ITravelByMyOwn · Itinerary');
+
+  // Cuerpo: texto plano desde las tablas (limitado para mailto)
+  let body = 'Here is my itinerary (exported from ITravelByMyOwn):\n\n';
+
+  tables.forEach((tbl, idx)=>{
+    const city = getActiveCityLabel();
+    body += `=== ${city} ===\n`;
+    const rows = Array.from(tbl.querySelectorAll('tr'));
+    rows.forEach(tr=>{
+      const cells = Array.from(tr.querySelectorAll('th,td')).map(c => (c.textContent || '').trim());
+      if(cells.length) body += cells.join(' | ') + '\n';
+    });
+    if(idx < tables.length - 1) body += '\n';
+  });
+
+  body += '\n\nNote: Attachments (PDF/CSV) require a backend email endpoint.';
+
+  // Mailto tiene límite práctico; recortamos
+  const maxLen = 1800;
+  if(body.length > maxLen) body = body.slice(0, maxLen) + '\n...';
+
+  const href = `mailto:?subject=${subject}&body=${encodeURIComponent(body)}`;
+  window.location.href = href;
+}
+
+function bindExportListeners(){
+  // No clono nodos aquí para no interferir con otros binds.
+  $btnPDF?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    exportItineraryToPDF();
+  });
+
+  $btnCSV?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    exportItineraryToCSV();
+  });
+
+  $btnEmail?.addEventListener('click', (e)=>{
+    e.preventDefault();
+    sendItineraryByEmail();
+  });
+}
+
 // ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
@@ -2963,4 +3195,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // ✅ NUEVO (quirúrgico): sincroniza el perfil inicial que viene en el HTML
   renumberTravelerProfiles();
   setTravelerButtonsState();
+
+  // ✅ NUEVO (quirúrgico): activar botones PDF/CSV/Email
+  bindExportListeners();
 });
