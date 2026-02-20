@@ -2729,27 +2729,10 @@ function bindTravelersListeners(){
 
 /* =========================================================
    🧾 MVP — Export (PDF / CSV / Email)
-   ✅ Quirúrgico y honesto: NO asume estructura de "itineraries".
-   Exporta desde lo que YA está renderizado en el DOM:
-   - tablas HTML: table.itinerary dentro de #itinerary-container
+   ✅ Exporta desde el ESTADO real:
+   - savedDestinations (orden de ciudades)
+   - itineraries[city].byDay (filas por día)
 ========================================================= */
-function getRenderedItineraryTables(){
-  const root = $itWrap || document;
-  const tables = Array.from(root.querySelectorAll('table.itinerary'));
-  return tables;
-}
-
-function getActiveCityLabel(){
-  // Intenta: tab activo → texto
-  try{
-    const active = document.querySelector('.city-tab.active');
-    const txt = (active?.textContent || '').trim();
-    if(txt) return txt;
-  }catch(_){}
-
-  // fallback suave
-  return 'Itinerary';
-}
 
 function safeFilePart(s){
   return String(s || '')
@@ -2780,51 +2763,97 @@ function csvEscape(v){
   return s;
 }
 
+function getCityBaseDateDMY(city){
+  // Prioridad: itineraries[city].baseDate -> cityMeta[city].baseDate -> null
+  const d0 = itineraries?.[city]?.baseDate || cityMeta?.[city]?.baseDate || null;
+  if(!d0) return null;
+  const parsed = parseDMY(String(d0));
+  return parsed || null;
+}
+
+function getDayDateLabel(city, dayNum){
+  const base = getCityBaseDateDMY(city);
+  if(!base) return '';
+  try{
+    const d = addDays(base, (dayNum-1));
+    return formatDMY(d);
+  }catch(_){
+    return '';
+  }
+}
+
+function getOrderedCitiesForExport(){
+  // Orden exacto: savedDestinations
+  const cities = (savedDestinations || []).map(x=>x?.city).filter(Boolean);
+  return cities;
+}
+
+function getOrderedDaysForCity(city){
+  const byDay = itineraries?.[city]?.byDay || {};
+  const days = Object.keys(byDay).map(n=>+n).filter(n=>Number.isFinite(n)).sort((a,b)=>a-b);
+  // fallback suave
+  if(!days.length){
+    const savedN = savedDestinations?.find(x=>x.city===city)?.days;
+    if(savedN && Number.isFinite(+savedN) && +savedN>0){
+      return Array.from({length:+savedN}, (_,i)=>i+1);
+    }
+  }
+  return days;
+}
+
+function normalizeCellText(v){
+  return String(v ?? '').replace(/\s+\n/g, '\n').trim();
+}
+
 function exportItineraryToCSV(){
-  const tables = getRenderedItineraryTables();
-  if(!tables.length){
-    alert('No hay itinerario renderizado todavía para exportar.');
+  const cities = getOrderedCitiesForExport();
+  if(!cities.length){
+    alert('No hay ciudades guardadas todavía para exportar.');
     return;
   }
 
-  // Construimos un CSV por TODAS las tablas renderizadas (si hay varias ciudades/páginas).
-  // Columnas: City + las columnas existentes del table (headers).
+  // Validación: al menos una ciudad con byDay
+  const hasAny = cities.some(city=>{
+    const byDay = itineraries?.[city]?.byDay;
+    return byDay && Object.keys(byDay).length;
+  });
+  if(!hasAny){
+    alert('No hay itinerarios generados todavía para exportar.');
+    return;
+  }
+
   const lines = [];
-  let headerWritten = false;
+  // Header fijo (Excel-friendly)
+  lines.push([
+    'City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'
+  ].map(csvEscape).join(','));
 
-  tables.forEach((tbl, idx)=>{
-    const city = getActiveCityLabel(); // honesto: no tengo mapeo tabla→ciudad sin tu estructura interna
+  cities.forEach(city=>{
+    const days = getOrderedDaysForCity(city);
+    days.forEach(dayNum=>{
+      const rows = itineraries?.[city]?.byDay?.[dayNum] || [];
+      const dateLabel = getDayDateLabel(city, dayNum);
 
-    const thead = tbl.querySelector('thead');
-    const headerCells = thead ? Array.from(thead.querySelectorAll('th')) : [];
-    const headers = headerCells.map(th => (th.textContent || '').trim()).filter(Boolean);
+      rows.forEach(r=>{
+        // Mantener el texto tal cual, pero seguro para CSV
+        const row = [
+          city,
+          dayNum,
+          dateLabel,
+          normalizeCellText(r.start),
+          normalizeCellText(r.end),
+          normalizeCellText(r.activity),
+          normalizeCellText(r.from),
+          normalizeCellText(r.to),
+          normalizeCellText(r.transport),
+          normalizeCellText(r.duration),
+          normalizeCellText(r.notes)
+        ];
+        lines.push(row.map(csvEscape).join(','));
+      });
 
-    // Si no hay thead, intenta primera fila como header
-    let effectiveHeaders = headers;
-    const rows = Array.from(tbl.querySelectorAll('tbody tr'));
-    if(!effectiveHeaders.length){
-      const firstRow = rows[0];
-      if(firstRow){
-        const tds = Array.from(firstRow.querySelectorAll('td'));
-        effectiveHeaders = tds.map(td => (td.textContent || '').trim());
-      }
-    }
-
-    if(!headerWritten){
-      lines.push(['City', ...effectiveHeaders].map(csvEscape).join(','));
-      headerWritten = true;
-    }
-
-    rows.forEach(tr=>{
-      const cells = Array.from(tr.querySelectorAll('td')).map(td => (td.textContent || '').trim());
-      if(!cells.length) return;
-      lines.push([city, ...cells].map(csvEscape).join(','));
+      // Si un día no tiene filas, igual lo dejamos sin filas (honesto) — Excel no necesita "día vacío"
     });
-
-    // Separador visual opcional entre tablas (línea en blanco)
-    if(idx < tables.length - 1){
-      lines.push('');
-    }
   });
 
   const csv = lines.join('\n');
@@ -2840,95 +2869,145 @@ function exportItineraryToCSV(){
 }
 
 function exportItineraryToPDF(){
-  // Verificaciones mínimas
+  // jsPDF verificación
   if(!window.jspdf || !window.jspdf.jsPDF){
     alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');
     return;
   }
-  const tables = getRenderedItineraryTables();
-  if(!tables.length){
-    alert('No hay itinerario renderizado todavía para exportar.');
+  if(typeof window.jspdf.jsPDF !== 'function'){
+    alert('jsPDF no está inicializado correctamente.');
+    return;
+  }
+  if(typeof (window.jspdf?.jsPDF)?.API === 'undefined' && typeof (window.jspdf?.jsPDF) === 'function'){
+    // fail-open: no hacemos nada
+  }
+
+  const cities = getOrderedCitiesForExport();
+  if(!cities.length){
+    alert('No hay ciudades guardadas todavía para exportar.');
+    return;
+  }
+
+  const hasAny = cities.some(city=>{
+    const byDay = itineraries?.[city]?.byDay;
+    return byDay && Object.keys(byDay).length;
+  });
+  if(!hasAny){
+    alert('No hay itinerarios generados todavía para exportar.');
     return;
   }
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4' });
 
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth()+1).padStart(2,'0');
+  const dd = String(now.getDate()).padStart(2,'0');
 
-  const title = `ITravelByMyOwn · Itinerary`;
-  doc.setFontSize(14);
-  doc.text(title, 40, 48);
-  doc.setFontSize(10);
-  doc.text(`${yyyy}-${mm}-${dd}`, 40, 64);
+  // helper: encabezado por página
+  function pageHeader(city, dayNum){
+    const left = 40;
 
-  let y = 86;
+    doc.setFontSize(14);
+    doc.text(String(city || 'Itinerary'), left, 46);
 
-  tables.forEach((tbl, idx)=>{
-    const city = getActiveCityLabel(); // honesto: sin estructura interna, no puedo asignar tabla→ciudad con 100% certeza
-    doc.setFontSize(12);
-    doc.text(`${city}`, 40, y);
-    y += 10;
+    const dateLabel = getDayDateLabel(city, dayNum);
+    doc.setFontSize(11);
+    const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${dateLabel})` : `${t('uiDayTitle', dayNum)}`;
+    doc.text(dayLine, left, 66);
 
-    // AutoTable desde HTML
-    try{
-      doc.autoTable({
-        html: tbl,
-        startY: y + 6,
-        margin: { left: 40, right: 40 },
-        styles: { fontSize: 8, cellPadding: 3 }
-      });
-      y = (doc.lastAutoTable?.finalY || (y + 40)) + 18;
-    }catch(err){
-      // Si AutoTable falla por alguna tabla rara, no rompemos todo
-      doc.setFontSize(9);
-      doc.text('⚠️ No se pudo exportar una tabla automáticamente.', 40, y + 14);
-      y += 34;
-    }
+    doc.setFontSize(9);
+    doc.text(`${yyyy}-${mm}-${dd}`, left, 84);
+  }
 
-    // Si se va muy abajo, nueva página
-    const pageH = doc.internal.pageSize.getHeight();
-    if(y > pageH - 80 && idx < tables.length - 1){
-      doc.addPage();
-      y = 56;
-    }
+  // Encabezados de la tabla (usa i18n del UI si existe)
+  const head = [[
+    t('thStart'),
+    t('thEnd'),
+    t('thActivity'),
+    t('thFrom'),
+    t('thTo'),
+    t('thTransport'),
+    t('thDuration'),
+    t('thNotes')
+  ]];
+
+  let isFirstPage = true;
+
+  cities.forEach(city=>{
+    const days = getOrderedDaysForCity(city);
+
+    days.forEach(dayNum=>{
+      const rows = itineraries?.[city]?.byDay?.[dayNum] || [];
+
+      // 1 día = 1 página
+      if(!isFirstPage) doc.addPage();
+      isFirstPage = false;
+
+      pageHeader(city, dayNum);
+
+      // body
+      const body = rows.map(r => ([
+        normalizeCellText(r.start),
+        normalizeCellText(r.end),
+        normalizeCellText(r.activity),
+        normalizeCellText(r.from),
+        normalizeCellText(r.to),
+        normalizeCellText(r.transport),
+        normalizeCellText(r.duration),
+        normalizeCellText(r.notes)
+      ]));
+
+      // Si no hay filas, ponemos nota (honesto) y seguimos
+      if(!body.length){
+        doc.setFontSize(10);
+        doc.text(t('uiNoActivities'), 40, 120);
+        return;
+      }
+
+      try{
+        doc.autoTable({
+          head,
+          body,
+          startY: 98,
+          margin: { left: 40, right: 40 },
+          styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
+          headStyles: { fontSize: 8 },
+          didDrawPage: () => {}
+        });
+      }catch(err){
+        doc.setFontSize(10);
+        doc.text('⚠️ No se pudo generar la tabla en PDF para este día.', 40, 120);
+      }
+    });
   });
 
-  const cityPart = safeFilePart(getActiveCityLabel());
-  const filename = `ITBMO-${cityPart || 'Itinerary'}-${yyyy}-${mm}-${dd}.pdf`;
+  const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
   doc.save(filename);
 }
 
 function sendItineraryByEmail(){
-  const tables = getRenderedItineraryTables();
-  if(!tables.length){
-    alert('No hay itinerario renderizado todavía para enviar por email.');
+  // MVP honesto: mailto sin adjuntos
+  const cities = getOrderedCitiesForExport();
+  if(!cities.length){
+    alert('No hay ciudades guardadas todavía.');
     return;
   }
-
-  // MVP honesto: mailto sin adjuntos
   const subject = encodeURIComponent('ITravelByMyOwn · Itinerary');
-
-  // Cuerpo: texto plano desde las tablas (limitado para mailto)
   let body = 'Here is my itinerary (exported from ITravelByMyOwn):\n\n';
 
-  tables.forEach((tbl, idx)=>{
-    const city = getActiveCityLabel();
+  cities.forEach(city=>{
+    const days = getOrderedDaysForCity(city);
     body += `=== ${city} ===\n`;
-    const rows = Array.from(tbl.querySelectorAll('tr'));
-    rows.forEach(tr=>{
-      const cells = Array.from(tr.querySelectorAll('th,td')).map(c => (c.textContent || '').trim());
-      if(cells.length) body += cells.join(' | ') + '\n';
+    days.forEach(dayNum=>{
+      const dateLabel = getDayDateLabel(city, dayNum);
+      body += `- Day ${dayNum}${dateLabel ? ` (${dateLabel})` : ''}\n`;
     });
-    if(idx < tables.length - 1) body += '\n';
+    body += '\n';
   });
 
-  body += '\n\nNote: Attachments (PDF/CSV) require a backend email endpoint.';
-
-  // Mailto tiene límite práctico; recortamos
+  body += '\nNote: Attachments (PDF/CSV) require a backend email endpoint.';
   const maxLen = 1800;
   if(body.length > maxLen) body = body.slice(0, maxLen) + '\n...';
 
@@ -2937,7 +3016,6 @@ function sendItineraryByEmail(){
 }
 
 function bindExportListeners(){
-  // No clono nodos aquí para no interferir con otros binds.
   $btnPDF?.addEventListener('click', (e)=>{
     e.preventDefault();
     exportItineraryToPDF();
