@@ -2827,11 +2827,13 @@ function exportItineraryToCSV(){
     return;
   }
 
+  const SEP = ';';
+
   const lines = [];
   // Header fijo (Excel-friendly)
   lines.push([
     'City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'
-  ].map(csvEscape).join(','));
+  ].map(csvEscape).join(SEP));
 
   cities.forEach(city=>{
     const days = getOrderedDaysForCity(city);
@@ -2854,14 +2856,14 @@ function exportItineraryToCSV(){
           normalizeCellText(r.duration),
           normalizeCellText(r.notes)
         ];
-        lines.push(row.map(csvEscape).join(','));
+        lines.push(row.map(csvEscape).join(SEP));
       });
 
       // Si un día no tiene filas, igual lo dejamos sin filas (honesto) — Excel no necesita "día vacío"
     });
   });
 
-  const csv = lines.join('\n');
+  const csv = '\ufeff' + lines.join('\r\n'); // BOM + CRLF para Excel
   const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
 
   const d = new Date();
