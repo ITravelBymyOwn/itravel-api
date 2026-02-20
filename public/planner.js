@@ -291,58 +291,99 @@ if (typeof window !== 'undefined') window.tone = tone;
 /* ==============================
    SECCIÓN 3 · Referencias DOM
    (v55.1 añade soporte al botón flotante del Info Chat)
+   ✅ QUIRÚRGICO: refs “refreshables” para Webflow (cloneNode rompe referencias)
 ================================= */
-const $cityList = qs('#city-list');
-const $addCity  = qs('#add-city-btn');
-const $save     = qs('#save-destinations');
-const $start    = qs('#start-planning');
+let $cityList = qs('#city-list');
+let $addCity  = qs('#add-city-btn');
+let $save     = qs('#save-destinations');
+let $start    = qs('#start-planning');
 
-const $chatBox  = qs('#chat-container');
-const $chatM    = qs('#chat-messages');
-const $chatI    = qs('#chat-input');
-const $send     = qs('#send-btn');
+let $chatBox  = qs('#chat-container');
+let $chatM    = qs('#chat-messages');
+let $chatI    = qs('#chat-input');
+let $send     = qs('#send-btn');
 
-const $tabs     = qs('#city-tabs');
-const $itWrap   = qs('#itinerary-container');
+let $tabs     = qs('#city-tabs');
+let $itWrap   = qs('#itinerary-container');
 
-const $upsell      = qs('#monetization-upsell');
-const $upsellClose = qs('#upsell-close');
-const $confirmCTA  = qs('#confirm-itinerary');
+let $upsell      = qs('#monetization-upsell');
+let $upsellClose = qs('#upsell-close');
+let $confirmCTA  = qs('#confirm-itinerary');
 
-const $overlayWOW  = qs('#loading-overlay');
-const $thinkingIndicator = qs('#thinking-indicator');
+let $overlayWOW  = qs('#loading-overlay');
+let $thinkingIndicator = qs('#thinking-indicator');
 
 // 📌 Info Chat (IDs según tu HTML)
 // Nota: en el MVP quitamos el botón #info-chat-toggle del HTML (queda null y NO rompe).
-const $infoToggle   = qs('#info-chat-toggle');
-const $infoModal    = qs('#info-chat-modal');
-const $infoInput    = qs('#info-chat-input');
-const $infoSend     = qs('#info-chat-send');
-const $infoClose    = qs('#info-chat-close');
-const $infoMessages = qs('#info-chat-messages');
+let $infoToggle   = qs('#info-chat-toggle');
+let $infoModal    = qs('#info-chat-modal');
+let $infoInput    = qs('#info-chat-input');
+let $infoSend     = qs('#info-chat-send');
+let $infoClose    = qs('#info-chat-close');
+let $infoMessages = qs('#info-chat-messages');
 // 🆕 Botón flotante (se mantiene como ÚNICO botón en el MVP)
-const $infoFloating = qs('#info-chat-floating');
+let $infoFloating = qs('#info-chat-floating');
 
 // 🆕 Sidebar y botón reset
-const $sidebar = qs('.sidebar');
-const $resetBtn = qs('#reset-planner');
+let $sidebar = qs('.sidebar');
+let $resetBtn = qs('#reset-planner');
 
 /* 🆕 Viajeros (nuevo UI compacto MVP) */
-const $travelerMode      = qs('#traveler-mode');
-const $travelerSoloPanel = qs('#traveler-solo-panel');
-const $travelerGroupPanel= qs('#traveler-group-panel');
+let $travelerMode      = qs('#traveler-mode');
+let $travelerSoloPanel = qs('#traveler-solo-panel');
+let $travelerGroupPanel= qs('#traveler-group-panel');
 
-const $soloGender   = qs('#solo-gender');
-const $soloAgeRange = qs('#solo-age-range');
+let $soloGender   = qs('#solo-gender');
+let $soloAgeRange = qs('#solo-age-range');
 
-const $travelerProfiles = qs('#traveler-profiles');
-const $travelerAdd      = qs('#traveler-add');
-const $travelerRemove   = qs('#traveler-remove');
+let $travelerProfiles = qs('#traveler-profiles');
+let $travelerAdd      = qs('#traveler-add');
+let $travelerRemove   = qs('#traveler-remove');
 
-/* 🆕 Toolbar MVP (PDF / CSV / Email) */
-const $btnPdf   = qs('#btn-pdf');
-const $btnCsv   = qs('#btn-csv');
-const $btnEmail = qs('#btn-email');
+/* ✅ QUIRÚRGICO: refresca refs (Webflow + cloneNode pueden invalidarlas) */
+function refreshDOMRefs(){
+  $cityList = qs('#city-list');
+  $addCity  = qs('#add-city-btn');
+  $save     = qs('#save-destinations');
+  $start    = qs('#start-planning');
+
+  $chatBox  = qs('#chat-container');
+  $chatM    = qs('#chat-messages');
+  $chatI    = qs('#chat-input');
+  $send     = qs('#send-btn');
+
+  $tabs     = qs('#city-tabs');
+  $itWrap   = qs('#itinerary-container');
+
+  $upsell      = qs('#monetization-upsell');
+  $upsellClose = qs('#upsell-close');
+  $confirmCTA  = qs('#confirm-itinerary');
+
+  $overlayWOW  = qs('#loading-overlay');
+  $thinkingIndicator = qs('#thinking-indicator');
+
+  $infoToggle   = qs('#info-chat-toggle');
+  $infoModal    = qs('#info-chat-modal');
+  $infoInput    = qs('#info-chat-input');
+  $infoSend     = qs('#info-chat-send');
+  $infoClose    = qs('#info-chat-close');
+  $infoMessages = qs('#info-chat-messages');
+  $infoFloating = qs('#info-chat-floating');
+
+  $sidebar = qs('.sidebar');
+  $resetBtn = qs('#reset-planner');
+
+  $travelerMode       = qs('#traveler-mode');
+  $travelerSoloPanel  = qs('#traveler-solo-panel');
+  $travelerGroupPanel = qs('#traveler-group-panel');
+
+  $soloGender   = qs('#solo-gender');
+  $soloAgeRange = qs('#solo-age-range');
+
+  $travelerProfiles = qs('#traveler-profiles');
+  $travelerAdd      = qs('#traveler-add');
+  $travelerRemove   = qs('#traveler-remove');
+}
 
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
@@ -3086,12 +3127,6 @@ function bindInfoChatListeners(){
   const close  = qs('#info-chat-close');
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
-
-  // Limpieza previa por si se re-vincula
-  toggleTop?.replaceWith(toggleTop.cloneNode(true));
-  toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
-  close?.replaceWith(close.cloneNode(true));
-  send?.replaceWith(send.cloneNode(true));
 
   const tTop = qs('#info-chat-toggle');
   const tFloat = qs('#info-chat-floating');
