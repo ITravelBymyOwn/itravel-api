@@ -339,6 +339,11 @@ const $travelerProfiles = qs('#traveler-profiles');
 const $travelerAdd      = qs('#traveler-add');
 const $travelerRemove   = qs('#traveler-remove');
 
+/* 🆕 Toolbar MVP (PDF / CSV / Email) */
+const $btnPdf   = qs('#btn-pdf');
+const $btnCsv   = qs('#btn-csv');
+const $btnEmail = qs('#btn-email');
+
 /* ==============================
    SECCIÓN 4 · Chat UI + “Pensando…”
 ================================= */
@@ -2722,7 +2727,186 @@ function bindTravelersListeners(){
   setTravelerButtonsState();
 }
 
-// ⛔ Reset con confirmación modal (corregido: visible → active)
+/* =========================================================
+   🧾 Export PDF (MVP) — QUIRÚRGICO
+   - Requiere jsPDF + autoTable cargados en Webflow
+   - Exporta EXACTAMENTE lo que ya renderizas (por city/day)
+========================================================= */
+function exportItineraryToPDF(){
+  try{
+    const jsPDF = (window?.jspdf && window.jspdf.jsPDF) ? window.jspdf.jsPDF : null;
+    if(!jsPDF){
+      alert('PDF library not loaded. Please add jsPDF scripts in Webflow page settings.');
+      return;
+    }
+    if(!savedDestinations?.length){
+      alert(getLang()==='es' ? 'No hay destinos guardados.' : 'No saved destinations.');
+      return;
+    }
+
+    // ¿Hay al menos 1 fila?
+    let hasRows = false;
+    for(const d of savedDestinations){
+      const city = d.city;
+      const byDay = itineraries?.[city]?.byDay || {};
+      const days = Object.keys(byDay);
+      for(const k of days){
+        if((byDay[k]||[]).length){
+          hasRows = true; break;
+        }
+      }
+      if(hasRows) break;
+    }
+    if(!hasRows){
+      alert(getLang()==='es'
+        ? 'Aún no hay itinerarios generados para exportar.'
+        : 'No itineraries generated yet to export.');
+      return;
+    }
+
+    const doc = new jsPDF({ orientation:'p', unit:'pt', format:'a4' });
+    const marginX = 40;
+    let y = 44;
+
+    const title = (getLang()==='es') ? 'Itinerario' : 'Itinerary';
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(18);
+    doc.text(`ITravelByMyOwn · ${title}`, marginX, y);
+    y += 18;
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(10);
+    const dt = new Date();
+    const stamp = dt.toLocaleString();
+    doc.text(`${getLang()==='es' ? 'Generado:' : 'Generated:'} ${stamp}`, marginX, y);
+    y += 18;
+
+    const head = [[
+      t('thStart'),
+      t('thEnd'),
+      t('thActivity'),
+      t('thFrom'),
+      t('thTo'),
+      t('thTransport'),
+      t('thDuration'),
+      t('thNotes')
+    ]];
+
+    const safeFormatDMY = (d)=> {
+      try{ return (typeof formatDMY==='function') ? formatDMY(d) : ''; }catch(_){ return ''; }
+    };
+    const safeAddDays = (d, n)=>{
+      try{ return (typeof addDays==='function') ? addDays(d, n) : null; }catch(_){ return null; }
+    };
+    const safeParseDMY = (s)=>{
+      try{ return (typeof parseDMY==='function') ? parseDMY(s) : null; }catch(_){ return null; }
+    };
+
+    const autoTable = (doc.autoTable || (window?.jspdf && window.jspdf.autoTable));
+    if(!autoTable && !doc.autoTable){
+      alert('autoTable not loaded. Please add jsPDF autoTable script in Webflow.');
+      return;
+    }
+
+    const doAutoTable = (opts)=>{
+      if(doc.autoTable) return doc.autoTable(opts);
+      // fallback if plugin attached globally
+      return autoTable(doc, opts);
+    };
+
+    for(const dest of savedDestinations){
+      const city = dest.city;
+      const cityData = itineraries?.[city];
+      if(!cityData) continue;
+
+      const byDay = cityData.byDay || {};
+      const days = Object.keys(byDay).map(n=>+n).sort((a,b)=>a-b);
+
+      // City header
+      if(y > 720){ doc.addPage(); y = 44; }
+      doc.setFont('helvetica','bold');
+      doc.setFontSize(14);
+      doc.text(city, marginX, y);
+      y += 10;
+
+      // Meta line
+      doc.setFont('helvetica','normal');
+      doc.setFontSize(10);
+      const baseStr = cityData.baseDate || cityMeta?.[city]?.baseDate || dest.baseDate || '';
+      const base = baseStr ? safeParseDMY(baseStr) : null;
+      const metaPieces = [];
+      if(dest.country) metaPieces.push(dest.country);
+      metaPieces.push(`${dest.days} ${getLang()==='es' ? 'día(s)' : 'day(s)'}`);
+      if(baseStr) metaPieces.push(`${getLang()==='es' ? 'Inicio:' : 'Start:'} ${baseStr}`);
+      const hotel = cityMeta?.[city]?.hotel || '';
+      const transport = cityMeta?.[city]?.transport || '';
+      if(hotel) metaPieces.push(`${getLang()==='es' ? 'Hotel/Zona:' : 'Hotel/Area:'} ${hotel}`);
+      if(transport) metaPieces.push(`${getLang()==='es' ? 'Transporte:' : 'Transport:'} ${transport}`);
+      doc.text(metaPieces.join(' · '), marginX, y);
+      y += 14;
+
+      for(const dayNum of days){
+        const rows = (byDay[dayNum]||[]);
+        if(!rows.length) continue;
+
+        if(y > 700){ doc.addPage(); y = 44; }
+
+        // Day title with optional date
+        doc.setFont('helvetica','bold');
+        doc.setFontSize(12);
+        let dayTitle = t('uiDayTitle', dayNum);
+        if(base){
+          const d2 = safeAddDays(base, dayNum-1);
+          const lbl = d2 ? safeFormatDMY(d2) : '';
+          if(lbl) dayTitle += ` (${lbl})`;
+        }
+        doc.text(dayTitle, marginX, y);
+        y += 8;
+
+        const body = rows.map(r=>[
+          String(r.start||''),
+          String(r.end||''),
+          String(r.activity||'').replace(/^rev:\s*/i,''),
+          String(r.from||''),
+          String(r.to||''),
+          String(r.transport||''),
+          String(r.duration||''),
+          String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim()
+        ]);
+
+        doAutoTable({
+          head,
+          body,
+          startY: y,
+          margin: { left: marginX, right: marginX },
+          styles: {
+            font: 'helvetica',
+            fontSize: 8,
+            cellPadding: 3,
+            overflow: 'linebreak',
+            valign: 'middle'
+          },
+          headStyles: {
+            fontStyle: 'bold'
+          },
+          theme: 'grid'
+        });
+
+        y = (doc.lastAutoTable && doc.lastAutoTable.finalY) ? (doc.lastAutoTable.finalY + 16) : (y + 20);
+      }
+
+      y += 8;
+    }
+
+    const fileName = `ITBMO_${title.replace(/\s+/g,'_')}_${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(fileName);
+  }catch(e){
+    console.error('PDF export failed:', e);
+    alert(getLang()==='es' ? 'No se pudo generar el PDF. Revisa consola.' : 'Could not generate PDF. Check console.');
+  }
+}
+
+/* ⛔ Reset con confirmación modal (corregido: visible → active) */
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
   overlay.className = 'reset-overlay';
@@ -2857,6 +3041,12 @@ document.addEventListener('itbmo:addDays', e=>{
 
   // ⚡ Ejecutar rebalanceo selectivo
   rebalanceWholeCity(city, { start, end, dayTripTo });
+});
+
+/* ====== Toolbar MVP: PDF ====== */
+$btnPdf?.addEventListener('click', (e)=>{
+  e.preventDefault();
+  exportItineraryToPDF();
 });
 
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
