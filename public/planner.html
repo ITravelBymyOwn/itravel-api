@@ -265,7 +265,8 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           -->
         </div>
 
-        <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button>
+        <!-- ✅ MVP: oculto (no se usa por ahora) -->
+        <!-- <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button> -->
       </section>
     </main>
   </div>
@@ -565,7 +566,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         // Nota: el selector anterior también puede pegarle a "Tu información"; por eso el de arriba ya se setea y acá buscamos el segundo
         if (travelerSection) {
           const strongs = travelerSection.querySelectorAll("#traveler-group-panel strong");
-          if (strongs && strongs.length >= 2) setText(strongs[1], t("traveler_profiles"));
+          if (strongs && strongs.length >= 2) setText(strongs[1], t("travelers_profiles"));
         }
         setText(document.getElementById("traveler-add"), t("add"));
         setText(document.getElementById("traveler-remove"), t("remove"));
@@ -632,7 +633,6 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         setText(document.getElementById("btn-pdf"), t("export_pdf"));
         setText(document.getElementById("btn-csv"), t("export_csv"));
         setText(document.getElementById("btn-email"), t("email"));
-        setText(document.getElementById("confirm-itinerary"), t("choose_itinerary"));
 
         // Info Chat modal texts
         setText(document.querySelector("#info-chat-modal .info-chat-header h3"), t("info_header"));
