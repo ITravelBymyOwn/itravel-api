@@ -1680,7 +1680,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
 - If you propose a day trip, it must be COMPLETE:
   • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = the FIRST real sub-stop).
   • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
@@ -1703,11 +1703,32 @@ QUALITY / MAXIMIZE EXPERIENCE:
   const text = await _callPlannerSystemPrompt_(instructions, false);
   const parsed = parseJSON(text);
 
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
+  // ✅ AJUSTE QUIRÚRGICO: aceptar también city_day (formato A del API)
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let tmpCity = city;
     let tmpRows = [];
-    if(parsed.rows){ tmpRows = parsed.rows.map(r=>normalizeRow(r)); }
-    else if(parsed.destination && parsed.destination===city){ tmpRows = parsed.rows?.map(r=>normalizeRow(r))||[]; }
+
+    // ✅ NUEVO (quirúrgico): aplanar city_day -> rows
+    if(Array.isArray(parsed.city_day)){
+      try{
+        const blocks = parsed.city_day || [];
+        const pick = blocks.filter(b => String(b?.city || b?.destination || '').trim().toLowerCase() === String(city).trim().toLowerCase());
+        const use = (pick && pick.length) ? pick : blocks;
+
+        use.forEach(b=>{
+          const rr = Array.isArray(b?.rows) ? b.rows : [];
+          rr.forEach(r=>{
+            tmpRows.push(normalizeRow(r));
+          });
+        });
+      }catch(_){}
+    }
+    else if(parsed.rows){
+      tmpRows = parsed.rows.map(r=>normalizeRow(r));
+    }
+    else if(parsed.destination && parsed.destination===city){
+      tmpRows = parsed.rows?.map(r=>normalizeRow(r))||[];
+    }
     else if(Array.isArray(parsed.destinations)){
       const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
       tmpRows = (dd?.rows||[]).map(r=>normalizeRow(r));
