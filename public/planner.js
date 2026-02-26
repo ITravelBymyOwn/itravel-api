@@ -3335,4 +3335,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   // ✅ NUEVO (quirúrgico): activar botones PDF/CSV/Email
   bindExportListeners();
-});
+}); 
