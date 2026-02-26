@@ -39,11 +39,15 @@
         <div class="row-actions">
           <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
         </div>
-        <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
+
+        <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
+        <!-- <button class="btn primary w-100" id="save-destinations">Guardar destinos</button> -->
         <!-- 🆕 Botón de reinicio reubicado -->
+        <!--
         <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
           Reiniciar planificación
         </button>
+        -->
       </section>
 
       <section class="box special-conditions">
@@ -210,6 +214,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
         </div>
       </section>
+
+      <!-- ✅ QUIRÚRGICO: botones al final del tab Planner (después de Travelers) -->
+      <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
+      <!-- 🆕 Botón de reinicio reubicado -->
+      <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
+        Reiniciar planificación
+      </button>
 
       <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
     </aside>
