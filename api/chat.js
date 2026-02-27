@@ -348,6 +348,11 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
      FIXED dates, any provided TIME WINDOWS, AND any explicit "I want to visit/do X" requests (must-include).
   2) SOFT preferences: "prefer", "would like", interests, budget direction, pace, style (unless clearly stated as must).
   3) SUGGESTIONS: optional ideas, examples, "if possible", or vague wishes.
+- CRITICAL (Special conditions must-include places):
+  • The user may type place names inside "Special conditions / Conditions" (e.g., "Montserrat", "Girona", "Toledo", "Versailles").
+  • If the user explicitly lists places they want to visit (including inside conditions), treat them as MUST-INCLUDE.
+  • If multiple must-include places are provided, you MUST schedule EACH of them at least once across the itinerary days (when feasible),
+    distributing them across different days if days_total allows (do NOT silently drop one).
 - If the user explicitly requests a place/activity (e.g., "I want Montserrat and Girona"), you MUST ensure it appears in the itinerary
   unless it is infeasible; if infeasible, propose the closest equivalent and explain briefly in notes.
 - If there is a conflict (e.g., “no walking” vs “hiking”), prioritize safety/feasibility and propose an equivalent alternative.
@@ -423,6 +428,9 @@ TIME INFERENCE (CRITICAL):
   • Each row's end time MUST be <= the next row's start time (allow small buffers).
   • If a day has a provided day-end time, ONLY the final row should end at/near that time.
     Do NOT repeat the day-end time as the end time for multiple rows.
+  • CRITICAL CONTINUITY (no teleporting):
+    - By default, the next row's "from" should match the previous row's "to" (or be an immediately plausible continuation).
+    - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
 
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
 - If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
@@ -489,6 +497,7 @@ DAY TRIPS / MACRO-TOURS:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
 - For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
+- CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
