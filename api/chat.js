@@ -404,6 +404,15 @@ GENERAL RULES:
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
 
+TIME INFERENCE (CRITICAL):
+- User-provided start/end times are HARD CONSTRAINTS and must be respected exactly.
+- If the user provides hours for SOME days only, you MUST:
+  • Respect those exact hours where provided.
+  • Actively infer realistic start/end times for ALL other days and rows.
+- Absence of hours is NOT a restriction.
+- NEVER leave start or end empty.
+- Use expert judgment to create a coherent, realistic daily flow.
+
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
 - If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
   • Aim for 6–10 rows for a normal full day window.
