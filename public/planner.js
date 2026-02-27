@@ -1037,7 +1037,7 @@ Edits:
 
   // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
   const controller = new AbortController();
-  const timeoutMs = 75000; // 75s (ajustable)
+  const timeoutMs = 120000; // 120s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1601,7 +1601,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
   // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
-  const timeoutMs = 75000;
+  const timeoutMs = 120000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
