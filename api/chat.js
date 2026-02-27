@@ -463,12 +463,29 @@ AURORAS (HARD RULE + REPLACEMENT):
 - If the destination is NOT a typical auroral zone (e.g., Barcelona/Madrid/Rome/Budapest/Cairo/etc.), you MUST NOT include any aurora-related rows or wording (not even as a suggestion).
 - If auroras are NOT plausible and you need a night highlight, you MUST replace it with a real iconic night experience for that city (night viewpoint, show, night cruise, illuminated landmark walk, etc.).
 
-DAY TRIPS / MACRO-TOURS:
-- If you create a day trip, you must break it down into 5–8 sub-stops (rows).
-- Always close with a dedicated return row:
-  • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
-- Avoid the last day if there are options.
-- For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
+DAY TRIPS / MACRO-TOURS (PREMIUM STRUCTURE – STRICT):
+- If you create a day trip, you MUST break it down into 5–8 real physical sub-stops (rows).
+- DO NOT create umbrella rows such as:
+  • "Day trip to X"
+  • "Excursion to X"
+  • "Visit to X"
+  Every row must represent either:
+    1) A real transport movement (e.g., "Barcelona – Train to Montserrat")
+    2) A named physical sub-stop (basilica, viewpoint, funicular, trail, castle, plaza, etc.)
+- Prefer SPECIFIC iconic names instead of generic labels.
+  Example (GOOD):
+    • "Montserrat – Basílica e La Moreneta"
+    • "Montserrat – Funicular de Sant Joan"
+    • "Montserrat – Mirante de Sant Jeroni"
+  Example (FORBIDDEN):
+    • "Montserrat – Mosteiro"
+    • "Montserrat – Trilhas"
+    • "Montserrat – Passeio"
+- For famous destinations, actively include their best-known highlights when realistic.
+- Always include:
+    • Outbound transport row (clearly named)
+    • Return transport row (clearly named: "<Macro-tour> – Return to {Base city}")
+- Return timing must be conservative and realistic (never optimistic).
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
