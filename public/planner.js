@@ -875,7 +875,12 @@ function getFrontendSnapshot(){
     )
   );
 }
-function buildIntake(){
+
+/* =========================================================
+   🆕 NUEVO: Intake por ciudad (aislamiento real multi-ciudad)
+========================================================= */
+function buildCityIntake(city){
+
   const pax = [
     ['adults','#p-adults'],
     ['young','#p-young'],
@@ -895,42 +900,45 @@ function buildIntake(){
     .replace(/\n+/g,' ')
     .trim() || 'N/A';
 
-  savedDestinations.forEach(dest=>{
-    if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
-    if(!cityMeta[dest.city].perDay) cityMeta[dest.city].perDay = [];
-    cityMeta[dest.city].perDay = Array.from({length:dest.days}, (_,i)=>{
-      const prev = (cityMeta[dest.city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i];
-      return {
-        day: i+1,
-        start: (prev && prev.start) ? prev.start : DEFAULT_START,
-        end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
-      };
-    });
+  const dest = savedDestinations.find(d=>d.city===city);
+  if(!dest) return '';
+
+  // Garantizar perDayHours solo de esta ciudad
+  if(!cityMeta[city]) cityMeta[city] = {};
+  if(!cityMeta[city].perDay) cityMeta[city].perDay = [];
+
+  cityMeta[city].perDay = Array.from({length:dest.days}, (_,i)=>{
+    const prev = (cityMeta[city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i];
+    return {
+      day: i+1,
+      start: (prev && prev.start) ? prev.start : DEFAULT_START,
+      end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
+    };
   });
 
-  const perDayHours = Object.fromEntries(
-    savedDestinations.map(dest=>[
-      dest.city,
-      (cityMeta[dest.city]?.perDay || []).map(x=>({
-        day: x.day,
-        start: x.start || DEFAULT_START,
-        end: x.end || DEFAULT_END
-      }))
-    ])
-  );
+  const perDay = cityMeta[city].perDay.map(x=>({
+    day: x.day,
+    start: x.start || DEFAULT_START,
+    end: x.end || DEFAULT_END
+  }));
 
-  const list = savedDestinations.map(x=>{
-    const dates = x.baseDate ? `, start=${x.baseDate}` : '';
-    return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
-  }).join(' | ');
+  const existing = itineraries[city]
+    ? JSON.stringify({
+        baseDate: itineraries[city].baseDate || null,
+        transport: cityMeta[city]?.transport || '',
+        days: itineraries[city].byDay || {}
+      })
+    : '{}';
+
+  const dates = dest.baseDate ? `, start=${dest.baseDate}` : '';
 
   return [
-    `Destinations: ${list}`,
+    `Destination: ${city} (${dest.country||'—'} · ${dest.days} days${dates})`,
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
     `Special conditions: ${specialConditions}`,
-    `PerDayHours: ${JSON.stringify(perDayHours)}`,
-    `Existing: ${getFrontendSnapshot()}`
+    `PerDayHours: ${JSON.stringify(perDay)}`,
+    `Existing: ${existing}`
   ].join('\n');
 }
 
