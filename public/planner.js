@@ -1742,84 +1742,124 @@ async function generateCityItinerary(city){
   const hotel    = cityMeta[city]?.hotel || '';
   const transport= cityMeta[city]?.transport || 'recommend me';
 
-  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
+  const CITY_INTAKE = (typeof buildCityIntake === 'function') ? buildCityIntake(city) : buildIntake();
+
+  /* ===============================
+     ✅ NUEVO (QUIRÚRGICO)
+     Detectar posibles must-includes escritos en condiciones
+  ================================== */
+  const specialRaw = (qs('#special-conditions')?.value||'').trim();
+  const possibleMustIncludes = specialRaw
+    .split(/[,;\n]/)
+    .map(x=>x.trim())
+    .filter(x=>x.length>2);
+
+  const explicitMustText = possibleMustIncludes.length
+    ? `\nEXPLICIT MUST-INCLUDE (from user conditions): ${possibleMustIncludes.join(' | ')}`
+    : '';
 
   const instructions = `
 ${FORMAT}
-**ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
-- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+ROLE: Planner. Create a full itinerary ONLY for "${city}" (${dest.days} day/s). Return ONLY JSON.
 
-KEY RULES (MANDATORY):
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
-  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
-  • If it's NOT a day trip, "Destination" can be "${city}".
-  • This applies to ALL rows, including transfers and returns.
-  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
-  • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
-  • Correct example (city): "${city} – Return to hotel".
-- "from", "to", "transport" and "notes" can NEVER be empty.
-- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
-- VERY IMPORTANT (to avoid errors like "to=South Coast"):
-  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
-  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
+OUTPUT FORMAT:
+{"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
 
-TRANSPORT (smart priority, no invention):
-- In city: Walk/Metro/Bus/Tram depending on real availability.
-- For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
-  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
-- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+DAY FIELD (CRITICAL):
+- EVERY row MUST include "day" between 1 and ${dest.days}.
+- You MUST distribute rows across ALL days (1..${dest.days}).
 
-AURORAS (if plausible by city/season/latitude):
-- You must include AT LEAST 1 aurora night in the itinerary.
-- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
-- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
-- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
+TIME WINDOWS:
+${JSON.stringify(perDay)}
 
-DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
-- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
-- If you propose a day trip, it must be COMPLETE:
-  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
-  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
-  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
+MUST-INCLUDE PLACES (CRITICAL):
+- If the user explicitly lists places to visit inside Special conditions,
+  you MUST include EACH of them at least once (when geographically feasible).
+- Do NOT silently omit any explicitly requested place.
+${explicitMustText}
 
-QUALITY / MAXIMIZE EXPERIENCE:
-- Cover key daytime and nighttime highlights.
-- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
-- Group by areas, avoid backtracking.
-- Validate overall plausibility and safety.
-  • If a special activity is plausible, add "notes" with "valid: <justification>".
-  • Avoid activities in clearly risky/restricted areas or time windows.
-  • Replace with safer alternatives when applicable.
-- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
-- No text outside JSON.
+ROW QUALITY:
+- activity must be "DESTINATION – Specific sub-stop"
+- duration must be EXACTLY 2 lines with \\n
+- For day trips: 5–8 real sub-stops + final "Return to ${city}"
+
+CONTEXT:
+${CITY_INTAKE}
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
-  // ✅ SURGICAL (CRITICAL): instructions as SYSTEM, language anchor as USER
-  const text = await _callPlannerSystemPrompt_(instructions, false);
-  const parsed = parseJSON(text);
+  let text = await _callPlannerSystemPrompt_(instructions, false);
+  let parsed = parseJSON(text);
+
+  /* ===============================
+     ✅ GUARD-RAIL 1 (ya existía)
+     Todo en day=1
+  ================================== */
+  const needsRepair = (p)=>{
+    try{
+      const rows = p?.rows;
+      if(!Array.isArray(rows) || rows.length===0) return false;
+      if(dest.days <= 1) return false;
+      const days = new Set(rows.map(r => parseInt(r?.day,10) || 1));
+      return (days.size === 1 && days.has(1));
+    }catch(_){ return false; }
+  };
+
+  /* ===============================
+     ✅ GUARD-RAIL 2 (NUEVO)
+     Must-includes faltantes
+  ================================== */
+  const missingMustIncludes = (p)=>{
+    try{
+      if(!possibleMustIncludes.length) return [];
+      const text = JSON.stringify(p).toLowerCase();
+      return possibleMustIncludes.filter(place =>
+        !text.includes(place.toLowerCase())
+      );
+    }catch(_){ return []; }
+  };
+
+  let mustMissing = parsed ? missingMustIncludes(parsed) : [];
+
+  if(parsed && (needsRepair(parsed) || mustMissing.length)){
+    const repair = `
+REPAIR (CRITICAL):
+- Your previous JSON was invalid.
+
+${needsRepair(parsed) ? '- All rows were assigned to day=1. Distribute across days correctly.' : ''}
+
+${mustMissing.length ? `- You omitted these required places: ${mustMissing.join(' | ')}. You MUST include them.` : ''}
+
+Regenerate the FULL itinerary for "${city}".
+Return ONLY valid JSON.
+`.trim();
+
+    const repairedInstructions = `${instructions}\n\n${repair}`;
+    text = await _callPlannerSystemPrompt_(repairedInstructions, false);
+    parsed = parseJSON(text);
+  }
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
     let tmpCity = city;
     let tmpRows = [];
-    if(parsed.rows){ tmpRows = parsed.rows.map(r=>normalizeRow(r)); }
-    else if(parsed.destination && parsed.destination===city){ tmpRows = parsed.rows?.map(r=>normalizeRow(r))||[]; }
-    else if(Array.isArray(parsed.destinations)){
+
+    if(parsed.rows){
+      tmpRows = parsed.rows.map(r=>normalizeRow(r));
+    } else if(parsed.destination && parsed.destination===city){
+      tmpRows = (parsed.rows||[]).map(r=>normalizeRow(r));
+    } else if(Array.isArray(parsed.destinations)){
       const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
       tmpRows = (dd?.rows||[]).map(r=>normalizeRow(r));
-    }else if(Array.isArray(parsed.itineraries)){
+    } else if(Array.isArray(parsed.itineraries)){
       const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
       tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
     }
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 if replanning → replace=true
+    pushRows(tmpCity, val.allowed, forceReplan);
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
 
