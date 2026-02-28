@@ -1742,62 +1742,55 @@ async function generateCityItinerary(city){
   const hotel    = cityMeta[city]?.hotel || '';
   const transport= cityMeta[city]?.transport || 'recommend me';
 
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
+  // ✅ QUIRÚRGICO: Intake SOLO para esta ciudad (evita contaminación multiciudad)
   const CITY_INTAKE = (typeof buildCityIntake === 'function') ? buildCityIntake(city) : buildIntake();
 
-  /* ===============================
-     ✅ NUEVO (QUIRÚRGICO)
-     Detectar posibles must-includes escritos en condiciones
-  ================================== */
-  const specialRaw = (qs('#special-conditions')?.value||'').trim();
-  const possibleMustIncludes = specialRaw
-    .split(/[,;\n]/)
-    .map(x=>x.trim())
-    .filter(x=>x.length>2);
-
-  const explicitMustText = possibleMustIncludes.length
-    ? `\nEXPLICIT MUST-INCLUDE (from user conditions): ${possibleMustIncludes.join(' | ')}`
-    : '';
-
+  // ✅ QUIRÚRGICO: Instrucciones cortas (NO intentan reemplazar el SYSTEM_PROMPT del API).
+  // Solo “amarra” contrato, días y must-includes.
   const instructions = `
 ${FORMAT}
 ROLE: Planner. Create a full itinerary ONLY for "${city}" (${dest.days} day/s). Return ONLY JSON.
 
 OUTPUT FORMAT:
+- Prefer Format B exactly:
 {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
 
 DAY FIELD (CRITICAL):
-- EVERY row MUST include "day" between 1 and ${dest.days}.
-- You MUST distribute rows across ALL days (1..${dest.days}).
+- EVERY row MUST include "day" as an integer between 1 and ${dest.days}.
+- You MUST distribute rows across ALL days (1..${dest.days}) with a realistic plan per day.
+- If you return all rows with day=1, it is invalid.
 
-TIME WINDOWS:
+TIME WINDOWS (PER DAY):
+- Respect these per-day windows (they are constraints where provided):
 ${JSON.stringify(perDay)}
 
 MUST-INCLUDE PLACES (CRITICAL):
-- If the user explicitly lists places to visit inside Special conditions,
-  you MUST include EACH of them at least once (when geographically feasible).
-- Do NOT silently omit any explicitly requested place.
-${explicitMustText}
+- The user may type place names in Special conditions.
+- If Special conditions contains explicit places to visit (e.g., "Segovia", "Toledo", "Montserrat", "Girona"),
+  you MUST include EACH of them at least once across the itinerary (when feasible).
+- If multiple must-includes exist, spread them across different days when possible (do NOT silently drop one).
 
-ROW QUALITY:
-- activity must be "DESTINATION – Specific sub-stop"
-- duration must be EXACTLY 2 lines with \\n
-- For day trips: 5–8 real sub-stops + final "Return to ${city}"
+ROW QUALITY (STRICT):
+- Non-empty: activity/from/to/transport/duration/notes.
+- activity must be "DESTINATION – Specific sub-stop" (avoid generic).
+- duration must be EXACTLY 2 lines with \\n:
+  "Transport: ...\\nActivity: ..."
+- For day trips/macro-tours: 5–8 real sub-stops + final row "Return to ${city}".
 
-CONTEXT:
+CONTEXT (this city only):
 ${CITY_INTAKE}
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
+  // ✅ Ciudad por ciudad y sin historial del chat (evita mezcla entre ciudades)
   let text = await _callPlannerSystemPrompt_(instructions, false);
   let parsed = parseJSON(text);
 
-  /* ===============================
-     ✅ GUARD-RAIL 1 (ya existía)
-     Todo en day=1
-  ================================== */
+  // ✅ Guard-rail: si days>1 y todo cae en day=1 → 1 reintento “repair”
   const needsRepair = (p)=>{
     try{
       const rows = p?.rows;
@@ -1808,33 +1801,13 @@ ${CITY_INTAKE}
     }catch(_){ return false; }
   };
 
-  /* ===============================
-     ✅ GUARD-RAIL 2 (NUEVO)
-     Must-includes faltantes
-  ================================== */
-  const missingMustIncludes = (p)=>{
-    try{
-      if(!possibleMustIncludes.length) return [];
-      const text = JSON.stringify(p).toLowerCase();
-      return possibleMustIncludes.filter(place =>
-        !text.includes(place.toLowerCase())
-      );
-    }catch(_){ return []; }
-  };
-
-  let mustMissing = parsed ? missingMustIncludes(parsed) : [];
-
-  if(parsed && (needsRepair(parsed) || mustMissing.length)){
+  if(parsed && needsRepair(parsed)){
     const repair = `
 REPAIR (CRITICAL):
-- Your previous JSON was invalid.
-
-${needsRepair(parsed) ? '- All rows were assigned to day=1. Distribute across days correctly.' : ''}
-
-${mustMissing.length ? `- You omitted these required places: ${mustMissing.join(' | ')}. You MUST include them.` : ''}
-
-Regenerate the FULL itinerary for "${city}".
-Return ONLY valid JSON.
+- Your previous JSON put all rows in day=1. That is INVALID.
+- Regenerate the FULL itinerary for "${city}" with "day" correctly set on EVERY row and distributed across days 1..${dest.days}.
+- Keep the same JSON format B and keep all must-includes from Special conditions.
+- Return ONLY valid JSON.
 `.trim();
 
     const repairedInstructions = `${instructions}\n\n${repair}`;
