@@ -875,7 +875,6 @@ function getFrontendSnapshot(){
     )
   );
 }
-
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -932,89 +931,6 @@ function buildIntake(){
     `Special conditions: ${specialConditions}`,
     `PerDayHours: ${JSON.stringify(perDayHours)}`,
     `Existing: ${getFrontendSnapshot()}`
-  ].join('\n');
-}
-
-/* ✅ NUEVO (QUIRÚRGICO): intake SOLO para 1 ciudad
-   - Evita contaminación multiciudad
-   - Mantiene viajeros/presupuesto/condiciones globales (aplican a todas)
-*/
-function getCitySnapshot(city){
-  try{
-    const data = itineraries?.[city];
-    const snap = {
-      [city]: {
-        baseDate: data?.baseDate || cityMeta?.[city]?.baseDate || null,
-        transport: cityMeta?.[city]?.transport || '',
-        days: Object.fromEntries(
-          Object.entries(data?.byDay||{}).map(([d,rows])=>[
-            d,
-            (rows||[]).map(r=>({
-              day:+d, start:r.start||'', end:r.end||'', activity:r.activity||'',
-              from:r.from||'', to:r.to||'', transport:r.transport||'',
-              duration:r.duration||'', notes:r.notes||''
-            }))
-          ])
-        )
-      }
-    };
-    return JSON.stringify(snap);
-  }catch(_){
-    return '{}';
-  }
-}
-
-function buildCityIntake(city){
-  const pax = [
-    ['adults','#p-adults'],
-    ['young','#p-young'],
-    ['children','#p-children'],
-    ['infants','#p-infants'],
-    ['seniors','#p-seniors']
-  ].map(([k,id])=>`${k}:${qs(id)?.value||0}`).join(', ');
-
-  const budgetVal = qs('#budget')?.value || 'N/A';
-  const currencyVal = qs('#currency')?.value || 'USD';
-  const budget = budgetVal !== 'N/A' ? `${budgetVal} ${currencyVal}` : 'N/A';
-
-  const specialConditionsRaw = (qs('#special-conditions')?.value||'');
-  const specialConditions = specialConditionsRaw
-    .replace(/\r\n/g,'\n')
-    .replace(/\r/g,'\n')
-    .replace(/\n+/g,' ')
-    .trim() || 'N/A';
-
-  const dest = savedDestinations.find(x=>x.city===city);
-  const days = dest?.days || 1;
-
-  // asegurar perDay para esta ciudad
-  if(!cityMeta[city]) cityMeta[city] = {};
-  if(!cityMeta[city].perDay) cityMeta[city].perDay = [];
-  cityMeta[city].perDay = Array.from({length:days}, (_,i)=>{
-    const prev = (cityMeta[city].perDay||[]).find(x=>x.day===i+1) || dest?.perDay?.[i];
-    return {
-      day: i+1,
-      start: (prev && prev.start) ? prev.start : DEFAULT_START,
-      end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
-    };
-  });
-
-  const perDayHours = (cityMeta[city]?.perDay || []).map(x=>({
-    day: x.day,
-    start: x.start || DEFAULT_START,
-    end: x.end || DEFAULT_END
-  }));
-
-  const dates = dest?.baseDate ? `, start=${dest.baseDate}` : '';
-  const header = `${city} (${dest?.country||'—'} · ${days} días${dates})`;
-
-  return [
-    `Destination: ${header}`,
-    `Travelers: ${pax}`,
-    `Budget: ${budget}`,
-    `Special conditions: ${specialConditions}`,
-    `PerDayHours: ${JSON.stringify(perDayHours)}`,
-    `Existing (this city only): ${getCitySnapshot(city)}`
   ].join('\n');
 }
 
