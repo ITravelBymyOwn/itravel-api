@@ -360,7 +360,7 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
 
 TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
 - The user may provide start/end hours for some days and leave others blank.
-- Treat ONLY provided hours as binding, PER DAY:
+- Treat ONLY explicitly provided hours as binding, PER DAY:
   • If a day has a provided start, the first row of that day MUST start at or after it.
   • If a day has a provided end, the LAST row of that day MUST end at or before it.
 - IMPORTANT: start/end fields are PER ROW (per activity), not "day limits".
@@ -473,7 +473,7 @@ MANDATORY ROW CONTRACT:
 - activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
   - "DESTINATION" is NOT always the base city:
-    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
+    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza", "Reykjanes Peninsula", "Snæfellsnes Peninsula").
     • If it's NOT a day trip, "DESTINATION" can be the base city.
   - This also applies to transfers/returns:
     • Day trip example: "South Coast – Return to Reykjavik"
@@ -521,6 +521,12 @@ DAY TRIPS / MACRO-TOURS:
   • If you include a macro-tour/day trip but provide fewer than 5 rows OR forget the dedicated return row, that output is INVALID.
   • In that case, you MUST regenerate the day trip with 5–8 real sub-stops + return row.
 
+🆕 DETAIL DENSITY (CRITICAL: no “light” region days):
+- If a day is clearly a REGION / PENINSULA / ROUTE day (a macro-tour by nature, even without the word "day trip"),
+  you MUST still break it down into 5–8 real sub-stops + a dedicated return row to the base city.
+  Examples: "Reykjanes Peninsula", "Snæfellsnes Peninsula", "Golden Circle", "South Coast".
+- Output is INVALID if such a day has only 1–4 rows.
+
 CONSISTENCY BETWEEN TIMES AND DURATION (CRITICAL):
 - The row time block (end-start) must be broadly consistent with the stated duration:
   • Transport + Activity should roughly fit inside the time block (allow buffers).
@@ -547,7 +553,7 @@ FINAL SELF-CHECK (MANDATORY BEFORE OUTPUT):
 - Confirm: duration is exactly 2 lines with \\n and no "0m".
 - Confirm: times are ordered, non-overlapping, continuous enough (no teleporting).
 - Confirm: days_total>1 => rows distributed across all days; not all day=1.
-- Confirm: macro-tours/day trips => 5–8 sub-stops + dedicated return row.
+- Confirm: macro-tours/day trips/region days => 5–8 sub-stops + dedicated return row.
 - Confirm: no cross-city mixing in multi-city; if multi-city, use Format C.
 
 Respond with valid JSON only.
