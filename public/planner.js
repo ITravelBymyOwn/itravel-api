@@ -887,7 +887,13 @@ function buildIntake(){
   const budgetVal = qs('#budget')?.value || 'N/A';
   const currencyVal = qs('#currency')?.value || 'USD';
   const budget = budgetVal !== 'N/A' ? `${budgetVal} ${currencyVal}` : 'N/A';
-  const specialConditions = (qs('#special-conditions')?.value||'').trim()||'N/A';
+
+  const specialConditionsRaw = (qs('#special-conditions')?.value||'');
+  const specialConditions = specialConditionsRaw
+    .replace(/\r\n/g,'\n')
+    .replace(/\r/g,'\n')
+    .replace(/\n+/g,' ')
+    .trim() || 'N/A';
 
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
@@ -902,6 +908,17 @@ function buildIntake(){
     });
   });
 
+  const perDayHours = Object.fromEntries(
+    savedDestinations.map(dest=>[
+      dest.city,
+      (cityMeta[dest.city]?.perDay || []).map(x=>({
+        day: x.day,
+        start: x.start || DEFAULT_START,
+        end: x.end || DEFAULT_END
+      }))
+    ])
+  );
+
   const list = savedDestinations.map(x=>{
     const dates = x.baseDate ? `, start=${x.baseDate}` : '';
     return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
@@ -912,6 +929,7 @@ function buildIntake(){
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
     `Special conditions: ${specialConditions}`,
+    `PerDayHours: ${JSON.stringify(perDayHours)}`,
     `Existing: ${getFrontendSnapshot()}`
   ].join('\n');
 }
@@ -1019,7 +1037,7 @@ Edits:
 
   // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
   const controller = new AbortController();
-  const timeoutMs = 75000; // 75s (ajustable)
+  const timeoutMs = 120000; // 120s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1583,7 +1601,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
   // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
-  const timeoutMs = 75000;
+  const timeoutMs = 120000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
