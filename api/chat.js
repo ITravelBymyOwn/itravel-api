@@ -360,7 +360,7 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
 
 TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
 - The user may provide start/end hours for some days and leave others blank.
-- Treat ONLY explicitly provided hours as binding, PER DAY:
+- Treat ONLY provided hours as binding, PER DAY:
   • If a day has a provided start, the first row of that day MUST start at or after it.
   • If a day has a provided end, the LAST row of that day MUST end at or before it.
 - IMPORTANT: start/end fields are PER ROW (per activity), not "day limits".
@@ -368,31 +368,18 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
   • Only the final row (or at most the final 1–2 rows if needed) may approach the day end.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
-- CRITICAL ANTI-DEFAULTS (robustness):
-  • Sometimes the system may include DEFAULT-looking hours for days the user left blank.
-  • You MUST NOT treat “default hours” as user constraints unless the user clearly stated them.
-  • If you are not sure the hours were explicitly provided by the user, treat that day as FLEXIBLE (use expert realistic hours).
+
+CRITICAL ANTI-DEFAULTS (ROBUSTNESS):
+- Sometimes the system may include DEFAULT-looking hours for days the user left blank.
+- You MUST NOT treat default hours as user constraints unless the user clearly stated them.
+- If you are not sure the hours were explicitly provided by the user, treat that day as FLEXIBLE and use expert realistic hours.
+- If you detect many days repeating the exact same generic window (e.g., 09:00–17:00) without explicit user confirmation, treat ONLY the first/last-day explicit constraints as binding and keep the rest flexible.
 
 CONTEXT USAGE (CRITICAL):
 - You must use ALL information provided by the user in the Planner tab.
 - ESPECIALLY: Preferences / Restrictions / Special conditions (apply them in every decision: pace, schedules, mobility, budget, meals, accessibility, interests, safety, etc.).
 - If the user provides traveler info (ages, kids, seniors, mobility, interests), actively incorporate it into: schedules, breaks, block durations, transport, activity types, and notes.
 - If a traveler profile is incomplete, do not assume sensitive details; keep activities broadly suitable and add light notes.
-
-MULTI-CITY ROBUSTNESS (CRITICAL):
-- The Planner input may include multiple destinations/cities.
-- You MUST NOT mix activities between cities.
-- Each destination must have its own complete plan for its own days.
-- If multiple cities are present in the input, you MUST output Format C:
-  {"destinations":[{"name":"City","rows":[...]}, ...], "followup":"..."}
-  (unless the user explicitly asks for a single city only).
-- For each destination:
-  • Use only that city's context (must-includes, per-day windows, hotel/transport notes if present).
-  • NEVER schedule a day trip whose target is geographically inconsistent (e.g., Segovia as a day trip from Barcelona).
-  • If the user requests an inconsistent day trip, DO NOT silently comply:
-    - Keep the itinerary feasible for the base city.
-    - Add a brief clarification in notes for the affected row and in followup: ask the user to confirm/correct the city.
-- If the user provided MANY cities and the plan becomes too constrained, add a brief followup recommending generating city-by-city for best quality (do NOT refuse the output; still provide the best feasible JSON).
 
 PREFERRED FORMAT (new, table-ready):
 A) {
@@ -451,6 +438,13 @@ TIME INFERENCE (CRITICAL):
     - By default, the next row's "from" should match the previous row's "to" (or be an immediately plausible continuation).
     - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
 
+CONSISTENCY BETWEEN TIMES AND DURATION (CRITICAL):
+- The row time block (end-start) must be broadly consistent with the stated duration:
+  • Transport + Activity should roughly fit inside the time block (allow buffers).
+- Do NOT output huge blocks (e.g., 09:00–17:00) with tiny durations (e.g., Transport 45m + Activity 2h).
+  If you need a long day, split it into multiple sub-stops (rows) with realistic transport/activity ranges.
+- NEVER output "0m" for transport/activity.
+
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
 - If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
   • Aim for 6–10 rows for a normal full day window.
@@ -473,7 +467,7 @@ MANDATORY ROW CONTRACT:
 - activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
   - "DESTINATION" is NOT always the base city:
-    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza", "Reykjanes Peninsula", "Snæfellsnes Peninsula").
+    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
     • If it's NOT a day trip, "DESTINATION" can be the base city.
   - This also applies to transfers/returns:
     • Day trip example: "South Coast – Return to Reykjavik"
@@ -516,22 +510,16 @@ DAY TRIPS / MACRO-TOURS:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
 - For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
-- CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row OR the return row ends at/near the hotel.
-- CRITICAL COMPLETENESS CHECK:
-  • If you include a macro-tour/day trip but provide fewer than 5 rows OR forget the dedicated return row, that output is INVALID.
-  • In that case, you MUST regenerate the day trip with 5–8 real sub-stops + return row.
+- CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
 
-🆕 DETAIL DENSITY (CRITICAL: no “light” region days):
-- If a day is clearly a REGION / PENINSULA / ROUTE day (a macro-tour by nature, even without the word "day trip"),
-  you MUST still break it down into 5–8 real sub-stops + a dedicated return row to the base city.
-  Examples: "Reykjanes Peninsula", "Snæfellsnes Peninsula", "Golden Circle", "South Coast".
-- Output is INVALID if such a day has only 1–4 rows.
-
-CONSISTENCY BETWEEN TIMES AND DURATION (CRITICAL):
-- The row time block (end-start) must be broadly consistent with the stated duration:
-  • Transport + Activity should roughly fit inside the time block (allow buffers).
-- Do NOT output huge blocks (e.g., 09:00–17:00) with tiny durations (e.g., Transport 45m + Activity 2h). If you need a long block, increase activity/transport realistically or add sub-stops.
-- NEVER output 0m for transport/activity.
+MACRO-DAYS (REGION/ROUTE DAYS) (CRITICAL DETAIL DENSITY):
+- Some days are effectively a region route even if not labeled as a "day trip".
+  Examples: "Reykjanes Peninsula", "Snæfellsnes Peninsula", "Golden Circle", "South Coast", "Ring Road segment", "Highlands day".
+- If a day’s activities clearly describe a REGION/ROUTE (peninsula/coast/circle/route/road), you MUST treat that day as a MACRO-DAY:
+  • Provide 5–8 REAL sub-stops (rows) in a logical drive sequence (not 1–3 rows).
+  • Use the macro name as DESTINATION for those rows (e.g., "Reykjanes – Bridge Between Continents", "Snæfellsnes – Kirkjufell").
+  • Include a dedicated final return row: "<Macro> – Return to {Base city}".
+  • Keep from/to as REAL places (hotel/attraction/town/viewpoint), never the macro name.
 
 DAYS DISTRIBUTION (CRITICAL, anti-Day1-only):
 - If days_total > 1, you MUST distribute rows across ALL days 1..days_total.
@@ -545,16 +533,6 @@ SAFETY / GLOBAL COHERENCE:
 SMART EDITING:
 - If the user asks to add/remove/adjust schedules, return updated JSON that remains consistent.
 - By default, preserve the itinerary's global coherence.
-
-FINAL SELF-CHECK (MANDATORY BEFORE OUTPUT):
-- Confirm: JSON only, no extra text.
-- Confirm: correct language (user’s real language).
-- Confirm: from/to/transport/duration/notes are non-empty for every row; notes >= 20 chars.
-- Confirm: duration is exactly 2 lines with \\n and no "0m".
-- Confirm: times are ordered, non-overlapping, continuous enough (no teleporting).
-- Confirm: days_total>1 => rows distributed across all days; not all day=1.
-- Confirm: macro-tours/day trips/region days => 5–8 sub-stops + dedicated return row.
-- Confirm: no cross-city mixing in multi-city; if multi-city, use Format C.
 
 Respond with valid JSON only.
 `.trim();
