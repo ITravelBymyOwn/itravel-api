@@ -348,13 +348,6 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
      FIXED dates, any provided TIME WINDOWS, AND any explicit "I want to visit/do X" requests (must-include).
   2) SOFT preferences: "prefer", "would like", interests, budget direction, pace, style (unless clearly stated as must).
   3) SUGGESTIONS: optional ideas, examples, "if possible", or vague wishes.
-
-🆕 QUIRÚRGICO (HOURS POLICY OVERRIDE — mandatory vs optimizable):
-- IMPORTANT: Only the START time of Day 1 and the END time of the LAST day are strictly mandatory time constraints.
-- Any other start/end hours provided for intermediate days MUST be treated as SOFT/OPTIMIZABLE (you may adjust them slightly if needed for a better itinerary).
-- If intermediate-day hours conflict with realism, logistics, daylight, closures, or route efficiency, you should modify them and keep the plan coherent.
-- You must still respect user intent (avoid extreme deviations) and keep times realistic.
-
 - CRITICAL (Special conditions must-include places):
   • The user may type place names inside "Special conditions / Conditions" (e.g., "Montserrat", "Girona", "Toledo", "Versailles").
   • If the user explicitly lists places they want to visit (including inside conditions), treat them as MUST-INCLUDE.
@@ -375,12 +368,6 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
   • Only the final row (or at most the final 1–2 rows if needed) may approach the day end.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
-
-🆕 QUIRÚRGICO (ANTI-DEFAULTS + intermediate-day flexibility, without breaking your block above):
-- Sometimes the system may include DEFAULT-looking hours for days the user left blank.
-- You MUST NOT treat default hours as user constraints unless the user clearly stated them.
-- If you are not sure the hours were explicitly provided by the user, treat that day as FLEXIBLE (use expert realistic hours).
-- Re-assertion: Only Day 1 start and Last Day end are strict; intermediate-day hours are optimizable.
 
 CONTEXT USAGE (CRITICAL):
 - You must use ALL information provided by the user in the Planner tab.
@@ -445,11 +432,6 @@ TIME INFERENCE (CRITICAL):
     - By default, the next row's "from" should match the previous row's "to" (or be an immediately plausible continuation).
     - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
 
-🆕 QUIRÚRGICO (CONSISTENCY BETWEEN TIMES AND DURATION):
-- The row time block (end-start) must be broadly consistent with Transport + Activity duration.
-- Do NOT output huge blocks (e.g., 09:00–17:00) with tiny durations (e.g., Transport 45m + Activity 2h).
-  If a day is long, split it into multiple sub-stops with realistic times.
-
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
 - If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
   • Aim for 6–10 rows for a normal full day window.
@@ -481,7 +463,7 @@ MANDATORY ROW CONTRACT:
   "Transport: <realistic estimate or ~range>"
   "Activity: <realistic estimate or ~range>"
   FORBIDDEN: "Transport: 0m" or "Activity: 0m"
-- notes: required (>=20 chars) motivating and useful:
+- notes: required (>=20 chars), motivating and useful:
   1) 1 emotional sentence (Admire/Discover/Feel…)
   2) 1 logistical tip (best time, reservations, tickets, view, etc.)
   + condition/alternative if applicable
@@ -516,25 +498,6 @@ DAY TRIPS / MACRO-TOURS:
 - Avoid the last day if there are options.
 - For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
 - CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
-
-🆕 QUIRÚRGICO (MACRO-DAYS for regions/routes + Blue Lagoon sequencing):
-- Some days are effectively REGION/ROUTE days even if not labeled "day trip".
-  Examples: "Reykjanes Peninsula", "Snæfellsnes Peninsula", "Golden Circle", "South Coast", "Ring Road segment", "Highlands day".
-- If a day represents a region/route, you MUST:
-  • Provide 5–8 REAL sub-stops (rows) in a logical geographic order.
-  • Use the macro name as DESTINATION for those rows (e.g., "Reykjanes – Bridge Between Continents").
-  • Include a dedicated final row: "<Macro> – Return to {Base city}".
-- Thermal/spa integration (e.g., Blue Lagoon within Reykjanes):
-  • BOTH are valid and you must choose the best:
-    (A) Tour first → thermal/spa near the end to finish relaxed.
-    (B) Thermal/spa first → continue the route afterward.
-  • Ensure the thermal/spa block is realistic (typically ~2–3h Activity) and the day remains optimized (not short).
-  • Do NOT compress a macro-day + thermal/spa into only 2–3 rows.
-
-🆕 QUIRÚRGICO (DAYS DISTRIBUTION — anti-Day1-only):
-- If days_total > 1, you MUST distribute rows across ALL days 1..days_total.
-- Output is INVALID if all rows end up with day=1.
-- In that case, you MUST regenerate with correct day values across days.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
