@@ -876,6 +876,15 @@ function getFrontendSnapshot(){
   );
 }
 
+/* ✅ NUEVO (QUIRÚRGICO): detectar si una hora fue realmente provista por el usuario
+   - No inventa defaults como "constraints"
+   - Acepta HH:MM; todo lo demás se considera "no provisto"
+*/
+function _isProvidedTime_(v){
+  const s = String(v ?? '').trim();
+  return /^\d{2}:\d{2}$/.test(s);
+}
+
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -899,23 +908,25 @@ function buildIntake(){
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
     if(!cityMeta[dest.city].perDay) cityMeta[dest.city].perDay = [];
+
+    // ✅ QUIRÚRGICO: NO forzar DEFAULT_* como si fueran horas provistas por el usuario.
+    // Conservamos lo que exista; si no hay nada, guardamos '' para indicar "flexible".
     cityMeta[dest.city].perDay = Array.from({length:dest.days}, (_,i)=>{
-      const prev = (cityMeta[dest.city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i];
-      return {
-        day: i+1,
-        start: (prev && prev.start) ? prev.start : DEFAULT_START,
-        end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
-      };
+      const prev = (cityMeta[dest.city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i] || {};
+      const start = _isProvidedTime_(prev.start) ? prev.start : '';
+      const end   = _isProvidedTime_(prev.end)   ? prev.end   : '';
+      return { day:i+1, start, end };
     });
   });
 
+  // ✅ QUIRÚRGICO: perDayHours debe reflejar SOLO lo provisto (o '' si flexible)
   const perDayHours = Object.fromEntries(
     savedDestinations.map(dest=>[
       dest.city,
       (cityMeta[dest.city]?.perDay || []).map(x=>({
         day: x.day,
-        start: x.start || DEFAULT_START,
-        end: x.end || DEFAULT_END
+        start: _isProvidedTime_(x.start) ? x.start : '',
+        end: _isProvidedTime_(x.end) ? x.end : ''
       }))
     ])
   );
@@ -990,19 +1001,19 @@ function buildCityIntake(city){
   // asegurar perDay para esta ciudad
   if(!cityMeta[city]) cityMeta[city] = {};
   if(!cityMeta[city].perDay) cityMeta[city].perDay = [];
+
+  // ✅ QUIRÚRGICO: NO forzar DEFAULT_* como constraints; usar '' si no provisto
   cityMeta[city].perDay = Array.from({length:days}, (_,i)=>{
-    const prev = (cityMeta[city].perDay||[]).find(x=>x.day===i+1) || dest?.perDay?.[i];
-    return {
-      day: i+1,
-      start: (prev && prev.start) ? prev.start : DEFAULT_START,
-      end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
-    };
+    const prev = (cityMeta[city].perDay||[]).find(x=>x.day===i+1) || dest?.perDay?.[i] || {};
+    const start = _isProvidedTime_(prev.start) ? prev.start : '';
+    const end   = _isProvidedTime_(prev.end)   ? prev.end   : '';
+    return { day:i+1, start, end };
   });
 
   const perDayHours = (cityMeta[city]?.perDay || []).map(x=>({
     day: x.day,
-    start: x.start || DEFAULT_START,
-    end: x.end || DEFAULT_END
+    start: _isProvidedTime_(x.start) ? x.start : '',
+    end: _isProvidedTime_(x.end) ? x.end : ''
   }));
 
   const dates = dest?.baseDate ? `, start=${dest.baseDate}` : '';
@@ -1729,13 +1740,144 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   }
 }
 
+/* ✅ QUIRÚRGICO: helpers para guard-rails (sin reescribir arquitectura) */
+function _isProvidedTime_(v){
+  const s = String(v ?? '').trim();
+  return /^\d{2}:\d{2}$/.test(s);
+}
+function _timeToMin_(hhmm){
+  const s = String(hhmm||'').trim();
+  const m = s.match(/^(\d{2}):(\d{2})$/);
+  if(!m) return null;
+  const h = parseInt(m[1],10), mm = parseInt(m[2],10);
+  if(Number.isNaN(h) || Number.isNaN(mm)) return null;
+  return h*60+mm;
+}
+function _extractRowsFromParsed_(parsed, city){
+  let tmpRows = [];
+  if(!parsed) return tmpRows;
+
+  if(parsed.rows){
+    tmpRows = parsed.rows;
+  } else if(parsed.destination && parsed.destination===city){
+    tmpRows = parsed.rows || [];
+  } else if(Array.isArray(parsed.destinations)){
+    const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
+    tmpRows = dd?.rows || [];
+  } else if(Array.isArray(parsed.itineraries)){
+    const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+    tmpRows = ii?.rows || [];
+  }
+  return Array.isArray(tmpRows) ? tmpRows : [];
+}
+function _getProvidedWindowMap_(perDayArr){
+  const map = {};
+  (perDayArr||[]).forEach(x=>{
+    const day = parseInt(x?.day,10) || null;
+    if(!day) return;
+    map[day] = {
+      start: _isProvidedTime_(x?.start) ? String(x.start).trim() : '',
+      end: _isProvidedTime_(x?.end) ? String(x.end).trim() : ''
+    };
+  });
+  return map;
+}
+function _violatesProvidedWindows_(rows, perDayArr){
+  try{
+    const win = _getProvidedWindowMap_(perDayArr);
+    const byDay = {};
+    (rows||[]).forEach(r=>{
+      const d = parseInt(r?.day,10) || 1;
+      if(!byDay[d]) byDay[d] = [];
+      byDay[d].push(r);
+    });
+
+    const badDays = [];
+    Object.entries(byDay).forEach(([dk, arr])=>{
+      const d = parseInt(dk,10) || 1;
+      const w = win[d] || {start:'',end:''};
+      const startLimit = _timeToMin_(w.start);
+      const endLimit   = _timeToMin_(w.end);
+
+      if(startLimit !== null){
+        const first = arr.slice().sort((a,b)=> (String(a.start||'') < String(b.start||'') ? -1 : 1))[0];
+        const firstStart = _timeToMin_(first?.start);
+        if(firstStart !== null && firstStart < startLimit) badDays.push(d);
+      }
+      if(endLimit !== null){
+        const last = arr.slice().sort((a,b)=> (String(a.end||'') < String(b.end||'') ? -1 : 1)).slice(-1)[0];
+        const lastEnd = _timeToMin_(last?.end);
+        if(lastEnd !== null && lastEnd > endLimit) badDays.push(d);
+      }
+    });
+
+    return Array.from(new Set(badDays)).sort((a,b)=>a-b);
+  }catch(_){
+    return [];
+  }
+}
+
+/* ✅ QUIRÚRGICO: macro/region day detection => must have 5–8 sub-stops + return */
+function _macroDensityMissing_(rows, city){
+  try{
+    const normCity = String(city||'').toLowerCase().trim();
+    const byDay = {};
+    (rows||[]).forEach(r=>{
+      const d = parseInt(r?.day,10) || 1;
+      if(!byDay[d]) byDay[d] = [];
+      byDay[d].push(r);
+    });
+
+    const missing = [];
+    Object.entries(byDay).forEach(([dk, arr])=>{
+      const d = parseInt(dk,10) || 1;
+      // count rows by DESTINATION prefix (before " – ")
+      const destCount = {};
+      for(const r of arr){
+        const a = String(r?.activity||'').trim();
+        const parts = a.split('–').map(x=>x.trim());
+        const left = (parts[0]||'').toLowerCase();
+        if(!left) continue;
+        destCount[left] = (destCount[left]||0) + 1;
+      }
+
+      // Find dominant macro destination that is NOT the base city
+      const entries = Object.entries(destCount).sort((a,b)=>b[1]-a[1]);
+      if(!entries.length) return;
+      const [topDest, topN] = entries[0];
+
+      // Heuristic: if topDest != city and it dominates the day, treat it as macro/region day
+      const total = arr.length;
+      const isMacro = topDest && (topDest !== normCity) && (topN >= 2 || total <= 4);
+
+      if(isMacro){
+        // Must have >=5 rows for that macro day
+        if(topN < 5) missing.push({ day:d, macro: topDest, count: topN });
+        // Must include explicit return row
+        const hasReturn = arr.some(r=>{
+          const a = String(r?.activity||'').toLowerCase();
+          return a.includes('return to') || a.includes('regreso a') || a.includes('retorno a');
+        });
+        if(!hasReturn) missing.push({ day:d, macro: topDest, count: topN, missingReturn:true });
+      }
+    });
+
+    return missing;
+  }catch(_){
+    return [];
+  }
+}
+
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
+  // ✅ QUIRÚRGICO: perDay debe reflejar SOLO lo provisto; si no provisto => ''
   const perDay = Array.from({length:dest.days}, (_,i)=>{
     const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-    return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
+    const start = _isProvidedTime_(src.start) ? String(src.start).trim() : '';
+    const end   = _isProvidedTime_(src.end)   ? String(src.end).trim()   : '';
+    return { day:i+1, start, end };
   });
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
@@ -1771,8 +1913,16 @@ DAY FIELD (CRITICAL):
 - EVERY row MUST include "day" between 1 and ${dest.days}.
 - You MUST distribute rows across ALL days (1..${dest.days}).
 
-TIME WINDOWS:
+TIME WINDOWS (CRITICAL):
+- Only treat provided HH:MM as binding for that day.
+- If start is provided for a day, the FIRST row must start at or after it.
+- If end is provided for a day, the LAST row must end at or before it.
+- If a day has blank start/end, it is FLEXIBLE (do NOT force default limits).
 ${JSON.stringify(perDay)}
+
+DETAIL DENSITY (CRITICAL):
+- For ROUTE/REGION/MACRO days (peninsulas, coasts, circles, routes), you MUST provide 5–8 real sub-stops (rows) PLUS a final dedicated return row to "${city}".
+- This applies even if you don't call it a "day trip".
 
 MUST-INCLUDE PLACES (CRITICAL):
 - If the user explicitly lists places to visit inside Special conditions,
@@ -1783,7 +1933,7 @@ ${explicitMustText}
 ROW QUALITY:
 - activity must be "DESTINATION – Specific sub-stop"
 - duration must be EXACTLY 2 lines with \\n
-- For day trips: 5–8 real sub-stops + final "Return to ${city}"
+- For macro days: 5–8 real sub-stops + final "Return to ${city}"
 
 CONTEXT:
 ${CITY_INTAKE}
@@ -1809,7 +1959,7 @@ ${CITY_INTAKE}
   };
 
   /* ===============================
-     ✅ GUARD-RAIL 2 (NUEVO)
+     ✅ GUARD-RAIL 2 (ya existía)
      Must-includes faltantes
   ================================== */
   const missingMustIncludes = (p)=>{
@@ -1822,9 +1972,35 @@ ${CITY_INTAKE}
     }catch(_){ return []; }
   };
 
-  let mustMissing = parsed ? missingMustIncludes(parsed) : [];
+  /* ===============================
+     ✅ GUARD-RAIL 3 (NUEVO)
+     Violación de ventanas provistas (Day1 start / LastDay end u otras)
+  ================================== */
+  const timeWindowBadDays = (p)=>{
+    try{
+      const rows = _extractRowsFromParsed_(p, city);
+      if(!rows.length) return [];
+      return _violatesProvidedWindows_(rows, perDay);
+    }catch(_){ return []; }
+  };
 
-  if(parsed && (needsRepair(parsed) || mustMissing.length)){
+  /* ===============================
+     ✅ GUARD-RAIL 4 (NUEVO)
+     Macro/region day con pocas sub-paradas o sin return
+  ================================== */
+  const macroMissing = (p)=>{
+    try{
+      const rows = _extractRowsFromParsed_(p, city);
+      if(!rows.length) return [];
+      return _macroDensityMissing_(rows, city);
+    }catch(_){ return []; }
+  };
+
+  let mustMissing = parsed ? missingMustIncludes(parsed) : [];
+  let badDays = parsed ? timeWindowBadDays(parsed) : [];
+  let macroMissingInfo = parsed ? macroMissing(parsed) : [];
+
+  if(parsed && (needsRepair(parsed) || mustMissing.length || badDays.length || macroMissingInfo.length)){
     const repair = `
 REPAIR (CRITICAL):
 - Your previous JSON was invalid.
@@ -1832,6 +2008,10 @@ REPAIR (CRITICAL):
 ${needsRepair(parsed) ? '- All rows were assigned to day=1. Distribute across days correctly.' : ''}
 
 ${mustMissing.length ? `- You omitted these required places: ${mustMissing.join(' | ')}. You MUST include them.` : ''}
+
+${badDays.length ? `- You violated provided time windows on these day(s): ${badDays.join(', ')}. Respect only the provided constraints: Day start => first row start >= start; Day end => last row end <= end.` : ''}
+
+${macroMissingInfo.length ? `- Your macro/route/region day(s) are too light or missing return rows. Fix these day(s): ${macroMissingInfo.map(x=>`Day ${x.day} (${x.macro})`).join(' | ')}. For EACH macro day: 5–8 real sub-stops + final dedicated "Return to ${city}" row.` : ''}
 
 Regenerate the FULL itinerary for "${city}".
 Return ONLY valid JSON.
@@ -1879,10 +2059,15 @@ Return ONLY valid JSON.
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
+
+  // ✅ QUIRÚRGICO: en rebalance también, hours no provistas quedan ''
   const perDay = Array.from({length: totalDays}, (_,i)=>{
-    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:DEFAULT_START,end:DEFAULT_END};
-    return { day:i+1, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END };
+    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:'',end:''};
+    const start = _isProvidedTime_(src.start) ? String(src.start).trim() : '';
+    const end   = _isProvidedTime_(src.end)   ? String(src.end).trim()   : '';
+    return { day:i+1, start, end };
   });
+
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
@@ -1904,18 +2089,28 @@ ${lockedDaysText}
 
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
-  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
-  • If it's NOT a day trip, "Destination" can be "${city}".
+  • "Destination" is NOT always the city: if a row belongs to a macro/route/region day, day trip or tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo", "Reykjanes Peninsula", "Snæfellsnes Peninsula").
+  • If it's NOT a macro/route day, "Destination" can be "${city}".
 - from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
   • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
 
+TIME WINDOWS (CRITICAL):
+- Only treat provided HH:MM as binding for that day; blank means FLEXIBLE.
+- If start is provided for a day => first row start >= start.
+- If end is provided for a day => last row end <= end.
+- Do NOT force default limits for blank days.
+Windows (only for affected range): ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+
+DETAIL DENSITY (CRITICAL):
+- For macro/route/region day(s) you MUST provide 5–8 real sub-stops PLUS a final dedicated return row to "${city}".
+- Output is INVALID if such a day has only 1–4 rows or misses the return row.
+
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
-- For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
-  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- For macro/route days (scattered stops):
+  - Use EXACTLY: "Rental Car or Guided Tour" unless a single obvious public transport option truly fits the whole route.
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible):
@@ -1926,17 +2121,12 @@ AURORAS (if plausible):
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
 - Guideline: ideally ≤ ~3h per one-way drive. If near the limit, adjust stops/window.
-- If you include a day trip:
+- If you include a macro/route day:
   • 5–8 sub-stops (rows) with realistic sequence.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
-  • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route, reach the logical end highlight before returning.
-  • Avoid optimistic returns: use conservative estimates in winter or at night.
+  • The FIRST macro row must be: "<Macro> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must end with a final dedicated row: "<Macro> – Return to ${city}".
 
 QUALITY:
-- Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
-- Consider key highlights and distribute without duplication.
-${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
 - The last day can be lighter, but don’t leave it “empty” if key highlights remain.
 - Validate plausibility and safety; replace with safe alternatives when needed.
 - Notes must ALWAYS be useful (never empty or "seed").
@@ -1960,6 +2150,33 @@ ${buildIntake()}
     }else if(Array.isArray(parsed.itineraries)){
       const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
       rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+    }
+
+    // ✅ Guard-rail adicional: si viola ventanas provistas o macro days light, reintenta una vez
+    const badDays = _violatesProvidedWindows_(rows, perDay);
+    const macroMissingInfo = _macroDensityMissing_(rows, city);
+    if(badDays.length || macroMissingInfo.length){
+      const repair = `
+REPAIR (CRITICAL):
+${badDays.length ? `- You violated provided time windows on day(s): ${badDays.join(', ')}.` : ''}
+${macroMissingInfo.length ? `- Your macro/route day(s) are too light or missing return rows. Fix: ${macroMissingInfo.map(x=>`Day ${x.day} (${x.macro})`).join(' | ')}` : ''}
+Regenerate the FULL rebalanced plan for "${city}" between days ${startDay} and ${endDay}.
+Return ONLY valid JSON.
+`.trim();
+      const ans2 = await _callPlannerSystemPrompt_(`${prompt}\n\n${repair}`, true);
+      const parsed2 = parseJSON(ans2);
+      if(parsed2 && (parsed2.rows || parsed2.destinations || parsed2.itineraries)){
+        // re-extract
+        if(parsed2.rows) rows = parsed2.rows.map(r=>normalizeRow(r));
+        else if(parsed2.destination===city && parsed2.rows) rows = parsed2.rows.map(r=>normalizeRow(r));
+        else if(Array.isArray(parsed2.destinations)){
+          const dd = parsed2.destinations.find(d=> (d.name||d.destination)===city);
+          rows = (dd?.rows||[]).map(r=>normalizeRow(r));
+        }else if(Array.isArray(parsed2.itineraries)){
+          const ii = parsed2.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+          rows = (ii?.rows||[]).map(r=>normalizeRow(r));
+        }
+      }
     }
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
