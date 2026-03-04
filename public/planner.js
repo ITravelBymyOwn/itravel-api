@@ -875,6 +875,7 @@ function getFrontendSnapshot(){
     )
   );
 }
+
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -895,27 +896,42 @@ function buildIntake(){
     .replace(/\n+/g,' ')
     .trim() || 'N/A';
 
+  // ✅ FIX: preserve blanks; do NOT force DEFAULT_START/DEFAULT_END into per-day hours.
+  // Hours must only be constraints if the user actually provided them.
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
     if(!cityMeta[dest.city].perDay) cityMeta[dest.city].perDay = [];
     cityMeta[dest.city].perDay = Array.from({length:dest.days}, (_,i)=>{
       const prev = (cityMeta[dest.city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i];
+
+      const rawStart = (prev && prev.start != null) ? String(prev.start).trim() : '';
+      const rawEnd   = (prev && prev.end   != null) ? String(prev.end).trim()   : '';
+
       return {
         day: i+1,
-        start: (prev && prev.start) ? prev.start : DEFAULT_START,
-        end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
+        start: rawStart,   // '' if not provided
+        end:   rawEnd      // '' if not provided
       };
     });
   });
 
+  // ✅ FIX: send null + provided flags so the agent only treats explicitly provided hours as binding.
   const perDayHours = Object.fromEntries(
     savedDestinations.map(dest=>[
       dest.city,
-      (cityMeta[dest.city]?.perDay || []).map(x=>({
-        day: x.day,
-        start: x.start || DEFAULT_START,
-        end: x.end || DEFAULT_END
-      }))
+      (cityMeta[dest.city]?.perDay || []).map(x=>{
+        const s = (x.start != null) ? String(x.start).trim() : '';
+        const e = (x.end   != null) ? String(x.end).trim()   : '';
+        const startProvided = !!s;
+        const endProvided   = !!e;
+        return {
+          day: x.day,
+          start: startProvided ? s : null,
+          end:   endProvided   ? e : null,
+          start_provided: startProvided,
+          end_provided:   endProvided
+        };
+      })
     ])
   );
 
