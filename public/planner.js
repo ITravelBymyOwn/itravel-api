@@ -951,92 +951,58 @@ function buildIntake(){
 }
 
 /* ==============================
-   SECCIÓN 11 · JSON / LLM Contract (reinforced v49) — v58 hardened (API rules)
+   SECCIÓN 11 · Contrato JSON / LLM (reforzado v49) — v58 robustecido (reglas API v52.5)
 ================================= */
 const FORMAT = `
-Return ONLY valid JSON (no markdown) in one of these formats:
+Devuelve SOLO JSON válido (sin markdown) en uno de estos:
 
-A) (PREFERRED, table-ready, aligned with current SYSTEM_PROMPT)
-{
-  "destination":"City",
-  "days_total":N,
-  "city_day":[
-    {"city":"City","day":1,"rows":[
-      {"day":1,"start":"09:00","end":"10:00","activity":"DESTINATION – SUB-STOP","from":"..","to":"..","transport":"..","duration":"Transport: ..\\\\nActivity: ..","notes":"..","kind":"","zone":""}
-    ]}
-  ],
-  "followup":"Short question"
-}
+A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
 
-B) (LEGACY compat) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Short question"}
+B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Pregunta breve"}
 
-C) (LEGACY compat) {"destination":"City","rows":[{...}],"replace":false,"followup":"Short question"}
+C) {"rows":[{...}],"replace":false,"followup":"Pregunta breve"}
 
-D) (LEGACY compat) {"rows":[{...}],"replace":false,"followup":"Short question"}
+D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Texto","transport":"Texto"},"followup":"Pregunta breve"}
 
-E) (Optional META) {
-  "meta":{
-    "city":"City",
-    "baseDate":"DD/MM/YYYY",
-    "start":"HH:MM" | [null|"HH:MM",...],
-    "end":"HH:MM" | [null|"HH:MM",...],
-    "hotel":"Text",
-    "transport":"Text"
-  },
-  "followup":"Short question"
-}
+Reglas (obligatorias, alineadas con API v52.5):
 
-Rules (mandatory, aligned with current SYSTEM_PROMPT + Planner behavior):
+- Responde SIEMPRE en el MISMO idioma del texto real del usuario (lo que el usuario escribió), independientemente del idioma del sitio (EN/ES).
+- Devuelve SIEMPRE al menos 1 fila renderizable en "rows". Nada de texto fuera del JSON.
+- Máximo 20 filas por día.
+- Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
+- Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre). No solapes.
+- Valida PLAUSIBILIDAD GLOBAL (geografía, temporada, clima aproximado, logística).
+- Seguridad y restricciones:
+  • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
+  • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o sustituye por alternativa segura.
 
-- Language:
-  • The Planner chat asks the user for the output language.
-  • Therefore, DO NOT infer language from template labels; just follow the user's chosen output language.
-- Return ALWAYS at least 1 renderable row (never an empty table). No text outside JSON.
-- Max 20 rows per day.
-- Optimize affected day(s) (minimize backtracking, group by zones, respect time windows).
-- Per-day time windows (CRITICAL):
-  • Treat ONLY time windows that were actually PROVIDED by the user as binding.
-  • If a day has NO provided end time, DO NOT invent a hard day-end (do NOT force 20:00/DEFAULT).
-  • If using arrays in meta.start/meta.end: use null for days without a time; null is NOT a constraint.
-- start/end are PER ROW (activity), NOT "day limits":
-  • Forbidden to set the day-end time as the end time for all rows.
-  • Only the final row (or at most the final 1–2 rows) may approach the day end if it was provided.
-  • FORBIDDEN "umbrella rows": never create a first row like 09:00–20:00 and then put more rows inside it.
-  • If there are multiple rows, each row must end before the next row starts (no overlaps).
-- If hours are missing, infer realistic times (open/close patterns) with no overlaps and a plausible sequence.
-- Validate global plausibility (geography, season, rough weather/logistics).
-- Safety & restrictions:
-  • Do not propose clearly unsafe or infeasible activities; prefer safe alternatives.
-  • If a risk/warning is relevant, mention a short, calm note in "notes" or replace with a safer option.
+Campos obligatorios por fila (NO vacíos):
+- "activity","from","to","transport","duration","notes" deben tener texto útil. Prohibido "seed" y notes vacías.
 
-Required per-row fields (NOT empty):
-- "activity","from","to","transport","duration","notes" must contain useful text. Forbidden: "seed" and empty notes.
-- "from/to/transport" must NEVER be empty.
+Formato de activity (obligatorio cuando aplique a itinerario):
+- "DESTINO – SUB-PARADA" (– o - con espacios). Evita genéricos tipo "museo", "parque", "restaurante local", "paseo por la ciudad".
 
-Activity format (mandatory when building an itinerary):
-- "DESTINATION – SUB-STOP" (– or - with spaces). Avoid generic labels like "museum", "park", "local restaurant", "walk around".
+Formato de duration (obligatorio, tabla-ready):
+- 2 líneas EXACTAS con salto \\n:
+  "Transporte: <estimación realista o ~rango>"
+  "Actividad: <estimación realista o ~rango>"
+- PROHIBIDO: "Transporte: 0m" o "Actividad: 0m"
+- NO usar comas para separar Transporte/Actividad.
 
-Duration format (mandatory, table-ready):
-- EXACTLY 2 lines with \\n:
-  "Transport: <realistic estimate or ~range>"
-  "Activity: <realistic estimate or ~range>"
-- FORBIDDEN: "Transport: 0m" or "Activity: 0m"
-- Do NOT use commas to separate Transport/Activity.
+Comidas (regla flexible):
+- NO son obligatorias. Si se incluyen, NO genéricas ("restaurante local" prohibido). Deben aportar valor.
 
-Meals (flex rule):
-- NOT required. If included, NOT generic ("local restaurant" forbidden). Must add real flow/value.
-
-Auroras (only if plausible by latitude/season):
-- Avoid consecutive days if possible. Avoid the last day; if it only fits there, mark as conditional.
-- Must be at realistic night hours.
+Auroras (solo si plausibles por latitud/temporada):
+- Evitar días consecutivos si hay opciones. Evitar el último día; si SOLO cabe ahí, marcar condicional.
+- Debe ser nocturno típico local.
+- En notes incluir: "valid: <justificación breve>" + referencia a clima/nubosidad + alternativa low-cost cercana.
 
 Day trips / Macro-tours:
-- If you propose a day trip, break it into 5–8 sub-stops (rows).
-- Close with its own return row: "<Macro-tour> – Return to {Base city}".
-- Avoid macro-tours on the last day if possible.
-- It is FORBIDDEN for the first day-trip row to cover the whole day.
+- Si propones excursión/day trip, desglosa en 5–8 sub-paradas (filas).
+- Cierra con fila propia: "Regreso a {Ciudad base}".
+- Evitar macro-tours en el último día si hay opciones.
 
-By default preserve existing plan (merge); do NOT delete existing rows unless explicitly instructed (replace=true).
+Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
 
 `;
 
@@ -1458,8 +1424,8 @@ function addMultipleDaysToCity(city, extraDays){
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
 LANGUAGE (CRITICAL):
-- The Planner asks the user for the output language. Output MUST follow the user's chosen itinerary language.
-- Do NOT infer language from system/template labels.
+- Output MUST be in the same language as the user's own content in the context.
+- Ignore system/template labels when choosing output language.
 
 Devuelve SOLO JSON válido:
 {
@@ -1473,11 +1439,6 @@ Devuelve SOLO JSON válido:
 
 CRITERIOS GLOBALES (flexibles):
 - Corrige horas solo si hay solapes evidentes o incoherencias claras.
-- ✅ CRITICAL ANTI-UMBRELLA (para bug actual):
-  • PROHIBIDO crear una primera fila que se extienda hasta el fin del día (ej. 09:00–20:00) si hay más filas ese día.
-  • Si detectas una fila paraguas, divídela/corrígela para que cada fila tenga ventana realista y sin solapes.
-  • No fuerces "end" a un supuesto cierre del día si el usuario no lo proveyó explícitamente.
-
 - Transporte lógico según actividad:
   • Barco para whale watching (puerto local).
   • Tour/bus/van para excursiones extensas.
