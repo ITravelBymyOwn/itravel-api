@@ -875,7 +875,6 @@ function getFrontendSnapshot(){
     )
   );
 }
-
 function buildIntake(){
   const pax = [
     ['adults','#p-adults'],
@@ -888,52 +887,20 @@ function buildIntake(){
   const budgetVal = qs('#budget')?.value || 'N/A';
   const currencyVal = qs('#currency')?.value || 'USD';
   const budget = budgetVal !== 'N/A' ? `${budgetVal} ${currencyVal}` : 'N/A';
+  const specialConditions = (qs('#special-conditions')?.value||'').trim()||'N/A';
 
-  const specialConditionsRaw = (qs('#special-conditions')?.value||'');
-  const specialConditions = specialConditionsRaw
-    .replace(/\r\n/g,'\n')
-    .replace(/\r/g,'\n')
-    .replace(/\n+/g,' ')
-    .trim() || 'N/A';
-
-  // ✅ FIX: preserve blanks; do NOT force DEFAULT_START/DEFAULT_END into per-day hours.
-  // Hours must only be constraints if the user actually provided them.
   savedDestinations.forEach(dest=>{
     if(!cityMeta[dest.city]) cityMeta[dest.city] = {};
     if(!cityMeta[dest.city].perDay) cityMeta[dest.city].perDay = [];
     cityMeta[dest.city].perDay = Array.from({length:dest.days}, (_,i)=>{
       const prev = (cityMeta[dest.city].perDay||[]).find(x=>x.day===i+1) || dest.perDay?.[i];
-
-      const rawStart = (prev && prev.start != null) ? String(prev.start).trim() : '';
-      const rawEnd   = (prev && prev.end   != null) ? String(prev.end).trim()   : '';
-
       return {
         day: i+1,
-        start: rawStart,   // '' if not provided
-        end:   rawEnd      // '' if not provided
+        start: (prev && prev.start) ? prev.start : DEFAULT_START,
+        end:   (prev && prev.end)   ? prev.end   : DEFAULT_END
       };
     });
   });
-
-  // ✅ FIX: send null + provided flags so the agent only treats explicitly provided hours as binding.
-  const perDayHours = Object.fromEntries(
-    savedDestinations.map(dest=>[
-      dest.city,
-      (cityMeta[dest.city]?.perDay || []).map(x=>{
-        const s = (x.start != null) ? String(x.start).trim() : '';
-        const e = (x.end   != null) ? String(x.end).trim()   : '';
-        const startProvided = !!s;
-        const endProvided   = !!e;
-        return {
-          day: x.day,
-          start: startProvided ? s : null,
-          end:   endProvided   ? e : null,
-          start_provided: startProvided,
-          end_provided:   endProvided
-        };
-      })
-    ])
-  );
 
   const list = savedDestinations.map(x=>{
     const dates = x.baseDate ? `, start=${x.baseDate}` : '';
@@ -945,7 +912,6 @@ function buildIntake(){
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
     `Special conditions: ${specialConditions}`,
-    `PerDayHours: ${JSON.stringify(perDayHours)}`,
     `Existing: ${getFrontendSnapshot()}`
   ].join('\n');
 }
@@ -1053,7 +1019,7 @@ Edits:
 
   // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
   const controller = new AbortController();
-  const timeoutMs = 120000; // 120s (ajustable)
+  const timeoutMs = 75000; // 75s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1617,7 +1583,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
   // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
-  const timeoutMs = 120000;
+  const timeoutMs = 75000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1661,31 +1627,14 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   }
 }
 
-// ✅ helper (local to SECTION 15): keep blanks; no DEFAULT_* in prompt hours
-function _normalizePerDayForPrompt_(dest, city){
-  return Array.from({length:dest.days}, (_,i)=>{
-    const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-    const s = (src.start != null) ? String(src.start).trim() : '';
-    const e = (src.end   != null) ? String(src.end).trim()   : '';
-    const startProvided = !!s;
-    const endProvided   = !!e;
-    return {
-      day: i+1,
-      start: startProvided ? s : null,
-      end:   endProvided   ? e : null,
-      start_provided: startProvided,
-      end_provided:   endProvided
-    };
-  });
-}
-
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
-  // ✅ FIX: do NOT inject DEFAULT_START/DEFAULT_END into the prompt reference.
-  // Only pass provided times; blanks become null + flags.
-  const perDay = _normalizePerDayForPrompt_(dest, city);
+  const perDay = Array.from({length:dest.days}, (_,i)=>{
+    const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
+    return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
+  });
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
@@ -1788,30 +1737,17 @@ QUALITY / MAXIMIZE EXPERIENCE:
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
-
-  // ✅ FIX: do NOT inject DEFAULT_START/DEFAULT_END into the prompt reference
   const perDay = Array.from({length: totalDays}, (_,i)=>{
-    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {};
-    const s = (src.start != null) ? String(src.start).trim() : '';
-    const e = (src.end   != null) ? String(src.end).trim()   : '';
-    const startProvided = !!s;
-    const endProvided   = !!e;
-    return {
-      day: i+1,
-      start: startProvided ? s : null,
-      end:   endProvided   ? e : null,
-      start_provided: startProvided,
-      end_provided:   endProvided
-    };
+    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:DEFAULT_START,end:DEFAULT_END};
+    return { day:i+1, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END };
   });
-
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
   // 🆕 Determine rebalance range
   const startDay = opts.start || 1;
   const endDay = opts.end || totalDays;
-  const lockedDaysText = startDay > 1
+  const lockedDaysText = startDay > 1 
     ? `Keep days 1 to ${startDay - 1} intact.`
     : '';
 
@@ -1863,7 +1799,7 @@ ${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, i
 - Validate plausibility and safety; replace with safe alternatives when needed.
 - Notes must ALWAYS be useful (never empty or "seed").
 
-Current context (to merge without deleting):
+Current context (to merge without deleting): 
 ${buildIntake()}
 `.trim();
 
