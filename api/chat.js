@@ -363,14 +363,20 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
 
 TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
 - The user may provide start/end hours for some days and leave others blank.
-- Treat ONLY provided hours as binding, PER DAY:
-  • If a day has a provided start, the first row of that day MUST start at or after it.
-  • If a day has a provided end, the LAST row of that day MUST end at or before it.
+- Treat ONLY explicitly PROVIDED hours as binding, PER DAY.
+  • If the Planner input provides per-day hours with flags (recommended):
+    - If start_provided=true, then the first row of that day MUST start at or after "start".
+    - If end_provided=true, then the LAST row of that day MUST end at or before "end".
+    - If *_provided is false OR hours are null/empty, those hours are NOT constraints.
+  • If the user explicitly wrote a day start/end in free text, treat it as provided.
 - IMPORTANT: start/end fields are PER ROW (per activity), not "day limits".
   • Do NOT set end time of every row to the day end time.
   • Only the final row (or at most the final 1–2 rows if needed) may approach the day end.
-  • CRITICAL FIX: NEVER create a first row that spans the whole day (e.g., 09:00–17:00) and then add more rows inside that window.
+  • CRITICAL FIX: NEVER create a first row that spans the whole day (e.g., 09:00–20:00) and then add more rows inside that window.
     If there are multiple rows, the first row MUST end before the next row starts (no overlaps).
+  • STRICT ANTI-UMBRELLA:
+    - If a day has >=2 rows, it is FORBIDDEN for the first row's "end" to equal the day's provided end time.
+    - It is FORBIDDEN to create any "covers-the-day" block and then split activities under it.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
 
@@ -424,7 +430,7 @@ GENERAL RULES:
   - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
 
 TIME INFERENCE (CRITICAL):
-- User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
+- User-provided per-day start/end times are HARD CONSTRAINTS ONLY when explicitly provided (see TIME WINDOWS).
 - If the user provides hours for SOME days only, you MUST:
   • Respect those exact per-day hours where provided.
   • Actively infer realistic start/end times for ALL other days and rows.
@@ -440,7 +446,7 @@ TIME INFERENCE (CRITICAL):
     - Do NOT create placeholder/umbrella rows like "Departure from City" that cover large blocks of the day.
     - If you include a "Departure" row (for a day trip), it must be a NORMAL row with realistic duration:
       it should represent only the initial transfer + brief arrival/setup, and MUST end before the next stop begins.
-      Guideline: typically 30–90 minutes total window unless the actual transfer is longer; never "09:00–17:00" as a departure row.
+      Guideline: typically 30–90 minutes total window unless the actual transfer is longer; never "09:00–20:00" as a departure row.
   • CRITICAL CONTINUITY (no teleporting):
     - By default, the next row's "from" should match the previous row's "to" (or be an immediately plausible continuation).
     - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
