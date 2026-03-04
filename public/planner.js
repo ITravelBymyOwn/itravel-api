@@ -1458,8 +1458,8 @@ function addMultipleDaysToCity(city, extraDays){
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
 LANGUAGE (CRITICAL):
-- Output MUST be in the same language as the user's own content in the context.
-- Ignore system/template labels when choosing output language.
+- The Planner asks the user for the output language. Output MUST follow the user's chosen itinerary language.
+- Do NOT infer language from system/template labels.
 
 Devuelve SOLO JSON válido:
 {
@@ -1473,6 +1473,11 @@ Devuelve SOLO JSON válido:
 
 CRITERIOS GLOBALES (flexibles):
 - Corrige horas solo si hay solapes evidentes o incoherencias claras.
+- ✅ CRITICAL ANTI-UMBRELLA (para bug actual):
+  • PROHIBIDO crear una primera fila que se extienda hasta el fin del día (ej. 09:00–20:00) si hay más filas ese día.
+  • Si detectas una fila paraguas, divídela/corrígela para que cada fila tenga ventana realista y sin solapes.
+  • No fuerces "end" a un supuesto cierre del día si el usuario no lo proveyó explícitamente.
+
 - Transporte lógico según actividad:
   • Barco para whale watching (puerto local).
   • Tour/bus/van para excursiones extensas.
@@ -1695,14 +1700,31 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   }
 }
 
+// ✅ helper (local to SECTION 15): keep blanks; no DEFAULT_* in prompt hours
+function _normalizePerDayForPrompt_(dest, city){
+  return Array.from({length:dest.days}, (_,i)=>{
+    const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
+    const s = (src.start != null) ? String(src.start).trim() : '';
+    const e = (src.end   != null) ? String(src.end).trim()   : '';
+    const startProvided = !!s;
+    const endProvided   = !!e;
+    return {
+      day: i+1,
+      start: startProvided ? s : null,
+      end:   endProvided   ? e : null,
+      start_provided: startProvided,
+      end_provided:   endProvided
+    };
+  });
+}
+
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
-  const perDay = Array.from({length:dest.days}, (_,i)=>{
-    const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-    return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
-  });
+  // ✅ FIX: do NOT inject DEFAULT_START/DEFAULT_END into the prompt reference.
+  // Only pass provided times; blanks become null + flags.
+  const perDay = _normalizePerDayForPrompt_(dest, city);
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
@@ -1805,17 +1827,30 @@ QUALITY / MAXIMIZE EXPERIENCE:
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
+
+  // ✅ FIX: do NOT inject DEFAULT_START/DEFAULT_END into the prompt reference
   const perDay = Array.from({length: totalDays}, (_,i)=>{
-    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:DEFAULT_START,end:DEFAULT_END};
-    return { day:i+1, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END };
+    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {};
+    const s = (src.start != null) ? String(src.start).trim() : '';
+    const e = (src.end   != null) ? String(src.end).trim()   : '';
+    const startProvided = !!s;
+    const endProvided   = !!e;
+    return {
+      day: i+1,
+      start: startProvided ? s : null,
+      end:   endProvided   ? e : null,
+      start_provided: startProvided,
+      end_provided:   endProvided
+    };
   });
+
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
   // 🆕 Determine rebalance range
   const startDay = opts.start || 1;
   const endDay = opts.end || totalDays;
-  const lockedDaysText = startDay > 1 
+  const lockedDaysText = startDay > 1
     ? `Keep days 1 to ${startDay - 1} intact.`
     : '';
 
@@ -1867,7 +1902,7 @@ ${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, i
 - Validate plausibility and safety; replace with safe alternatives when needed.
 - Notes must ALWAYS be useful (never empty or "seed").
 
-Current context (to merge without deleting): 
+Current context (to merge without deleting):
 ${buildIntake()}
 `.trim();
 
