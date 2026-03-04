@@ -417,17 +417,6 @@ GENERAL RULES:
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
 
-OUTPUT VALIDATION (MUST PASS BEFORE YOU RETURN JSON):
-- You MUST self-check and fix the schedule before responding:
-  1) For each day: sort rows by start time.
-  2) Ensure NO overlaps: row[i].end <= row[i+1].start (add realistic buffers if needed).
-  3) If a day has 2+ rows, FORBIDDEN to have any single row that spans most of the day (umbrella block).
-     - Hard rule: If a day has 2+ rows, NO row may span more than 4 hours.
-     - If a single experience truly takes most of the day (e.g., a long tour), then it MUST be the ONLY row of that day (or at most add one small evening row after it that starts AFTER the tour ends, never inside it).
-  4) If a day has a provided day-end time, ONLY the final row may end near it; earlier rows must end earlier.
-  5) Start/end must always be present and in HH:MM local time.
-- If any check fails, you MUST fix times/structure and re-validate before output.
-
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
 - If the user provides hours for SOME days only, you MUST:
@@ -512,14 +501,22 @@ AURORAS (HARD RULE + REPLACEMENT):
 - If auroras are NOT plausible and you need a night highlight, you MUST replace it with a real iconic night experience for that city (night viewpoint, show, night cruise, illuminated landmark walk, etc.).
 - CRITICAL ADDITION (when auroras ARE plausible and you include them):
   • In the aurora row "notes", include a short list of 3–6 viable nearby viewing areas/spots (realistic for that base city) as options.
-    - Example for Reykjavik area (adapt as needed): Grótta Lighthouse, Heiðmörk, Þingvellir (if already nearby), Hvalfjörður viewpoints, Kleifarvatn/Krýsuvík area, Reykjanes coastline dark spots.
   • Also include a practical validation tip: "Check aurora forecast + cloud cover before leaving" (or equivalent in the user's language).
-  • Auroras MUST be scheduled at NIGHT local time (never daytime).
 
-DAY TRIPS / MACRO-TOURS:
+DAY TRIPS / MACRO-TOURS (CRITICAL — NO DAY-BLOCK FIRST ROWS):
 - If you create a day trip, you must break it down into 5–8 sub-stops (rows) WHEN IT MAKES SENSE (destination supports multiple real stops).
 - If the day trip is inherently simple/logistical (e.g., ferry + a couple of core stops) OR the user's time window is short,
   you MAY return 3–5 rows (but avoid 1–2 rows unless the user explicitly requests a minimal plan).
+- HARD RULE (prevents the bug you reported):
+  • You MUST NOT output a first day-trip row that spans most of the day (e.g., 09:00–17:00).
+  • A day trip MUST be represented as a sequence of normal rows:
+    1) Optional "Departure/Drive" row: short, realistic (usually 30–90m unless the transfer is truly longer).
+    2) 2–6 stop rows with their own times.
+    3) A dedicated return row with its own realistic times.
+  • If you output a long first row and then additional rows inside that window, your answer is INVALID—fix it before returning JSON.
+- HARD RULE (time geometry):
+  • The "start/end" window of a row must match the "duration" roughly (no 8-hour window with 1-hour duration).
+  • Each stop row must have a plausible activity window (typically 45m–2h30m), and driving segments must match realistic transfer time.
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
@@ -533,7 +530,6 @@ DAY TRIPS / MACRO-TOURS:
     - Choose ONE coherent strategy (decide as an expert):
       A) Reykjanes scenic stops first → Blue Lagoon later (relax last), OR
       B) Blue Lagoon first → 1–3 nearby iconic Reykjanes stops after (if still reasonable).
-    - Nearby/iconic Reykjanes stop examples (pick only what fits logically): Krýsuvík/Seltún geothermal area, Kleifarvatn lake, Gunnuhver, Reykjanesviti lighthouse/coast, Bridge Between Continents, Brimketill, Garður lighthouse.
     - Add only stops that are truly nearby and iconic; do NOT force 5–8 if it would be filler.
     - Keep timing realistic and avoid rushed loops; if the day is tight, keep it simple and add a notes tip suggesting an optional nearby add-on.
 
