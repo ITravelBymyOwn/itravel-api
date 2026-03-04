@@ -353,6 +353,9 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
   • If the user explicitly lists places they want to visit (including inside conditions), treat them as MUST-INCLUDE.
   • If multiple must-include places are provided, you MUST schedule EACH of them at least once across the itinerary days (when feasible),
     distributing them across different days if days_total allows (do NOT silently drop one).
+  • 🆕 MUST-INCLUDE CONTRACT (no silent omissions):
+    - Every MUST-INCLUDE place must appear in at least ONE row "activity" or "to" field.
+    - If ANY MUST-INCLUDE place cannot be scheduled (distance/closed/time impossible), you MUST explain it in "followup" and propose the closest feasible alternative.
 - If the user explicitly requests a place/activity (e.g., "I want Montserrat and Girona"), you MUST ensure it appears in the itinerary
   unless it is infeasible; if infeasible, propose the closest equivalent and explain briefly in notes.
 - If there is a conflict (e.g., “no walking” vs “hiking”), prioritize safety/feasibility and propose an equivalent alternative.
@@ -414,6 +417,9 @@ GENERAL RULES:
 - Times must be ordered and NOT overlap.
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
+- 🆕 ANTI-EMPTY DAYS (UX):
+  - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–8 rows (not 1–2).
+  - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -493,6 +499,9 @@ AURORAS (HARD RULE + REPLACEMENT):
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–8 sub-stops (rows).
+- 🆕 FORBIDDEN umbrella rows:
+  - Do NOT use generic activities like "Day trip to X", "Excursion to X", "Excursão de um dia", "Tour de 1 dia".
+  - Each row must be either a named transport movement OR a named physical sub-stop.
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
