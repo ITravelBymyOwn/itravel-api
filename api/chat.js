@@ -353,6 +353,9 @@ INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
   • If the user explicitly lists places they want to visit (including inside conditions), treat them as MUST-INCLUDE.
   • If multiple must-include places are provided, you MUST schedule EACH of them at least once across the itinerary days (when feasible),
     distributing them across different days if days_total allows (do NOT silently drop one).
+  • 🆕 MUST-INCLUDE CONTRACT (no silent omissions):
+    - Every MUST-INCLUDE place must appear in at least ONE row "activity" or "to" field.
+    - If ANY MUST-INCLUDE place cannot be scheduled (distance/closed/time impossible), you MUST explain it in "followup" and propose the closest feasible alternative.
 - If the user explicitly requests a place/activity (e.g., "I want Montserrat and Girona"), you MUST ensure it appears in the itinerary
   unless it is infeasible; if infeasible, propose the closest equivalent and explain briefly in notes.
 - If there is a conflict (e.g., “no walking” vs “hiking”), prioritize safety/feasibility and propose an equivalent alternative.
@@ -416,6 +419,9 @@ GENERAL RULES:
 - Times must be ordered and NOT overlap.
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
+- 🆕 ANTI-EMPTY DAYS (UX):
+  - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–8 rows (not 1–2).
+  - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -503,20 +509,10 @@ AURORAS (HARD RULE + REPLACEMENT):
   • In the aurora row "notes", include a short list of 3–6 viable nearby viewing areas/spots (realistic for that base city) as options.
   • Also include a practical validation tip: "Check aurora forecast + cloud cover before leaving" (or equivalent in the user's language).
 
-DAY TRIPS / MACRO-TOURS (CRITICAL — NO DAY-BLOCK FIRST ROWS):
+DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–8 sub-stops (rows) WHEN IT MAKES SENSE (destination supports multiple real stops).
 - If the day trip is inherently simple/logistical (e.g., ferry + a couple of core stops) OR the user's time window is short,
   you MAY return 3–5 rows (but avoid 1–2 rows unless the user explicitly requests a minimal plan).
-- HARD RULE (prevents the bug you reported):
-  • You MUST NOT output a first day-trip row that spans most of the day (e.g., 09:00–17:00).
-  • A day trip MUST be represented as a sequence of normal rows:
-    1) Optional "Departure/Drive" row: short, realistic (usually 30–90m unless the transfer is truly longer).
-    2) 2–6 stop rows with their own times.
-    3) A dedicated return row with its own realistic times.
-  • If you output a long first row and then additional rows inside that window, your answer is INVALID—fix it before returning JSON.
-- HARD RULE (time geometry):
-  • The "start/end" window of a row must match the "duration" roughly (no 8-hour window with 1-hour duration).
-  • Each stop row must have a plausible activity window (typically 45m–2h30m), and driving segments must match realistic transfer time.
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
