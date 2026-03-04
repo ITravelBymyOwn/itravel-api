@@ -417,6 +417,17 @@ GENERAL RULES:
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
 
+OUTPUT VALIDATION (MUST PASS BEFORE YOU RETURN JSON):
+- You MUST self-check and fix the schedule before responding:
+  1) For each day: sort rows by start time.
+  2) Ensure NO overlaps: row[i].end <= row[i+1].start (add realistic buffers if needed).
+  3) If a day has 2+ rows, FORBIDDEN to have any single row that spans most of the day (umbrella block).
+     - Hard rule: If a day has 2+ rows, NO row may span more than 4 hours.
+     - If a single experience truly takes most of the day (e.g., a long tour), then it MUST be the ONLY row of that day (or at most add one small evening row after it that starts AFTER the tour ends, never inside it).
+  4) If a day has a provided day-end time, ONLY the final row may end near it; earlier rows must end earlier.
+  5) Start/end must always be present and in HH:MM local time.
+- If any check fails, you MUST fix times/structure and re-validate before output.
+
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
 - If the user provides hours for SOME days only, you MUST:
@@ -501,7 +512,9 @@ AURORAS (HARD RULE + REPLACEMENT):
 - If auroras are NOT plausible and you need a night highlight, you MUST replace it with a real iconic night experience for that city (night viewpoint, show, night cruise, illuminated landmark walk, etc.).
 - CRITICAL ADDITION (when auroras ARE plausible and you include them):
   • In the aurora row "notes", include a short list of 3–6 viable nearby viewing areas/spots (realistic for that base city) as options.
+    - Example for Reykjavik area (adapt as needed): Grótta Lighthouse, Heiðmörk, Þingvellir (if already nearby), Hvalfjörður viewpoints, Kleifarvatn/Krýsuvík area, Reykjanes coastline dark spots.
   • Also include a practical validation tip: "Check aurora forecast + cloud cover before leaving" (or equivalent in the user's language).
+  • Auroras MUST be scheduled at NIGHT local time (never daytime).
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–8 sub-stops (rows) WHEN IT MAKES SENSE (destination supports multiple real stops).
@@ -520,6 +533,7 @@ DAY TRIPS / MACRO-TOURS:
     - Choose ONE coherent strategy (decide as an expert):
       A) Reykjanes scenic stops first → Blue Lagoon later (relax last), OR
       B) Blue Lagoon first → 1–3 nearby iconic Reykjanes stops after (if still reasonable).
+    - Nearby/iconic Reykjanes stop examples (pick only what fits logically): Krýsuvík/Seltún geothermal area, Kleifarvatn lake, Gunnuhver, Reykjanesviti lighthouse/coast, Bridge Between Continents, Brimketill, Garður lighthouse.
     - Add only stops that are truly nearby and iconic; do NOT force 5–8 if it would be filler.
     - Keep timing realistic and avoid rushed loops; if the day is tight, keep it simple and add a notes tip suggesting an optional nearby add-on.
 
