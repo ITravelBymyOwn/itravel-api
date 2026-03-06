@@ -1794,21 +1794,50 @@ function _extractPlannerRows_(parsed, city){
     return parsed.rows.map(r=>normalizeRow(r));
   }
 
+  // ✅ CRITICAL FIX: preserve block.day when rows inside city_day do not include their own day
   if(Array.isArray(parsed.city_day)){
     return parsed.city_day
-      .filter(block => (block?.city || parsed.destination || '') === city || !block?.city)
-      .flatMap(block => Array.isArray(block?.rows) ? block.rows : [])
-      .map(r=>normalizeRow(r));
+      .filter(block => {
+        const blockCity = block?.city || parsed.destination || city;
+        return blockCity === city;
+      })
+      .flatMap(block => {
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        return rows.map(r => normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum));
+      });
   }
 
   if(Array.isArray(parsed.destinations)){
     const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
-    return (dd?.rows||[]).map(r=>normalizeRow(r));
+    if(Array.isArray(dd?.rows)) return dd.rows.map(r=>normalizeRow(r));
+
+    // ✅ same fix for nested city_day inside destinations
+    if(Array.isArray(dd?.city_day)){
+      return dd.city_day.flatMap(block=>{
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        return rows.map(r => normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum));
+      });
+    }
+
+    return [];
   }
 
   if(Array.isArray(parsed.itineraries)){
     const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
-    return (ii?.rows||[]).map(r=>normalizeRow(r));
+    if(Array.isArray(ii?.rows)) return ii.rows.map(r=>normalizeRow(r));
+
+    // ✅ same fix for nested city_day inside itineraries
+    if(Array.isArray(ii?.city_day)){
+      return ii.city_day.flatMap(block=>{
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        return rows.map(r => normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum));
+      });
+    }
+
+    return [];
   }
 
   return [];
@@ -2001,11 +2030,6 @@ ${buildIntake()}
     chatMsg(getLang()==='es' ? 'I did not receive valid changes for rebalancing. Want to try another way?' : 'I did not receive valid changes for rebalancing. Want to try another way?','ai');
   }
 }
-
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v55.1 (parte 3/3)
-   Base: v54  ✅
-========================================================= */
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
