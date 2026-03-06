@@ -1168,23 +1168,120 @@ function ensureDays(city){
   }
   itineraries[city].byDay = byDay;
 }
-function normalizeRow(r = {}, fallbackDay = 1){
-  const start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? DEFAULT_START;
-  const end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? DEFAULT_END;
-  const act     = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
-  const from    = r.from ?? r.origin ?? r.origen ?? '';
-  const to      = r.to   ?? r.destination ?? r.destino ?? '';
-  const trans   = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
-  const durRaw  = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
-  const notes   = r.notes ?? r.nota ?? r.comentarios ?? '';
 
-  // ✅ QUIRÚRGICO: normaliza duration a 2 líneas si viene "Transporte: X, Actividad: Y"
-  let duration = (typeof durRaw === 'number') ? `${durRaw}m` : (String(durRaw)||'');
-  if (duration && /Transporte\s*:/i.test(duration) && /Actividad\s*:/i.test(duration) && duration.includes(',')) {
-    duration = duration.replace(/\s*,\s*Actividad\s*:/i, '\nActividad:');
+// ✅ QUIRÚRGICO: helpers locales para evitar filas paraguas y duraciones inválidas
+function _hhmmToMinutes_(s){
+  const m = String(s||'').trim().match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  const hh = Math.max(0, Math.min(23, parseInt(m[1],10)));
+  const mm = Math.max(0, Math.min(59, parseInt(m[2],10)));
+  return (hh * 60) + mm;
+}
+function _minutesToHHMM_(mins){
+  let n = Number(mins);
+  if(!Number.isFinite(n)) return '';
+  while(n < 0) n += 24*60;
+  n = n % (24*60);
+  const hh = String(Math.floor(n/60)).padStart(2,'0');
+  const mm = String(Math.floor(n%60)).padStart(2,'0');
+  return `${hh}:${mm}`;
+}
+function _sumApproxMinutesFromDuration_(txt){
+  const s = String(txt||'');
+  if(!s.trim()) return null;
+
+  const matches = [...s.matchAll(/~?\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins)\b/ig)];
+  if(!matches.length) return null;
+
+  let total = 0;
+  for(const mm of matches){
+    const val = parseFloat(mm[1]);
+    const unit = String(mm[2]||'').toLowerCase();
+    if(!Number.isFinite(val)) continue;
+    if(unit.startsWith('h')) total += Math.round(val * 60);
+    else total += Math.round(val);
+  }
+  return total > 0 ? total : null;
+}
+function _sanitizeDurationLines_(raw){
+  let s = (typeof raw === 'number') ? `${raw}m` : String(raw||'').trim();
+
+  if (s && /Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && s.includes(',')) {
+    s = s.replace(/\s*,\s*Actividad\s*:/i, '\nActividad:');
+  }
+  if (s && /Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(',')) {
+    s = s.replace(/\s*,\s*Activity\s*:/i, '\nActivity:');
   }
 
+  if(!s){
+    return 'Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat';
+  }
+
+  // ✅ Evita 0m / ~0m
+  s = s.replace(/(Transporte|Transport)\s*:\s*~?0m\b/gi, '$1: ~10m');
+  s = s.replace(/(Actividad|Activity)\s*:\s*~?0m\b/gi, '$1: ~10m');
+
+  return s;
+}
+
+function normalizeRow(r = {}, fallbackDay = 1){
+  let start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
+  let end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
+  const act   = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
+  const from  = r.from ?? r.origin ?? r.origen ?? '';
+  const to    = r.to   ?? r.destination ?? r.destino ?? '';
+  const trans = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
+  const durRaw= r.duration ?? r.durationMinutes ?? r.duracion ?? '';
+  const notes = r.notes ?? r.nota ?? r.comentarios ?? '';
+
+  let duration = _sanitizeDurationLines_(durRaw);
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
+
+  const startStr = String(start||'').trim();
+  const endStr   = String(end||'').trim();
+
+  let startMin = _hhmmToMinutes_(startStr);
+  let endMin   = _hhmmToMinutes_(endStr);
+
+  // ✅ Si falta una hora, intenta inferirla desde duration (en vez de forzar defaults)
+  const approxDur = _sumApproxMinutesFromDuration_(duration);
+  if(startMin != null && endMin == null && approxDur){
+    endMin = startMin + Math.max(approxDur, 30);
+  }else if(startMin == null && endMin != null && approxDur){
+    startMin = Math.max(0, endMin - Math.max(approxDur, 30));
+  }
+
+  // ✅ Anti-umbrella: si la fila ocupa muchísimo más que su duración real, comprímela
+  if(startMin != null && endMin != null && approxDur){
+    let span = endMin - startMin;
+    if(span <= 0) span += 24*60;
+
+    // si el bloque es exageradamente mayor que la duración real, corrige el end
+    if(span >= Math.max(240, approxDur * 2.2)){
+      const compressed = Math.min(Math.max(approxDur + 15, 30), 210); // buffer ligero, sin exagerar
+      endMin = startMin + compressed;
+    }
+  }
+
+  // ✅ Fallback final: solo si sigue faltando algo, entonces sí usa defaults
+  if(startMin == null && endMin == null){
+    startMin = _hhmmToMinutes_(DEFAULT_START);
+    endMin   = _hhmmToMinutes_(DEFAULT_END);
+  }else if(startMin != null && endMin == null){
+    endMin = startMin + 90;
+  }else if(startMin == null && endMin != null){
+    startMin = Math.max(0, endMin - 90);
+  }
+
+  // ✅ Garantiza consistencia mínima
+  let finalSpan = endMin - startMin;
+  if(finalSpan <= 0) finalSpan += 24*60;
+  if(finalSpan < 15){
+    endMin = startMin + 30;
+  }
+
+  const finalStart = _minutesToHHMM_(startMin);
+  const finalEnd   = _minutesToHHMM_(endMin);
 
   // ✅ QUIRÚRGICO: guard-rails locales anti-campos-vacíos (fail-open)
   const safeActivity  = (String(act||'').trim() || 'Actividad por definir');
@@ -1193,9 +1290,18 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const safeTransport = (String(trans||'').trim() || 'A pie o Transporte local');
   const n0 = String(notes||'').trim();
   const safeNotes = (n0 && n0.toLowerCase()!=='seed') ? n0 : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
-  const safeDuration = (String(duration||'').trim() || 'Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat');
 
-  return { day:d, start:start||DEFAULT_START, end:end||DEFAULT_END, activity:safeActivity, from:safeFrom, to:safeTo, transport:safeTransport, duration:safeDuration, notes:safeNotes };
+  return {
+    day:d,
+    start: finalStart || DEFAULT_START,
+    end: finalEnd || DEFAULT_END,
+    activity:safeActivity,
+    from:safeFrom,
+    to:safeTo,
+    transport:safeTransport,
+    duration:duration,
+    notes:safeNotes
+  };
 }
 
 function dedupeSoftSameDay(rows){
@@ -1263,6 +1369,23 @@ function applyParsedToState(parsed){
     }
   }
 
+  // ✅ soporte quirúrgico para formato preferido city_day
+  if(Array.isArray(parsed.city_day)){
+    const name = parsed.destination || parsed.city || parsed.meta?.city || activeCity || savedDestinations[0]?.city;
+    if(name){
+      const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
+      parsed.city_day.forEach(block=>{
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
+      });
+      if(forceReplanCity === name){
+        delete plannerState.forceReplan[name];
+      }
+      return;
+    }
+  }
+
   if(Array.isArray(parsed.destinations)){
     parsed.destinations.forEach(d=>{
       const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
@@ -1275,6 +1398,14 @@ function applyParsedToState(parsed){
         });
       } else if(Array.isArray(d.rows)){
         pushRows(name, d.rows, mustReplace);
+      }
+
+      if(Array.isArray(d.city_day)){
+        d.city_day.forEach(block=>{
+          const dayNum = parseInt(block?.day, 10) || 1;
+          const rows = Array.isArray(block?.rows) ? block.rows : [];
+          pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
+        });
       }
 
       // ✅ limpiar flag una vez utilizado
@@ -1307,6 +1438,14 @@ function applyParsedToState(parsed){
         });
       } else if(Array.isArray(x.rows)) {
         pushRows(name, x.rows, mustReplace);
+      }
+
+      if(Array.isArray(x.city_day)){
+        x.city_day.forEach(block=>{
+          const dayNum = parseInt(block?.day, 10) || 1;
+          const rows = Array.isArray(block?.rows) ? block.rows : [];
+          pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
+        });
       }
 
       if(forceReplanCity === name){
