@@ -1627,14 +1627,59 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   }
 }
 
+// ✅ SURGICAL: keep blank day hours blank; do not inject defaults into the prompt payload
+function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
+  return Array.from({length: totalDays}, (_,i)=>{
+    const src = (cityMeta[city]?.perDay||[])[i] || fallbackPerDay?.[i] || {};
+    const start = (src.start != null && String(src.start).trim()) ? String(src.start).trim() : null;
+    const end   = (src.end   != null && String(src.end).trim())   ? String(src.end).trim()   : null;
+    return {
+      day: i+1,
+      start,
+      end,
+      start_provided: !!start,
+      end_provided: !!end
+    };
+  });
+}
+
+// ✅ SURGICAL: support current preferred API shape (city_day) + legacy formats
+function _extractPlannerRows_(parsed, city){
+  if(!parsed) return [];
+
+  if(Array.isArray(parsed.rows)){
+    return parsed.rows.map(r=>normalizeRow(r));
+  }
+
+  if(parsed.destination && parsed.destination===city && Array.isArray(parsed.rows)){
+    return parsed.rows.map(r=>normalizeRow(r));
+  }
+
+  if(Array.isArray(parsed.city_day)){
+    return parsed.city_day
+      .filter(block => (block?.city || parsed.destination || '') === city || !block?.city)
+      .flatMap(block => Array.isArray(block?.rows) ? block.rows : [])
+      .map(r=>normalizeRow(r));
+  }
+
+  if(Array.isArray(parsed.destinations)){
+    const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
+    return (dd?.rows||[]).map(r=>normalizeRow(r));
+  }
+
+  if(Array.isArray(parsed.itineraries)){
+    const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+    return (ii?.rows||[]).map(r=>normalizeRow(r));
+  }
+
+  return [];
+}
+
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
-  const perDay = Array.from({length:dest.days}, (_,i)=>{
-    const src  = (cityMeta[city]?.perDay||[])[i] || dest.perDay?.[i] || {};
-    return { day:i+1, start: src.start || DEFAULT_START, end: src.end || DEFAULT_END };
-  });
+  const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
@@ -1703,18 +1748,9 @@ QUALITY / MAXIMIZE EXPERIENCE:
   const text = await _callPlannerSystemPrompt_(instructions, false);
   const parsed = parseJSON(text);
 
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let tmpCity = city;
-    let tmpRows = [];
-    if(parsed.rows){ tmpRows = parsed.rows.map(r=>normalizeRow(r)); }
-    else if(parsed.destination && parsed.destination===city){ tmpRows = parsed.rows?.map(r=>normalizeRow(r))||[]; }
-    else if(Array.isArray(parsed.destinations)){
-      const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
-      tmpRows = (dd?.rows||[]).map(r=>normalizeRow(r));
-    }else if(Array.isArray(parsed.itineraries)){
-      const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
-      tmpRows = (ii?.rows||[]).map(r=>normalizeRow(r));
-    }
+    let tmpRows = _extractPlannerRows_(parsed, city);
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan); // 🧠 if replanning → replace=true
@@ -1737,10 +1773,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
-  const perDay = Array.from({length: totalDays}, (_,i)=>{
-    const src = (cityMeta[city]?.perDay||[]).find(x=>x.day===i+1) || {start:DEFAULT_START,end:DEFAULT_END};
-    return { day:i+1, start: src.start||DEFAULT_START, end: src.end||DEFAULT_END };
-  });
+  const perDay = _normalizePerDayForPrompt_(city, totalDays);
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
@@ -1808,17 +1841,8 @@ ${buildIntake()}
   // ✅ SURGICAL (CRITICAL): prompt as SYSTEM, language anchor as USER
   const ans = await _callPlannerSystemPrompt_(prompt, true);
   const parsed = parseJSON(ans);
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries)){
-    let rows = [];
-    if(parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
-    else if(parsed.destination===city && parsed.rows) rows = parsed.rows.map(r=>normalizeRow(r));
-    else if(Array.isArray(parsed.destinations)){
-      const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
-      rows = (dd?.rows||[]).map(r=>normalizeRow(r));
-    }else if(Array.isArray(parsed.itineraries)){
-      const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
-      rows = (ii?.rows||[]).map(r=>normalizeRow(r));
-    }
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    let rows = _extractPlannerRows_(parsed, city);
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
