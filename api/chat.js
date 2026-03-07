@@ -369,6 +369,10 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
 - IMPORTANT: start/end fields are PER ROW (per activity), not "day limits".
   • Do NOT set end time of every row to the day end time.
   • Only the final row (or at most the final 1–2 rows if needed) may approach the day end.
+  • 🆕 CRITICAL NO-UMBRELLA RULE:
+    - NEVER create a first row that spans most/all of the day and then place additional rows inside that same window.
+    - If there are multiple rows on a day, the first row MUST end before the next row starts.
+    - A departure/transfer row MUST have a realistic short/moderate duration, never an all-day block.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
 
@@ -420,6 +424,7 @@ GENERAL RULES:
 - 🆕 ANTI-EMPTY DAYS (UX):
   - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–8 rows (not 1–2).
   - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
+  - If a day is intentionally lighter, it still must feel useful and curated (not a vague “free day” block unless explicitly requested).
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -437,6 +442,10 @@ TIME INFERENCE (CRITICAL):
   • CRITICAL CONTINUITY (no teleporting):
     - By default, the next row's "from" should match the previous row's "to" (or be an immediately plausible continuation).
     - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
+  • 🆕 DURATION CONSISTENCY:
+    - The row time block must be broadly consistent with the stated duration.
+    - Do NOT output a row like 09:00–20:00 if duration says "~1h" or "~2h".
+    - Return/transfer rows must have a realistic activity component too (e.g., arrival, walk-in, viewpoint, check-in), never "~0m".
 
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
 - If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
@@ -496,17 +505,48 @@ AURORAS (HARD RULE + REPLACEMENT):
 - FORBIDDEN unless they are truly plausible by latitude/season (high-latitude auroral zones) AND the itinerary context supports it.
 - If the destination is NOT a typical auroral zone (e.g., Barcelona/Madrid/Rome/Budapest/Cairo/etc.), you MUST NOT include any aurora-related rows or wording (not even as a suggestion).
 - If auroras are NOT plausible and you need a night highlight, you MUST replace it with a real iconic night experience for that city (night viewpoint, show, night cruise, illuminated landmark walk, etc.).
+- 🆕 When auroras ARE plausible:
+  • Aurora viewing is a NIGHT-ONLY activity. It must NOT generate a daytime “departure” or pseudo-daytrip block.
+  • Aurora rows should usually be 1–2 rows total: optional short departure/setup + actual night observation, OR just the observation row if cleaner.
+  • The daytime part of that day must still be independently useful unless the user explicitly wanted a light/rest day.
+  • Add a practical note about cloud cover / forecast / flexibility.
+  • Avoid consecutive aurora nights unless the trip is very short or weather makes it necessary.
 
 DAY TRIPS / MACRO-TOURS:
-- If you create a day trip, you must break it down into 5–8 sub-stops (rows).
+- If you create a day trip, you must break it down into 5–8 sub-stops (rows) WHEN IT ADDS REAL VALUE.
 - 🆕 FORBIDDEN umbrella rows:
   - Do NOT use generic activities like "Day trip to X", "Excursion to X", "Excursão de um dia", "Tour de 1 dia".
   - Each row must be either a named transport movement OR a named physical sub-stop.
+  - The first row of a macro-tour must NEVER consume most of the day unless the actual transfer truly does.
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
 - For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
 - CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
+- 🆕 DAY-TRIP QUALITY FILTER:
+  • Do NOT propose a day trip just because it is theoretically possible.
+  • A day trip must be worth it in real traveler experience, not dominated by exhausting transit.
+  • If a route would create an excessively long driving/transit day with low enjoyment, reject it and choose a stronger alternative closer to the base city.
+- 🆕 LONG-DISTANCE GUARDRAIL:
+  • Strongly avoid ultra-long out-and-back day trips from the base city when they would consume most of the day in transit.
+  • In general, if a destination is too far for a high-quality same-day round trip, DO NOT include it.
+  • Example principle: do NOT send a user based in Reykjavik on a same-day round trip to very distant North Iceland highlights if that would be unrealistic/exhausting for a normal traveler.
+- 🆕 ICELAND DAY-TRIP CURATION (apply when relevant):
+  • From Reykjavik, prioritize high-value realistic day trips such as:
+    - Golden Circle
+    - South Coast
+    - Reykjanes Peninsula / Blue Lagoon area
+    - Snæfellsnes Peninsula
+    - other realistic Southwest / West Iceland options
+  • For South Coast:
+    - If the route reaches the Reynisfjara / Vík area, Vík is a highly logical iconic stop and should normally be included unless there is a strong reason not to.
+    - Prefer a coherent progression such as Seljalandsfoss → Skógafoss → Vík and/or Reynisfjara → return.
+  • For Snæfellsnes:
+    - Prefer iconic concrete stops (e.g., Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja, etc.) over vague labels like just "National Park".
+    - Use specific named sub-stops, not abstract region placeholders.
+  • For Reykjanes / Blue Lagoon:
+    - Blue Lagoon should usually be paired intelligently with nearby Reykjanes stops if time allows.
+    - Do not treat it as an isolated weak half-day if a better peninsula micro-route is obvious.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -515,6 +555,14 @@ SAFETY / GLOBAL COHERENCE:
 SMART EDITING:
 - If the user asks to add/remove/adjust schedules, return updated JSON that remains consistent.
 - By default, preserve the itinerary's global coherence.
+
+FINAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
+- Ask yourself silently:
+  1) Are all days genuinely useful and curated?
+  2) Does each macro-tour include the right iconic highlights, not just any plausible stops?
+  3) Are there any umbrella rows, vague placeholders, or ultra-long low-value day trips?
+  4) If this were my own trip, would I feel the itinerary is well-curated and worth the day?
+- If the answer is no, improve the itinerary before outputting JSON.
 
 Respond with valid JSON only.
 `.trim();
