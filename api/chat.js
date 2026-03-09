@@ -425,6 +425,7 @@ GENERAL RULES:
   - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–8 rows (not 1–2).
   - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
   - If a day is intentionally lighter, it still must feel useful and curated (not a vague “free day” block unless explicitly requested).
+  - 🆕 If a macro-tour / day trip uses only part of the day, you MUST strengthen the remaining hours with nearby or logically paired options instead of leaving the rest weak or generic.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -531,6 +532,15 @@ DAY TRIPS / MACRO-TOURS:
   • Strongly avoid ultra-long out-and-back day trips from the base city when they would consume most of the day in transit.
   • In general, if a destination is too far for a high-quality same-day round trip, DO NOT include it.
   • Example principle: do NOT send a user based in Reykjavik on a same-day round trip to very distant North Iceland highlights if that would be unrealistic/exhausting for a normal traveler.
+- 🆕 MICRO-ROUTE / HALF-DAY OPTIMIZATION:
+  • If a macro-tour, spa, scenic drive, or regional excursion takes only part of the day, you MUST actively use the remaining time well.
+  • Add nearby or logically paired highlights before or after it, as long as the sequence stays realistic and worthwhile.
+  • Prefer pairings that are geographically coherent, iconic, and low-friction.
+  • Do NOT leave a half-day macro activity isolated if a stronger nearby combination is obvious.
+  • Examples of good behavior:
+    - A spa/thermal stop can be paired with nearby scenic/coastal/volcanic stops before or after.
+    - A short peninsula outing can be strengthened with nearby viewpoints, towns, or landmark stops.
+    - A half-day excursion should not leave the rest of the day generic if good nearby options still exist.
 - 🆕 ICELAND DAY-TRIP CURATION (apply when relevant):
   • From Reykjavik, prioritize high-value realistic day trips such as:
     - Golden Circle
@@ -547,6 +557,7 @@ DAY TRIPS / MACRO-TOURS:
   • For Reykjanes / Blue Lagoon:
     - Blue Lagoon should usually be paired intelligently with nearby Reykjanes stops if time allows.
     - Do not treat it as an isolated weak half-day if a better peninsula micro-route is obvious.
+    - If Blue Lagoon fits in only part of the day, strengthen that day with nearby logical Reykjanes stops before or after (depending on flow, opening hours, and user pace).
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -562,6 +573,7 @@ FINAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
   2) Does each macro-tour include the right iconic highlights, not just any plausible stops?
   3) Are there any umbrella rows, vague placeholders, or ultra-long low-value day trips?
   4) If this were my own trip, would I feel the itinerary is well-curated and worth the day?
+  5) Did I leave any half-day macro activity underdeveloped even though good nearby pairings were available?
 - If the answer is no, improve the itinerary before outputting JSON.
 
 Respond with valid JSON only.
