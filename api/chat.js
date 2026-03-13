@@ -1,10 +1,9 @@
-// /api/chat.js — v58 (surgically adjusted per v52.5 rules) — ESM compatible on Vercel
+// /api/chat.js — v58.1 (surgical timeout stabilization) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
-// ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
-// ✅ SURGICAL ADJUSTMENT: "info" fully open (any topic) + planner/info respond in the REAL language of the user's content (any language).
-// ✅ SURGICAL ADJUSTMENT: Info Chat "like ChatGPT": keeps context using messages/history and responds conversationally.
-// ✅ SURGICAL ADJUSTMENT: Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
+// ✅ Keeps planner prompt + parse/guardrails.
+// ✅ SURGICAL FIX: reduces backend total latency to avoid frontend-timeout.
+// ✅ SURGICAL FIX: keeps explicit language override when user directly selects itinerary language.
 
 import OpenAI from "openai";
 
@@ -53,7 +52,6 @@ function detectLanguageOverride(messages = []) {
   if (!cleaned) return null;
 
   // Only treat as "language pick" if it's short-ish (prevents normal sentences from triggering)
-  // e.g., "Português", "pt", "Español", "English", "francais"
   const tokens = cleaned.split(" ").filter(Boolean);
   const joined = cleaned;
 
@@ -145,12 +143,12 @@ function detectUserLang(messages = []) {
   const topLang = String(top?.[0] || "en");
   const topScore = Number(top?.[1] || 0);
 
-  // If there are no clear signals, default to EN (so your fallback is consistent)
+  // If there are no clear signals, default to EN
   if (!topScore) return "en";
   return topLang;
 }
 
-// v52.5-style robust JSON extraction (surgical: replaces cleanToJSON without changing external usage)
+// v52.5-style robust JSON extraction
 function cleanToJSON(raw = "") {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
@@ -175,7 +173,6 @@ function cleanToJSON(raw = "") {
 }
 
 function fallbackJSON(lang = "en") {
-  // Fallback is always English (surgical: avoid partial translations here)
   return {
     destination: "Unknown",
     city_day: [
@@ -205,7 +202,6 @@ function fallbackJSON(lang = "en") {
 
 // Guard-rail: avoids a blank table if the model fails in planner
 function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "en") {
-  // Skeleton is always English (surgical: avoid partial translations here)
   const city = String(destination || "Destination").trim() || "Destination";
   const n = Math.max(1, Number(daysTotal) || 1);
   const blocks = [];
@@ -324,7 +320,7 @@ function normalizeParsed(parsed) {
 }
 
 // ==============================
-// Improved base prompt ✨ (PLANNER) — Adjusted to v52.5 rules
+// Improved base prompt ✨ (PLANNER)
 // ==============================
 const SYSTEM_PROMPT = `
 You are Astra, the smart travel planner of ITravelByMyOwn.
@@ -553,7 +549,7 @@ Respond with valid JSON only.
 `.trim();
 
 // ==============================
-// Base prompt ✨ (FREE INFO CHAT) — like ChatGPT: any topic + context + user's real language
+// Base prompt ✨ (FREE INFO CHAT)
 // ==============================
 const SYSTEM_PROMPT_INFO = `
 You are Astra, a general conversational assistant (like ChatGPT) inside ITravelByMyOwn.
@@ -575,13 +571,13 @@ FORMAT:
 `.trim();
 
 // ==============================
-// Model call (with soft timeout)
+// Model call (with shorter timeout to avoid cumulative frontend timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
+async function callStructured(messages, temperature = 0.28, max_output_tokens = 2200, timeoutMs = 38000) {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
 
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
+  const t = setTimeout(() => controller.abort("model-timeout"), timeoutMs);
 
   try {
     const resp = await client.responses.create(
@@ -620,14 +616,19 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
-    // 🧭 INFO CHAT MODE — free text (like ChatGPT: open + context + user's real language)
+    // 🧭 INFO CHAT MODE — free text
     if (mode === "info") {
-      const raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages], 0.45, 2600, 70000);
+      const raw = await callStructured(
+        [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
+        0.45,
+        1800,
+        30000
+      );
       const text = raw || "⚠️ No response was obtained from the assistant.";
       return res.status(200).json({ text });
     }
 
-    // ✅ NEW (ULTRA-SURGICAL): language override if user explicitly selected a language (e.g., "Português")
+    // ✅ NEW (ULTRA-SURGICAL): language override if user explicitly selected a language
     const override = detectLanguageOverride(clientMessages);
     const overrideLine = override
       ? `LANGUAGE OVERRIDE (USER-SELECTED, HIGHEST PRIORITY): Output MUST be in ${override.toUpperCase()}.\n- Ignore earlier mixed-language content.\n- Keep ALL JSON keys/shape the same.\n`
@@ -635,11 +636,16 @@ export default async function handler(req, res) {
 
     const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT).trim();
 
-    // 🧭 PLANNER MODE — with strong v52.5 rules (only via prompt + guardrails)
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 3200, 90000);
+    // 🧭 PLANNER MODE — shorter main call to avoid frontend timeout
+    let raw = await callStructured(
+      [{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages],
+      0.28,
+      2200,
+      38000
+    );
     let parsed = cleanToJSON(raw);
 
-    // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
+    // 1) Retry: strict only once (remove long cumulative ultra retry)
     const hasSome =
       parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
 
@@ -651,40 +657,22 @@ export default async function handler(req, res) {
 MANDATORY:
 - Respond with valid JSON only.
 - Must include city_day (preferred) or rows (legacy) with at least 1 row.
+- Cover ALL days meaningfully.
 - No meta or text outside.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 3400, 95000);
+      raw = await callStructured(
+        [{ role: "system", content: strictPrompt }, ...clientMessages],
+        0.20,
+        2000,
+        22000
+      );
       parsed = cleanToJSON(raw);
     }
 
-    // 2) Retry: ultra with minimal example (only if still failing)
-    const stillBad =
-      !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
-
-    if (stillBad) {
-      const ultraPrompt =
-        SYSTEM_PROMPT_EFFECTIVE +
-        `
-
-Minimal valid example (DO NOT copy it literally; format guide only):
-{
-  "destination":"CITY",
-  "days_total":1,
-  "city_day":[{"city":"CITY","day":1,"rows":[
-    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Iconic spot","from":"Hotel","to":"Center","transport":"Walk","duration":"Transport: ~10m\\nActivity: ~90m","notes":"Discover a landmark corner and arrive early to avoid lines. Tip: bring water and check hours.","kind":"","zone":""}
-  ]}],
-  "followup":""
-}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.14, 3600, 95000);
-      parsed = cleanToJSON(raw);
-    }
-
-    // 3) Normalization + anti-blank-table guardrails
+    // 2) Normalization + anti-blank-table guardrails
     if (!parsed) parsed = fallbackJSON(lang);
 
-    // Prefer city_day: if the model returned legacy rows, keep them; but if it returned city_day, normalize it.
     parsed = normalizeParsed(parsed);
 
-    // Final guard-rail: if city_day exists but is empty/no rows, inject skeleton
     try {
       const dest = String(parsed?.destination || "Destination").trim() || "Destination";
       const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
