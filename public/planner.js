@@ -1019,7 +1019,7 @@ Edits:
 
   // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
   const controller = new AbortController();
-  const timeoutMs = 75000; // 75s (ajustable)
+  const timeoutMs = 120000; // 120s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1702,9 +1702,12 @@ function _userLanguageAnchor_(){
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
+  // ✅ CRITICAL FIX:
+  // Frontend timeout must be LONGER than backend internal timeout/retries.
+  // Backend can take ~90–95s; give enough margin here.
   const controller = new AbortController();
-  const timeoutMs = 75000;
-  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  const timeoutMs = 130000;
+  const timer = setTimeout(()=>controller.abort('frontend-timeout'), timeoutMs);
 
   try{
     showThinking(true);
@@ -1733,11 +1736,18 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
     const data = await res.json().catch(()=>({text:''}));
     return data?.text || '';
   }catch(e){
-    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
+    const msg = String(e?.message || e || '');
+    const isAbort =
+      (e && e.name === 'AbortError') ||
+      msg.toLowerCase().includes('abort') ||
+      msg.toLowerCase().includes('signal is aborted');
+
     console.error("Failed to contact the API:", e);
+
     if(isAbort){
       return `{"followup":"⚠️ The assistant took too long to respond (timeout). Try again or reduce the number of days/cities."}`;
     }
+
     return `{"followup":"${tone.fail}"}`;
   }finally{
     clearTimeout(timer);
