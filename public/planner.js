@@ -1642,8 +1642,10 @@ function showWOW(on, msg){
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
+    // ✅ Keep only the reset button enabled
     if (el.id === 'reset-planner') return;
 
+    // 🆕 Also lock the floating Info Chat button
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
       return;
@@ -1663,9 +1665,18 @@ function showWOW(on, msg){
   });
 }
 
+/* =========================================================
+   ✅ SURGICAL (CRITICAL): preserve user's language
+   - We do NOT send long instructions (in ES) as "user".
+   - We send rules/prompt as "system".
+   - The last "user" message will be an ANCHOR with real user text
+     so the API answers in that language (even if site is EN/ES).
+========================================================= */
 function _lastUserFromSession_(){
   try{
+    // ✅ Ultra-surgical FIX: avoid ReferenceError if session does not exist yet
     if(typeof session === 'undefined' || !session) return '';
+
     for(let i=(session?.length||0)-1; i>=0; i--){
       const m = session[i];
       if(String(m?.role||'').toLowerCase()==='user'){
@@ -1678,6 +1689,7 @@ function _lastUserFromSession_(){
 }
 
 function _userLanguageAnchor_(){
+  // ✅ NEW (quirúrgico): si el usuario eligió idioma global, úsalo como anchor duro
   try{
     const chosen = (typeof plannerState !== 'undefined' && plannerState)
       ? String(plannerState?.itineraryLang || '').trim()
@@ -1685,24 +1697,41 @@ function _userLanguageAnchor_(){
     if(chosen) return chosen;
   }catch(_){}
 
+  // ✅ Ultra-surgical FIX: avoid ReferenceError if plannerState does not exist yet
+  const sc = (typeof plannerState !== 'undefined' && plannerState)
+    ? String(plannerState?.specialConditions || '').trim()
+    : '';
+  if(sc) return sc;
+
+  // ✅ SURGICAL: also use the real textarea if plannerState isn't populated yet
+  const sc2 = (typeof qs !== 'undefined')
+    ? String(qs('#special-conditions')?.value || '').trim()
+    : '';
+  if(sc2) return sc2;
+
+  // Next: last text written by the user in the planner chat (if exists)
   const last = _lastUserFromSession_();
   if(last) return last;
 
-  return 'Please generate the itinerary.';
+  // Safe fallback (only if there is no user text to infer language)
+  return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
 }
 
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
+  // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
-  const timeoutMs = 115000;
-  const timer = setTimeout(()=>controller.abort('frontend-timeout'), timeoutMs);
+  const timeoutMs = 75000;
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
     showThinking(true);
 
     const anchor = _userLanguageAnchor_();
 
+    // ✅ Important: the LAST user message must be the "anchor" (real user language)
+    // and the system must contain the rules and structured request.
     const messages = [
       { role:'system', content: String(systemPrompt || '') },
       ...(Array.isArray(history) ? history : []),
@@ -1725,19 +1754,11 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
     const data = await res.json().catch(()=>({text:''}));
     return data?.text || '';
   }catch(e){
-    const msg = String(e?.message || e || '');
-    const isAbort =
-      (e && e.name === 'AbortError') ||
-      msg.toLowerCase().includes('abort') ||
-      msg.toLowerCase().includes('signal is aborted') ||
-      msg.toLowerCase().includes('frontend-timeout');
-
+    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Failed to contact the API:", e);
-
     if(isAbort){
       return `{"followup":"⚠️ The assistant took too long to respond (timeout). Try again or reduce the number of days/cities."}`;
     }
-
     return `{"followup":"${tone.fail}"}`;
   }finally{
     clearTimeout(timer);
@@ -1745,6 +1766,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   }
 }
 
+// ✅ SURGICAL: keep blank day hours blank; do not inject defaults into the prompt payload
 function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
   return Array.from({length: totalDays}, (_,i)=>{
     const src = (cityMeta[city]?.perDay||[])[i] || fallbackPerDay?.[i] || {};
@@ -1760,6 +1782,7 @@ function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
   });
 }
 
+// ✅ SURGICAL: support current preferred API shape (city_day) + legacy formats
 function _extractPlannerRows_(parsed, city){
   if(!parsed) return [];
 
@@ -1771,6 +1794,7 @@ function _extractPlannerRows_(parsed, city){
     return parsed.rows.map(r=>normalizeRow(r));
   }
 
+  // ✅ CRITICAL FIX: preserve block.day when rows inside city_day do not include their own day
   if(Array.isArray(parsed.city_day)){
     return parsed.city_day
       .filter(block => {
@@ -1788,6 +1812,7 @@ function _extractPlannerRows_(parsed, city){
     const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
     if(Array.isArray(dd?.rows)) return dd.rows.map(r=>normalizeRow(r));
 
+    // ✅ same fix for nested city_day inside destinations
     if(Array.isArray(dd?.city_day)){
       return dd.city_day.flatMap(block=>{
         const dayNum = parseInt(block?.day, 10) || 1;
@@ -1803,6 +1828,7 @@ function _extractPlannerRows_(parsed, city){
     const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
     if(Array.isArray(ii?.rows)) return ii.rows.map(r=>normalizeRow(r));
 
+    // ✅ same fix for nested city_day inside itineraries
     if(Array.isArray(ii?.city_day)){
       return ii.city_day.flatMap(block=>{
         const dayNum = parseInt(block?.day, 10) || 1;
@@ -1817,220 +1843,91 @@ function _extractPlannerRows_(parsed, city){
   return [];
 }
 
-function _rowsCountByDay_(rows=[], totalDays=1){
-  const counts = {};
-  for(let d=1; d<=totalDays; d++) counts[d] = 0;
-
-  (rows||[]).forEach(r=>{
-    const day = Math.max(1, Math.min(totalDays, parseInt(r?.day, 10) || 1));
-    counts[day] = (counts[day] || 0) + 1;
-  });
-
-  return counts;
-}
-
-function _minRowsExpectedForDay_(day, totalDays){
-  if(totalDays <= 1) return 5;
-  if(day === 1 || day === totalDays) return 3;
-  return 4;
-}
-
-function _analyzePlannerCoverage_(rows=[], totalDays=1){
-  const counts = _rowsCountByDay_(rows, totalDays);
-  const missingDays = [];
-  const weakDays = [];
-
-  for(let d=1; d<=totalDays; d++){
-    const count = counts[d] || 0;
-    const min = _minRowsExpectedForDay_(d, totalDays);
-
-    if(count === 0){
-      missingDays.push(d);
-    }else if(count < min){
-      weakDays.push({ day:d, count, min });
-    }
-  }
-
-  const day1 = counts[1] || 0;
-  const laterTotal = Object.keys(counts)
-    .filter(k => Number(k) > 1)
-    .reduce((acc, k)=> acc + (counts[k] || 0), 0);
-
-  const allInFirstDay = totalDays > 1 && day1 > 0 && laterTotal === 0;
-  const totalRows = (rows || []).length;
-
-  return {
-    totalRows,
-    counts,
-    missingDays,
-    weakDays,
-    allInFirstDay,
-    needsRecovery: totalRows === 0 || allInFirstDay || missingDays.length > 0 || weakDays.length > 0
-  };
-}
-
-function _plannerRowsScore_(rows=[], totalDays=1){
-  const info = _analyzePlannerCoverage_(rows, totalDays);
-  let score = (rows?.length || 0) * 10;
-
-  score -= info.missingDays.length * 120;
-  score -= info.weakDays.length * 35;
-  if(info.allInFirstDay) score -= 180;
-
-  const lastDayCount = info.counts?.[totalDays] || 0;
-  if(totalDays > 1 && lastDayCount === 0) score -= 100;
-  if(totalDays > 2 && lastDayCount > 0 && lastDayCount < _minRowsExpectedForDay_(totalDays, totalDays)) score -= 25;
-
-  return score;
-}
-
-function _buildCoverageRecoveryText_(city, totalDays, issues){
-  const missingTxt = issues?.missingDays?.length
-    ? `Missing days: ${issues.missingDays.join(', ')}.`
-    : '';
-
-  const weakTxt = issues?.weakDays?.length
-    ? `Weak days: ${issues.weakDays.map(x=>`day ${x.day} has ${x.count} rows, needs at least ${x.min}`).join(' | ')}.`
-    : '';
-
-  const firstDayTxt = issues?.allInFirstDay
-    ? `The previous answer front-loaded the itinerary into day 1 and degraded later days.`
-    : '';
-
-  return `
-RECOVERY MODE (MANDATORY):
-- Regenerate the FULL itinerary for "${city}" across ALL ${totalDays} day(s).
-- EVERY day from 1 to ${totalDays} must contain meaningful rows.
-- Keep quality strong through the LAST day.
-- Do NOT front-load most highlights into the first days.
-- For normal middle days, aim for 4–8 rows.
-- For first/last day, if naturally shorter, still aim for at least 3 meaningful rows unless the user explicitly requested a very light day.
-- Distribute key highlights and must-include places across the full stay.
-- Return valid JSON only.
-${firstDayTxt}
-${missingTxt}
-${weakTxt}
-`.trim();
-}
-
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
   const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
+
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
   const transport= cityMeta[city]?.transport || 'recommend me';
 
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const instructions = `
 ${FORMAT}
 **ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
-- Preferred output shape: {"destination":"${city}","days_total":${dest.days},"city_day":[...],"followup":"..."}
-- Legacy compatible output is also accepted if needed: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 KEY RULES (MANDATORY):
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • If it's NOT a day trip, "Destination" can be "${city}".
+  • This applies to ALL rows, including transfers and returns.
+  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
+  • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
+  • Correct example (city): "${city} – Return to hotel".
 - "from", "to", "transport" and "notes" can NEVER be empty.
-- "from" and "to" must be REAL places, NEVER the macro-tour name.
+- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
+- VERY IMPORTANT (to avoid errors like "to=South Coast"):
+  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
+  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
 
-TIME POLICY (MANDATORY):
-- HARD ONLY:
-  • Respect the START TIME of DAY 1 if provided.
-  • Respect the END TIME of the LAST DAY if provided.
-  • If this city has only 1 day, respect both when provided.
-- Intermediate-day hours are REFERENCES ONLY.
-- Never repeat the final-day end time across multiple rows.
-- Reference data: ${JSON.stringify(perDay)}.
-
-TRANSPORT:
+TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
 - For DAY TRIPS:
-  1) Use the best realistic public transport if clearly optimal.
-  2) Otherwise use EXACTLY: "Rental Car or Guided Tour".
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
-DAY TRIPS / MACRO-TOURS:
-- If you propose one, it must be COMPLETE:
-  • 5–8 sub-stops
-  • logical sequence
-  • realistic transfers
-  • dedicated return row
+AURORAS (if plausible by city/season/latitude):
+- You must include AT LEAST 1 aurora night in the itinerary.
+- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
+- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
+- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
 
-QUALITY / ANTI-DEGRADATION:
-- The itinerary must remain rich through ALL ${dest.days} day(s).
-- EVERY day must contain meaningful rows.
-- Do NOT front-load the best content into the first days.
-- For normal full days, aim for 4–8 rows.
-- For first/last day, if naturally shorter, still aim for at least 3 meaningful rows unless explicitly light.
-- The LAST day must still feel worthwhile.
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
+- If you propose a day trip, it must be COMPLETE:
+  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
+- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
 - Group by areas, avoid backtracking.
-- Replace weak ideas with better alternatives.
-- Use followup when needed.
-- Hotel/base reference: ${JSON.stringify(hotel || '')}
-- Transport preference/base reference: ${JSON.stringify(transport || '')}
+- Validate overall plausibility and safety.
+  • If a special activity is plausible, add "notes" with "valid: <justification>".
+  • Avoid activities in clearly risky/restricted areas or time windows.
+  • Replace with safer alternatives when applicable.
+- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
 - No text outside JSON.
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
-  let bestRows = [];
-  let bestScore = -Infinity;
-  let recoveryIssues = null;
+  // ✅ SURGICAL (CRITICAL): instructions as SYSTEM, language anchor as USER
+  const text = await _callPlannerSystemPrompt_(instructions, false);
+  const parsed = parseJSON(text);
 
-  const maxAttempts = 2;
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    let tmpCity = city;
+    let tmpRows = _extractPlannerRows_(parsed, city);
 
-  for(let attempt=1; attempt<=maxAttempts; attempt++){
-    const promptToSend = attempt === 1
-      ? instructions
-      : `${instructions}\n\n${_buildCoverageRecoveryText_(city, dest.days, recoveryIssues)}`;
-
-    const text = await _callPlannerSystemPrompt_(promptToSend, false);
-    const parsed = parseJSON(text);
-
-    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-      const rows = _extractPlannerRows_(parsed, city);
-      const issues = _analyzePlannerCoverage_(rows, dest.days);
-      const score = _plannerRowsScore_(rows, dest.days);
-
-      if(rows.length && score > bestScore){
-        bestScore = score;
-        bestRows = rows;
-      }
-
-      if(rows.length && !issues.needsRecovery){
-        const val = await validateRowsWithAgent(city, rows, baseDate);
-        pushRows(city, val.allowed, forceReplan);
-        renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-        showWOW(false);
-        $resetBtn?.removeAttribute('disabled');
-        if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
-        return;
-      }
-
-      recoveryIssues = issues;
-    }else{
-      recoveryIssues = {
-        totalRows: 0,
-        counts: {},
-        missingDays: Array.from({length: dest.days}, (_,i)=> i+1),
-        weakDays: [],
-        allInFirstDay: false,
-        needsRecovery: true
-      };
-    }
-  }
-
-  if(bestRows.length){
-    const val = await validateRowsWithAgent(city, bestRows, baseDate);
-    pushRows(city, val.allowed, forceReplan);
-    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
+    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 if replanning → replace=true
+    renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
     showWOW(false);
+
     $resetBtn?.removeAttribute('disabled');
     if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
     return;
   }
 
@@ -2040,6 +1937,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
   chatMsg(t('fallbackLocal'), 'ai');
 }
 
+/* 🆕 Bulk rebalance after changes (add days / requested day trip) */
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
@@ -2047,96 +1945,77 @@ async function rebalanceWholeCity(city, opts={}){
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
 
+  // 🆕 Determine rebalance range
   const startDay = opts.start || 1;
   const endDay = opts.end || totalDays;
-  const lockedDaysText = startDay > 1 ? `Keep days 1 to ${startDay - 1} intact.` : '';
+  const lockedDaysText = startDay > 1 
+    ? `Keep days 1 to ${startDay - 1} intact.`
+    : '';
+
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const prompt = `
 ${FORMAT}
 **ROLE:** Rebalance the city "${city}" between days ${startDay} and ${endDay}, keeping what is plausible and filling gaps.
 ${lockedDaysText}
-- Preferred output shape: {"destination":"${city}","days_total":${totalDays},"city_day":[...],"followup":"..."}
-- Legacy compatible output is also accepted if needed: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-KEY RULES:
-- activity must be "Destination – Specific sub-stop"
-- from/to/transport/notes never empty
-- from/to must be real places
+KEY RULES (MANDATORY):
+- "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • If it's NOT a day trip, "Destination" can be "${city}".
+- from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
+- VERY IMPORTANT:
+  • "from" and "to" must be REAL places, NEVER the macro-tour name.
+  • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
 
-TIME POLICY:
-- Hard only: day 1 start, last day end
-- Intermediate-day hours are reference only
-- Reference data: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}
+TRANSPORT (smart priority, no invention):
+- In city: Walk/Metro/Bus/Tram depending on real availability.
+- For DAY TRIPS:
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+
+AURORAS (if plausible):
+- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
+- Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
+- Notes must include "valid:" + a nearby low-cost alternative.
+
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may include day trips if they add value (no fixed rule). Decide intelligently.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, adjust stops/window.
+- If you include a day trip:
+  • 5–8 sub-stops (rows) with realistic sequence.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route, reach the logical end highlight before returning.
+  • Avoid optimistic returns: use conservative estimates in winter or at night.
 
 QUALITY:
-- Keep affected days rich and meaningful
-- Do NOT leave later days weak or nearly empty
-- For normal full days, aim for 4–8 rows
-- For first/last day, if naturally shorter, still aim for at least 3 meaningful rows unless explicitly light
-${wantedTrip ? `- User preference: day trip to "${wantedTrip}" if reasonable.` : ''}
+- Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Consider key highlights and distribute without duplication.
+${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
+- The last day can be lighter, but don’t leave it “empty” if key highlights remain.
+- Validate plausibility and safety; replace with safe alternatives when needed.
+- Notes must ALWAYS be useful (never empty or "seed").
 
-Current context (to merge without deleting):
+Current context (to merge without deleting): 
 ${buildIntake()}
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
-  let bestRows = [];
-  let bestScore = -Infinity;
-  let recoveryIssues = null;
+  // ✅ SURGICAL (CRITICAL): prompt as SYSTEM, language anchor as USER
+  const ans = await _callPlannerSystemPrompt_(prompt, true);
+  const parsed = parseJSON(ans);
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    let rows = _extractPlannerRows_(parsed, city);
 
-  const maxAttempts = 2;
-
-  for(let attempt=1; attempt<=maxAttempts; attempt++){
-    const promptToSend = attempt === 1
-      ? prompt
-      : `${prompt}\n\n${_buildCoverageRecoveryText_(city, totalDays, recoveryIssues)}`;
-
-    const ans = await _callPlannerSystemPrompt_(promptToSend, true);
-    const parsed = parseJSON(ans);
-
-    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-      const rows = _extractPlannerRows_(parsed, city);
-      const issues = _analyzePlannerCoverage_(rows, totalDays);
-      const score = _plannerRowsScore_(rows, totalDays);
-
-      if(rows.length && score > bestScore){
-        bestScore = score;
-        bestRows = rows;
-      }
-
-      if(rows.length && !issues.needsRecovery){
-        const val = await validateRowsWithAgent(city, rows, baseDate);
-        pushRows(city, val.allowed, forceReplan);
-
-        for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
-
-        renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-        showWOW(false);
-        $resetBtn?.removeAttribute('disabled');
-
-        if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
-        return;
-      }
-
-      recoveryIssues = issues;
-    }else{
-      recoveryIssues = {
-        totalRows: 0,
-        counts: {},
-        missingDays: Array.from({length: totalDays}, (_,i)=> i+1),
-        weakDays: [],
-        allInFirstDay: false,
-        needsRecovery: true
-      };
-    }
-  }
-
-  if(bestRows.length){
-    const val = await validateRowsWithAgent(city, bestRows, baseDate);
+    const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
 
+    // 🧠 Optimize only affected range
     for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -2144,12 +2023,12 @@ ${buildIntake()}
     $resetBtn?.removeAttribute('disabled');
 
     if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
-    return;
-  }
 
-  showWOW(false);
-  $resetBtn?.removeAttribute('disabled');
-  chatMsg(getLang()==='es' ? 'I did not receive valid changes for rebalancing. Want to try another way?' : 'I did not receive valid changes for rebalancing. Want to try another way?','ai');
+  }else{
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
+    chatMsg(getLang()==='es' ? 'I did not receive valid changes for rebalancing. Want to try another way?' : 'I did not receive valid changes for rebalancing. Want to try another way?','ai');
+  }
 }
 
 /* ==============================
