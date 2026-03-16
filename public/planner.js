@@ -1946,6 +1946,12 @@ ${FORMAT}
 **ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
 - Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
+GLOBAL MASTER PLAN (MANDATORY):
+- Before writing any rows, first design the BEST overall allocation of iconic highlights, day trips, scenic routes and night experiences across ALL days.
+- Do NOT front-load the trip and leave later days weak, residual or generic.
+- Each day must feel meaningful on its own before you finalize the JSON.
+- The final day must still feel intentional, not like leftover filler.
+
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
   • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
@@ -1956,42 +1962,52 @@ KEY RULES (MANDATORY):
   • Correct example (city): "${city} – Return to hotel".
 - "from", "to", "transport" and "notes" can NEVER be empty.
 - Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
+- Avoid generic placeholders such as "free time", "rest of day", "explore area", "free day" unless the user explicitly requested rest time.
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
 
 TRANSPORT (smart priority, no invention):
-- In city: Walk/Metro/Bus/Tram depending on real availability.
+- In city: choose the most realistic urban transport. Walking should be used for very short urban distances only, but compact walkable city-center movements should NOT default to rental car.
+- If the user explicitly indicated rental car / driving, treat that as the PRIMARY transport preference for dispersed routes and day trips where self-drive is realistic.
+- If the user said "recommend me" or did not specify transport, choose the most logical transport for each route.
 - For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it, unless the user explicitly indicated rental car / driving.
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible by city/season/latitude):
 - You must include AT LEAST 1 aurora night in the itinerary.
-- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
+- Must be a realistic NIGHT schedule for darkness conditions, never daylight or early-afternoon.
 - Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
 - Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
+- Guideline: ideally ≤ ~5h maximum per one-way trip, and only when the overall experience is still clearly worthwhile. If near the limit, simplify the day and keep it realistic.
+- If a route would feel exhausting, low-value, or mostly spent in transit, reject it and choose a better alternative closer to the base city.
 - If you propose a day trip, it must be COMPLETE:
-  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • 5–8 meaningful rows with clear names, logical sequence, realistic transfers.
+  • The FIRST macro-tour row must be a real transport/departure segment only: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Do NOT create umbrella rows that consume most of the day while later rows also represent sub-stops from the same excursion.
   • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • If it's a classic route, include the key logical sequence of highlights normally associated with that experience.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
+- A normal sightseeing day with decent available time should normally contain 4–8 meaningful rows.
 - If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
 - Group by areas, avoid backtracking.
+- Do NOT leave long unexplained gaps if realistic nearby experiences still exist.
 - Validate overall plausibility and safety.
   • If a special activity is plausible, add "notes" with "valid: <justification>".
   • Avoid activities in clearly risky/restricted areas or time windows.
   • Replace with safer alternatives when applicable.
 - Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
+- Context:
+  • Hotel/base: ${hotel || 'N/A'}
+  • Transport preference: ${transport || 'recommend me'}
 - No text outside JSON.
 `.trim();
 
@@ -2046,33 +2062,42 @@ ${FORMAT}
 ${lockedDaysText}
 - Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
+GLOBAL MASTER PLAN (MANDATORY):
+- Rebalance the affected range as a whole before writing rows.
+- Keep later days meaningful and avoid residual or weak endings.
+
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
   • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
   • If it's NOT a day trip, "Destination" can be "${city}".
 - from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
+- Avoid generic placeholders such as "free time", "rest of day", "explore area", "free day" unless the user explicitly requested rest time.
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
   • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
 
 TRANSPORT (smart priority, no invention):
-- In city: Walk/Metro/Bus/Tram depending on real availability.
+- In city: choose the most realistic urban transport. Compact walkable city-center movements should not default to rental car.
+- If the user explicitly indicated rental car / driving, prioritize self-drive where realistic for dispersed routes and day trips.
+- If the user said "recommend me" or did not specify transport, choose the most logical transport for each route.
 - For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it, unless the user explicitly indicated rental car / driving.
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible):
-- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
+- Include at least 1 aurora night in a realistic night window for darkness conditions.
 - Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
 - Notes must include "valid:" + a nearby low-cost alternative.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, adjust stops/window.
+- Guideline: ideally ≤ ~5h maximum per one-way trip, and only when the overall experience is clearly worthwhile. If near the limit, simplify the day.
+- If a route would feel exhausting or mostly spent in transit, choose a better alternative.
 - If you include a day trip:
-  • 5–8 sub-stops (rows) with realistic sequence.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • 5–8 meaningful rows with realistic sequence.
+  • The FIRST macro-tour row must be a real transport/departure segment only: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Do NOT create umbrella rows that consume most of the day while later rows also represent sub-stops from the same excursion.
   • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
@@ -2080,8 +2105,10 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
 - Consider key highlights and distribute without duplication.
-${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
-- The last day can be lighter, but don’t leave it “empty” if key highlights remain.
+${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it as a complete macro-tour and close with return.` : ''}
+- The last affected day can be lighter, but don’t leave it effectively empty if key highlights remain.
+- A normal sightseeing day with decent available time should normally contain 4–8 meaningful rows.
+- Do NOT leave long unexplained gaps if realistic nearby highlights still exist.
 - Validate plausibility and safety; replace with safe alternatives when needed.
 - Notes must ALWAYS be useful (never empty or "seed").
 
