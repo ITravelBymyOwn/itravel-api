@@ -946,7 +946,7 @@ Campos obligatorios por fila (NO vacíos):
 - "activity","from","to","transport","duration","notes" deben tener texto útil. Prohibido "seed" y notes vacías.
 
 Formato de activity (obligatorio cuando aplique a itinerario):
-- "DESTINO – SUB-PARADA" (– o - con espacios). Evita genéricos tipo "museo", "parque", "restaurante local", "paseo por la ciudad".
+- "Destino – SUB-parada" (– o - con espacios). Evita genéricos tipo "museo", "parque", "restaurante local", "paseo por la ciudad".
 
 Formato de duration (obligatorio, tabla-ready):
 - 2 líneas EXACTAS con salto \\n:
