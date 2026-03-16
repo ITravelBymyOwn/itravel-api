@@ -1166,44 +1166,65 @@ LANGUAGE (CRITICAL):
 }
 
 /* ==============================
-   SECCIÓN 13 · Merge / utilidades
+   SECTION 13 · Merge / utilities
 ================================= */
+
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
   const has = arr.find(x=>key(x)===key(row));
   if(!has) arr.push(row);
 }
+
 function ensureDays(city){
   if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null};
+
   const byDay = itineraries[city].byDay || {};
   const present = Object.keys(byDay).map(n=>+n);
   const maxPresent = present.length?Math.max(...present):0;
+
   const saved = savedDestinations.find(x=>x.city===city)?.days || 0;
   const want = Math.max(saved, maxPresent) || 1;
+
   for(let d=1; d<=want; d++){
     if(!byDay[d]) byDay[d]=[];
   }
+
   itineraries[city].byDay = byDay;
 }
 
-// ✅ QUIRÚRGICO: helpers locales para evitar filas paraguas y duraciones inválidas
+/* =========================================
+   INTERNAL HELPERS
+========================================= */
+
 function _hhmmToMinutes_(s){
   const m = String(s||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!m) return null;
+
   const hh = Math.max(0, Math.min(23, parseInt(m[1],10)));
   const mm = Math.max(0, Math.min(59, parseInt(m[2],10)));
+
   return (hh * 60) + mm;
 }
+
 function _minutesToHHMM_(mins){
   let n = Number(mins);
   if(!Number.isFinite(n)) return '';
+
   while(n < 0) n += 24*60;
   n = n % (24*60);
+
   const hh = String(Math.floor(n/60)).padStart(2,'0');
   const mm = String(Math.floor(n%60)).padStart(2,'0');
+
   return `${hh}:${mm}`;
 }
+
+/* =========================================
+   Duration helpers
+========================================= */
+
 function _sumApproxMinutesFromDuration_(txt){
+
   const s = String(txt||'');
   if(!s.trim()) return null;
 
@@ -1211,48 +1232,63 @@ function _sumApproxMinutesFromDuration_(txt){
   if(!matches.length) return null;
 
   let total = 0;
+
   for(const mm of matches){
+
     const val = parseFloat(mm[1]);
     const unit = String(mm[2]||'').toLowerCase();
+
     if(!Number.isFinite(val)) continue;
+
     if(unit.startsWith('h')) total += Math.round(val * 60);
     else total += Math.round(val);
   }
+
   return total > 0 ? total : null;
 }
+
+/* =========================================
+   Duration sanitation
+========================================= */
+
 function _sanitizeDurationLines_(raw){
+
   let s = (typeof raw === 'number') ? `${raw}m` : String(raw||'').trim();
 
-  if (s && /Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && s.includes(',')) {
-    s = s.replace(/\s*,\s*Actividad\s*:/i, '\nActividad:');
-  }
   if (s && /Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(',')) {
     s = s.replace(/\s*,\s*Activity\s*:/i, '\nActivity:');
   }
 
   if(!s){
-    return 'Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat';
+    return 'Transport: Verify in Info Chat\nActivity: Verify in Info Chat';
   }
 
-  // ✅ Evita 0m / ~0m
-  s = s.replace(/(Transporte|Transport)\s*:\s*~?0m\b/gi, '$1: ~10m');
-  s = s.replace(/(Actividad|Activity)\s*:\s*~?0m\b/gi, '$1: ~10m');
+  // prevent zero durations
+  s = s.replace(/Transport\s*:\s*~?0m\b/gi, 'Transport: ~10m');
+  s = s.replace(/Activity\s*:\s*~?0m\b/gi, 'Activity: ~10m');
 
   return s;
 }
 
+/* =========================================
+   Row normalization
+========================================= */
+
 function normalizeRow(r = {}, fallbackDay = 1){
-  let start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
-  let end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
-  const act   = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
-  const from  = r.from ?? r.origin ?? r.origen ?? '';
-  const to    = r.to   ?? r.destination ?? r.destino ?? '';
-  const trans = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
-  const durRaw= r.duration ?? r.durationMinutes ?? r.duracion ?? '';
-  const notes = r.notes ?? r.nota ?? r.comentarios ?? '';
+
+  let start = r.start ?? r.start_time ?? r.startTime ?? '';
+  let end   = r.end   ?? r.end_time   ?? r.endTime   ?? '';
+
+  const act   = r.activity ?? '';
+  const from  = r.from ?? '';
+  const to    = r.to ?? '';
+  const trans = r.transport ?? '';
+  const durRaw= r.duration ?? '';
+  const notes = r.notes ?? '';
 
   let duration = _sanitizeDurationLines_(durRaw);
-  const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
+
+  const d = Math.max(1, parseInt(r.day ?? fallbackDay, 10) || 1);
 
   const startStr = String(start||'').trim();
   const endStr   = String(end||'').trim();
@@ -1260,53 +1296,49 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let startMin = _hhmmToMinutes_(startStr);
   let endMin   = _hhmmToMinutes_(endStr);
 
-  // ✅ Si falta una hora, intenta inferirla desde duration (en vez de forzar defaults)
   const approxDur = _sumApproxMinutesFromDuration_(duration);
+
   if(startMin != null && endMin == null && approxDur){
     endMin = startMin + Math.max(approxDur, 30);
-  }else if(startMin == null && endMin != null && approxDur){
+  }
+
+  else if(startMin == null && endMin != null && approxDur){
     startMin = Math.max(0, endMin - Math.max(approxDur, 30));
   }
 
-  // ✅ Anti-umbrella: si la fila ocupa muchísimo más que su duración real, comprímela
-  if(startMin != null && endMin != null && approxDur){
-    let span = endMin - startMin;
-    if(span <= 0) span += 24*60;
-
-    // si el bloque es exageradamente mayor que la duración real, corrige el end
-    if(span >= Math.max(240, approxDur * 2.2)){
-      const compressed = Math.min(Math.max(approxDur + 15, 30), 210); // buffer ligero, sin exagerar
-      endMin = startMin + compressed;
-    }
-  }
-
-  // ✅ Fallback final: solo si sigue faltando algo, entonces sí usa defaults
   if(startMin == null && endMin == null){
     startMin = _hhmmToMinutes_(DEFAULT_START);
     endMin   = _hhmmToMinutes_(DEFAULT_END);
-  }else if(startMin != null && endMin == null){
+  }
+
+  else if(startMin != null && endMin == null){
     endMin = startMin + 90;
-  }else if(startMin == null && endMin != null){
+  }
+
+  else if(startMin == null && endMin != null){
     startMin = Math.max(0, endMin - 90);
   }
 
-  // ✅ Garantiza consistencia mínima
-  let finalSpan = endMin - startMin;
-  if(finalSpan <= 0) finalSpan += 24*60;
-  if(finalSpan < 15){
+  let span = endMin - startMin;
+  if(span <= 0) span += 24*60;
+
+  if(span < 15){
     endMin = startMin + 30;
   }
 
   const finalStart = _minutesToHHMM_(startMin);
   const finalEnd   = _minutesToHHMM_(endMin);
 
-  // ✅ QUIRÚRGICO: guard-rails locales anti-campos-vacíos (fail-open)
-  const safeActivity  = (String(act||'').trim() || 'Actividad por definir');
+  const safeActivity  = (String(act||'').trim() || 'Activity to define');
   const safeFrom      = (String(from||'').trim() || 'Hotel');
-  const safeTo        = (String(to||'').trim() || 'Centro');
-  const safeTransport = (String(trans||'').trim() || 'A pie o Transporte local');
+  const safeTo        = (String(to||'').trim() || 'City Center');
+  const safeTransport = (String(trans||'').trim() || 'Walk or Local Transport');
+
   const n0 = String(notes||'').trim();
-  const safeNotes = (n0 && n0.toLowerCase()!=='seed') ? n0 : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
+
+  const safeNotes = (n0 && n0.toLowerCase()!=='seed')
+    ? n0
+    : 'Tip: check opening hours, logistics and reservations in advance.';
 
   return {
     day:d,
@@ -1321,165 +1353,73 @@ function normalizeRow(r = {}, fallbackDay = 1){
   };
 }
 
+/* =========================================
+   Soft dedupe inside a day
+========================================= */
+
 function dedupeSoftSameDay(rows){
+
   const seen = new Set();
   const out = [];
+
   for(const r of rows.sort((a,b)=> (a.start||'') < (b.start||'') ? -1 : 1)){
-    const k = [String(r.activity||'').toLowerCase().trim(), (r.from||'').toLowerCase().trim(), (r.to||'').toLowerCase().trim()].join('|');
+
+    const k = [
+      String(r.activity||'').toLowerCase().trim(),
+      (r.from||'').toLowerCase().trim(),
+      (r.to||'').toLowerCase().trim()
+    ].join('|');
+
     if(seen.has(k)) continue;
+
     seen.add(k);
     out.push(r);
   }
+
   return out;
 }
 
+/* =========================================
+   Push rows to state
+========================================= */
+
 function pushRows(city, rows, replace=false){
+
   if(!city || !rows) return;
-  if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
+
+  if(!itineraries[city]){
+    itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
+  }
 
   const byDay = itineraries[city].byDay;
   const daysToReplace = new Set();
 
   const mapped = rows.map(raw=>normalizeRow(raw, 1));
+
   if(replace){
     mapped.forEach(obj=>{ daysToReplace.add(obj.day); });
     daysToReplace.forEach(d=>{ byDay[d] = []; });
   }
 
   mapped.forEach(obj=>{
+
     const d = obj.day;
+
     if(!byDay[d]) byDay[d]=[];
+
     dedupeInto(byDay[d], obj);
+
     byDay[d] = dedupeSoftSameDay(byDay[d]);
-    if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
+
+    if(byDay[d].length>20){
+      byDay[d] = byDay[d].slice(0,20);
+    }
+
   });
 
   itineraries[city].byDay = byDay;
+
   ensureDays(city);
-}
-function upsertCityMeta(meta){
-  const name = meta.city || activeCity || savedDestinations[0]?.city;
-  if(!name) return;
-  if(!cityMeta[name]) cityMeta[name] = { baseDate:null, start:null, end:null, hotel:'', transport:'', perDay:[] };
-  if(meta.baseDate) cityMeta[name].baseDate = meta.baseDate;
-  if(meta.start)    cityMeta[name].start    = meta.start;
-  if(meta.end)      cityMeta[name].end      = meta.end;
-  if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
-  if(typeof meta.transport==='string') cityMeta[name].transport = meta.transport;
-  if(Array.isArray(meta.perDay)) cityMeta[name].perDay = meta.perDay;
-  if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
-}
-function applyParsedToState(parsed){
-  if(!parsed) return;
-  if(parsed.itinerary) parsed = parsed.itinerary;
-  if(parsed.destinos)  parsed.destinations = parsed.destinos;
-  if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
-
-  if(parsed.meta) upsertCityMeta(parsed.meta);
-
-  // 🧠 Detectar forceReplan si aplica y ajustar replace
-  let forceReplanCity = null;
-  if (typeof plannerState !== 'undefined' && plannerState.forceReplan) {
-    const candidate = parsed.destination || parsed.city || parsed.meta?.city;
-    if (candidate && plannerState.forceReplan[candidate]) {
-      forceReplanCity = candidate;
-    }
-  }
-
-  // ✅ soporte quirúrgico para formato preferido city_day
-  if(Array.isArray(parsed.city_day)){
-    const name = parsed.destination || parsed.city || parsed.meta?.city || activeCity || savedDestinations[0]?.city;
-    if(name){
-      const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
-      parsed.city_day.forEach(block=>{
-        const dayNum = parseInt(block?.day, 10) || 1;
-        const rows = Array.isArray(block?.rows) ? block.rows : [];
-        pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
-      });
-      if(forceReplanCity === name){
-        delete plannerState.forceReplan[name];
-      }
-      return;
-    }
-  }
-
-  if(Array.isArray(parsed.destinations)){
-    parsed.destinations.forEach(d=>{
-      const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
-      if(!name) return;
-      const mustReplace = Boolean(d.replace) || (forceReplanCity === name);
-
-      if(d.rowsByDay && typeof d.rowsByDay === 'object'){
-        Object.entries(d.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
-        });
-      } else if(Array.isArray(d.rows)){
-        pushRows(name, d.rows, mustReplace);
-      }
-
-      if(Array.isArray(d.city_day)){
-        d.city_day.forEach(block=>{
-          const dayNum = parseInt(block?.day, 10) || 1;
-          const rows = Array.isArray(block?.rows) ? block.rows : [];
-          pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
-        });
-      }
-
-      // ✅ limpiar flag una vez utilizado
-      if(forceReplanCity === name){
-        delete plannerState.forceReplan[name];
-      }
-    });
-    return;
-  }
-
-  if(parsed.destination && Array.isArray(parsed.rows)){
-    const name = parsed.destination;
-    const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
-    pushRows(name, parsed.rows, mustReplace);
-    if(forceReplanCity === name){
-      delete plannerState.forceReplan[name];
-    }
-    return;
-  }
-
-  if(Array.isArray(parsed.itineraries)){
-    parsed.itineraries.forEach(x=>{
-      const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
-      if(!name) return;
-      const mustReplace = Boolean(x.replace) || (forceReplanCity === name);
-
-      if(x.rowsByDay && typeof x.rowsByDay==='object'){
-        Object.entries(x.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
-        });
-      } else if(Array.isArray(x.rows)) {
-        pushRows(name, x.rows, mustReplace);
-      }
-
-      if(Array.isArray(x.city_day)){
-        x.city_day.forEach(block=>{
-          const dayNum = parseInt(block?.day, 10) || 1;
-          const rows = Array.isArray(block?.rows) ? block.rows : [];
-          pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
-        });
-      }
-
-      if(forceReplanCity === name){
-        delete plannerState.forceReplan[name];
-      }
-    });
-    return;
-  }
-
-  if(Array.isArray(parsed.rows)){
-    const city = activeCity || savedDestinations[0]?.city;
-    const mustReplace = Boolean(parsed.replace) || (forceReplanCity === city);
-    pushRows(city, parsed.rows, mustReplace);
-    if(forceReplanCity === city){
-      delete plannerState.forceReplan[city];
-    }
-  }
 }
 
 /* ==============================
