@@ -1998,19 +1998,6 @@ function _extractPlannerRows_(parsed, city){
   return [];
 }
 
-// 🆕 CRITICAL FIX: detect if the model collapsed a multi-day plan into a single day
-function _hasCollapsedDays_(rows, startDay=1, endDay=1){
-  const normalized = (rows || [])
-    .map(r => parseInt(r?.day, 10))
-    .filter(n => Number.isFinite(n));
-
-  if(!normalized.length) return false;
-  if(endDay <= startDay) return false;
-
-  const uniqueDays = [...new Set(normalized)];
-  return uniqueDays.length === 1 && uniqueDays[0] === startDay;
-}
-
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -2027,45 +2014,7 @@ async function generateCityItinerary(city){
   const instructions = `
 ${FORMAT}
 **ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
-
-OUTPUT / COMPATIBILITY:
-- Preferred output is Format A:
-  {"destination":"${city}","days_total":${dest.days},"city_day":[{"city":"${city}","day":1,"rows":[...]}],"followup":"short text"}
-- Legacy compatibility also allowed:
-  • Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'},"followup":"short text"}
-  • Format C {"destinations":[{"name":"${city}","rows":[...]}],"followup":"short text"}
-- Return ONLY valid JSON. No text outside JSON.
-
-GLOBAL MASTER PLAN:
-- Internally define before generating rows:
-  • primary focus of EACH day
-  • city days vs regional day trips
-  • distribution of iconic highlights
-  • distribution of night experiences
-  • intensity vs lighter rhythm
-  • avoid weak final days
-- Do NOT concentrate all iconic highlights in the first half.
-- Every day must feel intentional.
-- The final day must not feel like leftover filler.
-
-LANGUAGE / CONTEXT:
-- Write in the REAL language chosen/written by the user.
-- Ignore site/system labels when inferring language or intent.
-- Use ALL user information from planner inputs, chat, preferences, restrictions, special conditions, traveler profile, ages, pace and mobility context.
-
-INTERPRETATION POLICY:
-- Internally distinguish:
-  1) HARD constraints
-  2) SOFT preferences
-  3) SUGGESTIONS
-- HARD constraints include:
-  • safety / accessibility / mobility / medical or allergy constraints
-  • explicit must / never rules
-  • fixed dates
-  • provided time windows
-  • explicit requested places
-- If a constraint conflicts with another preference, prioritize safety/feasibility and propose the closest good alternative.
-- If a key detail is missing to satisfy a restriction, choose the minimum safe option and keep the itinerary coherent.
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
@@ -2075,140 +2024,44 @@ KEY RULES (MANDATORY):
   • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
   • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
   • Correct example (city): "${city} – Return to hotel".
-- "day", "start", "end", "activity", "from", "to", "transport", "duration" and "notes" can NEVER be empty.
-- Avoid generic items: forbidden "tour", "museum", "park", "local restaurant", "free time", "rest of day", "explore area" without a clear name/identifier.
+- "from", "to", "transport" and "notes" can NEVER be empty.
+- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
 
-MUST-INCLUDE CONTRACT:
-- If the user explicitly requested places, including places written inside Special Conditions / Conditions, those places become MUST-INCLUDE.
-- EACH must-include place must appear at least once in "activity" or "to".
-- If there are multiple must-includes, distribute them across days when feasible.
-- Do NOT silently omit requested places.
-- If any must-include is infeasible (distance / closure / timing / safety), explain briefly in "followup" and propose the closest feasible alternative.
-
-TIME WINDOWS (PER DAY):
-- Respect daily time windows using this payload: ${JSON.stringify(perDay)}.
-- ONLY provided hours are binding for that specific day.
-- If a day has a provided start time, the first row must start at or after it.
-- If a day has a provided end time, the last row must end at or before it.
-- Start/end are PER-ROW times, not repeated day limits.
-- Do NOT set many rows to the same day-end time.
-- Do NOT create a first umbrella row that spans most or all of the day and then list sub-stops inside that same window.
-- If hours are missing, infer realistic local times and do NOT invent rigid day limits.
-
-TIME SEQUENCING / CONTINUITY:
-- Times must be ordered, realistic and non-overlapping.
-- Each row's end must be after its start.
-- Normally the next row's "from" should match the previous row's "to", or be an immediately plausible continuation.
-- Do NOT teleport between unrelated places.
-- If returning to hotel/base, add a realistic transfer row when needed.
-- The row time block must broadly match its stated duration.
-
-DURATION / NOTES CONTRACT:
-- "duration" MUST be EXACTLY 2 lines:
-  • "Transport: <estimate>"
-  • "Activity: <estimate>"
-- Forbidden: "Transport: 0m" or "Activity: 0m".
-- "notes" are REQUIRED and must be >= 20 characters.
-- "notes" must include:
-  • 1 emotional sentence
-  • 1 logistical tip
-  • condition/alternative if applicable
-  • when relevant, "Related: <nearby spot/logical pair>"
-
-DAY COMPLETENESS:
-- If a day has >= 6 hours available, it should normally contain 4–8 meaningful rows.
-- Do NOT leave long unexplained gaps if meaningful nearby experiences still exist.
-- A day must never end early just because planning stopped.
-- If there is a night-only item (e.g., aurora), do NOT make it the only row unless the user explicitly wants a light/rest day.
-
-ONE-DAY ITINERARY RULE:
-- If days_total = 1:
-  • full day → normally 6–10 rows
-  • short window (<4h) → 3–5 rows
-- Keep pacing realistic for kids / seniors / mobility limits.
-
 TRANSPORT (smart priority, no invention):
-- User transport preference for this city: "${transport}".
-- Hotel / lodging reference: "${hotel || 'not provided'}".
-- In city: choose the most realistic option among Walk / Metro / Bus / Tram / Urban Rail / Ferry / Funicular / Cable Car.
-- Use walking only for genuinely short distances.
-- Combined modes are allowed when they are the most realistic option.
+- In city: Walk/Metro/Bus/Tram depending on real availability.
 - For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly the best choice for that exact route, use it (e.g., realistic intercity train/bus).
-  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season, poor coverage), use EXACTLY: "Rental Car or Guided Tour".
-- If the user explicitly says they will rent a car or drive, treat that as the PRIMARY transport preference.
-- Do NOT force rental car inside compact historic centers when walking is clearly best for short core movements.
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
-MEALS:
-- Meals are optional, NOT mandatory.
-- Only include meals if they add real value to the flow.
-- If included, they must be specific and non-generic.
+AURORAS (if plausible by city/season/latitude):
+- You must include AT LEAST 1 aurora night in the itinerary.
+- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
+- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
+- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
 
-HOURS / CLOSURES:
-- Avoid unrealistic schedules.
-- Indoor attractions normally belong in a reasonable daytime window (guideline: 10:00–17:00 if not fully sure).
-- Outdoor viewpoints / bridges / scenic walks can be more flexible.
-- If exact hours are uncertain, mention confirmation in notes.
-
-NIGHT EXPERIENCES:
-- If the destination has a real iconic night experience, include at least 1 when appropriate.
-- Use realistic night timing.
-
-AURORAS:
-- Auroras are FORBIDDEN unless they are truly plausible by city / latitude / season.
-- If auroras are NOT plausible, do NOT mention them and replace with a real iconic night experience.
-- If auroras ARE plausible:
-  • include AT LEAST 1 aurora night
-  • realistic NIGHT schedule only (approx. 20:00–02:00 local)
-  • avoid consecutive days if there is margin
-  • avoid leaving it only for the final day unless it truly only fits there
-  • include 1 option like "Tour/Van" and 1 low-cost nearby alternative in notes with "valid:"
-  • aurora rows should not make the whole daytime part of the day feel empty
-
-DAY TRIPS / MACRO-TOURS:
-- You may propose day trips if they add real value.
-- HARD CAP: maximum ~5 hours per one-way trip.
-- If a route approaches that limit, reduce the number of stops or simplify the plan to keep the day realistic.
-- If the experience would still feel exhausting, low-value, or mostly transit, reject it and choose a better alternative closer to "${city}".
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
 - If you propose a day trip, it must be COMPLETE:
-  • 5–8 meaningful rows with clear names, logical sequence, realistic transfers
-  • the FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop)
-  • must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}"
-  • never create an incomplete excursion like: transport → single stop → return
-  • do NOT create one umbrella row that consumes most of the day while also listing separate sub-stops inside the same time block
-  • if it's a classic route, reach the logical end highlight before returning
-  • return times must NOT be optimistic: use conservative estimates in winter or at night
-  • after the return row, do NOT jump to hotel unless the return realistically ends there or a transfer row is added
-
-ICELAND CURATION (ONLY WHEN RELEVANT):
-- From Reykjavik, prioritize realistic high-value day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes and other realistic Southwest / West Iceland options.
-- For South Coast, if the route reaches the Reynisfjara / Vík area, include the logical highlight sequence before returning.
-- For Snæfellsnes, prefer specific named stops over vague placeholders.
-- Avoid extreme same-day round trips that would be exhausting and low-quality.
+  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
 - If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
 - Group by areas, avoid backtracking.
 - Validate overall plausibility and safety.
-- If a special activity is plausible, notes may include "valid: <justification>".
-- Avoid activities in clearly risky/restricted areas or time windows.
-- Replace with safer alternatives when applicable.
-
-FINAL VALIDATION (MANDATORY BEFORE JSON):
-- Verify all days still feel complete.
-- Verify later days are not weaker than earlier days.
-- Verify the final day still contains meaningful experiences.
-- Verify no must-include place was silently omitted.
-- Verify no day trip is incomplete.
-- Verify no aurora or other night-only activity appears in daylight.
-- Verify no umbrella rows consume most of the day while sub-stops are also listed separately.
-- Verify the JSON remains renderable and coherent.
-
+  • If a special activity is plausible, add "notes" with "valid: <justification>".
+  • Avoid activities in clearly risky/restricted areas or time windows.
+  • Replace with safer alternatives when applicable.
+- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
 - No text outside JSON.
 `.trim();
 
@@ -2221,31 +2074,6 @@ FINAL VALIDATION (MANDATORY BEFORE JSON):
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let tmpCity = city;
     let tmpRows = _extractPlannerRows_(parsed, city);
-
-    // 🆕 CRITICAL FIX: if a multi-day plan collapses into a single day, retry once with explicit day enforcement
-    if(dest.days > 1 && _hasCollapsedDays_(tmpRows, 1, dest.days)){
-      console.warn('Planner collapsed all rows into a single day. Retrying with explicit day enforcement...');
-
-      const retryInstructions = `
-${instructions}
-
-CRITICAL RETRY FIX:
-- Every row MUST include a valid "day" value from 1 to ${dest.days}.
-- Distribute rows across the correct days.
-- Do NOT collapse all rows into Day 1.
-- Rows without a valid "day" are invalid.
-- Return valid JSON only.
-`.trim();
-
-      const retryText = await _callPlannerSystemPrompt_(retryInstructions, false);
-      const retryParsed = parseJSON(retryText);
-      if(retryParsed && (retryParsed.rows || retryParsed.destinations || retryParsed.itineraries || retryParsed.city_day)){
-        const retryRows = _extractPlannerRows_(retryParsed, city);
-        if(retryRows?.length && !_hasCollapsedDays_(retryRows, 1, dest.days)){
-          tmpRows = retryRows;
-        }
-      }
-    }
 
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan); // 🧠 if replanning → replace=true
@@ -2286,124 +2114,46 @@ async function rebalanceWholeCity(city, opts={}){
 ${FORMAT}
 **ROLE:** Rebalance the city "${city}" between days ${startDay} and ${endDay}, keeping what is plausible and filling gaps.
 ${lockedDaysText}
-
-OUTPUT / COMPATIBILITY:
-- Preferred output is Format A:
-  {"destination":"${city}","days_total":${totalDays},"city_day":[{"city":"${city}","day":${startDay},"rows":[...]}],"followup":"short text"}
-- Legacy compatibility also allowed:
-  • Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'},"followup":"short text"}
-  • Format C {"destinations":[{"name":"${city}","rows":[...]}],"followup":"short text"}
-- Return ONLY valid JSON. No text outside JSON.
-
-GLOBAL MASTER PLAN:
-- Internally rebalance the affected range before writing rows:
-  • primary focus of each affected day
-  • city days vs regional day trips
-  • distribution of iconic highlights
-  • distribution of night experiences
-  • intensity vs lighter rhythm
-  • avoid weak final affected day
-- Do NOT concentrate all highlights too early inside the editable range.
-- The final affected day must still feel intentional.
-
-LANGUAGE / CONTEXT:
-- Write in the REAL language chosen/written by the user.
-- Ignore site/system labels when inferring language or intent.
-- Use all relevant planner context, traveler profile, restrictions, preferences and special conditions.
-
-INTERPRETATION POLICY:
-- Internally distinguish:
-  1) HARD constraints
-  2) SOFT preferences
-  3) SUGGESTIONS
-- Prioritize safety and feasibility when conflicts appear.
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 KEY RULES (MANDATORY):
 - "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
   • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
   • If it's NOT a day trip, "Destination" can be "${city}".
-- from/to/transport/duration/notes: NEVER empty.
-- Avoid generic items without clear names.
+- from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
   • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
 
-MUST-INCLUDE CONTRACT:
-- If the user explicitly requested places, including places written inside Special Conditions / Conditions, those places MUST appear unless truly infeasible.
-- EACH must-include place must appear at least once in "activity" or "to".
-- Do NOT silently omit must-includes.
-- If infeasible, explain briefly in "followup" and propose the closest feasible alternative.
-
-TIME WINDOWS / STRUCTURE:
-- Respect time windows using this payload: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
-- Only provided hours are binding for that specific day.
-- If a provided day has a start, the first row must start at or after it.
-- If a provided day has an end, the last row must end at or before it.
-- If hours are missing, infer realistic local times.
-- Times must be ordered and non-overlapping.
-- Do NOT create a first umbrella row that spans most of the day and then place sub-stops inside the same time block.
-- The row time block must broadly match its stated duration.
-
-DURATION / NOTES CONTRACT:
-- "duration" MUST be EXACTLY 2 lines:
-  • "Transport: <estimate>"
-  • "Activity: <estimate>"
-- Forbidden: "Transport: 0m" or "Activity: 0m".
-- Notes must ALWAYS be useful, specific, non-empty and >= 20 characters.
-- Notes should include 1 emotional sentence and 1 logistical tip.
-
-DAY COMPLETENESS:
-- If a day has >= 6 hours available, it should normally contain 4–8 meaningful rows.
-- Do NOT leave long unexplained gaps if nearby meaningful experiences still exist.
-- The last affected day can be lighter, but not empty if key highlights remain.
-- If a night-only item exists, do NOT let it be the only row unless the user explicitly wants a light/rest day.
-
 TRANSPORT (smart priority, no invention):
-- In city: Walk/Metro/Bus/Tram/Urban Rail/Ferry/Funicular/Cable Car depending on real availability.
+- In city: Walk/Metro/Bus/Tram depending on real availability.
 - For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly the best choice for that exact route, use it (realistic intercity train/bus).
-  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season, poor coverage), use EXACTLY: "Rental Car or Guided Tour".
-- If the user explicitly says they will rent a car or drive, treat that as the PRIMARY transport preference.
-- Do NOT force rental car inside compact urban cores when walking is clearly the best option for short movements.
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
-MEALS / NIGHT:
-- Meals are optional and only if they add real value.
-- If the destination has a true iconic night experience, include at least one when appropriate.
+AURORAS (if plausible):
+- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
+- Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
+- Notes must include "valid:" + a nearby low-cost alternative.
 
-AURORAS:
-- Auroras are ONLY allowed if truly plausible by city / latitude / season.
-- If plausible, include at least 1 aurora night in a realistic night window (20:00–02:00 approx.), avoid consecutive days if there is margin, and include "valid:" + a nearby low-cost alternative.
-- If not plausible, replace with a real iconic night experience and do NOT mention auroras.
-
-DAY TRIPS / MACRO-TOURS:
-- You may include day trips if they add real value.
-- HARD CAP: maximum ~5 hours per one-way trip.
-- If a route approaches that limit, reduce stops or simplify the plan.
-- If the route would still feel exhausting or low-value, reject it and choose a closer alternative.
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may include day trips if they add value (no fixed rule). Decide intelligently.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, adjust stops/window.
 - If you include a day trip:
-  • 5–8 meaningful rows with realistic sequence
-  • the FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop)
-  • must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}"
-  • never create an incomplete excursion like transport → single stop → return
-  • do NOT create one umbrella row that consumes most of the day while sub-stops are also listed separately
-  • if it's a classic route, reach the logical end highlight before returning
-  • avoid optimistic returns: use conservative estimates in winter or at night
+  • 5–8 sub-stops (rows) with realistic sequence.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route, reach the logical end highlight before returning.
+  • Avoid optimistic returns: use conservative estimates in winter or at night.
 
-CONTINUITY / QUALITY:
-- Normally the next row's "from" should match the previous row's "to", or be an immediately plausible continuation.
-- Consider key highlights and distribute them without duplication.
-${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable and within the ~5h per one-way cap, integrate it as a COMPLETE macro-tour and close with return.` : ''}
+QUALITY:
+- Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Consider key highlights and distribute without duplication.
+${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
+- The last day can be lighter, but don’t leave it “empty” if key highlights remain.
 - Validate plausibility and safety; replace with safe alternatives when needed.
-
-FINAL VALIDATION (MANDATORY BEFORE JSON):
-- Verify all affected days still feel complete.
-- Verify later affected days are not weaker than earlier affected days.
-- Verify the final affected day still has meaningful experiences.
-- Verify no must-include place was silently omitted.
-- Verify no day trip is incomplete.
-- Verify no aurora or other night-only activity appears in daylight.
-- Verify no umbrella rows consume most of the day while sub-stops are also listed separately.
+- Notes must ALWAYS be useful (never empty or "seed").
 
 Current context (to merge without deleting): 
 ${buildIntake()}
@@ -2416,31 +2166,6 @@ ${buildIntake()}
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
-
-    // 🆕 CRITICAL FIX: if a multi-day rebalance collapses into a single day, retry once with explicit day enforcement
-    if(endDay > startDay && _hasCollapsedDays_(rows, startDay, endDay)){
-      console.warn('Rebalance collapsed all rows into a single day. Retrying with explicit day enforcement...');
-
-      const retryPrompt = `
-${prompt}
-
-CRITICAL RETRY FIX:
-- Every row MUST include a valid "day" value from ${startDay} to ${endDay}.
-- Distribute rows across the correct affected days.
-- Do NOT collapse all rows into Day ${startDay}.
-- Rows without a valid "day" are invalid.
-- Return valid JSON only.
-`.trim();
-
-      const retryAns = await _callPlannerSystemPrompt_(retryPrompt, true);
-      const retryParsed = parseJSON(retryAns);
-      if(retryParsed && (retryParsed.rows || retryParsed.destinations || retryParsed.itineraries || retryParsed.city_day)){
-        const retryRows = _extractPlannerRows_(retryParsed, city);
-        if(retryRows?.length && !_hasCollapsedDays_(retryRows, startDay, endDay)){
-          rows = retryRows;
-        }
-      }
-    }
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
