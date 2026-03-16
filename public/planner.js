@@ -1192,9 +1192,9 @@ function ensureDays(city){
   itineraries[city].byDay = byDay;
 }
 
-/* =========================================
+/* ======================================================
    INTERNAL HELPERS
-========================================= */
+====================================================== */
 
 function _hhmmToMinutes_(s){
   const m = String(s||'').trim().match(/^(\d{1,2}):(\d{2})$/);
@@ -1219,9 +1219,9 @@ function _minutesToHHMM_(mins){
   return `${hh}:${mm}`;
 }
 
-/* =========================================
+/* ======================================================
    Duration helpers
-========================================= */
+====================================================== */
 
 function _sumApproxMinutesFromDuration_(txt){
 
@@ -1247,9 +1247,9 @@ function _sumApproxMinutesFromDuration_(txt){
   return total > 0 ? total : null;
 }
 
-/* =========================================
-   Duration sanitation
-========================================= */
+/* ======================================================
+   Duration sanitizer
+====================================================== */
 
 function _sanitizeDurationLines_(raw){
 
@@ -1260,24 +1260,23 @@ function _sanitizeDurationLines_(raw){
   }
 
   if(!s){
-    return 'Transport: Verify in Info Chat\nActivity: Verify in Info Chat';
+    return 'Transport: Verify duration in Info Chat\nActivity: Verify duration in Info Chat';
   }
 
-  // prevent zero durations
   s = s.replace(/Transport\s*:\s*~?0m\b/gi, 'Transport: ~10m');
   s = s.replace(/Activity\s*:\s*~?0m\b/gi, 'Activity: ~10m');
 
   return s;
 }
 
-/* =========================================
+/* ======================================================
    Row normalization
-========================================= */
+====================================================== */
 
 function normalizeRow(r = {}, fallbackDay = 1){
 
-  let start = r.start ?? r.start_time ?? r.startTime ?? '';
-  let end   = r.end   ?? r.end_time   ?? r.endTime   ?? '';
+  let start   = r.start ?? r.start_time ?? r.startTime ?? '';
+  let end     = r.end   ?? r.end_time   ?? r.endTime   ?? '';
 
   const act   = r.activity ?? '';
   const from  = r.from ?? '';
@@ -1301,7 +1300,6 @@ function normalizeRow(r = {}, fallbackDay = 1){
   if(startMin != null && endMin == null && approxDur){
     endMin = startMin + Math.max(approxDur, 30);
   }
-
   else if(startMin == null && endMin != null && approxDur){
     startMin = Math.max(0, endMin - Math.max(approxDur, 30));
   }
@@ -1310,19 +1308,17 @@ function normalizeRow(r = {}, fallbackDay = 1){
     startMin = _hhmmToMinutes_(DEFAULT_START);
     endMin   = _hhmmToMinutes_(DEFAULT_END);
   }
-
   else if(startMin != null && endMin == null){
     endMin = startMin + 90;
   }
-
   else if(startMin == null && endMin != null){
     startMin = Math.max(0, endMin - 90);
   }
 
-  let span = endMin - startMin;
-  if(span <= 0) span += 24*60;
+  let finalSpan = endMin - startMin;
+  if(finalSpan <= 0) finalSpan += 24*60;
 
-  if(span < 15){
+  if(finalSpan < 15){
     endMin = startMin + 30;
   }
 
@@ -1338,7 +1334,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
 
   const safeNotes = (n0 && n0.toLowerCase()!=='seed')
     ? n0
-    : 'Tip: check opening hours, logistics and reservations in advance.';
+    : 'Tip: check opening hours and logistics before visiting.';
 
   return {
     day:d,
@@ -1353,9 +1349,9 @@ function normalizeRow(r = {}, fallbackDay = 1){
   };
 }
 
-/* =========================================
-   Soft dedupe inside a day
-========================================= */
+/* ======================================================
+   Deduplicate rows softly within the same day
+====================================================== */
 
 function dedupeSoftSameDay(rows){
 
@@ -1379,9 +1375,9 @@ function dedupeSoftSameDay(rows){
   return out;
 }
 
-/* =========================================
-   Push rows to state
-========================================= */
+/* ======================================================
+   Push rows into itinerary state
+====================================================== */
 
 function pushRows(city, rows, replace=false){
 
