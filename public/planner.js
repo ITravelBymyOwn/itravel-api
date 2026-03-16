@@ -1166,13 +1166,14 @@ LANGUAGE (CRITICAL):
 }
 
 /* ==============================
-   SECCIÓN 13 · Merge / utilidades
+   SECTION 13 · Merge / utilities
 ================================= */
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
   const has = arr.find(x=>key(x)===key(row));
   if(!has) arr.push(row);
 }
+
 function ensureDays(city){
   if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null};
   const byDay = itineraries[city].byDay || {};
@@ -1186,7 +1187,10 @@ function ensureDays(city){
   itineraries[city].byDay = byDay;
 }
 
-// ✅ QUIRÚRGICO: helpers locales para evitar filas paraguas y duraciones inválidas
+/* ======================================================
+   Local helpers to avoid umbrella rows and invalid times
+====================================================== */
+
 function _hhmmToMinutes_(s){
   const m = String(s||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!m) return null;
@@ -1194,6 +1198,7 @@ function _hhmmToMinutes_(s){
   const mm = Math.max(0, Math.min(59, parseInt(m[2],10)));
   return (hh * 60) + mm;
 }
+
 function _minutesToHHMM_(mins){
   let n = Number(mins);
   if(!Number.isFinite(n)) return '';
@@ -1203,6 +1208,7 @@ function _minutesToHHMM_(mins){
   const mm = String(Math.floor(n%60)).padStart(2,'0');
   return `${hh}:${mm}`;
 }
+
 function _sumApproxMinutesFromDuration_(txt){
   const s = String(txt||'');
   if(!s.trim()) return null;
@@ -1220,7 +1226,9 @@ function _sumApproxMinutesFromDuration_(txt){
   }
   return total > 0 ? total : null;
 }
+
 function _sanitizeDurationLines_(raw){
+
   let s = (typeof raw === 'number') ? `${raw}m` : String(raw||'').trim();
 
   if (s && /Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && s.includes(',')) {
@@ -1231,10 +1239,9 @@ function _sanitizeDurationLines_(raw){
   }
 
   if(!s){
-    return 'Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat';
+    return 'Transport: Verify duration in Info Chat\nActivity: Verify duration in Info Chat';
   }
 
-  // ✅ Evita 0m / ~0m
   s = s.replace(/(Transporte|Transport)\s*:\s*~?0m\b/gi, '$1: ~10m');
   s = s.replace(/(Actividad|Activity)\s*:\s*~?0m\b/gi, '$1: ~10m');
 
@@ -1242,8 +1249,10 @@ function _sanitizeDurationLines_(raw){
 }
 
 function normalizeRow(r = {}, fallbackDay = 1){
+
   let start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
   let end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
+
   const act   = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
   const from  = r.from ?? r.origin ?? r.origen ?? '';
   const to    = r.to   ?? r.destination ?? r.destino ?? '';
@@ -1260,27 +1269,24 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let startMin = _hhmmToMinutes_(startStr);
   let endMin   = _hhmmToMinutes_(endStr);
 
-  // ✅ Si falta una hora, intenta inferirla desde duration (en vez de forzar defaults)
   const approxDur = _sumApproxMinutesFromDuration_(duration);
+
   if(startMin != null && endMin == null && approxDur){
     endMin = startMin + Math.max(approxDur, 30);
   }else if(startMin == null && endMin != null && approxDur){
     startMin = Math.max(0, endMin - Math.max(approxDur, 30));
   }
 
-  // ✅ Anti-umbrella: si la fila ocupa muchísimo más que su duración real, comprímela
   if(startMin != null && endMin != null && approxDur){
     let span = endMin - startMin;
     if(span <= 0) span += 24*60;
 
-    // si el bloque es exageradamente mayor que la duración real, corrige el end
     if(span >= Math.max(240, approxDur * 2.2)){
-      const compressed = Math.min(Math.max(approxDur + 15, 30), 210); // buffer ligero, sin exagerar
+      const compressed = Math.min(Math.max(approxDur + 15, 30), 210);
       endMin = startMin + compressed;
     }
   }
 
-  // ✅ Fallback final: solo si sigue faltando algo, entonces sí usa defaults
   if(startMin == null && endMin == null){
     startMin = _hhmmToMinutes_(DEFAULT_START);
     endMin   = _hhmmToMinutes_(DEFAULT_END);
@@ -1290,7 +1296,6 @@ function normalizeRow(r = {}, fallbackDay = 1){
     startMin = Math.max(0, endMin - 90);
   }
 
-  // ✅ Garantiza consistencia mínima
   let finalSpan = endMin - startMin;
   if(finalSpan <= 0) finalSpan += 24*60;
   if(finalSpan < 15){
@@ -1300,13 +1305,15 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const finalStart = _minutesToHHMM_(startMin);
   const finalEnd   = _minutesToHHMM_(endMin);
 
-  // ✅ QUIRÚRGICO: guard-rails locales anti-campos-vacíos (fail-open)
-  const safeActivity  = (String(act||'').trim() || 'Actividad por definir');
+  const safeActivity  = (String(act||'').trim() || 'Activity to define');
   const safeFrom      = (String(from||'').trim() || 'Hotel');
-  const safeTo        = (String(to||'').trim() || 'Centro');
-  const safeTransport = (String(trans||'').trim() || 'A pie o Transporte local');
+  const safeTo        = (String(to||'').trim() || 'City Center');
+  const safeTransport = (String(trans||'').trim() || 'Walk or Local Transport');
+
   const n0 = String(notes||'').trim();
-  const safeNotes = (n0 && n0.toLowerCase()!=='seed') ? n0 : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
+  const safeNotes = (n0 && n0.toLowerCase()!=='seed')
+    ? n0
+    : 'Tip: verify opening hours, safety and reservations before visiting.';
 
   return {
     day:d,
@@ -1334,13 +1341,17 @@ function dedupeSoftSameDay(rows){
 }
 
 function pushRows(city, rows, replace=false){
+
   if(!city || !rows) return;
-  if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
+
+  if(!itineraries[city])
+    itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
 
   const byDay = itineraries[city].byDay;
   const daysToReplace = new Set();
 
   const mapped = rows.map(raw=>normalizeRow(raw, 1));
+
   if(replace){
     mapped.forEach(obj=>{ daysToReplace.add(obj.day); });
     daysToReplace.forEach(d=>{ byDay[d] = []; });
@@ -1348,138 +1359,18 @@ function pushRows(city, rows, replace=false){
 
   mapped.forEach(obj=>{
     const d = obj.day;
+
     if(!byDay[d]) byDay[d]=[];
+
     dedupeInto(byDay[d], obj);
     byDay[d] = dedupeSoftSameDay(byDay[d]);
-    if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
+
+    if(byDay[d].length>20)
+      byDay[d] = byDay[d].slice(0,20);
   });
 
   itineraries[city].byDay = byDay;
   ensureDays(city);
-}
-function upsertCityMeta(meta){
-  const name = meta.city || activeCity || savedDestinations[0]?.city;
-  if(!name) return;
-  if(!cityMeta[name]) cityMeta[name] = { baseDate:null, start:null, end:null, hotel:'', transport:'', perDay:[] };
-  if(meta.baseDate) cityMeta[name].baseDate = meta.baseDate;
-  if(meta.start)    cityMeta[name].start    = meta.start;
-  if(meta.end)      cityMeta[name].end      = meta.end;
-  if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
-  if(typeof meta.transport==='string') cityMeta[name].transport = meta.transport;
-  if(Array.isArray(meta.perDay)) cityMeta[name].perDay = meta.perDay;
-  if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
-}
-function applyParsedToState(parsed){
-  if(!parsed) return;
-  if(parsed.itinerary) parsed = parsed.itinerary;
-  if(parsed.destinos)  parsed.destinations = parsed.destinos;
-  if(parsed.destino && parsed.rows) parsed.destination = parsed.destino;
-
-  if(parsed.meta) upsertCityMeta(parsed.meta);
-
-  // 🧠 Detectar forceReplan si aplica y ajustar replace
-  let forceReplanCity = null;
-  if (typeof plannerState !== 'undefined' && plannerState.forceReplan) {
-    const candidate = parsed.destination || parsed.city || parsed.meta?.city;
-    if (candidate && plannerState.forceReplan[candidate]) {
-      forceReplanCity = candidate;
-    }
-  }
-
-  // ✅ soporte quirúrgico para formato preferido city_day
-  if(Array.isArray(parsed.city_day)){
-    const name = parsed.destination || parsed.city || parsed.meta?.city || activeCity || savedDestinations[0]?.city;
-    if(name){
-      const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
-      parsed.city_day.forEach(block=>{
-        const dayNum = parseInt(block?.day, 10) || 1;
-        const rows = Array.isArray(block?.rows) ? block.rows : [];
-        pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
-      });
-      if(forceReplanCity === name){
-        delete plannerState.forceReplan[name];
-      }
-      return;
-    }
-  }
-
-  if(Array.isArray(parsed.destinations)){
-    parsed.destinations.forEach(d=>{
-      const name = d.name || d.destination || d.meta?.city || activeCity || savedDestinations[0]?.city;
-      if(!name) return;
-      const mustReplace = Boolean(d.replace) || (forceReplanCity === name);
-
-      if(d.rowsByDay && typeof d.rowsByDay === 'object'){
-        Object.entries(d.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
-        });
-      } else if(Array.isArray(d.rows)){
-        pushRows(name, d.rows, mustReplace);
-      }
-
-      if(Array.isArray(d.city_day)){
-        d.city_day.forEach(block=>{
-          const dayNum = parseInt(block?.day, 10) || 1;
-          const rows = Array.isArray(block?.rows) ? block.rows : [];
-          pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
-        });
-      }
-
-      // ✅ limpiar flag una vez utilizado
-      if(forceReplanCity === name){
-        delete plannerState.forceReplan[name];
-      }
-    });
-    return;
-  }
-
-  if(parsed.destination && Array.isArray(parsed.rows)){
-    const name = parsed.destination;
-    const mustReplace = Boolean(parsed.replace) || (forceReplanCity === name);
-    pushRows(name, parsed.rows, mustReplace);
-    if(forceReplanCity === name){
-      delete plannerState.forceReplan[name];
-    }
-    return;
-  }
-
-  if(Array.isArray(parsed.itineraries)){
-    parsed.itineraries.forEach(x=>{
-      const name = x.city || x.name || x.destination || activeCity || savedDestinations[0]?.city;
-      if(!name) return;
-      const mustReplace = Boolean(x.replace) || (forceReplanCity === name);
-
-      if(x.rowsByDay && typeof x.rowsByDay==='object'){
-        Object.entries(x.rowsByDay).forEach(([k,rows])=>{
-          pushRows(name, (rows||[]).map(r=>({...r, day:+k})), mustReplace);
-        });
-      } else if(Array.isArray(x.rows)) {
-        pushRows(name, x.rows, mustReplace);
-      }
-
-      if(Array.isArray(x.city_day)){
-        x.city_day.forEach(block=>{
-          const dayNum = parseInt(block?.day, 10) || 1;
-          const rows = Array.isArray(block?.rows) ? block.rows : [];
-          pushRows(name, rows.map(r=>({ ...r, day: r.day ?? dayNum })), mustReplace);
-        });
-      }
-
-      if(forceReplanCity === name){
-        delete plannerState.forceReplan[name];
-      }
-    });
-    return;
-  }
-
-  if(Array.isArray(parsed.rows)){
-    const city = activeCity || savedDestinations[0]?.city;
-    const mustReplace = Boolean(parsed.replace) || (forceReplanCity === city);
-    pushRows(city, parsed.rows, mustReplace);
-    if(forceReplanCity === city){
-      delete plannerState.forceReplan[city];
-    }
-  }
 }
 
 /* ==============================
