@@ -1858,7 +1858,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
     console.error("Planner API error:", e);
 
     if(isAbort){
-      return `{"followup":"⚠️ The assistant took too long to respond. Try again or reduce the number of days."}`;
+      return `{"followup":"⚠️ The assistant took too long to respond."}`;
     }
 
     return `{"followup":"${tone.fail}"}`;
@@ -1871,7 +1871,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 }
 
 /* =========================================================
-   Normalize per-day hours for prompt
+   Normalize per-day hours
 ========================================================= */
 
 function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
@@ -1904,90 +1904,7 @@ function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
 }
 
 /* =========================================================
-   Extract planner rows
-========================================================= */
-
-function _extractPlannerRows_(parsed, city){
-
-  if(!parsed) return [];
-
-  if(Array.isArray(parsed.rows)){
-    return parsed.rows.map(r=>normalizeRow(r));
-  }
-
-  if(parsed.destination && parsed.destination===city && Array.isArray(parsed.rows)){
-    return parsed.rows.map(r=>normalizeRow(r));
-  }
-
-  if(Array.isArray(parsed.city_day)){
-
-    return parsed.city_day
-      .filter(block => {
-        const blockCity = block?.city || parsed.destination || city;
-        return blockCity === city;
-      })
-      .flatMap(block => {
-
-        const dayNum = parseInt(block?.day, 10) || 1;
-        const rows = Array.isArray(block?.rows) ? block.rows : [];
-
-        return rows.map(r =>
-          normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum)
-        );
-      });
-  }
-
-  if(Array.isArray(parsed.destinations)){
-
-    const dd =
-      parsed.destinations.find(d =>
-        (d.name||d.destination)===city
-      );
-
-    if(Array.isArray(dd?.rows))
-      return dd.rows.map(r=>normalizeRow(r));
-
-    if(Array.isArray(dd?.city_day)){
-      return dd.city_day.flatMap(block=>{
-        const dayNum = parseInt(block?.day, 10) || 1;
-        const rows = Array.isArray(block?.rows) ? block.rows : [];
-        return rows.map(r =>
-          normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum)
-        );
-      });
-    }
-
-    return [];
-  }
-
-  if(Array.isArray(parsed.itineraries)){
-
-    const ii =
-      parsed.itineraries.find(x =>
-        (x.city||x.name||x.destination)===city
-      );
-
-    if(Array.isArray(ii?.rows))
-      return ii.rows.map(r=>normalizeRow(r));
-
-    if(Array.isArray(ii?.city_day)){
-      return ii.city_day.flatMap(block=>{
-        const dayNum = parseInt(block?.day, 10) || 1;
-        const rows = Array.isArray(block?.rows) ? block.rows : [];
-        return rows.map(r =>
-          normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum)
-        );
-      });
-    }
-
-    return [];
-  }
-
-  return [];
-}
-
-/* =========================================================
-   Generate itinerary for a city
+   Generate itinerary
 ========================================================= */
 
 async function generateCityItinerary(city){
@@ -2013,12 +1930,10 @@ ROLE: Travel planner "Astra".
 
 Create the best possible itinerary for "${city}" (${dest.days} days).
 
-CRITICAL PLANNING ORDER:
-
-1. First design the BEST OVERALL PLAN for the entire stay.
-2. Distribute major highlights, day trips, scenic routes and night activities across all days.
-3. Ensure later days remain meaningful (no residual or weak days).
-4. Only after the global plan is coherent, structure the itinerary day by day.
+CRITICAL GLOBAL PLANNING:
+Before generating rows, first design the best possible distribution
+of highlights, day trips, scenic routes and night activities across ALL days.
+Later days must remain meaningful and not residual.
 
 OUTPUT FORMAT:
 
@@ -2026,42 +1941,48 @@ OUTPUT FORMAT:
 
 MANDATORY RULES:
 
-- activity format MUST be:
-  "DESTINATION – Specific sub-stop"
+Activity format MUST be:
+"DESTINATION – Specific sub-stop"
 
-- DESTINATION may be:
-  • the city name
-  • the macro-tour name for day trips
+Destination may be:
+• the city name
+• the macro-tour name for day trips
 
-- from/to must always be REAL places.
+From/To must always be REAL locations.
 
-TRANSPORT LOGIC:
+TRANSPORT:
 
-- If the user said rental car → prioritize self-drive where realistic.
-- If transport is unspecified → recommend the most logical option.
+If the user said rental car or driving,
+prioritize self-drive when realistic.
+
+If unspecified,
+recommend the most logical transport.
 
 DAY TRIPS:
 
-- May be included when they significantly improve the itinerary.
-- A real day trip normally includes:
-  • departure
-  • multiple named stops
-  • final return row
+When a day trip is included,
+it must feel like a complete experience,
+normally including multiple meaningful stops
+before the return to the base city.
 
-DAY QUALITY:
+DAY COMPLETENESS:
 
-- Each day should normally contain several meaningful activities.
-- Avoid finishing days too early if nearby highlights remain.
+A normal sightseeing day should normally contain
+multiple meaningful activities.
+
+Avoid finishing days early if major nearby
+highlights remain.
 
 AURORAS (if plausible):
 
-- Must be real nighttime hours.
-- Avoid placing them only on the last day if alternatives exist.
+Must occur during real night hours.
+Avoid leaving them only for the last day if
+other nights are possible.
 
-Time windows reference:
+Daily windows reference:
 ${JSON.stringify(perDay)}
 
-No text outside JSON.
+Return JSON only.
 `.trim();
 
   showWOW(true, t('overlayDefault'));
