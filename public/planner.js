@@ -1797,6 +1797,7 @@ function showWOW(on, msg){
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
+    // Keep only reset enabled
     if (el.id === 'reset-planner') return;
 
     if (el.id === 'info-chat-floating') {
@@ -1816,6 +1817,332 @@ function showWOW(on, msg){
       }
     }
   });
+}
+
+/* ==============================
+   Language anchor helpers
+================================= */
+
+function _lastUserFromSession_(){
+  try{
+    if(typeof session === 'undefined' || !session) return '';
+
+    for(let i=(session?.length||0)-1; i>=0; i--){
+      const m = session[i];
+      if(String(m?.role||'').toLowerCase()==='user'){
+        const s = String(m?.content||'').trim();
+        if(s) return s;
+      }
+    }
+  }catch(_){}
+  return '';
+}
+
+function _userLanguageAnchor_(){
+  try{
+    const chosen = (typeof plannerState !== 'undefined' && plannerState)
+      ? String(plannerState?.itineraryLang || '').trim()
+      : '';
+    if(chosen) return chosen;
+  }catch(_){}
+
+  const sc = (typeof plannerState !== 'undefined' && plannerState)
+    ? String(plannerState?.specialConditions || '').trim()
+    : '';
+  if(sc) return sc;
+
+  const sc2 = (typeof qs !== 'undefined')
+    ? String(qs('#special-conditions')?.value || '').trim()
+    : '';
+  if(sc2) return sc2;
+
+  const last = _lastUserFromSession_();
+  if(last) return last;
+
+  return (getLang()==='es')
+    ? 'Please generate the itinerary.'
+    : 'Please generate the itinerary.';
+}
+
+/* ==============================
+   Planner API call
+================================= */
+
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
+
+  const history = useHistory ? session : [];
+
+  const controller = new AbortController();
+  const timeoutMs = 130000;
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+
+  try{
+
+    showThinking(true);
+
+    const anchor = _userLanguageAnchor_();
+
+    const messages = [
+      { role:'system', content: String(systemPrompt || '') },
+      ...(Array.isArray(history) ? history : []),
+      { role:'user', content: String(anchor || '') }
+    ];
+
+    const res = await fetch(API_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      signal: controller.signal,
+      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
+    });
+
+    if(!res.ok){
+      const raw = await res.text().catch(()=> '');
+      console.error('API error (planner):', res.status, res.statusText, raw);
+      return `{"followup":"${tone.fail}"}`;
+    }
+
+    const data = await res.json().catch(()=>({text:''}));
+    return data?.text || '';
+
+  }catch(e){
+
+    const isAbort =
+      (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
+
+    console.error("Failed to contact the API:", e);
+
+    if(isAbort){
+      return `{"followup":"⚠️ The assistant took too long to respond (timeout). Try again."}`;
+    }
+
+    return `{"followup":"${tone.fail}"}`;
+
+  }finally{
+
+    clearTimeout(timer);
+    showThinking(false);
+
+  }
+}
+
+/* ==============================
+   Normalize per-day windows
+================================= */
+
+function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
+
+  return Array.from({length: totalDays}, (_,i)=>{
+
+    const src =
+      (cityMeta[city]?.perDay||[])[i] ||
+      fallbackPerDay?.[i] ||
+      {};
+
+    const start =
+      (src.start != null && String(src.start).trim())
+      ? String(src.start).trim()
+      : null;
+
+    const end =
+      (src.end != null && String(src.end).trim())
+      ? String(src.end).trim()
+      : null;
+
+    return {
+      day: i+1,
+      start,
+      end,
+      start_provided: !!start,
+      end_provided: !!end
+    };
+
+  });
+
+}
+
+/* ==============================
+   Extract rows from planner JSON
+================================= */
+
+function _extractPlannerRows_(parsed, city){
+
+  if(!parsed) return [];
+
+  if(Array.isArray(parsed.rows)){
+    return parsed.rows.map(r=>normalizeRow(r));
+  }
+
+  if(parsed.destination && parsed.destination===city && Array.isArray(parsed.rows)){
+    return parsed.rows.map(r=>normalizeRow(r));
+  }
+
+  if(Array.isArray(parsed.city_day)){
+    return parsed.city_day
+      .filter(block => {
+        const blockCity = block?.city || parsed.destination || city;
+        return blockCity === city;
+      })
+      .flatMap(block => {
+
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+
+        return rows.map(r =>
+          normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum)
+        );
+
+      });
+  }
+
+  return [];
+}
+
+/* ==============================
+   Generate itinerary for city
+================================= */
+
+async function generateCityItinerary(city){
+
+  const dest = savedDestinations.find(x=>x.city===city);
+  if(!dest) return;
+
+  const perDay =
+    _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
+
+  const baseDate =
+    cityMeta[city]?.baseDate || dest.baseDate || '';
+
+  const forceReplan =
+    (typeof plannerState !== 'undefined'
+      && plannerState.forceReplan
+      && plannerState.forceReplan[city]) ? true : false;
+
+  const instructions = `
+${FORMAT}
+
+ROLE:
+You are Astra, the expert travel planner of ITravelByMyOwn.
+
+Create a complete itinerary ONLY for "${city}" (${dest.days} day/s).
+
+OUTPUT:
+Format B
+{"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}
+
+LANGUAGE:
+Always respond in the real language used by the user.
+
+INTERPRETATION POLICY:
+Distinguish internally between:
+1. Hard constraints
+2. Soft preferences
+3. Suggestions
+
+MUST-INCLUDE RULE:
+If the user explicitly mentions places (including in special conditions)
+they MUST appear at least once in the itinerary.
+If infeasible explain briefly in followup.
+
+TIME WINDOWS:
+Respect provided start/end hours per day.
+If none provided infer realistic times.
+
+ANTI-EMPTY DAYS:
+If a day has ≥6h available produce normally 4-8 rows.
+
+SEQUENCING:
+Rows must follow geographic continuity.
+Avoid teleporting.
+
+ONE DAY RULE:
+If days_total = 1 produce normally 6-10 rows.
+
+TRANSPORT:
+Choose the most efficient realistic option.
+Walking only when optimal.
+
+MANDATORY ROW STRUCTURE:
+activity: "DESTINATION – SUB-STOP"
+
+duration:
+Transport: ...
+Activity: ...
+
+notes:
+≥20 chars including
+1 emotional sentence
+1 logistical tip.
+
+MEALS:
+Optional only if valuable.
+
+HOURS:
+Indoor attractions normally 10:00-17:00.
+
+NIGHT HIGHLIGHTS:
+Include iconic night experiences when relevant.
+
+AURORAS:
+Only if latitude and season make them plausible.
+
+DAY TRIPS:
+Maximum recommended one-way travel time: 5 hours.
+
+A valid day trip must include multiple meaningful stops
+and end with
+"<Macro-tour> – Return to ${city}"
+
+QUALITY:
+Group attractions geographically.
+Avoid backtracking.
+
+Respect day windows:
+${JSON.stringify(perDay)}
+
+Return valid JSON only.
+`.trim();
+
+  showWOW(true, t('overlayDefault'));
+
+  const text =
+    await _callPlannerSystemPrompt_(instructions, false);
+
+  const parsed = parseJSON(text);
+
+  if(parsed && parsed.rows){
+
+    let tmpRows =
+      _extractPlannerRows_(parsed, city);
+
+    const val =
+      await validateRowsWithAgent(city, tmpRows, baseDate);
+
+    pushRows(city, val.allowed, forceReplan);
+
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
+
+    showWOW(false);
+
+    $resetBtn?.removeAttribute('disabled');
+
+    if(forceReplan && plannerState.forceReplan)
+      delete plannerState.forceReplan[city];
+
+    return;
+
+  }
+
+  renderCityTabs();
+  setActiveCity(city);
+  renderCityItinerary(city);
+
+  showWOW(false);
+
+  $resetBtn?.removeAttribute('disabled');
+
+  chatMsg(t('fallbackLocal'), 'ai');
 }
 
 /* ==============================
