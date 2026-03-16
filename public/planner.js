@@ -1998,6 +1998,19 @@ function _extractPlannerRows_(parsed, city){
   return [];
 }
 
+// 🆕 CRITICAL FIX: detect if the model collapsed a multi-day plan into a single day
+function _hasCollapsedDays_(rows, startDay=1, endDay=1){
+  const normalized = (rows || [])
+    .map(r => parseInt(r?.day, 10))
+    .filter(n => Number.isFinite(n));
+
+  if(!normalized.length) return false;
+  if(endDay <= startDay) return false;
+
+  const uniqueDays = [...new Set(normalized)];
+  return uniqueDays.length === 1 && uniqueDays[0] === startDay;
+}
+
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -2209,6 +2222,31 @@ FINAL VALIDATION (MANDATORY BEFORE JSON):
     let tmpCity = city;
     let tmpRows = _extractPlannerRows_(parsed, city);
 
+    // 🆕 CRITICAL FIX: if a multi-day plan collapses into a single day, retry once with explicit day enforcement
+    if(dest.days > 1 && _hasCollapsedDays_(tmpRows, 1, dest.days)){
+      console.warn('Planner collapsed all rows into a single day. Retrying with explicit day enforcement...');
+
+      const retryInstructions = `
+${instructions}
+
+CRITICAL RETRY FIX:
+- Every row MUST include a valid "day" value from 1 to ${dest.days}.
+- Distribute rows across the correct days.
+- Do NOT collapse all rows into Day 1.
+- Rows without a valid "day" are invalid.
+- Return valid JSON only.
+`.trim();
+
+      const retryText = await _callPlannerSystemPrompt_(retryInstructions, false);
+      const retryParsed = parseJSON(retryText);
+      if(retryParsed && (retryParsed.rows || retryParsed.destinations || retryParsed.itineraries || retryParsed.city_day)){
+        const retryRows = _extractPlannerRows_(retryParsed, city);
+        if(retryRows?.length && !_hasCollapsedDays_(retryRows, 1, dest.days)){
+          tmpRows = retryRows;
+        }
+      }
+    }
+
     const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
     pushRows(tmpCity, val.allowed, forceReplan); // 🧠 if replanning → replace=true
     renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
@@ -2378,6 +2416,31 @@ ${buildIntake()}
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
+
+    // 🆕 CRITICAL FIX: if a multi-day rebalance collapses into a single day, retry once with explicit day enforcement
+    if(endDay > startDay && _hasCollapsedDays_(rows, startDay, endDay)){
+      console.warn('Rebalance collapsed all rows into a single day. Retrying with explicit day enforcement...');
+
+      const retryPrompt = `
+${prompt}
+
+CRITICAL RETRY FIX:
+- Every row MUST include a valid "day" value from ${startDay} to ${endDay}.
+- Distribute rows across the correct affected days.
+- Do NOT collapse all rows into Day ${startDay}.
+- Rows without a valid "day" are invalid.
+- Return valid JSON only.
+`.trim();
+
+      const retryAns = await _callPlannerSystemPrompt_(retryPrompt, true);
+      const retryParsed = parseJSON(retryAns);
+      if(retryParsed && (retryParsed.rows || retryParsed.destinations || retryParsed.itineraries || retryParsed.city_day)){
+        const retryRows = _extractPlannerRows_(retryParsed, city);
+        if(retryRows?.length && !_hasCollapsedDays_(retryRows, startDay, endDay)){
+          rows = retryRows;
+        }
+      }
+    }
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
