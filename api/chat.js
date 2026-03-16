@@ -441,12 +441,10 @@ GENERAL RULES:
   - Do NOT front-load most major highlights into the first days and leave later days weak, generic, or residual.
   - The LAST day must still feel worthwhile and intentional, not like leftover filler.
   - Before finalizing the JSON, internally verify that EACH day still feels complete, coherent, and worthwhile on its own.
-- ANTI-FREE-TIME GAPS (MANDATORY):
-  - On a normal sightseeing day, do NOT leave large unexplained idle gaps.
-  - If a day starts in the morning or midday and ends early, continue filling it with logical nearby activities, viewpoints, neighborhoods, cafes, museums, scenic stops, thermal stops, shopping streets, or night highlights, as long as they fit the route and traveler profile.
-  - Avoid gaps longer than about 90 minutes unless there is a clear reason such as a long transfer, a true rest block explicitly requested by the user, or a realistic night wait for a night-only activity.
-  - A day must not feel half-empty if strong realistic options still exist nearby.
-  - Do NOT use vague placeholders like "free time", "día libre", "rest of day free", or equivalent unless the user explicitly requested free time or a rest day.
+- ANTI-GAPS:
+  - Avoid large empty gaps on a normal sightseeing day.
+  - If a day trip or city day still has realistic nearby highlights after the current last row, continue filling the day with logical high-value stops instead of ending the day too early.
+  - Do NOT create a "thin day" when richer realistic options still exist.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD only when they are explicitly fixed, and by default DAY 1 start / LAST DAY end take priority.
@@ -499,8 +497,7 @@ MANDATORY ROW CONTRACT:
 - activity must be as SPECIFIC as possible, especially in day tours and scenic routes.
   • Prefer named sub-stops, named viewpoints, named waterfalls, named beaches, named neighborhoods, named monuments, named markets, named museums, named sections of a route.
   • Avoid generic labels such as "City center", "Scenic stop", "Museum visit", "Waterfall stop", "Beach stop", "Sightseeing", unless there is truly no more specific realistic name available.
-  • Do NOT use generic placeholders like "Restaurante local", "Spa local", "Centro de la ciudad", "Zona oscura", or equivalent when a realistic more specific name can be provided.
-  • Meals and relaxation rows should also be as specific as realistically possible when included.
+  • IMPORTANT: on iconic routes, use the real signature stop names whenever feasible.
 - duration: EXACTLY 2 lines with \\n:
   "Transport: <realistic estimate or ~range>"
   "Activity: <realistic estimate or ~range>"
@@ -516,8 +513,7 @@ MEALS (Flexible rule):
 - NOT mandatory.
 - Include ONLY if they add real value to the flow.
 - If included, NOT generic ("dinner at a local restaurant" forbidden).
-- On normal sightseeing days, meals should support the route, not replace missing attractions.
-- Do NOT use meal rows as filler to make an empty day look complete.
+- Do NOT use meal rows as filler to replace missing iconic or realistic nearby sights.
 
 HOURS / CLOSURES (GLOBAL, anti-impossible schedules):
 - For places with typical hours (museums, castles, indoor monuments, baths/spas, markets), do NOT schedule visits outside a reasonable daytime window.
@@ -542,10 +538,10 @@ AURORAS (HARD RULE + REPLACEMENT):
 - If auroras ARE plausible:
   • They must be scheduled as a real NIGHT activity, never as a daytime activity.
   • They must use darkness-appropriate local hours, not generic evening placeholders.
-  • Use a realistic aurora window that matches actual darkness for the destination/date; do NOT create a too-short or implausibly early aurora slot.
+  • Use a realistic aurora window that matches actual darkness for the destination/date.
+  • Do NOT place aurora starts in broad daylight or bright twilight.
   • Prefer a meaningful aurora block that feels usable in real life, usually longer than a token 1-hour window unless there is a strong reason otherwise.
   • They must not be the only meaningful content of the day unless the user explicitly wants that.
-  • On a trip with several days in a strong aurora destination, it is often better to spread aurora opportunities intelligently instead of concentrating all night potential into a single weak day when better alternatives exist.
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–8 sub-stops (rows).
@@ -556,17 +552,20 @@ DAY TRIPS / MACRO-TOURS:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options.
 - For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
-- CRITICAL: after the return row, do NOT jump back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
+- CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
 - Classic scenic routes must feel like real full-day experiences, not like one main stop plus return.
 - If a classic route is chosen (for example Golden Circle, South Coast, Snæfellsnes, Reykjanes / Blue Lagoon area, or equivalent iconic routes), include the route's most logical signature stops in sequence when feasible.
 - A classic day trip is NOT complete if it contains only an outbound row, one attraction row, and one return row.
+- If an iconic anchor stop can be naturally combined with adjacent high-value nearby stops or a broader scenic area without harming coherence, prefer the richer combined route over the isolated anchor-only version.
 - ICELAND / REYKJAVIK CURATION (when relevant):
   • If the base city is Reykjavik and the user has a rental car or is willing to drive, prioritize strong self-drive day plans over guided-bus simplifications.
   • Golden Circle should normally include a coherent sequence such as Þingvellir, Geysir/Strokkur, Gullfoss, and optionally one additional logical stop when feasible.
   • South Coast should normally go beyond a single waterfall and include the route's signature sequence when feasible, such as Seljalandsfoss, Skógafoss, Reynisfjara, Vík, and/or one additional logical stop.
+  • If the South Coast route reaches the Vík area, Reynisfjara should normally be included unless there is a clear reason not to.
   • Snæfellsnes should normally include several of its signature stops when feasible, not just Kirkjufell alone.
   • Reykjanes / Blue Lagoon area should be treated as a broader peninsula/geothermal route when that creates a better itinerary than Blue Lagoon alone.
-  • A 7-day Reykjavik base itinerary should not waste multiple days on thin local filler if strong realistic day trips still exist.
+  • Blue Lagoon is iconic, but when feasible it can be combined with nearby Reykjanes-area highlights as part of a richer coherent day.
+  • On a 7-day Reykjavik base itinerary, do NOT waste multiple days on thin local filler if strong realistic day trips still exist.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
