@@ -1582,16 +1582,18 @@ function addMultipleDaysToCity(city, extraDays){
 }
 
 /* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
-   (ajuste quirúrgico: menos reglas duras, más criterio experto)
+   SECTION 14 · GLOBAL validation (AI second pass)
 ================================= */
+
 async function validateRowsWithAgent(city, rows, baseDate){
+
   const payload = `
 LANGUAGE (CRITICAL):
-- Output MUST be in the same language as the user's own content in the context.
-- Ignore system/template labels when choosing output language.
+- Output MUST be in the same language as the user's own content.
+- Ignore system/template labels when choosing language.
 
-Devuelve SOLO JSON válido:
+Return ONLY valid JSON:
+
 {
   "allowed":[
     {"day":1,"start":"..","end":"..","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}
@@ -1601,86 +1603,110 @@ Devuelve SOLO JSON válido:
   ]
 }
 
-CRITERIOS GLOBALES (flexibles):
-- Corrige horas solo si hay solapes evidentes o incoherencias claras.
-- Transporte lógico según actividad:
-  • Barco para whale watching (puerto local).
-  • Tour/bus/van para excursiones extensas.
-  • Tren/bus/auto interurbano cuando aplique.
-  • A pie/metro en zonas urbanas.
-- Day trips:
-  • Evalúa con criterio experto si son razonables por distancia, duración total y experiencia real.
-  • Permite hasta ~3h por trayecto (ida) como guía; usa sentido común turístico.
-  • No limites la cantidad de day trips; decide según calidad/valor y tiempo total.
-  • Si un day trip NO es razonable, muévelo a "removed" con reason "distance:" + alternativa viable.
-- Seguridad y restricciones:
-  • Si hay riesgo evidente, restricción oficial o ventana horaria claramente insegura, usa "removed" con reason "risk:".
-  • Prioriza siempre opciones plausibles, seguras y razonables.
-- Notes:
-  • NUNCA vacías ni "seed".
-  • Añade siempre al menos un tip útil o contexto breve.
-- Duraciones:
-  • Acepta rangos realistas (ej. "~90m", "~2–3h").
-  • Si viene en minutos, permite "90m" o "1.5h".
-- Máx. 20 filas por día; prioriza icónicas y evita redundancias.
-- Activity (guía suave):
-  • Prefiere el formato "Destino – Sub-parada específica" si aplica.
-    - "Destino" NO es siempre la ciudad: si una fila pertenece a un day trip/macro-tour, "Destino" debe ser el nombre del macro-tour (ej. "Círculo Dorado", "Costa Sur", "Toledo").
-    - Si NO es day trip, "Destino" puede ser la ciudad.
-  • Evita genéricos tipo "tour" o "museo" sin especificar, cuando sea fácil concretar.
-- From/To (muy importante):
-  • "from" y "to" deben ser LUGARES reales (Hotel/Centro/atracción/pueblo/mirador), NUNCA el nombre del macro-tour.
-    - Ejemplo incorrecto: to="Costa Sur" / from="Círculo Dorado".
-    - Si detectas eso, corrígelo a un lugar real (p.ej., la primera/última sub-parada o el hotel/centro).
-  • Evita filas tipo "<Ciudad> – Excursión a <Macro-tour>" sin sub-parada real.
-    - Si existe una fila así, conviértela a "<Macro-tour> – Salida de <Ciudad>" y ajusta from/to a: from="Hotel/Centro en <Ciudad>" → to="<Primera sub-parada real>".
+GLOBAL VALIDATION GOAL:
+Improve the itinerary without destroying its structure.
 
-CASOS ESPECIALES (guía, no bloqueo):
-1) Whale watching:
-   - Transporte: Barco.
-   - Duración típica total: 3–4h.
-   - Añade en notes: "valid:" con referencia breve a temporada si aplica.
-2) Auroras:
-   - Actividad nocturna (horario local aproximado).
-   - Transporte: Tour/Van o Auto si procede.
-   - Incluir "valid:" con justificación breve (latitud/temporada/clima).
-   - Si hay varias noches posibles, evita duplicar sin motivo.
-3) Rutas escénicas en coche:
-   - Considera conducción + paradas como experiencia integrada.
-   - Si no hay coche ni tour viable, usa "risk" o "logistics" y sugiere alternativa.
-4) Museos/monumentos:
-   - Horario diurno realista.
-5) Cenas/vida nocturna:
-   - Horarios nocturnos razonables (flexibles según destino).
+Prefer fixing rows instead of removing them.
 
-REGLAS DE FUSIÓN:
-- Devuelve en "allowed" las filas ya corregidas.
-- Mueve a "removed" SOLO lo claramente inviable o inseguro.
-- Para excursiones extensas (day trips), si detectas un regreso claramente subestimado, corrige la duración/ventana de tiempo de forma realista.
+--------------------------------------------------
 
-Contexto:
-- Ciudad: "${city}"
-- Fecha base (Día 1): ${baseDate || 'N/A'}
-- Filas a validar: ${JSON.stringify(rows)}
+GLOBAL CRITERIA (expert judgement):
+
+TIME COHERENCE
+- Correct obvious overlaps or impossible sequences.
+- Ensure each activity occurs at a realistic time of day.
+- Night activities must not appear in daylight hours.
+- Daylight nature activities should not occur at unrealistic night hours unless justified.
+
+DAY QUALITY
+- Each day should normally contain multiple meaningful activities.
+- Avoid leaving large unexplained idle gaps if nearby realistic experiences exist.
+- Do not collapse a day into only 1–2 rows unless the available time window is clearly short.
+
+TRANSPORT LOGIC
+- Choose realistic transport for the route.
+- Walking only for short urban distances.
+- If the user mentioned rental car / driving, self-drive is usually acceptable for dispersed routes.
+- Prefer train/bus when clearly the most logical option.
+
+DAY TRIPS / REGIONAL EXCURSIONS
+- Evaluate using real travel logic and tourism experience.
+- A full excursion normally contains several stops rather than a single attraction.
+- If the excursion is unrealistic due to distance or logistics, move it to "removed" with reason:
+  "distance: not realistic from base city".
+
+ICONIC EXPERIENCE COMPLETENESS
+- If a classic scenic route or regional excursion appears, ensure it contains a logical sequence of highlights.
+- Avoid collapsing major routes into a single stop.
+
+AURORA VALIDATION (if applicable)
+- Aurora activities must occur at realistic night hours.
+- Avoid duplicates on multiple consecutive days unless clearly justified.
+- Notes must include "valid:" with a brief justification.
+
+SAFETY AND FEASIBILITY
+- Remove only activities that are clearly impossible, unsafe, or geographically incoherent.
+- If a safer alternative is obvious, prefer correcting instead of removing.
+
+NOTES
+- Notes must never be empty.
+- They should include at least one useful logistical tip.
+
+DURATION
+- Accept realistic ranges such as "~90m" or "~2–3h".
+- Never allow 0m durations.
+
+ACTIVITY FORMAT
+- Prefer format: "Destination – Specific Sub-Stop".
+- Destination may be the base city or the macro-tour name for day trips.
+
+FROM / TO
+- Must always be real places (hotel, attraction, viewpoint, town, etc.).
+- Never use a macro-tour name as the location.
+
+--------------------------------------------------
+
+MERGE RULES
+- Return corrected rows in "allowed".
+- Move only clearly invalid rows to "removed".
+- Preserve the overall itinerary structure.
+
+--------------------------------------------------
+
+Context:
+
+City: "${city}"
+Base date (Day 1): ${baseDate || 'N/A'}
+
+Rows to validate:
+${JSON.stringify(rows)}
+
 `.trim();
 
   try{
+
     const res = await callAgent(payload, true);
     const parsed = parseJSON(res);
+
     if(parsed?.allowed) return parsed;
+
   }catch(e){
     console.warn('Validator error', e);
   }
 
-  // Fail-open seguro: solo sanitiza notes
+  /* Fail-open fallback */
+
   const sanitized = (rows||[]).map(r => {
+
     const notes = (r.notes||'').trim();
+
     return {
       ...r,
       notes: notes && notes.toLowerCase()!=='seed'
         ? notes
-        : 'Tip: revisa horarios locales, logística real y reserva con antelación si aplica.'
+        : 'Tip: verify local schedules, logistics and reservations if needed.'
     };
+
   });
 
   return { allowed: sanitized, removed: [] };
