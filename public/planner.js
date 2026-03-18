@@ -1844,94 +1844,152 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 INPUT NORMALIZATION HELPERS (hotel + transport)
+   🆕 INPUT / ROW NORMALIZATION HELPERS
 ========================================================= */
 function _normText_(v){
-  return String(v || '')
-    .replace(/\s+/g, ' ')
-    .replace(/[|;]/g, ',')
-    .trim();
+  return String(v || '').replace(/\s+/g,' ').trim();
 }
 
-function _isRecommendToken_(s=''){
-  const x = String(s || '').toLowerCase().trim();
-  return /^(recomiendame|recomiéndame|recommend me|recommended|you choose|your choice|surprise me|no preference|sin preferencia|sem preferencia|à recommander|recommande-moi)$/.test(x)
-    || /(recomiendame|recomiéndame|recommend me|you choose|surprise me|sin preferencia|sem preferencia|recommande-moi)/.test(x);
-}
+function _detectTransportPreference_(v=''){
+  const s = String(v || '').toLowerCase().trim();
+  if(!s) return '';
 
-function _detectTransportPreference_(s=''){
-  const x = String(s || '').toLowerCase().trim();
-  if(!x) return '';
-
-  if(_isRecommendToken_(x)) return 'recommend me';
-
-  if(/rental car|rent a car|rented car|car rental|auto privado|coche|carro|auto|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado/.test(x)){
-    return 'rental car';
-  }
-
-  if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|subway|train|tren/.test(x)){
-    return 'public transport';
-  }
-
-  if(/guided tour|tour guiado|excursi[oó]n guiada|excursion guiada/.test(x)){
-    return 'guided tour';
-  }
-
-  if(/walk|walking|a pie|caminando/.test(x)){
-    return 'walk';
-  }
-
-  if(/taxi|uber|cab/.test(x)){
-    return 'taxi or uber';
-  }
+  if(/recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia/.test(s)) return 'recommend me';
+  if(/rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado/.test(s)) return 'rental car';
+  if(/guided tour|tour guiado|excursi[oó]n guiada|excursion guiada/.test(s)) return 'guided tour';
+  if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|tren|train|subway/.test(s)) return 'public transport';
+  if(/walking|walk|a pie|caminando/.test(s)) return 'walk';
+  if(/taxi|uber|cab/.test(s)) return 'taxi or uber';
 
   return '';
 }
 
-function _cleanHotelText_(hotelRaw=''){
-  let s = _normText_(hotelRaw);
+function _cleanHotelBase_(v=''){
+  let s = _normText_(v);
   if(!s) return '';
 
-  // remove obvious transport-choice fragments only at the end or after separators
-  s = s
-    .replace(/\s*,\s*(recomiendame|recomiéndame|recommend me|you choose|surprise me|sin preferencia|sem preferencia)\s*$/i, '')
-    .replace(/\s*,\s*(rental car|rent a car|public transport|guided tour|walk|walking|taxi|uber|coche|carro|auto privado|transporte p[úu]blico|tour guiado)\s*$/i, '')
-    .trim();
+  // remove trailing transport preference fragments
+  s = s.replace(/\s*,\s*(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\s*$/i,'').trim();
+  s = s.replace(/\s*,\s*(rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado|guided tour|tour guiado|excursi[oó]n guiada|excursion guiada|public transport|transporte p[úu]blico|transporte publico|walking|walk|a pie|caminando|taxi|uber)\s*$/i,'').trim();
 
   return s;
 }
 
-function _resolveHotelTransportContext_(city, dest){
+function _resolveHotelTransportContext_(city){
   const rawHotel = _normText_(cityMeta[city]?.hotel || '');
   const rawTransport = _normText_(cityMeta[city]?.transport || '');
 
-  let hotel = _cleanHotelText_(rawHotel);
+  let hotel = _cleanHotelBase_(rawHotel);
   let transport = _detectTransportPreference_(rawTransport);
 
-  // If transport field is empty but hotel field contains "hotel/base, transport pref"
   if(!transport && rawHotel.includes(',')){
     const parts = rawHotel.split(',').map(x => _normText_(x)).filter(Boolean);
     if(parts.length >= 2){
-      const tail = parts.slice(1).join(', ');
-      const detected = _detectTransportPreference_(tail);
+      const maybeTransport = parts.slice(1).join(', ');
+      const detected = _detectTransportPreference_(maybeTransport);
       if(detected){
         transport = detected;
-        hotel = _cleanHotelText_(parts[0]);
+        hotel = _cleanHotelBase_(parts[0]);
       }
     }
   }
 
-  // If hotel still looks contaminated, try a safer split by comma
-  if(hotel && /recomiendame|recomiéndame|recommend me|rental car|public transport|guided tour|walk|walking|taxi|uber|coche|carro|auto privado|transporte p[úu]blico|tour guiado/i.test(hotel)){
-    const first = _normText_(hotel.split(',')[0] || '');
-    if(first) hotel = _cleanHotelText_(first);
-  }
-
-  // Final fallbacks
-  if(!hotel) hotel = _normText_(rawHotel);
+  if(!hotel) hotel = rawHotel;
   if(!transport) transport = 'recommend me';
 
   return { hotel, transport };
+}
+
+function _cleanPlaceField_(value='', cleanHotel=''){
+  let s = _normText_(value);
+  if(!s) return s;
+
+  s = s.replace(/\b(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\b/ig, '').trim();
+  s = s.replace(/\s*,\s*,+/g, ', ').replace(/^,\s*|\s*,$/g,'').trim();
+
+  // If the place field still contains the hotel plus transport phrase, collapse to clean hotel
+  if(cleanHotel){
+    const hotelLc = cleanHotel.toLowerCase();
+    const sLc = s.toLowerCase();
+    if(sLc.includes(hotelLc) || hotelLc.includes(sLc)){
+      const junk = /(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia|rental car|guided tour|public transport|walking|walk|taxi|uber|carro alquilado|coche alquilado|veh[íi]culo alquilado|vehiculo alquilado|tour guiado|transporte p[úu]blico|transporte publico)/i;
+      if(junk.test(sLc)) return cleanHotel;
+    }
+  }
+
+  return s;
+}
+
+function _normalizeTransportField_(value='', pref='recommend me'){
+  const raw = _normText_(value);
+  if(!raw) return raw;
+
+  const prefLc = String(pref || '').toLowerCase().trim();
+  const rawLc = raw.toLowerCase();
+
+  // Explicit preference: normalize labels to consistent output when compatible
+  if(prefLc === 'rental car'){
+    if(/coche|auto privado|rental car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado/.test(rawLc)){
+      return getLang()==='es' ? 'Vehículo alquilado' : 'Rental Car';
+    }
+  }
+
+  if(prefLc === 'guided tour'){
+    if(/guided tour|tour guiado|bus\/van|van|tour/.test(rawLc)){
+      return getLang()==='es' ? 'Tour guiado' : 'Guided Tour';
+    }
+  }
+
+  if(prefLc === 'public transport'){
+    if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|tren|train|subway/.test(rawLc)){
+      return getLang()==='es' ? 'Transporte público' : 'Public Transport';
+    }
+  }
+
+  if(prefLc === 'walk'){
+    if(/walk|walking|a pie|caminando/.test(rawLc)){
+      return getLang()==='es' ? 'A pie' : 'Walking';
+    }
+  }
+
+  if(prefLc === 'taxi or uber'){
+    if(/taxi|uber|cab/.test(rawLc)){
+      return getLang()==='es' ? 'Taxi o Uber' : 'Taxi or Uber';
+    }
+  }
+
+  // Generic cleanup even when recommend me
+  if(/n\/a|na$/i.test(rawLc)) return getLang()==='es' ? 'En el lugar' : 'On site';
+  if(/a pie|caminando|walking|walk/.test(rawLc)) return getLang()==='es' ? 'A pie' : 'Walking';
+  if(/transporte p[úu]blico|transporte publico|public transport/.test(rawLc)) return getLang()==='es' ? 'Transporte público' : 'Public Transport';
+  if(/coche|auto privado|veh[íi]culo alquilado|vehiculo alquilado|rental car|carro alquilado|coche alquilado/.test(rawLc)) return getLang()==='es' ? 'Vehículo alquilado' : 'Rental Car';
+  if(/guided tour|tour guiado/.test(rawLc)) return getLang()==='es' ? 'Tour guiado' : 'Guided Tour';
+  if(/taxi|uber|cab/.test(rawLc)) return getLang()==='es' ? 'Taxi o Uber' : 'Taxi or Uber';
+
+  return raw;
+}
+
+function _postProcessGeneratedRows_(rows=[], ctx={}){
+  const cleanHotel = _normText_(ctx?.hotel || '');
+  const pref = String(ctx?.transport || 'recommend me').trim();
+
+  return (rows || []).map(r=>{
+    const rr = { ...r };
+
+    rr.from = _cleanPlaceField_(rr.from, cleanHotel);
+    rr.to = _cleanPlaceField_(rr.to, cleanHotel);
+    rr.transport = _normalizeTransportField_(rr.transport, pref);
+
+    // If the first row starts from a contaminated base, normalize to clean hotel
+    if(cleanHotel){
+      const fromLc = String(rr.from || '').toLowerCase();
+      if(!fromLc || /recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia/.test(fromLc)){
+        rr.from = cleanHotel;
+      }
+    }
+
+    return normalizeRow(rr, parseInt(rr?.day, 10) || 1);
+  });
 }
 
 /* =========================================================
@@ -2000,9 +2058,9 @@ MANDATORY:
   • "notes" should briefly justify the day theme
 - Do NOT generate detailed sub-stops yet.
 - IMPORTANT:
-  • Treat hotel/base as a clean accommodation reference only: ${JSON.stringify(hotel || '')}
-  • Treat transport preference separately: ${JSON.stringify(transport || 'recommend me')}
-  • NEVER echo transport preference text inside place fields.
+  • Hotel/base is: ${JSON.stringify(hotel || '')}
+  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
+  • NEVER echo preference text inside place fields.
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
 - No text outside JSON.
@@ -2066,12 +2124,11 @@ MANDATORY:
 - If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
 - Avoid generic placeholders.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
-- IMPORTANT:
-  • Hotel/base is: ${JSON.stringify(hotel || '')}
-  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
-  • If transport preference is "recommend me", choose the best realistic option per route/day.
-  • If transport preference is explicit, prioritize it whenever feasible.
-  • NEVER echo transport preference words inside place fields ("from"/"to").
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- If preferred transport is "recommend me", choose the best realistic option per route/day.
+- If preferred transport is explicit, prioritize it whenever feasible.
+- NEVER echo transport preference text inside place fields.
 - No text outside JSON.
 `.trim();
 
@@ -2141,11 +2198,9 @@ async function generateCityItinerary(city){
   const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-
-  // ✅ NEW: clean hotel/base and transport preference
-  const resolvedCtx = _resolveHotelTransportContext_(city, dest);
-  const hotel    = resolvedCtx.hotel || '';
-  const transport= resolvedCtx.transport || 'recommend me';
+  const ctx = _resolveHotelTransportContext_(city);
+  const hotel = ctx.hotel || '';
+  const transport = ctx.transport || 'recommend me';
 
   // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
@@ -2168,9 +2223,9 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
-  • Hotel/base is a clean accommodation reference only: ${JSON.stringify(hotel || '')}
-  • Preferred transport is separate: ${JSON.stringify(transport || 'recommend me')}
-  • NEVER print transport preference words inside place fields.
+  • Hotel/base is: ${JSON.stringify(hotel || '')}
+  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
+  • NEVER print transport preference text inside place fields.
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2243,6 +2298,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
+    stitchedRows = _postProcessGeneratedRows_(stitchedRows, { hotel, transport });
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2281,6 +2337,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
       let tmpCity = city;
       let tmpRows = _extractPlannerRows_(parsed, city);
+      tmpRows = _postProcessGeneratedRows_(tmpRows, { hotel, transport });
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2383,6 +2440,9 @@ ${buildIntake()}
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
+
+    const ctx = _resolveHotelTransportContext_(city);
+    rows = _postProcessGeneratedRows_(rows, ctx);
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
