@@ -1849,56 +1849,77 @@ function _extractPlannerRows_(parsed, city){
 function _extractMasterPlanDays_(parsed, city, totalDays){
   if(!parsed) return [];
 
-  const arr = Array.isArray(parsed?.days) ? parsed.days : [];
-  const clean = arr
-    .map(x => ({
-      day: parseInt(x?.day, 10),
-      theme: String(x?.theme || x?.focus || x?.plan || '').trim()
-    }))
-    .filter(x => x.day >= 1 && x.day <= totalDays && x.theme);
+  // ✅ Use the existing planner contract: rows/city_day/destinations/itineraries
+  const rows = _extractPlannerRows_(parsed, city);
+  if(!Array.isArray(rows) || !rows.length) return [];
 
-  if(clean.length !== totalDays) return [];
+  const byDay = new Map();
 
-  const unique = new Set(clean.map(x=>x.day));
+  for(const r of rows){
+    const day = parseInt(r?.day, 10);
+    if(!(day >= 1 && day <= totalDays)) continue;
+    if(byDay.has(day)) continue;
+
+    const act = String(r?.activity || '').trim();
+    const to  = String(r?.to || '').trim();
+    const notes = String(r?.notes || '').trim();
+
+    // Expect something like "PLAN – Historic center + harbor"
+    let theme = '';
+    const m = act.match(/^[^-–]+[–-]\s*(.+)$/);
+    if(m && m[1]) theme = String(m[1]).trim();
+
+    if(!theme) theme = act || to || notes;
+    if(!theme) continue;
+
+    byDay.set(day, { day, theme });
+  }
+
+  const out = Array.from(byDay.values()).sort((a,b)=>a.day-b.day);
+  if(out.length !== totalDays) return [];
+
+  const unique = new Set(out.map(x=>x.day));
   if(unique.size !== totalDays) return [];
 
-  return clean.sort((a,b)=>a.day-b.day);
+  return out;
 }
 
 async function _buildCityMasterPlan_(city, totalDays, perDay, baseDate='', hotel='', transport='recommend me'){
   const prompt = `
-Return ONLY valid JSON.
+${FORMAT}
+**ROLE:** Planner “Astra”. Create a STRATEGIC DISTRIBUTION PLAN ONLY for "${city}" (${totalDays} day/s).
+- Return Format B JSON: {"destination":"${city}","rows":[...]}.
 
-{
-  "destination":"${city}",
-  "days":[
-    {"day":1,"theme":"short strategic theme"},
-    {"day":2,"theme":"short strategic theme"}
-  ],
-  "followup":"short text"
-}
-
-Rules:
-- Create EXACTLY ${totalDays} days for "${city}".
-- This is ONLY a strategic distribution plan, NOT the final itinerary rows.
-- Each day must have a clear and realistic travel purpose/theme.
-- Distribute the trip intelligently across all days.
+MANDATORY:
+- Create EXACTLY ${totalDays} rows total.
+- Create EXACTLY ONE row per day (day 1 to day ${totalDays}).
+- This is NOT the final itinerary. This is ONLY a strategic day-by-day plan.
+- Each row represents the theme/purpose of that day.
+- Use "activity" exactly like: "PLAN – <short strategic theme>".
+- Keep themes realistic and well distributed across all days.
 - Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
-- If some day has a shorter window, make it lighter accordingly.
-- If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
+- If a day has a shorter window, make that theme lighter accordingly.
+- If a day is a strong candidate for a nearby excursion, assign that strategically.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
-- Do NOT output activities/rows/timetables yet.
+- Since this is only planning metadata:
+  • "from" can be "Hotel"
+  • "to" can be "City area" or a short strategic area label
+  • "transport" can be "Planning"
+  • "duration" can be "Transport: planning\\nActivity: planning"
+  • "notes" should briefly justify the day theme
+- Do NOT generate detailed sub-stops yet.
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
 `.trim();
 
-  console.log(`[MASTER PLAN] Requesting strategic plan for ${city} (${totalDays} days)...`);
+  console.log(\`[MASTER PLAN] Requesting strategic plan for \${city} (\${totalDays} days)...\`);
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
   const out = _extractMasterPlanDays_(parsed, city, totalDays);
-  console.log(`[MASTER PLAN] ${out.length === totalDays ? 'OK' : 'FAIL'}`, out);
+  console.log(\`[MASTER PLAN] \${out.length === totalDays ? 'OK' : 'FAIL'}\`, out, parsed);
   return out;
 }
 
