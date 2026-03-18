@@ -1849,39 +1849,39 @@ function _extractPlannerRows_(parsed, city){
 function _extractMasterPlanDays_(parsed, city, totalDays){
   if(!parsed) return [];
 
-  // ✅ Use the existing planner contract: rows/city_day/destinations/itineraries
+  // ✅ Extract from the SAME planner contract (rows / city_day / destinations / itineraries)
   const rows = _extractPlannerRows_(parsed, city);
   if(!Array.isArray(rows) || !rows.length) return [];
 
-  const byDay = new Map();
+  const out = [];
+  const used = new Set();
 
   for(const r of rows){
     const day = parseInt(r?.day, 10);
     if(!(day >= 1 && day <= totalDays)) continue;
-    if(byDay.has(day)) continue;
+    if(used.has(day)) continue;
 
-    const act = String(r?.activity || '').trim();
-    const to  = String(r?.to || '').trim();
-    const notes = String(r?.notes || '').trim();
-
-    // Expect something like "PLAN – Historic center + harbor"
+    const activity = String(r?.activity || '').trim();
     let theme = '';
-    const m = act.match(/^[^-–]+[–-]\s*(.+)$/);
-    if(m && m[1]) theme = String(m[1]).trim();
 
-    if(!theme) theme = act || to || notes;
+    // Expected: "PLAN – <theme>"
+    const match = activity.match(/^[^-–]+[–-]\s*(.+)$/);
+    if(match && match[1]) theme = String(match[1]).trim();
+
+    if(!theme) theme = activity;
+    if(!theme) theme = String(r?.to || '').trim();
+    if(!theme) theme = String(r?.notes || '').trim();
     if(!theme) continue;
 
-    byDay.set(day, { day, theme });
+    used.add(day);
+    out.push({ day, theme });
   }
 
-  const out = Array.from(byDay.values()).sort((a,b)=>a.day-b.day);
   if(out.length !== totalDays) return [];
-
   const unique = new Set(out.map(x=>x.day));
   if(unique.size !== totalDays) return [];
 
-  return out;
+  return out.sort((a,b)=>a.day-b.day);
 }
 
 async function _buildCityMasterPlan_(city, totalDays, perDay, baseDate='', hotel='', transport='recommend me'){
@@ -1898,12 +1898,12 @@ MANDATORY:
 - Use "activity" exactly like: "PLAN – <short strategic theme>".
 - Keep themes realistic and well distributed across all days.
 - Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
-- If a day has a shorter window, make that theme lighter accordingly.
-- If a day is a strong candidate for a nearby excursion, assign that strategically.
+- If some day has a shorter window, make it lighter accordingly.
+- If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Since this is only planning metadata:
   • "from" can be "Hotel"
-  • "to" can be "City area" or a short strategic area label
+  • "to" can be "City area"
   • "transport" can be "Planning"
   • "duration" can be "Transport: planning\\nActivity: planning"
   • "notes" should briefly justify the day theme
@@ -1915,11 +1915,11 @@ MANDATORY:
 - No text outside JSON.
 `.trim();
 
-  console.log(\`[MASTER PLAN] Requesting strategic plan for \${city} (\${totalDays} days)...\`);
+  console.log(`[MASTER PLAN] Requesting strategic plan for ${city} (${totalDays} days)...`);
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
   const out = _extractMasterPlanDays_(parsed, city, totalDays);
-  console.log(\`[MASTER PLAN] \${out.length === totalDays ? 'OK' : 'FAIL'}\`, out, parsed);
+  console.log(`[MASTER PLAN] ${out.length === totalDays ? 'OK' : 'FAIL'}`, out, parsed);
   return out;
 }
 
@@ -2050,6 +2050,60 @@ async function generateCityItinerary(city){
   // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
+  const instructions = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+
+KEY RULES (MANDATORY):
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • If it's NOT a day trip, "Destination" can be "${city}".
+  • This applies to ALL rows, including transfers and returns.
+  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
+  • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
+  • Correct example (city): "${city} – Return to hotel".
+- "from", "to", "transport" and "notes" can NEVER be empty.
+- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
+- VERY IMPORTANT (to avoid errors like "to=South Coast"):
+  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
+  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
+
+TRANSPORT (smart priority, no invention):
+- In city: Walk/Metro/Bus/Tram depending on real availability.
+- For DAY TRIPS:
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+
+AURORAS (if plausible by city/season/latitude):
+- You must include AT LEAST 1 aurora night in the itinerary.
+- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
+- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
+- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
+
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
+- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
+- If you propose a day trip, it must be COMPLETE:
+  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
+
+QUALITY / MAXIMIZE EXPERIENCE:
+- Cover key daytime and nighttime highlights.
+- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
+- Group by areas, avoid backtracking.
+- Validate overall plausibility and safety.
+  • If a special activity is plausible, add "notes" with "valid: <justification>".
+  • Avoid activities in clearly risky/restricted areas or time windows.
+  • Replace with safer alternatives when applicable.
+- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
+- No text outside JSON.
+`.trim();
+
   showWOW(true, t('overlayDefault'));
 
   try{
@@ -2108,16 +2162,46 @@ async function generateCityItinerary(city){
     return;
 
   }catch(err){
-    console.error(`[CITY ${city}] staged generation failed:`, err);
-    showWOW(false);
-    $resetBtn?.removeAttribute('disabled');
-
-    const msg = getLang()==='es'
-      ? 'La nueva generación por etapas falló antes de completar el itinerario. Revisa la consola para identificar si falló el plan maestro o un bloque específico.'
-      : 'The staged generation failed before completing the itinerary. Check the console to see whether the master plan or a specific block failed.';
-
-    chatMsg(msg, 'ai');
+    console.error(`[CITY ${city}] staged generation failed, falling back to one-shot:`, err);
   }
+
+  /* ======================================================
+     ✅ RECOVERY FALLBACK — original one-shot generation
+     Restores generation if staged flow fails.
+  ====================================================== */
+  try{
+    const text = await _callPlannerSystemPrompt_(instructions, false);
+    const parsed = parseJSON(text);
+
+    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+      let tmpCity = city;
+      let tmpRows = _extractPlannerRows_(parsed, city);
+
+      const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
+      pushRows(tmpCity, val.allowed, forceReplan);
+      renderCityTabs();
+      setActiveCity(tmpCity);
+      renderCityItinerary(tmpCity);
+      showWOW(false);
+
+      $resetBtn?.removeAttribute('disabled');
+      if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
+      console.log(`[CITY ${city}] SUCCESS — fallback one-shot applied.`);
+      return;
+    }
+  }catch(err2){
+    console.error(`[CITY ${city}] fallback one-shot failed:`, err2);
+  }
+
+  showWOW(false);
+  $resetBtn?.removeAttribute('disabled');
+
+  const msg = getLang()==='es'
+    ? 'No pude completar la generación del itinerario ni con el flujo por etapas ni con el flujo de respaldo. Revisa la consola para identificar el punto de fallo.'
+    : 'I could not complete itinerary generation with either the staged flow or the backup flow. Check the console to identify the failure point.';
+
+  chatMsg(msg, 'ai');
 }
 
 /* 🆕 Bulk rebalance after changes (add days / requested day trip) */
