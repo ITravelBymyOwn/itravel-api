@@ -1844,6 +1844,97 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
+   🆕 INPUT NORMALIZATION HELPERS (hotel + transport)
+========================================================= */
+function _normText_(v){
+  return String(v || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[|;]/g, ',')
+    .trim();
+}
+
+function _isRecommendToken_(s=''){
+  const x = String(s || '').toLowerCase().trim();
+  return /^(recomiendame|recomiéndame|recommend me|recommended|you choose|your choice|surprise me|no preference|sin preferencia|sem preferencia|à recommander|recommande-moi)$/.test(x)
+    || /(recomiendame|recomiéndame|recommend me|you choose|surprise me|sin preferencia|sem preferencia|recommande-moi)/.test(x);
+}
+
+function _detectTransportPreference_(s=''){
+  const x = String(s || '').toLowerCase().trim();
+  if(!x) return '';
+
+  if(_isRecommendToken_(x)) return 'recommend me';
+
+  if(/rental car|rent a car|rented car|car rental|auto privado|coche|carro|auto|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado/.test(x)){
+    return 'rental car';
+  }
+
+  if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|subway|train|tren/.test(x)){
+    return 'public transport';
+  }
+
+  if(/guided tour|tour guiado|excursi[oó]n guiada|excursion guiada/.test(x)){
+    return 'guided tour';
+  }
+
+  if(/walk|walking|a pie|caminando/.test(x)){
+    return 'walk';
+  }
+
+  if(/taxi|uber|cab/.test(x)){
+    return 'taxi or uber';
+  }
+
+  return '';
+}
+
+function _cleanHotelText_(hotelRaw=''){
+  let s = _normText_(hotelRaw);
+  if(!s) return '';
+
+  // remove obvious transport-choice fragments only at the end or after separators
+  s = s
+    .replace(/\s*,\s*(recomiendame|recomiéndame|recommend me|you choose|surprise me|sin preferencia|sem preferencia)\s*$/i, '')
+    .replace(/\s*,\s*(rental car|rent a car|public transport|guided tour|walk|walking|taxi|uber|coche|carro|auto privado|transporte p[úu]blico|tour guiado)\s*$/i, '')
+    .trim();
+
+  return s;
+}
+
+function _resolveHotelTransportContext_(city, dest){
+  const rawHotel = _normText_(cityMeta[city]?.hotel || '');
+  const rawTransport = _normText_(cityMeta[city]?.transport || '');
+
+  let hotel = _cleanHotelText_(rawHotel);
+  let transport = _detectTransportPreference_(rawTransport);
+
+  // If transport field is empty but hotel field contains "hotel/base, transport pref"
+  if(!transport && rawHotel.includes(',')){
+    const parts = rawHotel.split(',').map(x => _normText_(x)).filter(Boolean);
+    if(parts.length >= 2){
+      const tail = parts.slice(1).join(', ');
+      const detected = _detectTransportPreference_(tail);
+      if(detected){
+        transport = detected;
+        hotel = _cleanHotelText_(parts[0]);
+      }
+    }
+  }
+
+  // If hotel still looks contaminated, try a safer split by comma
+  if(hotel && /recomiendame|recomiéndame|recommend me|rental car|public transport|guided tour|walk|walking|taxi|uber|coche|carro|auto privado|transporte p[úu]blico|tour guiado/i.test(hotel)){
+    const first = _normText_(hotel.split(',')[0] || '');
+    if(first) hotel = _cleanHotelText_(first);
+  }
+
+  // Final fallbacks
+  if(!hotel) hotel = _normText_(rawHotel);
+  if(!transport) transport = 'recommend me';
+
+  return { hotel, transport };
+}
+
+/* =========================================================
    🆕 STAGED GENERATION HELPERS (master + blocks)
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
@@ -1908,10 +1999,12 @@ MANDATORY:
   • "duration" can be "Transport: planning\\nActivity: planning"
   • "notes" should briefly justify the day theme
 - Do NOT generate detailed sub-stops yet.
+- IMPORTANT:
+  • Treat hotel/base as a clean accommodation reference only: ${JSON.stringify(hotel || '')}
+  • Treat transport preference separately: ${JSON.stringify(transport || 'recommend me')}
+  • NEVER echo transport preference text inside place fields.
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
-- Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
 `.trim();
 
@@ -1973,8 +2066,12 @@ MANDATORY:
 - If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
 - Avoid generic placeholders.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
-- Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- IMPORTANT:
+  • Hotel/base is: ${JSON.stringify(hotel || '')}
+  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
+  • If transport preference is "recommend me", choose the best realistic option per route/day.
+  • If transport preference is explicit, prioritize it whenever feasible.
+  • NEVER echo transport preference words inside place fields ("from"/"to").
 - No text outside JSON.
 `.trim();
 
@@ -2044,8 +2141,11 @@ async function generateCityItinerary(city){
   const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-  const hotel    = cityMeta[city]?.hotel || '';
-  const transport= cityMeta[city]?.transport || 'recommend me';
+
+  // ✅ NEW: clean hotel/base and transport preference
+  const resolvedCtx = _resolveHotelTransportContext_(city, dest);
+  const hotel    = resolvedCtx.hotel || '';
+  const transport= resolvedCtx.transport || 'recommend me';
 
   // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
@@ -2068,6 +2168,9 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
+  • Hotel/base is a clean accommodation reference only: ${JSON.stringify(hotel || '')}
+  • Preferred transport is separate: ${JSON.stringify(transport || 'recommend me')}
+  • NEVER print transport preference words inside place fields.
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2075,6 +2178,8 @@ TRANSPORT (smart priority, no invention):
   1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+- If preferred transport is "recommend me", choose the most efficient realistic option per route/day.
+- If preferred transport is explicit, prioritize it whenever feasible and safe.
 
 AURORAS (if plausible by city/season/latitude):
 - You must include AT LEAST 1 aurora night in the itinerary.
