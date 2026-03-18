@@ -1844,8 +1844,7 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 SURGICAL HELPERS — master plan + per-day generation
-   Added without removing the original one-shot flow.
+   🆕 STAGED GENERATION HELPERS (master + blocks)
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
   if(!parsed) return [];
@@ -1858,11 +1857,12 @@ function _extractMasterPlanDays_(parsed, city, totalDays){
     }))
     .filter(x => x.day >= 1 && x.day <= totalDays && x.theme);
 
-  if(clean.length === totalDays){
-    return clean.sort((a,b)=>a.day-b.day);
-  }
+  if(clean.length !== totalDays) return [];
 
-  return [];
+  const unique = new Set(clean.map(x=>x.day));
+  if(unique.size !== totalDays) return [];
+
+  return clean.sort((a,b)=>a.day-b.day);
 }
 
 async function _buildCityMasterPlan_(city, totalDays, perDay, baseDate='', hotel='', transport='recommend me'){
@@ -1886,57 +1886,134 @@ Rules:
 - Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
 - If some day has a shorter window, make it lighter accordingly.
 - If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
+- Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Do NOT output activities/rows/timetables yet.
-- Keep themes globally applicable for any destination.
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 `.trim();
 
+  console.log(`[MASTER PLAN] Requesting strategic plan for ${city} (${totalDays} days)...`);
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
-  return _extractMasterPlanDays_(parsed, city, totalDays);
+  const out = _extractMasterPlanDays_(parsed, city, totalDays);
+  console.log(`[MASTER PLAN] ${out.length === totalDays ? 'OK' : 'FAIL'}`, out);
+  return out;
 }
 
-function _forceRowsIntoDay_(rows=[], dayNum=1){
-  return (rows || []).map(r => normalizeRow({ ...r, day: dayNum }, dayNum));
+function _chunkMasterDays_(days=[]){
+  const arr = Array.isArray(days) ? days.slice().sort((a,b)=>a.day-b.day) : [];
+  if(!arr.length) return [];
+
+  const chunks = [];
+  for(let i=0; i<arr.length; i+=2){
+    chunks.push(arr.slice(i, i+2));
+  }
+  return chunks;
 }
 
-async function _generateSingleDayFromTheme_(city, totalDays, dayObj, perDayForDay, forceReplan=false, hotel='', transport='recommend me'){
-  const d = parseInt(dayObj?.day, 10) || 1;
-  const theme = String(dayObj?.theme || '').trim();
+function _forceRowsIntoValidDayRange_(rows=[], allowedDays=[]){
+  const allowed = new Set((allowedDays || []).map(d => Number(d)));
+  return (rows || [])
+    .map(r=>{
+      let d = parseInt(r?.day, 10);
+      if(!allowed.has(d)) d = Number(allowedDays?.[0] || 1);
+      return normalizeRow({ ...r, day: d }, d);
+    })
+    .filter(r => allowed.has(Number(r?.day)));
+}
+
+function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
+  const set = new Set((rows||[]).map(r => Number(r?.day)));
+  return (blockDays || []).every(d => set.has(Number(d)));
+}
+
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me'){
+  const dayNums = blockDaysObjs.map(x => Number(x.day));
+  const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
 
   const prompt = `
 ${FORMAT}
-**ROLE:** Planner “Astra”. Create itinerary rows ONLY for DAY ${d} of "${city}" (${totalDays} day/s total).
-- Theme for this day: "${theme}".
-- Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+**ROLE:** Planner “Astra”. Create itinerary rows ONLY for these days of "${city}" (${totalDays} day/s total):
+${JSON.stringify(blockDaysObjs)}
+
+Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
 MANDATORY:
-- Generate rows ONLY for day ${d}.
-- Every row MUST have day=${d}.
-- Respect this day's reference window intelligently: ${JSON.stringify(perDayForDay)}.
-- If this day is a normal usable day, target 4–8 rows.
-- If this day becomes a day trip, it must still be complete and realistic.
+- Generate rows ONLY for these days: ${dayNums.join(', ')}.
+- Every row MUST have day equal to one of these days only.
+- Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
+- Each normal usable day should target 4–8 rows.
+- If a day becomes a day trip/excursion, it must still be complete and realistic.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - "from", "to", "transport", "notes" can NEVER be empty.
 - "from" and "to" must be REAL places, never a macro-tour label.
-- If the day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
+- If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
 - Avoid generic placeholders.
+- Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
 `.trim();
 
+  const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
+  console.log(`[BLOCK ${label}] Requesting rows...`);
+
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    return _forceRowsIntoDay_(_extractPlannerRows_(parsed, city), d);
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+
+    console.log(`[BLOCK ${label}] Parsed rows:`, forced.length, forced);
+
+    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
+      console.log(`[BLOCK ${label}] OK`);
+      return forced;
+    }
+
+    console.warn(`[BLOCK ${label}] FAIL — missing rows for some block days.`);
+    return [];
   }
 
+  console.warn(`[BLOCK ${label}] FAIL — invalid JSON or empty parse.`);
   return [];
+}
+
+function _dedupeRows_(rows=[]){
+  const seen = new Set();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = JSON.stringify([
+      Number(r?.day||1),
+      String(r?.start||'').trim(),
+      String(r?.end||'').trim(),
+      String(r?.activity||'').trim(),
+      String(r?.from||'').trim(),
+      String(r?.to||'').trim()
+    ]);
+
+    if(seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+
+  return out.sort((a,b)=>{
+    const da = Number(a?.day||1), db = Number(b?.day||1);
+    if(da !== db) return da-db;
+    return String(a?.start||'').localeCompare(String(b?.start||''));
+  });
+}
+
+function _rowsCoverAllDays_(rows=[], totalDays=1){
+  const set = new Set((rows||[]).map(r => Number(r?.day)));
+  for(let d=1; d<=totalDays; d++){
+    if(!set.has(d)) return false;
+  }
+  return true;
 }
 
 async function generateCityItinerary(city){
@@ -1952,131 +2029,74 @@ async function generateCityItinerary(city){
   // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
-  const instructions = `
-${FORMAT}
-**ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
-- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-
-KEY RULES (MANDATORY):
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
-  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
-  • If it's NOT a day trip, "Destination" can be "${city}".
-  • This applies to ALL rows, including transfers and returns.
-  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
-  • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
-  • Correct example (city): "${city} – Return to hotel".
-- "from", "to", "transport" and "notes" can NEVER be empty.
-- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
-- VERY IMPORTANT (to avoid errors like "to=South Coast"):
-  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
-  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
-
-TRANSPORT (smart priority, no invention):
-- In city: Walk/Metro/Bus/Tram depending on real availability.
-- For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
-  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
-- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
-
-AURORAS (if plausible by city/season/latitude):
-- You must include AT LEAST 1 aurora night in the itinerary.
-- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
-- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
-- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
-
-DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
-- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
-- If you propose a day trip, it must be COMPLETE:
-  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
-  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
-  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
-
-QUALITY / MAXIMIZE EXPERIENCE:
-- Cover key daytime and nighttime highlights.
-- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
-- Group by areas, avoid backtracking.
-- Validate overall plausibility and safety.
-  • If a special activity is plausible, add "notes" with "valid: <justification>".
-  • Avoid activities in clearly risky/restricted areas or time windows.
-  • Replace with safer alternatives when applicable.
-- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
-- No text outside JSON.
-`.trim();
-
   showWOW(true, t('overlayDefault'));
 
-  /* ======================================================
-     🆕 NEW SAFE FLOW:
-     1) Try master-plan + day-by-day generation
-     2) If anything fails, fall back to the ORIGINAL one-shot flow
-  ====================================================== */
   try{
     const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+
+    if(!Array.isArray(masterDays) || masterDays.length !== dest.days){
+      throw new Error(`MASTER_PLAN_INVALID:${city}`);
+    }
+
+    const blocks = _chunkMasterDays_(masterDays);
     let stitchedRows = [];
 
-    if(Array.isArray(masterDays) && masterDays.length === dest.days){
-      for(const dayObj of masterDays){
-        const d = parseInt(dayObj?.day, 10) || 1;
-        const perDayForDay = perDay.filter(x => Number(x?.day) === d);
-        const rows = await _generateSingleDayFromTheme_(
-          city,
-          dest.days,
-          dayObj,
-          perDayForDay,
-          forceReplan,
-          hotel,
-          transport
-        );
+    for(let i=0; i<blocks.length; i++){
+      const block = blocks[i];
+      const blockRows = await _generateBlockFromThemes_(
+        city,
+        dest.days,
+        block,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
 
-        if(Array.isArray(rows) && rows.length){
-          stitchedRows.push(...rows);
-        }
+      if(!blockRows.length){
+        const first = Number(block?.[0]?.day || 1);
+        const last  = Number(block?.[block.length-1]?.day || first);
+        throw new Error(`BLOCK_FAIL:${city}:${first}-${last}`);
       }
+
+      stitchedRows.push(...blockRows);
     }
 
-    if(Array.isArray(stitchedRows) && stitchedRows.length){
-      const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
-      pushRows(city, val.allowed, forceReplan); // 🧠 if replanning → replace=true
-      renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-      showWOW(false);
+    stitchedRows = _dedupeRows_(stitchedRows);
 
-      $resetBtn?.removeAttribute('disabled');
-      if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
-
-      return;
+    if(!stitchedRows.length){
+      throw new Error(`NO_ROWS_STITCHED:${city}`);
     }
-  }catch(err){
-    console.error('Master-plan flow failed, falling back to original one-shot generation:', err);
-  }
 
-  /* ======================================================
-     ✅ ORIGINAL FLOW (UNCHANGED) — kept as guaranteed fallback
-  ====================================================== */
-  const text = await _callPlannerSystemPrompt_(instructions, false);
-  const parsed = parseJSON(text);
+    if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
+      throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
+    }
 
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    let tmpCity = city;
-    let tmpRows = _extractPlannerRows_(parsed, city);
+    const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
+    pushRows(city, val.allowed, forceReplan); // 🧠 if replanning → replace=true
 
-    const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-    pushRows(tmpCity, val.allowed, forceReplan); // 🧠 if replanning → replace=true
-    renderCityTabs(); setActiveCity(tmpCity); renderCityItinerary(tmpCity);
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
     showWOW(false);
 
     $resetBtn?.removeAttribute('disabled');
     if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
 
+    console.log(`[CITY ${city}] SUCCESS — staged generation applied.`);
     return;
-  }
 
-  renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
-  showWOW(false);
-  $resetBtn?.removeAttribute('disabled');
-  chatMsg(t('fallbackLocal'), 'ai');
+  }catch(err){
+    console.error(`[CITY ${city}] staged generation failed:`, err);
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
+
+    const msg = getLang()==='es'
+      ? 'La nueva generación por etapas falló antes de completar el itinerario. Revisa la consola para identificar si falló el plan maestro o un bloque específico.'
+      : 'The staged generation failed before completing the itinerary. Check the console to see whether the master plan or a specific block failed.';
+
+    chatMsg(msg, 'ai');
+  }
 }
 
 /* 🆕 Bulk rebalance after changes (add days / requested day trip) */
