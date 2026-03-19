@@ -1844,360 +1844,6 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 INPUT / ROW NORMALIZATION HELPERS
-========================================================= */
-function _normText_(v){
-  return String(v || '').replace(/\s+/g,' ').trim();
-}
-
-function _detectTransportPreference_(v=''){
-  const s = String(v || '').toLowerCase().trim();
-  if(!s) return '';
-
-  if(/recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia/.test(s)) return 'recommend me';
-  if(/rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado/.test(s)) return 'rental car';
-  if(/guided tour|tour guiado|excursi[oó]n guiada|excursion guiada/.test(s)) return 'guided tour';
-  if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|tren|train|subway/.test(s)) return 'public transport';
-  if(/walking|walk|a pie|caminando/.test(s)) return 'walk';
-  if(/taxi|uber|cab/.test(s)) return 'taxi or uber';
-
-  return '';
-}
-
-function _cleanHotelBase_(v=''){
-  let s = _normText_(v);
-  if(!s) return '';
-
-  // remove trailing transport preference fragments
-  s = s.replace(/\s*,\s*(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\s*$/i,'').trim();
-  s = s.replace(/\s*,\s*(rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado|guided tour|tour guiado|excursi[oó]n guiada|excursion guiada|public transport|transporte p[úu]blico|transporte publico|walking|walk|a pie|caminando|taxi|uber)\s*$/i,'').trim();
-
-  return s;
-}
-
-function _resolveHotelTransportContext_(city){
-  const rawHotel = _normText_(cityMeta[city]?.hotel || '');
-  const rawTransport = _normText_(cityMeta[city]?.transport || '');
-
-  let hotel = _cleanHotelBase_(rawHotel);
-  let transport = _detectTransportPreference_(rawTransport);
-
-  if(!transport && rawHotel.includes(',')){
-    const parts = rawHotel.split(',').map(x => _normText_(x)).filter(Boolean);
-    if(parts.length >= 2){
-      const maybeTransport = parts.slice(1).join(', ');
-      const detected = _detectTransportPreference_(maybeTransport);
-      if(detected){
-        transport = detected;
-        hotel = _cleanHotelBase_(parts[0]);
-      }
-    }
-  }
-
-  if(!hotel) hotel = rawHotel;
-  if(!transport) transport = 'recommend me';
-
-  return { hotel, transport };
-}
-
-function _cleanPlaceField_(value='', cleanHotel=''){
-  let s = _normText_(value);
-  if(!s) return s;
-
-  s = s.replace(/\b(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\b/ig, '').trim();
-  s = s.replace(/\s*,\s*,+/g, ', ').replace(/^,\s*|\s*,$/g,'').trim();
-
-  // If the place field still contains the hotel plus transport phrase, collapse to clean hotel
-  if(cleanHotel){
-    const hotelLc = cleanHotel.toLowerCase();
-    const sLc = s.toLowerCase();
-    if(sLc.includes(hotelLc) || hotelLc.includes(sLc)){
-      const junk = /(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia|rental car|guided tour|public transport|walking|walk|taxi|uber|carro alquilado|coche alquilado|veh[íi]culo alquilado|vehiculo alquilado|tour guiado|transporte p[úu]blico|transporte publico)/i;
-      if(junk.test(sLc)) return cleanHotel;
-    }
-  }
-
-  return s;
-}
-
-function _normalizeTransportField_(value='', pref='recommend me'){
-  const raw = _normText_(value);
-  if(!raw) return raw;
-
-  const prefLc = String(pref || '').toLowerCase().trim();
-  const rawLc = raw.toLowerCase();
-
-  // Explicit preference: normalize labels to consistent output when compatible
-  if(prefLc === 'rental car'){
-    if(/coche|auto privado|rental car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado/.test(rawLc)){
-      return getLang()==='es' ? 'Vehículo alquilado' : 'Rental Car';
-    }
-  }
-
-  if(prefLc === 'guided tour'){
-    if(/guided tour|tour guiado|bus\/van|van|tour/.test(rawLc)){
-      return getLang()==='es' ? 'Tour guiado' : 'Guided Tour';
-    }
-  }
-
-  if(prefLc === 'public transport'){
-    if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|tren|train|subway/.test(rawLc)){
-      return getLang()==='es' ? 'Transporte público' : 'Public Transport';
-    }
-  }
-
-  if(prefLc === 'walk'){
-    if(/walk|walking|a pie|caminando/.test(rawLc)){
-      return getLang()==='es' ? 'A pie' : 'Walking';
-    }
-  }
-
-  if(prefLc === 'taxi or uber'){
-    if(/taxi|uber|cab/.test(rawLc)){
-      return getLang()==='es' ? 'Taxi o Uber' : 'Taxi or Uber';
-    }
-  }
-
-  // Generic cleanup even when recommend me
-  if(/n\/a|na$/i.test(rawLc)) return getLang()==='es' ? 'En el lugar' : 'On site';
-  if(/a pie|caminando|walking|walk/.test(rawLc)) return getLang()==='es' ? 'A pie' : 'Walking';
-  if(/transporte p[úu]blico|transporte publico|public transport/.test(rawLc)) return getLang()==='es' ? 'Transporte público' : 'Public Transport';
-  if(/coche|auto privado|veh[íi]culo alquilado|vehiculo alquilado|rental car|carro alquilado|coche alquilado/.test(rawLc)) return getLang()==='es' ? 'Vehículo alquilado' : 'Rental Car';
-  if(/guided tour|tour guiado/.test(rawLc)) return getLang()==='es' ? 'Tour guiado' : 'Guided Tour';
-  if(/taxi|uber|cab/.test(rawLc)) return getLang()==='es' ? 'Taxi o Uber' : 'Taxi or Uber';
-
-  return raw;
-}
-
-function _extractTransportMinutes_(duration=''){
-  const s = String(duration || '');
-  const m = s.match(/Transport:\s*~?(\d+)\s*m/i);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-function _sameCityPrefix_(activity='', city=''){
-  const a = String(activity || '');
-  const c = String(city || '').trim().toLowerCase();
-  if(!a || !c) return false;
-  const m = a.match(/^(.+?)\s*[–-]\s*(.+)$/);
-  const prefix = String((m && m[1]) || '').trim().toLowerCase();
-  return prefix === c;
-}
-
-function _smartUrbanTransportNormalize_(row={}, city='', pref='recommend me'){
-  const rr = { ...row };
-  const prefLc = String(pref || '').toLowerCase().trim();
-
-  if(prefLc !== 'rental car') return rr;
-  if(!_sameCityPrefix_(rr.activity, city)) return rr;
-
-  const mins = _extractTransportMinutes_(rr.duration);
-  const from = String(rr.from || '').toLowerCase();
-  const to = String(rr.to || '').toLowerCase();
-
-  // Only correct obvious intra-city center hops, not hotel-to-outside-city legs
-  const outOfTownHints = /(national park|parque nacional|laguna|blue lagoon|peninsula|península|waterfall|foss|vik|reynisfjara|thingvellir|þingvellir|gullfoss|geysir|snæfellsnes|snaefellsnes|kirkjufell|arnarstapi)/i;
-  if(outOfTownHints.test(from) || outOfTownHints.test(to)) return rr;
-
-  if(mins !== null && mins <= 15){
-    rr.transport = getLang()==='es' ? 'A pie' : 'Walking';
-  }else if(mins !== null && mins <= 25){
-    rr.transport = getLang()==='es' ? 'Transporte público' : 'Public Transport';
-  }
-
-  return rr;
-}
-
-function _postProcessGeneratedRows_(rows=[], ctx={}){
-  const cleanHotel = _normText_(ctx?.hotel || '');
-  const pref = String(ctx?.transport || 'recommend me').trim();
-  const city = String(ctx?.city || '').trim();
-
-  return (rows || []).map(r=>{
-    let rr = { ...r };
-
-    rr.from = _cleanPlaceField_(rr.from, cleanHotel);
-    rr.to = _cleanPlaceField_(rr.to, cleanHotel);
-    rr.transport = _normalizeTransportField_(rr.transport, pref);
-
-    // If the first row starts from a contaminated base, normalize to clean hotel
-    if(cleanHotel){
-      const fromLc = String(rr.from || '').toLowerCase();
-      if(!fromLc || /recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia/.test(fromLc)){
-        rr.from = cleanHotel;
-      }
-    }
-
-    rr = _smartUrbanTransportNormalize_(rr, city, pref);
-
-    return normalizeRow(rr, parseInt(rr?.day, 10) || 1);
-  });
-}
-
-function _normalizeHighlightToken_(s=''){
-  return String(s || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-}
-
-function _extractHighlightTokenFromRow_(row={}, city=''){
-  const activity = String(row?.activity || '').trim();
-  const to = String(row?.to || '').trim();
-
-  const match = activity.match(/^(.+?)\s*[–-]\s*(.+)$/);
-  const prefix = String((match && match[1]) || '').trim();
-  const suffix = String((match && match[2]) || '').trim();
-
-  let candidate = '';
-  if(prefix && _normalizeHighlightToken_(prefix) !== _normalizeHighlightToken_(city)){
-    candidate = prefix;
-  }else{
-    candidate = to || suffix || activity;
-  }
-
-  const tok = _normalizeHighlightToken_(candidate);
-  if(!tok) return '';
-
-  // Exclude generic/non-highlight noise
-  if(/^(hotel|city area|downtown|centro|planning|return to|regreso a|almuerzo|lunch|dinner|cena|restaurant|restaurante|return to hotel|regreso a hotel|entry|entrada|spa y tratamientos|relajacion en las aguas|relajación en las aguas)$/.test(tok)) return '';
-  return tok;
-}
-
-function _collectUsedHighlightsFromRows_(rows=[], city=''){
-  const out = [];
-  const seen = new Set();
-
-  for(const r of (rows || [])){
-    const tok = _extractHighlightTokenFromRow_(r, city);
-    if(!tok) continue;
-    if(seen.has(tok)) continue;
-    seen.add(tok);
-    out.push(tok);
-  }
-
-  return out;
-}
-
-function _findDuplicateHighlightsAcrossDays_(rows=[], city=''){
-  const seen = new Map();
-  const dupes = [];
-
-  for(const r of (rows || [])){
-    const day = parseInt(r?.day, 10) || 1;
-    const tok = _extractHighlightTokenFromRow_(r, city);
-    if(!tok) continue;
-
-    if(!seen.has(tok)){
-      seen.set(tok, new Set([day]));
-    }else{
-      seen.get(tok).add(day);
-    }
-  }
-
-  for(const [tok, daysSet] of seen.entries()){
-    const days = Array.from(daysSet).sort((a,b)=>a-b);
-    if(days.length > 1){
-      dupes.push({ token: tok, days });
-    }
-  }
-
-  return dupes;
-}
-
-function _dropLaterDuplicateHighlights_(rows=[], city=''){
-  const sorted = (rows || []).slice().sort((a,b)=>{
-    const da = Number(a?.day||1), db = Number(b?.day||1);
-    if(da !== db) return da-db;
-    return String(a?.start||'').localeCompare(String(b?.start||''));
-  });
-
-  const firstDayByToken = new Map();
-  const out = [];
-
-  for(const r of sorted){
-    const tok = _extractHighlightTokenFromRow_(r, city);
-    const day = Number(r?.day || 1);
-
-    if(!tok){
-      out.push(r);
-      continue;
-    }
-
-    if(!firstDayByToken.has(tok)){
-      firstDayByToken.set(tok, day);
-      out.push(r);
-      continue;
-    }
-
-    if(firstDayByToken.get(tok) === day){
-      out.push(r);
-      continue;
-    }
-
-    // Drop later-day duplicate highlight rows
-    const txt = `${r?.activity || ''} ${r?.to || ''}`.toLowerCase();
-    if(/return to|regreso a|cena|almuerzo|restaurant|restaurante/.test(txt)){
-      out.push(r);
-    }
-  }
-
-  return out;
-}
-
-function _isExcursionLikeTheme_(theme=''){
-  const t = _normalizeHighlightToken_(theme);
-  return /(circle|coast|peninsula|peninsula|route|road trip|day trip|excursion|excursion|national park|parque nacional|lagoon|laguna|waterfall|foss|vik|reynisfjara|thingvellir|gullfoss|geysir|snaefellsnes|snæfellsnes|kirkjufell|arnarstapi)/.test(t);
-}
-
-function _isExcursionLikeRow_(row={}, city=''){
-  const activity = String(row?.activity || '');
-  const prefixMatch = activity.match(/^(.+?)\s*[–-]\s*(.+)$/);
-  const prefix = String((prefixMatch && prefixMatch[1]) || '').trim();
-  const prefixTok = _normalizeHighlightToken_(prefix);
-  const cityTok = _normalizeHighlightToken_(city);
-  if(prefixTok && prefixTok !== cityTok) return true;
-
-  const tok = _extractHighlightTokenFromRow_(row, city);
-  return /(thingvellir|gullfoss|geysir|vik|reynisfjara|laguna azul|blue lagoon|snaefellsnes|snæfellsnes|kirkjufell|arnarstapi|seljalandsfoss|skogafoss|parque nacional|national park)/.test(tok);
-}
-
-function _rowsByDay_(rows=[]){
-  const m = {};
-  for(const r of (rows || [])){
-    const d = Number(r?.day || 1);
-    if(!m[d]) m[d] = [];
-    m[d].push(r);
-  }
-  return m;
-}
-
-function _hasWeakExcursionDays_(rows=[], masterDays=[], city=''){
-  const byDay = _rowsByDay_(rows);
-
-  for(const md of (masterDays || [])){
-    const d = Number(md?.day || 1);
-    const theme = String(md?.theme || '');
-    const dayRows = byDay[d] || [];
-    if(!dayRows.length) continue;
-
-    const excursionTheme = _isExcursionLikeTheme_(theme) || dayRows.some(r => _isExcursionLikeRow_(r, city));
-    if(!excursionTheme) continue;
-
-    const meaningful = dayRows.filter(r=>{
-      const txt = `${r?.activity || ''} ${r?.to || ''}`.toLowerCase();
-      return !/return to|regreso a|cena|almuerzo|restaurant|restaurante/.test(txt);
-    });
-
-    if(meaningful.length < 4) return true;
-  }
-
-  return false;
-}
-
-/* =========================================================
    🆕 STAGED GENERATION HELPERS (master + blocks)
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
@@ -2254,7 +1900,6 @@ MANDATORY:
 - Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
 - If some day has a shorter window, make it lighter accordingly.
 - If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
-- DO NOT repeat the same main highlight/theme on two different days unless the user explicitly requested repetition.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Since this is only planning metadata:
   • "from" can be "Hotel"
@@ -2263,12 +1908,10 @@ MANDATORY:
   • "duration" can be "Transport: planning\\nActivity: planning"
   • "notes" should briefly justify the day theme
 - Do NOT generate detailed sub-stops yet.
-- IMPORTANT:
-  • Hotel/base is: ${JSON.stringify(hotel || '')}
-  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
-  • NEVER echo preference text inside place fields.
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
 `.trim();
 
@@ -2307,12 +1950,9 @@ function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
   return (blockDays || []).every(d => set.has(Number(d)));
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[]){
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me'){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
-  const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
-    ? forbiddenHighlights.join(', ')
-    : '';
 
   const prompt = `
 ${FORMAT}
@@ -2334,13 +1974,7 @@ MANDATORY:
 - Avoid generic placeholders.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
-- If preferred transport is "recommend me", choose the best realistic option per route/day.
-- If preferred transport is explicit, treat it as a GLOBAL PREFERENCE, NOT a blind mandate for every micro-movement.
-- For short urban hops inside the same city center, prefer the truly optimal mode (often walking or public transport) even if the user prefers rental car globally.
-- If a day is an excursion/day trip, keep it robust and fully expanded; do NOT compress a major excursion into just 2–3 meaningful rows.
-- NEVER echo transport preference text inside place fields.
-${forbiddenText ? `- DO NOT repeat these already-used main highlights in this block unless the user explicitly requested repetition: ${forbiddenText}` : ''}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
 `.trim();
 
@@ -2395,6 +2029,68 @@ function _dedupeRows_(rows=[]){
   });
 }
 
+/* =========================================================
+   🆕 QUIRÚRGICO — avoid duplicated key highlights across days
+========================================================= */
+function _normalizeHighlightKey_(value=''){
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _extractHighlightKey_(row={}){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+
+  // Prefer the specific sub-stop in "activity"
+  const parts = activity.split(/\s+[–-]\s+/);
+  let candidate = parts.length > 1 ? parts[1] : '';
+
+  // Fallback to "to"
+  if(!candidate) candidate = to;
+
+  candidate = _normalizeHighlightKey_(candidate);
+
+  // Ignore generic / operational rows
+  if(!candidate) return '';
+  if(/^(hotel|downtown|city area|reykjavik|return to hotel|return to reykjavik|departure from reykjavik|lunch|dinner|restaurant|planning)$/.test(candidate)) return '';
+
+  return candidate;
+}
+
+function _dedupeHighlightsAcrossDays_(rows=[]){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    // Keep if same day; remove if repeated on a different day
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
 function _rowsCoverAllDays_(rows=[], totalDays=1){
   const set = new Set((rows||[]).map(r => Number(r?.day)));
   for(let d=1; d<=totalDays; d++){
@@ -2410,9 +2106,8 @@ async function generateCityItinerary(city){
   const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-  const ctx = _resolveHotelTransportContext_(city);
-  const hotel = ctx.hotel || '';
-  const transport = ctx.transport || 'recommend me';
+  const hotel    = cityMeta[city]?.hotel || '';
+  const transport= cityMeta[city]?.transport || 'recommend me';
 
   // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
@@ -2435,9 +2130,6 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
-  • Hotel/base is: ${JSON.stringify(hotel || '')}
-  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
-  • NEVER print transport preference text inside place fields.
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2445,9 +2137,6 @@ TRANSPORT (smart priority, no invention):
   1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
-- If preferred transport is "recommend me", choose the most efficient realistic option per route/day.
-- If preferred transport is explicit, treat it as a GLOBAL PREFERENCE, NOT a blind mandate for every micro-movement.
-- For short urban hops inside the same city center, prefer the truly optimal mode (often walking or public transport) even if the user prefers rental car globally.
 
 AURORAS (if plausible by city/season/latitude):
 - You must include AT LEAST 1 aurora night in the itinerary.
@@ -2464,7 +2153,6 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
-- DO NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2489,7 +2177,6 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
     const blocks = _chunkMasterDays_(masterDays);
     let stitchedRows = [];
-    let usedHighlights = [];
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
@@ -2500,8 +2187,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
         perDay,
         forceReplan,
         hotel,
-        transport,
-        usedHighlights
+        transport
       );
 
       if(!blockRows.length){
@@ -2511,12 +2197,10 @@ QUALITY / MAXIMIZE EXPERIENCE:
       }
 
       stitchedRows.push(...blockRows);
-      usedHighlights = _collectUsedHighlightsFromRows_(stitchedRows, city);
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
-    stitchedRows = _postProcessGeneratedRows_(stitchedRows, { hotel, transport, city });
-    stitchedRows = _dropLaterDuplicateHighlights_(stitchedRows, city);
+    stitchedRows = _dedupeHighlightsAcrossDays_(stitchedRows);
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2524,15 +2208,6 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
     if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
       throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
-    }
-
-    const duplicateHighlights = _findDuplicateHighlightsAcrossDays_(stitchedRows, city);
-    if(duplicateHighlights.length){
-      throw new Error(`DUPLICATE_HIGHLIGHTS:${city}:${duplicateHighlights.map(x=>`${x.token}@${x.days.join('-')}`).join('|')}`);
-    }
-
-    if(_hasWeakExcursionDays_(stitchedRows, masterDays, city)){
-      throw new Error(`WEAK_EXCURSION_DAY:${city}`);
     }
 
     const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
@@ -2564,13 +2239,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
       let tmpCity = city;
       let tmpRows = _extractPlannerRows_(parsed, city);
-      tmpRows = _postProcessGeneratedRows_(tmpRows, { hotel, transport, city });
-      tmpRows = _dropLaterDuplicateHighlights_(tmpRows, city);
-
-      const duplicateHighlights = _findDuplicateHighlightsAcrossDays_(tmpRows, city);
-      if(duplicateHighlights.length){
-        console.warn(`[CITY ${city}] fallback one-shot duplicates detected:`, duplicateHighlights);
-      }
+      tmpRows = _dedupeRows_(tmpRows);
+      tmpRows = _dedupeHighlightsAcrossDays_(tmpRows);
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2606,7 +2276,6 @@ async function rebalanceWholeCity(city, opts={}){
   const perDay = _normalizePerDayForPrompt_(city, totalDays);
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
-  const ctx = _resolveHotelTransportContext_(city);
 
   // 🆕 Determine rebalance range
   const startDay = opts.start || 1;
@@ -2632,9 +2301,6 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
   • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
-  • Hotel/base is: ${JSON.stringify(ctx.hotel || '')}
-  • Preferred transport is: ${JSON.stringify(ctx.transport || 'recommend me')}
-  • NEVER print transport preference text inside place fields.
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2642,9 +2308,6 @@ TRANSPORT (smart priority, no invention):
   1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
-- If preferred transport is "recommend me", choose the most efficient realistic option per route/day.
-- If preferred transport is explicit, treat it as a GLOBAL PREFERENCE, NOT a blind mandate for every micro-movement.
-- For short urban hops inside the same city center, prefer the truly optimal mode even if the user prefers rental car globally.
 
 AURORAS (if plausible):
 - Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
@@ -2660,7 +2323,6 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
-- DO NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
@@ -2681,9 +2343,8 @@ ${buildIntake()}
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
-
-    rows = _postProcessGeneratedRows_(rows, { ...ctx, city });
-    rows = _dropLaterDuplicateHighlights_(rows, city);
+    rows = _dedupeRows_(rows);
+    rows = _dedupeHighlightsAcrossDays_(rows);
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
