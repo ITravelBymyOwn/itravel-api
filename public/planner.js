@@ -984,8 +984,25 @@ CRITICAL RULE:
 - When asked for an itinerary, output ONLY valid JSON (no extra text, no markdown).
 
 LANGUAGE (CRITICAL):
-- Output MUST be in the same language as the user's own content (preferences/restrictions/special conditions/chat text).
-- Ignore any system/template labels when choosing output language.
+Primary rule (highest priority):
+- ALWAYS respond in the language explicitly selected by the user when the planner asks for the itinerary language.
+- This selected language is the ONLY source of truth for the output language.
+Secondary rule (fallback only):
+- If no explicit language selection is provided, then:
+  - Determine the language from the user's written content.
+  - Ignore template/system labels (e.g., "Preferences", "Restrictions", "Start time", etc.).
+  - Use only the natural language written by the user.
+Mixed language handling:
+- If the user mixes languages:
+  • Prioritize the explicitly selected language.
+  • If no selection exists, use the dominant language of the user's content.
+  • If no dominant language exists, use the language of the last user entry.
+Consistency (critical):
+- The entire JSON output MUST be in ONE single language only.
+- Do NOT mix languages inside the response.
+Translation rule:
+- Do NOT translate into the site/system language unless explicitly requested by the user.
+- The output must strictly follow the selected or inferred language rules above.
 
 Quality & coherence:
 - Use common sense: geography, seasons, time windows, distances and basic logistics.
@@ -1529,8 +1546,25 @@ function addMultipleDaysToCity(city, extraDays){
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
 LANGUAGE (CRITICAL):
-- Output MUST be in the same language as the user's own content in the context.
-- Ignore system/template labels when choosing output language.
+Primary rule (highest priority):
+- ALWAYS respond in the language explicitly selected by the user when the planner asks for the itinerary language.
+- This selected language is the ONLY source of truth for the output language.
+Secondary rule (fallback only):
+- If no explicit language selection is provided, then:
+  - Determine the language from the user's written content.
+  - Ignore template/system labels (e.g., "Preferences", "Restrictions", "Start time", etc.).
+  - Use only the natural language written by the user.
+Mixed language handling:
+- If the user mixes languages:
+  • Prioritize the explicitly selected language.
+  • If no selection exists, use the dominant language of the user's content.
+  • If no dominant language exists, use the language of the last user entry.
+Consistency (critical):
+- The entire JSON output MUST be in ONE single language only.
+- Do NOT mix languages inside the response.
+Translation rule:
+- Do NOT translate into the site/system language unless explicitly requested by the user.
+- The output must strictly follow the selected or inferred language rules above.
 
 Devuelve SOLO JSON válido:
 {
@@ -1667,9 +1701,14 @@ function showWOW(on, msg){
 
 /* =========================================================
    ✅ SURGICAL (CRITICAL): preserve user's language
+   - We do NOT send long instructions (in ES) as "user".
+   - We send rules/prompt as "system".
+   - The last "user" message will be an ANCHOR with real user text
+     so the API answers in that language (even if site is EN/ES).
 ========================================================= */
 function _lastUserFromSession_(){
   try{
+    // ✅ Ultra-surgical FIX: avoid ReferenceError if session does not exist yet
     if(typeof session === 'undefined' || !session) return '';
 
     for(let i=(session?.length||0)-1; i>=0; i--){
@@ -1684,6 +1723,7 @@ function _lastUserFromSession_(){
 }
 
 function _userLanguageAnchor_(){
+  // ✅ NEW (quirúrgico): si el usuario eligió idioma global, úsalo como anchor duro
   try{
     const chosen = (typeof plannerState !== 'undefined' && plannerState)
       ? String(plannerState?.itineraryLang || '').trim()
@@ -1691,25 +1731,30 @@ function _userLanguageAnchor_(){
     if(chosen) return chosen;
   }catch(_){}
 
+  // ✅ Ultra-surgical FIX: avoid ReferenceError if plannerState does not exist yet
   const sc = (typeof plannerState !== 'undefined' && plannerState)
     ? String(plannerState?.specialConditions || '').trim()
     : '';
   if(sc) return sc;
 
+  // ✅ SURGICAL: also use the real textarea if plannerState isn't populated yet
   const sc2 = (typeof qs !== 'undefined')
     ? String(qs('#special-conditions')?.value || '').trim()
     : '';
   if(sc2) return sc2;
 
+  // Next: last text written by the user in the planner chat (if exists)
   const last = _lastUserFromSession_();
   if(last) return last;
 
+  // Safe fallback (only if there is no user text to infer language)
   return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
 }
 
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
+  // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
   const timeoutMs = 130000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
@@ -1719,6 +1764,8 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
     const anchor = _userLanguageAnchor_();
 
+    // ✅ Important: the LAST user message must be the "anchor" (real user language)
+    // and the system must contain the rules and structured request.
     const messages = [
       { role:'system', content: String(systemPrompt || '') },
       ...(Array.isArray(history) ? history : []),
@@ -1753,9 +1800,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   }
 }
 
-/* =========================================================
-   ✅ Existing helpers
-========================================================= */
+// ✅ SURGICAL: keep blank day hours blank; do not inject defaults into the prompt payload
 function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
   return Array.from({length: totalDays}, (_,i)=>{
     const src = (cityMeta[city]?.perDay||[])[i] || fallbackPerDay?.[i] || {};
@@ -1771,6 +1816,7 @@ function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
   });
 }
 
+// ✅ SURGICAL: support current preferred API shape (city_day) + legacy formats
 function _extractPlannerRows_(parsed, city){
   if(!parsed) return [];
 
@@ -1782,6 +1828,7 @@ function _extractPlannerRows_(parsed, city){
     return parsed.rows.map(r=>normalizeRow(r));
   }
 
+  // ✅ CRITICAL FIX: preserve block.day when rows inside city_day do not include their own day
   if(Array.isArray(parsed.city_day)){
     return parsed.city_day
       .filter(block => {
@@ -1799,6 +1846,7 @@ function _extractPlannerRows_(parsed, city){
     const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
     if(Array.isArray(dd?.rows)) return dd.rows.map(r=>normalizeRow(r));
 
+    // ✅ same fix for nested city_day inside destinations
     if(Array.isArray(dd?.city_day)){
       return dd.city_day.flatMap(block=>{
         const dayNum = parseInt(block?.day, 10) || 1;
@@ -1814,6 +1862,7 @@ function _extractPlannerRows_(parsed, city){
     const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
     if(Array.isArray(ii?.rows)) return ii.rows.map(r=>normalizeRow(r));
 
+    // ✅ same fix for nested city_day inside itineraries
     if(Array.isArray(ii?.city_day)){
       return ii.city_day.flatMap(block=>{
         const dayNum = parseInt(block?.day, 10) || 1;
@@ -1829,335 +1878,12 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 INPUT NORMALIZATION (hotel + transport)
-========================================================= */
-function _normText_(v){
-  return String(v || '').replace(/\s+/g,' ').trim();
-}
-
-function _detectTransportPreference_(v=''){
-  const s = String(v || '').toLowerCase().trim();
-  if(!s) return '';
-
-  if(/recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia/.test(s)) return 'recommend me';
-  if(/rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado/.test(s)) return 'rental car';
-  if(/guided tour|tour guiado|excursi[oó]n guiada|excursion guiada/.test(s)) return 'guided tour';
-  if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|tren|train|subway/.test(s)) return 'public transport';
-  if(/walking|walk|a pie|caminando/.test(s)) return 'walk';
-  if(/taxi|uber|cab/.test(s)) return 'taxi or uber';
-
-  return '';
-}
-
-function _cleanHotelBase_(v=''){
-  let s = _normText_(v);
-  if(!s) return '';
-
-  s = s.replace(/\s*,\s*(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\s*$/i,'').trim();
-  s = s.replace(/\s*,\s*(rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado|guided tour|tour guiado|excursi[oó]n guiada|excursion guiada|public transport|transporte p[úu]blico|transporte publico|walking|walk|a pie|caminando|taxi|uber)\s*$/i,'').trim();
-
-  return s;
-}
-
-function _resolveHotelTransportContext_(city){
-  const rawHotel = _normText_(cityMeta[city]?.hotel || '');
-  const rawTransport = _normText_(cityMeta[city]?.transport || '');
-
-  let hotel = _cleanHotelBase_(rawHotel);
-  let transport = _detectTransportPreference_(rawTransport);
-
-  if(!transport && rawHotel.includes(',')){
-    const parts = rawHotel.split(',').map(x => _normText_(x)).filter(Boolean);
-    if(parts.length >= 2){
-      const maybeTransport = parts.slice(1).join(', ');
-      const detected = _detectTransportPreference_(maybeTransport);
-      if(detected){
-        transport = detected;
-        hotel = _cleanHotelBase_(parts[0]);
-      }
-    }
-  }
-
-  if(!hotel) hotel = rawHotel;
-  if(!transport) transport = 'recommend me';
-
-  return { hotel, transport };
-}
-
-/* =========================================================
-   🆕 ROW CLEANUP / SEMANTIC VALIDATION HELPERS
-========================================================= */
-function _cleanPlaceField_(value='', cleanHotel=''){
-  let s = _normText_(value);
-  if(!s) return s;
-
-  s = s.replace(/\b(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\b/ig, '').trim();
-  s = s.replace(/\b(rental car|guided tour|public transport|walking|walk|taxi|uber|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|tour guiado|transporte p[úu]blico|transporte publico)\b/ig, '').trim();
-  s = s.replace(/\s*,\s*,+/g, ', ').replace(/^,\s*|\s*,$/g,'').trim();
-
-  if(cleanHotel){
-    const hotelLc = cleanHotel.toLowerCase();
-    const sLc = s.toLowerCase();
-    if(sLc && (sLc === hotelLc || hotelLc.includes(sLc) || sLc.includes(hotelLc))){
-      return cleanHotel;
-    }
-  }
-
-  return s;
-}
-
-function _extractTransportMinutes_(duration=''){
-  const s = String(duration || '');
-  const m = s.match(/Transport:\s*~?(\d+)\s*m/i);
-  return m ? parseInt(m[1], 10) : null;
-}
-
-function _normalizeTransportField_(value='', pref='recommend me', row={}, city=''){
-  const raw = _normText_(value);
-  if(!raw) return raw;
-
-  const rawLc = raw.toLowerCase();
-  const prefLc = String(pref || 'recommend me').toLowerCase().trim();
-
-  // Smart override for short urban hops: preference is not blind mandate
-  const activity = String(row?.activity || '');
-  const activityPrefix = String((activity.split(/\s+[–-]\s+/)[0] || '')).trim().toLowerCase();
-  const cityLc = String(city || '').trim().toLowerCase();
-  const mins = _extractTransportMinutes_(row?.duration || '');
-  const from = String(row?.from || '').toLowerCase();
-  const to = String(row?.to || '').toLowerCase();
-
-  const likelyUrban = activityPrefix === cityLc || (!/national park|parque nacional|laguna|blue lagoon|snæfellsnes|snaefellsnes|vik|reynisfjara|gullfoss|geysir|thingvellir|þingvellir|kirkjufell|arnarstapi|seljalandsfoss|skogafoss/i.test(`${from} ${to} ${activity}`) && mins !== null && mins <= 20);
-
-  if(prefLc === 'rental car' && likelyUrban){
-    if(mins !== null && mins <= 12) return getLang()==='es' ? 'A pie' : 'Walking';
-    if(mins !== null && mins <= 25) return getLang()==='es' ? 'Transporte público' : 'Public Transport';
-  }
-
-  if(/n\/a|na$/i.test(rawLc)) return getLang()==='es' ? 'En el lugar' : 'On site';
-  if(/a pie|caminando|walking|walk/.test(rawLc)) return getLang()==='es' ? 'A pie' : 'Walking';
-  if(/transporte p[úu]blico|transporte publico|public transport/.test(rawLc)) return getLang()==='es' ? 'Transporte público' : 'Public Transport';
-  if(/guided tour|tour guiado/.test(rawLc)) return getLang()==='es' ? 'Tour guiado' : 'Guided Tour';
-  if(/taxi|uber|cab/.test(rawLc)) return getLang()==='es' ? 'Taxi o Uber' : 'Taxi or Uber';
-  if(/coche|auto privado|veh[íi]culo alquilado|vehiculo alquilado|rental car|carro alquilado|coche alquilado/.test(rawLc)) return getLang()==='es' ? 'Vehículo alquilado' : 'Rental Car';
-
-  return raw;
-}
-
-function _postProcessGeneratedRows_(rows=[], ctx={}){
-  const cleanHotel = _normText_(ctx?.hotel || '');
-  const pref = String(ctx?.transport || 'recommend me').trim();
-  const city = String(ctx?.city || '').trim();
-
-  return (rows || []).map(r=>{
-    const rr = { ...r };
-
-    rr.from = _cleanPlaceField_(rr.from, cleanHotel);
-    rr.to = _cleanPlaceField_(rr.to, cleanHotel);
-    rr.transport = _normalizeTransportField_(rr.transport, pref, rr, city);
-
-    if(cleanHotel){
-      const fromLc = String(rr.from || '').toLowerCase();
-      if(!fromLc || /recomiendame|recomiéndame|recommend me|rental car|guided tour|public transport|walking|walk|taxi|uber/.test(fromLc)){
-        rr.from = cleanHotel;
-      }
-      const toLc = String(rr.to || '').toLowerCase();
-      if(!toLc || /recomiendame|recomiéndame|recommend me|rental car|guided tour|public transport|walking|walk|taxi|uber/.test(toLc)){
-        rr.to = String(rr.to || '').trim() || cleanHotel;
-      }
-    }
-
-    return normalizeRow(rr, parseInt(rr?.day, 10) || 1);
-  });
-}
-
-function _normalizeHighlightKey_(value=''){
-  return String(value || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function _extractHighlightKey_(row={}, city=''){
-  const activity = String(row?.activity || '').trim();
-  const to = String(row?.to || '').trim();
-  const cityKey = _normalizeHighlightKey_(city);
-
-  const parts = activity.split(/\s+[–-]\s+/);
-  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
-  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
-
-  let candidate = '';
-
-  // for macro tours, prefix may be the route theme; for city rows use the specific suffix or "to"
-  if(prefix && prefix !== cityKey){
-    candidate = prefix;
-  }else{
-    candidate = suffix || _normalizeHighlightKey_(to);
-  }
-
-  if(!candidate) return '';
-  if(/^(hotel|downtown|city area|reykjavik|return to hotel|return to reykjavik|departure from reykjavik|lunch|dinner|restaurant|planning|return to|regreso a|almuerzo|cena)$/.test(candidate)) return '';
-
-  return candidate;
-}
-
-function _collectUsedHighlights_(rows=[], city=''){
-  const out = new Set();
-  for(const r of (rows || [])){
-    const k = _extractHighlightKey_(r, city);
-    if(k) out.add(k);
-  }
-  return Array.from(out);
-}
-
-function _findDuplicateHighlightsAcrossDays_(rows=[], city=''){
-  const seen = new Map();
-  const dupes = [];
-
-  for(const r of (rows || [])){
-    const key = _extractHighlightKey_(r, city);
-    if(!key) continue;
-    const day = Number(r?.day || 1);
-
-    if(!seen.has(key)){
-      seen.set(key, new Set([day]));
-    }else{
-      seen.get(key).add(day);
-    }
-  }
-
-  for(const [key, daySet] of seen.entries()){
-    const days = Array.from(daySet);
-    if(days.length > 1){
-      dupes.push({ key, days: days.sort((a,b)=>a-b) });
-    }
-  }
-
-  return dupes;
-}
-
-function _rowsByDay_(rows=[]){
-  const map = {};
-  for(const r of (rows || [])){
-    const d = Number(r?.day || 1);
-    if(!map[d]) map[d] = [];
-    map[d].push(r);
-  }
-  return map;
-}
-
-function _isExcursionLikeTheme_(theme=''){
-  const t = _normalizeHighlightKey_(theme);
-  return /(circle|coast|peninsula|route|road trip|day trip|excursion|national park|parque nacional|lagoon|laguna|waterfall|foss|vik|reynisfjara|thingvellir|gullfoss|geysir|snaefellsnes|snaefellsnes|kirkjufell|arnarstapi|blue lagoon)/.test(t);
-}
-
-function _getBlockIssues_(rows=[], blockDaysObjs=[], city='', ctx={}, usedHighlights=[]){
-  const issues = [];
-  const byDay = _rowsByDay_(rows);
-  const duplicateHighlights = _findDuplicateHighlightsAcrossDays_(rows, city);
-
-  if(duplicateHighlights.length){
-    issues.push(`Do not repeat the same main highlight across different days: ${duplicateHighlights.map(x=>`${x.key} (${x.days.join(',')})`).join('; ')}`);
-  }
-
-  for(const r of (rows || [])){
-    const from = String(r?.from || '');
-    const to = String(r?.to || '');
-    if(/recomiendame|recomiéndame|recommend me|rental car|guided tour|public transport|walking|walk|taxi|uber/i.test(from)){
-      issues.push(`Place contamination detected in "from": ${from}`);
-      break;
-    }
-    if(/recomiendame|recomiéndame|recommend me|rental car|guided tour|public transport|walking|walk|taxi|uber/i.test(to)){
-      issues.push(`Place contamination detected in "to": ${to}`);
-      break;
-    }
-  }
-
-  const cityKey = _normalizeHighlightKey_(city);
-  const usedSet = new Set((usedHighlights || []).map(x => _normalizeHighlightKey_(x)));
-  for(const r of (rows || [])){
-    const k = _extractHighlightKey_(r, city);
-    if(k && usedSet.has(k) && _normalizeHighlightKey_(String(r?.activity || '').split(/\s+[–-]\s+/)[0]) !== cityKey){
-      issues.push(`This block repeats an already used main highlight from a previous block: ${k}`);
-      break;
-    }
-  }
-
-  for(const bd of (blockDaysObjs || [])){
-    const day = Number(bd?.day || 1);
-    const theme = String(bd?.theme || '');
-    const dayRows = byDay[day] || [];
-    if(!dayRows.length){
-      issues.push(`Missing rows for day ${day}`);
-      continue;
-    }
-
-    if(_isExcursionLikeTheme_(theme)){
-      const meaningful = dayRows.filter(r => {
-        const txt = `${r?.activity || ''} ${r?.to || ''}`.toLowerCase();
-        return !/return to|regreso a|almuerzo|cena|restaurant|restaurante/.test(txt);
-      });
-      if(meaningful.length < 4){
-        issues.push(`Day ${day} is an excursion-like day but is underdeveloped. Expand it with more real sub-stops.`);
-      }
-    }
-  }
-
-  return Array.from(new Set(issues));
-}
-
-async function _retryBlockWithIssues_(city, totalDays, blockDaysObjs, perDay, forceReplan, hotel, transport, currentRows, issues, usedHighlights=[]){
-  const dayNums = blockDaysObjs.map(x => Number(x.day));
-  const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
-  const usedText = (usedHighlights || []).length ? usedHighlights.join(', ') : '';
-
-  const prompt = `
-${FORMAT}
-**ROLE:** Planner “Astra”. REPAIR this block for "${city}".
-- Days in this block: ${JSON.stringify(blockDaysObjs)}
-- Return Format B JSON only.
-
-CURRENT BAD BLOCK:
-${JSON.stringify(currentRows)}
-
-ISSUES TO FIX (MANDATORY):
-${issues.map(x=>`- ${x}`).join('\n')}
-
-REPAIR RULES:
-- Generate rows ONLY for these days: ${dayNums.join(', ')}.
-- Keep each day meaningful and realistic.
-- If a day is excursion-like, expand it properly with enough real sub-stops.
-- Do NOT repeat main highlights across days in this block.
-${usedText ? `- Also do NOT reuse these highlights already used in previous blocks unless the user explicitly requested them: ${usedText}` : ''}
-- Hotel/base is: ${JSON.stringify(hotel || '')}
-- Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
-- Treat transport preference as global preference, not blind mandate for every micro-hop.
-- For very short urban center hops, use the truly optimal mode.
-- NEVER print preference text inside place fields.
-- Respect windows: ${JSON.stringify(perDayForBlock)}
-- No text outside JSON.
-`.trim();
-
-  const ans = await _callPlannerSystemPrompt_(prompt, false);
-  const parsed = parseJSON(ans);
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    let rows = _extractPlannerRows_(parsed, city);
-    rows = _forceRowsIntoValidDayRange_(rows, dayNums);
-    rows = _postProcessGeneratedRows_(rows, { hotel, transport, city });
-    return rows;
-  }
-  return [];
-}
-
-/* =========================================================
    🆕 STAGED GENERATION HELPERS (master + blocks)
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
   if(!parsed) return [];
 
+  // ✅ Extract from the SAME planner contract (rows / city_day / destinations / itineraries)
   const rows = _extractPlannerRows_(parsed, city);
   if(!Array.isArray(rows) || !rows.length) return [];
 
@@ -2172,6 +1898,7 @@ function _extractMasterPlanDays_(parsed, city, totalDays){
     const activity = String(r?.activity || '').trim();
     let theme = '';
 
+    // Expected: "PLAN – <theme>"
     const match = activity.match(/^[^-–]+[–-]\s*(.+)$/);
     if(match && match[1]) theme = String(match[1]).trim();
 
@@ -2207,7 +1934,6 @@ MANDATORY:
 - Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
 - If some day has a shorter window, make it lighter accordingly.
 - If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
-- DO NOT repeat the same main highlight or macro-excursion theme on different days unless the user explicitly requested repetition.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Since this is only planning metadata:
   • "from" can be "Hotel"
@@ -2258,10 +1984,9 @@ function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
   return (blockDays || []).every(d => set.has(Number(d)));
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', usedHighlights=[]){
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me'){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
-  const usedText = (usedHighlights || []).length ? usedHighlights.join(', ') : '';
 
   const prompt = `
 ${FORMAT}
@@ -2284,11 +2009,6 @@ MANDATORY:
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
-- If preferred transport is "recommend me", choose the best realistic option per route/day.
-- If preferred transport is explicit, treat it as a GLOBAL PREFERENCE, NOT a blind mandate for every micro-movement.
-- For short urban hops inside the same city center, prefer the truly optimal mode (often walking or public transport) even if the user prefers rental car globally.
-- If a day is an excursion/day trip, keep it robust and fully expanded; do NOT compress a major excursion into just 2–3 meaningful rows.
-${usedText ? `- DO NOT reuse these main highlights already used in previous blocks unless the user explicitly requested repetition: ${usedText}` : ''}
 - No text outside JSON.
 `.trim();
 
@@ -2299,29 +2019,17 @@ ${usedText ? `- DO NOT reuse these main highlights already used in previous bloc
   const parsed = parseJSON(ans);
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    let extracted = _extractPlannerRows_(parsed, city);
-    extracted = _forceRowsIntoValidDayRange_(extracted, dayNums);
-    extracted = _postProcessGeneratedRows_(extracted, { hotel, transport, city });
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
 
-    console.log(`[BLOCK ${label}] Parsed rows:`, extracted.length, extracted);
+    console.log(`[BLOCK ${label}] Parsed rows:`, forced.length, forced);
 
-    let issues = _getBlockIssues_(extracted, blockDaysObjs, city, { hotel, transport }, usedHighlights);
-
-    if(issues.length){
-      console.warn(`[BLOCK ${label}] Issues detected, retrying block...`, issues);
-      const repaired = await _retryBlockWithIssues_(city, totalDays, blockDaysObjs, perDay, forceReplan, hotel, transport, extracted, issues, usedHighlights);
-      if(repaired.length){
-        extracted = repaired;
-        issues = _getBlockIssues_(extracted, blockDaysObjs, city, { hotel, transport }, usedHighlights);
-      }
-    }
-
-    if(extracted.length && _hasUsableRowsForAllBlockDays_(extracted, dayNums) && !issues.length){
+    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
       console.log(`[BLOCK ${label}] OK`);
-      return extracted;
+      return forced;
     }
 
-    console.warn(`[BLOCK ${label}] FAIL — still has issues.`, issues);
+    console.warn(`[BLOCK ${label}] FAIL — missing rows for some block days.`);
     return [];
   }
 
@@ -2370,10 +2078,10 @@ async function generateCityItinerary(city){
   const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
 
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-  const ctx = _resolveHotelTransportContext_(city);
-  const hotel = ctx.hotel || '';
-  const transport = ctx.transport || 'recommend me';
+  const hotel    = cityMeta[city]?.hotel || '';
+  const transport= cityMeta[city]?.transport || 'recommend me';
 
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const instructions = `
@@ -2394,9 +2102,6 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
-  • Hotel/base is: ${JSON.stringify(hotel || '')}
-  • Preferred transport is: ${JSON.stringify(transport || 'recommend me')}
-  • NEVER print transport preference text inside place fields.
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2404,9 +2109,6 @@ TRANSPORT (smart priority, no invention):
   1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
-- If preferred transport is "recommend me", choose the most efficient realistic option per route/day.
-- If preferred transport is explicit, treat it as a GLOBAL PREFERENCE, NOT a blind mandate for every micro-movement.
-- For short urban hops inside the same city center, prefer the truly optimal mode (often walking or public transport) even if the user prefers rental car globally.
 
 AURORAS (if plausible by city/season/latitude):
 - You must include AT LEAST 1 aurora night in the itinerary.
@@ -2423,7 +2125,6 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
-- DO NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2448,7 +2149,6 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
     const blocks = _chunkMasterDays_(masterDays);
     let stitchedRows = [];
-    let usedHighlights = [];
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
@@ -2459,8 +2159,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
         perDay,
         forceReplan,
         hotel,
-        transport,
-        usedHighlights
+        transport
       );
 
       if(!blockRows.length){
@@ -2470,11 +2169,9 @@ QUALITY / MAXIMIZE EXPERIENCE:
       }
 
       stitchedRows.push(...blockRows);
-      usedHighlights = _collectUsedHighlights_(stitchedRows, city);
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
-    stitchedRows = _postProcessGeneratedRows_(stitchedRows, { hotel, transport, city });
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2484,13 +2181,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
       throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
     }
 
-    const duplicateHighlights = _findDuplicateHighlightsAcrossDays_(stitchedRows, city);
-    if(duplicateHighlights.length){
-      throw new Error(`DUPLICATE_HIGHLIGHTS:${city}:${duplicateHighlights.map(x=>`${x.key}@${x.days.join('-')}`).join('|')}`);
-    }
-
     const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
-    pushRows(city, val.allowed, forceReplan);
+    pushRows(city, val.allowed, forceReplan); // 🧠 if replanning → replace=true
 
     renderCityTabs();
     setActiveCity(city);
@@ -2509,6 +2201,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
   /* ======================================================
      ✅ RECOVERY FALLBACK — original one-shot generation
+     Restores generation if staged flow fails.
   ====================================================== */
   try{
     const text = await _callPlannerSystemPrompt_(instructions, false);
@@ -2517,8 +2210,6 @@ QUALITY / MAXIMIZE EXPERIENCE:
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
       let tmpCity = city;
       let tmpRows = _extractPlannerRows_(parsed, city);
-      tmpRows = _dedupeRows_(tmpRows);
-      tmpRows = _postProcessGeneratedRows_(tmpRows, { hotel, transport, city });
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2554,14 +2245,15 @@ async function rebalanceWholeCity(city, opts={}){
   const perDay = _normalizePerDayForPrompt_(city, totalDays);
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
-  const ctx = _resolveHotelTransportContext_(city);
 
+  // 🆕 Determine rebalance range
   const startDay = opts.start || 1;
   const endDay = opts.end || totalDays;
   const lockedDaysText = startDay > 1 
     ? `Keep days 1 to ${startDay - 1} intact.`
     : '';
 
+  // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
   const prompt = `
@@ -2578,9 +2270,6 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
   • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
-  • Hotel/base is: ${JSON.stringify(ctx.hotel || '')}
-  • Preferred transport is: ${JSON.stringify(ctx.transport || 'recommend me')}
-  • NEVER print transport preference text inside place fields.
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2588,9 +2277,6 @@ TRANSPORT (smart priority, no invention):
   1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
   2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
-- If preferred transport is "recommend me", choose the most efficient realistic option per route/day.
-- If preferred transport is explicit, treat it as a GLOBAL PREFERENCE, NOT a blind mandate for every micro-movement.
-- For short urban hops inside the same city center, prefer the truly optimal mode even if the user prefers rental car globally.
 
 AURORAS (if plausible):
 - Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
@@ -2606,7 +2292,6 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
-- DO NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
@@ -2622,16 +2307,16 @@ ${buildIntake()}
 
   showWOW(true, t('overlayDefault'));
 
+  // ✅ SURGICAL (CRITICAL): prompt as SYSTEM, language anchor as USER
   const ans = await _callPlannerSystemPrompt_(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
-    rows = _dedupeRows_(rows);
-    rows = _postProcessGeneratedRows_(rows, { ...ctx, city });
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
 
+    // 🧠 Optimize only affected range
     for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
 
     renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
@@ -2916,12 +2601,29 @@ async function optimizeDay(city, day){
 `;
   }
 
-  // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): fuerza que la salida use el idioma del CONTENIDO del usuario (no labels del sistema)
+  // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): fuerza que la salida use el idioma que indique el usuario (no labels del sistema)
   const langDirective = `
 LANGUAGE (CRITICAL):
-- Output MUST be in the same language as the user's own content found in "Contexto" (preferences/restrictions/travelers) and any user-written text.
-- Ignore the language of system labels/templates in this prompt (e.g., "Ciudad", "Día", "Filas", etc.).
-- If mixed languages, use the dominant user language; if unclear, use the language of the most recent user-written paragraph in "Contexto".
+Primary rule (highest priority):
+- ALWAYS respond in the language explicitly selected by the user when the planner asks for the itinerary language.
+- This selected language is the ONLY source of truth for the output language.
+Secondary rule (fallback only):
+- If no explicit language selection is provided, then:
+  - Determine the language from the user's written content.
+  - Ignore template/system labels (e.g., "Preferences", "Restrictions", "Start time", etc.).
+  - Use only the natural language written by the user.
+Mixed language handling:
+- If the user mixes languages:
+  • Prioritize the explicitly selected language.
+  • If no selection exists, use the dominant language of the user's content.
+  • If no dominant language exists, use the language of the last user entry.
+Consistency (critical):
+- The entire JSON output MUST be in ONE single language only.
+- Do NOT mix languages inside the response.
+Translation rule:
+- Do NOT translate into the site/system language unless explicitly requested by the user.
+- The output must strictly follow the selected or inferred language rules above.
+
 `.trim();
 
   const prompt = `
