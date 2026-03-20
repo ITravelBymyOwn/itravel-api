@@ -2120,6 +2120,242 @@ function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
   return out;
 }
 
+/* =========================================================
+   🆕 GROUP 1 — DAY STRUCTURE / SEQUENCE HELPERS
+========================================================= */
+function _hhmmToMin_(v=''){
+  const s = String(v || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  const hh = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if(hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh*60 + mm;
+}
+
+function _minToHHMM_(mins){
+  const n = Math.max(0, Math.min(23*60+59, Number(mins||0)));
+  const hh = Math.floor(n/60);
+  const mm = n % 60;
+  return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+}
+
+function _extractApproxMinutesFromLine_(line=''){
+  const s = String(line || '').toLowerCase();
+  if(!s) return 0;
+
+  let total = 0;
+  const hourMatch = s.match(/~?\s*(\d+)\s*h/);
+  const minMatch = s.match(/~?\s*(\d+)\s*m/);
+
+  if(hourMatch) total += parseInt(hourMatch[1], 10) * 60;
+  if(minMatch) total += parseInt(minMatch[1], 10);
+
+  if(!total){
+    const rangeMatch = s.match(/(\d+)\s*-\s*(\d+)\s*m/);
+    if(rangeMatch){
+      total += Math.round((parseInt(rangeMatch[1],10) + parseInt(rangeMatch[2],10))/2);
+    }
+  }
+
+  return total;
+}
+
+function _extractDurationParts_(duration=''){
+  const raw = String(duration || '');
+  const lines = raw.split('\n').map(x => x.trim()).filter(Boolean);
+  const transportLine = lines.find(x => /^transport:/i.test(x)) || '';
+  const activityLine = lines.find(x => /^activity:/i.test(x)) || '';
+
+  return {
+    transportMin: _extractApproxMinutesFromLine_(transportLine),
+    activityMin: _extractApproxMinutesFromLine_(activityLine)
+  };
+}
+
+function _rowsByDay_(rows=[]){
+  const out = {};
+  for(const r of (rows || [])){
+    const d = Number(r?.day || 1);
+    if(!out[d]) out[d] = [];
+    out[d].push(r);
+  }
+  Object.keys(out).forEach(d=>{
+    out[d].sort((a,b)=> String(a?.start||'').localeCompare(String(b?.start||'')));
+  });
+  return out;
+}
+
+function _isAuroraRow_(row={}){
+  const txt = `${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`.toLowerCase();
+  return /aurora|auroras|northern lights|boreal/.test(txt);
+}
+
+function _isReturnRow_(row={}){
+  const txt = `${row?.activity || ''}`.toLowerCase();
+  return /return to|regreso a/.test(txt);
+}
+
+function _isExcursionLikeRow_(row={}, city=''){
+  const activity = String(row?.activity || '');
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = _normalizeHighlightKey_(parts[0] || '');
+  const cityKey = _normalizeHighlightKey_(city);
+  if(prefix && prefix !== cityKey) return true;
+
+  const txt = `${row?.activity || ''} ${row?.to || ''}`.toLowerCase();
+  return /national park|parque nacional|lagoon|laguna|coast|costa|circle|circulo|círculo|peninsula|península|road|vik|reynisfjara|gullfoss|geysir|thingvellir|þingvellir|snaefellsnes|snæfellsnes|aurora|boreal/.test(txt);
+}
+
+function _getDayWindowRef_(perDay=[], dayNum){
+  return (perDay || []).find(x => Number(x?.day) === Number(dayNum)) || null;
+}
+
+function _hasNormalDayWindow_(perDayRef){
+  if(!perDayRef) return true;
+
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+
+  if(start === null || end === null) return true;
+  return (end - start) >= 360; // 6h+
+}
+
+function _isNightOnlyWindow_(perDayRef){
+  if(!perDayRef) return false;
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+  if(start === null || end === null) return false;
+  return start >= 18*60;
+}
+
+function _getBlockIssues_(rows=[], blockDaysObjs=[], perDay=[], city=''){
+  const issues = [];
+  const byDay = _rowsByDay_(rows);
+
+  for(const dayObj of (blockDaysObjs || [])){
+    const day = Number(dayObj?.day || 1);
+    const dayRows = byDay[day] || [];
+    const ref = _getDayWindowRef_(perDay, day);
+
+    if(!dayRows.length){
+      issues.push(`Day ${day} has no rows.`);
+      continue;
+    }
+
+    // ordered / overlap / gaps too weird
+    for(let i=0; i<dayRows.length; i++){
+      const r = dayRows[i];
+      const start = _hhmmToMin_(r?.start);
+      const end = _hhmmToMin_(r?.end);
+
+      if(start === null || end === null || end <= start){
+        issues.push(`Day ${day} has an invalid time block in row "${r?.activity || ''}".`);
+        continue;
+      }
+
+      const parts = _extractDurationParts_(r?.duration || '');
+      const blockSpan = end - start;
+      const approxNeed = (parts.transportMin || 0) + (parts.activityMin || 0);
+
+      // allow wide tolerance, but catch obvious incoherence
+      if(approxNeed > 0 && Math.abs(blockSpan - approxNeed) > 120){
+        issues.push(`Day ${day} has duration inconsistent with time block in row "${r?.activity || ''}".`);
+      }
+
+      if(i > 0){
+        const prevEnd = _hhmmToMin_(dayRows[i-1]?.end);
+        if(prevEnd !== null && start < prevEnd){
+          issues.push(`Day ${day} has overlapping or out-of-order rows around "${r?.activity || ''}".`);
+        }
+      }
+    }
+
+    // return row should be last if present
+    const returnRows = dayRows.filter(r => _isReturnRow_(r));
+    if(returnRows.length){
+      const last = dayRows[dayRows.length-1];
+      if(!_isReturnRow_(last)){
+        issues.push(`Day ${day} has a return row that is not the final row.`);
+      }
+    }
+
+    // if excursion-like day, require enough substance
+    const excursionLike = dayRows.some(r => _isExcursionLikeRow_(r, city));
+    const meaningfulRows = dayRows.filter(r => !_isReturnRow_(r));
+    if(excursionLike && meaningfulRows.length < 4){
+      issues.push(`Day ${day} is an excursion-like day but has too few meaningful rows.`);
+    }
+
+    // aurora day cannot be empty before night unless explicitly night-only
+    const auroraRows = dayRows.filter(r => _isAuroraRow_(r));
+    if(auroraRows.length){
+      const daytimeRows = dayRows.filter(r => {
+        const start = _hhmmToMin_(r?.start);
+        return start !== null && start < 18*60 && !_isAuroraRow_(r);
+      });
+
+      if(!daytimeRows.length && !_isNightOnlyWindow_(ref)){
+        issues.push(`Day ${day} contains auroras but lacks daytime content.`);
+      }
+    }
+
+    // normal day shouldn't be too weak
+    if(_hasNormalDayWindow_(ref) && dayRows.length < 4 && !auroraRows.length){
+      issues.push(`Day ${day} is underdeveloped for its available daytime window.`);
+    }
+  }
+
+  return Array.from(new Set(issues));
+}
+
+async function _retryBlockWithIssues_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', currentRows=[], issues=[]){
+  const dayNums = blockDaysObjs.map(x => Number(x.day));
+  const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
+
+  const prompt = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Repair this block for "${city}" (${totalDays} total day/s).
+- Return Format B JSON only.
+
+BLOCK DAYS:
+${JSON.stringify(blockDaysObjs)}
+
+CURRENT BLOCK (needs correction):
+${JSON.stringify(currentRows)}
+
+ISSUES TO FIX (MANDATORY):
+${issues.map(x => `- ${x}`).join('\n')}
+
+REPAIR RULES:
+- Generate rows ONLY for these days: ${dayNums.join(', ')}.
+- Respect these windows: ${JSON.stringify(perDayForBlock)}.
+- Keep a realistic ordered sequence with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- If there is a return row, it must be the final row of that day.
+- If a day includes auroras, auroras are only the night part; the day must still have useful daytime content unless the day window is explicitly night-only.
+- Normal daytime windows should not be left weak or half-empty.
+- Excursion-like days must not be underdeveloped.
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places, never a macro-tour label.
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
+`.trim();
+
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
+
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    return forced;
+  }
+
+  return [];
+}
+
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
@@ -2153,6 +2389,12 @@ MANDATORY:
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
+- Day structure rules:
+  • Rows must be in realistic chronological order with NO overlaps.
+  • Each row time block must broadly match the stated duration.
+  • If there is a return row, it must be the final row of that day.
+  • If a day includes auroras, auroras are only the night part; the day must still have useful daytime content unless the day window is explicitly night-only.
+  • Normal daytime windows should not be weak or half-empty.
 - No text outside JSON.
 `.trim();
 
@@ -2163,17 +2405,39 @@ ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used u
   const parsed = parseJSON(ans);
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    const extracted = _extractPlannerRows_(parsed, city);
-    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    let extracted = _extractPlannerRows_(parsed, city);
+    let forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
 
     console.log(`[BLOCK ${label}] Parsed rows:`, forced.length, forced);
 
-    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
+    let issues = _getBlockIssues_(forced, blockDaysObjs, perDayForBlock, city);
+
+    if(issues.length){
+      console.warn(`[BLOCK ${label}] Issues detected, retrying block...`, issues);
+      const repaired = await _retryBlockWithIssues_(
+        city,
+        totalDays,
+        blockDaysObjs,
+        perDay,
+        forceReplan,
+        hotel,
+        transport,
+        forced,
+        issues
+      );
+
+      if(repaired.length){
+        forced = repaired;
+        issues = _getBlockIssues_(forced, blockDaysObjs, perDayForBlock, city);
+      }
+    }
+
+    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums) && !issues.length){
       console.log(`[BLOCK ${label}] OK`);
       return forced;
     }
 
-    console.warn(`[BLOCK ${label}] FAIL — missing rows for some block days.`);
+    console.warn(`[BLOCK ${label}] FAIL — missing rows or unresolved structure issues.`);
     return [];
   }
 
@@ -2259,6 +2523,7 @@ AURORAS (if plausible by city/season/latitude):
 - Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
 - Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
 - Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
+- Auroras are a NIGHT activity only; the same day must still include useful daytime content unless the day window is explicitly night-only.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
@@ -2266,11 +2531,15 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - If you propose a day trip, it must be COMPLETE:
   • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
   • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
-  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • Must include a final dedicated return row using the macro-tour Destination: "<Macro-tour> – Return to ${city}" as the LAST row of that day.
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
-- Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
-- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
+
+SEQUENCE / TIMING (MANDATORY):
+- Rows must be in realistic chronological order with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- Normal daytime windows should not be weak or half-empty.
+- Do NOT leave a normal day almost blank except for a night item.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2335,6 +2604,11 @@ QUALITY / MAXIMIZE EXPERIENCE:
       throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
     }
 
+    const finalIssues = _getBlockIssues_(stitchedRows, Array.from({length: dest.days}, (_,i)=>({day:i+1})), perDay, city);
+    if(finalIssues.length){
+      throw new Error(`FINAL_STRUCTURE_ISSUES:${city}:${finalIssues.join(' | ')}`);
+    }
+
     const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
     pushRows(city, val.allowed, forceReplan); // 🧠 if replanning → replace=true
 
@@ -2367,6 +2641,11 @@ QUALITY / MAXIMIZE EXPERIENCE:
       tmpRows = _dedupeRows_(tmpRows);
       tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
       tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
+
+      const fallbackIssues = _getBlockIssues_(tmpRows, Array.from({length: dest.days}, (_,i)=>({day:i+1})), perDay, city);
+      if(fallbackIssues.length){
+        console.warn(`[CITY ${city}] fallback one-shot still has structure issues:`, fallbackIssues);
+      }
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2439,6 +2718,7 @@ AURORAS (if plausible):
 - Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
 - Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
 - Notes must include "valid:" + a nearby low-cost alternative.
+- Auroras are a NIGHT activity only; the same day must still include useful daytime content unless the day window is explicitly night-only.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
@@ -2449,8 +2729,12 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
-- Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
-- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
+
+SEQUENCE / TIMING:
+- Rows must be in realistic chronological order with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- If there is a return row, it must be the final row of that day.
+- Normal daytime windows should not be weak or half-empty.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
