@@ -1946,6 +1946,7 @@ MANDATORY:
 - Base date: ${JSON.stringify(baseDate || '')}
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- Do NOT repeat the same main highlight/theme on different days unless the user explicitly requested repetition.
 - No text outside JSON.
 `.trim();
 
@@ -1984,9 +1985,87 @@ function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
   return (blockDays || []).every(d => set.has(Number(d)));
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me'){
+/* =========================================================
+   🆕 DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
+========================================================= */
+function _normalizeHighlightKey_(value=''){
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _extractHighlightKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  let candidate = '';
+
+  // If prefix is not the base city, it is likely the macro-tour/highlight
+  if(prefix && prefix !== cityKey){
+    candidate = prefix;
+  }else{
+    candidate = suffix || _normalizeHighlightKey_(to);
+  }
+
+  if(!candidate) return '';
+  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning)$/.test(candidate)) return '';
+
+  return candidate;
+}
+
+function _collectUsedHighlightKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    // keep rows if highlight belongs to the same day; drop it if repeated in another day
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
+  const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
+    ? forbiddenHighlights.join(', ')
+    : '';
 
   const prompt = `
 ${FORMAT}
@@ -2009,6 +2088,7 @@ MANDATORY:
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 - No text outside JSON.
 `.trim();
 
@@ -2125,6 +2205,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
+- Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2149,6 +2230,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
     const blocks = _chunkMasterDays_(masterDays);
     let stitchedRows = [];
+    let usedHighlightKeys = [];
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
@@ -2159,7 +2241,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
         perDay,
         forceReplan,
         hotel,
-        transport
+        transport,
+        usedHighlightKeys
       );
 
       if(!blockRows.length){
@@ -2169,9 +2252,11 @@ QUALITY / MAXIMIZE EXPERIENCE:
       }
 
       stitchedRows.push(...blockRows);
+      usedHighlightKeys = _collectUsedHighlightKeys_(stitchedRows, city);
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
+    stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2210,6 +2295,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
     if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
       let tmpCity = city;
       let tmpRows = _extractPlannerRows_(parsed, city);
+      tmpRows = _dedupeRows_(tmpRows);
+      tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2292,6 +2379,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
+- Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
@@ -2312,6 +2400,8 @@ ${buildIntake()}
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
+    rows = _dedupeRows_(rows);
+    rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
