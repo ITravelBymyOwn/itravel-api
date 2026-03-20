@@ -1878,101 +1878,6 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 CLEAN HOTEL/BASE VS TRANSPORT CONTEXT
-   (solo para corregir contaminación en from/to)
-========================================================= */
-function _normPlannerText_(v){
-  return String(v || '').replace(/\s+/g,' ').trim();
-}
-
-function _detectTransportToken_(v=''){
-  const s = String(v || '').toLowerCase().trim();
-  if(!s) return '';
-  if(/recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia/.test(s)) return 'recommend me';
-  if(/rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado|rentar car/.test(s)) return 'rental car';
-  if(/guided tour|tour guiado|excursi[oó]n guiada|excursion guiada/.test(s)) return 'guided tour';
-  if(/public transport|transporte p[úu]blico|transporte publico|metro|bus|tram|tren|train|subway/.test(s)) return 'public transport';
-  if(/walking|walk|a pie|caminando/.test(s)) return 'walk';
-  if(/taxi|uber|cab/.test(s)) return 'taxi or uber';
-  return '';
-}
-
-function _cleanHotelBaseOnly_(v=''){
-  let s = _normPlannerText_(v);
-  if(!s) return '';
-
-  s = s.replace(/\s*,\s*(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\s*$/i,'').trim();
-  s = s.replace(/\s*,\s*(rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado|guided tour|tour guiado|excursi[oó]n guiada|excursion guiada|public transport|transporte p[úu]blico|transporte publico|walking|walk|a pie|caminando|taxi|uber|rentar car)\s*$/i,'').trim();
-
-  return s;
-}
-
-function _resolveCleanHotelTransport_(city, hotel='', transport='recommend me'){
-  const rawHotel = _normPlannerText_(hotel || cityMeta[city]?.hotel || '');
-  const rawTransport = _normPlannerText_(transport || cityMeta[city]?.transport || '');
-
-  let cleanHotel = _cleanHotelBaseOnly_(rawHotel);
-  let cleanTransport = _detectTransportToken_(rawTransport);
-
-  if(!cleanTransport && rawHotel.includes(',')){
-    const parts = rawHotel.split(',').map(x => _normPlannerText_(x)).filter(Boolean);
-    if(parts.length >= 2){
-      const maybeTransport = parts.slice(1).join(', ');
-      const detected = _detectTransportToken_(maybeTransport);
-      if(detected){
-        cleanTransport = detected;
-        cleanHotel = _cleanHotelBaseOnly_(parts[0]);
-      }
-    }
-  }
-
-  if(!cleanHotel) cleanHotel = rawHotel;
-  if(!cleanTransport) cleanTransport = rawTransport || 'recommend me';
-
-  return { hotel: cleanHotel, transport: cleanTransport };
-}
-
-function _cleanPlaceFieldForBase_(value='', cleanHotel=''){
-  let s = _normPlannerText_(value);
-  if(!s) return s;
-
-  s = s.replace(/\b(recomiendame|recomiéndame|recommend me|you choose|your choice|sin preferencia|no preference|sem preferencia)\b/ig, '').trim();
-  s = s.replace(/\b(rental car|rent a car|veh[íi]culo alquilado|vehiculo alquilado|carro alquilado|coche alquilado|auto privado|guided tour|tour guiado|excursi[oó]n guiada|excursion guiada|public transport|transporte p[úu]blico|transporte publico|walking|walk|a pie|caminando|taxi|uber|rentar car)\b/ig, '').trim();
-  s = s.replace(/\s*,\s*,+/g, ', ').replace(/^,\s*|\s*,$/g,'').trim();
-
-  if(cleanHotel){
-    const hotelLc = cleanHotel.toLowerCase();
-    const sLc = s.toLowerCase();
-    if(sLc && (sLc === hotelLc || sLc.includes(hotelLc) || hotelLc.includes(sLc))){
-      return cleanHotel;
-    }
-  }
-
-  return s;
-}
-
-function _cleanRowsBaseContamination_(rows=[], cleanHotel=''){
-  return (rows || []).map(r=>{
-    const rr = { ...r };
-    rr.from = _cleanPlaceFieldForBase_(rr.from, cleanHotel);
-    rr.to   = _cleanPlaceFieldForBase_(rr.to, cleanHotel);
-
-    if(cleanHotel){
-      const fromLc = String(rr.from || '').toLowerCase();
-      if(!fromLc || /recomiendame|recomiéndame|recommend me|rental car|rentar car|guided tour|public transport|walking|walk|taxi|uber/.test(fromLc)){
-        rr.from = cleanHotel;
-      }
-      const toLc = String(rr.to || '').toLowerCase();
-      if(toLc && /recomiendame|recomiéndame|recommend me|rental car|rentar car|guided tour|public transport|walking|walk|taxi|uber/.test(toLc)){
-        rr.to = _cleanPlaceFieldForBase_(rr.to, cleanHotel);
-      }
-    }
-
-    return normalizeRow(rr, parseInt(rr?.day, 10) || 1);
-  });
-}
-
-/* =========================================================
    🆕 STAGED GENERATION HELPERS (master + blocks)
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
@@ -2014,8 +1919,6 @@ function _extractMasterPlanDays_(parsed, city, totalDays){
 }
 
 async function _buildCityMasterPlan_(city, totalDays, perDay, baseDate='', hotel='', transport='recommend me'){
-  const cleanCtx = _resolveCleanHotelTransport_(city, hotel, transport);
-
   const prompt = `
 ${FORMAT}
 **ROLE:** Planner “Astra”. Create a STRATEGIC DISTRIBUTION PLAN ONLY for "${city}" (${totalDays} day/s).
@@ -2041,9 +1944,11 @@ MANDATORY:
 - Do NOT generate detailed sub-stops yet.
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
-- Hotel/base: ${JSON.stringify(cleanCtx.hotel || '')}
-- Preferred transport: ${JSON.stringify(cleanCtx.transport || 'recommend me')}
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - Do NOT repeat the same main highlight/theme on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster in multiple city days.
+- Prefer a day with auroras to still have useful daytime content unless that day is explicitly night-only.
 - No text outside JSON.
 `.trim();
 
@@ -2118,10 +2023,39 @@ function _extractHighlightKey_(row={}, city=''){
   return candidate;
 }
 
+function _extractUrbanClusterKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  // Only for base-city rows, not macro tours
+  if(prefix && prefix !== cityKey) return '';
+
+  let candidate = _normalizeHighlightKey_(to || suffix);
+  if(!candidate) return '';
+
+  if(/^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner|return to|regreso a)$/.test(candidate)) return '';
+
+  return candidate;
+}
+
 function _collectUsedHighlightKeys_(rows=[], city=''){
   const out = new Set();
   for(const r of (rows || [])){
     const key = _extractHighlightKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _collectUsedUrbanClusterKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
     if(key) out.add(key);
   }
   return Array.from(out);
@@ -2157,13 +2091,472 @@ function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
   return out;
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[]){
+function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    // keep rows if same cluster remains inside same day; drop if reused in a different day
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+/* =========================================================
+   🆕 GROUP 1 — LIGHT STRUCTURE HELPERS (CONSERVATIVE)
+========================================================= */
+function _hhmmToMin_(v=''){
+  const s = String(v || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  const hh = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if(hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function _minToHHMM_(mins){
+  const n = Math.max(0, Math.min(23*60+59, Number(mins||0)));
+  const hh = Math.floor(n/60);
+  const mm = n % 60;
+  return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+}
+
+function _extractApproxMinutesFromLine_(line=''){
+  const s = String(line || '').toLowerCase();
+  if(!s) return 0;
+
+  let total = 0;
+  const hours = s.match(/(\d+)\s*h/);
+  const mins = s.match(/(\d+)\s*m/);
+  const range = s.match(/(\d+)\s*-\s*(\d+)\s*m/);
+
+  if(hours) total += parseInt(hours[1], 10) * 60;
+  if(mins) total += parseInt(mins[1], 10);
+  if(!total && range){
+    total = Math.round((parseInt(range[1],10) + parseInt(range[2],10))/2);
+  }
+
+  return total;
+}
+
+function _extractDurationParts_(duration=''){
+  const lines = String(duration || '').split('\n').map(x => x.trim()).filter(Boolean);
+  const transportLine = lines.find(x => /^(transport|transporte):/i.test(x)) || '';
+  const activityLine = lines.find(x => /^(activity|actividad):/i.test(x)) || '';
+  return {
+    transportMin: _extractApproxMinutesFromLine_(transportLine),
+    activityMin: _extractApproxMinutesFromLine_(activityLine)
+  };
+}
+
+function _groupRowsByDay_(rows=[]){
+  const out = {};
+  for(const r of (rows || [])){
+    const d = Number(r?.day || 1);
+    if(!out[d]) out[d] = [];
+    out[d].push(r);
+  }
+  Object.keys(out).forEach(d=>{
+    out[d].sort((a,b)=> String(a?.start||'').localeCompare(String(b?.start||'')));
+  });
+  return out;
+}
+
+function _isAuroraRow_(row={}){
+  const txt = `${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`.toLowerCase();
+  return /aurora|auroras|northern lights|boreal/.test(txt);
+}
+
+function _isReturnRow_(row={}){
+  return /return to|regreso a/i.test(String(row?.activity || ''));
+}
+
+function _getDayWindowRef_(perDay=[], dayNum){
+  return (perDay || []).find(x => Number(x?.day) === Number(dayNum)) || null;
+}
+
+function _hasNormalDayWindow_(perDayRef){
+  if(!perDayRef) return true;
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+  if(start === null || end === null) return true;
+  return (end - start) >= 360;
+}
+
+function _isNightOnlyWindow_(perDayRef){
+  if(!perDayRef) return false;
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+  if(start === null || end === null) return false;
+  return start >= 18*60 && (end - start) <= 360;
+}
+
+function _getWeakDayNums_(rows=[], perDay=[]){
+  const byDay = _groupRowsByDay_(rows);
+  const weak = [];
+
+  Object.keys(byDay).forEach(dayKey=>{
+    const day = Number(dayKey);
+    const dayRows = byDay[day] || [];
+    const ref = _getDayWindowRef_(perDay, day);
+    const auroraRows = dayRows.filter(r => _isAuroraRow_(r));
+    const nonReturnRows = dayRows.filter(r => !_isReturnRow_(r));
+
+    // 1) aurora day with no useful daytime content
+    if(auroraRows.length && !_isNightOnlyWindow_(ref)){
+      const daytimeRows = dayRows.filter(r=>{
+        const start = _hhmmToMin_(r?.start);
+        return start !== null && start < 18*60 && !_isAuroraRow_(r);
+      });
+      if(daytimeRows.length < 2){
+        weak.push(day);
+        return;
+      }
+    }
+
+    // 2) normal day too weak
+    if(_hasNormalDayWindow_(ref) && nonReturnRows.length < 4){
+      weak.push(day);
+      return;
+    }
+
+    // 3) broken order / overlaps / very obvious duration mismatch / return row not last
+    for(let i=0; i<dayRows.length; i++){
+      const r = dayRows[i];
+      const start = _hhmmToMin_(r?.start);
+      const end = _hhmmToMin_(r?.end);
+      if(start === null || end === null || end <= start){
+        weak.push(day);
+        return;
+      }
+
+      if(i > 0){
+        const prevEnd = _hhmmToMin_(dayRows[i-1]?.end);
+        if(prevEnd !== null && start < prevEnd){
+          weak.push(day);
+          return;
+        }
+      }
+
+      const dur = _extractDurationParts_(r?.duration || '');
+      const span = end - start;
+      const approxNeed = (dur.transportMin || 0) + (dur.activityMin || 0);
+      if(approxNeed > 0 && Math.abs(span - approxNeed) > 150){
+        weak.push(day);
+        return;
+      }
+    }
+
+    const returnRows = dayRows.filter(r => _isReturnRow_(r));
+    if(returnRows.length && !_isReturnRow_(dayRows[dayRows.length-1])){
+      weak.push(day);
+      return;
+    }
+  });
+
+  return Array.from(new Set(weak)).sort((a,b)=>a-b);
+}
+
+function _replaceDaysInRows_(baseRows=[], replacementRows=[], daysToReplace=[]){
+  const set = new Set((daysToReplace || []).map(Number));
+  const kept = (baseRows || []).filter(r => !set.has(Number(r?.day || 1)));
+  return _dedupeRows_([...(kept || []), ...(replacementRows || [])]);
+}
+
+async function _repairWeakDays_(city, totalDays, rows, weakDays, perDay, forceReplan=false, hotel='', transport='recommend me'){
+  const dayNums = (weakDays || []).map(Number).filter(Boolean);
+  if(!dayNums.length) return [];
+
+  const perDayForRepair = (perDay || []).filter(x => dayNums.includes(Number(x?.day)));
+
+  const prompt = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Repair ONLY these weak days for "${city}" (${totalDays} total day/s):
+${JSON.stringify(dayNums)}
+
+CURRENT ITINERARY CONTEXT:
+${JSON.stringify(rows)}
+
+Return Format B JSON only.
+
+MANDATORY REPAIR RULES:
+- Generate rows ONLY for days: ${dayNums.join(', ')}.
+- Respect these windows: ${JSON.stringify(perDayForRepair)}.
+- Keep chronological order with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- If there is a return row, it must be the FINAL row of that day.
+- If a day includes auroras, auroras are ONLY the night part; the day must still include useful daytime content unless the day window is explicitly night-only.
+- Normal daytime windows should not be weak or almost empty.
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places, never a macro-tour label.
+- Keep the rest of the trip logic coherent.
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
+`.trim();
+
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
+
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    return forced;
+  }
+
+  return [];
+}
+
+/* =========================================================
+   🆕 AURORA OPTION + RETURN DURATION FIX (PLANNER-LEVEL)
+========================================================= */
+function _plannerLangCode_(){
+  const raw = String(
+    (typeof plannerState !== 'undefined' && plannerState?.itineraryLang) ||
+    (typeof getLang === 'function' ? getLang() : '') ||
+    'en'
+  ).toLowerCase().trim();
+
+  if(raw.startsWith('es')) return 'es';
+  if(raw.startsWith('pt')) return 'pt';
+  if(raw.startsWith('fr')) return 'fr';
+  return 'en';
+}
+
+function _plannerLocalePack_(){
+  const lang = _plannerLangCode_();
+
+  if(lang === 'es'){
+    return {
+      transportLabel: 'Transporte',
+      activityLabel: 'Actividad',
+      auroraActivityBase: 'Opción para ver auroras',
+      auroraTo: 'Zona de observación de auroras',
+      auroraTransport: 'Por cuenta propia o tour guiado',
+      auroraNotes: 'Opcional: esta noche puedes intentar ver auroras por tu cuenta o reservando un tour. Revisa nubosidad y pronóstico geomagnético antes de salir.',
+      hotelFallback: 'Hotel'
+    };
+  }
+
+  if(lang === 'pt'){
+    return {
+      transportLabel: 'Transporte',
+      activityLabel: 'Atividade',
+      auroraActivityBase: 'Opção para ver auroras',
+      auroraTo: 'Área de observação de auroras',
+      auroraTransport: 'Por conta própria ou tour guiado',
+      auroraNotes: 'Opcional: esta noite você pode tentar ver auroras por conta própria ou reservando um tour. Verifique nuvens e previsão geomagnética antes de sair.',
+      hotelFallback: 'Hotel'
+    };
+  }
+
+  if(lang === 'fr'){
+    return {
+      transportLabel: 'Transport',
+      activityLabel: 'Activité',
+      auroraActivityBase: 'Option pour voir les aurores',
+      auroraTo: "Zone d'observation des aurores",
+      auroraTransport: 'Par vous-même ou en excursion guidée',
+      auroraNotes: 'Optionnel : ce soir vous pouvez tenter de voir des aurores par vous-même ou avec une excursion guidée. Vérifiez la couverture nuageuse et la prévision géomagnétique avant de partir.',
+      hotelFallback: 'Hotel'
+    };
+  }
+
+  return {
+    transportLabel: 'Transport',
+    activityLabel: 'Activity',
+    auroraActivityBase: 'Optional aurora viewing',
+    auroraTo: 'Aurora viewing area',
+    auroraTransport: 'Self-drive or Guided Tour',
+    auroraNotes: 'Optional: tonight you may try aurora viewing on your own or by booking a tour. Check cloud cover and geomagnetic forecast before heading out.',
+    hotelFallback: 'Hotel'
+  };
+}
+
+function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
+  const key = _normalizeHighlightKey_(city);
+
+  // ✅ Predetermined, by user request
+  const plausibleCityHints = [
+    'reykjavik','iceland','islandia',
+    'tromso','tromsø',
+    'akureyri',
+    'rovaniemi',
+    'kiruna',
+    'abisko',
+    'fairbanks',
+    'yellowknife'
+  ];
+
+  const cityOk = plausibleCityHints.some(h => key.includes(_normalizeHighlightKey_(h)));
+  if(!cityOk) return false;
+
+  const m = String(baseDate || '').match(/^\d{4}-(\d{2})-\d{2}$/);
+  if(!m) return true; // if date missing, allow
+  const month = parseInt(m[1], 10);
+
+  // Broad northern-hemisphere aurora season
+  return [9,10,11,12,1,2,3,4].includes(month);
+}
+
+function _pickAuroraNightCount_(totalDays){
+  const n = Number(totalDays || 0);
+  if(n >= 7) return 3;
+  if(n >= 4) return 2;
+  if(n >= 2) return 1;
+  return 0;
+}
+
+function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
+  const byDay = _groupRowsByDay_(rows);
+  const candidates = [];
+
+  for(let day=1; day<Number(totalDays||1); day++){
+    const dayRows = byDay[day] || [];
+    const ref = _getDayWindowRef_(perDay, day);
+
+    if(!dayRows.length) continue;
+    if(_isNightOnlyWindow_(ref)) continue;
+    if(dayRows.some(r => _isAuroraRow_(r))) continue;
+
+    const lastRow = dayRows[dayRows.length-1];
+    const lastEnd = _hhmmToMin_(lastRow?.end);
+    if(lastEnd === null) continue;
+
+    // Prefer days that finish not too late
+    if(lastEnd <= 20*60){
+      candidates.push({ day, score: lastEnd });
+    }
+  }
+
+  candidates.sort((a,b)=>{
+    if(a.score !== b.score) return a.score - b.score;
+    return a.day - b.day;
+  });
+
+  const wanted = _pickAuroraNightCount_(totalDays);
+  if(!wanted) return [];
+
+  const picked = [];
+  for(const c of candidates){
+    if(picked.length >= wanted) break;
+    if(!picked.length){
+      picked.push(c.day);
+      continue;
+    }
+    const prev = picked[picked.length-1];
+    if(Math.abs(c.day - prev) >= 2 || candidates.length <= wanted){
+      picked.push(c.day);
+    }
+  }
+
+  // Fill if spacing was too strict
+  if(picked.length < wanted){
+    for(const c of candidates){
+      if(picked.length >= wanted) break;
+      if(!picked.includes(c.day)) picked.push(c.day);
+    }
+  }
+
+  return picked.sort((a,b)=>a-b);
+}
+
+function _buildAuroraOptionRow_(city, day, dayRows=[]){
+  const loc = _plannerLocalePack_();
+  const hotel = String(cityMeta?.[city]?.hotel || loc.hotelFallback).trim() || loc.hotelFallback;
+
+  const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end||'').localeCompare(String(b?.end||''))).pop() || null;
+  const lastEnd = _hhmmToMin_(lastRow?.end);
+  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 20*60 + 30) : (20*60 + 30);
+  const end = Math.min(baseStart + 150, 23*60 + 30);
+  const start = Math.min(baseStart, end - 60);
+
+  const transportMin = 30;
+  const activityMin = Math.max(90, (end - start) - transportMin);
+
+  return normalizeRow({
+    day,
+    start: _minToHHMM_(start),
+    end: _minToHHMM_(end),
+    activity: `${city} – ${loc.auroraActivityBase}`,
+    from: hotel,
+    to: loc.auroraTo,
+    transport: loc.auroraTransport,
+    duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${Math.round(activityMin/30)*30}m`,
+    notes: loc.auroraNotes
+  }, day);
+}
+
+function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDate=''){
+  if(!_isAuroraPlausibleForCityAndDate_(city, baseDate)) return rows;
+  if((rows || []).some(r => _isAuroraRow_(r))) return rows;
+
+  const candidates = _pickAuroraCandidateDays_(rows, totalDays, perDay);
+  if(!candidates.length) return rows;
+
+  const byDay = _groupRowsByDay_(rows);
+  const injected = [];
+
+  for(const day of candidates){
+    injected.push(_buildAuroraOptionRow_(city, day, byDay[day] || []));
+  }
+
+  return _dedupeRows_([...(rows || []), ...injected]);
+}
+
+function _fixReturnRowDurationConsistency_(rows=[]){
+  const loc = _plannerLocalePack_();
+
+  return (rows || []).map(r=>{
+    if(!_isReturnRow_(r)) return r;
+
+    const start = _hhmmToMin_(r?.start);
+    const end = _hhmmToMin_(r?.end);
+    if(start === null || end === null || end <= start) return r;
+
+    const span = end - start;
+
+    // Keep only a tiny activity allowance at return rows
+    const activityMin = span >= 30 ? 10 : 5;
+    const transportMin = Math.max(5, span - activityMin);
+
+    return normalizeRow({
+      ...r,
+      duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${activityMin}m`
+    }, Number(r?.day || 1));
+  });
+}
+
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
   const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
     ? forbiddenHighlights.join(', ')
     : '';
-  const cleanCtx = _resolveCleanHotelTransport_(city, hotel, transport);
+  const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
+    ? forbiddenUrbanClusters.join(', ')
+    : '';
 
   const prompt = `
 ${FORMAT}
@@ -2184,10 +2577,15 @@ MANDATORY:
 - If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
 - Avoid generic placeholders.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
-- Hotel/base: ${JSON.stringify(cleanCtx.hotel || '')}
-- Preferred transport: ${JSON.stringify(cleanCtx.transport || 'recommend me')}
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
-- NEVER print hotel/base mixed with transport preference inside "from" or "to".
+${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
+- Day structure:
+  • Keep rows in chronological order with NO overlaps.
+  • Keep durations broadly consistent with time blocks.
+  • If a day has auroras, do NOT leave the rest of the day almost empty unless the day window is explicitly night-only.
+  • If there is a return row, place it as the FINAL row.
 - No text outside JSON.
 `.trim();
 
@@ -2198,9 +2596,8 @@ ${forbiddenText ? `- Do NOT repeat these main highlights already used on other d
   const parsed = parseJSON(ans);
 
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    let extracted = _extractPlannerRows_(parsed, city);
-    let forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
-    forced = _cleanRowsBaseContamination_(forced, cleanCtx.hotel);
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
 
     console.log(`[BLOCK ${label}] Parsed rows:`, forced.length, forced);
 
@@ -2260,7 +2657,6 @@ async function generateCityItinerary(city){
   const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
   const hotel    = cityMeta[city]?.hotel || '';
   const transport= cityMeta[city]?.transport || 'recommend me';
-  const cleanCtx = _resolveCleanHotelTransport_(city, hotel, transport);
 
   // 🧭 Detect if we must force replanning
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
@@ -2283,9 +2679,6 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT (to avoid errors like "to=South Coast"):
   • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
   • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
-  • Hotel/base: ${JSON.stringify(cleanCtx.hotel || '')}
-  • Preferred transport: ${JSON.stringify(cleanCtx.transport || 'recommend me')}
-  • NEVER print hotel/base mixed with transport preference inside "from" or "to".
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2299,6 +2692,7 @@ AURORAS (if plausible by city/season/latitude):
 - Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
 - Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
 - Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
+- Auroras are a NIGHT activity only; the same day must still include useful daytime content unless the day window is explicitly night-only.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
@@ -2310,6 +2704,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 - Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2320,13 +2715,14 @@ QUALITY / MAXIMIZE EXPERIENCE:
   • Avoid activities in clearly risky/restricted areas or time windows.
   • Replace with safer alternatives when applicable.
 - Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
+- Keep rows in chronological order, avoid overlaps, and keep return rows as the last row when they exist.
 - No text outside JSON.
 `.trim();
 
   showWOW(true, t('overlayDefault'));
 
   try{
-    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, cleanCtx.hotel, cleanCtx.transport);
+    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
 
     if(!Array.isArray(masterDays) || masterDays.length !== dest.days){
       throw new Error(`MASTER_PLAN_INVALID:${city}`);
@@ -2335,6 +2731,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
     const blocks = _chunkMasterDays_(masterDays);
     let stitchedRows = [];
     let usedHighlightKeys = [];
+    let usedUrbanClusterKeys = [];
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
@@ -2344,9 +2741,10 @@ QUALITY / MAXIMIZE EXPERIENCE:
         block,
         perDay,
         forceReplan,
-        cleanCtx.hotel,
-        cleanCtx.transport,
-        usedHighlightKeys
+        hotel,
+        transport,
+        usedHighlightKeys,
+        usedUrbanClusterKeys
       );
 
       if(!blockRows.length){
@@ -2357,11 +2755,43 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
       stitchedRows.push(...blockRows);
       usedHighlightKeys = _collectUsedHighlightKeys_(stitchedRows, city);
+      usedUrbanClusterKeys = _collectUsedUrbanClusterKeys_(stitchedRows, city);
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
     stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
-    stitchedRows = _cleanRowsBaseContamination_(stitchedRows, cleanCtx.hotel);
+    stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
+
+    // 🆕 Inject optional aurora rows at planner level
+    stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
+
+    // 🆕 Fix only return-row duration coherence without moving times
+    stitchedRows = _fixReturnRowDurationConsistency_(stitchedRows);
+
+    // 🆕 LIGHT, TARGETED repair only for truly weak days
+    const weakDays = _getWeakDayNums_(stitchedRows, perDay);
+    if(weakDays.length){
+      console.warn(`[CITY ${city}] Weak days detected, repairing only those days:`, weakDays);
+      const repairedRows = await _repairWeakDays_(
+        city,
+        dest.days,
+        stitchedRows,
+        weakDays,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length){
+        stitchedRows = _replaceDaysInRows_(stitchedRows, repairedRows, weakDays);
+        stitchedRows = _dedupeRows_(stitchedRows);
+        stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
+        stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
+        stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
+        stitchedRows = _fixReturnRowDurationConsistency_(stitchedRows);
+      }
+    }
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2402,7 +2832,14 @@ QUALITY / MAXIMIZE EXPERIENCE:
       let tmpRows = _extractPlannerRows_(parsed, city);
       tmpRows = _dedupeRows_(tmpRows);
       tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
-      tmpRows = _cleanRowsBaseContamination_(tmpRows, cleanCtx.hotel);
+      tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
+      tmpRows = _injectAuroraOptionRows_(city, tmpRows, dest.days, perDay, baseDate);
+      tmpRows = _fixReturnRowDurationConsistency_(tmpRows);
+
+      const fallbackWeakDays = _getWeakDayNums_(tmpRows, perDay);
+      if(fallbackWeakDays.length){
+        console.warn(`[CITY ${city}] fallback still has weak days:`, fallbackWeakDays);
+      }
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2438,7 +2875,6 @@ async function rebalanceWholeCity(city, opts={}){
   const perDay = _normalizePerDayForPrompt_(city, totalDays);
   const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
   const wantedTrip = (opts.dayTripTo||'').trim();
-  const cleanCtx = _resolveCleanHotelTransport_(city);
 
   // 🆕 Determine rebalance range
   const startDay = opts.start || 1;
@@ -2464,9 +2900,6 @@ KEY RULES (MANDATORY):
 - VERY IMPORTANT:
   • "from" and "to" must be REAL places, NEVER the macro-tour name.
   • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
-  • Hotel/base: ${JSON.stringify(cleanCtx.hotel || '')}
-  • Preferred transport: ${JSON.stringify(cleanCtx.transport || 'recommend me')}
-  • NEVER print hotel/base mixed with transport preference inside "from" or "to".
 
 TRANSPORT (smart priority, no invention):
 - In city: Walk/Metro/Bus/Tram depending on real availability.
@@ -2479,6 +2912,7 @@ AURORAS (if plausible):
 - Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
 - Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
 - Notes must include "valid:" + a nearby low-cost alternative.
+- Auroras are a NIGHT activity only; the same day must still include useful daytime content unless the day window is explicitly night-only.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
@@ -2490,6 +2924,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
 - Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
@@ -2498,6 +2933,7 @@ ${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, i
 - The last day can be lighter, but don’t leave it “empty” if key highlights remain.
 - Validate plausibility and safety; replace with safe alternatives when needed.
 - Notes must ALWAYS be useful (never empty or "seed").
+- Keep rows in chronological order, avoid overlaps, and keep return rows as the last row when they exist.
 
 Current context (to merge without deleting): 
 ${buildIntake()}
@@ -2512,7 +2948,32 @@ ${buildIntake()}
     let rows = _extractPlannerRows_(parsed, city);
     rows = _dedupeRows_(rows);
     rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
-    rows = _cleanRowsBaseContamination_(rows, cleanCtx.hotel);
+    rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+    rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
+    rows = _fixReturnRowDurationConsistency_(rows);
+
+    const weakDays = _getWeakDayNums_(rows, perDay);
+    if(weakDays.length){
+      const repairedRows = await _repairWeakDays_(
+        city,
+        totalDays,
+        rows,
+        weakDays,
+        perDay,
+        forceReplan,
+        cityMeta[city]?.hotel || '',
+        cityMeta[city]?.transport || 'recommend me'
+      );
+
+      if(repairedRows.length){
+        rows = _replaceDaysInRows_(rows, repairedRows, weakDays);
+        rows = _dedupeRows_(rows);
+        rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
+        rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+        rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
+        rows = _fixReturnRowDurationConsistency_(rows);
+      }
+    }
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
