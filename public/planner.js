@@ -2422,8 +2422,7 @@ function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
 
 function _pickAuroraNightCount_(totalDays){
   const n = Number(totalDays || 0);
-  if(n >= 7) return 3;
-  if(n >= 4) return 2;
+  if(n > 7) return 2;
   if(n >= 2) return 1;
   return 0;
 }
@@ -2444,8 +2443,8 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
     const lastEnd = _hhmmToMin_(lastRow?.end);
     if(lastEnd === null) continue;
 
-    // Prefer days that finish not too late
-    if(lastEnd <= 20*60){
+    // ✅ More surgical: only use days that finish early enough
+    if(lastEnd <= 19*60){
       candidates.push({ day, score: lastEnd });
     }
   }
@@ -2471,7 +2470,6 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
     }
   }
 
-  // Fill if spacing was too strict
   if(picked.length < wanted){
     for(const c of candidates){
       if(picked.length >= wanted) break;
@@ -2488,12 +2486,12 @@ function _buildAuroraOptionRow_(city, day, dayRows=[]){
 
   const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end||'').localeCompare(String(b?.end||''))).pop() || null;
   const lastEnd = _hhmmToMin_(lastRow?.end);
-  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 20*60 + 30) : (20*60 + 30);
-  const end = Math.min(baseStart + 150, 23*60 + 30);
+  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 21*60) : (21*60);
+  const end = Math.min(baseStart + 120, 23*60 + 30);
   const start = Math.min(baseStart, end - 60);
 
   const transportMin = 30;
-  const activityMin = Math.max(90, (end - start) - transportMin);
+  const activityMin = Math.max(60, (end - start) - transportMin);
 
   return normalizeRow({
     day,
@@ -2762,12 +2760,6 @@ QUALITY / MAXIMIZE EXPERIENCE:
     stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
     stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
 
-    // 🆕 Inject optional aurora rows at planner level
-    stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
-
-    // 🆕 Fix only return-row duration coherence without moving times
-    stitchedRows = _fixReturnRowDurationConsistency_(stitchedRows);
-
     // 🆕 LIGHT, TARGETED repair only for truly weak days
     const weakDays = _getWeakDayNums_(stitchedRows, perDay);
     if(weakDays.length){
@@ -2788,10 +2780,14 @@ QUALITY / MAXIMIZE EXPERIENCE:
         stitchedRows = _dedupeRows_(stitchedRows);
         stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
         stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
-        stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
-        stitchedRows = _fixReturnRowDurationConsistency_(stitchedRows);
       }
     }
+
+    // 🆕 More surgical aurora injection: at the very end only
+    stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
+
+    // 🆕 Fix only return-row duration coherence without moving times
+    stitchedRows = _fixReturnRowDurationConsistency_(stitchedRows);
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2833,13 +2829,15 @@ QUALITY / MAXIMIZE EXPERIENCE:
       tmpRows = _dedupeRows_(tmpRows);
       tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
       tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
-      tmpRows = _injectAuroraOptionRows_(city, tmpRows, dest.days, perDay, baseDate);
-      tmpRows = _fixReturnRowDurationConsistency_(tmpRows);
 
       const fallbackWeakDays = _getWeakDayNums_(tmpRows, perDay);
       if(fallbackWeakDays.length){
         console.warn(`[CITY ${city}] fallback still has weak days:`, fallbackWeakDays);
       }
+
+      // 🆕 Same surgical order in fallback
+      tmpRows = _injectAuroraOptionRows_(city, tmpRows, dest.days, perDay, baseDate);
+      tmpRows = _fixReturnRowDurationConsistency_(tmpRows);
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2949,8 +2947,6 @@ ${buildIntake()}
     rows = _dedupeRows_(rows);
     rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
     rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
-    rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
-    rows = _fixReturnRowDurationConsistency_(rows);
 
     const weakDays = _getWeakDayNums_(rows, perDay);
     if(weakDays.length){
@@ -2970,10 +2966,12 @@ ${buildIntake()}
         rows = _dedupeRows_(rows);
         rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
         rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
-        rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
-        rows = _fixReturnRowDurationConsistency_(rows);
       }
     }
+
+    // 🆕 Same surgical order in rebalance
+    rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
+    rows = _fixReturnRowDurationConsistency_(rows);
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
