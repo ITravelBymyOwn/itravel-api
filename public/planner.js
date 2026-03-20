@@ -1947,6 +1947,7 @@ MANDATORY:
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - Do NOT repeat the same main highlight/theme on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster in multiple city days.
 - No text outside JSON.
 `.trim();
 
@@ -2021,10 +2022,39 @@ function _extractHighlightKey_(row={}, city=''){
   return candidate;
 }
 
+function _extractUrbanClusterKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  // Only for base-city rows, not macro tours
+  if(prefix && prefix !== cityKey) return '';
+
+  let candidate = _normalizeHighlightKey_(to || suffix);
+  if(!candidate) return '';
+
+  if(/^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner|return to|regreso a)$/.test(candidate)) return '';
+
+  return candidate;
+}
+
 function _collectUsedHighlightKeys_(rows=[], city=''){
   const out = new Set();
   for(const r of (rows || [])){
     const key = _extractHighlightKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _collectUsedUrbanClusterKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
     if(key) out.add(key);
   }
   return Array.from(out);
@@ -2060,11 +2090,44 @@ function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
   return out;
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[]){
+function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    // keep rows if same cluster remains inside same day; drop if reused in a different day
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
   const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
     ? forbiddenHighlights.join(', ')
+    : '';
+  const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
+    ? forbiddenUrbanClusters.join(', ')
     : '';
 
   const prompt = `
@@ -2089,6 +2152,7 @@ MANDATORY:
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
+${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
 - No text outside JSON.
 `.trim();
 
@@ -2206,6 +2270,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 - Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2231,6 +2296,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
     const blocks = _chunkMasterDays_(masterDays);
     let stitchedRows = [];
     let usedHighlightKeys = [];
+    let usedUrbanClusterKeys = [];
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
@@ -2242,7 +2308,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
         forceReplan,
         hotel,
         transport,
-        usedHighlightKeys
+        usedHighlightKeys,
+        usedUrbanClusterKeys
       );
 
       if(!blockRows.length){
@@ -2253,10 +2320,12 @@ QUALITY / MAXIMIZE EXPERIENCE:
 
       stitchedRows.push(...blockRows);
       usedHighlightKeys = _collectUsedHighlightKeys_(stitchedRows, city);
+      usedUrbanClusterKeys = _collectUsedUrbanClusterKeys_(stitchedRows, city);
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
     stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
+    stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
 
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
@@ -2297,6 +2366,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
       let tmpRows = _extractPlannerRows_(parsed, city);
       tmpRows = _dedupeRows_(tmpRows);
       tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
+      tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
 
       const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
       pushRows(tmpCity, val.allowed, forceReplan);
@@ -2380,6 +2450,7 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • If it's a classic route, reach the logical end highlight before returning.
   • Avoid optimistic returns: use conservative estimates in winter or at night.
 - Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
@@ -2402,6 +2473,7 @@ ${buildIntake()}
     let rows = _extractPlannerRows_(parsed, city);
     rows = _dedupeRows_(rows);
     rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
+    rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
 
     const val = await validateRowsWithAgent(city, rows, baseDate);
     pushRows(city, val.allowed, forceReplan);
