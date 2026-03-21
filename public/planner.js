@@ -1933,7 +1933,6 @@ MANDATORY:
 - Keep themes realistic and well distributed across all days.
 - Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
 - If some day has a shorter window, make it lighter accordingly.
-- If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
 - Keep the logic GLOBAL; do not depend on hardcoded destinations.
 - Since this is only planning metadata:
   • "from" can be "Hotel"
@@ -1942,13 +1941,25 @@ MANDATORY:
   • "duration" can be "Transport: planning\\nActivity: planning"
   • "notes" should briefly justify the day theme
 - Do NOT generate detailed sub-stops yet.
+
+GLOBAL PLANNING LOGIC:
+- First identify the city's/base's iconic highlights AND the best radial day-trip rings / circuits around it.
+- Think radially from the base city: near rings, medium rings, farther rings.
+- But DO NOT order the itinerary rigidly by distance. Balance the trip intelligently.
+- Prefer the BEST overall distribution by intensity, logistics, and experience.
+- Avoid repeating the same macro-region / circuit / ring on different days.
+- For longer stays, after covering the top iconic rings, expand outward to additional worthwhile rings before repeating earlier ones.
+- If a spa / geothermal stop / marine-life stop / scenic detour naturally belongs inside a nearby regional ring, bundle it there when that improves coherence.
+  Examples only: Blue Lagoon inside a Reykjanes-style ring, Secret Lagoon inside a Golden-Circle-style ring.
+- Prefer specific, iconic regional rings / day tours when they exist, instead of repeating generic city days.
+- If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
+- Do NOT over-reuse the same urban area / neighborhood / cluster in multiple city days.
+- Prefer a day with auroras to still have useful daytime content unless that day is explicitly night-only.
+
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
-- Do NOT repeat the same main highlight/theme on different days unless the user explicitly requested repetition.
-- Do NOT over-reuse the same urban area / neighborhood / cluster in multiple city days.
-- Prefer a day with auroras to still have useful daytime content unless that day is explicitly night-only.
 - No text outside JSON.
 `.trim();
 
@@ -2119,6 +2130,90 @@ function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
   }
 
   return out;
+}
+
+/* =========================================================
+   🆕 MACRO-ZONES / RADIAL RINGS — GLOBAL HELPERS
+========================================================= */
+function _extractMacroZoneKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+  const toKey = _normalizeHighlightKey_(row?.to || '');
+
+  if(!prefix || prefix === cityKey) return '';
+
+  if(/^(return to|regreso a|departure from|salida desde|optional aurora viewing|opcion para ver auroras|aurora option|tour de auroras|tour auroras|tour aurora)$/.test(suffix)) return '';
+
+  if(/^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner)$/.test(prefix)) return '';
+
+  return prefix;
+}
+
+function _collectUsedMacroZoneKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractMacroZoneKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _findRepeatedMacroZoneDays_(rows=[], city=''){
+  const firstDayByZone = new Map();
+  const repeatedDays = new Set();
+
+  for(const r of (rows || [])){
+    const zone = _extractMacroZoneKey_(r, city);
+    const day = Number(r?.day || 1);
+    if(!zone) continue;
+
+    if(!firstDayByZone.has(zone)){
+      firstDayByZone.set(zone, day);
+      continue;
+    }
+
+    const firstDay = firstDayByZone.get(zone);
+    if(firstDay !== day){
+      repeatedDays.add(day);
+    }
+  }
+
+  return Array.from(repeatedDays).sort((a,b)=>a-b);
+}
+
+function _removeRepeatedMacroZonesAcrossDays_(rows=[], city=''){
+  const firstDayByZone = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const zone = _extractMacroZoneKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!zone){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByZone.has(zone)){
+      firstDayByZone.set(zone, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByZone.get(zone);
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+function _buildUsedMacroZonesContext_(rows=[], city=''){
+  return _collectUsedMacroZoneKeys_(rows, city).join(', ');
 }
 
 /* =========================================================
@@ -2311,6 +2406,59 @@ MANDATORY REPAIR RULES:
 - "from", "to", "transport", "notes" can NEVER be empty.
 - "from" and "to" must be REAL places, never a macro-tour label.
 - Keep the rest of the trip logic coherent.
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
+`.trim();
+
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
+
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    return forced;
+  }
+
+  return [];
+}
+
+async function _repairRepeatedMacroZoneDays_(city, totalDays, rows, repeatedDays, perDay, forceReplan=false, hotel='', transport='recommend me'){
+  const dayNums = (repeatedDays || []).map(Number).filter(Boolean);
+  if(!dayNums.length) return [];
+
+  const perDayForRepair = (perDay || []).filter(x => dayNums.includes(Number(x?.day)));
+  const usedMacroZones = _buildUsedMacroZonesContext_(
+    (rows || []).filter(r => !dayNums.includes(Number(r?.day || 1))),
+    city
+  );
+
+  const prompt = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Rebuild ONLY these repeated days for "${city}" (${totalDays} total day/s):
+${JSON.stringify(dayNums)}
+
+CURRENT ITINERARY CONTEXT:
+${JSON.stringify(rows)}
+
+Return Format B JSON only.
+
+MANDATORY REPAIR RULES:
+- Generate rows ONLY for days: ${dayNums.join(', ')}.
+- Respect these windows: ${JSON.stringify(perDayForRepair)}.
+- Keep chronological order with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- If there is a return row, it must be the FINAL row of that day.
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places, never a macro-tour label.
+- GLOBAL radial rule:
+  • Identify alternative iconic day-trip rings / macro-regions / circuits not yet used.
+  • Do NOT reuse already-covered macro-regions unless the user explicitly requested repetition.
+  • Balance the trip naturally; do NOT force a strict near-to-far order.
+  • Prefer a strong unused nearby or medium-distance ring before recycling a previously used ring.
+  • If a special stop (spa, geothermal, wildlife, scenic detour) fits naturally inside a ring, bundle it there.
+- Already used macro-regions / rings that are FORBIDDEN for these rebuilt days: ${usedMacroZones || 'none'}
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
@@ -2546,7 +2694,7 @@ function _fixReturnRowDurationConsistency_(rows=[]){
   });
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
+async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[], forbiddenMacroZones=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
   const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
@@ -2554,6 +2702,9 @@ async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay,
     : '';
   const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
     ? forbiddenUrbanClusters.join(', ')
+    : '';
+  const forbiddenMacroText = Array.isArray(forbiddenMacroZones) && forbiddenMacroZones.length
+    ? forbiddenMacroZones.join(', ')
     : '';
 
   const prompt = `
@@ -2579,6 +2730,17 @@ MANDATORY:
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
+${forbiddenMacroText ? `- FORBIDDEN macro-regions / circuits / rings already used on other days: ${forbiddenMacroText}` : ''}
+
+GLOBAL RADIAL RULES:
+- Identify all iconic base-city highlights AND all strong nearby / medium / farther radial rings around the base.
+- Balance the trip naturally. Do NOT rigidly order by distance.
+- Prefer a strong UNUSED ring before reusing a previously covered ring.
+- If there is a coherent nearby regional ring with multiple worthwhile stops, prefer that over repeating an already-used region.
+- If a special stop (spa, geothermal site, marine-life activity, scenic detour, thermal baths, etc.) fits naturally inside a day-trip ring, bundle it there when it improves coherence.
+  Examples only: Blue Lagoon inside a Reykjanes-style ring, Secret Lagoon inside a Golden-Circle-style ring.
+- For longer stays, you may expand outward to additional worthwhile rings before repeating earlier ones.
+
 - Day structure:
   • Keep rows in chronological order with NO overlaps.
   • Keep durations broadly consistent with time blocks.
@@ -2694,15 +2856,23 @@ AURORAS (if plausible by city/season/latitude):
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
+- Guideline: ideally ≤ ~5h per one-way drive ONLY when the stay is long enough to justify it. Otherwise prefer stronger nearer / medium-distance rings first.
 - If you propose a day trip, it must be COMPLETE:
   • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
   • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
   • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • If it's a classic route, reach the logical end highlight before returning.
   • Return times must NOT be optimistic: use conservative estimates in winter or at night.
 - Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 - Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
+- Do NOT repeat the same macro-region / circuit / radial ring across different days unless the user explicitly requested it.
+
+GLOBAL RADIAL RULES:
+- First identify the city's imperdibles and the strongest radial day-trip rings from nearest to farthest.
+- Then distribute them in the BEST BALANCED order for the trip. Do NOT force a rigid near-to-far sequence.
+- Prefer strong unused nearby/medium rings before recycling an already-covered ring.
+- If a special stop (spa, geothermal, whale watching, thermal baths, marine-life, scenic detour, etc.) fits naturally inside a regional ring, bundle it there when it improves coherence.
+  Examples only: Blue Lagoon inside a Reykjanes-style ring, Secret Lagoon inside a Golden-Circle-style ring.
 
 QUALITY / MAXIMIZE EXPERIENCE:
 - Cover key daytime and nighttime highlights.
@@ -2730,6 +2900,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
     let stitchedRows = [];
     let usedHighlightKeys = [];
     let usedUrbanClusterKeys = [];
+    let usedMacroZoneKeys = [];
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
@@ -2742,7 +2913,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
         hotel,
         transport,
         usedHighlightKeys,
-        usedUrbanClusterKeys
+        usedUrbanClusterKeys,
+        usedMacroZoneKeys
       );
 
       if(!blockRows.length){
@@ -2754,11 +2926,35 @@ QUALITY / MAXIMIZE EXPERIENCE:
       stitchedRows.push(...blockRows);
       usedHighlightKeys = _collectUsedHighlightKeys_(stitchedRows, city);
       usedUrbanClusterKeys = _collectUsedUrbanClusterKeys_(stitchedRows, city);
+      usedMacroZoneKeys = _collectUsedMacroZoneKeys_(stitchedRows, city);
     }
 
     stitchedRows = _dedupeRows_(stitchedRows);
     stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
     stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
+
+    // 🆕 If same macro-zone got reused on another day, repair only the repeated days
+    const repeatedMacroZoneDays = _findRepeatedMacroZoneDays_(stitchedRows, city);
+    if(repeatedMacroZoneDays.length){
+      console.warn(`[CITY ${city}] Repeated macro-zones detected, repairing days:`, repeatedMacroZoneDays);
+      const repairedRows = await _repairRepeatedMacroZoneDays_(
+        city,
+        dest.days,
+        stitchedRows,
+        repeatedMacroZoneDays,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length){
+        stitchedRows = _replaceDaysInRows_(stitchedRows, repairedRows, repeatedMacroZoneDays);
+        stitchedRows = _dedupeRows_(stitchedRows);
+        stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
+        stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
+      }
+    }
 
     // 🆕 LIGHT, TARGETED repair only for truly weak days
     const weakDays = _getWeakDayNums_(stitchedRows, perDay);
@@ -2782,6 +2978,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
         stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
       }
     }
+
+    stitchedRows = _removeRepeatedMacroZonesAcrossDays_(stitchedRows, city);
 
     // 🆕 More surgical aurora injection: at the very end only
     stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
@@ -2830,10 +3028,32 @@ QUALITY / MAXIMIZE EXPERIENCE:
       tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
       tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
 
+      const repeatedMacroZoneDays = _findRepeatedMacroZoneDays_(tmpRows, city);
+      if(repeatedMacroZoneDays.length){
+        const repairedRows = await _repairRepeatedMacroZoneDays_(
+          city,
+          dest.days,
+          tmpRows,
+          repeatedMacroZoneDays,
+          perDay,
+          forceReplan,
+          hotel,
+          transport
+        );
+        if(repairedRows.length){
+          tmpRows = _replaceDaysInRows_(tmpRows, repairedRows, repeatedMacroZoneDays);
+          tmpRows = _dedupeRows_(tmpRows);
+          tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
+          tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
+        }
+      }
+
       const fallbackWeakDays = _getWeakDayNums_(tmpRows, perDay);
       if(fallbackWeakDays.length){
         console.warn(`[CITY ${city}] fallback still has weak days:`, fallbackWeakDays);
       }
+
+      tmpRows = _removeRepeatedMacroZonesAcrossDays_(tmpRows, city);
 
       // 🆕 Same surgical order in fallback
       tmpRows = _injectAuroraOptionRows_(city, tmpRows, dest.days, perDay, baseDate);
@@ -2914,7 +3134,7 @@ AURORAS (if plausible):
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, adjust stops/window.
+- Guideline: ideally ≤ ~5h per one-way drive ONLY when the stay is long enough to justify it. Otherwise prefer stronger nearer / medium rings first.
 - If you include a day trip:
   • 5–8 sub-stops (rows) with realistic sequence.
   • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
@@ -2923,6 +3143,14 @@ DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
   • Avoid optimistic returns: use conservative estimates in winter or at night.
 - Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
 - Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
+- Do NOT repeat the same macro-region / circuit / radial ring across different days unless the user explicitly requested it.
+
+GLOBAL RADIAL RULES:
+- First identify the city's imperdibles and the strongest radial day-trip rings from nearest to farthest.
+- Then distribute them in the BEST BALANCED order for the trip. Do NOT force a rigid near-to-far sequence.
+- Prefer strong unused nearby/medium rings before recycling an already-covered ring.
+- If a special stop (spa, geothermal, whale watching, thermal baths, marine-life, scenic detour, etc.) fits naturally inside a regional ring, bundle it there when it improves coherence.
+  Examples only: Blue Lagoon inside a Reykjanes-style ring, Secret Lagoon inside a Golden-Circle-style ring.
 
 QUALITY:
 - Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
@@ -2948,6 +3176,27 @@ ${buildIntake()}
     rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
     rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
 
+    const repeatedMacroZoneDays = _findRepeatedMacroZoneDays_(rows, city);
+    if(repeatedMacroZoneDays.length){
+      const repairedRows = await _repairRepeatedMacroZoneDays_(
+        city,
+        totalDays,
+        rows,
+        repeatedMacroZoneDays,
+        perDay,
+        forceReplan,
+        cityMeta[city]?.hotel || '',
+        cityMeta[city]?.transport || 'recommend me'
+      );
+
+      if(repairedRows.length){
+        rows = _replaceDaysInRows_(rows, repairedRows, repeatedMacroZoneDays);
+        rows = _dedupeRows_(rows);
+        rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
+        rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+      }
+    }
+
     const weakDays = _getWeakDayNums_(rows, perDay);
     if(weakDays.length){
       const repairedRows = await _repairWeakDays_(
@@ -2968,6 +3217,8 @@ ${buildIntake()}
         rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
       }
     }
+
+    rows = _removeRepeatedMacroZonesAcrossDays_(rows, city);
 
     // 🆕 Same surgical order in rebalance
     rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
