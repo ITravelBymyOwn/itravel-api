@@ -2453,6 +2453,7 @@ MANDATORY REPAIR RULES:
 /* =========================================================
    SECTION 15E · AURORA OPTION + RETURN DURATION FIX + BLOCK GENERATION
 ========================================================= */
+
 function _plannerLangCode_(){
   const raw = String(
     (typeof plannerState !== 'undefined' && plannerState?.itineraryLang) ||
@@ -2523,7 +2524,6 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
   const byDay = _groupRowsByDay_(rows);
   const loc = _plannerLocalePack_();
 
-  // insertar noches reales
   const nights = _pickAuroraNightCount_(totalDays);
   let inserted = 0;
 
@@ -2557,7 +2557,6 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
     inserted++;
   });
 
-  // referencia en otros días
   Object.keys(byDay).forEach(dayKey=>{
     const day = Number(dayKey);
     if(day === totalDays) return;
@@ -2622,6 +2621,35 @@ No text outside JSON
   }
 
   return [];
+}
+
+/* =========================================================
+   🆕 FIX CRÍTICO — DEDUPE (DEPENDENCIA)
+========================================================= */
+function _dedupeRows_(rows=[]){
+  const seen = new Set();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = JSON.stringify([
+      Number(r?.day||1),
+      String(r?.start||'').trim(),
+      String(r?.end||'').trim(),
+      String(r?.activity||'').trim(),
+      String(r?.from||'').trim(),
+      String(r?.to||'').trim()
+    ]);
+
+    if(seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+
+  return out.sort((a,b)=>{
+    const da = Number(a?.day||1), db = Number(b?.day||1);
+    if(da !== db) return da-db;
+    return String(a?.start||'').localeCompare(String(b?.start||''));
+  });
 }
 
 /* =========================================================
