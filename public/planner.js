@@ -1664,6 +1664,9 @@ Contexto:
 /* ==============================
    SECTION 15 · City generation
 ================================= */
+/* ==============================
+   SECTION 15A · UI + idioma + normalización base + extracción
+================================= */
 function setOverlayMessage(msg=t('overlayDefault')){
   const p = $overlayWOW?.querySelector('p');
   if(p) p.textContent = msg;
@@ -1862,7 +1865,7 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 STAGED GENERATION HELPERS (master + blocks)
+   SECTION 15B · STAGED GENERATION HELPERS (master + blocks)
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
   if(!parsed) return [];
@@ -1984,7 +1987,7 @@ function _rowsCoverRequestedDays_(rows=[], requestedDays=[]){
 }
 
 /* =========================================================
-   🆕 DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
+   SECTION 15C · DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
 ========================================================= */
 function _normalizeHighlightKey_(value=''){
   return String(value || '')
@@ -2125,7 +2128,7 @@ function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
 }
 
 /* =========================================================
-   🆕 MACRO-ZONE DETECTION (VERY LIGHT)
+   SECTION 15C.2 · MACRO-ZONE DETECTION (VERY LIGHT)
 ========================================================= */
 function _extractMacroZoneKey_(row={}, city=''){
   const activity = String(row?.activity || '').trim();
@@ -2135,8 +2138,16 @@ function _extractMacroZoneKey_(row={}, city=''){
 
   if(!prefix) return '';
   if(prefix === cityKey) return '';
-  if(/^(return to|regreso a|departure from|salida desde)$/.test(prefix)) return '';
-  return prefix;
+
+  // 🆕 FIX: normalización fuerte de clusters equivalentes
+  const normalized = prefix
+    .replace(/thingvellir|þingvellir|geyser|geysir|gullfoss|kerid/g,'golden circle')
+    .replace(/blue lagoon|reykjanes/g,'reykjanes')
+    .replace(/vik|skogafoss|seljalandsfoss|reynisfjara/g,'south coast')
+    .replace(/snaefellsnes|snæfellsnes/g,'snaefellsnes');
+
+  if(/^(return to|regreso a|departure from|salida desde)$/.test(normalized)) return '';
+  return normalized;
 }
 
 function _findRepeatedMacroZoneDays_(rows=[], city=''){
@@ -2172,7 +2183,7 @@ function _collectUsedMacroZoneKeys_(rows=[], city=''){
 }
 
 /* =========================================================
-   🆕 LIGHT STRUCTURE HELPERS
+   SECTION 15D · LIGHT STRUCTURE HELPERS
 ========================================================= */
 function _hhmmToMin_(v=''){
   const s = String(v || '').trim();
@@ -2319,6 +2330,21 @@ function _getWeakDayNums_(rows=[], perDay=[]){
       weak.push(day);
       return;
     }
+
+    // 🆕 FIX: detectar cierre temprano sin cierre nocturno razonable
+    const lastRow = dayRows[dayRows.length-1];
+    const lastEnd = _hhmmToMin_(lastRow?.end);
+    if(lastEnd !== null && _hasNormalDayWindow_(ref) && lastEnd < 18*60 + 30){
+      weak.push(day);
+      return;
+    }
+
+    // 🆕 FIX: detectar day trips / macro-tours pobres
+    const macroRows = dayRows.filter(r => !!_extractMacroZoneKey_(r));
+    if(macroRows.length && macroRows.length < 4){
+      weak.push(day);
+      return;
+    }
   });
 
   return Array.from(new Set(weak)).sort((a,b)=>a-b);
@@ -2425,7 +2451,7 @@ MANDATORY REPAIR RULES:
 }
 
 /* =========================================================
-   🆕 AURORA OPTION + RETURN DURATION FIX
+   SECTION 15E · AURORA OPTION + RETURN DURATION FIX
 ========================================================= */
 function _plannerLangCode_(){
   const raw = String(
@@ -2516,7 +2542,8 @@ function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
 
 function _pickAuroraNightCount_(totalDays){
   const n = Number(totalDays || 0);
-  if(n > 7) return 2;
+  if(n >= 7) return 3;
+  if(n >= 4) return 2;
   if(n >= 2) return 1;
   return 0;
 }
@@ -2537,7 +2564,7 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
     const lastEnd = _hhmmToMin_(lastRow?.end);
     if(lastEnd === null) continue;
 
-    if(lastEnd <= 19*60){
+    if(lastEnd <= 20*60){
       candidates.push({ day, score: lastEnd });
     }
   }
@@ -2601,17 +2628,51 @@ function _buildAuroraOptionRow_(city, day, dayRows=[]){
 
 function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDate=''){
   if(!_isAuroraPlausibleForCityAndDate_(city, baseDate)) return rows;
-  if((rows || []).some(r => _isAuroraRow_(r))) return rows;
-
-  const candidates = _pickAuroraCandidateDays_(rows, totalDays, perDay);
-  if(!candidates.length) return rows;
 
   const byDay = _groupRowsByDay_(rows);
+
+  const hasAuroraReference = (dayRows=[])=>{
+    return dayRows.some(r=>{
+      const txt = `${r?.activity || ''} ${r?.to || ''} ${r?.notes || ''}`.toLowerCase();
+      return /aurora|auroras|northern lights|boreal/.test(txt);
+    });
+  };
+
+  const candidates = _pickAuroraCandidateDays_(rows, totalDays, perDay);
   const injected = [];
 
   for(const day of candidates){
-    injected.push(_buildAuroraOptionRow_(city, day, byDay[day] || []));
+    if(!hasAuroraReference(byDay[day] || [])){
+      injected.push(_buildAuroraOptionRow_(city, day, byDay[day] || []));
+    }
   }
+
+  const loc = _plannerLocalePack_();
+
+  // 🆕 FIX: referencia ligera en notas de otros días plausibles (excepto último)
+  Object.keys(byDay).forEach(dayKey=>{
+    const day = Number(dayKey);
+    if(day >= Number(totalDays || 1)) return;
+
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+    if(hasAuroraReference(dayRows)) return;
+
+    const eveningRows = dayRows.filter(r=>{
+      const start = _hhmmToMin_(r?.start);
+      return start !== null && start >= 17*60;
+    });
+
+    const target = eveningRows.length ? eveningRows[eveningRows.length-1] : dayRows[dayRows.length-1];
+    if(!target) return;
+
+    const extraNote = (loc.auroraNotes || '').trim();
+    if(!extraNote) return;
+
+    target.notes = String(target.notes || '').trim()
+      ? `${String(target.notes).trim()} ${extraNote}`
+      : extraNote;
+  });
 
   return _dedupeRows_([...(rows || []), ...injected]);
 }
@@ -2676,6 +2737,9 @@ ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used u
   • Think in radial exploration from the base city, but balance the trip naturally instead of forcing a rigid nearest-to-farthest order.
   • Do NOT reuse the same macro-region, circuit, or regional ring on different days.
   • If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name or with only part of the same route.
+- STRICT CLUSTER RULE:
+  • Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
+  • Even partial reuse (subset of the same route) is FORBIDDEN.
 - DAY TRIP LOGIC (CRITICAL):
   • If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, etc.), group nearby highlights into ONE coherent day when it improves the trip.
   • Avoid single-activity regional days when multiple nearby worthwhile stops exist.
@@ -2752,6 +2816,9 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
   return true;
 }
 
+/* =========================================================
+   SECTION 15F · generateCityItinerary
+========================================================= */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -2925,6 +2992,11 @@ QUALITY / MAXIMIZE EXPERIENCE:
     stitchedRows = _injectAuroraOptionRows_(city, stitchedRows, dest.days, perDay, baseDate);
     stitchedRows = _fixReturnRowDurationConsistency_(stitchedRows);
 
+    const postWeakDays = _getWeakDayNums_(stitchedRows, perDay);
+    if(postWeakDays.length){
+      console.warn(`[CITY ${city}] Post-aurora weak days detected:`, postWeakDays);
+    }
+
     if(!stitchedRows.length){
       throw new Error(`NO_ROWS_STITCHED:${city}`);
     }
@@ -3019,7 +3091,9 @@ QUALITY / MAXIMIZE EXPERIENCE:
   chatMsg(msg, 'ai');
 }
 
-/* 🆕 Bulk rebalance after changes (add days / requested day trip) */
+/* =========================================================
+   SECTION 15G · Bulk rebalance after changes (add days / requested day trip)
+========================================================= */
 async function rebalanceWholeCity(city, opts={}){
   const data = itineraries[city];
   const totalDays = Object.keys(data.byDay||{}).length;
@@ -3173,6 +3247,7 @@ ${buildIntake()}
     chatMsg(getLang()==='es' ? 'I did not receive valid changes for rebalancing. Want to try another way?' : 'I did not receive valid changes for rebalancing. Want to try another way?','ai');
   }
 }
+
 
 /* ==============================
    SECCIÓN 16 · Inicio (hotel/transport)
