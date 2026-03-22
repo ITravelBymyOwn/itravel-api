@@ -2469,10 +2469,9 @@ MANDATORY REPAIR RULES:
   return [];
 }
 
-/* ==============================
+/* =========================================================
    SECTION 15E · AURORA OPTION + RETURN DURATION FIX
-================================= */
-
+========================================================= */
 function _plannerLangCode_(){
   const raw = String(
     (typeof plannerState !== 'undefined' && plannerState?.itineraryLang) ||
@@ -2496,7 +2495,31 @@ function _plannerLocalePack_(){
       auroraActivityBase: 'Opción para ver auroras',
       auroraTo: 'Zona de observación de auroras',
       auroraTransport: 'Por cuenta propia o tour guiado',
-      auroraNotes: 'Opcional: esta noche puedes intentar ver auroras por tu cuenta o reservando un tour.',
+      auroraNotes: 'Opcional: esta noche puedes intentar ver auroras por tu cuenta o reservando un tour. Revisa nubosidad y pronóstico geomagnético antes de salir.',
+      hotelFallback: 'Hotel'
+    };
+  }
+
+  if(lang === 'pt'){
+    return {
+      transportLabel: 'Transporte',
+      activityLabel: 'Atividade',
+      auroraActivityBase: 'Opção para ver auroras',
+      auroraTo: 'Área de observação de auroras',
+      auroraTransport: 'Por conta própria ou tour guiado',
+      auroraNotes: 'Opcional: esta noite você pode tentar ver auroras por conta própria ou reservando um tour. Verifique nuvens e previsão geomagnética antes de sair.',
+      hotelFallback: 'Hotel'
+    };
+  }
+
+  if(lang === 'fr'){
+    return {
+      transportLabel: 'Transport',
+      activityLabel: 'Activité',
+      auroraActivityBase: 'Option pour voir les aurores',
+      auroraTo: "Zone d'observation des aurores",
+      auroraTransport: 'Par vous-même ou en excursion guidée',
+      auroraNotes: 'Optionnel : ce soir vous pouvez tenter de voir des aurores par vous-même ou avec une excursion guidée. Vérifiez la couverture nuageuse et la prévision géomagnétique avant de partir.',
       hotelFallback: 'Hotel'
     };
   }
@@ -2507,9 +2530,33 @@ function _plannerLocalePack_(){
     auroraActivityBase: 'Optional aurora viewing',
     auroraTo: 'Aurora viewing area',
     auroraTransport: 'Self-drive or Guided Tour',
-    auroraNotes: 'Optional: tonight you may try aurora viewing.',
+    auroraNotes: 'Optional: tonight you may try aurora viewing on your own or by booking a tour. Check cloud cover and geomagnetic forecast before heading out.',
     hotelFallback: 'Hotel'
   };
+}
+
+function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
+  const key = _normalizeHighlightKey_(city);
+
+  const plausibleCityHints = [
+    'reykjavik','iceland','islandia',
+    'tromso','tromsø',
+    'akureyri',
+    'rovaniemi',
+    'kiruna',
+    'abisko',
+    'fairbanks',
+    'yellowknife'
+  ];
+
+  const cityOk = plausibleCityHints.some(h => key.includes(_normalizeHighlightKey_(h)));
+  if(!cityOk) return false;
+
+  const m = String(baseDate || '').match(/^\d{4}-(\d{2})-\d{2}$/);
+  if(!m) return true;
+  const month = parseInt(m[1], 10);
+
+  return [9,10,11,12,1,2,3,4].includes(month);
 }
 
 function _pickAuroraNightCount_(totalDays){
@@ -2520,122 +2567,316 @@ function _pickAuroraNightCount_(totalDays){
   return 0;
 }
 
-function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDate=''){
+function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
   const byDay = _groupRowsByDay_(rows);
-  const loc = _plannerLocalePack_();
+  const candidates = [];
 
-  const nights = _pickAuroraNightCount_(totalDays);
-  let inserted = 0;
+  for(let day=1; day<Number(totalDays||1); day++){
+    const dayRows = byDay[day] || [];
+    const ref = _getDayWindowRef_(perDay, day);
+
+    if(!dayRows.length) continue;
+    if(_isNightOnlyWindow_(ref)) continue;
+    if(dayRows.some(r => _isAuroraRow_(r))) continue;
+
+    const lastRow = dayRows[dayRows.length-1];
+    const lastEnd = _hhmmToMin_(lastRow?.end);
+    if(lastEnd === null) continue;
+
+    if(lastEnd <= 20*60){
+      candidates.push({ day, score: lastEnd });
+    }
+  }
+
+  candidates.sort((a,b)=>{
+    if(a.score !== b.score) return a.score - b.score;
+    return a.day - b.day;
+  });
+
+  const wanted = _pickAuroraNightCount_(totalDays);
+  if(!wanted) return [];
+
+  const picked = [];
+  for(const c of candidates){
+    if(picked.length >= wanted) break;
+    if(!picked.length){
+      picked.push(c.day);
+      continue;
+    }
+    const prev = picked[picked.length-1];
+    if(Math.abs(c.day - prev) >= 2 || candidates.length <= wanted){
+      picked.push(c.day);
+    }
+  }
+
+  if(picked.length < wanted){
+    for(const c of candidates){
+      if(picked.length >= wanted) break;
+      if(!picked.includes(c.day)) picked.push(c.day);
+    }
+  }
+
+  return picked.sort((a,b)=>a-b);
+}
+
+function _buildAuroraOptionRow_(city, day, dayRows=[]){
+  const loc = _plannerLocalePack_();
+  const hotel = String(cityMeta?.[city]?.hotel || loc.hotelFallback).trim() || loc.hotelFallback;
+
+  const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end||'').localeCompare(String(b?.end||''))).pop() || null;
+  const lastEnd = _hhmmToMin_(lastRow?.end);
+  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 21*60) : (21*60);
+  const end = Math.min(baseStart + 120, 23*60 + 30);
+  const start = Math.min(baseStart, end - 60);
+
+  const transportMin = 30;
+  const activityMin = Math.max(60, (end - start) - transportMin);
+
+  return normalizeRow({
+    day,
+    start: _minToHHMM_(start),
+    end: _minToHHMM_(end),
+    activity: `${city} – ${loc.auroraActivityBase}`,
+    from: hotel,
+    to: loc.auroraTo,
+    transport: loc.auroraTransport,
+    duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${Math.round(activityMin/30)*30}m`,
+    notes: loc.auroraNotes
+  }, day);
+}
+
+function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDate=''){
+  if(!_isAuroraPlausibleForCityAndDate_(city, baseDate)) return rows;
+
+  const byDay = _groupRowsByDay_(rows);
+
+  const hasAuroraReference = (dayRows=[])=>{
+    return dayRows.some(r=>{
+      const txt = `${r?.activity || ''} ${r?.to || ''} ${r?.notes || ''}`.toLowerCase();
+      return /aurora|auroras|northern lights|boreal/.test(txt);
+    });
+  };
+
+  const candidates = _pickAuroraCandidateDays_(rows, totalDays, perDay);
+  const injected = [];
+
+  for(const day of candidates){
+    if(!hasAuroraReference(byDay[day] || [])){
+      injected.push(_buildAuroraOptionRow_(city, day, byDay[day] || []));
+    }
+  }
+
+  const loc = _plannerLocalePack_();
 
   Object.keys(byDay).forEach(dayKey=>{
     const day = Number(dayKey);
-    if(day >= totalDays) return;
-    if(inserted >= nights) return;
+    if(day >= Number(totalDays || 1)) return;
 
-    const dayRows = byDay[day];
-    const last = dayRows[dayRows.length-1];
-    if(!last) return;
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+    if(hasAuroraReference(dayRows)) return;
 
-    const start = _hhmmToMin_(last.end);
-    if(start === null) return;
+    const eveningRows = dayRows.filter(r=>{
+      const start = _hhmmToMin_(r?.start);
+      return start !== null && start >= 17*60;
+    });
 
-    rows.push(normalizeRow({
-      day,
-      start: _minToHHMM_(Math.max(start+60,21*60)),
-      end: _minToHHMM_(Math.max(start+180,23*60)),
-      activity: `${city} – ${loc.auroraActivityBase}`,
-      from: loc.hotelFallback,
-      to: loc.auroraTo,
-      transport: loc.auroraTransport,
-      duration: `${loc.transportLabel}: ~30m\n${loc.activityLabel}: ~90m`,
-      notes: loc.auroraNotes
-    }, day));
+    const target = eveningRows.length ? eveningRows[eveningRows.length-1] : dayRows[dayRows.length-1];
+    if(!target) return;
 
-    inserted++;
+    const extraNote = (loc.auroraNotes || '').trim();
+    if(!extraNote) return;
+
+    target.notes = String(target.notes || '').trim()
+      ? `${String(target.notes).trim()} ${extraNote}`
+      : extraNote;
   });
 
-  return rows;
+  return _dedupeRows_([...(rows || []), ...injected]);
 }
 
-/* ==============================
-   🔧 BLOCK GENERATION (FIX REAL)
-================================= */
+function _fixReturnRowDurationConsistency_(rows=[]){
+  const loc = _plannerLocalePack_();
+
+  return (rows || []).map(r=>{
+    if(!_isReturnRow_(r)) return r;
+
+    const start = _hhmmToMin_(r?.start);
+    const end = _hhmmToMin_(r?.end);
+    if(start === null || end === null || end <= start) return r;
+
+    const span = end - start;
+    const activityMin = span >= 30 ? 10 : 5;
+    const transportMin = Math.max(5, span - activityMin);
+
+    return normalizeRow({
+      ...r,
+      duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${activityMin}m`
+    }, Number(r?.day || 1));
+  });
+}
+
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
+  const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
+    ? forbiddenHighlights.join(', ')
+    : '';
+  const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
+    ? forbiddenUrbanClusters.join(', ')
+    : '';
 
-  const forbiddenText = forbiddenHighlights?.length ? forbiddenHighlights.join(', ') : '';
-  const forbiddenUrbanText = forbiddenUrbanClusters?.length ? forbiddenUrbanClusters.join(', ') : '';
-
-  const prompt = `
+  const buildPrimaryPrompt = () => `
 ${FORMAT}
-You are Astra, expert travel planner.
+**ROLE:** Planner “Astra”. Create itinerary rows ONLY for these days of "${city}" (${totalDays} day/s total):
+${JSON.stringify(blockDaysObjs)}
 
-Generate itinerary rows ONLY for ${city}.
+Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-STRICT REQUIREMENTS:
+MANDATORY:
+- Generate rows ONLY for these days: ${dayNums.join(', ')}.
+- Every row MUST have day equal to one of these days only.
+- You MUST return usable rows for EVERY requested day in this block.
+- Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
+- Each normal usable day should target 4–7 rows.
+- If a day becomes a day trip/excursion, it must still be complete and realistic.
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places, never a macro-tour label.
+- If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
+- Avoid generic placeholders.
+- Keep the logic GLOBAL; do not depend on hardcoded destinations.
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
+${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
 
-- MUST generate rows for ALL these days: ${dayNums.join(', ')}
-- EVERY day MUST have at least 3–6 rows (no empty days)
-- Each row MUST include: day, start, end, activity, from, to, transport, duration, notes
+BALANCE / COVERAGE:
+- First identify the best remaining highlights, regions, and day-trip circuits around the base city.
+- Then assign them across THESE requested block days so that no requested day is left empty.
+- If this block contains the final day(s), still provide meaningful content for them.
+- Do NOT sacrifice coverage of a requested day just to make another day richer.
+- If a day is shorter, scale it down, but still return useful rows for that day.
 
-STRUCTURE:
+ANTI-DUPLICATION:
+- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
+- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name or with only part of the same route.
+- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
+- Even partial reuse (subset of the same route) is FORBIDDEN.
 
-1. Use radial planning from ${city}
-2. Each major region/cluster can be used ONLY ONCE
-3. Distribute experiences evenly across ALL days
-4. Avoid weak final days
-
-DAY TRIPS:
-
-- Must include multiple real stops (ideally 4–6+)
-- Must end with: "<Region> – Return to ${city}"
+DAY TRIP LOGIC:
+- If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, etc.), group nearby highlights into ONE coherent day when it improves the trip.
+- Avoid single-activity regional days when multiple nearby worthwhile stops exist.
+- Prefer complete regional loops over fragmented visits.
+- If a special activity fits naturally inside a regional day, you may integrate it there.
 
 QUALITY:
-
-- Avoid repetition
-- Keep geographic logic
-- Avoid empty or incomplete days
-
-${forbiddenText ? `- DO NOT repeat these highlights: ${forbiddenText}` : ''}
-${forbiddenUrbanText ? `- Avoid reusing these urban areas: ${forbiddenUrbanText}` : ''}
-
-Return ONLY valid JSON (Format B)
+- Keep rows in chronological order with NO overlaps.
+- If there is a return row, place it as the FINAL row.
+- No text outside JSON.
 `.trim();
 
-  const label = `${dayNums[0]}-${dayNums[dayNums.length-1]}`;
-  console.log(`[BLOCK ${label}] Requesting rows...`);
+  const buildRetryPrompt = (missingDays=[]) => `
+${FORMAT}
+Return ONLY valid Format B JSON for "${city}".
 
-  const ans = await _callPlannerSystemPrompt_(prompt, false);
-  const parsed = parseJSON(ans);
+Generate rows ONLY for these day numbers: ${missingDays.join(', ')}.
+You MUST return at least 3 usable rows for EACH requested day.
+No markdown. No explanations.
 
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    const extracted = _extractPlannerRows_(parsed, city);
-    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+Rules:
+- "activity" = "Destination – <Specific sub-stop>"
+- all fields required
+- real places in "from" and "to"
+- chronological order
+- no overlaps
+- if excursion/day trip exists, end with "<Region> – Return to ${city}"
+- use remaining unused highlights/areas
+- keep final day meaningful
+- windows reference: ${JSON.stringify(perDay.filter(x => missingDays.includes(Number(x?.day))))}
+- hotel/base: ${JSON.stringify(hotel || '')}
+- transport preference: ${JSON.stringify(transport || 'recommend me')}
+`.trim();
 
-    // 🔧 FIX CLAVE: tolerancia mayor (NO romper bloques)
-    if(forced.length >= dayNums.length * 2){
-      return forced;
+  async function _requestBlockRows_(promptText){
+    const ans = await _callPlannerSystemPrompt_(promptText, false);
+    const parsed = parseJSON(ans);
+
+    if(!(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day))){
+      return [];
     }
 
-    console.warn(`[BLOCK ${label}] Weak but usable, returning anyway`);
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    return Array.isArray(forced) ? forced : [];
+  }
+
+  function _missingDaysFromRows_(rows=[]){
+    const set = new Set((rows || []).map(r => Number(r?.day)));
+    return dayNums.filter(d => !set.has(Number(d)));
+  }
+
+  const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
+  console.log(`[BLOCK ${label}] Requesting rows...`);
+
+  let forced = [];
+  try{
+    forced = await _requestBlockRows_(buildPrimaryPrompt());
+  }catch(err){
+    console.warn(`[BLOCK ${label}] Primary request failed:`, err);
+    forced = [];
+  }
+
+  if(_hasUsableRowsForAllBlockDays_(forced, dayNums)){
+    console.log(`[BLOCK ${label}] OK`);
     return forced;
   }
 
-  console.warn(`[BLOCK ${label}] FAIL — returning empty`);
+  const missingDays = _missingDaysFromRows_(forced);
+  if(missingDays.length){
+    console.warn(`[BLOCK ${label}] Missing requested days after primary pass, retrying only missing days:`, missingDays);
+
+    let retryRows = [];
+    try{
+      retryRows = await _requestBlockRows_(buildRetryPrompt(missingDays));
+    }catch(err2){
+      console.warn(`[BLOCK ${label}] Retry request failed:`, err2);
+      retryRows = [];
+    }
+
+    const merged = _dedupeRows_([...(forced || []), ...(retryRows || [])]);
+    if(_hasUsableRowsForAllBlockDays_(merged, dayNums)){
+      console.log(`[BLOCK ${label}] OK after retry`);
+      return merged;
+    }
+
+    if(merged.length){
+      console.warn(`[BLOCK ${label}] Partial rows returned after retry; returning partial result for downstream repair.`);
+      return merged;
+    }
+  }
+
+  if(forced.length){
+    console.warn(`[BLOCK ${label}] Returning partial result for downstream repair.`);
+    return forced;
+  }
+
+  console.warn(`[BLOCK ${label}] FAIL — invalid JSON or empty parse.`);
   return [];
 }
 
-/* ==============================
-   DEDUPE
-================================= */
 function _dedupeRows_(rows=[]){
   const seen = new Set();
   const out = [];
 
   for(const r of (rows || [])){
     const key = JSON.stringify([
-      r.day, r.start, r.end, r.activity, r.from, r.to
+      Number(r?.day||1),
+      String(r?.start||'').trim(),
+      String(r?.end||'').trim(),
+      String(r?.activity||'').trim(),
+      String(r?.from||'').trim(),
+      String(r?.to||'').trim()
     ]);
 
     if(seen.has(key)) continue;
@@ -2643,7 +2884,19 @@ function _dedupeRows_(rows=[]){
     out.push(r);
   }
 
-  return out;
+  return out.sort((a,b)=>{
+    const da = Number(a?.day||1), db = Number(b?.day||1);
+    if(da !== db) return da-db;
+    return String(a?.start||'').localeCompare(String(b?.start||''));
+  });
+}
+
+function _rowsCoverAllDays_(rows=[], totalDays=1){
+  const set = new Set((rows||[]).map(r => Number(r?.day)));
+  for(let d=1; d<=totalDays; d++){
+    if(!set.has(d)) return false;
+  }
+  return true;
 }
 
 /* =========================================================
