@@ -2009,7 +2009,6 @@ function _extractHighlightKey_(row={}, city=''){
 
   let candidate = '';
 
-  // 🆕 PRIORIDAD: macro-tour completo
   if(prefix && prefix !== cityKey){
     candidate = prefix;
   }else{
@@ -2018,16 +2017,19 @@ function _extractHighlightKey_(row={}, city=''){
 
   if(!candidate) return '';
 
-  // 🆕 NORMALIZACIÓN AVANZADA (CRÍTICO)
-  // Detecta equivalencias reales (Golden Circle, etc.)
+  // 🆕 FIX: normalización avanzada + equivalencias más agresivas
   const normalized = candidate
-    .replace(/thingvellir|þingvellir/g,'golden circle')
-    .replace(/geyser|geysir/g,'golden circle')
-    .replace(/gullfoss/g,'golden circle')
-    .replace(/kerid/g,'golden circle')
+    .replace(/thingvellir|þingvellir|geyser|geysir|gullfoss|kerid/g,'golden circle')
+    .replace(/golden circle.*/g,'golden circle')
+
     .replace(/blue lagoon/g,'reykjanes')
-    .replace(/reykjanes/g,'reykjanes')
-    .replace(/vik|skogafoss|seljalandsfoss|reynisfjara/g,'south coast');
+    .replace(/reykjanes.*/g,'reykjanes')
+
+    .replace(/vik|skogafoss|seljalandsfoss|reynisfjara/g,'south coast')
+    .replace(/south coast.*/g,'south coast')
+
+    .replace(/snaefellsnes|snæfellsnes/g,'snaefellsnes')
+    .replace(/snaefellsnes.*/g,'snaefellsnes');
 
   if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning)$/.test(normalized)) return '';
 
@@ -2091,6 +2093,8 @@ function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
     }
 
     const firstDay = firstDayByKey.get(key);
+
+    // 🆕 FIX: eliminar completamente duplicados en otros días
     if(firstDay === day){
       out.push(r);
     }
@@ -2119,6 +2123,7 @@ function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
     }
 
     const firstDay = firstDayByKey.get(key);
+
     if(firstDay === day){
       out.push(r);
     }
@@ -2128,25 +2133,34 @@ function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
 }
 
 /* =========================================================
-   SECTION 15C.2 · MACRO-ZONE DETECTION (VERY LIGHT)
+   SECTION 15C.2 · MACRO-ZONE DETECTION (ENHANCED)
 ========================================================= */
 function _extractMacroZoneKey_(row={}, city=''){
   const activity = String(row?.activity || '').trim();
   const cityKey = _normalizeHighlightKey_(city);
+
   const parts = activity.split(/\s+[–-]\s+/);
   const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
 
   if(!prefix) return '';
   if(prefix === cityKey) return '';
 
-  // 🆕 FIX: normalización fuerte de clusters equivalentes
+  // 🆕 FIX: normalización fuerte de regiones completas
   const normalized = prefix
     .replace(/thingvellir|þingvellir|geyser|geysir|gullfoss|kerid/g,'golden circle')
-    .replace(/blue lagoon|reykjanes/g,'reykjanes')
+    .replace(/golden circle.*/g,'golden circle')
+
+    .replace(/blue lagoon/g,'reykjanes')
+    .replace(/reykjanes.*/g,'reykjanes')
+
     .replace(/vik|skogafoss|seljalandsfoss|reynisfjara/g,'south coast')
-    .replace(/snaefellsnes|snæfellsnes/g,'snaefellsnes');
+    .replace(/south coast.*/g,'south coast')
+
+    .replace(/snaefellsnes|snæfellsnes/g,'snaefellsnes')
+    .replace(/snaefellsnes.*/g,'snaefellsnes');
 
   if(/^(return to|regreso a|departure from|salida desde)$/.test(normalized)) return '';
+
   return normalized;
 }
 
@@ -2157,6 +2171,7 @@ function _findRepeatedMacroZoneDays_(rows=[], city=''){
   for(const r of (rows || [])){
     const zone = _extractMacroZoneKey_(r, city);
     const day = Number(r?.day || 1);
+
     if(!zone) continue;
 
     if(!firstDayByZone.has(zone)){
@@ -2165,6 +2180,8 @@ function _findRepeatedMacroZoneDays_(rows=[], city=''){
     }
 
     const firstDay = firstDayByZone.get(zone);
+
+    // 🆕 FIX: marcar cualquier reutilización real
     if(firstDay !== day){
       repeatedDays.add(day);
     }
@@ -2175,10 +2192,12 @@ function _findRepeatedMacroZoneDays_(rows=[], city=''){
 
 function _collectUsedMacroZoneKeys_(rows=[], city=''){
   const out = new Set();
+
   for(const r of (rows || [])){
     const k = _extractMacroZoneKey_(r, city);
     if(k) out.add(k);
   }
+
   return Array.from(out);
 }
 
@@ -2579,45 +2598,83 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
+  const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
+    ? forbiddenHighlights.join(', ')
+    : '';
+  const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
+    ? forbiddenUrbanClusters.join(', ')
+    : '';
 
   const prompt = `
 ${FORMAT}
-ROLE: Advanced travel planner.
+**ROLE:** Planner “Astra”. Create itinerary rows ONLY for these days of "${city}" (${totalDays} day/s total):
+${JSON.stringify(blockDaysObjs)}
 
-CRITICAL RULES:
+Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
 
-1. RADIAL STRUCTURE:
-- Identify ALL clusters around the city first
-- Each cluster = ONE day ONLY
-- NEVER repeat clusters
+MANDATORY:
+- Generate rows ONLY for these days: ${dayNums.join(', ')}.
+- Every row MUST have day equal to one of these days only.
+- Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
+- Each normal usable day should target 4–8 rows.
 
-2. DAY TRIPS:
-- Must have 5–8 real stops
-- Must end with: Return to ${city}
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places.
 
-3. BALANCE:
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+
+${forbiddenText ? `- Do NOT repeat these main highlights already used: ${forbiddenText}` : ''}
+${forbiddenUrbanText ? `- Avoid reusing these urban clusters: ${forbiddenUrbanText}` : ''}
+
+-------------------------
+CRITICAL INTELLIGENCE RULES
+-------------------------
+
+1) RADIAL LOGIC:
+- First identify ALL main regions/circuits around the city
+- Each region MUST be used ONLY once
+
+2) STRICT CLUSTER RULE:
+- NEVER repeat a region or route
+- Even partial reuse is FORBIDDEN
+
+3) DAY TRIPS:
+- Must have 5–8 REAL stops
+- Must end with: "<Region> – Return to ${city}"
+
+4) BALANCE:
 - Distribute strong experiences across ALL days
-- Do not leave weak final days
+- Do NOT leave weak final days
 
-4. NO DUPLICATION:
-- No repeated regions
-- No disguised repetition
-
-5. QUALITY:
+5) QUALITY:
 - Each day must feel complete
-- No empty or weak days
+- No empty or filler days
 
-Generate rows ONLY for days: ${dayNums.join(', ')}
+-------------------------
 
-No text outside JSON
+- Keep chronological order
+- No overlaps
+- Return row MUST be last
+- No text outside JSON
 `.trim();
+
+  const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
+  console.log(`[BLOCK ${label}] Requesting rows...`);
 
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
 
-  if(parsed && parsed.rows){
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     const extracted = _extractPlannerRows_(parsed, city);
-    return _forceRowsIntoValidDayRange_(extracted, dayNums);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+
+    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
+      return forced;
+    }
+
+    return [];
   }
 
   return [];
