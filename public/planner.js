@@ -1977,6 +1977,12 @@ function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
   return (blockDays || []).every(d => set.has(Number(d)));
 }
 
+// 🆕 CRITICAL: only replace repaired days if ALL requested days were returned
+function _rowsCoverRequestedDays_(rows=[], requestedDays=[]){
+  const set = new Set((rows || []).map(r => Number(r?.day)));
+  return (requestedDays || []).every(d => set.has(Number(d)));
+}
+
 /* =========================================================
    🆕 DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
 ========================================================= */
@@ -2882,11 +2888,13 @@ QUALITY / MAXIMIZE EXPERIENCE:
         transport
       );
 
-      if(repairedRows.length){
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, repeatedMacroZoneDays)){
         stitchedRows = _replaceDaysInRows_(stitchedRows, repairedRows, repeatedMacroZoneDays);
         stitchedRows = _dedupeRows_(stitchedRows);
         stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
         stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
+      }else{
+        console.warn(`[CITY ${city}] macro-zone repair skipped because returned rows did not cover all requested days.`);
       }
     }
 
@@ -2904,11 +2912,13 @@ QUALITY / MAXIMIZE EXPERIENCE:
         transport
       );
 
-      if(repairedRows.length){
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, weakDays)){
         stitchedRows = _replaceDaysInRows_(stitchedRows, repairedRows, weakDays);
         stitchedRows = _dedupeRows_(stitchedRows);
         stitchedRows = _removeDuplicateHighlightsAcrossDays_(stitchedRows, city);
         stitchedRows = _removeDuplicateUrbanClustersAcrossDays_(stitchedRows, city);
+      }else{
+        console.warn(`[CITY ${city}] weak-day repair skipped because returned rows did not cover all requested days.`);
       }
     }
 
@@ -2964,11 +2974,13 @@ QUALITY / MAXIMIZE EXPERIENCE:
           hotel,
           transport
         );
-        if(repairedRows.length){
+        if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, repeatedMacroZoneDays)){
           tmpRows = _replaceDaysInRows_(tmpRows, repairedRows, repeatedMacroZoneDays);
           tmpRows = _dedupeRows_(tmpRows);
           tmpRows = _removeDuplicateHighlightsAcrossDays_(tmpRows, city);
           tmpRows = _removeDuplicateUrbanClustersAcrossDays_(tmpRows, city);
+        }else{
+          console.warn(`[CITY ${city}] fallback macro-zone repair skipped because returned rows did not cover all requested days.`);
         }
       }
 
@@ -3108,11 +3120,13 @@ ${buildIntake()}
         cityMeta[city]?.transport || 'recommend me'
       );
 
-      if(repairedRows.length){
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, repeatedMacroZoneDays)){
         rows = _replaceDaysInRows_(rows, repairedRows, repeatedMacroZoneDays);
         rows = _dedupeRows_(rows);
         rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
         rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+      }else{
+        console.warn(`[CITY ${city}] rebalance macro-zone repair skipped because returned rows did not cover all requested days.`);
       }
     }
 
@@ -3129,11 +3143,13 @@ ${buildIntake()}
         cityMeta[city]?.transport || 'recommend me'
       );
 
-      if(repairedRows.length){
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, weakDays)){
         rows = _replaceDaysInRows_(rows, repairedRows, weakDays);
         rows = _dedupeRows_(rows);
         rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
         rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+      }else{
+        console.warn(`[CITY ${city}] rebalance weak-day repair skipped because returned rows did not cover all requested days.`);
       }
     }
 
