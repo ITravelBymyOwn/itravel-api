@@ -2000,6 +2000,7 @@ function _extractHighlightKey_(row={}, city=''){
 
   let candidate = '';
 
+  // 🆕 PRIORIDAD: macro-tour completo
   if(prefix && prefix !== cityKey){
     candidate = prefix;
   }else{
@@ -2007,9 +2008,21 @@ function _extractHighlightKey_(row={}, city=''){
   }
 
   if(!candidate) return '';
-  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning)$/.test(candidate)) return '';
 
-  return candidate;
+  // 🆕 NORMALIZACIÓN AVANZADA (CRÍTICO)
+  // Detecta equivalencias reales (Golden Circle, etc.)
+  const normalized = candidate
+    .replace(/thingvellir|þingvellir/g,'golden circle')
+    .replace(/geyser|geysir/g,'golden circle')
+    .replace(/gullfoss/g,'golden circle')
+    .replace(/kerid/g,'golden circle')
+    .replace(/blue lagoon/g,'reykjanes')
+    .replace(/reykjanes/g,'reykjanes')
+    .replace(/vik|skogafoss|seljalandsfoss|reynisfjara/g,'south coast');
+
+  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning)$/.test(normalized)) return '';
+
+  return normalized;
 }
 
 function _extractUrbanClusterKey_(row={}, city=''){
@@ -2651,6 +2664,24 @@ MANDATORY:
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
+- GLOBAL STRUCTURE (CRITICAL):
+  • First identify ALL major highlights, regions, and day-trip circuits around the city.
+  • Then distribute them across days WITHOUT repetition.
+  • Think in radial exploration from the base city, but balance the trip naturally instead of forcing a rigid nearest-to-farthest order.
+  • Do NOT reuse the same macro-region, circuit, or regional ring on different days.
+  • If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name or with only part of the same route.
+- DAY TRIP LOGIC (CRITICAL):
+  • If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, etc.), group nearby highlights into ONE coherent day when it improves the trip.
+  • Avoid single-activity regional days when multiple nearby worthwhile stops exist.
+  • Prefer complete regional loops over fragmented visits.
+  • If a special activity (thermal baths, marine life, scenic detour, iconic restaurant stop, etc.) fits naturally inside a regional day, you may integrate it there.
+- BALANCING (CRITICAL):
+  • Distribute major highlights across ALL days.
+  • Avoid concentrating all strong content in the first days and leaving later days with weaker or repeated versions.
+  • If the stay is long, expand outward to additional worthwhile regional rings before repeating previously used ones.
+- DUPLICATION PREVENTION (STRICT):
+  • If a region, route, or circuit has already been used, it MUST NOT appear again under any variation.
+  • This includes renamed, partial, overlapping, or disguised repetitions of the same macro-area.
 - Keep rows in chronological order with NO overlaps.
 - If there is a return row, place it as the FINAL row.
 - No text outside JSON.
