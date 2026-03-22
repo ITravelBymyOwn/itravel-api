@@ -2469,9 +2469,9 @@ MANDATORY REPAIR RULES:
   return [];
 }
 
-/* =========================================================
+/* ==============================
    SECTION 15E · AURORA OPTION + RETURN DURATION FIX
-========================================================= */
+================================= */
 
 function _plannerLangCode_(){
   const raw = String(
@@ -2557,63 +2557,78 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
   return rows;
 }
 
-/* =========================================================
-   🆕 FIX CRÍTICO (ESTO ES LO QUE TE ROMPÍA TODO)
-========================================================= */
-function _fixReturnRowDurationConsistency_(rows=[]){
-  const loc = _plannerLocalePack_();
-
-  return (rows || []).map(r=>{
-    if(!_isReturnRow_(r)) return r;
-
-    const start = _hhmmToMin_(r?.start);
-    const end = _hhmmToMin_(r?.end);
-    if(start === null || end === null || end <= start) return r;
-
-    const span = end - start;
-
-    return normalizeRow({
-      ...r,
-      duration: `${loc.transportLabel}: ~${span}m\n${loc.activityLabel}: ~5m`
-    }, Number(r?.day || 1));
-  });
-}
-
-/* =========================================================
-   BLOCK GENERATION (SIN ROMPER NADA)
-========================================================= */
+/* ==============================
+   🔧 BLOCK GENERATION (FIX REAL)
+================================= */
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
+  const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
+
+  const forbiddenText = forbiddenHighlights?.length ? forbiddenHighlights.join(', ') : '';
+  const forbiddenUrbanText = forbiddenUrbanClusters?.length ? forbiddenUrbanClusters.join(', ') : '';
 
   const prompt = `
 ${FORMAT}
-Create itinerary rows for ${city}.
+You are Astra, expert travel planner.
 
-Rules:
-- No repetition of regions
-- Balanced days
-- Day trips must be complete (5–8 stops)
-- Return must be last row
+Generate itinerary rows ONLY for ${city}.
 
-Generate ONLY days: ${dayNums.join(', ')}
+STRICT REQUIREMENTS:
 
-Return JSON only
-`;
+- MUST generate rows for ALL these days: ${dayNums.join(', ')}
+- EVERY day MUST have at least 3–6 rows (no empty days)
+- Each row MUST include: day, start, end, activity, from, to, transport, duration, notes
+
+STRUCTURE:
+
+1. Use radial planning from ${city}
+2. Each major region/cluster can be used ONLY ONCE
+3. Distribute experiences evenly across ALL days
+4. Avoid weak final days
+
+DAY TRIPS:
+
+- Must include multiple real stops (ideally 4–6+)
+- Must end with: "<Region> – Return to ${city}"
+
+QUALITY:
+
+- Avoid repetition
+- Keep geographic logic
+- Avoid empty or incomplete days
+
+${forbiddenText ? `- DO NOT repeat these highlights: ${forbiddenText}` : ''}
+${forbiddenUrbanText ? `- Avoid reusing these urban areas: ${forbiddenUrbanText}` : ''}
+
+Return ONLY valid JSON (Format B)
+`.trim();
+
+  const label = `${dayNums[0]}-${dayNums[dayNums.length-1]}`;
+  console.log(`[BLOCK ${label}] Requesting rows...`);
 
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
 
-  if(parsed && parsed.rows){
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     const extracted = _extractPlannerRows_(parsed, city);
-    return _forceRowsIntoValidDayRange_(extracted, dayNums);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+
+    // 🔧 FIX CLAVE: tolerancia mayor (NO romper bloques)
+    if(forced.length >= dayNums.length * 2){
+      return forced;
+    }
+
+    console.warn(`[BLOCK ${label}] Weak but usable, returning anyway`);
+    return forced;
   }
 
+  console.warn(`[BLOCK ${label}] FAIL — returning empty`);
   return [];
 }
 
-/* =========================================================
+/* ==============================
    DEDUPE
-========================================================= */
+================================= */
 function _dedupeRows_(rows=[]){
   const seen = new Set();
   const out = [];
