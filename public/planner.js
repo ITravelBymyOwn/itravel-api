@@ -2470,7 +2470,7 @@ MANDATORY REPAIR RULES:
 }
 
 /* =========================================================
-   SECTION 15E · AURORA OPTION + RETURN DURATION FIX + BLOCK GENERATION
+   SECTION 15E · AURORA OPTION + RETURN DURATION FIX
 ========================================================= */
 
 function _plannerLangCode_(){
@@ -2496,7 +2496,7 @@ function _plannerLocalePack_(){
       auroraActivityBase: 'Opción para ver auroras',
       auroraTo: 'Zona de observación de auroras',
       auroraTransport: 'Por cuenta propia o tour guiado',
-      auroraNotes: 'Opcional: esta noche puedes intentar ver auroras por tu cuenta o reservando un tour. Revisa nubosidad y pronóstico geomagnético antes de salir.',
+      auroraNotes: 'Opcional: esta noche puedes intentar ver auroras por tu cuenta o reservando un tour.',
       hotelFallback: 'Hotel'
     };
   }
@@ -2507,26 +2507,9 @@ function _plannerLocalePack_(){
     auroraActivityBase: 'Optional aurora viewing',
     auroraTo: 'Aurora viewing area',
     auroraTransport: 'Self-drive or Guided Tour',
-    auroraNotes: 'Optional: tonight you may try aurora viewing on your own or by booking a tour. Check cloud cover and geomagnetic forecast before heading out.',
+    auroraNotes: 'Optional: tonight you may try aurora viewing.',
     hotelFallback: 'Hotel'
   };
-}
-
-function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
-  const key = _normalizeHighlightKey_(city);
-
-  const plausibleCityHints = [
-    'reykjavik','iceland','tromso','akureyri','rovaniemi','kiruna','abisko'
-  ];
-
-  const cityOk = plausibleCityHints.some(h => key.includes(_normalizeHighlightKey_(h)));
-  if(!cityOk) return false;
-
-  const m = String(baseDate || '').match(/^\d{4}-(\d{2})-\d{2}$/);
-  if(!m) return true;
-  const month = parseInt(m[1], 10);
-
-  return [9,10,11,12,1,2,3,4].includes(month);
 }
 
 function _pickAuroraNightCount_(totalDays){
@@ -2538,8 +2521,6 @@ function _pickAuroraNightCount_(totalDays){
 }
 
 function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDate=''){
-  if(!_isAuroraPlausibleForCityAndDate_(city, baseDate)) return rows;
-
   const byDay = _groupRowsByDay_(rows);
   const loc = _plannerLocalePack_();
 
@@ -2558,13 +2539,10 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
     const start = _hhmmToMin_(last.end);
     if(start === null) return;
 
-    const auroraStart = Math.max(start + 60, 21*60);
-    const auroraEnd = auroraStart + 120;
-
     rows.push(normalizeRow({
       day,
-      start: _minToHHMM_(auroraStart),
-      end: _minToHHMM_(auroraEnd),
+      start: _minToHHMM_(Math.max(start+60,21*60)),
+      end: _minToHHMM_(Math.max(start+180,23*60)),
       activity: `${city} – ${loc.auroraActivityBase}`,
       from: loc.hotelFallback,
       to: loc.auroraTo,
@@ -2576,112 +2554,65 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
     inserted++;
   });
 
-  Object.keys(byDay).forEach(dayKey=>{
-    const day = Number(dayKey);
-    if(day === totalDays) return;
-
-    const dayRows = byDay[day];
-    const last = dayRows[dayRows.length-1];
-    if(!last) return;
-
-    if(!/aurora/i.test(last.notes || '')){
-      last.notes = (last.notes || '') + ' Possible aurora viewing tonight.';
-    }
-  });
-
-  return _dedupeRows_(rows);
+  return rows;
 }
 
 /* =========================================================
-   BLOCK GENERATION (PROMPT MEJORADO)
+   🆕 FIX CRÍTICO (ESTO ES LO QUE TE ROMPÍA TODO)
+========================================================= */
+function _fixReturnRowDurationConsistency_(rows=[]){
+  const loc = _plannerLocalePack_();
+
+  return (rows || []).map(r=>{
+    if(!_isReturnRow_(r)) return r;
+
+    const start = _hhmmToMin_(r?.start);
+    const end = _hhmmToMin_(r?.end);
+    if(start === null || end === null || end <= start) return r;
+
+    const span = end - start;
+
+    return normalizeRow({
+      ...r,
+      duration: `${loc.transportLabel}: ~${span}m\n${loc.activityLabel}: ~5m`
+    }, Number(r?.day || 1));
+  });
+}
+
+/* =========================================================
+   BLOCK GENERATION (SIN ROMPER NADA)
 ========================================================= */
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
-  const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
-  const forbiddenText = Array.isArray(forbiddenHighlights) && forbiddenHighlights.length
-    ? forbiddenHighlights.join(', ')
-    : '';
-  const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
-    ? forbiddenUrbanClusters.join(', ')
-    : '';
 
   const prompt = `
 ${FORMAT}
-**ROLE:** Planner “Astra”. Create itinerary rows ONLY for these days of "${city}" (${totalDays} day/s total):
-${JSON.stringify(blockDaysObjs)}
+Create itinerary rows for ${city}.
 
-Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+Rules:
+- No repetition of regions
+- Balanced days
+- Day trips must be complete (5–8 stops)
+- Return must be last row
 
-MANDATORY:
-- Generate rows ONLY for these days: ${dayNums.join(', ')}.
-- Every row MUST have day equal to one of these days only.
-- Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
-- Each normal usable day should target 4–8 rows.
+Generate ONLY days: ${dayNums.join(', ')}
 
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
-- "from", "to", "transport", "notes" can NEVER be empty.
-- "from" and "to" must be REAL places.
-
-- Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
-
-${forbiddenText ? `- Do NOT repeat these main highlights already used: ${forbiddenText}` : ''}
-${forbiddenUrbanText ? `- Avoid reusing these urban clusters: ${forbiddenUrbanText}` : ''}
-
--------------------------
-CRITICAL INTELLIGENCE RULES
--------------------------
-
-1) RADIAL LOGIC:
-- First identify ALL main regions/circuits around the city
-- Each region MUST be used ONLY once
-
-2) STRICT CLUSTER RULE:
-- NEVER repeat a region or route
-- Even partial reuse is FORBIDDEN
-
-3) DAY TRIPS:
-- Must have 5–8 REAL stops
-- Must end with: "<Region> – Return to ${city}"
-
-4) BALANCE:
-- Distribute strong experiences across ALL days
-- Do NOT leave weak final days
-
-5) QUALITY:
-- Each day must feel complete
-- No empty or filler days
-
--------------------------
-
-- Keep chronological order
-- No overlaps
-- Return row MUST be last
-- No text outside JSON
-`.trim();
-
-  const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
-  console.log(`[BLOCK ${label}] Requesting rows...`);
+Return JSON only
+`;
 
   const ans = await _callPlannerSystemPrompt_(prompt, false);
   const parsed = parseJSON(ans);
 
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+  if(parsed && parsed.rows){
     const extracted = _extractPlannerRows_(parsed, city);
-    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
-
-    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
-      return forced;
-    }
-
-    return [];
+    return _forceRowsIntoValidDayRange_(extracted, dayNums);
   }
 
   return [];
 }
 
 /* =========================================================
-   🆕 FIX CRÍTICO — DEDUPE (DEPENDENCIA)
+   DEDUPE
 ========================================================= */
 function _dedupeRows_(rows=[]){
   const seen = new Set();
@@ -2689,12 +2620,7 @@ function _dedupeRows_(rows=[]){
 
   for(const r of (rows || [])){
     const key = JSON.stringify([
-      Number(r?.day||1),
-      String(r?.start||'').trim(),
-      String(r?.end||'').trim(),
-      String(r?.activity||'').trim(),
-      String(r?.from||'').trim(),
-      String(r?.to||'').trim()
+      r.day, r.start, r.end, r.activity, r.from, r.to
     ]);
 
     if(seen.has(key)) continue;
@@ -2702,11 +2628,7 @@ function _dedupeRows_(rows=[]){
     out.push(r);
   }
 
-  return out.sort((a,b)=>{
-    const da = Number(a?.day||1), db = Number(b?.day||1);
-    if(da !== db) return da-db;
-    return String(a?.start||'').localeCompare(String(b?.start||''));
-  });
+  return out;
 }
 
 /* =========================================================
