@@ -2002,6 +2002,7 @@ function _normalizeHighlightKey_(value=''){
 
 /* =========================================================
    INTERNAL · semantic cluster normalization
+   (Use ONLY for macro-zone logic, not for highlight de-dupe)
 ========================================================= */
 function _normalizeSemanticClusterKey_(value=''){
   const s = _normalizeHighlightKey_(value);
@@ -2015,7 +2016,6 @@ function _normalizeSemanticClusterKey_(value=''){
     /\boxararfoss\b/.test(s) ||
     /\bogsararfoss\b/.test(s) ||
     /\bgeysir\b/.test(s) ||
-    /\bgeysir geothermal area\b/.test(s) ||
     /\bgullfoss\b/.test(s) ||
     /\bkerid\b/.test(s) ||
     /\bkerith\b/.test(s) ||
@@ -2046,7 +2046,6 @@ function _normalizeSemanticClusterKey_(value=''){
     /\bseltun\b/.test(s) ||
     /\breykjanes lighthouse\b/.test(s) ||
     /\bfaro de reykjanes\b/.test(s) ||
-    /\bgeothermal area de seltun\b/.test(s) ||
     /\blava restaurant\b/.test(s)
   ){
     return 'reykjanes';
@@ -2089,11 +2088,35 @@ function _normalizeSemanticClusterKey_(value=''){
   return s;
 }
 
+/* =========================================================
+   INTERNAL · specific place normalization
+   (Use for highlight de-dupe; keep this SPECIFIC, not macro)
+========================================================= */
+function _normalizeSpecificPlaceKey_(value=''){
+  let s = _normalizeHighlightKey_(value);
+  if(!s) return '';
+
+  s = s
+    .replace(/\bdeparture from .*$/g, '')
+    .replace(/\breturn to .*$/g, '')
+    .replace(/\bregreso a .*$/g, '')
+    .replace(/\bsalida desde .*$/g, '')
+    .trim();
+
+  // normalize exact place aliases, but DO NOT collapse to whole macro-cluster
+  s = s
+    .replace(/\bpingvellir\b/g, 'thingvellir')
+    .replace(/\bogsararfoss\b/g, 'oxararfoss')
+    .replace(/\bkerith\b/g, 'kerid')
+    .replace(/\bsnaefellsjokull\b/g, 'snaefellsjokull');
+
+  return s;
+}
+
 function _extractHighlightKey_(row={}, city=''){
   const activity = String(row?.activity || '').trim();
   const to = String(row?.to || '').trim();
   const from = String(row?.from || '').trim();
-  const notes = String(row?.notes || '').trim();
   const cityKey = _normalizeHighlightKey_(city);
 
   const parts = activity.split(/\s+[–-]\s+/);
@@ -2102,23 +2125,25 @@ function _extractHighlightKey_(row={}, city=''){
 
   let candidate = '';
 
-  // Prefer macro / destination prefix when it is not the city
-  if(prefix && prefix !== cityKey){
-    candidate = prefix;
+  // For exact highlight de-dupe, prefer the SPECIFIC sub-stop, not the macro label
+  if(to){
+    candidate = to;
+  }else if(suffix && suffix !== cityKey){
+    candidate = suffix;
+  }else if(from && _normalizeHighlightKey_(from) !== cityKey){
+    candidate = from;
   }else{
-    candidate = suffix || _normalizeHighlightKey_(to);
+    candidate = activity;
   }
 
-  // semantic fallback using concrete place names if prefix is too generic
-  const semantic = _normalizeSemanticClusterKey_(
-    `${candidate} ${to} ${from} ${notes}`
-  );
+  const normalized = _normalizeSpecificPlaceKey_(candidate);
+  if(!normalized) return '';
 
-  if(!semantic) return '';
+  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning|dark area|zona de observacion de auroras|aurora viewing area)$/.test(normalized)){
+    return '';
+  }
 
-  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning)$/.test(semantic)) return '';
-
-  return semantic;
+  return normalized;
 }
 
 function _extractUrbanClusterKey_(row={}, city=''){
@@ -2130,7 +2155,7 @@ function _extractUrbanClusterKey_(row={}, city=''){
   const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
   const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
 
-  // if this is clearly a macro-region, do not treat as urban cluster
+  // if clearly a macro-region outside the city, do not treat as urban cluster
   const semanticPrefix = _normalizeSemanticClusterKey_(prefix);
   if(prefix && prefix !== cityKey && semanticPrefix && semanticPrefix !== 'reykjavik city') return '';
 
@@ -2185,7 +2210,8 @@ function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
 
     const firstDay = firstDayByKey.get(key);
 
-    // keep only rows for the first day where that highlight/macro cluster appeared
+    // Keep only exact place duplicates on the first day they appeared.
+    // Do NOT use this to collapse whole macro-zones; that is handled below.
     if(firstDay === day){
       out.push(r);
     }
@@ -2237,10 +2263,10 @@ function _extractMacroZoneKey_(row={}, city=''){
   const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
   const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
 
-  // 1) direct semantic read from prefix when present
+  // direct semantic read from prefix when present
   let semantic = _normalizeSemanticClusterKey_(prefix);
 
-  // 2) if prefix is generic, infer from concrete stops / notes
+  // if prefix is generic or city-like, infer from concrete stops / notes
   const genericPrefixes = new Set([
     'reykjavik city',
     _normalizeSemanticClusterKey_(cityKey),
@@ -2262,7 +2288,7 @@ function _extractMacroZoneKey_(row={}, city=''){
   if(semantic === _normalizeHighlightKey_(city)) return '';
   if(/^(return to|regreso a|departure from|salida desde)$/.test(semantic)) return '';
 
-  // treat inner-city cluster as non-macro for repeated macro-zone detection
+  // city cluster is not a macro-zone for repeated macro detection
   if(semantic === 'reykjavik city') return '';
 
   return semantic;
