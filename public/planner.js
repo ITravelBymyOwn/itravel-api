@@ -3124,7 +3124,7 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
 }
 
 /* =========================================================
-   SECTION 15F · generateCityItinerary (GLOBAL FIXED)
+   SECTION 15F · generateCityItinerary (OPTIMIZED)
 ========================================================= */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -3138,6 +3138,7 @@ async function generateCityItinerary(city){
 
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
+  // 🔒 CONTROL FLAGS (NUEVO)
   let repairState = {
     weakDone: false,
     missingDone: false,
@@ -3162,15 +3163,8 @@ async function generateCityItinerary(city){
     }
   }
 
-  function _applyGlobalCleanup_(rows=[]){
-    let out = _dedupeRows_(rows);
-    out = _removeDuplicateHighlightsAcrossDays_(out, city);
-    out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
-    return out;
-  }
-
   async function _repairRequestedDaysIndividually_(rows=[], dayNums=[]){
-    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).slice(0,2);
+    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).slice(0,2); // 🔒 LIMITE
 
     let out = rows.slice();
 
@@ -3189,7 +3183,7 @@ async function generateCityItinerary(city){
 
         if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, [day])){
           out = _replaceDaysInRows_(out, repairedRows, [day]);
-          out = _applyGlobalCleanup_(out);
+          out = _dedupeRows_(out);
         }
       }catch(err){
         console.warn(`[CITY ${city}] individual repair failed for day ${day}:`, err);
@@ -3200,12 +3194,14 @@ async function generateCityItinerary(city){
   }
 
   async function _rescueMissingDays_(rows=[]){
-    if(repairState.missingDone) return rows;
+    if(repairState.missingDone) return rows; // 🔒 NO LOOP
 
     const missingDays = _getMissingDayNums_(rows, dest.days);
     if(!missingDays.length) return rows;
 
     repairState.missingDone = true;
+
+    console.warn(`[CITY ${city}] Missing day coverage detected (single attempt):`, missingDays);
 
     const rescuedRows = await _repairWeakDays_(
       city,
@@ -3220,24 +3216,27 @@ async function generateCityItinerary(city){
 
     if(rescuedRows.length && _rowsCoverRequestedDays_(rescuedRows, missingDays)){
       let merged = _replaceDaysInRows_(rows, rescuedRows, missingDays);
-      return _applyGlobalCleanup_(merged);
+      return _dedupeRows_(merged);
     }
 
     return await _repairRequestedDaysIndividually_(rows, missingDays);
   }
 
   async function _postProcessCityRows_(rows=[]){
-    let out = _applyGlobalCleanup_(rows);
+    let out = _dedupeRows_(rows);
 
+    // 🔒 WEAK DAYS (UNA SOLA VEZ)
     let weakDays = _getWeakDayNums_(out, perDay);
     if(weakDays.length && !repairState.weakDone){
       repairState.weakDone = true;
+
+      console.warn(`[CITY ${city}] Weak days detected (single pass):`, weakDays);
 
       const repairedRows = await _repairWeakDays_(
         city,
         dest.days,
         out,
-        weakDays.slice(0,3),
+        weakDays.slice(0,3), // 🔒 LIMITADO
         perDay,
         forceReplan,
         hotel,
@@ -3246,14 +3245,17 @@ async function generateCityItinerary(city){
 
       if(repairedRows.length){
         out = _replaceDaysInRows_(out, repairedRows, weakDays);
-        out = _applyGlobalCleanup_(out);
+        out = _dedupeRows_(out);
       }
     }
 
+    // 🔒 MISSING DAYS (UNA SOLA VEZ)
     out = await _rescueMissingDays_(out);
 
+    // 🔒 AURORAS
     out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
 
+    // 🔒 POST-AURORA (SOLO SI PEQUEÑO)
     let postWeakDays = _getWeakDayNums_(out, perDay);
     if(postWeakDays.length && postWeakDays.length <= 2 && !repairState.postAuroraDone){
       repairState.postAuroraDone = true;
@@ -3271,13 +3273,14 @@ async function generateCityItinerary(city){
 
       if(repairedRows.length){
         out = _replaceDaysInRows_(out, repairedRows, postWeakDays);
-        out = _applyGlobalCleanup_(out);
+        out = _dedupeRows_(out);
       }
     }
 
+    // 🔒 FINAL CLEAN
     out = _fixReturnRowDurationConsistency_(out);
 
-    return _applyGlobalCleanup_(out);
+    return out;
   }
 
   showWOW(true, t('overlayDefault'));
@@ -3308,13 +3311,14 @@ async function generateCityItinerary(city){
 
       stitchedRows.push(...blockRows);
 
-      const interimRows = _applyGlobalCleanup_(stitchedRows);
+      const interimRows = _dedupeRows_(stitchedRows);
       usedHighlightKeys = _collectUsedHighlightKeys_(interimRows, city);
       usedUrbanClusterKeys = _collectUsedUrbanClusterKeys_(interimRows, city);
     }
 
     stitchedRows = await _postProcessCityRows_(stitchedRows);
 
+    // 🔒 YA NO FORZAMOS ERROR DURO SI FALTA 1 DÍA
     if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
       console.warn(`[CITY ${city}] partial coverage after post-process, continuing without fallback.`);
     }
@@ -3327,7 +3331,7 @@ async function generateCityItinerary(city){
     renderCityItinerary(city);
     showWOW(false);
 
-    console.log(`[CITY ${city}] SUCCESS — global clean generation.`);
+    console.log(`[CITY ${city}] SUCCESS — optimized staged generation.`);
     return;
 
   }catch(err){
