@@ -2868,7 +2868,9 @@ MANDATORY:
 - Every row MUST have day equal to one of these days only.
 - You MUST return useful rows for EVERY requested day in this block.
 - Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
-- For a normal usable day, target 4–7 rows.
+- For a normal usable day, target 4–8 rows.
+- For a dense, compact, high-value regional cluster or peninsula, you MAY go beyond that and use roughly 8–12 rows if the geography truly supports it.
+- Do NOT inflate rows artificially. More rows are allowed only when the route remains coherent, realistic, and readable.
 - For a shorter day, still return useful rows; do NOT leave it nearly empty.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - "from", "to", "transport", "notes" can NEVER be empty.
@@ -2892,6 +2894,43 @@ CANDIDATE UNIVERSE (CRITICAL):
 - This 5-hour boundary is NOT an automatic inclusion rule. It is only the outer exploration universe.
 - Build a rich candidate pool first. Only after that, select what best fits the trip length.
 - Leave farther or lower-value candidates OUT if they do not add enough value for this trip length.
+
+MICRO-STOPS / DENSITY (CRITICAL):
+- For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
+- Think in 2 levels:
+  • Macro-stops = major anchor places / major sights / towns / regions
+  • Micro-stops = small but valuable enrichers inside the same cluster:
+    - viewpoints
+    - short boardwalks
+    - cliffs
+    - lava fields
+    - bridges
+    - rock formations
+    - small craters
+    - beaches
+    - harbors
+    - cafes with scenic value
+    - short detours
+    - photo points
+    - pools / spas / geothermal pockets
+    - local museums / cultural spots
+- For each chosen cluster, mentally generate between 5 and 15 REAL possible sub-stops if the destination genuinely offers them.
+- Then SELECT ONLY the sub-stops that actually fit the day coherently.
+- Do NOT force all 15 into the itinerary.
+- Use more sub-stops and more final rows when the cluster is dense and compact.
+- Use fewer, higher-value sub-stops when the cluster is large and spread out.
+- The purpose is to avoid weak sparse days and enrich the route naturally, not to overload the day.
+
+MICRO-GUIDE ENRICHMENT (CRITICAL):
+- For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
+- This micro-guide must be:
+  • ordered in the same optimal geographic flow of the route
+  • made of REAL places only
+  • specific and useful to the user
+  • clearly presented as an optional enriched route, not random notes
+- If the day already includes many real rows, the micro-guide can be shorter.
+- If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
+- This is especially valuable for peninsulas, scenic routes, dense regional clusters, and rich city-walk clusters.
 
 RADIAL / BALANCE LOGIC:
 - First identify the BEST REMAINING candidate pool around the base city after excluding already-used highlights/clusters.
@@ -2919,7 +2958,7 @@ DAY TRIP LOGIC:
 - Avoid single-activity regional days when multiple nearby worthwhile stops exist.
 - Prefer complete regional loops over fragmented visits.
 - If a special activity fits naturally inside a regional day, you may integrate it there.
-- A proper day trip should normally include 4–7 useful rows, not just departure + 1 stop + return.
+- A proper day trip should normally include 4–8 useful rows, but for dense and highly visitable clusters it may expand to around 8–12 rows when that clearly improves the guide and still remains realistic.
 
 QUALITY / RHYTHM:
 - Avoid giant dead gaps in the middle of a normal full day unless they are justified by a genuinely long transfer or a long immersive activity.
@@ -2941,12 +2980,18 @@ Return Format B JSON only.
 MANDATORY:
 - Generate rows ONLY for these days: ${missingDays.join(', ')}.
 - You MUST return useful rows for EVERY requested missing day.
-- For a normal usable day, target 4–6 rows.
+- For a normal usable day, target 4–7 rows.
+- For a dense and compact remaining cluster, you MAY use around 8–12 rows if it truly fits.
 - If the missing day is the final day of the trip, it must still be meaningful; do NOT make it an aurora-only day unless the user explicitly requested that.
 - Use the remaining UNUSED candidate universe first, thinking radially from the base city:
   • local / urban / harbor / waterfront / museum / food / scenic / cultural combinations
   • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
   • then unused regional clusters only if they are genuinely new
+- For the chosen remaining cluster or local pack, also think in micro-stops:
+  • generate mentally 5–15 possible micro-stops if the destination genuinely offers them
+  • then choose only the ones that fit coherently in the missing day
+- If the chosen remaining cluster is rich and compact, include more real rows.
+- Also enrich the FIRST row notes with an ordered micro-guide when useful.
 - Do NOT repeat macro-regions already used, including partial reuse of sub-stops from the same cluster.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - all fields required
