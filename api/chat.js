@@ -433,7 +433,7 @@ GENERAL RULES:
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
 - ANTI-EMPTY DAYS:
-  - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–8 rows (not 1–2).
+  - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–15 rows (not 1–2).
   - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
   - For multi-day itineraries, you MUST distribute meaningful rows across ALL days.
   - A day is NOT valid if it only contains a trivial placeholder like "free day", "last moments", or one single short stop, unless the user explicitly requested a light/rest day or the available time window is genuinely short.
@@ -533,7 +533,7 @@ AURORAS (HARD RULE + REPLACEMENT):
   • Avoid consecutive days if there is room elsewhere; do not leave the only aurora attempt for the very last possible day unless truly necessary.
 
 DAY TRIPS / MACRO-TOURS:
-- If you create a day trip, you must break it down into 5–8 sub-stops (rows) WHEN IT ADDS REAL VALUE.
+- If you create a day trip, you must break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
 - FORBIDDEN umbrella rows:
   - Do NOT use generic activities like "Day trip to X", "Excursion to X", "Excursão de um dia", "Tour de 1 dia".
   - Each row must be either a named transport movement OR a named physical sub-stop.
