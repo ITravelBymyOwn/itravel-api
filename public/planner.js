@@ -2598,6 +2598,943 @@ MANDATORY REPAIR RULES:
   return [];
 }
 
+/* ==============================
+   SECTION 15 · City generation
+================================= */
+/* ==============================
+   SECTION 15A · UI + idioma + normalización base + extracción
+================================= */
+function setOverlayMessage(msg=t('overlayDefault')){
+  const p = $overlayWOW?.querySelector('p');
+  if(p) p.textContent = msg;
+}
+
+function showWOW(on, msg){
+  if(!$overlayWOW) return;
+  if(msg) setOverlayMessage(msg);
+  $overlayWOW.style.display = on ? 'flex' : 'none';
+
+  const all = qsa('button, input, select, textarea');
+  all.forEach(el=>{
+    // ✅ Keep only the reset button enabled
+    if (el.id === 'reset-planner') return;
+
+    // 🆕 Also lock the floating Info Chat button
+    if (el.id === 'info-chat-floating') {
+      el.disabled = on;
+      return;
+    }
+
+    if(on){
+      el._prevDisabled = el.disabled;
+      el.disabled = true;
+    }else{
+      if(typeof el._prevDisabled !== 'undefined'){
+        el.disabled = el._prevDisabled;
+        delete el._prevDisabled;
+      }else{
+        el.disabled = false;
+      }
+    }
+  });
+}
+
+/* =========================================================
+   ✅ SURGICAL (CRITICAL): preserve user's language
+========================================================= */
+function _lastUserFromSession_(){
+  try{
+    if(typeof session === 'undefined' || !session) return '';
+
+    for(let i=(session?.length||0)-1; i>=0; i--){
+      const m = session[i];
+      if(String(m?.role||'').toLowerCase()==='user'){
+        const s = String(m?.content||'').trim();
+        if(s) return s;
+      }
+    }
+  }catch(_){}
+  return '';
+}
+
+function _userLanguageAnchor_(){
+  try{
+    const chosen = (typeof plannerState !== 'undefined' && plannerState)
+      ? String(plannerState?.itineraryLang || '').trim()
+      : '';
+    if(chosen) return chosen;
+  }catch(_){}
+
+  const sc = (typeof plannerState !== 'undefined' && plannerState)
+    ? String(plannerState?.specialConditions || '').trim()
+    : '';
+  if(sc) return sc;
+
+  const sc2 = (typeof qs !== 'undefined')
+    ? String(qs('#special-conditions')?.value || '').trim()
+    : '';
+  if(sc2) return sc2;
+
+  const last = _lastUserFromSession_();
+  if(last) return last;
+
+  return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
+}
+
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
+  const history = useHistory ? session : [];
+
+  const controller = new AbortController();
+  const timeoutMs = 130000;
+  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+
+  try{
+    showThinking(true);
+
+    const anchor = _userLanguageAnchor_();
+
+    const messages = [
+      { role:'system', content: String(systemPrompt || '') },
+      ...(Array.isArray(history) ? history : []),
+      { role:'user', content: String(anchor || '') }
+    ];
+
+    const res = await fetch(API_URL,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      signal: controller.signal,
+      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
+    });
+
+    if(!res.ok){
+      const raw = await res.text().catch(()=> '');
+      console.error('API error (planner):', res.status, res.statusText, raw);
+      return `{"followup":"${tone.fail}"}`;
+    }
+
+    const data = await res.json().catch(()=>({text:''}));
+    return data?.text || '';
+  }catch(e){
+    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
+    console.error("Failed to contact the API:", e);
+    if(isAbort){
+      return `{"followup":"⚠️ The assistant took too long to respond (timeout). Try again or reduce the number of days/cities."}`;
+    }
+    return `{"followup":"${tone.fail}"}`;
+  }finally{
+    clearTimeout(timer);
+    showThinking(false);
+  }
+}
+
+// ✅ SURGICAL: keep blank day hours blank
+function _normalizePerDayForPrompt_(city, totalDays, fallbackPerDay=[]){
+  return Array.from({length: totalDays}, (_,i)=>{
+    const src = (cityMeta[city]?.perDay||[])[i] || fallbackPerDay?.[i] || {};
+    const start = (src.start != null && String(src.start).trim()) ? String(src.start).trim() : null;
+    const end   = (src.end   != null && String(src.end).trim())   ? String(src.end).trim()   : null;
+    return {
+      day: i+1,
+      start,
+      end,
+      start_provided: !!start,
+      end_provided: !!end
+    };
+  });
+}
+
+// ✅ SURGICAL: support current preferred API shape (city_day) + legacy formats
+function _extractPlannerRows_(parsed, city){
+  if(!parsed) return [];
+
+  if(Array.isArray(parsed.rows)){
+    return parsed.rows.map(r=>normalizeRow(r));
+  }
+
+  if(parsed.destination && parsed.destination===city && Array.isArray(parsed.rows)){
+    return parsed.rows.map(r=>normalizeRow(r));
+  }
+
+  if(Array.isArray(parsed.city_day)){
+    return parsed.city_day
+      .filter(block => {
+        const blockCity = block?.city || parsed.destination || city;
+        return blockCity === city;
+      })
+      .flatMap(block => {
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        return rows.map(r => normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum));
+      });
+  }
+
+  if(Array.isArray(parsed.destinations)){
+    const dd = parsed.destinations.find(d=> (d.name||d.destination)===city);
+    if(Array.isArray(dd?.rows)) return dd.rows.map(r=>normalizeRow(r));
+
+    if(Array.isArray(dd?.city_day)){
+      return dd.city_day.flatMap(block=>{
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        return rows.map(r => normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum));
+      });
+    }
+
+    return [];
+  }
+
+  if(Array.isArray(parsed.itineraries)){
+    const ii = parsed.itineraries.find(x=> (x.city||x.name||x.destination)===city);
+    if(Array.isArray(ii?.rows)) return ii.rows.map(r=>normalizeRow(r));
+
+    if(Array.isArray(ii?.city_day)){
+      return ii.city_day.flatMap(block=>{
+        const dayNum = parseInt(block?.day, 10) || 1;
+        const rows = Array.isArray(block?.rows) ? block.rows : [];
+        return rows.map(r => normalizeRow({ ...r, day: r?.day ?? dayNum }, dayNum));
+      });
+    }
+
+    return [];
+  }
+
+  return [];
+}
+
+/* =========================================================
+   SECTION 15B · STAGED GENERATION HELPERS (master + blocks)
+========================================================= */
+function _extractMasterPlanDays_(parsed, city, totalDays){
+  if(!parsed) return [];
+
+  const rows = _extractPlannerRows_(parsed, city);
+  if(!Array.isArray(rows) || !rows.length) return [];
+
+  const out = [];
+  const used = new Set();
+
+  for(const r of rows){
+    const day = parseInt(r?.day, 10);
+    if(!(day >= 1 && day <= totalDays)) continue;
+    if(used.has(day)) continue;
+
+    const activity = String(r?.activity || '').trim();
+    let theme = '';
+
+    const match = activity.match(/^[^-–]+[–-]\s*(.+)$/);
+    if(match && match[1]) theme = String(match[1]).trim();
+
+    if(!theme) theme = activity;
+    if(!theme) theme = String(r?.to || '').trim();
+    if(!theme) theme = String(r?.notes || '').trim();
+    if(!theme) continue;
+
+    used.add(day);
+    out.push({ day, theme });
+  }
+
+  if(out.length !== totalDays) return [];
+  const unique = new Set(out.map(x=>x.day));
+  if(unique.size !== totalDays) return [];
+
+  return out.sort((a,b)=>a.day-b.day);
+}
+
+async function _buildCityMasterPlan_(city, totalDays, perDay, baseDate='', hotel='', transport='recommend me'){
+  const prompt = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Create a STRATEGIC DISTRIBUTION PLAN ONLY for "${city}" (${totalDays} day/s).
+- Return Format B JSON: {"destination":"${city}","rows":[...]}.
+
+MANDATORY:
+- Create EXACTLY ${totalDays} rows total.
+- Create EXACTLY ONE row per day (day 1 to day ${totalDays}).
+- This is NOT the final itinerary. This is ONLY a strategic day-by-day plan.
+- Each row represents the theme/purpose of that day.
+- Use "activity" exactly like: "PLAN – <short strategic theme>".
+- Keep themes realistic and well distributed across all days.
+- Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
+- If some day has a shorter window, make it lighter accordingly.
+- If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
+- Keep the logic GLOBAL; do not depend on hardcoded destinations.
+- Since this is only planning metadata:
+  • "from" can be "Hotel"
+  • "to" can be "City area"
+  • "transport" can be "Planning"
+  • "duration" can be "Transport: planning\\nActivity: planning"
+  • "notes" should briefly justify the day theme
+- Do NOT generate detailed sub-stops yet.
+- Do NOT repeat the same main highlight/theme on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster in multiple city days.
+
+GLOBAL BALANCE RULE:
+- First identify iconic highlights and strong regional day-trip rings around the base city.
+- Then distribute them in the BEST balanced order for the trip.
+- Do NOT force a rigid nearest-to-farthest sequence.
+- For longer stays, prefer covering additional worthwhile rings before repeating previously used ones.
+- If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally inside a regional ring, you may bundle it there when that improves coherence.
+  Examples only: Blue Lagoon in a Reykjanes-style ring, Secret Lagoon in a Golden-Circle-style ring.
+
+- Daily reference windows: ${JSON.stringify(perDay)}
+- Base date: ${JSON.stringify(baseDate || '')}
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
+`.trim();
+
+  console.log(`[MASTER PLAN] Requesting strategic plan for ${city} (${totalDays} days)...`);
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
+  const out = _extractMasterPlanDays_(parsed, city, totalDays);
+  console.log(`[MASTER PLAN] ${out.length === totalDays ? 'OK' : 'FAIL'}`, out, parsed);
+  return out;
+}
+
+function _chunkMasterDays_(days=[]){
+  const arr = Array.isArray(days) ? days.slice().sort((a,b)=>a.day-b.day) : [];
+  if(!arr.length) return [];
+
+  const chunks = [];
+  for(let i=0; i<arr.length; i+=2){
+    chunks.push(arr.slice(i, i+2));
+  }
+  return chunks;
+}
+
+function _forceRowsIntoValidDayRange_(rows=[], allowedDays=[]){
+  const allowed = new Set((allowedDays || []).map(d => Number(d)));
+  return (rows || [])
+    .map(r=>{
+      let d = parseInt(r?.day, 10);
+      if(!allowed.has(d)) d = Number(allowedDays?.[0] || 1);
+      return normalizeRow({ ...r, day: d }, d);
+    })
+    .filter(r => allowed.has(Number(r?.day)));
+}
+
+function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
+  const set = new Set((rows||[]).map(r => Number(r?.day)));
+  return (blockDays || []).every(d => set.has(Number(d)));
+}
+
+// 🆕 CRITICAL: only replace repaired days if ALL requested days were returned
+function _rowsCoverRequestedDays_(rows=[], requestedDays=[]){
+  const set = new Set((rows || []).map(r => Number(r?.day)));
+  return (requestedDays || []).every(d => set.has(Number(d)));
+}
+
+/* =========================================================
+   SECTION 15C · DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
+========================================================= */
+function _normalizeHighlightKey_(value=''){
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[þ]/g, 'th')
+    .replace(/[ð]/g, 'd')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* =========================================================
+   INTERNAL · semantic cluster normalization
+   (Use ONLY for macro-zone logic, not for highlight de-dupe)
+========================================================= */
+function _normalizeSemanticClusterKey_(value=''){
+  const s = _normalizeHighlightKey_(value);
+  if(!s) return '';
+
+  // Golden Circle + wider Thingvellir area / close relatives
+  if(
+    /\bgolden circle\b/.test(s) ||
+    /\bthingvellir\b/.test(s) ||
+    /\bpingvellir\b/.test(s) ||
+    /\boxararfoss\b/.test(s) ||
+    /\bogsararfoss\b/.test(s) ||
+    /\bgeysir\b/.test(s) ||
+    /\bgullfoss\b/.test(s) ||
+    /\bkerid\b/.test(s) ||
+    /\bkerith\b/.test(s) ||
+    /\bpingvallavatn\b/.test(s) ||
+    /\bthingvallavatn\b/.test(s)
+  ){
+    return 'golden circle';
+  }
+
+  // South Coast
+  if(
+    /\bsouth coast\b/.test(s) ||
+    /\bcosta sur\b/.test(s) ||
+    /\bseljalandsfoss\b/.test(s) ||
+    /\bskogafoss\b/.test(s) ||
+    /\breynisfjara\b/.test(s) ||
+    /\bvik\b/.test(s) ||
+    /\bvik i myrdal\b/.test(s) ||
+    /\bdyrholaey\b/.test(s)
+  ){
+    return 'south coast';
+  }
+
+  // Reykjanes / Blue Lagoon
+  if(
+    /\breykjanes\b/.test(s) ||
+    /\bblue lagoon\b/.test(s) ||
+    /\bseltun\b/.test(s) ||
+    /\breykjanes lighthouse\b/.test(s) ||
+    /\bfaro de reykjanes\b/.test(s) ||
+    /\blava restaurant\b/.test(s)
+  ){
+    return 'reykjanes';
+  }
+
+  // Snæfellsnes
+  if(
+    /\bsnaefellsnes\b/.test(s) ||
+    /\bsnaefellsnes peninsula\b/.test(s) ||
+    /\bpeninsula de snaefellsnes\b/.test(s) ||
+    /\bkirkjufell\b/.test(s) ||
+    /\barnarstapi\b/.test(s) ||
+    /\bhellnar\b/.test(s) ||
+    /\bdjupalonssandur\b/.test(s) ||
+    /\bsnaefellsjokull\b/.test(s)
+  ){
+    return 'snaefellsnes';
+  }
+
+  // Reykjavik / city cluster
+  if(
+    /\breykjavik\b/.test(s) ||
+    /\bhallgrimskirkja\b/.test(s) ||
+    /\bharpa\b/.test(s) ||
+    /\blaugavegur\b/.test(s) ||
+    /\bsun voyager\b/.test(s) ||
+    /\bperlan\b/.test(s) ||
+    /\bnational museum of iceland\b/.test(s) ||
+    /\bmuseo nacional de islandia\b/.test(s) ||
+    /\breykjavik art museum\b/.test(s) ||
+    /\bmuseo de arte de reykjavik\b/.test(s) ||
+    /\bbotanical garden\b/.test(s) ||
+    /\bjardin botanico\b/.test(s) ||
+    /\bold harbor\b/.test(s) ||
+    /\bharbor\b/.test(s)
+  ){
+    return 'reykjavik city';
+  }
+
+  return s;
+}
+
+/* =========================================================
+   INTERNAL · specific place normalization
+   (Use for highlight de-dupe; keep this SPECIFIC, not macro)
+========================================================= */
+function _normalizeSpecificPlaceKey_(value=''){
+  let s = _normalizeHighlightKey_(value);
+  if(!s) return '';
+
+  s = s
+    .replace(/\bdeparture from .*$/g, '')
+    .replace(/\breturn to .*$/g, '')
+    .replace(/\bregreso a .*$/g, '')
+    .replace(/\bsalida desde .*$/g, '')
+    .trim();
+
+  // normalize exact place aliases, but DO NOT collapse to whole macro-cluster
+  s = s
+    .replace(/\bpingvellir\b/g, 'thingvellir')
+    .replace(/\bogsararfoss\b/g, 'oxararfoss')
+    .replace(/\bkerith\b/g, 'kerid')
+    .replace(/\bsnaefellsjokull\b/g, 'snaefellsjokull');
+
+  return s;
+}
+
+function _extractHighlightKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const from = String(row?.from || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  let candidate = '';
+
+  // For exact highlight de-dupe, prefer the SPECIFIC sub-stop, not the macro label
+  if(to){
+    candidate = to;
+  }else if(suffix && suffix !== cityKey){
+    candidate = suffix;
+  }else if(from && _normalizeHighlightKey_(from) !== cityKey){
+    candidate = from;
+  }else{
+    candidate = activity;
+  }
+
+  const normalized = _normalizeSpecificPlaceKey_(candidate);
+  if(!normalized) return '';
+
+  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning|dark area|zona de observacion de auroras|aurora viewing area)$/.test(normalized)){
+    return '';
+  }
+
+  return normalized;
+}
+
+function _extractUrbanClusterKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  // if clearly a macro-region outside the city, do not treat as urban cluster
+  const semanticPrefix = _normalizeSemanticClusterKey_(prefix);
+  if(prefix && prefix !== cityKey && semanticPrefix && semanticPrefix !== 'reykjavik city') return '';
+
+  let candidate = _normalizeHighlightKey_(to || suffix);
+  if(!candidate) return '';
+
+  const semantic = _normalizeSemanticClusterKey_(candidate);
+
+  // only keep real urban reykjavik subclusters here
+  if(semantic && semantic !== 'reykjavik city' && semantic !== candidate) return '';
+  if(/^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner|return to|regreso a)$/.test(candidate)) return '';
+
+  return candidate;
+}
+
+function _collectUsedHighlightKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _collectUsedUrbanClusterKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    // Keep only exact place duplicates on the first day they appeared.
+    // Do NOT use this to collapse whole macro-zones; that is handled below.
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+/* =========================================================
+   SECTION 15C.2 · MACRO-ZONE DETECTION (ENHANCED)
+========================================================= */
+function _extractMacroZoneKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const from = String(row?.from || '').trim();
+  const notes = String(row?.notes || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  // direct semantic read from prefix when present
+  let semantic = _normalizeSemanticClusterKey_(prefix);
+
+  // if prefix is generic or city-like, infer from concrete stops / notes
+  const genericPrefixes = new Set([
+    'reykjavik city',
+    _normalizeSemanticClusterKey_(cityKey),
+    'excursion a la naturaleza',
+    'nature excursion',
+    'day trip',
+    'excursion',
+    'tour',
+    'planning'
+  ]);
+
+  if(!semantic || genericPrefixes.has(semantic) || semantic === _normalizeHighlightKey_(city)){
+    semantic = _normalizeSemanticClusterKey_(
+      `${to} ${from} ${suffix} ${notes}`
+    );
+  }
+
+  if(!semantic) return '';
+  if(semantic === _normalizeHighlightKey_(city)) return '';
+  if(/^(return to|regreso a|departure from|salida desde)$/.test(semantic)) return '';
+
+  // city cluster is not a macro-zone for repeated macro detection
+  if(semantic === 'reykjavik city') return '';
+
+  return semantic;
+}
+
+function _findRepeatedMacroZoneDays_(rows=[], city=''){
+  const firstDayByZone = new Map();
+  const repeatedDays = new Set();
+
+  for(const r of (rows || [])){
+    const zone = _extractMacroZoneKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!zone) continue;
+
+    if(!firstDayByZone.has(zone)){
+      firstDayByZone.set(zone, day);
+      continue;
+    }
+
+    const firstDay = firstDayByZone.get(zone);
+
+    if(firstDay !== day){
+      repeatedDays.add(day);
+    }
+  }
+
+  return Array.from(repeatedDays).sort((a,b)=>a-b);
+}
+
+function _collectUsedMacroZoneKeys_(rows=[], city=''){
+  const out = new Set();
+
+  for(const r of (rows || [])){
+    const k = _extractMacroZoneKey_(r, city);
+    if(k) out.add(k);
+  }
+
+  return Array.from(out);
+}
+
+/* =========================================================
+   SECTION 15D · LIGHT STRUCTURE HELPERS
+========================================================= */
+function _hhmmToMin_(v=''){
+  const s = String(v || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if(!m) return null;
+  const hh = parseInt(m[1], 10);
+  const mm = parseInt(m[2], 10);
+  if(hh < 0 || hh > 23 || mm < 0 || mm > 59) return null;
+  return hh * 60 + mm;
+}
+
+function _minToHHMM_(mins){
+  const n = Math.max(0, Math.min(23*60+59, Number(mins||0)));
+  const hh = Math.floor(n/60);
+  const mm = n % 60;
+  return `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+}
+
+function _extractApproxMinutesFromLine_(line=''){
+  const s = String(line || '').toLowerCase();
+  if(!s) return 0;
+
+  let total = 0;
+  const hours = s.match(/(\d+)\s*h/);
+  const mins = s.match(/(\d+)\s*m/);
+  const range = s.match(/(\d+)\s*-\s*(\d+)\s*m/);
+
+  if(hours) total += parseInt(hours[1], 10) * 60;
+  if(mins) total += parseInt(mins[1], 10);
+  if(!total && range){
+    total = Math.round((parseInt(range[1],10) + parseInt(range[2],10))/2);
+  }
+
+  return total;
+}
+
+function _extractDurationParts_(duration=''){
+  const lines = String(duration || '').split('\n').map(x => x.trim()).filter(Boolean);
+  const transportLine = lines.find(x => /^(transport|transporte):/i.test(x)) || '';
+  const activityLine = lines.find(x => /^(activity|actividad):/i.test(x)) || '';
+  return {
+    transportMin: _extractApproxMinutesFromLine_(transportLine),
+    activityMin: _extractApproxMinutesFromLine_(activityLine)
+  };
+}
+
+function _groupRowsByDay_(rows=[]){
+  const out = {};
+  for(const r of (rows || [])){
+    const d = Number(r?.day || 1);
+    if(!out[d]) out[d] = [];
+    out[d].push(r);
+  }
+  Object.keys(out).forEach(d=>{
+    out[d].sort((a,b)=> String(a?.start||'').localeCompare(String(b?.start||'')));
+  });
+  return out;
+}
+
+function _isAuroraRow_(row={}){
+  const txt = `${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`.toLowerCase();
+  return /aurora|auroras|northern lights|boreal/.test(txt);
+}
+
+function _isReturnRow_(row={}){
+  return /return to|regreso a/i.test(String(row?.activity || ''));
+}
+
+function _getDayWindowRef_(perDay=[], dayNum){
+  return (perDay || []).find(x => Number(x?.day) === Number(dayNum)) || null;
+}
+
+function _hasNormalDayWindow_(perDayRef){
+  if(!perDayRef) return true;
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+  if(start === null || end === null) return true;
+  return (end - start) >= 360;
+}
+
+function _isNightOnlyWindow_(perDayRef){
+  if(!perDayRef) return false;
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+  if(start === null || end === null) return false;
+  return start >= 18*60 && (end - start) <= 360;
+}
+
+function _getWeakDayNums_(rows=[], perDay=[]){
+  const byDay = _groupRowsByDay_(rows);
+  const weak = [];
+
+  Object.keys(byDay).forEach(dayKey=>{
+    const day = Number(dayKey);
+    const dayRows = byDay[day] || [];
+    const ref = _getDayWindowRef_(perDay, day);
+    const auroraRows = dayRows.filter(r => _isAuroraRow_(r));
+    const nonReturnRows = dayRows.filter(r => !_isReturnRow_(r));
+
+    if(auroraRows.length && !_isNightOnlyWindow_(ref)){
+      const daytimeRows = dayRows.filter(r=>{
+        const start = _hhmmToMin_(r?.start);
+        return start !== null && start < 18*60 && !_isAuroraRow_(r);
+      });
+      if(daytimeRows.length < 2){
+        weak.push(day);
+        return;
+      }
+    }
+
+    if(_hasNormalDayWindow_(ref) && nonReturnRows.length < 4){
+      weak.push(day);
+      return;
+    }
+
+    for(let i=0; i<dayRows.length; i++){
+      const r = dayRows[i];
+      const start = _hhmmToMin_(r?.start);
+      const end = _hhmmToMin_(r?.end);
+      if(start === null || end === null || end <= start){
+        weak.push(day);
+        return;
+      }
+
+      if(i > 0){
+        const prevEnd = _hhmmToMin_(dayRows[i-1]?.end);
+        if(prevEnd !== null && start < prevEnd){
+          weak.push(day);
+          return;
+        }
+      }
+
+      const dur = _extractDurationParts_(r?.duration || '');
+      const span = end - start;
+      const approxNeed = (dur.transportMin || 0) + (dur.activityMin || 0);
+      if(approxNeed > 0 && Math.abs(span - approxNeed) > 150){
+        weak.push(day);
+        return;
+      }
+    }
+
+    const returnRows = dayRows.filter(r => _isReturnRow_(r));
+    if(returnRows.length && !_isReturnRow_(dayRows[dayRows.length-1])){
+      weak.push(day);
+      return;
+    }
+
+    // 🆕 FIX: detectar cierre temprano sin cierre nocturno razonable
+    const lastRow = dayRows[dayRows.length-1];
+    const lastEnd = _hhmmToMin_(lastRow?.end);
+    if(lastEnd !== null && _hasNormalDayWindow_(ref) && lastEnd < 18*60 + 30){
+      weak.push(day);
+      return;
+    }
+
+    // 🆕 FIX: detectar day trips / macro-tours pobres
+    const macroRows = dayRows.filter(r => !!_extractMacroZoneKey_(r));
+    if(macroRows.length && macroRows.length < 4){
+      weak.push(day);
+      return;
+    }
+  });
+
+  return Array.from(new Set(weak)).sort((a,b)=>a-b);
+}
+
+function _replaceDaysInRows_(baseRows=[], replacementRows=[], daysToReplace=[]){
+  const set = new Set((daysToReplace || []).map(Number));
+  const kept = (baseRows || []).filter(r => !set.has(Number(r?.day || 1)));
+  return _dedupeRows_([...(kept || []), ...(replacementRows || [])]);
+}
+
+async function _repairWeakDays_(city, totalDays, rows, weakDays, perDay, forceReplan=false, hotel='', transport='recommend me'){
+  const dayNums = (weakDays || []).map(Number).filter(Boolean);
+  if(!dayNums.length) return [];
+
+  const perDayForRepair = (perDay || []).filter(x => dayNums.includes(Number(x?.day)));
+
+  const prompt = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Repair ONLY these weak days for "${city}" (${totalDays} total day/s):
+${JSON.stringify(dayNums)}
+
+CURRENT ITINERARY CONTEXT:
+${JSON.stringify(rows)}
+
+Return Format B JSON only.
+
+MANDATORY REPAIR RULES:
+- Generate rows ONLY for days: ${dayNums.join(', ')}.
+- Respect these windows: ${JSON.stringify(perDayForRepair)}.
+- Keep chronological order with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- If there is a return row, it must be the FINAL row of that day.
+- If a day includes auroras, auroras are ONLY the night part; the day must still include useful daytime content unless the day window is explicitly night-only.
+- Normal daytime windows should not be weak or almost empty.
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places, never a macro-tour label.
+- Keep the rest of the trip logic coherent.
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
+`.trim();
+
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
+
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    return forced;
+  }
+
+  return [];
+}
+
+async function _repairRepeatedMacroZoneDays_(city, totalDays, rows, repeatedDays, perDay, forceReplan=false, hotel='', transport='recommend me'){
+  const dayNums = (repeatedDays || []).map(Number).filter(Boolean);
+  if(!dayNums.length) return [];
+
+  const perDayForRepair = (perDay || []).filter(x => dayNums.includes(Number(x?.day)));
+  const otherRows = (rows || []).filter(r => !dayNums.includes(Number(r?.day || 1)));
+  const forbiddenMacroZones = _collectUsedMacroZoneKeys_(otherRows, city).join(', ');
+
+  const prompt = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Rebuild ONLY these repeated days for "${city}" (${totalDays} total day/s):
+${JSON.stringify(dayNums)}
+
+CURRENT ITINERARY CONTEXT:
+${JSON.stringify(rows)}
+
+Return Format B JSON only.
+
+MANDATORY REPAIR RULES:
+- Generate rows ONLY for days: ${dayNums.join(', ')}.
+- Respect these windows: ${JSON.stringify(perDayForRepair)}.
+- Keep chronological order with NO overlaps.
+- Each row time block must broadly match the stated duration.
+- If there is a return row, it must be the FINAL row of that day.
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "from", "to", "transport", "notes" can NEVER be empty.
+- "from" and "to" must be REAL places, never a macro-tour label.
+- These macro-regions / circuits / rings are already used on other days and must NOT be reused here unless the user explicitly requested repetition: ${forbiddenMacroZones || 'none'}
+- Identify alternative iconic unused rings / regional day tours / nearby coherent circuits before repeating previous ones.
+- Balance the trip naturally. Do NOT force a rigid nearest-to-farthest sequence.
+- If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally into an unused regional ring, you may bundle it there.
+  Examples only: Blue Lagoon in a Reykjanes-style ring, Secret Lagoon in a Golden-Circle-style ring.
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- No text outside JSON.
+`.trim();
+
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
+
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+    return forced;
+  }
+
+  return [];
+}
+
 /* =========================================================
    SECTION 15E · AURORA OPTION + RETURN DURATION FIX
 ========================================================= */
@@ -3112,6 +4049,381 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
     if(!set.has(d)) return false;
   }
   return true;
+}
+
+/* =========================================================
+   SECTION 15F · generateCityItinerary (OPTIMIZED)
+========================================================= */
+async function generateCityItinerary(city){
+  const dest  = savedDestinations.find(x=>x.city===city);
+  if(!dest) return;
+
+  const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
+
+  const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
+  const hotel    = cityMeta[city]?.hotel || '';
+  const transport= cityMeta[city]?.transport || 'recommend me';
+
+  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
+  // 🔒 CONTROL FLAGS (NUEVO)
+  let repairState = {
+    weakDone: false,
+    missingDone: false,
+    postAuroraDone: false
+  };
+
+  function _getMissingDayNums_(rows=[], totalDays=1){
+    const set = new Set((rows || []).map(r => Number(r?.day)));
+    const missing = [];
+    for(let d=1; d<=Number(totalDays || 1); d++){
+      if(!set.has(d)) missing.push(d);
+    }
+    return missing;
+  }
+
+  async function _safeValidateRows_(rows=[]){
+    try{
+      return await validateRowsWithAgent(city, rows, baseDate);
+    }catch(err){
+      console.error(`[CITY ${city}] validateRowsWithAgent failed, using unvalidated rows:`, err);
+      return { allowed: rows };
+    }
+  }
+
+  async function _repairRequestedDaysIndividually_(rows=[], dayNums=[]){
+    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).slice(0,2); // 🔒 LIMITE
+
+    let out = rows.slice();
+
+    for(const day of targets){
+      try{
+        const repairedRows = await _repairWeakDays_(
+          city,
+          dest.days,
+          out,
+          [day],
+          perDay,
+          forceReplan,
+          hotel,
+          transport
+        );
+
+        if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, [day])){
+          out = _replaceDaysInRows_(out, repairedRows, [day]);
+          out = _dedupeRows_(out);
+        }
+      }catch(err){
+        console.warn(`[CITY ${city}] individual repair failed for day ${day}:`, err);
+      }
+    }
+
+    return out;
+  }
+
+  async function _rescueMissingDays_(rows=[]){
+    if(repairState.missingDone) return rows; // 🔒 NO LOOP
+
+    const missingDays = _getMissingDayNums_(rows, dest.days);
+    if(!missingDays.length) return rows;
+
+    repairState.missingDone = true;
+
+    console.warn(`[CITY ${city}] Missing day coverage detected (single attempt):`, missingDays);
+
+    const rescuedRows = await _repairWeakDays_(
+      city,
+      dest.days,
+      rows,
+      missingDays,
+      perDay,
+      forceReplan,
+      hotel,
+      transport
+    );
+
+    if(rescuedRows.length && _rowsCoverRequestedDays_(rescuedRows, missingDays)){
+      let merged = _replaceDaysInRows_(rows, rescuedRows, missingDays);
+      return _dedupeRows_(merged);
+    }
+
+    return await _repairRequestedDaysIndividually_(rows, missingDays);
+  }
+
+  async function _postProcessCityRows_(rows=[]){
+    let out = _dedupeRows_(rows);
+
+    // 🔒 WEAK DAYS (UNA SOLA VEZ)
+    let weakDays = _getWeakDayNums_(out, perDay);
+    if(weakDays.length && !repairState.weakDone){
+      repairState.weakDone = true;
+
+      console.warn(`[CITY ${city}] Weak days detected (single pass):`, weakDays);
+
+      const repairedRows = await _repairWeakDays_(
+        city,
+        dest.days,
+        out,
+        weakDays.slice(0,3), // 🔒 LIMITADO
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length){
+        out = _replaceDaysInRows_(out, repairedRows, weakDays);
+        out = _dedupeRows_(out);
+      }
+    }
+
+    // 🔒 MISSING DAYS (UNA SOLA VEZ)
+    out = await _rescueMissingDays_(out);
+
+    // 🔒 AURORAS
+    out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
+
+    // 🔒 POST-AURORA (SOLO SI PEQUEÑO)
+    let postWeakDays = _getWeakDayNums_(out, perDay);
+    if(postWeakDays.length && postWeakDays.length <= 2 && !repairState.postAuroraDone){
+      repairState.postAuroraDone = true;
+
+      const repairedRows = await _repairWeakDays_(
+        city,
+        dest.days,
+        out,
+        postWeakDays,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length){
+        out = _replaceDaysInRows_(out, repairedRows, postWeakDays);
+        out = _dedupeRows_(out);
+      }
+    }
+
+    // 🔒 FINAL CLEAN
+    out = _fixReturnRowDurationConsistency_(out);
+
+    return out;
+  }
+
+  showWOW(true, t('overlayDefault'));
+
+  try{
+    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+
+    const blocks = _chunkMasterDays_(masterDays);
+
+    let stitchedRows = [];
+    let usedHighlightKeys = [];
+    let usedUrbanClusterKeys = [];
+
+    for(let i=0; i<blocks.length; i++){
+      const block = blocks[i];
+
+      const blockRows = await _generateBlockFromThemes_(
+        city,
+        dest.days,
+        block,
+        perDay,
+        forceReplan,
+        hotel,
+        transport,
+        usedHighlightKeys,
+        usedUrbanClusterKeys
+      );
+
+      stitchedRows.push(...blockRows);
+
+      const interimRows = _dedupeRows_(stitchedRows);
+      usedHighlightKeys = _collectUsedHighlightKeys_(interimRows, city);
+      usedUrbanClusterKeys = _collectUsedUrbanClusterKeys_(interimRows, city);
+    }
+
+    stitchedRows = await _postProcessCityRows_(stitchedRows);
+
+    // 🔒 YA NO FORZAMOS ERROR DURO SI FALTA 1 DÍA
+    if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
+      console.warn(`[CITY ${city}] partial coverage after post-process, continuing without fallback.`);
+    }
+
+    const val = await _safeValidateRows_(stitchedRows);
+    pushRows(city, val.allowed, forceReplan);
+
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
+    showWOW(false);
+
+    console.log(`[CITY ${city}] SUCCESS — optimized staged generation.`);
+    return;
+
+  }catch(err){
+    console.error(`[CITY ${city}] staged generation failed, fallback triggered:`, err);
+  }
+
+  showWOW(false);
+}
+
+/* =========================================================
+   SECTION 15G · Bulk rebalance after changes (add days / requested day trip)
+========================================================= */
+async function rebalanceWholeCity(city, opts={}){
+  const data = itineraries[city];
+  const totalDays = Object.keys(data.byDay||{}).length;
+  const perDay = _normalizePerDayForPrompt_(city, totalDays);
+  const baseDate = data.baseDate || cityMeta[city]?.baseDate || '';
+  const wantedTrip = (opts.dayTripTo||'').trim();
+
+  const startDay = opts.start || 1;
+  const endDay = opts.end || totalDays;
+  const lockedDaysText = startDay > 1 
+    ? `Keep days 1 to ${startDay - 1} intact.`
+    : '';
+
+  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
+  const prompt = `
+${FORMAT}
+**ROLE:** Rebalance the city "${city}" between days ${startDay} and ${endDay}, keeping what is plausible and filling gaps.
+${lockedDaysText}
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+
+KEY RULES (MANDATORY):
+- "activity" MUST ALWAYS: "Destination – <Specific sub-stop>" (includes returns/transfers).
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • If it's NOT a day trip, "Destination" can be "${city}".
+- from/to/transport/notes: NEVER empty. Avoid generic items without clear names.
+- VERY IMPORTANT:
+  • "from" and "to" must be REAL places, NEVER the macro-tour name.
+  • Avoid rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. If there is a macro-tour, the first row must be "<Macro-tour> – Departure from ${city}" with "to" = first real sub-stop.
+
+TRANSPORT (smart priority, no invention):
+- In city: Walk/Metro/Bus/Tram depending on real availability.
+- For DAY TRIPS:
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+
+AURORAS (if plausible):
+- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
+- Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
+- Notes must include "valid:" + a nearby low-cost alternative.
+- Auroras are a NIGHT activity only; the same day must still include useful daytime content unless the day window is explicitly night-only.
+
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may include day trips if they add value (no fixed rule). Decide intelligently.
+- Guideline: ideally ≤ ~5h per one-way drive ONLY when the stay is long enough to justify it. Otherwise prefer stronger nearer / medium rings first.
+- If you include a day trip:
+  • 5–8 sub-stops (rows) with realistic sequence.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must end with a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route, reach the logical end highlight before returning.
+  • Avoid optimistic returns: use conservative estimates in winter or at night.
+- Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
+- Do NOT repeat the same macro-region / ring across different days unless the user explicitly requested it.
+
+GLOBAL BALANCE RULE:
+- First identify iconic highlights and strong regional day-trip rings around the base city.
+- Then distribute them in the BEST balanced order for the trip.
+- Do NOT force a rigid nearest-to-farthest sequence.
+- Prefer covering additional worthwhile rings before repeating previously used ones.
+- If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally inside a regional ring, you may bundle it there.
+  Examples only: Blue Lagoon in a Reykjanes-style ring, Secret Lagoon in a Golden-Circle-style ring.
+
+QUALITY:
+- Respect time windows as reference: ${JSON.stringify(perDay.filter(x => x.day >= startDay && x.day <= endDay))}.
+- Consider key highlights and distribute without duplication.
+${wantedTrip ? `- User preference: day trip to "${wantedTrip}". If reasonable, integrate it (complete macro-tour) and close with return.` : ''}
+- The last day can be lighter, but don’t leave it “empty” if key highlights remain.
+- Validate plausibility and safety; replace with safe alternatives when needed.
+- Notes must ALWAYS be useful (never empty or "seed").
+- Keep rows in chronological order, avoid overlaps, and keep return rows as the last row when they exist.
+
+Current context (to merge without deleting): 
+${buildIntake()}
+`.trim();
+
+  showWOW(true, t('overlayDefault'));
+
+  const ans = await _callPlannerSystemPrompt_(prompt, true);
+  const parsed = parseJSON(ans);
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    let rows = _extractPlannerRows_(parsed, city);
+    rows = _dedupeRows_(rows);
+    rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
+    rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+
+    const repeatedMacroZoneDays = _findRepeatedMacroZoneDays_(rows, city);
+    if(repeatedMacroZoneDays.length){
+      const repairedRows = await _repairRepeatedMacroZoneDays_(
+        city,
+        totalDays,
+        rows,
+        repeatedMacroZoneDays,
+        perDay,
+        forceReplan,
+        cityMeta[city]?.hotel || '',
+        cityMeta[city]?.transport || 'recommend me'
+      );
+
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, repeatedMacroZoneDays)){
+        rows = _replaceDaysInRows_(rows, repairedRows, repeatedMacroZoneDays);
+        rows = _dedupeRows_(rows);
+        rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
+        rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+      }else{
+        console.warn(`[CITY ${city}] rebalance macro-zone repair skipped because returned rows did not cover all requested days.`);
+      }
+    }
+
+    const weakDays = _getWeakDayNums_(rows, perDay);
+    if(weakDays.length){
+      const repairedRows = await _repairWeakDays_(
+        city,
+        totalDays,
+        rows,
+        weakDays,
+        perDay,
+        forceReplan,
+        cityMeta[city]?.hotel || '',
+        cityMeta[city]?.transport || 'recommend me'
+      );
+
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, weakDays)){
+        rows = _replaceDaysInRows_(rows, repairedRows, weakDays);
+        rows = _dedupeRows_(rows);
+        rows = _removeDuplicateHighlightsAcrossDays_(rows, city);
+        rows = _removeDuplicateUrbanClustersAcrossDays_(rows, city);
+      }else{
+        console.warn(`[CITY ${city}] rebalance weak-day repair skipped because returned rows did not cover all requested days.`);
+      }
+    }
+
+    rows = _injectAuroraOptionRows_(city, rows, totalDays, perDay, baseDate);
+    rows = _fixReturnRowDurationConsistency_(rows);
+
+    const val = await validateRowsWithAgent(city, rows, baseDate);
+    pushRows(city, val.allowed, forceReplan);
+
+    for(let d=startDay; d<=endDay; d++) await optimizeDay(city, d);
+
+    renderCityTabs(); setActiveCity(city); renderCityItinerary(city);
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
+
+    if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
+  }else{
+    showWOW(false);
+    $resetBtn?.removeAttribute('disabled');
+    chatMsg(getLang()==='es' ? 'I did not receive valid changes for rebalancing. Want to try another way?' : 'I did not receive valid changes for rebalancing. Want to try another way?','ai');
+  }
 }
 
 /* =========================================================
