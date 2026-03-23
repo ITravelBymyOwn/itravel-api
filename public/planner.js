@@ -3345,6 +3345,330 @@ QUALITY / MAXIMIZE EXPERIENCE:
 }
 
 /* =========================================================
+   SECTION 15F · generateCityItinerary
+========================================================= */
+async function generateCityItinerary(city){
+  const dest  = savedDestinations.find(x=>x.city===city);
+  if(!dest) return;
+
+  const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
+
+  const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
+  const hotel    = cityMeta[city]?.hotel || '';
+  const transport= cityMeta[city]?.transport || 'recommend me';
+
+  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+
+  const instructions = `
+${FORMAT}
+**ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
+- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+
+KEY RULES (MANDATORY):
+- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
+  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
+  • If it's NOT a day trip, "Destination" can be "${city}".
+  • This applies to ALL rows, including transfers and returns.
+  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
+  • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
+  • Correct example (city): "${city} – Return to hotel".
+- "from", "to", "transport" and "notes" can NEVER be empty.
+- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
+- VERY IMPORTANT (to avoid errors like "to=South Coast"):
+  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
+  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
+
+TRANSPORT (smart priority, no invention):
+- In city: Walk/Metro/Bus/Tram depending on real availability.
+- For DAY TRIPS:
+  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
+  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
+- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
+
+AURORAS (if plausible by city/season/latitude):
+- You must include AT LEAST 1 aurora night in the itinerary.
+- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
+- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
+- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
+- Auroras are a NIGHT activity only; the same day must still include useful daytime content unless the day window is explicitly night-only.
+
+DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
+- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
+- Guideline: ideally ≤ ~5h per one-way drive ONLY when the stay is long enough to justify it. Otherwise prefer stronger nearer / medium rings first.
+- If you propose a day trip, it must be COMPLETE:
+  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
+  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
+  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
+  • If it's a classic route, reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
+  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
+- Do NOT repeat the same main highlight on different days unless the user explicitly requested repetition.
+- Do NOT over-reuse the same urban area / neighborhood / cluster across different city days.
+- Do NOT repeat the same macro-region / ring across different days unless the user explicitly requested it.
+
+GLOBAL BALANCE RULE:
+- First identify iconic highlights and strong regional day-trip rings around the base city.
+- Then distribute them in the BEST balanced order for the trip.
+- Do NOT force a rigid nearest-to-farthest sequence.
+- Prefer covering additional worthwhile rings before repeating previously used ones.
+- If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally inside a regional ring, you may bundle it there.
+  Examples only: Blue Lagoon in a Reykjanes-style ring, Secret Lagoon in a Golden-Circle-style ring.
+
+QUALITY / MAXIMIZE EXPERIENCE:
+- Cover key daytime and nighttime highlights.
+- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
+- Group by areas, avoid backtracking.
+- Validate overall plausibility and safety.
+  • If a special activity is plausible, add "notes" with "valid: <justification>".
+  • Avoid activities in clearly risky/restricted areas or time windows.
+  • Replace with safer alternatives when applicable.
+- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
+- Keep rows in chronological order, avoid overlaps, and keep return rows as the last row when they exist.
+- No text outside JSON.
+`.trim();
+
+  function _getMissingDayNums_(rows=[], totalDays=1){
+    const set = new Set((rows || []).map(r => Number(r?.day)));
+    const missing = [];
+    for(let d=1; d<=Number(totalDays || 1); d++){
+      if(!set.has(d)) missing.push(d);
+    }
+    return missing;
+  }
+
+  async function _rescueMissingDays_(rows=[]){
+    const missingDays = _getMissingDayNums_(rows, dest.days);
+    if(!missingDays.length) return rows;
+
+    console.warn(`[CITY ${city}] Missing day coverage detected, attempting targeted rescue:`, missingDays);
+
+    const rescuedRows = await _repairWeakDays_(
+      city,
+      dest.days,
+      rows,
+      missingDays,
+      perDay,
+      forceReplan,
+      hotel,
+      transport
+    );
+
+    if(rescuedRows.length && _rowsCoverRequestedDays_(rescuedRows, missingDays)){
+      let merged = _replaceDaysInRows_(rows, rescuedRows, missingDays);
+      merged = _dedupeRows_(merged);
+      merged = _removeDuplicateHighlightsAcrossDays_(merged, city);
+      merged = _removeDuplicateUrbanClustersAcrossDays_(merged, city);
+      return merged;
+    }
+
+    console.warn(`[CITY ${city}] Missing-day rescue did not fully cover requested days.`);
+    return rows;
+  }
+
+  async function _postProcessCityRows_(rows=[]){
+    let out = _dedupeRows_(rows);
+    out = _removeDuplicateHighlightsAcrossDays_(out, city);
+    out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+
+    const repeatedMacroZoneDays = _findRepeatedMacroZoneDays_(out, city);
+    if(repeatedMacroZoneDays.length){
+      console.warn(`[CITY ${city}] repeated macro-zones detected, repairing only these days:`, repeatedMacroZoneDays);
+      const repairedRows = await _repairRepeatedMacroZoneDays_(
+        city,
+        dest.days,
+        out,
+        repeatedMacroZoneDays,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, repeatedMacroZoneDays)){
+        out = _replaceDaysInRows_(out, repairedRows, repeatedMacroZoneDays);
+        out = _dedupeRows_(out);
+        out = _removeDuplicateHighlightsAcrossDays_(out, city);
+        out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+      }else{
+        console.warn(`[CITY ${city}] macro-zone repair skipped because returned rows did not cover all requested days.`);
+      }
+    }
+
+    const weakDays = _getWeakDayNums_(out, perDay);
+    if(weakDays.length){
+      console.warn(`[CITY ${city}] Weak days detected, repairing only those days:`, weakDays);
+      const repairedRows = await _repairWeakDays_(
+        city,
+        dest.days,
+        out,
+        weakDays,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, weakDays)){
+        out = _replaceDaysInRows_(out, repairedRows, weakDays);
+        out = _dedupeRows_(out);
+        out = _removeDuplicateHighlightsAcrossDays_(out, city);
+        out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+      }else{
+        console.warn(`[CITY ${city}] weak-day repair skipped because returned rows did not cover all requested days.`);
+      }
+    }
+
+    out = await _rescueMissingDays_(out);
+
+    out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
+    out = _fixReturnRowDurationConsistency_(out);
+
+    const postWeakDays = _getWeakDayNums_(out, perDay);
+    if(postWeakDays.length){
+      console.warn(`[CITY ${city}] Post-aurora weak days detected:`, postWeakDays);
+
+      const repairedRows = await _repairWeakDays_(
+        city,
+        dest.days,
+        out,
+        postWeakDays,
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, postWeakDays)){
+        out = _replaceDaysInRows_(out, repairedRows, postWeakDays);
+        out = _dedupeRows_(out);
+        out = _removeDuplicateHighlightsAcrossDays_(out, city);
+        out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+        out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
+        out = _fixReturnRowDurationConsistency_(out);
+      }
+    }
+
+    out = await _rescueMissingDays_(out);
+
+    return out;
+  }
+
+  showWOW(true, t('overlayDefault'));
+
+  try{
+    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+
+    if(!Array.isArray(masterDays) || masterDays.length !== dest.days){
+      throw new Error(`MASTER_PLAN_INVALID:${city}`);
+    }
+
+    const blocks = _chunkMasterDays_(masterDays);
+    let stitchedRows = [];
+    let usedHighlightKeys = [];
+    let usedUrbanClusterKeys = [];
+
+    for(let i=0; i<blocks.length; i++){
+      const block = blocks[i];
+      const blockRows = await _generateBlockFromThemes_(
+        city,
+        dest.days,
+        block,
+        perDay,
+        forceReplan,
+        hotel,
+        transport,
+        usedHighlightKeys,
+        usedUrbanClusterKeys
+      );
+
+      if(!blockRows.length){
+        const first = Number(block?.[0]?.day || 1);
+        const last  = Number(block?.[block.length-1]?.day || first);
+        throw new Error(`BLOCK_FAIL:${city}:${first}-${last}`);
+      }
+
+      stitchedRows.push(...blockRows);
+
+      const interimRows = _dedupeRows_(stitchedRows);
+      usedHighlightKeys = _collectUsedHighlightKeys_(interimRows, city);
+      usedUrbanClusterKeys = _collectUsedUrbanClusterKeys_(interimRows, city);
+    }
+
+    stitchedRows = await _postProcessCityRows_(stitchedRows);
+
+    if(!stitchedRows.length){
+      throw new Error(`NO_ROWS_STITCHED:${city}`);
+    }
+
+    if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
+      throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
+    }
+
+    const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
+    pushRows(city, val.allowed, forceReplan);
+
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
+    showWOW(false);
+
+    $resetBtn?.removeAttribute('disabled');
+    if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
+    console.log(`[CITY ${city}] SUCCESS — staged generation applied.`);
+    return;
+
+  }catch(err){
+    console.error(`[CITY ${city}] staged generation failed, falling back to one-shot:`, err);
+  }
+
+  try{
+    const text = await _callPlannerSystemPrompt_(instructions, false);
+    const parsed = parseJSON(text);
+
+    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+      let tmpCity = city;
+      let tmpRows = _extractPlannerRows_(parsed, city);
+
+      tmpRows = await _postProcessCityRows_(tmpRows);
+
+      const fallbackMissingDays = _getMissingDayNums_(tmpRows, dest.days);
+      if(fallbackMissingDays.length){
+        console.warn(`[CITY ${city}] fallback still missing days after post-process:`, fallbackMissingDays);
+      }
+
+      const fallbackWeakDays = _getWeakDayNums_(tmpRows, perDay);
+      if(fallbackWeakDays.length){
+        console.warn(`[CITY ${city}] fallback still has weak days:`, fallbackWeakDays);
+      }
+
+      const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
+      pushRows(tmpCity, val.allowed, forceReplan);
+      renderCityTabs();
+      setActiveCity(tmpCity);
+      renderCityItinerary(tmpCity);
+      showWOW(false);
+
+      $resetBtn?.removeAttribute('disabled');
+      if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+
+      console.log(`[CITY ${city}] SUCCESS — fallback one-shot applied.`);
+      return;
+    }
+  }catch(err2){
+    console.error(`[CITY ${city}] fallback one-shot failed:`, err2);
+  }
+
+  showWOW(false);
+  $resetBtn?.removeAttribute('disabled');
+
+  const msg = getLang()==='es'
+    ? 'No pude completar la generación del itinerario ni con el flujo por etapas ni con el flujo de respaldo. Revisa la consola para identificar el punto de fallo.'
+    : 'I could not complete itinerary generation with either the staged flow or the backup flow. Check the console to identify the failure point.';
+
+  chatMsg(msg, 'ai');
+}
+
+/* =========================================================
    SECTION 15G · Bulk rebalance after changes (add days / requested day trip)
 ========================================================= */
 async function rebalanceWholeCity(city, opts={}){
