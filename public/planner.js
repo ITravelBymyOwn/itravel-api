@@ -2668,6 +2668,7 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
   const loc = _plannerLocalePack_();
 
+  // 🆕 FIX: referencia ligera en notas de otros días plausibles (excepto último)
   Object.keys(byDay).forEach(dayKey=>{
     const day = Number(dayKey);
     if(day >= Number(totalDays || 1)) return;
@@ -2726,7 +2727,7 @@ async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay,
     ? forbiddenUrbanClusters.join(', ')
     : '';
 
-  const buildPrimaryPrompt = () => `
+  const prompt = `
 ${FORMAT}
 **ROLE:** Planner “Astra”. Create itinerary rows ONLY for these days of "${city}" (${totalDays} day/s total):
 ${JSON.stringify(blockDaysObjs)}
@@ -2736,9 +2737,8 @@ Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceRe
 MANDATORY:
 - Generate rows ONLY for these days: ${dayNums.join(', ')}.
 - Every row MUST have day equal to one of these days only.
-- You MUST return usable rows for EVERY requested day in this block.
 - Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
-- Each normal usable day should target 4–7 rows.
+- Each normal usable day should target 4–8 rows.
 - If a day becomes a day trip/excursion, it must still be complete and realistic.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - "from", "to", "transport", "notes" can NEVER be empty.
@@ -2750,115 +2750,51 @@ MANDATORY:
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
-
-BALANCE / COVERAGE:
-- First identify the best remaining highlights, regions, and day-trip circuits around the base city.
-- Then assign them across THESE requested block days so that no requested day is left empty.
-- If this block contains the final day(s), still provide meaningful content for them.
-- Do NOT sacrifice coverage of a requested day just to make another day richer.
-- If a day is shorter, scale it down, but still return useful rows for that day.
-
-ANTI-DUPLICATION:
-- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
-- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name or with only part of the same route.
-- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
-- Even partial reuse (subset of the same route) is FORBIDDEN.
-
-DAY TRIP LOGIC:
-- If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, etc.), group nearby highlights into ONE coherent day when it improves the trip.
-- Avoid single-activity regional days when multiple nearby worthwhile stops exist.
-- Prefer complete regional loops over fragmented visits.
-- If a special activity fits naturally inside a regional day, you may integrate it there.
-
-QUALITY:
+- GLOBAL STRUCTURE (CRITICAL):
+  • First identify ALL major highlights, regions, and day-trip circuits around the city.
+  • Then distribute them across days WITHOUT repetition.
+  • Think in radial exploration from the base city, but balance the trip naturally instead of forcing a rigid nearest-to-farthest order.
+  • Do NOT reuse the same macro-region, circuit, or regional ring on different days.
+  • If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name or with only part of the same route.
+- STRICT CLUSTER RULE:
+  • Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
+  • Even partial reuse (subset of the same route) is FORBIDDEN.
+- DAY TRIP LOGIC (CRITICAL):
+  • If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, etc.), group nearby highlights into ONE coherent day when it improves the trip.
+  • Avoid single-activity regional days when multiple nearby worthwhile stops exist.
+  • Prefer complete regional loops over fragmented visits.
+  • If a special activity (thermal baths, marine life, scenic detour, iconic restaurant stop, etc.) fits naturally inside a regional day, you may integrate it there.
+- BALANCING (CRITICAL):
+  • Distribute major highlights across ALL days.
+  • Avoid concentrating all strong content in the first days and leaving later days with weaker or repeated versions.
+  • If the stay is long, expand outward to additional worthwhile regional rings before repeating previously used ones.
+- DUPLICATION PREVENTION (STRICT):
+  • If a region, route, or circuit has already been used, it MUST NOT appear again under any variation.
+  • This includes renamed, partial, overlapping, or disguised repetitions of the same macro-area.
 - Keep rows in chronological order with NO overlaps.
 - If there is a return row, place it as the FINAL row.
 - No text outside JSON.
 `.trim();
 
-  const buildRetryPrompt = (missingDays=[]) => `
-${FORMAT}
-Return ONLY valid Format B JSON for "${city}".
-
-Generate rows ONLY for these day numbers: ${missingDays.join(', ')}.
-You MUST return at least 3 usable rows for EACH requested day.
-No markdown. No explanations.
-
-Rules:
-- "activity" = "Destination – <Specific sub-stop>"
-- all fields required
-- real places in "from" and "to"
-- chronological order
-- no overlaps
-- if excursion/day trip exists, end with "<Region> – Return to ${city}"
-- use remaining unused highlights/areas
-- keep final day meaningful
-- windows reference: ${JSON.stringify(perDay.filter(x => missingDays.includes(Number(x?.day))))}
-- hotel/base: ${JSON.stringify(hotel || '')}
-- transport preference: ${JSON.stringify(transport || 'recommend me')}
-`.trim();
-
-  async function _requestBlockRows_(promptText){
-    const ans = await _callPlannerSystemPrompt_(promptText, false);
-    const parsed = parseJSON(ans);
-
-    if(!(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day))){
-      return [];
-    }
-
-    const extracted = _extractPlannerRows_(parsed, city);
-    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
-    return Array.isArray(forced) ? forced : [];
-  }
-
-  function _missingDaysFromRows_(rows=[]){
-    const set = new Set((rows || []).map(r => Number(r?.day)));
-    return dayNums.filter(d => !set.has(Number(d)));
-  }
-
   const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
   console.log(`[BLOCK ${label}] Requesting rows...`);
 
-  let forced = [];
-  try{
-    forced = await _requestBlockRows_(buildPrimaryPrompt());
-  }catch(err){
-    console.warn(`[BLOCK ${label}] Primary request failed:`, err);
-    forced = [];
-  }
+  const ans = await _callPlannerSystemPrompt_(prompt, false);
+  const parsed = parseJSON(ans);
 
-  if(_hasUsableRowsForAllBlockDays_(forced, dayNums)){
-    console.log(`[BLOCK ${label}] OK`);
-    return forced;
-  }
+  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
+    const extracted = _extractPlannerRows_(parsed, city);
+    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
 
-  const missingDays = _missingDaysFromRows_(forced);
-  if(missingDays.length){
-    console.warn(`[BLOCK ${label}] Missing requested days after primary pass, retrying only missing days:`, missingDays);
+    console.log(`[BLOCK ${label}] Parsed rows:`, forced.length, forced);
 
-    let retryRows = [];
-    try{
-      retryRows = await _requestBlockRows_(buildRetryPrompt(missingDays));
-    }catch(err2){
-      console.warn(`[BLOCK ${label}] Retry request failed:`, err2);
-      retryRows = [];
+    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
+      console.log(`[BLOCK ${label}] OK`);
+      return forced;
     }
 
-    const merged = _dedupeRows_([...(forced || []), ...(retryRows || [])]);
-    if(_hasUsableRowsForAllBlockDays_(merged, dayNums)){
-      console.log(`[BLOCK ${label}] OK after retry`);
-      return merged;
-    }
-
-    if(merged.length){
-      console.warn(`[BLOCK ${label}] Partial rows returned after retry; returning partial result for downstream repair.`);
-      return merged;
-    }
-  }
-
-  if(forced.length){
-    console.warn(`[BLOCK ${label}] Returning partial result for downstream repair.`);
-    return forced;
+    console.warn(`[BLOCK ${label}] FAIL — missing rows for some block days.`);
+    return [];
   }
 
   console.warn(`[BLOCK ${label}] FAIL — invalid JSON or empty parse.`);
