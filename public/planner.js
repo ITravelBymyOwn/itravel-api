@@ -2882,25 +2882,37 @@ ${forbiddenText ? `- Do NOT repeat these main highlights already used on other d
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
 
 CANDIDATE UNIVERSE (CRITICAL):
-- Starting from the base city, first identify the iconic places and day trips that are plausibly visitable within up to about 5 hours one-way by car as a MAXIMUM exploration universe.
-- This 5-hour limit is NOT an automatic selection rule. It is only the outer exploration boundary.
-- After identifying the universe of candidates, group them into natural clusters / regions / routes.
-- Then select only the candidates that make the most sense for the number of available days, keeping the trip balanced and coherent.
+- Starting from the base city, first identify the broadest plausible universe of iconic places, regional routes, scenic areas, day trips, near-city experiences, harbor/marine experiences, spa/wellness options, food/cultural options, viewpoint options, and local half-day combinations that are realistically visitable from the base.
+- Explore this universe outward in radial tiers before selecting:
+  • Tier A: city / near-base / urban / harbor / waterfront / museums / food / local viewpoints
+  • Tier B: short regional escapes and near-base nature
+  • Tier C: medium day trips / coherent regional loops
+  • Tier D: long but still plausible day trips
+  • Tier E: outer exploration boundary up to about 5 hours one-way by car ONLY as a maximum candidate horizon
+- This 5-hour boundary is NOT an automatic inclusion rule. It is only the outer exploration universe.
+- Build a rich candidate pool first. Only after that, select what best fits the trip length.
 - Leave farther or lower-value candidates OUT if they do not add enough value for this trip length.
 
 RADIAL / BALANCE LOGIC:
-- First identify the best remaining highlights, regions, and day-trip circuits around the base city.
+- First identify the BEST REMAINING candidate pool around the base city after excluding already-used highlights/clusters.
+- Then group candidates into natural clusters / regions / routes / local packs.
 - Then assign them across THESE requested block days so that no requested day is left empty.
 - If this block contains the final day(s), still provide meaningful content for them.
 - Do NOT sacrifice coverage of a requested day just to make another day richer.
 - Avoid front-loading all strong content into the first days and leaving weak leftovers later.
-- If no strong far regional circuit remains, prefer meaningful local / near-base content over a weak sparse day.
+- If no strong far regional circuit remains, prefer a rich local / near-base / harbor / museum / food / scenic / marina / cultural day over recycling an already-used regional cluster.
+- The planner MUST always prefer an UNUSED smaller cluster or a rich local combination over a repeated major regional cluster.
 
-ANTI-DUPLICATION:
+ANTI-DUPLICATION (VERY STRICT):
 - Do NOT reuse the same macro-region, circuit, or regional ring on different days.
-- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name or with only part of the same route.
+- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name, a subset of the same route, nearby supporting stops, scenic detours, or partial cluster fragments.
 - Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
 - Even partial reuse (subset of the same route) is FORBIDDEN.
+- If Golden Circle is already used, do NOT reuse Thingvellir / Pingvallavatn / Öxarárfoss / Geysir / Gullfoss / Kerið as another day.
+- If South Coast is already used, do NOT reuse Seljalandsfoss / Skógafoss / Vík / Reynisfjara / Dyrhólaey as another day.
+- If Reykjanes / Blue Lagoon is already used, do NOT reuse Blue Lagoon / Seltún / Reykjanes lighthouse as another day.
+- If Snæfellsnes is already used, do NOT reuse Kirkjufell / Arnarstapi / Hellnar / Djúpalónssandur / Snæfellsjökull as another day.
+- Use this anti-duplication rule as a general global principle, not just for these examples.
 
 DAY TRIP LOGIC:
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -2931,8 +2943,11 @@ MANDATORY:
 - You MUST return useful rows for EVERY requested missing day.
 - For a normal usable day, target 4–6 rows.
 - If the missing day is the final day of the trip, it must still be meaningful; do NOT make it an aurora-only day unless the user explicitly requested that.
-- Use remaining unused iconic places / local highlights / harbor / old town / waterfront / food / museum / scenic / marine / spa-adjacent options when they fit naturally.
-- Do NOT repeat macro-regions already used.
+- Use the remaining UNUSED candidate universe first, thinking radially from the base city:
+  • local / urban / harbor / waterfront / museum / food / scenic / cultural combinations
+  • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
+  • then unused regional clusters only if they are genuinely new
+- Do NOT repeat macro-regions already used, including partial reuse of sub-stops from the same cluster.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - all fields required
 - real places in "from" and "to"
