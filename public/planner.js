@@ -3205,6 +3205,50 @@ QUALITY / MAXIMIZE EXPERIENCE:
     return missing;
   }
 
+  async function _safeValidateRows_(rows=[]){
+    try{
+      return await validateRowsWithAgent(city, rows, baseDate);
+    }catch(err){
+      console.error(`[CITY ${city}] validateRowsWithAgent failed, using unvalidated rows:`, err);
+      return { allowed: rows };
+    }
+  }
+
+  async function _repairRequestedDaysIndividually_(rows=[], dayNums=[]){
+    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).sort((a,b)=>a-b);
+    if(!targets.length) return rows;
+
+    let out = rows.slice();
+
+    for(const day of targets){
+      try{
+        const repairedRows = await _repairWeakDays_(
+          city,
+          dest.days,
+          out,
+          [day],
+          perDay,
+          forceReplan,
+          hotel,
+          transport
+        );
+
+        if(repairedRows.length && _rowsCoverRequestedDays_(repairedRows, [day])){
+          out = _replaceDaysInRows_(out, repairedRows, [day]);
+          out = _dedupeRows_(out);
+          out = _removeDuplicateHighlightsAcrossDays_(out, city);
+          out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+        }else{
+          console.warn(`[CITY ${city}] individual repair skipped for day ${day} because returned rows did not cover that day.`);
+        }
+      }catch(err){
+        console.warn(`[CITY ${city}] individual repair failed for day ${day}:`, err);
+      }
+    }
+
+    return out;
+  }
+
   async function _rescueMissingDays_(rows=[]){
     const missingDays = _getMissingDayNums_(rows, dest.days);
     if(!missingDays.length) return rows;
@@ -3230,8 +3274,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
       return merged;
     }
 
-    console.warn(`[CITY ${city}] Missing-day rescue did not fully cover requested days.`);
-    return rows;
+    console.warn(`[CITY ${city}] Missing-day rescue did not fully cover requested days. Trying individually...`);
+    return await _repairRequestedDaysIndividually_(rows, missingDays);
   }
 
   async function _postProcessCityRows_(rows=[]){
@@ -3263,7 +3307,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
       }
     }
 
-    const weakDays = _getWeakDayNums_(out, perDay);
+    let weakDays = _getWeakDayNums_(out, perDay);
     if(weakDays.length){
       console.warn(`[CITY ${city}] Weak days detected, repairing only those days:`, weakDays);
       const repairedRows = await _repairWeakDays_(
@@ -3283,7 +3327,8 @@ QUALITY / MAXIMIZE EXPERIENCE:
         out = _removeDuplicateHighlightsAcrossDays_(out, city);
         out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
       }else{
-        console.warn(`[CITY ${city}] weak-day repair skipped because returned rows did not cover all requested days.`);
+        console.warn(`[CITY ${city}] weak-day repair skipped because returned rows did not cover all requested days. Trying individually...`);
+        out = await _repairRequestedDaysIndividually_(out, weakDays);
       }
     }
 
@@ -3292,7 +3337,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
     out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
     out = _fixReturnRowDurationConsistency_(out);
 
-    const postWeakDays = _getWeakDayNums_(out, perDay);
+    let postWeakDays = _getWeakDayNums_(out, perDay);
     if(postWeakDays.length){
       console.warn(`[CITY ${city}] Post-aurora weak days detected:`, postWeakDays);
 
@@ -3314,10 +3359,23 @@ QUALITY / MAXIMIZE EXPERIENCE:
         out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
         out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
         out = _fixReturnRowDurationConsistency_(out);
+      }else{
+        console.warn(`[CITY ${city}] post-aurora weak-day repair skipped because returned rows did not cover all requested days. Trying individually...`);
+        out = await _repairRequestedDaysIndividually_(out, postWeakDays);
+        out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
+        out = _fixReturnRowDurationConsistency_(out);
       }
     }
 
     out = await _rescueMissingDays_(out);
+
+    // one last light pass in case individual repairs changed quality
+    const finalWeakDays = _getWeakDayNums_(out, perDay);
+    if(finalWeakDays.length && finalWeakDays.length <= 2){
+      out = await _repairRequestedDaysIndividually_(out, finalWeakDays);
+      out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
+      out = _fixReturnRowDurationConsistency_(out);
+    }
 
     return out;
   }
@@ -3373,7 +3431,7 @@ QUALITY / MAXIMIZE EXPERIENCE:
       throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
     }
 
-    const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
+    const val = await _safeValidateRows_(stitchedRows);
     pushRows(city, val.allowed, forceReplan);
 
     renderCityTabs();
@@ -3404,14 +3462,19 @@ QUALITY / MAXIMIZE EXPERIENCE:
       const fallbackMissingDays = _getMissingDayNums_(tmpRows, dest.days);
       if(fallbackMissingDays.length){
         console.warn(`[CITY ${city}] fallback still missing days after post-process:`, fallbackMissingDays);
+        tmpRows = await _repairRequestedDaysIndividually_(tmpRows, fallbackMissingDays);
       }
 
       const fallbackWeakDays = _getWeakDayNums_(tmpRows, perDay);
       if(fallbackWeakDays.length){
         console.warn(`[CITY ${city}] fallback still has weak days:`, fallbackWeakDays);
+        tmpRows = await _repairRequestedDaysIndividually_(tmpRows, fallbackWeakDays);
       }
 
-      const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
+      tmpRows = _injectAuroraOptionRows_(city, tmpRows, dest.days, perDay, baseDate);
+      tmpRows = _fixReturnRowDurationConsistency_(tmpRows);
+
+      const val = await _safeValidateRows_(tmpRows);
       pushRows(tmpCity, val.allowed, forceReplan);
       renderCityTabs();
       setActiveCity(tmpCity);
