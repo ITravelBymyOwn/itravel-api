@@ -2897,6 +2897,21 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - Prefer routes and combinations that create a WOW result: iconic, coherent, memorable, visually strong, and better than a generic tourist plan.
 - The candidate discovery must come from the destination itself, not from pre-existing template routes.
 
+LONG-STAY EXPANSION / EXTERNAL CLUSTERS (CRITICAL):
+- For longer stays, do NOT keep orbiting the base city once the strongest urban clusters have already been substantially covered.
+- As trip length increases, you must proactively open strong external clusters / day trips / regional loops that are clearly viable from the base city before repeating similar urban packs.
+- For stays of around 6+ days, it is usually NOT optimal to spend almost all days inside the same city unless the destination is exceptionally dense and the city still offers clearly distinct, high-value, non-overlapping clusters.
+- If the base city is already substantially covered, prefer a NEW viable regional cluster over another similar old-town / food / shopping / museum repetition.
+- Do NOT assume the best order is strictly nearest-to-farthest. Arrange days in the best strategic order for the overall trip quality.
+- The goal is not radial sequence; the goal is best overall itinerary quality.
+- In long stays, external clusters should receive strong consideration whenever they are realistically reachable and improve the trip.
+
+URBAN SATURATION CONTROL (CRITICAL):
+- Treat the historic center / old town / main shopping spine / main food market / waterfront core as consumable clusters.
+- Once a city-core cluster has already been substantially used, do NOT recycle it as a "new" day unless there is a clearly different angle with high value.
+- Avoid ending long trips with multiple semantically similar city-center days that revisit the same urban core through slightly different wording.
+- If two candidate city days would feel too similar to a human traveler, replace one of them with a stronger external cluster or a clearly different premium city pack.
+
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
 - Think in 2 levels:
@@ -2947,6 +2962,7 @@ RADIAL / BALANCE LOGIC:
 - If no strong far regional circuit remains, prefer a rich local / near-base / waterfront / museum / food / scenic / cultural day over recycling an already-used regional cluster.
 - The planner MUST always prefer an UNUSED smaller cluster or a rich local combination over a repeated major regional cluster.
 - For later days of the trip, prioritize high-quality secondary clusters, premium city packs, scenic closures, or layered cultural/food/waterfront combinations instead of weak filler.
+- If a long trip from the base city still has viable external clusters remaining, prefer those before repeating similar core-city days.
 
 ANTI-DUPLICATION (VERY STRICT, GLOBAL):
 - Do NOT reuse the same macro-region, circuit, or regional ring on different days.
@@ -2955,6 +2971,7 @@ ANTI-DUPLICATION (VERY STRICT, GLOBAL):
 - Even partial reuse (subset of the same route) is FORBIDDEN.
 - Apply this as a global principle for ANY destination in the world.
 - If a region has already been substantially consumed, do not recycle its internal highlights as a “new” day.
+- Apply the same principle to urban core clusters: do not create fake novelty by renaming substantially overlapping city-center content.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -2963,6 +2980,7 @@ DAY TRIP LOGIC (GLOBAL):
 - If a special activity fits naturally inside a regional day, you may integrate it there.
 - A proper day trip should normally include 4–8 useful rows, but for dense and highly visitable clusters it may expand to around 8–12 rows when that clearly improves the guide and still remains realistic.
 - For powerful regional days, make the route feel like a true expertly designed circuit, not just a list of stops.
+- In medium and long trips, clearly viable day trips should be considered a major source of value, not a last resort.
 
 QUALITY / RHYTHM:
 - Avoid giant dead gaps in the middle of a normal full day unless they are justified by a genuinely long transfer or a long immersive activity.
@@ -2994,6 +3012,7 @@ MANDATORY:
   • local / urban / waterfront / museum / food / scenic / cultural combinations
   • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
   • then unused regional clusters only if they are genuinely new
+- In longer trips, if there are still strong viable external clusters / day trips remaining, prefer them before repeating similar city-core content.
 - The replacement day must be built from what the destination still offers, not from a template route.
 - For the chosen remaining cluster or local pack, also think in micro-stops:
   • generate mentally 5–15 possible micro-stops if the destination genuinely offers them
@@ -3001,6 +3020,7 @@ MANDATORY:
 - If the chosen remaining cluster is rich and compact, include more real rows.
 - Also enrich the FIRST row notes with an ordered micro-guide when useful.
 - Do NOT repeat macro-regions already used, including partial reuse of sub-stops from the same cluster.
+- Do NOT solve a long missing-day problem by repeating semantically similar old-town / market / shopping / central-walk days unless the city still has clearly distinct unused premium clusters.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - all fields required
 - real places in "from" and "to"
