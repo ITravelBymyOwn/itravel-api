@@ -1987,59 +1987,120 @@ function _rowsCoverRequestedDays_(rows=[], requestedDays=[]){
 }
 
 /* =========================================================
-   INTERNAL · semantic cluster normalization (GLOBAL FIX)
+   SECTION 15C · DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
+========================================================= */
+function _normalizeHighlightKey_(value=''){
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[þ]/g, 'th')
+    .replace(/[ð]/g, 'd')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/* =========================================================
+   INTERNAL · semantic cluster normalization (GLOBAL)
+   (Use ONLY for macro-zone logic, not for highlight de-dupe)
 ========================================================= */
 function _normalizeSemanticClusterKey_(value=''){
   const s = _normalizeHighlightKey_(value);
   if(!s) return '';
 
-  // 🆕 GLOBAL: detect generic regional clusters (NOT hardcoded places)
-
-  // Detect typical "macro-region" patterns
+  // Generic non-geographic placeholders / non-clusters
   if(
-    /\b(coast|costa|peninsula|península|region|región|valley|valle|mountain|montaña|park|parque|route|ruta|loop|circuit|island|isla|lake|lago|fjord|fiordo)\b/.test(s)
-  ){
-    return s;
-  }
-
-  // Detect "day trip" style names
-  if(
-    /\bday trip\b/.test(s) ||
-    /\bexcursion\b/.test(s) ||
-    /\bexcursión\b/.test(s) ||
-    /\btour\b/.test(s)
-  ){
-    return s;
-  }
-
-  // If it's just city-like, ignore as macro
-  return s;
-}
-
-/* =========================================================
-   INTERNAL · urban cluster extraction (GLOBAL FIX)
-========================================================= */
-function _extractUrbanClusterKey_(row={}, city=''){
-  const activity = String(row?.activity || '').trim();
-  const to = String(row?.to || '').trim();
-
-  const parts = activity.split(/\s+[–-]\s+/);
-  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
-
-  const candidate = _normalizeHighlightKey_(to || suffix);
-
-  if(!candidate) return '';
-
-  // 🆕 GLOBAL FILTER: remove non-urban noise
-  if(
-    /^(hotel|downtown|city area|restaurant|restaurante|lunch|dinner|return to|regreso a)$/.test(candidate)
+    /^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner|planning|return to|regreso a|departure from|salida desde)$/.test(s)
   ){
     return '';
   }
 
-  // 🆕 DO NOT treat large regions as urban clusters
+  // Typical macro-zone / regional-route patterns (GLOBAL)
   if(
-    /\b(coast|peninsula|valley|mountain|park|route|island|lake|fjord)\b/.test(candidate)
+    /\b(peninsula|península|coast|costa|route|ruta|loop|circuit|circuito|circle|circulo|círculo|island|isla|archipelago|archipielago|archipiélago|fjord|fiordo|lake|lago|lagoon|laguna|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|park|parque|national park|parque nacional|district|distrito|region|región|canyon|cañon|cañón|wine area|wine region|harbor district|old town|historic center|centro historico|centro histórico|waterfront)\b/.test(s)
+  ){
+    return s;
+  }
+
+  // Generic excursion/tour/day-trip labels are too generic by themselves
+  if(/^(day trip|excursion|excursión|tour|nature excursion|excursion a la naturaleza)$/.test(s)){
+    return '';
+  }
+
+  return s;
+}
+
+/* =========================================================
+   INTERNAL · specific place normalization
+   (Use for highlight de-dupe; keep this SPECIFIC, not macro)
+========================================================= */
+function _normalizeSpecificPlaceKey_(value=''){
+  let s = _normalizeHighlightKey_(value);
+  if(!s) return '';
+
+  s = s
+    .replace(/\bdeparture from .*$/g, '')
+    .replace(/\breturn to .*$/g, '')
+    .replace(/\bregreso a .*$/g, '')
+    .replace(/\bsalida desde .*$/g, '')
+    .trim();
+
+  return s;
+}
+
+function _extractHighlightKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const from = String(row?.from || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  let candidate = '';
+
+  // For exact highlight de-dupe, prefer the SPECIFIC sub-stop, not the macro label
+  if(to){
+    candidate = to;
+  }else if(suffix && suffix !== cityKey){
+    candidate = suffix;
+  }else if(from && _normalizeHighlightKey_(from) !== cityKey){
+    candidate = from;
+  }else{
+    candidate = activity;
+  }
+
+  const normalized = _normalizeSpecificPlaceKey_(candidate);
+  if(!normalized) return '';
+
+  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning|dark area|zona de observacion de auroras|aurora viewing area)$/.test(normalized)){
+    return '';
+  }
+
+  return normalized;
+}
+
+function _extractUrbanClusterKey_(row={}, city=''){
+  const activity = String(row?.activity || '').trim();
+  const to = String(row?.to || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
+
+  const parts = activity.split(/\s+[–-]\s+/);
+  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
+
+  // If clearly a macro-region outside the base city, do not treat as urban cluster
+  const semanticPrefix = _normalizeSemanticClusterKey_(prefix);
+  if(prefix && prefix !== cityKey && semanticPrefix) return '';
+
+  let candidate = _normalizeHighlightKey_(to || suffix);
+  if(!candidate) return '';
+
+  if(/^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner|return to|regreso a)$/.test(candidate)) return '';
+
+  // Global filter: do not treat obvious regional labels as urban clusters
+  if(
+    /\b(peninsula|península|coast|costa|route|ruta|loop|circuit|circuito|circle|circulo|círculo|island|isla|fjord|fiordo|lake|lago|lagoon|laguna|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|park|parque|district|distrito|region|región|canyon|cañon|cañón)\b/.test(candidate)
   ){
     return '';
   }
@@ -2047,45 +2108,165 @@ function _extractUrbanClusterKey_(row={}, city=''){
   return candidate;
 }
 
+function _collectUsedHighlightKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _collectUsedUrbanClusterKeys_(rows=[], city=''){
+  const out = new Set();
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
+    if(key) out.add(key);
+  }
+  return Array.from(out);
+}
+
+function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractHighlightKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    // Keep only exact place duplicates on the first day they appeared.
+    // Do NOT use this to collapse whole macro-zones; that is handled below.
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
+function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
+  const firstDayByKey = new Map();
+  const out = [];
+
+  for(const r of (rows || [])){
+    const key = _extractUrbanClusterKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!key){
+      out.push(r);
+      continue;
+    }
+
+    if(!firstDayByKey.has(key)){
+      firstDayByKey.set(key, day);
+      out.push(r);
+      continue;
+    }
+
+    const firstDay = firstDayByKey.get(key);
+
+    if(firstDay === day){
+      out.push(r);
+    }
+  }
+
+  return out;
+}
+
 /* =========================================================
-   SECTION 15C.2 · MACRO-ZONE DETECTION (GLOBAL FIX)
+   SECTION 15C.2 · MACRO-ZONE DETECTION (GLOBAL)
 ========================================================= */
 function _extractMacroZoneKey_(row={}, city=''){
   const activity = String(row?.activity || '').trim();
   const to = String(row?.to || '').trim();
   const from = String(row?.from || '').trim();
   const notes = String(row?.notes || '').trim();
+  const cityKey = _normalizeHighlightKey_(city);
 
   const parts = activity.split(/\s+[–-]\s+/);
   const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
+  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
 
-  // 🆕 GLOBAL detection based on semantic patterns
+  // Direct semantic read from prefix when present
   let semantic = _normalizeSemanticClusterKey_(prefix);
 
-  // If prefix is weak, infer from content
-  if(!semantic || semantic === _normalizeHighlightKey_(city)){
-    semantic = _normalizeSemanticClusterKey_(
-      `${to} ${from} ${notes}`
-    );
+  // If prefix is generic or city-like, infer from concrete stops / notes
+  const genericPrefixes = new Set([
+    _normalizeSemanticClusterKey_(cityKey),
+    'day trip',
+    'excursion',
+    'excursión',
+    'tour',
+    'nature excursion',
+    'excursion a la naturaleza',
+    'planning'
+  ]);
+
+  if(!semantic || genericPrefixes.has(semantic) || semantic === cityKey){
+    semantic = _normalizeSemanticClusterKey_(`${to} ${from} ${suffix} ${notes}`);
   }
 
   if(!semantic) return '';
+  if(semantic === cityKey) return '';
+  if(/^(return to|regreso a|departure from|salida desde)$/.test(semantic)) return '';
 
-  // 🆕 filter non-macro
+  // Only keep real macro-zones / regional circuits
   if(
-    /^(hotel|downtown|city area|restaurant|lunch|dinner|return to|regreso a)$/.test(semantic)
-  ){
-    return '';
-  }
-
-  // 🆕 ONLY consider macro zones if they look like regions
-  if(
-    /\b(coast|peninsula|valley|mountain|park|route|island|lake|fjord|region|loop|circuit)\b/.test(semantic)
+    /\b(peninsula|península|coast|costa|route|ruta|loop|circuit|circuito|circle|circulo|círculo|island|isla|archipelago|archipielago|archipiélago|fjord|fiordo|lake|lago|lagoon|laguna|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|park|parque|national park|parque nacional|district|distrito|region|región|canyon|cañon|cañón|wine area|wine region)\b/.test(semantic)
   ){
     return semantic;
   }
 
   return '';
+}
+
+function _findRepeatedMacroZoneDays_(rows=[], city=''){
+  const firstDayByZone = new Map();
+  const repeatedDays = new Set();
+
+  for(const r of (rows || [])){
+    const zone = _extractMacroZoneKey_(r, city);
+    const day = Number(r?.day || 1);
+
+    if(!zone) continue;
+
+    if(!firstDayByZone.has(zone)){
+      firstDayByZone.set(zone, day);
+      continue;
+    }
+
+    const firstDay = firstDayByZone.get(zone);
+
+    if(firstDay !== day){
+      repeatedDays.add(day);
+    }
+  }
+
+  return Array.from(repeatedDays).sort((a,b)=>a-b);
+}
+
+function _collectUsedMacroZoneKeys_(rows=[], city=''){
+  const out = new Set();
+
+  for(const r of (rows || [])){
+    const k = _extractMacroZoneKey_(r, city);
+    if(k) out.add(k);
+  }
+
+  return Array.from(out);
 }
 
 /* =========================================================
