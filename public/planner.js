@@ -3004,6 +3004,9 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - Leave farther or lower-value candidates OUT if they do not add enough value for this trip length.
 - Prefer routes and combinations that create a WOW result: iconic, coherent, memorable, visually strong, and better than a generic tourist plan.
 - The candidate discovery must come from the destination itself, not from pre-existing template routes.
+- Before reusing an urban cluster or a second-tier city pack, you MUST explicitly evaluate whether there are still unused worthwhile regional day trips / rings / nearby towns / scenic routes reachable from the base.
+- For trips of 5 or more days, if the destination genuinely supports strong day trips, you MUST include 1–3 of them before recycling urban content.
+- Failing to include obvious strong day trips in a long stay should be treated as a low-quality itinerary.
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3035,6 +3038,8 @@ MICRO-STOPS / DENSITY (CRITICAL):
 - When the destination is exceptionally rich, prefer a denser but still readable and realistic day over a weak sparse day.
 - A normal usable day should usually have at least 4 meaningful rows unless the time window is clearly short.
 - A short day should still usually have at least 3 meaningful rows unless the user window is extremely limited.
+- For iconic regional day trips / scenic routes / peninsulas / coastlines / heritage towns, the micro-stops must NOT remain only conceptual: the final itinerary should usually include 5–8 REAL sub-stops / rows when the geography genuinely supports them.
+- The optional micro-guide in notes can enrich the route, but it does NOT replace the need for enough real rows in the itinerary itself.
 
 MICRO-GUIDE ENRICHMENT (CRITICAL):
 - For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
@@ -3100,6 +3105,7 @@ DAY TRIP LOGIC (GLOBAL):
 - In trips of 5 or more days, actively prioritize worthwhile day trips / regional circuits when the destination genuinely offers them.
 - Do NOT leave a long trip mostly urban if the destination is widely known for strong day trips reachable from the base.
 - A day trip should feel fully developed, not like a thin placeholder with only 2–3 stops.
+- A real day trip should end with an explicit return row in the format "<Macro-tour> – Return to <base city>".
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
@@ -3143,6 +3149,7 @@ QUALITY / RHYTHM:
 - Final days should feel like a strong closure, not leftover filler.
 - Prioritize iconic endings, emotional endings, scenic endings, or premium cultural/food/waterfront closures when appropriate.
 - The overall result should feel WOW: premium, specific, memorable, realistic, and smarter than a standard travel planner.
+- When the final day is still urban, it must feel materially different from earlier urban days and avoid obvious recycling of the same cluster.
 
 FAIL-SAFE GENERATION (CRITICAL):
 - Under NO circumstances should a requested day return:
@@ -3183,6 +3190,7 @@ MANDATORY:
   • local / urban / waterfront / museum / food / scenic / cultural combinations
   • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
   • then unused regional clusters only if they are genuinely new
+- For trips of 5 or more days, before choosing another urban day, explicitly evaluate whether there are still strong unused day trips / nearby towns / regional scenic circuits available from the base.
 - The replacement day must be built from what the destination still offers, not from a template route.
 - For the chosen remaining cluster or local pack, also think in micro-stops:
   • generate mentally 5–15 possible micro-stops if the destination genuinely offers them
@@ -3193,6 +3201,8 @@ MANDATORY:
 - Prefer UNUSED clusters first, but if the destination has truly limited variety, a meaningfully distinct internal route is acceptable over leaving the day weak.
 - If the destination genuinely offers strong day trips / regional circuits and this is a long trip, prefer using one of those before falling back to a thin urban day.
 - A valid missing-day rebuild should usually produce at least 3 meaningful rows for a short day and at least 4 meaningful rows for a normal day.
+- For iconic regional missing-day rebuilds, prefer 5–8 real sub-stops / rows when the geography genuinely supports them.
+- The micro-guide in notes can enrich the route but must not replace real rows in the itinerary.
 - If the chosen missing day is spa/thermal/relax-based, place that anchor at the start or end of the day and leave at least about 3 effective hours on site.
 - Keep daylight-sensitive activities in daylight-friendly hours.
 - If excursion/day trip exists, end with "<Region> – Return to ${city}".
