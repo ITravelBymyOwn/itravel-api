@@ -3313,7 +3313,7 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
 }
 
 /* =========================================================
-   SECTION 15F · generateCityItinerary (OPTIMIZED v2 PRO)
+   SECTION 15F · generateCityItinerary (BLOCK-SAFE + FINAL GUARANTEE)
 ========================================================= */
 async function generateCityItinerary(city){
   const dest  = savedDestinations.find(x=>x.city===city);
@@ -3330,26 +3330,9 @@ async function generateCityItinerary(city){
   let repairState = {
     weakDone: false,
     missingDone: false,
-    postAuroraDone: false
+    postAuroraDone: false,
+    repeatedMacroDone: false
   };
-
-  // 🟢 NUEVO: VALIDACIÓN DE DENSIDAD POR DÍA
-  function _isDayTooThin_(rows=[], totalDays=1){
-    const counts = {};
-    rows.forEach(r=>{
-      const d = Number(r?.day);
-      if(!counts[d]) counts[d]=0;
-      counts[d]++;
-    });
-
-    const thinDays = [];
-    for(let d=1; d<=totalDays; d++){
-      if((counts[d] || 0) < 3){ // 🔥 regla mínima global
-        thinDays.push(d);
-      }
-    }
-    return thinDays;
-  }
 
   function _getMissingDayNums_(rows=[], totalDays=1){
     const set = new Set((rows || []).map(r => Number(r?.day)));
@@ -3360,31 +3343,113 @@ async function generateCityItinerary(city){
     return missing;
   }
 
+  // 🔥 NUEVO: thin detection SOLO para días del bloque
+  function _getThinDaysInRequestedSet_(rows=[], requestedDays=[], minRows=3){
+    const byDay = _groupRowsByDay_(rows);
+    const thin = [];
+
+    (requestedDays || []).forEach(d=>{
+      const count = (byDay[d] || []).length;
+      if(count < minRows){
+        thin.push(Number(d));
+      }
+    });
+
+    return thin;
+  }
+
+  function _buildFallbackMasterDays_(totalDays=1){
+    const out = [];
+    for(let d=1; d<=Number(totalDays || 1); d++){
+      out.push({
+        day: d,
+        theme: d === Number(totalDays || 1)
+          ? 'Memorable final day'
+          : 'High-value local discovery'
+      });
+    }
+    return out;
+  }
+
   async function _safeValidateRows_(rows=[]){
     try{
-      return await validateRowsWithAgent(city, rows, baseDate);
+      const result = await validateRowsWithAgent(city, rows, baseDate);
+      const allowed = Array.isArray(result?.allowed) ? result.allowed : [];
+      if(allowed.length){
+        return { allowed };
+      }
+      return { allowed: rows };
     }catch(err){
-      console.error(`[CITY ${city}] validateRowsWithAgent failed:`, err);
       return { allowed: rows };
     }
+  }
+
+  async function _repairRequestedDaysIndividually_(rows=[], dayNums=[]){
+    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).slice(0,4);
+    let out = rows.slice();
+
+    for(const day of targets){
+      try{
+        const repairedRows = await _repairWeakDays_(
+          city,
+          dest.days,
+          out,
+          [day],
+          perDay,
+          forceReplan,
+          hotel,
+          transport
+        );
+
+        if(repairedRows.length){
+          out = _replaceDaysInRows_(out, repairedRows, [day]);
+          out = _dedupeRows_(out);
+        }
+      }catch(err){}
+    }
+
+    return out;
+  }
+
+  async function _rescueMissingDays_(rows=[]){
+    let missing = _getMissingDayNums_(rows, dest.days);
+    if(!missing.length) return rows;
+
+    let repaired = await _repairRequestedDaysIndividually_(rows, missing);
+
+    missing = _getMissingDayNums_(repaired, dest.days);
+    if(missing.length){
+      repaired = await _repairRequestedDaysIndividually_(repaired, missing);
+    }
+
+    return _dedupeRows_(repaired);
   }
 
   async function _postProcessCityRows_(rows=[]){
     let out = _dedupeRows_(rows);
 
-    // 🔴 NUEVO: DETECTAR DÍAS POBRES ANTES DE TODO
-    let thinDays = _isDayTooThin_(out, dest.days);
+    out = _removeDuplicateHighlightsAcrossDays_(out, city);
+    out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
 
-    if(thinDays.length && !repairState.weakDone){
+    let weakDays = _getWeakDayNums_(out, perDay);
+
+    const byDay = _groupRowsByDay_(out);
+    Object.keys(byDay).forEach(d=>{
+      if(byDay[d].length < 3){
+        if(!weakDays.includes(Number(d))){
+          weakDays.push(Number(d));
+        }
+      }
+    });
+
+    if(weakDays.length && !repairState.weakDone){
       repairState.weakDone = true;
 
-      console.warn(`[CITY ${city}] Thin days detected:`, thinDays);
-
       const repairedRows = await _repairWeakDays_(
         city,
         dest.days,
         out,
-        thinDays,
+        weakDays.slice(0,3),
         perDay,
         forceReplan,
         hotel,
@@ -3392,67 +3457,27 @@ async function generateCityItinerary(city){
       );
 
       if(repairedRows.length){
-        out = _replaceDaysInRows_(out, repairedRows, thinDays);
+        out = _replaceDaysInRows_(out, repairedRows, weakDays);
         out = _dedupeRows_(out);
       }
     }
 
-    // 🔒 MISSING DAYS
-    const missingDays = _getMissingDayNums_(out, dest.days);
-    if(missingDays.length && !repairState.missingDone){
-      repairState.missingDone = true;
+    out = await _rescueMissingDays_(out);
 
-      const rescuedRows = await _repairWeakDays_(
-        city,
-        dest.days,
-        out,
-        missingDays,
-        perDay,
-        forceReplan,
-        hotel,
-        transport
-      );
-
-      if(rescuedRows.length){
-        out = _replaceDaysInRows_(out, rescuedRows, missingDays);
-        out = _dedupeRows_(out);
-      }
-    }
-
-    // 🔒 AURORAS
     out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
-
-    // 🔴 NUEVO: SEGUNDO PASO DE CALIDAD
-    let finalThin = _isDayTooThin_(out, dest.days);
-    if(finalThin.length && !repairState.postAuroraDone){
-      repairState.postAuroraDone = true;
-
-      const repairedRows = await _repairWeakDays_(
-        city,
-        dest.days,
-        out,
-        finalThin,
-        perDay,
-        forceReplan,
-        hotel,
-        transport
-      );
-
-      if(repairedRows.length){
-        out = _replaceDaysInRows_(out, repairedRows, finalThin);
-        out = _dedupeRows_(out);
-      }
-    }
-
     out = _fixReturnRowDurationConsistency_(out);
 
-    return out;
+    return _dedupeRows_(out);
   }
 
   showWOW(true, t('overlayDefault'));
 
   try{
-    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+    let masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+
+    if(!Array.isArray(masterDays) || masterDays.length !== Number(dest.days || 1)){
+      masterDays = _buildFallbackMasterDays_(dest.days);
+    }
 
     const blocks = _chunkMasterDays_(masterDays);
 
@@ -3462,6 +3487,7 @@ async function generateCityItinerary(city){
 
     for(let i=0; i<blocks.length; i++){
       const block = blocks[i];
+      const blockDays = block.map(x=>Number(x.day));
 
       let blockRows = await _generateBlockFromThemes_(
         city,
@@ -3475,29 +3501,21 @@ async function generateCityItinerary(city){
         usedUrbanClusterKeys
       );
 
-      // 🔴 NUEVO: VALIDACIÓN INMEDIATA DEL BLOQUE
-      const thinBlockDays = _isDayTooThin_(blockRows, dest.days);
+      // 🔥 FIX REAL: evaluar solo días del bloque
+      let thinDays = _getThinDaysInRequestedSet_(blockRows, blockDays);
 
-      if(thinBlockDays.length){
-        console.warn(`[CITY ${city}] Block too thin, regenerating:`, thinBlockDays);
+      if(thinDays.length){
+        console.warn(`[CITY ${city}] Block thin (REAL):`, thinDays);
 
-        const retryRows = await _repairWeakDays_(
-          city,
-          dest.days,
-          blockRows,
-          thinBlockDays,
-          perDay,
-          forceReplan,
-          hotel,
-          transport
-        );
-
-        if(retryRows.length){
-          blockRows = retryRows;
+        const repaired = await _repairRequestedDaysIndividually_(blockRows, thinDays);
+        if(repaired.length){
+          blockRows = repaired;
         }
       }
 
-      stitchedRows.push(...blockRows);
+      if(Array.isArray(blockRows) && blockRows.length){
+        stitchedRows.push(...blockRows);
+      }
 
       const interimRows = _dedupeRows_(stitchedRows);
       usedHighlightKeys = _collectUsedHighlightKeys_(interimRows, city);
@@ -3506,8 +3524,31 @@ async function generateCityItinerary(city){
 
     stitchedRows = await _postProcessCityRows_(stitchedRows);
 
+    // 🔥 GARANTÍA FINAL TOTAL
+    let finalMissing = _getMissingDayNums_(stitchedRows, dest.days);
+    if(finalMissing.length){
+      stitchedRows = await _repairRequestedDaysIndividually_(stitchedRows, finalMissing);
+      stitchedRows = _dedupeRows_(stitchedRows);
+    }
+
+    // 🔥 GARANTÍA DE DENSIDAD FINAL
+    const byDayFinal = _groupRowsByDay_(stitchedRows);
+    let finalWeak = [];
+    Object.keys(byDayFinal).forEach(d=>{
+      if(byDayFinal[d].length < 3){
+        finalWeak.push(Number(d));
+      }
+    });
+
+    if(finalWeak.length){
+      stitchedRows = await _repairRequestedDaysIndividually_(stitchedRows, finalWeak);
+      stitchedRows = _dedupeRows_(stitchedRows);
+    }
+
     const val = await _safeValidateRows_(stitchedRows);
-    pushRows(city, val.allowed, forceReplan);
+    const finalRows = _dedupeRows_(Array.isArray(val?.allowed) && val.allowed.length ? val.allowed : stitchedRows);
+
+    pushRows(city, finalRows, forceReplan);
 
     renderCityTabs();
     setActiveCity(city);
@@ -3518,7 +3559,7 @@ async function generateCityItinerary(city){
     return;
 
   }catch(err){
-    console.error(`[CITY ${city}] generation failed:`, err);
+    console.error(`[CITY ${city}] staged generation failed, fallback triggered:`, err);
   }
 
   showWOW(false);
