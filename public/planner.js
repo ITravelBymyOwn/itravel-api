@@ -2648,12 +2648,16 @@ function _cleanTransportField_(rows=[]){
       );
 
     const looksReturn = /return to|regreso a|retour a|retour à|regresso a/.test(activity);
-    const looksUrban = !looksReturn && !/peninsula|península|coast|costa|circle|circulo|círculo|route|ruta|montserrat|snæfellsnes|reykjanes|south coast|golden circle|island|isla|valley|valles|volcano|volcan|volcán|national park|parque nacional/.test(activity);
+
+    const looksRegional =
+      /\b(peninsula|península|coast|costa|route|ruta|loop|circuit|circuito|circle|circulo|círculo|island|isla|archipelago|archipielago|archipiélago|fjord|fiordo|lake|lago|lagoon|laguna|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|park|parque|national park|parque nacional|district|distrito|region|región|canyon|cañon|cañón|wine area|wine region)\b/.test(activity);
+
+    const looksUrban = !looksReturn && !looksRegional;
 
     let fallback = 'Walking / Metro / Taxi (as appropriate)';
     if(sameArea) fallback = 'Walking';
     else if(looksUrban) fallback = 'Walking / Metro';
-    else fallback = 'Rental Car or Guided Tour';
+    else fallback = 'Rental car or Guided tour';
 
     return normalizeRow({
       ...r,
@@ -2698,7 +2702,7 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
   const byDay = _groupRowsByDay_(rows);
   const candidates = [];
 
-  for(let day=1; day<Number(totalDays||1); day++){
+  for(let day=1; day<Number(totalDays || 1); day++){
     const dayRows = byDay[day] || [];
     const ref = _getDayWindowRef_(perDay, day);
 
@@ -2706,11 +2710,11 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
     if(_isNightOnlyWindow_(ref)) continue;
     if(dayRows.some(r => _isAuroraRow_(r))) continue;
 
-    const lastRow = dayRows[dayRows.length-1];
+    const lastRow = dayRows[dayRows.length - 1];
     const lastEnd = _hhmmToMin_(lastRow?.end);
     if(lastEnd === null) continue;
 
-    if(lastEnd <= 20*60){
+    if(lastEnd <= 20 * 60){
       candidates.push({ day, score: lastEnd });
     }
   }
@@ -2730,7 +2734,7 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
       picked.push(c.day);
       continue;
     }
-    const prev = picked[picked.length-1];
+    const prev = picked[picked.length - 1];
     if(Math.abs(c.day - prev) >= 2 || candidates.length <= wanted){
       picked.push(c.day);
     }
@@ -2750,10 +2754,10 @@ function _buildAuroraOptionRow_(city, day, dayRows=[]){
   const loc = _plannerLocalePack_();
   const hotel = String(cityMeta?.[city]?.hotel || loc.hotelFallback).trim() || loc.hotelFallback;
 
-  const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end||'').localeCompare(String(b?.end||''))).pop() || null;
+  const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end || '').localeCompare(String(b?.end || ''))).pop() || null;
   const lastEnd = _hhmmToMin_(lastRow?.end);
-  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 21*60) : (21*60);
-  const end = Math.min(baseStart + 120, 23*60 + 30);
+  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 21 * 60) : (21 * 60);
+  const end = Math.min(baseStart + 120, 23 * 60 + 30);
   const start = Math.min(baseStart, end - 60);
 
   const transportMin = 30;
@@ -2767,7 +2771,7 @@ function _buildAuroraOptionRow_(city, day, dayRows=[]){
     from: hotel,
     to: loc.auroraTo,
     transport: loc.auroraTransport,
-    duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${Math.round(activityMin/30)*30}m`,
+    duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${Math.round(activityMin / 30) * 30}m`,
     notes: loc.auroraNotes
   }, day);
 }
@@ -2805,10 +2809,10 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
     const eveningRows = dayRows.filter(r=>{
       const start = _hhmmToMin_(r?.start);
-      return start !== null && start >= 17*60;
+      return start !== null && start >= 17 * 60;
     });
 
-    const target = eveningRows.length ? eveningRows[eveningRows.length-1] : dayRows[dayRows.length-1];
+    const target = eveningRows.length ? eveningRows[eveningRows.length - 1] : dayRows[dayRows.length - 1];
     if(!target) return;
 
     const extraNote = (loc.auroraNotes || '').trim();
@@ -2866,19 +2870,26 @@ MANDATORY:
 - Every row MUST have day equal to one of these days only.
 - You MUST return useful rows for EVERY requested day in this block.
 - Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
-- The end time provided by the planner is a HARD MAXIMUM boundary, not a target. The day may end earlier, but it must NEVER end later.
-- For a normal usable day, target 4–8 rows.
-- For a dense, compact, high-value regional cluster, scenic route, or richly walkable urban area, you MAY go beyond that and use roughly 8–12 rows if the geography truly supports it.
-- Do NOT inflate rows artificially. More rows are allowed only when the route remains coherent, realistic, and readable.
-- For a shorter day, still return useful rows; do NOT leave it nearly empty.
-- The final day must still feel valuable, intentional, and memorable even if shorter.
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
-- "from", "to", "transport", "notes" can NEVER be empty.
-- "transport" must be a real final choice, NEVER placeholders like "recommend me", "recomiéndame", "as appropriate", or similar.
-- "from" and "to" must be REAL places, never a macro-tour label.
-- If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
-- Avoid generic placeholders.
-- Keep the logic GLOBAL.
+- The end time provided by the planner is a HARD MAXIMUM boundary, not a target.
+
+- HARD RULES:
+  • chronological order with NO overlaps
+  • all fields must be filled
+  • "activity" format: "Destination – <Specific sub-stop>"
+  • "from" and "to" must be REAL places
+  • "transport" must be a REAL final value (no placeholders)
+
+- SOFT RULES (HIGH PRIORITY BUT FLEXIBLE):
+  • target 4–8 rows for normal days
+  • allow 8–12 only when naturally dense
+  • avoid weak days whenever possible
+  • prefer variety across days
+
+- CRITICAL FALLBACK:
+  If no strong regional cluster is available for a day:
+  → you MUST create a high-quality local / urban / waterfront / cultural / food / scenic day instead.
+  → NEVER leave a day weak or empty.
+
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(promptTransport)}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
@@ -2938,27 +2949,47 @@ MICRO-GUIDE ENRICHMENT (CRITICAL):
 - If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
 - This is especially valuable for dense scenic routes, rich urban walks, peninsulas, coastlines, regional loops, and layered city days.
 
-RADIAL / BALANCE LOGIC:
-- First identify the BEST REMAINING candidate pool around the base city after excluding already-used highlights/clusters.
-- Then group candidates into natural clusters / regions / routes / local packs.
-- Then assign them across THESE requested block days so that no requested day is left empty.
-- If this block contains the final day(s), still provide meaningful content for them.
-- Do NOT sacrifice coverage of a requested day just to make another day richer.
-- Avoid front-loading all strong content into the first days and leaving weak leftovers later.
-- If no strong far regional circuit remains, prefer a rich local / near-base / waterfront / museum / food / scenic / cultural day over recycling an already-used regional cluster.
-- The planner MUST always prefer an UNUSED smaller cluster or a rich local combination over a repeated major regional cluster.
-- For later days of the trip, prioritize high-quality secondary clusters, premium city packs, scenic closures, or layered cultural/food/waterfront combinations instead of weak filler.
+RADIAL / BALANCE LOGIC (IMPROVED):
+- Build a pool of candidate experiences around the base city:
+  • urban clusters
+  • nearby escapes
+  • regional day trips
+  • scenic routes
+  • cultural + food combinations
 
-ANTI-DUPLICATION (VERY STRICT, GLOBAL):
-- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
-- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name, a subset of the same route, nearby supporting stops, scenic detours, or partial cluster fragments.
-- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
-- Even partial reuse (subset of the same route) is FORBIDDEN.
-- Apply this as a global principle for ANY destination in the world.
-- If a region has already been substantially consumed, do not recycle its internal highlights as a “new” day.
-- Apply the same principle to urban core clusters: do not create fake novelty by renaming substantially overlapping city-center content.
-- IMPORTANT: if a famous regional circuit was already used, do NOT reuse its component highlights later under another label such as "nature day", "landscape day", "scenic escape", "adventure day", "hidden gems", or similar.
-- IMPORTANT: if a cluster/day would clearly feel like the same ring to a human traveler, it must be treated as duplicate and rejected.
+- Assign them across requested days ensuring:
+  • NO day is left empty
+  • NO day feels weak
+
+- PRIORITY ORDER:
+  1. Unused strong regional clusters
+  2. Secondary regional clusters
+  3. High-quality urban + cultural + scenic combinations
+
+- CRITICAL:
+  If strong regional clusters are exhausted:
+  → build PREMIUM local days (not filler)
+
+- Avoid:
+  • front-loading all strong content
+  • leaving last days weak
+
+- The LAST day must feel intentional and memorable.
+
+ANTI-DUPLICATION (BALANCED):
+- Avoid repeating the same macro-region, circuit, or regional ring across days.
+- STRONG RULE:
+  Do NOT repeat the SAME major regional circuit when clear alternatives exist.
+- FLEXIBLE RULE:
+  If the destination has limited variety and no strong unused alternatives remain:
+  → you MAY reuse a region ONLY IF:
+    • the internal route is meaningfully different
+    • it focuses on different sub-stops
+    • it creates a clearly distinct experience for the user
+- NEVER:
+  • duplicate the exact same route
+  • reuse identical highlight combinations
+- Always prefer UNUSED clusters first.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -3011,6 +3042,14 @@ QUALITY / RHYTHM:
 - Final days should feel like a strong closure, not leftover filler.
 - Prioritize iconic endings, emotional endings, scenic endings, or premium cultural/food/waterfront closures when appropriate.
 - The overall result should feel WOW: premium, specific, memorable, realistic, and smarter than a standard travel planner.
+
+FAIL-SAFE GENERATION (CRITICAL):
+- Under NO circumstances should a requested day return:
+  • zero rows
+  • only 1–2 weak rows
+- If constraints conflict:
+  → PRIORITIZE generating a strong, coherent day over strictly respecting all soft rules.
+- The planner MUST always return a complete and usable itinerary.
 - No text outside JSON.
 `.trim();
 
@@ -3024,10 +3063,19 @@ Return Format B JSON only.
 MANDATORY:
 - Generate rows ONLY for these days: ${missingDays.join(', ')}.
 - You MUST return useful rows for EVERY requested missing day.
-- For a normal usable day, target 4–7 rows.
-- For a dense and compact remaining cluster, you MAY use around 8–12 rows if it truly fits.
-- If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
+- Respect these windows intelligently: ${JSON.stringify(perDay.filter(x => missingDays.includes(Number(x?.day))))}.
 - The end time provided by the planner is a HARD MAXIMUM boundary, not a target.
+- HARD RULES:
+  • chronological order
+  • no overlaps
+  • all fields required
+  • "activity" MUST be "Destination – <Specific sub-stop>"
+  • real places in "from" and "to"
+  • transport must be a real final value
+- SOFT RULES:
+  • target 4–8 rows
+  • allow around 8–12 when the remaining cluster is truly dense and compact
+- If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
 - Use the remaining UNUSED candidate universe first, thinking radially from the base city:
   • local / urban / waterfront / museum / food / scenic / cultural combinations
   • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
@@ -3038,20 +3086,13 @@ MANDATORY:
   • then choose only the ones that fit coherently in the missing day
 - If the chosen remaining cluster is rich and compact, include more real rows.
 - Also enrich the FIRST row notes with an ordered micro-guide when useful.
-- Do NOT repeat macro-regions already used, including partial reuse of sub-stops from the same cluster.
-- Do NOT solve a long missing-day problem by repeating semantically similar old-town / market / shopping / central-walk days unless the city still has clearly distinct unused premium clusters.
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
-- "transport" must be a real final choice, never placeholders like "recommend me" or "recomiéndame".
+- Do NOT solve a long missing-day problem by repeating the exact same route or identical highlight combinations.
+- Prefer UNUSED clusters first, but if the destination has truly limited variety, a meaningfully distinct internal route is acceptable over leaving the day weak.
 - If the chosen missing day is spa/thermal/relax-based, place that anchor at the start or end of the day and leave at least about 3 effective hours on site.
 - Keep daylight-sensitive activities in daylight-friendly hours.
-- all fields required
-- real places in "from" and "to"
-- chronological order
-- no overlaps
-- if excursion/day trip exists, end with "<Region> – Return to ${city}"
-- windows reference: ${JSON.stringify(perDay.filter(x => missingDays.includes(Number(x?.day))))}
-- hotel/base: ${JSON.stringify(hotel || '')}
-- transport preference: ${JSON.stringify(promptTransport)}
+- If excursion/day trip exists, end with "<Region> – Return to ${city}".
+- Hotel/base: ${JSON.stringify(hotel || '')}
+- Transport preference: ${JSON.stringify(promptTransport)}
 - The result should feel globally premium and destination-aware, not generic.
 - No text outside JSON.
 `.trim();
@@ -3075,7 +3116,7 @@ MANDATORY:
     return (requestedDays || []).filter(d => !set.has(Number(d)));
   }
 
-  const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
+  const label = `${dayNums[0]}${dayNums.length > 1 ? '-' + dayNums[dayNums.length - 1] : ''}`;
   console.log(`[BLOCK ${label}] Requesting rows...`);
 
   let primaryRows = [];
@@ -3138,12 +3179,12 @@ function _dedupeRows_(rows=[]){
 
   for(const r of (rows || [])){
     const key = JSON.stringify([
-      Number(r?.day||1),
-      String(r?.start||'').trim(),
-      String(r?.end||'').trim(),
-      String(r?.activity||'').trim(),
-      String(r?.from||'').trim(),
-      String(r?.to||'').trim()
+      Number(r?.day || 1),
+      String(r?.start || '').trim(),
+      String(r?.end || '').trim(),
+      String(r?.activity || '').trim(),
+      String(r?.from || '').trim(),
+      String(r?.to || '').trim()
     ]);
 
     if(seen.has(key)) continue;
@@ -3152,14 +3193,14 @@ function _dedupeRows_(rows=[]){
   }
 
   return out.sort((a,b)=>{
-    const da = Number(a?.day||1), db = Number(b?.day||1);
-    if(da !== db) return da-db;
-    return String(a?.start||'').localeCompare(String(b?.start||''));
+    const da = Number(a?.day || 1), db = Number(b?.day || 1);
+    if(da !== db) return da - db;
+    return String(a?.start || '').localeCompare(String(b?.start || ''));
   });
 }
 
 function _rowsCoverAllDays_(rows=[], totalDays=1){
-  const set = new Set((rows||[]).map(r => Number(r?.day)));
+  const set = new Set((rows || []).map(r => Number(r?.day)));
   for(let d=1; d<=totalDays; d++){
     if(!set.has(d)) return false;
   }
