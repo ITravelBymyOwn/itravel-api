@@ -1987,347 +1987,105 @@ function _rowsCoverRequestedDays_(rows=[], requestedDays=[]){
 }
 
 /* =========================================================
-   SECTION 15C · DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
-========================================================= */
-function _normalizeHighlightKey_(value=''){
-  return String(value || '')
-    .toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/[þ]/g, 'th')
-    .replace(/[ð]/g, 'd')
-    .replace(/[^a-z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-/* =========================================================
-   INTERNAL · semantic cluster normalization
-   (Use ONLY for macro-zone logic, not for highlight de-dupe)
+   INTERNAL · semantic cluster normalization (GLOBAL FIX)
 ========================================================= */
 function _normalizeSemanticClusterKey_(value=''){
   const s = _normalizeHighlightKey_(value);
   if(!s) return '';
 
-  // Golden Circle + wider Thingvellir area / close relatives
+  // 🆕 GLOBAL: detect generic regional clusters (NOT hardcoded places)
+
+  // Detect typical "macro-region" patterns
   if(
-    /\bgolden circle\b/.test(s) ||
-    /\bthingvellir\b/.test(s) ||
-    /\bpingvellir\b/.test(s) ||
-    /\boxararfoss\b/.test(s) ||
-    /\bogsararfoss\b/.test(s) ||
-    /\bgeysir\b/.test(s) ||
-    /\bgullfoss\b/.test(s) ||
-    /\bkerid\b/.test(s) ||
-    /\bkerith\b/.test(s) ||
-    /\bpingvallavatn\b/.test(s) ||
-    /\bthingvallavatn\b/.test(s)
+    /\b(coast|costa|peninsula|península|region|región|valley|valle|mountain|montaña|park|parque|route|ruta|loop|circuit|island|isla|lake|lago|fjord|fiordo)\b/.test(s)
   ){
-    return 'golden circle';
+    return s;
   }
 
-  // South Coast
+  // Detect "day trip" style names
   if(
-    /\bsouth coast\b/.test(s) ||
-    /\bcosta sur\b/.test(s) ||
-    /\bseljalandsfoss\b/.test(s) ||
-    /\bskogafoss\b/.test(s) ||
-    /\breynisfjara\b/.test(s) ||
-    /\bvik\b/.test(s) ||
-    /\bvik i myrdal\b/.test(s) ||
-    /\bdyrholaey\b/.test(s)
+    /\bday trip\b/.test(s) ||
+    /\bexcursion\b/.test(s) ||
+    /\bexcursión\b/.test(s) ||
+    /\btour\b/.test(s)
   ){
-    return 'south coast';
+    return s;
   }
 
-  // Reykjanes / Blue Lagoon
-  if(
-    /\breykjanes\b/.test(s) ||
-    /\bblue lagoon\b/.test(s) ||
-    /\bseltun\b/.test(s) ||
-    /\breykjanes lighthouse\b/.test(s) ||
-    /\bfaro de reykjanes\b/.test(s) ||
-    /\blava restaurant\b/.test(s)
-  ){
-    return 'reykjanes';
-  }
-
-  // Snæfellsnes
-  if(
-    /\bsnaefellsnes\b/.test(s) ||
-    /\bsnaefellsnes peninsula\b/.test(s) ||
-    /\bpeninsula de snaefellsnes\b/.test(s) ||
-    /\bkirkjufell\b/.test(s) ||
-    /\barnarstapi\b/.test(s) ||
-    /\bhellnar\b/.test(s) ||
-    /\bdjupalonssandur\b/.test(s) ||
-    /\bsnaefellsjokull\b/.test(s)
-  ){
-    return 'snaefellsnes';
-  }
-
-  // Reykjavik / city cluster
-  if(
-    /\breykjavik\b/.test(s) ||
-    /\bhallgrimskirkja\b/.test(s) ||
-    /\bharpa\b/.test(s) ||
-    /\blaugavegur\b/.test(s) ||
-    /\bsun voyager\b/.test(s) ||
-    /\bperlan\b/.test(s) ||
-    /\bnational museum of iceland\b/.test(s) ||
-    /\bmuseo nacional de islandia\b/.test(s) ||
-    /\breykjavik art museum\b/.test(s) ||
-    /\bmuseo de arte de reykjavik\b/.test(s) ||
-    /\bbotanical garden\b/.test(s) ||
-    /\bjardin botanico\b/.test(s) ||
-    /\bold harbor\b/.test(s) ||
-    /\bharbor\b/.test(s)
-  ){
-    return 'reykjavik city';
-  }
-
+  // If it's just city-like, ignore as macro
   return s;
 }
 
 /* =========================================================
-   INTERNAL · specific place normalization
-   (Use for highlight de-dupe; keep this SPECIFIC, not macro)
+   INTERNAL · urban cluster extraction (GLOBAL FIX)
 ========================================================= */
-function _normalizeSpecificPlaceKey_(value=''){
-  let s = _normalizeHighlightKey_(value);
-  if(!s) return '';
-
-  s = s
-    .replace(/\bdeparture from .*$/g, '')
-    .replace(/\breturn to .*$/g, '')
-    .replace(/\bregreso a .*$/g, '')
-    .replace(/\bsalida desde .*$/g, '')
-    .trim();
-
-  // normalize exact place aliases, but DO NOT collapse to whole macro-cluster
-  s = s
-    .replace(/\bpingvellir\b/g, 'thingvellir')
-    .replace(/\bogsararfoss\b/g, 'oxararfoss')
-    .replace(/\bkerith\b/g, 'kerid')
-    .replace(/\bsnaefellsjokull\b/g, 'snaefellsjokull');
-
-  return s;
-}
-
-function _extractHighlightKey_(row={}, city=''){
-  const activity = String(row?.activity || '').trim();
-  const to = String(row?.to || '').trim();
-  const from = String(row?.from || '').trim();
-  const cityKey = _normalizeHighlightKey_(city);
-
-  const parts = activity.split(/\s+[–-]\s+/);
-  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
-  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
-
-  let candidate = '';
-
-  // For exact highlight de-dupe, prefer the SPECIFIC sub-stop, not the macro label
-  if(to){
-    candidate = to;
-  }else if(suffix && suffix !== cityKey){
-    candidate = suffix;
-  }else if(from && _normalizeHighlightKey_(from) !== cityKey){
-    candidate = from;
-  }else{
-    candidate = activity;
-  }
-
-  const normalized = _normalizeSpecificPlaceKey_(candidate);
-  if(!normalized) return '';
-
-  if(/^(hotel|downtown|city area|return to|regreso a|departure from|salida desde|lunch|dinner|restaurant|restaurante|almuerzo|cena|planning|dark area|zona de observacion de auroras|aurora viewing area)$/.test(normalized)){
-    return '';
-  }
-
-  return normalized;
-}
-
 function _extractUrbanClusterKey_(row={}, city=''){
   const activity = String(row?.activity || '').trim();
   const to = String(row?.to || '').trim();
-  const cityKey = _normalizeHighlightKey_(city);
 
   const parts = activity.split(/\s+[–-]\s+/);
-  const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
   const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
 
-  // if clearly a macro-region outside the city, do not treat as urban cluster
-  const semanticPrefix = _normalizeSemanticClusterKey_(prefix);
-  if(prefix && prefix !== cityKey && semanticPrefix && semanticPrefix !== 'reykjavik city') return '';
+  const candidate = _normalizeHighlightKey_(to || suffix);
 
-  let candidate = _normalizeHighlightKey_(to || suffix);
   if(!candidate) return '';
 
-  const semantic = _normalizeSemanticClusterKey_(candidate);
+  // 🆕 GLOBAL FILTER: remove non-urban noise
+  if(
+    /^(hotel|downtown|city area|restaurant|restaurante|lunch|dinner|return to|regreso a)$/.test(candidate)
+  ){
+    return '';
+  }
 
-  // only keep real urban reykjavik subclusters here
-  if(semantic && semantic !== 'reykjavik city' && semantic !== candidate) return '';
-  if(/^(hotel|downtown|city area|restaurant|restaurante|almuerzo|cena|lunch|dinner|return to|regreso a)$/.test(candidate)) return '';
+  // 🆕 DO NOT treat large regions as urban clusters
+  if(
+    /\b(coast|peninsula|valley|mountain|park|route|island|lake|fjord)\b/.test(candidate)
+  ){
+    return '';
+  }
 
   return candidate;
 }
 
-function _collectUsedHighlightKeys_(rows=[], city=''){
-  const out = new Set();
-  for(const r of (rows || [])){
-    const key = _extractHighlightKey_(r, city);
-    if(key) out.add(key);
-  }
-  return Array.from(out);
-}
-
-function _collectUsedUrbanClusterKeys_(rows=[], city=''){
-  const out = new Set();
-  for(const r of (rows || [])){
-    const key = _extractUrbanClusterKey_(r, city);
-    if(key) out.add(key);
-  }
-  return Array.from(out);
-}
-
-function _removeDuplicateHighlightsAcrossDays_(rows=[], city=''){
-  const firstDayByKey = new Map();
-  const out = [];
-
-  for(const r of (rows || [])){
-    const key = _extractHighlightKey_(r, city);
-    const day = Number(r?.day || 1);
-
-    if(!key){
-      out.push(r);
-      continue;
-    }
-
-    if(!firstDayByKey.has(key)){
-      firstDayByKey.set(key, day);
-      out.push(r);
-      continue;
-    }
-
-    const firstDay = firstDayByKey.get(key);
-
-    // Keep only exact place duplicates on the first day they appeared.
-    // Do NOT use this to collapse whole macro-zones; that is handled below.
-    if(firstDay === day){
-      out.push(r);
-    }
-  }
-
-  return out;
-}
-
-function _removeDuplicateUrbanClustersAcrossDays_(rows=[], city=''){
-  const firstDayByKey = new Map();
-  const out = [];
-
-  for(const r of (rows || [])){
-    const key = _extractUrbanClusterKey_(r, city);
-    const day = Number(r?.day || 1);
-
-    if(!key){
-      out.push(r);
-      continue;
-    }
-
-    if(!firstDayByKey.has(key)){
-      firstDayByKey.set(key, day);
-      out.push(r);
-      continue;
-    }
-
-    const firstDay = firstDayByKey.get(key);
-
-    if(firstDay === day){
-      out.push(r);
-    }
-  }
-
-  return out;
-}
-
 /* =========================================================
-   SECTION 15C.2 · MACRO-ZONE DETECTION (ENHANCED)
+   SECTION 15C.2 · MACRO-ZONE DETECTION (GLOBAL FIX)
 ========================================================= */
 function _extractMacroZoneKey_(row={}, city=''){
   const activity = String(row?.activity || '').trim();
   const to = String(row?.to || '').trim();
   const from = String(row?.from || '').trim();
   const notes = String(row?.notes || '').trim();
-  const cityKey = _normalizeHighlightKey_(city);
 
   const parts = activity.split(/\s+[–-]\s+/);
   const prefix = parts.length > 1 ? _normalizeHighlightKey_(parts[0]) : '';
-  const suffix = parts.length > 1 ? _normalizeHighlightKey_(parts[1]) : '';
 
-  // direct semantic read from prefix when present
+  // 🆕 GLOBAL detection based on semantic patterns
   let semantic = _normalizeSemanticClusterKey_(prefix);
 
-  // if prefix is generic or city-like, infer from concrete stops / notes
-  const genericPrefixes = new Set([
-    'reykjavik city',
-    _normalizeSemanticClusterKey_(cityKey),
-    'excursion a la naturaleza',
-    'nature excursion',
-    'day trip',
-    'excursion',
-    'tour',
-    'planning'
-  ]);
-
-  if(!semantic || genericPrefixes.has(semantic) || semantic === _normalizeHighlightKey_(city)){
+  // If prefix is weak, infer from content
+  if(!semantic || semantic === _normalizeHighlightKey_(city)){
     semantic = _normalizeSemanticClusterKey_(
-      `${to} ${from} ${suffix} ${notes}`
+      `${to} ${from} ${notes}`
     );
   }
 
   if(!semantic) return '';
-  if(semantic === _normalizeHighlightKey_(city)) return '';
-  if(/^(return to|regreso a|departure from|salida desde)$/.test(semantic)) return '';
 
-  // city cluster is not a macro-zone for repeated macro detection
-  if(semantic === 'reykjavik city') return '';
-
-  return semantic;
-}
-
-function _findRepeatedMacroZoneDays_(rows=[], city=''){
-  const firstDayByZone = new Map();
-  const repeatedDays = new Set();
-
-  for(const r of (rows || [])){
-    const zone = _extractMacroZoneKey_(r, city);
-    const day = Number(r?.day || 1);
-
-    if(!zone) continue;
-
-    if(!firstDayByZone.has(zone)){
-      firstDayByZone.set(zone, day);
-      continue;
-    }
-
-    const firstDay = firstDayByZone.get(zone);
-
-    if(firstDay !== day){
-      repeatedDays.add(day);
-    }
+  // 🆕 filter non-macro
+  if(
+    /^(hotel|downtown|city area|restaurant|lunch|dinner|return to|regreso a)$/.test(semantic)
+  ){
+    return '';
   }
 
-  return Array.from(repeatedDays).sort((a,b)=>a-b);
-}
-
-function _collectUsedMacroZoneKeys_(rows=[], city=''){
-  const out = new Set();
-
-  for(const r of (rows || [])){
-    const k = _extractMacroZoneKey_(r, city);
-    if(k) out.add(k);
+  // 🆕 ONLY consider macro zones if they look like regions
+  if(
+    /\b(coast|peninsula|valley|mountain|park|route|island|lake|fjord|region|loop|circuit)\b/.test(semantic)
+  ){
+    return semantic;
   }
 
-  return Array.from(out);
+  return '';
 }
 
 /* =========================================================
