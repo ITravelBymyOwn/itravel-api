@@ -2959,21 +2959,6 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - Prefer routes and combinations that create a WOW result: iconic, coherent, memorable, visually strong, and better than a generic tourist plan.
 - The candidate discovery must come from the destination itself, not from pre-existing template routes.
 
-LONG-STAY EXPANSION / EXTERNAL CLUSTERS (CRITICAL):
-- For longer stays, do NOT keep orbiting the base city once the strongest urban clusters have already been substantially covered.
-- As trip length increases, you must proactively open strong external clusters / day trips / regional loops that are clearly viable from the base city before repeating similar urban packs.
-- For stays of around 6+ days, it is usually NOT optimal to spend almost all days inside the same city unless the destination is exceptionally dense and the city still offers clearly distinct, high-value, non-overlapping clusters.
-- If the base city is already substantially covered, prefer a NEW viable regional cluster over another similar old-town / food / shopping / museum repetition.
-- Do NOT assume the best order is strictly nearest-to-farthest. Arrange days in the best strategic order for the overall trip quality.
-- The goal is not radial sequence; the goal is best overall itinerary quality.
-- In long stays, external clusters should receive strong consideration whenever they are realistically reachable and improve the trip.
-
-URBAN SATURATION CONTROL (CRITICAL):
-- Treat the historic center / old town / main shopping spine / main food market / waterfront core as consumable clusters.
-- Once a city-core cluster has already been substantially used, do NOT recycle it as a "new" day unless there is a clearly different angle with high value.
-- Avoid ending long trips with multiple semantically similar city-center days that revisit the same urban core through slightly different wording.
-- If two candidate city days would feel too similar to a human traveler, replace one of them with a stronger external cluster or a clearly different premium city pack.
-
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
 - Think in 2 levels:
@@ -3014,17 +2999,6 @@ MICRO-GUIDE ENRICHMENT (CRITICAL):
 - If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
 - This is especially valuable for dense scenic routes, rich urban walks, peninsulas, coastlines, regional loops, and layered city days.
 
-ANTI-DUPLICATION (VERY STRICT, GLOBAL):
-- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
-- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name, a subset of the same route, nearby supporting stops, scenic detours, or partial cluster fragments.
-- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
-- Even partial reuse (subset of the same route) is FORBIDDEN.
-- Apply this as a global principle for ANY destination in the world.
-- If a region has already been substantially consumed, do not recycle its internal highlights as a “new” day.
-- Apply the same principle to urban core clusters: do not create fake novelty by renaming substantially overlapping city-center content.
-- IMPORTANT: if a famous regional circuit was already used, do NOT reuse its component highlights later under another label such as "nature day", "landscape day", "scenic escape", "adventure day", "hidden gems", or similar.
-- IMPORTANT: if a cluster/day would clearly feel like the same ring to a human traveler, it must be treated as duplicate and rejected.
-
 RADIAL / BALANCE LOGIC:
 - First identify the BEST REMAINING candidate pool around the base city after excluding already-used highlights/clusters.
 - Then group candidates into natural clusters / regions / routes / local packs.
@@ -3035,7 +3009,17 @@ RADIAL / BALANCE LOGIC:
 - If no strong far regional circuit remains, prefer a rich local / near-base / waterfront / museum / food / scenic / cultural day over recycling an already-used regional cluster.
 - The planner MUST always prefer an UNUSED smaller cluster or a rich local combination over a repeated major regional cluster.
 - For later days of the trip, prioritize high-quality secondary clusters, premium city packs, scenic closures, or layered cultural/food/waterfront combinations instead of weak filler.
-- If a long trip from the base city still has viable external clusters remaining, prefer those before repeating similar core-city days.
+
+ANTI-DUPLICATION (VERY STRICT, GLOBAL):
+- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
+- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name, a subset of the same route, nearby supporting stops, scenic detours, or partial cluster fragments.
+- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
+- Even partial reuse (subset of the same route) is FORBIDDEN.
+- Apply this as a global principle for ANY destination in the world.
+- If a region has already been substantially consumed, do not recycle its internal highlights as a “new” day.
+- Apply the same principle to urban core clusters: do not create fake novelty by renaming substantially overlapping city-center content.
+- IMPORTANT: if a famous regional circuit was already used, do NOT reuse its component highlights later under another label such as "nature day", "landscape day", "scenic escape", "adventure day", "hidden gems", or similar.
+- IMPORTANT: if a cluster/day would clearly feel like the same ring to a human traveler, it must be treated as duplicate and rejected.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -3109,7 +3093,6 @@ MANDATORY:
   • local / urban / waterfront / museum / food / scenic / cultural combinations
   • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
   • then unused regional clusters only if they are genuinely new
-- In longer trips, if there are still strong viable external clusters / day trips remaining, prefer them before repeating similar city-core content.
 - The replacement day must be built from what the destination still offers, not from a template route.
 - For the chosen remaining cluster or local pack, also think in micro-stops:
   • generate mentally 5–15 possible micro-stops if the destination genuinely offers them
