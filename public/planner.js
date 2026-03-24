@@ -2664,6 +2664,65 @@ function _plannerLocalePack_(){
   };
 }
 
+function _normalizeTransportPreferenceForPrompt_(transport=''){
+  const raw = String(transport || '').trim().toLowerCase();
+  if(!raw) return 'decide intelligently based on the route';
+  if(raw === 'recommend me' || raw === 'recomiendame' || raw === 'recomiéndame'){
+    return 'decide intelligently based on the route';
+  }
+  return String(transport || '').trim();
+}
+
+function _sanitizeTransportValue_(value=''){
+  const raw = String(value || '').trim();
+  const low = raw.toLowerCase();
+
+  if(
+    !raw ||
+    low === 'recommend me' ||
+    low === 'recomiendame' ||
+    low === 'recomiéndame' ||
+    low === 'recommended by planner' ||
+    low === 'as appropriate'
+  ){
+    return '';
+  }
+
+  return raw;
+}
+
+function _cleanTransportField_(rows=[]){
+  return (rows || []).map(r=>{
+    const cleaned = _sanitizeTransportValue_(r?.transport);
+    if(cleaned) return r;
+
+    const from = String(r?.from || '').toLowerCase();
+    const to   = String(r?.to || '').toLowerCase();
+    const activity = String(r?.activity || '').toLowerCase();
+
+    const sameArea =
+      from && to &&
+      (
+        from === to ||
+        from.includes(to) ||
+        to.includes(from)
+      );
+
+    const looksReturn = /return to|regreso a|retour a|retour à|regresso a/.test(activity);
+    const looksUrban = !looksReturn && !/peninsula|península|coast|costa|circle|circulo|círculo|route|ruta|montserrat|snæfellsnes|reykjanes|south coast|golden circle|island|isla|valley|valles|volcano|volcan|volcán|national park|parque nacional/.test(activity);
+
+    let fallback = 'Walking / Metro / Taxi (as appropriate)';
+    if(sameArea) fallback = 'Walking';
+    else if(looksUrban) fallback = 'Walking / Metro';
+    else fallback = 'Rental Car or Guided Tour';
+
+    return normalizeRow({
+      ...r,
+      transport: fallback
+    }, Number(r?.day || 1));
+  });
+}
+
 function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
   const key = _normalizeHighlightKey_(city);
 
@@ -2854,6 +2913,7 @@ async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay,
   const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
     ? forbiddenUrbanClusters.join(', ')
     : '';
+  const promptTransport = _normalizeTransportPreferenceForPrompt_(transport);
 
   const buildPrimaryPrompt = () => `
 ${FORMAT}
@@ -2867,6 +2927,7 @@ MANDATORY:
 - Every row MUST have day equal to one of these days only.
 - You MUST return useful rows for EVERY requested day in this block.
 - Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
+- The end time provided by the planner is a HARD MAXIMUM boundary, not a target. The day may end earlier, but it must NEVER end later.
 - For a normal usable day, target 4–8 rows.
 - For a dense, compact, high-value regional cluster, scenic route, or richly walkable urban area, you MAY go beyond that and use roughly 8–12 rows if the geography truly supports it.
 - Do NOT inflate rows artificially. More rows are allowed only when the route remains coherent, realistic, and readable.
@@ -2874,12 +2935,13 @@ MANDATORY:
 - The final day must still feel valuable, intentional, and memorable even if shorter.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
 - "from", "to", "transport", "notes" can NEVER be empty.
+- "transport" must be a real final choice, NEVER placeholders like "recommend me", "recomiéndame", "as appropriate", or similar.
 - "from" and "to" must be REAL places, never a macro-tour label.
 - If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
 - Avoid generic placeholders.
 - Keep the logic GLOBAL.
 - Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
+- Preferred transport: ${JSON.stringify(promptTransport)}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
 
@@ -2952,6 +3014,17 @@ MICRO-GUIDE ENRICHMENT (CRITICAL):
 - If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
 - This is especially valuable for dense scenic routes, rich urban walks, peninsulas, coastlines, regional loops, and layered city days.
 
+ANTI-DUPLICATION (VERY STRICT, GLOBAL):
+- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
+- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name, a subset of the same route, nearby supporting stops, scenic detours, or partial cluster fragments.
+- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
+- Even partial reuse (subset of the same route) is FORBIDDEN.
+- Apply this as a global principle for ANY destination in the world.
+- If a region has already been substantially consumed, do not recycle its internal highlights as a “new” day.
+- Apply the same principle to urban core clusters: do not create fake novelty by renaming substantially overlapping city-center content.
+- IMPORTANT: if a famous regional circuit was already used, do NOT reuse its component highlights later under another label such as "nature day", "landscape day", "scenic escape", "adventure day", "hidden gems", or similar.
+- IMPORTANT: if a cluster/day would clearly feel like the same ring to a human traveler, it must be treated as duplicate and rejected.
+
 RADIAL / BALANCE LOGIC:
 - First identify the BEST REMAINING candidate pool around the base city after excluding already-used highlights/clusters.
 - Then group candidates into natural clusters / regions / routes / local packs.
@@ -2964,15 +3037,6 @@ RADIAL / BALANCE LOGIC:
 - For later days of the trip, prioritize high-quality secondary clusters, premium city packs, scenic closures, or layered cultural/food/waterfront combinations instead of weak filler.
 - If a long trip from the base city still has viable external clusters remaining, prefer those before repeating similar core-city days.
 
-ANTI-DUPLICATION (VERY STRICT, GLOBAL):
-- Do NOT reuse the same macro-region, circuit, or regional ring on different days.
-- If a macro-region/circuit was already used, it is FORBIDDEN to reuse it in another day, even under a slightly different name, a subset of the same route, nearby supporting stops, scenic detours, or partial cluster fragments.
-- Each macro-region / circuit / ring can ONLY be used ONCE in the entire itinerary.
-- Even partial reuse (subset of the same route) is FORBIDDEN.
-- Apply this as a global principle for ANY destination in the world.
-- If a region has already been substantially consumed, do not recycle its internal highlights as a “new” day.
-- Apply the same principle to urban core clusters: do not create fake novelty by renaming substantially overlapping city-center content.
-
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
 - Avoid single-activity regional days when multiple nearby worthwhile stops exist.
@@ -2981,6 +3045,38 @@ DAY TRIP LOGIC (GLOBAL):
 - A proper day trip should normally include 4–8 useful rows, but for dense and highly visitable clusters it may expand to around 8–12 rows when that clearly improves the guide and still remains realistic.
 - For powerful regional days, make the route feel like a true expertly designed circuit, not just a list of stops.
 - In medium and long trips, clearly viable day trips should be considered a major source of value, not a last resort.
+
+SPA / THERMAL / RELAX LOGIC (CRITICAL):
+- Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
+- Such activities must either:
+  • start the day as a major anchor
+  • or end the day as a major anchor
+- Do NOT place an immersive relaxation activity as a short middle stop between multiple unrelated visits.
+- Reserve at least about 3 effective hours on site for a true spa / thermal / relaxation anchor unless the user explicitly asked for a brief stop.
+- If there is nearby coherent content, place it BEFORE the spa or AFTER it in a way that still feels natural.
+- The result should feel realistic to a human traveler.
+
+DAYLIGHT / NIGHT LOGIC (CRITICAL):
+- Daylight-sensitive activities must be scheduled during daylight or strong natural-light hours when possible:
+  • scenic viewpoints
+  • waterfalls
+  • beaches
+  • coastal cliffs
+  • panoramic drives
+  • villages / old towns best enjoyed outdoors
+  • parks / gardens
+  • hiking / walking routes
+  • outdoor architecture appreciation
+  • natural landmarks
+- Evening/night should be used primarily for:
+  • dinners
+  • nightlife
+  • illuminated urban strolls
+  • shows / performances
+  • auroras
+  • clearly indoor late-compatible experiences
+- Do NOT schedule strongly daylight-dependent outdoor sightseeing into clearly night-like windows just because there is still time available.
+- If the user provided an end time, treat it as the latest acceptable finish, not a target to fill aggressively.
 
 QUALITY / RHYTHM:
 - Avoid giant dead gaps in the middle of a normal full day unless they are justified by a genuinely long transfer or a long immersive activity.
@@ -3008,6 +3104,7 @@ MANDATORY:
 - For a normal usable day, target 4–7 rows.
 - For a dense and compact remaining cluster, you MAY use around 8–12 rows if it truly fits.
 - If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
+- The end time provided by the planner is a HARD MAXIMUM boundary, not a target.
 - Use the remaining UNUSED candidate universe first, thinking radially from the base city:
   • local / urban / waterfront / museum / food / scenic / cultural combinations
   • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
@@ -3022,6 +3119,9 @@ MANDATORY:
 - Do NOT repeat macro-regions already used, including partial reuse of sub-stops from the same cluster.
 - Do NOT solve a long missing-day problem by repeating semantically similar old-town / market / shopping / central-walk days unless the city still has clearly distinct unused premium clusters.
 - "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
+- "transport" must be a real final choice, never placeholders like "recommend me" or "recomiéndame".
+- If the chosen missing day is spa/thermal/relax-based, place that anchor at the start or end of the day and leave at least about 3 effective hours on site.
+- Keep daylight-sensitive activities in daylight-friendly hours.
 - all fields required
 - real places in "from" and "to"
 - chronological order
@@ -3029,7 +3129,7 @@ MANDATORY:
 - if excursion/day trip exists, end with "<Region> – Return to ${city}"
 - windows reference: ${JSON.stringify(perDay.filter(x => missingDays.includes(Number(x?.day))))}
 - hotel/base: ${JSON.stringify(hotel || '')}
-- transport preference: ${JSON.stringify(transport || 'recommend me')}
+- transport preference: ${JSON.stringify(promptTransport)}
 - The result should feel globally premium and destination-aware, not generic.
 - No text outside JSON.
 `.trim();
@@ -3044,7 +3144,8 @@ MANDATORY:
 
     const extracted = _extractPlannerRows_(parsed, city);
     const forced = _forceRowsIntoValidDayRange_(extracted, allowedDays);
-    return Array.isArray(forced) ? forced : [];
+    const cleanedTransport = _cleanTransportField_(forced);
+    return Array.isArray(cleanedTransport) ? cleanedTransport : [];
   }
 
   function _missingDaysFromRows_(rows=[], requestedDays=[]){
