@@ -3222,11 +3222,12 @@ async function generateCityItinerary(city){
 
   const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
 
-  // 🔒 CONTROL FLAGS (NUEVO)
+  // 🔒 CONTROL FLAGS
   let repairState = {
     weakDone: false,
     missingDone: false,
-    postAuroraDone: false
+    postAuroraDone: false,
+    repeatedMacroDone: false
   };
 
   function _getMissingDayNums_(rows=[], totalDays=1){
@@ -3238,9 +3239,31 @@ async function generateCityItinerary(city){
     return missing;
   }
 
+  function _buildFallbackMasterDays_(totalDays=1){
+    const out = [];
+    for(let d=1; d<=Number(totalDays || 1); d++){
+      out.push({
+        day: d,
+        theme: d === Number(totalDays || 1)
+          ? 'Memorable final day'
+          : 'High-value local discovery'
+      });
+    }
+    return out;
+  }
+
   async function _safeValidateRows_(rows=[]){
     try{
-      return await validateRowsWithAgent(city, rows, baseDate);
+      const result = await validateRowsWithAgent(city, rows, baseDate);
+      const allowed = Array.isArray(result?.allowed) ? result.allowed : [];
+
+      // 🔒 preserve usable rows if validator returns empty/invalid
+      if(allowed.length){
+        return { allowed };
+      }
+
+      console.warn(`[CITY ${city}] validator returned empty/invalid rows, preserving local rows.`);
+      return { allowed: rows };
     }catch(err){
       console.error(`[CITY ${city}] validateRowsWithAgent failed, using unvalidated rows:`, err);
       return { allowed: rows };
@@ -3248,7 +3271,7 @@ async function generateCityItinerary(city){
   }
 
   async function _repairRequestedDaysIndividually_(rows=[], dayNums=[]){
-    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).slice(0,2); // 🔒 LIMITE
+    const targets = Array.from(new Set((dayNums || []).map(Number).filter(Boolean))).slice(0,4);
 
     let out = rows.slice();
 
@@ -3278,7 +3301,7 @@ async function generateCityItinerary(city){
   }
 
   async function _rescueMissingDays_(rows=[]){
-    if(repairState.missingDone) return rows; // 🔒 NO LOOP
+    if(repairState.missingDone) return rows;
 
     const missingDays = _getMissingDayNums_(rows, dest.days);
     if(!missingDays.length) return rows;
@@ -3299,7 +3322,7 @@ async function generateCityItinerary(city){
     );
 
     if(rescuedRows.length && _rowsCoverRequestedDays_(rescuedRows, missingDays)){
-      let merged = _replaceDaysInRows_(rows, rescuedRows, missingDays);
+      const merged = _replaceDaysInRows_(rows, rescuedRows, missingDays);
       return _dedupeRows_(merged);
     }
 
@@ -3309,7 +3332,39 @@ async function generateCityItinerary(city){
   async function _postProcessCityRows_(rows=[]){
     let out = _dedupeRows_(rows);
 
-    // 🔒 WEAK DAYS (UNA SOLA VEZ)
+    // 🔒 remove exact repeated highlights / repeated urban clusters across days
+    out = _removeDuplicateHighlightsAcrossDays_(out, city);
+    out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+    out = _dedupeRows_(out);
+
+    // 🔒 repeated macro-zones (single pass)
+    const repeatedMacroDays = _findRepeatedMacroZoneDays_(out, city);
+    if(repeatedMacroDays.length && !repairState.repeatedMacroDone){
+      repairState.repeatedMacroDone = true;
+
+      console.warn(`[CITY ${city}] Repeated macro-zones detected (single pass):`, repeatedMacroDays);
+
+      const repairedRows = await _repairRepeatedMacroZoneDays_(
+        city,
+        dest.days,
+        out,
+        repeatedMacroDays.slice(0,3),
+        perDay,
+        forceReplan,
+        hotel,
+        transport
+      );
+
+      if(repairedRows.length){
+        out = _replaceDaysInRows_(out, repairedRows, repeatedMacroDays);
+        out = _dedupeRows_(out);
+        out = _removeDuplicateHighlightsAcrossDays_(out, city);
+        out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+        out = _dedupeRows_(out);
+      }
+    }
+
+    // 🔒 weak days (single pass)
     let weakDays = _getWeakDayNums_(out, perDay);
     if(weakDays.length && !repairState.weakDone){
       repairState.weakDone = true;
@@ -3320,7 +3375,7 @@ async function generateCityItinerary(city){
         city,
         dest.days,
         out,
-        weakDays.slice(0,3), // 🔒 LIMITADO
+        weakDays.slice(0,3),
         perDay,
         forceReplan,
         hotel,
@@ -3333,13 +3388,18 @@ async function generateCityItinerary(city){
       }
     }
 
-    // 🔒 MISSING DAYS (UNA SOLA VEZ)
+    // 🔒 missing days (single pass)
     out = await _rescueMissingDays_(out);
 
-    // 🔒 AURORAS
+    // 🔒 anti-repeat cleanup after rescues
+    out = _removeDuplicateHighlightsAcrossDays_(out, city);
+    out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+    out = _dedupeRows_(out);
+
+    // 🔒 auroras
     out = _injectAuroraOptionRows_(city, out, dest.days, perDay, baseDate);
 
-    // 🔒 POST-AURORA (SOLO SI PEQUEÑO)
+    // 🔒 post-aurora repair only if small
     let postWeakDays = _getWeakDayNums_(out, perDay);
     if(postWeakDays.length && postWeakDays.length <= 2 && !repairState.postAuroraDone){
       repairState.postAuroraDone = true;
@@ -3361,7 +3421,10 @@ async function generateCityItinerary(city){
       }
     }
 
-    // 🔒 FINAL CLEAN
+    // 🔒 final cleanup
+    out = _removeDuplicateHighlightsAcrossDays_(out, city);
+    out = _removeDuplicateUrbanClustersAcrossDays_(out, city);
+    out = _dedupeRows_(out);
     out = _fixReturnRowDurationConsistency_(out);
 
     return out;
@@ -3370,7 +3433,13 @@ async function generateCityItinerary(city){
   showWOW(true, t('overlayDefault'));
 
   try{
-    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+    let masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
+
+    // 🔒 safe fallback if master plan fails / is incomplete
+    if(!Array.isArray(masterDays) || masterDays.length !== Number(dest.days || 1)){
+      console.warn(`[CITY ${city}] master plan incomplete/invalid, using fallback strategic days.`);
+      masterDays = _buildFallbackMasterDays_(dest.days);
+    }
 
     const blocks = _chunkMasterDays_(masterDays);
 
@@ -3393,7 +3462,9 @@ async function generateCityItinerary(city){
         usedUrbanClusterKeys
       );
 
-      stitchedRows.push(...blockRows);
+      if(Array.isArray(blockRows) && blockRows.length){
+        stitchedRows.push(...blockRows);
+      }
 
       const interimRows = _dedupeRows_(stitchedRows);
       usedHighlightKeys = _collectUsedHighlightKeys_(interimRows, city);
@@ -3402,13 +3473,14 @@ async function generateCityItinerary(city){
 
     stitchedRows = await _postProcessCityRows_(stitchedRows);
 
-    // 🔒 YA NO FORZAMOS ERROR DURO SI FALTA 1 DÍA
     if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
-      console.warn(`[CITY ${city}] partial coverage after post-process, continuing without fallback.`);
+      console.warn(`[CITY ${city}] partial coverage after post-process, continuing without hard fallback.`);
     }
 
     const val = await _safeValidateRows_(stitchedRows);
-    pushRows(city, val.allowed, forceReplan);
+    const finalRows = _dedupeRows_(Array.isArray(val?.allowed) && val.allowed.length ? val.allowed : stitchedRows);
+
+    pushRows(city, finalRows, forceReplan);
 
     renderCityTabs();
     setActiveCity(city);
