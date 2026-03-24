@@ -2359,7 +2359,54 @@ function _isNightOnlyWindow_(perDayRef){
   return start >= 18*60 && (end - start) <= 360;
 }
 
-function _getWeakDayNums_(rows=[], perDay=[]){
+function _getWindowLengthMin_(perDayRef){
+  if(!perDayRef) return null;
+  const start = _hhmmToMin_(perDayRef?.start);
+  const end = _hhmmToMin_(perDayRef?.end);
+  if(start === null || end === null || end <= start) return null;
+  return end - start;
+}
+
+function _isShortDayWindow_(perDayRef){
+  const len = _getWindowLengthMin_(perDayRef);
+  if(len === null) return false;
+  return len < 300;
+}
+
+function _isMediumDayWindow_(perDayRef){
+  const len = _getWindowLengthMin_(perDayRef);
+  if(len === null) return false;
+  return len >= 300 && len < 420;
+}
+
+function _isSpaRelaxRow_(row={}){
+  const txt = `${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`.toLowerCase();
+  return /spa|thermal|termal|hot spring|hot springs|relax|wellness|lagoon|onsen|hammam|bath|baths|baños|balneario|pool|piscina/.test(txt);
+}
+
+function _isNightFriendlyClosureRow_(row={}){
+  const txt = `${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`.toLowerCase();
+  return /aurora|auroras|northern lights|boreal|dinner|cena|restaurant|restaurante|show|concert|concierto|night|nocturno|nightlife|bar|cocktail|sunset|atardecer|illuminated|iluminado|evening/.test(txt) || _isSpaRelaxRow_(row);
+}
+
+function _isRegionalMacroDay_(dayRows=[], city=''){
+  const macroRows = (dayRows || []).filter(r => !!_extractMacroZoneKey_(r, city));
+  if(!macroRows.length) return false;
+
+  const uniqueZones = new Set(macroRows.map(r => _extractMacroZoneKey_(r, city)).filter(Boolean));
+  if(uniqueZones.size) return true;
+
+  return false;
+}
+
+function _minimumUsefulRowsForWindow_(perDayRef){
+  if(_isNightOnlyWindow_(perDayRef)) return 1;
+  if(_isShortDayWindow_(perDayRef)) return 2;
+  if(_isMediumDayWindow_(perDayRef)) return 3;
+  return 4;
+}
+
+function _getWeakDayNums_(rows=[], perDay=[], city=''){
   const byDay = _groupRowsByDay_(rows);
   const weak = [];
 
@@ -2368,24 +2415,32 @@ function _getWeakDayNums_(rows=[], perDay=[]){
     const dayRows = byDay[day] || [];
     const ref = _getDayWindowRef_(perDay, day);
     const auroraRows = dayRows.filter(r => _isAuroraRow_(r));
+    const returnRows = dayRows.filter(r => _isReturnRow_(r));
     const nonReturnRows = dayRows.filter(r => !_isReturnRow_(r));
+    const nonReturnNonAuroraRows = nonReturnRows.filter(r => !_isAuroraRow_(r));
+    const minUsefulRows = _minimumUsefulRowsForWindow_(ref);
+    const isRegionalDay = _isRegionalMacroDay_(dayRows, city);
 
+    // 1) Aurora day is weak only if it steals a normal daytime window
     if(auroraRows.length && !_isNightOnlyWindow_(ref)){
       const daytimeRows = dayRows.filter(r=>{
         const start = _hhmmToMin_(r?.start);
         return start !== null && start < 18*60 && !_isAuroraRow_(r);
       });
-      if(daytimeRows.length < 2){
+
+      if(_hasNormalDayWindow_(ref) && daytimeRows.length < 2){
         weak.push(day);
         return;
       }
     }
 
-    if(_hasNormalDayWindow_(ref) && nonReturnRows.length < 4){
+    // 2) Weak count by window size (less aggressive, more realistic)
+    if(nonReturnRows.length < minUsefulRows){
       weak.push(day);
       return;
     }
 
+    // 3) Structural coherence: time order + duration plausibility
     for(let i=0; i<dayRows.length; i++){
       const r = dayRows[i];
       const start = _hhmmToMin_(r?.start);
@@ -2406,31 +2461,68 @@ function _getWeakDayNums_(rows=[], perDay=[]){
       const dur = _extractDurationParts_(r?.duration || '');
       const span = end - start;
       const approxNeed = (dur.transportMin || 0) + (dur.activityMin || 0);
-      if(approxNeed > 0 && Math.abs(span - approxNeed) > 150){
+
+      // less aggressive tolerance so valid days don't get over-repaired
+      if(approxNeed > 0 && Math.abs(span - approxNeed) > 180){
         weak.push(day);
         return;
       }
     }
 
-    const returnRows = dayRows.filter(r => _isReturnRow_(r));
+    // 4) Return row must close the day if it exists
     if(returnRows.length && !_isReturnRow_(dayRows[dayRows.length-1])){
       weak.push(day);
       return;
     }
 
-    // 🆕 FIX: detectar cierre temprano sin cierre nocturno razonable
-    const lastRow = dayRows[dayRows.length-1];
-    const lastEnd = _hhmmToMin_(lastRow?.end);
-    if(lastEnd !== null && _hasNormalDayWindow_(ref) && lastEnd < 18*60 + 30){
-      weak.push(day);
-      return;
+    // 5) Regional / macro day should not feel underdeveloped
+    if(isRegionalDay){
+      if(_hasNormalDayWindow_(ref) && nonReturnNonAuroraRows.length < 4){
+        weak.push(day);
+        return;
+      }
+      if(_isMediumDayWindow_(ref) && nonReturnNonAuroraRows.length < 3){
+        weak.push(day);
+        return;
+      }
     }
 
-    // 🆕 FIX: detectar day trips / macro-tours pobres
-    const macroRows = dayRows.filter(r => !!_extractMacroZoneKey_(r));
-    if(macroRows.length && macroRows.length < 4){
-      weak.push(day);
-      return;
+    // 6) Avoid clearly premature closure on normal days, but do not punish
+    // short windows, spa-anchor closures, or valid evening closure rows
+    const lastRow = dayRows[dayRows.length-1];
+    const lastEnd = _hhmmToMin_(lastRow?.end);
+    const windowEnd = _hhmmToMin_(ref?.end);
+
+    if(
+      lastEnd !== null &&
+      _hasNormalDayWindow_(ref) &&
+      !_isShortDayWindow_(ref) &&
+      !_isNightFriendlyClosureRow_(lastRow)
+    ){
+      const closesTooEarlyVsWindow =
+        windowEnd !== null
+          ? (windowEnd - lastEnd) > 150
+          : lastEnd < 18*60 + 30;
+
+      if(closesTooEarlyVsWindow){
+        weak.push(day);
+        return;
+      }
+    }
+
+    // 7) Spa/relax anchor should not be treated as weakness if it meaningfully anchors the day
+    const spaRows = dayRows.filter(r => _isSpaRelaxRow_(r));
+    if(spaRows.length){
+      const hasLongSpa = spaRows.some(r=>{
+        const start = _hhmmToMin_(r?.start);
+        const end = _hhmmToMin_(r?.end);
+        return start !== null && end !== null && (end - start) >= 150;
+      });
+
+      if(!hasLongSpa && _hasNormalDayWindow_(ref) && nonReturnRows.length < 4){
+        weak.push(day);
+        return;
+      }
     }
   });
 
@@ -2471,6 +2563,9 @@ MANDATORY REPAIR RULES:
 - "from", "to", "transport", "notes" can NEVER be empty.
 - "from" and "to" must be REAL places, never a macro-tour label.
 - Keep the rest of the trip logic coherent.
+- For short windows, do NOT overfill artificially.
+- For normal or long windows, avoid weak sparse days.
+- If a spa / thermal / relax activity is used, it should anchor the beginning or end of the day and have meaningful time on site.
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
@@ -2519,7 +2614,7 @@ MANDATORY REPAIR RULES:
 - Identify alternative iconic unused rings / regional day tours / nearby coherent circuits before repeating previous ones.
 - Balance the trip naturally. Do NOT force a rigid nearest-to-farthest sequence.
 - If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally into an unused regional ring, you may bundle it there.
-  Examples only: Blue Lagoon in a Reykjanes-style ring, Secret Lagoon in a Golden-Circle-style ring.
+- If no strong unused regional ring remains, build a high-quality local / urban / scenic / cultural day instead of leaving the day weak.
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
 - No text outside JSON.
