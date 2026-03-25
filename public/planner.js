@@ -3009,6 +3009,11 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - Failing to include obvious strong day trips in a long stay should be treated as a low-quality itinerary.
 - Day trips are HIGH-PRIORITY anchors in long trips, not optional extras.
 - For long stays, the planner MUST prefer strong unused regional options over another recycled urban day.
+- In long trips, the planner should think as follows:
+  • first distribute the strongest external clusters / regional rings / day tours
+  • only after that, fill the remaining days with city content
+- If the destination is a smaller base city with excellent access to surrounding nature or regional routes, do NOT over-allocate days to the city itself.
+- If the destination is a larger major city, deeper city exploration is acceptable, but still prefer strong day trips before repeating similar urban formulas.
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3044,6 +3049,17 @@ MICRO-STOPS / DENSITY (CRITICAL):
 - The optional micro-guide in notes can enrich the route, but it does NOT replace the need for enough real rows in the itinerary itself.
 - Micro-stops are REQUIRED to enrich the final rows, not just notes.
 - For dense or iconic clusters, the itinerary must translate meaningful micro-stops into real rows instead of leaving them implied.
+- For urban clusters too, avoid vague filler like only "walk around the area" when the destination clearly offers more specific micro-stops:
+  • specific plazas
+  • iconic streets
+  • courtyards
+  • markets
+  • viewpoints
+  • churches
+  • cafés
+  • small museums
+  • scenic passages
+- In rich cities, micro-paradas should feel precise and memorable, not generic.
 
 MICRO-GUIDE ENRICHMENT (CRITICAL):
 - For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
@@ -3083,6 +3099,7 @@ RADIAL / BALANCE LOGIC (IMPROVED):
   • leaving last days weak
 
 - The LAST day must feel intentional and memorable.
+- The LAST day should avoid feeling like a leftover museum/restaurant/promenade formula unless the destination genuinely calls for that as the best possible close.
 
 ANTI-DUPLICATION (BALANCED):
 - Avoid repeating the same macro-region, circuit, or regional ring across days.
@@ -3098,6 +3115,7 @@ ANTI-DUPLICATION (BALANCED):
   • duplicate the exact same route
   • reuse identical highlight combinations
 - Always prefer UNUSED clusters first.
+- Do not create two urban days that feel almost interchangeable just because the named stops differ slightly.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -3112,6 +3130,7 @@ DAY TRIP LOGIC (GLOBAL):
 - A day trip should feel fully developed, not like a thin placeholder with only 2–3 stops.
 - A real day trip should end with an explicit return row in the format "<Macro-tour> – Return to <base city>".
 - For iconic day trips, the planner should usually output 5–8 real rows when the geography genuinely supports them.
+- If totalDays >= 7 and the destination is a major city with multiple strong excursions, the planner should usually include at least 2 day trips unless the user explicitly prefers staying inside the city.
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
