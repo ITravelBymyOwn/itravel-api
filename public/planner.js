@@ -3007,6 +3007,8 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - Before reusing an urban cluster or a second-tier city pack, you MUST explicitly evaluate whether there are still unused worthwhile regional day trips / rings / nearby towns / scenic routes reachable from the base.
 - For trips of 5 or more days, if the destination genuinely supports strong day trips, you MUST include 1–3 of them before recycling urban content.
 - Failing to include obvious strong day trips in a long stay should be treated as a low-quality itinerary.
+- Day trips are HIGH-PRIORITY anchors in long trips, not optional extras.
+- For long stays, the planner MUST prefer strong unused regional options over another recycled urban day.
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3040,6 +3042,8 @@ MICRO-STOPS / DENSITY (CRITICAL):
 - A short day should still usually have at least 3 meaningful rows unless the user window is extremely limited.
 - For iconic regional day trips / scenic routes / peninsulas / coastlines / heritage towns, the micro-stops must NOT remain only conceptual: the final itinerary should usually include 5–8 REAL sub-stops / rows when the geography genuinely supports them.
 - The optional micro-guide in notes can enrich the route, but it does NOT replace the need for enough real rows in the itinerary itself.
+- Micro-stops are REQUIRED to enrich the final rows, not just notes.
+- For dense or iconic clusters, the itinerary must translate meaningful micro-stops into real rows instead of leaving them implied.
 
 MICRO-GUIDE ENRICHMENT (CRITICAL):
 - For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
@@ -3051,6 +3055,7 @@ MICRO-GUIDE ENRICHMENT (CRITICAL):
 - If the day already includes many real rows, the micro-guide can be shorter.
 - If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
 - This is especially valuable for dense scenic routes, rich urban walks, peninsulas, coastlines, regional loops, and layered city days.
+- However, the micro-guide must never be used as an excuse to keep a rich route artificially short in the actual rows.
 
 RADIAL / BALANCE LOGIC (IMPROVED):
 - Build a pool of candidate experiences around the base city:
@@ -3106,6 +3111,7 @@ DAY TRIP LOGIC (GLOBAL):
 - Do NOT leave a long trip mostly urban if the destination is widely known for strong day trips reachable from the base.
 - A day trip should feel fully developed, not like a thin placeholder with only 2–3 stops.
 - A real day trip should end with an explicit return row in the format "<Macro-tour> – Return to <base city>".
+- For iconic day trips, the planner should usually output 5–8 real rows when the geography genuinely supports them.
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
@@ -3160,6 +3166,11 @@ FAIL-SAFE GENERATION (CRITICAL):
 - The planner MUST always return a complete and usable itinerary.
 - Before finalizing, verify that each requested day in this block has enough useful content for its time window.
 - If a day is still too thin, rebuild it internally before returning JSON.
+- HARD CHECK BEFORE RETURN:
+  • short day: at least 3 real rows
+  • normal day: usually at least 4–8 real rows
+  • iconic regional day trip: usually 5–8 real rows when geography genuinely supports it
+- Notes are enrichment only. They do not replace rows.
 - No text outside JSON.
 `.trim();
 
