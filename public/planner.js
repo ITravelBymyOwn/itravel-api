@@ -3014,6 +3014,14 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
   • only after that, fill the remaining days with city content
 - If the destination is a smaller base city with excellent access to surrounding nature or regional routes, do NOT over-allocate days to the city itself.
 - If the destination is a larger major city, deeper city exploration is acceptable, but still prefer strong day trips before repeating similar urban formulas.
+- Use destination type intelligently:
+  • if the base city is relatively compact and mainly serves as a gateway to surrounding regions, external clusters should dominate medium/long stays
+  • if the base city itself is exceptionally rich and layered, city days may be more numerous, but only if they remain materially different from one another
+- The planner must avoid the "easy urban fallback" when richer external options still exist.
+- In trips with rental car access or very strong public-transport day tours, assume radial expansion is easier and prioritize it more aggressively.
+- For a 7-day trip:
+  • smaller gateway-type cities should usually dedicate only about 1–2 days to the base city unless the user explicitly wants more city time
+  • larger major cities should still usually include at least 2 strong day trips when those are clearly available
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3060,6 +3068,9 @@ MICRO-STOPS / DENSITY (CRITICAL):
   • small museums
   • scenic passages
 - In rich cities, micro-paradas should feel precise and memorable, not generic.
+- Avoid filling a city day only with museum + restaurant + generic walk unless there is truly no stronger combination available.
+- When an urban zone is selected, try to sequence named micro-stops so the day feels like exploration, not a placeholder list.
+- If a cluster is known for multiple real sub-stops in close proximity, prefer expressing those as multiple rows rather than compressing them into one broad stop.
 
 MICRO-GUIDE ENRICHMENT (CRITICAL):
 - For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
@@ -3072,6 +3083,7 @@ MICRO-GUIDE ENRICHMENT (CRITICAL):
 - If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
 - This is especially valuable for dense scenic routes, rich urban walks, peninsulas, coastlines, regional loops, and layered city days.
 - However, the micro-guide must never be used as an excuse to keep a rich route artificially short in the actual rows.
+- The micro-guide is enrichment, not substitution.
 
 RADIAL / BALANCE LOGIC (IMPROVED):
 - Build a pool of candidate experiences around the base city:
@@ -3100,6 +3112,14 @@ RADIAL / BALANCE LOGIC (IMPROVED):
 
 - The LAST day must feel intentional and memorable.
 - The LAST day should avoid feeling like a leftover museum/restaurant/promenade formula unless the destination genuinely calls for that as the best possible close.
+- If the trip is long, do not let the base city absorb too many days too early while strong outer clusters remain unused.
+- Prefer diversity of day character across the itinerary:
+  • one day can be historic
+  • another architectural
+  • another waterfront
+  • another regional / scenic
+  • another food/culture
+  • but avoid repeating the same urban day shape with only renamed stops
 
 ANTI-DUPLICATION (BALANCED):
 - Avoid repeating the same macro-region, circuit, or regional ring across days.
@@ -3116,6 +3136,7 @@ ANTI-DUPLICATION (BALANCED):
   • reuse identical highlight combinations
 - Always prefer UNUSED clusters first.
 - Do not create two urban days that feel almost interchangeable just because the named stops differ slightly.
+- Penalize repeated use of the same broad urban zone unless the new day offers a genuinely different angle.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -3131,6 +3152,8 @@ DAY TRIP LOGIC (GLOBAL):
 - A real day trip should end with an explicit return row in the format "<Macro-tour> – Return to <base city>".
 - For iconic day trips, the planner should usually output 5–8 real rows when the geography genuinely supports them.
 - If totalDays >= 7 and the destination is a major city with multiple strong excursions, the planner should usually include at least 2 day trips unless the user explicitly prefers staying inside the city.
+- If totalDays >= 7 and the destination is a compact gateway city with strong surroundings, external day trips / regional days should usually dominate over urban days.
+- Day trips should not be treated as token inclusions; they should feel like some of the strongest days of the trip.
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
@@ -3175,6 +3198,7 @@ QUALITY / RHYTHM:
 - Prioritize iconic endings, emotional endings, scenic endings, or premium cultural/food/waterfront closures when appropriate.
 - The overall result should feel WOW: premium, specific, memorable, realistic, and smarter than a standard travel planner.
 - When the final day is still urban, it must feel materially different from earlier urban days and avoid obvious recycling of the same cluster.
+- The itinerary should feel curated, not merely valid.
 
 FAIL-SAFE GENERATION (CRITICAL):
 - Under NO circumstances should a requested day return:
@@ -3239,6 +3263,8 @@ MANDATORY:
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Transport preference: ${JSON.stringify(promptTransport)}
 - The result should feel globally premium and destination-aware, not generic.
+- If the trip is long and the destination still has strong unused excursions, prefer one of those before another generic urban day.
+- The replacement day must be materially different from already-used days.
 - No text outside JSON.
 `.trim();
 
