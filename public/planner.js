@@ -2713,9 +2713,7 @@ function _sanitizeTransportValue_(value=''){
 
   if(
     !raw ||
-    low === 'recommend me' ||
-    low === 'recomiendame' ||
-    low === 'recomiéndame' ||
+    /recommend me|recomiendame|recomiéndame/.test(low) ||
     low === 'recommended by planner' ||
     low === 'as appropriate'
   ){
@@ -2725,13 +2723,42 @@ function _sanitizeTransportValue_(value=''){
   return raw;
 }
 
+function _sanitizeBaseLikeValue_(value='', fallback=''){
+  let raw = String(value || '').trim();
+  raw = raw
+    .replace(/\b(recommend me|recomiendame|recomiéndame)\b/ig, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+,/g, ',')
+    .replace(/,\s*,+/g, ',')
+    .replace(/^[,\-\s]+|[,\-\s]+$/g, '')
+    .trim();
+
+  if(!raw) return String(fallback || '').trim();
+
+  // Evita strings basura tipo "In ," o "In"
+  if(/^(in|en|à|a|de|desde)\s*$/i.test(raw)) return String(fallback || '').trim();
+
+  return raw;
+}
+
 function _cleanTransportField_(rows=[]){
   return (rows || []).map(r=>{
     const cleaned = _sanitizeTransportValue_(r?.transport);
-    if(cleaned) return r;
 
-    const from = String(r?.from || '').toLowerCase();
-    const to   = String(r?.to || '').toLowerCase();
+    const cleanFrom = _sanitizeBaseLikeValue_(r?.from, '');
+    const cleanTo   = _sanitizeBaseLikeValue_(r?.to, '');
+
+    if(cleaned){
+      return normalizeRow({
+        ...r,
+        from: cleanFrom || String(r?.from || '').trim(),
+        to: cleanTo || String(r?.to || '').trim(),
+        transport: cleaned
+      }, Number(r?.day || 1));
+    }
+
+    const from = String(cleanFrom || r?.from || '').toLowerCase();
+    const to   = String(cleanTo || r?.to || '').toLowerCase();
     const activity = String(r?.activity || '').toLowerCase();
 
     const sameArea =
@@ -2756,6 +2783,8 @@ function _cleanTransportField_(rows=[]){
 
     return normalizeRow({
       ...r,
+      from: cleanFrom || String(r?.from || '').trim(),
+      to: cleanTo || String(r?.to || '').trim(),
       transport: fallback
     }, Number(r?.day || 1));
   });
@@ -2847,7 +2876,7 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
 
 function _buildAuroraOptionRow_(city, day, dayRows=[]){
   const loc = _plannerLocalePack_();
-  const hotel = String(cityMeta?.[city]?.hotel || loc.hotelFallback).trim() || loc.hotelFallback;
+  const hotel = _sanitizeBaseLikeValue_(cityMeta?.[city]?.hotel || loc.hotelFallback, loc.hotelFallback) || loc.hotelFallback;
 
   const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end || '').localeCompare(String(b?.end || ''))).pop() || null;
   const lastEnd = _hhmmToMin_(lastRow?.end);
@@ -2952,6 +2981,7 @@ async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay,
     ? forbiddenUrbanClusters.join(', ')
     : '';
   const promptTransport = _normalizeTransportPreferenceForPrompt_(transport);
+  const promptBase = _sanitizeBaseLikeValue_(hotel || '', '');
 
   const buildPrimaryPrompt = () => `
 ${FORMAT}
@@ -2973,9 +3003,12 @@ MANDATORY:
   • "activity" format: "Destination – <Specific sub-stop>"
   • "from" and "to" must be REAL places
   • "transport" must be a REAL final value (no placeholders)
+  • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
+  • NEVER contaminate hotel/base/from/to strings with transport preference text
 
 - SOFT RULES (HIGH PRIORITY BUT FLEXIBLE):
-  • target 4–8 rows for normal days
+  • target 4–7 rows for a normal urban day
+  • target 6–10 rows for a flagship regional day / iconic outward day when geography and time window support it
   • allow 8–12 only when naturally dense
   • avoid weak days whenever possible
   • prefer variety across days
@@ -2986,7 +3019,7 @@ MANDATORY:
   → NEVER leave a day weak or empty.
   → a normal usable day should still feel complete, intentional, and valuable.
 
-- Hotel/base: ${JSON.stringify(hotel || '')}
+- Hotel/base: ${JSON.stringify(promptBase)}
 - Preferred transport: ${JSON.stringify(promptTransport)}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
@@ -3020,8 +3053,10 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - The planner must avoid the "easy urban fallback" when richer external options still exist.
 - In trips with rental car access or very strong public-transport day tours, assume radial expansion is easier and prioritize it more aggressively.
 - For a 7-day trip:
-  • smaller gateway-type cities should usually dedicate only about 1–2 days to the base city unless the user explicitly wants more city time
+  • smaller gateway-type cities should usually dedicate only about 1–2.5 days to the base city unless the user explicitly wants more city time
   • larger major cities should still usually include at least 2 strong day trips when those are clearly available
+- Do NOT omit a flagship outward cluster if it is one of the most iconic, reachable, and compatible experiences from the base.
+- If a destination is clearly known more for outward exploration than for many dense urban days, prefer outward distribution by default.
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3053,7 +3088,7 @@ MICRO-STOPS / DENSITY (CRITICAL):
 - When the destination is exceptionally rich, prefer a denser but still readable and realistic day over a weak sparse day.
 - A normal usable day should usually have at least 4 meaningful rows unless the time window is clearly short.
 - A short day should still usually have at least 3 meaningful rows unless the user window is extremely limited.
-- For iconic regional day trips / scenic routes / peninsulas / coastlines / heritage towns, the micro-stops must NOT remain only conceptual: the final itinerary should usually include 5–8 REAL sub-stops / rows when the geography genuinely supports them.
+- For iconic regional day trips / scenic routes / peninsulas / coastlines / heritage towns, the micro-stops must NOT remain only conceptual: the final itinerary should usually include 6–10 REAL sub-stops / rows when the geography genuinely supports them.
 - The optional micro-guide in notes can enrich the route, but it does NOT replace the need for enough real rows in the itinerary itself.
 - Micro-stops are REQUIRED to enrich the final rows, not just notes.
 - For dense or iconic clusters, the itinerary must translate meaningful micro-stops into real rows instead of leaving them implied.
@@ -3071,6 +3106,7 @@ MICRO-STOPS / DENSITY (CRITICAL):
 - Avoid filling a city day only with museum + restaurant + generic walk unless there is truly no stronger combination available.
 - When an urban zone is selected, try to sequence named micro-stops so the day feels like exploration, not a placeholder list.
 - If a cluster is known for multiple real sub-stops in close proximity, prefer expressing those as multiple rows rather than compressing them into one broad stop.
+- Micro-stops should make the day feel discovered, not merely valid.
 
 MICRO-GUIDE ENRICHMENT (CRITICAL):
 - For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
@@ -3120,6 +3156,8 @@ RADIAL / BALANCE LOGIC (IMPROVED):
   • another regional / scenic
   • another food/culture
   • but avoid repeating the same urban day shape with only renamed stops
+- In outward/gateway destinations, the urban days should be intentionally limited and highly differentiated.
+- In dense major cities, urban days may be more numerous, but repeated zone recycling should still be penalized.
 
 ANTI-DUPLICATION (BALANCED):
 - Avoid repeating the same macro-region, circuit, or regional ring across days.
@@ -3150,10 +3188,11 @@ DAY TRIP LOGIC (GLOBAL):
 - Do NOT leave a long trip mostly urban if the destination is widely known for strong day trips reachable from the base.
 - A day trip should feel fully developed, not like a thin placeholder with only 2–3 stops.
 - A real day trip should end with an explicit return row in the format "<Macro-tour> – Return to <base city>".
-- For iconic day trips, the planner should usually output 5–8 real rows when the geography genuinely supports them.
+- For iconic day trips, the planner should usually output 6–10 real rows when the geography genuinely supports them.
 - If totalDays >= 7 and the destination is a major city with multiple strong excursions, the planner should usually include at least 2 day trips unless the user explicitly prefers staying inside the city.
 - If totalDays >= 7 and the destination is a compact gateway city with strong surroundings, external day trips / regional days should usually dominate over urban days.
 - Day trips should not be treated as token inclusions; they should feel like some of the strongest days of the trip.
+- Flagship day trips should usually outperform secondary urban days in score and priority.
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
@@ -3212,7 +3251,7 @@ FAIL-SAFE GENERATION (CRITICAL):
 - HARD CHECK BEFORE RETURN:
   • short day: at least 3 real rows
   • normal day: usually at least 4–8 real rows
-  • iconic regional day trip: usually 5–8 real rows when geography genuinely supports it
+  • iconic regional day trip: usually 6–10 real rows when geography genuinely supports it
 - Notes are enrichment only. They do not replace rows.
 - No text outside JSON.
 `.trim();
@@ -3236,8 +3275,10 @@ MANDATORY:
   • "activity" MUST be "Destination – <Specific sub-stop>"
   • real places in "from" and "to"
   • transport must be a real final value
+  • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
 - SOFT RULES:
-  • target 4–8 rows
+  • target 4–7 rows for a normal urban day
+  • target 6–10 rows for a flagship regional day / iconic outward day when geography and time window support it
   • allow around 8–12 when the remaining cluster is truly dense and compact
 - If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
 - Use the remaining UNUSED candidate universe first, thinking radially from the base city:
@@ -3255,16 +3296,17 @@ MANDATORY:
 - Prefer UNUSED clusters first, but if the destination has truly limited variety, a meaningfully distinct internal route is acceptable over leaving the day weak.
 - If the destination genuinely offers strong day trips / regional circuits and this is a long trip, prefer using one of those before falling back to a thin urban day.
 - A valid missing-day rebuild should usually produce at least 3 meaningful rows for a short day and at least 4 meaningful rows for a normal day.
-- For iconic regional missing-day rebuilds, prefer 5–8 real sub-stops / rows when the geography genuinely supports them.
+- For iconic regional missing-day rebuilds, prefer 6–10 real sub-stops / rows when the geography genuinely supports them.
 - The micro-guide in notes can enrich the route but must not replace real rows in the itinerary.
 - If the chosen missing day is spa/thermal/relax-based, place that anchor at the start or end of the day and leave at least about 3 effective hours on site.
 - Keep daylight-sensitive activities in daylight-friendly hours.
 - If excursion/day trip exists, end with "<Region> – Return to ${city}".
-- Hotel/base: ${JSON.stringify(hotel || '')}
+- Hotel/base: ${JSON.stringify(promptBase)}
 - Transport preference: ${JSON.stringify(promptTransport)}
 - The result should feel globally premium and destination-aware, not generic.
 - If the trip is long and the destination still has strong unused excursions, prefer one of those before another generic urban day.
 - The replacement day must be materially different from already-used days.
+- If the destination is an outward/gateway type base, keep the number of extra urban rebuilds low and prioritize strong outer clusters first.
 - No text outside JSON.
 `.trim();
 
