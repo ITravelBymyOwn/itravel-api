@@ -2735,7 +2735,6 @@ function _sanitizeBaseLikeValue_(value='', fallback=''){
 
   if(!raw) return String(fallback || '').trim();
 
-  // Evita strings basura tipo "In ," o "In"
   if(/^(in|en|à|a|de|desde)\s*$/i.test(raw)) return String(fallback || '').trim();
 
   return raw;
@@ -3005,6 +3004,13 @@ MANDATORY:
   • "transport" must be a REAL final value (no placeholders)
   • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
   • NEVER contaminate hotel/base/from/to strings with transport preference text
+  • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
+  • Examples of the contract:
+    - correct: "Golden Circle – Geysir"
+    - correct: "South Coast – Reynisfjara"
+    - correct: "Snæfellsnes Peninsula – Arnarstapi"
+    - correct: "Montserrat – Monastery"
+    - wrong: "${city} – Geysir" when Geysir belongs to a regional day trip
 
 - SOFT RULES (HIGH PRIORITY BUT FLEXIBLE):
   • target 4–7 rows for a normal urban day
@@ -3057,6 +3063,8 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
   • larger major cities should still usually include at least 2 strong day trips when those are clearly available
 - Do NOT omit a flagship outward cluster if it is one of the most iconic, reachable, and compatible experiences from the base.
 - If a destination is clearly known more for outward exploration than for many dense urban days, prefer outward distribution by default.
+- If the destination behaves like a gateway / outward base, strong outer clusters should usually dominate over extra city days.
+- For gateway/outward bases, do not let secondary city days crowd out flagship radial experiences.
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3158,6 +3166,8 @@ RADIAL / BALANCE LOGIC (IMPROVED):
   • but avoid repeating the same urban day shape with only renamed stops
 - In outward/gateway destinations, the urban days should be intentionally limited and highly differentiated.
 - In dense major cities, urban days may be more numerous, but repeated zone recycling should still be penalized.
+- In gateway/outward destinations, the planner should usually cap urban allocation around 1–2.5 days in a 7-day stay unless the user explicitly asks for more city time.
+- Outward/gateway bases should prioritize "outside first, city later" once arrival logistics are covered.
 
 ANTI-DUPLICATION (BALANCED):
 - Avoid repeating the same macro-region, circuit, or regional ring across days.
@@ -3193,6 +3203,7 @@ DAY TRIP LOGIC (GLOBAL):
 - If totalDays >= 7 and the destination is a compact gateway city with strong surroundings, external day trips / regional days should usually dominate over urban days.
 - Day trips should not be treated as token inclusions; they should feel like some of the strongest days of the trip.
 - Flagship day trips should usually outperform secondary urban days in score and priority.
+- A flagship cluster should not be reduced to only 3–4 rows if the route naturally supports a richer 6–10-row structure.
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
@@ -3276,6 +3287,7 @@ MANDATORY:
   • real places in "from" and "to"
   • transport must be a real final value
   • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
+  • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
 - SOFT RULES:
   • target 4–7 rows for a normal urban day
   • target 6–10 rows for a flagship regional day / iconic outward day when geography and time window support it
