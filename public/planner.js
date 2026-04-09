@@ -3005,8 +3005,11 @@ MANDATORY:
   • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
   • NEVER contaminate hotel/base/from/to strings with transport preference text
   • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
+  • If a stop belongs to a known regional circuit chosen for that day, do NOT label it as "${city} – <Sub-stop>"
+  • The base city name on the LEFT side is allowed only for true urban/local days
   • Examples of the contract:
     - correct: "Golden Circle – Geysir"
+    - correct: "Golden Circle – Friðheimar"
     - correct: "South Coast – Reynisfjara"
     - correct: "Snæfellsnes Peninsula – Arnarstapi"
     - correct: "Montserrat – Monastery"
@@ -3065,6 +3068,8 @@ GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - If a destination is clearly known more for outward exploration than for many dense urban days, prefer outward distribution by default.
 - If the destination behaves like a gateway / outward base, strong outer clusters should usually dominate over extra city days.
 - For gateway/outward bases, do not let secondary city days crowd out flagship radial experiences.
+- If a flagship cluster is selected for the trip, it should not be silently replaced by a weaker semi-urban variant.
+- In outward/gateway cases, prefer coverage of the main iconic clusters first, then secondary clusters, and only then additional city days.
 
 MICRO-STOPS / DENSITY (CRITICAL):
 - For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
@@ -3115,6 +3120,7 @@ MICRO-STOPS / DENSITY (CRITICAL):
 - When an urban zone is selected, try to sequence named micro-stops so the day feels like exploration, not a placeholder list.
 - If a cluster is known for multiple real sub-stops in close proximity, prefer expressing those as multiple rows rather than compressing them into one broad stop.
 - Micro-stops should make the day feel discovered, not merely valid.
+- For flagship regional clusters, do not stop at only 4–5 rows if there are clearly more real sub-stops nearby that fit naturally.
 
 MICRO-GUIDE ENRICHMENT (CRITICAL):
 - For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
@@ -3168,6 +3174,9 @@ RADIAL / BALANCE LOGIC (IMPROVED):
 - In dense major cities, urban days may be more numerous, but repeated zone recycling should still be penalized.
 - In gateway/outward destinations, the planner should usually cap urban allocation around 1–2.5 days in a 7-day stay unless the user explicitly asks for more city time.
 - Outward/gateway bases should prioritize "outside first, city later" once arrival logistics are covered.
+- Do not create two days that are materially the same in ordered structure, zone pattern, and stop logic.
+- Two different days must not reuse the same ordered chain or near-identical sequence of: museum + garden + lunch + museum + return, or equivalent repeated formulas.
+- Every day must have a materially distinct identity, not only different stop names.
 
 ANTI-DUPLICATION (BALANCED):
 - Avoid repeating the same macro-region, circuit, or regional ring across days.
@@ -3182,9 +3191,12 @@ ANTI-DUPLICATION (BALANCED):
 - NEVER:
   • duplicate the exact same route
   • reuse identical highlight combinations
+  • create two days that are near-duplicates in sequence, rhythm, and area logic
 - Always prefer UNUSED clusters first.
 - Do not create two urban days that feel almost interchangeable just because the named stops differ slightly.
 - Penalize repeated use of the same broad urban zone unless the new day offers a genuinely different angle.
+- If a day resembles an earlier day in both stop order and overall shape, rebuild it before returning.
+- Day-to-day distinctiveness is mandatory, not optional.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -3204,6 +3216,7 @@ DAY TRIP LOGIC (GLOBAL):
 - Day trips should not be treated as token inclusions; they should feel like some of the strongest days of the trip.
 - Flagship day trips should usually outperform secondary urban days in score and priority.
 - A flagship cluster should not be reduced to only 3–4 rows if the route naturally supports a richer 6–10-row structure.
+- For outward/gateway destinations, ensure the flagship clusters are covered once each before adding redundant city-heavy alternatives.
 
 SPA / THERMAL / RELAX LOGIC (CRITICAL):
 - Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
@@ -3263,6 +3276,7 @@ FAIL-SAFE GENERATION (CRITICAL):
   • short day: at least 3 real rows
   • normal day: usually at least 4–8 real rows
   • iconic regional day trip: usually 6–10 real rows when geography genuinely supports it
+  • no day may be a near-duplicate of an earlier day in sequence and structure
 - Notes are enrichment only. They do not replace rows.
 - No text outside JSON.
 `.trim();
@@ -3319,6 +3333,7 @@ MANDATORY:
 - If the trip is long and the destination still has strong unused excursions, prefer one of those before another generic urban day.
 - The replacement day must be materially different from already-used days.
 - If the destination is an outward/gateway type base, keep the number of extra urban rebuilds low and prioritize strong outer clusters first.
+- Do not create a missing-day rebuild that duplicates another day already used in the itinerary.
 - No text outside JSON.
 `.trim();
 
