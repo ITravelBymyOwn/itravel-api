@@ -2740,6 +2740,54 @@ function _sanitizeBaseLikeValue_(value='', fallback=''){
   return raw;
 }
 
+/* =========================================================
+   PATCH HELPERS · ANTI-REPEAT / NORMALIZATION
+========================================================= */
+function _normalizeRepeatKey_(txt=''){
+  return String(txt || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _canonicalActivityKey_(activity='', city=''){
+  let key = _normalizeRepeatKey_(activity);
+
+  const cityKey = _normalizeRepeatKey_(city);
+  if(cityKey){
+    const prefix = `${cityKey} `;
+    if(key.startsWith(prefix)){
+      key = key.slice(prefix.length).trim();
+    }
+  }
+
+  key = key
+    .replace(/^(golden circle|south coast|snaefellsnes peninsula|snaefellsnes|reykjanes peninsula|reykjanes|reykjavik)\s+/i, '')
+    .trim();
+
+  return key;
+}
+
+function _rowSemanticKey_(row={}, city=''){
+  const activityKey = _canonicalActivityKey_(row?.activity || '', city);
+  const toKey = _normalizeRepeatKey_(row?.to || '');
+  return [activityKey, toKey].filter(Boolean).join(' | ');
+}
+
+function _isForbiddenHighlight_(row={}, forbiddenList=[], city=''){
+  const rowKey = _rowSemanticKey_(row, city);
+  if(!rowKey) return false;
+
+  return (forbiddenList || []).some(f=>{
+    const fk = _canonicalActivityKey_(String(f || ''), city);
+    if(!fk) return false;
+    return rowKey.includes(fk) || fk.includes(rowKey);
+  });
+}
+
 function _cleanTransportField_(rows=[]){
   return (rows || []).map(r=>{
     const cleaned = _sanitizeTransportValue_(r?.transport);
@@ -2790,7 +2838,7 @@ function _cleanTransportField_(rows=[]){
 }
 
 function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
-  const key = _normalizeHighlightKey_(city);
+  const key = _normalizeRepeatKey_(city);
 
   const plausibleCityHints = [
     'reykjavik','iceland','islandia',
@@ -2803,7 +2851,7 @@ function _isAuroraPlausibleForCityAndDate_(city='', baseDate=''){
     'yellowknife'
   ];
 
-  const cityOk = plausibleCityHints.some(h => key.includes(_normalizeHighlightKey_(h)));
+  const cityOk = plausibleCityHints.some(h => key.includes(_normalizeRepeatKey_(h)));
   if(!cityOk) return false;
 
   const m = String(baseDate || '').match(/^\d{4}-(\d{2})-\d{2}$/);
@@ -2946,7 +2994,7 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
       : extraNote;
   });
 
-  return _dedupeRows_([...(rows || []), ...injected]);
+  return _dedupeRows_([...(rows || []), ...injected], city);
 }
 
 function _fixReturnRowDurationConsistency_(rows=[]){
@@ -3197,6 +3245,7 @@ ANTI-DUPLICATION (BALANCED):
 - Penalize repeated use of the same broad urban zone unless the new day offers a genuinely different angle.
 - If a day resembles an earlier day in both stop order and overall shape, rebuild it before returning.
 - Day-to-day distinctiveness is mandatory, not optional.
+- Reusing the same exact POI across different days is forbidden unless the user explicitly requested repetition.
 
 DAY TRIP LOGIC (GLOBAL):
 - If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
@@ -3347,7 +3396,13 @@ MANDATORY:
 
     const extracted = _extractPlannerRows_(parsed, city);
     const forced = _forceRowsIntoValidDayRange_(extracted, allowedDays);
-    const cleanedTransport = _cleanTransportField_(forced);
+    let cleanedTransport = _cleanTransportField_(forced);
+
+    /* ================================
+       PATCH · HARD FILTER FOR FORBIDDEN HIGHLIGHTS
+    ================================ */
+    cleanedTransport = (cleanedTransport || []).filter(r => !_isForbiddenHighlight_(r, forbiddenHighlights, city));
+
     return Array.isArray(cleanedTransport) ? cleanedTransport : [];
   }
 
@@ -3366,6 +3421,8 @@ MANDATORY:
     console.warn(`[BLOCK ${label}] Primary request failed:`, err);
     primaryRows = [];
   }
+
+  primaryRows = _dedupeRows_(primaryRows, city);
 
   if(_hasUsableRowsForAllBlockDays_(primaryRows, dayNums)){
     console.log(`[BLOCK ${label}] OK`);
@@ -3392,7 +3449,9 @@ MANDATORY:
     retryRows = [];
   }
 
-  const merged = _dedupeRows_([...(primaryRows || []), ...(retryRows || [])]);
+  retryRows = _dedupeRows_(retryRows, city);
+
+  const merged = _dedupeRows_([...(primaryRows || []), ...(retryRows || [])], city);
 
   if(_hasUsableRowsForAllBlockDays_(merged, dayNums)){
     console.log(`[BLOCK ${label}] OK after retry`);
@@ -3413,22 +3472,15 @@ MANDATORY:
   return [];
 }
 
-function _dedupeRows_(rows=[]){
+function _dedupeRows_(rows=[], city=''){
   const seen = new Set();
   const out = [];
 
   for(const r of (rows || [])){
-    const key = JSON.stringify([
-      Number(r?.day || 1),
-      String(r?.start || '').trim(),
-      String(r?.end || '').trim(),
-      String(r?.activity || '').trim(),
-      String(r?.from || '').trim(),
-      String(r?.to || '').trim()
-    ]);
-
-    if(seen.has(key)) continue;
-    seen.add(key);
+    const semantic = _rowSemanticKey_(r, city);
+    const dayKey = `${Number(r?.day || 1)}::${semantic}`;
+    if(seen.has(dayKey)) continue;
+    seen.add(dayKey);
     out.push(r);
   }
 
@@ -3446,7 +3498,6 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
   }
   return true;
 }
-
 /* =========================================================
    SECTION 15F · generateCityItinerary (BLOCK-SAFE + FINAL GUARANTEE)
 ========================================================= */
