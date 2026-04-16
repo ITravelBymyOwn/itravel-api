@@ -2788,6 +2788,107 @@ function _isForbiddenHighlight_(row={}, forbiddenList=[], city=''){
   });
 }
 
+/* =========================================================
+   NEW HELPERS · DESTINATION-WIDE SELECTION BIAS
+========================================================= */
+function _buildExplorationModeBiasBlock_(city='', totalDays=1){
+  const n = Number(totalDays || 0);
+
+  if(n >= 7){
+    return `
+DESTINATION-WIDE SELECTION BIAS (CRITICAL):
+- First determine whether "${city}" behaves more like:
+  • a dense major city with many true urban imperdibles
+  • a gateway base whose strongest value comes from outward day trips
+  • or a balanced hybrid between both
+- This decision must be made from the destination's candidate universe, not from a template.
+
+IF "${city}" behaves like a dense major city:
+- You MUST still cover the core urban imperdibles first.
+- But for a 7-day stay, you should normally still include around 2 strong day trips or near-city escapes if they are genuinely worthwhile and feasible.
+- Do NOT spend all 7 days inside the city if strong outward options clearly exist.
+
+IF "${city}" behaves like a gateway / outward base:
+- The strongest external clusters should dominate.
+- Keep pure city allocation tighter unless the city itself clearly deserves more.
+
+IF "${city}" behaves like a hybrid:
+- Cover the city's major imperdibles properly.
+- Then actively add the strongest outward experiences before building secondary urban filler days.
+
+PRIORITY RULE FOR LONG STAYS:
+- Never let secondary or tertiary urban content displace:
+  • the main city imperdibles
+  • or the strongest feasible outward day trips
+- For 7-day stays, prefer:
+  1. core city imperdibles
+  2. strongest day trips / outward escapes
+  3. only then secondary urban content
+`.trim();
+  }
+
+  if(n >= 5){
+    return `
+DESTINATION-WIDE SELECTION BIAS:
+- Determine whether "${city}" is mainly:
+  • city-heavy
+  • outward/gateway
+  • or hybrid
+- Cover the main city imperdibles if the destination is city-heavy.
+- But if strong outward options clearly exist, include at least 1 meaningful excursion before falling into weaker secondary city content.
+`.trim();
+  }
+
+  return `
+DESTINATION-WIDE SELECTION BIAS:
+- Determine naturally whether "${city}" is better explored mainly through city content, outward content, or a hybrid.
+- Keep the itinerary focused on the strongest experiences only.
+`.trim();
+}
+
+function _buildCoverageGuardBlock_(city='', totalDays=1){
+  const n = Number(totalDays || 0);
+
+  if(n >= 7){
+    return `
+COVERAGE GUARD (CRITICAL):
+- Before finalizing this block, mentally verify:
+  • are the core city imperdibles already being covered somewhere in the trip?
+  • are the strongest outward day trips / escapes already being covered somewhere in the trip?
+- If the answer is NO and the destination clearly supports them, do NOT spend this block on weaker secondary urban content.
+- For 7-day trips, the itinerary should feel like the user truly saw both:
+  • the essential city
+  • and the essential surroundings
+- If the destination clearly supports 2 or more strong day trips, the planner should normally include them before creating a third weak urban day.
+`.trim();
+  }
+
+  return `
+COVERAGE GUARD:
+- Before finalizing, make sure this block is not using weaker city filler while stronger essential city content or stronger outward content still remains unused.
+`.trim();
+}
+
+function _buildUrbanDayQualityBlock_(city='', totalDays=1){
+  const n = Number(totalDays || 0);
+
+  if(n >= 6){
+    return `
+URBAN DAY QUALITY RULE:
+- A secondary urban day must justify its existence by being materially different and strong.
+- Do NOT generate a weaker urban day if a better outward option exists.
+- Do NOT generate a generic "museum + lunch + walk + dinner" day unless that is truly the best remaining option.
+- If the city still needs core imperdibles, prioritize those.
+- If the core imperdibles are already covered, outward options should usually outrank weak extra urban days.
+`.trim();
+  }
+
+  return `
+URBAN DAY QUALITY RULE:
+- Urban days must stay meaningful and distinct, not generic.
+`.trim();
+}
+
 function _cleanTransportField_(rows=[]){
   return (rows || []).map(r=>{
     const cleaned = _sanitizeTransportValue_(r?.transport);
@@ -3080,6 +3181,10 @@ MANDATORY:
 - Preferred transport: ${JSON.stringify(promptTransport)}
 ${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
+
+${_buildExplorationModeBiasBlock_(city, totalDays)}
+${_buildCoverageGuardBlock_(city, totalDays)}
+${_buildUrbanDayQualityBlock_(city, totalDays)}
 
 GLOBAL CANDIDATE DISCOVERY (CRITICAL):
 - Starting from the base city, first identify the broadest plausible universe of iconic places, routes, scenic areas, day trips, near-city experiences, waterfront/harbor experiences, wellness options, food/cultural options, viewpoint options, and local half-day combinations that are realistically visitable from the base.
@@ -3498,6 +3603,7 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
   }
   return true;
 }
+
 /* =========================================================
    SECTION 15F · generateCityItinerary (BLOCK-SAFE + FINAL GUARANTEE)
 ========================================================= */
