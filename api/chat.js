@@ -428,6 +428,37 @@ GOLDEN RULE:
 
 GENERAL RULES:
 - Max 20 rows per day.
+- GLOBAL ANTI-DUPLICATION (ULTRA-CRITICAL):
+  • The itinerary MUST avoid repetition across days in ALL forms:
+    - same POIs
+    - same macro-routes
+    - same regional circuits
+    - same neighborhoods
+    - same scenic loops
+    - same sequence structure
+    - same "shape" of the day
+  • This applies EVEN IF the names are translated, abbreviated, paraphrased, misspelled, or written differently.
+  • Treat equivalent routes/areas across languages and naming variants as the SAME underlying itinerary.
+  • Examples of equivalent duplicates:
+    - "Golden Circle" = "Golden Cycle" = "Círculo Dorado" = "Cercle d'Or" = "Circolo d'Oro"
+    - "South Coast" = "Costa Sur" = "Côte Sud" = "Costa Sul"
+    - "Snæfellsnes" = "Snaefellsnes Peninsula" = "Península de Snæfellsnes"
+    - "Reykjanes Peninsula" = "Península de Reykjanes"
+    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville"
+    - "Waterfront" = "Riverside" = "Harbor area" = "Promenade" when they refer to the same local corridor
+  • The planner MUST reason semantically/geographically, not only textually.
+  • If a macro-region, flagship route, neighborhood corridor, or major circuit has already been used, do NOT reuse it unless:
+    - the destination genuinely has no strong alternative
+    - AND the internal route is materially different.
+  • Two days are considered duplicates if they share:
+    - similar geography
+    - similar stop progression
+    - similar rhythm
+    - similar emotional structure
+    - similar route logic
+    - or equivalent translated/paraphrased macro names.
+  • Merely renaming stops is FORBIDDEN.
+  • Every day must feel strategically different from the others.
 - Local times must be realistic; if the user doesn't provide hours, decide as an expert.
 - Times must be ordered and NOT overlap.
 - from/to/transport: NEVER empty.
@@ -438,6 +469,24 @@ GENERAL RULES:
   - For multi-day itineraries, you MUST distribute meaningful rows across ALL days.
   - A day is NOT valid if it only contains a trivial placeholder like "free day", "last moments", or one single short stop, unless the user explicitly requested a light/rest day or the available time window is genuinely short.
   - If the itinerary still has unscheduled key highlights and a day remains weak, you MUST use that day to place coherent remaining highlights.
+  - Regional/scenic/day-trip days MUST NOT contain giant dead gaps.
+  - If a regional day contains gaps larger than roughly 2h–2h30, you MUST enrich the route with REAL intermediate micro-stops from the same geographic corridor.
+  - Micro-stops must appear as REAL itinerary rows, not only inside notes.
+  - Examples of valid micro-stops:
+    • viewpoints
+    • waterfalls
+    • cliffs
+    • scenic cafés
+    • lava fields
+    • geothermal pockets
+    • small villages
+    • roadside landmarks
+    • harbors
+    • boardwalks
+    • crater stops
+    • coastal pullouts
+    • local museums directly on-route
+  - The goal is to make regional days feel continuous, rich, and geographically coherent.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -534,6 +583,12 @@ AURORAS (HARD RULE + REPLACEMENT):
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
+- CRITICAL MICRO-STOPS RULE:
+  • If a route naturally supports many worthwhile sub-stops, you MUST enrich the itinerary with those real intermediate stops instead of leaving large empty time gaps.
+  • Strong regional routes should feel like expert-designed exploration days, not sparse skeleton itineraries.
+  • A flagship regional day should usually contain around 6–10 meaningful rows when geography realistically supports it.
+  • Micro-stops must be represented as actual rows whenever they materially improve continuity and richness.
+  • Notes are NOT a replacement for real itinerary rows.
 - FORBIDDEN umbrella rows:
   - Do NOT use generic activities like "Day trip to X", "Excursion to X", "Excursão de um dia", "Tour de 1 dia".
   - Each row must be either a named transport movement OR a named physical sub-stop.
@@ -551,6 +606,25 @@ DAY TRIPS / MACRO-TOURS:
   • it skips the logical signature highlights of that route,
   • it hides key highlights only in notes instead of rows,
   • or it lacks a dedicated realistic return row.
+- GLOBAL REPEAT PREVENTION (CRITICAL):
+  • NEVER repeat the same flagship regional route twice in one itinerary unless there is truly no strong alternative.
+  • Before generating a regional day, mentally verify that the same macro-region/circuit has not already been used in another day.
+  • This verification must be semantic and geographic, NOT textual.
+  • Equivalent translated names, paraphrases, common misspellings, tourism nicknames, and alternate-language names count as duplicates.
+  • If a prior day already covered a regional circuit, the next regional day must use a DIFFERENT:
+    - geography
+    - macro-cluster
+    - directional corridor
+    - route logic
+    - stop progression
+  • Avoid creating multiple days with:
+    - museum + lunch + walk + return
+    - scenic stop + scenic stop + return
+    - waterfront + food + harbor + return
+    - old town + church + market + viewpoint
+    - or any equivalent repeated structure.
+  • Each day must have a clearly distinct identity.
+  • Do NOT use translated naming to disguise repetition.
 
 ICELAND CURATION (when relevant):
   • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, and other realistic Southwest / West Iceland options.
@@ -567,6 +641,17 @@ ICELAND CURATION (when relevant):
     - Do NOT treat Blue Lagoon as a full standalone day unless the user's constraints, timing, pace, or recovery preference clearly justify it.
     - The main Blue Lagoon visit row should use a real external area / corridor label, not the Reykjavik city label, unless it is explicitly the departure/return row.
   • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
+  • Do NOT repeat the same Iceland macro-route across different days.
+  • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
+  • If South Coast was already used, avoid rebuilding another equivalent South Coast corridor day.
+  • If Snæfellsnes was already used, do not recycle the same peninsula structure.
+  • If Reykjanes / Blue Lagoon area was already used, do not create a second equivalent Reykjanes day unless the route is truly different and there are no better alternatives.
+  • Prefer new geographic corridors before repeating known ones.
+  • Iceland itineraries must maximize geographic diversity across days.
+  • Regional Iceland days should feel dense, continuous, and exploratory:
+    - avoid giant dead gaps
+    - enrich routes with real scenic/geothermal/coastal micro-stops
+    - ensure the day feels like a full coherent expedition.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -575,6 +660,22 @@ SAFETY / GLOBAL COHERENCE:
 SMART EDITING:
 - If the user asks to add/remove/adjust schedules, return updated JSON that remains consistent.
 - By default, preserve the itinerary's global coherence.
+
+FINAL INTERNAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
+- Before returning JSON, internally verify:
+  • no duplicated macro-routes
+  • no duplicated regional circuits
+  • no semantically equivalent translated routes
+  • no repeated route under alternate names, misspellings, paraphrases, or different languages
+  • no structurally repetitive days
+  • no repeated neighborhood/corridor/day-shape pattern
+  • no giant unexplained gaps in regional/scenic days
+  • no weak sparse flagship routes
+  • no important micro-stops hidden only in notes when they should be rows
+- If any of those problems exist:
+  • rebuild the affected day internally BEFORE returning the JSON.
+- NEVER return a knowingly repetitive or sparse itinerary if stronger alternatives exist.
+- The itinerary must feel globally curated, geographically diverse, and materially different day by day.
 
 Respond with valid JSON only.
 `.trim();
