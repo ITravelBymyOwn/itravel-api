@@ -2754,6 +2754,142 @@ function _normalizeRepeatKey_(txt=''){
     .trim();
 }
 
+function _canonicalRouteAliasKey_(txt=''){
+  let key = _normalizeRepeatKey_(txt);
+
+  if(!key) return '';
+
+  const replacements = [
+    [/^(golden cycle|golden circle|circulo dorado|círculo dorado|cercle d or|cercle dor|circolo d oro|goldener kreis)$/i, 'golden circle'],
+    [/\b(golden cycle|golden circle|circulo dorado|círculo dorado|cercle d or|cercle dor|circolo d oro|goldener kreis)\b/ig, 'golden circle'],
+
+    [/^(south coast|costa sur|cote sud|côte sud|costa sul|sudurland|suourland|sudur coast|southern coast)$/i, 'south coast'],
+    [/\b(south coast|costa sur|cote sud|côte sud|costa sul|sudurland|suourland|southern coast)\b/ig, 'south coast'],
+
+    [/^(snaefellsnes|snaefellsnes peninsula|snaefellsnes península|peninsula de snaefellsnes|península de snaefellsnes|snaefellsnes route)$/i, 'snaefellsnes peninsula'],
+    [/\b(snaefellsnes|snaefellsnes peninsula|peninsula de snaefellsnes|península de snaefellsnes)\b/ig, 'snaefellsnes peninsula'],
+
+    [/^(reykjanes|reykjanes peninsula|peninsula de reykjanes|península de reykjanes|reykjanes route)$/i, 'reykjanes peninsula'],
+    [/\b(reykjanes peninsula|peninsula de reykjanes|península de reykjanes|reykjanes)\b/ig, 'reykjanes peninsula'],
+
+    [/^(blue lagoon|laguna azul|lagoa azul|lagon bleu)$/i, 'blue lagoon'],
+    [/\b(blue lagoon|laguna azul|lagoa azul|lagon bleu)\b/ig, 'blue lagoon'],
+
+    [/^(sky lagoon|laguna sky|lagon sky)$/i, 'sky lagoon'],
+    [/\b(sky lagoon|laguna sky|lagon sky)\b/ig, 'sky lagoon'],
+
+    [/^(silver circle|circulo plateado|círculo plateado|silver route|borgarfjordur|borgarfjörður)$/i, 'silver circle borgarfjordur'],
+    [/\b(silver circle|circulo plateado|círculo plateado|borgarfjordur|borgarfjörður)\b/ig, 'silver circle borgarfjordur'],
+
+    [/^(old town|historic center|historical center|centro historico|centro histórico|vieille ville|casco antiguo|ciudad vieja)$/i, 'historic center'],
+    [/\b(old town|historic center|historical center|centro historico|centro histórico|vieille ville|casco antiguo|ciudad vieja)\b/ig, 'historic center'],
+
+    [/^(waterfront|riverside|riverfront|harbor|harbour|puerto|malecon|malecón|promenade|paseo maritimo|paseo marítimo)$/i, 'waterfront harbor'],
+    [/\b(waterfront|riverside|riverfront|harbor|harbour|puerto|malecon|malecón|promenade|paseo maritimo|paseo marítimo)\b/ig, 'waterfront harbor'],
+
+    [/^(whale watching|whales|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)$/i, 'whale watching'],
+    [/\b(whale watching|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)\b/ig, 'whale watching'],
+
+    [/^(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)$/i, 'lava tunnel'],
+    [/\b(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)\b/ig, 'lava tunnel']
+  ];
+
+  replacements.forEach(([pattern, replacement])=>{
+    key = key.replace(pattern, replacement);
+  });
+
+  return key.replace(/\s+/g, ' ').trim();
+}
+
+function _macroAliasKey_(value=''){
+  return _canonicalRouteAliasKey_(value || '');
+}
+
+function _isReturnLikeRow_(row={}){
+  if(typeof _isReturnRow_ === 'function' && _isReturnRow_(row)) return true;
+
+  const txt = _normalizeRepeatKey_(`${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`);
+  return /\b(return to|regreso a|retorno a|volver a|retour a|retour vers|regresso a|back to|back in|return)\b/.test(txt);
+}
+
+function _isDaylightSensitiveRow_(row={}){
+  if(_isAuroraRow_(row) || _isReturnLikeRow_(row)) return false;
+
+  const txt = _normalizeRepeatKey_(`${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`);
+  return /\b(waterfall|cascada|beach|playa|black sand|arena negra|cliff|acantilado|viewpoint|mirador|volcano|volcan|volcán|glacier|glaciar|lagoon|laguna|lake|lago|park|parque|national park|parque nacional|canyon|cañon|cañón|coast|costa|peninsula|península|fjord|fiordo|mountain|montana|montaña|valley|valle|lava field|campo de lava|crater|crater|cráter|geyser|geysir|geothermal|geotermal|harbor walk|scenic drive|panoramic|panoramica|panorámica|village|pueblo|fishing village|boardwalk|sendero|trail)\b/.test(txt);
+}
+
+function _latestDaylightEndMin_(city='', totalDays=1){
+  const cityKey = _normalizeRepeatKey_(city);
+
+  if(/\b(reykjavik|iceland|islandia|tromso|tromsø|rovaniemi|kiruna|akureyri|abisko|fairbanks|yellowknife)\b/.test(cityKey)){
+    return 17 * 60 + 30;
+  }
+
+  return 19 * 60;
+}
+
+function _hasDaylightTimingIssue_(dayRows=[], city='', totalDays=1){
+  const latest = _latestDaylightEndMin_(city, totalDays);
+
+  return (dayRows || []).some(r=>{
+    if(!_isDaylightSensitiveRow_(r)) return false;
+
+    const start = _hhmmToMin_(r?.start);
+    const end = _hhmmToMin_(r?.end);
+
+    if(start !== null && start >= latest) return true;
+    if(end !== null && end > latest + 45) return true;
+
+    return false;
+  });
+}
+
+function _regionalDayMissingReturn_(dayRows=[], city=''){
+  const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
+  if(!_isRegionalDay_(rows, city)) return false;
+
+  const hasReturn = rows.some(r => _isReturnLikeRow_(r));
+  if(hasReturn) return false;
+
+  const macros = _dayMacroSet_(rows, city).filter(m => m && m !== 'urban-base');
+  const hasRegionalMacro = macros.some(m => _isRegionalMacroKey_(m));
+  const endsOutsideBase = rows.length ? _activityMacroKey_(rows[rows.length - 1]?.activity || '', city) !== 'urban-base' : false;
+
+  return hasRegionalMacro || endsOutsideBase;
+}
+
+function _dayExperienceBucket_(dayRows=[], city=''){
+  const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
+  const txt = _normalizeRepeatKey_(rows.map(r => `${r?.activity || ''} ${r?.to || ''} ${r?.notes || ''}`).join(' '));
+  const macroSig = _regionalMacroSignature_(rows, city);
+
+  if(/\b(whale watching|ballenas|baleines|wildlife|boat|barco|cruise|ferry|sailing|harbor tour)\b/.test(txt)) return 'wildlife_boat';
+  if(/\b(spa|thermal|hot spring|termas|lagoon|laguna|onsen|hammam|wellness)\b/.test(txt)) return 'thermal_wellness';
+  if(/\b(lava tunnel|lava tube|ice cave|cave|caverna|tunel|túnel|snowmobile|glacier hike|horseback|horse riding|adventure)\b/.test(txt)) return 'adventure_special';
+  if(/\b(food|market|mercado|restaurant|restaurante|cafe|café|culinary|gastronomy|gastronomia|gastronomía|fish market)\b/.test(txt) && !_isRegionalDay_(rows, city)) return 'food_local';
+  if(/\b(museum|museo|gallery|galeria|galería|church|cathedral|iglesia|catedral|architecture|arquitectura|design)\b/.test(txt) && !_isRegionalDay_(rows, city)) return 'urban_culture';
+  if(_isRegionalDay_(rows, city)) return `regional_${macroSig || 'route'}`;
+  if(/\b(waterfront|harbor|harbour|puerto|promenade|malecon|malecón|riverside)\b/.test(txt)) return 'waterfront_local';
+
+  return _dayDominantKind_(rows, city) || 'general';
+}
+
+function _areDaysExperienceDuplicates_(rowsA=[], rowsB=[], city=''){
+  const bucketA = _dayExperienceBucket_(rowsA, city);
+  const bucketB = _dayExperienceBucket_(rowsB, city);
+
+  if(bucketA && bucketB && bucketA === bucketB){
+    if(bucketA.startsWith('regional_')) return true;
+
+    const poiOverlap = _poiOverlapRatio_(rowsA, rowsB, city);
+    const shape = _areDaysStructurallyTooSimilar_(rowsA, rowsB, city);
+    return poiOverlap >= 0.25 || shape;
+  }
+
+  return false;
+}
+
 function _canonicalActivityKey_(activity='', city=''){
   let key = _normalizeRepeatKey_(activity);
 
@@ -2769,7 +2905,7 @@ function _canonicalActivityKey_(activity='', city=''){
     .replace(/^(golden circle|south coast|snaefellsnes peninsula|snaefellsnes|reykjanes peninsula|reykjanes|reykjavik)\s+/i, '')
     .trim();
 
-  return key;
+  return _canonicalRouteAliasKey_(key);
 }
 
 function _rowSemanticKey_(row={}, city=''){
@@ -2787,7 +2923,7 @@ function _activityMacroKey_(activity='', city=''){
   if(cityKey && key === cityKey) return 'urban-base';
   if(cityKey && key.startsWith(cityKey + ' ')) key = key.slice(cityKey.length).trim();
 
-  return key || 'unknown';
+  return _macroAliasKey_(key || 'unknown') || 'unknown';
 }
 
 function _rowShapeToken_(row={}, city=''){
@@ -2870,12 +3006,11 @@ function _isForbiddenHighlight_(row={}, forbiddenList=[], city=''){
   });
 }
 
-
 function _isRegionalMacroKey_(macro=''){
   const key = _normalizeRepeatKey_(macro);
   if(!key || key === 'urban-base') return false;
 
-  return /\b(circle|circulo|circulo|círculo|coast|costa|peninsula|península|snaefellsnes|reykjanes|fjord|fiordo|route|ruta|loop|circuit|circuito|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|glacier|glaciar|lagoon|laguna|lake|lago|canyon|cañon|cañón|island|isla|national park|parque nacional|region|región|silver|golden|south|north|east|west|heritage route|wine region|wine area|monastery route|thermal route)\b/.test(key);
+  return /\b(circle|circulo|círculo|coast|costa|peninsula|península|snaefellsnes|reykjanes|fjord|fiordo|route|ruta|loop|circuit|circuito|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|glacier|glaciar|lagoon|laguna|lake|lago|canyon|cañon|cañón|island|isla|national park|parque nacional|region|región|silver|golden|south|north|east|west|heritage route|wine region|wine area|monastery route|thermal route|whale watching|ballenas|lava tunnel|ice cave|glacier route|boat route|wildlife route)\b/.test(key);
 }
 
 function _isRegionalDay_(dayRows=[], city=''){
@@ -2884,7 +3019,7 @@ function _isRegionalDay_(dayRows=[], city=''){
 
   const macros = rows.map(r => _activityMacroKey_(r?.activity || '', city));
   const regionalMacroCount = macros.filter(m => _isRegionalMacroKey_(m)).length;
-  const returnCount = rows.filter(r => _isReturnRow_(r)).length;
+  const returnCount = rows.filter(r => _isReturnLikeRow_(r)).length;
 
   return regionalMacroCount >= Math.max(2, Math.ceil(rows.length * 0.45)) || returnCount > 0;
 }
@@ -2901,7 +3036,7 @@ function _isUrbanBaseDay_(dayRows=[], city=''){
 function _dayDominantKind_(dayRows=[], city=''){
   const counts = {};
   (dayRows || []).forEach(r=>{
-    if(_isAuroraRow_(r) || _isReturnRow_(r)) return;
+    if(_isAuroraRow_(r) || _isReturnLikeRow_(r)) return;
     const kind = String(_rowShapeToken_(r, city).split(':')[1] || 'generic');
     counts[kind] = (counts[kind] || 0) + 1;
   });
@@ -2924,7 +3059,7 @@ function _countUrbanBaseDays_(rows=[], city=''){
 
 function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
   const n = Number(totalDays || 0);
-  if(n < 5) return [];
+  if(n < 4) return [];
 
   const byDay = _groupRowsByDay_(rows);
   const days = (requestedDays || []).map(Number).sort((a,b)=>a-b);
@@ -2947,8 +3082,9 @@ function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=
       const sameShape = _areDaysStructurallyTooSimilar_(rowsPrev, rowsD, city);
       const sameKind = _dayDominantKind_(rowsPrev, city) === _dayDominantKind_(rowsD, city);
       const macroOverlap = _similarityRatio_(_dayMacroSet_(rowsPrev, city).join('|'), _dayMacroSet_(rowsD, city).join('|'));
+      const sameBucket = _areDaysExperienceDuplicates_(rowsPrev, rowsD, city);
 
-      if(sameShape || (sameKind && macroOverlap >= 0.5)){
+      if(sameShape || sameBucket || (sameKind && macroOverlap >= 0.5)){
         repair.add(d);
         break;
       }
@@ -2964,6 +3100,9 @@ function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=
 
   _findMicroStopRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
   _findRepeatedItineraryRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
+  _findDaylightRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
+  _findMissingReturnRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
+  _findExperienceBucketRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
 
   return [...repair].filter(d => days.includes(Number(d))).sort((a,b)=>a-b);
 }
@@ -3021,7 +3160,7 @@ function _hasThinRegionalDay_(dayRows=[], city=''){
   const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
   if(!_isRegionalDay_(rows, city)) return false;
 
-  const meaningfulRows = rows.filter(r => !_isReturnRow_(r));
+  const meaningfulRows = rows.filter(r => !_isReturnLikeRow_(r));
   const maxGap = _maxMeaningfulGapMinutes_(rows);
 
   return meaningfulRows.length < 5 || maxGap >= 150;
@@ -3030,7 +3169,7 @@ function _hasThinRegionalDay_(dayRows=[], city=''){
 function _regionalMacroSignature_(dayRows=[], city=''){
   const macros = _dayMacroSet_(dayRows, city)
     .filter(m => m && m !== 'urban-base')
-    .map(m => _normalizeRepeatKey_(m))
+    .map(m => _canonicalRouteAliasKey_(m))
     .filter(Boolean);
 
   const regional = macros.filter(m => _isRegionalMacroKey_(m));
@@ -3040,7 +3179,7 @@ function _regionalMacroSignature_(dayRows=[], city=''){
 
 function _dayPOISet_(dayRows=[], city=''){
   return [...new Set((dayRows || [])
-    .filter(r => !_isAuroraRow_(r) && !_isReturnRow_(r))
+    .filter(r => !_isAuroraRow_(r) && !_isReturnLikeRow_(r))
     .map(r => _rowSemanticKey_(r, city))
     .filter(Boolean)
   )];
@@ -3126,8 +3265,78 @@ function _findRepeatedItineraryRepairDays_(rows=[], requestedDays=[], totalDays=
         repair.add(day);
         break;
       }
+
+      if(_areDaysExperienceDuplicates_(rowsPrev, rowsD, city)){
+        repair.add(day);
+        break;
+      }
     }
   }
+
+  return [...repair].sort((a,b)=>a-b);
+}
+
+function _findDaylightRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
+  const byDay = _groupRowsByDay_(rows);
+  const repair = [];
+
+  (requestedDays || []).map(Number).forEach(day=>{
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+
+    if(_hasDaylightTimingIssue_(dayRows, city, totalDays)){
+      repair.push(day);
+    }
+  });
+
+  return [...new Set(repair)].sort((a,b)=>a-b);
+}
+
+function _findMissingReturnRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
+  const byDay = _groupRowsByDay_(rows);
+  const repair = [];
+
+  (requestedDays || []).map(Number).forEach(day=>{
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+
+    if(_regionalDayMissingReturn_(dayRows, city)){
+      repair.push(day);
+    }
+  });
+
+  return [...new Set(repair)].sort((a,b)=>a-b);
+}
+
+function _findExperienceBucketRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
+  const n = Number(totalDays || 0);
+  if(n < 5) return [];
+
+  const byDay = _groupRowsByDay_(rows);
+  const days = (requestedDays || []).map(Number).sort((a,b)=>a-b);
+  const buckets = {};
+  const repair = new Set();
+
+  days.forEach(day=>{
+    const bucket = _dayExperienceBucket_(byDay[day] || [], city);
+    if(!bucket) return;
+
+    if(!buckets[bucket]) buckets[bucket] = [];
+    buckets[bucket].push(day);
+  });
+
+  Object.keys(buckets).forEach(bucket=>{
+    const bucketDays = buckets[bucket] || [];
+
+    if(bucket.startsWith('regional_') && bucketDays.length > 1){
+      bucketDays.slice(1).forEach(d => repair.add(d));
+      return;
+    }
+
+    if(['urban_culture','food_local','waterfront_local'].includes(bucket) && bucketDays.length > 1){
+      bucketDays.slice(1).forEach(d => repair.add(d));
+    }
+  });
 
   return [...repair].sort((a,b)=>a-b);
 }
@@ -3140,6 +3349,8 @@ function _hasCriticalQualityIssueForDays_(rows=[], days=[], city=''){
     if(!dayRows.length) return true;
     if(_hasThinRegionalDay_(dayRows, city)) return true;
     if(_hasCriticalDayGap_(dayRows, city)) return true;
+    if(_hasDaylightTimingIssue_(dayRows, city)) return true;
+    if(_regionalDayMissingReturn_(dayRows, city)) return true;
     return false;
   });
 }
@@ -3155,13 +3366,13 @@ function _buildExplorationModeBiasBlock_(city='', totalDays=1){
 DESTINATION-WIDE SELECTION BIAS (CRITICAL):
 - First determine whether "${city}" behaves more like:
   • a dense major city with many true urban imperdibles
-  • a gateway base whose strongest value comes from outward day trips
+  • a gateway base whose strongest value comes from outward day trips / nature / regional experiences
   • or a balanced hybrid between both
 - This decision must be made dynamically from the destination's real candidate universe, not from hardcoded examples or a template.
 - Build the itinerary according to the detected destination behavior:
-  • Gateway/outward base: outward flagship clusters must dominate.
+  • Gateway/outward base: outward flagship clusters and iconic experience buckets must dominate.
   • Dense city: urban imperdibles must be covered deeply, but strong excursions still matter.
-  • Hybrid: balance core city imperdibles with the strongest outward clusters.
+  • Hybrid: balance core city imperdibles with the strongest outward clusters and special experiences.
 
 IF "${city}" behaves like a dense major city:
 - You MUST still cover the core urban imperdibles first.
@@ -3174,6 +3385,13 @@ IF "${city}" behaves like a gateway / outward base:
 - Keep pure city allocation tighter unless the city itself clearly deserves more.
 - In a 7-day stay, pure base-city days should usually be limited to roughly 1–2.5 days unless the user asked otherwise.
 - Prioritize flagship regional clusters before any secondary urban filler.
+- After the core flagship clusters, use alternative experience buckets before repeating city filler:
+  • wildlife / boat / marine experiences
+  • thermal / spa / wellness experiences
+  • light adventure / cave / glacier / mountain / valley experiences
+  • food / local culture
+  • indoor iconic backups
+  • short scenic escapes
 
 IF "${city}" behaves like a hybrid:
 - Cover the city's major imperdibles properly.
@@ -3182,11 +3400,13 @@ IF "${city}" behaves like a hybrid:
 PRIORITY RULE FOR LONG STAYS:
 - Never let secondary or tertiary urban content displace:
   • the main city imperdibles
-  • or the strongest feasible outward day trips
+  • the strongest feasible outward day trips
+  • iconic special experiences that make the destination unique
 - For 7-day stays, prefer:
   1. core city imperdibles
   2. strongest day trips / outward escapes
-  3. only then secondary urban content
+  3. distinctive special experience buckets
+  4. only then secondary urban content
 `.trim();
   }
 
@@ -3200,13 +3420,13 @@ DESTINATION-WIDE SELECTION BIAS:
 - Make this decision dynamically from the destination's real candidate universe.
 - Cover the main city imperdibles if the destination is city-heavy.
 - But if strong outward options clearly exist, include at least 1 meaningful excursion before falling into weaker secondary city content.
-- Do not repeat the same urban day shape with different names.
+- Use distinctive experience buckets before repeating the same urban day shape with different names.
 `.trim();
   }
 
   return `
 DESTINATION-WIDE SELECTION BIAS:
-- Determine naturally whether "${city}" is better explored mainly through city content, outward content, or a hybrid.
+- Determine naturally whether "${city}" is better explored mainly through city content, outward content, special experiences, or a hybrid.
 - Keep the itinerary focused on the strongest experiences only.
 - Avoid repeated day shapes even in short trips.
 `.trim();
@@ -3220,19 +3440,22 @@ COVERAGE GUARD (CRITICAL):
 - Before finalizing this block, mentally verify:
   • are the core city imperdibles already being covered somewhere in the trip?
   • are the strongest outward day trips / escapes already being covered somewhere in the trip?
+  • are the destination's iconic special experiences already being covered somewhere in the trip?
   • are the days materially different in macro-cluster, geography, rhythm, and sequence?
 - If the answer is NO and the destination clearly supports them, do NOT spend this block on weaker secondary urban content.
 - For 7-day trips, the itinerary should feel like the user truly saw both:
   • the essential city
-  • and the essential surroundings
+  • the essential surroundings
+  • the destination's most iconic experiences
 - If the destination clearly supports 2 or more strong day trips, the planner should normally include them before creating a third weak urban day.
 - A day that merely changes POI names but repeats the same museum + food + walk + return structure is NOT sufficiently different.
+- If the destination has iconic experience buckets (wildlife, boat, thermal, scenic rail, cave systems, glacier activities, food culture, etc.), use them before repeating generic urban filler.
 `.trim();
   }
 
   return `
 COVERAGE GUARD:
-- Before finalizing, make sure this block is not using weaker city filler while stronger essential city content or stronger outward content still remains unused.
+- Before finalizing, make sure this block is not using weaker city filler while stronger essential city content, stronger outward content, or stronger iconic experiences still remain unused.
 - Avoid repeated day structures, not only repeated POI names.
 `.trim();
 }
@@ -3244,16 +3467,19 @@ function _buildUrbanDayQualityBlock_(city='', totalDays=1){
     return `
 URBAN DAY QUALITY RULE:
 - A secondary urban day must justify its existence by being materially different and strong.
-- Do NOT generate a weaker urban day if a better outward option exists.
+- Do NOT generate a weaker urban day if:
+  • a better outward option exists
+  • OR a better special experience bucket exists
 - Do NOT generate a generic "museum + lunch + walk + dinner" day unless that is truly the best remaining option.
 - If the city still needs core imperdibles, prioritize those.
-- If the core imperdibles are already covered, outward options should usually outrank weak extra urban days.
+- If the core imperdibles are already covered, outward options and iconic experiences should usually outrank weak extra urban days.
 - If an urban day is necessary, it must have a distinct identity:
   • different district / zone
   • different sequence
   • different experience type
   • different emotional arc
   • specific micro-stops
+- Avoid repeated waterfront/harbor/promenade days unless the destination truly revolves around them.
 `.trim();
   }
 
@@ -3261,6 +3487,28 @@ URBAN DAY QUALITY RULE:
 URBAN DAY QUALITY RULE:
 - Urban days must stay meaningful and distinct, not generic.
 - Do not repeat the same structure with different POI names.
+`.trim();
+}
+
+function _buildMustSeeCoverageBlock_(city='', totalDays=1){
+  const n = Number(totalDays || 0);
+
+  return `
+DESTINATION MUST-SEE COVERAGE (CRITICAL):
+- Before building the itinerary, internally identify:
+  • the destination's essential city imperdibles
+  • the destination's essential regional/day-trip imperdibles (if applicable)
+  • the destination's iconic special experiences
+- Cover the strongest must-see highlights FIRST unless user constraints make them infeasible.
+- Do NOT replace essential must-sees with secondary filler.
+- If a destination behaves as a gateway/outward base, some regional day trips are considered MUST-SEE core experiences.
+- For longer stays, the itinerary should progressively expand from:
+  • core city imperdibles
+  • to flagship regional routes
+  • to iconic special experiences
+  • to secondary content only afterward.
+- If an essential must-see is intentionally skipped due to distance, closure, season, safety, weather, time, or user preference, briefly explain it in notes or followup.
+- Each must-see cluster should appear only once unless the destination genuinely requires revisiting it.
 `.trim();
 }
 
@@ -3295,7 +3543,7 @@ function _cleanTransportField_(rows=[]){
     const looksReturn = /return to|regreso a|retour a|retour à|regresso a/.test(activity);
 
     const looksRegional =
-      /\b(peninsula|península|coast|costa|route|ruta|loop|circuit|circuito|circle|circulo|círculo|island|isla|archipelago|archipielago|archipiélago|fjord|fiordo|lake|lago|lagoon|laguna|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|park|parque|national park|parque nacional|district|distrito|region|región|canyon|cañon|cañón|wine area|wine region)\b/.test(activity);
+      /\b(peninsula|península|coast|costa|route|ruta|loop|circuit|circuito|circle|circulo|círculo|island|isla|archipelago|archipielago|archipiélago|fjord|fiordo|lake|lago|lagoon|laguna|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|park|parque|national park|parque nacional|district|distrito|region|región|canyon|cañon|cañón|wine area|wine region|whale watching|ballenas|boat|harbor cruise|glacier|lava tunnel|ice cave)\b/.test(activity);
 
     const looksUrban = !looksReturn && !looksRegional;
 
@@ -3502,12 +3750,11 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
   return _dedupeRows_([...(rows || []), ...injected], city);
 }
-
 function _fixReturnRowDurationConsistency_(rows=[]){
   const loc = _plannerLocalePack_();
 
   return (rows || []).map(r=>{
-    if(!_isReturnRow_(r)) return r;
+    if(!_isReturnLikeRow_(r)) return r;
 
     const start = _hhmmToMin_(r?.start);
     const end = _hhmmToMin_(r?.end);
@@ -3565,6 +3812,26 @@ MANDATORY:
   • If a stop belongs to a known regional circuit chosen for that day, do NOT label it as "${city} – <Sub-stop>"
   • The base city name on the LEFT side is allowed only for true urban/local days
 
+- DESTINATION MUST-SEE + BUCKET LOGIC:
+  • First identify the destination's essential must-see universe:
+    - core city imperdibles
+    - flagship regional/day-trip imperdibles
+    - special iconic experiences
+    - seasonal experiences
+    - family/adventure/food/wildlife/wellness buckets when relevant
+  • If "${city}" behaves like a gateway base, regional tours and iconic experiences may be core must-sees.
+  • For a 7-day gateway itinerary, do NOT fill weak urban days while unused must-see buckets remain.
+  • Use different experience buckets before repeating any route:
+    - flagship regional route
+    - secondary regional route
+    - wildlife / boat / marine
+    - thermal / spa / wellness
+    - cave / glacier / mountain / adventure light
+    - food / local culture
+    - indoor iconic backup
+    - short scenic escape
+  • Each selected day must have a distinct purpose and identity.
+
 - CRITICAL MICRO-STOPS ENFORCEMENT:
   • regional / outward / scenic days MUST NOT contain giant dead gaps
   • if a regional day has gaps bigger than ~2h–2h30, you MUST enrich the same route with REAL intermediate micro-stops
@@ -3586,20 +3853,31 @@ MANDATORY:
     - small museums directly on-route
   • DO NOT leave a regional day sparse if the route naturally supports more exploration
   • a flagship scenic day should usually feel rich and continuous, not like 3 stops separated by huge voids
+  • micro-stops must be real rows, not only notes
 
 - HARD ANTI-REPEAT:
   • NEVER reuse the same flagship regional circuit twice unless the destination genuinely has no other worthwhile alternative
   • NEVER create two days with materially equivalent structure
+  • equivalent names in other languages, misspellings, paraphrases, or tourism nicknames count as the SAME route
   • avoid repeated:
     - museum + lunch + walk + return
     - scenic stop + scenic stop + dinner
     - waterfront + food + harbor + return
+    - old town + church + market + viewpoint
   • changing POI names alone is NOT enough
   • each day must have:
     - distinct geography
     - distinct rhythm
     - distinct macro-cluster
     - distinct emotional identity
+    - distinct experience bucket
+
+- DAYLIGHT / RETURN VALIDATION:
+  • daylight-sensitive natural stops must be scheduled in daylight-friendly hours
+  • do NOT place beaches, black sand beaches, waterfalls, cliffs, viewpoints, glaciers, parks, lava fields, craters, coastal roads, or scenic outdoor stops at night
+  • if a regional/day-trip day exists, it MUST end with an explicit return row:
+    "<Macro-tour> – Return to ${city}"
+  • return row must be the final row of the regional day
 
 - SOFT RULES:
   • normal urban day: usually 4–7 rows
@@ -3613,6 +3891,7 @@ MANDATORY:
 ${forbiddenText ? `- Do NOT repeat these highlights already used elsewhere: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- Avoid reusing these urban clusters / neighborhoods unless strictly necessary: ${forbiddenUrbanText}` : ''}
 
+${_buildMustSeeCoverageBlock_(city, totalDays)}
 ${_buildExplorationModeBiasBlock_(city, totalDays)}
 ${_buildCoverageGuardBlock_(city, totalDays)}
 ${_buildUrbanDayQualityBlock_(city, totalDays)}
@@ -3645,19 +3924,26 @@ MANDATORY:
   • use specific places, not vague filler
   • regional missing-day rebuilds should usually have 6–10 rows when geography supports it
 - ANTI-REPEAT:
-  • do NOT repeat a macro-region, circuit, route, neighborhood sequence, or day structure already used
-  • if a previous day used Golden Circle, do not rebuild another Golden Circle-style day unless no alternative exists
-  • if a previous day used South Coast, do not rebuild another South Coast-style day unless the internal route is clearly different
+  • do NOT repeat a macro-region, circuit, route, neighborhood sequence, experience bucket, or day structure already used
+  • treat translated names, misspellings, paraphrases, and tourism nicknames as duplicates
+  • if a previous day used Golden Circle / Círculo Dorado / Golden Cycle, do not rebuild another Golden Circle-style day unless no alternative exists
+  • if a previous day used South Coast / Costa Sur, do not rebuild another South Coast-style day unless the internal route is clearly different
   • if a previous day used a museum + lunch + walk rhythm, do not repeat that same rhythm
+- MUST-SEE / BUCKET RECOVERY:
+  • use the strongest unused must-see bucket before filling with generic urban content
+  • consider unused iconic special experiences when relevant:
+    - wildlife / boat / marine
+    - thermal / spa / wellness
+    - light adventure / cave / glacier / mountain / valley
+    - food / local culture
+    - indoor iconic backup
+    - short scenic escape
 - If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
-- Use the remaining UNUSED candidate universe first, thinking radially from the base city:
-  • local / urban / waterfront / museum / food / scenic / cultural combinations
-  • unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
-  • unused regional clusters if they are genuinely new
-- For trips of 5 or more days, before choosing another urban day, explicitly evaluate whether there are still strong unused day trips / nearby towns / regional scenic circuits available from the base.
+- Use the remaining UNUSED candidate universe first, thinking radially from the base city.
 - The replacement day must be built from what the destination still offers, not from a template route.
 - For the chosen remaining cluster or local pack, mentally generate 5–15 possible real micro-stops if the destination genuinely offers them, then choose only the ones that fit coherently.
 - If excursion/day trip exists, end with "<Region> – Return to ${city}".
+- Daylight-sensitive natural stops must be scheduled before night.
 - Hotel/base: ${JSON.stringify(promptBase)}
 - Transport preference: ${JSON.stringify(promptTransport)}
 - The result should feel globally premium and destination-aware, not generic.
@@ -3668,7 +3954,7 @@ MANDATORY:
 ${FORMAT}
 **ROLE:** Planner “Astra”. Strategic quality repair for "${city}".
 
-The current itinerary already has usable rows, but the following day numbers are too sparse, too gapped, repetitive, structurally similar, or weak for a ${totalDays}-day stay:
+The current itinerary already has usable rows, but the following day numbers are invalid or weak because they are too sparse, too gapped, repetitive, structurally similar, missing a return row, contain daylight-sensitive stops at night, or fail to use a stronger must-see bucket:
 ${JSON.stringify(repairDays)}
 
 Return Format B JSON only:
@@ -3689,16 +3975,36 @@ ${JSON.stringify((currentRows || []).map(r => ({
   start: r?.start,
   end: r?.end,
   notes: String(r?.notes || '').slice(0, 180)
-})).slice(0, 100))}
+})).slice(0, 120))}
 
 REPAIR OBJECTIVE:
 - Fix the exact quality failure:
   • if the issue is a huge gap, add REAL on-route micro-stops or rebuild the route with a denser coherent sequence
   • if the issue is a thin regional day, expand it into a proper day trip with real stops
   • if the issue is repetition, replace it with a genuinely different macro-cluster or day identity
+  • if the issue is daylight-sensitive content at night, move it earlier or replace it with night-compatible content
+  • if the issue is missing return row, add a realistic final return row
+  • if the issue is weak filler, use a stronger unused must-see or special experience bucket
 - Do NOT return another sparse day.
 - Do NOT return another structurally similar day.
 - Do NOT solve the problem only by changing names.
+
+MUST-SEE / EXPERIENCE BUCKET LOGIC — ULTRA CRITICAL:
+- Before rebuilding, identify unused high-value buckets for this destination.
+- Prefer an unused must-see bucket over repeated city filler.
+- Potential global bucket types include:
+  • flagship regional route
+  • secondary regional route
+  • wildlife / boat / marine
+  • thermal / spa / wellness
+  • cave / glacier / mountain / valley / light adventure
+  • food / local culture
+  • indoor iconic backup
+  • short scenic escape
+  • historic town / heritage route
+  • architecture / design district
+- For gateway/outward bases, regional routes and iconic special experiences are often core must-sees.
+- The repaired day must have a clearly different identity from all existing days.
 
 MICRO-STOP RULES — ULTRA CRITICAL:
 - Regional / outward / scenic days must feel continuous and intentionally routed.
@@ -3724,7 +4030,8 @@ MICRO-STOP RULES — ULTRA CRITICAL:
 - Iconic regional repaired days should usually produce 6–10 real rows when geography supports it.
 
 ANTI-REPEAT RULES — ULTRA CRITICAL:
-- Avoid all already-used macro-regions, circuits, rings, routes, neighborhoods, and highlight combinations.
+- Avoid all already-used macro-regions, circuits, rings, routes, neighborhoods, highlight combinations, and experience buckets.
+- Treat translated names, misspellings, paraphrases, tourism nicknames, and alternate-language names as the SAME underlying route.
 - If using the same broad region is unavoidable, the internal route must be clearly different:
   • different sub-stops
   • different sequence
@@ -3739,25 +4046,22 @@ ANTI-REPEAT RULES — ULTRA CRITICAL:
 - If an existing day is:
   • scenic stop + scenic stop + return
   the repaired day must be denser or geographically different.
-- Each repaired day must have a distinct identity:
-  • scenic peninsula
-  • coast route
-  • geothermal route
-  • heritage town route
-  • food/local life
-  • architecture/design
-  • waterfront/harbor
-  • spa/thermal anchor with surrounding route
-  • mountain/valley/fjord route
+- Each repaired day must have a distinct identity.
 
 REGIONAL / DAY-TRIP CONTRACT:
 - For a regional/day-trip day, the LEFT side of "activity" MUST be the macro destination or route name, not the base city.
-- A regional/day-trip replacement should end with "<Macro-tour> – Return to ${city}".
+- A regional/day-trip replacement MUST end with "<Macro-tour> – Return to ${city}".
+- The return row must be the FINAL row.
 - Use real places in "from" and "to".
 - Use realistic transport:
   • urban/local short movements: Walking / Taxi / Public transport as appropriate
   • regional/outward days: Rental car or Guided tour when appropriate
 - Do not leak "recommend me", "recomiéndame", "recommended by planner", or transport preference text into any field.
+
+DAYLIGHT / NIGHT CONTRACT:
+- Do NOT schedule daylight-sensitive natural stops at night.
+- Beaches, black sand beaches, waterfalls, cliffs, viewpoints, glaciers, parks, lava fields, craters, scenic villages, and coastal roads must be in daylight-friendly windows.
+- Evening/night should be used for dinners, illuminated urban walks, shows, auroras, indoor experiences, or night-compatible activities.
 
 QUALITY CHECK BEFORE RETURN:
 - Every repaired day must have at least 3 meaningful rows.
@@ -3765,6 +4069,8 @@ QUALITY CHECK BEFORE RETURN:
 - Iconic regional repaired days should usually have 6–10 real rows if feasible.
 - No repaired day may contain obvious 2h30+ dead gaps unless justified by a true long transfer.
 - No repaired day may be structurally similar to the existing itinerary.
+- No regional repaired day may omit its return row.
+- No daylight-sensitive scenic stop may be scheduled at night.
 - No text outside JSON.
 `.trim();
 
@@ -3798,7 +4104,7 @@ QUALITY CHECK BEFORE RETURN:
 
     if(!repairDays.length) return rows;
 
-    console.warn(`[BLOCK ${label}] Strategic repair needed for repetitive/thin/gapped days:`, repairDays);
+    console.warn(`[BLOCK ${label}] Strategic repair needed for repetitive/thin/gapped/daylight/return/bucket issues:`, repairDays);
 
     let repairedRows = [];
 
@@ -3941,12 +4247,13 @@ function _dedupeRows_(rows=[], city=''){
     const dayRows = byDay[day] || [];
     const tooSimilar = acceptedDays.some(prevDayRows => {
       if(_areRegionalDaysTooSimilar_(prevDayRows, dayRows, city)) return true;
+      if(_areDaysExperienceDuplicates_(prevDayRows, dayRows, city)) return true;
       return _areDaysStructurallyTooSimilar_(prevDayRows, dayRows, city);
     });
 
     if(tooSimilar){
       const filtered = dayRows.filter(r=>{
-        if(_isReturnRow_(r) || _isAuroraRow_(r)) return true;
+        if(_isReturnLikeRow_(r) || _isAuroraRow_(r)) return true;
 
         const token = _rowShapeToken_(r, city);
         const semantic = _rowSemanticKey_(r, city);
@@ -3993,7 +4300,6 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
 
   return true;
 }
-
 /* =========================================================
    SECTION 15F · generateCityItinerary (BLOCK-SAFE + FINAL GUARANTEE)
 ========================================================= */
