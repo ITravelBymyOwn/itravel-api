@@ -2962,6 +2962,9 @@ function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=
     urbanDays.slice(2).forEach(d => repair.add(d));
   }
 
+  _findMicroStopRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
+  _findRepeatedItineraryRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
+
   return [...repair].filter(d => days.includes(Number(d))).sort((a,b)=>a-b);
 }
 
@@ -2977,6 +2980,167 @@ function _hasMinimumRowsForDays_(rows=[], days=[]){
   return (days || []).every(day=>{
     const clean = (byDay[day] || []).filter(r => !_isAuroraRow_(r));
     return clean.length >= 3;
+  });
+}
+
+function _maxMeaningfulGapMinutes_(dayRows=[]){
+  const rows = (dayRows || [])
+    .filter(r => !_isAuroraRow_(r))
+    .slice()
+    .sort((a,b)=> String(a?.start || '').localeCompare(String(b?.start || '')));
+
+  let maxGap = 0;
+
+  for(let i=1; i<rows.length; i++){
+    const prevEnd = _hhmmToMin_(rows[i-1]?.end);
+    const nextStart = _hhmmToMin_(rows[i]?.start);
+
+    if(prevEnd === null || nextStart === null) continue;
+
+    const gap = nextStart - prevEnd;
+    if(gap > maxGap) maxGap = gap;
+  }
+
+  return maxGap;
+}
+
+function _hasCriticalDayGap_(dayRows=[], city=''){
+  const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
+  if(rows.length < 3) return false;
+
+  const maxGap = _maxMeaningfulGapMinutes_(rows);
+  if(maxGap < 150) return false;
+
+  if(_isRegionalDay_(rows, city)) return true;
+
+  const dominant = _dayDominantKind_(rows, city);
+  return ['nature','regional','walk'].includes(dominant) && maxGap >= 180;
+}
+
+function _hasThinRegionalDay_(dayRows=[], city=''){
+  const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
+  if(!_isRegionalDay_(rows, city)) return false;
+
+  const meaningfulRows = rows.filter(r => !_isReturnRow_(r));
+  const maxGap = _maxMeaningfulGapMinutes_(rows);
+
+  return meaningfulRows.length < 5 || maxGap >= 150;
+}
+
+function _regionalMacroSignature_(dayRows=[], city=''){
+  const macros = _dayMacroSet_(dayRows, city)
+    .filter(m => m && m !== 'urban-base')
+    .map(m => _normalizeRepeatKey_(m))
+    .filter(Boolean);
+
+  const regional = macros.filter(m => _isRegionalMacroKey_(m));
+
+  return [...new Set(regional.length ? regional : macros)].sort().join('|');
+}
+
+function _dayPOISet_(dayRows=[], city=''){
+  return [...new Set((dayRows || [])
+    .filter(r => !_isAuroraRow_(r) && !_isReturnRow_(r))
+    .map(r => _rowSemanticKey_(r, city))
+    .filter(Boolean)
+  )];
+}
+
+function _poiOverlapRatio_(rowsA=[], rowsB=[], city=''){
+  const a = _dayPOISet_(rowsA, city);
+  const b = _dayPOISet_(rowsB, city);
+  if(!a.length || !b.length) return 0;
+
+  const setA = new Set(a);
+  const setB = new Set(b);
+  let inter = 0;
+
+  setA.forEach(x=>{
+    if(setB.has(x)) inter++;
+  });
+
+  return inter / Math.max(Math.min(setA.size, setB.size), 1);
+}
+
+function _areRegionalDaysTooSimilar_(rowsA=[], rowsB=[], city=''){
+  if(!_isRegionalDay_(rowsA, city) || !_isRegionalDay_(rowsB, city)) return false;
+
+  const sigA = _regionalMacroSignature_(rowsA, city);
+  const sigB = _regionalMacroSignature_(rowsB, city);
+
+  if(sigA && sigB && sigA === sigB) return true;
+
+  const macroOverlap = _similarityRatio_(sigA, sigB);
+  const poiOverlap = _poiOverlapRatio_(rowsA, rowsB, city);
+
+  if(macroOverlap >= 0.75 && poiOverlap >= 0.35) return true;
+  if(poiOverlap >= 0.5) return true;
+
+  return false;
+}
+
+function _findMicroStopRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
+  const n = Number(totalDays || 0);
+  if(n < 3) return [];
+
+  const byDay = _groupRowsByDay_(rows);
+  const days = (requestedDays || []).map(Number).sort((a,b)=>a-b);
+  const repair = new Set();
+
+  days.forEach(day=>{
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+
+    if(_hasThinRegionalDay_(dayRows, city) || _hasCriticalDayGap_(dayRows, city)){
+      repair.add(day);
+    }
+  });
+
+  return [...repair].sort((a,b)=>a-b);
+}
+
+function _findRepeatedItineraryRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
+  const n = Number(totalDays || 0);
+  if(n < 4) return [];
+
+  const byDay = _groupRowsByDay_(rows);
+  const days = (requestedDays || []).map(Number).sort((a,b)=>a-b);
+  const repair = new Set();
+
+  for(let i=0; i<days.length; i++){
+    const day = days[i];
+    const rowsD = byDay[day] || [];
+    if(!rowsD.length) continue;
+
+    for(let j=0; j<i; j++){
+      const prev = days[j];
+      const rowsPrev = byDay[prev] || [];
+      if(!rowsPrev.length) continue;
+
+      if(_areRegionalDaysTooSimilar_(rowsPrev, rowsD, city)){
+        repair.add(day);
+        break;
+      }
+
+      if(_areDaysStructurallyTooSimilar_(rowsPrev, rowsD, city)){
+        repair.add(day);
+        break;
+      }
+    }
+  }
+
+  return [...repair].sort((a,b)=>a-b);
+}
+
+function _hasCriticalQualityIssueForDays_(rows=[], days=[], city=''){
+  const byDay = _groupRowsByDay_(rows);
+
+  return (days || []).some(day=>{
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return true;
+    if(_hasThinRegionalDay_(dayRows, city)) return true;
+    if(_hasCriticalDayGap_(dayRows, city)) return true;
+    return false;
   });
 }
 
@@ -3361,6 +3525,7 @@ function _fixReturnRowDurationConsistency_(rows=[]){
     }, Number(r?.day || 1));
   });
 }
+
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
@@ -3370,6 +3535,7 @@ async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay,
   const forbiddenUrbanText = Array.isArray(forbiddenUrbanClusters) && forbiddenUrbanClusters.length
     ? forbiddenUrbanClusters.join(', ')
     : '';
+
   const promptTransport = _normalizeTransportPreferenceForPrompt_(transport);
   const promptBase = _sanitizeBaseLikeValue_(hotel || '', '');
 
@@ -3398,311 +3564,58 @@ MANDATORY:
   • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
   • If a stop belongs to a known regional circuit chosen for that day, do NOT label it as "${city} – <Sub-stop>"
   • The base city name on the LEFT side is allowed only for true urban/local days
-  • Examples of the contract:
-    - correct: "Golden Circle – Geysir"
-    - correct: "Golden Circle – Friðheimar"
-    - correct: "South Coast – Reynisfjara"
-    - correct: "Snæfellsnes Peninsula – Arnarstapi"
-    - correct: "Montserrat – Monastery"
-    - wrong: "${city} – Geysir" when Geysir belongs to a regional day trip
 
-- SOFT RULES (HIGH PRIORITY BUT FLEXIBLE):
-  • target 4–7 rows for a normal urban day
-  • target 6–10 rows for a flagship regional day / iconic outward day when geography and time window support it
-  • allow 8–12 only when naturally dense
+- CRITICAL MICRO-STOPS ENFORCEMENT:
+  • regional / outward / scenic days MUST NOT contain giant dead gaps
+  • if a regional day has gaps bigger than ~2h–2h30, you MUST enrich the same route with REAL intermediate micro-stops
+  • examples of valid micro-stops:
+    - viewpoints
+    - cliffs
+    - lava fields
+    - cafés with scenic value
+    - roadside photo stops
+    - geothermal pockets
+    - short boardwalks
+    - fishing villages
+    - local food stops
+    - harbors
+    - waterfalls
+    - crater stops
+    - scenic churches
+    - basalt formations
+    - small museums directly on-route
+  • DO NOT leave a regional day sparse if the route naturally supports more exploration
+  • a flagship scenic day should usually feel rich and continuous, not like 3 stops separated by huge voids
+
+- HARD ANTI-REPEAT:
+  • NEVER reuse the same flagship regional circuit twice unless the destination genuinely has no other worthwhile alternative
+  • NEVER create two days with materially equivalent structure
+  • avoid repeated:
+    - museum + lunch + walk + return
+    - scenic stop + scenic stop + dinner
+    - waterfront + food + harbor + return
+  • changing POI names alone is NOT enough
+  • each day must have:
+    - distinct geography
+    - distinct rhythm
+    - distinct macro-cluster
+    - distinct emotional identity
+
+- SOFT RULES:
+  • normal urban day: usually 4–7 rows
+  • flagship regional day: usually 6–10 rows when geography supports it
+  • dense compact routes may reach around 8–12 rows if natural
   • avoid weak days whenever possible
-  • prefer variety across days
-
-- CRITICAL FALLBACK:
-  If no strong regional cluster is available for a day:
-  → you MUST create a high-quality local / urban / waterfront / cultural / food / scenic day instead.
-  → NEVER leave a day weak or empty.
-  → a normal usable day should still feel complete, intentional, and valuable.
+  • prioritize WOW quality
 
 - Hotel/base: ${JSON.stringify(promptBase)}
 - Preferred transport: ${JSON.stringify(promptTransport)}
-${forbiddenText ? `- Do NOT repeat these main highlights already used on other days unless the user explicitly requested repetition: ${forbiddenText}` : ''}
-${forbiddenUrbanText ? `- For base-city days, avoid reusing these already-used urban areas / neighborhoods / clusters unless strictly necessary: ${forbiddenUrbanText}` : ''}
+${forbiddenText ? `- Do NOT repeat these highlights already used elsewhere: ${forbiddenText}` : ''}
+${forbiddenUrbanText ? `- Avoid reusing these urban clusters / neighborhoods unless strictly necessary: ${forbiddenUrbanText}` : ''}
 
 ${_buildExplorationModeBiasBlock_(city, totalDays)}
 ${_buildCoverageGuardBlock_(city, totalDays)}
 ${_buildUrbanDayQualityBlock_(city, totalDays)}
-
-GLOBAL CANDIDATE DISCOVERY (CRITICAL):
-- Starting from the base city, first identify the broadest plausible universe of iconic places, routes, scenic areas, day trips, near-city experiences, waterfront/harbor experiences, wellness options, food/cultural options, viewpoint options, and local half-day combinations that are realistically visitable from the base.
-- Explore this universe outward in radial tiers before selecting:
-  • Tier A: city / near-base / urban / waterfront / museums / food / local viewpoints
-  • Tier B: short regional escapes and near-base nature
-  • Tier C: medium day trips / coherent regional loops
-  • Tier D: long but still plausible day trips
-  • Tier E: outer exploration boundary up to about 5 hours one-way by car ONLY as a maximum candidate horizon
-- This outer boundary is NOT an automatic inclusion rule. It is only the outer exploration universe.
-- Build a rich candidate pool first. Only after that, select what best fits the trip length.
-- Leave farther or lower-value candidates OUT if they do not add enough value for this trip length.
-- Prefer routes and combinations that create a WOW result: iconic, coherent, memorable, visually strong, and better than a generic tourist plan.
-- The candidate discovery must come from the destination itself, not from pre-existing template routes.
-- Before reusing an urban cluster or a second-tier city pack, you MUST explicitly evaluate whether there are still unused worthwhile regional day trips / rings / nearby towns / scenic routes reachable from the base.
-- For trips of 5 or more days, if the destination genuinely supports strong day trips, you MUST include 1–3 of them before recycling urban content.
-- Failing to include obvious strong day trips in a long stay should be treated as a low-quality itinerary.
-- Day trips are HIGH-PRIORITY anchors in long trips, not optional extras.
-- For long stays, the planner MUST prefer strong unused regional options over another recycled urban day.
-- In long trips, the planner should think as follows:
-  • first distribute the strongest external clusters / regional rings / day tours
-  • only after that, fill the remaining days with city content
-- If the destination is a smaller base city with excellent access to surrounding nature or regional routes, do NOT over-allocate days to the city itself.
-- If the destination is a larger major city, deeper city exploration is acceptable, but still prefer strong day trips before repeating similar urban formulas.
-- Use destination type intelligently:
-  • if the base city is relatively compact and mainly serves as a gateway to surrounding regions, external clusters should dominate medium/long stays
-  • if the base city itself is exceptionally rich and layered, city days may be more numerous, but only if they remain materially different from one another
-- The planner must avoid the "easy urban fallback" when richer external options still exist.
-- In trips with rental car access or very strong public-transport day tours, assume radial expansion is easier and prioritize it more aggressively.
-- For a 7-day trip:
-  • smaller gateway-type cities should usually dedicate only about 1–2.5 days to the base city unless the user explicitly wants more city time
-  • larger major cities should still usually include at least 2 strong day trips when those are clearly available
-- Do NOT omit a flagship outward cluster if it is one of the most iconic, reachable, and compatible experiences from the base.
-- If a destination is clearly known more for outward exploration than for many dense urban days, prefer outward distribution by default.
-- If the destination behaves like a gateway / outward base, strong outer clusters should usually dominate over extra city days.
-- For gateway/outward bases, do not let secondary city days crowd out flagship radial experiences.
-- If a flagship cluster is selected for the trip, it should not be silently replaced by a weaker semi-urban variant.
-- In outward/gateway cases, prefer coverage of the main iconic clusters first, then secondary clusters, and only then additional city days.
-
-STRUCTURAL ANTI-DUPLICATION (CRITICAL):
-- The planner must compare entire day shape, not only POI names.
-- Two days are too similar if they repeat the same broad sequence, such as:
-  • museum + lunch + walk + museum + return
-  • viewpoint + café + waterfront + dinner
-  • plaza + church + lunch + promenade + return
-  • generic urban stroll + food + cultural stop + return
-- If two days have the same structure, rebuild one using a different:
-  • macro-cluster
-  • zone
-  • rhythm
-  • anchor type
-  • geographic direction
-  • emotional purpose
-- Day identity must be clearly different:
-  • flagship scenic route
-  • historic core
-  • architecture/design
-  • food/local life
-  • waterfront/harbor
-  • wellness/thermal
-  • nearby town/heritage
-  • nature/coast/mountains
-- Do NOT solve duplication by only renaming stops.
-- Each day must feel like it was selected from a different strategic bucket unless the destination truly has limited variety.
-- In gateway/outward destinations, avoid creating multiple base-city filler days with the same structure.
-- In dense cities, urban days may repeat the city macro name, but they must use distinct districts and different day shapes.
-
-MICRO-STOPS / DENSITY (CRITICAL):
-- For each chosen cluster / region / route, identify a richer internal pool of REAL sub-stops before building the final day.
-- Think in 2 levels:
-  • Macro-stops = major anchor places / major sights / towns / regions
-  • Micro-stops = small but valuable enrichers inside the same cluster:
-    - viewpoints
-    - short boardwalks
-    - cliffs
-    - lava fields
-    - bridges
-    - rock formations
-    - small craters
-    - beaches
-    - harbors
-    - cafes with scenic value
-    - short detours
-    - photo points
-    - pools / spas / geothermal pockets
-    - local museums / cultural spots
-    - scenic plazas / alleys / architectural landmarks
-    - local markets / food halls / waterfront details
-- For each chosen cluster, mentally generate between 5 and 15 REAL possible sub-stops if the destination genuinely offers them.
-- Then SELECT ONLY the sub-stops that actually fit the day coherently.
-- Do NOT force all 15 into the itinerary.
-- Use more sub-stops and more final rows when the cluster is dense and compact.
-- Use fewer, higher-value sub-stops when the cluster is large and spread out.
-- The purpose is to avoid weak sparse days and enrich the route naturally, not to overload the day.
-- When the destination is exceptionally rich, prefer a denser but still readable and realistic day over a weak sparse day.
-- A normal usable day should usually have at least 4 meaningful rows unless the time window is clearly short.
-- A short day should still usually have at least 3 meaningful rows unless the user window is extremely limited.
-- For iconic regional day trips / scenic routes / peninsulas / coastlines / heritage towns, the micro-stops must NOT remain only conceptual: the final itinerary should usually include 6–10 REAL sub-stops / rows when the geography genuinely supports them.
-- The optional micro-guide in notes can enrich the route, but it does NOT replace the need for enough real rows in the itinerary itself.
-- Micro-stops are REQUIRED to enrich the final rows, not just notes.
-- For dense or iconic clusters, the itinerary must translate meaningful micro-stops into real rows instead of leaving them implied.
-- For urban clusters too, avoid vague filler like only "walk around the area" when the destination clearly offers more specific micro-stops:
-  • specific plazas
-  • iconic streets
-  • courtyards
-  • markets
-  • viewpoints
-  • churches
-  • cafés
-  • small museums
-  • scenic passages
-- In rich cities, micro-paradas should feel precise and memorable, not generic.
-- Avoid filling a city day only with museum + restaurant + generic walk unless there is truly no stronger combination available.
-- When an urban zone is selected, try to sequence named micro-stops so the day feels like exploration, not a placeholder list.
-- If a cluster is known for multiple real sub-stops in close proximity, prefer expressing those as multiple rows rather than compressing them into one broad stop.
-- Micro-stops should make the day feel discovered, not merely valid.
-- For flagship regional clusters, do not stop at only 4–5 rows if there are clearly more real sub-stops nearby that fit naturally.
-
-MICRO-GUIDE ENRICHMENT (CRITICAL):
-- For regional days / day trips, the FIRST row of that cluster/day should include in "notes" a structured, ordered micro-guide of additional sub-stops along the same route when the cluster supports them.
-- This micro-guide must be:
-  • ordered in the same optimal geographic flow of the route
-  • made of REAL places only
-  • specific and useful to the user
-  • clearly presented as an optional enriched route, not random notes
-- If the day already includes many real rows, the micro-guide can be shorter.
-- If the day cannot include all valuable micro-stops as rows, use the first row notes to preserve that expert-level detail.
-- This is especially valuable for dense scenic routes, rich urban walks, peninsulas, coastlines, regional loops, and layered city days.
-- However, the micro-guide must never be used as an excuse to keep a rich route artificially short in the actual rows.
-- The micro-guide is enrichment, not substitution.
-
-RADIAL / BALANCE LOGIC (IMPROVED):
-- Build a pool of candidate experiences around the base city:
-  • urban clusters
-  • nearby escapes
-  • regional day trips
-  • scenic routes
-  • cultural + food combinations
-
-- Assign them across requested days ensuring:
-  • NO day is left empty
-  • NO day feels weak
-
-- PRIORITY ORDER:
-  1. Unused strong regional clusters
-  2. Secondary regional clusters
-  3. High-quality urban + cultural + scenic combinations
-
-- CRITICAL:
-  If strong regional clusters are exhausted:
-  → build PREMIUM local days (not filler)
-
-- Avoid:
-  • front-loading all strong content
-  • leaving last days weak
-
-- The LAST day must feel intentional and memorable.
-- The LAST day should avoid feeling like a leftover museum/restaurant/promenade formula unless the destination genuinely calls for that as the best possible close.
-- If the trip is long, do not let the base city absorb too many days too early while strong outer clusters remain unused.
-- Prefer diversity of day character across the itinerary:
-  • one day can be historic
-  • another architectural
-  • another waterfront
-  • another regional / scenic
-  • another food/culture
-  • but avoid repeating the same urban day shape with only renamed stops
-- In outward/gateway destinations, the urban days should be intentionally limited and highly differentiated.
-- In dense major cities, urban days may be more numerous, but repeated zone recycling should still be penalized.
-- In gateway/outward destinations, the planner should usually cap urban allocation around 1–2.5 days in a 7-day stay unless the user explicitly asks for more city time.
-- Outward/gateway bases should prioritize "outside first, city later" once arrival logistics are covered.
-- Do not create two days that are materially the same in ordered structure, zone pattern, and stop logic.
-- Two different days must not reuse the same ordered chain or near-identical sequence of: museum + garden + lunch + museum + return, or equivalent repeated formulas.
-- Every day must have a materially distinct identity, not only different stop names.
-
-ANTI-DUPLICATION (BALANCED):
-- Avoid repeating the same macro-region, circuit, or regional ring across days.
-- STRONG RULE:
-  Do NOT repeat the SAME major regional circuit when clear alternatives exist.
-- FLEXIBLE RULE:
-  If the destination has limited variety and no strong unused alternatives remain:
-  → you MAY reuse a region ONLY IF:
-    • the internal route is meaningfully different
-    • it focuses on different sub-stops
-    • it creates a clearly distinct experience for the user
-- NEVER:
-  • duplicate the exact same route
-  • reuse identical highlight combinations
-  • create two days that are near-duplicates in sequence, rhythm, and area logic
-- Always prefer UNUSED clusters first.
-- Do not create two urban days that feel almost interchangeable just because the named stops differ slightly.
-- Penalize repeated use of the same broad urban zone unless the new day offers a genuinely different angle.
-- If a day resembles an earlier day in both stop order and overall shape, rebuild it before returning.
-- Day-to-day distinctiveness is mandatory, not optional.
-- Reusing the same exact POI across different days is forbidden unless the user explicitly requested repetition.
-
-DAY TRIP LOGIC (GLOBAL):
-- If an activity belongs to a region (peninsula, coast, geothermal area, mountain route, lake district, wine area, canyon route, heritage route, island route, etc.), group nearby highlights into ONE coherent day when it improves the trip.
-- Avoid single-activity regional days when multiple nearby worthwhile stops exist.
-- Prefer complete regional loops over fragmented visits.
-- If a special activity fits naturally inside a regional day, you may integrate it there.
-- A proper day trip should normally include 4–8 useful rows, but for dense and highly visitable clusters it may expand to around 8–12 rows when that clearly improves the guide and still remains realistic.
-- For powerful regional days, make the route feel like a true expertly designed circuit, not just a list of stops.
-- In medium and long trips, clearly viable day trips should be considered a major source of value, not a last resort.
-- In trips of 5 or more days, actively prioritize worthwhile day trips / regional circuits when the destination genuinely offers them.
-- Do NOT leave a long trip mostly urban if the destination is widely known for strong day trips reachable from the base.
-- A day trip should feel fully developed, not like a thin placeholder with only 2–3 stops.
-- A real day trip should end with an explicit return row in the format "<Macro-tour> – Return to <base city>".
-- For iconic day trips, the planner should usually output 6–10 real rows when the geography genuinely supports them.
-- If totalDays >= 7 and the destination is a major city with multiple strong excursions, the planner should usually include at least 2 day trips unless the user explicitly prefers staying inside the city.
-- If totalDays >= 7 and the destination is a compact gateway city with strong surroundings, external day trips / regional days should usually dominate over urban days.
-- Day trips should not be treated as token inclusions; they should feel like some of the strongest days of the trip.
-- Flagship day trips should usually outperform secondary urban days in score and priority.
-- A flagship cluster should not be reduced to only 3–4 rows if the route naturally supports a richer 6–10-row structure.
-- For outward/gateway destinations, ensure the flagship clusters are covered once each before adding redundant city-heavy alternatives.
-
-SPA / THERMAL / RELAX LOGIC (CRITICAL):
-- Activities centered on thermal baths, hot springs, spas, wellness complexes, hammams, onsen, relaxation pools, or similar immersive relaxation experiences must be treated as ANCHOR blocks.
-- Such activities must either:
-  • start the day as a major anchor
-  • or end the day as a major anchor
-- Do NOT place an immersive relaxation activity as a short middle stop between multiple unrelated visits.
-- Reserve at least about 3 effective hours on site for a true spa / thermal / relaxation anchor unless the user explicitly asked for a brief stop.
-- If there is nearby coherent content, place it BEFORE the spa or AFTER it in a way that still feels natural.
-- The result should feel realistic to a human traveler.
-
-DAYLIGHT / NIGHT LOGIC (CRITICAL):
-- Daylight-sensitive activities must be scheduled during daylight or strong natural-light hours when possible:
-  • scenic viewpoints
-  • waterfalls
-  • beaches
-  • coastal cliffs
-  • panoramic drives
-  • villages / old towns best enjoyed outdoors
-  • parks / gardens
-  • hiking / walking routes
-  • outdoor architecture appreciation
-  • natural landmarks
-- Evening/night should be used primarily for:
-  • dinners
-  • nightlife
-  • illuminated urban strolls
-  • shows / performances
-  • auroras
-  • clearly indoor late-compatible experiences
-- Do NOT schedule strongly daylight-dependent outdoor sightseeing into clearly night-like windows just because there is still time available.
-- If the user provided an end time, treat it as the latest acceptable finish, not a target to fill aggressively.
-
-QUALITY / RHYTHM:
-- Avoid giant dead gaps in the middle of a normal full day unless they are justified by a genuinely long transfer or a long immersive activity.
-- If the day is spa/relax/boat/marine-based, enrich the rest of the day with coherent nearby content instead of leaving the day almost empty.
-- Aurora viewing should NOT be the main daytime anchor of a normal full day.
-- On days with normal daytime availability, auroras should appear only as evening/night content or as notes, not as the core daytime activity.
-- Keep rows in chronological order with NO overlaps.
-- If there is a return row, place it as the FINAL row.
-- Final days should feel like a strong closure, not leftover filler.
-- Prioritize iconic endings, emotional endings, scenic endings, or premium cultural/food/waterfront closures when appropriate.
-- The overall result should feel WOW: premium, specific, memorable, realistic, and smarter than a standard travel planner.
-- When the final day is still urban, it must feel materially different from earlier urban days and avoid obvious recycling of the same cluster.
-- The itinerary should feel curated, not merely valid.
-
-FAIL-SAFE GENERATION (CRITICAL):
-- Under NO circumstances should a requested day return:
-  • zero rows
-  • only 1–2 weak rows
-- If constraints conflict:
-  → PRIORITIZE generating a strong, coherent day over strictly respecting all soft rules.
-- The planner MUST always return a complete and usable itinerary.
-- Before finalizing, verify that each requested day in this block has enough useful content for its time window.
-- If a day is still too thin, rebuild it internally before returning JSON.
-- HARD CHECK BEFORE RETURN:
-  • short day: at least 3 real rows
-  • normal day: usually at least 4–8 real rows
-  • iconic regional day trip: usually 6–10 real rows when geography genuinely supports it
-  • no day may be a near-duplicate of an earlier day in sequence and structure
-- Notes are enrichment only. They do not replace rows.
-- No text outside JSON.
 `.trim();
 
   const buildMissingDaysPrompt = (missingDays=[]) => `
@@ -3726,39 +3639,28 @@ MANDATORY:
   • transport must be a real final value
   • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
   • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
-- SOFT RULES:
-  • target 4–7 rows for a normal urban day
-  • target 6–10 rows for a flagship regional day / iconic outward day when geography and time window support it
-  • allow around 8–12 when the remaining cluster is truly dense and compact
+- MICRO-STOPS / GAP REPAIR:
+  • if the missing day is regional/outward/scenic, do NOT return a sparse day
+  • fill the day with real on-route micro-stops instead of leaving 2h+ gaps
+  • use specific places, not vague filler
+  • regional missing-day rebuilds should usually have 6–10 rows when geography supports it
+- ANTI-REPEAT:
+  • do NOT repeat a macro-region, circuit, route, neighborhood sequence, or day structure already used
+  • if a previous day used Golden Circle, do not rebuild another Golden Circle-style day unless no alternative exists
+  • if a previous day used South Coast, do not rebuild another South Coast-style day unless the internal route is clearly different
+  • if a previous day used a museum + lunch + walk rhythm, do not repeat that same rhythm
 - If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
 - Use the remaining UNUSED candidate universe first, thinking radially from the base city:
   • local / urban / waterfront / museum / food / scenic / cultural combinations
-  • then unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
-  • then unused regional clusters only if they are genuinely new
+  • unused near-base nature / marine / spa-adjacent / viewpoint / old-town / architecture combinations
+  • unused regional clusters if they are genuinely new
 - For trips of 5 or more days, before choosing another urban day, explicitly evaluate whether there are still strong unused day trips / nearby towns / regional scenic circuits available from the base.
 - The replacement day must be built from what the destination still offers, not from a template route.
-- For the chosen remaining cluster or local pack, also think in micro-stops:
-  • generate mentally 5–15 possible micro-stops if the destination genuinely offers them
-  • then choose only the ones that fit coherently in the missing day
-- If the chosen remaining cluster is rich and compact, include more real rows.
-- Also enrich the FIRST row notes with an ordered micro-guide when useful.
-- Do NOT solve a long missing-day problem by repeating the exact same route or identical highlight combinations.
-- Prefer UNUSED clusters first, but if the destination has truly limited variety, a meaningfully distinct internal route is acceptable over leaving the day weak.
-- If the destination genuinely offers strong day trips / regional circuits and this is a long trip, prefer using one of those before falling back to a thin urban day.
-- A valid missing-day rebuild should usually produce at least 3 meaningful rows for a short day and at least 4 meaningful rows for a normal day.
-- For iconic regional missing-day rebuilds, prefer 6–10 real sub-stops / rows when the geography genuinely supports them.
-- The micro-guide in notes can enrich the route but must not replace real rows in the itinerary.
-- If the chosen missing day is spa/thermal/relax-based, place that anchor at the start or end of the day and leave at least about 3 effective hours on site.
-- Keep daylight-sensitive activities in daylight-friendly hours.
+- For the chosen remaining cluster or local pack, mentally generate 5–15 possible real micro-stops if the destination genuinely offers them, then choose only the ones that fit coherently.
 - If excursion/day trip exists, end with "<Region> – Return to ${city}".
 - Hotel/base: ${JSON.stringify(promptBase)}
 - Transport preference: ${JSON.stringify(promptTransport)}
 - The result should feel globally premium and destination-aware, not generic.
-- If the trip is long and the destination still has strong unused excursions, prefer one of those before another generic urban day.
-- The replacement day must be materially different from already-used days.
-- If the destination is an outward/gateway type base, keep the number of extra urban rebuilds low and prioritize strong outer clusters first.
-- Do not create a missing-day rebuild that duplicates another day already used in the itinerary.
-- Do not create a day that is structurally similar to previous days even if the POI names are different.
 - No text outside JSON.
 `.trim();
 
@@ -3766,7 +3668,7 @@ MANDATORY:
 ${FORMAT}
 **ROLE:** Planner “Astra”. Strategic quality repair for "${city}".
 
-The current itinerary already has usable rows, but the following day numbers are too urban, repetitive, structurally similar, or weak for a ${totalDays}-day stay:
+The current itinerary already has usable rows, but the following day numbers are too sparse, too gapped, repetitive, structurally similar, or weak for a ${totalDays}-day stay:
 ${JSON.stringify(repairDays)}
 
 Return Format B JSON only:
@@ -3781,38 +3683,87 @@ MANDATORY:
 ${JSON.stringify((currentRows || []).map(r => ({
   day: r?.day,
   activity: r?.activity,
+  from: r?.from,
   to: r?.to,
   transport: r?.transport,
+  start: r?.start,
+  end: r?.end,
   notes: String(r?.notes || '').slice(0, 180)
-})).slice(0, 80))}
+})).slice(0, 100))}
 
 REPAIR OBJECTIVE:
-- Replace weak/repetitive urban filler with stronger, materially different days.
-- For long trips from gateway/outward bases, prioritize unused regional clusters, scenic loops, nearby towns, peninsulas, coasts, geothermal areas, parks, valleys, fjords, islands, heritage routes, or other coherent outward experiences before adding another city day.
-- If "${city}" is a dense major city, repair using a clearly different district/anchor/experience type or a strong day trip if available.
-- If "${city}" is a hybrid, choose the strongest unused city or outward bucket, not a repeated day shape.
-- Do NOT repeat the same broad structure as prior days.
-- Do NOT create another museum + lunch + walk + return day unless the destination truly has no stronger alternative.
-- The replacement must feel WOW, specific, geographic, realistic, and materially different.
+- Fix the exact quality failure:
+  • if the issue is a huge gap, add REAL on-route micro-stops or rebuild the route with a denser coherent sequence
+  • if the issue is a thin regional day, expand it into a proper day trip with real stops
+  • if the issue is repetition, replace it with a genuinely different macro-cluster or day identity
+- Do NOT return another sparse day.
+- Do NOT return another structurally similar day.
+- Do NOT solve the problem only by changing names.
 
-STRICT REPAIR RULES:
-- Use a NEW macro-cluster whenever possible.
+MICRO-STOP RULES — ULTRA CRITICAL:
+- Regional / outward / scenic days must feel continuous and intentionally routed.
+- Avoid gaps bigger than ~2h–2h30 unless the gap is a genuine long transfer.
+- If there is a long transfer, the itinerary should still include useful stops before/after it so the day feels complete.
+- For each regional repaired day, include real micro-stops such as:
+  • viewpoints
+  • cliffs
+  • small towns
+  • harbors
+  • beaches
+  • lava fields
+  • waterfalls
+  • crater stops
+  • scenic cafés
+  • boardwalks
+  • geothermal areas
+  • photo pullouts
+  • local museums on-route
+  • churches or landmarks directly on-route
+- Do NOT use notes as a substitute for rows.
+- The final rows themselves must contain enough real sub-stops.
+- Iconic regional repaired days should usually produce 6–10 real rows when geography supports it.
+
+ANTI-REPEAT RULES — ULTRA CRITICAL:
 - Avoid all already-used macro-regions, circuits, rings, routes, neighborhoods, and highlight combinations.
-- If using an urban/local day, it must have a distinct identity and not repeat the same rhythm.
-- If using a regional day trip, produce a complete circuit with usually 6–10 real rows when geography supports it.
+- If using the same broad region is unavoidable, the internal route must be clearly different:
+  • different sub-stops
+  • different sequence
+  • different purpose
+  • different geography
+  • different rhythm
+- NEVER repeat the same flagship route as a prior day.
+- NEVER create two days that are equivalent in structure even if the names are different.
+- If an existing day is:
+  • museum + lunch + walk + dinner
+  the repaired day must NOT follow the same pattern.
+- If an existing day is:
+  • scenic stop + scenic stop + return
+  the repaired day must be denser or geographically different.
+- Each repaired day must have a distinct identity:
+  • scenic peninsula
+  • coast route
+  • geothermal route
+  • heritage town route
+  • food/local life
+  • architecture/design
+  • waterfront/harbor
+  • spa/thermal anchor with surrounding route
+  • mountain/valley/fjord route
+
+REGIONAL / DAY-TRIP CONTRACT:
+- For a regional/day-trip day, the LEFT side of "activity" MUST be the macro destination or route name, not the base city.
 - A regional/day-trip replacement should end with "<Macro-tour> – Return to ${city}".
-- The LEFT side of "activity" must be the macro destination/route for regional days.
-- The base city name on the LEFT side is only for true local/urban days.
 - Use real places in "from" and "to".
-- Do not leak "recommend me", "recomiéndame", "recommended by planner", or transport preference text into any field.
-- Transport must be realistic:
+- Use realistic transport:
   • urban/local short movements: Walking / Taxi / Public transport as appropriate
   • regional/outward days: Rental car or Guided tour when appropriate
-- Notes must add useful expert detail, but notes do not replace real rows.
+- Do not leak "recommend me", "recomiéndame", "recommended by planner", or transport preference text into any field.
 
 QUALITY CHECK BEFORE RETURN:
-- Every repaired day must have at least 3 meaningful rows; normal/full days should usually have 4–8.
+- Every repaired day must have at least 3 meaningful rows.
+- Normal/full days should usually have 4–8 rows.
 - Iconic regional repaired days should usually have 6–10 real rows if feasible.
+- No repaired day may contain obvious 2h30+ dead gaps unless justified by a true long transfer.
 - No repaired day may be structurally similar to the existing itinerary.
 - No text outside JSON.
 `.trim();
@@ -3847,7 +3798,7 @@ QUALITY CHECK BEFORE RETURN:
 
     if(!repairDays.length) return rows;
 
-    console.warn(`[BLOCK ${label}] Strategic repair needed for repetitive/weak days:`, repairDays);
+    console.warn(`[BLOCK ${label}] Strategic repair needed for repetitive/thin/gapped days:`, repairDays);
 
     let repairedRows = [];
 
@@ -3867,13 +3818,20 @@ QUALITY CHECK BEFORE RETURN:
 
     const candidate = _dedupeRows_(_replaceRowsForDays_(rows, repairedRows, repairDays), city);
 
-    if(_hasUsableRowsForAllBlockDays_(candidate, dayNums)){
-      console.log(`[BLOCK ${label}] OK after strategic repair`);
-      return candidate;
+    if(!_hasUsableRowsForAllBlockDays_(candidate, dayNums)){
+      console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; keeping original rows.`);
+      return rows;
     }
 
-    console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; keeping original rows.`);
-    return rows;
+    const stillBroken = _findStrategicRepairDays_(candidate, repairDays, totalDays, city);
+
+    if(stillBroken.length && _hasCriticalQualityIssueForDays_(candidate, stillBroken, city)){
+      console.warn(`[BLOCK ${label}] Strategic repair still has critical quality issue on days:`, stillBroken);
+      return rows;
+    }
+
+    console.log(`[BLOCK ${label}] OK after strategic repair`);
+    return candidate;
   }
 
   const label = `${dayNums[0]}${dayNums.length > 1 ? '-' + dayNums[dayNums.length - 1] : ''}`;
@@ -3981,19 +3939,27 @@ function _dedupeRows_(rows=[], city=''){
 
   Object.keys(byDay).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const dayRows = byDay[day] || [];
-    const tooSimilar = acceptedDays.some(prevDayRows => _areDaysStructurallyTooSimilar_(prevDayRows, dayRows, city));
+    const tooSimilar = acceptedDays.some(prevDayRows => {
+      if(_areRegionalDaysTooSimilar_(prevDayRows, dayRows, city)) return true;
+      return _areDaysStructurallyTooSimilar_(prevDayRows, dayRows, city);
+    });
 
     if(tooSimilar){
       const filtered = dayRows.filter(r=>{
         if(_isReturnRow_(r) || _isAuroraRow_(r)) return true;
 
         const token = _rowShapeToken_(r, city);
+        const semantic = _rowSemanticKey_(r, city);
 
         const repeatedToken = acceptedDays.some(prevDayRows =>
           (prevDayRows || []).some(pr => _rowShapeToken_(pr, city) === token)
         );
 
-        return !repeatedToken;
+        const repeatedPoi = acceptedDays.some(prevDayRows =>
+          (prevDayRows || []).some(pr => _rowSemanticKey_(pr, city) === semantic)
+        );
+
+        return !repeatedToken && !repeatedPoi;
       });
 
       if(filtered.length >= 3){
