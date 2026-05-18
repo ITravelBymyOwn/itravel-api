@@ -2870,6 +2870,116 @@ function _isForbiddenHighlight_(row={}, forbiddenList=[], city=''){
   });
 }
 
+
+function _isRegionalMacroKey_(macro=''){
+  const key = _normalizeRepeatKey_(macro);
+  if(!key || key === 'urban-base') return false;
+
+  return /\b(circle|circulo|circulo|círculo|coast|costa|peninsula|península|snaefellsnes|reykjanes|fjord|fiordo|route|ruta|loop|circuit|circuito|valley|valle|mountain|montana|montaña|volcano|volcan|volcán|glacier|glaciar|lagoon|laguna|lake|lago|canyon|cañon|cañón|island|isla|national park|parque nacional|region|región|silver|golden|south|north|east|west|heritage route|wine region|wine area|monastery route|thermal route)\b/.test(key);
+}
+
+function _isRegionalDay_(dayRows=[], city=''){
+  const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
+  if(!rows.length) return false;
+
+  const macros = rows.map(r => _activityMacroKey_(r?.activity || '', city));
+  const regionalMacroCount = macros.filter(m => _isRegionalMacroKey_(m)).length;
+  const returnCount = rows.filter(r => _isReturnRow_(r)).length;
+
+  return regionalMacroCount >= Math.max(2, Math.ceil(rows.length * 0.45)) || returnCount > 0;
+}
+
+function _isUrbanBaseDay_(dayRows=[], city=''){
+  const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
+  if(!rows.length) return false;
+  if(_isRegionalDay_(rows, city)) return false;
+
+  const urbanCount = rows.filter(r => _activityMacroKey_(r?.activity || '', city) === 'urban-base').length;
+  return urbanCount >= Math.max(2, Math.ceil(rows.length * 0.5));
+}
+
+function _dayDominantKind_(dayRows=[], city=''){
+  const counts = {};
+  (dayRows || []).forEach(r=>{
+    if(_isAuroraRow_(r) || _isReturnRow_(r)) return;
+    const kind = String(_rowShapeToken_(r, city).split(':')[1] || 'generic');
+    counts[kind] = (counts[kind] || 0) + 1;
+  });
+
+  return Object.keys(counts).sort((a,b)=> counts[b] - counts[a])[0] || 'generic';
+}
+
+function _dayMacroSet_(dayRows=[], city=''){
+  return [...new Set((dayRows || [])
+    .filter(r => !_isAuroraRow_(r))
+    .map(r => _activityMacroKey_(r?.activity || '', city))
+    .filter(Boolean)
+  )];
+}
+
+function _countUrbanBaseDays_(rows=[], city=''){
+  const byDay = _groupRowsByDay_(rows);
+  return Object.keys(byDay).filter(d => _isUrbanBaseDay_(byDay[d] || [], city)).length;
+}
+
+function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
+  const n = Number(totalDays || 0);
+  if(n < 5) return [];
+
+  const byDay = _groupRowsByDay_(rows);
+  const days = (requestedDays || []).map(Number).sort((a,b)=>a-b);
+  const repair = new Set();
+  const urbanDays = [];
+
+  days.forEach(day=>{
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+    if(_isUrbanBaseDay_(dayRows, city)) urbanDays.push(day);
+  });
+
+  for(let i=0; i<urbanDays.length; i++){
+    const d = urbanDays[i];
+    const rowsD = byDay[d] || [];
+
+    for(let j=0; j<i; j++){
+      const prev = urbanDays[j];
+      const rowsPrev = byDay[prev] || [];
+      const sameShape = _areDaysStructurallyTooSimilar_(rowsPrev, rowsD, city);
+      const sameKind = _dayDominantKind_(rowsPrev, city) === _dayDominantKind_(rowsD, city);
+      const macroOverlap = _similarityRatio_(_dayMacroSet_(rowsPrev, city).join('|'), _dayMacroSet_(rowsD, city).join('|'));
+
+      if(sameShape || (sameKind && macroOverlap >= 0.5)){
+        repair.add(d);
+        break;
+      }
+    }
+  }
+
+  const regionalDays = days.filter(day => _isRegionalDay_(byDay[day] || [], city)).length;
+  const urbanCount = urbanDays.length;
+
+  if(n >= 7 && urbanCount >= 3 && regionalDays < 4){
+    urbanDays.slice(2).forEach(d => repair.add(d));
+  }
+
+  return [...repair].filter(d => days.includes(Number(d))).sort((a,b)=>a-b);
+}
+
+function _replaceRowsForDays_(baseRows=[], replacementRows=[], days=[]){
+  const daySet = new Set((days || []).map(Number));
+  const kept = (baseRows || []).filter(r => !daySet.has(Number(r?.day)));
+  const repl = (replacementRows || []).filter(r => daySet.has(Number(r?.day)));
+  return [...kept, ...repl];
+}
+
+function _hasMinimumRowsForDays_(rows=[], days=[]){
+  const byDay = _groupRowsByDay_(rows);
+  return (days || []).every(day=>{
+    const clean = (byDay[day] || []).filter(r => !_isAuroraRow_(r));
+    return clean.length >= 3;
+  });
+}
+
 /* =========================================================
    NEW HELPERS · DESTINATION-WIDE SELECTION BIAS
 ========================================================= */
@@ -2937,7 +3047,6 @@ DESTINATION-WIDE SELECTION BIAS:
 - Avoid repeated day shapes even in short trips.
 `.trim();
 }
-
 function _buildCoverageGuardBlock_(city='', totalDays=1){
   const n = Number(totalDays || 0);
 
@@ -3027,9 +3136,19 @@ function _cleanTransportField_(rows=[]){
     const looksUrban = !looksReturn && !looksRegional;
 
     let fallback = 'Walking / Metro / Taxi (as appropriate)';
-    if(sameArea) fallback = 'Walking';
-    else if(looksUrban) fallback = 'Walking / Metro';
-    else fallback = 'Rental car or Guided tour';
+
+    if(
+      /\breykjavik\b/.test(activity) ||
+      /\breykjavik\b/.test(from) ||
+      /\breykjavik\b/.test(to)
+    ){
+      if(sameArea) fallback = 'Walking';
+      else fallback = 'Walking / Taxi / Public Bus';
+    }else{
+      if(sameArea) fallback = 'Walking';
+      else if(looksUrban) fallback = 'Walking / Metro';
+      else fallback = 'Rental car or Guided tour';
+    }
 
     return normalizeRow({
       ...r,
@@ -3104,11 +3223,14 @@ function _pickAuroraCandidateDays_(rows=[], totalDays=1, perDay=[]){
   const picked = [];
   for(const c of candidates){
     if(picked.length >= wanted) break;
+
     if(!picked.length){
       picked.push(c.day);
       continue;
     }
+
     const prev = picked[picked.length - 1];
+
     if(Math.abs(c.day - prev) >= 2 || candidates.length <= wanted){
       picked.push(c.day);
     }
@@ -3128,9 +3250,17 @@ function _buildAuroraOptionRow_(city, day, dayRows=[]){
   const loc = _plannerLocalePack_();
   const hotel = _sanitizeBaseLikeValue_(cityMeta?.[city]?.hotel || loc.hotelFallback, loc.hotelFallback) || loc.hotelFallback;
 
-  const lastRow = (dayRows || []).slice().sort((a,b)=> String(a?.end || '').localeCompare(String(b?.end || ''))).pop() || null;
+  const lastRow = (dayRows || [])
+    .slice()
+    .sort((a,b)=> String(a?.end || '').localeCompare(String(b?.end || '')))
+    .pop() || null;
+
   const lastEnd = _hhmmToMin_(lastRow?.end);
-  const baseStart = lastEnd !== null ? Math.max(lastEnd + 90, 21 * 60) : (21 * 60);
+
+  const baseStart = lastEnd !== null
+    ? Math.max(lastEnd + 90, 21 * 60)
+    : (21 * 60);
+
   const end = Math.min(baseStart + 120, 23 * 60 + 30);
   const start = Math.min(baseStart, end - 60);
 
@@ -3175,10 +3305,12 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
   Object.keys(byDay).forEach(dayKey=>{
     const day = Number(dayKey);
+
     if(day >= Number(totalDays || 1)) return;
 
     const dayRows = byDay[day] || [];
     if(!dayRows.length) return;
+
     if(hasAuroraReference(dayRows)) return;
 
     const eveningRows = dayRows.filter(r=>{
@@ -3186,14 +3318,21 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
       return start !== null && start >= 17 * 60;
     });
 
-    const target = eveningRows.length ? eveningRows[eveningRows.length - 1] : dayRows[dayRows.length - 1];
+    const target = eveningRows.length
+      ? eveningRows[eveningRows.length - 1]
+      : dayRows[dayRows.length - 1];
+
     if(!target) return;
 
     const extraNote = (loc.auroraNotes || '').trim();
     if(!extraNote) return;
 
-    target.notes = String(target.notes || '').trim()
-      ? `${String(target.notes).trim()} ${extraNote}`
+    const current = String(target.notes || '').trim();
+
+    if(/aurora|northern lights|boreal/i.test(current)) return;
+
+    target.notes = current
+      ? `${current} ${extraNote}`
       : extraNote;
   });
 
@@ -3208,9 +3347,11 @@ function _fixReturnRowDurationConsistency_(rows=[]){
 
     const start = _hhmmToMin_(r?.start);
     const end = _hhmmToMin_(r?.end);
+
     if(start === null || end === null || end <= start) return r;
 
     const span = end - start;
+
     const activityMin = span >= 30 ? 10 : 5;
     const transportMin = Math.max(5, span - activityMin);
 
@@ -3220,7 +3361,6 @@ function _fixReturnRowDurationConsistency_(rows=[]){
     }, Number(r?.day || 1));
   });
 }
-
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
   const dayNums = blockDaysObjs.map(x => Number(x.day));
   const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
@@ -3622,6 +3762,61 @@ MANDATORY:
 - No text outside JSON.
 `.trim();
 
+  const buildStrategicRepairPrompt = (repairDays=[], currentRows=[]) => `
+${FORMAT}
+**ROLE:** Planner “Astra”. Strategic quality repair for "${city}".
+
+The current itinerary already has usable rows, but the following day numbers are too urban, repetitive, structurally similar, or weak for a ${totalDays}-day stay:
+${JSON.stringify(repairDays)}
+
+Return Format B JSON only:
+{"destination":"${city}","rows":[...]}
+
+MANDATORY:
+- Generate replacement rows ONLY for these days: ${repairDays.join(', ')}.
+- Every returned row MUST have day equal to one of these repair days only.
+- Respect these windows intelligently: ${JSON.stringify(perDay.filter(x => repairDays.includes(Number(x?.day))))}.
+- The end time provided by the planner is a HARD MAXIMUM boundary, not a target.
+- Existing itinerary summary to avoid repeating:
+${JSON.stringify((currentRows || []).map(r => ({
+  day: r?.day,
+  activity: r?.activity,
+  to: r?.to,
+  transport: r?.transport,
+  notes: String(r?.notes || '').slice(0, 180)
+})).slice(0, 80))}
+
+REPAIR OBJECTIVE:
+- Replace weak/repetitive urban filler with stronger, materially different days.
+- For long trips from gateway/outward bases, prioritize unused regional clusters, scenic loops, nearby towns, peninsulas, coasts, geothermal areas, parks, valleys, fjords, islands, heritage routes, or other coherent outward experiences before adding another city day.
+- If "${city}" is a dense major city, repair using a clearly different district/anchor/experience type or a strong day trip if available.
+- If "${city}" is a hybrid, choose the strongest unused city or outward bucket, not a repeated day shape.
+- Do NOT repeat the same broad structure as prior days.
+- Do NOT create another museum + lunch + walk + return day unless the destination truly has no stronger alternative.
+- The replacement must feel WOW, specific, geographic, realistic, and materially different.
+
+STRICT REPAIR RULES:
+- Use a NEW macro-cluster whenever possible.
+- Avoid all already-used macro-regions, circuits, rings, routes, neighborhoods, and highlight combinations.
+- If using an urban/local day, it must have a distinct identity and not repeat the same rhythm.
+- If using a regional day trip, produce a complete circuit with usually 6–10 real rows when geography supports it.
+- A regional/day-trip replacement should end with "<Macro-tour> – Return to ${city}".
+- The LEFT side of "activity" must be the macro destination/route for regional days.
+- The base city name on the LEFT side is only for true local/urban days.
+- Use real places in "from" and "to".
+- Do not leak "recommend me", "recomiéndame", "recommended by planner", or transport preference text into any field.
+- Transport must be realistic:
+  • urban/local short movements: Walking / Taxi / Public transport as appropriate
+  • regional/outward days: Rental car or Guided tour when appropriate
+- Notes must add useful expert detail, but notes do not replace real rows.
+
+QUALITY CHECK BEFORE RETURN:
+- Every repaired day must have at least 3 meaningful rows; normal/full days should usually have 4–8.
+- Iconic regional repaired days should usually have 6–10 real rows if feasible.
+- No repaired day may be structurally similar to the existing itinerary.
+- No text outside JSON.
+`.trim();
+
   async function _requestBlockRows_(promptText, allowedDays){
     const ans = await _callPlannerSystemPrompt_(promptText, false);
     const parsed = parseJSON(ans);
@@ -3647,6 +3842,40 @@ MANDATORY:
     return (requestedDays || []).filter(d => !set.has(Number(d)));
   }
 
+  async function _repairStrategicDaysIfNeeded_(rows=[]){
+    const repairDays = _findStrategicRepairDays_(rows, dayNums, totalDays, city);
+
+    if(!repairDays.length) return rows;
+
+    console.warn(`[BLOCK ${label}] Strategic repair needed for repetitive/weak days:`, repairDays);
+
+    let repairedRows = [];
+
+    try{
+      repairedRows = await _requestBlockRows_(buildStrategicRepairPrompt(repairDays, rows), repairDays);
+    }catch(err){
+      console.warn(`[BLOCK ${label}] Strategic repair request failed:`, err);
+      repairedRows = [];
+    }
+
+    repairedRows = _dedupeRows_(repairedRows, city);
+
+    if(!_hasMinimumRowsForDays_(repairedRows, repairDays)){
+      console.warn(`[BLOCK ${label}] Strategic repair returned insufficient rows; keeping original rows.`);
+      return rows;
+    }
+
+    const candidate = _dedupeRows_(_replaceRowsForDays_(rows, repairedRows, repairDays), city);
+
+    if(_hasUsableRowsForAllBlockDays_(candidate, dayNums)){
+      console.log(`[BLOCK ${label}] OK after strategic repair`);
+      return candidate;
+    }
+
+    console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; keeping original rows.`);
+    return rows;
+  }
+
   const label = `${dayNums[0]}${dayNums.length > 1 ? '-' + dayNums[dayNums.length - 1] : ''}`;
   console.log(`[BLOCK ${label}] Requesting rows...`);
 
@@ -3661,16 +3890,20 @@ MANDATORY:
   primaryRows = _dedupeRows_(primaryRows, city);
 
   if(_hasUsableRowsForAllBlockDays_(primaryRows, dayNums)){
+    primaryRows = await _repairStrategicDaysIfNeeded_(primaryRows);
     console.log(`[BLOCK ${label}] OK`);
     return primaryRows;
   }
 
   const missingDays = _missingDaysFromRows_(primaryRows, dayNums);
+
   if(!missingDays.length){
     if(primaryRows.length){
       console.warn(`[BLOCK ${label}] Partial but non-empty rows returned; passing downstream.`);
+      primaryRows = await _repairStrategicDaysIfNeeded_(primaryRows);
       return primaryRows;
     }
+
     console.warn(`[BLOCK ${label}] FAIL — empty primary result.`);
     return [];
   }
@@ -3687,20 +3920,23 @@ MANDATORY:
 
   retryRows = _dedupeRows_(retryRows, city);
 
-  const merged = _dedupeRows_([...(primaryRows || []), ...(retryRows || [])], city);
+  let merged = _dedupeRows_([...(primaryRows || []), ...(retryRows || [])], city);
 
   if(_hasUsableRowsForAllBlockDays_(merged, dayNums)){
+    merged = await _repairStrategicDaysIfNeeded_(merged);
     console.log(`[BLOCK ${label}] OK after retry`);
     return merged;
   }
 
   const stillMissing = _missingDaysFromRows_(merged, dayNums);
+
   if(stillMissing.length){
     console.warn(`[BLOCK ${label}] Still missing days after retry:`, stillMissing);
   }
 
   if(merged.length){
     console.warn(`[BLOCK ${label}] Returning partial rows for downstream repair.`);
+    merged = await _repairStrategicDaysIfNeeded_(merged);
     return merged;
   }
 
@@ -3715,21 +3951,28 @@ function _dedupeRows_(rows=[], city=''){
   for(const r of (rows || [])){
     const semantic = _rowSemanticKey_(r, city);
     const dayKey = `${Number(r?.day || 1)}::${semantic}`;
+
     if(seen.has(dayKey)) continue;
+
     seen.add(dayKey);
     out.push(r);
   }
 
   const sorted = out.sort((a,b)=>{
     const da = Number(a?.day || 1), db = Number(b?.day || 1);
+
     if(da !== db) return da - db;
+
     return String(a?.start || '').localeCompare(String(b?.start || ''));
   });
 
   const byDay = {};
+
   sorted.forEach(r=>{
     const d = Number(r?.day || 1);
+
     if(!byDay[d]) byDay[d] = [];
+
     byDay[d].push(r);
   });
 
@@ -3743,10 +3986,13 @@ function _dedupeRows_(rows=[], city=''){
     if(tooSimilar){
       const filtered = dayRows.filter(r=>{
         if(_isReturnRow_(r) || _isAuroraRow_(r)) return true;
+
         const token = _rowShapeToken_(r, city);
+
         const repeatedToken = acceptedDays.some(prevDayRows =>
           (prevDayRows || []).some(pr => _rowShapeToken_(pr, city) === token)
         );
+
         return !repeatedToken;
       });
 
@@ -3765,16 +4011,20 @@ function _dedupeRows_(rows=[], city=''){
 
   return finalRows.sort((a,b)=>{
     const da = Number(a?.day || 1), db = Number(b?.day || 1);
+
     if(da !== db) return da - db;
+
     return String(a?.start || '').localeCompare(String(b?.start || ''));
   });
 }
 
 function _rowsCoverAllDays_(rows=[], totalDays=1){
   const set = new Set((rows || []).map(r => Number(r?.day)));
+
   for(let d=1; d<=totalDays; d++){
     if(!set.has(d)) return false;
   }
+
   return true;
 }
 
