@@ -2778,8 +2778,8 @@ function _canonicalRouteAliasKey_(txt=''){
     [/^(sky lagoon|laguna sky|lagon sky)$/i, 'sky lagoon'],
     [/\b(sky lagoon|laguna sky|lagon sky)\b/ig, 'sky lagoon'],
 
-    [/^(silver circle|circulo plateado|círculo plateado|silver route|borgarfjordur|borgarfjörður)$/i, 'silver circle borgarfjordur'],
-    [/\b(silver circle|circulo plateado|círculo plateado|borgarfjordur|borgarfjörður)\b/ig, 'silver circle borgarfjordur'],
+    [/^(silver circle|circulo plateado|círculo plateado|silver route|borgarfjordur|borgarfjörður|borgarfjorthur)$/i, 'silver circle borgarfjordur'],
+    [/\b(silver circle|circulo plateado|círculo plateado|silver route|borgarfjordur|borgarfjörður|borgarfjorthur)\b/ig, 'silver circle borgarfjordur'],
 
     [/^(old town|historic center|historical center|centro historico|centro histórico|vieille ville|casco antiguo|ciudad vieja)$/i, 'historic center'],
     [/\b(old town|historic center|historical center|centro historico|centro histórico|vieille ville|casco antiguo|ciudad vieja)\b/ig, 'historic center'],
@@ -2788,10 +2788,19 @@ function _canonicalRouteAliasKey_(txt=''){
     [/\b(waterfront|riverside|riverfront|harbor|harbour|puerto|malecon|malecón|promenade|paseo maritimo|paseo marítimo)\b/ig, 'waterfront harbor'],
 
     [/^(whale watching|whales|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)$/i, 'whale watching'],
-    [/\b(whale watching|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)\b/ig, 'whale watching'],
+    [/\b(whale watching|whales|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)\b/ig, 'whale watching'],
 
     [/^(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)$/i, 'lava tunnel'],
-    [/\b(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)\b/ig, 'lava tunnel']
+    [/\b(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)\b/ig, 'lava tunnel'],
+
+    [/^(ice cave|glacier cave|cueva de hielo|caverna de hielo|grotte de glace)$/i, 'ice cave'],
+    [/\b(ice cave|glacier cave|cueva de hielo|caverna de hielo|grotte de glace)\b/ig, 'ice cave'],
+
+    [/^(horseback riding|horse riding|icelandic horses|cabalgata|caballos islandeses)$/i, 'horseback riding'],
+    [/\b(horseback riding|horse riding|icelandic horses|cabalgata|caballos islandeses)\b/ig, 'horseback riding'],
+
+    [/^(food tour|culinary tour|tour gastronomico|tour gastronómico|gastronomy tour)$/i, 'food tour'],
+    [/\b(food tour|culinary tour|tour gastronomico|tour gastronómico|gastronomy tour)\b/ig, 'food tour']
   ];
 
   replacements.forEach(([pattern, replacement])=>{
@@ -2823,7 +2832,7 @@ function _latestDaylightEndMin_(city='', totalDays=1){
   const cityKey = _normalizeRepeatKey_(city);
 
   if(/\b(reykjavik|iceland|islandia|tromso|tromsø|rovaniemi|kiruna|akureyri|abisko|fairbanks|yellowknife)\b/.test(cityKey)){
-    return 17 * 60 + 30;
+    return 17 * 60;
   }
 
   return 19 * 60;
@@ -2988,9 +2997,30 @@ function _areDaysStructurallyTooSimilar_(rowsA=[], rowsB=[], city=''){
   const macroSim = _similarityRatio_(a.macroSet, b.macroSet);
   const kindSim = _similarityRatio_(a.kindSeq, b.kindSeq);
 
+  const sameKindFlow =
+    a.kindSeq &&
+    b.kindSeq &&
+    (
+      a.kindSeq === b.kindSeq ||
+      a.kindSeq.includes(b.kindSeq) ||
+      b.kindSeq.includes(a.kindSeq)
+    );
+
+  const sameMacroFlow =
+    a.macroSeq &&
+    b.macroSeq &&
+    (
+      a.macroSeq === b.macroSeq ||
+      a.macroSeq.includes(b.macroSeq) ||
+      b.macroSeq.includes(a.macroSeq)
+    );
+
   if(a.macroSeq && b.macroSeq && a.macroSeq === b.macroSeq && kindSim >= 0.6) return true;
   if(macroSim >= 0.8 && kindSim >= 0.75) return true;
   if(a.kindSeq === b.kindSeq && macroSim >= 0.6) return true;
+
+  if(sameKindFlow && macroSim >= 0.7) return true;
+  if(sameMacroFlow && kindSim >= 0.65) return true;
 
   return false;
 }
@@ -3083,8 +3113,9 @@ function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=
       const sameKind = _dayDominantKind_(rowsPrev, city) === _dayDominantKind_(rowsD, city);
       const macroOverlap = _similarityRatio_(_dayMacroSet_(rowsPrev, city).join('|'), _dayMacroSet_(rowsD, city).join('|'));
       const sameBucket = _areDaysExperienceDuplicates_(rowsPrev, rowsD, city);
+      const samePoiHeavy = _poiOverlapRatio_(rowsPrev, rowsD, city) >= 0.35;
 
-      if(sameShape || sameBucket || (sameKind && macroOverlap >= 0.5)){
+      if(sameShape || sameBucket || samePoiHeavy || (sameKind && macroOverlap >= 0.5)){
         repair.add(d);
         break;
       }
@@ -3096,6 +3127,30 @@ function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=
 
   if(n >= 7 && urbanCount >= 3 && regionalDays < 4){
     urbanDays.slice(2).forEach(d => repair.add(d));
+  }
+
+  if(n >= 6){
+    const buckets = {};
+
+    days.forEach(day=>{
+      const bucket = _dayExperienceBucket_(byDay[day] || [], city);
+      if(!bucket) return;
+      if(!buckets[bucket]) buckets[bucket] = [];
+      buckets[bucket].push(day);
+    });
+
+    Object.keys(buckets).forEach(bucket=>{
+      const bucketDays = buckets[bucket] || [];
+
+      if(bucket.startsWith('regional_') && bucketDays.length > 1){
+        bucketDays.slice(1).forEach(d => repair.add(d));
+        return;
+      }
+
+      if(['urban_culture','food_local','waterfront_local','general'].includes(bucket) && bucketDays.length > 1){
+        bucketDays.slice(1).forEach(d => repair.add(d));
+      }
+    });
   }
 
   _findMicroStopRepairDays_(rows, days, totalDays, city).forEach(d => repair.add(d));
@@ -3121,7 +3176,6 @@ function _hasMinimumRowsForDays_(rows=[], days=[]){
     return clean.length >= 3;
   });
 }
-
 function _maxMeaningfulGapMinutes_(dayRows=[]){
   const rows = (dayRows || [])
     .filter(r => !_isAuroraRow_(r))
@@ -3270,6 +3324,13 @@ function _findRepeatedItineraryRepairDays_(rows=[], requestedDays=[], totalDays=
         repair.add(day);
         break;
       }
+
+      const overlap = _poiOverlapRatio_(rowsPrev, rowsD, city);
+
+      if(overlap >= 0.35){
+        repair.add(day);
+        break;
+      }
     }
   }
 
@@ -3313,150 +3374,129 @@ function _findExperienceBucketRepairDays_(rows=[], requestedDays=[], totalDays=1
   if(n < 5) return [];
 
   const byDay = _groupRowsByDay_(rows);
-  const days = (requestedDays || []).map(Number).sort((a,b)=>a-b);
   const buckets = {};
   const repair = new Set();
 
-  days.forEach(day=>{
+  (requestedDays || []).map(Number).forEach(day=>{
     const bucket = _dayExperienceBucket_(byDay[day] || [], city);
+
     if(!bucket) return;
 
-    if(!buckets[bucket]) buckets[bucket] = [];
+    if(!buckets[bucket]){
+      buckets[bucket] = [];
+    }
+
     buckets[bucket].push(day);
   });
 
   Object.keys(buckets).forEach(bucket=>{
-    const bucketDays = buckets[bucket] || [];
+    const arr = buckets[bucket] || [];
 
-    if(bucket.startsWith('regional_') && bucketDays.length > 1){
-      bucketDays.slice(1).forEach(d => repair.add(d));
+    if(bucket.startsWith('regional_') && arr.length > 1){
+      arr.slice(1).forEach(d => repair.add(d));
       return;
     }
 
-    if(['urban_culture','food_local','waterfront_local'].includes(bucket) && bucketDays.length > 1){
-      bucketDays.slice(1).forEach(d => repair.add(d));
+    if(
+      ['urban_culture','food_local','waterfront_local','general'].includes(bucket) &&
+      arr.length > 1
+    ){
+      arr.slice(1).forEach(d => repair.add(d));
     }
   });
 
   return [...repair].sort((a,b)=>a-b);
 }
 
-function _hasCriticalQualityIssueForDays_(rows=[], days=[], city=''){
-  const byDay = _groupRowsByDay_(rows);
-
-  return (days || []).some(day=>{
-    const dayRows = byDay[day] || [];
-    if(!dayRows.length) return true;
-    if(_hasThinRegionalDay_(dayRows, city)) return true;
-    if(_hasCriticalDayGap_(dayRows, city)) return true;
-    if(_hasDaylightTimingIssue_(dayRows, city)) return true;
-    if(_regionalDayMissingReturn_(dayRows, city)) return true;
-    return false;
-  });
-}
-
-/* =========================================================
-   NEW HELPERS · DESTINATION-WIDE SELECTION BIAS
-========================================================= */
 function _buildExplorationModeBiasBlock_(city='', totalDays=1){
   const n = Number(totalDays || 0);
 
   if(n >= 7){
     return `
-DESTINATION-WIDE SELECTION BIAS (CRITICAL):
-- First determine whether "${city}" behaves more like:
-  • a dense major city with many true urban imperdibles
-  • a gateway base whose strongest value comes from outward day trips / nature / regional experiences
-  • or a balanced hybrid between both
-- This decision must be made dynamically from the destination's real candidate universe, not from hardcoded examples or a template.
-- Build the itinerary according to the detected destination behavior:
-  • Gateway/outward base: outward flagship clusters and iconic experience buckets must dominate.
-  • Dense city: urban imperdibles must be covered deeply, but strong excursions still matter.
-  • Hybrid: balance core city imperdibles with the strongest outward clusters and special experiences.
+DESTINATION-WIDE SELECTION BIAS (ULTRA CRITICAL):
+- First determine dynamically whether "${city}" behaves more like:
+  • a dense urban destination
+  • a gateway/outward base
+  • or a hybrid destination
 
-IF "${city}" behaves like a dense major city:
-- You MUST still cover the core urban imperdibles first.
-- But for a 7-day stay, you should normally still include around 2 strong day trips or near-city escapes if they are genuinely worthwhile and feasible.
-- Do NOT spend all 7 days inside the city if strong outward options clearly exist.
-- Urban days must use different district logic, not repeated museum + lunch + walk formulas.
+GATEWAY / OUTWARD DESTINATION LOGIC:
+- If "${city}" behaves like a gateway/outward base, prioritize:
+  1. flagship regional routes
+  2. secondary regional routes
+  3. iconic special experiences
+  4. only then weaker urban filler
 
-IF "${city}" behaves like a gateway / outward base:
-- The strongest external clusters should dominate.
-- Keep pure city allocation tighter unless the city itself clearly deserves more.
-- In a 7-day stay, pure base-city days should usually be limited to roughly 1–2.5 days unless the user asked otherwise.
-- Prioritize flagship regional clusters before any secondary urban filler.
-- After the core flagship clusters, use alternative experience buckets before repeating city filler:
-  • wildlife / boat / marine experiences
-  • thermal / spa / wellness experiences
-  • light adventure / cave / glacier / mountain / valley experiences
-  • food / local culture
-  • indoor iconic backups
-  • short scenic escapes
+- Avoid repeating:
+  • museum + food + walk structures
+  • waterfront + dinner + stroll structures
+  • old town + church + café structures
+  • generic scenic loops
 
-IF "${city}" behaves like a hybrid:
-- Cover the city's major imperdibles properly.
-- Then actively add the strongest outward experiences before building secondary urban filler days.
+- Different days must feel materially different in:
+  • geography
+  • pacing
+  • route logic
+  • emotional tone
+  • experience bucket
+  • macro-cluster
 
-PRIORITY RULE FOR LONG STAYS:
-- Never let secondary or tertiary urban content displace:
-  • the main city imperdibles
-  • the strongest feasible outward day trips
-  • iconic special experiences that make the destination unique
-- For 7-day stays, prefer:
-  1. core city imperdibles
-  2. strongest day trips / outward escapes
-  3. distinctive special experience buckets
-  4. only then secondary urban content
+- Use strong unused destination content before repeating weaker city filler.
 `.trim();
   }
 
   if(n >= 5){
     return `
 DESTINATION-WIDE SELECTION BIAS:
-- Determine whether "${city}" is mainly:
-  • city-heavy
-  • outward/gateway
+- Determine dynamically whether "${city}" is:
+  • urban-heavy
+  • gateway/outward
   • or hybrid
-- Make this decision dynamically from the destination's real candidate universe.
-- Cover the main city imperdibles if the destination is city-heavy.
-- But if strong outward options clearly exist, include at least 1 meaningful excursion before falling into weaker secondary city content.
-- Use distinctive experience buckets before repeating the same urban day shape with different names.
+- Prioritize stronger unused destination content first.
+- Avoid repeated structures.
 `.trim();
   }
 
   return `
 DESTINATION-WIDE SELECTION BIAS:
-- Determine naturally whether "${city}" is better explored mainly through city content, outward content, special experiences, or a hybrid.
-- Keep the itinerary focused on the strongest experiences only.
-- Avoid repeated day shapes even in short trips.
+- Prioritize the strongest experiences naturally.
+- Avoid repeated structures.
 `.trim();
 }
+
 function _buildCoverageGuardBlock_(city='', totalDays=1){
   const n = Number(totalDays || 0);
 
   if(n >= 7){
     return `
-COVERAGE GUARD (CRITICAL):
-- Before finalizing this block, mentally verify:
-  • are the core city imperdibles already being covered somewhere in the trip?
-  • are the strongest outward day trips / escapes already being covered somewhere in the trip?
-  • are the destination's iconic special experiences already being covered somewhere in the trip?
-  • are the days materially different in macro-cluster, geography, rhythm, and sequence?
-- If the answer is NO and the destination clearly supports them, do NOT spend this block on weaker secondary urban content.
-- For 7-day trips, the itinerary should feel like the user truly saw both:
-  • the essential city
-  • the essential surroundings
-  • the destination's most iconic experiences
-- If the destination clearly supports 2 or more strong day trips, the planner should normally include them before creating a third weak urban day.
-- A day that merely changes POI names but repeats the same museum + food + walk + return structure is NOT sufficiently different.
-- If the destination has iconic experience buckets (wildlife, boat, thermal, scenic rail, cave systems, glacier activities, food culture, etc.), use them before repeating generic urban filler.
+COVERAGE GUARD (ULTRA CRITICAL):
+Before finalizing:
+1. Verify urban must-sees are covered.
+2. Verify flagship regional routes are covered.
+3. Verify iconic experiences are covered.
+4. Verify days feel materially different.
+
+INVALID:
+- Same structure with renamed POIs.
+- Repeated harbor/walk days.
+- Repeated museum/walk/food rhythm.
+- Weak late-trip filler.
+
+Use:
+• wildlife
+• whale watching
+• lava tunnels
+• thermal experiences
+• scenic villages
+• regional rings
+• hidden iconic routes
+before repeating generic filler.
 `.trim();
   }
 
   return `
 COVERAGE GUARD:
-- Before finalizing, make sure this block is not using weaker city filler while stronger essential city content, stronger outward content, or stronger iconic experiences still remain unused.
-- Avoid repeated day structures, not only repeated POI names.
+- Avoid repeated structures.
+- Prefer stronger unused destination content.
 `.trim();
 }
 
@@ -3466,30 +3506,30 @@ function _buildUrbanDayQualityBlock_(city='', totalDays=1){
   if(n >= 6){
     return `
 URBAN DAY QUALITY RULE:
-- A secondary urban day must justify its existence by being materially different and strong.
-- Do NOT generate a weaker urban day if:
-  • a better outward option exists
-  • OR a better special experience bucket exists
-- Do NOT generate a generic "museum + lunch + walk + dinner" day unless that is truly the best remaining option.
-- If the city still needs core imperdibles, prioritize those.
-- If the core imperdibles are already covered, outward options and iconic experiences should usually outrank weak extra urban days.
-- If an urban day is necessary, it must have a distinct identity:
-  • different district / zone
-  • different sequence
-  • different experience type
-  • different emotional arc
-  • specific micro-stops
-- Avoid repeated waterfront/harbor/promenade days unless the destination truly revolves around them.
+- Urban days must justify their existence.
+- Never generate weak repeated urban filler if stronger destination content still exists.
+
+FORBIDDEN:
+- repeated museum + lunch + walk days
+- repeated waterfront + dinner days
+- repeated old town + café structures
+- repeated shopping filler
+
+Urban days should vary:
+• districts
+• pacing
+• mood
+• sequence
+• experience bucket
+• local identity
 `.trim();
   }
 
   return `
 URBAN DAY QUALITY RULE:
-- Urban days must stay meaningful and distinct, not generic.
-- Do not repeat the same structure with different POI names.
+- Urban days must remain distinct and meaningful.
 `.trim();
 }
-
 function _buildMustSeeCoverageBlock_(city='', totalDays=1){
   const n = Number(totalDays || 0);
 
@@ -3750,6 +3790,7 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
   return _dedupeRows_([...(rows || []), ...injected], city);
 }
+
 function _fixReturnRowDurationConsistency_(rows=[]){
   const loc = _plannerLocalePack_();
 
@@ -4086,9 +4127,6 @@ QUALITY CHECK BEFORE RETURN:
     const forced = _forceRowsIntoValidDayRange_(extracted, allowedDays);
     let cleanedTransport = _cleanTransportField_(forced);
 
-    /* ================================
-       PATCH · HARD FILTER FOR FORBIDDEN HIGHLIGHTS
-    ================================ */
     cleanedTransport = (cleanedTransport || []).filter(r => !_isForbiddenHighlight_(r, forbiddenHighlights, city));
 
     return Array.isArray(cleanedTransport) ? cleanedTransport : [];
@@ -4300,6 +4338,7 @@ function _rowsCoverAllDays_(rows=[], totalDays=1){
 
   return true;
 }
+
 /* =========================================================
    SECTION 15F · generateCityItinerary (BLOCK-SAFE + FINAL GUARANTEE)
 ========================================================= */
