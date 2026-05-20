@@ -4087,9 +4087,44 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
       : extraNote;
   });
 
-  return _dedupeRows_([...(rows || []), ...injected], city);
+   return _dedupeRows_([...(rows || []), ...injected], city);
 }
 
+function _fixReturnRowDurationConsistency_(rows=[]){
+  const loc = _plannerLocalePack_();
+
+  return (rows || []).map(r=>{
+    if(!_isReturnLikeRow_(r)) return r;
+
+    const start = _hhmmToMin_(r?.start);
+    const end = _hhmmToMin_(r?.end);
+
+    if(start === null || end === null || end <= start) return r;
+
+    const span = end - start;
+
+    const activityMin = span >= 30 ? 10 : 5;
+    const transportMin = Math.max(5, span - activityMin);
+
+    return normalizeRow({
+      ...r,
+      duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${activityMin}m`
+    }, Number(r?.day || 1));
+  });
+}
+
+async function _generateBlockFromThemes_(
+  city,
+  totalDays,
+  blockDaysObjs,
+  perDay,
+  forceReplan=false,
+  hotel='',
+  transport='recommend me',
+  forbiddenHighlights=[],
+  forbiddenUrbanClusters=[]
+){
+  
 /* =========================================================
    SECTION 15F · generateCityItinerary (BLOCK-SAFE + FINAL GUARANTEE)
 ========================================================= */
