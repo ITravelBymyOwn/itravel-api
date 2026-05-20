@@ -3271,29 +3271,9 @@ function _areDaysStructurallyTooSimilar_(rowsA=[], rowsB=[], city=''){
   const macroSim = _similarityRatio_(a.macroSet, b.macroSet);
   const kindSim = _similarityRatio_(a.kindSeq, b.kindSeq);
 
-  const sameKindFlow =
-    a.kindSeq &&
-    b.kindSeq &&
-    (
-      a.kindSeq === b.kindSeq ||
-      a.kindSeq.includes(b.kindSeq) ||
-      b.kindSeq.includes(a.kindSeq)
-    );
-
-  const sameMacroFlow =
-    a.macroSeq &&
-    b.macroSeq &&
-    (
-      a.macroSeq === b.macroSeq ||
-      a.macroSeq.includes(b.macroSeq) ||
-      b.macroSeq.includes(a.macroSeq)
-    );
-
   if(a.macroSeq && b.macroSeq && a.macroSeq === b.macroSeq && kindSim >= 0.6) return true;
   if(macroSim >= 0.8 && kindSim >= 0.75) return true;
   if(a.kindSeq === b.kindSeq && macroSim >= 0.6) return true;
-  if(sameKindFlow && macroSim >= 0.7) return true;
-  if(sameMacroFlow && kindSim >= 0.65) return true;
 
   return false;
 }
@@ -3326,6 +3306,7 @@ function _isRegionalDay_(dayRows=[], city=''){
 
   return regionalMacroCount >= Math.max(2, Math.ceil(rows.length * 0.45)) || returnCount > 0;
 }
+
 function _isUrbanBaseDay_(dayRows=[], city=''){
   const rows = (dayRows || []).filter(r => !_isAuroraRow_(r));
   if(!rows.length) return false;
@@ -3572,11 +3553,6 @@ function _findRepeatedItineraryRepairDays_(rows=[], requestedDays=[], totalDays=
         repair.add(day);
         break;
       }
-
-      if(_poiOverlapRatio_(rowsPrev, rowsD, city) >= 0.35){
-        repair.add(day);
-        break;
-      }
     }
   }
 
@@ -3640,7 +3616,7 @@ function _findExperienceBucketRepairDays_(rows=[], requestedDays=[], totalDays=1
       return;
     }
 
-    if(['urban_culture','food_local','waterfront_local','general'].includes(bucket) && bucketDays.length > 1){
+    if(['urban_culture','food_local','waterfront_local'].includes(bucket) && bucketDays.length > 1){
       bucketDays.slice(1).forEach(d => repair.add(d));
     }
   });
@@ -3661,6 +3637,7 @@ function _hasCriticalQualityIssueForDays_(rows=[], days=[], city=''){
     return false;
   });
 }
+
 /* =========================================================
    NEW HELPERS · DESTINATION-WIDE SELECTION BIAS
 ========================================================= */
@@ -3737,7 +3714,6 @@ DESTINATION-WIDE SELECTION BIAS:
 - Avoid repeated day shapes even in short trips.
 `.trim();
 }
-
 function _buildCoverageGuardBlock_(city='', totalDays=1){
   const n = Number(totalDays || 0);
 
@@ -4057,7 +4033,6 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
   return _dedupeRows_([...(rows || []), ...injected], city);
 }
-
 function _fixReturnRowDurationConsistency_(rows=[]){
   const loc = _plannerLocalePack_();
 
@@ -4394,11 +4369,10 @@ QUALITY CHECK BEFORE RETURN:
     const forced = _forceRowsIntoValidDayRange_(extracted, allowedDays);
     let cleanedTransport = _cleanTransportField_(forced);
 
-    const filteredTransport = (cleanedTransport || []).filter(r => !_isForbiddenHighlight_(r, forbiddenHighlights, city));
-
-    if(filteredTransport.length){
-      cleanedTransport = filteredTransport;
-    }
+    /* ================================
+       PATCH · HARD FILTER FOR FORBIDDEN HIGHLIGHTS
+    ================================ */
+    cleanedTransport = (cleanedTransport || []).filter(r => !_isForbiddenHighlight_(r, forbiddenHighlights, city));
 
     return Array.isArray(cleanedTransport) ? cleanedTransport : [];
   }
