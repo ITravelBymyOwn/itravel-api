@@ -1982,6 +1982,17 @@ GLOBAL ANTI-REPEAT RULE:
   • Waterfront = Harbor = Promenade if referring to the same corridor
 - If a route/bucket has already been assigned to one day, later days must use a different strategic bucket unless there is truly no strong alternative.
 
+ULTRA-CRITICAL SELECTION INTELLIGENCE:
+- Long stays MUST progressively expand into the destination's broader experience universe.
+- After assigning a flagship regional route once, prioritize UNUSED strong alternatives before considering any variation of the same route.
+- NEVER create a second day that is effectively the same flagship excursion with reordered stops.
+- A reordered route still counts as repetition.
+- Different languages, aliases, paraphrases, or partial subsets still count as the SAME route.
+- Before assigning a day, internally verify:
+  • "Has this macro-experience already been covered?"
+  • "Is there a stronger unused bucket available?"
+- If YES, use the stronger unused bucket instead.
+
 LONG-STAY BALANCE RULE:
 - For totalDays >= 7:
   • gateway/outward bases should normally include several distinct regional/special experience days
@@ -1996,6 +2007,32 @@ GLOBAL BALANCE RULE:
 - For longer stays, prefer covering additional worthwhile rings before repeating previously used ones.
 - If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally inside a regional ring, you may bundle it there when that improves coherence.
   Examples only: Blue Lagoon in a Reykjanes-style ring, Secret Lagoon in a Golden-Circle-style ring.
+
+GLOBAL FEASIBILITY VALIDATION (CRITICAL):
+- Every assigned strategic day must be geographically feasible as a REAL day trip from the base city.
+- Before assigning a regional route:
+  • mentally validate realistic driving/train/ferry timing
+  • mentally validate round-trip feasibility
+  • mentally validate whether the destination realistically fits as a same-day experience
+- Do NOT assign distant regions that realistically require:
+  • overnight stay
+  • domestic flight
+  • extreme driving burden
+unless the user explicitly requested it.
+- If a destination is too far for a realistic day trip, choose a closer strong alternative instead.
+- Keep this logic GLOBAL for any country in the world.
+
+GLOBAL DIVERSITY PRIORITY (ULTRA-CRITICAL):
+- The planner should maximize meaningful diversity across the trip.
+- Prefer:
+  • different geography
+  • different atmosphere
+  • different rhythm
+  • different emotional arc
+  • different transportation feeling
+  • different visual identity
+across days.
+- A 7-day itinerary should feel like multiple distinct experiences, not the same day repeated with different POI names.
 
 - Daily reference windows: ${JSON.stringify(perDay)}
 - Base date: ${JSON.stringify(baseDate || '')}
@@ -2044,7 +2081,6 @@ function _rowsCoverRequestedDays_(rows=[], requestedDays=[]){
   const set = new Set((rows || []).map(r => Number(r?.day)));
   return (requestedDays || []).every(d => set.has(Number(d)));
 }
-
 /* =========================================================
    SECTION 15C · DUPLICATED HIGHLIGHTS BETWEEN DAYS — HELPERS
 ========================================================= */
@@ -2595,6 +2631,62 @@ function _getRepeatedExperienceDaysBasic_(rows=[], city=''){
   return Array.from(repeated).sort((a,b)=>a-b);
 }
 
+function _hasBrokenDayContinuity_(dayRows=[], city=''){
+  const rows = (dayRows || [])
+    .filter(r => !_isAuroraRow_(r))
+    .slice()
+    .sort((a,b)=> String(a?.start || '').localeCompare(String(b?.start || '')));
+
+  if(rows.length < 2) return false;
+
+  const visited = new Set();
+
+  const norm = (v='')=>{
+    const s = String(v || '').trim();
+    if(!s) return '';
+    if(typeof _normalizeAliasSafeKey_ === 'function') return _normalizeAliasSafeKey_(s);
+    return _normalizeHighlightKey_(s);
+  };
+
+  const cityKey = norm(city);
+  const generic = /^(hotel|city area|downtown|reykjavik|reykjavík|restaurant|restaurante|lunch|dinner|almuerzo|cena|planning)$/i;
+
+  rows.forEach((r, idx)=>{
+    if(idx === 0){
+      const from = norm(r?.from || '');
+      if(from) visited.add(from);
+    }
+
+    const to = norm(r?.to || '');
+    if(to) visited.add(to);
+  });
+
+  for(let i=1; i<rows.length; i++){
+    const from = norm(rows[i]?.from || '');
+    const prevTo = norm(rows[i-1]?.to || '');
+
+    if(!from || !prevTo) continue;
+    if(from === prevTo) continue;
+    if(from.includes(prevTo) || prevTo.includes(from)) continue;
+    if(cityKey && (from === cityKey || from.includes(cityKey))) continue;
+    if(generic.test(from)) continue;
+
+    const appearedBefore = rows
+      .slice(0, i)
+      .some(prev=>{
+        const pTo = norm(prev?.to || '');
+        const pFrom = norm(prev?.from || '');
+        return pTo === from || pFrom === from || (pTo && from.includes(pTo)) || (pTo && pTo.includes(from));
+      });
+
+    if(!appearedBefore){
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function _getWeakDayNums_(rows=[], perDay=[], city=''){
   const byDay = _groupRowsByDay_(rows);
   const weak = [];
@@ -2610,7 +2702,6 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
     const minUsefulRows = _minimumUsefulRowsForWindow_(ref);
     const isRegionalDay = _isRegionalMacroDay_(dayRows, city);
 
-    // 1) Aurora day is weak only if it steals a normal daytime window
     if(auroraRows.length && !_isNightOnlyWindow_(ref)){
       const daytimeRows = dayRows.filter(r=>{
         const start = _hhmmToMin_(r?.start);
@@ -2623,13 +2714,11 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
       }
     }
 
-    // 2) Weak count by window size
     if(nonReturnRows.length < minUsefulRows){
       weak.push(day);
       return;
     }
 
-    // 3) Structural coherence: time order + duration plausibility
     for(let i=0; i<dayRows.length; i++){
       const r = dayRows[i];
       const start = _hhmmToMin_(r?.start);
@@ -2657,13 +2746,11 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
       }
     }
 
-    // 4) Return row must close the day if it exists
     if(returnRows.length && !_isReturnLikeBasicRow_(dayRows[dayRows.length-1])){
       weak.push(day);
       return;
     }
 
-    // 5) Regional / macro day should not feel underdeveloped
     if(isRegionalDay){
       if(_hasNormalDayWindow_(ref) && nonReturnNonAuroraRows.length < 5){
         weak.push(day);
@@ -2675,19 +2762,16 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
       }
     }
 
-    // 6) Regional / macro day must have explicit return row
     if(_regionalMacroDayMissingReturn_(dayRows, city)){
       weak.push(day);
       return;
     }
 
-    // 7) Daylight-sensitive scenic/nature content must not happen at night
     if(_hasDaylightTimingBasicIssue_(dayRows, city)){
       weak.push(day);
       return;
     }
 
-    // 8) Avoid giant unexplained gaps, especially on regional/scenic days
     const maxGap = _maxGapWithinDay_(dayRows);
     if(isRegionalDay && maxGap >= 150){
       weak.push(day);
@@ -2699,8 +2783,11 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
       return;
     }
 
-    // 9) Avoid clearly premature closure on normal days, but do not punish
-    // short windows, spa-anchor closures, or valid evening closure rows
+    if(_hasBrokenDayContinuity_(dayRows, city)){
+      weak.push(day);
+      return;
+    }
+
     const lastRow = dayRows[dayRows.length-1];
     const lastEnd = _hhmmToMin_(lastRow?.end);
     const windowEnd = _hhmmToMin_(ref?.end);
@@ -2722,7 +2809,6 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
       }
     }
 
-    // 10) Spa/relax anchor should not be treated as weakness if it meaningfully anchors the day
     const spaRows = dayRows.filter(r => _isSpaRelaxRow_(r));
     if(spaRows.length){
       const hasLongSpa = spaRows.some(r=>{
@@ -2745,10 +2831,10 @@ function _getWeakDayNums_(rows=[], perDay=[], city=''){
   return Array.from(new Set(weak)).sort((a,b)=>a-b);
 }
 
-function _replaceDaysInRows_(baseRows=[], replacementRows=[], daysToReplace=[]){
+function _replaceDaysInRows_(baseRows=[], replacementRows=[], daysToReplace=[], city=''){
   const set = new Set((daysToReplace || []).map(Number));
   const kept = (baseRows || []).filter(r => !set.has(Number(r?.day || 1)));
-  return _dedupeRows_([...(kept || []), ...(replacementRows || [])], '');
+  return _dedupeRows_([...(kept || []), ...(replacementRows || [])], city);
 }
 
 async function _repairWeakDays_(city, totalDays, rows, weakDays, perDay, forceReplan=false, hotel='', transport='recommend me'){
@@ -2763,7 +2849,7 @@ async function _repairWeakDays_(city, totalDays, rows, weakDays, perDay, forceRe
 
   const prompt = `
 ${FORMAT}
-**ROLE:** Planner “Astra”. Repair ONLY these weak days for "${city}" (${totalDays} total day/s):
+**ROLE:** Planner “Astra”. FULLY REBUILD ONLY these weak days for "${city}" (${totalDays} total day/s):
 ${JSON.stringify(dayNums)}
 
 CURRENT ITINERARY CONTEXT:
@@ -2773,6 +2859,10 @@ Return Format B JSON only.
 
 MANDATORY REPAIR RULES:
 - Generate rows ONLY for days: ${dayNums.join(', ')}.
+- Rebuild each requested day as a COMPLETE coherent day, not as a partial patch.
+- Do NOT preserve old rows from the weak day unless they still make sense inside the new full-day sequence.
+- Do NOT create orphan references such as starting from a restaurant/café/place that was not visited earlier that day.
+- Every row's "from" must logically connect from the previous row's "to", except the first row which may start from hotel/base.
 - Respect these windows: ${JSON.stringify(perDayForRepair)}.
 - Keep chronological order with NO overlaps.
 - Each row time block must broadly match the stated duration.
@@ -2791,12 +2881,13 @@ MANDATORY REPAIR RULES:
 
 WEAK-DAY REPAIR PRIORITIES:
 - Fix the specific weakness:
-  • too few useful rows → add real stops or rebuild the day
+  • too few useful rows → rebuild the full day with real stops
   • regional day too thin → expand into a proper 5–10 row route when feasible
-  • giant gap → add REAL on-route micro-stops
+  • giant gap → rebuild the sequence with REAL on-route micro-stops
   • missing return row → add a realistic final return row
   • daylight-sensitive content at night → move it earlier or replace with night-compatible content
   • repeated structure / bucket → use a different unused bucket
+  • broken continuity → rebuild the whole day from hotel/base through each stop logically
 - Do NOT return the same weak pattern with different names.
 
 ANTI-REPEAT / UNUSED BUCKET RULE:
@@ -2815,6 +2906,12 @@ ANTI-REPEAT / UNUSED BUCKET RULE:
   • short scenic escape
   • historic town / heritage route
   • architecture / design district
+
+GEOGRAPHIC FEASIBILITY:
+- The repaired day must be realistic as a same-day experience from "${city}".
+- Do NOT use distant regions that realistically require an overnight stay, domestic flight, or extreme driving burden.
+- If a candidate is too far, choose a closer unused high-value bucket.
+- Validate round-trip travel time mentally before returning the rows.
 
 DAYLIGHT RULE:
 - Do NOT schedule beaches, black sand beaches, waterfalls, cliffs, viewpoints, glaciers, parks, lava fields, craters, scenic villages, or coastal roads at night.
@@ -2849,7 +2946,7 @@ async function _repairRepeatedMacroZoneDays_(city, totalDays, rows, repeatedDays
 
   const prompt = `
 ${FORMAT}
-**ROLE:** Planner “Astra”. Rebuild ONLY these repeated days for "${city}" (${totalDays} total day/s):
+**ROLE:** Planner “Astra”. FULLY REBUILD ONLY these repeated days for "${city}" (${totalDays} total day/s):
 ${JSON.stringify(dayNums)}
 
 CURRENT ITINERARY CONTEXT:
@@ -2859,6 +2956,10 @@ Return Format B JSON only.
 
 MANDATORY REPAIR RULES:
 - Generate rows ONLY for days: ${dayNums.join(', ')}.
+- Rebuild each requested repeated day as a COMPLETE coherent day, not as a partial patch.
+- Do NOT preserve old rows from the repeated day unless they still make sense inside the new full-day sequence.
+- Do NOT create orphan references such as starting from a restaurant/café/place that was not visited earlier that day.
+- Every row's "from" must logically connect from the previous row's "to", except the first row which may start from hotel/base.
 - Respect these windows: ${JSON.stringify(perDayForRepair)}.
 - Keep chronological order with NO overlaps.
 - Each row time block must broadly match the stated duration.
@@ -2897,6 +2998,12 @@ MICRO-STOPS / DAYLIGHT:
 - Do NOT schedule daylight-sensitive scenic/nature stops at night.
 - Balance the trip naturally. Do NOT force a rigid nearest-to-farthest sequence.
 - If a special stop (spa, geothermal baths, marine life, scenic detour, etc.) fits naturally into an unused regional ring, you may bundle it there.
+
+GEOGRAPHIC FEASIBILITY:
+- The repaired day must be realistic as a same-day experience from "${city}".
+- Do NOT use distant regions that realistically require an overnight stay, domestic flight, or extreme driving burden.
+- If a candidate is too far, choose a closer unused high-value bucket.
+- Validate round-trip travel time mentally before returning the rows.
 
 - Hotel/base: ${JSON.stringify(hotel || '')}
 - Preferred transport: ${JSON.stringify(transport || 'recommend me')}
