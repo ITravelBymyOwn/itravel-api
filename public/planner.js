@@ -3839,17 +3839,29 @@ function _findRepeatedItineraryRepairDays_(rows=[], requestedDays=[], totalDays=
         break;
       }
 
+      const poiOverlap = _poiOverlapRatio_(rowsPrev, rowsD, city);
+      if(poiOverlap >= 0.34){
+        repair.add(day);
+        break;
+      }
+
       const prevTxt = _normalizeRepeatKey_(
         rowsPrev.map(r => `${r?.activity || ''} ${r?.to || ''} ${r?.notes || ''}`).join(' ')
       );
       const currTxt = _normalizeRepeatKey_(
         rowsD.map(r => `${r?.activity || ''} ${r?.to || ''} ${r?.notes || ''}`).join(' ')
       );
+
       const repeatedWaterfront =
         /\b(waterfront|harbor|harbour|puerto|promenade|malecon|malec[oó]n)\b/.test(prevTxt) &&
         /\b(waterfront|harbor|harbour|puerto|promenade|malecon|malec[oó]n)\b/.test(currTxt);
 
-      if(repeatedWaterfront){
+      const repeatedUrbanCulture =
+        /\b(museum|museo|gallery|galeria|galería|sculpture|escultura|market|mercado|park|parque)\b/.test(prevTxt) &&
+        /\b(museum|museo|gallery|galeria|galería|sculpture|escultura|market|mercado|park|parque)\b/.test(currTxt) &&
+        poiOverlap >= 0.2;
+
+      if(repeatedWaterfront || repeatedUrbanCulture){
         repair.add(day);
         break;
       }
@@ -4358,60 +4370,175 @@ function _fixReturnRowDurationConsistency_(rows=[]){
 }
 
 /* =========================================================
-   PATCH E.3 · SAFE FALLBACK PARA EVITAR DÍAS VACÍOS
+   PATCH E.3 · SAFE FALLBACK DIVERSIFICADO PARA EVITAR DÍAS VACÍOS Y CLONADOS
 ========================================================= */
-function _buildSafeFallbackRowsForMissingDays_(city='', missingDays=[], perDay=[], hotel='', transport='recommend me'){
+function _fallbackTemplatesForCity_(city=''){
+  const key = _normalizeRepeatKey_(city);
+
+  if(/\b(reykjavik|iceland|islandia)\b/.test(key)){
+    return [
+      {
+        macro: 'Reykjanes Peninsula',
+        transport: 'Rental car or Guided tour',
+        stops: ['Kleifarvatn', 'Seltún geothermal area', 'Brimketill lava pool viewpoint', 'Gunnuhver geothermal area', 'Bridge Between Continents', `Return to ${city}`]
+      },
+      {
+        macro: 'Silver Circle Borgarfjörður',
+        transport: 'Rental car or Guided tour',
+        stops: ['Borgarnes', 'Deildartunguhver', 'Hraunfossar', 'Barnafoss', 'Reykholt', `Return to ${city}`]
+      },
+      {
+        macro: 'Lava Tunnel and South-West Iceland',
+        transport: 'Rental car or Guided tour',
+        stops: ['Raufarhólshellir Lava Tunnel', 'Hveragerði', 'Hellisheiði viewpoint', 'Geothermal Exhibition area', `Return to ${city}`]
+      },
+      {
+        macro: 'Marine and Local Culture Route',
+        transport: 'Walking / Taxi / Public Bus',
+        stops: ['Old Harbour whale-watching pier', 'Grandi district', 'Marshall House', 'Food hall stop', 'Harbour evening walk', `Return to hotel`]
+      },
+      {
+        macro: 'Thermal and Coastal Route',
+        transport: 'Rental car or Guided tour',
+        stops: ['Sky Lagoon', 'Seltjarnarnes lighthouse area', 'Grótta coastal viewpoint', 'Local seafood stop', `Return to ${city}`]
+      }
+    ];
+  }
+
+  return [
+    {
+      macro: 'Regional scenic route',
+      transport: 'Rental car or Guided tour',
+      stops: ['Main scenic stop', 'Viewpoint stop', 'Local lunch stop', 'Secondary nature stop', `Return to ${city}`]
+    },
+    {
+      macro: 'Thermal or wellness route',
+      transport: 'Rental car or Guided tour',
+      stops: ['Wellness entry point', 'Scenic transfer stop', 'Local lunch stop', 'Relaxation block', `Return to ${city}`]
+    },
+    {
+      macro: 'Wildlife or marine route',
+      transport: 'Guided tour or local transport',
+      stops: ['Departure pier or meeting point', 'Main wildlife experience', 'Harbour or coastal stop', 'Local food stop', `Return to ${city}`]
+    },
+    {
+      macro: 'Local culture and food route',
+      transport: 'Walking / Taxi / Public transport',
+      stops: ['Historic district', 'Local market or food hall', 'Signature lunch stop', 'Design or cultural landmark', `Return to hotel`]
+    },
+    {
+      macro: 'Short scenic escape',
+      transport: 'Rental car or Guided tour',
+      stops: ['Scenic village or district', 'Viewpoint stop', 'Local café stop', 'Nature walk', `Return to ${city}`]
+    }
+  ];
+}
+
+function _usedMacroKeysFromRows_(rows=[], city=''){
+  const set = new Set();
+
+  (rows || []).forEach(r=>{
+    const macro = _activityMacroKey_(r?.activity || '', city);
+    if(macro) set.add(_canonicalRouteAliasKey_(macro));
+  });
+
+  return set;
+}
+
+function _pickFallbackTemplate_(city='', day=1, existingRows=[]){
+  const templates = _fallbackTemplatesForCity_(city);
+  const used = _usedMacroKeysFromRows_(existingRows, city);
+
+  for(let offset=0; offset<templates.length; offset++){
+    const idx = (Number(day || 1) + offset) % templates.length;
+    const tpl = templates[idx];
+    const key = _canonicalRouteAliasKey_(tpl.macro);
+
+    if(!used.has(key)){
+      return tpl;
+    }
+  }
+
+  return templates[Number(day || 1) % templates.length];
+}
+
+function _buildSafeFallbackRowsForMissingDays_(city='', missingDays=[], perDay=[], hotel='', transport='recommend me', existingRows=[]){
   const loc = _plannerLocalePack_();
   const base = _sanitizeBaseLikeValue_(hotel || cityMeta?.[city]?.hotel || loc.hotelFallback, loc.hotelFallback) || loc.hotelFallback;
-  const cleanTransport = _normalizeTransportPreferenceForPrompt_(transport);
-  const regionalTransport = /rental|veh[ií]culo|car|auto|drive|guided|tour/i.test(cleanTransport)
-    ? cleanTransport
-    : 'Rental car or Guided tour';
-
   const rows = [];
 
   (missingDays || []).map(Number).filter(Boolean).forEach(day=>{
     const ref = _getDayWindowRef_(perDay, day) || {};
     const start = String(ref.start || '09:00').slice(0,5);
     const startMin = _hhmmToMin_(start) ?? 9 * 60;
+    const tpl = _pickFallbackTemplate_(city, day, [...(existingRows || []), ...rows]);
+    const transportValue = tpl.transport || 'Rental car or Guided tour';
 
-    const templates = [
-      {
-        macro: 'Scenic regional route',
-        stops: ['Main scenic stop', 'Viewpoint stop', 'Local lunch stop', 'Secondary nature stop', `Return to ${city}`]
-      },
-      {
-        macro: 'Local culture and food route',
-        stops: ['Historic district', 'Local market or food hall', 'Signature lunch stop', 'Design or cultural landmark', `Return to ${base}`]
-      }
-    ];
+    const stops = tpl.stops || [];
+    const step = 75;
+    const transfer = /walking|public|taxi/i.test(transportValue) ? 10 : 25;
 
-    const tpl = templates[day % templates.length];
+    stops.forEach((stop, idx)=>{
+      const rowStart = startMin + (idx * step);
+      const rowEnd = rowStart + (idx === stops.length - 1 ? 45 : 60);
+      const isReturn = idx === stops.length - 1;
 
-    const times = [
-      [startMin, startMin + 75],
-      [startMin + 90, startMin + 165],
-      [startMin + 180, startMin + 255],
-      [startMin + 270, startMin + 345],
-      [startMin + 360, startMin + 420]
-    ];
-
-    tpl.stops.forEach((stop, idx)=>{
       rows.push(normalizeRow({
         day,
-        start: _minToHHMM_(times[idx][0]),
-        end: _minToHHMM_(times[idx][1]),
+        start: _minToHHMM_(rowStart),
+        end: _minToHHMM_(rowEnd),
         activity: `${tpl.macro} – ${stop}`,
-        from: idx === 0 ? base : tpl.stops[idx - 1],
-        to: stop,
-        transport: idx === tpl.stops.length - 1 ? regionalTransport : regionalTransport,
-        duration: `${loc.transportLabel}: ~20m\n${loc.activityLabel}: ~${Math.max(30, times[idx][1] - times[idx][0] - 20)}m`,
-        notes: `Fallback itinerary row created to avoid an empty day when the AI repair call fails. Replace with a richer destination-specific stop on the next successful generation.`
+        from: idx === 0 ? base : stops[idx - 1],
+        to: isReturn ? base : stop,
+        transport: transportValue,
+        duration: `${loc.transportLabel}: ~${transfer}m\n${loc.activityLabel}: ~${Math.max(10, (rowEnd - rowStart) - transfer)}m`,
+        notes: isReturn
+          ? `Return row added to close the route safely and avoid leaving the day incomplete.`
+          : `Backup diversified itinerary row used only when the AI repair call fails; this keeps the day usable and avoids repeating previous city filler.`
       }, day));
     });
   });
 
   return rows;
+}
+
+function _findRepeatedDayCloneRepairDays_(rows=[], requestedDays=[], city=''){
+  const byDay = _groupRowsByDay_(rows);
+  const days = (requestedDays || Object.keys(byDay)).map(Number).sort((a,b)=>a-b);
+  const repair = new Set();
+
+  for(let i=0; i<days.length; i++){
+    const day = days[i];
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) continue;
+
+    for(let j=0; j<i; j++){
+      const prev = days[j];
+      const prevRows = byDay[prev] || [];
+      if(!prevRows.length) continue;
+
+      const poiOverlap = _poiOverlapRatio_(prevRows, dayRows, city);
+      const sameShape = _areDaysStructurallyTooSimilar_(prevRows, dayRows, city);
+      const sameBucket = _areDaysExperienceDuplicates_(prevRows, dayRows, city);
+
+      if(poiOverlap >= 0.34 || sameShape || sameBucket){
+        repair.add(day);
+        break;
+      }
+    }
+  }
+
+  return [...repair].sort((a,b)=>a-b);
+}
+
+function _replaceCloneDaysWithFallback_(rows=[], cloneDays=[], city='', perDay=[], hotel='', transport='recommend me'){
+  const days = (cloneDays || []).map(Number).filter(Boolean);
+  if(!days.length) return rows;
+
+  const kept = (rows || []).filter(r => !days.includes(Number(r?.day)));
+  const fallbackRows = _buildSafeFallbackRowsForMissingDays_(city, days, perDay, hotel, transport, kept);
+
+  return _dedupeRows_([...(kept || []), ...(fallbackRows || [])], city);
 }
 
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
@@ -4599,7 +4726,7 @@ REPAIR OBJECTIVE:
   }
 
   async function _repairStrategicDaysIfNeeded_(rows=[]){
-    const repairDays = _findStrategicRepairDays_(rows, dayNums, totalDays, city);
+    let repairDays = _findStrategicRepairDays_(rows, dayNums, totalDays, city);
 
     if(!repairDays.length) return rows;
 
@@ -4617,22 +4744,24 @@ REPAIR OBJECTIVE:
     repairedRows = _dedupeRows_(repairedRows, city);
 
     if(!_hasMinimumRowsForDays_(repairedRows, repairDays)){
-      console.warn(`[BLOCK ${label}] Strategic repair returned insufficient rows; keeping original rows.`);
-      return rows;
+      console.warn(`[BLOCK ${label}] Strategic repair returned insufficient rows; using diversified fallback for repair days.`);
+      return _replaceCloneDaysWithFallback_(rows, repairDays, city, perDay, hotel, transport);
     }
 
-    const candidate = _dedupeRows_(_replaceRowsForDays_(rows, repairedRows, repairDays), city);
+    let candidate = _dedupeRows_(_replaceRowsForDays_(rows, repairedRows, repairDays), city);
 
     if(!_hasUsableRowsForAllBlockDays_(candidate, dayNums)){
-      console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; keeping original rows.`);
-      return rows;
+      console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; using diversified fallback for repair days.`);
+      return _replaceCloneDaysWithFallback_(rows, repairDays, city, perDay, hotel, transport);
     }
 
     const stillBroken = _findStrategicRepairDays_(candidate, repairDays, totalDays, city);
+    const cloneDays = _findRepeatedDayCloneRepairDays_(candidate, dayNums, city);
+    const fallbackDays = [...new Set([...(stillBroken || []), ...(cloneDays || [])])].filter(d => repairDays.includes(Number(d)));
 
-    if(stillBroken.length && _hasCriticalQualityIssueForDays_(candidate, stillBroken, city)){
-      console.warn(`[BLOCK ${label}] Strategic repair still has critical quality issue on days:`, stillBroken);
-      return rows;
+    if(fallbackDays.length && _hasCriticalQualityIssueForDays_(candidate, fallbackDays, city)){
+      console.warn(`[BLOCK ${label}] Strategic repair still has critical quality issue; replacing affected days with diversified fallback:`, fallbackDays);
+      candidate = _replaceCloneDaysWithFallback_(candidate, fallbackDays, city, perDay, hotel, transport);
     }
 
     console.log(`[BLOCK ${label}] OK after strategic repair`);
@@ -4654,6 +4783,13 @@ REPAIR OBJECTIVE:
 
   if(_hasUsableRowsForAllBlockDays_(primaryRows, dayNums)){
     primaryRows = await _repairStrategicDaysIfNeeded_(primaryRows);
+
+    const cloneDays = _findRepeatedDayCloneRepairDays_(primaryRows, dayNums, city);
+    if(cloneDays.length){
+      console.warn(`[BLOCK ${label}] Clone days detected after repair; replacing with diversified fallback:`, cloneDays);
+      primaryRows = _replaceCloneDaysWithFallback_(primaryRows, cloneDays, city, perDay, hotel, transport);
+    }
+
     console.log(`[BLOCK ${label}] OK`);
     return primaryRows;
   }
@@ -4664,6 +4800,12 @@ REPAIR OBJECTIVE:
     if(primaryRows.length){
       console.warn(`[BLOCK ${label}] Partial but non-empty rows returned; passing downstream.`);
       primaryRows = await _repairStrategicDaysIfNeeded_(primaryRows);
+
+      const cloneDays = _findRepeatedDayCloneRepairDays_(primaryRows, dayNums, city);
+      if(cloneDays.length){
+        primaryRows = _replaceCloneDaysWithFallback_(primaryRows, cloneDays, city, perDay, hotel, transport);
+      }
+
       return primaryRows;
     }
 
@@ -4688,13 +4830,20 @@ REPAIR OBJECTIVE:
 
   if(stillMissing.length){
     console.warn(`[BLOCK ${label}] Still missing days after retry; injecting safe fallback rows:`, stillMissing);
-    const fallbackRows = _buildSafeFallbackRowsForMissingDays_(city, stillMissing, perDay, hotel, transport);
+    const fallbackRows = _buildSafeFallbackRowsForMissingDays_(city, stillMissing, perDay, hotel, transport, merged);
     merged = _dedupeRows_([...(merged || []), ...(fallbackRows || [])], city);
     stillMissing = _missingDaysFromRows_(merged, dayNums);
   }
 
   if(_hasUsableRowsForAllBlockDays_(merged, dayNums)){
     merged = await _repairStrategicDaysIfNeeded_(merged);
+
+    const cloneDays = _findRepeatedDayCloneRepairDays_(merged, dayNums, city);
+    if(cloneDays.length){
+      console.warn(`[BLOCK ${label}] Clone days detected after retry/fallback; replacing with diversified fallback:`, cloneDays);
+      merged = _replaceCloneDaysWithFallback_(merged, cloneDays, city, perDay, hotel, transport);
+    }
+
     console.log(`[BLOCK ${label}] OK after retry/fallback`);
     return merged;
   }
