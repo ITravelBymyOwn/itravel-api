@@ -3853,15 +3853,19 @@ function _findRepeatedItineraryRepairDays_(rows=[], requestedDays=[], totalDays=
       );
 
       const repeatedWaterfront =
-        /\b(waterfront|harbor|harbour|puerto|promenade|malecon|malec[oó]n)\b/.test(prevTxt) &&
-        /\b(waterfront|harbor|harbour|puerto|promenade|malecon|malec[oó]n)\b/.test(currTxt);
+        /\b(waterfront|harbor|harbour|puerto|promenade|malecon|malec[oó]n|old harbour|old harbor|puerto viejo)\b/.test(prevTxt) &&
+        /\b(waterfront|harbor|harbour|puerto|promenade|malecon|malec[oó]n|old harbour|old harbor|puerto viejo)\b/.test(currTxt);
 
       const repeatedUrbanCulture =
-        /\b(museum|museo|gallery|galeria|galería|sculpture|escultura|market|mercado|park|parque)\b/.test(prevTxt) &&
-        /\b(museum|museo|gallery|galeria|galería|sculpture|escultura|market|mercado|park|parque)\b/.test(currTxt) &&
+        /\b(museum|museo|gallery|galeria|galería|sculpture|escultura|market|mercado|park|parque|garden|jardin|jardín|harpa|perlan)\b/.test(prevTxt) &&
+        /\b(museum|museo|gallery|galeria|galería|sculpture|escultura|market|mercado|park|parque|garden|jardin|jardín|harpa|perlan)\b/.test(currTxt) &&
         poiOverlap >= 0.2;
 
-      if(repeatedWaterfront || repeatedUrbanCulture){
+      const sameGenericMacro =
+        /\b(cultura y naturaleza|culture and nature|local culture|urban culture)\b/.test(prevTxt) &&
+        /\b(cultura y naturaleza|culture and nature|local culture|urban culture)\b/.test(currTxt);
+
+      if(repeatedWaterfront || repeatedUrbanCulture || sameGenericMacro){
         repair.add(day);
         break;
       }
@@ -4027,7 +4031,6 @@ DESTINATION-WIDE SELECTION BIAS:
 - Avoid repeated day shapes even in short trips.
 `.trim();
 }
-
 function _buildCoverageGuardBlock_(city='', totalDays=1){
   const n = Number(totalDays || 0);
 
@@ -4088,6 +4091,8 @@ URBAN DAY QUALITY RULE:
 }
 
 function _buildMustSeeCoverageBlock_(city='', totalDays=1){
+  const n = Number(totalDays || 0);
+
   return `
 DESTINATION MUST-SEE COVERAGE (CRITICAL):
 - Before building the itinerary, internally identify:
@@ -4345,7 +4350,6 @@ function _injectAuroraOptionRows_(city, rows=[], totalDays=1, perDay=[], baseDat
 
   return _dedupeRows_([...(rows || []), ...injected], city);
 }
-
 function _fixReturnRowDurationConsistency_(rows=[]){
   const loc = _plannerLocalePack_();
 
@@ -4367,178 +4371,6 @@ function _fixReturnRowDurationConsistency_(rows=[]){
       duration: `${loc.transportLabel}: ~${transportMin}m\n${loc.activityLabel}: ~${activityMin}m`
     }, Number(r?.day || 1));
   });
-}
-
-/* =========================================================
-   PATCH E.3 · SAFE FALLBACK DIVERSIFICADO PARA EVITAR DÍAS VACÍOS Y CLONADOS
-========================================================= */
-function _fallbackTemplatesForCity_(city=''){
-  const key = _normalizeRepeatKey_(city);
-
-  if(/\b(reykjavik|iceland|islandia)\b/.test(key)){
-    return [
-      {
-        macro: 'Reykjanes Peninsula',
-        transport: 'Rental car or Guided tour',
-        stops: ['Kleifarvatn', 'Seltún geothermal area', 'Brimketill lava pool viewpoint', 'Gunnuhver geothermal area', 'Bridge Between Continents', `Return to ${city}`]
-      },
-      {
-        macro: 'Silver Circle Borgarfjörður',
-        transport: 'Rental car or Guided tour',
-        stops: ['Borgarnes', 'Deildartunguhver', 'Hraunfossar', 'Barnafoss', 'Reykholt', `Return to ${city}`]
-      },
-      {
-        macro: 'Lava Tunnel and South-West Iceland',
-        transport: 'Rental car or Guided tour',
-        stops: ['Raufarhólshellir Lava Tunnel', 'Hveragerði', 'Hellisheiði viewpoint', 'Geothermal Exhibition area', `Return to ${city}`]
-      },
-      {
-        macro: 'Marine and Local Culture Route',
-        transport: 'Walking / Taxi / Public Bus',
-        stops: ['Old Harbour whale-watching pier', 'Grandi district', 'Marshall House', 'Food hall stop', 'Harbour evening walk', `Return to hotel`]
-      },
-      {
-        macro: 'Thermal and Coastal Route',
-        transport: 'Rental car or Guided tour',
-        stops: ['Sky Lagoon', 'Seltjarnarnes lighthouse area', 'Grótta coastal viewpoint', 'Local seafood stop', `Return to ${city}`]
-      }
-    ];
-  }
-
-  return [
-    {
-      macro: 'Regional scenic route',
-      transport: 'Rental car or Guided tour',
-      stops: ['Main scenic stop', 'Viewpoint stop', 'Local lunch stop', 'Secondary nature stop', `Return to ${city}`]
-    },
-    {
-      macro: 'Thermal or wellness route',
-      transport: 'Rental car or Guided tour',
-      stops: ['Wellness entry point', 'Scenic transfer stop', 'Local lunch stop', 'Relaxation block', `Return to ${city}`]
-    },
-    {
-      macro: 'Wildlife or marine route',
-      transport: 'Guided tour or local transport',
-      stops: ['Departure pier or meeting point', 'Main wildlife experience', 'Harbour or coastal stop', 'Local food stop', `Return to ${city}`]
-    },
-    {
-      macro: 'Local culture and food route',
-      transport: 'Walking / Taxi / Public transport',
-      stops: ['Historic district', 'Local market or food hall', 'Signature lunch stop', 'Design or cultural landmark', `Return to hotel`]
-    },
-    {
-      macro: 'Short scenic escape',
-      transport: 'Rental car or Guided tour',
-      stops: ['Scenic village or district', 'Viewpoint stop', 'Local café stop', 'Nature walk', `Return to ${city}`]
-    }
-  ];
-}
-
-function _usedMacroKeysFromRows_(rows=[], city=''){
-  const set = new Set();
-
-  (rows || []).forEach(r=>{
-    const macro = _activityMacroKey_(r?.activity || '', city);
-    if(macro) set.add(_canonicalRouteAliasKey_(macro));
-  });
-
-  return set;
-}
-
-function _pickFallbackTemplate_(city='', day=1, existingRows=[]){
-  const templates = _fallbackTemplatesForCity_(city);
-  const used = _usedMacroKeysFromRows_(existingRows, city);
-
-  for(let offset=0; offset<templates.length; offset++){
-    const idx = (Number(day || 1) + offset) % templates.length;
-    const tpl = templates[idx];
-    const key = _canonicalRouteAliasKey_(tpl.macro);
-
-    if(!used.has(key)){
-      return tpl;
-    }
-  }
-
-  return templates[Number(day || 1) % templates.length];
-}
-
-function _buildSafeFallbackRowsForMissingDays_(city='', missingDays=[], perDay=[], hotel='', transport='recommend me', existingRows=[]){
-  const loc = _plannerLocalePack_();
-  const base = _sanitizeBaseLikeValue_(hotel || cityMeta?.[city]?.hotel || loc.hotelFallback, loc.hotelFallback) || loc.hotelFallback;
-  const rows = [];
-
-  (missingDays || []).map(Number).filter(Boolean).forEach(day=>{
-    const ref = _getDayWindowRef_(perDay, day) || {};
-    const start = String(ref.start || '09:00').slice(0,5);
-    const startMin = _hhmmToMin_(start) ?? 9 * 60;
-    const tpl = _pickFallbackTemplate_(city, day, [...(existingRows || []), ...rows]);
-    const transportValue = tpl.transport || 'Rental car or Guided tour';
-
-    const stops = tpl.stops || [];
-    const step = 75;
-    const transfer = /walking|public|taxi/i.test(transportValue) ? 10 : 25;
-
-    stops.forEach((stop, idx)=>{
-      const rowStart = startMin + (idx * step);
-      const rowEnd = rowStart + (idx === stops.length - 1 ? 45 : 60);
-      const isReturn = idx === stops.length - 1;
-
-      rows.push(normalizeRow({
-        day,
-        start: _minToHHMM_(rowStart),
-        end: _minToHHMM_(rowEnd),
-        activity: `${tpl.macro} – ${stop}`,
-        from: idx === 0 ? base : stops[idx - 1],
-        to: isReturn ? base : stop,
-        transport: transportValue,
-        duration: `${loc.transportLabel}: ~${transfer}m\n${loc.activityLabel}: ~${Math.max(10, (rowEnd - rowStart) - transfer)}m`,
-        notes: isReturn
-          ? `Return row added to close the route safely and avoid leaving the day incomplete.`
-          : `Backup diversified itinerary row used only when the AI repair call fails; this keeps the day usable and avoids repeating previous city filler.`
-      }, day));
-    });
-  });
-
-  return rows;
-}
-
-function _findRepeatedDayCloneRepairDays_(rows=[], requestedDays=[], city=''){
-  const byDay = _groupRowsByDay_(rows);
-  const days = (requestedDays || Object.keys(byDay)).map(Number).sort((a,b)=>a-b);
-  const repair = new Set();
-
-  for(let i=0; i<days.length; i++){
-    const day = days[i];
-    const dayRows = byDay[day] || [];
-    if(!dayRows.length) continue;
-
-    for(let j=0; j<i; j++){
-      const prev = days[j];
-      const prevRows = byDay[prev] || [];
-      if(!prevRows.length) continue;
-
-      const poiOverlap = _poiOverlapRatio_(prevRows, dayRows, city);
-      const sameShape = _areDaysStructurallyTooSimilar_(prevRows, dayRows, city);
-      const sameBucket = _areDaysExperienceDuplicates_(prevRows, dayRows, city);
-
-      if(poiOverlap >= 0.34 || sameShape || sameBucket){
-        repair.add(day);
-        break;
-      }
-    }
-  }
-
-  return [...repair].sort((a,b)=>a-b);
-}
-
-function _replaceCloneDaysWithFallback_(rows=[], cloneDays=[], city='', perDay=[], hotel='', transport='recommend me'){
-  const days = (cloneDays || []).map(Number).filter(Boolean);
-  if(!days.length) return rows;
-
-  const kept = (rows || []).filter(r => !days.includes(Number(r?.day)));
-  const fallbackRows = _buildSafeFallbackRowsForMissingDays_(city, days, perDay, hotel, transport, kept);
-
-  return _dedupeRows_([...(kept || []), ...(fallbackRows || [])], city);
 }
 
 async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me', forbiddenHighlights=[], forbiddenUrbanClusters=[]){
@@ -4576,9 +4408,15 @@ MANDATORY:
   • "transport" must be a REAL final value (no placeholders)
   • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
   • NEVER contaminate hotel/base/from/to strings with transport preference text
+  • NEVER use generic macro labels such as "Cultura y Naturaleza", "Culture and Nature", "Local Culture", or "Urban Culture" as the LEFT side of activity
   • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
   • If a stop belongs to a known regional circuit chosen for that day, do NOT label it as "${city} – <Sub-stop>"
   • The base city name on the LEFT side is allowed only for true urban/local days
+
+- LANGUAGE:
+  • Use the same user-facing language already used by the itinerary/request.
+  • Do not output internal repair/fallback/debug wording in notes.
+  • Do not output English labels if the itinerary is in Spanish, Portuguese, or French.
 
 - DESTINATION MUST-SEE + BUCKET LOGIC:
   • First identify the destination's essential must-see universe:
@@ -4603,16 +4441,46 @@ MANDATORY:
 - CRITICAL MICRO-STOPS ENFORCEMENT:
   • regional / outward / scenic days MUST NOT contain giant dead gaps
   • if a regional day has gaps bigger than ~2h–2h30, you MUST enrich the same route with REAL intermediate micro-stops
+  • examples of valid micro-stops:
+    - viewpoints
+    - cliffs
+    - lava fields
+    - cafés with scenic value
+    - roadside photo stops
+    - geothermal pockets
+    - short boardwalks
+    - fishing villages
+    - local food stops
+    - harbors
+    - waterfalls
+    - crater stops
+    - scenic churches
+    - basalt formations
+    - small museums directly on-route
+  • DO NOT leave a regional day sparse if the route naturally supports more exploration
+  • a flagship scenic day should usually feel rich and continuous, not like 3 stops separated by huge voids
   • micro-stops must be real rows, not only notes
 
 - HARD ANTI-REPEAT:
   • NEVER reuse the same flagship regional circuit twice unless the destination genuinely has no other worthwhile alternative
   • NEVER create two days with materially equivalent structure
+  • equivalent names in other languages, misspellings, paraphrases, or tourism nicknames count as the SAME route
+  • avoid repeated:
+    - museum + lunch + walk + return
+    - scenic stop + scenic stop + dinner
+    - waterfront + food + harbor + return
+    - old town + church + market + viewpoint
   • changing POI names alone is NOT enough
-  • each day must have distinct geography, rhythm, macro-cluster, emotional identity, and experience bucket
+  • each day must have:
+    - distinct geography
+    - distinct rhythm
+    - distinct macro-cluster
+    - distinct emotional identity
+    - distinct experience bucket
 
 - DAYLIGHT / RETURN VALIDATION:
   • daylight-sensitive natural stops must be scheduled in daylight-friendly hours
+  • do NOT place beaches, black sand beaches, waterfalls, cliffs, viewpoints, glaciers, parks, lava fields, craters, coastal roads, or scenic outdoor stops at night
   • if a regional/day-trip day exists, it MUST end with an explicit return row:
     "<Macro-tour> – Return to ${city}"
   • return row must be the final row of the regional day
@@ -4620,6 +4488,7 @@ MANDATORY:
 - SOFT RULES:
   • normal urban day: usually 4–7 rows
   • flagship regional day: usually 6–10 rows when geography supports it
+  • dense compact routes may reach around 8–12 rows if natural
   • avoid weak days whenever possible
   • prioritize WOW quality
 
@@ -4654,18 +4523,40 @@ MANDATORY:
   • real places in "from" and "to"
   • transport must be a real final value
   • NEVER output placeholders or leaked planner values such as "recommend me", "recomiéndame", "recommended by planner", etc. in ANY field
+  • NEVER use generic macro labels such as "Cultura y Naturaleza", "Culture and Nature", "Local Culture", or "Urban Culture"
   • For a regional / radial / day-trip day, the LEFT side of "activity" MUST be the MACRO destination or route name, never the base city name
+- LANGUAGE:
+  • Use the same user-facing language already used by the itinerary/request.
+  • Do not output internal repair/fallback/debug wording in notes.
 - MICRO-STOPS / GAP REPAIR:
   • if the missing day is regional/outward/scenic, do NOT return a sparse day
   • fill the day with real on-route micro-stops instead of leaving 2h+ gaps
+  • use specific places, not vague filler
   • regional missing-day rebuilds should usually have 6–10 rows when geography supports it
 - ANTI-REPEAT:
   • do NOT repeat a macro-region, circuit, route, neighborhood sequence, experience bucket, or day structure already used
+  • treat translated names, misspellings, paraphrases, and tourism nicknames as duplicates
+  • if a previous day used Golden Circle / Círculo Dorado / Golden Cycle, do not rebuild another Golden Circle-style day unless no alternative exists
+  • if a previous day used South Coast / Costa Sur, do not rebuild another South Coast-style day unless the internal route is clearly different
+  • if a previous day used a museum + lunch + walk rhythm, do not repeat that same rhythm
+- MUST-SEE / BUCKET RECOVERY:
   • use the strongest unused must-see bucket before filling with generic urban content
+  • consider unused iconic special experiences when relevant:
+    - wildlife / boat / marine
+    - thermal / spa / wellness
+    - light adventure / cave / glacier / mountain / valley
+    - food / local culture
+    - indoor iconic backup
+    - short scenic escape
+- If the missing day is the final day of the trip, it must still be meaningful, polished, and memorable; do NOT make it feel like leftover filler.
+- Use the remaining UNUSED candidate universe first, thinking radially from the base city.
+- The replacement day must be built from what the destination still offers, not from a template route.
+- For the chosen remaining cluster or local pack, mentally generate 5–15 possible real micro-stops if the destination genuinely offers them, then choose only the ones that fit coherently.
 - If excursion/day trip exists, end with "<Region> – Return to ${city}".
 - Daylight-sensitive natural stops must be scheduled before night.
 - Hotel/base: ${JSON.stringify(promptBase)}
 - Transport preference: ${JSON.stringify(promptTransport)}
+- The result should feel globally premium and destination-aware, not generic.
 - No text outside JSON.
 `.trim();
 
@@ -4673,7 +4564,7 @@ MANDATORY:
 ${FORMAT}
 **ROLE:** Planner “Astra”. Strategic quality repair for "${city}".
 
-The current itinerary already has usable rows, but the following day numbers are invalid or weak:
+The current itinerary already has usable rows, but the following day numbers are invalid or weak because they are too sparse, too gapped, repetitive, structurally similar, missing a return row, contain daylight-sensitive stops at night, or fail to use a stronger must-see bucket:
 ${JSON.stringify(repairDays)}
 
 Return Format B JSON only:
@@ -4683,6 +4574,10 @@ MANDATORY:
 - Generate replacement rows ONLY for these days: ${repairDays.join(', ')}.
 - Every returned row MUST have day equal to one of these repair days only.
 - Respect these windows intelligently: ${JSON.stringify(perDay.filter(x => repairDays.includes(Number(x?.day))))}.
+- The end time provided by the planner is a HARD MAXIMUM boundary, not a target.
+- Do NOT use generic macro labels such as "Cultura y Naturaleza", "Culture and Nature", "Local Culture", or "Urban Culture".
+- Use the same user-facing language already used by the itinerary/request.
+- Do not output internal repair/fallback/debug wording in notes.
 - Existing itinerary summary to avoid repeating:
 ${JSON.stringify((currentRows || []).map(r => ({
   day: r?.day,
@@ -4696,10 +4591,100 @@ ${JSON.stringify((currentRows || []).map(r => ({
 })).slice(0, 120))}
 
 REPAIR OBJECTIVE:
-- Fix sparse, repetitive, structurally similar, missing-return, daylight, or weak-filler issues.
-- Prefer unused must-see buckets over repeated city filler.
-- Regional/outward/scenic days should usually produce 6–10 real rows if feasible.
-- If excursion/day trip exists, end with "<Macro-tour> – Return to ${city}".
+- Fix the exact quality failure:
+  • if the issue is a huge gap, add REAL on-route micro-stops or rebuild the route with a denser coherent sequence
+  • if the issue is a thin regional day, expand it into a proper day trip with real stops
+  • if the issue is repetition, replace it with a genuinely different macro-cluster or day identity
+  • if the issue is daylight-sensitive content at night, move it earlier or replace it with night-compatible content
+  • if the issue is missing return row, add a realistic final return row
+  • if the issue is weak filler, use a stronger unused must-see or special experience bucket
+  • if the issue is excessive urban repetition, replace it with a different geography, outward route, or special-experience bucket
+- Do NOT return another sparse day.
+- Do NOT return another structurally similar day.
+- Do NOT solve the problem only by changing names.
+
+MUST-SEE / EXPERIENCE BUCKET LOGIC — ULTRA CRITICAL:
+- Before rebuilding, identify unused high-value buckets for this destination.
+- Prefer an unused must-see bucket over repeated city filler.
+- Potential global bucket types include:
+  • flagship regional route
+  • secondary regional route
+  • wildlife / boat / marine
+  • thermal / spa / wellness
+  • cave / glacier / mountain / valley / light adventure
+  • food / local culture
+  • indoor iconic backup
+  • short scenic escape
+  • historic town / heritage route
+  • architecture / design district
+- For gateway/outward bases, regional routes and iconic special experiences are often core must-sees.
+- The repaired day must have a clearly different identity from all existing days.
+
+MICRO-STOP RULES — ULTRA CRITICAL:
+- Regional / outward / scenic days must feel continuous and intentionally routed.
+- Avoid gaps bigger than ~2h–2h30 unless the gap is a genuine long transfer.
+- If there is a long transfer, the itinerary should still include useful stops before/after it so the day feels complete.
+- For each regional repaired day, include real micro-stops such as:
+  • viewpoints
+  • cliffs
+  • small towns
+  • harbors
+  • beaches
+  • lava fields
+  • waterfalls
+  • crater stops
+  • scenic cafés
+  • boardwalks
+  • geothermal areas
+  • photo pullouts
+  • local museums on-route
+  • churches or landmarks directly on-route
+- Do NOT use notes as a substitute for rows.
+- The final rows themselves must contain enough real sub-stops.
+- Iconic regional repaired days should usually produce 6–10 real rows when geography supports it.
+
+ANTI-REPEAT RULES — ULTRA CRITICAL:
+- Avoid all already-used macro-regions, circuits, rings, routes, neighborhoods, highlight combinations, and experience buckets.
+- Treat translated names, misspellings, paraphrases, tourism nicknames, and alternate-language names as the SAME underlying route.
+- If using the same broad region is unavoidable, the internal route must be clearly different:
+  • different sub-stops
+  • different sequence
+  • different purpose
+  • different geography
+  • different rhythm
+- NEVER repeat the same flagship route as a prior day.
+- NEVER create two days that are equivalent in structure even if the names are different.
+- If an existing day is:
+  • museum + lunch + walk + dinner
+  the repaired day must NOT follow the same pattern.
+- If an existing day is:
+  • scenic stop + scenic stop + return
+  the repaired day must be denser or geographically different.
+- Each repaired day must have a distinct identity.
+
+REGIONAL / DAY-TRIP CONTRACT:
+- For a regional/day-trip day, the LEFT side of "activity" MUST be the macro destination or route name, not the base city.
+- A regional/day-trip replacement MUST end with "<Macro-tour> – Return to ${city}".
+- The return row must be the FINAL row.
+- Use real places in "from" and "to".
+- Use realistic transport:
+  • urban/local short movements: Walking / Taxi / Public transport as appropriate
+  • regional/outward days: Rental car or Guided tour when appropriate
+- Do not leak "recommend me", "recomiéndame", "recommended by planner", or transport preference text into any field.
+
+DAYLIGHT / NIGHT CONTRACT:
+- Do NOT schedule daylight-sensitive natural stops at night.
+- Beaches, black sand beaches, waterfalls, cliffs, viewpoints, glaciers, parks, lava fields, craters, scenic villages, and coastal roads must be in daylight-friendly windows.
+- Evening/night should be used for dinners, illuminated urban walks, shows, auroras, indoor experiences, or night-compatible activities.
+
+QUALITY CHECK BEFORE RETURN:
+- Every repaired day must have at least 3 meaningful rows.
+- Normal/full days should usually have 4–8 rows.
+- Iconic regional repaired days should usually have 6–10 real rows if feasible.
+- No repaired day may contain obvious 2h30+ dead gaps unless justified by a true long transfer.
+- No repaired day may be structurally similar to the existing itinerary.
+- No regional repaired day may omit its return row.
+- No daylight-sensitive scenic stop may be scheduled at night.
 - No text outside JSON.
 `.trim();
 
@@ -4726,7 +4711,7 @@ REPAIR OBJECTIVE:
   }
 
   async function _repairStrategicDaysIfNeeded_(rows=[]){
-    let repairDays = _findStrategicRepairDays_(rows, dayNums, totalDays, city);
+    const repairDays = _findStrategicRepairDays_(rows, dayNums, totalDays, city);
 
     if(!repairDays.length) return rows;
 
@@ -4744,24 +4729,22 @@ REPAIR OBJECTIVE:
     repairedRows = _dedupeRows_(repairedRows, city);
 
     if(!_hasMinimumRowsForDays_(repairedRows, repairDays)){
-      console.warn(`[BLOCK ${label}] Strategic repair returned insufficient rows; using diversified fallback for repair days.`);
-      return _replaceCloneDaysWithFallback_(rows, repairDays, city, perDay, hotel, transport);
+      console.warn(`[BLOCK ${label}] Strategic repair returned insufficient rows; keeping original rows.`);
+      return rows;
     }
 
-    let candidate = _dedupeRows_(_replaceRowsForDays_(rows, repairedRows, repairDays), city);
+    const candidate = _dedupeRows_(_replaceRowsForDays_(rows, repairedRows, repairDays), city);
 
     if(!_hasUsableRowsForAllBlockDays_(candidate, dayNums)){
-      console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; using diversified fallback for repair days.`);
-      return _replaceCloneDaysWithFallback_(rows, repairDays, city, perDay, hotel, transport);
+      console.warn(`[BLOCK ${label}] Strategic repair candidate failed usability check; keeping original rows.`);
+      return rows;
     }
 
     const stillBroken = _findStrategicRepairDays_(candidate, repairDays, totalDays, city);
-    const cloneDays = _findRepeatedDayCloneRepairDays_(candidate, dayNums, city);
-    const fallbackDays = [...new Set([...(stillBroken || []), ...(cloneDays || [])])].filter(d => repairDays.includes(Number(d)));
 
-    if(fallbackDays.length && _hasCriticalQualityIssueForDays_(candidate, fallbackDays, city)){
-      console.warn(`[BLOCK ${label}] Strategic repair still has critical quality issue; replacing affected days with diversified fallback:`, fallbackDays);
-      candidate = _replaceCloneDaysWithFallback_(candidate, fallbackDays, city, perDay, hotel, transport);
+    if(stillBroken.length && _hasCriticalQualityIssueForDays_(candidate, stillBroken, city)){
+      console.warn(`[BLOCK ${label}] Strategic repair still has critical quality issue on days:`, stillBroken);
+      return rows;
     }
 
     console.log(`[BLOCK ${label}] OK after strategic repair`);
@@ -4783,13 +4766,6 @@ REPAIR OBJECTIVE:
 
   if(_hasUsableRowsForAllBlockDays_(primaryRows, dayNums)){
     primaryRows = await _repairStrategicDaysIfNeeded_(primaryRows);
-
-    const cloneDays = _findRepeatedDayCloneRepairDays_(primaryRows, dayNums, city);
-    if(cloneDays.length){
-      console.warn(`[BLOCK ${label}] Clone days detected after repair; replacing with diversified fallback:`, cloneDays);
-      primaryRows = _replaceCloneDaysWithFallback_(primaryRows, cloneDays, city, perDay, hotel, transport);
-    }
-
     console.log(`[BLOCK ${label}] OK`);
     return primaryRows;
   }
@@ -4800,12 +4776,6 @@ REPAIR OBJECTIVE:
     if(primaryRows.length){
       console.warn(`[BLOCK ${label}] Partial but non-empty rows returned; passing downstream.`);
       primaryRows = await _repairStrategicDaysIfNeeded_(primaryRows);
-
-      const cloneDays = _findRepeatedDayCloneRepairDays_(primaryRows, dayNums, city);
-      if(cloneDays.length){
-        primaryRows = _replaceCloneDaysWithFallback_(primaryRows, cloneDays, city, perDay, hotel, transport);
-      }
-
       return primaryRows;
     }
 
@@ -4826,30 +4796,22 @@ REPAIR OBJECTIVE:
   retryRows = _dedupeRows_(retryRows, city);
 
   let merged = _dedupeRows_([...(primaryRows || []), ...(retryRows || [])], city);
-  let stillMissing = _missingDaysFromRows_(merged, dayNums);
-
-  if(stillMissing.length){
-    console.warn(`[BLOCK ${label}] Still missing days after retry; injecting safe fallback rows:`, stillMissing);
-    const fallbackRows = _buildSafeFallbackRowsForMissingDays_(city, stillMissing, perDay, hotel, transport, merged);
-    merged = _dedupeRows_([...(merged || []), ...(fallbackRows || [])], city);
-    stillMissing = _missingDaysFromRows_(merged, dayNums);
-  }
 
   if(_hasUsableRowsForAllBlockDays_(merged, dayNums)){
     merged = await _repairStrategicDaysIfNeeded_(merged);
-
-    const cloneDays = _findRepeatedDayCloneRepairDays_(merged, dayNums, city);
-    if(cloneDays.length){
-      console.warn(`[BLOCK ${label}] Clone days detected after retry/fallback; replacing with diversified fallback:`, cloneDays);
-      merged = _replaceCloneDaysWithFallback_(merged, cloneDays, city, perDay, hotel, transport);
-    }
-
-    console.log(`[BLOCK ${label}] OK after retry/fallback`);
+    console.log(`[BLOCK ${label}] OK after retry`);
     return merged;
   }
 
+  const stillMissing = _missingDaysFromRows_(merged, dayNums);
+
+  if(stillMissing.length){
+    console.warn(`[BLOCK ${label}] Still missing days after retry:`, stillMissing);
+  }
+
   if(merged.length){
-    console.warn(`[BLOCK ${label}] Returning partial rows after fallback protection.`);
+    console.warn(`[BLOCK ${label}] Returning partial rows for downstream repair.`);
+    merged = await _repairStrategicDaysIfNeeded_(merged);
     return merged;
   }
 
@@ -4859,22 +4821,65 @@ REPAIR OBJECTIVE:
 
 function _dedupeRows_(rows=[], city=''){
   const seen = new Set();
-  const finalRows = [];
+  const out = [];
 
   for(const r of (rows || [])){
     const day = Number(r?.day || 1);
-    const semantic = _rowSemanticKey_(r, city);
-    const key = `${day}::${semantic || String(r?.activity || '').trim()}::${String(r?.start || '').trim()}`;
+    const key = `${day}::${_rowSemanticKey_(r, city)}`;
 
     if(seen.has(key)) continue;
-
     seen.add(key);
-    finalRows.push(r);
+    out.push(r);
   }
+
+  const byDay = _groupRowsByDay_(out);
+  const acceptedDays = [];
+  const finalRows = [];
+
+  Object.keys(byDay).map(Number).sort((a,b)=>a-b).forEach(day=>{
+    const dayRows = byDay[day] || [];
+    const tooSimilar = acceptedDays.some(prevDayRows => {
+      if(_areRegionalDaysTooSimilar_(prevDayRows, dayRows, city)) return true;
+      if(_areDaysExperienceDuplicates_(prevDayRows, dayRows, city)) return true;
+      return _areDaysStructurallyTooSimilar_(prevDayRows, dayRows, city);
+    });
+
+    if(tooSimilar){
+      const filtered = dayRows.filter(r=>{
+        if(_isReturnLikeRow_(r) || _isAuroraRow_(r)) return true;
+
+        const token = _rowShapeToken_(r, city);
+        const semantic = _rowSemanticKey_(r, city);
+
+        const repeatedToken = acceptedDays.some(prevDayRows =>
+          (prevDayRows || []).some(pr => _rowShapeToken_(pr, city) === token)
+        );
+
+        const repeatedPoi = acceptedDays.some(prevDayRows =>
+          (prevDayRows || []).some(pr => _rowSemanticKey_(pr, city) === semantic)
+        );
+
+        return !repeatedToken && !repeatedPoi;
+      });
+
+      if(filtered.length >= 3){
+        acceptedDays.push(filtered);
+        finalRows.push(...filtered);
+      }else{
+        acceptedDays.push(dayRows);
+        finalRows.push(...dayRows);
+      }
+    }else{
+      acceptedDays.push(dayRows);
+      finalRows.push(...dayRows);
+    }
+  });
 
   return finalRows.sort((a,b)=>{
     const da = Number(a?.day || 1), db = Number(b?.day || 1);
+
     if(da !== db) return da - db;
+
     return String(a?.start || '').localeCompare(String(b?.start || ''));
   });
 }
