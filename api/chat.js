@@ -1,12 +1,10 @@
-// /api/chat.js — v58.1 (surgical global planner blueprint + master day plan)
+// /api/chat.js — v58 (surgically adjusted per v52.5 rules) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
-// ✅ Adds GLOBAL planner pre-step: destination profile + master day plan.
-// ✅ Adds soft quality validation + one retry before returning.
-// ✅ Does NOT change frontend contract.
-// ✅ Keeps city_day preferred format.
-// ✅ Keeps language override behavior.
-// ✅ Increases planner output token budget for multi-day rich itineraries.
+// ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
+// ✅ SURGICAL ADJUSTMENT: "info" fully open (any topic) + planner/info respond in the REAL language of the user's content (any language).
+// ✅ SURGICAL ADJUSTMENT: Info Chat "like ChatGPT": keeps context using messages/history and responds conversationally.
+// ✅ SURGICAL ADJUSTMENT: Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
 
 import OpenAI from "openai";
 
@@ -37,11 +35,15 @@ function _lastUserText_(messages = []) {
   return "";
 }
 
+// ✅ NEW (ULTRA-SURGICAL): detect explicit language choice in the last user message.
+// This is used ONLY to override output language when the user explicitly selects a language
+// (e.g., "Português", "Espanol", "English", "Deutsch", "pt", "es", etc.).
 function detectLanguageOverride(messages = []) {
   const raw = _lastUserText_(messages);
   const t = String(raw || "").trim();
   if (!t) return null;
 
+  // Normalize: lowercase + remove accents + keep letters/spaces only
   const noAccents = t
     .toLowerCase()
     .normalize("NFD")
@@ -50,11 +52,15 @@ function detectLanguageOverride(messages = []) {
   const cleaned = noAccents.replace(/[^a-z\s]/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned) return null;
 
+  // Only treat as "language pick" if it's short-ish (prevents normal sentences from triggering)
+  // e.g., "Português", "pt", "Español", "English", "francais"
   const tokens = cleaned.split(" ").filter(Boolean);
   const joined = cleaned;
 
+  // If user writes a long sentence, don't override
   if (joined.length > 28 && tokens.length > 2) return null;
 
+  // Common language name / code aliases (include misspellings)
   const map = [
     { code: "en", names: ["en", "eng", "english", "ingles", "ingl", "anglais"] },
     { code: "es", names: ["es", "spa", "spanish", "espanol", "español", "castellano"] },
@@ -67,11 +73,13 @@ function detectLanguageOverride(messages = []) {
   const isMatch = (val, candidate) => {
     if (!val || !candidate) return false;
     if (val === candidate) return true;
+    // tolerate small typos by prefix match (safe because we limit length)
     if (val.length >= 3 && candidate.startsWith(val)) return true;
     if (candidate.length >= 3 && val.startsWith(candidate)) return true;
     return false;
   };
 
+  // Check single token first (most common)
   if (tokens.length === 1) {
     const w = tokens[0];
     for (const entry of map) {
@@ -82,6 +90,7 @@ function detectLanguageOverride(messages = []) {
     return null;
   }
 
+  // If 2 tokens, allow things like "portuguese brazil" (still counts as pt)
   if (tokens.length === 2) {
     for (const entry of map) {
       for (const n of entry.names) {
@@ -93,19 +102,33 @@ function detectLanguageOverride(messages = []) {
   return null;
 }
 
+// Simple multi-language detection (surgical): ONLY for fallback/guardrails when the model doesn't respond.
+// Note: does NOT affect normal content (the model decides language via prompt).
 function detectUserLang(messages = []) {
   const t = _lastUserText_(messages).trim();
   if (!t) return "en";
 
   const s = t.toLowerCase();
 
+  // Strong Spanish signals
   if (/[¿¡ñáéíóúü]/i.test(t)) return "es";
+  const esHits = (s.match(/\b(el|la|los|las|de|que|y|para|con|por|una|un|como|donde|qué|cuál|cuáles|cómo)\b/g) || [])
+    .length;
 
-  const esHits = (s.match(/\b(el|la|los|las|de|que|y|para|con|por|una|un|como|donde|qué|cuál|cuáles|cómo)\b/g) || []).length;
+  // Strong English signals
   const enHits = (s.match(/\b(the|and|for|with|to|from|what|which|how|where|when|please)\b/g) || []).length;
-  const frHits = (s.match(/\b(le|la|les|des|de|du|et|pour|avec|sans|où|quoi|quel|quelle|quels|quelles|s\'il|vous)\b/g) || []).length;
+
+  // Strong French signals
+  const frHits = (s.match(/\b(le|la|les|des|de|du|et|pour|avec|sans|où|quoi|quel|quelle|quels|quelles|s\'il|vous)\b/g) || [])
+    .length;
+
+  // Strong Italian signals
   const itHits = (s.match(/\b(il|lo|la|i|gli|le|di|che|e|per|con|senza|dove|cosa|quale|quali|grazie)\b/g) || []).length;
+
+  // Strong German signals
   const deHits = (s.match(/\b(der|die|das|und|für|mit|ohne|wo|was|welche|welcher|bitte|danke)\b/g) || []).length;
+
+  // Strong Portuguese signals
   const ptHits = (s.match(/\b(o|a|os|as|de|que|e|para|com|sem|onde|qual|quais|obrigado|por favor)\b/g) || []).length;
 
   const scores = [
@@ -122,10 +145,12 @@ function detectUserLang(messages = []) {
   const topLang = String(top?.[0] || "en");
   const topScore = Number(top?.[1] || 0);
 
+  // If there are no clear signals, default to EN (so your fallback is consistent)
   if (!topScore) return "en";
   return topLang;
 }
 
+// v52.5-style robust JSON extraction (surgical: replaces cleanToJSON without changing external usage)
 function cleanToJSON(raw = "") {
   if (!raw) return null;
   if (typeof raw === "object") return raw;
@@ -150,6 +175,7 @@ function cleanToJSON(raw = "") {
 }
 
 function fallbackJSON(lang = "en") {
+  // Fallback is always English (surgical: avoid partial translations here)
   return {
     destination: "Unknown",
     city_day: [
@@ -177,7 +203,9 @@ function fallbackJSON(lang = "en") {
   };
 }
 
+// Guard-rail: avoids a blank table if the model fails in planner
 function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "en") {
+  // Skeleton is always English (surgical: avoid partial translations here)
   const city = String(destination || "Destination").trim() || "Destination";
   const n = Math.max(1, Number(daysTotal) || 1);
   const blocks = [];
@@ -212,10 +240,12 @@ function _normalizeDurationText_(txt) {
   const s = String(txt ?? "").trim();
   if (!s) return s;
 
+  // "Transport: X, Activity: Y" => 2 lines
   if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(",")) {
     return s.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
   }
 
+  // If it comes in a single line without line breaks but has both labels, try forcing split with common separators
   if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && !s.includes("\n")) {
     const tmp = s.replace(/\s*\|\s*/g, ", ").replace(/\s*;\s*/g, ", ");
     if (tmp.includes(",")) return tmp.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
@@ -256,11 +286,13 @@ function normalizeParsed(parsed) {
   if (!parsed) return parsed;
 
   try {
+    // Prefer city_day; if legacy rows arrive, keep them for compat but the frontend ideally uses city_day
     if (Array.isArray(parsed.city_day)) {
       const dest = String(parsed?.destination || "").trim();
       parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
     }
 
+    // If the model returned legacy "rows", normalize duration/kind/zone too
     if (Array.isArray(parsed.rows)) {
       parsed.rows = parsed.rows.map((r) => ({
         ...r,
@@ -292,312 +324,7 @@ function normalizeParsed(parsed) {
 }
 
 // ==============================
-// v58.1 Global quality helpers
-// ==============================
-function _asciiKey_(txt = "") {
-  return String(txt || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function _safeStringify_(obj, max = 12000) {
-  try {
-    const s = JSON.stringify(obj, null, 2);
-    if (s.length <= max) return s;
-    return s.slice(0, max) + "\n...[truncated]";
-  } catch {
-    return "";
-  }
-}
-
-function _collectPlannerRows_(parsed = {}) {
-  const rows = [];
-
-  try {
-    if (Array.isArray(parsed?.city_day)) {
-      parsed.city_day.forEach((b) => {
-        (Array.isArray(b?.rows) ? b.rows : []).forEach((r) => rows.push({ ...r, day: Number(r?.day || b?.day || 1) }));
-      });
-    }
-
-    if (!rows.length && Array.isArray(parsed?.rows)) {
-      parsed.rows.forEach((r) => rows.push({ ...r, day: Number(r?.day || 1) }));
-    }
-
-    if (!rows.length && Array.isArray(parsed?.destinations)) {
-      parsed.destinations.forEach((d) => {
-        if (Array.isArray(d?.city_day)) {
-          d.city_day.forEach((b) => {
-            (Array.isArray(b?.rows) ? b.rows : []).forEach((r) => rows.push({ ...r, day: Number(r?.day || b?.day || 1) }));
-          });
-        } else if (Array.isArray(d?.rows)) {
-          d.rows.forEach((r) => rows.push({ ...r, day: Number(r?.day || 1) }));
-        }
-      });
-    }
-  } catch {}
-
-  return rows;
-}
-
-function _extractActivityLeft_(activity = "") {
-  const s = String(activity || "");
-  const parts = s.split(/\s+[–-]\s+/);
-  return String(parts?.[0] || s || "").trim();
-}
-
-function _extractActivityRight_(activity = "") {
-  const s = String(activity || "");
-  const parts = s.split(/\s+[–-]\s+/);
-  return String(parts?.slice(1).join(" - ") || s || "").trim();
-}
-
-function _rowText_(r = {}) {
-  return `${r?.activity || ""} ${r?.from || ""} ${r?.to || ""} ${r?.notes || ""}`;
-}
-
-function _isReturnOrHotelRow_(r = {}) {
-  const t = _asciiKey_(_rowText_(r));
-  return /\b(return|regreso|retorno|volver|back|hotel|alojamiento)\b/.test(t);
-}
-
-function _isAuroraRow_(r = {}) {
-  const t = _asciiKey_(_rowText_(r));
-  return /\b(aurora|auroras|northern lights|boreal)\b/.test(t);
-}
-
-function _poiKey_(r = {}) {
-  if (!r || _isReturnOrHotelRow_(r) || _isAuroraRow_(r)) return "";
-  const right = _extractActivityRight_(r?.activity || "");
-  const to = String(r?.to || "");
-  let key = _asciiKey_(right || to || r?.activity || "");
-
-  key = key
-    .replace(/\b(restaurante|restaurant|local|cafe|café|almuerzo|lunch|cena|dinner|comida|food|stop|parada)\b/g, "")
-    .replace(/\b(en|in|at|de|del|la|el|the|a|an|por|para)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (!key || key.length < 3) return "";
-  return key;
-}
-
-function _dayPattern_(rows = []) {
-  const tokens = [];
-
-  (rows || []).forEach((r) => {
-    if (_isAuroraRow_(r) || _isReturnOrHotelRow_(r)) return;
-
-    const t = _asciiKey_(_rowText_(r));
-
-    if (/\b(museum|museo|gallery|galeria|exhibition|exposicion|art|arte|saga|history|historia)\b/.test(t)) tokens.push("museum");
-    else if (/\b(harbor|harbour|puerto|waterfront|promenade|malecon|old harbour|old harbor)\b/.test(t)) tokens.push("harbor");
-    else if (/\b(lunch|almuerzo|dinner|cena|restaurant|restaurante|cafe|café|market|mercado|food)\b/.test(t)) tokens.push("food");
-    else if (/\b(garden|jardin|jardín|park|parque|sculpture|escultura)\b/.test(t)) tokens.push("garden");
-    else if (/\b(waterfall|cascada|beach|playa|glacier|glaciar|geyser|geysir|volcano|volcan|crater|crater|lagoon|laguna|peninsula|peninsula|coast|costa|circle|circulo|route|ruta|valley|valle|lava|cave|cueva)\b/.test(t)) tokens.push("regional");
-    else if (/\b(church|iglesia|cathedral|catedral|temple|templo|landmark|monument|monumento|viewpoint|mirador)\b/.test(t)) tokens.push("landmark");
-    else if (/\b(walk|paseo|stroll|centro|center|downtown|old town|historic)\b/.test(t)) tokens.push("walk");
-    else tokens.push("other");
-  });
-
-  return tokens.join(">");
-}
-
-function _genericMacroIssue_(r = {}) {
-  const left = _asciiKey_(_extractActivityLeft_(r?.activity || ""));
-  return /\b(cultura y naturaleza|culture and nature|local culture|urban culture|general|scenic regional route|local culture and food route)\b/.test(left);
-}
-
-function _qualityScan_(parsed = {}) {
-  const issues = [];
-  const repairDays = new Set();
-  const rows = _collectPlannerRows_(parsed);
-  const daysTotal = Math.max(
-    Number(parsed?.days_total || 0),
-    ...rows.map((r) => Number(r?.day || 0)),
-    Array.isArray(parsed?.city_day) ? parsed.city_day.length : 0,
-    1
-  );
-
-  const byDay = {};
-  rows.forEach((r) => {
-    const d = Number(r?.day || 1);
-    if (!byDay[d]) byDay[d] = [];
-    byDay[d].push(r);
-  });
-
-  for (let d = 1; d <= daysTotal; d++) {
-    const dayRows = byDay[d] || [];
-    const nonAurora = dayRows.filter((r) => !_isAuroraRow_(r));
-    if (!dayRows.length || nonAurora.length < 2) {
-      issues.push(`Day ${d} has too few usable rows.`);
-      repairDays.add(d);
-    }
-  }
-
-  const poiMap = {};
-  rows.forEach((r) => {
-    const key = _poiKey_(r);
-    if (!key) return;
-    if (!poiMap[key]) poiMap[key] = new Set();
-    poiMap[key].add(Number(r?.day || 1));
-  });
-
-  Object.entries(poiMap).forEach(([key, daySet]) => {
-    if (daySet.size >= 2) {
-      issues.push(`Repeated POI/concept across days: ${key} on days ${[...daySet].join(", ")}.`);
-      [...daySet].slice(1).forEach((d) => repairDays.add(d));
-    }
-  });
-
-  const patternMap = {};
-  Object.keys(byDay).forEach((day) => {
-    const d = Number(day);
-    const pattern = _dayPattern_(byDay[d] || []);
-    if (!pattern || pattern.length < 5) return;
-    if (!patternMap[pattern]) patternMap[pattern] = [];
-    patternMap[pattern].push(d);
-  });
-
-  Object.entries(patternMap).forEach(([pattern, days]) => {
-    if (days.length >= 2) {
-      issues.push(`Repeated day structure "${pattern}" on days ${days.join(", ")}.`);
-      days.slice(1).forEach((d) => repairDays.add(d));
-    }
-  });
-
-  rows.forEach((r) => {
-    if (_genericMacroIssue_(r)) {
-      const d = Number(r?.day || 1);
-      issues.push(`Generic macro label detected on day ${d}: ${r?.activity || ""}.`);
-      repairDays.add(d);
-    }
-
-    const combined = _asciiKey_(`${r?.from || ""} ${r?.to || ""}`);
-    if (/\brental car\b/.test(combined) || /\brecommend me\b/.test(combined) || /\brecommended by planner\b/.test(combined)) {
-      const d = Number(r?.day || 1);
-      issues.push(`Transport preference leaked into from/to on day ${d}.`);
-      repairDays.add(d);
-    }
-  });
-
-  if (daysTotal >= 6) {
-    let urbanLikeDays = 0;
-    Object.keys(byDay).forEach((day) => {
-      const pattern = _dayPattern_(byDay[day] || []);
-      const regionalCount = (pattern.match(/regional/g) || []).length;
-      const museumFoodHarbor =
-        /museum/.test(pattern) &&
-        (/food/.test(pattern) || /harbor/.test(pattern) || /walk/.test(pattern) || /garden/.test(pattern));
-
-      if (regionalCount === 0 && museumFoodHarbor) urbanLikeDays++;
-    });
-
-    if (urbanLikeDays >= 4) {
-      issues.push(`Too many urban-filler days for a long itinerary: ${urbanLikeDays}.`);
-    }
-  }
-
-  return {
-    ok: issues.length === 0,
-    issues,
-    repairDays: [...repairDays].sort((a, b) => a - b),
-  };
-}
-
-function _plannerBlueprintPrompt_(languageLine = "") {
-  return `
-You are Astra's GLOBAL itinerary architect.
-
-Return ONLY valid JSON.
-
-Your task is NOT to generate itinerary rows yet.
-Your task is to create a destination profile and a master day plan that will later control row generation.
-
-${languageLine || ""}
-
-OUTPUT SHAPE:
-{
-  "destination":"City or destination",
-  "days_total": number,
-  "destination_profile":{
-    "destination_type":"dense_city | gateway_outward_base | hybrid | island_beach_relax | roadtrip_multi_base | nature_adventure_base",
-    "city_weight": number,
-    "outward_weight": number,
-    "special_experience_weight": number,
-    "pace":"light | balanced | active",
-    "reasoning_summary":"short internal-style summary but user-safe"
-  },
-  "core_city_buckets":[
-    {"bucket":"name","priority":1,"notes":"why it matters"}
-  ],
-  "regional_buckets":[
-    {"bucket":"name","priority":1,"notes":"why it matters"}
-  ],
-  "special_experience_buckets":[
-    {"bucket":"name","priority":1,"notes":"why it matters"}
-  ],
-  "master_day_plan":[
-    {
-      "day":1,
-      "day_identity":"short unique identity",
-      "bucket":"specific bucket to use",
-      "bucket_type":"city_core | regional_day_trip | special_experience | food_culture | recovery_light | transfer_arrival_departure | night_experience",
-      "must_include":[],
-      "avoid":[],
-      "notes":"short generation instruction"
-    }
-  ],
-  "global_avoid_repetition_rules":[
-    "short rule"
-  ]
-}
-
-GLOBAL RULES:
-- This must work for ANY city in the world.
-- Dynamically classify the destination:
-  dense_city, gateway_outward_base, hybrid, island_beach_relax, roadtrip_multi_base, or nature_adventure_base.
-- For long stays, avoid filling extra days with weak urban filler if stronger regional/special buckets exist.
-- The master_day_plan MUST assign a distinct identity to every day.
-- Do NOT repeat the same bucket, route, corridor, neighborhood pattern, or day shape.
-- If destination is a gateway/outward base, outward/regional/special buckets must dominate.
-- If destination is a dense city, city districts can dominate, but day identities must still be meaningfully different.
-- Respect user language selection, dates, hours, hotel/base, transport preference, pace, travelers, restrictions, and must-includes.
-- If start time of Day 1 is late, Day 1 should normally be a lighter city/arrival rhythm, not a major distant day trip.
-- If last day has early end, use a realistic final-day bucket.
-- Do not hardcode only one destination; reason globally.
-`.trim();
-}
-
-function _buildBlueprintContractBlock_(blueprint = null) {
-  if (!blueprint || typeof blueprint !== "object") return "";
-
-  return `
-PRECOMPUTED DESTINATION BLUEPRINT + MASTER DAY PLAN (HIGHEST PRIORITY AFTER USER HARD CONSTRAINTS):
-You MUST follow this blueprint when generating the itinerary rows.
-Do NOT ignore it.
-Do NOT collapse multiple day identities into repeated city filler.
-Do NOT create days outside their assigned bucket unless impossible; if impossible, choose the closest stronger unused bucket.
-
-${_safeStringify_(blueprint, 14000)}
-
-MASTER DAY PLAN CONTRACT:
-- Every day MUST follow its assigned "bucket" and "day_identity".
-- Every day must feel materially different from the others.
-- Do NOT repeat POIs, neighborhoods, regional corridors, route logic, or day shape.
-- If a day is assigned "regional_day_trip", generate real sub-stops and close with a return row.
-- If a day is assigned "city_core", use true city imperdibles and avoid weak filler.
-- If a day is assigned "special_experience", make that special experience the spine of the day.
-- If the itinerary is in Spanish, Portuguese, French, Italian, German, etc., ALL user-facing fields must use that language.
-`.trim();
-}
-
-// ==============================
-// Improved base prompt ✨ (PLANNER)
+// Improved base prompt ✨ (PLANNER) — Adjusted to v52.5 rules
 // ==============================
 const SYSTEM_PROMPT = `
 You are Astra, the smart travel planner of ITravelByMyOwn.
@@ -620,9 +347,46 @@ Mixed language handling:
 Consistency (critical):
 - The entire JSON output MUST be in ONE single language only.
 - Do NOT mix languages inside the response.
+- JSON keys must stay exactly as specified, but all user-facing values must use the selected/inferred language.
 Translation rule:
 - Do NOT translate into the site/system language unless explicitly requested by the user.
 - The output must strictly follow the selected or inferred language rules above.
+
+INTERNAL DESTINATION STRATEGY (CRITICAL — DO NOT OUTPUT THIS):
+Before writing itinerary rows, you MUST internally complete these steps:
+1) Classify the destination dynamically as one of:
+   - dense_city
+   - gateway_outward_base
+   - hybrid_city_and_region
+   - island_beach_relax
+   - nature_adventure_base
+   - roadtrip_multi_base
+2) Build an internal MASTER DAY PLAN before generating rows.
+3) Assign each day a unique day identity and bucket.
+4) Generate rows only after the full day strategy is clear.
+
+MASTER DAY PLAN RULES (CRITICAL — INTERNAL ONLY):
+- Every day must have a clear unique role before rows are generated.
+- Possible bucket types include:
+  • arrival / light city orientation
+  • core city highlights
+  • distinct city district
+  • flagship regional day trip
+  • secondary regional day trip
+  • special experience
+  • food / local culture
+  • wellness / thermal / spa
+  • wildlife / marine / boat
+  • mountain / cave / glacier / adventure
+  • night highlight
+  • final flexible day
+- Do NOT generate rows by simply filling each day from top to bottom with museums, cafés, harbor walks, gardens, and dinners.
+- For long stays, the itinerary must first allocate the strongest buckets, then generate activities inside each bucket.
+- For 6+ day itineraries, weak urban filler must NOT displace stronger outward, regional, special, or iconic experiences.
+- For gateway/outward-base destinations, regional and special-experience buckets must dominate over repeated city filler.
+- For dense cities, city days can dominate, but each day must use a different district, rhythm, route logic, and emotional identity.
+- For hybrid destinations, balance core city must-sees with strong outward experiences.
+- If the final itinerary would contain repeated day shapes, rebuild the affected day internally before returning JSON.
 
 INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
 - The user's Planner input contains a mix of: hard constraints, soft preferences, and suggestions.
@@ -652,7 +416,7 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
   • If a day has a provided end, the LAST row of that day MUST end at or before it.
 - IMPORTANT: start/end fields are PER ROW (per activity), not "day limits".
   • Do NOT set end time of every row to the day end time.
-  • Only the final row (or at most the final 1–2 rows if needed) may approach the day end.
+  • Only the final row may approach the day end.
   • NEVER create a first row that spans most/all of the day and then place additional rows inside that same window.
   • If there are multiple rows on a day, the first row MUST end before the next row starts.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
@@ -710,22 +474,79 @@ GENERAL RULES:
     - same scenic loops
     - same sequence structure
     - same "shape" of the day
+    - same emotional arc
+    - same museum + food + walk pattern
+    - same harbor/waterfront filler pattern
   • This applies EVEN IF the names are translated, abbreviated, paraphrased, misspelled, or written differently.
   • Treat equivalent routes/areas across languages and naming variants as the SAME underlying itinerary.
+  • Examples of equivalent duplicates:
+    - "Golden Circle" = "Golden Cycle" = "Círculo Dorado" = "Cercle d'Or" = "Circolo d'Oro"
+    - "South Coast" = "Costa Sur" = "Côte Sud" = "Costa Sul"
+    - "Snæfellsnes" = "Snaefellsnes Peninsula" = "Península de Snæfellsnes"
+    - "Reykjanes Peninsula" = "Península de Reykjanes"
+    - "Old Town" = "Centro histórico" = "Historic Center" = "Vieille Ville"
+    - "Waterfront" = "Riverside" = "Harbor area" = "Promenade" when they refer to the same local corridor
+  • The planner MUST reason semantically/geographically, not only textually.
+  • If a macro-region, flagship route, neighborhood corridor, or major circuit has already been used, do NOT reuse it unless:
+    - the destination genuinely has no strong alternative
+    - AND the internal route is materially different.
+  • Two days are considered duplicates if they share:
+    - similar geography
+    - similar stop progression
+    - similar rhythm
+    - similar emotional structure
+    - similar route logic
+    - similar meal/walk/museum sequence
+    - or equivalent translated/paraphrased macro names.
+  • Merely renaming stops is FORBIDDEN.
   • Every day must feel strategically different from the others.
 - Local times must be realistic; if the user doesn't provide hours, decide as an expert.
 - Times must be ordered and NOT overlap.
 - from/to/transport: NEVER empty.
 - Do NOT return "seed" or empty notes.
-- ANTI-EMPTY DAYS:
-  - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–15 rows (not 1–2).
-  - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
-  - For multi-day itineraries, you MUST distribute meaningful rows across ALL days.
-  - A day is NOT valid if it only contains a trivial placeholder like "free day", "last moments", or one single short stop, unless the user explicitly requested a light/rest day or the available time window is genuinely short.
-  - If the itinerary still has unscheduled key highlights and a day remains weak, you MUST use that day to place coherent remaining highlights.
-  - Regional/scenic/day-trip days MUST NOT contain giant dead gaps.
-  - If a regional day contains gaps larger than roughly 2h–2h30, you MUST enrich the route with REAL intermediate micro-stops from the same geographic corridor.
-  - Micro-stops must appear as REAL itinerary rows, not only inside notes.
+- Do NOT output internal words such as "fallback", "repair", "debug", "backup", "placeholder", or "itinerary pending" in user-facing fields.
+- Do NOT use generic macro labels such as "Cultura y Naturaleza", "Culture and Nature", "Local Culture", "Urban Culture", "General Route", or "Scenic Route" as the left side of activity.
+
+ANTI-EMPTY DAYS:
+- If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–15 rows (not 1–2).
+- If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
+- For multi-day itineraries, you MUST distribute meaningful rows across ALL days.
+- A day is NOT valid if it only contains a trivial placeholder like "free day", "last moments", or one single short stop, unless the user explicitly requested a light/rest day or the available time window is genuinely short.
+- If the itinerary still has unscheduled key highlights and a day remains weak, you MUST use that day to place coherent remaining highlights.
+- Regional/scenic/day-trip days MUST NOT contain giant dead gaps.
+- If a regional day contains gaps larger than roughly 2h–2h30, you MUST enrich the route with REAL intermediate micro-stops from the same geographic corridor.
+- Micro-stops must appear as REAL itinerary rows, not only inside notes.
+- Examples of valid micro-stops:
+  • viewpoints
+  • waterfalls
+  • cliffs
+  • scenic cafés
+  • lava fields
+  • geothermal pockets
+  • small villages
+  • roadside landmarks
+  • harbors
+  • boardwalks
+  • crater stops
+  • coastal pullouts
+  • local museums directly on-route
+- The goal is to make regional days feel continuous, rich, and geographically coherent.
+
+LONG-STAY CURATION RULES (GLOBAL):
+- For itineraries of 5+ days, do NOT simply create more city filler.
+- Before generating days, identify:
+  1) essential city highlights
+  2) strongest regional/day-trip opportunities
+  3) iconic special experiences
+  4) food/culture/wellness/wildlife/adventure buckets
+  5) final-day realistic options
+- For 6–8 day stays:
+  • Avoid more than 2–3 pure urban filler days unless the destination is truly a dense city with enough distinct world-class districts.
+  • If the destination is a gateway/outward base, prioritize 3–5 outward/regional/special buckets when feasible.
+  • If the destination is hybrid, include both city and outward buckets.
+  • If the destination is dense city, split days by truly distinct districts/themes.
+- The last 2 days must NOT degrade into repeated museums, harbor walks, cafés, gardens, and dinners if stronger unused buckets remain.
+- If a day starts to look like a repeated prior day, internally rebuild it using a different bucket.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -739,26 +560,30 @@ TIME INFERENCE (CRITICAL):
   • Each row's end time MUST be after its start time.
   • Each row's end time MUST be <= the next row's start time (allow small buffers).
   • If a day has a provided day-end time, ONLY the final row should end at/near that time.
+    Do NOT repeat the day-end time as the end time for multiple rows.
   • CRITICAL CONTINUITY (no teleporting):
     - By default, the next row's "from" should match the previous row's "to" (or be an immediately plausible continuation).
-    - If you need to switch context, add a realistic transfer row OR set "from" to the actual prior "to".
+    - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
   • The row time block must be broadly consistent with its stated duration.
-- CRITICAL: if an anchor activity occupies only part of the day and there is still a useful remaining time window, you MUST complete that day with nearby coherent real stops unless the user explicitly wanted a short/light day.
+    - Do NOT output a row like 09:00–20:00 if duration says ~1h or ~2h.
+- CRITICAL: if an anchor activity (spa, lagoon, museum, viewpoint area, market, beach, etc.) occupies only part of the day and there is still a useful remaining time window, you MUST complete that day with nearby coherent real stops unless the user explicitly wanted a short/light day.
 
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
-- If days_total = 1, provide a well-detailed day plan:
+- If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
   • Aim for 6–10 rows for a normal full day window.
-  • If the available time window is short, provide 3–5 rows.
+  • If the available time window is short (e.g., <4h), provide 3–5 rows.
   • Do NOT return only 1–2 rows unless the user explicitly requests a minimal plan.
+- Keep pacing realistic with breaks if travelers include kids/seniors/mobility limits.
 
 TRANSPORT OPTIMIZATION (GLOBAL, ULTRA-IMPORTANT):
 - For EVERY row, choose the MOST EFFICIENT and REALISTIC transport for that exact from->to pair.
-- Use internal knowledge of each city/region's mobility options.
-- Do NOT default to "Walk" unless genuinely optimal.
-- If public transport is clearly faster/reliable, prefer it.
-- For DAY TRIPS from major cities, prefer the most efficient common option unless the user explicitly prefers a guided tour or car.
-- Never leave transport blank; never use vague transport.
-- NEVER contaminate "from" or "to" fields with transport preference text such as "rental car", "recommend me", or "guided tour".
+- Use your internal knowledge of each city/region's common mobility options (metro/subway, bus, tram, urban rail, commuter rail, funicular, cable car, ferries, etc.).
+- Do NOT default to "Walk" unless it is genuinely optimal (very short distance / same neighborhood / clearly pedestrian-friendly).
+- If public transport is clearly faster/reliable, prefer it (e.g., Metro/Subway, Tram, Bus, Urban Rail).
+- When needed, allow combined modes (e.g., "Metro + Funicular", "Metro + Cable car", "Metro + Bus").
+- For DAY TRIPS from major cities, prefer the most efficient common option (often Train/Regional rail) unless the user explicitly prefers a guided tour or car.
+- Never leave transport blank; never use vague transport. If not 100% sure, still pick the best option and add a short notes tip.
+- NEVER contaminate "from" or "to" with transport preference text such as "rental car", "guided tour", "recommend me", "recommended by planner", or "as appropriate".
 
 MANDATORY ROW CONTRACT:
 - day (number)
@@ -766,70 +591,131 @@ MANDATORY ROW CONTRACT:
 - activity: ALWAYS "DESTINATION – SUB-STOP" (– or - with spaces). Generic like "museum", "park", "local restaurant" is forbidden.
   IMPORTANT (GLOBAL):
   - "DESTINATION" is NOT always the base city:
-    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME.
+    • If the row belongs to a DAY TRIP / MACRO-TOUR, "DESTINATION" must be the macro-tour NAME (e.g., "Golden Circle", "South Coast", "Toledo", "Sinai", "Giza").
     • If it's NOT a day trip, "DESTINATION" can be the base city.
   - This also applies to transfers/returns:
     • Day trip example: "South Coast – Return to Reykjavik"
     • City example: "Budapest – Return to hotel"
   - CRITICAL GEOGRAPHIC SEMANTICS:
     • If the stop is clearly outside the base city, do NOT label it as "<Base city> – <Outside stop>" unless it is explicitly a departure or return row.
+    • For out-of-city attractions, prefer the real area / corridor / macro-tour name as DESTINATION.
+    • Example: avoid "Reykjavik – Blue Lagoon" as the main visit row; prefer a real external area/macro-tour label.
 - duration: EXACTLY 2 lines with \\n:
   "Transport: <realistic estimate or ~range>"
   "Activity: <realistic estimate or ~range>"
   FORBIDDEN: "Transport: 0m" or "Activity: 0m"
-- notes: required (>=20 chars), motivating and useful.
+- notes: required (>=20 chars), motivating and useful:
+  1) 1 emotional sentence
+  2) 1 logistical tip
+  + condition/alternative if applicable
+  + when relevant, add nearby logical pair information.
 
 MEALS (Flexible rule):
 - NOT mandatory.
 - Include ONLY if they add real value to the flow.
-- If included, NOT generic.
-- Meal stops must be specific enough to be useful.
+- If included, NOT generic ("dinner at a local restaurant" forbidden).
+- Meal stops must be specific enough to be useful:
+  • use a named venue, a clearly identified food hall/harbor/market/street, or a concrete area with recognizable dining value.
+  • avoid vague placeholders like "local restaurant" or "restaurant near attraction" as the main sub-stop.
+- Do NOT use the same restaurant or same food corridor repeatedly across multiple days unless the user requested it.
 
 HOURS / CLOSURES (GLOBAL, anti-impossible schedules):
-- For places with typical hours, do NOT schedule visits outside a reasonable daytime window.
-- Guideline if not 100% sure: 10:00–17:00 for indoor/museums.
+- For places with typical hours (museums, castles, indoor monuments, baths/spas, markets), do NOT schedule visits outside a reasonable daytime window.
+  Guideline if not 100% sure: 10:00–17:00 for indoor/museums.
+- If the place may be closed on certain days and you are not sure, avoid extreme times and add in notes that exact hours should be confirmed.
 - For viewpoints/bridges/outdoor areas, you can be more flexible.
 
 NIGHT TOURS (GLOBAL, when applicable):
 - If the destination has an iconic night highlight or classic night experience, include AT LEAST 1 iconic night activity.
+- Keep realistic times (e.g., 19:00–23:30) and include a logistical tip in notes.
 
 AURORAS (HARD RULE + REPLACEMENT):
-- FORBIDDEN unless truly plausible by latitude/season.
-- If auroras are NOT plausible and you need a night highlight, replace with a real iconic night experience.
+- FORBIDDEN unless they are truly plausible by latitude/season (high-latitude auroral zones) AND the itinerary context supports it.
+- If the destination is NOT a typical auroral zone, you MUST NOT include any aurora-related rows or wording.
+- If auroras are NOT plausible and you need a night highlight, replace it with a real iconic night experience for that city.
 - When auroras ARE plausible:
   • Aurora viewing is a NIGHT activity.
-  • If included, they MUST appear as at least one REAL row with nighttime schedule.
-  • Auroras should usually be 1–2 rows total.
-  • Add practical note about cloud cover / forecast / flexibility.
+  • If you include auroras, they MUST appear as REAL rows with nighttime schedule, realistic transport, and plausible viewing area.
+  • Auroras are NOT valid if they appear only in notes, suggestions, dinner rows, or followup text.
+  • Aurora rows should usually be 1–3 opportunities total depending on trip length and season.
+  • Do NOT add the same aurora note to every day.
   • Avoid consecutive days if there is room elsewhere.
+  • Do not leave the only aurora attempt for the very last possible day unless truly necessary.
 
 DAY TRIPS / MACRO-TOURS:
-- If you create a day trip, break it down into 5–15 sub-stops WHEN IT ADDS REAL VALUE.
-- Strong regional routes should feel like expert-designed exploration days.
+- If you create a day trip, you must break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
+- CRITICAL MICRO-STOPS RULE:
+  • If a route naturally supports many worthwhile sub-stops, you MUST enrich the itinerary with those real intermediate stops instead of leaving large empty time gaps.
+  • Strong regional routes should feel like expert-designed exploration days, not sparse skeleton itineraries.
+  • A flagship regional day should usually contain around 6–10 meaningful rows when geography realistically supports it.
+  • Micro-stops must be represented as actual rows whenever they materially improve continuity and richness.
+  • Notes are NOT a replacement for real itinerary rows.
+- FORBIDDEN umbrella rows:
+  - Do NOT use generic activities like "Day trip to X", "Excursion to X", "Excursão de um dia", "Tour de 1 dia".
+  - Each row must be either a named transport movement OR a named physical sub-stop.
+  - The first row of a macro-tour must NEVER consume most of the day unless the transfer truly does.
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
-- Avoid the last day if there are options.
-- For day trips, avoid optimistic timing.
+- Avoid the last day if there are options, unless the last day has enough time and it is the best remaining bucket.
+- For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
+- CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
+- Do NOT propose a day trip just because it is theoretically possible.
+  • A day trip must be good in real traveler experience, not dominated by exhausting transit.
+  • If a route would create an excessively long round trip with low enjoyment, reject it and choose a better alternative closer to the base city.
 - A macro-tour is NOT valid if:
-  • it has too few useful rows,
-  • it skips logical signature highlights,
-  • it hides key highlights only in notes,
+  • it has too few useful rows for a normal full day,
+  • it skips the logical signature highlights of that route,
+  • it hides key highlights only in notes instead of rows,
   • or it lacks a dedicated realistic return row.
-- NEVER repeat the same flagship regional route twice in one itinerary unless there is truly no strong alternative.
-- Each day must have a clearly distinct identity.
+- GLOBAL REPEAT PREVENTION (CRITICAL):
+  • NEVER repeat the same flagship regional route twice in one itinerary unless there is truly no strong alternative.
+  • Before generating a regional day, mentally verify that the same macro-region/circuit has not already been used in another day.
+  • This verification must be semantic and geographic, NOT textual.
+  • Equivalent translated names, paraphrases, common misspellings, tourism nicknames, and alternate-language names count as duplicates.
+  • If a prior day already covered a regional circuit, the next regional day must use a DIFFERENT:
+    - geography
+    - macro-cluster
+    - directional corridor
+    - route logic
+    - stop progression
+  • Avoid creating multiple days with:
+    - museum + lunch + walk + return
+    - scenic stop + scenic stop + return
+    - waterfront + food + harbor + return
+    - old town + church + market + viewpoint
+    - garden + museum + café + dinner
+    - or any equivalent repeated structure.
+  • Each day must have a clearly distinct identity.
+  • Do NOT use translated naming to disguise repetition.
 
 ICELAND CURATION (when relevant):
-  • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, and other realistic Southwest / West Iceland options.
+  • From Reykjavik, prioritize high-value realistic day trips such as Golden Circle, South Coast, Reykjanes / Blue Lagoon area, Snæfellsnes, Silver Circle / Borgarfjörður, lava tunnel / geothermal route, whale watching / marine experience, and realistic Southwest / West Iceland options.
+  • For a 7-day Reykjavik itinerary in winter, avoid using 4+ days as pure urban museum/harbor/café filler.
+  • Keep pure Reykjavik city content limited unless the user specifically requested a city-only trip.
   • For South Coast:
     - If the route reaches the Reynisfjara / Vík area, Vík should normally be included unless there is a strong reason not to.
+    - Prefer a coherent progression such as Seljalandsfoss → Skógafoss → Vík and/or Reynisfjara → return.
     - Reynisfjara must appear as a real row if that South Coast stretch is being used; do NOT leave it only in notes.
   • For Snæfellsnes:
     - Prefer specific iconic stops such as Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja when appropriate.
+    - Avoid vague placeholders like only "National Park" if specific named stops are available.
   • For Reykjanes / Blue Lagoon:
     - If Blue Lagoon is included and the available day still has a useful remaining window, prefer integrating it with coherent Reykjanes Peninsula stops instead of leaving the day half-empty.
-  • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights.
+    - Plausible complements may include geothermal/coastal/scenic stops in the same corridor when they fit naturally and safely.
+    - Do NOT treat Blue Lagoon as a full standalone day unless the user's constraints, timing, pace, or recovery preference clearly justify it.
+    - The main Blue Lagoon visit row should use a real external area / corridor label, not the Reykjavik city label, unless it is explicitly the departure/return row.
+  • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
   • Do NOT repeat the same Iceland macro-route across different days.
+  • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
+  • If South Coast was already used, avoid rebuilding another equivalent South Coast corridor day.
+  • If Snæfellsnes was already used, do not recycle the same peninsula structure.
+  • If Reykjanes / Blue Lagoon area was already used, do not create a second equivalent Reykjanes day unless the route is truly different and there are no better alternatives.
+  • Prefer new geographic corridors before repeating known ones.
   • Iceland itineraries must maximize geographic diversity across days.
+  • Regional Iceland days should feel dense, continuous, and exploratory:
+    - avoid giant dead gaps
+    - enrich routes with real scenic/geothermal/coastal micro-stops
+    - ensure the day feels like a full coherent expedition.
 
 SAFETY / GLOBAL COHERENCE:
 - Do not propose things that are infeasible due to distance/time/season or obvious risks.
@@ -841,26 +727,34 @@ SMART EDITING:
 
 FINAL INTERNAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
 - Before returning JSON, internally verify:
+  • a master day plan exists internally
+  • each day has a unique identity
   • no duplicated macro-routes
   • no duplicated regional circuits
   • no semantically equivalent translated routes
-  • no repeated route under alternate names
+  • no repeated route under alternate names, misspellings, paraphrases, or different languages
   • no structurally repetitive days
   • no repeated neighborhood/corridor/day-shape pattern
+  • no repeated POIs across different days unless unavoidable and justified
+  • no repeated museum + food + harbor/walk + dinner pattern
+  • no excessive urban filler in long gateway/outward-base itineraries
   • no giant unexplained gaps in regional/scenic days
   • no weak sparse flagship routes
-  • no important micro-stops hidden only in notes
-  • no generic macro labels such as "Cultura y Naturaleza", "Culture and Nature", "Local Culture", or "Urban Culture"
-  • no internal fallback/debug wording in user-facing fields
+  • no important micro-stops hidden only in notes when they should be rows
+  • no generic macro labels
+  • no internal fallback/debug wording
+  • no mixed language in user-facing fields
+  • no transport preference leaked into "from" or "to"
 - If any of those problems exist:
-  • rebuild the affected day internally BEFORE returning JSON.
+  • rebuild the affected day internally BEFORE returning the JSON.
 - NEVER return a knowingly repetitive or sparse itinerary if stronger alternatives exist.
+- The itinerary must feel globally curated, geographically diverse, and materially different day by day.
 
 Respond with valid JSON only.
 `.trim();
 
 // ==============================
-// Base prompt ✨ (FREE INFO CHAT)
+// Base prompt ✨ (FREE INFO CHAT) — like ChatGPT: any topic + context + user's real language
 // ==============================
 const SYSTEM_PROMPT_INFO = `
 You are Astra, a general conversational assistant (like ChatGPT) inside ITravelByMyOwn.
@@ -882,7 +776,7 @@ FORMAT:
 `.trim();
 
 // ==============================
-// Model call
+// Model call (with soft timeout)
 // ==============================
 async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
@@ -923,55 +817,30 @@ export default async function handler(req, res) {
     }
 
     const body = req.body || {};
-    const mode = body.mode || "planner";
+    const mode = body.mode || "planner"; // 👈 existing parameter
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
+    // 🧭 INFO CHAT MODE — free text (like ChatGPT: open + context + user's real language)
     if (mode === "info") {
       const raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages], 0.45, 2600, 70000);
       const text = raw || "⚠️ No response was obtained from the assistant.";
       return res.status(200).json({ text });
     }
 
+    // ✅ NEW (ULTRA-SURGICAL): language override if user explicitly selected a language (e.g., "Português")
     const override = detectLanguageOverride(clientMessages);
     const overrideLine = override
       ? `LANGUAGE OVERRIDE (USER-SELECTED, HIGHEST PRIORITY): Output MUST be in ${override.toUpperCase()}.\n- Ignore earlier mixed-language content.\n- Keep ALL JSON keys/shape the same.\n`
       : "";
 
-    let blueprint = null;
+    const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT).trim();
 
-    try {
-      const blueprintRaw = await callStructured(
-        [
-          { role: "system", content: _plannerBlueprintPrompt_(overrideLine) },
-          ...clientMessages,
-        ],
-        0.18,
-        1800,
-        45000
-      );
-
-      const parsedBlueprint = cleanToJSON(blueprintRaw);
-
-      if (
-        parsedBlueprint &&
-        Array.isArray(parsedBlueprint?.master_day_plan) &&
-        parsedBlueprint.master_day_plan.length
-      ) {
-        blueprint = parsedBlueprint;
-        console.log("🧭 BLUEPRINT:", JSON.stringify(blueprint));
-      }
-    } catch (bpErr) {
-      console.warn("Blueprint step failed; continuing without blueprint:", bpErr?.message || bpErr);
-      blueprint = null;
-    }
-
-    const blueprintBlock = _buildBlueprintContractBlock_(blueprint);
-    const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT + (blueprintBlock ? "\n\n" + blueprintBlock : "")).trim();
-
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.24, 6200, 110000);
+    // 🧭 PLANNER MODE — with strong v52.5 rules (only via prompt + guardrails)
+    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 3200, 90000);
     let parsed = cleanToJSON(raw);
 
+    // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
     const hasSome =
       parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
 
@@ -984,10 +853,11 @@ MANDATORY:
 - Respond with valid JSON only.
 - Must include city_day (preferred) or rows (legacy) with at least 1 row.
 - No meta or text outside.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.18, 6800, 115000);
+      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 3400, 95000);
       parsed = cleanToJSON(raw);
     }
 
+    // 2) Retry: ultra with minimal example (only if still failing)
     const stillBad =
       !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
 
@@ -1005,73 +875,17 @@ Minimal valid example (DO NOT copy it literally; format guide only):
   ]}],
   "followup":""
 }`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.12, 7000, 115000);
+      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.14, 3600, 95000);
       parsed = cleanToJSON(raw);
     }
 
+    // 3) Normalization + anti-blank-table guardrails
     if (!parsed) parsed = fallbackJSON(lang);
 
+    // Prefer city_day: if the model returned legacy rows, keep them; but if it returned city_day, normalize it.
     parsed = normalizeParsed(parsed);
 
-    try {
-      const scan = _qualityScan_(parsed);
-
-      if (!scan.ok && scan.issues.length) {
-        console.warn("🧪 QUALITY ISSUES:", scan);
-
-        const qualityRetryPrompt =
-          SYSTEM_PROMPT_EFFECTIVE +
-          `
-
-QUALITY REPAIR RETRY (CRITICAL):
-The previous JSON was valid but failed deterministic quality checks.
-You must regenerate the itinerary JSON, not explain.
-
-Detected issues:
-${scan.issues.map((x) => `- ${x}`).join("\n")}
-
-Repair days to focus on:
-${JSON.stringify(scan.repairDays)}
-
-Rules:
-- Keep the same output JSON contract.
-- Follow the master day plan if provided.
-- Do NOT repeat POIs, harbor/waterfront corridors, museums, restaurants, neighborhoods, regional routes, or day patterns.
-- Do NOT use generic macro labels.
-- Do NOT leak transport preference text into from/to.
-- Do NOT output fallback/debug/internal repair wording.
-- If long stay and destination has strong outward/special buckets, use those before extra urban filler.
-- Preserve language consistency.
-
-Previous flawed itinerary summary:
-${_safeStringify_(parsed, 18000)}
-`.trim();
-
-        const retryRaw = await callStructured([{ role: "system", content: qualityRetryPrompt }, ...clientMessages], 0.18, 7000, 115000);
-        const retryParsedRaw = cleanToJSON(retryRaw);
-
-        if (retryParsedRaw) {
-          const retryParsed = normalizeParsed(retryParsedRaw);
-          const retryScan = _qualityScan_(retryParsed);
-
-          const originalIssueCount = scan.issues.length;
-          const retryIssueCount = retryScan.issues.length;
-
-          if (
-            (Array.isArray(retryParsed?.city_day) || Array.isArray(retryParsed?.rows) || Array.isArray(retryParsed?.destinations)) &&
-            retryIssueCount <= originalIssueCount
-          ) {
-            parsed = retryParsed;
-            console.log("✅ QUALITY RETRY ACCEPTED:", retryScan);
-          } else {
-            console.warn("⚠️ QUALITY RETRY REJECTED; keeping original parsed itinerary:", retryScan);
-          }
-        }
-      }
-    } catch (qErr) {
-      console.warn("Quality scan/retry failed; continuing with parsed itinerary:", qErr?.message || qErr);
-    }
-
+    // Final guard-rail: if city_day exists but is empty/no rows, inject skeleton
     try {
       const dest = String(parsed?.destination || "Destination").trim() || "Destination";
       const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
@@ -1091,6 +905,7 @@ ${_safeStringify_(parsed, 18000)}
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
+    // In case of exception, try responding in the user's language based on body (fallback only).
     try {
       const body = req?.body || {};
       const clientMessages = extractMessages(body);
