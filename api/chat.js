@@ -363,7 +363,8 @@ Before writing itinerary rows, you MUST internally complete these steps:
    - roadtrip_multi_base
 2) Build an internal MASTER DAY PLAN before generating rows.
 3) Assign each day a unique day identity and bucket.
-4) Generate rows only after the full day strategy is clear.
+4) Rank all available buckets from strongest to weakest BEFORE choosing the final daily plan.
+5) Generate rows only after the full day strategy is clear.
 
 MASTER DAY PLAN RULES (CRITICAL — INTERNAL ONLY):
 - Every day must have a clear unique role before rows are generated.
@@ -386,7 +387,34 @@ MASTER DAY PLAN RULES (CRITICAL — INTERNAL ONLY):
 - For gateway/outward-base destinations, regional and special-experience buckets must dominate over repeated city filler.
 - For dense cities, city days can dominate, but each day must use a different district, rhythm, route logic, and emotional identity.
 - For hybrid destinations, balance core city must-sees with strong outward experiences.
+- A bucket may NOT be reused if another strong unused bucket exists.
+- Days 5+ must NOT repeat the identity, rhythm, corridor, or experience type of earlier days.
+- If two days would both be classified as weak "urban culture", replace one of them with the strongest remaining unused bucket.
 - If the final itinerary would contain repeated day shapes, rebuild the affected day internally before returning JSON.
+
+BUCKET EXHAUSTION RULE (CRITICAL — INTERNAL ONLY):
+- Before using a weak urban filler bucket, verify that stronger unused buckets are not available.
+- Weak urban filler includes:
+  • secondary museums
+  • generic gardens
+  • repeated harbor walks
+  • repeated cafés
+  • repeated markets
+  • repeated restaurants
+  • generic cultural centers
+  • museum + lunch + harbor/walk + dinner sequences
+- Stronger buckets include:
+  • flagship regional route
+  • secondary regional route
+  • iconic natural corridor
+  • wellness / thermal / spa
+  • wildlife / marine / boat
+  • cave / glacier / mountain / valley / adventure
+  • food culture that is truly distinctive
+  • iconic night experience
+  • scenic route with real sub-stops
+- If a strong unused bucket exists, you MUST use it before creating another weak urban filler day.
+- For 6–8 day itineraries, the last 2–3 days must still feel intentional and premium, not like leftovers.
 
 INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
 - The user's Planner input contains a mix of: hard constraints, soft preferences, and suggestions.
@@ -534,19 +562,23 @@ ANTI-EMPTY DAYS:
 
 LONG-STAY CURATION RULES (GLOBAL):
 - For itineraries of 5+ days, do NOT simply create more city filler.
-- Before generating days, identify:
+- Before generating days, identify and rank:
   1) essential city highlights
   2) strongest regional/day-trip opportunities
   3) iconic special experiences
   4) food/culture/wellness/wildlife/adventure buckets
   5) final-day realistic options
+- Strong unused buckets MUST be consumed before creating additional weak urban culture filler.
+- Museums, gardens, cafés, harbor walks, markets, and generic cultural stops are LOW-PRIORITY buckets unless they are globally iconic or explicitly requested.
+- A low-priority bucket may only be used after stronger regional, experiential, wellness, wildlife, geothermal, scenic, or adventure buckets have been exhausted or are infeasible.
 - For 6–8 day stays:
   • Avoid more than 2–3 pure urban filler days unless the destination is truly a dense city with enough distinct world-class districts.
   • If the destination is a gateway/outward base, prioritize 3–5 outward/regional/special buckets when feasible.
   • If the destination is hybrid, include both city and outward buckets.
   • If the destination is dense city, split days by truly distinct districts/themes.
 - The last 2 days must NOT degrade into repeated museums, harbor walks, cafés, gardens, and dinners if stronger unused buckets remain.
-- If a day starts to look like a repeated prior day, internally rebuild it using a different bucket.
+- If a day starts to look like a repeated prior day, internally rebuild it using a different stronger unused bucket.
+- If a gateway/outward-base destination still has strong unused regional or special-experience buckets, do NOT create another generic urban day.
 
 TIME INFERENCE (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
@@ -582,6 +614,10 @@ TRANSPORT OPTIMIZATION (GLOBAL, ULTRA-IMPORTANT):
 - If public transport is clearly faster/reliable, prefer it (e.g., Metro/Subway, Tram, Bus, Urban Rail).
 - When needed, allow combined modes (e.g., "Metro + Funicular", "Metro + Cable car", "Metro + Bus").
 - For DAY TRIPS from major cities, prefer the most efficient common option (often Train/Regional rail) unless the user explicitly prefers a guided tour or car.
+- For compact urban movements inside the same city center, do NOT force rental car just because the user selected or mentioned rental car.
+- Treat explicit transport preference as a global preference, not a blind mandate for every micro-transfer.
+- Use rental car / guided tour mainly for regional, scenic, outward, rural, or poor-transit routes.
+- For urban short hops, prefer walking, taxi, bus, tram, metro, or public transport when more realistic.
 - Never leave transport blank; never use vague transport. If not 100% sure, still pick the best option and add a short notes tip.
 - NEVER contaminate "from" or "to" with transport preference text such as "rental car", "guided tour", "recommend me", "recommended by planner", or "as appropriate".
 
@@ -704,6 +740,12 @@ ICELAND CURATION (when relevant):
     - Plausible complements may include geothermal/coastal/scenic stops in the same corridor when they fit naturally and safely.
     - Do NOT treat Blue Lagoon as a full standalone day unless the user's constraints, timing, pace, or recovery preference clearly justify it.
     - The main Blue Lagoon visit row should use a real external area / corridor label, not the Reykjavik city label, unless it is explicitly the departure/return row.
+  • For Silver Circle / Borgarfjörður:
+    - Prefer real stops such as Borgarnes, Deildartunguhver, Hraunfossar, Barnafoss, Reykholt, and Krauma when they fit naturally.
+  • For lava tunnel / geothermal route:
+    - Prefer real stops such as Raufarhólshellir, Hveragerði, Hellisheiði, geothermal exhibition area, or nearby coherent geothermal/scenic stops.
+  • For whale watching / marine experience:
+    - Use it only if plausible for the season and traveler profile; pair it with a distinct harbor/food/culture block only once, not repeated across many days.
   • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
   • Do NOT repeat the same Iceland macro-route across different days.
   • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
@@ -729,6 +771,9 @@ FINAL INTERNAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
 - Before returning JSON, internally verify:
   • a master day plan exists internally
   • each day has a unique identity
+  • stronger unused buckets are not being skipped in favor of weak urban filler
+  • days 5+ are not dominated by museums, cafés, harbor walks, gardens, and generic cultural filler if stronger unused buckets remain
+  • gateway/outward-base destinations have used major regional/special opportunities before creating repeated urban days
   • no duplicated macro-routes
   • no duplicated regional circuits
   • no semantically equivalent translated routes
