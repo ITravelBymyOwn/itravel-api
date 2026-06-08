@@ -3112,6 +3112,20 @@ function _sanitizeTransportValue_(value=''){
     return '';
   }
 
+  /*
+     PATCH · Do not blindly trust car/rental-car values emitted by the API.
+     Reason: if the user selected "rental car", the model tends to apply it to every
+     micro-transfer, including compact urban Reykjavik movements. Returning blank here
+     lets the downstream _cleanTransportField_ infer the correct mode by row context:
+     - urban/local: Walking / Taxi / Public Bus
+     - regional/outward: Rental car or Guided tour
+  */
+  if(
+    /\b(vehiculo alquilado|vehículo alquilado|auto alquilado|carro alquilado|coche alquilado|rental car|self drive|self-drive)\b/i.test(low)
+  ){
+    return '';
+  }
+
   return raw;
 }
 
@@ -3119,7 +3133,8 @@ function _sanitizeBaseLikeValue_(value='', fallback=''){
   let raw = String(value || '').trim();
   raw = raw
     .replace(/\b(recommend me|recomiendame|recomiéndame|recommended by planner|as appropriate)\b/ig, '')
-    .replace(/\b(self[-\s]?drive|guided tour|rental car|walking|metro|taxi|bus|train|uber|private transfer)\b\s*$/ig, '')
+    .replace(/\b(self[-\s]?drive|guided tour|rental car|vehiculo alquilado|vehículo alquilado|auto alquilado|carro alquilado|coche alquilado|walking|metro|taxi|bus|train|uber|private transfer)\b\s*$/ig, '')
+    .replace(/^(in|en|at|à|a)\s+/ig, '')
     .replace(/\s{2,}/g, ' ')
     .replace(/\s+,/g, ',')
     .replace(/,\s*,+/g, ',')
@@ -3128,7 +3143,7 @@ function _sanitizeBaseLikeValue_(value='', fallback=''){
 
   if(!raw) return String(fallback || '').trim();
 
-  if(/^(in|en|à|a|de|desde)\s*$/i.test(raw)) return String(fallback || '').trim();
+  if(/^(in|en|at|à|a|de|desde)\s*$/i.test(raw)) return String(fallback || '').trim();
 
   return raw;
 }
@@ -3190,7 +3205,7 @@ function _gatewayDestinationProfile_(city=''){
   const key = _normalizeRepeatKey_(city);
 
   if(
-    /\b(reykjavik|iceland|islandia)\b/.test(key)
+    /\b(reykjavik|iceland|islandia|tromso|tromsø|cusco|cuzco|interlaken|queenstown|banff|bariloche|el calafate|ushuaia|puerto natales)\b/.test(key)
   ){
     return {
       type: 'gateway',
@@ -3252,19 +3267,22 @@ function _findGatewayCoverageRepairDays_(rows=[], requestedDays=[], totalDays=1,
   }
 
   const byDay = _groupRowsByDay_(rows);
+  const profile = _gatewayDestinationProfile_(city);
+  let acceptedUrban = 0;
 
-  (requestedDays || []).forEach(day=>{
+  (requestedDays || []).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const dayRows = byDay[day] || [];
     if(!dayRows.length) return;
 
-    if(
-      _isUrbanBaseDay_(dayRows, city) &&
-      (
-        _hasExcessiveWeakUrbanFiller_(dayRows, city) ||
-        _areDaysExperienceDuplicates_(dayRows, dayRows, city)
-      )
-    ){
-      repair.add(Number(day));
+    if(_isUrbanBaseDay_(dayRows, city)){
+      acceptedUrban += 1;
+
+      if(
+        acceptedUrban > profile.maxPureUrbanDays ||
+        _hasExcessiveWeakUrbanFiller_(dayRows, city)
+      ){
+        repair.add(Number(day));
+      }
     }
   });
 
@@ -3287,20 +3305,43 @@ function _findExcessiveUrbanFillerRepairDays_(rows=[], requestedDays=[], totalDa
   return [...repair].sort((a,b)=>a-b);
 }
 
+function _isTrivialRepeatPOIKey_(poi=''){
+  const key = _normalizeRepeatKey_(poi);
+
+  if(!key) return true;
+
+  return (
+    key === 'reykjavik' ||
+    key === 'hotel' ||
+    key === 'in jofurbas' ||
+    key === 'jofurbas' ||
+    key === 'urban-base' ||
+    /\b(return|regreso|retorno|hotel|aurora|zona de observacion|zona de observación)\b/.test(key)
+  );
+}
+
 function _findOverRepeatedPOIRepairDays_(rows=[], requestedDays=[], totalDays=1, city=''){
   const byDay = _groupRowsByDay_(rows);
   const seen = {};
   const repair = new Set();
 
-  (requestedDays || []).forEach(day=>{
+  (requestedDays || []).map(Number).sort((a,b)=>a-b).forEach(day=>{
     const dayRows = byDay[day] || [];
-
-    const pois = _dayPOISet_(dayRows, city);
+    const pois = _dayPOISet_(dayRows, city).filter(p => !_isTrivialRepeatPOIKey_(p));
 
     pois.forEach(poi=>{
-      seen[poi] = (seen[poi] || 0) + 1;
+      const key = _canonicalRouteAliasKey_(poi);
+      if(!key || _isTrivialRepeatPOIKey_(key)) return;
 
-      if(seen[poi] >= 3){
+      seen[key] = seen[key] || new Set();
+      seen[key].add(Number(day));
+
+      /*
+         PATCH · Repeating a real POI/route concept on a second day is already enough
+         to mark that later day for repair. The old threshold (3) allowed Day 5/Day 7
+         clones to survive.
+      */
+      if(seen[key].size >= 2){
         repair.add(Number(day));
       }
     });
@@ -3308,6 +3349,7 @@ function _findOverRepeatedPOIRepairDays_(rows=[], requestedDays=[], totalDays=1,
 
   return [...repair].sort((a,b)=>a-b);
 }
+
 /* =========================================================
    SECTION 15E.2
 ========================================================= */
@@ -3317,17 +3359,24 @@ function _canonicalRouteAliasKey_(txt=''){
   if(!key) return '';
 
   const replacements = [
+    /*
+       PATCH · Core Iceland semantic aliases.
+       Important: the model often disguises repeated routes by using a sub-area as the
+       macro label (e.g. Þingvellir instead of Golden Circle, Snæfellsjökull instead of
+       Snæfellsnes). These aliases make the duplicate detector deterministic.
+    */
     [/^(golden cycle|golden circle|circulo dorado|círculo dorado|cercle d or|cercle dor|circolo d oro|goldener kreis)$/i, 'golden circle'],
     [/\b(golden cycle|golden circle|circulo dorado|círculo dorado|cercle d or|cercle dor|circolo d oro|goldener kreis)\b/ig, 'golden circle'],
+    [/\b(thingvellir|þingvellir|parque nacional thingvellir|parque nacional þingvellir|thingvellir national park|þingvellir national park|haukadalur|geysir|strokkur|gullfoss|kerid|kerið)\b/ig, 'golden circle'],
 
     [/^(south coast|costa sur|cote sud|côte sud|costa sul|sudurland|suourland|sudur coast|southern coast)$/i, 'south coast'],
-    [/\b(south coast|costa sur|cote sud|côte sud|costa sul|sudurland|suourland|southern coast)\b/ig, 'south coast'],
+    [/\b(south coast|costa sur|cote sud|côte sud|costa sul|sudurland|suourland|southern coast|seljalandsfoss|skogafoss|skógafoss|reynisfjara|dyrholaey|dyrhólaey|vik|vík)\b/ig, 'south coast'],
 
-    [/^(snaefellsnes|snaefellsnes peninsula|snaefellsnes península|peninsula de snaefellsnes|península de snaefellsnes|snaefellsnes route)$/i, 'snaefellsnes peninsula'],
-    [/\b(snaefellsnes|snaefellsnes peninsula|peninsula de snaefellsnes|península de snaefellsnes)\b/ig, 'snaefellsnes peninsula'],
+    [/^(snaefellsnes|snæfellsnes|snaefellsnes peninsula|snæfellsnes peninsula|snaefellsnes península|snæfellsnes península|peninsula de snaefellsnes|península de snaefellsnes|peninsula de snæfellsnes|península de snæfellsnes|snaefellsnes route|snæfellsnes route|snaefellsjokull|snæfellsjökull|parque nacional snaefellsjokull|parque nacional snæfellsjökull)$/i, 'snaefellsnes peninsula'],
+    [/\b(snaefellsnes|snæfellsnes|snaefellsnes peninsula|snæfellsnes peninsula|peninsula de snaefellsnes|península de snaefellsnes|peninsula de snæfellsnes|península de snæfellsnes|snaefellsjokull|snæfellsjökull|parque nacional snaefellsjokull|parque nacional snæfellsjökull|kirkjufell|kirkjufellsfoss|djupalonssandur|djúpalónssandur|vatnshellir|arnarstapi|hellnar|londrangar|londrangar|lóndrangar|budir|búðir|budakirkja|búðakirkja)\b/ig, 'snaefellsnes peninsula'],
 
-    [/^(reykjanes|reykjanes peninsula|peninsula de reykjanes|península de reykjanes|reykjanes route)$/i, 'reykjanes peninsula'],
-    [/\b(reykjanes peninsula|peninsula de reykjanes|península de reykjanes|reykjanes)\b/ig, 'reykjanes peninsula'],
+    [/^(reykjanes|reykjanes peninsula|peninsula de reykjanes|península de reykjanes|reykjanes route|parque nacional reykjanes)$/i, 'reykjanes peninsula'],
+    [/\b(reykjanes peninsula|peninsula de reykjanes|península de reykjanes|reykjanes|parque nacional reykjanes|gunnuhver|reykjanesviti|grindavik|grindavík|kleifarvatn|seltun|seltún|brimketill|bridge between continents|puente entre continentes)\b/ig, 'reykjanes peninsula'],
 
     [/^(blue lagoon|laguna azul|lagoa azul|lagon bleu)$/i, 'blue lagoon'],
     [/\b(blue lagoon|laguna azul|lagoa azul|lagon bleu)\b/ig, 'blue lagoon'],
@@ -3336,19 +3385,19 @@ function _canonicalRouteAliasKey_(txt=''){
     [/\b(sky lagoon|laguna sky|lagon sky)\b/ig, 'sky lagoon'],
 
     [/^(silver circle|circulo plateado|círculo plateado|silver route|borgarfjordur|borgarfjörður)$/i, 'silver circle borgarfjordur'],
-    [/\b(silver circle|circulo plateado|círculo plateado|borgarfjordur|borgarfjörður)\b/ig, 'silver circle borgarfjordur'],
+    [/\b(silver circle|circulo plateado|círculo plateado|borgarfjordur|borgarfjörður|borgarnes|deildartunguhver|hraunfossar|barnafoss|reykholt|krauma)\b/ig, 'silver circle borgarfjordur'],
 
     [/^(old town|historic center|historical center|centro historico|centro histórico|vieille ville|casco antiguo|ciudad vieja)$/i, 'historic center'],
     [/\b(old town|historic center|historical center|centro historico|centro histórico|vieille ville|casco antiguo|ciudad vieja)\b/ig, 'historic center'],
 
     [/^(waterfront|riverside|riverfront|harbor|harbour|puerto|malecon|malecón|promenade|paseo maritimo|paseo marítimo)$/i, 'waterfront harbor'],
-    [/\b(waterfront|riverside|riverfront|harbor|harbour|puerto|malecon|malecón|promenade|paseo maritimo|paseo marítimo)\b/ig, 'waterfront harbor'],
+    [/\b(waterfront|riverside|riverfront|harbor|harbour|puerto|malecon|malecón|promenade|paseo maritimo|paseo marítimo|old harbor|old harbour|puerto viejo)\b/ig, 'waterfront harbor'],
 
     [/^(whale watching|whales|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)$/i, 'whale watching'],
     [/\b(whale watching|avistamiento de ballenas|observacion de ballenas|observación de ballenas|baleines|walbeobachtung)\b/ig, 'whale watching'],
 
     [/^(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)$/i, 'lava tunnel'],
-    [/\b(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave)\b/ig, 'lava tunnel'],
+    [/\b(lava tunnel|lava tube|tunel de lava|túnel de lava|tube de lave|raufarholshellir|raufarhólshellir)\b/ig, 'lava tunnel'],
 
     [/^(ice cave|cueva de hielo|caverna de hielo|grotte de glace|eishohle)$/i, 'ice cave'],
     [/\b(ice cave|cueva de hielo|caverna de hielo|grotte de glace|eishohle)\b/ig, 'ice cave'],
@@ -3495,7 +3544,7 @@ function _rowShapeToken_(row={}, city=''){
   const txt = _normalizeRepeatKey_(`${row?.activity || ''} ${row?.to || ''} ${row?.notes || ''}`);
 
   let kind = 'generic';
-  if(_isReturnRow_(row)) kind = 'return';
+  if(_isReturnLikeRow_(row)) kind = 'return';
   else if(/\b(museum|museo|gallery|galeria|galería|exhibition|exposicion|exposición)\b/.test(txt)) kind = 'museum';
   else if(/\b(church|cathedral|temple|monastery|iglesia|catedral|templo|monasterio|basilica|basílica)\b/.test(txt)) kind = 'heritage';
   else if(/\b(waterfall|cascada|beach|playa|cliff|acantilado|viewpoint|mirador|volcano|volcan|volcán|glacier|glaciar|lagoon|laguna|lake|lago|park|parque|canyon|cañon|cañón)\b/.test(txt)) kind = 'nature';
@@ -3584,7 +3633,14 @@ function _isRegionalDay_(dayRows=[], city=''){
   const regionalMacroCount = macros.filter(m => _isRegionalMacroKey_(m)).length;
   const returnCount = rows.filter(r => _isReturnLikeRow_(r)).length;
 
-  return regionalMacroCount >= Math.max(2, Math.ceil(rows.length * 0.45)) || returnCount > 0;
+  const textKey = _canonicalRouteAliasKey_(
+    rows.map(r => `${r?.activity || ''} ${r?.to || ''} ${r?.notes || ''}`).join(' ')
+  );
+
+  const hasKnownRegionalAlias =
+    /\b(golden circle|south coast|snaefellsnes peninsula|reykjanes peninsula|silver circle borgarfjordur|lava tunnel|whale watching|blue lagoon|sky lagoon)\b/.test(textKey);
+
+  return regionalMacroCount >= Math.max(2, Math.ceil(rows.length * 0.45)) || returnCount > 0 || hasKnownRegionalAlias;
 }
 
 function _isUrbanBaseDay_(dayRows=[], city=''){
@@ -3654,6 +3710,35 @@ function _findStrategicRepairDays_(rows=[], requestedDays=[], totalDays=1, city=
     }
   }
 
+  /*
+     PATCH · hard regional macro duplicate detection.
+     This catches cases like:
+     - Day 2 Golden Circle + Day 4 Þingvellir-only day
+     - Day 5 Snæfellsjökull + Day 7 Snaefellsnes
+  */
+  const seenRegionalMacros = new Map();
+
+  days.forEach(day=>{
+    const dayRows = byDay[day] || [];
+    if(!dayRows.length) return;
+    if(!_isRegionalDay_(dayRows, city)) return;
+
+    const sig = _regionalMacroSignature_(dayRows, city);
+    if(!sig) return;
+
+    const pieces = sig.split('|').map(x => _canonicalRouteAliasKey_(x)).filter(Boolean);
+
+    pieces.forEach(macro=>{
+      if(!macro || macro === 'urban-base') return;
+
+      if(seenRegionalMacros.has(macro)){
+        repair.add(Number(day));
+      }else{
+        seenRegionalMacros.set(macro, Number(day));
+      }
+    });
+  });
+
   const regionalDays = days.filter(day => _isRegionalDay_(byDay[day] || [], city)).length;
   const urbanCount = urbanDays.length;
 
@@ -3687,6 +3772,7 @@ function _hasMinimumRowsForDays_(rows=[], days=[]){
     return clean.length >= 3;
   });
 }
+
 /* =========================================================
    SECTION 15E.3
 ========================================================= */
