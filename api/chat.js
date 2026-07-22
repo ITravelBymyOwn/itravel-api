@@ -886,7 +886,7 @@ export default async function handler(req, res) {
     const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT).trim();
 
     // 🧭 PLANNER MODE — with strong v52.5 rules (only via prompt + guardrails)
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 3200, 90000);
+    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 8000, 120000);
     let parsed = cleanToJSON(raw);
 
     // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
@@ -902,7 +902,7 @@ MANDATORY:
 - Respond with valid JSON only.
 - Must include city_day (preferred) or rows (legacy) with at least 1 row.
 - No meta or text outside.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 3400, 95000);
+      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 9000, 120000);
       parsed = cleanToJSON(raw);
     }
 
@@ -924,7 +924,7 @@ Minimal valid example (DO NOT copy it literally; format guide only):
   ]}],
   "followup":""
 }`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.14, 3600, 95000);
+      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.14, 10000, 120000);
       parsed = cleanToJSON(raw);
     }
 
