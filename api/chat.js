@@ -823,37 +823,558 @@ FORMAT:
 `.trim();
 
 // ==============================
-// Model call (with soft timeout)
+// Deterministic validation + surgical repair (v59)
+// ==============================
+const MAX_REPAIR_ATTEMPTS = Math.max(
+  0,
+  Math.min(2, Number.parseInt(process.env.ITBMO_MAX_REPAIRS || "2", 10) || 2)
+);
+
+function _normKey_(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[’'"]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _parseTime_(value = "") {
+  const m = String(value || "").match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+}
+
+function _cleanPlannerLeak_(value = "") {
+  return String(value || "")
+    .replace(/\bclose\s+to\b/gi, "")
+    .replace(/\brecommend\s*me\b/gi, "")
+    .replace(/\brecommended\s+by\s+(the\s+)?planner\b/gi, "")
+    .replace(/\bas\s+appropriate\b/gi, "")
+    .replace(/\s+/g, " ")
+    .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "")
+    .trim();
+}
+
+function _durationToMinutes_(value = "") {
+  const s = _normKey_(value);
+  if (!s) return null;
+
+  let total = 0;
+  const h = s.match(/(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)/);
+  const m = s.match(/(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)/);
+
+  if (h) total += Math.round(Number(h[1]) * 60);
+  if (m) total += Number(m[1]);
+
+  if (!h && !m) {
+    const range = s.match(/(\d+)\s*[-–]\s*(\d+)/);
+    if (range) total = Math.round((Number(range[1]) + Number(range[2])) / 2);
+  }
+
+  return total > 0 ? total : null;
+}
+
+function _formatDuration_(minutes) {
+  const n = Math.max(1, Math.round(Number(minutes) || 1));
+  if (n < 60) return `~${n}m`;
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  return m ? `~${h}h ${m}m` : `~${h}h`;
+}
+
+function _extractDurationPart_(duration = "", labels = []) {
+  const source = String(duration || "");
+  for (const label of labels) {
+    const re = new RegExp(`${label}\\s*:\\s*([^\\n|;]+)`, "i");
+    const match = source.match(re);
+    if (match?.[1]) return match[1].trim();
+  }
+  return "";
+}
+
+function _normalizeDurationV59_(row = {}) {
+  const raw = String(row?.duration || "");
+  const transportRaw = _extractDurationPart_(raw, ["Transport", "Transporte"]);
+  const activityRaw = _extractDurationPart_(raw, [
+    "Activity",
+    "Atividade",
+    "Actividad",
+    "Activité",
+    "Aktivität",
+    "Attività",
+  ]);
+
+  const start = _parseTime_(row?.start);
+  const end = _parseTime_(row?.end);
+  const blockMinutes = start != null && end != null && end > start ? end - start : 60;
+
+  const transportMinutes = _durationToMinutes_(transportRaw) || 10;
+  const activityMinutes = _durationToMinutes_(activityRaw) || Math.max(15, blockMinutes - transportMinutes);
+
+  return `Transport: ${_formatDuration_(transportMinutes)}\nActivity: ${_formatDuration_(activityMinutes)}`;
+}
+
+function _normalizeRowV59_(row = {}, blockDay = 1, previousTo = "") {
+  const from = _cleanPlannerLeak_(row?.from) || _cleanPlannerLeak_(previousTo) || "Hotel";
+  const activity = String(row?.activity || "").replace(/\s+/g, " ").trim();
+  const inferredTo = activity.split(/\s+[–-]\s+/).pop() || "Destination";
+  const to = _cleanPlannerLeak_(row?.to) || _cleanPlannerLeak_(inferredTo);
+
+  return {
+    ...row,
+    day: Number(row?.day) || Number(blockDay) || 1,
+    start: String(row?.start || "").trim(),
+    end: String(row?.end || "").trim(),
+    activity,
+    from,
+    to,
+    transport: String(row?.transport || "").replace(/\s+/g, " ").trim(),
+    duration: _normalizeDurationV59_(row),
+    notes: String(row?.notes || "").replace(/\s+/g, " ").trim(),
+    kind: row?.kind ?? "",
+    zone: row?.zone ?? "",
+  };
+}
+
+function _normalizeCityDayV59_(city_day, destinationFallback = "") {
+  const uniqueDays = new Map();
+
+  for (const [idx, block] of (Array.isArray(city_day) ? city_day : []).entries()) {
+    const day = Number(block?.day) || idx + 1;
+    let previousTo = "";
+    const rows = (Array.isArray(block?.rows) ? block.rows : [])
+      .map((row) => {
+        const normalized = _normalizeRowV59_(row, day, previousTo);
+        previousTo = normalized.to;
+        return normalized;
+      })
+      .sort((a, b) => (_parseTime_(a.start) ?? 9999) - (_parseTime_(b.start) ?? 9999));
+
+    uniqueDays.set(day, {
+      city: String(block?.city || block?.destination || destinationFallback || "").trim(),
+      day,
+      rows,
+    });
+  }
+
+  return [...uniqueDays.values()].sort((a, b) => a.day - b.day);
+}
+
+function _normalizeParsedV59_(parsed) {
+  parsed = normalizeParsed(parsed);
+  if (!parsed || typeof parsed !== "object") return parsed;
+
+  if (Array.isArray(parsed.city_day)) {
+    parsed.city_day = _normalizeCityDayV59_(parsed.city_day, parsed.destination);
+  }
+
+  if (Array.isArray(parsed.rows)) {
+    parsed.rows = parsed.rows.map((row) => _normalizeRowV59_(row, row?.day || 1, ""));
+  }
+
+  if (Array.isArray(parsed.destinations)) {
+    parsed.destinations = parsed.destinations.map((destination) => {
+      const name = destination?.name || destination?.destination || "";
+      return {
+        ...destination,
+        rows: Array.isArray(destination?.rows)
+          ? destination.rows.map((row) => _normalizeRowV59_(row, row?.day || 1, ""))
+          : destination?.rows,
+        city_day: Array.isArray(destination?.city_day)
+          ? _normalizeCityDayV59_(destination.city_day, name)
+          : destination?.city_day,
+      };
+    });
+  }
+
+  return parsed;
+}
+
+function _rowRangeForDay_(block = {}) {
+  const rows = Array.isArray(block?.rows) ? block.rows : [];
+  if (!rows.length) return { min: 1, max: 20 };
+
+  const first = _parseTime_(rows[0]?.start);
+  const last = _parseTime_(rows[rows.length - 1]?.end);
+  const span = first != null && last != null && last > first ? last - first : null;
+
+  if (span != null && span < 240) return { min: 2, max: 6 };
+  if (span != null && span < 360) return { min: 3, max: 8 };
+  return { min: 4, max: 15 };
+}
+
+function _isLikelyDayTrip_(block = {}) {
+  const text = _normKey_(
+    (Array.isArray(block?.rows) ? block.rows : [])
+      .map((r) => `${r?.activity || ""} ${r?.to || ""} ${r?.notes || ""}`)
+      .join(" ")
+  );
+
+  return [
+    "day trip",
+    "excursion",
+    "excursao",
+    "excursión",
+    "regional",
+    "circle",
+    "circuito",
+    "coast",
+    "costa",
+    "peninsula",
+    "península",
+    "toledo",
+    "girona",
+    "montserrat",
+  ].some((hint) => text.includes(_normKey_(hint)));
+}
+
+function _hasReturnRow_(block = {}) {
+  const rows = Array.isArray(block?.rows) ? block.rows : [];
+  const lastRows = rows.slice(-2);
+  const text = _normKey_(
+    lastRows.map((r) => `${r?.activity || ""} ${r?.to || ""} ${r?.notes || ""}`).join(" ")
+  );
+
+  return [
+    "return",
+    "back to",
+    "regresso",
+    "retorno",
+    "regreso",
+    "volta",
+    "hotel",
+  ].some((hint) => text.includes(_normKey_(hint)));
+}
+
+function _validateCityDayV59_(parsed) {
+  const errors = [];
+  const cityDay = Array.isArray(parsed?.city_day) ? parsed.city_day : [];
+  const expectedDays = Math.max(1, Number(parsed?.days_total || cityDay.length || 1));
+
+  const dayNumbers = cityDay.map((b) => Number(b?.day)).filter(Number.isFinite);
+  const uniqueDayNumbers = new Set(dayNumbers);
+
+  for (let d = 1; d <= expectedDays; d++) {
+    if (!uniqueDayNumbers.has(d)) errors.push({ code: "MISSING_DAY", day: d });
+  }
+
+  for (const d of new Set(dayNumbers.filter((day, idx) => dayNumbers.indexOf(day) !== idx))) {
+    errors.push({ code: "DAY_UNIQUENESS", day: d });
+  }
+
+  const poiMap = new Map();
+
+  for (const block of cityDay) {
+    const day = Number(block?.day) || 0;
+    const rows = Array.isArray(block?.rows) ? block.rows : [];
+    const range = _rowRangeForDay_(block);
+
+    if (rows.length < range.min || rows.length > range.max) {
+      errors.push({
+        code: "ROW_COUNT",
+        day,
+        actual: rows.length,
+        expected_min: range.min,
+        expected_max: range.max,
+      });
+    }
+
+    let previousEnd = null;
+    let previousTo = "";
+
+    rows.forEach((row, index) => {
+      const rowNumber = index + 1;
+
+      for (const field of ["start", "end", "activity", "from", "to", "transport", "duration", "notes"]) {
+        if (!String(row?.[field] || "").trim()) {
+          errors.push({ code: "REQUIRED_FIELDS", day, row: rowNumber, field });
+        }
+      }
+
+      const start = _parseTime_(row?.start);
+      const end = _parseTime_(row?.end);
+
+      if (start == null || end == null || start >= end) {
+        errors.push({
+          code: "TIME_ORDER",
+          day,
+          row: rowNumber,
+          start: row?.start,
+          end: row?.end,
+        });
+      }
+
+      if (previousEnd != null && start != null && start < previousEnd) {
+        errors.push({ code: "TIME_OVERLAP", day, rows: [index, rowNumber] });
+      }
+
+      if (index > 0 && previousTo) {
+        const currentFrom = _normKey_(row?.from);
+        const priorTo = _normKey_(previousTo);
+        const compatible =
+          currentFrom === priorTo ||
+          currentFrom.includes(priorTo) ||
+          priorTo.includes(currentFrom) ||
+          /hotel|station|estacion|estacao|airport|aeroporto|aeropuerto/.test(
+            `${currentFrom} ${priorTo}`
+          );
+
+        if (!compatible) {
+          errors.push({
+            code: "CONTINUITY",
+            day,
+            row: rowNumber,
+            expected_from: previousTo,
+            actual_from: row?.from,
+          });
+        }
+      }
+
+      const durationLines = String(row?.duration || "").split("\n").filter(Boolean);
+      if (
+        durationLines.length !== 2 ||
+        !/^Transport\s*:/i.test(durationLines[0]) ||
+        !/^Activity\s*:/i.test(durationLines[1]) ||
+        /\b0m\b/i.test(String(row?.duration || ""))
+      ) {
+        errors.push({ code: "DURATION_FORMAT", day, row: rowNumber });
+      }
+
+      if (
+        /\b(close\s+to|recommend\s*me|recommended\s+by\s+planner|as\s+appropriate)\b/i.test(
+          `${row?.from || ""} ${row?.to || ""}`
+        )
+      ) {
+        errors.push({ code: "FIELD_CONTAMINATION", day, row: rowNumber });
+      }
+
+      if (!/\s+[–-]\s+/.test(String(row?.activity || ""))) {
+        errors.push({ code: "ACTIVITY_FORMAT", day, row: rowNumber });
+      }
+
+      if (
+        /\b(fallback|repair|debug|placeholder|itinerary pending|free day|dia libre|día libre|tempo livre)\b/i.test(
+          String(row?.activity || "")
+        )
+      ) {
+        errors.push({ code: "GENERIC_ACTIVITY", day, row: rowNumber });
+      }
+
+      const poi = _normKey_(row?.to);
+      if (poi && poi.length >= 5) {
+        if (!poiMap.has(poi)) poiMap.set(poi, []);
+        poiMap.get(poi).push({ day, row: rowNumber });
+      }
+
+      previousEnd = end;
+      previousTo = row?.to || "";
+    });
+
+    if (_isLikelyDayTrip_(block) && !_hasReturnRow_(block)) {
+      errors.push({ code: "RETURN_ROW", day });
+    }
+  }
+
+  for (const [poi, uses] of poiMap.entries()) {
+    const distinctDays = [...new Set(uses.map((u) => u.day))];
+    if (distinctDays.length > 1) {
+      errors.push({ code: "DUPLICATE_POI", poi, uses });
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    affected_days: [
+      ...new Set(
+        errors.flatMap((error) => {
+          const days = [];
+          if (Number.isFinite(Number(error?.day))) days.push(Number(error.day));
+          for (const use of Array.isArray(error?.uses) ? error.uses : []) {
+            if (Number.isFinite(Number(use?.day))) days.push(Number(use.day));
+          }
+          return days;
+        })
+      ),
+    ].sort((a, b) => a - b),
+  };
+}
+
+function _mergeRepairedDays_(current, repaired) {
+  if (!Array.isArray(current?.city_day) || !Array.isArray(repaired?.city_day)) return current;
+
+  const replacements = new Map(
+    repaired.city_day.map((block) => [Number(block?.day), block])
+  );
+
+  const merged = current.city_day.map(
+    (block) => replacements.get(Number(block?.day)) || block
+  );
+
+  for (const [day, block] of replacements.entries()) {
+    if (!merged.some((existing) => Number(existing?.day) === day)) merged.push(block);
+  }
+
+  return {
+    ...current,
+    city_day: _normalizeCityDayV59_(merged, current?.destination || ""),
+    followup: repaired?.followup ?? current?.followup ?? "",
+  };
+}
+
+function _publicPlannerError_(lang = "en", code = "GENERATION_ERROR") {
+  const messages = {
+    es: "No fue posible completar el itinerario con la calidad requerida. Inténtalo nuevamente.",
+    pt: "Não foi possível concluir o itinerário com a qualidade necessária. Tente novamente.",
+    fr: "Impossible de terminer l’itinéraire avec la qualité requise. Veuillez réessayer.",
+    de: "Die Reiseroute konnte nicht in der erforderlichen Qualität erstellt werden. Bitte versuchen Sie es erneut.",
+    it: "Non è stato possibile completare l’itinerario con la qualità richiesta. Riprova.",
+    en: "The itinerary could not be completed at the required quality. Please try again.",
+  };
+
+  return {
+    ok: false,
+    error: {
+      code,
+      message: messages[lang] || messages.en,
+      retryable: true,
+      stage: "planner_validation",
+    },
+  };
+}
+
+// ==============================
+// Model call — real roles + explicit status/usage
 // ==============================
 async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
-  const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
-
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
+  const systemMessages = (messages || []).filter(
+    (m) => String(m?.role || "").toLowerCase() === "system"
+  );
+  const nonSystemMessages = (messages || []).filter(
+    (m) => String(m?.role || "").toLowerCase() !== "system"
+  );
+
+  const instructions = systemMessages
+    .map((m) => String(m?.content || ""))
+    .filter(Boolean)
+    .join("\n\n");
+
+  const input = nonSystemMessages.map((m) => ({
+    role: ["user", "assistant", "developer"].includes(String(m?.role || "").toLowerCase())
+      ? String(m.role).toLowerCase()
+      : "user",
+    content: String(m?.content || ""),
+  }));
+
   try {
-   const resp = await client.responses.create(
-  {
-    model: MODEL,
-    reasoning: {
-      effort: "low",
-    },
-    input,
-    max_output_tokens,
-  },
-  { signal: controller.signal }
-);
+    const resp = await client.responses.create(
+      {
+        model: MODEL,
+        instructions,
+        reasoning: { effort: "low" },
+        input,
+        max_output_tokens,
+      },
+      { signal: controller.signal }
+    );
 
-    const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
+    const text =
+      resp?.output_text?.trim() ||
+      resp?.output?.[0]?.content?.[0]?.text?.trim() ||
+      "";
 
-    console.log("🛰️ RAW RESPONSE:", text);
+    console.log("🛰️ MODEL STATUS:", {
+      status: resp?.status,
+      incomplete_details: resp?.incomplete_details || null,
+      usage: resp?.usage || null,
+      output_chars: text.length,
+    });
+
+    if (resp?.status === "incomplete") {
+      const error = new Error("INCOMPLETE_OUTPUT");
+      error.code = "INCOMPLETE_OUTPUT";
+      error.details = resp?.incomplete_details || null;
+      throw error;
+    }
+
+    if (!text) {
+      const error = new Error("EMPTY_MODEL_OUTPUT");
+      error.code = "EMPTY_MODEL_OUTPUT";
+      throw error;
+    }
+
     return text;
   } catch (e) {
     console.warn("callStructured error:", e?.message || e);
-    return "";
+    throw e;
   } finally {
     clearTimeout(t);
   }
+}
+
+async function _repairPlannerOutput_(
+  currentParsed,
+  validationReport,
+  systemPromptEffective,
+  clientMessages,
+  attempt
+) {
+  const affectedDays = validationReport?.affected_days?.length
+    ? validationReport.affected_days
+    : (currentParsed?.city_day || []).map((block) => Number(block?.day)).filter(Number.isFinite);
+
+  const affectedBlocks = Array.isArray(currentParsed?.city_day)
+    ? currentParsed.city_day.filter((block) => affectedDays.includes(Number(block?.day)))
+    : [];
+
+  const validSurroundingDays = Array.isArray(currentParsed?.city_day)
+    ? currentParsed.city_day.filter((block) => !affectedDays.includes(Number(block?.day)))
+    : [];
+
+  const repairPrompt = `
+${systemPromptEffective}
+
+SURGICAL REPAIR MODE — ATTEMPT ${attempt}:
+- Do NOT regenerate valid days.
+- Return a valid JSON object containing ONLY:
+  {
+    "destination":"same destination",
+    "days_total":same number,
+    "city_day":[complete replacement blocks only for affected days],
+    "followup":""
+  }
+- Each returned affected day must be complete and table-ready.
+- Fix every listed validation error.
+- Preserve the selected language.
+- Preserve must-includes, day identity, geography and valid content.
+- Do not introduce new duplicated POIs, field contamination, overlaps, missing returns or generic filler.
+- No text outside JSON.
+`.trim();
+
+  const repairContext = {
+    validation_errors: validationReport?.errors || [],
+    affected_days: affectedDays,
+    affected_day_blocks: affectedBlocks,
+    valid_surrounding_days: validSurroundingDays,
+  };
+
+  const repairMessages = [
+    { role: "system", content: repairPrompt },
+    ...clientMessages,
+    {
+      role: "user",
+      content: `REPAIR CONTEXT:\n${JSON.stringify(repairContext)}`,
+    },
+  ];
+
+  const raw = await callStructured(repairMessages, 0.12, 9000, 120000);
+  const parsed = cleanToJSON(raw);
+  return parsed ? _normalizeParsedV59_(parsed) : null;
 }
 
 // ==============================
@@ -866,18 +1387,32 @@ export default async function handler(req, res) {
     }
 
     const body = req.body || {};
-    const mode = body.mode || "planner"; // 👈 existing parameter
+    const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
-    // 🧭 INFO CHAT MODE — free text (like ChatGPT: open + context + user's real language)
+    // INFO mode remains externally unchanged.
     if (mode === "info") {
-      const raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages], 0.45, 2600, 70000);
-      const text = raw || "⚠️ No response was obtained from the assistant.";
-      return res.status(200).json({ text });
+      try {
+        const raw = await callStructured(
+          [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
+          0.45,
+          2600,
+          70000
+        );
+        return res.status(200).json({ text: raw });
+      } catch {
+        return res.status(200).json({
+          text:
+            lang === "es"
+              ? "⚠️ No se obtuvo respuesta del asistente."
+              : lang === "pt"
+                ? "⚠️ Não foi obtida uma resposta do assistente."
+                : "⚠️ No response was obtained from the assistant.",
+        });
+      }
     }
 
-    // ✅ NEW (ULTRA-SURGICAL): language override if user explicitly selected a language (e.g., "Português")
     const override = detectLanguageOverride(clientMessages);
     const overrideLine = override
       ? `LANGUAGE OVERRIDE (USER-SELECTED, HIGHEST PRIORITY): Output MUST be in ${override.toUpperCase()}.\n- Ignore earlier mixed-language content.\n- Keep ALL JSON keys/shape the same.\n`
@@ -885,83 +1420,104 @@ export default async function handler(req, res) {
 
     const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT).trim();
 
-    // 🧭 PLANNER MODE — with strong v52.5 rules (only via prompt + guardrails)
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 8000, 120000);
+    let raw = await callStructured(
+      [{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages],
+      0.28,
+      10000,
+      120000
+    );
     let parsed = cleanToJSON(raw);
 
-    // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
     const hasSome =
-      parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
+      parsed &&
+      (Array.isArray(parsed.city_day) ||
+        Array.isArray(parsed.rows) ||
+        Array.isArray(parsed.destinations));
 
     if (!hasSome) {
-      const strictPrompt =
-        SYSTEM_PROMPT_EFFECTIVE +
-        `
+      const strictPrompt = `${SYSTEM_PROMPT_EFFECTIVE}
 
-MANDATORY:
-- Respond with valid JSON only.
-- Must include city_day (preferred) or rows (legacy) with at least 1 row.
-- No meta or text outside.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 9000, 120000);
+MANDATORY RECOVERY:
+- Return valid JSON only.
+- Include city_day (preferred), rows, or destinations with renderable rows.
+- Complete all requested days.
+- No meta commentary or text outside JSON.
+- Under token pressure, shorten notes before omitting rows or days.`;
+
+      raw = await callStructured(
+        [{ role: "system", content: strictPrompt }, ...clientMessages],
+        0.18,
+        11000,
+        120000
+      );
       parsed = cleanToJSON(raw);
     }
 
-    // 2) Retry: ultra with minimal example (only if still failing)
-    const stillBad =
-      !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
-
-    if (stillBad) {
-      const ultraPrompt =
-        SYSTEM_PROMPT_EFFECTIVE +
-        `
-
-Minimal valid example (DO NOT copy it literally; format guide only):
-{
-  "destination":"CITY",
-  "days_total":1,
-  "city_day":[{"city":"CITY","day":1,"rows":[
-    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Iconic spot","from":"Hotel","to":"Center","transport":"Walk","duration":"Transport: ~10m\\nActivity: ~90m","notes":"Discover a landmark corner and arrive early to avoid lines. Tip: bring water and check hours.","kind":"","zone":""}
-  ]}],
-  "followup":""
-}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.14, 10000, 120000);
-      parsed = cleanToJSON(raw);
+    if (!parsed) {
+      return res
+        .status(200)
+        .json({ text: JSON.stringify(_publicPlannerError_(lang, "SCHEMA_ERROR")) });
     }
 
-    // 3) Normalization + anti-blank-table guardrails
-    if (!parsed) parsed = fallbackJSON(lang);
+    parsed = _normalizeParsedV59_(parsed);
 
-    // Prefer city_day: if the model returned legacy rows, keep them; but if it returned city_day, normalize it.
-    parsed = normalizeParsed(parsed);
+    // Apply deterministic validation and repair only to the preferred city_day format.
+    // Legacy rows/destinations remain compatible and are returned normalized.
+    if (Array.isArray(parsed.city_day)) {
+      let report = _validateCityDayV59_(parsed);
 
-    // Final guard-rail: if city_day exists but is empty/no rows, inject skeleton
-    try {
-      const dest = String(parsed?.destination || "Destination").trim() || "Destination";
-      const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
+      for (
+        let attempt = 1;
+        !report.ok && attempt <= MAX_REPAIR_ATTEMPTS;
+        attempt++
+      ) {
+        console.warn("🧪 VALIDATION REPORT:", {
+          attempt,
+          affected_days: report.affected_days,
+          codes: [...new Set(report.errors.map((error) => error.code))],
+        });
 
-      if (Array.isArray(parsed.city_day)) {
-        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
-        if (!_hasAnyRows_(parsed.city_day)) {
-          parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
-          parsed.followup =
-            (parsed.followup ? parsed.followup + " | " : "") +
-            "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table.";
-        }
+        const repaired = await _repairPlannerOutput_(
+          parsed,
+          report,
+          SYSTEM_PROMPT_EFFECTIVE,
+          clientMessages,
+          attempt
+        );
+
+        if (!repaired?.city_day?.length) break;
+
+        parsed = _mergeRepairedDays_(parsed, repaired);
+        parsed = _normalizeParsedV59_(parsed);
+        report = _validateCityDayV59_(parsed);
       }
-    } catch {}
+
+      if (!report.ok) {
+        console.error("❌ FINAL BUSINESS VALIDATION ERROR:", report);
+        return res.status(200).json({
+          text: JSON.stringify(
+            _publicPlannerError_(lang, "BUSINESS_VALIDATION_ERROR")
+          ),
+        });
+      }
+    }
 
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
-    // In case of exception, try responding in the user's language based on body (fallback only).
     try {
       const body = req?.body || {};
       const clientMessages = extractMessages(body);
       const lang = detectUserLang(clientMessages);
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON(lang)) });
+      const code = err?.code === "INCOMPLETE_OUTPUT" ? "INCOMPLETE_OUTPUT" : "MODEL_ERROR";
+      return res
+        .status(200)
+        .json({ text: JSON.stringify(_publicPlannerError_(lang, code)) });
     } catch {
-      return res.status(200).json({ text: JSON.stringify(fallbackJSON("en")) });
+      return res
+        .status(200)
+        .json({ text: JSON.stringify(_publicPlannerError_("en", "MODEL_ERROR")) });
     }
   }
 }
