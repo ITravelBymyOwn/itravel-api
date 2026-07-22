@@ -832,14 +832,17 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   const t = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const resp = await client.responses.create(
-      {
-        model: MODEL,
-        input,
-        max_output_tokens,
-      },
-      { signal: controller.signal }
-    );
+   const resp = await client.responses.create(
+  {
+    model: MODEL,
+    reasoning: {
+      effort: "low",
+    },
+    input,
+    max_output_tokens,
+  },
+  { signal: controller.signal }
+);
 
     const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 
