@@ -829,7 +829,7 @@ FORMAT:
 
 const ITBMO_MAX_REPAIRS = Math.max(
   0,
-  Math.min(2, Number.parseInt(process.env.ITBMO_MAX_REPAIRS || "1", 10) || 1)
+  Math.min(2, Number.parseInt(process.env.ITBMO_MAX_REPAIRS || "2", 10) || 2)
 );
 
 const ITBMO_ALWAYS_AUDIT =
@@ -864,8 +864,13 @@ B. DATE, SEASON, DAYLIGHT AND OPERATING REALITY
    the destination and date.
 7. Seasonal signature experiences should be considered when relevant. They remain conditional:
    never guarantee wildlife, auroras, blossoms, snow, weather, sea conditions or visibility.
-8. When current opening, road, volcanic, maritime, weather or access conditions matter, state a
+8. For a stay of five nights or more at a high-latitude destination during a plausible aurora
+   season, include at least one real conditional aurora-hunting row unless the user explicitly
+   excludes night activities. It must be a timed row, never only a sentence in Notes.
+9. When current opening, road, volcanic, maritime, weather or access conditions matter, state a
    concise confirmation requirement. Do not pretend to have live data.
+10. Never use a generic summer template in winter. In limited-daylight seasons, calculate the
+   trip rhythm around a plausible daylight envelope before assigning scenic outdoor stops.
 
 C. TIME MATHEMATICS
 1. The row interval from start to end must contain both transport and activity.
@@ -891,7 +896,9 @@ D. TRANSPORT CHOICE
    rented a car.
 4. Rental-car information belongs in transport, never inside the lodging or geographic name.
 5. Inside a venue, spa, museum, terminal or pedestrian complex, do not invent a car movement.
-6. Public transport, taxi, walking, ferry, train and rental car should be selected according to
+6. For compact urban clusters, compare walking time with the burden of driving and parking.
+   Prefer walking when it is practical, even when a rental car exists.
+7. Public transport, taxi, walking, ferry, train and rental car should be selected according to
    actual leg logic and user restrictions.
 
 E. CONCRETE PLACES
@@ -906,7 +913,9 @@ E. CONCRETE PLACES
 
 F. DUPLICATION
 1. Do not repeat the same major POI on different days.
-2. Treat translated names, aliases, abbreviations and parent/child labels as the same POI when they
+2. Before final output, create an internal trip-wide list of every major POI already used and
+   compare every later row against it.
+3. Treat translated names, aliases, abbreviations and parent/child labels as the same POI when they
    clearly refer to the same visit.
 3. Do not split one attraction into multiple days merely by changing the subtitle.
 4. Repeating the hotel, airport, base city, station, return point or a necessary transit node is
@@ -960,6 +969,8 @@ function _v60CleanLocation(value = "") {
     .replace(/\brecommend\s*me\b/gi, "")
     .replace(/\brecommended\s+by\s+(the\s+)?planner\b/gi, "")
     .replace(/\bas\s+appropriate\b/gi, "")
+    .replace(/,\s*(?:rental\s*car|rent[- ]?a[- ]?car|veh[ií]culo\s+alquilado|coche\s+alquilado|carro\s+alugado)\b/gi, "")
+    .replace(/\(\s*(?:rental\s*car|veh[ií]culo\s+alquilado|coche\s+alquilado|carro\s+alugado)\s*\)/gi, "")
     .replace(/\s+/g, " ")
     .replace(/^[,;:\-\s]+|[,;:\-\s]+$/g, "")
     .trim();
@@ -1156,16 +1167,33 @@ function _v60IsMeal(row = {}) {
 }
 
 function _v60CanonicalPoi(row = {}) {
-  const to = _v60NormKey(row?.to);
+  const rawTo = String(row?.to || "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\/.*$/g, " ");
+  const rawActivity = String(row?.activity || "")
+    .replace(/^.*?\s+[–-]\s+/, "")
+    .replace(/\([^)]*\)/g, " ");
+
+  const to = _v60NormKey(rawTo);
+  const activity = _v60NormKey(rawActivity);
+
   if (!to || _v60IsTransitNode(to)) return "";
 
   let key = to
-    .replace(/\b(parking|car park|entrance|entrada|reception|recepcion|recepção|visitor center|centre|centro de visitantes|mirador|viewpoint)\b/g, "")
+    .replace(/\b(parking|car park|entrance|entrada|reception|recepcion|recepcao|visitor center|visitor centre|centro de visitantes|mirador|viewpoint|tower|torre|exterior|interior|museum|museo|museu|concert hall|hall)\b/g, "")
     .replace(/\s+/g, " ")
     .trim();
 
+  const activityKey = activity
+    .replace(/\b(mirador|viewpoint|tower|torre|exterior|interior|visit|visita|paseo|walk|almuerzo|lunch|cena|dinner)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (activityKey.length >= 6 && (key.includes(activityKey) || activityKey.includes(key))) {
+    key = key.length <= activityKey.length ? key : activityKey;
+  }
+
   if (_v60IsMeal(row)) {
-    // Restaurants are only duplicates when the same named venue is reused.
     return key.length >= 8 ? `meal:${key}` : "";
   }
 
@@ -1209,6 +1237,83 @@ function _v60HasReturn(block = {}) {
   return /\b(return|back to|regreso|retorno|regresso|volta|hotel|alojamiento|accommodation|base)\b/.test(
     finalText
   );
+}
+
+
+function _v61EnsureCanonicalCityDay(parsed) {
+  if (!parsed || typeof parsed !== "object") return parsed;
+
+  if (Array.isArray(parsed.city_day) && parsed.city_day.length) {
+    parsed.city_day = _v60NormalizeCityDay(parsed.city_day, parsed.destination || "");
+    parsed.days_total = Number(parsed.days_total || parsed.city_day.length);
+    return parsed;
+  }
+
+  if (Array.isArray(parsed.rows) && parsed.rows.length) {
+    const grouped = new Map();
+    for (const row of parsed.rows) {
+      const day = Number(row?.day) || 1;
+      if (!grouped.has(day)) grouped.set(day, []);
+      grouped.get(day).push(row);
+    }
+
+    parsed.city_day = _v60NormalizeCityDay(
+      [...grouped.entries()].map(([day, rows]) => ({
+        city: parsed.destination || "",
+        day,
+        rows,
+      })),
+      parsed.destination || ""
+    );
+    parsed.days_total = Number(parsed.days_total || parsed.city_day.length);
+    return parsed;
+  }
+
+  if (Array.isArray(parsed.destinations) && parsed.destinations.length === 1) {
+    const destination = parsed.destinations[0] || {};
+    const name = destination.name || destination.destination || parsed.destination || "";
+
+    if (Array.isArray(destination.city_day) && destination.city_day.length) {
+      parsed.destination = parsed.destination || name;
+      parsed.city_day = _v60NormalizeCityDay(destination.city_day, name);
+      parsed.days_total = Number(parsed.days_total || destination.days_total || parsed.city_day.length);
+    } else if (Array.isArray(destination.rows) && destination.rows.length) {
+      const grouped = new Map();
+      for (const row of destination.rows) {
+        const day = Number(row?.day) || 1;
+        if (!grouped.has(day)) grouped.set(day, []);
+        grouped.get(day).push(row);
+      }
+      parsed.destination = parsed.destination || name;
+      parsed.city_day = _v60NormalizeCityDay(
+        [...grouped.entries()].map(([day, rows]) => ({ city: name, day, rows })),
+        name
+      );
+      parsed.days_total = Number(parsed.days_total || destination.days_total || parsed.city_day.length);
+    }
+  }
+
+  return parsed;
+}
+
+function _v61ValidationSummary(report) {
+  if (!report || report.ok) return { ok: true, errors: [] };
+  return {
+    ok: false,
+    affected_days: report.affected_days || [],
+    errors: (report.errors || []).map((error) => ({
+      code: error.code,
+      day: error.day ?? null,
+      row: error.row ?? null,
+      poi: error.poi ?? null,
+      row_minutes: error.row_minutes ?? null,
+      minimum_needed_minutes: error.minimum_needed_minutes ?? null,
+      expected_from: error.expected_from ?? null,
+      actual_from: error.actual_from ?? null,
+      to: error.to ?? null,
+      uses: error.uses ?? null,
+    })),
+  };
 }
 
 function _v60Validate(parsed) {
@@ -1325,6 +1430,14 @@ function _v60Validate(parsed) {
       }
 
       if (
+        /(?:,|\()\s*(?:rental\s*car|rent[- ]?a[- ]?car|veh[ií]culo\s+alquilado|coche\s+alquilado|carro\s+alugado)\b/i.test(
+          `${row?.from || ""} ${row?.to || ""}`
+        )
+      ) {
+        errors.push({ code: "LODGING_TRANSPORT_CONTAMINATION", day, row: rowNumber });
+      }
+
+      if (
         /\s\/\s|\bor similar\b|\bo similar\b|\bselected\b|\bseleccionados\b|\brecommended restaurant\b|\brestaurante recomendado\b/i.test(
           String(row?.to || "")
         )
@@ -1381,6 +1494,33 @@ function _v60Validate(parsed) {
         poi,
         uses,
       });
+    }
+  }
+
+  const poiEntries = [...poiMap.entries()];
+  for (let i = 0; i < poiEntries.length; i++) {
+    for (let j = i + 1; j < poiEntries.length; j++) {
+      const [poiA, usesA] = poiEntries[i];
+      const [poiB, usesB] = poiEntries[j];
+      if (poiA.startsWith("meal:") || poiB.startsWith("meal:")) continue;
+
+      const a = poiA.replace(/^meal:/, "");
+      const b = poiB.replace(/^meal:/, "");
+      const same =
+        a === b ||
+        (a.length >= 7 && b.length >= 7 && (a.includes(b) || b.includes(a)));
+
+      if (!same) continue;
+
+      const uses = [...usesA, ...usesB];
+      const distinctDays = [...new Set(uses.map((use) => use.day))];
+      if (distinctDays.length > 1) {
+        errors.push({
+          code: "DUPLICATE_POI_ALIAS",
+          poi: `${poiA} <> ${poiB}`,
+          uses,
+        });
+      }
     }
   }
 
@@ -1517,19 +1657,31 @@ Do not return commentary.
 IMPORTANT:
 - Preserve every genuinely strong and distinct day bucket from the draft.
 - Do not replace a unique regional or signature experience with repeated city filler.
-- Correct season/daylight logic, row time mathematics, transport choice, concrete destinations,
-  language consistency, continuity, duplicate POIs and missing returns.
+- Correct every item in deterministic_validation, plus season/daylight logic, transport choice,
+  concrete destinations, language consistency and whole-trip diversity.
+- A row is invalid when minimum transport + minimum activity exceeds end - start.
+- A major POI may appear on only one day. Hall, church, museum, tower, exterior and viewpoint
+  subtitles do not make a repeated place new.
 - Compare all days globally before editing.
 - For each later day, prefer the strongest unused experience bucket.
 - Do not remove a valid regional day merely because it is operationally conditional; instead make
   it conditional and provide one coherent same-direction fallback in Notes.
 - Alternatives belong only in Notes, never inside To.
+- Remove rental-car wording from accommodation and geographic fields.
+- Prefer walking for compact central clusters.
 - Every row interval must fit transport plus activity.
+- In a high-latitude aurora season with five or more nights, include one conditional timed aurora
+  row unless the request excludes night activities.
 - Return all requested days exactly once.
 `.trim();
 
+  const draftReport = _v60Validate(_v61EnsureCanonicalCityDay(
+    JSON.parse(JSON.stringify(parsed))
+  ));
+
   const auditContext = {
     draft_itinerary: parsed,
+    deterministic_validation: _v61ValidationSummary(draftReport),
   };
 
   const raw = await callStructured(
@@ -1586,8 +1738,10 @@ Do not regenerate or weaken valid surrounding days.
 The validation errors are authoritative.
 Preserve each affected day's strongest original identity whenever possible.
 Never replace a distinct regional/signature day with repeated city attractions.
-Correct all duration mathematics, duplication, continuity, transport, seasonal/daylight,
-language, concrete-destination and return-row problems.
+Correct all duration mathematics, duplication and alias duplication, continuity, transport,
+seasonal/daylight, language, concrete-destination, lodging-field contamination and return-row
+problems. Do not return a repaired day until every row's minimum transport plus minimum activity
+fits inside its own start/end interval.
 `.trim();
 
   const context = {
@@ -1731,7 +1885,7 @@ Do not output commentary.`;
       });
     }
 
-    parsed = _v60NormalizeParsed(parsed);
+    parsed = _v61EnsureCanonicalCityDay(_v60NormalizeParsed(parsed));
 
     // A global model audit is intentionally run before deterministic repair.
     // It preserves strong day diversity while correcting season/daylight and whole-trip logic.
@@ -1744,14 +1898,20 @@ Do not output commentary.`;
         );
 
         if (audited?.city_day?.length) {
-          parsed = audited;
+          parsed = _v61EnsureCanonicalCityDay(audited);
         }
       } catch (auditError) {
         console.warn("⚠️ Global audit skipped after error:", auditError?.message || auditError);
       }
     }
 
-    parsed = _v60NormalizeParsed(parsed);
+    parsed = _v61EnsureCanonicalCityDay(_v60NormalizeParsed(parsed));
+
+    if (!Array.isArray(parsed.city_day) || !parsed.city_day.length) {
+      return res.status(200).json({
+        text: JSON.stringify(_v60PublicError(lang, "MISSING_CITY_DAY")),
+      });
+    }
 
     if (Array.isArray(parsed.city_day)) {
       let report = _v60Validate(parsed);
@@ -1778,7 +1938,7 @@ Do not output commentary.`;
         if (!repaired?.city_day?.length) break;
 
         parsed = _v60MergeDays(parsed, repaired);
-        parsed = _v60NormalizeParsed(parsed);
+        parsed = _v61EnsureCanonicalCityDay(_v60NormalizeParsed(parsed));
         report = _v60Validate(parsed);
       }
 
