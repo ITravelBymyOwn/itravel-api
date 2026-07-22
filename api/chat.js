@@ -835,7 +835,6 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
     const resp = await client.responses.create(
       {
         model: MODEL,
-        temperature,
         input,
         max_output_tokens,
       },
