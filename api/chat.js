@@ -12,6 +12,8 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+
 // ==============================
 // Helpers
 // ==============================
@@ -832,7 +834,7 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   try {
     const resp = await client.responses.create(
       {
-        model: "gpt-5-mini",
+        model: MODEL,
         temperature,
         input,
         max_output_tokens,
