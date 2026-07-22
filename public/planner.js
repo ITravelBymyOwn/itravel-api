@@ -4814,7 +4814,7 @@ MANDATORY:
 ${forbiddenText ? `- Do NOT repeat these highlights already used elsewhere: ${forbiddenText}` : ''}
 ${forbiddenUrbanText ? `- Avoid reusing these urban clusters / neighborhoods unless strictly necessary: ${forbiddenUrbanText}` : ''}
 
-${_buildMustSeeCoverageBlock_(city, totalDays)}
+//${_buildMustSeeCoverageBlock_(city, totalDays)}
 ${_buildExplorationModeBiasBlock_(city, totalDays)}
 ${_buildCoverageGuardBlock_(city, totalDays)}
 ${_buildUrbanDayQualityBlock_(city, totalDays)}
