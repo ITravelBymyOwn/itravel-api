@@ -1,7 +1,7 @@
-// /api/chat.js — v58 (surgically adjusted per v52.5 rules) — ESM compatible on Vercel
+// /api/chat.js — v59 WOW MVP Planner Engine — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
-// ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
+// ✅ Preserves the v58 public contract while adding a multi-stage planning engine, seasonal intelligence, journey arc, validation and targeted repair.
 // ✅ SURGICAL ADJUSTMENT: "info" fully open (any topic) + planner/info respond in the REAL language of the user's content (any language).
 // ✅ SURGICAL ADJUSTMENT: Info Chat "like ChatGPT": keeps context using messages/history and responds conversationally.
 // ✅ SURGICAL ADJUSTMENT: Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
@@ -324,6 +324,326 @@ function normalizeParsed(parsed) {
 
   return parsed;
 }
+
+
+// ==============================
+// Planner Engine v2 — deterministic helpers
+// ==============================
+const PLANNER_ENGINE_VERSION = "v59-wow-mvp";
+
+function _safeString_(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function _normalizeKey_(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _parseHHMM_(value) {
+  const m = String(value || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isInteger(h) || !Number.isInteger(min) || h < 0 || h > 23 || min < 0 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function _extractJSONCandidate_(raw = "") {
+  const parsed = cleanToJSON(raw);
+  if (parsed && typeof parsed === "object") return parsed;
+  return null;
+}
+
+function _compactMessages_(messages = [], maxChars = 24000) {
+  const normalized = (Array.isArray(messages) ? messages : [])
+    .filter((m) => m && typeof m === "object")
+    .map((m) => ({
+      role: ["system", "assistant", "user"].includes(String(m.role || "").toLowerCase())
+        ? String(m.role).toLowerCase()
+        : "user",
+      content: String(m.content || ""),
+    }));
+
+  let total = 0;
+  const out = [];
+  for (let i = normalized.length - 1; i >= 0; i--) {
+    const m = normalized[i];
+    const remaining = Math.max(0, maxChars - total);
+    if (!remaining) break;
+    const content = m.content.length > remaining ? m.content.slice(-remaining) : m.content;
+    out.unshift({ ...m, content });
+    total += content.length;
+  }
+  return out;
+}
+
+function _destinationFromParsed_(parsed, fallback = "Destination") {
+  return (
+    _safeString_(parsed?.destination) ||
+    _safeString_(parsed?.city_day?.[0]?.city) ||
+    _safeString_(parsed?.destinations?.[0]?.name) ||
+    fallback
+  );
+}
+
+function _flattenCityDayRows_(parsed) {
+  if (Array.isArray(parsed?.city_day)) {
+    return parsed.city_day.flatMap((block) =>
+      (Array.isArray(block?.rows) ? block.rows : []).map((row) => ({
+        ...row,
+        __blockDay: Number(block?.day) || Number(row?.day) || 0,
+        __city: block?.city || parsed?.destination || "",
+      }))
+    );
+  }
+  if (Array.isArray(parsed?.rows)) return parsed.rows.map((row) => ({ ...row, __blockDay: Number(row?.day) || 0 }));
+  return [];
+}
+
+function validateItinerary(parsed, expectedDays = 0) {
+  const issues = [];
+  const warnings = [];
+
+  if (!parsed || typeof parsed !== "object") {
+    return { valid: false, score: 0, issues: ["Response is not a JSON object."], warnings };
+  }
+
+  if (!Array.isArray(parsed.city_day) || !parsed.city_day.length) {
+    issues.push("Missing non-empty city_day array.");
+    return { valid: false, score: 10, issues, warnings };
+  }
+
+  const blocks = [...parsed.city_day].sort((a, b) => Number(a?.day || 0) - Number(b?.day || 0));
+  const dayNumbers = blocks.map((b) => Number(b?.day)).filter(Number.isFinite);
+  const uniqueDays = new Set(dayNumbers);
+
+  if (expectedDays > 0 && uniqueDays.size !== expectedDays) {
+    issues.push(`Expected ${expectedDays} itinerary days but received ${uniqueDays.size}.`);
+  }
+
+  const seenActivities = new Map();
+  let rowCount = 0;
+
+  for (const block of blocks) {
+    const day = Number(block?.day) || 0;
+    const rows = Array.isArray(block?.rows) ? block.rows : [];
+    rowCount += rows.length;
+
+    if (!rows.length) {
+      issues.push(`Day ${day || "?"} has no rows.`);
+      continue;
+    }
+
+    if (rows.length < 3) warnings.push(`Day ${day} is sparse with only ${rows.length} rows.`);
+    if (rows.length > 20) issues.push(`Day ${day} exceeds 20 rows.`);
+
+    let previousEnd = null;
+    let previousTo = "";
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i] || {};
+      const label = `Day ${day}, row ${i + 1}`;
+      const required = ["start", "end", "activity", "from", "to", "transport", "duration", "notes"];
+      for (const field of required) {
+        if (!_safeString_(row[field])) issues.push(`${label}: missing ${field}.`);
+      }
+
+      const start = _parseHHMM_(row.start);
+      const end = _parseHHMM_(row.end);
+      if (start == null || end == null) {
+        issues.push(`${label}: invalid HH:MM time.`);
+      } else {
+        if (end <= start) issues.push(`${label}: end time is not after start time.`);
+        if (previousEnd != null && start < previousEnd) issues.push(`${label}: overlaps the previous row.`);
+        previousEnd = Math.max(previousEnd ?? -1, end);
+      }
+
+      const duration = String(row.duration || "");
+      const durationLines = duration.split("\n").map((x) => x.trim()).filter(Boolean);
+      if (
+        durationLines.length !== 2 ||
+        !/^Transport\s*:/i.test(durationLines[0]) ||
+        !/^Activity\s*:/i.test(durationLines[1])
+      ) {
+        issues.push(`${label}: duration must contain exactly Transport and Activity lines.`);
+      }
+
+      if (_safeString_(row.notes).length < 20) issues.push(`${label}: notes are shorter than 20 characters.`);
+      if (!_safeString_(row.activity).includes(" – ") && !_safeString_(row.activity).includes(" - ")) {
+        warnings.push(`${label}: activity does not clearly follow DESTINATION – SUB-STOP.`);
+      }
+
+      if (i > 0 && previousTo) {
+        const fromKey = _normalizeKey_(row.from);
+        const previousToKey = _normalizeKey_(previousTo);
+        if (fromKey && previousToKey && fromKey !== previousToKey) {
+          warnings.push(`${label}: possible continuity gap from '${previousTo}' to '${row.from}'.`);
+        }
+      }
+      previousTo = row.to;
+
+      const activityKey = _normalizeKey_(row.activity)
+        .replace(/\b(return|return to|regreso|retorno|retour|ritorno|ruckkehr)\b/g, "")
+        .trim();
+      if (activityKey.length >= 8) {
+        const prior = seenActivities.get(activityKey);
+        if (prior && prior.day !== day) {
+          warnings.push(`${label}: possible repeated activity also used on day ${prior.day}.`);
+        } else if (!prior) {
+          seenActivities.set(activityKey, { day, row: i + 1 });
+        }
+      }
+    }
+  }
+
+  if (!rowCount) issues.push("The itinerary contains no renderable rows.");
+
+  let score = 100;
+  score -= Math.min(70, issues.length * 8);
+  score -= Math.min(25, warnings.length * 2);
+  score = Math.max(0, score);
+
+  return {
+    valid: issues.length === 0,
+    score,
+    issues: issues.slice(0, 40),
+    warnings: warnings.slice(0, 40),
+  };
+}
+
+function _inferExpectedDays_(messages = [], parsed = null) {
+  const parsedDays = Number(parsed?.days_total);
+  if (Number.isFinite(parsedDays) && parsedDays > 0) return Math.min(30, Math.floor(parsedDays));
+
+  const text = (messages || []).map((m) => String(m?.content || "")).join("\n");
+  const patterns = [
+    /days[_\s-]*total\s*[:=]\s*(\d{1,2})/i,
+    /(?:total\s+)?(?:days|dias|días|jours|tage|giorni)\s*[:=]?\s*(\d{1,2})/i,
+    /(\d{1,2})\s*(?:days|dias|días|jours|tage|giorni)\b/i,
+  ];
+  for (const p of patterns) {
+    const m = text.match(p);
+    if (m) return Math.min(30, Math.max(1, Number(m[1])));
+  }
+  return 0;
+}
+
+function buildStrategyPrompt(languageOverride = null) {
+  const languageRule = languageOverride
+    ? `All user-facing strategy labels must be in ${languageOverride.toUpperCase()}.`
+    : "Use the language selected by the user; otherwise use the dominant language of the user's natural content.";
+
+  return `
+You are the internal Travel Strategy Architect for ITravelByMyOwn.
+You do NOT write the final itinerary. You create a compact, high-value planning blueprint that another model call will execute.
+You have no live web access, so use stable general travel knowledge and explicitly avoid pretending to know live closures, road status, prices, or availability.
+
+${languageRule}
+
+Return EXCLUSIVELY valid JSON with this exact top-level shape:
+{
+  "destination_profile": {
+    "destination": "",
+    "destination_type": "dense_city|gateway_outward_base|hybrid_city_and_region|island_beach_relax|nature_adventure_base|roadtrip_multi_base",
+    "trip_length": 0,
+    "season_context": "",
+    "seasonal_opportunities": [""],
+    "seasonal_risks": [""],
+    "traveler_fit": [""]
+  },
+  "hard_constraints": [""],
+  "soft_preferences": [""],
+  "must_include": [""],
+  "experience_inventory": [
+    {
+      "experience": "",
+      "category": "city|regional|nature|culture|food|wellness|wildlife|adventure|night|arrival|departure",
+      "strength": 1,
+      "season_fit": 1,
+      "traveler_fit": 1,
+      "geographic_cluster": "",
+      "why_it_matters": ""
+    }
+  ],
+  "journey_arc": {
+    "opening_emotion": "",
+    "middle_emotions": [""],
+    "closing_emotion": "",
+    "narrative": ""
+  },
+  "master_day_plan": [
+    {
+      "day": 1,
+      "identity": "",
+      "emotion": "",
+      "bucket": "",
+      "geographic_cluster": "",
+      "anchor_experience": "",
+      "supporting_experiences": [""],
+      "pace": "light|balanced|intense",
+      "seasonal_logic": "",
+      "why_this_day_now": ""
+    }
+  ],
+  "anti_repetition": {
+    "reserved_clusters": [""],
+    "experience_types_to_avoid_repeating": [""],
+    "day_shapes": [""]
+  },
+  "execution_notes": [""]
+}
+
+STRATEGY QUALITY RULES:
+- Build the complete master day plan before finishing.
+- Every day must have a distinct identity, geographic logic, emotional role, and experience mix.
+- Treat explicit requested places as must-includes unless impossible.
+- Use seasonality as a design input, not as decorative advice.
+- Create a narrative progression: arrival/orientation, discovery, immersion, peak experiences, recovery or contrast, and a satisfying farewell.
+- Prefer strong, iconic and distinctive experiences before filler.
+- For gateway destinations, use outward/regional experiences before repeating urban content.
+- Detect semantic experience repetition, not only duplicate place names.
+- Do not invent precise live facts. When exact hours, weather, closures, availability, or road conditions matter, tell the executor to add a confirmation note.
+- Keep the blueprint compact enough to be injected into the final generation prompt.
+`.trim();
+}
+
+const WOW_EXECUTION_LAYER = `
+WOW MVP EXECUTION LAYER (CRITICAL — PRESERVE ALL EXISTING RULES):
+- You will receive an INTERNAL PLANNING BLUEPRINT produced before this call.
+- Treat that blueprint as the day-level architecture, but reconcile it with the user's hard constraints and all rules in this prompt.
+- Do not output the blueprint. Output only the final itinerary JSON.
+
+SEASONAL INTELLIGENCE:
+- Plan the destination for the actual travel season, not as a generic destination.
+- Use stable seasonal knowledge to influence daylight use, pacing, indoor/outdoor balance, heat/cold exposure, photography moments, wildlife plausibility, night activities and transport conservatism.
+- Never pretend to know live weather, live road status, current closures, current prices or availability.
+- When those details matter, add a concise note to verify them closer to the date.
+
+JOURNEY ARC:
+- The trip must feel intentionally designed from arrival to farewell.
+- Each day must have a clear emotional role and a reason for appearing at that point in the journey.
+- Alternate intensity and experience types where appropriate so the trip has rhythm, contrast and recovery.
+- Day titles are not a separate JSON field; express the identity through the day's selected activities, sequence and notes.
+
+MOMENT-BASED DESIGN:
+- Do not merely state where to go. In notes, explain why that stop belongs at that moment of the day or trip.
+- Examples of valid logic: best use of morning energy, atmospheric evening light, recovery after an intense regional day, convenient geographic pairing, or a memorable closing experience.
+
+EXPERIENCE DIVERSITY:
+- Detect repeated experiences even when POI names differ.
+- Repeated waterfront strolls, churches, viewpoints, food halls, museums, old towns, markets or thermal experiences can still feel repetitive.
+- Preserve only the strongest version of a repeated experience type unless the second is genuinely different in purpose, setting and emotional effect.
+
+PREMIUM FINAL DAYS:
+- The final days must not feel like leftovers.
+- Reserve at least one meaningful, distinctive or emotionally satisfying experience for the closing phase of trips of 5+ days.
+`;
 
 // ==============================
 // Improved base prompt ✨ (PLANNER) — Adjusted to v52.5 rules
@@ -797,6 +1117,8 @@ FINAL INTERNAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
 - NEVER return a knowingly repetitive or sparse itinerary if stronger alternatives exist.
 - The itinerary must feel globally curated, geographically diverse, and materially different day by day.
 
+${WOW_EXECUTION_LAYER}
+
 Respond with valid JSON only.
 `.trim();
 
@@ -823,37 +1145,116 @@ FORMAT:
 `.trim();
 
 // ==============================
-// Model call (with soft timeout)
+// Model calls (Responses API + soft timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
-  const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
-
+async function callModel({
+  instructions = "",
+  messages = [],
+  max_output_tokens = 2600,
+  timeoutMs = 90000,
+  reasoningEffort = "low",
+  label = "model",
+} = {}) {
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-   const resp = await client.responses.create(
-  {
-    model: MODEL,
-    reasoning: {
-      effort: "low",
-    },
-    input,
-    max_output_tokens,
-  },
-  { signal: controller.signal }
-);
+    const compactMessages = _compactMessages_(messages);
+    const resp = await client.responses.create(
+      {
+        model: MODEL,
+        instructions: String(instructions || ""),
+        input: compactMessages,
+        reasoning: { effort: reasoningEffort },
+        max_output_tokens,
+      },
+      { signal: controller.signal }
+    );
 
-    const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
+    const text = String(resp?.output_text || "").trim();
+    const incomplete = resp?.status === "incomplete";
 
-    console.log("🛰️ RAW RESPONSE:", text);
-    return text;
+    console.log(`🛰️ ${label} RESPONSE:`, {
+      status: resp?.status,
+      incomplete_details: resp?.incomplete_details || null,
+      chars: text.length,
+      preview: text.slice(0, 600),
+    });
+
+    return {
+      text,
+      status: resp?.status || "unknown",
+      incomplete,
+      incomplete_details: resp?.incomplete_details || null,
+    };
   } catch (e) {
-    console.warn("callStructured error:", e?.message || e);
-    return "";
+    const aborted = e?.name === "AbortError" || controller.signal.aborted;
+    console.warn(`${label} error:`, aborted ? "Request timed out/aborted" : e?.message || e);
+    return { text: "", status: aborted ? "timeout" : "error", incomplete: false, error: e };
   } finally {
-    clearTimeout(t);
+    clearTimeout(timer);
   }
+}
+
+async function buildPlanningBlueprint(clientMessages, languageOverride) {
+  const result = await callModel({
+    instructions: buildStrategyPrompt(languageOverride),
+    messages: clientMessages,
+    max_output_tokens: 4200,
+    timeoutMs: 90000,
+    reasoningEffort: "medium",
+    label: "STRATEGY",
+  });
+
+  const blueprint = _extractJSONCandidate_(result.text);
+  if (!blueprint) {
+    console.warn("Strategy blueprint was unavailable; final generation will continue with the full planner prompt only.");
+    return null;
+  }
+  return blueprint;
+}
+
+function buildFinalPlannerInstructions(systemPrompt, blueprint) {
+  const blueprintText = blueprint ? JSON.stringify(blueprint) : "null";
+  return `${systemPrompt}
+
+INTERNAL PLANNING BLUEPRINT (DO NOT OUTPUT, DO NOT MENTION):
+${blueprintText}
+
+BLUEPRINT EXECUTION CONTRACT:
+- Use the master_day_plan as the default day architecture.
+- Preserve every hard constraint and must-include from the user even if the blueprint missed one.
+- Improve the blueprint when a specific itinerary rule in the main prompt requires it.
+- Return only the final table-ready JSON.`;
+}
+
+async function repairItinerary({ systemPrompt, clientMessages, parsed, validation, expectedDays }) {
+  const repairInstructions = `${systemPrompt}
+
+TARGETED REPAIR MODE:
+You are repairing an already-generated itinerary, not creating an unrelated replacement.
+Return the COMPLETE corrected itinerary JSON, preserving all good content and changing only what is necessary.
+Resolve every listed validation issue and the most important warnings.
+Do not discuss the repair. Do not output markdown. Do not omit any day.
+Expected number of days: ${expectedDays || "use the user's request"}.
+
+VALIDATION REPORT:
+${JSON.stringify(validation)}
+
+CURRENT ITINERARY TO REPAIR:
+${JSON.stringify(parsed)}`;
+
+  const result = await callModel({
+    instructions: repairInstructions,
+    messages: clientMessages,
+    max_output_tokens: 12000,
+    timeoutMs: 120000,
+    reasoningEffort: "medium",
+    label: "REPAIR",
+  });
+
+  const repaired = normalizeParsed(_extractJSONCandidate_(result.text));
+  return repaired;
 }
 
 // ==============================
@@ -866,18 +1267,24 @@ export default async function handler(req, res) {
     }
 
     const body = req.body || {};
-    const mode = body.mode || "planner"; // 👈 existing parameter
+    const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
-    // 🧭 INFO CHAT MODE — free text (like ChatGPT: open + context + user's real language)
+    // 🧭 INFO CHAT MODE — same public behavior, proper system hierarchy
     if (mode === "info") {
-      const raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages], 0.45, 2600, 70000);
-      const text = raw || "⚠️ No response was obtained from the assistant.";
+      const result = await callModel({
+        instructions: SYSTEM_PROMPT_INFO,
+        messages: clientMessages,
+        max_output_tokens: 3200,
+        timeoutMs: 70000,
+        reasoningEffort: "low",
+        label: "INFO",
+      });
+      const text = result.text || "⚠️ No response was obtained from the assistant.";
       return res.status(200).json({ text });
     }
 
-    // ✅ NEW (ULTRA-SURGICAL): language override if user explicitly selected a language (e.g., "Português")
     const override = detectLanguageOverride(clientMessages);
     const overrideLine = override
       ? `LANGUAGE OVERRIDE (USER-SELECTED, HIGHEST PRIORITY): Output MUST be in ${override.toUpperCase()}.\n- Ignore earlier mixed-language content.\n- Keep ALL JSON keys/shape the same.\n`
@@ -885,76 +1292,122 @@ export default async function handler(req, res) {
 
     const SYSTEM_PROMPT_EFFECTIVE = (overrideLine + SYSTEM_PROMPT).trim();
 
-    // 🧭 PLANNER MODE — with strong v52.5 rules (only via prompt + guardrails)
-    let raw = await callStructured([{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages], 0.28, 8000, 120000);
-    let parsed = cleanToJSON(raw);
+    // Stage 1: strategy architecture (no user-visible output)
+    const blueprint = await buildPlanningBlueprint(clientMessages, override);
 
-    // 1) Retry: strict (if it doesn't parse or doesn't include city_day/rows/destinations)
+    // Stage 2: full itinerary generation using the architecture
+    const finalInstructions = buildFinalPlannerInstructions(SYSTEM_PROMPT_EFFECTIVE, blueprint);
+    let generation = await callModel({
+      instructions: finalInstructions,
+      messages: clientMessages,
+      max_output_tokens: 12000,
+      timeoutMs: 120000,
+      reasoningEffort: "medium",
+      label: "PLANNER",
+    });
+
+    let parsed = normalizeParsed(_extractJSONCandidate_(generation.text));
+
+    // Parse retry: strict JSON recovery, while retaining the same blueprint and user request
     const hasSome =
       parsed && (Array.isArray(parsed.city_day) || Array.isArray(parsed.rows) || Array.isArray(parsed.destinations));
 
     if (!hasSome) {
-      const strictPrompt =
-        SYSTEM_PROMPT_EFFECTIVE +
-        `
+      const strictInstructions = `${finalInstructions}
 
-MANDATORY:
-- Respond with valid JSON only.
-- Must include city_day (preferred) or rows (legacy) with at least 1 row.
-- No meta or text outside.`;
-      raw = await callStructured([{ role: "system", content: strictPrompt }, ...clientMessages], 0.22, 9000, 120000);
-      parsed = cleanToJSON(raw);
+STRICT JSON RECOVERY:
+- The prior attempt was missing or invalid.
+- Return valid JSON only.
+- Include city_day with at least one renderable row for every requested day.
+- No text outside JSON.`;
+
+      generation = await callModel({
+        instructions: strictInstructions,
+        messages: clientMessages,
+        max_output_tokens: 12000,
+        timeoutMs: 120000,
+        reasoningEffort: "medium",
+        label: "PLANNER_RETRY",
+      });
+      parsed = normalizeParsed(_extractJSONCandidate_(generation.text));
     }
 
-    // 2) Retry: ultra with minimal example (only if still failing)
-    const stillBad =
-      !parsed || (!Array.isArray(parsed.city_day) && !Array.isArray(parsed.rows) && !Array.isArray(parsed.destinations));
-
-    if (stillBad) {
-      const ultraPrompt =
-        SYSTEM_PROMPT_EFFECTIVE +
-        `
-
-Minimal valid example (DO NOT copy it literally; format guide only):
-{
-  "destination":"CITY",
-  "days_total":1,
-  "city_day":[{"city":"CITY","day":1,"rows":[
-    {"day":1,"start":"09:30","end":"11:00","activity":"CITY – Iconic spot","from":"Hotel","to":"Center","transport":"Walk","duration":"Transport: ~10m\\nActivity: ~90m","notes":"Discover a landmark corner and arrive early to avoid lines. Tip: bring water and check hours.","kind":"","zone":""}
-  ]}],
-  "followup":""
-}`;
-      raw = await callStructured([{ role: "system", content: ultraPrompt }, ...clientMessages], 0.14, 10000, 120000);
-      parsed = cleanToJSON(raw);
-    }
-
-    // 3) Normalization + anti-blank-table guardrails
     if (!parsed) parsed = fallbackJSON(lang);
-
-    // Prefer city_day: if the model returned legacy rows, keep them; but if it returned city_day, normalize it.
     parsed = normalizeParsed(parsed);
 
-    // Final guard-rail: if city_day exists but is empty/no rows, inject skeleton
-    try {
-      const dest = String(parsed?.destination || "Destination").trim() || "Destination";
-      const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
+    // Convert legacy rows into city_day when possible, preserving frontend compatibility
+    if (!Array.isArray(parsed.city_day) && Array.isArray(parsed.rows)) {
+      const destination = _destinationFromParsed_(parsed);
+      const grouped = new Map();
+      for (const row of parsed.rows) {
+        const day = Math.max(1, Number(row?.day) || 1);
+        if (!grouped.has(day)) grouped.set(day, []);
+        grouped.get(day).push(row);
+      }
+      parsed.city_day = [...grouped.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([day, rows]) => ({ city: destination, day, rows }));
+    }
 
-      if (Array.isArray(parsed.city_day)) {
-        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
-        if (!_hasAnyRows_(parsed.city_day)) {
-          parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
-          parsed.followup =
-            (parsed.followup ? parsed.followup + " | " : "") +
-            "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table.";
+    const expectedDays = _inferExpectedDays_(clientMessages, parsed);
+    let validation = validateItinerary(parsed, expectedDays);
+
+    // Stage 3: one targeted repair only when it materially improves reliability
+    const shouldRepair =
+      !validation.valid ||
+      validation.score < 82 ||
+      validation.warnings.some((w) => /sparse|repeated activity|overlap|continuity gap/i.test(w));
+
+    if (shouldRepair && Array.isArray(parsed?.city_day) && _hasAnyRows_(parsed.city_day)) {
+      const repaired = await repairItinerary({
+        systemPrompt: finalInstructions,
+        clientMessages,
+        parsed,
+        validation,
+        expectedDays,
+      });
+
+      if (repaired && Array.isArray(repaired.city_day) && _hasAnyRows_(repaired.city_day)) {
+        const repairedValidation = validateItinerary(repaired, expectedDays);
+        if (repairedValidation.score >= validation.score || !validation.valid) {
+          parsed = repaired;
+          validation = repairedValidation;
         }
       }
+    }
+
+    // Final anti-blank-table guardrail — same external contract as v58
+    try {
+      const dest = _destinationFromParsed_(parsed);
+      const daysTotal = Math.max(1, Number(parsed?.days_total || expectedDays || 1));
+
+      if (!Array.isArray(parsed.city_day)) parsed.city_day = [];
+      parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
+
+      if (!_hasAnyRows_(parsed.city_day)) {
+        parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
+        parsed.followup =
+          (parsed.followup ? parsed.followup + " | " : "") +
+          "⚠️ No valid itinerary was produced in this attempt. Please retry.";
+      }
     } catch {}
+
+    // Keep diagnostics server-side only; never alter the frontend JSON contract
+    console.log("✅ ITBMO PLANNER COMPLETE:", {
+      engine: PLANNER_ENGINE_VERSION,
+      model: MODEL,
+      blueprint: Boolean(blueprint),
+      validationScore: validation?.score,
+      issues: validation?.issues?.length || 0,
+      warnings: validation?.warnings?.length || 0,
+      days: parsed?.city_day?.length || 0,
+      rows: _flattenCityDayRows_(parsed).length,
+    });
 
     return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
-    // In case of exception, try responding in the user's language based on body (fallback only).
     try {
       const body = req?.body || {};
       const clientMessages = extractMessages(body);
