@@ -1,4 +1,4 @@
-// /api/chat.js — v63 (global dwell/daylight quality layer; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v64 (master-plan lock + global timing/daylight; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -332,7 +332,7 @@ function normalizeParsed(parsed) {
 // ==============================
 
 const ITBMO_FINAL_REPAIR_ENABLED =
-  String(process.env.ITBMO_FINAL_REPAIR_ENABLED || "true").toLowerCase() !== "false";
+  String(process.env.ITBMO_FINAL_REPAIR_ENABLED || "false").toLowerCase() === "true";
 
 function _allMessageText_(messages = []) {
   return (Array.isArray(messages) ? messages : [])
@@ -373,143 +373,163 @@ function detectPlannerStage(messages = []) {
 
 const MASTER_PLAN_QUALITY_LAYER = `
 MASTER-PLAN STAGE — PRESERVE THE REQUESTED INTERMEDIATE SCHEMA:
-- This is a strategic planning stage, not necessarily the final city_day response.
-- Follow the exact JSON schema requested by the user/frontend.
-- Do NOT force city_day, rows or a final itinerary unless explicitly requested in this stage.
-- Build a complete trip-wide strategy with exactly one distinct identity for every requested day.
-- Assign unique geographic corridors/buckets and protect strong regional or signature days.
-- Use the actual dates, destination latitude, season, plausible daylight, traveler profile,
-  restrictions and transport reality when designing the day identities.
-- Internally estimate a realistic useful-daylight window for each travel date before assigning
-  scenic outdoor buckets. Use darkness for transfers, indoor activities, meals, thermal
-  experiences and optional night opportunities.
-- Before selecting a macro-tour, internally inventory its strongest logical micro-stops and then
-  choose the best feasible subset. Do not reduce rich regional routes to only two or three stops
-  when daylight, safety and distance allow a fuller expert route.
-- Protect realistic dwell time for anchor experiences. Do not treat a spa, thermal lagoon,
-  wildlife cruise, whale-watching tour, guided food tour, major theme park, long guided visit or
-  other immersive anchor as a short photo stop.
-- For five or more days, do not fill later days with repeated city icons when stronger unused
-  regional, cultural, nature, wellness, gastronomy, wildlife or seasonal buckets exist.
-- Treat translated names, aliases and renamed variants of the same macro-route as duplicates.
-- The final-day strategy must be distinct from the arrival-day strategy.
-- Return only the exact strategic JSON requested by the frontend.
+
+This is the trip-wide strategic stage. The current frontend keeps only each row's day and activity
+theme, so the activity value must preserve the strategic decisions required by later block calls.
+
+SCHEMA AND COMPATIBILITY
+- Follow the exact JSON schema requested by the frontend.
+- Do NOT force city_day or final itinerary rows when the frontend requests a strategic Format B.
+- Return exactly one strategic row for every requested day and no extra rows.
+- Keep all required row fields present so the existing frontend parser continues to work.
+- Return JSON only.
+
+MANDATORY ACTIVITY FORMAT
+Use:
+"PLAN – <exclusive day identity and geographic corridor> | Anchors: <3–8 reserved anchors or experience categories>"
+
+Examples are structural only:
+"PLAN – Arrival and compact historic core | Anchors: central square, cathedral exterior, waterfront"
+"PLAN – Northern regional corridor | Anchors: waterfall A, village B, thermal experience C"
+
+The text after "PLAN –" is passed unchanged to the block generator. Therefore:
+- Name one EXCLUSIVE corridor/bucket per day.
+- List the principal anchors reserved for that day.
+- Do not repeat a major anchor, attraction, neighborhood, regional corridor, macro-tour, spa,
+  wildlife experience or equivalent alias in another day's theme.
+- If a day is intentionally light because of arrival/departure or a short user window, say so in
+  the identity instead of recycling earlier attractions.
+
+TRIP-WIDE ALLOCATION
+Before returning JSON, internally build a reservation ledger:
+1. classify the base as dense city, gateway/outward base, hybrid, nature base, island/relax base,
+   or multi-base road trip;
+2. rank the strongest feasible city, regional, nature, culture, wellness, wildlife, food,
+   adventure and seasonal buckets;
+3. assign each selected bucket to one day only;
+4. reserve every major anchor to one day only;
+5. audit all day themes together for duplicate corridors and duplicate anchors.
+
+For stays of five or more days:
+- Strong unused regional or signature experiences must be consumed before a second weak urban
+  filler day, when season, daylight, distance, safety and traveler profile make them feasible.
+- At a gateway/outward base, outward/regional/special days should normally outnumber generic city
+  filler days.
+- Do not split one coherent macro-route into two days merely to fill the calendar.
+- Do not schedule a macro-route plus its anchor experience on one day and then repeat that anchor
+  or route as a separate day.
+- The arrival and final days must have different scopes and reserved anchors.
+- If the requested duration is longer than the premium inventory, a lighter day is preferable to
+  repetition. Do not fabricate novelty.
+
+DATE, DAYLIGHT AND ANCHOR TIME
+- Use actual dates, latitude/season, daily windows, lodging/base and transport.
+- Protect plausible useful daylight for landscape-dependent outdoor buckets.
+- Use darkness for transfers, indoor activities, meals, thermal experiences and optional night
+  opportunities.
+- Reserve realistic dwell for immersive anchors: thermal lagoons/spas, wildlife or whale-watching
+  cruises, guided tours, large museums, theme parks, archaeological complexes and substantial
+  hikes. Do not assign more daytime stops than can realistically coexist with the anchor.
+
+GLOBALITY
+- These rules apply to every destination worldwide.
+- Destination examples in the base prompt are curatorial support only; never let them override
+  the user's actual destination, date or constraints.
 `.trim();
 
 const FINAL_ITINERARY_QUALITY_LAYER = `
-FINAL ITINERARY QUALITY LAYER — GLOBAL AND DESTINATION-INDEPENDENT
+FINAL ITINERARY QUALITY LAYER — GLOBAL, BLOCK-SAFE AND DESTINATION-INDEPENDENT
 
 Apply these rules only when producing actual itinerary rows.
 
-1. WHOLE-TRIP DIVERSITY
-- Use the complete Master Plan and compare every day against every earlier day available in context.
-- Every day must have a distinct identity, geographic corridor and emotional shape.
-- Do not replace a strong regional/signature day with repeated city filler.
-- A major POI may appear on only one day unless the user explicitly requests repetition.
-- A translated name, subtitle, tower/exterior/interior variation or paraphrase does not make a
-  repeated attraction new.
-- For stays of five days or more, exhaust strong unused buckets before repeating iconic POIs.
+1. MASTER-THEME LOCK — HIGHEST PRIORITY
+- The supplied day themes are approved trip-wide reservations from the Master Plan.
+- Treat each theme's identity, corridor and listed Anchors as the exclusive scope of that day.
+- Do not replace, broaden or duplicate the theme with a different corridor.
+- Do not add famous attractions merely because they are nearby or popular if they are not part of
+  the supplied day's scope.
+- Within the current request, compare all supplied day themes and keep their POIs, corridors,
+  neighborhoods, macro-routes and experience types distinct.
+- One coherent macro-route may appear on only one day. One major anchor may appear on only one day.
+- If the theme is intentionally light, keep it light. Never recycle earlier icons to make it look full.
 
-2. DATE, SEASON AND DAYLIGHT — HIGHEST PLANNING PRIORITY
-- The actual travel date is a hard planning input.
-- Infer season and a plausible useful-daylight envelope from destination latitude and month.
-- First place transfers and indoor/low-light-compatible activities; then protect the useful
-  daylight for scenic outdoor stops.
-- Scenic outdoor attractions must occur inside plausible useful daylight whenever their value
-  depends on landscape, views, photography, trails or natural visibility.
-- Never describe an hour as sunrise, sunset, daylight or golden hour unless plausible for the
-  destination and date.
-- Do not use a generic summer rhythm for winter or a generic winter rhythm for summer.
-- If useful daylight is short, allow a lighter day rather than placing scenic stops in darkness.
-- Current weather, roads, volcanic activity, maritime conditions, opening hours and visibility
-  must be described as requiring confirmation; never claim live knowledge.
+2. DATE, SEASON AND USEFUL DAYLIGHT
+- The actual date and destination latitude are hard planning inputs.
+- Infer a plausible useful-daylight window before placing scenic outdoor activities.
+- Schedule landscape-, viewpoint-, beach-, waterfall-, cliff-, trail- and photography-dependent
+  stops within useful daylight.
+- Use darkness for long transfers, indoor activities, meals, thermal experiences and conditional
+  night opportunities.
+- If the desired route does not fit daylight, reduce optional stops; do not move them into darkness.
+- Never claim live weather, road, sea, volcanic, opening-hour or visibility information. Tell the
+  traveler to confirm those conditions when relevant.
 
-3. REALISTIC DWELL-TIME ENGINE — GLOBAL
-- Classify each anchor experience by type before assigning its duration.
-- Never compress an immersive experience merely to fit more rows.
-- Typical minimum useful activity times, unless the user's constraints clearly require otherwise:
-  • destination thermal lagoon / major hot-spring complex / destination spa: normally 2h30–4h;
-  • iconic destination lagoons comparable to Blue Lagoon: minimum 3h of activity time, plus
-    separate arrival/check-in/changing/exit logistics when material;
-  • whale watching / wildlife cruise / marine safari: normally 2h30–4h of activity time, plus
-    check-in/boarding/return logistics;
-  • guided food tour / substantial guided walking tour: normally 2h30–4h;
-  • large museum or major immersive exhibition: normally 1h30–3h;
-  • major theme park / extensive archaeological site / large palace complex: normally 3h–full day;
-  • substantial hike or exposed nature walk: duration must reflect distance, terrain, season and
-    return walking time;
-  • viewpoint/photo stop: normally 15–45m unless combined with a real walk or visit.
-- These are category rules, not destination-specific hardcoding. Choose a realistic value based on
-  the actual attraction, traveler profile, date and operating format.
-- If the available window cannot support the minimum useful experience, move it, shorten the day's
-  scope, or omit it. Never publish a misleadingly short visit.
+3. REALISTIC EXPERIENCE DWELL — CATEGORY-BASED
+Before assigning a row duration, classify the experience:
+- destination thermal lagoon / major hot-spring or spa complex: normally 2h30–4h;
+- an iconic thermal lagoon comparable to Blue Lagoon: minimum 3h of actual experience time, plus
+  realistic arrival, parking, check-in, changing, shower and exit logistics when material;
+- whale watching / wildlife cruise / marine safari: normally 2h30–4h of activity time, plus
+  check-in, boarding and disembarkation logistics;
+- substantial guided walking or food tour: normally 2h30–4h;
+- large museum or major immersive exhibition: normally 1h30–3h;
+- major theme park, palace or archaeological complex: normally 3h to a full day;
+- substantial hike: include the complete outbound and return walking time, adjusted for terrain,
+  traveler profile and season;
+- simple viewpoint/photo stop: normally 15–45m.
 
-4. ROW TIME MATHEMATICS
-- Each row interval must contain both transport and activity.
-- Minimum transport time + minimum activity time must not exceed end time - start time.
-- Include check-in, boarding, parking, changing, walking from parking, security or pickup time
-  when they are operationally necessary.
-- Never place a two-hour activity inside a 45-minute row.
-- No overlaps and no unexplained giant gaps.
-- A day-trip return must be an explicit final row.
-- For a return transfer, use conservative door-to-door time. Do not understate the return from a
-  distant endpoint simply to make the day fit.
-- A pure return/arrival row should not invent a long "activity" duration; use only a brief arrival,
-  parking or settling buffer.
+These are global category rules, not destination hardcoding.
+If an experience cannot receive its useful minimum inside the user's window, move it, reduce the
+day's scope or omit it. Never publish a misleadingly short visit.
+
+4. TIME MATHEMATICS AND TRANSFERS
+- Every row interval must contain transport plus activity.
+- Minimum transport + minimum activity must fit between start and end.
+- Include parking, walking from parking, check-in, security, boarding, changing or pickup time when
+  operationally necessary.
+- No overlaps, teleporting or unexplained giant gaps.
+- Every regional/day-trip day must end with an explicit return to the lodging/base unless the user
+  sleeps elsewhere.
+- Estimate long returns conservatively from the actual final stop to the actual lodging/base.
+- Do not shorten a return simply to fit the requested end time; instead remove an optional stop.
+- A pure return row must use only a short arrival/parking/settling activity buffer, normally 5–20m.
 - Duration must have exactly two lines:
   Transport: <realistic estimate or range>
   Activity: <realistic estimate or range>
 - Under one hour use minutes. From one hour onward use hours/minutes. Never use 0h or 0m.
 
-5. MACRO-TOURS AND MICRO-STOPS
-- Before writing a regional route, internally inventory all strong logical stops on that corridor.
-- Select the best feasible subset according to daylight, safety, traveler fit, route continuity and
+5. MACRO-ROUTES AND MICRO-STOPS
+- For a regional route, first inventory the strongest logical stops on that exact corridor.
+- Select the best feasible subset according to route continuity, daylight, safety, traveler fit and
   anchor dwell time.
-- A flagship regional route should normally contain 6–10 meaningful rows when geography and the
-  available window support it.
-- Do not omit signature micro-stops merely to add a weak museum, generic café or artificial filler.
-- Do not include every possible stop blindly: quality, daylight, safety and continuity decide.
-- Important sub-stops must be real rows, not hidden only in Notes.
-- Avoid backtracking. Sequence stops in a coherent outward loop or corridor whenever possible.
+- Important sub-stops must be separate rows rather than hidden only in Notes.
+- A rich regional day will often contain 6–10 meaningful rows, but quality and feasibility are more
+  important than row count.
+- Do not add a weak museum, generic café or filler stop at the expense of a signature on-route stop.
+- Avoid backtracking and do not revisit the same route on another day.
 
-6. TRANSPORT
+6. TRANSPORT AND LOCATIONS
 - Choose transport per leg.
-- Prefer walking for compact, safe central-city clusters.
-- Do not drive between adjacent urban attractions merely because a rental car exists.
-- Rental-car wording belongs only in transport, never inside hotel/accommodation/from/to names.
-- Never invent car travel inside a spa, museum, terminal or pedestrian venue.
-- Long regional return estimates must be at least as conservative as the corresponding outward
-  corridor, adjusted for the actual endpoints and winter/night conditions.
+- Prefer walking for compact, safe urban clusters even when a rental car exists.
+- Rental-car wording belongs in transport, never in hotel/from/to names.
+- Every To field must contain one concrete primary place, not alternatives or slash-separated choices.
+- From should continue from the previous row's To.
 
-7. CONCRETE ROUTING
-- Every To field must contain one concrete primary destination.
-- Do not place alternatives, "/", "or similar", "selected bars" or Planner instructions in To.
-- Put alternatives only in Notes.
-- From must normally continue from the previous row's To.
-- Important route stops must be rows, not hidden only in Notes.
+7. CONDITIONAL AURORA / NIGHT OPPORTUNITIES
+- Aurora content is forbidden outside plausible auroral latitude and season.
+- When plausible, do not promise sightings and do not force a rigid main activity row.
+- Add a concise note to 1–3 suitable evening/end-of-day rows, beginning only after a plausible dark hour.
+- Explain that the traveler may either drive independently to a safe dark area when roads/weather
+  permit or book a paid guided tour.
+- State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
+- Do not repeat an identical aurora note every night.
 
-8. AURORA AND OTHER CONDITIONAL NIGHT OPPORTUNITIES
-- Aurora content is forbidden outside plausible auroral latitude/season.
-- When auroras are plausible, do not promise them and do not force a rigid main itinerary row.
-- Add a useful note to one or more logistically suitable evening/end-of-day rows, starting only
-  from a plausible dark hour.
-- The note should explain that the traveler may:
-  • go independently by rental car to a safe dark viewing area, if road/weather conditions allow;
-  • or book a paid guided aurora tour.
-- State that cloud cover, geomagnetic activity, road conditions and visibility must be checked,
-  and that sightings are never guaranteed.
-- Do not paste the same aurora note on every day. Prefer 1–3 well-chosen opportunities with backup
-  logic according to trip length.
-- Apply the same conditional-note pattern globally to other weather/season-dependent night
-  opportunities where appropriate.
-
-9. LANGUAGE AND QUALITY
-- Use one selected language in all user-facing values.
-- Official proper names may remain official, but generic instructions/actions must be translated.
-- Remove debug, fallback, placeholder and internal-planning wording.
-- Before returning JSON, silently audit all days, duplicates, time mathematics, anchor dwell,
-  daylight, transport, continuity, returns, must-includes and language; correct problems before
-  output.
+8. QUALITY
+- Use one selected language for all user-facing values.
+- Preserve official proper names but translate generic instructions.
+- Remove debug, placeholder and internal-planning wording.
+- Silently audit the requested block for scope fidelity, duplicates, daylight, duration mathematics,
+  transfers, continuity, returns and language before returning JSON.
 `.trim();
 
 function buildStagePrompt(basePrompt, stage) {
@@ -523,6 +543,242 @@ function buildStagePrompt(basePrompt, stage) {
 function _isNonEmptyJSON_(value) {
   if (Array.isArray(value)) return value.length > 0;
   return !!value && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+
+function _v64MasterRows_(parsed) {
+  if (!parsed || typeof parsed !== "object") return [];
+
+  if (Array.isArray(parsed.rows)) return parsed.rows;
+
+  if (Array.isArray(parsed.city_day)) {
+    return parsed.city_day.flatMap((block) =>
+      (Array.isArray(block?.rows) ? block.rows : []).map((row) => ({
+        ...row,
+        day: Number(row?.day) || Number(block?.day) || 0,
+      }))
+    );
+  }
+
+  for (const key of ["destinations", "itineraries"]) {
+    if (!Array.isArray(parsed?.[key])) continue;
+    const all = [];
+    for (const item of parsed[key]) {
+      if (Array.isArray(item?.rows)) all.push(...item.rows);
+      if (Array.isArray(item?.city_day)) {
+        for (const block of item.city_day) {
+          all.push(
+            ...(Array.isArray(block?.rows) ? block.rows : []).map((row) => ({
+              ...row,
+              day: Number(row?.day) || Number(block?.day) || 0,
+            }))
+          );
+        }
+      }
+    }
+    if (all.length) return all;
+  }
+
+  return [];
+}
+
+function _v64MasterNorm_(value = "") {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^.*?\bplan\b\s*[–-]\s*/i, "")
+    .replace(/\banchors?\s*:/gi, " ")
+    .replace(/[|/(),;:]+/g, " ")
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _v64MasterTokens_(value = "") {
+  const stop = new Set([
+    "and","or","the","of","to","in","for","with","from","day","route","tour","area",
+    "city","local","core","light","arrival","departure","final","orientation","experience",
+    "y","o","el","la","los","las","de","del","al","en","con","para","por","dia","día",
+    "ruta","tour","area","área","ciudad","local","ligero","llegada","salida","final",
+    "e","ou","do","da","dos","das","com","para","por","jour","et","ou","de","du","des",
+    "avec","pour","und","oder","der","die","das","mit","fur","für"
+  ]);
+
+  return [...new Set(
+    _v64MasterNorm_(value)
+      .split(/\s+/)
+      .filter((token) => token.length >= 4 && !stop.has(token))
+  )];
+}
+
+function _v64MasterSimilarity_(a = "", b = "") {
+  const A = new Set(_v64MasterTokens_(a));
+  const B = new Set(_v64MasterTokens_(b));
+  if (!A.size || !B.size) return 0;
+
+  let intersection = 0;
+  for (const token of A) if (B.has(token)) intersection += 1;
+  return intersection / Math.min(A.size, B.size);
+}
+
+function _v64ExtractMasterScope_(activity = "") {
+  const raw = String(activity || "").trim();
+  const withoutPlan = raw.replace(/^.*?\bPLAN\b\s*[–-]\s*/i, "").trim();
+  const parts = withoutPlan.split("|");
+  const identity = String(parts[0] || withoutPlan).trim();
+  const anchors = String(parts.slice(1).join(" | ") || "").trim();
+  return { raw, identity, anchors };
+}
+
+function _v64AuditMasterPlan_(parsed, expectedDays = 0) {
+  const rows = _v64MasterRows_(parsed);
+  const errors = [];
+  const usable = rows
+    .map((row) => ({
+      day: Number(row?.day) || 0,
+      ..._v64ExtractMasterScope_(row?.activity),
+    }))
+    .filter((row) => row.day > 0);
+
+  if (expectedDays > 0) {
+    const daySet = new Set(usable.map((row) => row.day));
+    for (let day = 1; day <= expectedDays; day += 1) {
+      if (!daySet.has(day)) errors.push({ code: "MASTER_MISSING_DAY", day });
+    }
+    if (usable.length !== expectedDays) {
+      errors.push({
+        code: "MASTER_ROW_COUNT",
+        expected: expectedDays,
+        actual: usable.length,
+      });
+    }
+  }
+
+  for (const row of usable) {
+    if (!/\|\s*anchors?\s*:/i.test(row.raw)) {
+      errors.push({
+        code: "MASTER_SCOPE_NOT_LOCKED",
+        day: row.day,
+        instruction:
+          'Use activity format "PLAN – <exclusive identity/corridor> | Anchors: <reserved anchors>".',
+      });
+    }
+  }
+
+  for (let i = 0; i < usable.length; i += 1) {
+    for (let j = i + 1; j < usable.length; j += 1) {
+      const a = usable[i];
+      const b = usable[j];
+
+      const identityA = _v64MasterNorm_(a.identity);
+      const identityB = _v64MasterNorm_(b.identity);
+      const anchorA = _v64MasterNorm_(a.anchors);
+      const anchorB = _v64MasterNorm_(b.anchors);
+
+      const sameIdentity =
+        identityA &&
+        identityB &&
+        (identityA === identityB ||
+          (identityA.length >= 8 &&
+            identityB.length >= 8 &&
+            (identityA.includes(identityB) || identityB.includes(identityA))) ||
+          _v64MasterSimilarity_(identityA, identityB) >= 0.6);
+
+      const anchorSimilarity = _v64MasterSimilarity_(anchorA, anchorB);
+      const sameAnchor =
+        anchorA &&
+        anchorB &&
+        (anchorA === anchorB ||
+          (anchorA.length >= 8 &&
+            anchorB.length >= 8 &&
+            (anchorA.includes(anchorB) || anchorB.includes(anchorA))) ||
+          anchorSimilarity >= 0.5);
+
+      if (sameIdentity) {
+        errors.push({
+          code: "MASTER_DUPLICATE_SCOPE",
+          days: [a.day, b.day],
+          first: a.identity,
+          second: b.identity,
+        });
+      }
+
+      if (sameAnchor) {
+        errors.push({
+          code: "MASTER_DUPLICATE_ANCHORS",
+          days: [a.day, b.day],
+          first: a.anchors,
+          second: b.anchors,
+        });
+      }
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    rows: usable,
+  };
+}
+
+function _v64ExpectedMasterDays_(messages = []) {
+  const text = _allMessageText_(messages);
+  const patterns = [
+    /create\s+(?:a\s+)?strategic\s+distribution\s+plan\s+only.*?\((\d+)\s+day/i,
+    /exactly\s+(\d+)\s+rows\s+total/i,
+    /day\s+1\s+to\s+day\s+(\d+)/i,
+    /(\d+)\s+day\/s/i,
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return Math.max(1, Number(match[1]) || 0);
+  }
+  return 0;
+}
+
+async function _v64RepairMasterPlanOnce_(
+  parsed,
+  report,
+  effectivePrompt,
+  clientMessages,
+  expectedDays
+) {
+  if (!parsed || report.ok) return null;
+
+  const repairPrompt = `${effectivePrompt}
+
+MASTER-PLAN SURGICAL REPAIR:
+- Return the complete strategic plan in exactly the same JSON schema as the draft.
+- Return exactly ${expectedDays || "the requested number of"} rows, one per requested day.
+- Keep every user-provided daily window, date, base, transport, preference and restriction.
+- Every activity MUST use:
+  "PLAN – <exclusive day identity and geographic corridor> | Anchors: <3–8 reserved anchors>"
+- Rebuild only the conflicting scopes, but audit all rows together.
+- No macro-route, region, neighborhood, major attraction, spa/thermal anchor, wildlife tour,
+  museum anchor or equivalent alias may be reserved on two days.
+- Do not split one coherent macro-route into multiple days.
+- Prefer a lighter but distinct day over repetition.
+- Preserve strong unused regional, nature, culture, wellness, wildlife, food and adventure buckets.
+- JSON only.
+
+DETERMINISTIC MASTER ERRORS:
+${JSON.stringify(report.errors)}
+
+CURRENT MASTER DRAFT:
+${JSON.stringify(parsed)}
+`.trim();
+
+  const raw = await callStructured(
+    [{ role: "system", content: repairPrompt }, ...clientMessages],
+    0.12,
+    6000,
+    85000
+  );
+
+  const repaired = cleanToJSON(raw);
+  return _isNonEmptyJSON_(repaired) ? repaired : null;
 }
 
 function _hasRenderableItinerary_(parsed) {
@@ -572,9 +828,8 @@ function _v62DurationBounds_(value = "") {
       .toLowerCase()
       .replace(/,/g, ".")
       .replace(/[–—]/g, "-")
-      .replace(/\baprox(?:\.|imadamente)?\b/g, "")
-      .replace(/\bapprox(?:\.|imately)?\b/g, "")
       .replace(/[~≈]/g, "")
+      .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?)\b/g, "")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -582,84 +837,58 @@ function _v62DurationBounds_(value = "") {
     const s = normalize(input);
     if (!s) return null;
 
+    const compact = s.match(/\b(\d+)\s*h\s*(\d{1,2})\b/);
+    if (compact) return Number(compact[1]) * 60 + Number(compact[2]);
+
+    const colon = s.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (colon) return Number(colon[1]) * 60 + Number(colon[2]);
+
     let total = 0;
     let found = false;
 
-    const hourMatch = s.match(
+    const hours = s.match(
       /(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/
     );
-    if (hourMatch) {
-      total += Math.round(Number(hourMatch[1]) * 60);
-      found = true;
-    }
-
-    const minuteMatch = s.match(
+    const minutes = s.match(
       /(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/
     );
-    if (minuteMatch) {
-      total += Number(minuteMatch[1]);
+
+    if (hours) {
+      total += Math.round(Number(hours[1]) * 60);
+      found = true;
+    }
+    if (minutes) {
+      total += Number(minutes[1]);
       found = true;
     }
 
-    // Compact forms such as 1h15, 2h05.
-    const compact = s.match(/(\d+)\s*h\s*(\d{1,2})\b/);
-    if (compact) {
-      total = Number(compact[1]) * 60 + Number(compact[2]);
-      found = true;
-    }
-
-    // Colon forms such as 1:30 h.
-    const colon = s.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (colon && !found) {
-      total = Number(colon[1]) * 60 + Number(colon[2]);
-      found = true;
-    }
-
-    // Bare number: interpret as minutes only when no unit exists.
     if (!found) {
-      const bare = s.match(/^\s*(\d+(?:\.\d+)?)\s*$/);
-      if (bare) {
-        total = Math.round(Number(bare[1]));
-        found = true;
-      }
+      const bare = s.match(/^\d+(?:\.\d+)?$/);
+      if (bare) return Math.round(Number(bare[0]));
     }
 
     return found && total > 0 ? total : null;
   };
 
   const s = normalize(original);
+  const parts = s.split(/\s*-\s*/).filter(Boolean);
 
-  // Mixed-unit or same-unit ranges:
-  // 45m-1h, 1h15-1h30, 1 h 15 min - 1 h 45 min, 90 min-2 h.
-  const rangeParts = s.split(/\s*-\s*/).filter(Boolean);
-  if (rangeParts.length >= 2) {
-    const first = parsePoint(rangeParts[0]);
-    const second = parsePoint(rangeParts[1]);
+  if (parts.length >= 2) {
+    let first = parsePoint(parts[0]);
+    let second = parsePoint(parts[1]);
+
+    // Shared trailing unit: "45-60 min", "1.5-2 h".
+    if (first != null && second == null) {
+      if (/\b(?:m|min|mins|minute|minutes|minuto|minutos)\b/.test(parts[1])) {
+        first = parsePoint(`${parts[0]} min`);
+      } else if (/\b(?:h|hr|hrs|hour|hours|hora|horas)\b/.test(parts[1])) {
+        first = parsePoint(`${parts[0]} h`);
+      }
+      second = parsePoint(parts[1]);
+    }
 
     if (first != null && second != null) {
-      return {
-        min: Math.min(first, second),
-        max: Math.max(first, second),
-      };
-    }
-
-    // Shared-unit range such as "45-60 min" or "1.5-2 h".
-    const sharedMinutes = s.match(
-      /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/
-    );
-    if (sharedMinutes) {
-      const a = Math.round(Number(sharedMinutes[1]));
-      const b = Math.round(Number(sharedMinutes[2]));
-      return { min: Math.min(a, b), max: Math.max(a, b) };
-    }
-
-    const sharedHours = s.match(
-      /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/
-    );
-    if (sharedHours) {
-      const a = Math.round(Number(sharedHours[1]) * 60);
-      const b = Math.round(Number(sharedHours[2]) * 60);
-      return { min: Math.min(a, b), max: Math.max(a, b) };
+      return { min: Math.min(first, second), max: Math.max(first, second) };
     }
   }
 
@@ -784,65 +1013,49 @@ function _v62CanonicalPoi_(row = {}) {
 }
 
 
-function _v63ExperienceProfile_(row = {}) {
+function _v64ExperienceProfile_(row = {}) {
   const text = _v62NormKey_(
     `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`
   );
 
-  const profile = {
-    type: "",
-    minimumActivityMinutes: 0,
-  };
-
-  // Curated destination exception plus global category.
   if (/\bblue lagoon\b|\bbl[aá]a l[oó]ni[dð]\b/.test(text)) {
     return { type: "iconic_thermal_lagoon", minimumActivityMinutes: 180 };
   }
 
   if (
-    /\bthermal lagoon\b|\bhot springs?\b|\bthermal baths?\b|\bgeothermal spa\b|\bonsen\b|\bhammam\b|\bspa complex\b|\bbalneario\b|\btermas\b|\bbanos termales\b|\bbaños termales\b|\baguas termales\b|\blaguna termal\b/.test(
-      text
-    )
+    /\bthermal lagoon\b|\bhot springs?\b|\bthermal baths?\b|\bgeothermal spa\b|\bonsen\b|\bhammam\b|\bspa complex\b|\bbalneario\b|\btermas\b|\bbanos termales\b|\bbaños termales\b|\baguas termales\b|\blaguna termal\b/.test(text)
   ) {
     return { type: "destination_thermal_experience", minimumActivityMinutes: 150 };
   }
 
   if (
-    /\bwhale watching\b|\bavistamiento de ballenas\b|\bavistamiento de cetaceos\b|\bavistamiento de cetáceos\b|\bwildlife cruise\b|\bmarine safari\b|\bdolphin watching\b|\bboat safari\b|\bsafari marino\b|\bobservacao de baleias\b|\bobservação de baleias\b/.test(
-      text
-    )
+    /\bwhale watching\b|\bavistamiento de ballenas\b|\bavistamiento de cetaceos\b|\bavistamiento de cetáceos\b|\bwildlife cruise\b|\bmarine safari\b|\bdolphin watching\b|\bboat safari\b|\bsafari marino\b|\bobservacao de baleias\b|\bobservação de baleias\b/.test(text)
   ) {
     return { type: "wildlife_marine_tour", minimumActivityMinutes: 150 };
   }
 
   if (
-    /\bfood tour\b|\bgastronomic tour\b|\bgastronomy tour\b|\btour gastronomico\b|\btour gastronómico\b|\bculinary tour\b|\bguided walking tour\b|\bwalking tour guiado\b/.test(
-      text
-    )
+    /\bfood tour\b|\bgastronomic tour\b|\bgastronomy tour\b|\btour gastronomico\b|\btour gastronómico\b|\bculinary tour\b|\bguided walking tour\b/.test(text)
   ) {
     return { type: "substantial_guided_tour", minimumActivityMinutes: 150 };
   }
 
   if (
-    /\btheme park\b|\bamusement park\b|\bparque tematico\b|\bparque temático\b|\bmajor archaeological site\b|\bgran complejo arqueologico\b|\bgran complejo arqueológico\b/.test(
-      text
-    )
+    /\btheme park\b|\bamusement park\b|\bparque tematico\b|\bparque temático\b|\bmajor archaeological site\b|\bgran complejo arqueologico\b|\bgran complejo arqueológico\b/.test(text)
   ) {
     return { type: "major_complex", minimumActivityMinutes: 180 };
   }
 
   if (
-    /\bmajor museum\b|\bimmersive exhibition\b|\bgran museo\b|\bmuseo nacional\b|\bnational museum\b/.test(
-      text
-    )
+    /\bmajor museum\b|\bimmersive exhibition\b|\bgran museo\b|\bmuseo nacional\b|\bnational museum\b/.test(text)
   ) {
     return { type: "major_museum", minimumActivityMinutes: 90 };
   }
 
-  return profile;
+  return { type: "", minimumActivityMinutes: 0 };
 }
 
-function _v63IsReturnRow_(row = {}) {
+function _v64IsReturnRow_(row = {}) {
   const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
   return /\b(return|back to|regreso|retorno|regresso|volta|volver|vuelta)\b/.test(text);
 }
@@ -865,22 +1078,6 @@ function _v62ValidateFinal_(parsed) {
 
     rows.forEach((row, index) => {
       const rowNumber = index + 1;
-
-      for (const field of [
-        "start",
-        "end",
-        "activity",
-        "from",
-        "to",
-        "transport",
-        "duration",
-        "notes",
-      ]) {
-        if (!String(row?.[field] || "").trim()) {
-          errors.push({ code: "REQUIRED_FIELD", day, row: rowNumber, field });
-        }
-      }
-
       const start = _v62ParseTime_(row?.start);
       const end = _v62ParseTime_(row?.end);
 
@@ -906,15 +1103,6 @@ function _v62ValidateFinal_(parsed) {
         ])
       );
 
-      if (!transport || !activity) {
-        errors.push({
-          code: "DURATION_UNPARSEABLE",
-          day,
-          row: rowNumber,
-          duration: row?.duration,
-        });
-      }
-
       if (start != null && end != null && transport && activity) {
         const available = end - start;
         const needed = transport.min + activity.min;
@@ -929,29 +1117,27 @@ function _v62ValidateFinal_(parsed) {
           });
         }
 
-        const experience = _v63ExperienceProfile_(row);
+        const profile = _v64ExperienceProfile_(row);
         if (
-          experience.minimumActivityMinutes > 0 &&
-          activity.min < experience.minimumActivityMinutes
+          profile.minimumActivityMinutes > 0 &&
+          activity.min < profile.minimumActivityMinutes
         ) {
           errors.push({
             code: "ANCHOR_DWELL_TOO_SHORT",
             day,
             row: rowNumber,
-            experience_type: experience.type,
+            experience_type: profile.type,
             actual_activity_minutes: activity.min,
-            minimum_activity_minutes: experience.minimumActivityMinutes,
+            minimum_activity_minutes: profile.minimumActivityMinutes,
           });
         }
 
-        if (_v63IsReturnRow_(row) && activity.min > 30) {
+        if (_v64IsReturnRow_(row) && activity.min > 30) {
           errors.push({
             code: "RETURN_ACTIVITY_TOO_LONG",
             day,
             row: rowNumber,
             actual_activity_minutes: activity.min,
-            instruction:
-              "Use only a short arrival/parking/settling buffer; do not invent activity time inside a return transfer.",
           });
         }
       }
@@ -1072,21 +1258,12 @@ FINAL SURGICAL REPAIR:
 - Correct every deterministic error listed below.
 - Preserve all strong, distinct regional/signature days and all explicit must-includes.
 - Do not replace a difficult regional day with repeated city attractions.
-- Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
-- Preserve realistic category-based dwell time for anchor experiences:
-  thermal lagoons/spas, whale watching/wildlife cruises, major guided tours, large museums,
-  theme parks, substantial hikes and other immersive attractions.
-- An iconic thermal lagoon comparable to Blue Lagoon must receive at least 3h of activity time;
-  whale watching/wildlife marine tours normally require at least 2h30 of activity time.
-- Correct conservative regional return-transfer time and remove artificial long activity time
-  from pure return rows.
+- Recalculate every affected row so transport + activity fits inside start/end.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
 - Remove rental-car wording from hotel/from/to fields.
 - Use walking in compact urban clusters when practical.
-- Correct season/daylight logic.
-- When auroras are plausible, add a concise conditional note to suitable evening rows explaining
-  independent rental-car viewing versus a paid guided tour; never guarantee visibility and do not
-  force a rigid aurora row.
+- Correct season/daylight logic and include a conditional timed seasonal signature experience
+  when globally appropriate.
 - Return JSON only.
 
 VALIDATION ERRORS:
@@ -1152,6 +1329,10 @@ Before writing itinerary rows, you MUST internally complete these steps:
 3) Assign each day a unique day identity and bucket.
 4) Rank all available buckets from strongest to weakest BEFORE choosing the final daily plan.
 5) Generate rows only after the full day strategy is clear.
+6) When the request supplies strategic themes in the form
+   "PLAN – <identity/corridor> | Anchors: <reserved anchors>", treat them as a binding trip-wide
+   reservation map. Generate only within that scope and do not introduce famous POIs from other
+   days.
 
 MASTER DAY PLAN RULES (CRITICAL — INTERNAL ONLY):
 - Every day must have a clear unique role before rows are generated.
@@ -1367,14 +1548,14 @@ LONG-STAY CURATION RULES (GLOBAL):
 - If a day starts to look like a repeated prior day, internally rebuild it using a different stronger unused bucket.
 - If a gateway/outward-base destination still has strong unused regional or special-experience buckets, do NOT create another generic urban day.
 
-TIME INFERENCE + DAYLIGHT ENVELOPE (CRITICAL):
+TIME INFERENCE + USEFUL DAYLIGHT (CRITICAL):
 - User-provided per-day start/end times are HARD CONSTRAINTS and must be respected.
-- Before assigning rows, infer a plausible useful-daylight window from the actual date, latitude
-  and season.
-- Protect useful daylight for scenic outdoor/nature stops. Use darkness for transfers, indoor
-  activities, meals, thermal experiences and conditional night opportunities.
-- If all desired outdoor stops do not fit into useful daylight, reduce the scope rather than
-  scheduling landscape-dependent visits in darkness.
+- Infer a plausible useful-daylight envelope from the actual date, latitude and season before
+  placing scenic outdoor activities.
+- Protect useful daylight for landscapes, viewpoints, beaches, trails, waterfalls and natural
+  photography. Use darkness for transfers, indoor visits, meals, thermal experiences and
+  conditional night opportunities.
+- If the route does not fit, remove optional stops rather than moving scenic visits into darkness.
 - If the user provides hours for SOME days only, you MUST:
   • Respect those exact per-day hours where provided.
   • Actively infer realistic start/end times for ALL other days and rows.
@@ -1391,10 +1572,9 @@ TIME INFERENCE + DAYLIGHT ENVELOPE (CRITICAL):
     - If you need to switch context (e.g., "back to hotel"), add a realistic transfer row OR set "from" to the actual prior "to".
   • The row time block must be broadly consistent with its stated duration.
     - Do NOT output a row like 09:00–20:00 if duration says ~1h or ~2h.
-- CRITICAL: protect the realistic minimum dwell time of every anchor activity before filling
-  remaining time. Only after the anchor has enough useful time may you complete the day with
-  nearby coherent stops. Never shorten a spa, thermal lagoon, whale-watching tour, wildlife
-  cruise, guided tour, large museum, theme park or substantial hike merely to add more rows.
+- CRITICAL: first protect the realistic dwell time and operating logistics of the anchor
+  experience. Only then may you add nearby coherent stops. Never shorten an immersive anchor or
+  reuse another day's reserved POIs merely to make the day look fuller.
 
 ONE-DAY ITINERARIES (DOUBLECHECK, IMPORTANT):
 - If days_total = 1 (single-day itinerary), you MUST provide a well-detailed day plan:
@@ -1462,26 +1642,17 @@ NIGHT TOURS (GLOBAL, when applicable):
 - Keep realistic times (e.g., 19:00–23:30) and include a logistical tip in notes.
 
 AURORAS (GLOBAL CONDITIONAL-NOTE RULE):
-- FORBIDDEN unless they are truly plausible by latitude/season and the itinerary context supports it.
-- If the destination is NOT a typical auroral zone, do NOT include aurora wording.
-- When auroras ARE plausible:
-  • Do not guarantee visibility.
-  • Do not force a rigid main itinerary row that displaces a stronger daytime plan.
-  • Add a useful conditional note to 1–3 suitable evening/end-of-day rows, beginning only after a
-    plausible dark hour.
-  • Explain that the traveler can either:
-    - drive independently to a safe dark area when weather/roads permit, or
-    - book a paid guided aurora tour.
-  • State that cloud cover, geomagnetic activity, visibility and road conditions must be checked.
-  • Do not repeat identical aurora notes every day.
-  • Keep at least one backup opportunity before the final night when trip length permits.
+- FORBIDDEN unless latitude, season and darkness make them genuinely plausible.
+- When plausible, never guarantee visibility and do not displace a stronger daytime plan.
+- Add a concise conditional note to 1–3 suitable evening/end-of-day rows, beginning only after a
+  plausible dark hour.
+- Explain that the traveler may either drive independently to a safe dark viewing area when
+  weather/roads permit or book a paid guided aurora tour.
+- State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
+- Do not repeat the same note every night; keep at least one backup opportunity when trip length permits.
 
 DAY TRIPS / MACRO-TOURS:
-- Before generating a day trip, internally inventory the route's strongest signature,
-  scenic, cultural, geothermal, coastal, wildlife, food and practical micro-stops.
-- Select the best feasible subset according to daylight, safety, traveler fit, anchor dwell time
-  and route continuity.
-- If you create a day trip, break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
+- If you create a day trip, you must break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
 - CRITICAL MICRO-STOPS RULE:
   • If a route naturally supports many worthwhile sub-stops, you MUST enrich the itinerary with those real intermediate stops instead of leaving large empty time gaps.
   • Strong regional routes should feel like expert-designed exploration days, not sparse skeleton itineraries.
@@ -1538,26 +1709,24 @@ ICELAND CURATION (when relevant):
     - Prefer specific iconic stops such as Kirkjufell, Arnarstapi/Hellnar, Djúpalónssandur, Lóndrangar, Búðir/Búðakirkja when appropriate.
     - Avoid vague placeholders like only "National Park" if specific named stops are available.
   • For Reykjanes / Blue Lagoon:
-    - Blue Lagoon is an iconic destination thermal experience: allocate at least 3 hours of actual
-      lagoon activity, plus realistic arrival, parking, check-in, changing, shower and exit time
-      when material.
-    - Only after protecting that dwell time should you add coherent Reykjanes Peninsula stops.
-    - Internally consider the full corridor inventory, such as Bridge Between Continents, Sandvík,
-      Gunnuhver, Reykjanesviti, Valahnúkur, Brimketill, Kleifarvatn, Seltún/Krýsuvík and valid
-      Grindavík-area viewpoints/access, then select the best safe feasible subset.
-    - Do not include every stop blindly; daylight, road/access conditions, safety and route
-      continuity decide.
-    - The main Blue Lagoon visit row should use a real external area / corridor label, not the
-      Reykjavik city label, unless it is explicitly the departure/return row.
+    - Reserve Blue Lagoon and the Reykjanes corridor to ONE day only.
+    - Allocate at least 3h of actual lagoon activity plus realistic arrival/check-in/changing/exit
+      logistics.
+    - Only after protecting that time, select the best feasible subset from the full corridor
+      inventory, which may include Bridge Between Continents, Sandvík, Gunnuhver, Reykjanesviti,
+      Valahnúkur, Brimketill, Kleifarvatn and Seltún/Krýsuvík.
+    - Do not include all stops blindly: useful daylight, safety, access, route continuity and the
+      user's pace decide.
+    - Never create a second Reykjanes or second Blue Lagoon day elsewhere in the same trip.
   • For Silver Circle / Borgarfjörður:
     - Prefer real stops such as Borgarnes, Deildartunguhver, Hraunfossar, Barnafoss, Reykholt, and Krauma when they fit naturally.
   • For lava tunnel / geothermal route:
     - Prefer real stops such as Raufarhólshellir, Hveragerði, Hellisheiði, geothermal exhibition area, or nearby coherent geothermal/scenic stops.
   • For whale watching / marine experience:
-    - Use it only if plausible for the season, operating location and traveler profile.
-    - Protect realistic check-in, boarding, marine-tour and return time; the activity itself should
-      normally receive at least 2h30 unless a specifically identified shorter format genuinely exists.
-    - Pair it with a distinct harbor/food/culture block only once, not repeated across many days.
+    - Use it only if plausible for season, operating location and traveler profile.
+    - Normally protect at least 2h30 of actual marine-tour time plus check-in, boarding and return.
+    - Reserve the wildlife/marine anchor to one day only and do not repeat the same harbor filler
+      pattern on other days.
   • Avoid extreme same-day round trips from Reykjavik to very distant North Iceland highlights when they would be exhausting and low quality.
   • Do NOT repeat the same Iceland macro-route across different days.
   • If Golden Circle was already used, do NOT create another Golden Circle variant later in the itinerary.
@@ -1762,7 +1931,6 @@ MANDATORY FINAL-ITINERARY RECOVERY:
     // Never force a master-plan response into city_day.
     if (stage === "master_plan") {
       if (!_isNonEmptyJSON_(parsed)) {
-        // Preserve frontend behavior: return a JSON object, never a fabricated itinerary.
         parsed = {
           ok: false,
           error: {
@@ -1770,6 +1938,45 @@ MANDATORY FINAL-ITINERARY RECOVERY:
             retryable: true,
           },
         };
+      } else {
+        const expectedDays = _v64ExpectedMasterDays_(clientMessages);
+        const masterReport = _v64AuditMasterPlan_(parsed, expectedDays);
+
+        if (!masterReport.ok) {
+          console.warn("🧭 ITBMO MASTER AUDIT:", {
+            expected_days: expectedDays,
+            codes: [...new Set(masterReport.errors.map((error) => error.code))],
+          });
+
+          try {
+            const repairedMaster = await _v64RepairMasterPlanOnce_(
+              parsed,
+              masterReport,
+              SYSTEM_PROMPT_EFFECTIVE,
+              clientMessages,
+              expectedDays
+            );
+
+            if (repairedMaster) {
+              const repairedReport = _v64AuditMasterPlan_(
+                repairedMaster,
+                expectedDays
+              );
+
+              if (
+                repairedReport.ok ||
+                repairedReport.errors.length < masterReport.errors.length
+              ) {
+                parsed = repairedMaster;
+              }
+            }
+          } catch (masterRepairError) {
+            console.warn(
+              "⚠️ Master-plan repair skipped; returning original strategic JSON:",
+              masterRepairError?.message || masterRepairError
+            );
+          }
+        }
       }
 
       return res.status(200).json({ text: JSON.stringify(parsed) });
