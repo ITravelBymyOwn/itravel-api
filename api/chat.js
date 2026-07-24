@@ -1,4 +1,4 @@
-// /api/chat.js — v64 (master-plan lock + global timing/daylight; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -332,7 +332,7 @@ function normalizeParsed(parsed) {
 // ==============================
 
 const ITBMO_FINAL_REPAIR_ENABLED =
-  String(process.env.ITBMO_FINAL_REPAIR_ENABLED || "false").toLowerCase() === "true";
+  String(process.env.ITBMO_FINAL_REPAIR_ENABLED || "true").toLowerCase() !== "false";
 
 function _allMessageText_(messages = []) {
   return (Array.isArray(messages) ? messages : [])
@@ -416,6 +416,7 @@ For stays of five or more days:
 - At a gateway/outward base, outward/regional/special days should normally outnumber generic city
   filler days.
 - Do not split one coherent macro-route into two days merely to fill the calendar.
+- Never reserve "optional if not visited previously", "express version", "second chance" or any conditional repeat of an attraction already allocated to another day.
 - Do not schedule a macro-route plus its anchor experience on one day and then repeat that anchor
   or route as a separate day.
 - The arrival and final days must have different scopes and reserved anchors.
@@ -509,6 +510,9 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - Avoid backtracking and do not revisit the same route on another day.
 
 6. TRANSPORT AND LOCATIONS
+- The user's named lodging/base and selected transport are HARD FACTS.
+- If a rental car was selected, use it for regional legs and walking for compact urban clusters; do not substitute Flybus, taxi, private transfer or guided tour unless explicitly requested.
+- Never replace a named lodging/base with "hotel in city center".
 - Choose transport per leg.
 - Prefer walking for compact, safe urban clusters even when a rental car exists.
 - Rental-car wording belongs in transport, never in hotel/from/to names.
@@ -1060,9 +1064,127 @@ function _v64IsReturnRow_(row = {}) {
   return /\b(return|back to|regreso|retorno|regresso|volta|volver|vuelta)\b/.test(text);
 }
 
-function _v62ValidateFinal_(parsed) {
+
+function _v65GetItineraryBlocks_(parsed) {
+  if (!parsed || typeof parsed !== "object") return [];
+
+  if (Array.isArray(parsed.city_day)) {
+    return parsed.city_day.map((block, index) => ({
+      city: String(block?.city || parsed?.destination || "").trim(),
+      day: Number(block?.day) || index + 1,
+      rows: Array.isArray(block?.rows) ? block.rows : [],
+    }));
+  }
+
+  if (Array.isArray(parsed.rows)) {
+    const byDay = new Map();
+    for (const row of parsed.rows) {
+      const day = Number(row?.day) || 1;
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(row);
+    }
+    return [...byDay.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([day, rows]) => ({
+        city: String(parsed?.destination || "").trim(),
+        day,
+        rows,
+      }));
+  }
+
+  for (const key of ["destinations", "itineraries"]) {
+    if (!Array.isArray(parsed?.[key])) continue;
+    const blocks = [];
+    for (const item of parsed[key]) {
+      const city = String(item?.name || item?.city || item?.destination || "").trim();
+      if (Array.isArray(item?.city_day)) {
+        item.city_day.forEach((block, index) => blocks.push({
+          city: String(block?.city || city).trim(),
+          day: Number(block?.day) || index + 1,
+          rows: Array.isArray(block?.rows) ? block.rows : [],
+        }));
+      } else if (Array.isArray(item?.rows)) {
+        const byDay = new Map();
+        for (const row of item.rows) {
+          const day = Number(row?.day) || 1;
+          if (!byDay.has(day)) byDay.set(day, []);
+          byDay.get(day).push(row);
+        }
+        for (const [day, rows] of byDay.entries()) blocks.push({ city, day, rows });
+      }
+    }
+    if (blocks.length) return blocks.sort((a, b) => a.day - b.day);
+  }
+
+  return [];
+}
+
+function _v65NormalizeEverySchema_(parsed) {
+  parsed = normalizeParsed(parsed);
+  if (!parsed || typeof parsed !== "object") return parsed;
+
+  const cleanRows = (rows, fallbackDay = 1) => {
+    let previousTo = "";
+    return (Array.isArray(rows) ? rows : []).map((row) => {
+      const activity = String(row?.activity || "").replace(/\s+/g, " ").trim();
+      const from = _v62CleanLocation_(row?.from) || _v62CleanLocation_(previousTo) || "Hotel";
+      const inferredTo = activity.split(/\s+[–-]\s+/).pop() || "Destination";
+      const to = _v62CleanLocation_(row?.to) || _v62CleanLocation_(inferredTo) || "Destination";
+      const out = {
+        ...row,
+        day: Number(row?.day) || fallbackDay,
+        activity,
+        from,
+        to,
+        transport: String(row?.transport || "").replace(/\s+/g, " ").trim(),
+        duration: _v62NormalizeDuration_(row),
+        notes: String(row?.notes || "").replace(/\bvalid\s*:\s*/gi, "").replace(/\s+/g, " ").trim(),
+        kind: row?.kind ?? "",
+        zone: row?.zone ?? "",
+      };
+      previousTo = out.to;
+      return out;
+    });
+  };
+
+  if (Array.isArray(parsed.city_day)) {
+    parsed.city_day = parsed.city_day.map((block, index) => ({
+      ...block,
+      day: Number(block?.day) || index + 1,
+      rows: cleanRows(block?.rows, Number(block?.day) || index + 1),
+    }));
+  }
+  if (Array.isArray(parsed.rows)) parsed.rows = cleanRows(parsed.rows, 1);
+  for (const key of ["destinations", "itineraries"]) {
+    if (!Array.isArray(parsed?.[key])) continue;
+    parsed[key] = parsed[key].map((item) => ({
+      ...item,
+      rows: Array.isArray(item?.rows) ? cleanRows(item.rows, 1) : item?.rows,
+      city_day: Array.isArray(item?.city_day)
+        ? item.city_day.map((block, index) => ({
+            ...block,
+            day: Number(block?.day) || index + 1,
+            rows: cleanRows(block?.rows, Number(block?.day) || index + 1),
+          }))
+        : item?.city_day,
+    }));
+  }
+  return parsed;
+}
+
+function _v65ExtractHardContext_(messages = []) {
+  const text = _allMessageText_(messages);
+  const out = { hotel: "", transport: "" };
+  const hm = text.match(/(?:hotel|lodging|accommodation|alojamiento|hospedaje)\s*:\s*([^\n]+)/i);
+  if (hm?.[1]) out.hotel = String(hm[1]).trim();
+  const tm = text.match(/(?:transport|transportation|transporte)\s*:\s*([^\n]+)/i);
+  if (tm?.[1]) out.transport = String(tm[1]).trim();
+  else if (/(?:rental car|rent a car|carro alquilado|veh[ií]culo alquilado|coche alquilado)/i.test(text)) out.transport = "rental car";
+  return out;
+}
+function _v62ValidateFinal_(parsed, options = {}) {
   const errors = [];
-  const cityDay = Array.isArray(parsed?.city_day) ? parsed.city_day : [];
+  const cityDay = _v65GetItineraryBlocks_(parsed);
 
   if (!cityDay.length) {
     return { ok: true, errors: [], affected_days: [] };
@@ -1167,6 +1289,21 @@ function _v62ValidateFinal_(parsed) {
         });
       }
 
+      const hardContext = _v65ExtractHardContext_(options?.messages || []);
+      if (hardContext.hotel && /\bhotel\b/i.test(String(row?.from || ""))) {
+        const expected = _v62NormKey_(hardContext.hotel);
+        const actual = _v62NormKey_(row?.from);
+        if (expected && actual && !expected.includes(actual) && !actual.includes(expected)) {
+          errors.push({ code: "BASE_NOT_RESPECTED", day, row: rowNumber, expected_base: hardContext.hotel, actual_from: row?.from });
+        }
+      }
+      if (hardContext.transport && /rental car|carro alquilado|veh[ií]culo alquilado|coche alquilado/i.test(hardContext.transport) && /\b(?:flybus|taxi|private transfer|transfer privado|guided tour|tour guiado)\b/i.test(String(row?.transport || ""))) {
+        errors.push({ code: "TRANSPORT_NOT_RESPECTED", day, row: rowNumber, expected_transport: hardContext.transport, actual_transport: row?.transport });
+      }
+      if (/\bvalid\s*:/i.test(String(row?.notes || ""))) {
+        errors.push({ code: "INTERNAL_TEXT_LEAK", day, row: rowNumber });
+      }
+
       if (index > 0 && previousTo) {
         const fromKey = _v62NormKey_(row?.from);
         const priorKey = _v62NormKey_(previousTo);
@@ -1258,7 +1395,14 @@ FINAL SURGICAL REPAIR:
 - Correct every deterministic error listed below.
 - Preserve all strong, distinct regional/signature days and all explicit must-includes.
 - Do not replace a difficult regional day with repeated city attractions.
-- Recalculate every affected row so transport + activity fits inside start/end.
+- Rebuild every affected day chronologically when needed: no row may overlap the next row.
+- NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
+- Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
+- Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
+- Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
+- Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
+- Long regional returns must be conservative; remove optional stops rather than shortening the return.
+- Aurora, when plausible, should normally be a concise note with independent-drive and paid-tour options, not a forced fixed row unless explicitly requested.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
 - Remove rental-car wording from hotel/from/to fields.
 - Use walking in compact urban clusters when practical.
@@ -1283,7 +1427,7 @@ ${JSON.stringify(parsed)}
   const repaired = cleanToJSON(raw);
   if (!_hasRenderableItinerary_(repaired)) return null;
 
-  return _v62NormalizeFinalParsed_(repaired);
+  return _v65NormalizeEverySchema_(repaired);
 }
 
 
@@ -1984,13 +2128,13 @@ MANDATORY FINAL-ITINERARY RECOVERY:
 
     // Final itinerary/one-shot normalization.
     if (!parsed) parsed = fallbackJSON(lang);
-    parsed = _v62NormalizeFinalParsed_(parsed);
+    parsed = _v65NormalizeEverySchema_(parsed);
 
     // Deterministic audit runs only on actual city_day output.
     // One bounded surgical repair is allowed; if it fails, the valid original draft is retained
     // so the planner workflow is never broken by the quality layer.
     if (Array.isArray(parsed?.city_day) && parsed.city_day.length) {
-      const report = _v62ValidateFinal_(parsed);
+      const report = _v62ValidateFinal_(parsed, { messages: clientMessages });
 
       if (!report.ok) {
         console.warn("🧪 ITBMO FINAL AUDIT:", {
@@ -2007,8 +2151,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
           );
 
           if (repaired) {
-            const repairedReport = _v62ValidateFinal_(repaired);
-            if (repairedReport.ok || repairedReport.errors.length < report.errors.length) {
+            const repairedReport = _v62ValidateFinal_(repaired, { messages: clientMessages });
+            if (repairedReport.ok || repairedReport.errors.length <= Math.max(0, Math.floor(report.errors.length * 0.35))) {
               parsed = repaired;
             }
           }
