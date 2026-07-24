@@ -1,4 +1,4 @@
-// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v66 (MVP WOW: all-schema audit, theme lock, daylight, aurora and dedupe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -432,6 +432,21 @@ DATE, DAYLIGHT AND ANCHOR TIME
   cruises, guided tours, large museums, theme parks, archaeological complexes and substantial
   hikes. Do not assign more daytime stops than can realistically coexist with the anchor.
 
+ADDITIONAL MVP-WOW ALLOCATION RULES
+- The anchor list is a binding reservation ledger, not illustrative text.
+- Every named anchor must be unique trip-wide unless it is the lodging/base or a necessary transit node.
+- Before returning the Master Plan, compare every anchor token across every day and replace duplicates.
+- Never allocate the same church, market, shopping street, harbor building, waterfront icon, museum,
+  spa, wildlife activity or restaurant district to arrival/final days twice.
+- For a gateway/outward base with 6–8 requested days:
+  • excluding a short arrival day, normally allocate at least 4 regional/special-experience days
+    when season, safety, daylight and driving radius support them;
+  • normally allow no more than 2 predominantly urban days;
+  • the final day must use unused places or be intentionally light—it must not replay arrival-day icons.
+- When a destination has a strong secondary radial route, use it before a third generic urban day.
+- Preserve a weather-sensitive alternative inside Notes/strategy, but do not reserve two competing
+  alternatives in the same To field or duplicate an anchor conditionally.
+
 GLOBALITY
 - These rules apply to every destination worldwide.
 - Destination examples in the base prompt are curatorial support only; never let them override
@@ -534,6 +549,40 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - Remove debug, placeholder and internal-planning wording.
 - Silently audit the requested block for scope fidelity, duplicates, daylight, duration mathematics,
   transfers, continuity, returns and language before returning JSON.
+
+9. STRICT ANCHOR COMPLIANCE AND UNUSED-POI RULE
+- Generate the day from the supplied Master Plan anchors. Those anchors are the primary allowed POIs.
+- Utility rows such as meals, lodging departure and return may be added, but do not introduce a major
+  attraction that is absent from the day's reserved anchors.
+- Never use an attraction described as "again", "express", "if not visited", "optional repeat",
+  "second chance" or equivalent.
+- The final day must not reuse arrival-day or earlier-day icons.
+- If the requested block includes several days, compare all of them before returning JSON.
+
+10. EXPLAIN THE ENTIRE ROW INTERVAL
+- Transport + activity should normally account for the row interval.
+- A residual buffer of up to 20 minutes is acceptable for parking, queueing, restroom, boarding,
+  weather adjustment or transition.
+- If more than 20 minutes remain unexplained, either increase a realistic activity/transport duration,
+  add an explicit buffer in Notes, shorten the row, or split it.
+- Never create a 90-minute row containing only 15 minutes of transport and 15 minutes of activity.
+
+11. SEASON-SPECIFIC NOTES
+- Every seasonal note must be relevant to the actual travel date.
+- Do not mention summer nesting restrictions, summer crowds, tropical rainy-season advice or other
+  irrelevant seasonal guidance during a winter trip.
+- Do not claim that a path is usable in the stated season merely because it is normally accessible.
+- For potentially closed/unsafe seasonal paths, state that access must be confirmed and provide a safe
+  alternative without asserting current conditions.
+
+12. OUTPUT-LANGUAGE LABELS
+- The duration labels are user-facing and must use the selected language:
+  Spanish: "Transporte" and "Actividad";
+  Portuguese: "Transporte" and "Atividade";
+  French: "Transport" and "Activité";
+  German: "Transport" and "Aktivität";
+  Italian: "Trasporto" and "Attività";
+  English: "Transport" and "Activity".
 `.trim();
 
 function buildStagePrompt(basePrompt, stage) {
@@ -719,6 +768,14 @@ function _v64AuditMasterPlan_(parsed, expectedDays = 0) {
     }
   }
 
+  if (_v66AuroraPlausibleFromText_(messages) && !_v66HasAuroraNote_(cityDay)) {
+    errors.push({
+      code: "MISSING_CONDITIONAL_AURORA_NOTE",
+      instruction:
+        "Add concise aurora notes to 1–3 suitable evening/end-of-day rows, with independent safe driving and paid-tour options; never guarantee visibility.",
+    });
+  }
+
   return {
     ok: errors.length === 0,
     errors,
@@ -790,7 +847,8 @@ function _hasRenderableItinerary_(parsed) {
     parsed &&
     (Array.isArray(parsed.city_day) ||
       Array.isArray(parsed.rows) ||
-      Array.isArray(parsed.destinations))
+      Array.isArray(parsed.destinations) ||
+      Array.isArray(parsed.itineraries))
   );
 }
 
@@ -911,13 +969,25 @@ function _v62ExtractDurationPart_(duration = "", labels = []) {
 
 function _v62FormatMinutes_(minutes) {
   const n = Math.max(1, Math.round(Number(minutes) || 1));
-  if (n < 60) return `~${n}m`;
+  if (n < 60) return `~${n} min`;
   const h = Math.floor(n / 60);
   const m = n % 60;
-  return m ? `~${h}h ${m}m` : `~${h}h`;
+  return m ? `~${h} h ${m} min` : `~${h} h`;
 }
 
-function _v62NormalizeDuration_(row = {}) {
+function _v66DurationLabels_(lang = "en") {
+  const map = {
+    es: ["Transporte", "Actividad"],
+    pt: ["Transporte", "Atividade"],
+    fr: ["Transport", "Activité"],
+    de: ["Transport", "Aktivität"],
+    it: ["Trasporto", "Attività"],
+    en: ["Transport", "Activity"],
+  };
+  return map[lang] || map.en;
+}
+
+function _v62NormalizeDuration_(row = {}, lang = "en") {
   const raw = String(row?.duration || "");
   const transportRaw = _v62ExtractDurationPart_(raw, ["Transport", "Transporte"]);
   const activityRaw = _v62ExtractDurationPart_(raw, [
@@ -933,13 +1003,14 @@ function _v62NormalizeDuration_(row = {}) {
   const activity = _v62DurationBounds_(activityRaw);
 
   if (transport && activity) {
-    return `Transport: ${_v62FormatMinutes_(transport.min)}\nActivity: ${_v62FormatMinutes_(activity.min)}`;
+    const [transportLabel, activityLabel] = _v66DurationLabels_(lang);
+    return `${transportLabel}: ${_v62FormatMinutes_(transport.min)}\n${activityLabel}: ${_v62FormatMinutes_(activity.min)}`;
   }
 
   return _normalizeDurationText_(raw);
 }
 
-function _v62NormalizeFinalParsed_(parsed) {
+function _v62NormalizeFinalParsed_(parsed, lang = "en") {
   parsed = normalizeParsed(parsed);
   if (!parsed || typeof parsed !== "object") return parsed;
 
@@ -968,7 +1039,7 @@ function _v62NormalizeFinalParsed_(parsed) {
             from,
             to,
             transport: String(row?.transport || "").replace(/\s+/g, " ").trim(),
-            duration: _v62NormalizeDuration_(row),
+            duration: _v62NormalizeDuration_(row, lang),
             notes: String(row?.notes || "").replace(/\s+/g, " ").trim(),
             kind: row?.kind ?? "",
             zone: row?.zone ?? "",
@@ -1119,7 +1190,7 @@ function _v65GetItineraryBlocks_(parsed) {
   return [];
 }
 
-function _v65NormalizeEverySchema_(parsed) {
+function _v65NormalizeEverySchema_(parsed, lang = "en") {
   parsed = normalizeParsed(parsed);
   if (!parsed || typeof parsed !== "object") return parsed;
 
@@ -1137,7 +1208,7 @@ function _v65NormalizeEverySchema_(parsed) {
         from,
         to,
         transport: String(row?.transport || "").replace(/\s+/g, " ").trim(),
-        duration: _v62NormalizeDuration_(row),
+        duration: _v62NormalizeDuration_(row, lang),
         notes: String(row?.notes || "").replace(/\bvalid\s*:\s*/gi, "").replace(/\s+/g, " ").trim(),
         kind: row?.kind ?? "",
         zone: row?.zone ?? "",
@@ -1182,9 +1253,93 @@ function _v65ExtractHardContext_(messages = []) {
   else if (/(?:rental car|rent a car|carro alquilado|veh[ií]culo alquilado|coche alquilado)/i.test(text)) out.transport = "rental car";
   return out;
 }
+
+function _v66ExtractThemes_(messages = []) {
+  const source = _allMessageText_(messages);
+  const out = [];
+
+  const patterns = [
+    /"day"\s*:\s*(\d+)[\s\S]{0,600}?"activity"\s*:\s*"(PLAN\s*[–-]\s*[^"]+)"/gi,
+    /"day"\s*:\s*(\d+)[\s\S]{0,600}?"theme"\s*:\s*"([^"]+)"/gi,
+    /day\s*(\d+)\s*[:\-]\s*(PLAN\s*[–-]\s*[^\n]+)/gi,
+    /d[ií]a\s*(\d+)\s*[:\-]\s*(PLAN\s*[–-]\s*[^\n]+)/gi,
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(source))) {
+      const day = Number(match[1]) || 0;
+      const theme = String(match[2] || "").trim();
+      if (day > 0 && theme && !out.some((item) => item.day === day)) {
+        out.push({ day, theme });
+      }
+    }
+  }
+
+  return out.sort((a, b) => a.day - b.day);
+}
+
+function _v66ThemeParts_(theme = "") {
+  const raw = String(theme || "").replace(/^.*?\bPLAN\b\s*[–-]\s*/i, "").trim();
+  const split = raw.split(/\|\s*Anchors?\s*:/i);
+  return {
+    identity: String(split[0] || "").trim(),
+    anchors: String(split.slice(1).join(" | ") || "").trim(),
+  };
+}
+
+function _v66TokenSet_(value = "") {
+  return new Set(_v64MasterTokens_(value));
+}
+
+function _v66RowIsUtility_(row = {}) {
+  return /\b(breakfast|lunch|dinner|brunch|restaurant|cafe|coffee|desayuno|almuerzo|cena|restaurante|cafeteria|cafetería|return|back|regreso|retorno|arrival|llegada|departure|salida|hotel|lodging|alojamiento|parking|aparcamiento|fuel|combustible)\b/i.test(
+    `${row?.activity || ""} ${row?.to || ""}`
+  );
+}
+
+function _v66ThemeCompliance_(row = {}, theme = "") {
+  if (!theme || _v66RowIsUtility_(row)) return true;
+
+  const parts = _v66ThemeParts_(theme);
+  const allowed = _v66TokenSet_(`${parts.identity} ${parts.anchors}`);
+  if (!allowed.size) return true;
+
+  const rowTokens = _v66TokenSet_(`${row?.activity || ""} ${row?.to || ""}`);
+  let hits = 0;
+  for (const token of rowTokens) if (allowed.has(token)) hits += 1;
+
+  return hits >= 1;
+}
+
+function _v66HasAuroraNote_(blocks = []) {
+  return blocks.some((block) =>
+    (Array.isArray(block?.rows) ? block.rows : []).some((row) =>
+      /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(
+        `${row?.activity || ""} ${row?.notes || ""}`
+      )
+    )
+  );
+}
+
+function _v66AuroraPlausibleFromText_(messages = []) {
+  const s = _v62NormKey_(_allMessageText_(messages));
+  const season =
+    /\b(january|enero|janeiro|janvier|januar|february|febrero|november|noviembre|december|diciembre|winter|invierno)\b/.test(
+      s
+    );
+  const zone =
+    /\b(iceland|islandia|reykjavik|reykjavik|norway|noruega|sweden|suecia|finland|finlandia|lapland|alaska|yellowknife|canada|greenland|groenlandia|faroe|faroes|svalbard|tromso|tromso)\b/.test(
+      s
+    );
+  return season && zone;
+}
+
 function _v62ValidateFinal_(parsed, options = {}) {
   const errors = [];
   const cityDay = _v65GetItineraryBlocks_(parsed);
+  const messages = Array.isArray(options?.messages) ? options.messages : [];
+  const themes = _v66ExtractThemes_(messages);
 
   if (!cityDay.length) {
     return { ok: true, errors: [], affected_days: [] };
@@ -1195,6 +1350,7 @@ function _v62ValidateFinal_(parsed, options = {}) {
   for (const block of cityDay) {
     const day = Number(block?.day) || 0;
     const rows = Array.isArray(block?.rows) ? block.rows : [];
+    const theme = String(themes.find((item) => Number(item.day) === day)?.theme || "");
     let previousEnd = null;
     let previousTo = "";
 
@@ -1236,6 +1392,19 @@ function _v62ValidateFinal_(parsed, options = {}) {
             row: rowNumber,
             available_minutes: available,
             required_minutes: needed,
+          });
+        }
+
+        const maximumExplained = transport.max + activity.max;
+        const unexplained = available - maximumExplained;
+        if (unexplained > 20) {
+          errors.push({
+            code: "ROW_INTERVAL_UNEXPLAINED",
+            day,
+            row: rowNumber,
+            available_minutes: available,
+            maximum_explained_minutes: maximumExplained,
+            unexplained_minutes: unexplained,
           });
         }
 
@@ -1286,6 +1455,41 @@ function _v62ValidateFinal_(parsed, options = {}) {
           code: "LOCATION_TRANSPORT_CONTAMINATION",
           day,
           row: rowNumber,
+        });
+      }
+
+      if (theme && !_v66ThemeCompliance_(row, theme)) {
+        errors.push({
+          code: "THEME_ANCHOR_VIOLATION",
+          day,
+          row: rowNumber,
+          approved_theme: theme,
+          activity: row?.activity,
+          to: row?.to,
+        });
+      }
+
+      if (
+        /\b(if not visited|si no fue visitad[oa]|again|de nuevo|express|second chance|segunda oportunidad|optional repeat|repetici[oó]n opcional)\b/i.test(
+          `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`
+        )
+      ) {
+        errors.push({ code: "CONDITIONAL_REPEAT", day, row: rowNumber });
+      }
+
+      if (
+        /\b(summer|verano|nesting|nidificaci[oó]n|temporada alta)\b/i.test(
+          String(row?.notes || "")
+        ) &&
+        /\b(january|enero|february|febrero|winter|invierno)\b/i.test(
+          _allMessageText_(messages)
+        )
+      ) {
+        errors.push({
+          code: "IRRELEVANT_SEASONAL_NOTE",
+          day,
+          row: rowNumber,
+          notes: row?.notes,
         });
       }
 
@@ -1408,6 +1612,19 @@ FINAL SURGICAL REPAIR:
 - Use walking in compact urban clusters when practical.
 - Correct season/daylight logic and include a conditional timed seasonal signature experience
   when globally appropriate.
+- Enforce the approved Master Plan anchors. Replace any major POI not belonging to the day's
+  approved theme, especially repeated arrival/final-day urban icons.
+- If the trip is 6–8 days from a gateway/outward base and too many days are urban, preserve the
+  Master Plan's strongest unused radial/special bucket rather than repeating city highlights.
+- Explain each row interval: transport + activity + an allowed operational buffer must cover the
+  row; unexplained residual time should normally be no more than 20 minutes.
+- Translate duration labels into the selected output language.
+- Add aurora guidance in Notes when latitude/season make it plausible: state a sensible dark-hour
+  start, independent rental-car option to a safe dark area, paid guided-tour option, conditions
+  to verify and no guarantee. Use 1–3 nights, not every night.
+- Remove seasonally irrelevant advice. For winter dates, do not mention summer nesting or summer
+  crowd guidance unless explicitly framed as irrelevant.
+- Never repeat arrival-day or earlier-day icons on the final day.
 - Return JSON only.
 
 VALIDATION ERRORS:
@@ -1427,7 +1644,7 @@ ${JSON.stringify(parsed)}
   const repaired = cleanToJSON(raw);
   if (!_hasRenderableItinerary_(repaired)) return null;
 
-  return _v65NormalizeEverySchema_(repaired);
+  return _v65NormalizeEverySchema_(repaired, detectLanguageOverride(clientMessages) || detectUserLang(clientMessages));
 }
 
 
@@ -1527,6 +1744,25 @@ BUCKET EXHAUSTION RULE (CRITICAL — INTERNAL ONLY):
   • scenic route with real sub-stops
 - If a strong unused bucket exists, you MUST use it before creating another weak urban filler day.
 - For 6–8 day itineraries, the last 2–3 days must still feel intentional and premium, not like leftovers.
+
+FINAL-DAY UNIQUENESS (HARD RULE):
+- The final day must use unused POIs and a distinct corridor from the arrival day and prior city days.
+- Do not repeat the arrival church, main shopping street, waterfront icon, market or concert hall.
+- If no premium unused POIs remain, create an intentionally light local/farewell day or use the
+  strongest feasible unused radial bucket—never replay earlier highlights.
+
+DAYLIGHT-FIRST SCHEDULING (HARD RULE):
+- For latitude/season combinations with late sunrise or early sunset, driving may begin in darkness,
+  but landscape-dependent visits must begin only inside plausible useful daylight.
+- Do not schedule waterfalls, beaches, cliffs, viewpoints, open-air geothermal fields or scenic
+  trails before plausible sunrise or after useful twilight.
+- Remove the weakest optional scenic stop when necessary to protect daylight and the return drive.
+
+AURORA NOTES (HARD RULE):
+- At plausible auroral destinations/seasons, include concise guidance in Notes on 1–3 suitable nights.
+- State the earliest sensible dark-hour window, the option to drive independently to a safe dark
+  location when roads/weather permit, the option to book a paid guided tour, what conditions to
+  check, and that sightings are not guaranteed.
 
 INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
 - The user's Planner input contains a mix of: hard constraints, soft preferences, and suggestions.
@@ -2128,12 +2364,12 @@ MANDATORY FINAL-ITINERARY RECOVERY:
 
     // Final itinerary/one-shot normalization.
     if (!parsed) parsed = fallbackJSON(lang);
-    parsed = _v65NormalizeEverySchema_(parsed);
+    parsed = _v65NormalizeEverySchema_(parsed, lang);
 
-    // Deterministic audit runs only on actual city_day output.
-    // One bounded surgical repair is allowed; if it fails, the valid original draft is retained
-    // so the planner workflow is never broken by the quality layer.
-    if (Array.isArray(parsed?.city_day) && parsed.city_day.length) {
+    // Deterministic audit runs on every renderable schema used by the current planner.js:
+    // city_day, rows, destinations and itineraries.
+    // One bounded surgical repair is allowed; if it fails, the original draft is retained.
+    if (_v65GetItineraryBlocks_(parsed).length) {
       const report = _v62ValidateFinal_(parsed, { messages: clientMessages });
 
       if (!report.ok) {
