@@ -1,5 +1,12 @@
 /* =========================================================
-   ✅ v59 (quirúrgico) — Idioma (Opción B)
+   ✅ v60 (MVP WOW) — Orquestación global coherente
+   - Conserva la interfaz, DOM, exportaciones y flujo de v59
+   - Mantiene API v65 sin cambiar su contrato
+   - Añade ledger global, contexto acumulado por bloque y auditoría final trip-wide
+   - Corrige deduplicación entre días, continuidad, duración, idioma y hechos no proporcionados
+
+   Base: v59
+   Idioma (Opción B)
    - Fuente primaria: <html lang="en|es">
    - Fallback: ruta URL (/es o /en) si el lang no está definido o es raro
    - Guarda idioma normalizado en plannerState.lang
@@ -21,7 +28,7 @@ const MODEL   = 'gpt-4o-mini';
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
 // 🧠 itineraries soporta originalDays para rebalanceos selectivos
-let itineraries = {};            // { [city]: { byDay:{[n]:Row[]}, currentDay, baseDate, originalDays } }
+let itineraries = {};            // { [city]: { byDay, currentDay, baseDate, originalDays, masterPlan, audit } }
 let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
 
 let session = [];                // historial para el agente principal
@@ -659,7 +666,7 @@ function saveDestinations(){
 
   savedDestinations = list;
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
-    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null };
+    if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null, masterPlan:[], audit:null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
     else {
       cityMeta[city].baseDate = baseDate||null;
@@ -768,16 +775,9 @@ function renderCityItinerary(city){
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
 
-  function formatDurationForDisplay(val){
+  function formatDurationForDisplay(val, transport=''){
     if(!val) return '';
-    const s = String(val).trim();
-    const m = s.match(/^(\d+(?:\.\d+)?)\s*m$/i);
-    if(m){
-      const minutes = parseFloat(m[1]);
-      const hours = minutes / 60;
-      return (Number.isInteger(hours) ? `${hours}h` : `${hours}h`);
-    }
-    return s;
+    return _sanitizeDurationLines_(val, transport);
   }
 
   days.forEach(dayNum=>{
@@ -808,7 +808,7 @@ function renderCityItinerary(city){
         <td>${r.from||''}</td>
         <td>${r.to||''}</td>
         <td>${r.transport||''}</td>
-        <td>${formatDurationForDisplay(r.duration||'')}</td>
+        <td>${formatDurationForDisplay(r.duration||'', r.transport||'')}</td>
         <td>${cleanNotes}</td>
       `;
       tb.appendChild(tr);
@@ -1174,7 +1174,7 @@ function dedupeInto(arr, row){
   if(!has) arr.push(row);
 }
 function ensureDays(city){
-  if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null};
+  if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:null,masterPlan:[],audit:null};
   const byDay = itineraries[city].byDay || {};
   const present = Object.keys(byDay).map(n=>+n);
   const maxPresent = present.length?Math.max(...present):0;
@@ -1203,120 +1203,224 @@ function _minutesToHHMM_(mins){
   const mm = String(Math.floor(n%60)).padStart(2,'0');
   return `${hh}:${mm}`;
 }
-function _sumApproxMinutesFromDuration_(txt){
-  const s = String(txt||'');
-  if(!s.trim()) return null;
-
-  const matches = [...s.matchAll(/~?\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|m|min|mins)\b/ig)];
-  if(!matches.length) return null;
-
-  let total = 0;
-  for(const mm of matches){
-    const val = parseFloat(mm[1]);
-    const unit = String(mm[2]||'').toLowerCase();
-    if(!Number.isFinite(val)) continue;
-    if(unit.startsWith('h')) total += Math.round(val * 60);
-    else total += Math.round(val);
-  }
-  return total > 0 ? total : null;
+function _plannerOutputLang_(){
+  const raw = String(plannerState?.itineraryLang || plannerState?.lang || getLang() || 'en')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'');
+  if(/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return 'es';
+  if(/\b(pt|por|portuguese|portugues)\b/.test(raw)) return 'pt';
+  if(/\b(fr|fre|french|francais)\b/.test(raw)) return 'fr';
+  if(/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return 'de';
+  if(/\b(it|ita|italian|italiano)\b/.test(raw)) return 'it';
+  return 'en';
 }
-function _sanitizeDurationLines_(raw){
-  let s = (typeof raw === 'number') ? `${raw}m` : String(raw||'').trim();
 
-  if (s && /Transporte\s*:/i.test(s) && /Actividad\s*:/i.test(s) && s.includes(',')) {
-    s = s.replace(/\s*,\s*Actividad\s*:/i, '\nActividad:');
+function _durationLabels_(){
+  const lang = _plannerOutputLang_();
+  const map = {
+    es:['Transporte','Actividad'],
+    pt:['Transporte','Atividade'],
+    fr:['Transport','Activité'],
+    de:['Transport','Aktivität'],
+    it:['Trasporto','Attività'],
+    en:['Transport','Activity']
+  };
+  return map[lang] || map.en;
+}
+
+function _extractDurationPart_(raw, kind='transport'){
+  const s = String(raw||'').replace(/\r/g,'').trim();
+  if(!s) return '';
+  const transportLabels = '(?:Transport|Transporte|Trasporto)';
+  const activityLabels = '(?:Activity|Actividad|Atividade|Activité|Aktivität|Attività)';
+  const re = kind === 'transport'
+    ? new RegExp(`${transportLabels}\\s*:\\s*([\\s\\S]*?)(?=\\n?\\s*${activityLabels}\\s*:|$)`, 'i')
+    : new RegExp(`${activityLabels}\\s*:\\s*([\\s\\S]*)$`, 'i');
+  return String(s.match(re)?.[1] || '').trim();
+}
+
+function _durationBoundsMinutes_(raw){
+  const s = String(raw||'')
+    .toLowerCase()
+    .replace(/,/g,'.')
+    .replace(/[–—]/g,'-')
+    .replace(/[~≈]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  if(!s) return null;
+
+  let m = s.match(/(\d+)\s*h\s*(\d{1,2})?\s*-\s*(\d+)\s*h\s*(\d{1,2})?/);
+  if(m){
+    const a = (+m[1]*60)+(+m[2]||0);
+    const b = (+m[3]*60)+(+m[4]||0);
+    return {min:Math.min(a,b), max:Math.max(a,b)};
   }
-  if (s && /Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(',')) {
-    s = s.replace(/\s*,\s*Activity\s*:/i, '\nActivity:');
+
+  m = s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
+  if(m){
+    const a = Math.round(+m[1]*60), b = Math.round(+m[2]*60);
+    return {min:Math.min(a,b), max:Math.max(a,b)};
   }
 
-  if(!s){
-    return 'Transporte: Verificar duración en el Info Chat\nActividad: Verificar duración en el Info Chat';
+  m = s.match(/(\d+)\s*-\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
+  if(m){
+    const a=+m[1], b=+m[2];
+    return {min:Math.min(a,b), max:Math.max(a,b)};
   }
 
-  // ✅ Evita 0m / ~0m
-  s = s.replace(/(Transporte|Transport)\s*:\s*~?0m\b/gi, '$1: ~10m');
-  s = s.replace(/(Actividad|Activity)\s*:\s*~?0m\b/gi, '$1: ~10m');
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})\b/);
+  if(m){
+    const v=(+m[1]*60)+(+m[2]||0);
+    return {min:v,max:v};
+  }
 
-  return s;
+  m = s.match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
+  if(m){
+    const v=Math.round(+m[1]*60);
+    return {min:v,max:v};
+  }
+
+  m = s.match(/(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
+  if(m){
+    const v=+m[1];
+    return {min:v,max:v};
+  }
+
+  return null;
+}
+
+function _formatMinutesHuman_(minutes){
+  const n=Math.max(1,Math.round(Number(minutes)||1));
+  if(n<60) return `~${n} min`;
+  const h=Math.floor(n/60), m=n%60;
+  return m ? `~${h} h ${m} min` : `~${h} h`;
+}
+
+function _formatDurationBounds_(b){
+  if(!b) return '';
+  if(b.min===b.max) return _formatMinutesHuman_(b.min);
+  return `${_formatMinutesHuman_(b.min)}–${_formatMinutesHuman_(b.max)}`;
+}
+
+function _transportBoundsFromField_(raw){
+  const s=String(raw||'');
+  const candidates=[];
+  const patterns=[
+    /(\d+)\s*h\s*(\d{1,2})?\s*[-–—]\s*(\d+)\s*h\s*(\d{1,2})?/gi,
+    /(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/gi,
+    /(\d+)\s*[-–—]\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/gi,
+    /(\d+)\s*h\s*(\d{1,2})\b/gi,
+    /(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/gi,
+    /(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/gi
+  ];
+  let m;
+  while((m=patterns[0].exec(s))){
+    const a=(+m[1]*60)+(+m[2]||0), b=(+m[3]*60)+(+m[4]||0);
+    candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
+  }
+  while((m=patterns[1].exec(s))){
+    const a=Math.round(+m[1]*60),b=Math.round(+m[2]*60);
+    candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
+  }
+  while((m=patterns[2].exec(s))){
+    candidates.push({min:Math.min(+m[1],+m[2]),max:Math.max(+m[1],+m[2])});
+  }
+  while((m=patterns[3].exec(s))){
+    const v=(+m[1]*60)+(+m[2]||0); candidates.push({min:v,max:v});
+  }
+  while((m=patterns[4].exec(s))){
+    const v=Math.round(+m[1]*60); candidates.push({min:v,max:v});
+  }
+  while((m=patterns[5].exec(s))){
+    const v=+m[1]; candidates.push({min:v,max:v});
+  }
+  return candidates.length ? candidates.reduce((a,b)=>b.max>a.max?b:a) : null;
+}
+
+function _sanitizeDurationLines_(raw, transportField=''){
+  const [transportLabel, activityLabel] = _durationLabels_();
+  const s = (typeof raw === 'number') ? `${raw} min` : String(raw||'').trim();
+
+  const declaredTransport = _durationBoundsMinutes_(_extractDurationPart_(s,'transport'));
+  const transportFromField = _transportBoundsFromField_(transportField);
+  const activity = _durationBoundsMinutes_(_extractDurationPart_(s,'activity'));
+
+  let transport = declaredTransport;
+  if(transportFromField && (!transport || transportFromField.max > transport.max)){
+    transport = transportFromField;
+  }
+
+  if(transport && activity){
+    return `${transportLabel}: ${_formatDurationBounds_(transport)}\n${activityLabel}: ${_formatDurationBounds_(activity)}`;
+  }
+
+  if(s){
+    return s
+      .replace(/^\s*(Transport|Transporte|Trasporto)\s*:/im, `${transportLabel}:`)
+      .replace(/^\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/im, `${activityLabel}:`)
+      .replace(/\s*\|\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`)
+      .replace(/\s*,\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`);
+  }
+
+  return `${transportLabel}: Verificar\n${activityLabel}: Verificar`;
+}
+
+function _durationTotalBounds_(duration){
+  const t=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
+  const a=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
+  if(!t || !a) return null;
+  return {min:t.min+a.min,max:t.max+a.max};
 }
 
 function normalizeRow(r = {}, fallbackDay = 1){
-  let start   = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
-  let end     = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
-  const act   = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
-  const from  = r.from ?? r.origin ?? r.origen ?? '';
-  const to    = r.to   ?? r.destination ?? r.destino ?? '';
-  const trans = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
-  const durRaw= r.duration ?? r.durationMinutes ?? r.duracion ?? '';
-  const notes = r.notes ?? r.nota ?? r.comentarios ?? '';
-
-  let duration = _sanitizeDurationLines_(durRaw);
+  const startRaw = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
+  const endRaw   = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
+  const act      = r.activity ?? r.title ?? r.name ?? r.descripcion ?? r.descripcion_actividad ?? '';
+  const from     = r.from ?? r.origin ?? r.origen ?? '';
+  const to       = r.to   ?? r.destination ?? r.destino ?? '';
+  const trans    = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
+  const durRaw   = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
+  const notes    = r.notes ?? r.nota ?? r.comentarios ?? '';
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
 
-  const startStr = String(start||'').trim();
-  const endStr   = String(end||'').trim();
+  let start = String(startRaw||'').trim();
+  let end = String(endRaw||'').trim();
+  let startMin=_hhmmToMinutes_(start), endMin=_hhmmToMinutes_(end);
+  const duration=_sanitizeDurationLines_(durRaw, trans);
+  const total=_durationTotalBounds_(duration);
 
-  let startMin = _hhmmToMinutes_(startStr);
-  let endMin   = _hhmmToMinutes_(endStr);
-
-  // ✅ Si falta una hora, intenta inferirla desde duration (en vez de forzar defaults)
-  const approxDur = _sumApproxMinutesFromDuration_(duration);
-  if(startMin != null && endMin == null && approxDur){
-    endMin = startMin + Math.max(approxDur, 30);
-  }else if(startMin == null && endMin != null && approxDur){
-    startMin = Math.max(0, endMin - Math.max(approxDur, 30));
+  // Infer only genuinely missing times. Do not rewrite valid model schedules.
+  if(startMin!=null && endMin==null && total){
+    endMin=startMin+Math.max(30,total.max);
+  }else if(startMin==null && endMin!=null && total){
+    startMin=Math.max(0,endMin-Math.max(30,total.max));
   }
 
-  // ✅ Anti-umbrella: si la fila ocupa muchísimo más que su duración real, comprímela
-  if(startMin != null && endMin != null && approxDur){
-    let span = endMin - startMin;
-    if(span <= 0) span += 24*60;
-
-    // si el bloque es exageradamente mayor que la duración real, corrige el end
-    if(span >= Math.max(240, approxDur * 2.2)){
-      const compressed = Math.min(Math.max(approxDur + 15, 30), 210); // buffer ligero, sin exagerar
-      endMin = startMin + compressed;
-    }
+  if(startMin!=null && endMin!=null){
+    let span=endMin-startMin;
+    if(span<=0) span+=24*60;
+    if(span<15) endMin=startMin+30;
   }
 
-  // ✅ Fallback final: solo si sigue faltando algo, entonces sí usa defaults
-  if(startMin == null && endMin == null){
-    startMin = _hhmmToMinutes_(DEFAULT_START);
-    endMin   = _hhmmToMinutes_(DEFAULT_END);
-  }else if(startMin != null && endMin == null){
-    endMin = startMin + 90;
-  }else if(startMin == null && endMin != null){
-    startMin = Math.max(0, endMin - 90);
-  }
+  start = startMin==null ? '' : _minutesToHHMM_(startMin);
+  end = endMin==null ? '' : _minutesToHHMM_(endMin);
 
-  // ✅ Garantiza consistencia mínima
-  let finalSpan = endMin - startMin;
-  if(finalSpan <= 0) finalSpan += 24*60;
-  if(finalSpan < 15){
-    endMin = startMin + 30;
-  }
-
-  const finalStart = _minutesToHHMM_(startMin);
-  const finalEnd   = _minutesToHHMM_(endMin);
-
-  // ✅ QUIRÚRGICO: guard-rails locales anti-campos-vacíos (fail-open)
-  const safeActivity  = (String(act||'').trim() || 'Actividad por definir');
-  const safeFrom      = (String(from||'').trim() || 'Hotel');
-  const safeTo        = (String(to||'').trim() || 'Centro');
-  const safeTransport = (String(trans||'').trim() || 'A pie o Transporte local');
-  const n0 = String(notes||'').trim();
-  const safeNotes = (n0 && n0.toLowerCase()!=='seed') ? n0 : 'Sugerencia: verifica horarios, seguridad básica y reserva con antelación.';
+  const safeActivity = String(act||'').trim();
+  const safeFrom = String(from||'').trim();
+  const safeTo = String(to||'').trim();
+  const safeTransport = String(trans||'').trim();
+  const safeNotes = String(notes||'').trim();
 
   return {
     day:d,
-    start: finalStart || DEFAULT_START,
-    end: finalEnd || DEFAULT_END,
+    start,
+    end,
     activity:safeActivity,
     from:safeFrom,
     to:safeTo,
     transport:safeTransport,
-    duration:duration,
+    duration,
     notes:safeNotes
   };
 }
@@ -1335,7 +1439,7 @@ function dedupeSoftSameDay(rows){
 
 function pushRows(city, rows, replace=false){
   if(!city || !rows) return;
-  if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null};
+  if(!itineraries[city]) itineraries[city] = {byDay:{},currentDay:1,baseDate:cityMeta[city]?.baseDate||null,masterPlan:[],audit:null};
 
   const byDay = itineraries[city].byDay;
   const daysToReplace = new Set();
@@ -1878,365 +1982,550 @@ function _extractPlannerRows_(parsed, city){
 }
 
 /* =========================================================
-   🆕 STAGED GENERATION HELPERS (master + blocks)
+   ✅ v60 · STAGED GENERATION WITH TRIP-WIDE LEDGER
 ========================================================= */
 function _extractMasterPlanDays_(parsed, city, totalDays){
   if(!parsed) return [];
-
-  // ✅ Extract from the SAME planner contract (rows / city_day / destinations / itineraries)
   const rows = _extractPlannerRows_(parsed, city);
   if(!Array.isArray(rows) || !rows.length) return [];
 
-  const out = [];
-  const used = new Set();
-
-  for(const r of rows){
-    const day = parseInt(r?.day, 10);
-    if(!(day >= 1 && day <= totalDays)) continue;
-    if(used.has(day)) continue;
-
-    const activity = String(r?.activity || '').trim();
-    let theme = '';
-
-    // Expected: "PLAN – <theme>"
-    const match = activity.match(/^[^-–]+[–-]\s*(.+)$/);
-    if(match && match[1]) theme = String(match[1]).trim();
-
-    if(!theme) theme = activity;
-    if(!theme) theme = String(r?.to || '').trim();
-    if(!theme) theme = String(r?.notes || '').trim();
-    if(!theme) continue;
-
-    used.add(day);
-    out.push({ day, theme });
+  const byDay = new Map();
+  for(const row of rows){
+    const day=Number(row?.day||0);
+    if(day<1 || day>totalDays || byDay.has(day)) continue;
+    const activity=String(row?.activity||'').trim();
+    const m=activity.match(/^\s*PLAN\s*[–-]\s*(.+)$/i);
+    const theme=String(m?.[1] || activity || row?.notes || row?.to || '').trim();
+    if(theme) byDay.set(day,{day,theme});
   }
 
-  if(out.length !== totalDays) return [];
-  const unique = new Set(out.map(x=>x.day));
-  if(unique.size !== totalDays) return [];
-
-  return out.sort((a,b)=>a.day-b.day);
+  const out=Array.from(byDay.values()).sort((a,b)=>a.day-b.day);
+  return out.length===totalDays ? out : [];
 }
 
-async function _buildCityMasterPlan_(city, totalDays, perDay, baseDate='', hotel='', transport='recommend me'){
-  const prompt = `
-${FORMAT}
-**ROLE:** Planner “Astra”. Create a STRATEGIC DISTRIBUTION PLAN ONLY for "${city}" (${totalDays} day/s).
-- Return Format B JSON: {"destination":"${city}","rows":[...]}.
+function _canonicalText_(value=''){
+  return String(value||'')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/[’'"]/g,'')
+    .replace(/\b(exterior|interior|tower|torre|viewpoint|mirador|museum|museo|market|mercado|street|calle|concert hall|sala de conciertos)\b/g,' ')
+    .replace(/[^a-z0-9]+/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
 
-MANDATORY:
-- Create EXACTLY ${totalDays} rows total.
-- Create EXACTLY ONE row per day (day 1 to day ${totalDays}).
-- This is NOT the final itinerary. This is ONLY a strategic day-by-day plan.
-- Each row represents the theme/purpose of that day.
-- Use "activity" exactly like: "PLAN – <short strategic theme>".
-- Keep themes realistic and well distributed across all days.
-- Avoid empty/light/generic placeholder days unless the user's time window genuinely makes that necessary.
-- If some day has a shorter window, make it lighter accordingly.
-- If some day is a good candidate for a nearby excursion/day trip, assign that strategically.
-- Keep the logic GLOBAL; do not depend on hardcoded destinations.
-- Since this is only planning metadata:
-  • "from" can be "Hotel"
-  • "to" can be "City area"
-  • "transport" can be "Planning"
-  • "duration" can be "Transport: planning\\nActivity: planning"
-  • "notes" should briefly justify the day theme
-- Do NOT generate detailed sub-stops yet.
-- Daily reference windows: ${JSON.stringify(perDay)}
-- Base date: ${JSON.stringify(baseDate || '')}
-- Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
-- No text outside JSON.
-`.trim();
+function _themeParts_(theme=''){
+  const s=String(theme||'').replace(/^\s*PLAN\s*[–-]\s*/i,'').trim();
+  const parts=s.split(/\|\s*Anchors?\s*:/i);
+  return {
+    identity:String(parts[0]||'').trim(),
+    anchors:String(parts.slice(1).join(' | ')||'').trim()
+  };
+}
 
-  console.log(`[MASTER PLAN] Requesting strategic plan for ${city} (${totalDays} days)...`);
-  const ans = await _callPlannerSystemPrompt_(prompt, false);
-  const parsed = parseJSON(ans);
-  const out = _extractMasterPlanDays_(parsed, city, totalDays);
-  console.log(`[MASTER PLAN] ${out.length === totalDays ? 'OK' : 'FAIL'}`, out, parsed);
-  return out;
+function _anchorItems_(theme=''){
+  const {anchors}=_themeParts_(theme);
+  return String(anchors||'')
+    .split(/\s*;\s*|\s*,\s*/)
+    .map(_canonicalText_)
+    .filter(x=>x.length>=4);
+}
+
+function _poiKeyFromRow_(row={}){
+  const to=_canonicalText_(row?.to);
+  const activity=_canonicalText_(String(row?.activity||'').replace(/^.*?[–-]\s*/,''));
+  return to || activity;
+}
+
+function _isUtilityRow_(row={}){
+  return /\b(return|regreso|retorno|arrival|llegada|departure|salida|hotel|lodging|alojamiento|breakfast|desayuno|lunch|almuerzo|dinner|cena|restaurant|restaurante|cafe|cafeteria|parking|aparcamiento|fuel|combustible|check in|check out)\b/i.test(
+    `${row?.activity||''} ${row?.to||''}`
+  );
+}
+
+function _rowsLedger_(rows=[]){
+  return (rows||[])
+    .filter(r=>!_isUtilityRow_(r))
+    .map(r=>({
+      day:Number(r?.day||0),
+      poi:_poiKeyFromRow_(r),
+      activity:String(r?.activity||''),
+      to:String(r?.to||'')
+    }))
+    .filter(x=>x.day>0 && x.poi);
 }
 
 function _chunkMasterDays_(days=[]){
-  const arr = Array.isArray(days) ? days.slice().sort((a,b)=>a.day-b.day) : [];
-  if(!arr.length) return [];
-
-  const chunks = [];
-  for(let i=0; i<arr.length; i+=2){
-    chunks.push(arr.slice(i, i+2));
-  }
+  const arr=(Array.isArray(days)?days:[]).slice().sort((a,b)=>a.day-b.day);
+  const chunks=[];
+  for(let i=0;i<arr.length;i+=2) chunks.push(arr.slice(i,i+2));
   return chunks;
 }
 
 function _forceRowsIntoValidDayRange_(rows=[], allowedDays=[]){
-  const allowed = new Set((allowedDays || []).map(d => Number(d)));
-  return (rows || [])
+  const allowed=new Set((allowedDays||[]).map(Number));
+  return (rows||[])
     .map(r=>{
-      let d = parseInt(r?.day, 10);
-      if(!allowed.has(d)) d = Number(allowedDays?.[0] || 1);
-      return normalizeRow({ ...r, day: d }, d);
+      let day=Number(r?.day||0);
+      if(!allowed.has(day)) day=Number(allowedDays?.[0]||1);
+      return normalizeRow({...r,day},day);
     })
-    .filter(r => allowed.has(Number(r?.day)));
+    .filter(r=>allowed.has(Number(r?.day)));
 }
 
 function _hasUsableRowsForAllBlockDays_(rows=[], blockDays=[]){
-  const set = new Set((rows||[]).map(r => Number(r?.day)));
-  return (blockDays || []).every(d => set.has(Number(d)));
+  const days=new Set((rows||[]).filter(r=>String(r?.activity||'').trim()).map(r=>Number(r?.day)));
+  return (blockDays||[]).every(d=>days.has(Number(d)));
 }
 
-async function _generateBlockFromThemes_(city, totalDays, blockDaysObjs, perDay, forceReplan=false, hotel='', transport='recommend me'){
-  const dayNums = blockDaysObjs.map(x => Number(x.day));
-  const perDayForBlock = perDay.filter(x => dayNums.includes(Number(x?.day)));
+function _masterPlanLedgerText_(masterDays=[]){
+  return (masterDays||[])
+    .map(x=>`Day ${x.day}: ${x.theme}`)
+    .join('\n');
+}
 
-  const prompt = `
+function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, transport){
+  return {
+    city,
+    total_days:totalDays,
+    base_date:baseDate||null,
+    daily_windows:perDay,
+    lodging_base:hotel||null,
+    transport:transport||null,
+    special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
+    travelers:plannerState?.travelers || null,
+    budget:plannerState?.budget || null,
+    currency:plannerState?.currency || null,
+    explicitly_provided_departure:
+      /\b(flight|vuelo|airport|aeropuerto|departure|salida|check[- ]?out|devolver|return car|rental company|europcar|hertz|avis)\b/i.test(
+        String(plannerState?.specialConditions || '')
+      )
+  };
+}
+
+async function _buildCityMasterPlan_(city,totalDays,perDay,baseDate='',hotel='',transport='recommend me'){
+  const facts=_knownUserFactsForCity_(city,totalDays,perDay,baseDate,hotel,transport);
+  const prompt=`
 ${FORMAT}
-**ROLE:** Planner “Astra”. Create itinerary rows ONLY for these days of "${city}" (${totalDays} day/s total):
-${JSON.stringify(blockDaysObjs)}
+ROLE: Astra. Produce STRATEGIC DISTRIBUTION METADATA ONLY for "${city}".
 
-Return Format B JSON: {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
+Return exactly:
+{"destination":"${city}","rows":[...]}
+with EXACTLY ${totalDays} rows, one per day.
 
-MANDATORY:
-- Generate rows ONLY for these days: ${dayNums.join(', ')}.
-- Every row MUST have day equal to one of these days only.
-- Respect these reference windows intelligently: ${JSON.stringify(perDayForBlock)}.
-- Each normal usable day should target 4–8 rows.
-- If a day becomes a day trip/excursion, it must still be complete and realistic.
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>".
-- "from", "to", "transport", "notes" can NEVER be empty.
-- "from" and "to" must be REAL places, never a macro-tour label.
-- If a day is a day trip/excursion, it should end with a realistic return to the base city/hotel area.
-- Avoid generic placeholders.
-- Keep the logic GLOBAL; do not depend on hardcoded destinations.
-- Hotel/base: ${JSON.stringify(hotel || '')}
-- Preferred transport: ${JSON.stringify(transport || 'recommend me')}
-- No text outside JSON.
+For every row:
+- day: correct day number.
+- activity MUST be:
+  "PLAN – <exclusive identity and geographic corridor> | Anchors: <3–8 concrete reserved anchors separated by semicolons>"
+- from: "Planning"
+- to: "Planning"
+- transport: "Planning"
+- duration: "Transport: planning\\nActivity: planning"
+- notes: short strategic justification.
+
+TRIP-WIDE RULES:
+- Audit all ${totalDays} rows together before returning.
+- No anchor, alias, district, landmark, restaurant, museum, thermal experience, wildlife experience,
+  macro-route or corridor may be reserved on two days.
+- Arrival and final days must have disjoint anchors.
+- Prefer strong unused regional/signature buckets over a third generic city day when feasible.
+- If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
+- Respect the actual daily windows, season, useful daylight, travelers, base and transport.
+- Do not invent flight, airport, check-out, rental company or car-return logistics.
+- This is metadata only; do not generate detailed itinerary rows.
+- JSON only.
+
+KNOWN USER FACTS:
+${JSON.stringify(facts)}
 `.trim();
 
-  const label = `${dayNums[0]}${dayNums.length>1 ? '-' + dayNums[dayNums.length-1] : ''}`;
-  console.log(`[BLOCK ${label}] Requesting rows...`);
+  console.log(`[MASTER PLAN] Requesting ${city} (${totalDays} days)...`);
+  const raw=await _callPlannerSystemPrompt_(prompt,false);
+  const parsed=parseJSON(raw);
+  const out=_extractMasterPlanDays_(parsed,city,totalDays);
+  console.log(`[MASTER PLAN] ${out.length===totalDays?'OK':'FAIL'}`,out);
+  return out;
+}
 
-  const ans = await _callPlannerSystemPrompt_(prompt, false);
-  const parsed = parseJSON(ans);
+async function _generateBlockFromThemes_(
+  city,totalDays,blockDaysObjs,allMasterDays,previousRows,perDay,
+  forceReplan=false,hotel='',transport='recommend me',baseDate=''
+){
+  const dayNums=blockDaysObjs.map(x=>Number(x.day));
+  const windows=perDay.filter(x=>dayNums.includes(Number(x?.day)));
+  const facts=_knownUserFactsForCity_(city,totalDays,perDay,baseDate,hotel,transport);
+  const previousLedger=_rowsLedger_(previousRows);
 
-  if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-    const extracted = _extractPlannerRows_(parsed, city);
-    const forced = _forceRowsIntoValidDayRange_(extracted, dayNums);
+  const prompt=`
+${FORMAT}
+ROLE: Astra. Generate FINAL itinerary rows ONLY for days ${dayNums.join(', ')} of "${city}".
 
-    console.log(`[BLOCK ${label}] Parsed rows:`, forced.length, forced);
+Return:
+{"destination":"${city}","rows":[...],"replace":${forceReplan?'true':'false'}}
 
-    if(forced.length && _hasUsableRowsForAllBlockDays_(forced, dayNums)){
-      console.log(`[BLOCK ${label}] OK`);
-      return forced;
-    }
+APPROVED TRIP-WIDE RESERVATION LEDGER:
+${_masterPlanLedgerText_(allMasterDays)}
 
-    console.warn(`[BLOCK ${label}] FAIL — missing rows for some block days.`);
-    return [];
-  }
+CURRENT BLOCK:
+${JSON.stringify(blockDaysObjs)}
 
-  console.warn(`[BLOCK ${label}] FAIL — invalid JSON or empty parse.`);
+ALREADY GENERATED POIs (FORBIDDEN TO REPEAT):
+${JSON.stringify(previousLedger)}
+
+KNOWN USER FACTS:
+${JSON.stringify(facts)}
+
+HARD RULES:
+- Generate rows only for days ${dayNums.join(', ')}.
+- Follow each day's approved identity/corridor and reserved anchors.
+- Do not borrow anchors from any other day.
+- Do not repeat a POI from ALREADY GENERATED POIs, including aliases, exterior/interior, tower,
+  viewpoint, express visit, conditional repeat or "last chance".
+- Arrival and final day must remain distinct.
+- Do not invent a flight, airport transfer, check-out, rental company or car-return unless explicitly
+  present in KNOWN USER FACTS.
+- A row's activity describes the place visited in THAT row.
+- Its To field must be that same concrete primary destination, not the next attraction.
+- The following row's From must continue from the preceding To.
+- One To and one primary transport choice per row; alternatives belong in notes.
+- Every row interval must realistically contain transport plus activity. No overlaps and no unexplained
+  gap over about 20 minutes.
+- Scenic outdoor visits must fit plausible useful daylight for the date/latitude. Driving, indoor
+  activities, meals and thermal experiences may use darker hours.
+- For winter paths, do not claim unconditional access; require verification and give a safe fallback.
+- Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
+  with an explicit return to the lodging/base.
+- Do not force a rigid aurora row. When plausible, add concise conditional guidance to 1–3 suitable
+  evening notes: sensible dark-hour window, safe self-drive option, guided-tour option, cloud/
+  geomagnetic/road checks and no guarantee.
+- Preserve official proper names; all generic user-facing text and duration labels must use the
+  selected itinerary language.
+- Target 4–8 useful rows on a normal full day, fewer on genuinely short/light days.
+- No text outside JSON.
+
+REFERENCE WINDOWS FOR THIS BLOCK:
+${JSON.stringify(windows)}
+`.trim();
+
+  const label=`${dayNums[0]}${dayNums.length>1?'-'+dayNums.at(-1):''}`;
+  console.log(`[BLOCK ${label}] Requesting rows with global ledger...`);
+  const raw=await _callPlannerSystemPrompt_(prompt,false);
+  const parsed=parseJSON(raw);
+  if(!parsed) return [];
+
+  const rows=_forceRowsIntoValidDayRange_(_extractPlannerRows_(parsed,city),dayNums);
+  if(rows.length && _hasUsableRowsForAllBlockDays_(rows,dayNums)) return rows;
+  console.warn(`[BLOCK ${label}] invalid/incomplete`);
   return [];
 }
 
 function _dedupeRows_(rows=[]){
-  const seen = new Set();
-  const out = [];
-
-  for(const r of (rows || [])){
-    const key = JSON.stringify([
-      Number(r?.day||1),
-      String(r?.start||'').trim(),
-      String(r?.end||'').trim(),
-      String(r?.activity||'').trim(),
-      String(r?.from||'').trim(),
-      String(r?.to||'').trim()
-    ]);
-
-    if(seen.has(key)) continue;
-    seen.add(key);
+  const seen=new Set(),out=[];
+  for(const row of (rows||[])){
+    const r=normalizeRow(row,Number(row?.day||1));
+    const exact=[
+      Number(r.day),r.start,r.end,_canonicalText_(r.activity),
+      _canonicalText_(r.from),_canonicalText_(r.to)
+    ].join('|');
+    if(seen.has(exact)) continue;
+    seen.add(exact);
     out.push(r);
   }
-
-  return out.sort((a,b)=>{
-    const da = Number(a?.day||1), db = Number(b?.day||1);
-    if(da !== db) return da-db;
-    return String(a?.start||'').localeCompare(String(b?.start||''));
-  });
+  return out.sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start).localeCompare(String(b.start)));
 }
 
-function _rowsCoverAllDays_(rows=[], totalDays=1){
-  const set = new Set((rows||[]).map(r => Number(r?.day)));
-  for(let d=1; d<=totalDays; d++){
-    if(!set.has(d)) return false;
-  }
+function _rowsCoverAllDays_(rows=[],totalDays=1){
+  const set=new Set((rows||[]).map(r=>Number(r?.day)));
+  for(let d=1;d<=totalDays;d++) if(!set.has(d)) return false;
   return true;
 }
 
-async function generateCityItinerary(city){
-  const dest  = savedDestinations.find(x=>x.city===city);
-  if(!dest) return;
+function _rowsByDayObject_(rows=[]){
+  const out={};
+  for(const row of rows||[]){
+    const day=Number(row?.day||1);
+    if(!out[day]) out[day]=[];
+    out[day].push(row);
+  }
+  Object.values(out).forEach(arr=>arr.sort((a,b)=>String(a.start).localeCompare(String(b.start))));
+  return out;
+}
 
-  const perDay = _normalizePerDayForPrompt_(city, dest.days, dest.perDay || []);
+function _arePoiAliases_(a='',b=''){
+  const A=_canonicalText_(a),B=_canonicalText_(b);
+  if(!A||!B) return false;
+  if(A===B) return true;
+  if(A.length>=6&&B.length>=6&&(A.includes(B)||B.includes(A))) return true;
+  const aa=new Set(A.split(' ').filter(x=>x.length>=4));
+  const bb=new Set(B.split(' ').filter(x=>x.length>=4));
+  if(!aa.size||!bb.size) return false;
+  let common=0; for(const x of aa) if(bb.has(x)) common++;
+  return common/Math.min(aa.size,bb.size)>=0.7;
+}
 
-  const baseDate = cityMeta[city]?.baseDate || dest.baseDate || '';
-  const hotel    = cityMeta[city]?.hotel || '';
-  const transport= cityMeta[city]?.transport || 'recommend me';
+function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay){
+  const errors=[];
+  const byDay=_rowsByDayObject_(rows);
+  const seenPois=[];
 
-  // 🧭 Detect if we must force replanning
-  const forceReplan = (typeof plannerState !== 'undefined' && plannerState.forceReplan && plannerState.forceReplan[city]) ? true : false;
+  for(let day=1;day<=totalDays;day++){
+    const dayRows=byDay[day]||[];
+    if(!dayRows.length) errors.push({code:'MISSING_DAY',day});
 
-  const instructions = `
-${FORMAT}
-**ROLE:** Planner “Astra”. Create a full itinerary ONLY for "${city}" (${dest.days} day/s).
-- Format B {"destination":"${city}","rows":[...],"replace": ${forceReplan ? 'true' : 'false'}}.
-
-KEY RULES (MANDATORY):
-- "activity" MUST ALWAYS be: "Destination – <Specific sub-stop>" (spaces around the dash).
-  • "Destination" is NOT always the city: if a row belongs to a day trip/macro-tour, "Destination" must be the macro-tour name (e.g., "Golden Circle", "South Coast", "Toledo").
-  • If it's NOT a day trip, "Destination" can be "${city}".
-  • This applies to ALL rows, including transfers and returns.
-  • Correct example (macro-tour, first row): "South Coast – Departure from ${city}".
-  • Correct example (macro-tour, last row): "South Coast – Return to ${city}".
-  • Correct example (city): "${city} – Return to hotel".
-- "from", "to", "transport" and "notes" can NEVER be empty.
-- Avoid generic items: forbidden "tour", "museum", "local restaurant" without a clear name/identifier.
-- VERY IMPORTANT (to avoid errors like "to=South Coast"):
-  • "from" and "to" must be REAL places (Hotel/Downtown/attraction/town/viewpoint), NEVER the macro-tour name.
-  • Forbidden rows like "${city} – Excursion to <Macro-tour>" where "to" is the macro-tour. Instead, start the macro-tour with: "<Macro-tour> – Departure from ${city}" and "to" must be the FIRST real sub-stop.
-
-TRANSPORT (smart priority, no invention):
-- In city: Walk/Metro/Bus/Tram depending on real availability.
-- For DAY TRIPS:
-  1) If there is a reasonable public transport option that is clearly “the best choice” for that route, use it (e.g., realistic intercity train/bus).
-  2) If it’s NOT clearly viable/best (many scattered stops, weak schedules, difficult season), use EXACTLY: "Rental Car or Guided Tour".
-- Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
-
-AURORAS (if plausible by city/season/latitude):
-- You must include AT LEAST 1 aurora night in the itinerary.
-- Must be a realistic NIGHT schedule (approx. 20:00–02:00 local).
-- Avoid consecutive days if there is margin and avoid leaving it ONLY for the last day (if it only fits there, mark it conditional in notes).
-- Include 1 option like "Tour/Van" and 1 low-cost nearby alternative (viewpoint/dark area) in "notes" with "valid:".
-
-DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
-- You may propose day trips if they add value (no fixed limit). Decide intelligently for “best of the best”.
-- Guideline: ideally ≤ ~3h per one-way drive. If near the limit, compensate by reducing stops or adjusting the window.
-- If you propose a day trip, it must be COMPLETE:
-  • 5–8 sub-stops (rows) with clear names, logical sequence, realistic transfers.
-  • The FIRST macro-tour row must be: "<Macro-tour> – Departure from ${city}" (and "to" = first real sub-stop).
-  • Must include a final dedicated row using the macro-tour Destination: "<Macro-tour> – Return to ${city}".
-  • If it's a classic route (e.g., “South Coast”), reach the logical end highlight (e.g., Vík or final iconic stop) before returning.
-  • Return times must NOT be optimistic: use conservative estimates in winter or at night.
-
-QUALITY / MAXIMIZE EXPERIENCE:
-- Cover key daytime and nighttime highlights.
-- If a day is too short or ends too early, add 1–3 iconic nearby realistic sub-stops (no weird inventions).
-- Group by areas, avoid backtracking.
-- Validate overall plausibility and safety.
-  • If a special activity is plausible, add "notes" with "valid: <justification>".
-  • Avoid activities in clearly risky/restricted areas or time windows.
-  • Replace with safer alternatives when applicable.
-- Respect daily time windows as reference (not rigid): ${JSON.stringify(perDay)}.
-- No text outside JSON.
-`.trim();
-
-  showWOW(true, t('overlayDefault'));
-
-  try{
-    const masterDays = await _buildCityMasterPlan_(city, dest.days, perDay, baseDate, hotel, transport);
-
-    if(!Array.isArray(masterDays) || masterDays.length !== dest.days){
-      throw new Error(`MASTER_PLAN_INVALID:${city}`);
-    }
-
-    const blocks = _chunkMasterDays_(masterDays);
-    let stitchedRows = [];
-
-    for(let i=0; i<blocks.length; i++){
-      const block = blocks[i];
-      const blockRows = await _generateBlockFromThemes_(
-        city,
-        dest.days,
-        block,
-        perDay,
-        forceReplan,
-        hotel,
-        transport
-      );
-
-      if(!blockRows.length){
-        const first = Number(block?.[0]?.day || 1);
-        const last  = Number(block?.[block.length-1]?.day || first);
-        throw new Error(`BLOCK_FAIL:${city}:${first}-${last}`);
+    let priorEnd=null,priorTo='';
+    for(let i=0;i<dayRows.length;i++){
+      const r=dayRows[i],row=i+1;
+      const start=_hhmmToMinutes_(r.start),end=_hhmmToMinutes_(r.end);
+      if(start==null||end==null){
+        errors.push({code:'INVALID_TIME',day,row,start:r.start,end:r.end});
+      }else{
+        let span=end-start;if(span<=0) span+=1440;
+        const total=_durationTotalBounds_(r.duration);
+        if(total){
+          if(total.min>span+5) errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min});
+          if(span-total.max>25) errors.push({code:'ROW_INTERVAL_UNEXPLAINED',day,row,span,explained:total.max});
+        }else{
+          errors.push({code:'DURATION_UNPARSEABLE',day,row,duration:r.duration});
+        }
+        if(priorEnd!=null && start<priorEnd) errors.push({code:'OVERLAP',day,row});
+        priorEnd=end;
       }
 
+      if(i>0 && priorTo && r.from && !_arePoiAliases_(priorTo,r.from)){
+        errors.push({code:'CONTINUITY',day,row,previous_to:priorTo,current_from:r.from});
+      }
+      priorTo=r.to;
+
+      if(!_isUtilityRow_(r)){
+        const poi=_poiKeyFromRow_(r);
+        for(const prior of seenPois){
+          if(prior.day!==day && _arePoiAliases_(poi,prior.poi)){
+            errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],poi:r.to||r.activity});
+            break;
+          }
+        }
+        if(poi) seenPois.push({day,poi});
+      }
+
+      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b/i.test(String(r.to||''))){
+        errors.push({code:'AMBIGUOUS_TO',day,row,to:r.to});
+      }
+      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b/i.test(String(r.transport||''))){
+        errors.push({code:'AMBIGUOUS_TRANSPORT',day,row,transport:r.transport});
+      }
+    }
+  }
+
+  const known=String(plannerState?.specialConditions||'');
+  const inventedDeparture=!/\b(flight|vuelo|airport|aeropuerto|departure|salida|check[- ]?out|devolver|return car|rental company|europcar|hertz|avis)\b/i.test(known)
+    && (rows||[]).some(r=>/\b(airport|aeropuerto|check[- ]?out|europcar|hertz|avis|return.*car|devoluci[oó]n.*veh[ií]culo)\b/i.test(`${r.activity} ${r.to} ${r.notes}`));
+  if(inventedDeparture) errors.push({code:'INVENTED_DEPARTURE_LOGISTICS'});
+
+  return {ok:errors.length===0,errors};
+}
+
+async function _finalTripWideRepair_(
+  city,rows,totalDays,masterDays,perDay,baseDate,hotel,transport,forceReplan=false
+){
+  const facts=_knownUserFactsForCity_(city,totalDays,perDay,baseDate,hotel,transport);
+  const local=_localGlobalAudit_(city,rows,totalDays,masterDays,perDay);
+
+  const prompt=`
+${FORMAT}
+ROLE: Astra, final trip-wide itinerary auditor.
+
+Return ONLY:
+{"destination":"${city}","rows":[...],"replace":${forceReplan?'true':'false'}}
+
+You are receiving the COMPLETE itinerary for all ${totalDays} days. Return the COMPLETE corrected
+itinerary, not a report and not only changed rows.
+
+APPROVED TRIP-WIDE RESERVATION LEDGER:
+${_masterPlanLedgerText_(masterDays)}
+
+KNOWN USER FACTS:
+${JSON.stringify(facts)}
+
+DETERMINISTIC ISSUES FOUND:
+${JSON.stringify(local.errors)}
+
+CURRENT COMPLETE ITINERARY:
+${JSON.stringify(rows)}
+
+FINAL AUDIT REQUIREMENTS:
+- Preserve the strongest valid content, but resolve every reported issue.
+- Exactly cover days 1 through ${totalDays}; no missing or extra days.
+- Enforce the ledger globally. A major POI, alias, landmark, district, restaurant, museum, viewpoint,
+  thermal experience, wildlife experience or macro-route may appear on only one day.
+- Arrival and final days must be distinct. Replace repeats with strong unused on-theme anchors; if
+  premium inventory is exhausted, keep the day intentionally light.
+- Do not invent flight, airport, check-out, rental company or vehicle-return logistics.
+- Correct shifted From/To semantics: To is the destination visited in the same row; the next row starts
+  from it.
+- Maintain exact continuity and realistic geography; no teleporting or backtracking.
+- Every row interval must contain transport plus activity, with at most about 20 minutes unexplained.
+- Reconcile duration with transport wording. Never collapse 1h–1h15 into 15 min.
+- Schedule scenic outdoor stops inside plausible useful daylight for actual date/latitude. Use darker
+  hours for transfers, museums, meals and thermal experiences.
+- If a route does not fit daylight, remove the weakest stop rather than moving it into darkness.
+- Keep thermal lagoons, cruises, major museums, tours and hikes at realistic category dwell times.
+- Aurora, when plausible, should normally be conditional guidance in notes on suitable nights, not a
+  guaranteed rigid booking.
+- One concrete To and one primary transport choice per row. Put alternatives in Notes.
+- Use the selected itinerary language consistently, including duration labels.
+- Remove irrelevant seasonal boilerplate, placeholders, "valid:", generic filler and unsupported facts.
+- Every regional day must explicitly return to the named lodging/base unless sleeping elsewhere.
+- JSON only.
+`.trim();
+
+  const raw=await _callPlannerSystemPrompt_(prompt,false);
+  const parsed=parseJSON(raw);
+  if(!parsed) return {rows,report:local,repaired:false};
+
+  let repaired=_extractPlannerRows_(parsed,city);
+  repaired=_dedupeRows_(repaired);
+  if(!repaired.length || !_rowsCoverAllDays_(repaired,totalDays)){
+    return {rows,report:local,repaired:false};
+  }
+
+  const after=_localGlobalAudit_(city,repaired,totalDays,masterDays,perDay);
+  // Accept repair when it materially improves or fully passes.
+  if(after.ok || after.errors.length < local.errors.length){
+    return {rows:repaired,report:after,repaired:true};
+  }
+  return {rows,report:local,repaired:false};
+}
+
+async function generateCityItinerary(city){
+  const dest=savedDestinations.find(x=>x.city===city);
+  if(!dest) return;
+
+  const perDay=_normalizePerDayForPrompt_(city,dest.days,dest.perDay||[]);
+  const baseDate=cityMeta[city]?.baseDate||dest.baseDate||'';
+  const hotel=cityMeta[city]?.hotel||'';
+  const transport=cityMeta[city]?.transport||'recommend me';
+  const forceReplan=!!plannerState?.forceReplan?.[city];
+
+  showWOW(true,t('overlayDefault'));
+
+  try{
+    const masterDays=await _buildCityMasterPlan_(city,dest.days,perDay,baseDate,hotel,transport);
+    if(masterDays.length!==dest.days) throw new Error(`MASTER_PLAN_INVALID:${city}`);
+
+    if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null};
+    itineraries[city].masterPlan=masterDays;
+
+    const blocks=_chunkMasterDays_(masterDays);
+    let stitchedRows=[];
+
+    for(const block of blocks){
+      const blockRows=await _generateBlockFromThemes_(
+        city,dest.days,block,masterDays,stitchedRows,perDay,
+        forceReplan,hotel,transport,baseDate
+      );
+      if(!blockRows.length){
+        const first=Number(block?.[0]?.day||1),last=Number(block?.at(-1)?.day||first);
+        throw new Error(`BLOCK_FAIL:${city}:${first}-${last}`);
+      }
       stitchedRows.push(...blockRows);
+      stitchedRows=_dedupeRows_(stitchedRows);
     }
 
-    stitchedRows = _dedupeRows_(stitchedRows);
+    if(!_rowsCoverAllDays_(stitchedRows,dest.days)) throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
 
-    if(!stitchedRows.length){
-      throw new Error(`NO_ROWS_STITCHED:${city}`);
-    }
+    const finalResult=await _finalTripWideRepair_(
+      city,stitchedRows,dest.days,masterDays,perDay,baseDate,hotel,transport,forceReplan
+    );
 
-    if(!_rowsCoverAllDays_(stitchedRows, dest.days)){
-      throw new Error(`MISSING_DAYS_AFTER_STITCH:${city}`);
-    }
+    const finalRows=_dedupeRows_(finalResult.rows);
+    itineraries[city].audit=finalResult.report;
 
-    const val = await validateRowsWithAgent(city, stitchedRows, baseDate);
-    pushRows(city, val.allowed, forceReplan); // 🧠 if replanning → replace=true
+    // Replace every generated day atomically; do not merge stale rows.
+    pushRows(city,finalRows,true);
 
     renderCityTabs();
     setActiveCity(city);
     renderCityItinerary(city);
-    showWOW(false);
-
     $resetBtn?.removeAttribute('disabled');
-    if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+    if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
-    console.log(`[CITY ${city}] SUCCESS — staged generation applied.`);
+    showWOW(false);
+    console.log(`[CITY ${city}] SUCCESS v60`,{
+      rows:finalRows.length,
+      repaired:finalResult.repaired,
+      remainingIssues:finalResult.report?.errors?.length||0
+    });
     return;
-
   }catch(err){
-    console.error(`[CITY ${city}] staged generation failed, falling back to one-shot:`, err);
+    console.error(`[CITY ${city}] v60 staged flow failed; using coherent one-shot recovery`,err);
   }
 
-  /* ======================================================
-     ✅ RECOVERY FALLBACK — original one-shot generation
-     Restores generation if staged flow fails.
-  ====================================================== */
+  // Coherent one-shot recovery still receives all user facts and must return the complete city.
   try{
-    const text = await _callPlannerSystemPrompt_(instructions, false);
-    const parsed = parseJSON(text);
+    const facts=_knownUserFactsForCity_(city,dest.days,perDay,baseDate,hotel,transport);
+    const prompt=`
+${FORMAT}
+ROLE: Astra. Generate the COMPLETE final itinerary for "${city}" covering days 1–${dest.days}.
+Return {"destination":"${city}","rows":[...],"replace":true} and JSON only.
 
-    if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
-      let tmpCity = city;
-      let tmpRows = _extractPlannerRows_(parsed, city);
+KNOWN USER FACTS:
+${JSON.stringify(facts)}
 
-      const val = await validateRowsWithAgent(tmpCity, tmpRows, baseDate);
-      pushRows(tmpCity, val.allowed, forceReplan);
-      renderCityTabs();
-      setActiveCity(tmpCity);
-      renderCityItinerary(tmpCity);
-      showWOW(false);
+HARD RULES:
+- Respect every daily window, base, transport, traveler and special condition.
+- Do not invent airport, flight, check-out, rental company or return logistics.
+- Build globally distinct day identities before generating rows.
+- No major POI, district, restaurant, museum, viewpoint, thermal experience or macro-route may repeat.
+- Arrival and final days must be different.
+- To is the place visited in the same row; the next From continues from it.
+- Every interval must contain transport plus activity; use realistic category dwell and conservative
+  regional transfers.
+- Scenic outdoor stops must fit plausible useful daylight.
+- Regional days require logical micro-stops and explicit return to the lodging/base.
+- Aurora, when plausible, belongs mainly as conditional guidance in notes.
+- One concrete To and one transport choice per row.
+- Use one selected language consistently, including duration labels.
+`.trim();
 
-      $resetBtn?.removeAttribute('disabled');
-      if(forceReplan && plannerState.forceReplan) delete plannerState.forceReplan[city];
+    const raw=await _callPlannerSystemPrompt_(prompt,false);
+    const parsed=parseJSON(raw);
+    let rows=_dedupeRows_(_extractPlannerRows_(parsed,city));
+    if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error('ONE_SHOT_INVALID');
 
-      console.log(`[CITY ${city}] SUCCESS — fallback one-shot applied.`);
-      return;
-    }
+    // One global repair of fallback output as well.
+    const syntheticMaster=Array.from({length:dest.days},(_,i)=>({
+      day:i+1,theme:`Distinct day ${i+1} | Anchors: unique unused experiences`
+    }));
+    const finalResult=await _finalTripWideRepair_(
+      city,rows,dest.days,syntheticMaster,perDay,baseDate,hotel,transport,true
+    );
+    rows=_dedupeRows_(finalResult.rows);
+    pushRows(city,rows,true);
+    itineraries[city].audit=finalResult.report;
+
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
+    $resetBtn?.removeAttribute('disabled');
+    if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
+    showWOW(false);
+    return;
   }catch(err2){
-    console.error(`[CITY ${city}] fallback one-shot failed:`, err2);
+    console.error(`[CITY ${city}] v60 recovery failed`,err2);
+  }finally{
+    showWOW(false);
   }
 
-  showWOW(false);
-  $resetBtn?.removeAttribute('disabled');
-
-  const msg = getLang()==='es'
-    ? 'No pude completar la generación del itinerario ni con el flujo por etapas ni con el flujo de respaldo. Revisa la consola para identificar el punto de fallo.'
-    : 'I could not complete itinerary generation with either the staged flow or the backup flow. Check the console to identify the failure point.';
-
-  chatMsg(msg, 'ai');
+  const msg=getLang()==='es'
+    ? 'No pude completar un itinerario coherente. Intenta nuevamente o reduce temporalmente la cantidad de días.'
+    : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
+  chatMsg(msg,'ai');
 }
+
+/* =========================================================
+   End v60 staged generation
+========================================================= */
 
 /* 🆕 Bulk rebalance after changes (add days / requested day trip) */
 async function rebalanceWholeCity(city, opts={}){
