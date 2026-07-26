@@ -1,4 +1,4 @@
-// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v66 (Final integrity + all-schema repair; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -528,7 +528,13 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
 - Do not repeat an identical aurora note every night.
 
-8. QUALITY
+8. FINAL INTEGRITY, OPERATIONS AND QUALITY
+- Include every requested day and at least one renderable row per day. A partial city is a failed response.
+- Validate the complete day after all duration changes: no overlaps, umbrella rows or chronology regressions.
+- Check normal weekly/seasonal operating logic against the actual date. When a venue is likely unavailable, choose a concrete robust substitute; never leave "if Sunday", "if applicable", "A or B" or "selected venue".
+- Optimize the complete route, not only adjacent pairs: cluster nearby POIs and minimize total backtracking.
+- Prefer genuine unstructured time over low-value filler. Every published activity must justify its presence.
+- Keep transport concise and user-facing; do not expose internal line-selection or correspondence logic.
 - Use one selected language for all user-facing values.
 - Preserve official proper names but translate generic instructions.
 - Remove debug, placeholder and internal-planning wording.
@@ -824,80 +830,50 @@ function _v62CleanLocation_(value = "") {
 }
 
 function _v62DurationBounds_(value = "") {
-  const original = String(value || "").trim();
-  if (!original) return null;
+  const s=String(value||"")
+    .toLowerCase()
+    .replace(/,/g,".")
+    .replace(/[–—]/g,"-")
+    .replace(/[~≈]/g," ")
+    .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?|about|around|cerca de)\b/g," ")
+    .replace(/\s+/g," ")
+    .trim();
+  if(!s) return null;
 
-  const normalize = (input) =>
-    String(input || "")
-      .toLowerCase()
-      .replace(/,/g, ".")
-      .replace(/[–—]/g, "-")
-      .replace(/[~≈]/g, "")
-      .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?)\b/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  const parsePoint = (input) => {
-    const s = normalize(input);
-    if (!s) return null;
-
-    const compact = s.match(/\b(\d+)\s*h\s*(\d{1,2})\b/);
-    if (compact) return Number(compact[1]) * 60 + Number(compact[2]);
-
-    const colon = s.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (colon) return Number(colon[1]) * 60 + Number(colon[2]);
-
-    let total = 0;
-    let found = false;
-
-    const hours = s.match(
-      /(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/
-    );
-    const minutes = s.match(
-      /(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/
-    );
-
-    if (hours) {
-      total += Math.round(Number(hours[1]) * 60);
-      found = true;
-    }
-    if (minutes) {
-      total += Number(minutes[1]);
-      found = true;
-    }
-
-    if (!found) {
-      const bare = s.match(/^\d+(?:\.\d+)?$/);
-      if (bare) return Math.round(Number(bare[0]));
-    }
-
-    return found && total > 0 ? total : null;
-  };
-
-  const s = normalize(original);
-  const parts = s.split(/\s*-\s*/).filter(Boolean);
-
-  if (parts.length >= 2) {
-    let first = parsePoint(parts[0]);
-    let second = parsePoint(parts[1]);
-
-    // Shared trailing unit: "45-60 min", "1.5-2 h".
-    if (first != null && second == null) {
-      if (/\b(?:m|min|mins|minute|minutes|minuto|minutos)\b/.test(parts[1])) {
-        first = parsePoint(`${parts[0]} min`);
-      } else if (/\b(?:h|hr|hrs|hour|hours|hora|horas)\b/.test(parts[1])) {
-        first = parsePoint(`${parts[0]} h`);
-      }
-      second = parsePoint(parts[1]);
-    }
-
-    if (first != null && second != null) {
-      return { min: Math.min(first, second), max: Math.max(first, second) };
-    }
+  const hm=(h,m)=>Math.max(0,(Number(h)||0)*60+(Number(m)||0));
+  let match=s.match(/(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*(?:m|min(?:ute)?s?)?)?\s*-\s*(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*(?:m|min(?:ute)?s?)?)?/i);
+  if(match){
+    const a=hm(match[1],match[2]),b=hm(match[3],match[4]);
+    return {min:Math.min(a,b),max:Math.max(a,b)};
   }
-
-  const single = parsePoint(s);
-  return single != null ? { min: single, max: single } : null;
+  match=s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/i);
+  if(match){
+    const a=Math.round(Number(match[1])*60),b=Math.round(Number(match[2])*60);
+    return {min:Math.min(a,b),max:Math.max(a,b)};
+  }
+  match=s.match(/(\d+)\s*-\s*(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/i);
+  if(match){
+    const a=Number(match[1]),b=Number(match[2]);
+    return {min:Math.min(a,b),max:Math.max(a,b)};
+  }
+  match=s.match(/(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*(?:m|min(?:ute)?s?)?)?\b/i);
+  if(match){
+    const v=String(match[1]).includes(".")&&!match[2]
+      ? Math.round(Number(match[1])*60)
+      : hm(match[1],match[2]);
+    return {min:v,max:v};
+  }
+  match=s.match(/(\d+(?:\.\d+)?)\s*(?:hr|hrs|hour|hours|hora|horas)\b/i);
+  if(match){
+    const v=Math.round(Number(match[1])*60);
+    return {min:v,max:v};
+  }
+  match=s.match(/(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/i);
+  if(match){
+    const v=Number(match[1]);
+    return {min:v,max:v};
+  }
+  return null;
 }
 
 function _v62ExtractDurationPart_(duration = "", labels = []) {
@@ -1182,12 +1158,55 @@ function _v65ExtractHardContext_(messages = []) {
   else if (/(?:rental car|rent a car|carro alquilado|veh[ií]culo alquilado|coche alquilado)/i.test(text)) out.transport = "rental car";
   return out;
 }
+function _v66ExpectedFinalDays_(messages = []) {
+  const text=_allMessageText_(messages);
+  const patterns=[
+    /covering\s+days?\s+1\s*[–-]\s*(\d+)/i,
+    /days?\s+1\s*(?:to|through|hasta|a)\s*(\d+)/i,
+    /"days"\s*:\s*(\d+)/i,
+    /totalDays["']?\s*:\s*(\d+)/i,
+    /(\d+)\s+(?:days|d[ií]as|dias)\b/i
+  ];
+  for(const pattern of patterns){
+    const match=text.match(pattern);
+    if(match?.[1]) return Math.max(1,Number(match[1])||0);
+  }
+  return 0;
+}
+
+function _v66SelectedLanguage_(messages = []) {
+  return detectLanguageOverride(messages) || detectUserLang(messages);
+}
+
+function _v66HasLanguageLeak_(row = {}, lang = "en") {
+  const text=`${row?.activity||""} ${row?.notes||""}`.trim();
+  if(lang==="es") return /\b(return to|check-?in|day trip|start time|end time|free time)\b/i.test(text);
+  if(lang==="pt") return /\b(return to|regreso a|día|actividad opcional)\b/i.test(text);
+  if(lang==="fr") return /\b(return to|regreso a|día|actividad)\b/i.test(text);
+  if(lang==="de") return /\b(return to|regreso a|día|actividad)\b/i.test(text);
+  if(lang==="it") return /\b(return to|regreso a|día|actividad)\b/i.test(text);
+  return false;
+}
+
 function _v62ValidateFinal_(parsed, options = {}) {
   const errors = [];
   const cityDay = _v65GetItineraryBlocks_(parsed);
+  const expectedDays=_v66ExpectedFinalDays_(options?.messages||[]);
+  const selectedLang=_v66SelectedLanguage_(options?.messages||[]);
 
   if (!cityDay.length) {
-    return { ok: true, errors: [], affected_days: [] };
+    return {
+      ok: false,
+      errors: [{code:"NO_RENDERABLE_ROWS"}],
+      affected_days: []
+    };
+  }
+
+  if(expectedDays>0){
+    const present=new Set(cityDay.filter(b=>Array.isArray(b?.rows)&&b.rows.length).map(b=>Number(b.day)));
+    for(let day=1;day<=expectedDays;day++){
+      if(!present.has(day)) errors.push({code:"MISSING_DAY",day});
+    }
   }
 
   const poiMap = new Map();
@@ -1195,6 +1214,7 @@ function _v62ValidateFinal_(parsed, options = {}) {
   for (const block of cityDay) {
     const day = Number(block?.day) || 0;
     const rows = Array.isArray(block?.rows) ? block.rows : [];
+    if(!rows.length) errors.push({code:"EMPTY_DAY",day});
     let previousEnd = null;
     let previousTo = "";
 
@@ -1304,6 +1324,26 @@ function _v62ValidateFinal_(parsed, options = {}) {
         errors.push({ code: "INTERNAL_TEXT_LEAK", day, row: rowNumber });
       }
 
+      if (_v66HasLanguageLeak_(row, selectedLang)) {
+        errors.push({ code: "LANGUAGE_LEAK", day, row: rowNumber, language: selectedLang });
+      }
+
+      if (
+        /\b(if (?:it is|it's) (?:sunday|monday|tuesday|wednesday|thursday|friday|saturday)|si coincide|si es domingo|if applicable|si procede|or similar|o similar|selected venue|sede seleccionada)\b/i.test(
+          `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`
+        )
+      ) {
+        errors.push({ code: "CONDITIONAL_PLACEHOLDER", day, row: rowNumber });
+      }
+
+      if (
+        /\b(?:line|l[ií]nea)\s*\d+\s*\+\s*(?:line|l[ií]nea)?\s*\d+|\bseg[uú]n correspondencia\b|\bdepending on connection\b/i.test(
+          String(row?.transport || "")
+        )
+      ) {
+        errors.push({ code: "OVERDETAILED_TRANSPORT", day, row: rowNumber });
+      }
+
       if (index > 0 && previousTo) {
         const fromKey = _v62NormKey_(row?.from);
         const priorKey = _v62NormKey_(previousTo);
@@ -1397,6 +1437,12 @@ FINAL SURGICAL REPAIR:
 - Do not replace a difficult regional day with repeated city attractions.
 - Rebuild every affected day chronologically when needed: no row may overlap the next row.
 - NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
+- Include every requested day with renderable rows; never return an empty day or placeholder itinerary.
+- Select one concrete operational POI. Never return "A or B", "if Sunday", "if applicable", "selected venue" or equivalent unresolved choices.
+- Do not schedule an attraction when its normal weekly/seasonal operation conflicts with the actual date; substitute a robust equivalent.
+- Use the selected language for every user-facing value, including Return/Check-in/Free time wording.
+- Keep transport user-facing and concise: mode + useful transfer count when needed, not internal line-selection logic.
+- Prefer genuine free time over weak filler; do not invent a generic walk, café or return merely to fill a clock.
 - Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
 - Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
@@ -1981,7 +2027,7 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
 
 
 // ==============================
-// Correct ESM export — v62 stage-aware, backward compatible
+// Correct ESM export — v66 stage-aware, backward compatible
 // ==============================
 export default async function handler(req, res) {
   try {
@@ -2130,10 +2176,9 @@ MANDATORY FINAL-ITINERARY RECOVERY:
     if (!parsed) parsed = fallbackJSON(lang);
     parsed = _v65NormalizeEverySchema_(parsed);
 
-    // Deterministic audit runs only on actual city_day output.
-    // One bounded surgical repair is allowed; if it fails, the valid original draft is retained
-    // so the planner workflow is never broken by the quality layer.
-    if (Array.isArray(parsed?.city_day) && parsed.city_day.length) {
+    // Deterministic audit runs across every supported external schema.
+    // One bounded surgical repair is allowed.
+    if (_hasRenderableItinerary_(parsed)) {
       const report = _v62ValidateFinal_(parsed, { messages: clientMessages });
 
       if (!report.ok) {
@@ -2165,20 +2210,20 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       }
     }
 
-    // Preserve original anti-blank guardrail only for final itinerary stages.
+    // Final hard integrity gate: never return skeleton/placeholder days as a successful itinerary.
     try {
-      const dest = String(parsed?.destination || "Destination").trim() || "Destination";
-      const daysTotal = Math.max(1, Number(parsed?.days_total || 1));
-
-      if (Array.isArray(parsed.city_day)) {
-        parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
-
-        if (!_hasAnyRows_(parsed.city_day)) {
-          parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
-          parsed.followup =
-            (parsed.followup ? parsed.followup + " | " : "") +
-            "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table.";
-        }
+      const finalReport=_v62ValidateFinal_(parsed,{messages:clientMessages});
+      const fatalCodes=new Set(["NO_RENDERABLE_ROWS","MISSING_DAY","EMPTY_DAY","INVALID_TIME","TIME_OVERLAP"]);
+      const fatal=finalReport.errors.filter(error=>fatalCodes.has(error?.code));
+      if(fatal.length){
+        parsed={
+          ok:false,
+          error:{
+            code:"FINAL_ITINERARY_INCOMPLETE",
+            retryable:true,
+            details:fatal
+          }
+        };
       }
     } catch {}
 
