@@ -1,10 +1,10 @@
 /* =========================================================
-   ITBMO PLANNER v63 — Planner Intelligence Upgrade
+   ITBMO PLANNER v64 — Precision Route & Anchor Upgrade
 
-   Base: v62
+   Base: v63
    API contract: compatible with API v65
 
-   Planner Intelligence Upgrade:
+   Precision Route & Anchor Upgrade:
    - Global geographic sequence optimization with anti-backtracking logic
    - Mathematical row-time reconciliation against transport + activity duration
    - Intelligent category-based minimum dwell times
@@ -13,6 +13,11 @@
    - Expert macro-tour enrichment with high-value low-detour micro-stops
    - Incremental tourism-value and experience-diversity scoring
    - Trip-wide weakest-day quality review integrated into the existing final pass
+   - Reservation/anchor experience protection with realistic full visit blocks
+   - Compact duration parser repair for forms such as 2h15m–2h30m
+   - Activity-location alignment: every visit occurs at the row's concrete To location
+   - Gap-aware day reconciliation without compressing premium anchor experiences
+   - Stronger macro-route candidate discovery and micro-stop coverage
    - Existing architecture, API contract, master plan, audits, repair loop, renderer and exports preserved
 ========================================================= */
 
@@ -859,7 +864,11 @@ Mandatory rules:
 - Optimize affected days globally: minimize unnecessary transfers, group logical zones, respect all daily windows and preserve continuity.
 - Before finalizing each day, compare plausible sequences and choose the geographically strongest order: minimize door-to-door travel, avoid backtracking, cluster nearby areas, respect the natural direction of the route, and avoid returning to a previously completed district unless operationally necessary.
 - Validate every row mathematically: the start-to-end interval must approximately equal transport time plus activity time. If the unexplained difference is significant, correct the schedule or regenerate only the affected row.
+- The activity described in a row MUST occur at that row's concrete "to" location. Never describe a visit at "from" while setting "to" to the following stop. Use a separate transfer/departure row only when operationally useful.
+- Protect reservation-based and destination-anchor experiences as complete visit blocks. Ticketed attractions, spas, thermal complexes, cruises, substantial tours and similar anchors must include realistic check-in, changing/boarding, core experience and exit time where applicable. Never compress an anchor merely to insert more stops.
+- Do not leave an unexplained gap immediately after an anchor experience. Either include the full experience in its activity duration, add an explicit meaningful buffer/free-time row when justified, or schedule the next row continuously.
 - Apply intelligent minimum dwell time by experience type. As a global guide: major waterfalls 30–45 min, viewpoints 15–30 min, neighborhoods 45–120 min, museums 60–180 min, food markets 45–90 min, beaches 45–90 min, national parks 45–180 min and churches 20–40 min. Allow 5–10 min only for an explicitly identified photographic micro-stop.
+- Major destination spas and thermal complexes normally require at least 3 hours of activity time, excluding the incoming road transfer. Small local baths may be shorter only when clearly identified as such. Large museums normally require at least 90 minutes unless the row explicitly states a selective highlights-only visit.
 - Detect semantic duplicate experiences, not only matching names. Merge or remove aliases, sub-area labels and repeated experiences that deliver essentially the same visit.
 - Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
@@ -908,6 +917,8 @@ Intelligent day-trip selection:
 Regional routes and macro-tours:
 - Treat every important regional route as an expert-curated journey, not merely a list of headline attractions.
 - Search for high-value viewpoints, minor waterfalls, picturesque villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops that are directly on the route or require only a very small detour.
+- Build a candidate pool before selecting the route. For a full-day scenic macro-route, evaluate enough candidates to avoid returning only the headline attractions; when daylight and the user window permit, normally retain a balanced set of roughly 4–8 meaningful visit stops plus the explicit return. This is a quality range, not a quota.
+- Do not omit a strong low-detour micro-stop merely because the route already contains several headline stops. Conversely, never sacrifice realistic anchor dwell time, useful daylight or safe return timing just to increase the count.
 - Use separate rows only for meaningful micro-stops that add real value, preserve rhythm and do not materially inflate the total route time.
 - Rank candidate micro-stops by incremental tourism value: proximity alone is insufficient. Prefer stops that add a distinct experience category over repetitive variants of experiences already included that day.
 - Remove weak micro-stops when a stronger nearby alternative exists. Never add activities merely to fill space.
@@ -955,6 +966,8 @@ Quality & coherence:
 - Prioritize iconic daytime + nighttime highlights; if time is limited, focus on essentials.
 - Optimize the actual visit sequence, not merely feasibility: compare plausible orders, minimize travel time, prevent backtracking, cluster nearby zones and preserve the natural direction of travel.
 - Validate each row mathematically so its time interval approximately equals transport plus activity. Correct any significant mismatch before output.
+- A row's activity must happen at its concrete To place. Do not write an activity at the From place while using To for the next destination.
+- Protect ticketed/reservation anchor experiences as complete blocks, including realistic operational time. Never shorten a spa, cruise, major attraction or substantial tour to make room for extra stops, and never leave its real visit time as an unexplained gap.
 - Enforce intelligent category-based dwell times and reject 5–10 minute visits unless explicitly justified as photographic micro-stops.
 - Detect duplicate experiences semantically across aliases, districts and closely overlapping descriptions.
 - If the user doesn't specify a specific day, review and adjust the entire city's itinerary, avoiding duplicates and absurd plans.
@@ -973,7 +986,7 @@ Itinerary rules (aligned with API v52.5):
 - Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
 - Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial.
 - Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
-- Macro-tours/day trips: curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final row "Return to {Base city}". Do not force a fixed count; quality and route rhythm are more important than quantity. Avoid the final day when stronger scheduling alternatives exist.
+- Macro-tours/day trips: first evaluate a broad candidate pool, then curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final localized return row to the base. On a full-day scenic route, normally aim for roughly 4–8 meaningful visit stops when daylight, safety and the user window allow; this is a flexible quality range, never a quota. Do not compress anchor experiences or add filler. Avoid the final day when stronger scheduling alternatives exist.
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
 
 Auroras (only if plausible by latitude/season):
@@ -1256,7 +1269,22 @@ function _durationBoundsMinutes_(raw){
     .trim();
   if(!s) return null;
 
-  let m = s.match(/(\d+)\s*h\s*(\d{1,2})?\s*-\s*(\d+)\s*h\s*(\d{1,2})?/);
+  // Compact hour/minute forms produced by models or transport fields:
+  // 2h15m-2h30m, 2h15-2h30, 1h20m, 1h20.
+  let m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\s*-\s*(\d+)\s*h\s*(\d{1,2})\s*m?/);
+  if(m){
+    const a=(+m[1]*60)+(+m[2]||0);
+    const b=(+m[3]*60)+(+m[4]||0);
+    return {min:Math.min(a,b),max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\b/);
+  if(m){
+    const v=(+m[1]*60)+(+m[2]||0);
+    return {min:v,max:v};
+  }
+
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})?\s*-\s*(\d+)\s*h\s*(\d{1,2})?/);
   if(m){
     const a = (+m[1]*60)+(+m[2]||0);
     const b = (+m[3]*60)+(+m[4]||0);
@@ -1313,6 +1341,8 @@ function _transportBoundsFromField_(raw){
   const s=String(raw||'');
   const candidates=[];
   const patterns=[
+    /(\d+)\s*h\s*(\d{1,2})\s*m?\s*[-–—]\s*(\d+)\s*h\s*(\d{1,2})\s*m?/gi,
+    /(\d+)\s*h\s*(\d{1,2})\s*m?\b/gi,
     /(\d+)\s*h\s*(\d{1,2})?\s*[-–—]\s*(\d+)\s*h\s*(\d{1,2})?/gi,
     /(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/gi,
     /(\d+)\s*[-–—]\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/gi,
@@ -1326,19 +1356,26 @@ function _transportBoundsFromField_(raw){
     candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
   }
   while((m=patterns[1].exec(s))){
+    const v=(+m[1]*60)+(+m[2]||0); candidates.push({min:v,max:v});
+  }
+  while((m=patterns[2].exec(s))){
+    const a=(+m[1]*60)+(+m[2]||0), b=(+m[3]*60)+(+m[4]||0);
+    candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
+  }
+  while((m=patterns[3].exec(s))){
     const a=Math.round(+m[1]*60),b=Math.round(+m[2]*60);
     candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
   }
-  while((m=patterns[2].exec(s))){
+  while((m=patterns[4].exec(s))){
     candidates.push({min:Math.min(+m[1],+m[2]),max:Math.max(+m[1],+m[2])});
   }
-  while((m=patterns[3].exec(s))){
+  while((m=patterns[5].exec(s))){
     const v=(+m[1]*60)+(+m[2]||0); candidates.push({min:v,max:v});
   }
-  while((m=patterns[4].exec(s))){
+  while((m=patterns[6].exec(s))){
     const v=Math.round(+m[1]*60); candidates.push({min:v,max:v});
   }
-  while((m=patterns[5].exec(s))){
+  while((m=patterns[7].exec(s))){
     const v=+m[1]; candidates.push({min:v,max:v});
   }
   return candidates.length ? candidates.reduce((a,b)=>b.max>a.max?b:a) : null;
@@ -1432,6 +1469,59 @@ function _dedupeSemanticSameDay_(rows=[]){
   return out;
 }
 
+function _setActivityDurationMinutes_(duration='', minutes=0){
+  const [transportLabel, activityLabel]=_durationLabels_();
+  const transport=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
+  const safeMinutes=Math.max(1,Math.round(Number(minutes)||1));
+  const transportText=transport ? _formatDurationBounds_(transport) : 'Verificar';
+  return `${transportLabel}: ${transportText}\n${activityLabel}: ${_formatMinutesHuman_(safeMinutes)}`;
+}
+
+function _enforceMinimumDwell_(row={}){
+  if(_isUtilityRow_(row)) return row;
+  const profile=_activityProfile_(row);
+  if(!profile) return row;
+  const current=_activityDurationBounds_(row.duration);
+  if(current && current.min>=profile.min) return row;
+  return {...row,duration:_setActivityDurationMinutes_(row.duration,profile.min)};
+}
+
+function _isAnchorExperienceRow_(row={}){
+  return Boolean(_activityProfile_(row)) || /\b(reservation|reserved|ticketed|timed entry|entry slot|booking|reserva|reservado|entrada con hora|horario de entrada|spa|thermal|termal|cruise|crucero|guided tour|tour guiado)\b/i.test(
+    `${row?.activity||''} ${row?.to||''} ${row?.notes||''}`
+  );
+}
+
+function _reconcileDayRows_(rows=[]){
+  const sorted=(rows||[]).slice().sort((a,b)=>{
+    const aa=_hhmmToMinutes_(a?.start), bb=_hhmmToMinutes_(b?.start);
+    return (aa==null?99999:aa)-(bb==null?99999:bb);
+  });
+
+  // First enforce deterministic minimum dwell and row math.
+  for(let i=0;i<sorted.length;i++){
+    sorted[i]=_reconcileRowTimeline_(_enforceMinimumDwell_(sorted[i]));
+  }
+
+  // Then use a short operational gap after an anchor as part of the real visit block.
+  // This prevents a 3-hour spa/cruise/museum from appearing as a 30-minute activity
+  // followed by unexplained blank time.
+  for(let i=0;i<sorted.length-1;i++){
+    const cur=sorted[i], next=sorted[i+1];
+    const end=_hhmmToMinutes_(cur.end), nextStart=_hhmmToMinutes_(next.start);
+    if(end==null || nextStart==null) continue;
+    let gap=nextStart-end;
+    if(gap<0) gap+=1440;
+    if(gap>20 && gap<=90 && _isAnchorExperienceRow_(cur)){
+      const activity=_activityDurationBounds_(cur.duration);
+      const extended=(activity?.max||0)+gap;
+      cur.duration=_setActivityDurationMinutes_(cur.duration,extended);
+      cur.end=next.start;
+    }
+  }
+  return sorted;
+}
+
 function normalizeRow(r = {}, fallbackDay = 1){
   const startRaw = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
   const endRaw   = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
@@ -1471,7 +1561,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const safeTransport = String(trans||'').trim();
   const safeNotes = String(notes||'').trim();
 
-  return _reconcileRowTimeline_({
+  return _reconcileRowTimeline_(_enforceMinimumDwell_({
     day:d,
     start,
     end,
@@ -1481,7 +1571,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
     transport:safeTransport,
     duration,
     notes:safeNotes
-  });
+  }));
 }
 
 function dedupeSoftSameDay(rows){
@@ -1515,6 +1605,7 @@ function pushRows(city, rows, replace=false){
     dedupeInto(byDay[d], obj);
     byDay[d] = dedupeSoftSameDay(byDay[d]);
     byDay[d] = _dedupeSemanticSameDay_(byDay[d]);
+    byDay[d] = _reconcileDayRows_(byDay[d]);
     if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
   });
 
@@ -1753,6 +1844,9 @@ CRITERIOS GLOBALES (flexibles):
 - Duraciones:
   • Acepta rangos realistas (ej. "~90m", "~2–3h").
   • Si viene en minutos, permite "90m" o "1.5h".
+  • Reconoce también formatos compactos como "2h15m-2h30m" y no los reduzcas a 30 minutos.
+  • Una experiencia termal/spa de destino debe reservar normalmente al menos 3 horas de actividad, sin contar el traslado de llegada.
+  • El horario de la fila debe cubrir la experiencia completa; no dejes su duración real escondida como un hueco entre filas.
 - Máx. 20 filas por día; prioriza icónicas y evita redundancias.
 - Activity (guía suave):
   • Prefiere el formato "Destino – Sub-parada específica" si aplica.
@@ -1760,6 +1854,7 @@ CRITERIOS GLOBALES (flexibles):
     - Si NO es day trip, "Destino" puede ser la ciudad.
   • Evita genéricos tipo "tour" o "museo" sin especificar, cuando sea fácil concretar.
 - From/To (muy importante):
+  • La actividad descrita DEBE ocurrir en el lugar concreto indicado en "to". No describas una visita en "from" mientras "to" apunta a la siguiente parada.
   • "from" y "to" deben ser LUGARES reales (Hotel/Centro/atracción/pueblo/mirador), NUNCA el nombre del macro-tour.
     - Ejemplo incorrecto: to="Costa Sur" / from="Círculo Dorado".
     - Si detectas eso, corrígelo a un lugar real (p.ej., la primera/última sub-parada o el hotel/centro).
@@ -2543,7 +2638,7 @@ function _auditSeverity_(error={}){
   const critical=new Set([
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
-    'CATEGORY_DWELL_TOO_SHORT','AMBIGUOUS_TO','GENERIC_TO'
+    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -2674,6 +2769,21 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         });
       }
 
+      if(profile && i<dayRows.length-1){
+        const nextStart=_hhmmToMinutes_(dayRows[i+1]?.start);
+        if(end!=null && nextStart!=null){
+          let gap=nextStart-end;
+          if(gap<0) gap+=1440;
+          if(gap>30 && gap<=120){
+            errors.push({
+              code:'ANCHOR_TIME_HIDDEN_AS_GAP',day,row,gap,
+              category:profile.type,
+              instruction:'Include the complete anchor experience in the row activity duration and end time; do not hide it as blank time.'
+            });
+          }
+        }
+      }
+
       if(_isAuroraActivityRow_(r) && !_explicitlyRequestedFixedAurora_()){
         errors.push({
           code:'RIGID_AURORA_ROW',
@@ -2757,6 +2867,8 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
   keep the day intentionally light rather than repeating icons.
 - Never invent flights, airports, check-out, rental companies or vehicle-return logistics.
 - The To field is the concrete place visited in that row. The next row's From must continue from it.
+- The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
+- Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
@@ -2773,6 +2885,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
   Driving, indoor attractions, meals and thermal experiences may use darker hours.
 - If a regional route does not fit daylight, remove the weakest stop instead of moving it into darkness.
 - A regional day should contain a useful, geographically coherent set of major stops and expert-selected micro-stops, with an explicit return to the named base unless sleeping elsewhere.
+- For a full-day scenic route, evaluate a broad candidate pool and normally retain roughly 4–8 meaningful visit stops when daylight, safety and timing allow. This is not a quota: preserve realistic dwell at anchor experiences and remove weak filler.
 - For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
 - Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
 - Aurora must be conditional guidance in suitable evening notes unless the user explicitly requested
