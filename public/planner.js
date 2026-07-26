@@ -1,19 +1,18 @@
 /* =========================================================
-   ITBMO PLANNER v61 — MVP WOW release candidate
+   ITBMO PLANNER v62 — MVP Release
 
-   Base: v60
+   Base: v61
    API contract: compatible with API v65
 
-   Main improvements:
-   - Stronger trip-wide duplicate detection, including restaurants and contextual repeats
-   - Category-based minimum dwell validation
-   - High-latitude winter daylight validation
-   - Generic-place and ambiguous-choice detection
-   - Conditional aurora enforcement
-   - More natural concierge writing and less repetitive note templates
-   - Weighted final audit and one bounded precision repair when critical issues remain
-   - English source comments and internal prompts
-   - Localized UI dictionaries intentionally remain multilingual
+   MVP Release improvements:
+   - Global intelligent day-trip selection based on relative tourism value and logistics
+   - Lodging-aware route optimization with reversible lodging normalization
+   - Preferences and restrictions enforced as planning constraints
+   - First/intermediate/final-day time-window policy
+   - Defensive duration normalization for malformed hour/minute formats
+   - Intelligent inference for missing or partial user input
+   - Premium itinerary-aware Info Chat travel concierge
+   - Existing master plan, audits, repair loop, renderer and exports preserved
 ========================================================= */
 
 
@@ -91,7 +90,7 @@ const I18N = {
     hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
     askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
     confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
-    doneAll: '🎉 Itinerarios generados. Si deseas cambiar algo, solo escríbelo y yo lo ajustaré por ti ✨ Para cualquier detalle específico —clima, transporte, ropa, seguridad y más— abre el Info Chat 🌐 y te daré toda la información que necesites.',
+    doneAll: '🎉 ¡Tus itinerarios están listos! ¿Necesitas ayuda para elegir la mejor zona donde hospedarte, revisar el clima, encontrar restaurantes, entender el transporte, descubrir la gastronomía local, planear fotografías, verificar tickets, conocer lugares ocultos, revisar seguridad o costumbres, preparar el equipaje, organizar el presupuesto o resolver cualquier otra duda del viaje? Abre el Info Chat 🌐 y pregúntame lo que necesites.',
     fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
     askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
     humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
@@ -167,7 +166,7 @@ const I18N = {
     hi: 'Hi! I’m Astra ✨, your travel concierge. Let’s build unforgettable itineraries 🌍',
     askHotelTransport: (city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental, public transit, taxi/uber, mixed, or “recommend”).`,
     confirmAll: '✨ Great. I’m starting to generate your itineraries…',
-    doneAll: '🎉 Itineraries generated. If you want to change anything, just tell me and I’ll adjust it ✨ For any specific details—weather, transport, clothing, safety and more—open the Info Chat 🌐 and I’ll help you with everything you need.',
+    doneAll: '🎉 Your itineraries are ready! Need help choosing the best area to stay, checking the weather, finding restaurants, understanding transportation, exploring local food, planning photography, verifying tickets, discovering hidden gems, reviewing safety or customs, deciding what to pack, managing your budget, or anything else about your trip? Open the Info Chat 🌐 and ask me anything.',
     fail: '⚠️ Could not reach the assistant. Check console/Vercel (API Key, URL).',
     askConfirm: (summary)=>`Do you confirm? ${summary}<br><small>Reply “yes” to apply or “no” to cancel.</small>`,
     humanOk: 'Perfect 🙌 I adjusted your itinerary so you can use your time better. It’s going to be great! ✨',
@@ -857,7 +856,10 @@ Mandatory rules:
 - Return at least one renderable row whenever itinerary rows are requested.
 - Return no more than 20 rows per day.
 - Optimize affected days globally: minimize unnecessary transfers, group logical zones, respect all daily windows and preserve continuity.
-- Use the user's daily times. When a time is missing, propose a realistic time without creating overlaps.
+- Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
+- When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
+- Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
+- Treat preferences and restrictions as binding planning constraints, not merely note content. Translate them into concrete scheduling, routing, meal and activity decisions.
 - Validate geography, season, useful daylight, route continuity, operational logistics and traveler fit.
 - Never invent flights, airports, check-out, rental companies or vehicle-return logistics.
 - Never claim live weather, live road conditions, live openings or guaranteed wildlife/aurora sightings.
@@ -892,6 +894,11 @@ Aurora:
 - Treat it as a conditional opportunity in notes unless the user explicitly requested a fixed outing.
 - Avoid identical notes on consecutive nights.
 - State that visibility is not guaranteed and that cloud cover, geomagnetic activity and road conditions must be checked.
+
+Intelligent day-trip selection:
+- Evaluate the complete trip before assigning days. Compare the marginal value of secondary city activities against nearby excursions using total trip length, the number of days required for the core city, relative tourism value, transfer time, season, traveler fit and route coherence.
+- When a nearby excursion clearly adds more value, substitute lower-priority city filler with the stronger day trip. Do not force a day trip when the city itself still has higher-value unmet priorities.
+- Apply this reasoning globally for every destination; never rely on city-name-specific logic.
 
 Regional routes and macro-tours:
 - Use separate rows for meaningful micro-stops.
@@ -946,8 +953,12 @@ Itinerary rules (aligned with API v52.5):
   "Transport: ...\\nActivity: ..."
   (no 0m, and do not use commas to separate).
 - Meals: not mandatory; if included, not generic.
-- Day trips: if adding days, consider 1-day excursions to nearby must-sees (≤2h each way guideline) and include them if they fit, with return to base city.
-- Macro-tours/day trips: 5–8 sub-stops + final row "Return to {Base city}". Avoid last day if there are options.
+- Intelligent day trips: evaluate the entire stay and decide whether a nearby excursion has greater tourism value than remaining secondary city activities. Consider total trip length, core-city coverage, relative quality, transfer time, season, traveler fit and logistical coherence. Substitute only lower-priority filler, never core unmet highlights. This rule is global and destination-agnostic.
+- Lodging base: when hotel, Airbnb, address, coordinates or area are provided, use them as the primary geographic anchor; minimize transfers and start/end there whenever sensible.
+- Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
+- Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial.
+- Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
+- Macro-tours/day trips: 5–8 sub-stops + final row "Return to {Base city}". Avoid the final day when stronger scheduling alternatives exist.
 
 Auroras (only if plausible by latitude/season):
 - Avoid consecutive nights if possible. Avoid last day; if only possible there, mark conditional.
@@ -1020,15 +1031,35 @@ function parseJSON(s){
 async function callInfoAgent(text){
   const history = infoSession;
   const globalStyle = `
-You are "Astra", a general-purpose assistant (like ChatGPT) for travel-related questions.
+You are "Astra", a premium expert travel concierge with the natural conversational quality of ChatGPT.
 
-GOAL:
-- Answer informational questions (weather, visas, mobility, safety, budget, plugs, best season, etc.) clearly and actionably.
-- Consider basic safety factors: mention relevant risks or obvious restrictions when applicable.
-- Do NOT output JSON. Output plain text.
+ROLE AND BEHAVIOR:
+- Think like an expert travel concierge, not a search engine.
+- Give a clear best recommendation when several options exist and briefly explain why it is the best fit.
+- Prefer actionable recommendations over generic information.
+- Personalize answers using the current itinerary, destinations, dates, travelers, lodging base, transport, budget, preferences and restrictions whenever relevant.
+- Answer naturally, warmly and professionally.
+- Reply in the same language as the user's latest message.
+- Do NOT output JSON. Output helpful plain text.
 
-LANGUAGE (CRITICAL):
-- Reply in the same language as the user's message (any language). Ignore system/template labels.
+ACCURACY:
+- Never invent current facts.
+- Clearly say when weather, prices, schedules, availability, tickets, road conditions, opening hours, entry rules or other time-sensitive facts should be verified.
+- Distinguish reliable general guidance from information that may have changed.
+
+FORMAT:
+- Be concise by default and expand only when the user requests more detail or the topic requires it.
+- Use short paragraphs.
+- Use lists when they improve clarity.
+- Use a compact comparison table when comparing several meaningful options.
+- Use descriptive subheadings for longer answers.
+- Avoid enormous blocks of text and repetitive disclaimers.
+
+SCOPE:
+- Help with lodging areas, weather planning, transportation, restaurants, local food, hidden gems, photography, tickets, safety, customs, packing, budgets and any other travel question.
+
+CURRENT PLANNER CONTEXT:
+${buildIntake()}
 `.trim();
 
   const controller = new AbortController();
@@ -1148,6 +1179,44 @@ function _durationLabels_(){
   return map[lang] || map.en;
 }
 
+
+function getPlannerCompletionMessage(){
+  const lang = _plannerOutputLang_();
+  const messages = {
+    en: `🎉 Your itineraries are ready!
+
+Need help choosing where to stay, checking the weather, finding great restaurants, discovering local food, understanding transportation, planning what to pack, exploring hidden gems, buying tickets, learning local customs, staying safe, managing your budget, or anything else about your trip?
+
+Open the Info Chat 🌐 and ask me anything. I'm here to help you get the most out of your journey.`,
+    es: `🎉 ¡Tus itinerarios están listos!
+
+¿Necesitas ayuda para elegir dónde hospedarte, revisar el clima, encontrar excelentes restaurantes, descubrir la gastronomía local, entender el transporte, planear qué llevar, explorar lugares ocultos, comprar entradas, conocer las costumbres locales, viajar con seguridad, administrar tu presupuesto o resolver cualquier otra duda sobre tu viaje?
+
+Abre el Info Chat 🌐 y pregúntame lo que necesites. Estoy aquí para ayudarte a aprovechar al máximo tu viaje.`,
+    pt: `🎉 Seus itinerários estão prontos!
+
+Precisa de ajuda para escolher onde ficar, verificar o clima, encontrar ótimos restaurantes, descobrir a gastronomia local, entender o transporte, planejar o que levar, explorar lugares escondidos, comprar ingressos, conhecer os costumes locais, viajar com segurança, administrar seu orçamento ou esclarecer qualquer outra dúvida sobre a viagem?
+
+Abra o Info Chat 🌐 e pergunte o que quiser. Estou aqui para ajudar você a aproveitar ao máximo a sua viagem.`,
+    fr: `🎉 Vos itinéraires sont prêts !
+
+Besoin d’aide pour choisir où séjourner, vérifier la météo, trouver d’excellents restaurants, découvrir la cuisine locale, comprendre les transports, préparer vos bagages, explorer des lieux méconnus, acheter des billets, connaître les coutumes locales, voyager en toute sécurité, gérer votre budget ou répondre à toute autre question sur votre voyage ?
+
+Ouvrez l’Info Chat 🌐 et posez-moi toutes vos questions. Je suis là pour vous aider à profiter pleinement de votre voyage.`,
+    de: `🎉 Ihre Reisepläne sind fertig!
+
+Benötigen Sie Hilfe bei der Wahl der besten Unterkunft, beim Prüfen des Wetters, bei Restaurantempfehlungen, lokaler Küche, Verkehrsmitteln, der Packliste, versteckten Highlights, Tickets, lokalen Gepflogenheiten, Sicherheit, Budgetplanung oder bei einer anderen Frage zu Ihrer Reise?
+
+Öffnen Sie den Info Chat 🌐 und fragen Sie mich alles. Ich helfe Ihnen dabei, das Beste aus Ihrer Reise herauszuholen.`,
+    it: `🎉 I tuoi itinerari sono pronti!
+
+Hai bisogno di aiuto per scegliere dove soggiornare, controllare il meteo, trovare ottimi ristoranti, scoprire la cucina locale, capire come muoverti, pianificare cosa mettere in valigia, esplorare luoghi nascosti, acquistare biglietti, conoscere le usanze locali, viaggiare in sicurezza, gestire il budget o chiarire qualsiasi altro dubbio sul viaggio?
+
+Apri l’Info Chat 🌐 e chiedimi qualsiasi cosa. Sono qui per aiutarti a ottenere il massimo dal tuo viaggio.`
+  };
+  return messages[lang] || messages.en;
+}
+
 function _extractDurationPart_(raw, kind='transport'){
   const s = String(raw||'').replace(/\r/g,'').trim();
   if(!s) return '';
@@ -1160,8 +1229,10 @@ function _extractDurationPart_(raw, kind='transport'){
 }
 
 function _durationBoundsMinutes_(raw){
-  const s = String(raw||'')
+  let s = String(raw||'')
     .toLowerCase()
+    .replace(/(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
+    .replace(/~\s*(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
     .replace(/,/g,'.')
     .replace(/[–—]/g,'-')
     .replace(/[~≈]/g,' ')
@@ -1211,9 +1282,9 @@ function _durationBoundsMinutes_(raw){
 
 function _formatMinutesHuman_(minutes){
   const n=Math.max(1,Math.round(Number(minutes)||1));
-  if(n<60) return `~${n} min`;
+  if(n<60) return `${n} min`;
   const h=Math.floor(n/60), m=n%60;
-  return m ? `~${h} h ${m} min` : `~${h} h`;
+  return m ? `${h} h ${m} min` : `${h} h`;
 }
 
 function _formatDurationBounds_(b){
@@ -1387,7 +1458,11 @@ function upsertCityMeta(meta){
   if(meta.baseDate) cityMeta[name].baseDate = meta.baseDate;
   if(meta.start)    cityMeta[name].start    = meta.start;
   if(meta.end)      cityMeta[name].end      = meta.end;
-  if(typeof meta.hotel==='string') cityMeta[name].hotel = meta.hotel;
+  if(typeof meta.hotel==='string'){
+    const lodging=_normalizeLodgingInput_(meta.hotel);
+    cityMeta[name].hotelOriginal = lodging.original;
+    cityMeta[name].hotel = lodging.normalized;
+  }
   if(typeof meta.transport==='string') cityMeta[name].transport = meta.transport;
   if(Array.isArray(meta.perDay)) cityMeta[name].perDay = meta.perDay;
   if(itineraries[name] && meta.baseDate) itineraries[name].baseDate = meta.baseDate;
@@ -2012,14 +2087,77 @@ function _masterPlanLedgerText_(masterDays=[]){
     .join('\n');
 }
 
+function _normalizeLodgingInput_(value=''){
+  const original=String(value||'').trim();
+  if(!original) return {original:'',normalized:''};
+
+  // Preserve relational expressions because they carry meaningful geographic nuance.
+  if(/^(near|close to|walking distance(?: from| to)?|next to|around)\b/i.test(original)){
+    return {original,normalized:original};
+  }
+
+  // Remove only a simple leading "in" used as a wrapper, never internal words.
+  const normalized=original.replace(/^in\s+/i,'').trim() || original;
+  return {original,normalized};
+}
+
+function _preferenceConstraintPolicy_(){
+  return {
+    rule:'Treat every stated preference and restriction as an operational planning constraint, not as decorative notes.',
+    examples:[
+      'Photography: favor strong light, sunrise, sunset, blue hour or suitable viewpoints when seasonally realistic.',
+      'Avoid crowds: use earlier, later or lower-congestion sequencing when practical.',
+      'No driving after sunset: finish self-drive legs and return to base before local darkness.',
+      'Walking limit or reduced mobility: reduce continuous walking, add realistic transfers and breaks, and avoid unsuitable terrain.',
+      'Vegetarian or dietary needs: choose concrete suitable meal venues or districts.',
+      'Anniversary or celebration: include a fitting romantic or memorable experience without sacrificing logistics.'
+    ],
+    inference:'Infer reasonable defaults for blank fields, conservatively complete partial information, and prioritize detailed user instructions.'
+  };
+}
+
+function _globalTimeWindowPolicy_(totalDays, perDay=[]){
+  return {
+    first_day:'Any provided start time is a hard boundary.',
+    final_day:'Any provided end time is a hard boundary.',
+    intermediate_days:'Provided start/end times are preferences. They may be optimized only when this materially improves quality or logistics, without creating impractical hours.',
+    windows:perDay,
+    total_days:totalDays
+  };
+}
+
+function _globalDayTripPolicy_(){
+  return {
+    rule:'Evaluate day trips globally and destination-agnostically.',
+    decision_factors:[
+      'total trip duration',
+      'days needed to cover the core destination well',
+      'relative tourism value of nearby excursions versus remaining secondary city activities',
+      'door-to-door transfer time',
+      'season, useful daylight and operating practicality',
+      'traveler preferences, restrictions and transport',
+      'route coherence and return to the lodging base'
+    ],
+    action:'Substitute lower-value secondary city filler with a stronger nearby excursion when the comparison clearly favors the excursion. Never displace unmet core highlights merely to add a day trip.',
+    prohibition:'Never use destination-name-specific conditions or hardcoded city lists.'
+  };
+}
+
 function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, transport){
+  const lodging=_normalizeLodgingInput_(hotel);
   return {
     city,
     total_days:totalDays,
     base_date:baseDate||null,
     daily_windows:perDay,
-    lodging_base:hotel||null,
+    lodging_base:lodging.normalized||null,
+    lodging_original:lodging.original||null,
+    lodging_normalization_applied:!!(lodging.original && lodging.normalized!==lodging.original),
+    lodging_policy:'Use lodging_base as the principal geographic anchor. Minimize unnecessary transfers and start/end there whenever sensible.',
     transport:transport||null,
+    global_day_trip_policy:_globalDayTripPolicy_(),
+    time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
+    preference_constraint_policy:_preferenceConstraintPolicy_(),
     special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
     travelers:plannerState?.travelers || null,
     budget:plannerState?.budget || null,
@@ -2056,7 +2194,11 @@ TRIP-WIDE RULES:
 - No anchor, alias, district, landmark, restaurant, museum, thermal experience, wildlife experience,
   macro-route or corridor may be reserved on two days.
 - Arrival and final days must have disjoint anchors.
-- Prefer strong unused regional/signature buckets over a third generic city day when feasible.
+- Decide intelligently whether nearby day trips should replace lower-value secondary city content. Compare total trip duration, core-city coverage needs, relative excursion quality, door-to-door transfer time, season/daylight, traveler fit and route coherence.
+- Prefer strong unused regional/signature buckets over generic city filler when the comparison clearly favors them, but never displace unmet core city highlights.
+- Use the normalized lodging base as the primary geographic anchor and reserve corridors that minimize unnecessary transfers.
+- Convert all preferences and restrictions into actual day identities, timing and routing decisions.
+- Apply the first/intermediate/final-day time policy contained in KNOWN USER FACTS.
 - If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
 - Respect the actual daily windows, season, useful daylight, travelers, base and transport.
 - Do not invent flight, airport, check-out, rental company or car-return logistics.
@@ -2106,6 +2248,10 @@ ${JSON.stringify(facts)}
 HARD RULES:
 - Generate rows only for days ${dayNums.join(', ')}.
 - Follow each day's approved identity/corridor and reserved anchors.
+- Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
+- Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
+- Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial.
+- Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
 - Do not repeat a POI from ALREADY GENERATED POIs, including aliases, exterior/interior, tower,
   viewpoint, express visit, conditional repeat, "last chance", named restaurant or contextual reuse.
@@ -2669,14 +2815,14 @@ async function generateCityItinerary(city){
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
     showWOW(false);
-    console.log(`[CITY ${city}] SUCCESS v61`,{
+    console.log(`[CITY ${city}] SUCCESS v62`,{
       rows:finalRows.length,
       repaired:finalResult.repaired,
       remainingIssues:finalResult.report?.errors?.length||0
     });
     return;
   }catch(err){
-    console.error(`[CITY ${city}] v61 staged flow failed; using coherent one-shot recovery`,err);
+    console.error(`[CITY ${city}] v62 staged flow failed; using coherent one-shot recovery`,err);
   }
 
   // Coherent one-shot recovery still receives all user facts and must return the complete city.
@@ -2691,7 +2837,11 @@ KNOWN USER FACTS:
 ${JSON.stringify(facts)}
 
 HARD RULES:
-- Respect every daily window, base, transport, traveler and special condition.
+- Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful.
+- Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
+- Enforce every preference and restriction through actual planning choices, not merely notes.
+- Intelligently evaluate nearby day trips against remaining secondary city content using trip length, core coverage, relative tourism value, transfer time and logistics.
+- Infer sensible defaults for missing information, complete partial input conservatively and prioritize detailed instructions.
 - Do not invent airport, flight, check-out, rental company or return logistics.
 - Build globally distinct day identities before generating rows.
 - No major POI, district, restaurant, museum, viewpoint, thermal experience or macro-route may repeat.
@@ -3166,7 +3316,10 @@ async function onSend(){
       : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
-    upsertCityMeta({ city, hotel: text, transport });
+    const lodgingText = String(text||'')
+      .replace(/(?:,|;|\||and|y)?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|recomi[eé]ndame|recommend(?:\s+me)?)\s*$/i,'')
+      .trim() || text;
+    upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
     askNextHotelTransport();
     return;
@@ -3184,7 +3337,7 @@ async function onSend(){
         await generateCityItinerary(city);
       }
       showWOW(false);
-      chatMsg(tone.doneAll, 'ai');
+      chatMsg(getPlannerCompletionMessage(), 'ai');
     })();
 
     return;
@@ -4274,10 +4427,146 @@ function bindInfoChatListeners(){
   });
 }
 
+function enhancePreferencesInfoChatCopy(){
+  const field=qs('#special-conditions');
+  if(!field || qs('#itbmo-preferences-infochat-note')) return;
+
+  const lang = _plannerOutputLang_();
+  const copy = {
+    en: {
+      title:'💡 Not sure what to write?',
+      intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
+      examples:'For example:',
+      items:[
+        '🏨 Best area or neighborhood to stay',
+        '🌦️ Weather and the best time for each activity',
+        '🚇 Transportation and how to get around',
+        '🍽️ Restaurants, cafés and local food',
+        '📸 Hidden gems and photography spots',
+        '🎟️ Tickets, reservations and practical travel tips',
+        '🧳 What to pack and local customs',
+        '💰 Budget recommendations',
+        '❓ Anything else related to your trip'
+      ],
+      final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
+      placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
+    },
+    es: {
+      title:'💡 ¿No sabes qué escribir?',
+      intro:'Puedes abrir el <strong>Info Chat 🌐</strong> en cualquier momento, <strong>antes, durante o después de planificar</strong>, y consultar cualquier cosa sobre tu viaje.',
+      examples:'Por ejemplo:',
+      items:[
+        '🏨 Mejor zona o barrio para hospedarte',
+        '🌦️ Clima y mejor horario para cada actividad',
+        '🚇 Transporte y cómo desplazarte',
+        '🍽️ Restaurantes, cafés y gastronomía local',
+        '📸 Lugares ocultos y puntos para fotografía',
+        '🎟️ Entradas, reservaciones y consejos prácticos',
+        '🧳 Qué llevar y costumbres locales',
+        '💰 Recomendaciones de presupuesto',
+        '❓ Cualquier otra consulta relacionada con tu viaje'
+      ],
+      final:'📝 Cada detalle ayuda a Astra a tomar decisiones de planificación más inteligentes. Cuanto más compartas, más personalizado y optimizado será tu itinerario.',
+      placeholder:'Cuéntale a Astra cómo quieres vivir tu viaje... ¿No estás seguro? Abre el Info Chat 🌐 para inspirarte.'
+    },
+    pt: {
+      title:'💡 Não sabe o que escrever?',
+      intro:'Você pode abrir o <strong>Info Chat 🌐</strong> a qualquer momento, <strong>antes, durante ou depois do planejamento</strong>, e perguntar qualquer coisa sobre a viagem.',
+      examples:'Por exemplo:',
+      items:['🏨 Melhor área ou bairro para ficar','🌦️ Clima e melhor horário para cada atividade','🚇 Transporte e como se locomover','🍽️ Restaurantes, cafés e gastronomia local','📸 Lugares escondidos e pontos para fotografia','🎟️ Ingressos, reservas e dicas práticas','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
+      final:'📝 Cada detalhe ajuda a Astra a tomar decisões de planejamento mais inteligentes. Quanto mais você compartilhar, mais personalizado e otimizado será o seu itinerário.',
+      placeholder:'Conte à Astra como você quer viver a viagem... Em dúvida? Abra o Info Chat 🌐 para se inspirar.'
+    },
+    fr: {
+      title:'💡 Vous ne savez pas quoi écrire ?',
+      intro:'Vous pouvez ouvrir l’<strong>Info Chat 🌐</strong> à tout moment, <strong>avant, pendant ou après la planification</strong>, et poser toutes vos questions sur le voyage.',
+      examples:'Par exemple :',
+      items:['🏨 Meilleur quartier où séjourner','🌦️ Météo et meilleur moment pour chaque activité','🚇 Transports et déplacements','🍽️ Restaurants, cafés et cuisine locale','📸 Lieux méconnus et spots photo','🎟️ Billets, réservations et conseils pratiques','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
+      final:'📝 Chaque détail aide Astra à prendre de meilleures décisions de planification. Plus vous partagez d’informations, plus votre itinéraire sera personnalisé et optimisé.',
+      placeholder:'Expliquez à Astra comment vous souhaitez vivre votre voyage... Besoin d’idées ? Ouvrez l’Info Chat 🌐.'
+    },
+    de: {
+      title:'💡 Sie wissen nicht, was Sie schreiben sollen?',
+      intro:'Sie können den <strong>Info Chat 🌐</strong> jederzeit <strong>vor, während oder nach der Planung</strong> öffnen und alles zu Ihrer Reise fragen.',
+      examples:'Zum Beispiel:',
+      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🌦️ Wetter und beste Zeit für jede Aktivität','🚇 Verkehrsmittel und Fortbewegung','🍽️ Restaurants, Cafés und lokale Küche','📸 Versteckte Orte und Fotospots','🎟️ Tickets, Reservierungen und praktische Reisetipps','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
+      final:'📝 Jedes Detail hilft Astra, intelligentere Planungsentscheidungen zu treffen. Je mehr Sie mitteilen, desto persönlicher und besser optimiert wird Ihre Reiseroute.',
+      placeholder:'Beschreiben Sie Astra, wie Sie Ihre Reise erleben möchten... Unsicher? Nutzen Sie den Info Chat 🌐 als Inspiration.'
+    },
+    it: {
+      title:'💡 Non sai cosa scrivere?',
+      intro:'Puoi aprire l’<strong>Info Chat 🌐</strong> in qualsiasi momento, <strong>prima, durante o dopo la pianificazione</strong>, e chiedere qualsiasi cosa sul viaggio.',
+      examples:'Per esempio:',
+      items:['🏨 Zona o quartiere migliore dove soggiornare','🌦️ Meteo e momento migliore per ogni attività','🚇 Trasporti e come spostarsi','🍽️ Ristoranti, caffè e cucina locale','📸 Luoghi nascosti e punti fotografici','🎟️ Biglietti, prenotazioni e consigli pratici','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
+      final:'📝 Ogni dettaglio aiuta Astra a prendere decisioni di pianificazione più intelligenti. Più informazioni condividi, più il tuo itinerario sarà personalizzato e ottimizzato.',
+      placeholder:'Racconta ad Astra come vuoi vivere il viaggio... Hai dubbi? Apri l’Info Chat 🌐 per trovare ispirazione.'
+    }
+  }[lang] || null;
+
+  const c = copy || {
+    title:'💡 Not sure what to write?',
+    intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
+    examples:'For example:',
+    items:['🏨 Best area or neighborhood to stay','🌦️ Weather and the best time for each activity','🚇 Transportation and how to get around','🍽️ Restaurants, cafés and local food','📸 Hidden gems and photography spots','🎟️ Tickets, reservations and practical travel tips','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
+    final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
+    placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
+  };
+
+  const note=document.createElement('div');
+  note.id='itbmo-preferences-infochat-note';
+  note.className='itbmo-preferences-infochat-note';
+  note.setAttribute('role','note');
+  note.style.cssText='margin:14px 0 18px;padding:16px 18px;border:1px solid rgba(63,120,255,.28);border-radius:14px;background:rgba(63,120,255,.08);box-shadow:0 8px 24px rgba(0,0,0,.06);line-height:1.5;';
+  note.innerHTML = `
+    <div style="font-size:1.05em;margin-bottom:8px;"><strong>${c.title}</strong></div>
+    <div style="margin-bottom:10px;">${c.intro}</div>
+    <div style="margin-bottom:6px;"><strong>${c.examples}</strong></div>
+    <div>${c.items.map(item=>`<div style="margin:3px 0;">${item}</div>`).join('')}</div>
+  `;
+
+  const scope = field.closest('.preferences, .preferences-section, .form-group, .field-group, section') || field.parentElement;
+  let anchor = null;
+  if(scope){
+    const candidates = Array.from(scope.querySelectorAll('p, div, span'));
+    anchor = candidates.find(el=>/This will help create an itinerary that truly matches your travel style\.|Esto ayudará a crear un itinerario que realmente se adapte a tu estilo de viaje\./i.test(String(el.textContent||'').trim()));
+  }
+  if(anchor?.parentNode){
+    anchor.parentNode.insertBefore(note, anchor.nextSibling);
+  }else{
+    field.parentNode?.insertBefore(note,field);
+  }
+
+  field.placeholder = c.placeholder;
+
+  if(scope){
+    const elements = Array.from(scope.querySelectorAll('p, div, span, small'));
+    const lastLine = elements.find(el=>{
+      const txt=String(el.textContent||'').trim();
+      return /^📝?\s*Every detail helps Astra/i.test(txt) || /^📝?\s*Cada detalle ayuda a Astra/i.test(txt);
+    });
+    if(lastLine) lastLine.textContent = c.final;
+  }
+
+  if(!scope || !scope.querySelector('#itbmo-preferences-final-line')){
+    const existingFinal = scope ? Array.from(scope.querySelectorAll('p, div, span, small')).find(el=>String(el.textContent||'').trim()===c.final) : null;
+    if(existingFinal){
+      existingFinal.id='itbmo-preferences-final-line';
+      existingFinal.style.fontWeight='600';
+    }else{
+      const finalLine=document.createElement('div');
+      finalLine.id='itbmo-preferences-final-line';
+      finalLine.style.cssText='margin-top:12px;font-weight:600;line-height:1.45;';
+      finalLine.textContent=c.final;
+      field.insertAdjacentElement('afterend', finalLine);
+    }
+  }
+}
+
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
+  enhancePreferencesInfoChatCopy();
 
   bindTravelersListeners();
 
