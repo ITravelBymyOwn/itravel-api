@@ -1,18 +1,19 @@
 /* =========================================================
-   ITBMO PLANNER v62 — MVP Release
+   ITBMO PLANNER v63 — Planner Intelligence Upgrade
 
-   Base: v61
+   Base: v62
    API contract: compatible with API v65
 
-   MVP Release improvements:
-   - Global intelligent day-trip selection based on relative tourism value and logistics
-   - Lodging-aware route optimization with reversible lodging normalization
-   - Preferences and restrictions enforced as planning constraints
-   - First/intermediate/final-day time-window policy
-   - Defensive duration normalization for malformed hour/minute formats
-   - Intelligent inference for missing or partial user input
-   - Premium itinerary-aware Info Chat travel concierge
-   - Existing master plan, audits, repair loop, renderer and exports preserved
+   Planner Intelligence Upgrade:
+   - Global geographic sequence optimization with anti-backtracking logic
+   - Mathematical row-time reconciliation against transport + activity duration
+   - Intelligent category-based minimum dwell times
+   - Semantic experience deduplication beyond exact place names
+   - Strict single-language itinerary output
+   - Expert macro-tour enrichment with high-value low-detour micro-stops
+   - Incremental tourism-value and experience-diversity scoring
+   - Trip-wide weakest-day quality review integrated into the existing final pass
+   - Existing architecture, API contract, master plan, audits, repair loop, renderer and exports preserved
 ========================================================= */
 
 
@@ -856,6 +857,10 @@ Mandatory rules:
 - Return at least one renderable row whenever itinerary rows are requested.
 - Return no more than 20 rows per day.
 - Optimize affected days globally: minimize unnecessary transfers, group logical zones, respect all daily windows and preserve continuity.
+- Before finalizing each day, compare plausible sequences and choose the geographically strongest order: minimize door-to-door travel, avoid backtracking, cluster nearby areas, respect the natural direction of the route, and avoid returning to a previously completed district unless operationally necessary.
+- Validate every row mathematically: the start-to-end interval must approximately equal transport time plus activity time. If the unexplained difference is significant, correct the schedule or regenerate only the affected row.
+- Apply intelligent minimum dwell time by experience type. As a global guide: major waterfalls 30–45 min, viewpoints 15–30 min, neighborhoods 45–120 min, museums 60–180 min, food markets 45–90 min, beaches 45–90 min, national parks 45–180 min and churches 20–40 min. Allow 5–10 min only for an explicitly identified photographic micro-stop.
+- Detect semantic duplicate experiences, not only matching names. Merge or remove aliases, sub-area labels and repeated experiences that deliver essentially the same visit.
 - Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
 - Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
@@ -901,10 +906,15 @@ Intelligent day-trip selection:
 - Apply this reasoning globally for every destination; never rely on city-name-specific logic.
 
 Regional routes and macro-tours:
-- Use separate rows for meaningful micro-stops.
-- Keep the route geographically sequential.
+- Treat every important regional route as an expert-curated journey, not merely a list of headline attractions.
+- Search for high-value viewpoints, minor waterfalls, picturesque villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops that are directly on the route or require only a very small detour.
+- Use separate rows only for meaningful micro-stops that add real value, preserve rhythm and do not materially inflate the total route time.
+- Rank candidate micro-stops by incremental tourism value: proximity alone is insufficient. Prefer stops that add a distinct experience category over repetitive variants of experiences already included that day.
+- Remove weak micro-stops when a stronger nearby alternative exists. Never add activities merely to fill space.
+- Keep the route geographically sequential and optimize its natural travel direction.
 - End with an explicit return to the named base unless sleeping elsewhere.
 - Do not place a major regional macro-route on the final day when stronger alternatives exist.
+- Before returning the itinerary, identify the weakest day and improve it only when a clearly stronger, preference-compatible and logistically realistic alternative exists.
 
 Merge behavior:
 - Preserve existing rows by default.
@@ -943,7 +953,12 @@ Translation rule:
 Quality & coherence:
 - Use common sense: geography, seasons, time windows, distances and basic logistics.
 - Prioritize iconic daytime + nighttime highlights; if time is limited, focus on essentials.
+- Optimize the actual visit sequence, not merely feasibility: compare plausible orders, minimize travel time, prevent backtracking, cluster nearby zones and preserve the natural direction of travel.
+- Validate each row mathematically so its time interval approximately equals transport plus activity. Correct any significant mismatch before output.
+- Enforce intelligent category-based dwell times and reject 5–10 minute visits unless explicitly justified as photographic micro-stops.
+- Detect duplicate experiences semantically across aliases, districts and closely overlapping descriptions.
 - If the user doesn't specify a specific day, review and adjust the entire city's itinerary, avoiding duplicates and absurd plans.
+- Perform a final weakest-day review and improve only the clearly weakest day when a materially stronger option exists without violating constraints.
 
 Itinerary rules (aligned with API v52.5):
 - Max 20 rows per day.
@@ -958,7 +973,8 @@ Itinerary rules (aligned with API v52.5):
 - Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
 - Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial.
 - Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
-- Macro-tours/day trips: 5–8 sub-stops + final row "Return to {Base city}". Avoid the final day when stronger scheduling alternatives exist.
+- Macro-tours/day trips: curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final row "Return to {Base city}". Do not force a fixed count; quality and route rhythm are more important than quantity. Avoid the final day when stronger scheduling alternatives exist.
+- For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
 
 Auroras (only if plausible by latitude/season):
 - Avoid consecutive nights if possible. Avoid last day; if only possible there, mark conditional.
@@ -1363,6 +1379,59 @@ function _durationTotalBounds_(duration){
   return {min:t.min+a.min,max:t.max+a.max};
 }
 
+function _reconcileRowTimeline_(row={}){
+  const startMin=_hhmmToMinutes_(row.start);
+  let endMin=_hhmmToMinutes_(row.end);
+  const total=_durationTotalBounds_(row.duration);
+  if(startMin==null || endMin==null || !total) return row;
+
+  let span=endMin-startMin;
+  if(span<=0) span+=24*60;
+  const lower=Math.max(1,total.min);
+  const upper=Math.max(lower,total.max);
+  const unexplained = span<lower ? lower-span : (span>upper ? span-upper : 0);
+
+  // Correct only meaningful inconsistencies; small buffers remain valid operational slack.
+  if(unexplained>20){
+    const target=Math.max(lower,upper);
+    endMin=startMin+target;
+    return {...row,end:_minutesToHHMM_(endMin)};
+  }
+  return row;
+}
+
+function _semanticExperienceKey_(row={}){
+  const text=_canonicalText_(`${row.activity||''} ${row.to||''}`)
+    .replace(/\b(port|harbour|harbor|puerto|district|barrio|quarter|area|zona|walk|paseo|galleries|galerias|gallery|galeria)\b/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  const tokens=text.split(' ').filter(x=>x.length>=4);
+  return [...new Set(tokens)].sort().join(' ');
+}
+
+function _semanticOverlapScore_(a='',b=''){
+  const A=new Set(String(a||'').split(' ').filter(Boolean));
+  const B=new Set(String(b||'').split(' ').filter(Boolean));
+  if(!A.size || !B.size) return 0;
+  let common=0;
+  A.forEach(x=>{ if(B.has(x)) common++; });
+  return common/Math.min(A.size,B.size);
+}
+
+function _dedupeSemanticSameDay_(rows=[]){
+  const out=[];
+  for(const row of rows){
+    if(_isUtilityRow_(row)){ out.push(row); continue; }
+    const key=_semanticExperienceKey_(row);
+    const duplicate=out.some(prev=>
+      !_isUtilityRow_(prev) &&
+      _semanticOverlapScore_(key,_semanticExperienceKey_(prev))>=0.78
+    );
+    if(!duplicate) out.push(row);
+  }
+  return out;
+}
+
 function normalizeRow(r = {}, fallbackDay = 1){
   const startRaw = r.start ?? r.start_time ?? r.startTime ?? r.hora_inicio ?? '';
   const endRaw   = r.end   ?? r.end_time   ?? r.endTime   ?? r.hora_fin    ?? '';
@@ -1402,7 +1471,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const safeTransport = String(trans||'').trim();
   const safeNotes = String(notes||'').trim();
 
-  return {
+  return _reconcileRowTimeline_({
     day:d,
     start,
     end,
@@ -1412,7 +1481,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
     transport:safeTransport,
     duration,
     notes:safeNotes
-  };
+  });
 }
 
 function dedupeSoftSameDay(rows){
@@ -1445,6 +1514,7 @@ function pushRows(city, rows, replace=false){
     if(!byDay[d]) byDay[d]=[];
     dedupeInto(byDay[d], obj);
     byDay[d] = dedupeSoftSameDay(byDay[d]);
+    byDay[d] = _dedupeSemanticSameDay_(byDay[d]);
     if(byDay[d].length>20) byDay[d] = byDay[d].slice(0,20);
   });
 
@@ -2139,6 +2209,9 @@ function _globalDayTripPolicy_(){
       'route coherence and return to the lodging base'
     ],
     action:'Substitute lower-value secondary city filler with a stronger nearby excursion when the comparison clearly favors the excursion. Never displace unmet core highlights merely to add a day trip.',
+    macro_tour_enrichment:'For important regional routes, evaluate high-value micro-stops directly on the route or requiring only a very small detour. Rank them by tourism value, route cost, rhythm and distinctiveness.',
+    incremental_value:'Prefer a candidate that adds a new experience category over a repetitive variant already represented, unless the repeated candidate is exceptionally iconic.',
+    quality_not_quantity:'Do not add stops merely to fill time. Remove weaker candidates when stronger alternatives exist.',
     prohibition:'Never use destination-name-specific conditions or hardcoded city lists.'
   };
 }
@@ -2248,11 +2321,19 @@ ${JSON.stringify(facts)}
 HARD RULES:
 - Generate rows only for days ${dayNums.join(', ')}.
 - Follow each day's approved identity/corridor and reserved anchors.
+- For each day, compare plausible geographic sequences and select the best one: minimize travel time, avoid backtracking, cluster nearby zones, respect the natural route direction and avoid returning to a completed district unless necessary.
+- Validate every row mathematically before returning it: start-to-end must approximately equal transport plus activity. Correct or regenerate only the inconsistent row.
+- Apply intelligent minimum dwell times by experience category. Never create 5–10 minute activities except clearly labeled photographic micro-stops.
+- Detect semantic duplicate experiences, including aliases and overlapping district/sub-area descriptions, and keep only the strongest representation.
 - Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
+- When the approved identity is a regional route or macro-tour, enrich it like an expert guide: evaluate iconic or highly recommendable low-detour viewpoints, minor waterfalls, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops.
+- Include a micro-stop only when it adds meaningful incremental tourism value, preserves route rhythm and does not materially increase total route time.
+- Prefer diversity of experiences: once a category is already well represented, favor a distinct high-value category over another similar minor stop.
+- Do not force extra rows. Remove weak stops when stronger alternatives exist.
 - Do not repeat a POI from ALREADY GENERATED POIs, including aliases, exterior/interior, tower,
   viewpoint, express visit, conditional repeat, "last chance", named restaurant or contextual reuse.
 - Arrival and final day must remain distinct.
@@ -2667,6 +2748,7 @@ ${JSON.stringify(rows)}
 
 NON-NEGOTIABLE FINAL REQUIREMENTS:
 - Preserve strong valid content while resolving every critical and major audit issue.
+- Treat this as the trip-wide second quality pass: score all days comparatively, identify the weakest day, and improve it only when a clearly stronger alternative exists within preferences, schedule, logistics, budget and lodging constraints.
 - Cover exactly days 1 through ${totalDays}; no missing or extra days.
 - Enforce global uniqueness across aliases and contexts. A named restaurant, landmark, district,
   museum, viewpoint, thermal experience, wildlife experience and macro-route may appear on one day only.
@@ -2676,6 +2758,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - Never invent flights, airports, check-out, rental companies or vehicle-return logistics.
 - The To field is the concrete place visited in that row. The next row's From must continue from it.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
+- Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
 - Reject generic destinations such as "nearby village", "local restaurant", "services" or "similar option".
 - Every row interval must contain transport plus activity with no more than about 20 minutes unexplained.
@@ -2689,8 +2772,9 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - Protect plausible useful daylight for scenic outdoor stops at the actual date and latitude.
   Driving, indoor attractions, meals and thermal experiences may use darker hours.
 - If a regional route does not fit daylight, remove the weakest stop instead of moving it into darkness.
-- A regional day should contain a useful, geographically coherent set of micro-stops and an explicit
-  return to the named base unless sleeping elsewhere.
+- A regional day should contain a useful, geographically coherent set of major stops and expert-selected micro-stops, with an explicit return to the named base unless sleeping elsewhere.
+- For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
+- Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
 - Aurora must be conditional guidance in suitable evening notes unless the user explicitly requested
   a fixed aurora outing. State that sightings are not guaranteed.
 - Use the selected itinerary language consistently, including duration labels.
@@ -2815,14 +2899,14 @@ async function generateCityItinerary(city){
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
     showWOW(false);
-    console.log(`[CITY ${city}] SUCCESS v62`,{
+    console.log(`[CITY ${city}] SUCCESS v63`,{
       rows:finalRows.length,
       repaired:finalResult.repaired,
       remainingIssues:finalResult.report?.errors?.length||0
     });
     return;
   }catch(err){
-    console.error(`[CITY ${city}] v62 staged flow failed; using coherent one-shot recovery`,err);
+    console.error(`[CITY ${city}] v63 staged flow failed; using coherent one-shot recovery`,err);
   }
 
   // Coherent one-shot recovery still receives all user facts and must return the complete city.
