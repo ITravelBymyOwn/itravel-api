@@ -1,20 +1,21 @@
 /* =========================================================
-   ✅ v60 (MVP WOW) — Orquestación global coherente
-   - Conserva la interfaz, DOM, exportaciones y flujo de v59
-   - Mantiene API v65 sin cambiar su contrato
-   - Añade ledger global, contexto acumulado por bloque y auditoría final trip-wide
-   - Corrige deduplicación entre días, continuidad, duración, idioma y hechos no proporcionados
+   ITBMO PLANNER v61 — MVP WOW release candidate
 
-   Base: v59
-   Idioma (Opción B)
-   - Fuente primaria: <html lang="en|es">
-   - Fallback: ruta URL (/es o /en) si el lang no está definido o es raro
-   - Guarda idioma normalizado en plannerState.lang
+   Base: v60
+   API contract: compatible with API v65
+
+   Main improvements:
+   - Stronger trip-wide duplicate detection, including restaurants and contextual repeats
+   - Category-based minimum dwell validation
+   - High-latitude winter daylight validation
+   - Generic-place and ambiguous-choice detection
+   - Conditional aurora enforcement
+   - More natural concierge writing and less repetitive note templates
+   - Weighted final audit and one bounded precision repair when critical issues remain
+   - English source comments and internal prompts
+   - Localized UI dictionaries intentionally remain multilingual
 ========================================================= */
 
-/* ==============================
-   SECCIÓN 1 · Helpers / Estado
-================================= */
 
 /* ---------- Helpers DOM ---------- */
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
@@ -24,10 +25,8 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const MODEL   = 'gpt-4o-mini';
 
-/* ---------- Estado principal ---------- */
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
-// 🧠 itineraries soporta originalDays para rebalanceos selectivos
 let itineraries = {};            // { [city]: { byDay, currentDay, baseDate, originalDays, masterPlan, audit } }
 let cityMeta = {};               // { [city]: { baseDate, start, end, hotel, transport, perDay:[] } }
 
@@ -35,7 +34,6 @@ let session = [];                // historial para el agente principal
 let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
-/* ---------- Flags de flujo ---------- */
 let planningStarted = false;
 let metaProgressIndex = 0;
 let collectingHotels = false;
@@ -45,11 +43,9 @@ let pendingChange = null;
 let hasSavedOnce = false;
 
 /* ---------- Defaults técnicos (NO rígidos) ---------- */
-// Fallback solo si el agente no trae horas
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
 
-/* ---------- Estado persistente del planner ---------- */
 let plannerState = {
   destinations: [],
   specialConditions: '',
@@ -65,12 +61,6 @@ let plannerState = {
   lang: 'en' // se setea abajo
 };
 
-/* =========================================================
-   🌐 Idioma del planner — Opción B (MVP)
-   - Fuente primaria: <html lang="en|es">
-   - Fallback: pathname (/en /es)
-   - Default seguro: en
-========================================================= */
 (function initPlannerLang(){
   const normalize = (v)=>{
     const s = String(v || '').trim().toLowerCase();
@@ -82,7 +72,6 @@ let plannerState = {
   // 1) <html lang="">
   let lang = normalize(document?.documentElement?.getAttribute('lang'));
 
-  // 2) URL fallback (/es o /en)
   if(!lang){
     try{
       const p = String(window?.location?.pathname || '').toLowerCase();
@@ -97,11 +86,6 @@ let plannerState = {
   plannerState.lang = lang;
 })();
 
-/* =========================================================
-   🌐 i18n (EN/ES) — QUIRÚRGICO
-   - Usa plannerState.lang como fuente
-   - t(key) con fallback a EN
-========================================================= */
 const I18N = {
   es: {
     hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
@@ -176,7 +160,6 @@ const I18N = {
     ageAdult5564: 'Adulto (55–64)',
     ageSenior: 'Mayor (65+)',
 
-    // Fallback local
     fallbackLocal: '⚠️ Fallback local: revisa configuración de Vercel o API Key.'
   },
 
@@ -253,7 +236,6 @@ const I18N = {
     ageAdult5564: 'Adult (55–64)',
     ageSenior: 'Senior (65+)',
 
-    // Fallback local
     fallbackLocal: '⚠️ Local fallback: check your Vercel configuration or API Key.'
   }
 };
@@ -273,10 +255,6 @@ function t(key, ...args){
   return '';
 }
 
-/* ==============================
-   SECCIÓN 2 · Tono / Mensajería
-================================= */
-// ✅ QUIRÚRGICO: evita que el planner reviente si el JS se carga más de una vez en Webflow
 // (const tone redeclarado => "Identifier 'tone' has already been declared")
 var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
   hi: t('hi'),
@@ -295,10 +273,6 @@ var tone = (typeof window !== 'undefined' && window.tone) ? window.tone : {
 
 if (typeof window !== 'undefined') window.tone = tone;
 
-/* ==============================
-   SECCIÓN 3 · Referencias DOM
-   (v55.1 añade soporte al botón flotante del Info Chat)
-================================= */
 const $cityList = qs('#city-list');
 const $addCity  = qs('#add-city-btn');
 const $save     = qs('#save-destinations');
@@ -320,21 +294,17 @@ const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
 
 // 📌 Info Chat (IDs según tu HTML)
-// Nota: en el MVP quitamos el botón #info-chat-toggle del HTML (queda null y NO rompe).
 const $infoToggle   = qs('#info-chat-toggle');
 const $infoModal    = qs('#info-chat-modal');
 const $infoInput    = qs('#info-chat-input');
 const $infoSend     = qs('#info-chat-send');
 const $infoClose    = qs('#info-chat-close');
 const $infoMessages = qs('#info-chat-messages');
-// 🆕 Botón flotante (se mantiene como ÚNICO botón en el MVP)
 const $infoFloating = qs('#info-chat-floating');
 
-// 🆕 Sidebar y botón reset
 const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
 
-/* 🆕 Viajeros (nuevo UI compacto MVP) */
 const $travelerMode      = qs('#traveler-mode');
 const $travelerSoloPanel = qs('#traveler-solo-panel');
 const $travelerGroupPanel= qs('#traveler-group-panel');
@@ -351,9 +321,6 @@ const $btnPDF   = qs('#btn-pdf');
 const $btnCSV   = qs('#btn-csv');
 const $btnEmail = qs('#btn-email');
 
-/* ==============================
-   SECCIÓN 4 · Chat UI + “Pensando…”
-================================= */
 function chatMsg(html, who='ai'){
   if(!html) return;
   const div = document.createElement('div');
@@ -388,14 +355,10 @@ function setChatBusy(on){
   showThinking(on);
 }
 
-/* ==============================
-   SECCIÓN 4B · Info Chat UI (mejorada estilo ChatGPT)
-================================= */
 function infoChatMsg(html, who='ai'){
   if(!html) return;
   const div = document.createElement('div');
   div.className = `chat-message ${who==='user'?'user':'ai'}`;
-  // ✅ Soporte visual para saltos de línea en el mensaje
   div.innerHTML = String(html).replace(/\n/g,'<br>');
   const container = $infoMessages || qs('#info-chat-messages');
   if(!container) return;
@@ -464,9 +427,6 @@ if($infoInput){
   });
 }
 
-/* ==============================
-   SECCIÓN 5 · Fechas / horas
-================================= */
 function autoFormatDMYInput(el){
   // 🆕 Placeholder visible + tooltip (UI consistente con DD/MM/AAAA)
   el.placeholder = 'DD/MM/AAAA';
@@ -478,7 +438,6 @@ function autoFormatDMYInput(el){
   });
 }
 
-// ✅ Parser flexible (quirúrgico): acepta DD/MM/YYYY y MM/DD/YYYY sin romper el flujo.
 // - Se prefiere DD/MM cuando ambos son válidos.
 function parseDMY(str){
   if(!str) return null;
@@ -489,16 +448,13 @@ function parseDMY(str){
   const b = parseInt(m[2],10);
   const y = parseInt(m[3],10);
 
-  // Intento 1: DD/MM
   const d1 = new Date(y, (b-1), a);
   const ok1 = (d1.getFullYear()===y && d1.getMonth()===(b-1) && d1.getDate()===a);
 
-  // Intento 2: MM/DD
   const d2 = new Date(y, (a-1), b);
   const ok2 = (d2.getFullYear()===y && d2.getMonth()===(a-1) && d2.getDate()===b);
 
   if(ok1 && ok2){
-    // Ambos válidos (ej. 02/03/2026). Preferimos DD/MM por UI (LatAm).
     return d1;
   }
   if(ok1) return d1;
@@ -520,9 +476,6 @@ function addMinutes(hhmm, min){
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-/* ==============================
-   SECCIÓN 6 · UI ciudades (sidebar)
-================================= */
 function makeHoursBlock(days){
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
@@ -533,7 +486,6 @@ function makeHoursBlock(days){
   guide.textContent = t('uiTimeHint');
   wrap.appendChild(guide);
 
-  // Encabezado único de horas
   const header = document.createElement('div');
   header.className = 'hours-header';
   header.innerHTML = `
@@ -557,7 +509,6 @@ function makeHoursBlock(days){
 }
 
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
-  // ✅ QUIRÚRGICO: evita que el planner “reviente” si #city-list no existe
   if(!$cityList){
     console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
     return;
@@ -581,7 +532,6 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 
   const baseDateEl = qs('.baseDate', row);
 
-  // ✅ QUIRÚRGICO: si .baseDate no existe (HTML cambió), NO romper addCityRow()
   if(baseDateEl){
     autoFormatDMYInput(baseDateEl);
   }
@@ -610,17 +560,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   $cityList.appendChild(row);
 }
 
-/* =========================================================
-   ITRAVELBYMYOWN · PLANNER v56 (parte 2/3)
-   Base: v55.1
-   Cambios mínimos:
-   - Bloqueo sidebar y botón reset al guardar destinos.
-   - Bloqueo del botón flotante Info Chat.
-========================================================= */
 
-/* ==============================
-   SECCIÓN 7 · Guardar destinos
-================================= */
 function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   const list = [];
@@ -647,11 +587,9 @@ function saveDestinations(){
     list.push({ city, country, days, baseDate, perDay });
   });
 
-  // 🧠 Detección de aumento de días y limpieza itinerario
   list.forEach(({city, days})=>{
     const prevDays = itineraries[city] ? Object.keys(itineraries[city].byDay).length : 0;
     if(prevDays && days > prevDays){
-      // Limpiar estructura existente para evitar duplicados
       itineraries[city].byDay = {};
       for(let d=1; d<=days; d++){
         itineraries[city].byDay[d] = [];
@@ -677,7 +615,6 @@ function saveDestinations(){
     }
   });
 
-  // Limpia ciudades eliminadas
   Object.keys(itineraries).forEach(c=>{ 
     if(!savedDestinations.find(x=>x.city===c)) delete itineraries[c]; 
   });
@@ -687,11 +624,9 @@ function saveDestinations(){
 
   renderCityTabs();
 
-  // ✅ Activar/desactivar botón de iniciar planificación
   $start.disabled = savedDestinations.length === 0;
   hasSavedOnce = true;
 
-  // ✅ Habilitar botón "Reiniciar" solo si hay destinos guardados
   if ($resetBtn) {
     if (savedDestinations.length > 0) {
       $resetBtn.removeAttribute('disabled');
@@ -703,13 +638,11 @@ function saveDestinations(){
   // ✅ Bloquear sidebar
   if ($sidebar) $sidebar.classList.add('disabled');
 
-  // ✅ Bloquear botón flotante Info Chat
   if ($infoFloating) {
     $infoFloating.style.pointerEvents = 'none';
     $infoFloating.style.opacity = '0.6';
   }
 
-  // 🧠 ACTUALIZAR PLANNERSTATE — Bloque ya existente
   if (typeof plannerState !== 'undefined') {
     plannerState.destinations = [...savedDestinations];
     plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
@@ -725,9 +658,6 @@ function saveDestinations(){
   }
 }
 
-/* ==============================
-   SECCIÓN 8 · Tabs + Render
-================================= */
 function setActiveCity(name){
   if(!name) return;
   activeCity = name;
@@ -758,9 +688,6 @@ function renderCityTabs(){
   }
 }
 
-/* ==============================
-   SECCIÓN 9 · Render Itinerario
-================================= */
 function renderCityItinerary(city){
   if(!city || !itineraries[city]) return;
   const data = itineraries[city];
@@ -849,9 +776,6 @@ function renderCityItinerary(city){
   show(itineraries[city].currentDay || days[0]);
 }
 
-/* ==============================
-   SECCIÓN 10 · Snapshot + Intake
-================================= */
 function getFrontendSnapshot(){
   return JSON.stringify(
     Object.fromEntries(
@@ -916,65 +840,70 @@ function buildIntake(){
   ].join('\n');
 }
 
-/* ==============================
-   SECCIÓN 11 · Contrato JSON / LLM (reforzado v49) — v58 robustecido (reglas API v52.5)
-================================= */
 const FORMAT = `
-Devuelve SOLO JSON válido (sin markdown) en uno de estos:
+Return ONLY valid JSON, without markdown, using one of these schemas:
 
-A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"..","from":"..","to":"..","transport":"..","duration":"..","notes":".."}]}], "followup":"Pregunta breve"}
+A) {"destinations":[{"name":"City","rows":[{"day":1,"start":"09:00","end":"10:00","activity":"...","from":"...","to":"...","transport":"...","duration":"...","notes":"..."}]}],"followup":"Short question"}
 
-B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+B) {"destination":"City","rows":[{...}],"replace":false,"followup":"Short question"}
 
-C) {"rows":[{...}],"replace":false,"followup":"Pregunta breve"}
+C) {"rows":[{...}],"replace":false,"followup":"Short question"}
 
-D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Texto","transport":"Texto"},"followup":"Pregunta breve"}
+D) {"meta":{"city":"City","baseDate":"DD/MM/YYYY","start":"HH:MM" | ["HH:MM",...],"end":"HH:MM" | ["HH:MM",...],"hotel":"Text","transport":"Text"},"followup":"Short question"}
 
-Reglas (obligatorias, alineadas con API v52.5):
+Mandatory rules:
 
-- Responde SIEMPRE en el MISMO idioma del texto real del usuario (lo que el usuario escribió), independientemente del idioma del sitio (EN/ES).
-- Devuelve SIEMPRE al menos 1 fila renderizable en "rows". Nada de texto fuera del JSON.
-- Máximo 20 filas por día.
-- Optimiza el/los día(s) afectado(s) (min traslados, agrupa por zonas, respeta ventanas).
-- Usa horas por día del usuario; si faltan, sugiere horas realistas (apertura/cierre). No solapes.
-- Valida PLAUSIBILIDAD GLOBAL (geografía, temporada, clima aproximado, logística).
-- Seguridad y restricciones:
-  • No incluyas actividades en zonas con riesgos relevantes o restricciones evidentes; prefiera alternativas seguras.
-  • Si detectas un posible riesgo/aviso, indica en "notes" un aviso breve (sin alarmismo) o sustituye por alternativa segura.
+- Use the explicitly selected itinerary language. If none was selected, use the dominant language of the user's natural-language content.
+- Return at least one renderable row whenever itinerary rows are requested.
+- Return no more than 20 rows per day.
+- Optimize affected days globally: minimize unnecessary transfers, group logical zones, respect all daily windows and preserve continuity.
+- Use the user's daily times. When a time is missing, propose a realistic time without creating overlaps.
+- Validate geography, season, useful daylight, route continuity, operational logistics and traveler fit.
+- Never invent flights, airports, check-out, rental companies or vehicle-return logistics.
+- Never claim live weather, live road conditions, live openings or guaranteed wildlife/aurora sightings.
 
-Campos obligatorios por fila (NO vacíos):
-- "activity","from","to","transport","duration","notes" deben tener texto útil. Prohibido "seed" y notes vacías.
+Required non-empty row fields:
+- activity
+- from
+- to
+- transport
+- duration
+- notes
 
-Formato de activity (obligatorio cuando aplique a itinerario):
-- "Destino – SUB-parada" (– o - con espacios). Evita genéricos tipo "museo", "parque", "restaurante local", "paseo por la ciudad".
+Activity:
+- Use "Destination – Specific stop" when appropriate.
+- Avoid generic labels such as "museum", "nearby village", "local restaurant" or "city walk".
 
-Formato de duration (obligatorio, tabla-ready):
-- 2 líneas EXACTAS con salto \\n:
-  "Transporte: <estimación realista o ~rango>"
-  "Actividad: <estimación realista o ~rango>"
-- PROHIBIDO: "Transporte: 0m" o "Actividad: 0m"
-- NO usar comas para separar Transporte/Actividad.
+Duration:
+- Exactly two lines separated by \\n:
+  "Transport: <realistic estimate or range>"
+  "Activity: <realistic estimate or range>"
+- Use localized labels in the selected itinerary language.
+- Never use zero-minute values.
+- The interval from start to end must contain both transport and activity.
 
-Comidas (regla flexible):
-- NO son obligatorias. Si se incluyen, NO genéricas ("restaurante local" prohibido). Deben aportar valor.
+Meals:
+- Meals are optional.
+- When included, choose a concrete place or a clearly defined food district.
+- Do not repeat the same named restaurant on another day.
 
-Auroras (solo si plausibles por latitud/temporada):
-- Evitar días consecutivos si hay opciones. Evitar el último día; si SOLO cabe ahí, marcar condicional.
-- Debe ser nocturno típico local.
-- En notes incluir: "valid: <justificación breve>" + referencia a clima/nubosidad + alternativa low-cost cercana.
+Aurora:
+- Include aurora only when plausible by latitude and season.
+- Treat it as a conditional opportunity in notes unless the user explicitly requested a fixed outing.
+- Avoid identical notes on consecutive nights.
+- State that visibility is not guaranteed and that cloud cover, geomagnetic activity and road conditions must be checked.
 
-Day trips / Macro-tours:
-- Si propones excursión/day trip, desglosa en 5–8 sub-paradas (filas).
-- Cierra con fila propia: "Regreso a {Ciudad base}".
-- Evitar macro-tours en el último día si hay opciones.
+Regional routes and macro-tours:
+- Use separate rows for meaningful micro-stops.
+- Keep the route geographically sequential.
+- End with an explicit return to the named base unless sleeping elsewhere.
+- Do not place a major regional macro-route on the final day when stronger alternatives exist.
 
-Conserva lo existente por defecto (fusión); NO borres lo actual salvo instrucción explícita (replace=true).
-
+Merge behavior:
+- Preserve existing rows by default.
+- Use replace=true only when the request or generation flow explicitly requires full replacement.
 `;
 
-/* ==============================
-   SECCIÓN 12 · Llamada a Astra (estilo global)
-================================= */
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
   const globalStyle = `
@@ -1034,7 +963,6 @@ Edits:
 - For edits: return the JSON per contract and merge by default (replace=false).
 `.trim();
 
-  // ✅ QUIRÚRGICO: timeout para evitar que "se pegue y no genere" en producción
   const controller = new AbortController();
   const timeoutMs = 130000; // 130s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
@@ -1042,8 +970,6 @@ Edits:
   try{
     showThinking(true);
 
-    // ✅ QUIRÚRGICO (CRÍTICO): no mezclar globalStyle dentro del "user input"
-    // para no forzar idioma. globalStyle va como "system".
     const messages = [
       { role:'system', content: globalStyle },
       ...(Array.isArray(history) ? history : []),
@@ -1054,7 +980,6 @@ Edits:
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      // ✅ QUIRÚRGICO: fuerza modo planner (API v58 default planner, pero lo fijamos para robustez)
       body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
     });
 
@@ -1068,7 +993,7 @@ Edits:
     return data?.text || '';
   }catch(e){
     const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
-    console.error("Fallo al contactar la API:", e);
+    console.error("Failed to contact the API:", e);
     if(isAbort){
       return `{"followup":"⚠️ The assistant took too long to respond (timeout). Try again or reduce the number of days/cities."}`;
     }
@@ -1106,7 +1031,6 @@ LANGUAGE (CRITICAL):
 - Reply in the same language as the user's message (any language). Ignore system/template labels.
 `.trim();
 
-  // ✅ QUIRÚRGICO: timeout también para Info Chat (evita cuelgues)
   const controller = new AbortController();
   const timeoutMs = 45000; // 45s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
@@ -1114,7 +1038,6 @@ LANGUAGE (CRITICAL):
   try{
     setInfoChatBusy(true);
 
-    // ✅ QUIRÚRGICO (CRÍTICO): system separado para no forzar idioma
     const messages = [
       { role:'system', content: globalStyle },
       ...(Array.isArray(history) ? history : []),
@@ -1148,16 +1071,16 @@ LANGUAGE (CRITICAL):
       try {
         const j = JSON.parse(answer);
         if (j?.destination || j?.rows || j?.followup) {
-          return 'No pude traer la respuesta del Info Chat correctamente. Verifica tu API Key/URL en Vercel o vuelve a intentarlo.';
+          return 'The Info Chat response could not be parsed correctly. Check the API Key/URL in Vercel and try again.';
         }
       } catch { /* no-op */ }
     }
 
-    return answer || '¿Algo más que quieras saber?';
+    return answer || 'Is there anything else you would like to know?';
   }catch(e){
     const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
-    console.error("Fallo Info Chat:", e);
-    if(isAbort) return '⚠️ El Info Chat tardó demasiado (timeout). Intenta de nuevo.';
+    console.error("Info Chat request failed:", e);
+    if(isAbort) return '⚠️ Info Chat took too long to respond. Please try again.';
     return tone.fail;
   }finally{
     clearTimeout(timer);
@@ -1165,9 +1088,6 @@ LANGUAGE (CRITICAL):
   }
 }
 
-/* ==============================
-   SECCIÓN 13 · Merge / utilidades
-================================= */
 function dedupeInto(arr, row){
   const key = o => [o.day,o.start||'',o.end||'',(o.activity||'').toLowerCase().trim()].join('|');
   const has = arr.find(x=>key(x)===key(row));
@@ -1186,7 +1106,6 @@ function ensureDays(city){
   itineraries[city].byDay = byDay;
 }
 
-// ✅ QUIRÚRGICO: helpers locales para evitar filas paraguas y duraciones inválidas
 function _hhmmToMinutes_(s){
   const m = String(s||'').trim().match(/^(\d{1,2}):(\d{2})$/);
   if(!m) return null;
@@ -1481,7 +1400,6 @@ function applyParsedToState(parsed){
 
   if(parsed.meta) upsertCityMeta(parsed.meta);
 
-  // 🧠 Detectar forceReplan si aplica y ajustar replace
   let forceReplanCity = null;
   if (typeof plannerState !== 'undefined' && plannerState.forceReplan) {
     const candidate = parsed.destination || parsed.city || parsed.meta?.city;
@@ -1490,7 +1408,6 @@ function applyParsedToState(parsed){
     }
   }
 
-  // ✅ soporte quirúrgico para formato preferido city_day
   if(Array.isArray(parsed.city_day)){
     const name = parsed.destination || parsed.city || parsed.meta?.city || activeCity || savedDestinations[0]?.city;
     if(name){
@@ -1529,7 +1446,6 @@ function applyParsedToState(parsed){
         });
       }
 
-      // ✅ limpiar flag una vez utilizado
       if(forceReplanCity === name){
         delete plannerState.forceReplan[name];
       }
@@ -1586,9 +1502,6 @@ function applyParsedToState(parsed){
   }
 }
 
-/* ==============================
-   SECCIÓN 13B · Add Multiple Days (mejorada con rebalanceo inteligente por rango)
-================================= */
 function addMultipleDaysToCity(city, extraDays){
   if(!city || extraDays <= 0) return;
   ensureDays(city);
@@ -1619,7 +1532,6 @@ function addMultipleDaysToCity(city, extraDays){
     }
   }
 
-  // 📝 Actualizar cantidad total de días en destino
   const dest = savedDestinations.find(x=>x.city===city);
   let newLastDay = currentMax + extraDays;
   if(dest){
@@ -1630,7 +1542,6 @@ function addMultipleDaysToCity(city, extraDays){
   const rebalanceStart = Math.max(1, lastOriginalDay);
   const rebalanceEnd = newLastDay;
 
-  // 🧭 Marcar replanificación para el agente
   if (typeof plannerState !== 'undefined') {
     if (!plannerState.forceReplan) plannerState.forceReplan = {};
     plannerState.forceReplan[city] = true;
@@ -1643,10 +1554,6 @@ function addMultipleDaysToCity(city, extraDays){
     .finally(() => showWOW(false));
 }
 
-/* ==============================
-   SECCIÓN 14 · Validación GLOBAL (2º paso con IA) — reforzado
-   (ajuste quirúrgico: menos reglas duras, más criterio experto)
-================================= */
 async function validateRowsWithAgent(city, rows, baseDate){
   const payload = `
 LANGUAGE (CRITICAL):
@@ -1827,7 +1734,6 @@ function _lastUserFromSession_(){
 }
 
 function _userLanguageAnchor_(){
-  // ✅ NEW (quirúrgico): si el usuario eligió idioma global, úsalo como anchor duro
   try{
     const chosen = (typeof plannerState !== 'undefined' && plannerState)
       ? String(plannerState?.itineraryLang || '').trim()
@@ -1851,7 +1757,6 @@ function _userLanguageAnchor_(){
   const last = _lastUserFromSession_();
   if(last) return last;
 
-  // Safe fallback (only if there is no user text to infer language)
   return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
 }
 
@@ -2038,10 +1943,32 @@ function _poiKeyFromRow_(row={}){
   return to || activity;
 }
 
-function _isUtilityRow_(row={}){
-  return /\b(return|regreso|retorno|arrival|llegada|departure|salida|hotel|lodging|alojamiento|breakfast|desayuno|lunch|almuerzo|dinner|cena|restaurant|restaurante|cafe|cafeteria|parking|aparcamiento|fuel|combustible|check in|check out)\b/i.test(
+function _isMealRow_(row={}){
+  return /\b(breakfast|desayuno|lunch|almuerzo|dinner|cena|brunch|restaurant|restaurante|cafe|café|cafeteria|cafetería|food hall|mercado gastron[oó]mico)\b/i.test(
     `${row?.activity||''} ${row?.to||''}`
   );
+}
+
+function _isGenericMealDestination_(value=''){
+  return /\b(local restaurant|restaurante local|nearby restaurant|restaurante cercano|local cafe|café local|nearby cafe|café cercano|food option|opci[oó]n de comida|similar option|opci[oó]n similar)\b/i.test(
+    String(value||'')
+  );
+}
+
+function _isUtilityRow_(row={}){
+  const text=`${row?.activity||''} ${row?.to||''}`;
+  if(/\b(return|regreso|retorno|arrival|llegada|departure|salida|hotel|lodging|alojamiento|parking|aparcamiento|fuel|combustible|check in|check-in|check out|check-out)\b/i.test(text)){
+    return true;
+  }
+
+  // A generic meal is operational. A named restaurant or concrete food venue is a real POI
+  // and must remain visible to trip-wide duplicate detection.
+  if(_isMealRow_(row)){
+    const to=String(row?.to||'').trim();
+    return !to || _isGenericMealDestination_(to);
+  }
+
+  return false;
 }
 
 function _rowsLedger_(rows=[]){
@@ -2181,7 +2108,7 @@ HARD RULES:
 - Follow each day's approved identity/corridor and reserved anchors.
 - Do not borrow anchors from any other day.
 - Do not repeat a POI from ALREADY GENERATED POIs, including aliases, exterior/interior, tower,
-  viewpoint, express visit, conditional repeat or "last chance".
+  viewpoint, express visit, conditional repeat, "last chance", named restaurant or contextual reuse.
 - Arrival and final day must remain distinct.
 - Do not invent a flight, airport transfer, check-out, rental company or car-return unless explicitly
   present in KNOWN USER FACTS.
@@ -2196,11 +2123,15 @@ HARD RULES:
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
 - Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
   with an explicit return to the lodging/base.
-- Do not force a rigid aurora row. When plausible, add concise conditional guidance to 1–3 suitable
-  evening notes: sensible dark-hour window, safe self-drive option, guided-tour option, cloud/
+- Do not force a rigid aurora row unless the user explicitly requested one. When plausible, add
+  concise conditional guidance to 1–3 suitable evening notes: sensible dark-hour window, safe self-drive option, guided-tour option, cloud/
   geomagnetic/road checks and no guarantee.
 - Preserve official proper names; all generic user-facing text and duration labels must use the
   selected itinerary language.
+- Never use generic destinations such as "nearby village", "local restaurant", "services",
+  "recommended place" or "similar option".
+- Notes must sound natural and expert. Do not repeat fixed labels such as "Emotion:" and "Tip:" on
+  every row. Include one specific operational or experiential insight instead.
 - Target 4–8 useful rows on a normal full day, fewer on genuinely short/light days.
 - No text outside JSON.
 
@@ -2264,7 +2195,147 @@ function _arePoiAliases_(a='',b=''){
   return common/Math.min(aa.size,bb.size)>=0.7;
 }
 
-function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay){
+
+function _parseBaseDate_(baseDate=''){
+  const parsed=parseDMY(baseDate);
+  return parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed : null;
+}
+
+function _dayDate_(baseDate='',day=1){
+  const base=_parseBaseDate_(baseDate);
+  return base ? addDays(base,Math.max(0,Number(day||1)-1)) : null;
+}
+
+function _isHighLatitudeWinterContext_(city='',baseDate=''){
+  const normalized=_canonicalText_(`${city} ${plannerState?.specialConditions||''}`);
+  const date=_parseBaseDate_(baseDate);
+  const month=date ? date.getMonth()+1 : null;
+
+  const highLatitude=/\b(iceland|reykjavik|akureyri|husavik|vik|norway|tromso|alta|lofoten|svalbard|bodo|sweden|kiruna|abisko|finland|rovaniemi|lapland|greenland|nuuk|ilulissat|faroe|alaska|fairbanks|anchorage|yellowknife|whitehorse|nunavut|yukon|scotland|orkney|shetland)\b/i.test(normalized.replace(/\s+/g,' '));
+
+  const northernWinter=month==null || [10,11,12,1,2,3].includes(month);
+  return highLatitude && northernWinter;
+}
+
+function _winterUsefulDaylightWindow_(city='',baseDate='',day=1){
+  if(!_isHighLatitudeWinterContext_(city,baseDate)) return null;
+  const date=_dayDate_(baseDate,day);
+  const month=date ? date.getMonth()+1 : 1;
+
+  // Conservative planning windows. These are not live sunrise calculations.
+  // They deliberately protect scenic visits from darkness at high latitude.
+  const byMonth={
+    10:{start:540,end:1050},
+    11:{start:570,end:990},
+    12:{start:600,end:930},
+    1:{start:585,end:1005},
+    2:{start:555,end:1050},
+    3:{start:510,end:1110}
+  };
+  return byMonth[month] || {start:570,end:1020};
+}
+
+function _isScenicOutdoorRow_(row={}){
+  return /\b(waterfall|cascada|beach|playa|cliff|acantilado|viewpoint|mirador|lookout|lighthouse|faro|crater|cr[aá]ter|geyser|g[eé]iser|geothermal field|campo geot[eé]rmico|volcano|volc[aá]n|lake|lago|lagoon shore|orilla|trail|sendero|hike|caminata|mountain|monta[nñ]a|canyon|ca[nñ][oó]n|coast|costa|fjord|fiordo|glacier|glaciar|national park|parque nacional|rock formation|formaci[oó]n rocosa|black sand|arena negra)\b/i.test(`${row?.activity||''} ${row?.to||''} ${row?.notes||''}`.replace(/\s+/g,' '));
+}
+
+function _isAuroraRow_(row={}){
+  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(
+    `${row?.activity||''} ${row?.to||''} ${row?.notes||''}`
+  );
+}
+
+function _isAuroraActivityRow_(row={}){
+  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(
+    `${row?.activity||''} ${row?.to||''}`
+  );
+}
+
+function _explicitlyRequestedFixedAurora_(){
+  return /\b(fixed aurora|aurora tour|northern lights tour|tour de auroras|cacer[ií]a de auroras|reservar aurora|book aurora|actividad fija de aurora)\b/i.test(String(plannerState?.specialConditions||'').replace(/\s+/g,' '));
+}
+
+function _genericPlaceReason_(value=''){
+  const text=String(value||'').trim();
+  if(!text) return 'EMPTY_PLACE';
+
+  const generic=/\b(nearby village|pueblo cercano|local village|pueblo local|nearby town|ciudad cercana|local restaurant|restaurante local|similar option|opci[oó]n similar|recommended place|lugar recomendado|selected place|lugar seleccionado|local cafe|café local|nearby cafe|café cercano|city center|centro de la ciudad|main area|zona principal|services|servicios|planning)\b/i;
+
+  if(generic.test(text.replace(/\s+/g,' '))) return 'GENERIC_PLACE';
+  return '';
+}
+
+function _activityProfile_(row={}){
+  const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
+
+  if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
+    return {type:'MAJOR_THERMAL',min:180};
+  }
+  if(/\b(whale watching|avistamiento de ballenas|wildlife cruise|marine safari|safari marino|boat wildlife)\b/.test(text)){
+    return {type:'WILDLIFE_CRUISE',min:150};
+  }
+  if(/\b(food tour|walking tour|guided tour|tour gastron[oó]mico|tour guiado|recorrido guiado)\b/.test(text)){
+    return {type:'SUBSTANTIAL_GUIDED_TOUR',min:150};
+  }
+  if(/\b(large museum|major museum|immersive museum|museo nacional|museo grande|exposici[oó]n inmersiva)\b/.test(text)){
+    return {type:'LARGE_MUSEUM',min:90};
+  }
+  if(/\b(theme park|parque tem[aá]tico|palace complex|complejo palaciego|archaeological complex|complejo arqueol[oó]gico)\b/.test(text)){
+    return {type:'MAJOR_COMPLEX',min:180};
+  }
+  if(/\b(round trip walk|round-trip walk|return hike|hike to|walk to the wreck|caminata ida y vuelta|sendero ida y vuelta|caminata al fuselaje|plane wreck|restos del avi[oó]n)\b/.test(text)){
+    return {type:'SUBSTANTIAL_HIKE',min:90};
+  }
+  return null;
+}
+
+function _activityDurationBounds_(duration=''){
+  return _durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
+}
+
+function _regionalDayLooksThin_(rows=[]){
+  const meaningful=(rows||[]).filter(r=>!_isUtilityRow_(r));
+  const regionalSignal=(rows||[]).some(r=>
+    /\b(route|ruta|circle|c[ií]rculo|peninsula|pen[ií]nsula|coast|costa|day trip|excursi[oó]n|region|regional)\b/i.test(
+      `${r?.activity||''} ${r?.notes||''}`
+    )
+  );
+  return regionalSignal && meaningful.length<4;
+}
+
+function _noteTemplateRatio_(rows=[]){
+  const useful=(rows||[]).filter(r=>String(r?.notes||'').trim());
+  if(useful.length<4) return 0;
+  const templated=useful.filter(r=>
+    /^\s*(emotion|emoci[oó]n|tip|consejo|highlight|destacado)\s*:/i.test(String(r.notes||''))
+  ).length;
+  return templated/useful.length;
+}
+
+function _auditSeverity_(error={}){
+  const critical=new Set([
+    'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
+    'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
+    'CATEGORY_DWELL_TOO_SHORT','AMBIGUOUS_TO','GENERIC_TO'
+  ]);
+  const major=new Set([
+    'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
+    'RIGID_AURORA_ROW','REGIONAL_DAY_TOO_THIN','REPETITIVE_NOTE_TEMPLATE'
+  ]);
+  if(critical.has(error?.code)) return 10;
+  if(major.has(error?.code)) return 4;
+  return 1;
+}
+
+function _auditScore_(report={}){
+  return (report?.errors||[]).reduce((sum,error)=>sum+_auditSeverity_(error),0);
+}
+
+function _hasCriticalAuditErrors_(report={}){
+  return (report?.errors||[]).some(error=>_auditSeverity_(error)>=10);
+}
+
+function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
   const errors=[];
   const byDay=_rowsByDayObject_(rows);
   const seenPois=[];
@@ -2273,27 +2344,63 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay){
     const dayRows=byDay[day]||[];
     if(!dayRows.length) errors.push({code:'MISSING_DAY',day});
 
-    let priorEnd=null,priorTo='';
+    const daylight=_winterUsefulDaylightWindow_(city,baseDate,day);
+    let priorEnd=null;
+    let priorTo='';
+
     for(let i=0;i<dayRows.length;i++){
-      const r=dayRows[i],row=i+1;
-      const start=_hhmmToMinutes_(r.start),end=_hhmmToMinutes_(r.end);
+      const r=dayRows[i];
+      const row=i+1;
+      const start=_hhmmToMinutes_(r.start);
+      const end=_hhmmToMinutes_(r.end);
+
       if(start==null||end==null){
         errors.push({code:'INVALID_TIME',day,row,start:r.start,end:r.end});
       }else{
-        let span=end-start;if(span<=0) span+=1440;
+        let span=end-start;
+        if(span<=0) span+=1440;
+
         const total=_durationTotalBounds_(r.duration);
         if(total){
-          if(total.min>span+5) errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min});
-          if(span-total.max>25) errors.push({code:'ROW_INTERVAL_UNEXPLAINED',day,row,span,explained:total.max});
+          if(total.min>span+5){
+            errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min});
+          }
+          if(span-total.max>25){
+            errors.push({
+              code:'ROW_INTERVAL_UNEXPLAINED',
+              day,row,span,explained:total.max,unexplained:span-total.max
+            });
+          }
         }else{
           errors.push({code:'DURATION_UNPARSEABLE',day,row,duration:r.duration});
         }
-        if(priorEnd!=null && start<priorEnd) errors.push({code:'OVERLAP',day,row});
+
+        if(priorEnd!=null && start<priorEnd){
+          errors.push({code:'OVERLAP',day,row});
+        }
         priorEnd=end;
+
+        if(daylight && _isScenicOutdoorRow_(r) && !_isAuroraRow_(r)){
+          const outdoorStart=start;
+          const outdoorEnd=end;
+          const tolerance=15;
+          if(outdoorStart<daylight.start-tolerance || outdoorEnd>daylight.end+tolerance){
+            errors.push({
+              code:'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
+              day,row,start:r.start,end:r.end,
+              useful_window:`${_minutesToHHMM_(daylight.start)}-${_minutesToHHMM_(daylight.end)}`
+            });
+          }
+        }
       }
 
       if(i>0 && priorTo && r.from && !_arePoiAliases_(priorTo,r.from)){
-        errors.push({code:'CONTINUITY',day,row,previous_to:priorTo,current_from:r.from});
+        errors.push({
+          code:'CONTINUITY',
+          day,row,
+          previous_to:priorTo,
+          current_from:r.from
+        });
       }
       priorTo=r.to;
 
@@ -2301,45 +2408,104 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay){
         const poi=_poiKeyFromRow_(r);
         for(const prior of seenPois){
           if(prior.day!==day && _arePoiAliases_(poi,prior.poi)){
-            errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],poi:r.to||r.activity});
+            errors.push({
+              code:'GLOBAL_DUPLICATE_POI',
+              days:[prior.day,day],
+              first:prior.label,
+              second:r.to||r.activity
+            });
             break;
           }
         }
-        if(poi) seenPois.push({day,poi});
+        if(poi){
+          seenPois.push({day,poi,label:r.to||r.activity});
+        }
       }
 
-      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b/i.test(String(r.to||''))){
+      const genericReason=_genericPlaceReason_(r.to);
+      if(genericReason){
+        errors.push({code:'GENERIC_TO',day,row,to:r.to,reason:genericReason});
+      }
+
+      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif full\b|\bsi est[aá] lleno\b/i.test(String(r.to||''))){
         errors.push({code:'AMBIGUOUS_TO',day,row,to:r.to});
       }
-      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b/i.test(String(r.transport||''))){
+
+      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif preferred\b|\bsi prefieres\b/i.test(String(r.transport||''))){
         errors.push({code:'AMBIGUOUS_TRANSPORT',day,row,transport:r.transport});
       }
+
+      const profile=_activityProfile_(r);
+      const activityBounds=_activityDurationBounds_(r.duration);
+      if(profile && (!activityBounds || activityBounds.min<profile.min)){
+        errors.push({
+          code:'CATEGORY_DWELL_TOO_SHORT',
+          day,row,
+          category:profile.type,
+          required_minimum_minutes:profile.min,
+          actual_minimum_minutes:activityBounds?.min||0
+        });
+      }
+
+      if(_isAuroraActivityRow_(r) && !_explicitlyRequestedFixedAurora_()){
+        errors.push({
+          code:'RIGID_AURORA_ROW',
+          day,row,
+          instruction:'Move aurora guidance into suitable evening notes unless the user explicitly requested a fixed outing.'
+        });
+      }
+    }
+
+    if(_regionalDayLooksThin_(dayRows)){
+      errors.push({code:'REGIONAL_DAY_TOO_THIN',day,row_count:dayRows.length});
     }
   }
 
   const known=String(plannerState?.specialConditions||'');
-  const inventedDeparture=!/\b(flight|vuelo|airport|aeropuerto|departure|salida|check[- ]?out|devolver|return car|rental company|europcar|hertz|avis)\b/i.test(known)
-    && (rows||[]).some(r=>/\b(airport|aeropuerto|check[- ]?out|europcar|hertz|avis|return.*car|devoluci[oó]n.*veh[ií]culo)\b/i.test(`${r.activity} ${r.to} ${r.notes}`));
-  if(inventedDeparture) errors.push({code:'INVENTED_DEPARTURE_LOGISTICS'});
+  const inventedDeparture=
+    !/\b(flight|vuelo|airport|aeropuerto|departure|salida|check[- ]?out|devolver|return car|rental company|europcar|hertz|avis)\b/i.test(known) &&
+    (rows||[]).some(r=>
+      /\b(airport|aeropuerto|check[- ]?out|europcar|hertz|avis|return.*car|devoluci[oó]n.*veh[ií]culo)\b/i.test(
+        `${r.activity} ${r.to} ${r.notes}`
+      )
+    );
+  if(inventedDeparture){
+    errors.push({code:'INVENTED_DEPARTURE_LOGISTICS'});
+  }
 
-  return {ok:errors.length===0,errors};
+  const noteRatio=_noteTemplateRatio_(rows);
+  if(noteRatio>=0.55){
+    errors.push({
+      code:'REPETITIVE_NOTE_TEMPLATE',
+      ratio:Number(noteRatio.toFixed(2)),
+      instruction:'Rewrite notes naturally without repeating fixed labels such as Emotion/Tip on every row.'
+    });
+  }
+
+  return {
+    ok:errors.length===0,
+    score:errors.reduce((sum,error)=>sum+_auditSeverity_(error),0),
+    errors
+  };
 }
-
-async function _finalTripWideRepair_(
-  city,rows,totalDays,masterDays,perDay,baseDate,hotel,transport,forceReplan=false
+async function _runTripWideRepairCall_(
+  city,rows,totalDays,masterDays,facts,report,forceReplan=false,precisionPass=false
 ){
-  const facts=_knownUserFactsForCity_(city,totalDays,perDay,baseDate,hotel,transport);
-  const local=_localGlobalAudit_(city,rows,totalDays,masterDays,perDay);
+  const passTitle=precisionPass
+    ? 'FINAL PRECISION REPAIR'
+    : 'FINAL TRIP-WIDE REPAIR';
 
   const prompt=`
 ${FORMAT}
-ROLE: Astra, final trip-wide itinerary auditor.
+ROLE: Astra, expert final itinerary auditor and concierge.
+
+${passTitle}
 
 Return ONLY:
 {"destination":"${city}","rows":[...],"replace":${forceReplan?'true':'false'}}
 
-You are receiving the COMPLETE itinerary for all ${totalDays} days. Return the COMPLETE corrected
-itinerary, not a report and not only changed rows.
+You are receiving the COMPLETE itinerary for all ${totalDays} days.
+Return the COMPLETE corrected itinerary, never a report and never only changed rows.
 
 APPROVED TRIP-WIDE RESERVATION LEDGER:
 ${_masterPlanLedgerText_(masterDays)}
@@ -2347,56 +2513,108 @@ ${_masterPlanLedgerText_(masterDays)}
 KNOWN USER FACTS:
 ${JSON.stringify(facts)}
 
-DETERMINISTIC ISSUES FOUND:
-${JSON.stringify(local.errors)}
+DETERMINISTIC AUDIT:
+${JSON.stringify(report)}
 
 CURRENT COMPLETE ITINERARY:
 ${JSON.stringify(rows)}
 
-FINAL AUDIT REQUIREMENTS:
-- Preserve the strongest valid content, but resolve every reported issue.
-- Exactly cover days 1 through ${totalDays}; no missing or extra days.
-- Enforce the ledger globally. A major POI, alias, landmark, district, restaurant, museum, viewpoint,
-  thermal experience, wildlife experience or macro-route may appear on only one day.
-- Arrival and final days must be distinct. Replace repeats with strong unused on-theme anchors; if
-  premium inventory is exhausted, keep the day intentionally light.
-- Do not invent flight, airport, check-out, rental company or vehicle-return logistics.
-- Correct shifted From/To semantics: To is the destination visited in the same row; the next row starts
-  from it.
-- Maintain exact continuity and realistic geography; no teleporting or backtracking.
-- Every row interval must contain transport plus activity, with at most about 20 minutes unexplained.
-- Reconcile duration with transport wording. Never collapse 1h–1h15 into 15 min.
-- Schedule scenic outdoor stops inside plausible useful daylight for actual date/latitude. Use darker
-  hours for transfers, museums, meals and thermal experiences.
-- If a route does not fit daylight, remove the weakest stop rather than moving it into darkness.
-- Keep thermal lagoons, cruises, major museums, tours and hikes at realistic category dwell times.
-- Aurora, when plausible, should normally be conditional guidance in notes on suitable nights, not a
-  guaranteed rigid booking.
-- One concrete To and one primary transport choice per row. Put alternatives in Notes.
+NON-NEGOTIABLE FINAL REQUIREMENTS:
+- Preserve strong valid content while resolving every critical and major audit issue.
+- Cover exactly days 1 through ${totalDays}; no missing or extra days.
+- Enforce global uniqueness across aliases and contexts. A named restaurant, landmark, district,
+  museum, viewpoint, thermal experience, wildlife experience and macro-route may appear on one day only.
+- Arrival and final days must use disjoint major anchors.
+- Replace a repeated POI with a strong unused on-theme option. If premium inventory is exhausted,
+  keep the day intentionally light rather than repeating icons.
+- Never invent flights, airports, check-out, rental companies or vehicle-return logistics.
+- The To field is the concrete place visited in that row. The next row's From must continue from it.
+- Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
+- Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
+- Reject generic destinations such as "nearby village", "local restaurant", "services" or "similar option".
+- Every row interval must contain transport plus activity with no more than about 20 minutes unexplained.
+- Reconcile duration with the transport field and preserve realistic long ranges.
+- Keep category dwell realistic:
+  * major thermal experience: at least 3 hours when comparable to a destination spa;
+  * whale watching or wildlife cruise: normally at least 2 hours 30 minutes of activity;
+  * substantial guided tour: normally at least 2 hours 30 minutes;
+  * large museum or immersive exhibition: normally at least 1 hour 30 minutes;
+  * substantial round-trip hike: include the complete walking time.
+- Protect plausible useful daylight for scenic outdoor stops at the actual date and latitude.
+  Driving, indoor attractions, meals and thermal experiences may use darker hours.
+- If a regional route does not fit daylight, remove the weakest stop instead of moving it into darkness.
+- A regional day should contain a useful, geographically coherent set of micro-stops and an explicit
+  return to the named base unless sleeping elsewhere.
+- Aurora must be conditional guidance in suitable evening notes unless the user explicitly requested
+  a fixed aurora outing. State that sightings are not guaranteed.
 - Use the selected itinerary language consistently, including duration labels.
-- Remove irrelevant seasonal boilerplate, placeholders, "valid:", generic filler and unsupported facts.
-- Every regional day must explicitly return to the named lodging/base unless sleeping elsewhere.
+- Write like an expert human concierge:
+  * specific, practical and destination-aware;
+  * no repeated "Emotion:" / "Tip:" formula on every row;
+  * no generic filler, unsupported facts, live-condition claims or promotional clichés;
+  * one genuinely useful operational or experiential insight per row.
+- Preserve official proper names.
 - JSON only.
 `.trim();
 
   const raw=await _callPlannerSystemPrompt_(prompt,false);
   const parsed=parseJSON(raw);
-  if(!parsed) return {rows,report:local,repaired:false};
+  if(!parsed) return null;
 
-  let repaired=_extractPlannerRows_(parsed,city);
-  repaired=_dedupeRows_(repaired);
-  if(!repaired.length || !_rowsCoverAllDays_(repaired,totalDays)){
-    return {rows,report:local,repaired:false};
-  }
-
-  const after=_localGlobalAudit_(city,repaired,totalDays,masterDays,perDay);
-  // Accept repair when it materially improves or fully passes.
-  if(after.ok || after.errors.length < local.errors.length){
-    return {rows:repaired,report:after,repaired:true};
-  }
-  return {rows,report:local,repaired:false};
+  const repaired=_dedupeRows_(_extractPlannerRows_(parsed,city));
+  if(!repaired.length || !_rowsCoverAllDays_(repaired,totalDays)) return null;
+  return repaired;
 }
 
+async function _finalTripWideRepair_(
+  city,rows,totalDays,masterDays,perDay,baseDate,hotel,transport,forceReplan=false
+){
+  const facts=_knownUserFactsForCity_(city,totalDays,perDay,baseDate,hotel,transport);
+  let currentRows=_dedupeRows_(rows);
+  let currentReport=_localGlobalAudit_(
+    city,currentRows,totalDays,masterDays,perDay,baseDate
+  );
+
+  const firstRepair=await _runTripWideRepairCall_(
+    city,currentRows,totalDays,masterDays,facts,currentReport,forceReplan,false
+  );
+
+  if(firstRepair){
+    const firstReport=_localGlobalAudit_(
+      city,firstRepair,totalDays,masterDays,perDay,baseDate
+    );
+    if(_auditScore_(firstReport)<_auditScore_(currentReport)){
+      currentRows=firstRepair;
+      currentReport=firstReport;
+    }
+  }
+
+  // A second call is allowed only when critical deterministic issues still remain.
+  // This keeps latency bounded while preventing publication of obvious duplicates,
+  // impossible timing, daylight violations or invented logistics.
+  if(_hasCriticalAuditErrors_(currentReport)){
+    const precisionRepair=await _runTripWideRepairCall_(
+      city,currentRows,totalDays,masterDays,facts,currentReport,forceReplan,true
+    );
+    if(precisionRepair){
+      const precisionReport=_localGlobalAudit_(
+        city,precisionRepair,totalDays,masterDays,perDay,baseDate
+      );
+      if(_auditScore_(precisionReport)<_auditScore_(currentReport)){
+        currentRows=precisionRepair;
+        currentReport=precisionReport;
+      }
+    }
+  }
+
+  return {
+    rows:currentRows,
+    report:currentReport,
+    repaired:_auditScore_(currentReport)<_auditScore_(
+      _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate)
+    )
+  };
+}
 async function generateCityItinerary(city){
   const dest=savedDestinations.find(x=>x.city===city);
   if(!dest) return;
@@ -2413,7 +2631,7 @@ async function generateCityItinerary(city){
     const masterDays=await _buildCityMasterPlan_(city,dest.days,perDay,baseDate,hotel,transport);
     if(masterDays.length!==dest.days) throw new Error(`MASTER_PLAN_INVALID:${city}`);
 
-    if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null};
+    if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null,masterPlan:[],audit:null};
     itineraries[city].masterPlan=masterDays;
 
     const blocks=_chunkMasterDays_(masterDays);
@@ -2451,14 +2669,14 @@ async function generateCityItinerary(city){
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
     showWOW(false);
-    console.log(`[CITY ${city}] SUCCESS v60`,{
+    console.log(`[CITY ${city}] SUCCESS v61`,{
       rows:finalRows.length,
       repaired:finalResult.repaired,
       remainingIssues:finalResult.report?.errors?.length||0
     });
     return;
   }catch(err){
-    console.error(`[CITY ${city}] v60 staged flow failed; using coherent one-shot recovery`,err);
+    console.error(`[CITY ${city}] v61 staged flow failed; using coherent one-shot recovery`,err);
   }
 
   // Coherent one-shot recovery still receives all user facts and must return the complete city.
@@ -2493,7 +2711,6 @@ HARD RULES:
     let rows=_dedupeRows_(_extractPlannerRows_(parsed,city));
     if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error('ONE_SHOT_INVALID');
 
-    // One global repair of fallback output as well.
     const syntheticMaster=Array.from({length:dest.days},(_,i)=>({
       day:i+1,theme:`Distinct day ${i+1} | Anchors: unique unused experiences`
     }));
@@ -2512,13 +2729,13 @@ HARD RULES:
     showWOW(false);
     return;
   }catch(err2){
-    console.error(`[CITY ${city}] v60 recovery failed`,err2);
+    console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
     showWOW(false);
   }
 
   const msg=getLang()==='es'
-    ? 'No pude completar un itinerario coherente. Intenta nuevamente o reduce temporalmente la cantidad de días.'
+    ? 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.'
     : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
   chatMsg(msg,'ai');
 }
@@ -2621,9 +2838,6 @@ ${buildIntake()}
   }
 }
 
-/* ==============================
-   SECCIÓN 16 · Inicio (hotel/transport)
-================================= */
 async function startPlanning(){
   if(savedDestinations.length===0) return;
   $chatBox.style.display='flex';
@@ -2639,7 +2853,6 @@ function askNextHotelTransport(){
   if(metaProgressIndex >= savedDestinations.length){
     collectingHotels = false;
 
-    // ✅ NUEVO (quirúrgico): preguntar idioma global antes de generar
     if (typeof plannerState !== 'undefined' && plannerState) {
       plannerState.collectingItineraryLang = true;
     }
@@ -2658,10 +2871,6 @@ function askNextHotelTransport(){
   chatMsg(tone.askHotelTransport(city),'ai');
 }
 
-/* ==============================
-   SECCIÓN 17 · NLU robusta + Intents (v55.1)
-   (amplía vocabulario y regex de v55 pero mantiene intents v54)
-================================= */
 const WORD_NUM = {
   'una':1,'uno':1,'un':1,'dos':2,'tres':3,'cuatro':4,'cinco':5,
   'seis':6,'siete':7,'ocho':8,'nueve':9,'diez':10,
@@ -2718,7 +2927,6 @@ function detectCityInText(text){
   return null;
 }
 
-// Detectar ciudad base a partir de país
 function detectCityFromCountryInText(text){
   const lowered = text.toLowerCase();
   const countryMap = {
@@ -2806,9 +3014,6 @@ function intentFromText(text){
   return {type:'free_edit', details:text};
 }
 
-/* ==============================
-   SECCIÓN 18 · Edición/Manipulación + Optimización + Validación
-================================= */
 function insertDayAt(city, position){
   ensureDays(city);
   const byDay = itineraries[city].byDay || {};
@@ -2890,7 +3095,6 @@ async function optimizeDay(city, day){
 `;
   }
 
-  // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): fuerza que la salida use el idioma que indique el usuario (no labels del sistema)
   const langDirective = `
 LANGUAGE (CRITICAL):
 Primary rule (highest priority):
@@ -2948,9 +3152,6 @@ ${buildIntake()}
   }
 }
 
-/* ==============================
-   SECCIÓN 19 · Chat handler (global)
-================================= */
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
@@ -2971,7 +3172,6 @@ async function onSend(){
     return;
   }
 
-  // ✅ NUEVO (quirúrgico): capturar idioma global antes de generar itinerarios
   if (typeof plannerState !== 'undefined' && plannerState && plannerState.collectingItineraryLang) {
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
@@ -3116,7 +3316,6 @@ async function onSend(){
     return;
   }
 
-  // 6) Cambiar horas
   if(intent.type==='change_hours' && intent.city){
     showWOW(true, getLang()==='es' ? 'Ajustando horarios…' : 'Adjusting times…');
     const city = intent.city;
@@ -3174,13 +3373,12 @@ async function onSend(){
     try{
       setChatBusy(true);
 
-      // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): NO forzar ES/EN por getLang(); responder en el idioma real del mensaje del usuario
       const ans = await callAgent(
 `Reply in the SAME language as the user's message (no JSON):\n"${text}"`,
         true
       );
 
-      chatMsg(ans || (getLang()==='es' ? '¿Algo más que quieras saber?' : 'Anything else you want to know?'));
+      chatMsg(ans || (getLang()==='es' ? 'Is there anything else you would like to know?' : 'Anything else you want to know?'));
     } finally {
       setChatBusy(false);
     }
@@ -3202,7 +3400,6 @@ async function onSend(){
     }).join('\n\n');
     const perDay = (cityMeta[city]?.perDay||[]).map(pd=>({day:pd.day, start:pd.start||DEFAULT_START, end:pd.end||DEFAULT_END}));
 
-    // ✅ AJUSTE QUIRÚRGICO (multi-idioma real): instrucción explícita para usar el idioma del texto del usuario
     const langDirective = `
 LANGUAGE (CRITICAL):
 - Output MUST be in the same language as the user's instruction text below (any language).
@@ -3268,9 +3465,6 @@ Instrucción del usuario: ${text}
   }
 }
 
-/* ==============================
-   SECCIÓN 20 · Orden de ciudades + Eventos
-================================= */
 function addRowReorderControls(row){
   const ctrlWrap = document.createElement('div');
   ctrlWrap.style.display='flex';
@@ -3308,11 +3502,6 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-/* ==============================
-   SECCIÓN 21 · INIT y listeners
-   (v55.1 añade: validación previa de fechas, botón flotante Info Chat
-    y reset con modal; mantiene startPlanning de v54)
-================================= */
 $addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
@@ -3474,7 +3663,6 @@ function resetTravelersUI(){
   if($soloGender) $soloGender.value = '';
   if($soloAgeRange) $soloAgeRange.value = '';
 
-  // ✅ NUEVO (quirúrgico): "Tu información" en modo acompañado
   const $meGender = qs('#me-gender');
   if($meGender) $meGender.value = '';
   const $meAge = qs('#me-age-range');
@@ -3517,16 +3705,9 @@ function bindTravelersListeners(){
     removeTravelerProfile();
   });
 
-  // Estado inicial
   setTravelerButtonsState();
 }
 
-/* =========================================================
-   🧾 MVP — Export (PDF / CSV / Email)
-   ✅ Exporta desde el ESTADO real:
-   - savedDestinations (orden de ciudades)
-   - itineraries[city].byDay (filas por día)
-========================================================= */
 
 function safeFilePart(s){
   return String(s || '')
@@ -3549,9 +3730,6 @@ function downloadBlob(blob, filename){
   }, 0);
 }
 
-/* ✅ NUEVO (quirúrgico): detecta delimitador para Excel según locale
-   - Muchos Excel en ES usan ";" cuando el separador decimal es ","
-*/
 function detectCsvDelimiter(){
   try{
     const dec = (new Intl.NumberFormat().format(1.1) || '');
@@ -3561,7 +3739,6 @@ function detectCsvDelimiter(){
   }
 }
 
-/* ✅ AJUSTE (quirúrgico): escape depende del delimitador */
 function csvEscape(v, delim){
   const s = String(v ?? '');
   const d = String(delim || ',');
@@ -3601,7 +3778,6 @@ function getOrderedCitiesForExport(){
 function getOrderedDaysForCity(city){
   const byDay = itineraries?.[city]?.byDay || {};
   const days = Object.keys(byDay).map(n=>+n).filter(n=>Number.isFinite(n)).sort((a,b)=>a-b);
-  // fallback suave
   if(!days.length){
     const savedN = savedDestinations?.find(x=>x.city===city)?.days;
     if(savedN && Number.isFinite(+savedN) && +savedN>0){
@@ -3611,11 +3787,6 @@ function getOrderedDaysForCity(city){
   return days;
 }
 
-/* ✅ AJUSTE (quirúrgico): normaliza para Excel y PDF
-   - Quita emojis/surrogates (causan PDFs corruptos en Acrobat)
-   - Reemplaza comillas/dashes unicode problemáticos
-   - Evita saltos de línea reales dentro de celdas (CSV) y reduce riesgo PDF
-*/
 function normalizeCellText(v){
   let s = String(v ?? '');
 
@@ -3694,7 +3865,6 @@ function exportItineraryToCSV(){
     });
   });
 
-  // ✅ BOM + CRLF para Excel (quirúrgico)
   const csv = '\uFEFF' + lines.join('\r\n');
   const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
 
@@ -3908,7 +4078,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const cancelReset  = overlay.querySelector('#cancel-reset');
 
   confirmReset.addEventListener('click', ()=>{
-    // 🔄 Estado principal
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
     addCityRow();
     $start.disabled = true;
@@ -3916,14 +4085,12 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
 
-    // 🔄 Flags de planificación
     planningStarted = false;
     metaProgressIndex = 0;
     collectingHotels = false;
     isItineraryLocked = false;
     activeCity = null;
 
-    // 🔄 Limpiar overlays/tooltips si están activos
     try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
     qsa('.date-tooltip').forEach(t0 => t0.remove());
 
@@ -3937,10 +4104,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     const $bu = qs('#budget');     if($bu) $bu.value = '';
     const $cu = qs('#currency');   if($cu) $cu.value = 'USD';
 
-    // ✅ NUEVO: reset UI de viajeros (modo/paneles/selects/perfiles)
     resetTravelersUI();
 
-    // 🔄 Sincronizar plannerState (definido en Sección 1)
     if (typeof plannerState !== 'undefined') {
       plannerState.destinations = [];
       plannerState.specialConditions = '';
@@ -3956,14 +4121,12 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // 🧹 Desbloquear sidebar tras reinicio
     if ($sidebar) $sidebar.classList.remove('disabled');
 
-    // 🧹 Restaurar Info Floating si aplica
     if ($infoFloating){
       $infoFloating.style.pointerEvents = 'auto';
       $infoFloating.style.opacity = '1';
       $infoFloating.disabled = false;
     }
 
-    // 🧹 Desactivar botón de reinicio
     if ($resetBtn) $resetBtn.setAttribute('disabled','true');
 
     // UX: enfocar primer input de ciudad
@@ -3985,7 +4148,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   });
 });
 
-// ▶️ Start: valida fechas (formato v54) y luego ejecuta startPlanning()
 $start?.addEventListener('click', ()=>{
   if(!validateBaseDatesDMY()) return;
   startPlanning();
@@ -4004,11 +4166,9 @@ $chatI?.addEventListener('keydown', e=>{
 $confirmCTA?.addEventListener('click', ()=>{
   isItineraryLocked = true;
 
-  // ✅ QUIRÚRGICO: evitar crash si no existe el upsell en el DOM
   if($upsell) $upsell.style.display='flex';
 });
 $upsellClose?.addEventListener('click', ()=>{
-  // ✅ QUIRÚRGICO: evitar crash si no existe el upsell en el DOM
   if($upsell) $upsell.style.display='none';
 });
 
@@ -4034,7 +4194,6 @@ function openInfoModal(){
   modal.style.display = 'flex';
   modal.classList.add('active');
 
-  // 🆕 Hook para CSS tipo ChatGPT (sin forzar estilos globales)
   document.body.classList.add('itbmo-info-open');
 }
 function closeInfoModal(){
@@ -4120,13 +4279,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
   bindInfoChatListeners();
 
-  // ✅ NUEVO: bind de viajeros (UI compacto MVP)
   bindTravelersListeners();
 
-  // ✅ NUEVO (quirúrgico): sincroniza el perfil inicial que viene en el HTML
   renumberTravelerProfiles();
   setTravelerButtonsState();
 
-  // ✅ NUEVO (quirúrgico): activar botones PDF/CSV/Email
   bindExportListeners();
 });
