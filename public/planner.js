@@ -1,10 +1,10 @@
 /* =========================================================
-   ITBMO PLANNER v65 — Stability & Final Quality Engine
+   ITBMO PLANNER v65 — MVP Stability & Quality Release
 
    Base: v64
    API contract: compatible with API v66
 
-   Stability & Final Quality Engine:
+   Precision Route & Anchor Upgrade:
    - Global geographic sequence optimization with anti-backtracking logic
    - Mathematical row-time reconciliation against transport + activity duration
    - Intelligent category-based minimum dwell times
@@ -706,7 +706,6 @@ function renderCityItinerary(city){
 
   const base = parseDMY(data.baseDate || cityMeta[city]?.baseDate || '');
   const sections = [];
-  const itineraryLabels=_itineraryUiLabels_();
 
   function formatDurationForDisplay(val, transport=''){
     if(!val) return '';
@@ -718,12 +717,12 @@ function renderCityItinerary(city){
     sec.className = 'day-section';
     const dateLabel = base ? ` (${formatDMY(addDays(base, dayNum-1))})` : '';
     sec.innerHTML = `
-      <div class="day-title"><strong>${itineraryLabels.day} ${dayNum}</strong>${dateLabel}</div>
+      <div class="day-title"><strong>${t('uiDayTitle', dayNum)}</strong>${dateLabel}</div>
       <table class="itinerary">
         <thead>
           <tr>
-            <th>${itineraryLabels.start}</th><th>${itineraryLabels.end}</th><th>${itineraryLabels.activity}</th><th>${itineraryLabels.from}</th>
-            <th>${itineraryLabels.to}</th><th>${itineraryLabels.transport}</th><th>${itineraryLabels.duration}</th><th>${itineraryLabels.notes}</th>
+            <th>${t('thStart')}</th><th>${t('thEnd')}</th><th>${t('thActivity')}</th><th>${t('thFrom')}</th>
+            <th>${t('thTo')}</th><th>${t('thTransport')}</th><th>${t('thDuration')}</th><th>${t('thNotes')}</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -1005,7 +1004,7 @@ Edits:
 `.trim();
 
   const controller = new AbortController();
-  const timeoutMs = 130000; // 130s (ajustable)
+  const timeoutMs = 165000; // API v66 is internally bounded; allow safe network headroom
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1209,19 +1208,6 @@ function _durationLabels_(){
   return map[lang] || map.en;
 }
 
-function _itineraryUiLabels_(){
-  const lang=_plannerOutputLang_();
-  const map={
-    es:{day:'Día',start:'Hora inicio',end:'Hora final',activity:'Actividad',from:'Desde',to:'Hacia',transport:'Transporte',duration:'Duración',notes:'Notas',generated:'Fecha de generación'},
-    pt:{day:'Dia',start:'Hora de início',end:'Hora final',activity:'Atividade',from:'De',to:'Para',transport:'Transporte',duration:'Duração',notes:'Notas',generated:'Data de geração'},
-    fr:{day:'Jour',start:'Heure de début',end:'Heure de fin',activity:'Activité',from:'Depuis',to:'Vers',transport:'Transport',duration:'Durée',notes:'Notes',generated:'Date de génération'},
-    de:{day:'Tag',start:'Startzeit',end:'Endzeit',activity:'Aktivität',from:'Von',to:'Nach',transport:'Transport',duration:'Dauer',notes:'Hinweise',generated:'Erstellungsdatum'},
-    it:{day:'Giorno',start:'Ora inizio',end:'Ora fine',activity:'Attività',from:'Da',to:'A',transport:'Trasporto',duration:'Durata',notes:'Note',generated:'Data di generazione'},
-    en:{day:'Day',start:'Start time',end:'End time',activity:'Activity',from:'From',to:'To',transport:'Transport',duration:'Duration',notes:'Notes',generated:'Generated'}
-  };
-  return map[lang]||map.en;
-}
-
 
 function getPlannerCompletionMessage(){
   const lang = _plannerOutputLang_();
@@ -1272,60 +1258,69 @@ function _extractDurationPart_(raw, kind='transport'){
 }
 
 function _durationBoundsMinutes_(raw){
-  let s=String(raw||'')
+  let s = String(raw||'')
     .toLowerCase()
+    .replace(/(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
+    .replace(/~\s*(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
     .replace(/,/g,'.')
     .replace(/[–—]/g,'-')
     .replace(/[~≈]/g,' ')
-    .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?|about|around|cerca de)\b/g,' ')
     .replace(/\s+/g,' ')
     .trim();
   if(!s) return null;
 
-  const toMinutes=(h,m)=>Math.max(0,(Number(h)||0)*60+(Number(m)||0));
-
-  // Explicit hour/minute range: 1 h 20 min-1 h 30 min, 2h15m-2h30m.
-  let m=s.match(/(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*(?:m|min(?:ute)?s?)?)?\s*-\s*(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*(?:m|min(?:ute)?s?)?)?/i);
+  // Compact hour/minute forms produced by models or transport fields:
+  // 2h15m-2h30m, 2h15-2h30, 1h20m, 1h20.
+  let m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\s*-\s*(\d+)\s*h\s*(\d{1,2})\s*m?/);
   if(m){
-    const a=toMinutes(m[1],m[2]);
-    const b=toMinutes(m[3],m[4]);
+    const a=(+m[1]*60)+(+m[2]||0);
+    const b=(+m[3]*60)+(+m[4]||0);
     return {min:Math.min(a,b),max:Math.max(a,b)};
   }
 
-  // Hour-only range: 1-1.5 h.
-  m=s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/i);
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\b/);
   if(m){
-    const a=Math.round(Number(m[1])*60),b=Math.round(Number(m[2])*60);
-    return {min:Math.min(a,b),max:Math.max(a,b)};
-  }
-
-  // Minute range: 20-30 min.
-  m=s.match(/(\d+)\s*-\s*(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/i);
-  if(m){
-    const a=Number(m[1]),b=Number(m[2]);
-    return {min:Math.min(a,b),max:Math.max(a,b)};
-  }
-
-  // Single hour/minute value: 1 h 20 min, 1h20m, 1.5 h.
-  m=s.match(/(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*(?:m|min(?:ute)?s?)?)?\b/i);
-  if(m){
-    const v=String(m[1]).includes('.') && !m[2]
-      ? Math.round(Number(m[1])*60)
-      : toMinutes(m[1],m[2]);
+    const v=(+m[1]*60)+(+m[2]||0);
     return {min:v,max:v};
   }
 
-  m=s.match(/(\d+(?:\.\d+)?)\s*(?:hr|hrs|hour|hours|hora|horas)\b/i);
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})?\s*-\s*(\d+)\s*h\s*(\d{1,2})?/);
   if(m){
-    const v=Math.round(Number(m[1])*60);
+    const a = (+m[1]*60)+(+m[2]||0);
+    const b = (+m[3]*60)+(+m[4]||0);
+    return {min:Math.min(a,b), max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
+  if(m){
+    const a = Math.round(+m[1]*60), b = Math.round(+m[2]*60);
+    return {min:Math.min(a,b), max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+)\s*-\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
+  if(m){
+    const a=+m[1], b=+m[2];
+    return {min:Math.min(a,b), max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})\b/);
+  if(m){
+    const v=(+m[1]*60)+(+m[2]||0);
     return {min:v,max:v};
   }
 
-  m=s.match(/(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/i);
+  m = s.match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
   if(m){
-    const v=Number(m[1]);
+    const v=Math.round(+m[1]*60);
     return {min:v,max:v};
   }
+
+  m = s.match(/(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
+  if(m){
+    const v=+m[1];
+    return {min:v,max:v};
+  }
+
   return null;
 }
 
@@ -1343,7 +1338,47 @@ function _formatDurationBounds_(b){
 }
 
 function _transportBoundsFromField_(raw){
-  return _durationBoundsMinutes_(String(raw||''));
+  const s=String(raw||'');
+  const candidates=[];
+  const patterns=[
+    /(\d+)\s*h\s*(\d{1,2})\s*m?\s*[-–—]\s*(\d+)\s*h\s*(\d{1,2})\s*m?/gi,
+    /(\d+)\s*h\s*(\d{1,2})\s*m?\b/gi,
+    /(\d+)\s*h\s*(\d{1,2})?\s*[-–—]\s*(\d+)\s*h\s*(\d{1,2})?/gi,
+    /(\d+(?:\.\d+)?)\s*[-–—]\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/gi,
+    /(\d+)\s*[-–—]\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/gi,
+    /(\d+)\s*h\s*(\d{1,2})\b/gi,
+    /(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/gi,
+    /(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/gi
+  ];
+  let m;
+  while((m=patterns[0].exec(s))){
+    const a=(+m[1]*60)+(+m[2]||0), b=(+m[3]*60)+(+m[4]||0);
+    candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
+  }
+  while((m=patterns[1].exec(s))){
+    const v=(+m[1]*60)+(+m[2]||0); candidates.push({min:v,max:v});
+  }
+  while((m=patterns[2].exec(s))){
+    const a=(+m[1]*60)+(+m[2]||0), b=(+m[3]*60)+(+m[4]||0);
+    candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
+  }
+  while((m=patterns[3].exec(s))){
+    const a=Math.round(+m[1]*60),b=Math.round(+m[2]*60);
+    candidates.push({min:Math.min(a,b),max:Math.max(a,b)});
+  }
+  while((m=patterns[4].exec(s))){
+    candidates.push({min:Math.min(+m[1],+m[2]),max:Math.max(+m[1],+m[2])});
+  }
+  while((m=patterns[5].exec(s))){
+    const v=(+m[1]*60)+(+m[2]||0); candidates.push({min:v,max:v});
+  }
+  while((m=patterns[6].exec(s))){
+    const v=Math.round(+m[1]*60); candidates.push({min:v,max:v});
+  }
+  while((m=patterns[7].exec(s))){
+    const v=+m[1]; candidates.push({min:v,max:v});
+  }
+  return candidates.length ? candidates.reduce((a,b)=>b.max>a.max?b:a) : null;
 }
 
 function _sanitizeDurationLines_(raw, transportField=''){
@@ -1459,51 +1494,91 @@ function _isAnchorExperienceRow_(row={}){
 
 function _reconcileDayRows_(rows=[]){
   const sorted=(rows||[]).slice().sort((a,b)=>{
-    const aa=_hhmmToMinutes_(a?.start),bb=_hhmmToMinutes_(b?.start);
+    const aa=_hhmmToMinutes_(a?.start), bb=_hhmmToMinutes_(b?.start);
     return (aa==null?99999:aa)-(bb==null?99999:bb);
-  }).map(row=>_reconcileRowTimeline_(_enforceMinimumDwell_(row)));
+  });
 
-  // Final day-level chronology pass. Row-level reconciliation can lengthen an
-  // anchor experience; every later row is therefore shifted forward atomically
-  // when needed, preserving its own duration and preventing umbrella overlaps.
-  let previousEnd=null;
   for(let i=0;i<sorted.length;i++){
-    const row=sorted[i];
-    let start=_hhmmToMinutes_(row.start);
-    let end=_hhmmToMinutes_(row.end);
-    const total=_durationTotalBounds_(row.duration);
+    sorted[i]=_reconcileRowTimeline_(_enforceMinimumDwell_(sorted[i]));
+  }
 
-    if(start==null && previousEnd!=null) start=previousEnd;
-    if(start==null || end==null){
-      if(start!=null && total) end=start+Math.max(15,total.max);
-      if(start!=null) row.start=_minutesToHHMM_(start);
-      if(end!=null) row.end=_minutesToHHMM_(end);
-      previousEnd=end;
+  // Deterministic whole-day chronology. Preserve fixed/reservation anchors, but never publish
+  // overlaps or giant unexplained gaps. A normal operational buffer of 10–35 min is retained.
+  for(let i=1;i<sorted.length;i++){
+    const prev=sorted[i-1], cur=sorted[i];
+    const prevEnd=_hhmmToMinutes_(prev.end);
+    let curStart=_hhmmToMinutes_(cur.start);
+    let curEnd=_hhmmToMinutes_(cur.end);
+    if(prevEnd==null || curStart==null || curEnd==null) continue;
+    const span=Math.max(15,curEnd-curStart);
+    const fixed=/\b(reserv|booking|ticket|timed|hora exacta|entrada con hora|embarque|check[- ]?in)\b/i.test(`${cur.activity||''} ${cur.notes||''}`);
+
+    if(curStart<prevEnd){
+      curStart=prevEnd+10;
+      curEnd=curStart+span;
+      cur.start=_minutesToHHMM_(curStart);
+      cur.end=_minutesToHHMM_(curEnd);
       continue;
     }
 
-    let span=end-start;
-    if(span<=0) span+=1440;
-
-    if(previousEnd!=null && start<previousEnd){
-      const shift=previousEnd-start;
-      start+=shift;
-      end=start+span;
-      row.start=_minutesToHHMM_(start);
-      row.end=_minutesToHHMM_(end);
+    const gap=curStart-prevEnd;
+    if(gap>120 && !fixed){
+      // Returns should start soon after the last real stop. Other flexible rows retain 30 min.
+      const targetGap=_isUtilityRow_(cur) ? 15 : 30;
+      curStart=prevEnd+targetGap;
+      curEnd=curStart+span;
+      cur.start=_minutesToHHMM_(curStart);
+      cur.end=_minutesToHHMM_(curEnd);
     }
-
-    // Keep small operational slack, but never unexplained multi-hour gaps inside a row.
-    if(total){
-      const target=Math.max(total.min,Math.min(total.max,span));
-      if(span<total.min || span-total.max>25){
-        end=start+Math.max(total.min,total.max);
-        row.end=_minutesToHHMM_(end);
-      }
-    }
-    previousEnd=end;
   }
-  return sorted;
+
+  // Final row math after any chronological movement.
+  return sorted.map(r=>_reconcileRowTimeline_(r));
+}
+
+
+function _sanitizePlannerUserText_(value='', field=''){
+  let s=String(value||'').replace(/\s+/g,' ').trim();
+  if(!s) return s;
+  const lang=_plannerOutputLang_();
+  if(lang==='es'){
+    const replacements=[
+      [/\bReturn to\b/gi,'Regreso a'],
+      [/\bTransfer (?:to|toward|towards)\b/gi,'Traslado hacia'],
+      [/\bTransfer\b/gi,'Traslado'],
+      [/\bcheck[- ]?in\b/gi,'registro'],
+      [/\bcheck[- ]?out\b/gi,'salida del alojamiento'],
+      [/\bfood hall\b/gi,'mercado gastronómico'],
+      [/\brestaurant\b/gi,'restaurante'],
+      [/\bbring\b/gi,'lleva'],
+      [/\bOld Harbour\b/gi,'Puerto Viejo'],
+      [/\bwalking tour\b/gi,'recorrido a pie'],
+      [/\bguided tour\b/gi,'tour guiado']
+    ];
+    for(const [re,to] of replacements) s=s.replace(re,to);
+  }
+  return s;
+}
+
+function _isInventedArrivalLogisticsRow_(row={}, facts={}){
+  if(facts?.explicitly_provided_departure) return false;
+  const text=`${row?.activity||''} ${row?.from||''} ${row?.to||''} ${row?.notes||''}`;
+  return Number(row?.day||0)===1 &&
+    /\b(airport|aeropuerto|flight|vuelo|arrival|llegada desde|punto de llegada)\b/i.test(text) &&
+    /\b(check[- ]?in|registro|alojamiento|hotel|lodging)\b/i.test(text);
+}
+
+function _finalizeGeneratedRows_(rows=[], facts={}){
+  let out=(rows||[]).filter(r=>!_isInventedArrivalLogisticsRow_(r,facts));
+  out=out.map(r=>({
+    ...r,
+    activity:_sanitizePlannerUserText_(r.activity,'activity'),
+    from:_sanitizePlannerUserText_(r.from,'from'),
+    to:_sanitizePlannerUserText_(r.to,'to'),
+    transport:_sanitizePlannerUserText_(r.transport,'transport'),
+    notes:_sanitizePlannerUserText_(r.notes,'notes')
+  }));
+  return _dedupeRows_(out);
 }
 
 function normalizeRow(r = {}, fallbackDay = 1){
@@ -1539,11 +1614,11 @@ function normalizeRow(r = {}, fallbackDay = 1){
   start = startMin==null ? '' : _minutesToHHMM_(startMin);
   end = endMin==null ? '' : _minutesToHHMM_(endMin);
 
-  const safeActivity = String(act||'').trim();
-  const safeFrom = String(from||'').trim();
-  const safeTo = String(to||'').trim();
-  const safeTransport = String(trans||'').trim();
-  const safeNotes = String(notes||'').trim();
+  const safeActivity = _sanitizePlannerUserText_(act,'activity');
+  const safeFrom = _sanitizePlannerUserText_(from,'from');
+  const safeTo = _sanitizePlannerUserText_(to,'to');
+  const safeTransport = _sanitizePlannerUserText_(trans,'transport');
+  const safeNotes = _sanitizePlannerUserText_(notes,'notes');
 
   return _reconcileRowTimeline_(_enforceMinimumDwell_({
     day:d,
@@ -1989,7 +2064,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
   // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
-  const timeoutMs = 130000;
+  const timeoutMs = 165000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -2919,7 +2994,7 @@ async function _finalTripWideRepair_(
   // A second call is allowed only when critical deterministic issues still remain.
   // This keeps latency bounded while preventing publication of obvious duplicates,
   // impossible timing, daylight violations or invented logistics.
-  if(_hasCriticalAuditErrors_(currentReport)){
+  if(_hasCriticalAuditErrors_(currentReport) && savedDestinations.length<=1){
     const precisionRepair=await _runTripWideRepairCall_(
       city,currentRows,totalDays,masterDays,facts,currentReport,forceReplan,true
     );
@@ -2942,41 +3017,9 @@ async function _finalTripWideRepair_(
     )
   };
 }
-function _cityMissingDays_(city){
-  const dest=savedDestinations.find(x=>x.city===city);
-  const total=Math.max(1,Number(dest?.days)||1);
-  const missing=[];
-  for(let day=1;day<=total;day++){
-    const rows=itineraries?.[city]?.byDay?.[day];
-    if(!Array.isArray(rows)||!rows.some(r=>String(r?.activity||'').trim())) missing.push(day);
-  }
-  return missing;
-}
-
-function _tripIntegrityReport_(){
-  const errors=[];
-  for(const dest of savedDestinations){
-    const missing=_cityMissingDays_(dest.city);
-    if(missing.length) errors.push({city:dest.city,missingDays:missing});
-  }
-  return {ok:errors.length===0,errors};
-}
-
-function _assertExportIntegrity_(){
-  const report=_tripIntegrityReport_();
-  if(report.ok) return true;
-  const detail=report.errors.map(x=>`${x.city}: ${x.missingDays.join(', ')}`).join(' | ');
-  alert(
-    _plannerOutputLang_()==='es'
-      ? `No se puede exportar: hay días sin itinerario (${detail}). Regenera esos destinos antes de exportar.`
-      : `Export blocked: some days have no itinerary (${detail}). Regenerate those destinations before exporting.`
-  );
-  return false;
-}
-
 async function generateCityItinerary(city){
   const dest=savedDestinations.find(x=>x.city===city);
-  if(!dest) return;
+  if(!dest) return false;
 
   const perDay=_normalizePerDayForPrompt_(city,dest.days,dest.perDay||[]);
   const baseDate=cityMeta[city]?.baseDate||dest.baseDate||'';
@@ -3015,7 +3058,8 @@ async function generateCityItinerary(city){
       city,stitchedRows,dest.days,masterDays,perDay,baseDate,hotel,transport,forceReplan
     );
 
-    const finalRows=_dedupeRows_(finalResult.rows);
+    const facts=_knownUserFactsForCity_(city,dest.days,perDay,baseDate,hotel,transport);
+    const finalRows=_finalizeGeneratedRows_(finalResult.rows,facts);
     itineraries[city].audit=finalResult.report;
 
     // Replace every generated day atomically; do not merge stale rows.
@@ -3035,7 +3079,7 @@ async function generateCityItinerary(city){
     });
     return true;
   }catch(err){
-    console.error(`[CITY ${city}] v63 staged flow failed; using coherent one-shot recovery`,err);
+    console.error(`[CITY ${city}] v65 staged flow failed; using coherent one-shot recovery`,err);
   }
 
   // Coherent one-shot recovery still receives all user facts and must return the complete city.
@@ -3080,7 +3124,8 @@ HARD RULES:
     const finalResult=await _finalTripWideRepair_(
       city,rows,dest.days,syntheticMaster,perDay,baseDate,hotel,transport,true
     );
-    rows=_dedupeRows_(finalResult.rows);
+    rows=_finalizeGeneratedRows_(finalResult.rows,facts);
+    if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error('RECOVERY_MISSING_DAYS');
     pushRows(city,rows,true);
     itineraries[city].audit=finalResult.report;
 
@@ -3092,14 +3137,14 @@ HARD RULES:
     showWOW(false);
     return true;
   }catch(err2){
-    console.error(`[CITY ${city}] v61 recovery failed`,err2);
+    console.error(`[CITY ${city}] v65 recovery failed`,err2);
   }finally{
     showWOW(false);
   }
 
   const msg=getLang()==='es'
-    ? 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.'
-    : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
+    ? 'No fue posible completar un itinerario coherente para esta ciudad. Inténtalo nuevamente; las demás ciudades no se perderán.'
+    : 'I could not complete a coherent itinerary for this city. Try again; the other cities will not be lost.';
   chatMsg(msg,'ai');
   return false;
 }
@@ -3547,32 +3592,20 @@ async function onSend(){
 
     (async ()=>{
       showWOW(true, t('overlayGenerating'));
-      const failures=[];
+      const failedCities=[];
       for(const {city} of savedDestinations){
-        let ok=false;
-        for(let attempt=1;attempt<=2 && !ok;attempt++){
-          ok=await generateCityItinerary(city);
-          if(!ok) console.warn(`[CITY ${city}] generation attempt ${attempt} failed`);
-        }
-        if(!ok || _cityMissingDays_(city).length) failures.push(city);
+        const ok=await generateCityItinerary(city);
+        if(!ok) failedCities.push(city);
       }
       showWOW(false);
-
-      const integrity=_tripIntegrityReport_();
-      if(failures.length || !integrity.ok){
-        const affected=[...new Set([
-          ...failures,
-          ...integrity.errors.map(x=>x.city)
-        ])];
-        chatMsg(
-          _plannerOutputLang_()==='es'
-            ? `⚠️ No se completaron todos los destinos: ${affected.join(', ')}. No exportes todavía; vuelve a intentar la generación de esos destinos.`
-            : `⚠️ Not every destination was completed: ${affected.join(', ')}. Do not export yet; retry those destinations.`,
-          'ai'
-        );
-        return;
+      if(failedCities.length){
+        const msg=(getLang()==='es')
+          ? `⚠️ Se completaron las demás ciudades, pero no fue posible finalizar: ${failedCities.join(', ')}. Vuelve a intentar únicamente esas ciudades; no se borraron los itinerarios correctos.`
+          : `⚠️ The other cities were completed, but these could not be finalized: ${failedCities.join(', ')}. Retry only those cities; completed itineraries were preserved.`;
+        chatMsg(msg,'ai');
+      }else{
+        chatMsg(getPlannerCompletionMessage(), 'ai');
       }
-      chatMsg(getPlannerCompletionMessage(), 'ai');
     })();
 
     return;
@@ -4202,7 +4235,6 @@ function normalizeCellText(v){
 }
 
 function exportItineraryToCSV(){
-  if(!_assertExportIntegrity_()) return;
   const cities = getOrderedCitiesForExport();
   if(!cities.length){
     alert('No hay ciudades guardadas todavía para exportar.');
@@ -4267,7 +4299,6 @@ function exportItineraryToCSV(){
 }
 
 function exportItineraryToPDF(){
-  if(!_assertExportIntegrity_()) return;
   // jsPDF verificación
   if(!window.jspdf || !window.jspdf.jsPDF){
     alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');
@@ -4298,7 +4329,6 @@ function exportItineraryToPDF(){
 
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4' });
-  const itineraryLabels=_itineraryUiLabels_();
 
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -4328,23 +4358,23 @@ function exportItineraryToPDF(){
 
     const dateLabel = getDayDateLabel(city, dayNum);
     doc.setFontSize(11);
-    const dayLine = dateLabel ? `${itineraryLabels.day} ${dayNum} (${normalizeCellText(dateLabel)})` : `${itineraryLabels.day} ${dayNum}`;
+    const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${normalizeCellText(dateLabel)})` : `${t('uiDayTitle', dayNum)}`;
     doc.text(normalizeCellText(dayLine), left, 66);
 
     doc.setFontSize(9);
-    doc.text(`${itineraryLabels.generated}: ${yyyy}-${mm}-${dd}`, left, 84);
+    doc.text(`${yyyy}-${mm}-${dd}`, left, 84);
   }
 
   // Encabezados de la tabla (usa i18n del UI si existe)
   const head = [[
-    normalizeCellText(itineraryLabels.start),
-    normalizeCellText(itineraryLabels.end),
-    normalizeCellText(itineraryLabels.activity),
-    normalizeCellText(itineraryLabels.from),
-    normalizeCellText(itineraryLabels.to),
-    normalizeCellText(itineraryLabels.transport),
-    normalizeCellText(itineraryLabels.duration),
-    normalizeCellText(itineraryLabels.notes)
+    normalizeCellText(t('thStart')),
+    normalizeCellText(t('thEnd')),
+    normalizeCellText(t('thActivity')),
+    normalizeCellText(t('thFrom')),
+    normalizeCellText(t('thTo')),
+    normalizeCellText(t('thTransport')),
+    normalizeCellText(t('thDuration')),
+    normalizeCellText(t('thNotes'))
   ]];
 
   let isFirstPage = true;
