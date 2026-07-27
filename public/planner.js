@@ -1,7 +1,7 @@
 /* =========================================================
-   ITBMO PLANNER v65 — Final Stability & Quality Upgrade
+   ITBMO PLANNER v64 — Precision Route & Anchor Upgrade
 
-   Base: v64
+   Base: v63
    API contract: compatible with API v65
 
    Precision Route & Anchor Upgrade:
@@ -717,12 +717,12 @@ function renderCityItinerary(city){
     sec.className = 'day-section';
     const dateLabel = base ? ` (${formatDMY(addDays(base, dayNum-1))})` : '';
     sec.innerHTML = `
-      <div class="day-title"><strong>${_itineraryText_('day', dayNum)}</strong>${dateLabel}</div>
+      <div class="day-title"><strong>${t('uiDayTitle', dayNum)}</strong>${dateLabel}</div>
       <table class="itinerary">
         <thead>
           <tr>
-            <th>${_itineraryText_('start')}</th><th>${_itineraryText_('end')}</th><th>${_itineraryText_('activity')}</th><th>${_itineraryText_('from')}</th>
-            <th>${_itineraryText_('to')}</th><th>${_itineraryText_('transport')}</th><th>${_itineraryText_('duration')}</th><th>${_itineraryText_('notes')}</th>
+            <th>${t('thStart')}</th><th>${t('thEnd')}</th><th>${t('thActivity')}</th><th>${t('thFrom')}</th>
+            <th>${t('thTo')}</th><th>${t('thTransport')}</th><th>${t('thDuration')}</th><th>${t('thNotes')}</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -1209,22 +1209,6 @@ function _durationLabels_(){
 }
 
 
-
-function _itineraryText_(key,...args){
-  const lang=_plannerOutputLang_();
-  const packs={
-    es:{day:n=>`Día ${n}`,start:'Hora inicio',end:'Hora final',activity:'Actividad',from:'Desde',to:'Hacia',transport:'Transporte',duration:'Duración',notes:'Notas',generated:'Fecha de generación'},
-    en:{day:n=>`Day ${n}`,start:'Start time',end:'End time',activity:'Activity',from:'From',to:'To',transport:'Transport',duration:'Duration',notes:'Notes',generated:'Generated on'},
-    pt:{day:n=>`Dia ${n}`,start:'Hora inicial',end:'Hora final',activity:'Atividade',from:'De',to:'Para',transport:'Transporte',duration:'Duração',notes:'Notas',generated:'Data de geração'},
-    fr:{day:n=>`Jour ${n}`,start:'Heure début',end:'Heure fin',activity:'Activité',from:'Depuis',to:'Vers',transport:'Transport',duration:'Durée',notes:'Notes',generated:'Date de génération'},
-    de:{day:n=>`Tag ${n}`,start:'Startzeit',end:'Endzeit',activity:'Aktivität',from:'Von',to:'Nach',transport:'Transport',duration:'Dauer',notes:'Hinweise',generated:'Erstellt am'},
-    it:{day:n=>`Giorno ${n}`,start:'Ora inizio',end:'Ora fine',activity:'Attività',from:'Da',to:'Verso',transport:'Trasporto',duration:'Durata',notes:'Note',generated:'Data di generazione'}
-  };
-  const p=packs[lang]||packs.en;
-  const v=p[key];
-  return typeof v==='function'?v(...args):(v||'');
-}
-
 function getPlannerCompletionMessage(){
   const lang = _plannerOutputLang_();
   const messages = {
@@ -1274,49 +1258,70 @@ function _extractDurationPart_(raw, kind='transport'){
 }
 
 function _durationBoundsMinutes_(raw){
-  let s=String(raw||'')
+  let s = String(raw||'')
     .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'')
+    .replace(/(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
+    .replace(/~\s*(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
     .replace(/,/g,'.')
-    .replace(/[–—−]/g,'-')
-    .replace(/[~≈]/g,'')
-    .replace(/\b(aprox(?:\.|imadamente)?|approx(?:\.|imately)?|about|around)\b/g,'')
+    .replace(/[–—]/g,'-')
+    .replace(/[~≈]/g,' ')
     .replace(/\s+/g,' ')
     .trim();
+  if(!s) return null;
 
-  if(!s || /\b(verificar|verify|check)\b/.test(s)) return null;
-
-  const point=(value,unit='')=>{
-    const p=String(value||'').trim();
-    let m=p.match(/^(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*m?)?$/i);
-    if(m) return Math.round(Number(m[1])*60)+Number(m[2]||0);
-    m=p.match(/^(\d{1,2}):(\d{2})$/);
-    if(m) return Number(m[1])*60+Number(m[2]);
-    m=p.match(/^(\d+(?:\.\d+)?)\s*(hr|hrs|hour|hours|hora|horas)$/i);
-    if(m) return Math.round(Number(m[1])*60);
-    m=p.match(/^(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)$/i);
-    if(m) return Number(m[1]);
-    if(/^\d+(?:\.\d+)?$/.test(p)) return unit==='h'?Math.round(Number(p)*60):Number(p);
-    return null;
-  };
-
-  let m=s.match(/(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?\s*-\s*(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?/i);
+  // Compact hour/minute forms produced by models or transport fields:
+  // 2h15m-2h30m, 2h15-2h30, 1h20m, 1h20.
+  let m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\s*-\s*(\d+)\s*h\s*(\d{1,2})\s*m?/);
   if(m){
-    const a=Math.round(Number(m[1])*60)+Number(m[2]||0);
-    const b=Math.round(Number(m[3])*60)+Number(m[4]||0);
+    const a=(+m[1]*60)+(+m[2]||0);
+    const b=(+m[3]*60)+(+m[4]||0);
     return {min:Math.min(a,b),max:Math.max(a,b)};
   }
 
-  m=s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas|m|min|mins|minute|minutes|minuto|minutos)\b/i);
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\b/);
   if(m){
-    const unit=/^(h|hr|hour|hora)/i.test(m[3])?'h':'m';
-    const a=point(m[1],unit),b=point(m[2],unit);
-    if(a!=null&&b!=null) return {min:Math.min(a,b),max:Math.max(a,b)};
+    const v=(+m[1]*60)+(+m[2]||0);
+    return {min:v,max:v};
   }
 
-  const single=point(s);
-  return single!=null&&single>0?{min:single,max:single}:null;
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})?\s*-\s*(\d+)\s*h\s*(\d{1,2})?/);
+  if(m){
+    const a = (+m[1]*60)+(+m[2]||0);
+    const b = (+m[3]*60)+(+m[4]||0);
+    return {min:Math.min(a,b), max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
+  if(m){
+    const a = Math.round(+m[1]*60), b = Math.round(+m[2]*60);
+    return {min:Math.min(a,b), max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+)\s*-\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
+  if(m){
+    const a=+m[1], b=+m[2];
+    return {min:Math.min(a,b), max:Math.max(a,b)};
+  }
+
+  m = s.match(/(\d+)\s*h\s*(\d{1,2})\b/);
+  if(m){
+    const v=(+m[1]*60)+(+m[2]||0);
+    return {min:v,max:v};
+  }
+
+  m = s.match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
+  if(m){
+    const v=Math.round(+m[1]*60);
+    return {min:v,max:v};
+  }
+
+  m = s.match(/(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
+  if(m){
+    const v=+m[1];
+    return {min:v,max:v};
+  }
+
+  return null;
 }
 
 function _formatMinutesHuman_(minutes){
@@ -1377,33 +1382,31 @@ function _transportBoundsFromField_(raw){
 }
 
 function _sanitizeDurationLines_(raw, transportField=''){
-  const [transportLabel,activityLabel]=_durationLabels_();
-  const rawText=(typeof raw==='number')?`${raw} min`:String(raw||'').trim();
-  const transportText=String(transportField||'').trim();
-  const combined=`${rawText}\n${transportText}`;
+  const [transportLabel, activityLabel] = _durationLabels_();
+  const s = (typeof raw === 'number') ? `${raw} min` : String(raw||'').trim();
 
-  let transport=_durationBoundsMinutes_(_extractDurationPart_(rawText,'transport'));
-  let activity=_durationBoundsMinutes_(_extractDurationPart_(rawText,'activity'));
+  const declaredTransport = _durationBoundsMinutes_(_extractDurationPart_(s,'transport'));
+  const transportFromField = _transportBoundsFromField_(transportField);
+  const activity = _durationBoundsMinutes_(_extractDurationPart_(s,'activity'));
 
-  if(!transport) transport=_durationBoundsMinutes_(_extractDurationPart_(transportText,'transport'));
-  if(!activity) activity=_durationBoundsMinutes_(_extractDurationPart_(transportText,'activity'));
-
-  const fieldTransport=_transportBoundsFromField_(transportText);
-  if(fieldTransport&&(!transport||fieldTransport.max>transport.max)) transport=fieldTransport;
-
-  if(!transport||!activity){
-    const normalized=combined
-      .replace(/\b(Transporte|Trasporto)\s*:/gi,'Transport:')
-      .replace(/\b(Actividad|Atividade|Activité|Aktivität|Attività)\s*:/gi,'Activity:')
-      .replace(/\s*[|;,]\s*(?=Activity\s*:)/gi,'\n');
-    if(!transport) transport=_durationBoundsMinutes_(_extractDurationPart_(normalized,'transport'));
-    if(!activity) activity=_durationBoundsMinutes_(_extractDurationPart_(normalized,'activity'));
+  let transport = declaredTransport;
+  if(transportFromField && (!transport || transportFromField.max > transport.max)){
+    transport = transportFromField;
   }
 
-  if(!transport) transport={min:15,max:15};
-  if(!activity) activity={min:30,max:30};
+  if(transport && activity){
+    return `${transportLabel}: ${_formatDurationBounds_(transport)}\n${activityLabel}: ${_formatDurationBounds_(activity)}`;
+  }
 
-  return `${transportLabel}: ${_formatDurationBounds_(transport)}\n${activityLabel}: ${_formatDurationBounds_(activity)}`;
+  if(s){
+    return s
+      .replace(/^\s*(Transport|Transporte|Trasporto)\s*:/im, `${transportLabel}:`)
+      .replace(/^\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/im, `${activityLabel}:`)
+      .replace(/\s*\|\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`)
+      .replace(/\s*,\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`);
+  }
+
+  return `${transportLabel}: Verificar\n${activityLabel}: Verificar`;
 }
 
 function _durationTotalBounds_(duration){
@@ -1479,11 +1482,8 @@ function _enforceMinimumDwell_(row={}){
   const profile=_activityProfile_(row);
   if(!profile) return row;
   const current=_activityDurationBounds_(row.duration);
-  let target=current?.max||profile.min;
-  if(target<profile.min) target=profile.min;
-  if(profile.max&&target>profile.max) target=profile.max;
-  if(current&&current.min>=profile.min&&(!profile.max||current.max<=profile.max)) return row;
-  return {...row,duration:_setActivityDurationMinutes_(row.duration,target)};
+  if(current && current.min>=profile.min) return row;
+  return {...row,duration:_setActivityDurationMinutes_(row.duration,profile.min)};
 }
 
 function _isAnchorExperienceRow_(row={}){
@@ -1492,89 +1492,31 @@ function _isAnchorExperienceRow_(row={}){
   );
 }
 
-
-function _explicitFreeTimeRow_(row={}){
-  return /\b(free time|tiempo libre|rest|descanso|meal|lunch|dinner|almuerzo|cena|reservation buffer|margen de reserva)\b/i.test(
-    `${row?.activity||''} ${row?.notes||''}`
-  );
-}
-
-function _auroraExplicitlyRequested_(){
-  return /\b(aurora|auroras|northern lights|luces del norte)\b/i.test(
-    String(plannerState?.specialConditions||'')
-  );
-}
-
-function _normalizeRigidAuroraRows_(rows=[]){
-  const out=[];
-  let conditionalNote='';
-  for(const row of (rows||[])){
-    if(!_isAuroraRow_(row)){ out.push(row); continue; }
-    const start=_hhmmToMinutes_(row.start);
-    const concrete=/\b(booked|reserved|tour guiado|guided tour|reserva|reservado)\b/i.test(
-      `${row?.activity||''} ${row?.notes||''}`
-    );
-    const keep=_auroraExplicitlyRequested_()&&concrete&&start!=null&&start>=18*60;
-    if(keep){ out.push(row); continue; }
-    conditionalNote=_plannerOutputLang_()==='es'
-      ?'Oportunidad condicional de auroras después de una hora de oscuridad plausible; no está garantizada y deben comprobarse nubosidad, actividad geomagnética y estado de las carreteras.'
-      :'Conditional aurora opportunity after plausible darkness; visibility is not guaranteed and cloud cover, geomagnetic activity and road conditions must be checked.';
-  }
-  if(conditionalNote&&out.length){
-    const last=out[out.length-1];
-    if(!String(last.notes||'').includes(conditionalNote)){
-      last.notes=`${String(last.notes||'').trim()} ${conditionalNote}`.trim();
-    }
-  }
-  return out;
-}
-
 function _reconcileDayRows_(rows=[]){
-  let sorted=(rows||[]).slice().sort((a,b)=>{
-    const aa=_hhmmToMinutes_(a?.start),bb=_hhmmToMinutes_(b?.start);
+  const sorted=(rows||[]).slice().sort((a,b)=>{
+    const aa=_hhmmToMinutes_(a?.start), bb=_hhmmToMinutes_(b?.start);
     return (aa==null?99999:aa)-(bb==null?99999:bb);
   });
 
-  sorted=_normalizeRigidAuroraRows_(sorted);
-
+  // First enforce deterministic minimum dwell and row math.
   for(let i=0;i<sorted.length;i++){
     sorted[i]=_reconcileRowTimeline_(_enforceMinimumDwell_(sorted[i]));
   }
 
-  for(let i=0;i<sorted.length;i++){
-    const row=sorted[i];
-    const start=_hhmmToMinutes_(row.start);
-    const total=_durationTotalBounds_(row.duration);
-    if(start!=null&&total){
-      row.end=_minutesToHHMM_(start+Math.max(total.min,total.max));
-    }
-
-    if(i===0) continue;
-    const prev=sorted[i-1];
-    const prevEnd=_hhmmToMinutes_(prev.end);
-    let curStart=_hhmmToMinutes_(row.start);
-    let curEnd=_hhmmToMinutes_(row.end);
-    if(prevEnd==null||curStart==null||curEnd==null) continue;
-
-    let span=curEnd-curStart;
-    if(span<=0) span+=1440;
-
-    if(curStart<prevEnd){
-      curStart=prevEnd+10;
-      curEnd=curStart+span;
-      row.start=_minutesToHHMM_(curStart);
-      row.end=_minutesToHHMM_(curEnd);
-      row.from=prev.to||row.from;
-      continue;
-    }
-
-    const gap=curStart-prevEnd;
-    if(gap>45&&!_explicitFreeTimeRow_(row)&&!_explicitFreeTimeRow_(prev)){
-      curStart=prevEnd+10;
-      curEnd=curStart+span;
-      row.start=_minutesToHHMM_(curStart);
-      row.end=_minutesToHHMM_(curEnd);
-      row.from=prev.to||row.from;
+  // Then use a short operational gap after an anchor as part of the real visit block.
+  // This prevents a 3-hour spa/cruise/museum from appearing as a 30-minute activity
+  // followed by unexplained blank time.
+  for(let i=0;i<sorted.length-1;i++){
+    const cur=sorted[i], next=sorted[i+1];
+    const end=_hhmmToMinutes_(cur.end), nextStart=_hhmmToMinutes_(next.start);
+    if(end==null || nextStart==null) continue;
+    let gap=nextStart-end;
+    if(gap<0) gap+=1440;
+    if(gap>20 && gap<=90 && _isAnchorExperienceRow_(cur)){
+      const activity=_activityDurationBounds_(cur.duration);
+      const extended=(activity?.max||0)+gap;
+      cur.duration=_setActivityDurationMinutes_(cur.duration,extended);
+      cur.end=next.start;
     }
   }
   return sorted;
@@ -2648,32 +2590,23 @@ function _genericPlaceReason_(value=''){
 function _activityProfile_(row={}){
   const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
 
-  if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal|balneario|onsen)\b/.test(text)){
-    return {type:'MAJOR_THERMAL',min:180,max:270};
+  if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
+    return {type:'MAJOR_THERMAL',min:180};
   }
   if(/\b(whale watching|avistamiento de ballenas|wildlife cruise|marine safari|safari marino|boat wildlife)\b/.test(text)){
-    return {type:'WILDLIFE_CRUISE',min:150,max:240};
+    return {type:'WILDLIFE_CRUISE',min:150};
   }
-  if(/\b(food tour|walking tour|guided tour|tour gastronomico|tour guiado|recorrido guiado)\b/.test(text)){
-    return {type:'SUBSTANTIAL_GUIDED_TOUR',min:150,max:240};
+  if(/\b(food tour|walking tour|guided tour|tour gastron[oó]mico|tour guiado|recorrido guiado)\b/.test(text)){
+    return {type:'SUBSTANTIAL_GUIDED_TOUR',min:150};
   }
-  if(/\b(large museum|major museum|immersive museum|museo nacional|museo grande|exposicion inmersiva)\b/.test(text)){
-    return {type:'LARGE_MUSEUM',min:90,max:180};
+  if(/\b(large museum|major museum|immersive museum|museo nacional|museo grande|exposici[oó]n inmersiva)\b/.test(text)){
+    return {type:'LARGE_MUSEUM',min:90};
   }
-  if(/\b(theme park|parque tematico|palace complex|complejo palaciego|archaeological complex|complejo arqueologico)\b/.test(text)){
-    return {type:'MAJOR_COMPLEX',min:180,max:480};
+  if(/\b(theme park|parque tem[aá]tico|palace complex|complejo palaciego|archaeological complex|complejo arqueol[oó]gico)\b/.test(text)){
+    return {type:'MAJOR_COMPLEX',min:180};
   }
-  if(/\b(round trip walk|round-trip walk|return hike|hike to|walk to the wreck|caminata ida y vuelta|sendero ida y vuelta|caminata al fuselaje|plane wreck|restos del avion)\b/.test(text)){
-    return {type:'SUBSTANTIAL_HIKE',min:90,max:240};
-  }
-  if(/\b(national park|parque nacional|archaeological landscape|paisaje arqueologico|large nature reserve|reserva natural)\b/.test(text)){
-    return {type:'MAJOR_NATURE_AREA',min:45,max:180};
-  }
-  if(/\b(lighthouse|faro|viewpoint|mirador|photo stop|parada fotografica|church exterior|exterior de iglesia|small waterfall|cascada menor|bridge|puente entre continentes)\b/.test(text)){
-    return {type:'SCENIC_STOP',min:15,max:60};
-  }
-  if(/\b(beach|playa|waterfall|cascada|geothermal field|campo geotermal|geothermal area|area geotermal)\b/.test(text)){
-    return {type:'STANDARD_OUTDOOR',min:30,max:90};
+  if(/\b(round trip walk|round-trip walk|return hike|hike to|walk to the wreck|caminata ida y vuelta|sendero ida y vuelta|caminata al fuselaje|plane wreck|restos del avi[oó]n)\b/.test(text)){
+    return {type:'SUBSTANTIAL_HIKE',min:90};
   }
   return null;
 }
@@ -4323,21 +4256,6 @@ function exportItineraryToPDF(){
     return;
   }
 
-  const incompleteCities=cities.filter(city=>{
-    const expected=savedDestinations.find(d=>d.city===city)?.days||0;
-    const byDay=itineraries?.[city]?.byDay||{};
-    for(let d=1;d<=expected;d++){
-      if(!Array.isArray(byDay[d])||!byDay[d].length) return true;
-    }
-    return false;
-  });
-  if(incompleteCities.length){
-    alert((_plannerOutputLang_()==='es'
-      ?'No se puede exportar: faltan días por generar en '
-      :'Cannot export: missing generated days in ')+incompleteCities.join(', '));
-    return;
-  }
-
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4' });
 
@@ -4369,23 +4287,23 @@ function exportItineraryToPDF(){
 
     const dateLabel = getDayDateLabel(city, dayNum);
     doc.setFontSize(11);
-    const dayLine = dateLabel ? `${_itineraryText_('day', dayNum)} (${normalizeCellText(dateLabel)})` : `${_itineraryText_('day', dayNum)}`;
+    const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${normalizeCellText(dateLabel)})` : `${t('uiDayTitle', dayNum)}`;
     doc.text(normalizeCellText(dayLine), left, 66);
 
     doc.setFontSize(9);
-    doc.text(`${_itineraryText_('generated')}: ${yyyy}-${mm}-${dd}`, left, 84);
+    doc.text(`${yyyy}-${mm}-${dd}`, left, 84);
   }
 
   // Encabezados de la tabla (usa i18n del UI si existe)
   const head = [[
-    normalizeCellText(_itineraryText_('start')),
-    normalizeCellText(_itineraryText_('end')),
-    normalizeCellText(_itineraryText_('activity')),
-    normalizeCellText(_itineraryText_('from')),
-    normalizeCellText(_itineraryText_('to')),
-    normalizeCellText(_itineraryText_('transport')),
-    normalizeCellText(_itineraryText_('duration')),
-    normalizeCellText(_itineraryText_('notes'))
+    normalizeCellText(t('thStart')),
+    normalizeCellText(t('thEnd')),
+    normalizeCellText(t('thActivity')),
+    normalizeCellText(t('thFrom')),
+    normalizeCellText(t('thTo')),
+    normalizeCellText(t('thTransport')),
+    normalizeCellText(t('thDuration')),
+    normalizeCellText(t('thNotes'))
   ]];
 
   let isFirstPage = true;
