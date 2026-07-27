@@ -1,4 +1,4 @@
-// /api/chat.js — v66 (MVP stable: bounded quality repair + mult-city safe; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v66 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -239,21 +239,21 @@ function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "en"
 }
 
 function _normalizeDurationText_(txt) {
-  const s = String(txt ?? "").trim();
+  let s = String(txt ?? "").replace(/\r/g, "").trim();
   if (!s) return s;
 
-  // "Transport: X, Activity: Y" => 2 lines
-  if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(",")) {
-    return s.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
-  }
+  s = s
+    .replace(/\b(?:Transporte|Trasporto)\s*:/gi, "Transport:")
+    .replace(/\b(?:Actividad|Atividade|Activité|Aktivität|Attività)\s*:/gi, "Activity:")
+    .replace(/\s*[|;,]\s*(?=Activity\s*:)/gi, "\n")
+    .replace(/\s+(?=Activity\s*:)/gi, "\n")
+    .replace(/\n{2,}/g, "\n")
+    .trim();
 
-  // If it comes in a single line without line breaks but has both labels, try forcing split with common separators
-  if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && !s.includes("\n")) {
-    const tmp = s.replace(/\s*\|\s*/g, ", ").replace(/\s*;\s*/g, ", ");
-    if (tmp.includes(",")) return tmp.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
-  }
+  const transport = s.match(/Transport\s*:\s*([\s\S]*?)(?=\n\s*Activity\s*:|$)/i)?.[1]?.trim() || "";
+  const activity = s.match(/Activity\s*:\s*([\s\S]*)$/i)?.[1]?.trim() || "";
 
-  return s;
+  return transport && activity ? `Transport: ${transport}\nActivity: ${activity}` : s;
 }
 
 function _hasAnyRows_(city_day) {
@@ -528,7 +528,17 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
 - Do not repeat an identical aurora note every night.
 
-8. QUALITY
+8. FINAL DETERMINISTIC QUALITY REQUIREMENTS
+- Never create a fixed aurora row unless the user explicitly requested a booked/fixed aurora outing. Otherwise mention aurora only as a conditional evening note. Any aurora row must begin after plausible local darkness.
+- Do not invent airport, flight, check-in, check-out or vehicle-return logistics that the user did not provide.
+- No outdoor scenic viewpoint, lighthouse, simple church exterior, short photo stop or small geological stop may receive multi-hour dwell. These are normally 15–60 minutes.
+- National parks, major archaeological landscapes and substantial nature areas normally require at least 45–120 minutes of actual visit time.
+- Do not write "optional", "A or B", "selected venue", "if it is Sunday", "if applicable" or equivalent unresolved choices in a final itinerary. Select one concrete feasible option.
+- Validate ordinary weekly operating patterns against the actual weekday. If availability is uncertain or commonly limited to other weekdays, choose a robust alternative.
+- After row-level reconciliation, audit the whole day again. No overlap and no unexplained gap above 45 minutes. A legitimate meal, rest, free-time or reservation buffer must be explicitly represented.
+- Compare activity duration against the notes. If notes describe a 90–120 minute walk, the activity duration must contain that full time.
+- Optimize the complete route, not only consecutive pairs. Cluster nearby stops and eliminate backtracking before returning JSON.
+- Prefer explicit free time over weak filler, but do not disguise packing, hotel rest or generic coffee as a tourism attraction.
 - Use one selected language for all user-facing values.
 - Preserve official proper names but translate generic instructions.
 - Remove debug, placeholder and internal-planning wording.
@@ -778,7 +788,7 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     6000,
-    35000
+    85000
   );
 
   const repaired = cleanToJSON(raw);
@@ -824,80 +834,50 @@ function _v62CleanLocation_(value = "") {
 }
 
 function _v62DurationBounds_(value = "") {
-  const original = String(value || "").trim();
-  if (!original) return null;
+  let s = String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/,/g, ".")
+    .replace(/[–—−]/g, "-")
+    .replace(/[~≈]/g, "")
+    .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?|about|around)\b/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  const normalize = (input) =>
-    String(input || "")
-      .toLowerCase()
-      .replace(/,/g, ".")
-      .replace(/[–—]/g, "-")
-      .replace(/[~≈]/g, "")
-      .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?)\b/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
+  if (!s || /\b(?:verify|verificar|check)\b/.test(s)) return null;
 
-  const parsePoint = (input) => {
-    const s = normalize(input);
-    if (!s) return null;
-
-    const compact = s.match(/\b(\d+)\s*h\s*(\d{1,2})\b/);
-    if (compact) return Number(compact[1]) * 60 + Number(compact[2]);
-
-    const colon = s.match(/\b(\d{1,2}):(\d{2})\b/);
-    if (colon) return Number(colon[1]) * 60 + Number(colon[2]);
-
-    let total = 0;
-    let found = false;
-
-    const hours = s.match(
-      /(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/
-    );
-    const minutes = s.match(
-      /(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/
-    );
-
-    if (hours) {
-      total += Math.round(Number(hours[1]) * 60);
-      found = true;
-    }
-    if (minutes) {
-      total += Number(minutes[1]);
-      found = true;
-    }
-
-    if (!found) {
-      const bare = s.match(/^\d+(?:\.\d+)?$/);
-      if (bare) return Math.round(Number(bare[0]));
-    }
-
-    return found && total > 0 ? total : null;
+  const point = (raw, unit = "") => {
+    const p = String(raw || "").trim();
+    let m = p.match(/^(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*m?)?$/i);
+    if (m) return Math.round(Number(m[1]) * 60) + Number(m[2] || 0);
+    m = p.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) return Number(m[1]) * 60 + Number(m[2]);
+    m = p.match(/^(\d+(?:\.\d+)?)\s*(?:hr|hrs|hour|hours|hora|horas)$/i);
+    if (m) return Math.round(Number(m[1]) * 60);
+    m = p.match(/^(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)$/i);
+    if (m) return Number(m[1]);
+    if (/^\d+(?:\.\d+)?$/.test(p)) return unit === "h" ? Math.round(Number(p) * 60) : Number(p);
+    return null;
   };
 
-  const s = normalize(original);
-  const parts = s.split(/\s*-\s*/).filter(Boolean);
-
-  if (parts.length >= 2) {
-    let first = parsePoint(parts[0]);
-    let second = parsePoint(parts[1]);
-
-    // Shared trailing unit: "45-60 min", "1.5-2 h".
-    if (first != null && second == null) {
-      if (/\b(?:m|min|mins|minute|minutes|minuto|minutos)\b/.test(parts[1])) {
-        first = parsePoint(`${parts[0]} min`);
-      } else if (/\b(?:h|hr|hrs|hour|hours|hora|horas)\b/.test(parts[1])) {
-        first = parsePoint(`${parts[0]} h`);
-      }
-      second = parsePoint(parts[1]);
-    }
-
-    if (first != null && second != null) {
-      return { min: Math.min(first, second), max: Math.max(first, second) };
-    }
+  let m = s.match(/(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?\s*-\s*(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?/i);
+  if (m) {
+    const a = Math.round(Number(m[1]) * 60) + Number(m[2] || 0);
+    const b = Math.round(Number(m[3]) * 60) + Number(m[4] || 0);
+    return { min: Math.min(a, b), max: Math.max(a, b) };
   }
 
-  const single = parsePoint(s);
-  return single != null ? { min: single, max: single } : null;
+  m = s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas|m|min|mins|minute|minutes|minuto|minutos)\b/i);
+  if (m) {
+    const unit = /^(h|hr|hour|hora)/i.test(m[3]) ? "h" : "m";
+    const a = point(m[1], unit);
+    const b = point(m[2], unit);
+    if (a != null && b != null) return { min: Math.min(a, b), max: Math.max(a, b) };
+  }
+
+  const single = point(s);
+  return single != null && single > 0 ? { min: single, max: single } : null;
 }
 
 function _v62ExtractDurationPart_(duration = "", labels = []) {
@@ -911,13 +891,37 @@ function _v62ExtractDurationPart_(duration = "", labels = []) {
 
 function _v62FormatMinutes_(minutes) {
   const n = Math.max(1, Math.round(Number(minutes) || 1));
-  if (n < 60) return `~${n}m`;
+  if (n < 60) return `${n} min`;
   const h = Math.floor(n / 60);
   const m = n % 60;
-  return m ? `~${h}h ${m}m` : `~${h}h`;
+  return m ? `${h} h ${m} min` : `${h} h`;
 }
 
 function _v62NormalizeDuration_(row = {}) {
+  const raw = _normalizeDurationText_(row?.duration);
+  const combined = `${raw}\n${String(row?.transport || "")}`;
+
+  const transportRaw =
+    _v62ExtractDurationPart_(raw, ["Transport", "Transporte", "Trasporto"]) ||
+    _v62ExtractDurationPart_(combined, ["Transport", "Transporte", "Trasporto"]);
+
+  const activityRaw =
+    _v62ExtractDurationPart_(raw, ["Activity", "Actividad", "Atividade", "Activité", "Aktivität", "Attività"]) ||
+    _v62ExtractDurationPart_(combined, ["Activity", "Actividad", "Atividade", "Activité", "Aktivität", "Attività"]);
+
+  const transport = _v62DurationBounds_(transportRaw);
+  const activity = _v62DurationBounds_(activityRaw);
+
+  const fmt = (b) => {
+    if (!b) return "";
+    if (b.min === b.max) return _v62FormatMinutes_(b.min);
+    return `${_v62FormatMinutes_(b.min)}–${_v62FormatMinutes_(b.max)}`;
+  };
+
+  return transport && activity
+    ? `Transport: ${fmt(transport)}\nActivity: ${fmt(activity)}`
+    : raw;
+}) {
   const raw = String(row?.duration || "");
   const transportRaw = _v62ExtractDurationPart_(raw, ["Transport", "Transporte"]);
   const activityRaw = _v62ExtractDurationPart_(raw, [
@@ -1210,8 +1214,13 @@ function _v62ValidateFinal_(parsed, options = {}) {
       if (previousEnd != null && start != null && start < previousEnd) {
         errors.push({ code: "TIME_OVERLAP", day, row: rowNumber });
       }
-      if (previousEnd != null && start != null && start - previousEnd > 120) {
-        errors.push({ code: "UNEXPLAINED_LARGE_GAP", day, row: rowNumber, gap_minutes: start - previousEnd });
+      if (previousEnd != null && start != null && start - previousEnd > 45) {
+        const explicitGap = /\b(meal|lunch|dinner|break|rest|free time|almuerzo|cena|descanso|tiempo libre)\b/i.test(
+          `${row?.activity || ""} ${row?.notes || ""}`
+        );
+        if (!explicitGap) {
+          errors.push({ code: "UNEXPLAINED_DAY_GAP", day, row: rowNumber, gap_minutes: start - previousEnd });
+        }
       }
 
       const transport = _v62DurationBounds_(
@@ -1307,23 +1316,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
         errors.push({ code: "INTERNAL_TEXT_LEAK", day, row: rowNumber });
       }
 
-      const allText = `${row?.activity || ""} ${row?.from || ""} ${row?.to || ""} ${row?.transport || ""} ${row?.notes || ""}`;
-      if (day === 1 && !/airport|aeropuerto|flight|vuelo/i.test(_allMessageText_(options?.messages || [])) && /airport|aeropuerto|flight|vuelo|punto de llegada/i.test(allText)) {
-        errors.push({ code: "INVENTED_ARRIVAL_LOGISTICS", day, row: rowNumber });
-      }
-      if (/\b(Return to|Transfer toward|Transfer to|bring camera|food hall|selected venue)\b/i.test(allText)) {
-        errors.push({ code: "MIXED_LANGUAGE_RESIDUE", day, row: rowNumber });
-      }
-      if (activity) {
-        const noteDurations = [...String(row?.notes || "").matchAll(/(\d+(?:[.,]\d+)?)\s*(?:-|–|to|a)?\s*(\d+(?:[.,]\d+)?)?\s*(h|hr|hrs|hour|hours|hora|horas)\b/gi)]
-          .map((m) => Math.round(Number(String(m[2] || m[1]).replace(',', '.')) * 60))
-          .filter((n) => Number.isFinite(n));
-        const stated = noteDurations.length ? Math.max(...noteDurations) : 0;
-        if (stated >= 90 && activity.max + 15 < stated) {
-          errors.push({ code: "NOTE_DURATION_CONTRADICTION", day, row: rowNumber, note_minutes: stated, activity_minutes: activity.max });
-        }
-      }
-
       if (index > 0 && previousTo) {
         const fromKey = _v62NormKey_(row?.from);
         const priorKey = _v62NormKey_(previousTo);
@@ -1348,6 +1340,25 @@ function _v62ValidateFinal_(parsed, options = {}) {
       if (poi) {
         if (!poiMap.has(poi)) poiMap.set(poi, []);
         poiMap.get(poi).push({ day, row: rowNumber });
+      }
+
+      const activityText = `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`;
+      if (/\b(aurora|auroras|northern lights|luces del norte)\b/i.test(activityText)) {
+        const requested = /\b(aurora|auroras|northern lights|luces del norte)\b/i.test(
+          _allMessageText_(options?.messages || [])
+        );
+        if (!requested || (start != null && start < 18 * 60)) {
+          errors.push({ code: "RIGID_OR_EARLY_AURORA", day, row: rowNumber });
+        }
+      }
+
+      if (/\b(airport|aeropuerto|flight|vuelo)\b/i.test(`${row?.from || ""} ${row?.activity || ""}`) &&
+          !/\b(airport|aeropuerto|flight|vuelo)\b/i.test(_allMessageText_(options?.messages || []))) {
+        errors.push({ code: "INVENTED_ARRIVAL_LOGISTICS", day, row: rowNumber });
+      }
+
+      if (/\b(optional|opcional|if applicable|si procede|if sunday|si es domingo|selected venue|sede seleccionada|or similar|o similar)\b/i.test(activityText)) {
+        errors.push({ code: "UNRESOLVED_FINAL_CHOICE", day, row: rowNumber });
       }
 
       previousEnd = end;
@@ -1415,10 +1426,7 @@ FINAL SURGICAL REPAIR:
 - Correct every deterministic error listed below.
 - Preserve all strong, distinct regional/signature days and all explicit must-includes.
 - Do not replace a difficult regional day with repeated city attractions.
-- Rebuild every affected day chronologically when needed: no row may overlap the next row and no unexplained gap may exceed 120 minutes.
-- If a note states a walk, cruise, visit or transfer takes longer than the Activity/Transport duration, correct the row or omit the stop.
-- Never invent airport/flight/arrival logistics unless explicitly provided.
-- Remove residual mixed-language operational phrases while preserving official proper names.
+- Rebuild every affected day chronologically when needed: no row may overlap the next row.
 - NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
 - Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
@@ -1444,7 +1452,7 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     9000,
-    40000
+    85000
   );
 
   const repaired = cleanToJSON(raw);
@@ -2012,10 +2020,6 @@ export default async function handler(req, res) {
       return res.status(405).json({ error: "Method not allowed" });
     }
 
-    const requestStartedAt = Date.now();
-    const REQUEST_BUDGET_MS = 105000;
-    const hasBudget = (neededMs = 0) => (Date.now() - requestStartedAt + neededMs) < REQUEST_BUDGET_MS;
-
     const body = req.body || {};
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
@@ -2049,7 +2053,7 @@ export default async function handler(req, res) {
 
     // One primary model call. Master-plan stages receive a smaller/faster output budget.
     const primaryTokens = stage === "master_plan" ? 5000 : 10000;
-    const primaryTimeout = stage === "master_plan" ? 65000 : 78000;
+    const primaryTimeout = stage === "master_plan" ? 85000 : 115000;
 
     let raw = await callStructured(
       [{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages],
@@ -2068,7 +2072,7 @@ export default async function handler(req, res) {
         ? _isNonEmptyJSON_(parsed)
         : _hasRenderableItinerary_(parsed);
 
-    if (!primaryValid && hasBudget(32000)) {
+    if (!primaryValid) {
       const strictPrompt =
         SYSTEM_PROMPT_EFFECTIVE +
         (stage === "master_plan"
@@ -2094,7 +2098,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         [{ role: "system", content: strictPrompt }, ...clientMessages],
         stage === "master_plan" ? 0.14 : 0.16,
         stage === "master_plan" ? 5500 : 10500,
-        stage === "master_plan" ? 30000 : 32000
+        stage === "master_plan" ? 85000 : 115000
       );
       parsed = cleanToJSON(raw);
     }
@@ -2113,7 +2117,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         const expectedDays = _v64ExpectedMasterDays_(clientMessages);
         const masterReport = _v64AuditMasterPlan_(parsed, expectedDays);
 
-        if (!masterReport.ok && hasBudget(36000)) {
+        if (!masterReport.ok) {
           console.warn("🧭 ITBMO MASTER AUDIT:", {
             expected_days: expectedDays,
             codes: [...new Set(masterReport.errors.map((error) => error.code))],
@@ -2160,10 +2164,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
     // Deterministic audit runs only on actual city_day output.
     // One bounded surgical repair is allowed; if it fails, the valid original draft is retained
     // so the planner workflow is never broken by the quality layer.
-    if (_hasRenderableItinerary_(parsed)) {
+    if (Array.isArray(parsed?.city_day) && parsed.city_day.length) {
       const report = _v62ValidateFinal_(parsed, { messages: clientMessages });
 
-      if (!report.ok && hasBudget(42000)) {
+      if (!report.ok) {
         console.warn("🧪 ITBMO FINAL AUDIT:", {
           affected_days: report.affected_days,
           codes: [...new Set(report.errors.map((error) => error.code))],
@@ -2201,11 +2205,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         parsed.city_day = _normalizeCityDayShape_(parsed.city_day, dest);
 
         if (!_hasAnyRows_(parsed.city_day)) {
-          parsed = {
-            ok: false,
-            error: { code: "EMPTY_ITINERARY", retryable: true, destination: dest, days_total: daysTotal },
-            followup: "The itinerary could not be completed in this attempt. Please retry."
-          };
+          parsed.city_day = skeletonCityDay(dest, daysTotal, lang);
+          parsed.followup =
+            (parsed.followup ? parsed.followup + " | " : "") +
+            "⚠️ Guard-rail: empty city_day or no rows. Returned skeleton to avoid a blank table.";
         }
       }
     } catch {}
@@ -2233,15 +2236,9 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         });
       }
 
-      return res.status(200).json({
-        text: JSON.stringify({
-          ok: false,
-          error: { code: "PLANNER_REQUEST_FAILED", retryable: true },
-          followup: lang === "es" ? "No fue posible completar esta generación. Inténtalo nuevamente." : "The generation could not be completed. Please retry."
-        })
-      });
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON(lang)) });
     } catch {
-      return res.status(200).json({ text: JSON.stringify({ ok:false, error:{ code:"PLANNER_REQUEST_FAILED", retryable:true } }) });
+      return res.status(200).json({ text: JSON.stringify(fallbackJSON("en")) });
     }
   }
 }
