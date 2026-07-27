@@ -1,8 +1,8 @@
 /* =========================================================
-   ITBMO PLANNER v65 — MVP Stability & Quality Release
+   ITBMO PLANNER v65 — Final Stability & Quality Upgrade
 
    Base: v64
-   API contract: compatible with API v66
+   API contract: compatible with API v65
 
    Precision Route & Anchor Upgrade:
    - Global geographic sequence optimization with anti-backtracking logic
@@ -717,12 +717,12 @@ function renderCityItinerary(city){
     sec.className = 'day-section';
     const dateLabel = base ? ` (${formatDMY(addDays(base, dayNum-1))})` : '';
     sec.innerHTML = `
-      <div class="day-title"><strong>${t('uiDayTitle', dayNum)}</strong>${dateLabel}</div>
+      <div class="day-title"><strong>${_itineraryText_('day', dayNum)}</strong>${dateLabel}</div>
       <table class="itinerary">
         <thead>
           <tr>
-            <th>${t('thStart')}</th><th>${t('thEnd')}</th><th>${t('thActivity')}</th><th>${t('thFrom')}</th>
-            <th>${t('thTo')}</th><th>${t('thTransport')}</th><th>${t('thDuration')}</th><th>${t('thNotes')}</th>
+            <th>${_itineraryText_('start')}</th><th>${_itineraryText_('end')}</th><th>${_itineraryText_('activity')}</th><th>${_itineraryText_('from')}</th>
+            <th>${_itineraryText_('to')}</th><th>${_itineraryText_('transport')}</th><th>${_itineraryText_('duration')}</th><th>${_itineraryText_('notes')}</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -1004,7 +1004,7 @@ Edits:
 `.trim();
 
   const controller = new AbortController();
-  const timeoutMs = 165000; // API v66 is internally bounded; allow safe network headroom
+  const timeoutMs = 130000; // 130s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -1209,6 +1209,22 @@ function _durationLabels_(){
 }
 
 
+
+function _itineraryText_(key,...args){
+  const lang=_plannerOutputLang_();
+  const packs={
+    es:{day:n=>`Día ${n}`,start:'Hora inicio',end:'Hora final',activity:'Actividad',from:'Desde',to:'Hacia',transport:'Transporte',duration:'Duración',notes:'Notas',generated:'Fecha de generación'},
+    en:{day:n=>`Day ${n}`,start:'Start time',end:'End time',activity:'Activity',from:'From',to:'To',transport:'Transport',duration:'Duration',notes:'Notes',generated:'Generated on'},
+    pt:{day:n=>`Dia ${n}`,start:'Hora inicial',end:'Hora final',activity:'Atividade',from:'De',to:'Para',transport:'Transporte',duration:'Duração',notes:'Notas',generated:'Data de geração'},
+    fr:{day:n=>`Jour ${n}`,start:'Heure début',end:'Heure fin',activity:'Activité',from:'Depuis',to:'Vers',transport:'Transport',duration:'Durée',notes:'Notes',generated:'Date de génération'},
+    de:{day:n=>`Tag ${n}`,start:'Startzeit',end:'Endzeit',activity:'Aktivität',from:'Von',to:'Nach',transport:'Transport',duration:'Dauer',notes:'Hinweise',generated:'Erstellt am'},
+    it:{day:n=>`Giorno ${n}`,start:'Ora inizio',end:'Ora fine',activity:'Attività',from:'Da',to:'Verso',transport:'Trasporto',duration:'Durata',notes:'Note',generated:'Data di generazione'}
+  };
+  const p=packs[lang]||packs.en;
+  const v=p[key];
+  return typeof v==='function'?v(...args):(v||'');
+}
+
 function getPlannerCompletionMessage(){
   const lang = _plannerOutputLang_();
   const messages = {
@@ -1258,70 +1274,49 @@ function _extractDurationPart_(raw, kind='transport'){
 }
 
 function _durationBoundsMinutes_(raw){
-  let s = String(raw||'')
+  let s=String(raw||'')
     .toLowerCase()
-    .replace(/(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
-    .replace(/~\s*(\d+)\s*h\s*-\s*~\s*(\d{1,2})\s*h\b/g, (m,h,mins)=> Number(mins)<60 ? `${h} h ${mins} min` : m)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
     .replace(/,/g,'.')
-    .replace(/[–—]/g,'-')
-    .replace(/[~≈]/g,' ')
+    .replace(/[–—−]/g,'-')
+    .replace(/[~≈]/g,'')
+    .replace(/\b(aprox(?:\.|imadamente)?|approx(?:\.|imately)?|about|around)\b/g,'')
     .replace(/\s+/g,' ')
     .trim();
-  if(!s) return null;
 
-  // Compact hour/minute forms produced by models or transport fields:
-  // 2h15m-2h30m, 2h15-2h30, 1h20m, 1h20.
-  let m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\s*-\s*(\d+)\s*h\s*(\d{1,2})\s*m?/);
+  if(!s || /\b(verificar|verify|check)\b/.test(s)) return null;
+
+  const point=(value,unit='')=>{
+    const p=String(value||'').trim();
+    let m=p.match(/^(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*m?)?$/i);
+    if(m) return Math.round(Number(m[1])*60)+Number(m[2]||0);
+    m=p.match(/^(\d{1,2}):(\d{2})$/);
+    if(m) return Number(m[1])*60+Number(m[2]);
+    m=p.match(/^(\d+(?:\.\d+)?)\s*(hr|hrs|hour|hours|hora|horas)$/i);
+    if(m) return Math.round(Number(m[1])*60);
+    m=p.match(/^(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)$/i);
+    if(m) return Number(m[1]);
+    if(/^\d+(?:\.\d+)?$/.test(p)) return unit==='h'?Math.round(Number(p)*60):Number(p);
+    return null;
+  };
+
+  let m=s.match(/(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?\s*-\s*(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?/i);
   if(m){
-    const a=(+m[1]*60)+(+m[2]||0);
-    const b=(+m[3]*60)+(+m[4]||0);
+    const a=Math.round(Number(m[1])*60)+Number(m[2]||0);
+    const b=Math.round(Number(m[3])*60)+Number(m[4]||0);
     return {min:Math.min(a,b),max:Math.max(a,b)};
   }
 
-  m = s.match(/(\d+)\s*h\s*(\d{1,2})\s*m?\b/);
+  m=s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas|m|min|mins|minute|minutes|minuto|minutos)\b/i);
   if(m){
-    const v=(+m[1]*60)+(+m[2]||0);
-    return {min:v,max:v};
+    const unit=/^(h|hr|hour|hora)/i.test(m[3])?'h':'m';
+    const a=point(m[1],unit),b=point(m[2],unit);
+    if(a!=null&&b!=null) return {min:Math.min(a,b),max:Math.max(a,b)};
   }
 
-  m = s.match(/(\d+)\s*h\s*(\d{1,2})?\s*-\s*(\d+)\s*h\s*(\d{1,2})?/);
-  if(m){
-    const a = (+m[1]*60)+(+m[2]||0);
-    const b = (+m[3]*60)+(+m[4]||0);
-    return {min:Math.min(a,b), max:Math.max(a,b)};
-  }
-
-  m = s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
-  if(m){
-    const a = Math.round(+m[1]*60), b = Math.round(+m[2]*60);
-    return {min:Math.min(a,b), max:Math.max(a,b)};
-  }
-
-  m = s.match(/(\d+)\s*-\s*(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
-  if(m){
-    const a=+m[1], b=+m[2];
-    return {min:Math.min(a,b), max:Math.max(a,b)};
-  }
-
-  m = s.match(/(\d+)\s*h\s*(\d{1,2})\b/);
-  if(m){
-    const v=(+m[1]*60)+(+m[2]||0);
-    return {min:v,max:v};
-  }
-
-  m = s.match(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas)\b/);
-  if(m){
-    const v=Math.round(+m[1]*60);
-    return {min:v,max:v};
-  }
-
-  m = s.match(/(\d+)\s*(m|min|mins|minute|minutes|minuto|minutos)\b/);
-  if(m){
-    const v=+m[1];
-    return {min:v,max:v};
-  }
-
-  return null;
+  const single=point(s);
+  return single!=null&&single>0?{min:single,max:single}:null;
 }
 
 function _formatMinutesHuman_(minutes){
@@ -1382,31 +1377,33 @@ function _transportBoundsFromField_(raw){
 }
 
 function _sanitizeDurationLines_(raw, transportField=''){
-  const [transportLabel, activityLabel] = _durationLabels_();
-  const s = (typeof raw === 'number') ? `${raw} min` : String(raw||'').trim();
+  const [transportLabel,activityLabel]=_durationLabels_();
+  const rawText=(typeof raw==='number')?`${raw} min`:String(raw||'').trim();
+  const transportText=String(transportField||'').trim();
+  const combined=`${rawText}\n${transportText}`;
 
-  const declaredTransport = _durationBoundsMinutes_(_extractDurationPart_(s,'transport'));
-  const transportFromField = _transportBoundsFromField_(transportField);
-  const activity = _durationBoundsMinutes_(_extractDurationPart_(s,'activity'));
+  let transport=_durationBoundsMinutes_(_extractDurationPart_(rawText,'transport'));
+  let activity=_durationBoundsMinutes_(_extractDurationPart_(rawText,'activity'));
 
-  let transport = declaredTransport;
-  if(transportFromField && (!transport || transportFromField.max > transport.max)){
-    transport = transportFromField;
+  if(!transport) transport=_durationBoundsMinutes_(_extractDurationPart_(transportText,'transport'));
+  if(!activity) activity=_durationBoundsMinutes_(_extractDurationPart_(transportText,'activity'));
+
+  const fieldTransport=_transportBoundsFromField_(transportText);
+  if(fieldTransport&&(!transport||fieldTransport.max>transport.max)) transport=fieldTransport;
+
+  if(!transport||!activity){
+    const normalized=combined
+      .replace(/\b(Transporte|Trasporto)\s*:/gi,'Transport:')
+      .replace(/\b(Actividad|Atividade|Activité|Aktivität|Attività)\s*:/gi,'Activity:')
+      .replace(/\s*[|;,]\s*(?=Activity\s*:)/gi,'\n');
+    if(!transport) transport=_durationBoundsMinutes_(_extractDurationPart_(normalized,'transport'));
+    if(!activity) activity=_durationBoundsMinutes_(_extractDurationPart_(normalized,'activity'));
   }
 
-  if(transport && activity){
-    return `${transportLabel}: ${_formatDurationBounds_(transport)}\n${activityLabel}: ${_formatDurationBounds_(activity)}`;
-  }
+  if(!transport) transport={min:15,max:15};
+  if(!activity) activity={min:30,max:30};
 
-  if(s){
-    return s
-      .replace(/^\s*(Transport|Transporte|Trasporto)\s*:/im, `${transportLabel}:`)
-      .replace(/^\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/im, `${activityLabel}:`)
-      .replace(/\s*\|\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`)
-      .replace(/\s*,\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`);
-  }
-
-  return `${transportLabel}: Verificar\n${activityLabel}: Verificar`;
+  return `${transportLabel}: ${_formatDurationBounds_(transport)}\n${activityLabel}: ${_formatDurationBounds_(activity)}`;
 }
 
 function _durationTotalBounds_(duration){
@@ -1482,8 +1479,11 @@ function _enforceMinimumDwell_(row={}){
   const profile=_activityProfile_(row);
   if(!profile) return row;
   const current=_activityDurationBounds_(row.duration);
-  if(current && current.min>=profile.min) return row;
-  return {...row,duration:_setActivityDurationMinutes_(row.duration,profile.min)};
+  let target=current?.max||profile.min;
+  if(target<profile.min) target=profile.min;
+  if(profile.max&&target>profile.max) target=profile.max;
+  if(current&&current.min>=profile.min&&(!profile.max||current.max<=profile.max)) return row;
+  return {...row,duration:_setActivityDurationMinutes_(row.duration,target)};
 }
 
 function _isAnchorExperienceRow_(row={}){
@@ -1492,93 +1492,92 @@ function _isAnchorExperienceRow_(row={}){
   );
 }
 
+
+function _explicitFreeTimeRow_(row={}){
+  return /\b(free time|tiempo libre|rest|descanso|meal|lunch|dinner|almuerzo|cena|reservation buffer|margen de reserva)\b/i.test(
+    `${row?.activity||''} ${row?.notes||''}`
+  );
+}
+
+function _auroraExplicitlyRequested_(){
+  return /\b(aurora|auroras|northern lights|luces del norte)\b/i.test(
+    String(plannerState?.specialConditions||'')
+  );
+}
+
+function _normalizeRigidAuroraRows_(rows=[]){
+  const out=[];
+  let conditionalNote='';
+  for(const row of (rows||[])){
+    if(!_isAuroraRow_(row)){ out.push(row); continue; }
+    const start=_hhmmToMinutes_(row.start);
+    const concrete=/\b(booked|reserved|tour guiado|guided tour|reserva|reservado)\b/i.test(
+      `${row?.activity||''} ${row?.notes||''}`
+    );
+    const keep=_auroraExplicitlyRequested_()&&concrete&&start!=null&&start>=18*60;
+    if(keep){ out.push(row); continue; }
+    conditionalNote=_plannerOutputLang_()==='es'
+      ?'Oportunidad condicional de auroras después de una hora de oscuridad plausible; no está garantizada y deben comprobarse nubosidad, actividad geomagnética y estado de las carreteras.'
+      :'Conditional aurora opportunity after plausible darkness; visibility is not guaranteed and cloud cover, geomagnetic activity and road conditions must be checked.';
+  }
+  if(conditionalNote&&out.length){
+    const last=out[out.length-1];
+    if(!String(last.notes||'').includes(conditionalNote)){
+      last.notes=`${String(last.notes||'').trim()} ${conditionalNote}`.trim();
+    }
+  }
+  return out;
+}
+
 function _reconcileDayRows_(rows=[]){
-  const sorted=(rows||[]).slice().sort((a,b)=>{
-    const aa=_hhmmToMinutes_(a?.start), bb=_hhmmToMinutes_(b?.start);
+  let sorted=(rows||[]).slice().sort((a,b)=>{
+    const aa=_hhmmToMinutes_(a?.start),bb=_hhmmToMinutes_(b?.start);
     return (aa==null?99999:aa)-(bb==null?99999:bb);
   });
+
+  sorted=_normalizeRigidAuroraRows_(sorted);
 
   for(let i=0;i<sorted.length;i++){
     sorted[i]=_reconcileRowTimeline_(_enforceMinimumDwell_(sorted[i]));
   }
 
-  // Deterministic whole-day chronology. Preserve fixed/reservation anchors, but never publish
-  // overlaps or giant unexplained gaps. A normal operational buffer of 10–35 min is retained.
-  for(let i=1;i<sorted.length;i++){
-    const prev=sorted[i-1], cur=sorted[i];
+  for(let i=0;i<sorted.length;i++){
+    const row=sorted[i];
+    const start=_hhmmToMinutes_(row.start);
+    const total=_durationTotalBounds_(row.duration);
+    if(start!=null&&total){
+      row.end=_minutesToHHMM_(start+Math.max(total.min,total.max));
+    }
+
+    if(i===0) continue;
+    const prev=sorted[i-1];
     const prevEnd=_hhmmToMinutes_(prev.end);
-    let curStart=_hhmmToMinutes_(cur.start);
-    let curEnd=_hhmmToMinutes_(cur.end);
-    if(prevEnd==null || curStart==null || curEnd==null) continue;
-    const span=Math.max(15,curEnd-curStart);
-    const fixed=/\b(reserv|booking|ticket|timed|hora exacta|entrada con hora|embarque|check[- ]?in)\b/i.test(`${cur.activity||''} ${cur.notes||''}`);
+    let curStart=_hhmmToMinutes_(row.start);
+    let curEnd=_hhmmToMinutes_(row.end);
+    if(prevEnd==null||curStart==null||curEnd==null) continue;
+
+    let span=curEnd-curStart;
+    if(span<=0) span+=1440;
 
     if(curStart<prevEnd){
       curStart=prevEnd+10;
       curEnd=curStart+span;
-      cur.start=_minutesToHHMM_(curStart);
-      cur.end=_minutesToHHMM_(curEnd);
+      row.start=_minutesToHHMM_(curStart);
+      row.end=_minutesToHHMM_(curEnd);
+      row.from=prev.to||row.from;
       continue;
     }
 
     const gap=curStart-prevEnd;
-    if(gap>120 && !fixed){
-      // Returns should start soon after the last real stop. Other flexible rows retain 30 min.
-      const targetGap=_isUtilityRow_(cur) ? 15 : 30;
-      curStart=prevEnd+targetGap;
+    if(gap>45&&!_explicitFreeTimeRow_(row)&&!_explicitFreeTimeRow_(prev)){
+      curStart=prevEnd+10;
       curEnd=curStart+span;
-      cur.start=_minutesToHHMM_(curStart);
-      cur.end=_minutesToHHMM_(curEnd);
+      row.start=_minutesToHHMM_(curStart);
+      row.end=_minutesToHHMM_(curEnd);
+      row.from=prev.to||row.from;
     }
   }
-
-  // Final row math after any chronological movement.
-  return sorted.map(r=>_reconcileRowTimeline_(r));
-}
-
-
-function _sanitizePlannerUserText_(value='', field=''){
-  let s=String(value||'').replace(/\s+/g,' ').trim();
-  if(!s) return s;
-  const lang=_plannerOutputLang_();
-  if(lang==='es'){
-    const replacements=[
-      [/\bReturn to\b/gi,'Regreso a'],
-      [/\bTransfer (?:to|toward|towards)\b/gi,'Traslado hacia'],
-      [/\bTransfer\b/gi,'Traslado'],
-      [/\bcheck[- ]?in\b/gi,'registro'],
-      [/\bcheck[- ]?out\b/gi,'salida del alojamiento'],
-      [/\bfood hall\b/gi,'mercado gastronómico'],
-      [/\brestaurant\b/gi,'restaurante'],
-      [/\bbring\b/gi,'lleva'],
-      [/\bOld Harbour\b/gi,'Puerto Viejo'],
-      [/\bwalking tour\b/gi,'recorrido a pie'],
-      [/\bguided tour\b/gi,'tour guiado']
-    ];
-    for(const [re,to] of replacements) s=s.replace(re,to);
-  }
-  return s;
-}
-
-function _isInventedArrivalLogisticsRow_(row={}, facts={}){
-  if(facts?.explicitly_provided_departure) return false;
-  const text=`${row?.activity||''} ${row?.from||''} ${row?.to||''} ${row?.notes||''}`;
-  return Number(row?.day||0)===1 &&
-    /\b(airport|aeropuerto|flight|vuelo|arrival|llegada desde|punto de llegada)\b/i.test(text) &&
-    /\b(check[- ]?in|registro|alojamiento|hotel|lodging)\b/i.test(text);
-}
-
-function _finalizeGeneratedRows_(rows=[], facts={}){
-  let out=(rows||[]).filter(r=>!_isInventedArrivalLogisticsRow_(r,facts));
-  out=out.map(r=>({
-    ...r,
-    activity:_sanitizePlannerUserText_(r.activity,'activity'),
-    from:_sanitizePlannerUserText_(r.from,'from'),
-    to:_sanitizePlannerUserText_(r.to,'to'),
-    transport:_sanitizePlannerUserText_(r.transport,'transport'),
-    notes:_sanitizePlannerUserText_(r.notes,'notes')
-  }));
-  return _dedupeRows_(out);
+  return sorted;
 }
 
 function normalizeRow(r = {}, fallbackDay = 1){
@@ -1614,11 +1613,11 @@ function normalizeRow(r = {}, fallbackDay = 1){
   start = startMin==null ? '' : _minutesToHHMM_(startMin);
   end = endMin==null ? '' : _minutesToHHMM_(endMin);
 
-  const safeActivity = _sanitizePlannerUserText_(act,'activity');
-  const safeFrom = _sanitizePlannerUserText_(from,'from');
-  const safeTo = _sanitizePlannerUserText_(to,'to');
-  const safeTransport = _sanitizePlannerUserText_(trans,'transport');
-  const safeNotes = _sanitizePlannerUserText_(notes,'notes');
+  const safeActivity = String(act||'').trim();
+  const safeFrom = String(from||'').trim();
+  const safeTo = String(to||'').trim();
+  const safeTransport = String(trans||'').trim();
+  const safeNotes = String(notes||'').trim();
 
   return _reconcileRowTimeline_(_enforceMinimumDwell_({
     day:d,
@@ -2064,7 +2063,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
 
   // timeout to avoid hangs (same pattern as SECTION 12)
   const controller = new AbortController();
-  const timeoutMs = 165000;
+  const timeoutMs = 130000;
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -2649,23 +2648,32 @@ function _genericPlaceReason_(value=''){
 function _activityProfile_(row={}){
   const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
 
-  if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
-    return {type:'MAJOR_THERMAL',min:180};
+  if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal|balneario|onsen)\b/.test(text)){
+    return {type:'MAJOR_THERMAL',min:180,max:270};
   }
   if(/\b(whale watching|avistamiento de ballenas|wildlife cruise|marine safari|safari marino|boat wildlife)\b/.test(text)){
-    return {type:'WILDLIFE_CRUISE',min:150};
+    return {type:'WILDLIFE_CRUISE',min:150,max:240};
   }
-  if(/\b(food tour|walking tour|guided tour|tour gastron[oó]mico|tour guiado|recorrido guiado)\b/.test(text)){
-    return {type:'SUBSTANTIAL_GUIDED_TOUR',min:150};
+  if(/\b(food tour|walking tour|guided tour|tour gastronomico|tour guiado|recorrido guiado)\b/.test(text)){
+    return {type:'SUBSTANTIAL_GUIDED_TOUR',min:150,max:240};
   }
-  if(/\b(large museum|major museum|immersive museum|museo nacional|museo grande|exposici[oó]n inmersiva)\b/.test(text)){
-    return {type:'LARGE_MUSEUM',min:90};
+  if(/\b(large museum|major museum|immersive museum|museo nacional|museo grande|exposicion inmersiva)\b/.test(text)){
+    return {type:'LARGE_MUSEUM',min:90,max:180};
   }
-  if(/\b(theme park|parque tem[aá]tico|palace complex|complejo palaciego|archaeological complex|complejo arqueol[oó]gico)\b/.test(text)){
-    return {type:'MAJOR_COMPLEX',min:180};
+  if(/\b(theme park|parque tematico|palace complex|complejo palaciego|archaeological complex|complejo arqueologico)\b/.test(text)){
+    return {type:'MAJOR_COMPLEX',min:180,max:480};
   }
-  if(/\b(round trip walk|round-trip walk|return hike|hike to|walk to the wreck|caminata ida y vuelta|sendero ida y vuelta|caminata al fuselaje|plane wreck|restos del avi[oó]n)\b/.test(text)){
-    return {type:'SUBSTANTIAL_HIKE',min:90};
+  if(/\b(round trip walk|round-trip walk|return hike|hike to|walk to the wreck|caminata ida y vuelta|sendero ida y vuelta|caminata al fuselaje|plane wreck|restos del avion)\b/.test(text)){
+    return {type:'SUBSTANTIAL_HIKE',min:90,max:240};
+  }
+  if(/\b(national park|parque nacional|archaeological landscape|paisaje arqueologico|large nature reserve|reserva natural)\b/.test(text)){
+    return {type:'MAJOR_NATURE_AREA',min:45,max:180};
+  }
+  if(/\b(lighthouse|faro|viewpoint|mirador|photo stop|parada fotografica|church exterior|exterior de iglesia|small waterfall|cascada menor|bridge|puente entre continentes)\b/.test(text)){
+    return {type:'SCENIC_STOP',min:15,max:60};
+  }
+  if(/\b(beach|playa|waterfall|cascada|geothermal field|campo geotermal|geothermal area|area geotermal)\b/.test(text)){
+    return {type:'STANDARD_OUTDOOR',min:30,max:90};
   }
   return null;
 }
@@ -2994,7 +3002,7 @@ async function _finalTripWideRepair_(
   // A second call is allowed only when critical deterministic issues still remain.
   // This keeps latency bounded while preventing publication of obvious duplicates,
   // impossible timing, daylight violations or invented logistics.
-  if(_hasCriticalAuditErrors_(currentReport) && savedDestinations.length<=1){
+  if(_hasCriticalAuditErrors_(currentReport)){
     const precisionRepair=await _runTripWideRepairCall_(
       city,currentRows,totalDays,masterDays,facts,currentReport,forceReplan,true
     );
@@ -3019,7 +3027,7 @@ async function _finalTripWideRepair_(
 }
 async function generateCityItinerary(city){
   const dest=savedDestinations.find(x=>x.city===city);
-  if(!dest) return false;
+  if(!dest) return;
 
   const perDay=_normalizePerDayForPrompt_(city,dest.days,dest.perDay||[]);
   const baseDate=cityMeta[city]?.baseDate||dest.baseDate||'';
@@ -3058,8 +3066,7 @@ async function generateCityItinerary(city){
       city,stitchedRows,dest.days,masterDays,perDay,baseDate,hotel,transport,forceReplan
     );
 
-    const facts=_knownUserFactsForCity_(city,dest.days,perDay,baseDate,hotel,transport);
-    const finalRows=_finalizeGeneratedRows_(finalResult.rows,facts);
+    const finalRows=_dedupeRows_(finalResult.rows);
     itineraries[city].audit=finalResult.report;
 
     // Replace every generated day atomically; do not merge stale rows.
@@ -3072,14 +3079,14 @@ async function generateCityItinerary(city){
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
     showWOW(false);
-    console.log(`[CITY ${city}] SUCCESS v65`,{
+    console.log(`[CITY ${city}] SUCCESS v63`,{
       rows:finalRows.length,
       repaired:finalResult.repaired,
       remainingIssues:finalResult.report?.errors?.length||0
     });
-    return true;
+    return;
   }catch(err){
-    console.error(`[CITY ${city}] v65 staged flow failed; using coherent one-shot recovery`,err);
+    console.error(`[CITY ${city}] v63 staged flow failed; using coherent one-shot recovery`,err);
   }
 
   // Coherent one-shot recovery still receives all user facts and must return the complete city.
@@ -3124,8 +3131,7 @@ HARD RULES:
     const finalResult=await _finalTripWideRepair_(
       city,rows,dest.days,syntheticMaster,perDay,baseDate,hotel,transport,true
     );
-    rows=_finalizeGeneratedRows_(finalResult.rows,facts);
-    if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error('RECOVERY_MISSING_DAYS');
+    rows=_dedupeRows_(finalResult.rows);
     pushRows(city,rows,true);
     itineraries[city].audit=finalResult.report;
 
@@ -3135,22 +3141,21 @@ HARD RULES:
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
     showWOW(false);
-    return true;
+    return;
   }catch(err2){
-    console.error(`[CITY ${city}] v65 recovery failed`,err2);
+    console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
     showWOW(false);
   }
 
   const msg=getLang()==='es'
-    ? 'No fue posible completar un itinerario coherente para esta ciudad. Inténtalo nuevamente; las demás ciudades no se perderán.'
-    : 'I could not complete a coherent itinerary for this city. Try again; the other cities will not be lost.';
+    ? 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.'
+    : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
   chatMsg(msg,'ai');
-  return false;
 }
 
 /* =========================================================
-   End v65 staged generation
+   End v60 staged generation
 ========================================================= */
 
 /* 🆕 Bulk rebalance after changes (add days / requested day trip) */
@@ -3576,7 +3581,7 @@ async function onSend(){
       : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
       : '';
     const lodgingText = String(text||'')
-      .replace(/(?:,|;|\||and|y)?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|recomi[eé]ndame|recommend(?:\s+me)?)\s*$/i,'')
+      .replace(/(?:,|;|\|| and | y )?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|recomi[eé]ndame|recommend(?:\s+me)?)\s*$/i,'')
       .trim() || text;
     upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
@@ -3592,20 +3597,11 @@ async function onSend(){
 
     (async ()=>{
       showWOW(true, t('overlayGenerating'));
-      const failedCities=[];
       for(const {city} of savedDestinations){
-        const ok=await generateCityItinerary(city);
-        if(!ok) failedCities.push(city);
+        await generateCityItinerary(city);
       }
       showWOW(false);
-      if(failedCities.length){
-        const msg=(getLang()==='es')
-          ? `⚠️ Se completaron las demás ciudades, pero no fue posible finalizar: ${failedCities.join(', ')}. Vuelve a intentar únicamente esas ciudades; no se borraron los itinerarios correctos.`
-          : `⚠️ The other cities were completed, but these could not be finalized: ${failedCities.join(', ')}. Retry only those cities; completed itineraries were preserved.`;
-        chatMsg(msg,'ai');
-      }else{
-        chatMsg(getPlannerCompletionMessage(), 'ai');
-      }
+      chatMsg(getPlannerCompletionMessage(), 'ai');
     })();
 
     return;
@@ -4327,6 +4323,21 @@ function exportItineraryToPDF(){
     return;
   }
 
+  const incompleteCities=cities.filter(city=>{
+    const expected=savedDestinations.find(d=>d.city===city)?.days||0;
+    const byDay=itineraries?.[city]?.byDay||{};
+    for(let d=1;d<=expected;d++){
+      if(!Array.isArray(byDay[d])||!byDay[d].length) return true;
+    }
+    return false;
+  });
+  if(incompleteCities.length){
+    alert((_plannerOutputLang_()==='es'
+      ?'No se puede exportar: faltan días por generar en '
+      :'Cannot export: missing generated days in ')+incompleteCities.join(', '));
+    return;
+  }
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'pt', format:'a4' });
 
@@ -4358,23 +4369,23 @@ function exportItineraryToPDF(){
 
     const dateLabel = getDayDateLabel(city, dayNum);
     doc.setFontSize(11);
-    const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${normalizeCellText(dateLabel)})` : `${t('uiDayTitle', dayNum)}`;
+    const dayLine = dateLabel ? `${_itineraryText_('day', dayNum)} (${normalizeCellText(dateLabel)})` : `${_itineraryText_('day', dayNum)}`;
     doc.text(normalizeCellText(dayLine), left, 66);
 
     doc.setFontSize(9);
-    doc.text(`${yyyy}-${mm}-${dd}`, left, 84);
+    doc.text(`${_itineraryText_('generated')}: ${yyyy}-${mm}-${dd}`, left, 84);
   }
 
   // Encabezados de la tabla (usa i18n del UI si existe)
   const head = [[
-    normalizeCellText(t('thStart')),
-    normalizeCellText(t('thEnd')),
-    normalizeCellText(t('thActivity')),
-    normalizeCellText(t('thFrom')),
-    normalizeCellText(t('thTo')),
-    normalizeCellText(t('thTransport')),
-    normalizeCellText(t('thDuration')),
-    normalizeCellText(t('thNotes'))
+    normalizeCellText(_itineraryText_('start')),
+    normalizeCellText(_itineraryText_('end')),
+    normalizeCellText(_itineraryText_('activity')),
+    normalizeCellText(_itineraryText_('from')),
+    normalizeCellText(_itineraryText_('to')),
+    normalizeCellText(_itineraryText_('transport')),
+    normalizeCellText(_itineraryText_('duration')),
+    normalizeCellText(_itineraryText_('notes'))
   ]];
 
   let isFirstPage = true;
