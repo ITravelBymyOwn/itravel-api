@@ -1,4 +1,4 @@
-// /api/chat.js — v66 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -239,21 +239,21 @@ function skeletonCityDay(destination = "Destination", daysTotal = 1, lang = "en"
 }
 
 function _normalizeDurationText_(txt) {
-  let s = String(txt ?? "").replace(/\r/g, "").trim();
+  const s = String(txt ?? "").trim();
   if (!s) return s;
 
-  s = s
-    .replace(/\b(?:Transporte|Trasporto)\s*:/gi, "Transport:")
-    .replace(/\b(?:Actividad|Atividade|Activité|Aktivität|Attività)\s*:/gi, "Activity:")
-    .replace(/\s*[|;,]\s*(?=Activity\s*:)/gi, "\n")
-    .replace(/\s+(?=Activity\s*:)/gi, "\n")
-    .replace(/\n{2,}/g, "\n")
-    .trim();
+  // "Transport: X, Activity: Y" => 2 lines
+  if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && s.includes(",")) {
+    return s.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
+  }
 
-  const transport = s.match(/Transport\s*:\s*([\s\S]*?)(?=\n\s*Activity\s*:|$)/i)?.[1]?.trim() || "";
-  const activity = s.match(/Activity\s*:\s*([\s\S]*)$/i)?.[1]?.trim() || "";
+  // If it comes in a single line without line breaks but has both labels, try forcing split with common separators
+  if (/Transport\s*:/i.test(s) && /Activity\s*:/i.test(s) && !s.includes("\n")) {
+    const tmp = s.replace(/\s*\|\s*/g, ", ").replace(/\s*;\s*/g, ", ");
+    if (tmp.includes(",")) return tmp.replace(/\s*,\s*Activity\s*:/i, "\nActivity:");
+  }
 
-  return transport && activity ? `Transport: ${transport}\nActivity: ${activity}` : s;
+  return s;
 }
 
 function _hasAnyRows_(city_day) {
@@ -528,17 +528,7 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
 - Do not repeat an identical aurora note every night.
 
-8. FINAL DETERMINISTIC QUALITY REQUIREMENTS
-- Never create a fixed aurora row unless the user explicitly requested a booked/fixed aurora outing. Otherwise mention aurora only as a conditional evening note. Any aurora row must begin after plausible local darkness.
-- Do not invent airport, flight, check-in, check-out or vehicle-return logistics that the user did not provide.
-- No outdoor scenic viewpoint, lighthouse, simple church exterior, short photo stop or small geological stop may receive multi-hour dwell. These are normally 15–60 minutes.
-- National parks, major archaeological landscapes and substantial nature areas normally require at least 45–120 minutes of actual visit time.
-- Do not write "optional", "A or B", "selected venue", "if it is Sunday", "if applicable" or equivalent unresolved choices in a final itinerary. Select one concrete feasible option.
-- Validate ordinary weekly operating patterns against the actual weekday. If availability is uncertain or commonly limited to other weekdays, choose a robust alternative.
-- After row-level reconciliation, audit the whole day again. No overlap and no unexplained gap above 45 minutes. A legitimate meal, rest, free-time or reservation buffer must be explicitly represented.
-- Compare activity duration against the notes. If notes describe a 90–120 minute walk, the activity duration must contain that full time.
-- Optimize the complete route, not only consecutive pairs. Cluster nearby stops and eliminate backtracking before returning JSON.
-- Prefer explicit free time over weak filler, but do not disguise packing, hotel rest or generic coffee as a tourism attraction.
+8. QUALITY
 - Use one selected language for all user-facing values.
 - Preserve official proper names but translate generic instructions.
 - Remove debug, placeholder and internal-planning wording.
@@ -834,50 +824,80 @@ function _v62CleanLocation_(value = "") {
 }
 
 function _v62DurationBounds_(value = "") {
-  let s = String(value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/,/g, ".")
-    .replace(/[–—−]/g, "-")
-    .replace(/[~≈]/g, "")
-    .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?|about|around)\b/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const original = String(value || "").trim();
+  if (!original) return null;
 
-  if (!s || /\b(?:verify|verificar|check)\b/.test(s)) return null;
+  const normalize = (input) =>
+    String(input || "")
+      .toLowerCase()
+      .replace(/,/g, ".")
+      .replace(/[–—]/g, "-")
+      .replace(/[~≈]/g, "")
+      .replace(/\b(?:aprox(?:\.|imadamente)?|approx(?:\.|imately)?)\b/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-  const point = (raw, unit = "") => {
-    const p = String(raw || "").trim();
-    let m = p.match(/^(\d+(?:\.\d+)?)\s*h(?:\s*(\d{1,2})\s*m?)?$/i);
-    if (m) return Math.round(Number(m[1]) * 60) + Number(m[2] || 0);
-    m = p.match(/^(\d{1,2}):(\d{2})$/);
-    if (m) return Number(m[1]) * 60 + Number(m[2]);
-    m = p.match(/^(\d+(?:\.\d+)?)\s*(?:hr|hrs|hour|hours|hora|horas)$/i);
-    if (m) return Math.round(Number(m[1]) * 60);
-    m = p.match(/^(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)$/i);
-    if (m) return Number(m[1]);
-    if (/^\d+(?:\.\d+)?$/.test(p)) return unit === "h" ? Math.round(Number(p) * 60) : Number(p);
-    return null;
+  const parsePoint = (input) => {
+    const s = normalize(input);
+    if (!s) return null;
+
+    const compact = s.match(/\b(\d+)\s*h\s*(\d{1,2})\b/);
+    if (compact) return Number(compact[1]) * 60 + Number(compact[2]);
+
+    const colon = s.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (colon) return Number(colon[1]) * 60 + Number(colon[2]);
+
+    let total = 0;
+    let found = false;
+
+    const hours = s.match(
+      /(\d+(?:\.\d+)?)\s*(?:h|hr|hrs|hour|hours|hora|horas)\b/
+    );
+    const minutes = s.match(
+      /(\d+)\s*(?:m|min|mins|minute|minutes|minuto|minutos)\b/
+    );
+
+    if (hours) {
+      total += Math.round(Number(hours[1]) * 60);
+      found = true;
+    }
+    if (minutes) {
+      total += Number(minutes[1]);
+      found = true;
+    }
+
+    if (!found) {
+      const bare = s.match(/^\d+(?:\.\d+)?$/);
+      if (bare) return Math.round(Number(bare[0]));
+    }
+
+    return found && total > 0 ? total : null;
   };
 
-  let m = s.match(/(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?\s*-\s*(\d+(?:\.\d+)?)\s*h\s*(\d{1,2})?\s*m?/i);
-  if (m) {
-    const a = Math.round(Number(m[1]) * 60) + Number(m[2] || 0);
-    const b = Math.round(Number(m[3]) * 60) + Number(m[4] || 0);
-    return { min: Math.min(a, b), max: Math.max(a, b) };
+  const s = normalize(original);
+  const parts = s.split(/\s*-\s*/).filter(Boolean);
+
+  if (parts.length >= 2) {
+    let first = parsePoint(parts[0]);
+    let second = parsePoint(parts[1]);
+
+    // Shared trailing unit: "45-60 min", "1.5-2 h".
+    if (first != null && second == null) {
+      if (/\b(?:m|min|mins|minute|minutes|minuto|minutos)\b/.test(parts[1])) {
+        first = parsePoint(`${parts[0]} min`);
+      } else if (/\b(?:h|hr|hrs|hour|hours|hora|horas)\b/.test(parts[1])) {
+        first = parsePoint(`${parts[0]} h`);
+      }
+      second = parsePoint(parts[1]);
+    }
+
+    if (first != null && second != null) {
+      return { min: Math.min(first, second), max: Math.max(first, second) };
+    }
   }
 
-  m = s.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|hora|horas|m|min|mins|minute|minutes|minuto|minutos)\b/i);
-  if (m) {
-    const unit = /^(h|hr|hour|hora)/i.test(m[3]) ? "h" : "m";
-    const a = point(m[1], unit);
-    const b = point(m[2], unit);
-    if (a != null && b != null) return { min: Math.min(a, b), max: Math.max(a, b) };
-  }
-
-  const single = point(s);
-  return single != null && single > 0 ? { min: single, max: single } : null;
+  const single = parsePoint(s);
+  return single != null ? { min: single, max: single } : null;
 }
 
 function _v62ExtractDurationPart_(duration = "", labels = []) {
@@ -891,37 +911,13 @@ function _v62ExtractDurationPart_(duration = "", labels = []) {
 
 function _v62FormatMinutes_(minutes) {
   const n = Math.max(1, Math.round(Number(minutes) || 1));
-  if (n < 60) return `${n} min`;
+  if (n < 60) return `~${n}m`;
   const h = Math.floor(n / 60);
   const m = n % 60;
-  return m ? `${h} h ${m} min` : `${h} h`;
+  return m ? `~${h}h ${m}m` : `~${h}h`;
 }
 
 function _v62NormalizeDuration_(row = {}) {
-  const raw = _normalizeDurationText_(row?.duration);
-  const combined = `${raw}\n${String(row?.transport || "")}`;
-
-  const transportRaw =
-    _v62ExtractDurationPart_(raw, ["Transport", "Transporte", "Trasporto"]) ||
-    _v62ExtractDurationPart_(combined, ["Transport", "Transporte", "Trasporto"]);
-
-  const activityRaw =
-    _v62ExtractDurationPart_(raw, ["Activity", "Actividad", "Atividade", "Activité", "Aktivität", "Attività"]) ||
-    _v62ExtractDurationPart_(combined, ["Activity", "Actividad", "Atividade", "Activité", "Aktivität", "Attività"]);
-
-  const transport = _v62DurationBounds_(transportRaw);
-  const activity = _v62DurationBounds_(activityRaw);
-
-  const fmt = (b) => {
-    if (!b) return "";
-    if (b.min === b.max) return _v62FormatMinutes_(b.min);
-    return `${_v62FormatMinutes_(b.min)}–${_v62FormatMinutes_(b.max)}`;
-  };
-
-  return transport && activity
-    ? `Transport: ${fmt(transport)}\nActivity: ${fmt(activity)}`
-    : raw;
-}) {
   const raw = String(row?.duration || "");
   const transportRaw = _v62ExtractDurationPart_(raw, ["Transport", "Transporte"]);
   const activityRaw = _v62ExtractDurationPart_(raw, [
@@ -1214,14 +1210,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
       if (previousEnd != null && start != null && start < previousEnd) {
         errors.push({ code: "TIME_OVERLAP", day, row: rowNumber });
       }
-      if (previousEnd != null && start != null && start - previousEnd > 45) {
-        const explicitGap = /\b(meal|lunch|dinner|break|rest|free time|almuerzo|cena|descanso|tiempo libre)\b/i.test(
-          `${row?.activity || ""} ${row?.notes || ""}`
-        );
-        if (!explicitGap) {
-          errors.push({ code: "UNEXPLAINED_DAY_GAP", day, row: rowNumber, gap_minutes: start - previousEnd });
-        }
-      }
 
       const transport = _v62DurationBounds_(
         _v62ExtractDurationPart_(row?.duration, ["Transport", "Transporte"])
@@ -1340,25 +1328,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
       if (poi) {
         if (!poiMap.has(poi)) poiMap.set(poi, []);
         poiMap.get(poi).push({ day, row: rowNumber });
-      }
-
-      const activityText = `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`;
-      if (/\b(aurora|auroras|northern lights|luces del norte)\b/i.test(activityText)) {
-        const requested = /\b(aurora|auroras|northern lights|luces del norte)\b/i.test(
-          _allMessageText_(options?.messages || [])
-        );
-        if (!requested || (start != null && start < 18 * 60)) {
-          errors.push({ code: "RIGID_OR_EARLY_AURORA", day, row: rowNumber });
-        }
-      }
-
-      if (/\b(airport|aeropuerto|flight|vuelo)\b/i.test(`${row?.from || ""} ${row?.activity || ""}`) &&
-          !/\b(airport|aeropuerto|flight|vuelo)\b/i.test(_allMessageText_(options?.messages || []))) {
-        errors.push({ code: "INVENTED_ARRIVAL_LOGISTICS", day, row: rowNumber });
-      }
-
-      if (/\b(optional|opcional|if applicable|si procede|if sunday|si es domingo|selected venue|sede seleccionada|or similar|o similar)\b/i.test(activityText)) {
-        errors.push({ code: "UNRESOLVED_FINAL_CHOICE", day, row: rowNumber });
       }
 
       previousEnd = end;
