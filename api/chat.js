@@ -1,4 +1,4 @@
-// /api/chat.js — v65.3 (MVP WOW: hard-quality gate + final route precision patch over v65.2; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.2 (MVP WOW: global day-route optimization patch over v65.1; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -585,20 +585,6 @@ indoor filler when a reserved outdoor anchor still remains.
   the arrival/parking/settling buffer (normally 5–15 minutes), never 1 minute and never invented sightseeing.
 - Activity titles should name the experience or destination. Use "Transfer/Return" only for genuine
   long outbound/return legs, not as the main identity of intermediate sightseeing rows.
-- For a genuine long outbound leg, title the row with the destination being reached and the arrival
-  purpose, not generic wording such as "Salida hacia", "Traslado hacia", "Drive to" or "Route to".
-  Example structure: "<corridor> – Arrival at <first anchor>". The transport field carries the driving detail.
-- After calculating clocks, sort rows by start time and run a strict non-overlap simulation. A row that
-  starts before the previous row ends invalidates the whole day and MUST be rebuilt before output.
-- Scenic dwell must be experience-led rather than compressed to fit more rows. Unless a fixed booking,
-  safety issue or short user window requires less, reserve approximately:
-  • major beach, waterfall, geothermal field, coastal cliff route or signature landscape: 35–60 minutes;
-  • compact photo landmark, lighthouse exterior, sculpture or church exterior: 15–30 minutes;
-  • substantial scenic walk: enough time for the complete out-and-back route.
-- Do not create a fixed aurora/night-sky row merely because the phenomenon is seasonally plausible.
-  Unless the user explicitly requested a scheduled outing or supplied a booking, keep it as a conditional
-  note attached to a suitable evening/return row. Never use a generic destination such as "dark point",
-  "dark area outside the city" or equivalent.
 - Keep user-facing language consistent in activity, transport, duration labels and notes; retain only
   official proper names in their original form.
 
@@ -1281,49 +1267,11 @@ function _v65IsTransferOnlyRow_(row = {}) {
   return /\b(transfer|traslado|return|regreso|retorno|regresso|back to|drive to|conduccion a|conducción a)\b/.test(text);
 }
 
-function _v65IsGenericOutboundTransferTitle_(row = {}) {
-  const activity = _v62NormKey_(row?.activity || "");
-  if (_v64IsReturnRow_(row)) return false;
-  return /\b(salida hacia|traslado hacia|ruta hacia|drive to|departure to|transfer to|outbound transfer)\b/.test(activity);
-}
-
-function _v65IsAuroraOrNightSkyRow_(row = {}) {
-  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`);
-  return /\b(aurora|northern lights|luces del norte|auroras boreales|aurora boreal|night sky|cielo nocturno)\b/.test(text);
-}
-
-function _v65UserRequestedScheduledAurora_(messages = []) {
-  const text = _allMessageText_(messages);
-  return /\b(?:schedule|scheduled|fixed|booking|booked|reserve|reserved|tour at|salida a las|hora fija|reserva|reservado|programar|agendar).{0,50}(?:aurora|northern lights|luces del norte|aurora boreal)\b/i.test(text) ||
-    /\b(?:aurora|northern lights|luces del norte|aurora boreal).{0,50}(?:schedule|scheduled|fixed|booking|booked|reserve|reserved|tour at|salida a las|hora fija|reserva|reservado|programar|agendar)\b/i.test(text);
-}
-
-function _v65HasGenericDarkDestination_(row = {}) {
-  const to = _v62NormKey_(row?.to || "");
-  return /\b(dark point|dark area|dark place|punto oscuro|zona oscura|lugar oscuro|outside the city|afueras de la ciudad|nearby dark area)\b/.test(to);
-}
-
-function _v65IsHardFinalErrorCode_(code = "") {
-  return new Set([
-    "INVALID_TIME",
-    "TIME_OVERLAP",
-    "DURATION_DOES_NOT_FIT",
-    "CONTINUITY",
-    "BASE_NOT_RESPECTED",
-    "TRANSPORT_NOT_RESPECTED",
-    "INVENTED_ARRIVAL_LOGISTICS",
-    "AMBIGUOUS_DESTINATION",
-    "LOCATION_TRANSPORT_CONTAMINATION",
-    "FORCED_CONDITIONAL_NIGHT_ROW",
-    "GENERIC_DARK_DESTINATION"
-  ]).has(String(code || ""));
-}
-
 function _v65MinimumDwellProfile_(row = {}) {
   const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`);
 
   if (/\b(black sand beach|beach|playa|strand|plage|praia|waterfall|cascada|cachoeira|cascade|geothermal field|campo geotermico|campo geotérmico|hot spring field|coastal cliff|acantilado|cliff walk)\b/.test(text)) {
-    return { type: "scenic_outdoor_anchor", minimumActivityMinutes: 35 };
+    return { type: "scenic_outdoor_anchor", minimumActivityMinutes: 30 };
   }
 
   if (/\b(church exterior|iglesia exterior|lighthouse|faro|photo stop|parada fotografica|parada fotográfica|viewpoint|mirador|monument|escultura)\b/.test(text)) {
@@ -1354,7 +1302,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
   const poiMap = new Map();
   const semanticMap = new Map();
   const userSuppliedArrivalLogistics = _v65UserSuppliedArrivalLogistics_(options?.messages || []);
-  const userRequestedScheduledAurora = _v65UserRequestedScheduledAurora_(options?.messages || []);
 
   for (const block of cityDay) {
     const day = Number(block?.day) || 0;
@@ -1502,32 +1449,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
 
       if (_v65LooksLikeWeakFiller_(row)) {
         errors.push({ code: "WEAK_FILLER_ACTIVITY", day, row: rowNumber });
-      }
-
-      if (_v65IsGenericOutboundTransferTitle_(row)) {
-        errors.push({
-          code: "GENERIC_OUTBOUND_TRANSFER_TITLE",
-          day,
-          row: rowNumber,
-          activity: row?.activity,
-        });
-      }
-
-      if (_v65IsAuroraOrNightSkyRow_(row) && !userRequestedScheduledAurora) {
-        errors.push({
-          code: "FORCED_CONDITIONAL_NIGHT_ROW",
-          day,
-          row: rowNumber,
-        });
-      }
-
-      if (_v65HasGenericDarkDestination_(row)) {
-        errors.push({
-          code: "GENERIC_DARK_DESTINATION",
-          day,
-          row: rowNumber,
-          to: row?.to,
-        });
       }
 
       if (
@@ -1689,14 +1610,6 @@ FINAL SURGICAL REPAIR:
 - Re-solve every affected day as one complete route: build the candidate sequence, compare plausible orders,
   preserve fixed anchors, place scenic stops in useful daylight, minimize total driving/backtracking, and only
   then recalculate all row clocks from the beginning of the day through the return.
-- Sort the rebuilt rows chronologically and simulate the complete clock. Every start MUST be at or after the
-  previous end. Any remaining overlap invalidates the repair.
-- Rename generic outbound rows such as "Salida hacia", "Traslado hacia", "Route to" or "Drive to" using the
-  concrete first destination/arrival purpose; keep driving detail in transport.
-- Give scenic outdoor anchors realistic useful dwell, normally at least 35 minutes for beaches, waterfalls,
-  geothermal fields and coastal cliffs unless the user window or safety clearly requires less.
-- Remove a fixed aurora/night-sky row unless the user explicitly supplied a scheduled outing or booking.
-  Keep aurora as a conditional note, and never use a generic dark-area destination.
 - Remove the weakest optional stop instead of compressing multiple rows or using impossible times.
 - NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
 - No row may begin before the prior row ends. Recheck the complete repaired day after all changes.
@@ -2465,30 +2378,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
 
           if (repaired) {
             const repairedReport = _v62ValidateFinal_(repaired, { messages: clientMessages });
-            const repairedHardErrors = repairedReport.errors.filter((error) =>
-              _v65IsHardFinalErrorCode_(error?.code)
-            );
-            const originalHardErrors = report.errors.filter((error) =>
-              _v65IsHardFinalErrorCode_(error?.code)
-            );
-
-            const materiallyBetter =
-              repairedReport.errors.length < report.errors.length &&
-              repairedHardErrors.length === 0 &&
-              repairedReport.errors.length <= Math.max(
-                2,
-                Math.floor(report.errors.length * 0.45)
-              );
-
-            if (repairedReport.ok || materiallyBetter) {
+            if (repairedReport.ok || repairedReport.errors.length <= Math.max(0, Math.floor(report.errors.length * 0.35))) {
               parsed = repaired;
-            } else {
-              console.warn("⚠️ Repaired itinerary rejected by hard-quality gate:", {
-                original_errors: report.errors.length,
-                repaired_errors: repairedReport.errors.length,
-                original_hard_errors: originalHardErrors.map((error) => error.code),
-                repaired_hard_errors: repairedHardErrors.map((error) => error.code),
-              });
             }
           }
         } catch (repairError) {
