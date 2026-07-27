@@ -1,4 +1,4 @@
-// /api/chat.js — v65.2 (MVP WOW: global day-route optimization patch over v65.1; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.3 (MVP WOW: deterministic full-day optimizer + scenic dwell + intelligent transport rows; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -558,7 +558,7 @@ indoor filler when a reserved outdoor anchor still remains.
 
 8. FINAL PRECISION AUDIT — NON-DESTRUCTIVE
 - Before returning JSON, audit the complete day sequence, not only isolated rows.
-- Unexplained gaps longer than 45 minutes are forbidden. A legitimate meal, rest, reservation margin
+- Incidental gaps of 1–30 minutes must be compacted during the final full-day clock simulation. Unexplained gaps longer than 30 minutes are forbidden. A legitimate meal, rest, reservation margin
   or free-time interval must be represented explicitly; otherwise close the gap by retiming only the
   affected rows. Never move a fixed reservation or compress an anchor experience to hide a gap.
 - The duration stated in Activity/Notes must agree with the duration field and the row interval. If
@@ -581,7 +581,7 @@ indoor filler when a reserved outdoor anchor still remains.
   next start must be at or after the previous end; no row may be nested inside or overlap another row.
 - Do not publish a restaurant/meal row longer than 90 minutes unless the user requested a tasting menu,
   food tour or special reservation. A normal meal is usually 45–75 minutes plus transport.
-- A transfer-only row may be used for a meaningful outbound or return leg, but its Activity value is only
+- A transfer-only row may be used for a genuine long RETURN leg. Do not create a separate outbound "Departure/Drive/Transfer to..." activity: fold that travel into the first real experience row. Its Activity value is only
   the arrival/parking/settling buffer (normally 5–15 minutes), never 1 minute and never invented sightseeing.
 - Activity titles should name the experience or destination. Use "Transfer/Return" only for genuine
   long outbound/return legs, not as the main identity of intermediate sightseeing rows.
@@ -1271,7 +1271,7 @@ function _v65MinimumDwellProfile_(row = {}) {
   const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`);
 
   if (/\b(black sand beach|beach|playa|strand|plage|praia|waterfall|cascada|cachoeira|cascade|geothermal field|campo geotermico|campo geotérmico|hot spring field|coastal cliff|acantilado|cliff walk)\b/.test(text)) {
-    return { type: "scenic_outdoor_anchor", minimumActivityMinutes: 30 };
+    return { type: "scenic_outdoor_anchor", minimumActivityMinutes: 45 };
   }
 
   if (/\b(church exterior|iglesia exterior|lighthouse|faro|photo stop|parada fotografica|parada fotográfica|viewpoint|mirador|monument|escultura)\b/.test(text)) {
@@ -1279,6 +1279,166 @@ function _v65MinimumDwellProfile_(row = {}) {
   }
 
   return { type: "", minimumActivityMinutes: 0 };
+}
+
+
+// ==============================
+// v65.3 — Deterministic premium day optimizer
+// Surgical post-processing only: preserves schema/architecture and never hardcodes a destination.
+// ==============================
+function _v653FormatClock_(minutes) {
+  const n = ((Math.round(Number(minutes) || 0) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(2, "0")}`;
+}
+
+function _v653ActivityMinutes_(row = {}) {
+  const bounds = _v62DurationBounds_(
+    _v62ExtractDurationPart_(row?.duration, [
+      "Activity", "Actividad", "Atividade", "Activité", "Aktivität", "Attività",
+    ])
+  );
+  return bounds?.min || 0;
+}
+
+function _v653TransportMinutes_(row = {}) {
+  const bounds = _v62DurationBounds_(
+    _v62ExtractDurationPart_(row?.duration, ["Transport", "Transporte"])
+  );
+  return bounds?.min || 0;
+}
+
+function _v653SetDuration_(row, transportMinutes, activityMinutes) {
+  return {
+    ...row,
+    duration: `Transport: ${_v62FormatMinutes_(Math.max(1, transportMinutes))}\nActivity: ${_v62FormatMinutes_(Math.max(1, activityMinutes))}`,
+  };
+}
+
+function _v653IsOutboundTransferShell_(row = {}, index = 0) {
+  if (index !== 0 || _v64IsReturnRow_(row)) return false;
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+  const activityMinutes = _v653ActivityMinutes_(row);
+  const transferLanguage = /\b(salida hacia|salida a|traslado hacia|traslado a|drive to|departure for|outbound transfer|transfer to|route to|ruta hacia|conduccion a|conducción a|heading to|partida para|saida para|saída para)\b/.test(text);
+  const shellDestination = /\b(route|ruta|transfer|traslado|en route|en ruta|towards|hacia)\b/.test(_v62NormKey_(row?.to));
+  return transferLanguage && shellDestination && activityMinutes <= 15;
+}
+
+function _v653RenameTransportActivity_(row = {}) {
+  if (_v64IsReturnRow_(row)) return row;
+  const activity = String(row?.activity || "").trim();
+  const norm = _v62NormKey_(activity);
+  if (!/\b(salida hacia|salida a|traslado hacia|traslado a|drive to|departure for|outbound transfer|transfer to|heading to|partida para|saida para|saída para)\b/.test(norm)) return row;
+
+  const target = _v62CleanLocation_(row?.to);
+  if (!target || /\b(route|ruta|transfer|traslado|en route|en ruta|towards|hacia)\b/.test(_v62NormKey_(target))) return row;
+
+  const split = activity.match(/^(.*?\s[–-]\s)(.*)$/);
+  return { ...row, activity: split ? `${split[1]}${target}` : target };
+}
+
+function _v653PremiumDwell_(row = {}) {
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`);
+  const existing = _v653ActivityMinutes_(row);
+  if (!existing) return existing;
+
+  // Immersive profiles already validated elsewhere; preserve the stronger minimum.
+  const immersive = _v64ExperienceProfile_(row);
+  if (immersive.minimumActivityMinutes > 0) {
+    return Math.max(existing, immersive.minimumActivityMinutes);
+  }
+
+  // Premium scenic dwell, globally category-based.
+  if (/\b(beach|playa|strand|plage|praia|waterfall|cascada|cachoeira|cascade|geothermal field|geothermal area|campo geotermico|campo geotérmico|hot spring field|coastal cliff|acantilado|cliff walk|crater|cráter|volcanic crater|geyser|geiser|géiser|lava field|campo de lava|nature reserve|parque nacional|national park)\b/.test(text)) {
+    return Math.max(existing, 45);
+  }
+  if (/\b(viewpoint|mirador|photo stop|parada fotografica|parada fotográfica|lighthouse|faro|scenic overlook|mirante)\b/.test(text)) {
+    return Math.max(existing, 30);
+  }
+  return existing;
+}
+
+function _v653OptimizeRows_(rows = []) {
+  let work = (Array.isArray(rows) ? rows : []).map((row) => ({ ...row }));
+  if (!work.length) return work;
+
+  // 1) Remove a valueless first "departure/route" shell and fold its real drive into the first experience.
+  if (work.length >= 2 && _v653IsOutboundTransferShell_(work[0], 0)) {
+    const shell = work[0];
+    const firstExperience = work[1];
+    const mergedTransport = _v653TransportMinutes_(shell) + _v653TransportMinutes_(firstExperience);
+    const mergedActivity = _v653PremiumDwell_(firstExperience) || _v653ActivityMinutes_(firstExperience) || 15;
+    work[1] = _v653SetDuration_({
+      ...firstExperience,
+      start: shell?.start || firstExperience?.start,
+      from: _v62CleanLocation_(shell?.from) || firstExperience?.from,
+      transport: [String(shell?.transport || "").trim(), String(firstExperience?.transport || "").trim()]
+        .filter(Boolean)
+        .join("; "),
+    }, mergedTransport, mergedActivity);
+    work.shift();
+  }
+
+  // 2) Rename residual "departure to X" activities when X is already a concrete experience.
+  work = work.map(_v653RenameTransportActivity_);
+
+  // 3) Apply scenic minimums and run one chronological clock simulation for the full day.
+  let cursor = _v62ParseTime_(work[0]?.start);
+  if (cursor == null) cursor = 9 * 60;
+  let previousTo = "";
+
+  return work.map((row, index) => {
+    const transportMinutes = Math.max(1, _v653TransportMinutes_(row) || 1);
+    const activityMinutes = Math.max(1, _v653PremiumDwell_(row) || _v653ActivityMinutes_(row) || 1);
+    const originalStart = _v62ParseTime_(row?.start);
+
+    // Compact incidental 1–30 minute holes; eliminate overlaps. Larger windows remain visible for repair/audit.
+    if (index === 0) {
+      cursor = originalStart != null ? originalStart : cursor;
+    } else if (originalStart != null && originalStart - cursor > 30) {
+      cursor = originalStart;
+    }
+
+    const start = cursor;
+    const end = start + transportMinutes + activityMinutes;
+    const from = _v62CleanLocation_(previousTo) || _v62CleanLocation_(row?.from) || "Hotel";
+    const optimized = _v653SetDuration_({
+      ...row,
+      start: _v653FormatClock_(start),
+      end: _v653FormatClock_(end),
+      from,
+    }, transportMinutes, activityMinutes);
+
+    cursor = end;
+    previousTo = optimized?.to || previousTo;
+    return optimized;
+  });
+}
+
+function _v653DeterministicOptimize_(parsed) {
+  if (!parsed || typeof parsed !== "object") return parsed;
+  if (Array.isArray(parsed.city_day)) {
+    parsed.city_day = parsed.city_day.map((block) => ({
+      ...block,
+      rows: _v653OptimizeRows_(block?.rows),
+    }));
+  }
+  return parsed;
+}
+
+function _v653IsForcedAuroraRow_(row = {}) {
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+  return /\b(aurora|northern lights|northern light|auroras|aurora boreal|luces del norte)\b/.test(text);
+}
+
+function _v653UserRequestedFixedAurora_(messages = []) {
+  const text = _v62NormKey_(_allMessageText_(messages));
+  return /\b(booked aurora|aurora booking|reserved aurora|aurora reservation|aurora tour booked|tour de auroras reservado|reserva de auroras|actividad fija de auroras|fixed aurora)\b/.test(text);
+}
+
+function _v653IsRegionalScenicDay_(rows = []) {
+  const text = _v62NormKey_(rows.map((row) => `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`).join(" "));
+  const totalTransport = rows.reduce((sum, row) => sum + _v653TransportMinutes_(row), 0);
+  return totalTransport >= 90 && /\b(beach|playa|waterfall|cascada|geothermal|geoterm|crater|cráter|cliff|acantilado|peninsula|península|coast|costa|national park|parque nacional|scenic|panoram|nature|naturaleza|mountain|montana|montaña)\b/.test(text);
 }
 
 function _v65ExtractHardContext_(messages = []) {
@@ -1528,6 +1688,38 @@ function _v62ValidateFinal_(parsed, options = {}) {
     });
   }
 
+
+  // v65.3 whole-day quality signals: force repair for sparse flagship routes and rigid aurora rows.
+  for (const block of cityDay) {
+    const day = Number(block?.day) || 0;
+    const rows = Array.isArray(block?.rows) ? block.rows : [];
+    const meaningfulRows = rows.filter((row) => {
+      if (_v65IsTransferOnlyRow_(row) || _v64IsReturnRow_(row)) return false;
+      const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+      return !/\b(lunch|dinner|breakfast|brunch|almuerzo|cena|desayuno|comida|restaurant|restaurante|cafe|café|coffee)\b/.test(text);
+    });
+
+    if (_v653IsRegionalScenicDay_(rows) && meaningfulRows.length < 5) {
+      errors.push({
+        code: "REGIONAL_ROUTE_UNDERDEVELOPED",
+        day,
+        meaningful_rows: meaningfulRows.length,
+        instruction: "Rebuild the complete corridor and add only high-value, directly on-route scenic/cultural micro-stops that fit daylight and dwell minima.",
+      });
+    }
+
+    rows.forEach((row, index) => {
+      if (_v653IsForcedAuroraRow_(row) && !_v653UserRequestedFixedAurora_(options?.messages || [])) {
+        errors.push({
+          code: "FORCED_AURORA_ROW",
+          day,
+          row: index + 1,
+          instruction: "Convert aurora into a concise conditional note unless the user explicitly requested a fixed aurora activity; use the released daytime capacity for a stronger distinct experience.",
+        });
+      }
+    });
+  }
+
   const entries = [...poiMap.entries()];
   for (let i = 0; i < entries.length; i++) {
     for (let j = i; j < entries.length; j++) {
@@ -1600,28 +1792,28 @@ FINAL SURGICAL REPAIR:
 - Preserve all strong, distinct regional/signature days and all explicit must-includes.
 - Do not replace a difficult regional day with repeated city attractions.
 - Rebuild every affected day chronologically when needed: no row may overlap the next row.
-- Close unexplained gaps longer than 45 minutes, or represent a legitimate meal, rest, reservation margin or free-time interval explicitly.
+- Close ALL incidental gaps of 1–30 minutes by recalculating the complete day clock; gaps over 30 minutes require an explicit legitimate row or must be removed.
 - Never move a fixed reservation or compress an anchor merely to eliminate a gap.
 - Make Activity/Notes duration statements agree with the duration field and row interval.
 - Remove airport/arrival/check-in/check-out/rental-car logistics unless explicitly supplied by the user.
 - Replace semantic duplicates and weak filler with a distinct concrete experience or honest free time.
 - Revalidate useful daylight after all time changes and remove a secondary stop rather than pushing a scenic anchor into darkness.
 - Resolve every A-or-B, selected venue, nearby area, recommended restaurant and if-open placeholder to one concrete feasible place.
-- Re-solve every affected day as one complete route: build the candidate sequence, compare plausible orders,
+- Re-solve every affected day as one complete route BEFORE editing rows: inventory the strongest on-corridor candidates, compare at least three plausible full-day orders,
   preserve fixed anchors, place scenic stops in useful daylight, minimize total driving/backtracking, and only
   then recalculate all row clocks from the beginning of the day through the return.
-- Remove the weakest optional stop instead of compressing multiple rows or using impossible times.
+- For a sparse regional flagship route, add the strongest feasible unused on-route micro-stops before using filler; remove the weakest optional stop only when daylight or honest timing requires it.
 - NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
 - No row may begin before the prior row ends. Recheck the complete repaired day after all changes.
 - Normal meals should be 45–75 minutes and never exceed 90 minutes unless explicitly special.
 - Transfer-only rows require a 5–15 minute arrival/parking buffer, not 1 minute.
-- Scenic beaches, waterfalls, geothermal fields and comparable outdoor anchors normally need at least 30 minutes.
+- Scenic beaches, waterfalls, geysers/geothermal fields, craters, coastal cliffs and comparable outdoor anchors normally need at least 45 minutes; substantial scenic walks often need 60 minutes or more.
 - Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
 - Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
-- Aurora, when plausible, should normally be a concise note with independent-drive and paid-tour options, not a forced fixed row unless explicitly requested.
+- Aurora, when plausible, must be a concise conditional note with independent-drive and paid-tour options, not a fixed activity row unless the user explicitly requested a fixed aurora booking.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
 - Remove rental-car wording from hotel/from/to fields.
 - Use walking in compact urban clusters when practical.
@@ -2355,6 +2547,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
     // Final itinerary/one-shot normalization.
     if (!parsed) parsed = fallbackJSON(lang);
     parsed = _v65NormalizeEverySchema_(parsed);
+    parsed = _v653DeterministicOptimize_(parsed);
 
     // Deterministic audit runs only on actual city_day output.
     // One bounded surgical repair is allowed; if it fails, the valid original draft is retained
@@ -2377,9 +2570,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
           );
 
           if (repaired) {
-            const repairedReport = _v62ValidateFinal_(repaired, { messages: clientMessages });
+            const optimizedRepaired = _v653DeterministicOptimize_(repaired);
+            const repairedReport = _v62ValidateFinal_(optimizedRepaired, { messages: clientMessages });
             if (repairedReport.ok || repairedReport.errors.length <= Math.max(0, Math.floor(report.errors.length * 0.35))) {
-              parsed = repaired;
+              parsed = optimizedRepaired;
             }
           }
         } catch (repairError) {
