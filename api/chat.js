@@ -1,4 +1,4 @@
-// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.1 (MVP WOW: precision quality patch over v65; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -528,7 +528,31 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
 - Do not repeat an identical aurora note every night.
 
-8. QUALITY
+8. FINAL PRECISION AUDIT — NON-DESTRUCTIVE
+- Before returning JSON, audit the complete day sequence, not only isolated rows.
+- Unexplained gaps longer than 45 minutes are forbidden. A legitimate meal, rest, reservation margin
+  or free-time interval must be represented explicitly; otherwise close the gap by retiming only the
+  affected rows. Never move a fixed reservation or compress an anchor experience to hide a gap.
+- The duration stated in Activity/Notes must agree with the duration field and the row interval. If
+  Notes describe a 90–120 minute walk, the published activity duration cannot be shorter.
+- Do not invent arrival/departure logistics, airport transfers, flights, check-in, check-out, rental-car
+  pickup/return or packing unless those facts are explicitly present in the user's input.
+- Detect semantic duplicates across days, including aliases for the same harbor, waterfront, old town,
+  neighborhood, scenic corridor or experience. Transit through an area is not a second visit.
+- Reject weak filler presented as a premium attraction: generic coffee, settling in, packing, an
+  aimless walk, generic rest, or an unnamed nearby viewpoint. Honest free time is preferable.
+- Revalidate scenic activities after all clock changes so useful daylight is still protected.
+- Choose one concrete venue/place. Do not leave unresolved choices such as A or B, selected venue,
+  nearby dark area, recommended restaurant, if open, if Sunday, or similar.
+- Use actual calendar date/day-of-week and normal seasonal operation when known from the request. If
+  operational certainty is insufficient, choose a more robust alternative instead of presenting the
+  doubtful venue as confirmed.
+- Optimize the entire route as one sequence: compare plausible orders, minimize backtracking, group
+  adjacent zones, avoid returning to a neighborhood already completed, and preserve anchor times.
+- Keep user-facing language consistent in activity, transport, duration labels and notes; retain only
+  official proper names in their original form.
+
+9. QUALITY
 - Use one selected language for all user-facing values.
 - Preserve official proper names but translate generic instructions.
 - Remove debug, placeholder and internal-planning wording.
@@ -1172,6 +1196,36 @@ function _v65NormalizeEverySchema_(parsed) {
   return parsed;
 }
 
+function _v65UserSuppliedArrivalLogistics_(messages = []) {
+  const text = _allMessageText_(messages);
+  return /\b(?:flight|vuelo|vol|flug|voo|airport|aeropuerto|aeroporto|arrival|arrive|llegada|llego|llegamos|chegada|departure|salida|partida|check[- ]?in|check[- ]?out|rental car pickup|car pickup|recogida del vehiculo|recogida del vehículo|devolucion del vehiculo|devolución del vehículo)\b/i.test(text);
+}
+
+function _v65LooksLikeInventedArrivalRow_(row = {}) {
+  const text = `${row?.activity || ""} ${row?.from || ""} ${row?.to || ""} ${row?.notes || ""}`;
+  return /\b(?:airport|aeropuerto|aeroporto|flight arrival|arrival transfer|traslado de llegada|airport transfer|check[- ]?in|hotel check[- ]?in|recoger (?:el )?(?:coche|vehiculo|vehículo)|rental car pickup)\b/i.test(text);
+}
+
+function _v65DurationMentionsInText_(value = "") {
+  const text = String(value || "");
+  const matches = text.match(/\b(?:\d+(?:[.,]\d+)?\s*(?:h|hr|hrs|hour|hours|hora|horas)(?:\s*\d{1,2}\s*(?:m|min|mins|minute|minutes|minuto|minutos))?|\d+\s*(?:m|min|mins|minute|minutes|minuto|minutos))(?:\s*[–—-]\s*(?:\d+(?:[.,]\d+)?\s*(?:h|hr|hrs|hour|hours|hora|horas)(?:\s*\d{1,2}\s*(?:m|min|mins|minute|minutes|minuto|minutos))?|\d+\s*(?:m|min|mins|minute|minutes|minuto|minutos)))?/gi) || [];
+  return matches.map((m) => _v62DurationBounds_(m)).filter(Boolean);
+}
+
+function _v65SemanticExperienceKey_(row = {}) {
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.zone || ""}`)
+    .replace(/\b(walk|walking|paseo|caminata|promenade|stroll|visit|visita|tour|area|zona|district|barrio|quarter|sector|harbor|harbour|puerto|waterfront|seafront|riverside|old town|historic center|historic centre|centro historico)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text || text.length < 6 || _v62IsTransitNode_(text)) return "";
+  return text;
+}
+
+function _v65LooksLikeWeakFiller_(row = {}) {
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+  return /\b(settle in|settling in|pack|packing|unpack|unpacking|generic coffee|coffee near|cafe near|rest at hotel|descanso en el hotel|tiempo para instalarse|acomodarse en el hotel|preparar maletas|empacar|paseo libre sin destino|free walk nearby|nearby walk)\b/.test(text);
+}
+
 function _v65ExtractHardContext_(messages = []) {
   const text = _allMessageText_(messages);
   const out = { hotel: "", transport: "" };
@@ -1191,6 +1245,8 @@ function _v62ValidateFinal_(parsed, options = {}) {
   }
 
   const poiMap = new Map();
+  const semanticMap = new Map();
+  const userSuppliedArrivalLogistics = _v65UserSuppliedArrivalLogistics_(options?.messages || []);
 
   for (const block of cityDay) {
     const day = Number(block?.day) || 0;
@@ -1209,6 +1265,15 @@ function _v62ValidateFinal_(parsed, options = {}) {
 
       if (previousEnd != null && start != null && start < previousEnd) {
         errors.push({ code: "TIME_OVERLAP", day, row: rowNumber });
+      }
+
+      if (previousEnd != null && start != null && start - previousEnd > 45) {
+        errors.push({
+          code: "UNEXPLAINED_LARGE_GAP",
+          day,
+          row: rowNumber,
+          gap_minutes: start - previousEnd,
+        });
       }
 
       const transport = _v62DurationBounds_(
@@ -1264,8 +1329,30 @@ function _v62ValidateFinal_(parsed, options = {}) {
         }
       }
 
+      if (activity) {
+        const mentions = _v65DurationMentionsInText_(`${row?.activity || ""} ${row?.notes || ""}`);
+        const strongestMention = mentions.reduce((max, item) => Math.max(max, Number(item?.min) || 0), 0);
+        if (strongestMention > 0 && strongestMention > activity.max + 15) {
+          errors.push({
+            code: "NOTE_DURATION_CONTRADICTION",
+            day,
+            row: rowNumber,
+            stated_minutes: strongestMention,
+            activity_minutes: activity.max,
+          });
+        }
+      }
+
+      if (!userSuppliedArrivalLogistics && _v65LooksLikeInventedArrivalRow_(row)) {
+        errors.push({ code: "INVENTED_ARRIVAL_LOGISTICS", day, row: rowNumber });
+      }
+
+      if (_v65LooksLikeWeakFiller_(row)) {
+        errors.push({ code: "WEAK_FILLER_ACTIVITY", day, row: rowNumber });
+      }
+
       if (
-        /\s\/\s|\bor similar\b|\bo similar\b|\bselected\b|\bseleccionados\b|\brecommended restaurant\b|\brestaurante recomendado\b/i.test(
+        /\s\/\s|\bor similar\b|\bo similar\b|\bselected\b|\bseleccionados\b|\brecommended restaurant\b|\brestaurante recomendado\b|\bnearby\b|\bcercano\b|\bcercana\b|\bif open\b|\bsi esta abierto\b|\bsi está abierto\b/i.test(
           String(row?.to || "")
         )
       ) {
@@ -1330,6 +1417,12 @@ function _v62ValidateFinal_(parsed, options = {}) {
         poiMap.get(poi).push({ day, row: rowNumber });
       }
 
+      const semanticKey = _v65SemanticExperienceKey_(row);
+      if (semanticKey) {
+        if (!semanticMap.has(semanticKey)) semanticMap.set(semanticKey, []);
+        semanticMap.get(semanticKey).push({ day, row: rowNumber });
+      }
+
       previousEnd = end;
       previousTo = row?.to || "";
     });
@@ -1359,6 +1452,17 @@ function _v62ValidateFinal_(parsed, options = {}) {
           uses,
         });
       }
+    }
+  }
+
+  for (const [key, uses] of semanticMap.entries()) {
+    const distinctDays = [...new Set(uses.map((use) => use.day))];
+    if (distinctDays.length > 1) {
+      errors.push({
+        code: "DUPLICATE_EXPERIENCE_SEMANTIC",
+        experience: key,
+        uses,
+      });
     }
   }
 
@@ -1396,6 +1500,14 @@ FINAL SURGICAL REPAIR:
 - Preserve all strong, distinct regional/signature days and all explicit must-includes.
 - Do not replace a difficult regional day with repeated city attractions.
 - Rebuild every affected day chronologically when needed: no row may overlap the next row.
+- Close unexplained gaps longer than 45 minutes, or represent a legitimate meal, rest, reservation margin or free-time interval explicitly.
+- Never move a fixed reservation or compress an anchor merely to eliminate a gap.
+- Make Activity/Notes duration statements agree with the duration field and row interval.
+- Remove airport/arrival/check-in/check-out/rental-car logistics unless explicitly supplied by the user.
+- Replace semantic duplicates and weak filler with a distinct concrete experience or honest free time.
+- Revalidate useful daylight after all time changes and remove a secondary stop rather than pushing a scenic anchor into darkness.
+- Resolve every A-or-B, selected venue, nearby area, recommended restaurant and if-open placeholder to one concrete feasible place.
+- Optimize the complete affected-day sequence for minimal backtracking while preserving anchors and user constraints.
 - NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
 - Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
@@ -1909,6 +2021,10 @@ FINAL INTERNAL QUALITY CHECK (MANDATORY BEFORE OUTPUT):
   • no repeated museum + food + harbor/walk + dinner pattern
   • no excessive urban filler in long gateway/outward-base itineraries
   • no giant unexplained gaps in regional/scenic days
+  • no invented arrival, airport, check-in, check-out or rental-car logistics absent from user input
+  • no contradiction between activity/notes duration and the duration field
+  • no unresolved A-or-B, selected venue, nearby-area or if-open placeholders
+  • no scenic outdoor activity pushed outside useful daylight after retiming
   • no weak sparse flagship routes
   • no important micro-stops hidden only in notes when they should be rows
   • no generic macro labels
