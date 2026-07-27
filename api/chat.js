@@ -1,4 +1,4 @@
-// /api/chat.js — v65.1 (MVP WOW: precision quality patch over v65; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.2 (MVP WOW: global day-route optimization patch over v65.1; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -504,10 +504,38 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - Select the best feasible subset according to route continuity, daylight, safety, traveler fit and
   anchor dwell time.
 - Important sub-stops must be separate rows rather than hidden only in Notes.
-- A rich regional day will often contain 6–10 meaningful rows, but quality and feasibility are more
-  important than row count.
+- A rich regional day may contain 6–10 meaningful rows, but NEVER chase a row count. Four excellent,
+  well-timed stops are better than eight rushed stops.
+- Add a micro-stop only when it is high-value, directly on the chosen corridor, seasonally plausible,
+  and does not reduce an anchor below its useful dwell or push a scenic stop outside useful daylight.
 - Do not add a weak museum, generic café or filler stop at the expense of a signature on-route stop.
 - Avoid backtracking and do not revisit the same route on another day.
+
+5A. GLOBAL DAY-ROUTE OPTIMIZATION — MANDATORY INTERNAL PASS
+Before writing ANY row for a day, solve the complete day as one route, not as independent A→B legs:
+1) Build a candidate pool limited to the approved Master-theme corridor and reserved anchors.
+2) Mark fixed reservations, useful-daylight activities, realistic dwell minima, meal needs, opening-risk,
+   traveler constraints and the required return/base endpoint.
+3) Compare at least three plausible full-day orders when three or more movable stops exist.
+4) Select the order that best minimizes total driving, backtracking and repeated zones while maximizing
+   anchor quality, useful daylight, route continuity and traveler comfort.
+5) Remove the lowest-value optional stop until the whole route fits honestly. Never shrink transport,
+   anchor dwell, meal time or safety margin to make an overloaded route appear feasible.
+6) Only after the winning full-day sequence is chosen, calculate every row clock from start to finish.
+
+GLOBAL OPTIMIZATION PRIORITIES, in this order:
+- hard user constraints and fixed reservations;
+- safety, seasonal feasibility and useful daylight;
+- complete anchor dwell and realistic transport;
+- geographic continuity and no backtracking;
+- high-value on-route micro-stops;
+- meals/rest;
+- optional filler last.
+
+A completed geographic zone must not be revisited later the same day unless the route physically requires
+passing through it without a second activity. Outbound and return driving may use darkness; scenic outdoor
+anchors should consume the useful-light window. Do not spend useful daylight on an ordinary meal or long
+indoor filler when a reserved outdoor anchor still remains.
 
 6. TRANSPORT AND LOCATIONS
 - The user's named lodging/base and selected transport are HARD FACTS.
@@ -549,6 +577,14 @@ day's scope or omit it. Never publish a misleadingly short visit.
   doubtful venue as confirmed.
 - Optimize the entire route as one sequence: compare plausible orders, minimize backtracking, group
   adjacent zones, avoid returning to a neighborhood already completed, and preserve anchor times.
+- After optimization, run a final clock simulation from the first departure through the return. Every
+  next start must be at or after the previous end; no row may be nested inside or overlap another row.
+- Do not publish a restaurant/meal row longer than 90 minutes unless the user requested a tasting menu,
+  food tour or special reservation. A normal meal is usually 45–75 minutes plus transport.
+- A transfer-only row may be used for a meaningful outbound or return leg, but its Activity value is only
+  the arrival/parking/settling buffer (normally 5–15 minutes), never 1 minute and never invented sightseeing.
+- Activity titles should name the experience or destination. Use "Transfer/Return" only for genuine
+  long outbound/return legs, not as the main identity of intermediate sightseeing rows.
 - Keep user-facing language consistent in activity, transport, duration labels and notes; retain only
   official proper names in their original form.
 
@@ -1226,6 +1262,25 @@ function _v65LooksLikeWeakFiller_(row = {}) {
   return /\b(settle in|settling in|pack|packing|unpack|unpacking|generic coffee|coffee near|cafe near|rest at hotel|descanso en el hotel|tiempo para instalarse|acomodarse en el hotel|preparar maletas|empacar|paseo libre sin destino|free walk nearby|nearby walk)\b/.test(text);
 }
 
+function _v65IsTransferOnlyRow_(row = {}) {
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+  return /\b(transfer|traslado|return|regreso|retorno|regresso|back to|drive to|conduccion a|conducción a)\b/.test(text);
+}
+
+function _v65MinimumDwellProfile_(row = {}) {
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`);
+
+  if (/\b(black sand beach|beach|playa|strand|plage|praia|waterfall|cascada|cachoeira|cascade|geothermal field|campo geotermico|campo geotérmico|hot spring field|coastal cliff|acantilado|cliff walk)\b/.test(text)) {
+    return { type: "scenic_outdoor_anchor", minimumActivityMinutes: 30 };
+  }
+
+  if (/\b(church exterior|iglesia exterior|lighthouse|faro|photo stop|parada fotografica|parada fotográfica|viewpoint|mirador|monument|escultura)\b/.test(text)) {
+    return { type: "compact_landmark", minimumActivityMinutes: 15 };
+  }
+
+  return { type: "", minimumActivityMinutes: 0 };
+}
+
 function _v65ExtractHardContext_(messages = []) {
   const text = _allMessageText_(messages);
   const out = { hotel: "", transport: "" };
@@ -1267,9 +1322,9 @@ function _v62ValidateFinal_(parsed, options = {}) {
         errors.push({ code: "TIME_OVERLAP", day, row: rowNumber });
       }
 
-      if (previousEnd != null && start != null && start - previousEnd > 45) {
+      if (previousEnd != null && start != null && start - previousEnd > 30) {
         errors.push({
-          code: "UNEXPLAINED_LARGE_GAP",
+          code: "UNEXPLAINED_GAP",
           day,
           row: rowNumber,
           gap_minutes: start - previousEnd,
@@ -1325,6 +1380,51 @@ function _v62ValidateFinal_(parsed, options = {}) {
             day,
             row: rowNumber,
             actual_activity_minutes: activity.min,
+          });
+        }
+
+        if (_v65IsTransferOnlyRow_(row) && activity.min < 5) {
+          errors.push({
+            code: "TRANSFER_BUFFER_TOO_SHORT",
+            day,
+            row: rowNumber,
+            actual_activity_minutes: activity.min,
+          });
+        }
+
+        const dwellProfile = _v65MinimumDwellProfile_(row);
+        if (
+          dwellProfile.minimumActivityMinutes > 0 &&
+          activity.min < dwellProfile.minimumActivityMinutes
+        ) {
+          errors.push({
+            code: "SCENIC_DWELL_TOO_SHORT",
+            day,
+            row: rowNumber,
+            experience_type: dwellProfile.type,
+            actual_activity_minutes: activity.min,
+            minimum_activity_minutes: dwellProfile.minimumActivityMinutes,
+          });
+        }
+
+        const rowSlack = available - needed;
+        const mealText = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+        const isOrdinaryMeal = /\b(lunch|dinner|breakfast|brunch|almuerzo|cena|desayuno|comida|restaurant|restaurante)\b/.test(mealText) &&
+          !/\b(food tour|tasting menu|degustacion|degustación|culinary tour|tour gastronomico|tour gastronómico)\b/.test(mealText);
+        if (isOrdinaryMeal && activity.min > 90) {
+          errors.push({
+            code: "ORDINARY_MEAL_TOO_LONG",
+            day,
+            row: rowNumber,
+            actual_activity_minutes: activity.min,
+          });
+        }
+        if (rowSlack > 60 && !_v64IsReturnRow_(row)) {
+          errors.push({
+            code: "ROW_INTERVAL_EXCESS_SLACK",
+            day,
+            row: rowNumber,
+            slack_minutes: rowSlack,
           });
         }
       }
@@ -1507,8 +1607,15 @@ FINAL SURGICAL REPAIR:
 - Replace semantic duplicates and weak filler with a distinct concrete experience or honest free time.
 - Revalidate useful daylight after all time changes and remove a secondary stop rather than pushing a scenic anchor into darkness.
 - Resolve every A-or-B, selected venue, nearby area, recommended restaurant and if-open placeholder to one concrete feasible place.
-- Optimize the complete affected-day sequence for minimal backtracking while preserving anchors and user constraints.
+- Re-solve every affected day as one complete route: build the candidate sequence, compare plausible orders,
+  preserve fixed anchors, place scenic stops in useful daylight, minimize total driving/backtracking, and only
+  then recalculate all row clocks from the beginning of the day through the return.
+- Remove the weakest optional stop instead of compressing multiple rows or using impossible times.
 - NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
+- No row may begin before the prior row ends. Recheck the complete repaired day after all changes.
+- Normal meals should be 45–75 minutes and never exceed 90 minutes unless explicitly special.
+- Transfer-only rows require a 5–15 minute arrival/parking buffer, not 1 minute.
+- Scenic beaches, waterfalls, geothermal fields and comparable outdoor anchors normally need at least 30 minutes.
 - Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
 - Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
@@ -1584,8 +1691,11 @@ Before writing itinerary rows, you MUST internally complete these steps:
 2) Build an internal MASTER DAY PLAN before generating rows.
 3) Assign each day a unique day identity and bucket.
 4) Rank all available buckets from strongest to weakest BEFORE choosing the final daily plan.
-5) Generate rows only after the full day strategy is clear.
-6) When the request supplies strategic themes in the form
+5) For each day, solve the COMPLETE route before generating rows: candidate stops, fixed anchors,
+   daylight, dwell, meals, full transport chain and return to base. Compare plausible full-day orders;
+   choose the strongest sequence and remove optional overload before assigning clocks.
+6) Generate rows only after the full day strategy and winning route sequence are clear.
+7) When the request supplies strategic themes in the form
    "PLAN – <identity/corridor> | Anchors: <reserved anchors>", treat them as a binding trip-wide
    reservation map. Generate only within that scope and do not introduce famous POIs from other
    days.
