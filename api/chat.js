@@ -1,4 +1,4 @@
-// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.1 (MVP WOW: stronger signature day-trip allocation; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -404,17 +404,38 @@ TRIP-WIDE ALLOCATION
 Before returning JSON, internally build a reservation ledger:
 1. classify the base as dense city, gateway/outward base, hybrid, nature base, island/relax base,
    or multi-base road trip;
-2. rank the strongest feasible city, regional, nature, culture, wellness, wildlife, food,
-   adventure and seasonal buckets;
-3. assign each selected bucket to one day only;
-4. reserve every major anchor to one day only;
-5. audit all day themes together for duplicate corridors and duplicate anchors.
+2. inventory and rank the strongest feasible city, regional, nature, culture, wellness, wildlife,
+   food, adventure and seasonal buckets, including realistic day trips from the selected base;
+3. score the best candidates by destination significance, uniqueness, traveler fit, season/daylight,
+   total logistics, operational plausibility, diversity and incremental value versus already chosen days;
+4. compare every weak or secondary urban candidate against the strongest unused excursion candidate;
+5. assign each selected bucket to one day only;
+6. reserve every major anchor to one day only;
+7. audit all day themes together for duplicate corridors, duplicate anchors and missed high-value
+   regional/signature opportunities.
+
+A day-trip candidate must not be chosen merely because it is famous. It must be realistically feasible
+from the stated lodging/base and transport within the available day window. Conversely, do not omit a
+high-value feasible excursion merely because a generic urban day is easier to compose.
 
 For stays of five or more days:
 - Strong unused regional or signature experiences must be consumed before a second weak urban
   filler day, when season, daylight, distance, safety and traveler profile make them feasible.
+- Before accepting any secondary urban day, explicitly compare it against the strongest remaining
+  feasible full-day or substantial half-day excursion from the same base.
+- Replace the weaker urban day when the excursion has clearly higher combined value in uniqueness,
+  destination significance, traveler fit, seasonality, logistics and use of available time.
+- For 4-day stays at a gateway, hybrid or nature base, evaluate at least one signature outward day
+  or substantial regional experience unless the city itself clearly offers stronger non-redundant
+  inventory.
+- For 5–6 day stays, evaluate multiple excursion candidates and normally reserve the best one or two
+  when they clearly outperform secondary urban filler.
+- For 7+ day stays, continue consuming top-ranked distinct regional/signature buckets while they
+  remain feasible and stronger than the weakest unassigned city day.
 - At a gateway/outward base, outward/regional/special days should normally outnumber generic city
   filler days.
+- At a nature base, do not let a short urban attraction or isolated viewpoint consume a full day
+  when a stronger regional nature, wildlife, snow, marine or adventure experience is feasible.
 - Do not split one coherent macro-route into two days merely to fill the calendar.
 - Never reserve "optional if not visited previously", "express version", "second chance" or any conditional repeat of an attraction already allocated to another day.
 - Do not schedule a macro-route plus its anchor experience on one day and then repeat that anchor
@@ -765,6 +786,11 @@ MASTER-PLAN SURGICAL REPAIR:
 - Do not split one coherent macro-route into multiple days.
 - Prefer a lighter but distinct day over repetition.
 - Preserve strong unused regional, nature, culture, wellness, wildlife, food and adventure buckets.
+- Re-evaluate the weakest urban day against the strongest unused feasible excursion from the same base.
+- For gateway, hybrid and nature bases, do not preserve a weak city filler day when a substantially
+  stronger day trip or signature regional experience is feasible within season, daylight, transport
+  and the user's daily window.
+- Do not force a quota of excursions: select them only when they outperform the weakest retained day.
 - JSON only.
 
 DETERMINISTIC MASTER ERRORS:
@@ -1496,7 +1522,13 @@ MASTER DAY PLAN RULES (CRITICAL — INTERNAL ONLY):
 - Do NOT generate rows by simply filling each day from top to bottom with museums, cafés, harbor walks, gardens, and dinners.
 - For long stays, the itinerary must first allocate the strongest buckets, then generate activities inside each bucket.
 - For 6+ day itineraries, weak urban filler must NOT displace stronger outward, regional, special, or iconic experiences.
+- For 4+ day gateway, hybrid or nature-base itineraries, explicitly compare the weakest proposed city day
+  against the strongest feasible unused excursion or regional signature experience.
+- For 5–6 day stays, consider the best one or two distinct day trips when they clearly beat secondary
+  urban days in significance, uniqueness, traveler fit, seasonality and practical feasibility.
 - For gateway/outward-base destinations, regional and special-experience buckets must dominate over repeated city filler.
+- For nature bases, prioritize substantial regional nature, wildlife, marine, snow or adventure experiences
+  over assigning a full day to a short viewpoint, cable car, harbor walk or generic city filler.
 - For dense cities, city days can dominate, but each day must use a different district, rhythm, route logic, and emotional identity.
 - For hybrid destinations, balance core city must-sees with strong outward experiences.
 - A bucket may NOT be reused if another strong unused bucket exists.
@@ -1526,6 +1558,10 @@ BUCKET EXHAUSTION RULE (CRITICAL — INTERNAL ONLY):
   • iconic night experience
   • scenic route with real sub-stops
 - If a strong unused bucket exists, you MUST use it before creating another weak urban filler day.
+- When several excursions are feasible, compare them and reserve only the top-ranked distinct option(s);
+  do not select the first recognizable day trip by default.
+- The comparison must consider actual season, daylight, travel time, transport mode, operating plausibility,
+  traveler profile, uniqueness and overlap with already selected days.
 - For 6–8 day itineraries, the last 2–3 days must still feel intentional and premium, not like leftovers.
 
 INTERPRETATION POLICY (CRITICAL: do NOT over-obey):
