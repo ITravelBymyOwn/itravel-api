@@ -1,197 +1,733 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
+  <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>I Travel — By My Own · Planificador con IA</title>
-  <meta name="description" content="Planifica viajes con IA: itinerarios inteligentes, rutas optimizadas y guardado de trips. Monetización preparada (afiliados + ads).">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/css/main.css" />
-  <script defer src="assets/js/ui.js"></script>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🗺️</text></svg>">
+  <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
+  <link rel="stylesheet" href="./planner.css?v=60" />
+
+  <!-- Tipografía -->
+  <link href="https://fonts.googleapis.com" rel="preconnect" />
+  <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin="anonymous" />
+  <script src="https://ajax.googleapis.com/ajax/libs/webfont/1.6.26/webfont.js"></script>
+  <script>
+    WebFont.load({ google: { families: ["Inter:400,500,600,700,800,900"] } });
+  </script>
 </head>
-<body class="theme-light">
-  <!-- Loader global -->
-  <div id="app-loader" class="loader hidden" aria-hidden="true">
-    <div class="loader-track"><div class="loader-bar"></div></div>
-    <div class="loader-veil"><div class="spinner" aria-label="Cargando"></div></div>
+<body>
+  <!-- TOPBAR -->
+  <div class="topbar">
+    <!-- ✅ Brand estilo logo (2 líneas) -->
+    <div class="brand brand-logo" aria-label="I Travel By My Own">
+      <div class="brand-line-1">I Travel</div>
+      <div class="brand-line-2">By My Own</div>
+    </div>
+
+    <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
+    <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
 
-  <!-- Header sticky -->
-  <header class="site-header is-sticky" data-sticky>
-    <div class="container header-inner">
-      <a class="brand" href="index.html" aria-label="I Travel — By My Own">
-        <div class="wordmark">
-          <span class="i-travel">I Travel</span>
-          <span class="by-my-own">By My Own</span>
-        </div>
-      </a>
+  <div id="planner-grid">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <h2>Planificador</h2>
 
-      <nav class="nav" aria-label="Principal">
-        <button class="nav-toggle" aria-expanded="false" aria-controls="nav-menu">
-          <span class="nav-toggle-bar"></span><span class="sr-only">Abrir menú</span>
+      <section class="box">
+        <h3>Destinos</h3>
+        <div id="city-list"></div>
+        <div class="row-actions">
+          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+        </div>
+
+        <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
+        <!-- <button class="btn primary w-100" id="save-destinations">Guardar destinos</button> -->
+        <!-- 🆕 Botón de reinicio reubicado -->
+        <!--
+        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
+          Reiniciar planificación
         </button>
-        <ul id="nav-menu" class="nav-menu">
-          <li><a href="index.html" class="is-active">Home</a></li>
-          <li><a href="planner.html">Planner</a></li>
-          <li><a href="pricing.html" data-aff="pricing">Pricing</a></li>
-          <li><a href="dashboard.html">Dashboard</a></li>
-          <li class="nav-cta"><a href="auth.html">Login</a></li>
-        </ul>
-      </nav>
-    </div>
-  </header>
+        -->
+      </section>
 
-  <!-- Botón flotante Home (móvil) -->
-  <a href="index.html" class="fab-home" aria-label="Volver al Home">🏠</a>
+      <section class="box special-conditions">
+        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
+        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
+Esta información permitirá crear un itinerario 100 % alineado contigo.
 
-  <main id="main-content">
-    <!-- HERO con foto rotativa y slot de Ads -->
-    <section class="hero hero--photo block-padding">
-      <div id="ad-hero" class="ad-slot" data-ads="header">
-        <!-- Slot Ads (Google/TikTok) – listo para integrar script del proveedor -->
-      </div>
+🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
+🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
+🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
+🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
+⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
+👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
 
-      <div class="container hero-grid">
-        <div class="hero-copy">
-          <h1 class="h1">Planifica viajes <span class="grad">inteligentes</span> con IA</h1>
-          <p class="lede">
-            Rutas optimizadas, tiempos reales y un diseño <strong>moderno, minimalista y premium</strong>.
-            Listo para guardar, exportar y compartir.
-          </p>
-          <div class="hero-actions">
-            <a class="btn btn-primary" href="planner.html" data-nav="planner">Comienza tu itinerario</a>
-            <a class="btn btn-ghost" href="pricing.html" data-aff="pricing">Ver planes</a>
+📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
+      </section>
+
+      <!-- ✅ NUEVO: Viajeros (compacto con dropdown) -->
+      <section class="box">
+        <h3>Viajeros</h3>
+
+        <!-- Dropdown tipo “número de días” (referencia visual en el UI) -->
+        <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+          ¿Con quién viajas?
+          <select id="traveler-mode" class="btn" style="padding:.55rem .7rem; border-radius:.55rem; background:#fff; text-align:left;">
+            <option value="" selected disabled></option>
+            <option value="solo">Viajo solamente yo</option>
+            <option value="group">Viajo acompañado</option>
+          </select>
+        </label>
+
+        <!-- Panel SOLO -->
+        <div id="traveler-solo-panel" style="display:none; margin-top:.85rem;">
+          <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
+            <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+              Género
+              <select id="solo-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                <option value="" selected disabled></option>
+                <option value="female">Femenino</option>
+                <option value="male">Masculino</option>
+                <option value="other">Otro</option>
+                <option value="na">Prefiero no decirlo</option>
+              </select>
+            </label>
+
+            <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+              Rango de edad
+              <select id="solo-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                <option value="" selected disabled></option>
+                <option value="0-2">Bebé (0–2)</option>
+                <option value="3-5">Preescolar (3–5)</option>
+                <option value="6-12">Niño (6–12)</option>
+                <option value="13-17">Adolescente (13–17)</option>
+                <option value="18-24">Joven adulto (18–24)</option>
+                <option value="25-39">Adulto (25–39)</option>
+                <option value="40-54">Adulto (40–54)</option>
+                <option value="55-64">Adulto (55–64)</option>
+                <option value="65+">Mayor (65+)</option>
+              </select>
+            </label>
           </div>
-          <ul class="bullets">
-            <li>Itinerarios dinámicos y editables</li>
-            <li>IA proactiva y multi-idioma</li>
-            <li>Upsell y afiliados integrados</li>
-          </ul>
         </div>
 
-        <!-- Imagen destacada / carrusel básico -->
-        <figure class="hero-art">
-          <img class="hero-img" id="hero-img" src="" alt="Inspiración de viaje" loading="lazy" />
-          <div class="img-placeholder" role="img" aria-label="Imagen de viaje — placeholder"></div>
-          <figcaption class="photo-credit" id="photo-credit"></figcaption>
-        </figure>
-      </div>
-    </section>
+        <!-- Panel ACOMPAÑADO -->
+        <div id="traveler-group-panel" style="display:none; margin-top:.85rem;">
 
-    <!-- Beneficios -->
-    <section class="benefits block-padding">
-      <div class="container">
-        <div class="section-head">
-          <h2 class="h2">Todo lo que necesitas para viajar mejor</h2>
-          <p class="muted">Ahorra tiempo y eleva tu experiencia con IA.</p>
-        </div>
-        <div class="cards-grid">
-          <article class="card">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 11h5a6 6 0 01-5 5v-5zM11 4a6 6 0 00-5 5h5V4z" fill="currentColor"/></svg>
+          <!-- ✅ NUEVO: Tu información (usuario) -->
+          <div class="box" style="margin:0 0 .75rem 0; padding:.9rem; border-style:dashed;">
+            <strong style="font-size:.95rem;">Tu información</strong>
+
+            <div style="display:flex; gap:.6rem; flex-wrap:wrap; margin-top:.75rem;">
+              <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+                Género
+                <select id="me-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                  <option value="" selected disabled></option>
+                  <option value="female">Femenino</option>
+                  <option value="male">Masculino</option>
+                  <option value="other">Otro</option>
+                  <option value="na">Prefiero no decirlo</option>
+                </select>
+              </label>
+
+              <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+                Rango de edad
+                <select id="me-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                  <option value="" selected disabled></option>
+                  <option value="0-2">Bebé (0–2)</option>
+                  <option value="3-5">Preescolar (3–5)</option>
+                  <option value="6-12">Niño (6–12)</option>
+                  <option value="13-17">Adolescente (13–17)</option>
+                  <option value="18-24">Joven adulto (18–24)</option>
+                  <option value="25-39">Adulto (25–39)</option>
+                  <option value="40-54">Adulto (40–54)</option>
+                  <option value="55-64">Adulto (55–64)</option>
+                  <option value="65+">Mayor (65+)</option>
+                </select>
+              </label>
             </div>
-            <h3 class="h4">Planificación inteligente</h3>
-            <p>Orden óptimo de visitas con tiempos y distancias reales.</p>
-          </article>
-
-          <article class="card">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14a1 1 0 011 1v7a8 8 0 11-16 0V5a1 1 0 011-1zm1 2v6a6 6 0 1012 0V6H6z" fill="currentColor"/></svg>
-            </div>
-            <h3 class="h4">Itinerarios dinámicos</h3>
-            <p>Edita, guarda, duplica y exporta cuando lo necesites.</p>
-          </article>
-
-          <article class="card">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5a2 2 0 012-2h5l2 2h7a2 2 0 012 2v3H3V5zm0 6h20v8a2 2 0 01-2 2H5a2 2 0 01-2-2v-8z" fill="currentColor"/></svg>
-            </div>
-            <h3 class="h4">Diseño premium</h3>
-            <p>Interfaz limpia, rápida y accesible, lista para crecer.</p>
-          </article>
-
-          <article class="card">
-            <div class="card-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 00-9 9h3a6 6 0 1112 0h3a9 9 0 00-9-9zm-1 10H6l6 8 6-8h-5V9h-2v4z" fill="currentColor"/></svg>
-            </div>
-            <h3 class="h4">Multi-idioma</h3>
-            <p>Contenido y UI listas para traducir y localizar.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- Bloque Afiliados (listo para tracking) -->
-    <section class="affiliates block-padding">
-      <div class="container affiliates-grid">
-        <a class="aff-card" data-aff="booking" href="#" rel="nofollow noopener">Booking</a>
-        <a class="aff-card" data-aff="airbnb" href="#" rel="nofollow noopener">Airbnb</a>
-        <a class="aff-card" data-aff="holafly" href="#" rel="nofollow noopener">Holafly</a>
-        <a class="aff-card" data-aff="airalo" href="#" rel="nofollow noopener">Airalo</a>
-        <a class="aff-card" data-aff="gyg" href="#" rel="nofollow noopener">GetYourGuide</a>
-      </div>
-    </section>
-
-    <!-- Mockup / Imagen ancha -->
-    <section class="mockup block-padding">
-      <div class="container mockup-grid">
-        <div class="mockup-art">
-          <img class="mockup-img" id="mockup-img" src="" alt="Vista previa del planner" loading="lazy" />
-          <div class="img-placeholder is-wide" role="img" aria-label="Mockup del planner — placeholder"></div>
-        </div>
-        <div class="mockup-copy">
-          <h2 class="h2">Visualiza tu ruta antes de salir</h2>
-          <p class="muted">Previsualiza los días, ajusta la secuencia y comparte tu plan con un clic.</p>
-          <a class="btn btn-primary" href="planner.html" data-nav="planner">Ir al Planner</a>
-        </div>
-      </div>
-    </section>
-
-    <!-- CTA final -->
-    <section class="cta block-padding">
-      <div class="container cta-box">
-        <h3 class="h2">¿Listo para tu próximo viaje?</h3>
-        <p class="muted">Comienza tu itinerario ahora y ajusta cada detalle a tu manera.</p>
-        <div class="cta-actions">
-          <a class="btn btn-primary" href="planner.html" data-nav="planner">Comienza tu itinerario</a>
-          <a class="btn btn-ghost" href="auth.html">Crear cuenta</a>
-        </div>
-      </div>
-    </section>
-
-    <!-- Slot Ads inferior -->
-    <div id="ad-footer" class="ad-slot" data-ads="footer"></div>
-  </main>
-
-  <!-- Footer -->
-  <footer class="site-footer">
-    <div class="container footer-grid">
-      <div class="footer-brand">
-        <a class="brand" href="index.html" aria-label="I Travel — By My Own">
-          <div class="wordmark small">
-            <span class="i-travel">I Travel</span>
-            <span class="by-my-own">By My Own</span>
           </div>
-        </a>
-        <p class="muted small">© <span id="y"></span> I Travel — By My Own. Todos los derechos reservados.</p>
-      </div>
-      <nav class="footer-nav" aria-label="Enlaces del sitio">
-        <a href="pricing.html">Pricing</a>
-        <a href="dashboard.html">Dashboard</a>
-        <a href="auth.html">Login</a>
-        <a href="#" aria-disabled="true">Política de Privacidad</a>
-        <a href="#" aria-disabled="true">Términos</a>
-      </nav>
-      <div class="footer-social">
-        <a href="#" aria-disabled="true" title="Próximamente">Instagram</a>
-        <a href="#" aria-disabled="true" title="Próximamente">YouTube</a>
-        <a href="#" aria-disabled="true" title="Próximamente">X / Twitter</a>
-      </div>
-    </div>
+          <!-- /Tu información -->
+
+          <div class="box" style="margin:0; padding:.9rem; border-style:dashed;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem;">
+              <strong style="font-size:.95rem;">Perfiles de viajeros</strong>
+              <!-- MVP: el JS luego generará perfiles automáticamente.
+                   Por ahora dejamos contenedor + botones opcionales para futuro -->
+              <div style="display:flex; gap:.4rem;">
+                <button id="traveler-add" class="btn ghost" type="button" style="padding:.45rem .7rem;">+ Agregar</button>
+                <button id="traveler-remove" class="btn ghost" type="button" style="padding:.45rem .7rem;">− Quitar</button>
+              </div>
+            </div>
+
+            <div id="traveler-profiles" style="display:grid; grid-template-columns:1fr; gap:.75rem; margin-top:.75rem;">
+              <!-- Perfil 1 -->
+              <div class="traveler-profile" style="border:1px solid #ccc; border-radius:.8rem; padding:.75rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
+                  <strong style="font-size:.9rem;">Viajero 1</strong>
+                  <span style="font-size:.85rem; color:rgba(11,31,59,.65);">Acompañante</span>
+                </div>
+                <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
+                  <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+                    Género
+                    <select class="traveler-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                      <option value="" selected disabled></option>
+                      <option value="female">Femenino</option>
+                      <option value="male">Masculino</option>
+                      <option value="other">Otro</option>
+                      <option value="na">Prefiero no decirlo</option>
+                    </select>
+                  </label>
+
+                  <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
+                    Rango de edad
+                    <select class="traveler-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
+                      <option value="" selected disabled></option>
+                      <option value="0-2">Bebé (0–2)</option>
+                      <option value="3-5">Preescolar (3–5)</option>
+                      <option value="6-12">Niño (6–12)</option>
+                      <option value="13-17">Adolescente (13–17)</option>
+                      <option value="18-24">Joven adulto (18–24)</option>
+                      <option value="25-39">Adulto (25–39)</option>
+                      <option value="40-54">Adulto (40–54)</option>
+                      <option value="55-64">Adulto (55–64)</option>
+                      <option value="65+">Mayor (65+)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <!-- /Perfil 1 -->
+            </div>
+
+            <p style="margin:.75rem 0 0; font-size:.85rem; color:rgba(11,31,59,.68);">
+              *En el MVP, estos perfiles se usarán para personalizar el itinerario. La lógica se conecta en JS después.
+            </p>
+          </div>
+        </div>
+
+        <!-- ✅ Compatibilidad: mantenemos el grid original oculto (por ahora) para no romper JS actual -->
+        <div id="traveler-grid" style="display:none;">
+          <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
+          <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
+          <label>Niños (6–12)<input id="p-children" type="number" min="0" value="0"></label>
+          <label>Infantes (0–5)<input id="p-infants" type="number" min="0" value="0"></label>
+          <label>Mayores (65+)<input id="p-seniors" type="number" min="0" value="0"></label>
+        </div>
+      </section>
+
+      <!-- ✅ QUIRÚRGICO: botones al final del tab Planner (después de Travelers) -->
+      <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
+      <!-- 🆕 Botón de reinicio reubicado -->
+      <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
+        Reiniciar planificación
+      </button>
+
+      <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <section class="box itinerary-section">
+
+        <!-- ✅ Header: Título + botón Info Chat arriba (como el HTML donde sí se veía) -->
+        <div class="itinerary-head">
+          <h2>Itinerario</h2>
+
+          <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
+          <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
+            💬 Info Chat
+          </button>
+        </div>
+
+        <div class="itinerary-actions">
+          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+        </div>
+
+        <div id="chat-container" class="chat" style="display:none;">
+          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+          <div class="chat-input">
+            <input id="chat-input" type="text" placeholder="Escribe tu mensaje..." />
+            <button id="send-btn" class="btn primary">Enviar</button>
+          </div>
+        </div>
+
+        <div class="city-tabs" id="city-tabs"></div>
+        <div id="itinerary-container"></div>
+
+        <div class="toolbar">
+          <button class="btn" id="btn-pdf">Exportar PDF</button>
+
+          <!-- 🆕 MVP: CSV para Excel -->
+          <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
+
+          <button class="btn" id="btn-email">Enviar por Email</button>
+
+          <!-- ✅ MVP: ocultos (se reactivan después) -->
+          <!--
+          <button class="btn" id="btn-maps">Mapas</button>
+          <button class="btn" id="btn-transport">Transporte</button>
+          <button class="btn" id="btn-weather">Clima</button>
+          <button class="btn" id="btn-clothing">Ropa</button>
+          <button class="btn" id="btn-restaurants">Restaurantes</button>
+          <button class="btn" id="btn-gas">Gasolineras</button>
+          <button class="btn" id="btn-bathrooms">Baños</button>
+          <button class="btn" id="btn-lodging">Hospedaje</button>
+          <button class="btn" id="btn-localinfo">Info Local</button>
+          -->
+        </div>
+
+        <!-- ✅ QUIRÚRGICO: oculto/eliminado por ahora -->
+        <!-- <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button> -->
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    © 2026 ITravelByMyOwn
   </footer>
 
-  <a class="skip-link" href="#main-content">Saltar al contenido</a>
+  <!-- Modal Info Chat -->
+  <!-- ✅ Cambio quirúrgico: removido style="display:none;" para que el toggle por clase .active funcione -->
+  <div id="info-chat-modal" class="info-chat-modal">
+    <div class="info-chat-panel">
+      <div class="info-chat-header">
+        <h3>Info Chat · Astra 🌍</h3>
+        <button id="info-chat-close" class="btn ghost">✖</button>
+      </div>
+      <div id="info-chat-messages" class="chat-messages"></div>
+      <div class="chat-input">
+        <textarea id="info-chat-input" placeholder="Ask me anything about travel..." rows="1"></textarea>
+        <button id="info-chat-send" class="btn primary">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay de carga -->
+  <div id="loading-overlay" style="display:none;">
+    <div class="loader">
+      <div class="hourglass"></div>
+
+      <!-- ✅ Mensaje EXACTO solicitado -->
+      <p>✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
+    </div>
+  </div>
+
+  <!-- 🧠 Indicador estilo ChatGPT (Planner) -->
+  <div id="thinking-indicator">
+    <span></span><span></span><span></span>
+  </div>
+
+  <!-- 🧠 Indicador estilo ChatGPT (Info Chat) -->
+  <div id="thinking-indicator-info">
+    <span></span><span></span><span></span>
+  </div>
+
+  <script>
+    (function () {
+      // ✅ Idioma: por ahora EN primero, luego ES con &lang=es en el iframe src.
+      const params = new URLSearchParams(window.location.search);
+      const lang = (params.get("lang") || "en").toLowerCase().slice(0, 2);
+      document.documentElement.setAttribute("lang", lang);
+      window.ITBMO_LANG = lang;
+
+      // ✅ i18n (quirúrgico): UI EN/ES sin reescribir HTML ni tocar planner.js aún
+      const I18N = {
+        en: {
+          planner_title: "Planner",
+          destinations: "Destinations",
+          add_city: "+ Add city",
+          save_destinations: "Save destinations",
+          reset_planning: "Reset planning",
+          special_title: "Preferences / Restrictions / Special conditions",
+          travelers_title: "Travelers",
+          who_travel: "Who are you traveling with?",
+          mode_solo: "Just me",
+          mode_group: "With others",
+          gender: "Gender",
+          age_range: "Age range",
+          female: "Female",
+          male: "Male",
+          other: "Other",
+          na: "Prefer not to say",
+          baby: "Baby (0–2)",
+          preschool: "Preschool (3–5)",
+          child: "Child (6–12)",
+          teen: "Teen (13–17)",
+          young_adult: "Young adult (18–24)",
+          adult_25_39: "Adult (25–39)",
+          adult_40_54: "Adult (40–54)",
+          adult_55_64: "Adult (55–64)",
+          senior: "Senior (65+)",
+          your_info: "Your info",
+          traveler_profiles: "Traveler profiles",
+          add: "+ Add",
+          remove: "− Remove",
+          traveler_1: "Traveler 1",
+          companion: "Companion",
+          mvp_note: "*In the MVP, these profiles will be used to personalize the itinerary. The logic connects in JS later.",
+          itinerary_title: "Itinerary",
+          open_info_chat: "Open Info Chat",
+          start_planning: "Start planning",
+          type_message: "Type your message...",
+          send: "Send",
+          export_pdf: "Export PDF",
+          export_csv: "Export CSV (Excel)",
+          email: "Send by Email",
+          choose_itinerary: "Choose this itinerary",
+          info_header: "Info Chat · Astra 🌍",
+          info_placeholder: "Ask me anything...",
+          loading_text: "✨ Astra is creating your full itinerary… This may take several minutes. Don’t close this tab: you’re saving hours of planning.",
+          special_placeholder:
+`✨ Tell Astra exactly how you want to live your trip.
+This will help create an itinerary that truly matches you.
+
+🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”
+🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”
+🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”
+🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”
+⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”
+👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”
+
+📝 The more details you share, the more precise, smooth and personalized your itinerary will be.`
+        },
+        es: {
+          planner_title: "Planificador",
+          destinations: "Destinos",
+          add_city: "+ Agregar ciudad",
+          save_destinations: "Guardar destinos",
+          reset_planning: "Reiniciar planificación",
+          special_title: "Preferencias / Restricciones / Condiciones especiales",
+          travelers_title: "Viajeros",
+          who_travel: "¿Con quién viajas?",
+          mode_solo: "Viajo solamente yo",
+          mode_group: "Viajo acompañado",
+          gender: "Género",
+          age_range: "Rango de edad",
+          female: "Femenino",
+          male: "Masculino",
+          other: "Otro",
+          na: "Prefiero no decirlo",
+          baby: "Bebé (0–2)",
+          preschool: "Preescolar (3–5)",
+          child: "Niño (6–12)",
+          teen: "Adolescente (13–17)",
+          young_adult: "Joven adulto (18–24)",
+          adult_25_39: "Adulto (25–39)",
+          adult_40_54: "Adulto (40–54)",
+          adult_55_64: "Adulto (55–64)",
+          senior: "Mayor (65+)",
+          your_info: "Tu información",
+          traveler_profiles: "Perfiles de viajeros",
+          add: "+ Agregar",
+          remove: "− Quitar",
+          traveler_1: "Viajero 1",
+          companion: "Acompañante",
+          mvp_note: "*En el MVP, estos perfiles se usarán para personalizar el itinerario. La lógica se conecta en JS después.",
+          itinerary_title: "Itinerario",
+          open_info_chat: "Open Info Chat",
+          start_planning: "Iniciar planificación",
+          type_message: "Escribe tu mensaje...",
+          send: "Enviar",
+          export_pdf: "Exportar PDF",
+          export_csv: "Exportar CSV (Excel)",
+          email: "Enviar por Email",
+          choose_itinerary: "Elijo este itinerario",
+          info_header: "Info Chat · Astra 🌍",
+          info_placeholder: "Pregúntame lo que quieras…",
+          loading_text: "✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.",
+          special_placeholder:
+`✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
+Esta información permitirá crear un itinerario 100 % alineado contigo.
+
+🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
+🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
+🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
+🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
+⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
+👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
+
+📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.`
+        }
+      };
+
+      function t(key) {
+        const pack = I18N[lang] || I18N.en;
+        return (pack && pack[key]) || (I18N.en && I18N.en[key]) || "";
+      }
+
+      function setText(el, value) {
+        if (!el) return;
+        el.textContent = value;
+      }
+
+      function setTitle(el, value) {
+        if (!el) return;
+        el.setAttribute("title", value);
+      }
+
+      function setPlaceholder(el, value) {
+        if (!el) return;
+        el.setAttribute("placeholder", value);
+      }
+
+      function setLabelLeadingTextForControl(controlId, value) {
+        const control = document.getElementById(controlId);
+        const label = control && control.closest("label");
+        if (!label) return;
+
+        // intenta reemplazar el primer nodo de texto "no vacío" dentro del label
+        for (let i = 0; i < label.childNodes.length; i++) {
+          const n = label.childNodes[i];
+          if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
+            n.textContent = value + "\n";
+            return;
+          }
+        }
+        // si no encontró, lo inserta al inicio
+        label.insertBefore(document.createTextNode(value + "\n"), label.firstChild);
+      }
+
+      function setSelectOptionText(selectEl, value, labelText) {
+        if (!selectEl) return;
+        const opt = selectEl.querySelector(`option[value="${CSS.escape(value)}"]`);
+        if (opt) opt.textContent = labelText;
+      }
+
+      function applyI18n() {
+        // Sidebar titles
+        setText(document.querySelector(".sidebar h2"), t("planner_title"));
+        setText(document.querySelector(".sidebar section.box h3"), t("destinations"));
+        setText(document.getElementById("add-city-btn"), t("add_city"));
+        setText(document.getElementById("save-destinations"), t("save_destinations"));
+        setText(document.getElementById("reset-planner"), t("reset_planning"));
+
+        // Special conditions
+        setText(document.querySelector(".special-conditions h3"), t("special_title"));
+        setPlaceholder(document.getElementById("special-conditions"), t("special_placeholder"));
+
+        // Travelers section
+        // (título del section: el primer h3 después del special-conditions ya existe en HTML: "Viajeros")
+        // lo seleccionamos de forma segura por ubicación: el h3 dentro del section que contiene #traveler-mode
+        const travelerMode = document.getElementById("traveler-mode");
+        const travelerSection = travelerMode ? travelerMode.closest("section.box") : null;
+        if (travelerSection) {
+          const h3 = travelerSection.querySelector("h3");
+          setText(h3, t("travelers_title"));
+        }
+
+        setLabelLeadingTextForControl("traveler-mode", t("who_travel"));
+        if (travelerMode) {
+          setSelectOptionText(travelerMode, "solo", t("mode_solo"));
+          setSelectOptionText(travelerMode, "group", t("mode_group"));
+        }
+
+        // SOLO panel labels
+        setLabelLeadingTextForControl("solo-gender", t("gender"));
+        setLabelLeadingTextForControl("solo-age-range", t("age_range"));
+
+        // SOLO options
+        const soloGender = document.getElementById("solo-gender");
+        if (soloGender) {
+          setSelectOptionText(soloGender, "female", t("female"));
+          setSelectOptionText(soloGender, "male", t("male"));
+          setSelectOptionText(soloGender, "other", t("other"));
+          setSelectOptionText(soloGender, "na", t("na"));
+        }
+        const soloAge = document.getElementById("solo-age-range");
+        if (soloAge) {
+          setSelectOptionText(soloAge, "0-2", t("baby"));
+          setSelectOptionText(soloAge, "3-5", t("preschool"));
+          setSelectOptionText(soloAge, "6-12", t("child"));
+          setSelectOptionText(soloAge, "13-17", t("teen"));
+          setSelectOptionText(soloAge, "18-24", t("young_adult"));
+          setSelectOptionText(soloAge, "25-39", t("adult_25_39"));
+          setSelectOptionText(soloAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(soloAge, "55-64", t("adult_55_64"));
+          setSelectOptionText(soloAge, "65+", t("senior"));
+        }
+
+        // GROUP: "Tu información"
+        const yourInfoStrong = document.querySelector("#traveler-group-panel .box strong");
+        setText(yourInfoStrong, t("your_info"));
+        setLabelLeadingTextForControl("me-gender", t("gender"));
+        setLabelLeadingTextForControl("me-age-range", t("age_range"));
+
+        const meGender = document.getElementById("me-gender");
+        if (meGender) {
+          setSelectOptionText(meGender, "female", t("female"));
+          setSelectOptionText(meGender, "male", t("male"));
+          setSelectOptionText(meGender, "other", t("other"));
+          setSelectOptionText(meGender, "na", t("na"));
+        }
+        const meAge = document.getElementById("me-age-range");
+        if (meAge) {
+          setSelectOptionText(meAge, "0-2", t("baby"));
+          setSelectOptionText(meAge, "3-5", t("preschool"));
+          setSelectOptionText(meAge, "6-12", t("child"));
+          setSelectOptionText(meAge, "13-17", t("teen"));
+          setSelectOptionText(meAge, "18-24", t("young_adult"));
+          setSelectOptionText(meAge, "25-39", t("adult_25_39"));
+          setSelectOptionText(meAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(meAge, "55-64", t("adult_55_64"));
+          setSelectOptionText(meAge, "65+", t("senior"));
+        }
+
+        // GROUP: Perfiles de viajeros + botones
+        const profilesHeader = document.querySelector("#traveler-group-panel .box strong[style*='font-size:.95rem']");
+        // Nota: el selector anterior también puede pegarle a "Tu información"; por eso el de arriba ya se setea y acá buscamos el segundo
+        if (travelerSection) {
+          const strongs = travelerSection.querySelectorAll("#traveler-group-panel strong");
+          if (strongs && strongs.length >= 2) setText(strongs[1], t("traveler_profiles"));
+        }
+        setText(document.getElementById("traveler-add"), t("add"));
+        setText(document.getElementById("traveler-remove"), t("remove"));
+
+        // Perfil 1 labels (texto visible)
+        const traveler1Strong = document.querySelector("#traveler-profiles .traveler-profile strong");
+        setText(traveler1Strong, t("traveler_1"));
+        const companionSpan = document.querySelector("#traveler-profiles .traveler-profile span");
+        setText(companionSpan, t("companion"));
+
+        // Perfil 1 selects (labels)
+        const profGender = document.querySelector("#traveler-profiles .traveler-profile select.traveler-gender");
+        const profAge = document.querySelector("#traveler-profiles .traveler-profile select.traveler-age-range");
+        if (profGender) {
+          const lbl = profGender.closest("label");
+          if (lbl) {
+            // reemplaza "Género"
+            for (let i = 0; i < lbl.childNodes.length; i++) {
+              const n = lbl.childNodes[i];
+              if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
+                n.textContent = t("gender") + "\n";
+                break;
+              }
+            }
+          }
+          setSelectOptionText(profGender, "female", t("female"));
+          setSelectOptionText(profGender, "male", t("male"));
+          setSelectOptionText(profGender, "other", t("other"));
+          setSelectOptionText(profGender, "na", t("na"));
+        }
+        if (profAge) {
+          const lbl = profAge.closest("label");
+          if (lbl) {
+            for (let i = 0; i < lbl.childNodes.length; i++) {
+              const n = lbl.childNodes[i];
+              if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
+                n.textContent = t("age_range") + "\n";
+                break;
+              }
+            }
+          }
+          setSelectOptionText(profAge, "0-2", t("baby"));
+          setSelectOptionText(profAge, "3-5", t("preschool"));
+          setSelectOptionText(profAge, "6-12", t("child"));
+          setSelectOptionText(profAge, "13-17", t("teen"));
+          setSelectOptionText(profAge, "18-24", t("young_adult"));
+          setSelectOptionText(profAge, "25-39", t("adult_25_39"));
+          setSelectOptionText(profAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(profAge, "55-64", t("adult_55_64"));
+          setSelectOptionText(profAge, "65+", t("senior"));
+        }
+
+        // Nota MVP (p final dentro del box de perfiles)
+        const mvpP = document.querySelector("#traveler-group-panel p");
+        setText(mvpP, t("mvp_note"));
+
+        // Main titles/buttons
+        setText(document.querySelector(".itinerary-head h2"), t("itinerary_title"));
+        setTitle(document.getElementById("info-chat-floating"), t("open_info_chat"));
+        setText(document.getElementById("start-planning"), t("start_planning"));
+        setPlaceholder(document.getElementById("chat-input"), t("type_message"));
+        setText(document.getElementById("send-btn"), t("send"));
+
+        setText(document.getElementById("btn-pdf"), t("export_pdf"));
+        setText(document.getElementById("btn-csv"), t("export_csv"));
+        setText(document.getElementById("btn-email"), t("email"));
+        setText(document.getElementById("confirm-itinerary"), t("choose_itinerary"));
+
+        // Info Chat modal texts
+        setText(document.querySelector("#info-chat-modal .info-chat-header h3"), t("info_header"));
+        setPlaceholder(document.getElementById("info-chat-input"), t("info_placeholder"));
+        setText(document.getElementById("info-chat-send"), t("send"));
+
+        // Loading overlay text
+        const loadingP = document.querySelector("#loading-overlay p");
+        setText(loadingP, t("loading_text"));
+      }
+
+      // ✅ Auto-height: emite la altura al parent (Webflow) para que el iframe se ajuste
+      function postHeight() {
+        try {
+          const h = Math.max(
+            document.documentElement.scrollHeight || 0,
+            document.body.scrollHeight || 0
+          );
+          window.parent && window.parent.postMessage(
+            { type: "ITBMO_PLANNER_HEIGHT", height: h },
+            "*"
+          );
+        } catch (_) {}
+      }
+
+      // ResizeObserver para cambios dinámicos (itinerario, chat, etc.)
+      try {
+        const ro = new ResizeObserver(function () {
+          postHeight();
+        });
+        ro.observe(document.body);
+      } catch (_) {
+        // fallback
+        window.addEventListener("load", postHeight);
+        window.addEventListener("resize", postHeight);
+        setInterval(postHeight, 1500);
+      }
+
+      // Primera medición rápida
+      window.addEventListener("load", function () {
+        applyI18n();
+        postHeight();
+        setTimeout(postHeight, 300);
+        setTimeout(postHeight, 900);
+      });
+
+      /* =========================================================
+         ✅ MVP: UI viajeros (solo HTML/CSS por ahora)
+         - Solo: muestra panel solo
+         - Acompañado: muestra panel grupo
+         (La integración con el intake del planner se hace luego en JS)
+      ========================================================= */
+      const modeSel = document.getElementById("traveler-mode");
+      const soloPanel = document.getElementById("traveler-solo-panel");
+      const groupPanel = document.getElementById("traveler-group-panel");
+
+      if (modeSel && soloPanel && groupPanel) {
+        modeSel.addEventListener("change", () => {
+          const v = (modeSel.value || "").toLowerCase();
+          if (v === "solo") {
+            soloPanel.style.display = "block";
+            groupPanel.style.display = "none";
+          } else if (v === "group") {
+            soloPanel.style.display = "none";
+            groupPanel.style.display = "block";
+          } else {
+            soloPanel.style.display = "none";
+            groupPanel.style.display = "none";
+          }
+          postHeight();
+        });
+      }
+    })();
+  </script>
+
+  <!-- jsPDF (required for PDF export) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<!-- jsPDF AutoTable (required for tables) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
+<!-- Tu JS del planner (después de los dos de arriba) -->
+<script src="./planner.js?v=58"></script>
+ 
 </body>
 </html>
