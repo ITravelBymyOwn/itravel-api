@@ -406,19 +406,25 @@ function setInfoChatBusy(on){
   }
 }
 
-// ✅ Mejora UX del textarea
+// ✅ Mejora UX del textarea: crece también cuando el texto hace wrap
+function resizeInfoChatComposer(textarea){
+  if(!textarea) return;
+  textarea.style.height = 'auto';
+
+  const styles = window.getComputedStyle(textarea);
+  const maxHeight = parseFloat(styles.maxHeight) || 220;
+  const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+
+  textarea.style.height = `${nextHeight}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+
 if($infoInput){
   $infoInput.setAttribute('rows','1');
-  $infoInput.style.overflowY = 'hidden';
-  const maxRows = 10;
+  resizeInfoChatComposer($infoInput);
 
-  // Autoajuste de altura dinámico
   $infoInput.addEventListener('input', ()=>{
-    $infoInput.style.height = 'auto';
-    const lineHeight = parseFloat(window.getComputedStyle($infoInput).lineHeight) || 20;
-    const lines = Math.min($infoInput.value.split('\n').length, maxRows);
-    $infoInput.style.height = `${lineHeight * lines + 8}px`;
-    $infoInput.scrollTop = $infoInput.scrollHeight;
+    resizeInfoChatComposer($infoInput);
   });
 
   // ✅ Shift+Enter → salto de línea | Enter → enviar
@@ -4563,7 +4569,7 @@ async function sendInfoMessage(){
   if(!txt) return;
   infoChatMsg(txt,'user');
   input.value='';
-  input.style.height = 'auto'; // reset altura tras envío
+  resizeInfoChatComposer(input); // vuelve a una línea tras enviar
   const ans = await callInfoAgent(txt);
   infoChatMsg(ans||'');
 }
@@ -4600,17 +4606,12 @@ function bindInfoChatListeners(){
     }
   });
 
-  // Textarea auto-ajustable
+  // Textarea auto-ajustable: considera saltos de línea y wrap automático
   if(i2){
     i2.setAttribute('rows','1');
-    i2.style.overflowY = 'hidden';
-    const maxRows = 10;
+    resizeInfoChatComposer(i2);
     i2.addEventListener('input', ()=>{
-      i2.style.height = 'auto';
-      const lineHeight = parseFloat(window.getComputedStyle(i2).lineHeight) || 20;
-      const lines = Math.min(i2.value.split('\n').length, maxRows);
-      i2.style.height = `${lineHeight * lines + 8}px`;
-      i2.scrollTop = i2.scrollHeight;
+      resizeInfoChatComposer(i2);
     });
   }
 
