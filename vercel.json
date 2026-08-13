@@ -5,6 +5,7 @@
     { "src": "api/info-public.js", "use": "@vercel/node" },
     { "src": "api/supabase-test.js", "use": "@vercel/node" },
     { "src": "api/user.js", "use": "@vercel/node" },
+    { "src": "api/trip.js", "use": "@vercel/node" },
     { "src": "public/**/*", "use": "@vercel/static" }
   ],
   "routes": [
@@ -12,6 +13,7 @@
     { "src": "/api/info-public", "dest": "/api/info-public.js" },
     { "src": "/api/supabase-test", "dest": "/api/supabase-test.js" },
     { "src": "/api/user", "dest": "/api/user.js" },
+    { "src": "/api/trip", "dest": "/api/trip.js" },
     { "src": "/(.*)", "dest": "/public/$1" }
   ]
 }
