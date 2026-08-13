@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=59" />
+  <link rel="stylesheet" href="./planner.css?v=60" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -33,36 +33,113 @@
     <aside class="sidebar">
       <h2>Planificador</h2>
 
-      <section class="box">
-        <h3>Destinos</h3>
-        <div id="city-list"></div>
-        <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+      <!-- =========================================================
+           ITBMO ACCOUNT — Registro / Login MVP
+           La autenticación visual vive en el Planner.
+           La persistencia real se procesa en /api/user (Vercel → Supabase).
+      ========================================================== -->
+      <section class="box account-box" id="account-box">
+        <div class="account-head">
+          <div>
+            <h3 id="account-title">Your ITBMO account</h3>
+            <p id="account-subtitle" class="account-subtitle">Register once and keep planning without entering your details again.</p>
+          </div>
+          <div id="account-user-badge" class="account-user-badge" style="display:none;"></div>
         </div>
 
-        <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
-        <!-- <button class="btn primary w-100" id="save-destinations">Guardar destinos</button> -->
-        <!-- 🆕 Botón de reinicio reubicado -->
-        <!--
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-          Reiniciar planificación
-        </button>
-        -->
-      </section>
+        <div id="account-guest">
+          <div class="account-mode-actions">
+            <button class="btn primary account-mode-btn" id="account-register-toggle" type="button">Register</button>
+            <button class="btn ghost account-mode-btn" id="account-login-toggle" type="button">Sign in</button>
+          </div>
 
-      <section class="box special-conditions">
-        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
-Esta información permitirá crear un itinerario 100 % alineado contigo.
+          <div id="account-register-panel" class="account-panel" style="display:none;">
+            <div class="account-form-grid">
+              <label>
+                <span id="label-first-name">First name</span>
+                <input id="account-first-name" type="text" maxlength="100" autocomplete="given-name" />
+              </label>
 
-🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
-🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
-🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
-🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
-⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
-👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
+              <label>
+                <span id="label-last-name">Last name</span>
+                <input id="account-last-name" type="text" maxlength="150" autocomplete="family-name" />
+              </label>
 
-📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
+              <label>
+                <span id="label-username">Username</span>
+                <input id="account-username" type="text" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" />
+                <small id="username-hint">3–30 characters: letters, numbers, dot, hyphen or underscore.</small>
+              </label>
+
+              <label>
+                <span id="label-email">Email</span>
+                <input id="account-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+              </label>
+
+              <label>
+                <span id="label-profile-age">Age range</span>
+                <select id="account-age-range">
+                  <option value="" selected disabled></option>
+                  <option value="18-24">18–24</option>
+                  <option value="25-34">25–34</option>
+                  <option value="35-44">35–44</option>
+                  <option value="45-54">45–54</option>
+                  <option value="55-64">55–64</option>
+                  <option value="65+">65+</option>
+                </select>
+              </label>
+
+              <label>
+                <span id="label-country-residence">Country of residence</span>
+                <select id="account-country">
+                  <option value="" selected disabled></option>
+                </select>
+              </label>
+            </div>
+
+            <label class="account-check">
+              <input id="account-legal-consent" type="checkbox" />
+              <span id="account-legal-copy">
+                I agree to the
+                <a id="account-terms-link" href="https://itravelbymyown.com/terms-and-conditions" target="_blank" rel="noopener noreferrer">Terms of Use</a>
+                and acknowledge the
+                <a id="account-privacy-link" href="https://itravelbymyown.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+              </span>
+            </label>
+
+            <label class="account-check optional">
+              <input id="account-marketing-consent" type="checkbox" />
+              <span id="account-marketing-copy">Send me travel inspiration, recommendations and special offers from ITBMO.</span>
+            </label>
+
+            <button class="btn primary w-100" id="account-register-submit" type="button">Create free account</button>
+          </div>
+
+          <div id="account-login-panel" class="account-panel" style="display:none;">
+            <div class="account-form-grid">
+              <label>
+                <span id="label-login-username">Username</span>
+                <input id="account-login-username" type="text" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" />
+              </label>
+
+              <label>
+                <span id="label-login-email">Email</span>
+                <input id="account-login-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+              </label>
+            </div>
+
+            <button class="btn primary w-100" id="account-login-submit" type="button">Sign in</button>
+          </div>
+
+          <div id="account-message" class="account-message" aria-live="polite"></div>
+        </div>
+
+        <div id="account-authenticated" class="account-authenticated" style="display:none;">
+          <div>
+            <strong id="account-welcome">Welcome back.</strong>
+            <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
+          </div>
+        </div>
       </section>
 
       <!-- ✅ NUEVO: Viajeros (compacto con dropdown) -->
@@ -215,8 +292,40 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         </div>
       </section>
 
-      <!-- ✅ QUIRÚRGICO: botones al final del tab Planner (después de Travelers) -->
-      <button class="btn primary w-100" id="save-destinations">Guardar destinos</button>
+      <section class="box">
+        <h3>Destinos</h3>
+        <div id="city-list"></div>
+        <div class="row-actions">
+          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+        </div>
+
+        <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
+        <!-- <button class="btn primary w-100" id="save-destinations">Guardar destinos</button> -->
+        <!-- 🆕 Botón de reinicio reubicado -->
+        <!--
+        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
+          Reiniciar planificación
+        </button>
+        -->
+      </section>
+
+      <section class="box special-conditions">
+        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
+        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
+Esta información permitirá crear un itinerario 100 % alineado contigo.
+
+🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
+🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
+🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
+🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
+⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
+👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
+
+📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
+      </section>
+
+      <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
+      <button class="btn primary w-100" id="save-destinations" disabled>Guardar destinos</button>
       <!-- 🆕 Botón de reinicio reubicado -->
       <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
         Reiniciar planificación
@@ -496,7 +605,9 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
       function applyI18n() {
         // Sidebar titles
         setText(document.querySelector(".sidebar h2"), t("planner_title"));
-        setText(document.querySelector(".sidebar section.box h3"), t("destinations"));
+        const cityList = document.getElementById("city-list");
+        const destinationSection = cityList ? cityList.closest("section.box") : null;
+        if (destinationSection) setText(destinationSection.querySelector("h3"), t("destinations"));
         setText(document.getElementById("add-city-btn"), t("add_city"));
         setText(document.getElementById("save-destinations"), t("save_destinations"));
         setText(document.getElementById("reset-planner"), t("reset_planning"));
@@ -727,7 +838,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=57"></script>
+<script src="./planner.js?v=58"></script>
  
 </body>
 </html>
