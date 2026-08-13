@@ -28,7 +28,18 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
 /* ---------- Config API ---------- */
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
+const USER_API_URL = 'https://itravelbymyown-api.vercel.app/api/user';
+const TRIP_API_URL = 'https://itravelbymyown-api.vercel.app/api/trip';
 const MODEL   = 'gpt-4o-mini';
+
+const ITBMO_SESSION_KEY = 'itbmo_session_token';
+const ITBMO_TERMS_VERSION = '1.0';
+const ITBMO_PRIVACY_VERSION = '1.0';
+const ITBMO_MARKETING_VERSION = '1.0';
+
+let currentUser = null;
+let currentTripId = null;
+let authReady = false;
 
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
@@ -310,6 +321,31 @@ const $infoFloating = qs('#info-chat-floating');
 const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
 
+/* ---------- ITBMO Account / Supabase ---------- */
+const $accountGuest = qs('#account-guest');
+const $accountAuthenticated = qs('#account-authenticated');
+const $accountRegisterToggle = qs('#account-register-toggle');
+const $accountLoginToggle = qs('#account-login-toggle');
+const $accountRegisterPanel = qs('#account-register-panel');
+const $accountLoginPanel = qs('#account-login-panel');
+const $accountRegisterSubmit = qs('#account-register-submit');
+const $accountLoginSubmit = qs('#account-login-submit');
+const $accountMessage = qs('#account-message');
+const $accountUserBadge = qs('#account-user-badge');
+const $accountWelcome = qs('#account-welcome');
+const $accountReadyCopy = qs('#account-ready-copy');
+
+const $accountFirstName = qs('#account-first-name');
+const $accountLastName = qs('#account-last-name');
+const $accountUsername = qs('#account-username');
+const $accountEmail = qs('#account-email');
+const $accountAgeRange = qs('#account-age-range');
+const $accountCountry = qs('#account-country');
+const $accountLegalConsent = qs('#account-legal-consent');
+const $accountMarketingConsent = qs('#account-marketing-consent');
+const $accountLoginUsername = qs('#account-login-username');
+const $accountLoginEmail = qs('#account-login-email');
+
 const $travelerMode      = qs('#traveler-mode');
 const $travelerSoloPanel = qs('#traveler-solo-panel');
 const $travelerGroupPanel= qs('#traveler-group-panel');
@@ -320,6 +356,541 @@ const $soloAgeRange = qs('#solo-age-range');
 const $travelerProfiles = qs('#traveler-profiles');
 const $travelerAdd      = qs('#traveler-add');
 const $travelerRemove   = qs('#traveler-remove');
+
+/* =========================================================
+   ITBMO ACCOUNT — Registro / Login + sesión persistente
+   - Frontend: solo UX + token local.
+   - Backend real: /api/user.
+   - Nunca expone SUPABASE_SECRET_KEY.
+========================================================= */
+const AUTH_COPY = {
+  es: {
+    title:'Tu cuenta ITBMO',
+    subtitle:'Regístrate una sola vez y sigue planificando sin volver a ingresar tus datos.',
+    register:'Registrarse',
+    login:'Iniciar sesión',
+    firstName:'Nombre',
+    lastName:'Apellidos',
+    username:'Nombre de usuario',
+    usernameHint:'3–30 caracteres: letras, números, punto, guion o guion bajo.',
+    email:'Email',
+    profileAge:'Rango de edad',
+    country:'País de residencia',
+    create:'Crear cuenta gratis',
+    signIn:'Iniciar sesión',
+    legalPrefix:'Acepto los ',
+    terms:'Términos de Uso',
+    legalMiddle:' y reconozco la ',
+    privacy:'Política de Privacidad',
+    legalSuffix:'.',
+    marketing:'Quiero recibir inspiración de viaje, recomendaciones y ofertas especiales de ITBMO.',
+    welcome:(name)=>`Hola, ${name} 👋`,
+    ready:'Tu perfil está activo en este dispositivo. Continúa planificando normalmente.',
+    registering:'Creando tu cuenta…',
+    signingIn:'Iniciando sesión…',
+    required:'Completa todos los campos obligatorios.',
+    legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
+    usernameInvalid:'El nombre de usuario debe tener 3–30 caracteres y usar solo letras minúsculas, números, punto, guion o guion bajo.',
+    emailInvalid:'Ingresa un email válido.',
+    duplicateUser:'Ese nombre de usuario ya está en uso.',
+    duplicateEmail:'Ese email ya está registrado. Usa “Iniciar sesión”.',
+    registerFail:'No pudimos crear tu cuenta. Intenta nuevamente.',
+    loginFail:'El nombre de usuario y el email no coinciden.',
+    connectionFail:'No se pudo conectar con tu cuenta ITBMO. Intenta nuevamente.',
+    loginRequired:'Regístrate o inicia sesión antes de guardar destinos.',
+    travelerRequired:'Indica con quién viajas antes de guardar destinos.',
+    companionRequired:'Indica el rango de edad de cada acompañante.',
+    tripSaving:'Guardando tu viaje…',
+    tripFail:'No pudimos guardar el viaje. Tus datos no se perdieron; intenta nuevamente.'
+  },
+  en: {
+    title:'Your ITBMO account',
+    subtitle:'Register once and keep planning without entering your details again.',
+    register:'Register',
+    login:'Sign in',
+    firstName:'First name',
+    lastName:'Last name',
+    username:'Username',
+    usernameHint:'3–30 characters: letters, numbers, dot, hyphen or underscore.',
+    email:'Email',
+    profileAge:'Age range',
+    country:'Country of residence',
+    create:'Create free account',
+    signIn:'Sign in',
+    legalPrefix:'I agree to the ',
+    terms:'Terms of Use',
+    legalMiddle:' and acknowledge the ',
+    privacy:'Privacy Policy',
+    legalSuffix:'.',
+    marketing:'Send me travel inspiration, recommendations and special offers from ITBMO.',
+    welcome:(name)=>`Hi, ${name} 👋`,
+    ready:'Your profile is active on this device. Continue planning normally.',
+    registering:'Creating your account…',
+    signingIn:'Signing in…',
+    required:'Complete all required fields.',
+    legalRequired:'You must accept the Terms of Use and Privacy Policy.',
+    usernameInvalid:'Username must contain 3–30 lowercase letters, numbers, dots, hyphens or underscores.',
+    emailInvalid:'Enter a valid email.',
+    duplicateUser:'That username is already in use.',
+    duplicateEmail:'That email is already registered. Use “Sign in”.',
+    registerFail:'We could not create your account. Please try again.',
+    loginFail:'Username and email do not match.',
+    connectionFail:'Could not connect to your ITBMO account. Please try again.',
+    loginRequired:'Register or sign in before saving destinations.',
+    travelerRequired:'Tell us who you are traveling with before saving destinations.',
+    companionRequired:'Select an age range for every companion.',
+    tripSaving:'Saving your trip…',
+    tripFail:'We could not save the trip. Your entries are still here; please try again.'
+  }
+};
+
+function authCopy(key, ...args){
+  const pack = AUTH_COPY[getLang()] || AUTH_COPY.en;
+  const value = pack[key];
+  return typeof value === 'function' ? value(...args) : (value || '');
+}
+
+function setAccountMessage(message='', type=''){
+  if(!$accountMessage) return;
+  $accountMessage.textContent = message;
+  $accountMessage.classList.remove('error','success');
+  if(type) $accountMessage.classList.add(type);
+}
+
+function getStoredSessionToken(){
+  try{ return String(localStorage.getItem(ITBMO_SESSION_KEY) || '').trim(); }
+  catch(_){ return ''; }
+}
+
+function storeSessionToken(token){
+  try{
+    if(token) localStorage.setItem(ITBMO_SESSION_KEY, token);
+  }catch(_){}
+}
+
+function clearSessionToken(){
+  try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
+}
+
+function setAuthBusy(on){
+  [$accountRegisterSubmit,$accountLoginSubmit,$accountRegisterToggle,$accountLoginToggle]
+    .forEach(el=>{ if(el) el.disabled = !!on; });
+}
+
+function updateSaveAvailability(){
+  if(!$save) return;
+  $save.disabled = !currentUser;
+}
+
+function showAccountMode(mode){
+  if(currentUser) return;
+  if($accountRegisterPanel) $accountRegisterPanel.style.display = mode === 'register' ? 'block' : 'none';
+  if($accountLoginPanel) $accountLoginPanel.style.display = mode === 'login' ? 'block' : 'none';
+  setAccountMessage('');
+}
+
+function renderAuthState(){
+  const logged = !!currentUser;
+
+  if($accountGuest) $accountGuest.style.display = logged ? 'none' : 'block';
+  if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
+
+  if($accountUserBadge){
+    $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
+    $accountUserBadge.textContent = logged ? `@${currentUser.username || ''}` : '';
+  }
+
+  if(logged){
+    if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || currentUser.username || 'Traveler');
+    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy('ready');
+  }
+
+  updateSaveAvailability();
+}
+
+function applyAuthLanguage(){
+  const set = (sel, txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
+
+  set('#account-title', authCopy('title'));
+  set('#account-subtitle', authCopy('subtitle'));
+  set('#account-register-toggle', authCopy('register'));
+  set('#account-login-toggle', authCopy('login'));
+  set('#label-first-name', authCopy('firstName'));
+  set('#label-last-name', authCopy('lastName'));
+  set('#label-username', authCopy('username'));
+  set('#username-hint', authCopy('usernameHint'));
+  set('#label-email', authCopy('email'));
+  set('#label-profile-age', authCopy('profileAge'));
+  set('#label-country-residence', authCopy('country'));
+  set('#label-login-username', authCopy('username'));
+  set('#label-login-email', authCopy('email'));
+  set('#account-register-submit', authCopy('create'));
+  set('#account-login-submit', authCopy('signIn'));
+  set('#account-marketing-copy', authCopy('marketing'));
+
+  const legal = qs('#account-legal-copy');
+  const terms = qs('#account-terms-link');
+  const privacy = qs('#account-privacy-link');
+  if(legal && terms && privacy){
+    legal.innerHTML = '';
+    legal.appendChild(document.createTextNode(authCopy('legalPrefix')));
+    terms.textContent = authCopy('terms');
+    legal.appendChild(terms);
+    legal.appendChild(document.createTextNode(authCopy('legalMiddle')));
+    privacy.textContent = authCopy('privacy');
+    legal.appendChild(privacy);
+    legal.appendChild(document.createTextNode(authCopy('legalSuffix')));
+  }
+
+  renderAuthState();
+}
+
+const ISO_COUNTRY_CODES = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW`.split(/\s+/);
+
+function populateAccountCountries(){
+  if(!$accountCountry || $accountCountry.options.length > 1) return;
+
+  let names = null;
+  try{
+    names = new Intl.DisplayNames([getLang()], { type:'region' });
+  }catch(_){}
+
+  const rows = ISO_COUNTRY_CODES.map(code=>({
+    code,
+    name: names ? (names.of(code) || code) : code
+  })).sort((a,b)=>String(a.name).localeCompare(String(b.name), getLang()));
+
+  rows.forEach(({code,name})=>{
+    const opt = document.createElement('option');
+    opt.value = code;
+    opt.textContent = name;
+    $accountCountry.appendChild(opt);
+  });
+}
+
+async function postUserAction(payload){
+  const response = await fetch(USER_API_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload)
+  });
+
+  let data = {};
+  try{ data = await response.json(); }catch(_){}
+  return { response, data };
+}
+
+async function registerITBMOUser(){
+  const first_name = String($accountFirstName?.value || '').trim();
+  const last_name = String($accountLastName?.value || '').trim();
+  const username = String($accountUsername?.value || '').trim().toLowerCase();
+  const email = String($accountEmail?.value || '').trim().toLowerCase();
+  const age_range = String($accountAgeRange?.value || '').trim();
+  const country_code = String($accountCountry?.value || '').trim().toUpperCase();
+
+  if(!first_name || !last_name || !username || !email || !age_range || !country_code){
+    setAccountMessage(authCopy('required'),'error');
+    return;
+  }
+
+  if(!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)){
+    setAccountMessage(authCopy('usernameInvalid'),'error');
+    return;
+  }
+
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+    setAccountMessage(authCopy('emailInvalid'),'error');
+    return;
+  }
+
+  if(!$accountLegalConsent?.checked){
+    setAccountMessage(authCopy('legalRequired'),'error');
+    return;
+  }
+
+  setAuthBusy(true);
+  setAccountMessage(authCopy('registering'));
+
+  try{
+    const params = new URLSearchParams(window.location.search);
+    const { response, data } = await postUserAction({
+      action:'register',
+      first_name,
+      last_name,
+      username,
+      email,
+      age_range,
+      country_code,
+      preferred_language:getLang(),
+      terms_accepted:true,
+      privacy_accepted:true,
+      marketing_consent:!!$accountMarketingConsent?.checked,
+      terms_version:ITBMO_TERMS_VERSION,
+      privacy_version:ITBMO_PRIVACY_VERSION,
+      marketing_version:ITBMO_MARKETING_VERSION,
+      terms_url:qs('#account-terms-link')?.href || null,
+      privacy_url:qs('#account-privacy-link')?.href || null,
+      registration_source:'planner',
+      utm_source:params.get('utm_source') || null,
+      utm_medium:params.get('utm_medium') || null,
+      utm_campaign:params.get('utm_campaign') || null,
+      utm_content:params.get('utm_content') || null,
+      utm_term:params.get('utm_term') || null,
+      referrer:document.referrer || null
+    });
+
+    if(response.ok && data?.ok && data?.session_token){
+      storeSessionToken(data.session_token);
+      currentUser = data.user || null;
+      authReady = true;
+      setAccountMessage('');
+      renderAuthState();
+      return;
+    }
+
+    if(response.status === 409){
+      if(data?.username_taken) setAccountMessage(authCopy('duplicateUser'),'error');
+      else if(data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
+      else setAccountMessage(authCopy('registerFail'),'error');
+      return;
+    }
+
+    setAccountMessage(authCopy('registerFail'),'error');
+  }catch(err){
+    console.error('ITBMO register error:', err);
+    setAccountMessage(authCopy('connectionFail'),'error');
+  }finally{
+    setAuthBusy(false);
+  }
+}
+
+async function loginITBMOUser(){
+  const username = String($accountLoginUsername?.value || '').trim().toLowerCase();
+  const email = String($accountLoginEmail?.value || '').trim().toLowerCase();
+
+  if(!username || !email){
+    setAccountMessage(authCopy('required'),'error');
+    return;
+  }
+
+  setAuthBusy(true);
+  setAccountMessage(authCopy('signingIn'));
+
+  try{
+    const { response, data } = await postUserAction({
+      action:'login',
+      username,
+      email
+    });
+
+    if(response.ok && data?.ok && data?.session_token){
+      storeSessionToken(data.session_token);
+      currentUser = data.user || null;
+      authReady = true;
+      setAccountMessage('');
+      renderAuthState();
+      return;
+    }
+
+    setAccountMessage(authCopy('loginFail'),'error');
+  }catch(err){
+    console.error('ITBMO login error:', err);
+    setAccountMessage(authCopy('connectionFail'),'error');
+  }finally{
+    setAuthBusy(false);
+  }
+}
+
+async function restoreITBMOSession(){
+  const token = getStoredSessionToken();
+
+  if(!token){
+    authReady = true;
+    currentUser = null;
+    renderAuthState();
+    return;
+  }
+
+  try{
+    const { response, data } = await postUserAction({
+      action:'session',
+      session_token:token
+    });
+
+    if(response.ok && data?.ok && data?.user){
+      currentUser = data.user;
+    }else{
+      clearSessionToken();
+      currentUser = null;
+    }
+  }catch(err){
+    console.warn('ITBMO session restore unavailable:', err);
+    currentUser = null;
+  }finally{
+    authReady = true;
+    renderAuthState();
+  }
+}
+
+function bindAccountListeners(){
+  $accountRegisterToggle?.addEventListener('click', ()=>showAccountMode('register'));
+  $accountLoginToggle?.addEventListener('click', ()=>showAccountMode('login'));
+  $accountRegisterSubmit?.addEventListener('click', registerITBMOUser);
+  $accountLoginSubmit?.addEventListener('click', loginITBMOUser);
+
+  $accountUsername?.addEventListener('input', ()=>{
+    const normalized = String($accountUsername.value || '').toLowerCase().replace(/[^a-z0-9._-]/g,'');
+    if($accountUsername.value !== normalized) $accountUsername.value = normalized;
+  });
+
+  populateAccountCountries();
+  applyAuthLanguage();
+  updateSaveAvailability();
+}
+
+/* =========================================================
+   Travelers → contador técnico existente del planner
+   La cuenta representa al titular (adulto 18+).
+   Los acompañantes se traducen a los 5 buckets ya usados
+   por plannerState para NO romper el contrato existente.
+========================================================= */
+function companionBucket(age){
+  if(age === '0-2' || age === '3-5') return 'infants';
+  if(age === '6-12') return 'children';
+  if(age === '13-17') return 'young';
+  if(age === '65+') return 'seniors';
+  return 'adults';
+}
+
+function collectTravelerStateFromUI(){
+  const mode = String($travelerMode?.value || '').toLowerCase();
+  if(mode !== 'solo' && mode !== 'group'){
+    return { ok:false, error:authCopy('travelerRequired') };
+  }
+
+  const counts = { adults:0, young:0, children:0, infants:0, seniors:0 };
+
+  if(String(currentUser?.age_range || '') === '65+') counts.seniors += 1;
+  else counts.adults += 1;
+
+  const companions = [];
+
+  if(mode === 'group'){
+    const cards = qsa('.traveler-profile', $travelerProfiles);
+    if(cards.length === 0){
+      return { ok:false, error:authCopy('companionRequired') };
+    }
+
+    for(const card of cards){
+      const gender = String(qs('.traveler-gender',card)?.value || '');
+      const age = String(qs('.traveler-age-range',card)?.value || '');
+
+      if(!age){
+        return { ok:false, error:authCopy('companionRequired') };
+      }
+
+      counts[companionBucket(age)] += 1;
+      companions.push({ gender:gender || null, age_range:age });
+    }
+  }
+
+  const total = Object.values(counts).reduce((a,b)=>a+b,0);
+
+  return { ok:true, mode, counts, companions, total };
+}
+
+function writeLegacyTravelerCounts(counts){
+  const mapping = {
+    '#p-adults':'adults',
+    '#p-young':'young',
+    '#p-children':'children',
+    '#p-infants':'infants',
+    '#p-seniors':'seniors'
+  };
+  Object.entries(mapping).forEach(([sel,key])=>{
+    const el = qs(sel);
+    if(el) el.value = String(Number(counts?.[key] || 0));
+  });
+}
+
+function dmyToISO(value){
+  const d = parseDMY(String(value || '').trim());
+  if(!d) return null;
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function saveTripRecord(list, travelerState){
+  const token = getStoredSessionToken();
+  if(!token || !currentUser) throw new Error('AUTH_REQUIRED');
+
+  const firstISO = list.length ? dmyToISO(list[0].baseDate) : null;
+  let finalISO = null;
+
+  if(list.length){
+    const last = list[list.length-1];
+    const base = parseDMY(last.baseDate);
+    if(base){
+      const end = new Date(base);
+      end.setDate(end.getDate() + Math.max(1,Number(last.days || 1)) - 1);
+      finalISO = `${end.getFullYear()}-${String(end.getMonth()+1).padStart(2,'0')}-${String(end.getDate()).padStart(2,'0')}`;
+    }
+  }
+
+  const destinations = list.map(d=>({
+    city:d.city,
+    country:d.country,
+    days:d.days,
+    base_date:dmyToISO(d.baseDate),
+    per_day:Array.isArray(d.perDay) ? d.perDay : []
+  }));
+
+  const body = {
+    action:'create',
+    session_token:token,
+    trip_name:list.map(x=>x.city).filter(Boolean).join(' · ').slice(0,150) || null,
+    start_date:firstISO,
+    end_date:finalISO,
+    travelers_count:travelerState.total,
+    travel_style:travelerState.mode,
+    transportation:null,
+    special_conditions:String(qs('#special-conditions')?.value || '').trim() || null,
+    language:getLang(),
+    destinations,
+    planner_input:{
+      destinations,
+      traveler_mode:travelerState.mode,
+      traveler_counts:travelerState.counts,
+      companion_profiles:travelerState.companions,
+      special_conditions:String(qs('#special-conditions')?.value || '').trim() || null
+    },
+    planner_version:'v64',
+    api_version:'v65'
+  };
+
+  const response = await fetch(TRIP_API_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+
+  let data = {};
+  try{ data = await response.json(); }catch(_){}
+
+  if(!response.ok || !data?.ok || !data?.trip?.id){
+    if(response.status === 401){
+      clearSessionToken();
+      currentUser = null;
+      renderAuthState();
+    }
+    throw new Error(data?.error || 'TRIP_SAVE_FAILED');
+  }
+
+  currentTripId = data.trip.id;
+  return data.trip;
+}
 
 /* 🆕 Export buttons (PDF / CSV / Email) */
 const $btnPDF   = qs('#btn-pdf');
@@ -572,7 +1143,22 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 }
 
 
-function saveDestinations(){
+async function saveDestinations(){
+  if(!currentUser || !getStoredSessionToken()){
+    setAccountMessage(authCopy('loginRequired'),'error');
+    try{ qs('#account-box')?.scrollIntoView({behavior:'smooth',block:'start'}); }catch(_){}
+    return;
+  }
+
+  const travelerState = collectTravelerStateFromUI();
+  if(!travelerState.ok){
+    alert(travelerState.error);
+    try{ $travelerMode?.scrollIntoView({behavior:'smooth',block:'center'}); }catch(_){}
+    return;
+  }
+
+  writeLegacyTravelerCounts(travelerState.counts);
+
   const rows = qsa('.city-row', $cityList);
   const list = [];
 
@@ -597,6 +1183,28 @@ function saveDestinations(){
 
     list.push({ city, country, days, baseDate, perDay });
   });
+
+  if(list.length === 0) return;
+
+  const previousSaveLabel = $save?.textContent || '';
+  if($save){
+    $save.disabled = true;
+    $save.textContent = authCopy('tripSaving');
+  }
+
+  try{
+    await saveTripRecord(list, travelerState);
+  }catch(err){
+    console.error('ITBMO trip save error:', err);
+    alert(authCopy('tripFail'));
+    if($save){
+      $save.textContent = previousSaveLabel;
+      updateSaveAvailability();
+    }
+    return;
+  }
+
+  if($save) $save.textContent = previousSaveLabel;
 
   list.forEach(({city, days})=>{
     const prevDays = itineraries[city] ? Object.keys(itineraries[city].byDay).length : 0;
@@ -657,13 +1265,7 @@ function saveDestinations(){
   if (typeof plannerState !== 'undefined') {
     plannerState.destinations = [...savedDestinations];
     plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
-    plannerState.travelers = {
-      adults: Number(qs('#p-adults')?.value || 0),
-      young: Number(qs('#p-young')?.value || 0),
-      children: Number(qs('#p-children')?.value || 0),
-      infants: Number(qs('#p-infants')?.value || 0),
-      seniors: Number(qs('#p-seniors')?.value || 0),
-    };
+    plannerState.travelers = { ...travelerState.counts };
     plannerState.budget = qs('#budget')?.value || '';
     plannerState.currency = qs('#currency')?.value || 'USD';
   }
@@ -4043,6 +4645,7 @@ function bindTravelersListeners(){
       }else if(v === 'group'){
         if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'block';
+        if(travelerCount() === 0) addTravelerProfile();
       }else{
         if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
@@ -4440,6 +5043,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     $tabs.innerHTML=''; $itWrap.innerHTML='';
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
+    currentTripId = null;
 
     planningStarted = false;
     metaProgressIndex = 0;
@@ -4484,6 +5088,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     }
 
     if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+    updateSaveAvailability();
 
     // UX: enfocar primer input de ciudad
     const firstCity = qs('.city-row .city');
@@ -4763,6 +5368,10 @@ function enhancePreferencesInfoChatCopy(){
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+  bindAccountListeners();
+  restoreITBMOSession();
+
   bindInfoChatListeners();
   enhancePreferencesInfoChatCopy();
 
