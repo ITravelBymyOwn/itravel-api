@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // Solo permitimos GET para esta prueba.
   if (req.method !== "GET") {
     return res.status(405).json({
       ok: false,
@@ -11,23 +10,21 @@ export default async function handler(req, res) {
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY;
 
-    // Verificamos que Vercel realmente recibió las variables.
     if (!supabaseUrl || !supabaseSecretKey) {
       return res.status(500).json({
         ok: false,
-        error: "Supabase environment variables are missing"
+        error: "Supabase environment variables are missing",
+        hasUrl: Boolean(supabaseUrl),
+        hasSecretKey: Boolean(supabaseSecretKey)
       });
     }
 
-    // Consulta mínima a la tabla profiles.
-    // No crea, modifica ni elimina absolutamente nada.
     const response = await fetch(
       `${supabaseUrl}/rest/v1/profiles?select=id&limit=1`,
       {
         method: "GET",
         headers: {
           apikey: supabaseSecretKey,
-          Authorization: `Bearer ${supabaseSecretKey}`,
           Accept: "application/json"
         }
       }
@@ -54,7 +51,8 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       ok: false,
-      error: "Unexpected server error"
+      error: "Unexpected server error",
+      details: String(error?.message || error)
     });
   }
 }
