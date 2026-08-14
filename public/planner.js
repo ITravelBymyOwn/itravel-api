@@ -343,6 +343,20 @@ const ITBMO_AFFILIATE_CONFIG = {
   previewMode: true, // TEST NOW. Set false immediately before public launch.
 
   partners: {
+    kayak: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.kayak.com/flights',
+      name: 'KAYAK',
+      category: 'flights'
+    },
+    skyscanner: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.skyscanner.com/',
+      name: 'Skyscanner',
+      category: 'flights'
+    },
     booking: {
       enabled: false,
       url: '',
@@ -396,39 +410,59 @@ function _affiliateCopy_(){
   const es = getLang()==='es';
   return es ? {
     loadingEyebrow: 'Mientras Astra crea tu viaje',
-    loadingTitle: 'Empieza a preparar lo mejor de tu viaje',
-    loadingSub: 'Tu itinerario sigue generándose aquí. Abre cualquier opción en otra pestaña y vuelve cuando quieras.',
+    loadingTitle: 'Tu viaje empieza antes de que termine de generarse',
+    loadingSub: 'Explora vuelos, hospedaje y experiencias mientras Astra sigue trabajando en esta pestaña.',
     afterEyebrow: 'Tu viaje ya tomó forma',
     afterTitle: 'Ahora hazlo realidad',
-    afterSub: 'Reserva lo esencial con nuestros partners de viaje. Tus opciones se abren en una pestaña nueva.',
-    hotelsTitle: 'Encuentra tu hospedaje',
-    hotelsDesc: 'Compara alojamientos para tu viaje.',
-    experiencesTitle: 'Experiencias y entradas',
-    experiencesDesc: 'Descubre tours, atracciones y actividades.',
-    transportTitle: 'Muévete entre ciudades',
-    transportDesc: 'Compara trenes, buses y opciones de transporte.',
-    esimTitle: 'Conéctate desde que aterrizas',
-    esimDesc: 'Explora opciones de eSIM para tu destino.',
+    afterSub: 'Da el siguiente paso. Compara, explora y reserva lo esencial para tu aventura.',
+    flightsTitle: 'Encuentra tu próximo vuelo',
+    flightsDesc: 'Compara opciones para llegar a tu destino.',
+    hotelsTitle: 'Elige dónde quedarte',
+    hotelsDesc: 'Encuentra el hospedaje ideal para tu viaje.',
+    experiencesTitle: 'Vive algo inolvidable',
+    experiencesDesc: 'Tours, entradas y experiencias para recordar.',
+    transportTitle: 'Muévete sin complicaciones',
+    transportDesc: 'Compara trenes, buses y conexiones.',
+    esimTitle: 'Llega conectado',
+    esimDesc: 'Activa datos para tu destino con una eSIM.',
     explore: 'Explorar',
-    preview: 'Vista previa'
+    compare: 'Comparar',
+    preview: 'Vista previa',
+    trust: 'Se abre en una pestaña nueva · ITBMO continúa aquí'
   } : {
     loadingEyebrow: 'While Astra builds your trip',
-    loadingTitle: 'Start preparing the best parts of your journey',
-    loadingSub: 'Your itinerary keeps generating here. Open any option in a new tab and come back whenever you like.',
+    loadingTitle: 'Your journey can start right now',
+    loadingSub: 'Explore flights, stays and experiences while Astra keeps working in this tab.',
     afterEyebrow: 'Your trip has taken shape',
     afterTitle: 'Now make it happen',
-    afterSub: 'Book the essentials with our travel partners. Every option opens in a new tab.',
-    hotelsTitle: 'Find your stay',
-    hotelsDesc: 'Compare places to stay for your trip.',
-    experiencesTitle: 'Experiences & tickets',
-    experiencesDesc: 'Discover tours, attractions and activities.',
-    transportTitle: 'Move between cities',
-    transportDesc: 'Compare trains, buses and transport options.',
-    esimTitle: 'Connect when you land',
-    esimDesc: 'Explore eSIM options for your destination.',
+    afterSub: 'Take the next step. Compare, explore and book the essentials for your adventure.',
+    flightsTitle: 'Find your next flight',
+    flightsDesc: 'Compare options to get to your destination.',
+    hotelsTitle: 'Choose where to stay',
+    hotelsDesc: 'Find the right stay for your trip.',
+    experiencesTitle: 'Make it unforgettable',
+    experiencesDesc: 'Tours, tickets and experiences worth remembering.',
+    transportTitle: 'Move with ease',
+    transportDesc: 'Compare trains, buses and connections.',
+    esimTitle: 'Land connected',
+    esimDesc: 'Get data for your destination with an eSIM.',
     explore: 'Explore',
-    preview: 'Preview'
+    compare: 'Compare',
+    preview: 'Preview',
+    trust: 'Opens in a new tab · ITBMO keeps working here'
   };
+}
+
+function _affiliateIcon_(key){
+  const common = 'viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"';
+  const icons = {
+    flights:`<svg ${common}><path d="M28 14.4 18.8 17l-6.2-10.1-2.7.8 3.4 10.8-6.2 1.8-3-3.2-2 .6 2.5 5.2 1.1 2.4 2-.6.8-4.2 6.2-1.8.2 11.3 2.7-.8 1.7-11.8 9.2-2.7c1.3-.4 2-1.7 1.6-3-.4-1.3-1.7-2-3-1.6Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    hotels:`<svg ${common}><path d="M5 23V11.5A2.5 2.5 0 0 1 7.5 9H12a3 3 0 0 1 3 3v11M15 15h8.5A3.5 3.5 0 0 1 27 18.5V23M5 19h22M7 23v3M25 23v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 13h3.5a1.5 1.5 0 0 1 1.5 1.5V16H8v-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
+    experiences:`<svg ${common}><path d="M7 8.5h18a2 2 0 0 1 2 2v4.2a3.7 3.7 0 0 0 0 7.4v-.1a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v.1a3.7 3.7 0 0 0 0-7.4v-4.2a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 11.5v2M16 18.5v2M16 25.5v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+    transport:`<svg ${common}><rect x="7" y="4.5" width="18" height="21" rx="5" stroke="currentColor" stroke-width="1.8"/><path d="M10 15h12M11.5 9h9M11 27.5l2-2M21 27.5l-2-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="11.5" cy="20.5" r="1.3" fill="currentColor"/><circle cx="20.5" cy="20.5" r="1.3" fill="currentColor"/></svg>`,
+    esim:`<svg ${common}><rect x="9" y="3.5" width="14" height="25" rx="4" stroke="currentColor" stroke-width="1.8"/><path d="M13.5 8h5M15 24.5h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13 17.5a4.2 4.2 0 0 1 6 0M14.8 19.4a1.7 1.7 0 0 1 2.4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`
+  };
+  return icons[key] || icons.flights;
 }
 
 function _affiliatePartnerVisible_(partner){
@@ -460,10 +494,11 @@ function _affiliateTrack_(partnerKey, placement){
 function _affiliateCategoryModel_(){
   const c = _affiliateCopy_();
   return [
-    { key:'hotels', icon:'🏨', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
-    { key:'experiences', icon:'🎟️', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
-    { key:'transport', icon:'🚆', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
-    { key:'esim', icon:'📱', title:c.esimTitle, desc:c.esimDesc, partners:['airalo','holafly'] }
+    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak','skyscanner'] },
+    { key:'hotels', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
+    { key:'experiences', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
+    { key:'transport', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
+    { key:'esim', title:c.esimTitle, desc:c.esimDesc, partners:['airalo','holafly'] }
   ];
 }
 
@@ -491,10 +526,13 @@ function renderAffiliateSurface(placement='loading'){
   const sub = isLoading ? c.loadingSub : c.afterSub;
 
   root.innerHTML = `
-    <div class="itbmo-affiliate-shell">
+    <div class="itbmo-affiliate-shell itbmo-affiliate-shell--${placement}">
+      <div class="itbmo-affiliate-orb itbmo-affiliate-orb--one" aria-hidden="true"></div>
+      <div class="itbmo-affiliate-orb itbmo-affiliate-orb--two" aria-hidden="true"></div>
+
       <div class="itbmo-affiliate-heading">
         <div class="itbmo-affiliate-eyebrow">
-          <span class="itbmo-affiliate-spark">✦</span>
+          <span class="itbmo-affiliate-spark" aria-hidden="true">✦</span>
           <span>${eyebrow}</span>
           ${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>` : ''}
         </div>
@@ -502,13 +540,15 @@ function renderAffiliateSurface(placement='loading'){
         <p>${sub}</p>
       </div>
 
-      <div class="itbmo-affiliate-grid">
+      <div class="itbmo-affiliate-grid" data-count="${categories.length}">
         ${categories.map(cat=>`
-          <article class="itbmo-affiliate-card itbmo-affiliate-card--${cat.key}">
-            <div class="itbmo-affiliate-icon" aria-hidden="true">${cat.icon}</div>
-            <div class="itbmo-affiliate-card-copy">
-              <h4>${cat.title}</h4>
-              <p>${cat.desc}</p>
+          <article class="itbmo-affiliate-card itbmo-affiliate-card--${cat.key}${cat.featured ? ' itbmo-affiliate-card--featured' : ''}">
+            <div class="itbmo-affiliate-card-top">
+              <div class="itbmo-affiliate-icon" aria-hidden="true">${_affiliateIcon_(cat.key)}</div>
+              <div class="itbmo-affiliate-card-copy">
+                <h4>${cat.title}</h4>
+                <p>${cat.desc}</p>
+              </div>
             </div>
             <div class="itbmo-affiliate-links">
               ${cat.partners.map(key=>{
@@ -522,8 +562,10 @@ function renderAffiliateSurface(placement='loading'){
                      data-affiliate-partner="${key}"
                      data-affiliate-placement="${placement}"
                      aria-label="${c.explore} ${p.name}">
-                    <span>${p.name}</span>
-                    <span class="itbmo-affiliate-arrow" aria-hidden="true">↗</span>
+                    <span class="itbmo-affiliate-brand">${p.name}</span>
+                    <span class="itbmo-affiliate-arrow" aria-hidden="true">
+                      <svg viewBox="0 0 20 20" fill="none"><path d="M6 14 14 6M8 6h6v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
                   </a>`;
               }).join('')}
             </div>
@@ -532,10 +574,8 @@ function renderAffiliateSurface(placement='loading'){
       </div>
 
       <div class="itbmo-affiliate-trust">
-        <span>✈</span>
-        <span>${getLang()==='es'
-          ? 'ITBMO sigue abierto en esta pestaña mientras exploras.'
-          : 'ITBMO stays open in this tab while you explore.'}</span>
+        <span class="itbmo-affiliate-trust-dot" aria-hidden="true"></span>
+        <span>${c.trust}</span>
       </div>
     </div>
   `;
