@@ -3348,3 +3348,348 @@ table.itinerary td:nth-child(2){
     transition-duration:.01ms !important;
   }
 }
+
+/* =========================================================
+   ITBMO AFFILIATES — Premium monetization surfaces
+   Independent visual layer; does not alter itinerary tables,
+   planner controls, Info Chat, exports or API behavior.
+========================================================= */
+.itbmo-affiliate-surface{
+  width:100%;
+  margin:1rem 0 0;
+  animation:itbmoAffiliateIn .46s cubic-bezier(.22,.8,.32,1) both;
+}
+@keyframes itbmoAffiliateIn{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+.itbmo-affiliate-shell{
+  position:relative;
+  overflow:hidden;
+  border:1px solid rgba(118,125,219,.22);
+  border-radius:1.35rem;
+  padding:1.05rem;
+  background:
+    radial-gradient(circle at 0% 0%,rgba(165,180,252,.28),transparent 34%),
+    radial-gradient(circle at 100% 100%,rgba(250,204,229,.24),transparent 34%),
+    linear-gradient(145deg,rgba(255,255,255,.98),rgba(248,249,255,.97));
+  box-shadow:
+    0 18px 45px rgba(45,56,96,.10),
+    inset 0 1px 0 rgba(255,255,255,.9);
+}
+
+.itbmo-affiliate-shell::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  background:linear-gradient(110deg,transparent 25%,rgba(255,255,255,.48) 48%,transparent 70%);
+  transform:translateX(-100%);
+  animation:itbmoAffiliateShimmer 7s ease-in-out infinite;
+}
+@keyframes itbmoAffiliateShimmer{
+  0%,62%,100%{transform:translateX(-110%)}
+  78%{transform:translateX(110%)}
+}
+
+.itbmo-affiliate-heading{
+  position:relative;
+  z-index:1;
+  text-align:left;
+  padding:.15rem .15rem .85rem;
+}
+.itbmo-affiliate-eyebrow{
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:.42rem;
+  margin-bottom:.36rem;
+  color:#6166b8;
+  font-size:.72rem;
+  line-height:1.2;
+  font-weight:850;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+}
+.itbmo-affiliate-spark{
+  display:inline-grid;
+  place-items:center;
+  width:1.45rem;
+  height:1.45rem;
+  border-radius:999px;
+  background:linear-gradient(135deg,#efeefe,#fff4d7);
+  box-shadow:0 4px 12px rgba(74,80,155,.12);
+}
+.itbmo-affiliate-preview{
+  margin-left:.15rem;
+  padding:.22rem .48rem;
+  border-radius:999px;
+  background:#fff3c4;
+  color:#705c00;
+  border:1px solid rgba(164,132,0,.18);
+  font-size:.62rem;
+  letter-spacing:.04em;
+}
+.itbmo-affiliate-heading h3{
+  margin:0;
+  color:#142744;
+  font-size:clamp(1.15rem,2vw,1.48rem);
+  line-height:1.15;
+  font-weight:900;
+  letter-spacing:-.022em;
+}
+.itbmo-affiliate-heading p{
+  margin:.42rem 0 0;
+  max-width:760px;
+  color:#68748a;
+  font-size:.84rem;
+  line-height:1.48;
+  font-weight:520;
+}
+
+.itbmo-affiliate-grid{
+  position:relative;
+  z-index:1;
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:.72rem;
+}
+.itbmo-affiliate-card{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+  gap:.66rem;
+  padding:.9rem;
+  border:1px solid rgba(195,200,222,.72);
+  border-radius:1rem;
+  background:rgba(255,255,255,.86);
+  box-shadow:0 7px 20px rgba(47,59,95,.055);
+  backdrop-filter:blur(8px);
+  transition:
+    transform .26s cubic-bezier(.22,.8,.32,1),
+    box-shadow .26s ease,
+    border-color .26s ease;
+}
+.itbmo-affiliate-card:hover{
+  transform:translateY(-3px);
+  border-color:rgba(129,140,248,.48);
+  box-shadow:0 13px 28px rgba(47,59,95,.10);
+}
+.itbmo-affiliate-card--hotels{background:linear-gradient(155deg,#fff,#f0f4ff)}
+.itbmo-affiliate-card--experiences{background:linear-gradient(155deg,#fff,#fff1f5)}
+.itbmo-affiliate-card--transport{background:linear-gradient(155deg,#fff,#eef9f5)}
+.itbmo-affiliate-card--esim{background:linear-gradient(155deg,#fff,#fff8e4)}
+
+.itbmo-affiliate-icon{
+  width:2.35rem;
+  height:2.35rem;
+  display:grid;
+  place-items:center;
+  flex:0 0 auto;
+  border-radius:.78rem;
+  background:rgba(255,255,255,.92);
+  border:1px solid rgba(207,212,231,.74);
+  box-shadow:0 5px 14px rgba(48,61,96,.07);
+  font-size:1.15rem;
+}
+.itbmo-affiliate-card-copy{
+  min-height:4rem;
+}
+.itbmo-affiliate-card h4{
+  margin:0;
+  color:#20324e;
+  font-size:.9rem;
+  line-height:1.24;
+  font-weight:850;
+  letter-spacing:-.012em;
+}
+.itbmo-affiliate-card p{
+  margin:.34rem 0 0;
+  color:#748096;
+  font-size:.73rem;
+  line-height:1.42;
+  font-weight:520;
+}
+.itbmo-affiliate-links{
+  display:flex;
+  flex-direction:column;
+  gap:.38rem;
+  margin-top:auto;
+}
+.itbmo-affiliate-link{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.5rem;
+  width:100%;
+  min-height:2.35rem;
+  padding:.55rem .66rem;
+  border-radius:.72rem;
+  border:1px solid rgba(129,140,248,.25);
+  background:rgba(255,255,255,.92);
+  color:#303a7a;
+  text-decoration:none;
+  font-size:.74rem;
+  line-height:1.2;
+  font-weight:800;
+  box-shadow:0 3px 9px rgba(65,74,132,.055);
+  transition:
+    transform .2s ease,
+    box-shadow .2s ease,
+    border-color .2s ease,
+    background .2s ease;
+}
+.itbmo-affiliate-link:hover,
+.itbmo-affiliate-link:focus-visible{
+  transform:translateY(-1px);
+  border-color:rgba(102,111,224,.55);
+  background:#fff;
+  box-shadow:0 7px 16px rgba(65,74,132,.11);
+  outline:none;
+}
+.itbmo-affiliate-arrow{
+  display:inline-grid;
+  place-items:center;
+  width:1.45rem;
+  height:1.45rem;
+  border-radius:999px;
+  color:#fff;
+  background:linear-gradient(135deg,#8685ed,#6e6ddb);
+  font-size:.7rem;
+  box-shadow:0 3px 8px rgba(105,104,219,.22);
+}
+
+.itbmo-affiliate-trust{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:.42rem;
+  margin:.78rem .15rem 0;
+  color:#7a8598;
+  text-align:center;
+  font-size:.68rem;
+  line-height:1.35;
+  font-weight:600;
+}
+
+/* Generation overlay: keep the monetization area compact enough
+   to preserve the loader and message on common laptop heights. */
+#loading-overlay .loader{
+  width:min(94vw,1080px);
+  max-height:96vh;
+  overflow:auto;
+  padding:1.15rem .9rem 1.35rem;
+  scrollbar-width:thin;
+}
+#loading-overlay .itbmo-affiliate-loading{
+  width:min(94vw,1040px);
+  margin:1.05rem auto 0;
+  text-align:left;
+}
+#loading-overlay .itbmo-affiliate-shell{
+  padding:.92rem;
+  box-shadow:0 18px 46px rgba(33,46,81,.13);
+}
+#loading-overlay .itbmo-affiliate-heading{
+  padding:.08rem .08rem .68rem;
+}
+#loading-overlay .itbmo-affiliate-heading h3{
+  font-size:1.17rem;
+}
+#loading-overlay .itbmo-affiliate-heading p{
+  font-size:.76rem;
+}
+#loading-overlay .itbmo-affiliate-card{
+  padding:.72rem;
+  gap:.5rem;
+}
+#loading-overlay .itbmo-affiliate-card-copy{
+  min-height:3.35rem;
+}
+#loading-overlay .itbmo-affiliate-card h4{
+  font-size:.82rem;
+}
+#loading-overlay .itbmo-affiliate-card p{
+  font-size:.68rem;
+}
+#loading-overlay .itbmo-affiliate-link{
+  min-height:2.15rem;
+  padding:.48rem .58rem;
+  font-size:.7rem;
+}
+
+/* Post-itinerary placement */
+.itbmo-affiliate-after{
+  margin:1.1rem 0 .35rem;
+}
+
+/* Responsive */
+@media(max-width:980px){
+  .itbmo-affiliate-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+  .itbmo-affiliate-card-copy{
+    min-height:3.5rem;
+  }
+}
+@media(max-width:620px){
+  .itbmo-affiliate-shell{
+    padding:.82rem;
+    border-radius:1.1rem;
+  }
+  .itbmo-affiliate-grid{
+    grid-template-columns:1fr;
+    gap:.58rem;
+  }
+  .itbmo-affiliate-card{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    grid-template-areas:
+      "icon copy"
+      "links links";
+    align-items:start;
+    padding:.72rem;
+  }
+  .itbmo-affiliate-icon{grid-area:icon}
+  .itbmo-affiliate-card-copy{
+    grid-area:copy;
+    min-height:0;
+  }
+  .itbmo-affiliate-links{
+    grid-area:links;
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
+  }
+  .itbmo-affiliate-heading h3{
+    font-size:1.08rem;
+  }
+  .itbmo-affiliate-heading p{
+    font-size:.77rem;
+  }
+  #loading-overlay{
+    justify-content:flex-start;
+    padding-top:.5rem;
+  }
+  #loading-overlay .loader{
+    max-height:98vh;
+    padding:.6rem .35rem 1rem;
+  }
+  #loading-overlay p{
+    margin-top:.7rem;
+    font-size:.9rem;
+    padding:0 .55rem;
+  }
+  #loading-overlay .itbmo-affiliate-loading{
+    margin-top:.7rem;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .itbmo-affiliate-surface,
+  .itbmo-affiliate-shell::before{
+    animation:none !important;
+  }
+}
