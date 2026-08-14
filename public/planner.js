@@ -314,6 +314,265 @@ const $confirmCTA  = qs('#confirm-itinerary');
 const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
 
+const $affiliateLoading = qs('#itbmo-affiliate-loading');
+const $affiliateAfter   = qs('#itbmo-affiliate-after');
+
+/* =========================================================
+   ITBMO AFFILIATES — MVP monetization layer
+   ---------------------------------------------------------
+   PREVIEW WORKFLOW (before publishing):
+   - previewMode: true  -> shows every partner using previewUrl.
+   - This lets you evaluate the complete UX now.
+
+   PUBLIC LAUNCH (before affiliate approvals):
+   - Change ONLY previewMode to false.
+   - Because every partner starts enabled:false, the surfaces disappear.
+
+   AS EACH PARTNER APPROVES ITBMO:
+   - Keep previewMode:false.
+   - Set that partner enabled:true.
+   - Paste its real affiliate URL in url.
+   - Republish. Nothing else needs to change.
+
+   IMPORTANT:
+   - This layer never calls the itinerary API.
+   - Links use target="_blank", so generation continues in this tab.
+   - If GA4/gtag is available, clicks emit affiliate_click.
+========================================================= */
+const ITBMO_AFFILIATE_CONFIG = {
+  previewMode: true, // TEST NOW. Set false immediately before public launch.
+
+  partners: {
+    booking: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.booking.com/',
+      name: 'Booking.com',
+      category: 'hotels'
+    },
+    getyourguide: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.getyourguide.com/',
+      name: 'GetYourGuide',
+      category: 'experiences'
+    },
+    viator: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.viator.com/',
+      name: 'Viator',
+      category: 'experiences'
+    },
+    omio: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.omio.com/',
+      name: 'Omio',
+      category: 'transport'
+    },
+    airalo: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.airalo.com/',
+      name: 'Airalo',
+      category: 'esim'
+    },
+    holafly: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://esim.holafly.com/',
+      name: 'Holafly',
+      category: 'esim'
+    }
+  }
+};
+
+if (typeof window !== 'undefined') {
+  window.ITBMO_AFFILIATE_CONFIG = ITBMO_AFFILIATE_CONFIG;
+}
+
+function _affiliateCopy_(){
+  const es = getLang()==='es';
+  return es ? {
+    loadingEyebrow: 'Mientras Astra crea tu viaje',
+    loadingTitle: 'Empieza a preparar lo mejor de tu viaje',
+    loadingSub: 'Tu itinerario sigue generándose aquí. Abre cualquier opción en otra pestaña y vuelve cuando quieras.',
+    afterEyebrow: 'Tu viaje ya tomó forma',
+    afterTitle: 'Ahora hazlo realidad',
+    afterSub: 'Reserva lo esencial con nuestros partners de viaje. Tus opciones se abren en una pestaña nueva.',
+    hotelsTitle: 'Encuentra tu hospedaje',
+    hotelsDesc: 'Compara alojamientos para tu viaje.',
+    experiencesTitle: 'Experiencias y entradas',
+    experiencesDesc: 'Descubre tours, atracciones y actividades.',
+    transportTitle: 'Muévete entre ciudades',
+    transportDesc: 'Compara trenes, buses y opciones de transporte.',
+    esimTitle: 'Conéctate desde que aterrizas',
+    esimDesc: 'Explora opciones de eSIM para tu destino.',
+    explore: 'Explorar',
+    preview: 'Vista previa'
+  } : {
+    loadingEyebrow: 'While Astra builds your trip',
+    loadingTitle: 'Start preparing the best parts of your journey',
+    loadingSub: 'Your itinerary keeps generating here. Open any option in a new tab and come back whenever you like.',
+    afterEyebrow: 'Your trip has taken shape',
+    afterTitle: 'Now make it happen',
+    afterSub: 'Book the essentials with our travel partners. Every option opens in a new tab.',
+    hotelsTitle: 'Find your stay',
+    hotelsDesc: 'Compare places to stay for your trip.',
+    experiencesTitle: 'Experiences & tickets',
+    experiencesDesc: 'Discover tours, attractions and activities.',
+    transportTitle: 'Move between cities',
+    transportDesc: 'Compare trains, buses and transport options.',
+    esimTitle: 'Connect when you land',
+    esimDesc: 'Explore eSIM options for your destination.',
+    explore: 'Explore',
+    preview: 'Preview'
+  };
+}
+
+function _affiliatePartnerVisible_(partner){
+  return !!(partner && (ITBMO_AFFILIATE_CONFIG.previewMode || (partner.enabled && partner.url)));
+}
+
+function _affiliatePartnerUrl_(partner){
+  if(!partner) return '';
+  if(partner.enabled && partner.url) return partner.url;
+  if(ITBMO_AFFILIATE_CONFIG.previewMode) return partner.previewUrl || '';
+  return '';
+}
+
+function _affiliateTrack_(partnerKey, placement){
+  try{
+    const partner = ITBMO_AFFILIATE_CONFIG.partners[partnerKey];
+    const destination = activeCity || savedDestinations?.[0]?.city || '';
+    if(typeof window !== 'undefined' && typeof window.gtag === 'function'){
+      window.gtag('event','affiliate_click',{
+        partner: partnerKey,
+        partner_name: partner?.name || partnerKey,
+        placement,
+        destination
+      });
+    }
+  }catch(_){}
+}
+
+function _affiliateCategoryModel_(){
+  const c = _affiliateCopy_();
+  return [
+    { key:'hotels', icon:'🏨', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
+    { key:'experiences', icon:'🎟️', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
+    { key:'transport', icon:'🚆', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
+    { key:'esim', icon:'📱', title:c.esimTitle, desc:c.esimDesc, partners:['airalo','holafly'] }
+  ];
+}
+
+function renderAffiliateSurface(placement='loading'){
+  const root = placement==='loading' ? $affiliateLoading : $affiliateAfter;
+  if(!root) return false;
+
+  const c = _affiliateCopy_();
+  const categories = _affiliateCategoryModel_()
+    .map(cat=>({
+      ...cat,
+      partners: cat.partners.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]))
+    }))
+    .filter(cat=>cat.partners.length);
+
+  if(!categories.length){
+    root.innerHTML='';
+    root.style.display='none';
+    return false;
+  }
+
+  const isLoading = placement==='loading';
+  const eyebrow = isLoading ? c.loadingEyebrow : c.afterEyebrow;
+  const title = isLoading ? c.loadingTitle : c.afterTitle;
+  const sub = isLoading ? c.loadingSub : c.afterSub;
+
+  root.innerHTML = `
+    <div class="itbmo-affiliate-shell">
+      <div class="itbmo-affiliate-heading">
+        <div class="itbmo-affiliate-eyebrow">
+          <span class="itbmo-affiliate-spark">✦</span>
+          <span>${eyebrow}</span>
+          ${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>` : ''}
+        </div>
+        <h3>${title}</h3>
+        <p>${sub}</p>
+      </div>
+
+      <div class="itbmo-affiliate-grid">
+        ${categories.map(cat=>`
+          <article class="itbmo-affiliate-card itbmo-affiliate-card--${cat.key}">
+            <div class="itbmo-affiliate-icon" aria-hidden="true">${cat.icon}</div>
+            <div class="itbmo-affiliate-card-copy">
+              <h4>${cat.title}</h4>
+              <p>${cat.desc}</p>
+            </div>
+            <div class="itbmo-affiliate-links">
+              ${cat.partners.map(key=>{
+                const p = ITBMO_AFFILIATE_CONFIG.partners[key];
+                const url = _affiliatePartnerUrl_(p);
+                return `
+                  <a class="itbmo-affiliate-link"
+                     href="${url}"
+                     target="_blank"
+                     rel="sponsored noopener noreferrer"
+                     data-affiliate-partner="${key}"
+                     data-affiliate-placement="${placement}"
+                     aria-label="${c.explore} ${p.name}">
+                    <span>${p.name}</span>
+                    <span class="itbmo-affiliate-arrow" aria-hidden="true">↗</span>
+                  </a>`;
+              }).join('')}
+            </div>
+          </article>
+        `).join('')}
+      </div>
+
+      <div class="itbmo-affiliate-trust">
+        <span>✈</span>
+        <span>${getLang()==='es'
+          ? 'ITBMO sigue abierto en esta pestaña mientras exploras.'
+          : 'ITBMO stays open in this tab while you explore.'}</span>
+      </div>
+    </div>
+  `;
+
+  root.style.display='block';
+
+  qsa('[data-affiliate-partner]',root).forEach(a=>{
+    a.addEventListener('click',()=>{
+      _affiliateTrack_(a.dataset.affiliatePartner, a.dataset.affiliatePlacement || placement);
+    });
+  });
+
+  return true;
+}
+
+function setLoadingAffiliateVisibility(on){
+  if(!$affiliateLoading) return;
+  if(!on){
+    $affiliateLoading.style.display='none';
+    return;
+  }
+  renderAffiliateSurface('loading');
+}
+
+function refreshPostItineraryAffiliate(){
+  if(!$affiliateAfter) return;
+  const city = activeCity;
+  const hasRows = !!(city && itineraries?.[city] &&
+    Object.values(itineraries[city].byDay||{}).some(rows=>Array.isArray(rows) && rows.length));
+  if(!hasRows){
+    $affiliateAfter.innerHTML='';
+    $affiliateAfter.style.display='none';
+    return;
+  }
+  renderAffiliateSurface('after');
+}
+
 // 📌 Info Chat (IDs según tu HTML)
 const $infoToggle   = qs('#info-chat-toggle');
 const $infoModal    = qs('#info-chat-modal');
@@ -1325,6 +1584,7 @@ function renderCityItinerary(city){
   $itWrap.innerHTML = '';
   if(!days.length){
     $itWrap.innerHTML = `<p>${t('uiNoActivities')}</p>`;
+    if($affiliateAfter) $affiliateAfter.style.display='none';
     return;
   }
 
@@ -1403,6 +1663,9 @@ function renderCityItinerary(city){
     else if(t0.dataset.day) show(+t0.dataset.day);
   });
   show(itineraries[city].currentDay || days[0]);
+
+  // Post-itinerary monetization surface: independent of itinerary rendering.
+  refreshPostItineraryAffiliate();
 }
 
 function getFrontendSnapshot(){
@@ -2548,6 +2811,10 @@ function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
   $overlayWOW.style.display = on ? 'flex' : 'none';
+
+  // Affiliate cards are anchors, not planner controls: they remain clickable
+  // in a new tab while the generation request continues untouched.
+  setLoadingAffiliateVisibility(!!on);
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
