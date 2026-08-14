@@ -297,6 +297,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         <div class="city-tabs" id="city-tabs"></div>
         <div id="itinerary-container"></div>
 
+        <!-- =========================================================
+             ITBMO AFFILIATES — Post-itinerary surface
+             Rendered by planner.js. Hidden automatically when no partner
+             is enabled (or when previewMode=false and none are active).
+        ========================================================== -->
+        <div id="itbmo-affiliate-after" class="itbmo-affiliate-surface itbmo-affiliate-after" style="display:none;" aria-live="polite"></div>
+
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
 
@@ -352,6 +359,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
       <!-- ✅ Mensaje EXACTO solicitado -->
       <p>✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
+
+      <!-- =========================================================
+           ITBMO AFFILIATES — Generation surface
+           Links open in a new tab and DO NOT interrupt generation.
+           Rendered by planner.js from one central configuration block.
+      ========================================================== -->
+      <div id="itbmo-affiliate-loading" class="itbmo-affiliate-surface itbmo-affiliate-loading" style="display:none;" aria-live="polite"></div>
     </div>
   </div>
 
