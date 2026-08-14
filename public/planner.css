@@ -3856,3 +3856,279 @@ table.itinerary td:nth-child(2){
     transition:none !important;
   }
 }
+
+/* =========================================================
+   ITBMO AFFILIATES — WOW EMPHASIS v2
+   ULTRA-SURGICAL VISUAL OVERRIDES ONLY.
+   No HTML, JS, planner, API or generation-message changes.
+========================================================= */
+
+/* 1) Make the monetization surface instantly noticeable without looking like an ad. */
+.itbmo-affiliate-surface{
+  position:relative;
+}
+.itbmo-affiliate-surface::before{
+  content:"";
+  position:absolute;
+  inset:-10px -8px;
+  z-index:-1;
+  pointer-events:none;
+  border-radius:2rem;
+  background:
+    radial-gradient(circle at 18% 20%,rgba(129,140,248,.22),transparent 34%),
+    radial-gradient(circle at 82% 78%,rgba(251,146,60,.16),transparent 30%),
+    radial-gradient(circle at 68% 18%,rgba(94,234,212,.13),transparent 28%);
+  filter:blur(16px);
+  opacity:.78;
+  animation:itbmoAffiliateHalo 5.8s ease-in-out infinite;
+}
+@keyframes itbmoAffiliateHalo{
+  0%,100%{opacity:.62;transform:scale(.992)}
+  50%{opacity:.95;transform:scale(1.012)}
+}
+
+.itbmo-affiliate-shell{
+  border-color:rgba(112,124,205,.26);
+  background:
+    radial-gradient(circle at 8% 0%,rgba(226,232,255,.72),transparent 24%),
+    radial-gradient(circle at 96% 100%,rgba(255,235,224,.58),transparent 27%),
+    linear-gradient(145deg,rgba(255,255,255,.985),rgba(247,249,255,.965));
+  box-shadow:
+    0 28px 72px rgba(31,48,83,.15),
+    0 6px 22px rgba(77,88,155,.08),
+    inset 0 1px 0 rgba(255,255,255,1);
+}
+
+/* 2) Stronger visual hierarchy: headline is the emotional CTA. */
+.itbmo-affiliate-heading{
+  padding:.08rem .22rem 1.05rem;
+}
+.itbmo-affiliate-eyebrow{
+  color:#5966c2;
+  font-size:.71rem;
+  letter-spacing:.075em;
+}
+.itbmo-affiliate-spark{
+  width:1.72rem;
+  height:1.72rem;
+  color:#5e5bd6;
+  background:linear-gradient(145deg,#ffffff,#e9edff);
+  border-color:rgba(103,110,220,.24);
+  box-shadow:
+    0 8px 22px rgba(88,94,180,.2),
+    0 0 0 5px rgba(129,140,248,.06),
+    inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-heading h3{
+  font-size:clamp(1.46rem,2.7vw,1.92rem);
+  line-height:1.02;
+  letter-spacing:-.047em;
+  color:#0d213f;
+  text-wrap:balance;
+}
+.itbmo-affiliate-heading p{
+  margin:.58rem 0 0;
+  max-width:820px;
+  color:#55657d;
+  font-size:.89rem;
+  line-height:1.46;
+  font-weight:590;
+}
+
+/* 3) Cards feel like premium Apple-style app modules. */
+.itbmo-affiliate-grid{
+  gap:.82rem;
+}
+.itbmo-affiliate-card{
+  border-color:rgba(91,107,153,.16);
+  background:linear-gradient(152deg,rgba(255,255,255,.96),rgba(249,251,255,.86));
+  box-shadow:
+    0 10px 30px rgba(33,49,81,.075),
+    inset 0 1px 0 rgba(255,255,255,1);
+}
+.itbmo-affiliate-card:hover{
+  transform:translateY(-6px) scale(1.012);
+  border-color:rgba(111,113,229,.36);
+  box-shadow:
+    0 22px 46px rgba(39,53,94,.145),
+    0 0 0 1px rgba(129,140,248,.045),
+    inset 0 1px 0 #fff;
+}
+
+/* Flights becomes the visual hero without becoming a banner ad. */
+.itbmo-affiliate-card--featured{
+  min-height:7.7rem;
+  border-color:rgba(105,112,230,.31);
+  background:
+    radial-gradient(circle at 7% 15%,rgba(165,180,252,.32),transparent 34%),
+    radial-gradient(circle at 96% 78%,rgba(196,181,253,.2),transparent 30%),
+    linear-gradient(130deg,rgba(255,255,255,.99),rgba(243,246,255,.96));
+  box-shadow:
+    0 15px 38px rgba(72,81,150,.12),
+    inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card--featured::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  border-radius:inherit;
+  padding:1px;
+  background:linear-gradient(120deg,rgba(129,140,248,.5),rgba(255,255,255,0) 44%,rgba(251,146,60,.22));
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor;
+  mask-composite:exclude;
+  opacity:.82;
+}
+.itbmo-affiliate-card--featured .itbmo-affiliate-icon{
+  width:3.35rem;
+  height:3.35rem;
+  flex-basis:3.35rem;
+  color:#4f55cb;
+  background:linear-gradient(145deg,#fff,#e9edff);
+  box-shadow:
+    0 14px 32px rgba(72,80,177,.18),
+    0 0 0 7px rgba(129,140,248,.055),
+    inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card--featured .itbmo-affiliate-icon svg{
+  width:1.9rem;
+  height:1.9rem;
+}
+.itbmo-affiliate-card--featured h4{
+  font-size:1.08rem;
+}
+
+/* More tactile app icons across every service. */
+.itbmo-affiliate-icon{
+  border-color:rgba(103,116,170,.2);
+  box-shadow:
+    0 12px 28px rgba(50,65,112,.15),
+    0 0 0 5px rgba(255,255,255,.46),
+    inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card:hover .itbmo-affiliate-icon{
+  transform:translateY(-2px) scale(1.09) rotate(-2deg);
+}
+
+/* 4) CTA links must look immediately clickable. */
+.itbmo-affiliate-link{
+  min-height:2.72rem;
+  border-color:rgba(100,111,180,.2);
+  background:linear-gradient(145deg,#fff,rgba(249,250,255,.96));
+  font-size:.76rem;
+  box-shadow:
+    0 7px 18px rgba(50,64,112,.09),
+    inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-link:hover,
+.itbmo-affiliate-link:focus-visible{
+  transform:translateY(-3px) scale(1.008);
+  border-color:rgba(102,103,226,.42);
+  box-shadow:
+    0 14px 30px rgba(58,69,134,.17),
+    0 0 0 3px rgba(129,140,248,.055),
+    inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-arrow{
+  width:1.86rem;
+  height:1.86rem;
+  flex-basis:1.86rem;
+  background:linear-gradient(145deg,#8e8df6,#5e60d9);
+  box-shadow:
+    0 8px 18px rgba(84,84,206,.32),
+    inset 0 1px 0 rgba(255,255,255,.32);
+}
+.itbmo-affiliate-link:hover .itbmo-affiliate-arrow{
+  transform:translate(2px,-2px) scale(1.08);
+}
+
+/* 5) Sequential entrance creates life without changing markup or JS. */
+.itbmo-affiliate-card{
+  animation:itbmoAffiliateCardReveal .58s cubic-bezier(.16,1,.3,1) both;
+}
+.itbmo-affiliate-card:nth-child(1){animation-delay:.05s}
+.itbmo-affiliate-card:nth-child(2){animation-delay:.11s}
+.itbmo-affiliate-card:nth-child(3){animation-delay:.17s}
+.itbmo-affiliate-card:nth-child(4){animation-delay:.23s}
+.itbmo-affiliate-card:nth-child(5){animation-delay:.29s}
+@keyframes itbmoAffiliateCardReveal{
+  from{opacity:0;transform:translateY(13px) scale(.985)}
+  to{opacity:1;transform:translateY(0) scale(1)}
+}
+
+/* Loading placement stays compact; original generation copy remains untouched. */
+#loading-overlay .itbmo-affiliate-shell{
+  border-color:rgba(108,119,211,.3);
+  box-shadow:
+    0 26px 62px rgba(39,52,95,.16),
+    inset 0 1px 0 #fff;
+}
+#loading-overlay .itbmo-affiliate-heading{
+  padding:0 .08rem .82rem;
+}
+#loading-overlay .itbmo-affiliate-heading h3{
+  font-size:1.3rem;
+  line-height:1.04;
+}
+#loading-overlay .itbmo-affiliate-heading p{
+  font-size:.76rem;
+  font-weight:600;
+}
+#loading-overlay .itbmo-affiliate-card--featured{
+  padding:.8rem;
+}
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-icon{
+  width:2.7rem;
+  height:2.7rem;
+  flex-basis:2.7rem;
+}
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-icon svg{
+  width:1.5rem;
+  height:1.5rem;
+}
+#loading-overlay .itbmo-affiliate-link{
+  min-height:2.18rem;
+}
+
+/* Post-itinerary gets a touch more breathing room because purchase intent is highest here. */
+.itbmo-affiliate-after .itbmo-affiliate-shell{
+  padding:1.12rem;
+}
+.itbmo-affiliate-after .itbmo-affiliate-heading{
+  padding-bottom:1.08rem;
+}
+.itbmo-affiliate-after .itbmo-affiliate-heading h3{
+  font-size:clamp(1.55rem,2.9vw,2rem);
+}
+
+@media(max-width:720px){
+  .itbmo-affiliate-surface::before{
+    inset:-6px -3px;
+    filter:blur(12px);
+  }
+  .itbmo-affiliate-heading h3,
+  #loading-overlay .itbmo-affiliate-heading h3{
+    font-size:1.2rem;
+  }
+  .itbmo-affiliate-heading p,
+  #loading-overlay .itbmo-affiliate-heading p{
+    font-size:.74rem;
+  }
+  .itbmo-affiliate-card--featured .itbmo-affiliate-icon{
+    width:2.8rem;
+    height:2.8rem;
+    flex-basis:2.8rem;
+  }
+  .itbmo-affiliate-card--featured .itbmo-affiliate-icon svg{
+    width:1.55rem;
+    height:1.55rem;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .itbmo-affiliate-surface::before,
+  .itbmo-affiliate-card{
+    animation:none !important;
+  }
+}
