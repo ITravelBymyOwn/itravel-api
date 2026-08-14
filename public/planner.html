@@ -142,11 +142,10 @@
         </div>
       </section>
 
-      <!-- ✅ NUEVO: Viajeros (compacto con dropdown) -->
+      <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
       <section class="box">
         <h3>Viajeros</h3>
 
-        <!-- Dropdown tipo “número de días” (referencia visual en el UI) -->
         <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
           ¿Con quién viajas?
           <select id="traveler-mode" class="btn" style="padding:.55rem .7rem; border-radius:.55rem; background:#fff; text-align:left;">
@@ -156,81 +155,14 @@
           </select>
         </label>
 
-        <!-- Panel SOLO -->
-        <div id="traveler-solo-panel" style="display:none; margin-top:.85rem;">
-          <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
-            <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
-              Género
-              <select id="solo-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
-                <option value="" selected disabled></option>
-                <option value="female">Femenino</option>
-                <option value="male">Masculino</option>
-                <option value="other">Otro</option>
-                <option value="na">Prefiero no decirlo</option>
-              </select>
-            </label>
+        <!-- Just me: no despliega campos adicionales.
+             La edad del titular se toma del perfil ITBMO ya registrado. -->
 
-            <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
-              Rango de edad
-              <select id="solo-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
-                <option value="" selected disabled></option>
-                <option value="0-2">Bebé (0–2)</option>
-                <option value="3-5">Preescolar (3–5)</option>
-                <option value="6-12">Niño (6–12)</option>
-                <option value="13-17">Adolescente (13–17)</option>
-                <option value="18-24">Joven adulto (18–24)</option>
-                <option value="25-39">Adulto (25–39)</option>
-                <option value="40-54">Adulto (40–54)</option>
-                <option value="55-64">Adulto (55–64)</option>
-                <option value="65+">Mayor (65+)</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <!-- Panel ACOMPAÑADO -->
+        <!-- Panel ACOMPAÑADO: solo datos de acompañantes -->
         <div id="traveler-group-panel" style="display:none; margin-top:.85rem;">
-
-          <!-- ✅ NUEVO: Tu información (usuario) -->
-          <div class="box" style="margin:0 0 .75rem 0; padding:.9rem; border-style:dashed;">
-            <strong style="font-size:.95rem;">Tu información</strong>
-
-            <div style="display:flex; gap:.6rem; flex-wrap:wrap; margin-top:.75rem;">
-              <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
-                Género
-                <select id="me-gender" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
-                  <option value="" selected disabled></option>
-                  <option value="female">Femenino</option>
-                  <option value="male">Masculino</option>
-                  <option value="other">Otro</option>
-                  <option value="na">Prefiero no decirlo</option>
-                </select>
-              </label>
-
-              <label style="flex:1; min-width:160px; display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
-                Rango de edad
-                <select id="me-age-range" style="padding:.55rem .7rem; border:1px solid #ccc; border-radius:.55rem; background:#fff;">
-                  <option value="" selected disabled></option>
-                  <option value="0-2">Bebé (0–2)</option>
-                  <option value="3-5">Preescolar (3–5)</option>
-                  <option value="6-12">Niño (6–12)</option>
-                  <option value="13-17">Adolescente (13–17)</option>
-                  <option value="18-24">Joven adulto (18–24)</option>
-                  <option value="25-39">Adulto (25–39)</option>
-                  <option value="40-54">Adulto (40–54)</option>
-                  <option value="55-64">Adulto (55–64)</option>
-                  <option value="65+">Mayor (65+)</option>
-                </select>
-              </label>
-            </div>
-          </div>
-          <!-- /Tu información -->
-
           <div class="box" style="margin:0; padding:.9rem; border-style:dashed;">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem;">
-              <strong style="font-size:.95rem;">Perfiles de viajeros</strong>
-              <!-- MVP: el JS luego generará perfiles automáticamente.
-                   Por ahora dejamos contenedor + botones opcionales para futuro -->
+              <strong id="traveler-profiles-title" style="font-size:.95rem;">Perfiles de viajeros</strong>
               <div style="display:flex; gap:.4rem;">
                 <button id="traveler-add" class="btn ghost" type="button" style="padding:.45rem .7rem;">+ Agregar</button>
                 <button id="traveler-remove" class="btn ghost" type="button" style="padding:.45rem .7rem;">− Quitar</button>
@@ -241,7 +173,7 @@
               <!-- Perfil 1 -->
               <div class="traveler-profile" style="border:1px solid #ccc; border-radius:.8rem; padding:.75rem;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.5rem;">
-                  <strong style="font-size:.9rem;">Viajero 1</strong>
+                  <strong class="traveler-title" style="font-size:.9rem;">Viajero 1</strong>
                   <span style="font-size:.85rem; color:rgba(11,31,59,.65);">Acompañante</span>
                 </div>
                 <div style="display:flex; gap:.6rem; flex-wrap:wrap;">
@@ -251,7 +183,8 @@
                       <option value="" selected disabled></option>
                       <option value="female">Femenino</option>
                       <option value="male">Masculino</option>
-                      <option value="other">Otro</option>
+                      <option value="non_binary">No binario</option>
+                      <option value="another_identity">Otra identidad</option>
                       <option value="na">Prefiero no decirlo</option>
                     </select>
                   </label>
@@ -265,8 +198,9 @@
                       <option value="6-12">Niño (6–12)</option>
                       <option value="13-17">Adolescente (13–17)</option>
                       <option value="18-24">Joven adulto (18–24)</option>
-                      <option value="25-39">Adulto (25–39)</option>
-                      <option value="40-54">Adulto (40–54)</option>
+                      <option value="25-34">Adulto (25–34)</option>
+                      <option value="35-44">Adulto (35–44)</option>
+                      <option value="45-54">Adulto (45–54)</option>
                       <option value="55-64">Adulto (55–64)</option>
                       <option value="65+">Mayor (65+)</option>
                     </select>
@@ -277,12 +211,12 @@
             </div>
 
             <p style="margin:.75rem 0 0; font-size:.85rem; color:rgba(11,31,59,.68);">
-              *En el MVP, estos perfiles se usarán para personalizar el itinerario. La lógica se conecta en JS después.
+              *Estos perfiles se usan para adaptar el itinerario a las edades y necesidades del grupo.
             </p>
           </div>
         </div>
 
-        <!-- ✅ Compatibilidad: mantenemos el grid original oculto (por ahora) para no romper JS actual -->
+        <!-- ✅ Compatibilidad: mantenemos el grid técnico original oculto para no romper el contrato existente -->
         <div id="traveler-grid" style="display:none;">
           <label>Adultos (18–64)<input id="p-adults" type="number" min="0" value="1"></label>
           <label>Jóvenes (13–17)<input id="p-young" type="number" min="0" value="0"></label>
@@ -456,24 +390,25 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           age_range: "Age range",
           female: "Female",
           male: "Male",
-          other: "Other",
+          non_binary: "Non-binary",
+          another_identity: "Another identity",
           na: "Prefer not to say",
           baby: "Baby (0–2)",
           preschool: "Preschool (3–5)",
           child: "Child (6–12)",
           teen: "Teen (13–17)",
           young_adult: "Young adult (18–24)",
-          adult_25_39: "Adult (25–39)",
-          adult_40_54: "Adult (40–54)",
+          adult_25_34: "Adult (25–34)",
+          adult_35_44: "Adult (35–44)",
+          adult_45_54: "Adult (45–54)",
           adult_55_64: "Adult (55–64)",
           senior: "Senior (65+)",
-          your_info: "Your info",
-          traveler_profiles: "Traveler profiles",
+          traveler_profiles: "Travel companions",
           add: "+ Add",
           remove: "− Remove",
           traveler_1: "Traveler 1",
           companion: "Companion",
-          mvp_note: "*In the MVP, these profiles will be used to personalize the itinerary. The logic connects in JS later.",
+          mvp_note: "*These profiles are used to adapt the itinerary to the ages and needs of the group.",
           itinerary_title: "Itinerary",
           open_info_chat: "Open Info Chat",
           start_planning: "Start planning",
@@ -514,24 +449,25 @@ This will help create an itinerary that truly matches you.
           age_range: "Rango de edad",
           female: "Femenino",
           male: "Masculino",
-          other: "Otro",
+          non_binary: "No binario",
+          another_identity: "Otra identidad",
           na: "Prefiero no decirlo",
           baby: "Bebé (0–2)",
           preschool: "Preescolar (3–5)",
           child: "Niño (6–12)",
           teen: "Adolescente (13–17)",
           young_adult: "Joven adulto (18–24)",
-          adult_25_39: "Adulto (25–39)",
-          adult_40_54: "Adulto (40–54)",
+          adult_25_34: "Adulto (25–34)",
+          adult_35_44: "Adulto (35–44)",
+          adult_45_54: "Adulto (45–54)",
           adult_55_64: "Adulto (55–64)",
           senior: "Mayor (65+)",
-          your_info: "Tu información",
-          traveler_profiles: "Perfiles de viajeros",
+          traveler_profiles: "Acompañantes",
           add: "+ Agregar",
           remove: "− Quitar",
           traveler_1: "Viajero 1",
           companion: "Acompañante",
-          mvp_note: "*En el MVP, estos perfiles se usarán para personalizar el itinerario. La lógica se conecta en JS después.",
+          mvp_note: "*Estos perfiles se usan para adaptar el itinerario a las edades y necesidades del grupo.",
           itinerary_title: "Itinerario",
           open_info_chat: "Open Info Chat",
           start_planning: "Iniciar planificación",
@@ -617,8 +553,6 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         setPlaceholder(document.getElementById("special-conditions"), t("special_placeholder"));
 
         // Travelers section
-        // (título del section: el primer h3 después del special-conditions ya existe en HTML: "Viajeros")
-        // lo seleccionamos de forma segura por ubicación: el h3 dentro del section que contiene #traveler-mode
         const travelerMode = document.getElementById("traveler-mode");
         const travelerSection = travelerMode ? travelerMode.closest("section.box") : null;
         if (travelerSection) {
@@ -632,80 +566,23 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           setSelectOptionText(travelerMode, "group", t("mode_group"));
         }
 
-        // SOLO panel labels
-        setLabelLeadingTextForControl("solo-gender", t("gender"));
-        setLabelLeadingTextForControl("solo-age-range", t("age_range"));
-
-        // SOLO options
-        const soloGender = document.getElementById("solo-gender");
-        if (soloGender) {
-          setSelectOptionText(soloGender, "female", t("female"));
-          setSelectOptionText(soloGender, "male", t("male"));
-          setSelectOptionText(soloGender, "other", t("other"));
-          setSelectOptionText(soloGender, "na", t("na"));
-        }
-        const soloAge = document.getElementById("solo-age-range");
-        if (soloAge) {
-          setSelectOptionText(soloAge, "0-2", t("baby"));
-          setSelectOptionText(soloAge, "3-5", t("preschool"));
-          setSelectOptionText(soloAge, "6-12", t("child"));
-          setSelectOptionText(soloAge, "13-17", t("teen"));
-          setSelectOptionText(soloAge, "18-24", t("young_adult"));
-          setSelectOptionText(soloAge, "25-39", t("adult_25_39"));
-          setSelectOptionText(soloAge, "40-54", t("adult_40_54"));
-          setSelectOptionText(soloAge, "55-64", t("adult_55_64"));
-          setSelectOptionText(soloAge, "65+", t("senior"));
-        }
-
-        // GROUP: "Tu información"
-        const yourInfoStrong = document.querySelector("#traveler-group-panel .box strong");
-        setText(yourInfoStrong, t("your_info"));
-        setLabelLeadingTextForControl("me-gender", t("gender"));
-        setLabelLeadingTextForControl("me-age-range", t("age_range"));
-
-        const meGender = document.getElementById("me-gender");
-        if (meGender) {
-          setSelectOptionText(meGender, "female", t("female"));
-          setSelectOptionText(meGender, "male", t("male"));
-          setSelectOptionText(meGender, "other", t("other"));
-          setSelectOptionText(meGender, "na", t("na"));
-        }
-        const meAge = document.getElementById("me-age-range");
-        if (meAge) {
-          setSelectOptionText(meAge, "0-2", t("baby"));
-          setSelectOptionText(meAge, "3-5", t("preschool"));
-          setSelectOptionText(meAge, "6-12", t("child"));
-          setSelectOptionText(meAge, "13-17", t("teen"));
-          setSelectOptionText(meAge, "18-24", t("young_adult"));
-          setSelectOptionText(meAge, "25-39", t("adult_25_39"));
-          setSelectOptionText(meAge, "40-54", t("adult_40_54"));
-          setSelectOptionText(meAge, "55-64", t("adult_55_64"));
-          setSelectOptionText(meAge, "65+", t("senior"));
-        }
-
-        // GROUP: Perfiles de viajeros + botones
-        const profilesHeader = document.querySelector("#traveler-group-panel .box strong[style*='font-size:.95rem']");
-        // Nota: el selector anterior también puede pegarle a "Tu información"; por eso el de arriba ya se setea y acá buscamos el segundo
-        if (travelerSection) {
-          const strongs = travelerSection.querySelectorAll("#traveler-group-panel strong");
-          if (strongs && strongs.length >= 2) setText(strongs[1], t("traveler_profiles"));
-        }
+        // GROUP: acompañantes + botones
+        setText(document.getElementById("traveler-profiles-title"), t("traveler_profiles"));
         setText(document.getElementById("traveler-add"), t("add"));
         setText(document.getElementById("traveler-remove"), t("remove"));
 
-        // Perfil 1 labels (texto visible)
+        // Perfil 1 visible en el HTML inicial
         const traveler1Strong = document.querySelector("#traveler-profiles .traveler-profile strong");
         setText(traveler1Strong, t("traveler_1"));
         const companionSpan = document.querySelector("#traveler-profiles .traveler-profile span");
         setText(companionSpan, t("companion"));
 
-        // Perfil 1 selects (labels)
         const profGender = document.querySelector("#traveler-profiles .traveler-profile select.traveler-gender");
         const profAge = document.querySelector("#traveler-profiles .traveler-profile select.traveler-age-range");
+
         if (profGender) {
           const lbl = profGender.closest("label");
           if (lbl) {
-            // reemplaza "Género"
             for (let i = 0; i < lbl.childNodes.length; i++) {
               const n = lbl.childNodes[i];
               if (n && n.nodeType === Node.TEXT_NODE && n.textContent && n.textContent.trim().length) {
@@ -716,9 +593,11 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           }
           setSelectOptionText(profGender, "female", t("female"));
           setSelectOptionText(profGender, "male", t("male"));
-          setSelectOptionText(profGender, "other", t("other"));
+          setSelectOptionText(profGender, "non_binary", t("non_binary"));
+          setSelectOptionText(profGender, "another_identity", t("another_identity"));
           setSelectOptionText(profGender, "na", t("na"));
         }
+
         if (profAge) {
           const lbl = profAge.closest("label");
           if (lbl) {
@@ -735,13 +614,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           setSelectOptionText(profAge, "6-12", t("child"));
           setSelectOptionText(profAge, "13-17", t("teen"));
           setSelectOptionText(profAge, "18-24", t("young_adult"));
-          setSelectOptionText(profAge, "25-39", t("adult_25_39"));
-          setSelectOptionText(profAge, "40-54", t("adult_40_54"));
+          setSelectOptionText(profAge, "25-34", t("adult_25_34"));
+          setSelectOptionText(profAge, "35-44", t("adult_35_44"));
+          setSelectOptionText(profAge, "45-54", t("adult_45_54"));
           setSelectOptionText(profAge, "55-64", t("adult_55_64"));
           setSelectOptionText(profAge, "65+", t("senior"));
         }
 
-        // Nota MVP (p final dentro del box de perfiles)
         const mvpP = document.querySelector("#traveler-group-panel p");
         setText(mvpP, t("mvp_note"));
 
@@ -809,22 +688,12 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
          (La integración con el intake del planner se hace luego en JS)
       ========================================================= */
       const modeSel = document.getElementById("traveler-mode");
-      const soloPanel = document.getElementById("traveler-solo-panel");
       const groupPanel = document.getElementById("traveler-group-panel");
 
-      if (modeSel && soloPanel && groupPanel) {
+      if (modeSel && groupPanel) {
         modeSel.addEventListener("change", () => {
           const v = (modeSel.value || "").toLowerCase();
-          if (v === "solo") {
-            soloPanel.style.display = "block";
-            groupPanel.style.display = "none";
-          } else if (v === "group") {
-            soloPanel.style.display = "none";
-            groupPanel.style.display = "block";
-          } else {
-            soloPanel.style.display = "none";
-            groupPanel.style.display = "none";
-          }
+          groupPanel.style.display = v === "group" ? "block" : "none";
           postHeight();
         });
       }
@@ -838,7 +707,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=58"></script>
+<script src="./planner.js?v=59"></script>
  
 </body>
 </html>
