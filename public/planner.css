@@ -3350,100 +3350,132 @@ table.itinerary td:nth-child(2){
 }
 
 /* =========================================================
-   ITBMO AFFILIATES — Premium monetization surfaces
-   Independent visual layer; does not alter itinerary tables,
-   planner controls, Info Chat, exports or API behavior.
+   ITBMO AFFILIATES — Apple-inspired premium travel shelf
+   Visual-only layer. It does not alter planner/API behavior.
 ========================================================= */
 .itbmo-affiliate-surface{
   width:100%;
+  min-width:0;
   margin:1rem 0 0;
-  animation:itbmoAffiliateIn .46s cubic-bezier(.22,.8,.32,1) both;
+  animation:itbmoAffiliateIn .52s cubic-bezier(.16,1,.3,1) both;
 }
 @keyframes itbmoAffiliateIn{
-  from{opacity:0;transform:translateY(8px)}
-  to{opacity:1;transform:translateY(0)}
+  from{opacity:0;transform:translateY(12px) scale(.985)}
+  to{opacity:1;transform:translateY(0) scale(1)}
 }
 
 .itbmo-affiliate-shell{
+  --aff-ink:#10233f;
+  --aff-muted:#66758c;
+  --aff-line:rgba(70,87,121,.13);
+  --aff-glow:rgba(129,140,248,.18);
   position:relative;
+  width:100%;
+  min-width:0;
   overflow:hidden;
-  border:1px solid rgba(118,125,219,.22);
-  border-radius:1.35rem;
-  padding:1.05rem;
+  isolation:isolate;
+  border:1px solid rgba(154,165,192,.22);
+  border-radius:1.55rem;
+  padding:1.15rem;
   background:
-    radial-gradient(circle at 0% 0%,rgba(165,180,252,.28),transparent 34%),
-    radial-gradient(circle at 100% 100%,rgba(250,204,229,.24),transparent 34%),
-    linear-gradient(145deg,rgba(255,255,255,.98),rgba(248,249,255,.97));
+    linear-gradient(145deg,rgba(255,255,255,.97),rgba(248,250,255,.93));
   box-shadow:
-    0 18px 45px rgba(45,56,96,.10),
-    inset 0 1px 0 rgba(255,255,255,.9);
+    0 22px 60px rgba(35,49,78,.11),
+    0 2px 10px rgba(35,49,78,.055),
+    inset 0 1px 0 rgba(255,255,255,.95);
+  backdrop-filter:blur(18px) saturate(1.08);
+  -webkit-backdrop-filter:blur(18px) saturate(1.08);
 }
 
-.itbmo-affiliate-shell::before{
+.itbmo-affiliate-shell::after{
   content:"";
   position:absolute;
   inset:0;
+  z-index:-1;
   pointer-events:none;
-  background:linear-gradient(110deg,transparent 25%,rgba(255,255,255,.48) 48%,transparent 70%);
-  transform:translateX(-100%);
-  animation:itbmoAffiliateShimmer 7s ease-in-out infinite;
+  background:linear-gradient(115deg,transparent 24%,rgba(255,255,255,.58) 47%,transparent 68%);
+  transform:translateX(-120%);
+  animation:itbmoAffiliateShine 8.5s ease-in-out infinite;
 }
-@keyframes itbmoAffiliateShimmer{
-  0%,62%,100%{transform:translateX(-110%)}
-  78%{transform:translateX(110%)}
+@keyframes itbmoAffiliateShine{
+  0%,68%,100%{transform:translateX(-120%)}
+  82%{transform:translateX(120%)}
+}
+
+.itbmo-affiliate-orb{
+  position:absolute;
+  z-index:-2;
+  width:15rem;
+  height:15rem;
+  border-radius:999px;
+  filter:blur(26px);
+  opacity:.42;
+  pointer-events:none;
+}
+.itbmo-affiliate-orb--one{
+  top:-9rem;
+  left:-6rem;
+  background:radial-gradient(circle,rgba(165,180,252,.8),rgba(165,180,252,0) 67%);
+}
+.itbmo-affiliate-orb--two{
+  right:-7rem;
+  bottom:-10rem;
+  background:radial-gradient(circle,rgba(251,207,232,.74),rgba(251,207,232,0) 68%);
 }
 
 .itbmo-affiliate-heading{
   position:relative;
   z-index:1;
+  padding:.05rem .15rem .95rem;
   text-align:left;
-  padding:.15rem .15rem .85rem;
 }
 .itbmo-affiliate-eyebrow{
   display:flex;
   align-items:center;
   flex-wrap:wrap;
   gap:.42rem;
-  margin-bottom:.36rem;
-  color:#6166b8;
-  font-size:.72rem;
+  margin-bottom:.42rem;
+  color:#6571bd;
+  font-size:.68rem;
   line-height:1.2;
   font-weight:850;
-  letter-spacing:.055em;
+  letter-spacing:.07em;
   text-transform:uppercase;
 }
 .itbmo-affiliate-spark{
   display:inline-grid;
   place-items:center;
-  width:1.45rem;
-  height:1.45rem;
+  width:1.55rem;
+  height:1.55rem;
   border-radius:999px;
-  background:linear-gradient(135deg,#efeefe,#fff4d7);
-  box-shadow:0 4px 12px rgba(74,80,155,.12);
+  color:#625fca;
+  background:linear-gradient(145deg,#fff,#eef0ff);
+  border:1px solid rgba(129,140,248,.18);
+  box-shadow:0 6px 18px rgba(88,94,170,.14),inset 0 1px 0 #fff;
+  font-size:.75rem;
 }
 .itbmo-affiliate-preview{
-  margin-left:.15rem;
-  padding:.22rem .48rem;
+  padding:.22rem .5rem;
   border-radius:999px;
-  background:#fff3c4;
-  color:#705c00;
-  border:1px solid rgba(164,132,0,.18);
-  font-size:.62rem;
-  letter-spacing:.04em;
+  color:#725c00;
+  background:rgba(255,243,196,.9);
+  border:1px solid rgba(164,132,0,.14);
+  font-size:.58rem;
+  letter-spacing:.045em;
 }
 .itbmo-affiliate-heading h3{
   margin:0;
-  color:#142744;
-  font-size:clamp(1.15rem,2vw,1.48rem);
-  line-height:1.15;
+  color:var(--aff-ink);
+  font-size:clamp(1.22rem,2.1vw,1.58rem);
+  line-height:1.08;
   font-weight:900;
-  letter-spacing:-.022em;
+  letter-spacing:-.035em;
 }
 .itbmo-affiliate-heading p{
-  margin:.42rem 0 0;
+  margin:.48rem 0 0;
   max-width:760px;
-  color:#68748a;
-  font-size:.84rem;
+  color:var(--aff-muted);
+  font-size:.82rem;
   line-height:1.48;
   font-weight:520;
 }
@@ -3452,112 +3484,196 @@ table.itinerary td:nth-child(2){
   position:relative;
   z-index:1;
   display:grid;
-  grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:.72rem;
+  width:100%;
+  min-width:0;
 }
+
 .itbmo-affiliate-card{
+  position:relative;
   min-width:0;
   display:flex;
   flex-direction:column;
-  gap:.66rem;
-  padding:.9rem;
-  border:1px solid rgba(195,200,222,.72);
-  border-radius:1rem;
-  background:rgba(255,255,255,.86);
-  box-shadow:0 7px 20px rgba(47,59,95,.055);
-  backdrop-filter:blur(8px);
+  justify-content:space-between;
+  gap:.78rem;
+  padding:.88rem;
+  overflow:hidden;
+  border:1px solid var(--aff-line);
+  border-radius:1.15rem;
+  background:rgba(255,255,255,.77);
+  box-shadow:
+    0 7px 24px rgba(40,54,85,.055),
+    inset 0 1px 0 rgba(255,255,255,.96);
   transition:
-    transform .26s cubic-bezier(.22,.8,.32,1),
-    box-shadow .26s ease,
-    border-color .26s ease;
+    transform .34s cubic-bezier(.16,1,.3,1),
+    box-shadow .34s ease,
+    border-color .34s ease,
+    background .34s ease;
+}
+.itbmo-affiliate-card::before{
+  content:"";
+  position:absolute;
+  inset:auto -12% -55% 34%;
+  height:75%;
+  border-radius:999px;
+  opacity:.22;
+  filter:blur(24px);
+  transition:opacity .34s ease,transform .34s ease;
 }
 .itbmo-affiliate-card:hover{
-  transform:translateY(-3px);
-  border-color:rgba(129,140,248,.48);
-  box-shadow:0 13px 28px rgba(47,59,95,.10);
+  transform:translateY(-4px) scale(1.008);
+  border-color:rgba(129,140,248,.28);
+  background:rgba(255,255,255,.93);
+  box-shadow:
+    0 18px 38px rgba(40,54,85,.11),
+    inset 0 1px 0 rgba(255,255,255,1);
 }
-.itbmo-affiliate-card--hotels{background:linear-gradient(155deg,#fff,#f0f4ff)}
-.itbmo-affiliate-card--experiences{background:linear-gradient(155deg,#fff,#fff1f5)}
-.itbmo-affiliate-card--transport{background:linear-gradient(155deg,#fff,#eef9f5)}
-.itbmo-affiliate-card--esim{background:linear-gradient(155deg,#fff,#fff8e4)}
+.itbmo-affiliate-card:hover::before{
+  opacity:.38;
+  transform:scale(1.08);
+}
 
+.itbmo-affiliate-card--featured{
+  grid-column:1 / -1;
+  min-height:7.2rem;
+  padding:1rem 1.05rem;
+  background:
+    radial-gradient(circle at 12% 0%,rgba(129,140,248,.18),transparent 42%),
+    linear-gradient(135deg,rgba(255,255,255,.96),rgba(245,247,255,.9));
+  border-color:rgba(129,140,248,.22);
+}
+.itbmo-affiliate-card--featured::before{background:#a5b4fc}
+.itbmo-affiliate-card--hotels::before{background:#93c5fd}
+.itbmo-affiliate-card--experiences::before{background:#f9a8d4}
+.itbmo-affiliate-card--transport::before{background:#86efac}
+.itbmo-affiliate-card--esim::before{background:#fde68a}
+
+.itbmo-affiliate-card-top{
+  display:flex;
+  align-items:center;
+  gap:.78rem;
+  min-width:0;
+}
 .itbmo-affiliate-icon{
-  width:2.35rem;
-  height:2.35rem;
+  width:3.05rem;
+  height:3.05rem;
+  flex:0 0 3.05rem;
   display:grid;
   place-items:center;
-  flex:0 0 auto;
-  border-radius:.78rem;
-  background:rgba(255,255,255,.92);
-  border:1px solid rgba(207,212,231,.74);
-  box-shadow:0 5px 14px rgba(48,61,96,.07);
-  font-size:1.15rem;
+  border-radius:1rem;
+  color:#4b55ad;
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.98),rgba(238,241,255,.92));
+  border:1px solid rgba(117,128,188,.16);
+  box-shadow:
+    0 10px 24px rgba(62,72,127,.13),
+    inset 0 1px 0 rgba(255,255,255,1),
+    inset 0 -1px 0 rgba(96,109,170,.06);
+  transition:transform .34s cubic-bezier(.16,1,.3,1),box-shadow .34s ease;
 }
+.itbmo-affiliate-card:hover .itbmo-affiliate-icon{
+  transform:scale(1.06) rotate(-2deg);
+  box-shadow:0 14px 30px rgba(62,72,127,.18),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-icon svg{
+  width:1.72rem;
+  height:1.72rem;
+  display:block;
+}
+.itbmo-affiliate-card--hotels .itbmo-affiliate-icon{color:#3478c8;background:linear-gradient(145deg,#fff,#eaf4ff)}
+.itbmo-affiliate-card--experiences .itbmo-affiliate-icon{color:#cf4a87;background:linear-gradient(145deg,#fff,#fff0f7)}
+.itbmo-affiliate-card--transport .itbmo-affiliate-icon{color:#268361;background:linear-gradient(145deg,#fff,#ebfaf4)}
+.itbmo-affiliate-card--esim .itbmo-affiliate-icon{color:#a36e00;background:linear-gradient(145deg,#fff,#fff8df)}
+
 .itbmo-affiliate-card-copy{
-  min-height:4rem;
+  min-width:0;
 }
 .itbmo-affiliate-card h4{
   margin:0;
-  color:#20324e;
+  color:#1d2f4b;
   font-size:.9rem;
-  line-height:1.24;
-  font-weight:850;
-  letter-spacing:-.012em;
+  line-height:1.18;
+  font-weight:880;
+  letter-spacing:-.018em;
 }
 .itbmo-affiliate-card p{
-  margin:.34rem 0 0;
+  margin:.28rem 0 0;
   color:#748096;
-  font-size:.73rem;
-  line-height:1.42;
+  font-size:.7rem;
+  line-height:1.38;
   font-weight:520;
 }
+.itbmo-affiliate-card--featured h4{
+  font-size:1rem;
+}
+
 .itbmo-affiliate-links{
   display:flex;
-  flex-direction:column;
-  gap:.38rem;
+  flex-wrap:wrap;
+  gap:.42rem;
   margin-top:auto;
+  min-width:0;
 }
 .itbmo-affiliate-link{
+  position:relative;
+  min-width:0;
+  flex:1 1 125px;
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:.5rem;
-  width:100%;
-  min-height:2.35rem;
-  padding:.55rem .66rem;
-  border-radius:.72rem;
-  border:1px solid rgba(129,140,248,.25);
-  background:rgba(255,255,255,.92);
-  color:#303a7a;
+  gap:.55rem;
+  min-height:2.55rem;
+  padding:.58rem .62rem .58rem .74rem;
+  border-radius:.84rem;
+  border:1px solid rgba(107,120,174,.15);
+  background:rgba(255,255,255,.9);
+  color:#283867;
   text-decoration:none;
-  font-size:.74rem;
-  line-height:1.2;
-  font-weight:800;
-  box-shadow:0 3px 9px rgba(65,74,132,.055);
+  font-size:.72rem;
+  line-height:1.15;
+  font-weight:820;
+  box-shadow:
+    0 5px 14px rgba(56,68,117,.07),
+    inset 0 1px 0 rgba(255,255,255,.98);
   transition:
-    transform .2s ease,
-    box-shadow .2s ease,
-    border-color .2s ease,
-    background .2s ease;
+    transform .24s cubic-bezier(.16,1,.3,1),
+    box-shadow .24s ease,
+    border-color .24s ease,
+    background .24s ease;
 }
 .itbmo-affiliate-link:hover,
 .itbmo-affiliate-link:focus-visible{
-  transform:translateY(-1px);
-  border-color:rgba(102,111,224,.55);
+  transform:translateY(-2px);
+  border-color:rgba(108,113,224,.35);
   background:#fff;
-  box-shadow:0 7px 16px rgba(65,74,132,.11);
+  box-shadow:0 11px 24px rgba(59,69,125,.13),inset 0 1px 0 #fff;
   outline:none;
 }
+.itbmo-affiliate-brand{
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+}
 .itbmo-affiliate-arrow{
-  display:inline-grid;
+  width:1.72rem;
+  height:1.72rem;
+  flex:0 0 1.72rem;
+  display:grid;
   place-items:center;
-  width:1.45rem;
-  height:1.45rem;
   border-radius:999px;
   color:#fff;
-  background:linear-gradient(135deg,#8685ed,#6e6ddb);
-  font-size:.7rem;
-  box-shadow:0 3px 8px rgba(105,104,219,.22);
+  background:linear-gradient(145deg,#8888f0,#6464d8);
+  box-shadow:0 6px 15px rgba(90,89,206,.26);
+  transition:transform .24s cubic-bezier(.16,1,.3,1);
+}
+.itbmo-affiliate-link:hover .itbmo-affiliate-arrow{
+  transform:translate(1px,-1px) scale(1.05);
+}
+.itbmo-affiliate-arrow svg{
+  width:.92rem;
+  height:.92rem;
+  display:block;
 }
 
 .itbmo-affiliate-trust{
@@ -3566,130 +3682,177 @@ table.itinerary td:nth-child(2){
   display:flex;
   align-items:center;
   justify-content:center;
-  gap:.42rem;
-  margin:.78rem .15rem 0;
-  color:#7a8598;
+  gap:.45rem;
+  margin:.82rem .1rem -.05rem;
+  color:#7a879a;
   text-align:center;
-  font-size:.68rem;
+  font-size:.64rem;
   line-height:1.35;
-  font-weight:600;
+  font-weight:620;
+}
+.itbmo-affiliate-trust-dot{
+  width:.42rem;
+  height:.42rem;
+  flex:0 0 .42rem;
+  border-radius:999px;
+  background:#63b99c;
+  box-shadow:0 0 0 4px rgba(99,185,156,.11);
 }
 
-/* Generation overlay: keep the monetization area compact enough
-   to preserve the loader and message on common laptop heights. */
+/* Loading placement: the original generation message above is untouched. */
 #loading-overlay .loader{
-  width:min(94vw,1080px);
+  width:min(94vw,980px);
+  max-width:980px;
   max-height:96vh;
-  overflow:auto;
-  padding:1.15rem .9rem 1.35rem;
+  overflow-y:auto;
+  overflow-x:hidden;
+  padding:1.15rem 1rem 1.3rem;
   scrollbar-width:thin;
 }
 #loading-overlay .itbmo-affiliate-loading{
-  width:min(94vw,1040px);
-  margin:1.05rem auto 0;
+  width:100%;
+  max-width:860px;
+  margin:.95rem auto 0;
   text-align:left;
 }
 #loading-overlay .itbmo-affiliate-shell{
-  padding:.92rem;
-  box-shadow:0 18px 46px rgba(33,46,81,.13);
+  padding:.9rem;
+  border-radius:1.35rem;
 }
 #loading-overlay .itbmo-affiliate-heading{
-  padding:.08rem .08rem .68rem;
+  padding:0 .05rem .7rem;
 }
 #loading-overlay .itbmo-affiliate-heading h3{
-  font-size:1.17rem;
+  font-size:1.15rem;
 }
 #loading-overlay .itbmo-affiliate-heading p{
-  font-size:.76rem;
+  font-size:.72rem;
+  margin-top:.35rem;
+}
+#loading-overlay .itbmo-affiliate-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.55rem;
 }
 #loading-overlay .itbmo-affiliate-card{
-  padding:.72rem;
-  gap:.5rem;
+  padding:.68rem;
+  gap:.55rem;
+  border-radius:.95rem;
 }
-#loading-overlay .itbmo-affiliate-card-copy{
-  min-height:3.35rem;
+#loading-overlay .itbmo-affiliate-card--featured{
+  min-height:0;
+  padding:.74rem;
+}
+#loading-overlay .itbmo-affiliate-icon{
+  width:2.45rem;
+  height:2.45rem;
+  flex-basis:2.45rem;
+  border-radius:.78rem;
+}
+#loading-overlay .itbmo-affiliate-icon svg{
+  width:1.4rem;
+  height:1.4rem;
 }
 #loading-overlay .itbmo-affiliate-card h4{
-  font-size:.82rem;
+  font-size:.8rem;
 }
 #loading-overlay .itbmo-affiliate-card p{
-  font-size:.68rem;
+  display:none;
+}
+#loading-overlay .itbmo-affiliate-links{
+  gap:.32rem;
 }
 #loading-overlay .itbmo-affiliate-link{
-  min-height:2.15rem;
-  padding:.48rem .58rem;
-  font-size:.7rem;
+  min-height:2.05rem;
+  padding:.4rem .45rem .4rem .58rem;
+  border-radius:.68rem;
+  font-size:.66rem;
+}
+#loading-overlay .itbmo-affiliate-arrow{
+  width:1.42rem;
+  height:1.42rem;
+  flex-basis:1.42rem;
+}
+#loading-overlay .itbmo-affiliate-trust{
+  margin-top:.62rem;
+  font-size:.6rem;
 }
 
 /* Post-itinerary placement */
 .itbmo-affiliate-after{
-  margin:1.1rem 0 .35rem;
+  margin:1.15rem 0 .4rem;
+}
+.itbmo-affiliate-after .itbmo-affiliate-shell{
+  padding:1rem;
 }
 
-/* Responsive */
-@media(max-width:980px){
-  .itbmo-affiliate-grid{
-    grid-template-columns:repeat(2,minmax(0,1fr));
-  }
-  .itbmo-affiliate-card-copy{
-    min-height:3.5rem;
-  }
-}
-@media(max-width:620px){
+@media(max-width:720px){
   .itbmo-affiliate-shell{
-    padding:.82rem;
-    border-radius:1.1rem;
+    padding:.88rem;
+    border-radius:1.25rem;
   }
-  .itbmo-affiliate-grid{
+  .itbmo-affiliate-grid,
+  #loading-overlay .itbmo-affiliate-grid{
     grid-template-columns:1fr;
-    gap:.58rem;
+  }
+  .itbmo-affiliate-card--featured{
+    grid-column:auto;
   }
   .itbmo-affiliate-card{
-    display:grid;
-    grid-template-columns:auto 1fr;
-    grid-template-areas:
-      "icon copy"
-      "links links";
-    align-items:start;
-    padding:.72rem;
+    padding:.78rem;
   }
-  .itbmo-affiliate-icon{grid-area:icon}
-  .itbmo-affiliate-card-copy{
-    grid-area:copy;
-    min-height:0;
-  }
-  .itbmo-affiliate-links{
-    grid-area:links;
-    display:grid;
-    grid-template-columns:repeat(auto-fit,minmax(130px,1fr));
+  .itbmo-affiliate-card p{
+    font-size:.68rem;
   }
   .itbmo-affiliate-heading h3{
-    font-size:1.08rem;
+    font-size:1.12rem;
   }
   .itbmo-affiliate-heading p{
-    font-size:.77rem;
+    font-size:.75rem;
   }
   #loading-overlay{
     justify-content:flex-start;
-    padding-top:.5rem;
+    padding:.4rem;
   }
   #loading-overlay .loader{
+    width:100%;
     max-height:98vh;
-    padding:.6rem .35rem 1rem;
+    padding:.7rem .45rem 1rem;
   }
   #loading-overlay p{
     margin-top:.7rem;
-    font-size:.9rem;
-    padding:0 .55rem;
+    padding:0 .45rem;
+    font-size:.88rem;
   }
   #loading-overlay .itbmo-affiliate-loading{
     margin-top:.7rem;
   }
 }
 
+@media(max-width:440px){
+  .itbmo-affiliate-card-top{
+    align-items:flex-start;
+  }
+  .itbmo-affiliate-links{
+    display:grid;
+    grid-template-columns:1fr;
+  }
+  .itbmo-affiliate-link{
+    width:100%;
+  }
+  .itbmo-affiliate-heading p{
+    line-height:1.4;
+  }
+}
+
 @media(prefers-reduced-motion:reduce){
   .itbmo-affiliate-surface,
-  .itbmo-affiliate-shell::before{
+  .itbmo-affiliate-shell::after{
     animation:none !important;
+  }
+  .itbmo-affiliate-card,
+  .itbmo-affiliate-link,
+  .itbmo-affiliate-icon,
+  .itbmo-affiliate-arrow{
+    transition:none !important;
   }
 }
