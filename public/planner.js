@@ -72,6 +72,7 @@ let plannerState = {
     infants: 0,
     seniors: 0
   },
+  travelerProfiles: null,
   budget: '',
   currency: 'USD',
   lang: 'en' // se setea abajo
@@ -164,15 +165,17 @@ const I18N = {
     travelerAgeRange: 'Rango de edad',
     genderFemale: 'Femenino',
     genderMale: 'Masculino',
-    genderOther: 'Otro',
+    genderNonBinary: 'No binario',
+    genderAnotherIdentity: 'Otra identidad',
     genderNA: 'Prefiero no decirlo',
     ageBaby: 'Bebé (0–2)',
     agePreschool: 'Preescolar (3–5)',
     ageChild: 'Niño (6–12)',
     ageTeen: 'Adolescente (13–17)',
     ageYoungAdult: 'Joven adulto (18–24)',
-    ageAdult2539: 'Adulto (25–39)',
-    ageAdult4054: 'Adulto (40–54)',
+    ageAdult2534: 'Adulto (25–34)',
+    ageAdult3544: 'Adulto (35–44)',
+    ageAdult4554: 'Adulto (45–54)',
     ageAdult5564: 'Adulto (55–64)',
     ageSenior: 'Mayor (65+)',
 
@@ -240,15 +243,17 @@ const I18N = {
     travelerAgeRange: 'Age range',
     genderFemale: 'Female',
     genderMale: 'Male',
-    genderOther: 'Other',
+    genderNonBinary: 'Non-binary',
+    genderAnotherIdentity: 'Another identity',
     genderNA: 'Prefer not to say',
     ageBaby: 'Baby (0–2)',
     agePreschool: 'Preschool (3–5)',
     ageChild: 'Child (6–12)',
     ageTeen: 'Teen (13–17)',
     ageYoungAdult: 'Young adult (18–24)',
-    ageAdult2539: 'Adult (25–39)',
-    ageAdult4054: 'Adult (40–54)',
+    ageAdult2534: 'Adult (25–34)',
+    ageAdult3544: 'Adult (35–44)',
+    ageAdult4554: 'Adult (45–54)',
     ageAdult5564: 'Adult (55–64)',
     ageSenior: 'Senior (65+)',
 
@@ -399,7 +404,7 @@ const AUTH_COPY = {
     connectionFail:'No se pudo conectar con tu cuenta ITBMO. Intenta nuevamente.',
     loginRequired:'Regístrate o inicia sesión antes de guardar destinos.',
     travelerRequired:'Indica con quién viajas antes de guardar destinos.',
-    companionRequired:'Indica el rango de edad de cada acompañante.',
+    companionRequired:'Indica género y rango de edad de cada acompañante.',
     tripSaving:'Guardando tu viaje…',
     tripFail:'No pudimos guardar el viaje. Tus datos no se perdieron; intenta nuevamente.'
   },
@@ -438,7 +443,7 @@ const AUTH_COPY = {
     connectionFail:'Could not connect to your ITBMO account. Please try again.',
     loginRequired:'Register or sign in before saving destinations.',
     travelerRequired:'Tell us who you are traveling with before saving destinations.',
-    companionRequired:'Select an age range for every companion.',
+    companionRequired:'Select gender and age range for every companion.',
     tripSaving:'Saving your trip…',
     tripFail:'We could not save the trip. Your entries are still here; please try again.'
   }
@@ -770,7 +775,12 @@ function collectTravelerStateFromUI(){
 
   const counts = { adults:0, young:0, children:0, infants:0, seniors:0 };
 
-  if(String(currentUser?.age_range || '') === '65+') counts.seniors += 1;
+  const primary = {
+    age_range: String(currentUser?.age_range || '') || null,
+    country_code: String(currentUser?.country_code || '') || null
+  };
+
+  if(primary.age_range === '65+') counts.seniors += 1;
   else counts.adults += 1;
 
   const companions = [];
@@ -785,18 +795,18 @@ function collectTravelerStateFromUI(){
       const gender = String(qs('.traveler-gender',card)?.value || '');
       const age = String(qs('.traveler-age-range',card)?.value || '');
 
-      if(!age){
+      if(!gender || !age){
         return { ok:false, error:authCopy('companionRequired') };
       }
 
       counts[companionBucket(age)] += 1;
-      companions.push({ gender:gender || null, age_range:age });
+      companions.push({ gender, age_range:age });
     }
   }
 
   const total = Object.values(counts).reduce((a,b)=>a+b,0);
 
-  return { ok:true, mode, counts, companions, total };
+  return { ok:true, mode, counts, primary, companions, total };
 }
 
 function writeLegacyTravelerCounts(counts){
@@ -863,6 +873,7 @@ async function saveTripRecord(list, travelerState){
       destinations,
       traveler_mode:travelerState.mode,
       traveler_counts:travelerState.counts,
+      primary_traveler:travelerState.primary,
       companion_profiles:travelerState.companions,
       special_conditions:String(qs('#special-conditions')?.value || '').trim() || null
     },
@@ -1266,6 +1277,11 @@ async function saveDestinations(){
     plannerState.destinations = [...savedDestinations];
     plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
     plannerState.travelers = { ...travelerState.counts };
+    plannerState.travelerProfiles = {
+      mode: travelerState.mode,
+      primary: travelerState.primary,
+      companions: travelerState.companions
+    };
     plannerState.budget = qs('#budget')?.value || '';
     plannerState.currency = qs('#currency')?.value || 'USD';
   }
@@ -2936,6 +2952,7 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     preference_constraint_policy:_preferenceConstraintPolicy_(),
     special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
     travelers:plannerState?.travelers || null,
+    traveler_profiles:plannerState?.travelerProfiles || null,
     budget:plannerState?.budget || null,
     currency:plannerState?.currency || null,
     explicitly_provided_departure:
@@ -4500,9 +4517,10 @@ $save?.addEventListener('click', saveDestinations);
 
 /* =========================================================
    🧍‍♂️🧍‍♀️ MVP — Viajeros (UI compacto)
-   - Máximo: 10 perfiles (acompañado)
-   - Permitir 0 (cero) perfiles
-   - No integra aún con intake; solo UI
+   - Máximo: 10 perfiles de acompañantes
+   - "Just me": usa la edad del perfil ITBMO, sin pedir datos otra vez
+   - "With others": género inclusivo + rango de edad por acompañante
+   - Mantiene los buckets técnicos existentes y añade perfiles ricos al agente
 ========================================================= */
 const MAX_TRAVELERS = 10;
 
@@ -4557,7 +4575,8 @@ function createTravelerProfileCard(index1){
           <option value="" selected disabled></option>
           <option value="female">${t('genderFemale')}</option>
           <option value="male">${t('genderMale')}</option>
-          <option value="other">${t('genderOther')}</option>
+          <option value="non_binary">${t('genderNonBinary')}</option>
+          <option value="another_identity">${t('genderAnotherIdentity')}</option>
           <option value="na">${t('genderNA')}</option>
         </select>
       </label>
@@ -4571,8 +4590,9 @@ function createTravelerProfileCard(index1){
           <option value="6-12">${t('ageChild')}</option>
           <option value="13-17">${t('ageTeen')}</option>
           <option value="18-24">${t('ageYoungAdult')}</option>
-          <option value="25-39">${t('ageAdult2539')}</option>
-          <option value="40-54">${t('ageAdult4054')}</option>
+          <option value="25-34">${t('ageAdult2534')}</option>
+          <option value="35-44">${t('ageAdult3544')}</option>
+          <option value="45-54">${t('ageAdult4554')}</option>
           <option value="55-64">${t('ageAdult5564')}</option>
           <option value="65+">${t('ageSenior')}</option>
         </select>
@@ -4640,7 +4660,7 @@ function bindTravelersListeners(){
     $travelerMode.addEventListener('change', ()=>{
       const v = String($travelerMode.value || '').toLowerCase();
       if(v === 'solo'){
-        if($travelerSoloPanel) $travelerSoloPanel.style.display = 'block';
+        if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
       }else if(v === 'group'){
         if($travelerSoloPanel) $travelerSoloPanel.style.display = 'none';
@@ -5070,6 +5090,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.destinations = [];
       plannerState.specialConditions = '';
       plannerState.travelers = { adults:1, young:0, children:0, infants:0, seniors:0 };
+      plannerState.travelerProfiles = null;
       plannerState.budget = '';
       plannerState.currency = 'USD';
       plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
