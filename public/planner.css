@@ -6091,3 +6091,478 @@ table.itinerary tbody tr:hover{
     animation:none !important;
   }
 }
+
+
+/* =========================================================
+   ITBMO · GYG-INSPIRED VIBRANT GLASS · v64
+   Final override layer on top of v63.
+   Goals:
+   1) Fix Date + Time controls at 100% browser zoom.
+   2) Make itinerary table fit its pane instead of clipping Notes.
+   3) Add life, contrast and glass using a coherent cold palette.
+   4) Keep premium hierarchy: navy typography + blue actions + teal Astra.
+   5) Preserve all HTML/JS/API contracts.
+========================================================= */
+
+:root{
+  --v64-navy:#071f3d;
+  --v64-navy-soft:#183b5d;
+  --v64-blue:#0877f9;
+  --v64-blue-dark:#0564d8;
+  --v64-cyan:#43c4d4;
+  --v64-teal:#0b9297;
+  --v64-teal-dark:#08757c;
+  --v64-indigo:#6878f5;
+  --v64-sky:#eaf5ff;
+  --v64-aqua:#e9faf9;
+  --v64-lav:#f1f2ff;
+  --v64-ice:#f7fbfd;
+  --v64-line:rgba(40,82,123,.14);
+  --v64-line-strong:rgba(34,107,157,.24);
+  --v64-shadow:0 2px 5px rgba(5,31,61,.025),0 16px 42px rgba(18,55,90,.07);
+  --v64-shadow-up:0 4px 10px rgba(5,31,61,.035),0 24px 55px rgba(18,55,90,.105);
+}
+
+/* ---------- A. Canvas / brand ---------- */
+body{
+  background:
+    radial-gradient(800px 460px at -4% 8%,rgba(67,196,212,.13),transparent 64%),
+    radial-gradient(900px 520px at 104% 5%,rgba(104,120,245,.11),transparent 65%),
+    linear-gradient(180deg,#f5fbfd 0%,#fbfcff 46%,#f5fafc 100%);
+}
+.topbar{
+  background:linear-gradient(108deg,#071f3d 0%,#0b3555 48%,#078c91 100%);
+  box-shadow:0 9px 28px rgba(5,31,61,.13);
+}
+
+/* ---------- B. Workspace: slightly wider Planner at 100% ---------- */
+#planner-grid{
+  width:min(calc(100% - 32px),1880px);
+  max-width:1880px;
+  grid-template-columns:minmax(560px,.82fr) minmax(0,1.18fr);
+  gap:1.15rem;
+}
+.sidebar,
+.main,
+.main > .box,
+.itinerary-section{
+  min-width:0;
+  max-width:100%;
+}
+.sidebar,
+.main > .box,
+.itinerary-section{
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.95),rgba(248,252,254,.89));
+  border-color:rgba(34,80,120,.12);
+  box-shadow:var(--v64-shadow);
+}
+
+/* ---------- C. Section cards: vivid cool glass, not monochrome ---------- */
+.sidebar > section.box,
+.box{
+  position:relative;
+  overflow:visible;
+  border:1px solid var(--v64-line);
+  box-shadow:0 2px 6px rgba(8,39,72,.025),0 9px 25px rgba(18,55,90,.04);
+  backdrop-filter:blur(13px) saturate(115%);
+  -webkit-backdrop-filter:blur(13px) saturate(115%);
+}
+.sidebar > section.box:nth-of-type(1),
+.account-box{
+  background:
+    radial-gradient(420px 190px at 100% 100%,rgba(52,190,198,.15),transparent 68%),
+    linear-gradient(145deg,#fff 32%,#f2fbfb 100%);
+  border-color:rgba(24,145,151,.20);
+}
+.sidebar > section.box:nth-of-type(2){
+  background:
+    radial-gradient(420px 190px at 100% 100%,rgba(74,151,232,.12),transparent 68%),
+    linear-gradient(145deg,#fff 34%,#f2f8ff 100%);
+  border-color:rgba(60,129,201,.17);
+}
+.sidebar > section.box:nth-of-type(3){
+  background:
+    radial-gradient(430px 200px at 100% 100%,rgba(104,120,245,.13),transparent 68%),
+    linear-gradient(145deg,#fff 34%,#f4f5ff 100%);
+  border-color:rgba(95,112,224,.17);
+}
+.sidebar > section.box:nth-of-type(4){
+  background:
+    radial-gradient(430px 210px at 100% 100%,rgba(55,188,209,.12),transparent 70%),
+    linear-gradient(145deg,#fff 34%,#f1fbfd 100%);
+  border-color:rgba(55,160,184,.16);
+}
+.sidebar > section.box:hover,
+.box:hover{
+  border-color:rgba(25,126,157,.24);
+  box-shadow:var(--v64-shadow-up);
+}
+
+/* ---------- D. Typography ---------- */
+.sidebar > h2,
+.itinerary-head h2,
+.itbmo-affiliate-heading h3{
+  color:var(--v64-navy);
+}
+.box h3,
+.account-head h3{
+  color:#153653;
+}
+
+/* ---------- E. Inputs: search-pill quality ---------- */
+.city-row input,
+.city-row select,
+input.start,
+input.end,
+#traveler-mode,
+#traveler-solo-panel select,
+#traveler-group-panel select,
+.account-form-grid input,
+.account-form-grid select,
+.special-conditions textarea,
+.chat-input input,
+.info-chat-modal .chat-input textarea{
+  border:1px solid rgba(36,79,119,.15);
+  background:rgba(255,255,255,.96);
+  box-shadow:0 1px 2px rgba(6,31,60,.025),inset 0 1px 0 rgba(255,255,255,.9);
+}
+.city-row input:focus,
+.city-row select:focus,
+input.start:focus,
+input.end:focus,
+#traveler-mode:focus,
+#traveler-solo-panel select:focus,
+#traveler-group-panel select:focus,
+.account-form-grid input:focus,
+.account-form-grid select:focus,
+.special-conditions textarea:focus,
+.chat-input input:focus,
+.info-chat-modal .chat-input textarea:focus{
+  border-color:rgba(8,119,249,.62);
+  box-shadow:0 0 0 4px rgba(8,119,249,.085),0 7px 18px rgba(17,84,145,.055);
+}
+
+/* =========================================================
+   F. HARD FIX — DESTINATION DATE AT 100% ZOOM
+========================================================= */
+.city-row{
+  width:100%;
+  min-width:0;
+  grid-template-columns:
+    minmax(0,1.08fr)
+    minmax(0,.88fr)
+    minmax(48px,.38fr)
+    minmax(0,1.22fr)
+    34px !important;
+  gap:.48rem !important;
+  padding:.95rem !important;
+}
+.city-row > *,
+.city-row label,
+.city-row label > *,
+.city-row input,
+.city-row select{
+  min-width:0 !important;
+  max-width:100% !important;
+}
+.city-row input,
+.city-row select{
+  width:100% !important;
+}
+.city-row .date-wrapper{
+  width:100% !important;
+  min-width:0 !important;
+  max-width:100% !important;
+}
+.city-row .remove{
+  width:30px;
+  height:30px;
+  align-self:end;
+  justify-self:center;
+}
+
+/* =========================================================
+   G. HARD FIX — HOURS AT 100% ZOOM
+   Give Day label only what it needs; let both time inputs flex.
+========================================================= */
+.hours-block{
+  grid-column:1 / -1;
+  width:100% !important;
+  min-width:0 !important;
+  max-width:100% !important;
+  overflow:visible;
+}
+.hours-header,
+.hours-day{
+  width:100% !important;
+  min-width:0 !important;
+  max-width:100% !important;
+  grid-template-columns:minmax(72px,.42fr) minmax(0,1fr) minmax(0,1fr) !important;
+  gap:.55rem !important;
+}
+.hours-header > *,
+.hours-day > *{
+  min-width:0 !important;
+  max-width:100% !important;
+}
+input.start,
+input.end,
+.hours-day input[type="time"]{
+  display:block;
+  width:100% !important;
+  min-width:0 !important;
+  max-width:100% !important;
+  box-sizing:border-box !important;
+  padding-left:.55rem !important;
+  padding-right:.55rem !important;
+}
+
+/* ---------- H. Stronger primary actions ---------- */
+.btn.primary,
+#save-destinations,
+#start-planning{
+  color:#fff;
+  background:linear-gradient(180deg,#1282ff 0%,#0877f9 58%,#0568df 100%);
+  border-color:rgba(5,98,213,.34);
+  box-shadow:0 1px 1px rgba(255,255,255,.28) inset,0 8px 18px rgba(8,119,249,.18);
+}
+.btn.primary:hover,
+#save-destinations:hover,
+#start-planning:hover{
+  color:#fff;
+  background:linear-gradient(180deg,#0e79f5 0%,#066fea 58%,#055fcf 100%);
+  box-shadow:0 1px 1px rgba(255,255,255,.28) inset,0 12px 23px rgba(8,119,249,.23);
+}
+.btn.ghost,
+#add-city-btn{
+  color:#126c83;
+  background:linear-gradient(180deg,#f7ffff,#eaf9fa);
+  border-color:rgba(17,146,155,.22);
+}
+
+/* ---------- I. Info Chat remains teal and deliberately distinct ---------- */
+.info-chat-floating,
+.itinerary-head .info-chat-floating{
+  background:
+    radial-gradient(120% 190% at 15% -30%,rgba(111,225,222,.27),transparent 45%),
+    linear-gradient(105deg,#082944 0%,#075c70 50%,#07979a 100%);
+  border-color:rgba(255,255,255,.20);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.29) inset,
+    0 12px 28px rgba(4,86,103,.21),
+    0 0 0 1px rgba(20,157,162,.09);
+}
+.info-chat-floating:hover,
+.itinerary-head .info-chat-floating:hover{
+  background:
+    radial-gradient(120% 190% at 15% -30%,rgba(126,235,231,.30),transparent 45%),
+    linear-gradient(105deg,#07263f 0%,#075468 50%,#078d91 100%);
+}
+
+/* ---------- J. Chat modal gets more contrast and glass ---------- */
+.info-chat-modal{
+  border-color:rgba(31,87,125,.15);
+  background:rgba(255,255,255,.965);
+  box-shadow:0 4px 10px rgba(5,31,61,.04),0 30px 78px rgba(12,47,76,.18);
+}
+.info-chat-header{
+  background:
+    radial-gradient(120% 180% at 100% 0%,rgba(70,200,199,.25),transparent 48%),
+    linear-gradient(105deg,#07213b 0%,#0a4058 50%,#07898c 100%);
+}
+.info-chat-modal .chat-messages{
+  background:
+    radial-gradient(520px 220px at 100% 0%,rgba(70,190,206,.055),transparent 68%),
+    #fbfdfe;
+}
+
+/* =========================================================
+   K. ITINERARY TABLE FIT — Notes stays visible at 100%
+========================================================= */
+#itinerary-container{
+  width:100%;
+  max-width:100%;
+  min-width:0;
+  overflow-x:hidden !important;
+}
+table.itinerary{
+  width:100% !important;
+  max-width:100% !important;
+  min-width:0 !important;
+  table-layout:fixed !important;
+}
+table.itinerary th,
+table.itinerary td{
+  min-width:0 !important;
+  max-width:none !important;
+  overflow-wrap:anywhere;
+  word-break:normal;
+  hyphens:auto;
+  padding:.62rem .46rem;
+}
+table.itinerary th:nth-child(1),
+table.itinerary td:nth-child(1){width:8%}
+table.itinerary th:nth-child(2),
+table.itinerary td:nth-child(2){width:8%}
+table.itinerary th:nth-child(3),
+table.itinerary td:nth-child(3){width:14%}
+table.itinerary th:nth-child(4),
+table.itinerary td:nth-child(4){width:13%}
+table.itinerary th:nth-child(5),
+table.itinerary td:nth-child(5){width:13%}
+table.itinerary th:nth-child(6),
+table.itinerary td:nth-child(6){width:15%}
+table.itinerary th:nth-child(7),
+table.itinerary td:nth-child(7){width:13%}
+table.itinerary th:nth-child(8),
+table.itinerary td:nth-child(8){width:16%}
+
+/* ---------- L. Table life / contrast ---------- */
+table.itinerary th,
+table.itinerary th:nth-child(n){
+  color:#143654;
+  background:linear-gradient(180deg,#eaf5f8,#e5f0f4);
+}
+table.itinerary tbody tr:nth-child(even){
+  background:#f8fbfc;
+}
+table.itinerary tbody tr:hover{
+  background:#eef8f8;
+  box-shadow:inset 3px 0 0 var(--v64-teal);
+}
+
+/* =========================================================
+   M. AFFILIATE CENTER — richer visual rhythm
+========================================================= */
+.itbmo-affiliate-shell{
+  border-color:rgba(55,102,174,.18);
+  background:
+    radial-gradient(680px 300px at 0% 0%,rgba(80,144,229,.10),transparent 62%),
+    radial-gradient(620px 300px at 100% 100%,rgba(41,177,177,.08),transparent 62%),
+    linear-gradient(145deg,#fff,#f7faff);
+  box-shadow:0 3px 8px rgba(7,31,61,.025),0 20px 48px rgba(24,59,96,.07);
+}
+.itbmo-affiliate-heading h3{
+  font-weight:920;
+}
+.itbmo-affiliate-preview{
+  color:#624e00;
+  background:#fff4c7;
+  border-color:rgba(154,121,0,.14);
+}
+.itbmo-affiliate-card{
+  border-color:rgba(38,80,119,.12);
+  box-shadow:0 2px 6px rgba(6,31,60,.025),0 9px 24px rgba(18,55,90,.04);
+}
+.itbmo-affiliate-card--featured{
+  border-color:rgba(70,111,215,.22);
+  background:
+    radial-gradient(520px 210px at 0% 0%,rgba(78,137,235,.12),transparent 68%),
+    linear-gradient(145deg,#fff,#f1f5ff);
+}
+.itbmo-affiliate-card--hotels{
+  background:linear-gradient(145deg,#fff,#f1f8ff);
+}
+.itbmo-affiliate-card--experiences{
+  background:linear-gradient(145deg,#fff,#f5f3ff);
+}
+.itbmo-affiliate-card--transport{
+  background:linear-gradient(145deg,#fff,#eefaf8);
+}
+.itbmo-affiliate-card--esim{
+  background:linear-gradient(145deg,#fff,#f1fafb);
+}
+.itbmo-affiliate-link,
+.itbmo-affiliate-card--featured .itbmo-affiliate-link{
+  border-color:rgba(36,79,119,.15);
+  background:#fff;
+}
+.itbmo-affiliate-link:hover,
+.itbmo-affiliate-link:focus-visible{
+  border-color:rgba(8,119,249,.29);
+  box-shadow:0 7px 18px rgba(8,92,177,.09);
+}
+.itbmo-affiliate-arrow{
+  background:linear-gradient(180deg,#139ea2,#07878c);
+}
+
+/* ---------- N. Generation overlay remains tall and action-focused ---------- */
+#loading-overlay .loader{
+  min-height:min(90vh,920px);
+}
+#loading-overlay .itbmo-affiliate-shell{
+  padding:1.2rem;
+}
+#loading-overlay .itbmo-affiliate-card{
+  min-height:156px;
+}
+#loading-overlay .itbmo-affiliate-card--featured{
+  min-height:138px;
+}
+#loading-overlay .itbmo-affiliate-link{
+  min-height:46px;
+  font-size:.75rem;
+}
+#loading-overlay .itbmo-affiliate-arrow{
+  width:1.92rem;
+  height:1.92rem;
+  flex-basis:1.92rem;
+}
+
+/* ---------- O. Secondary export actions ---------- */
+.toolbar #btn-pdf,
+.toolbar #btn-csv,
+.toolbar #btn-email{
+  color:#34556f;
+  background:linear-gradient(180deg,#fff,#f4f8fa);
+  border-color:rgba(36,79,119,.13);
+}
+.toolbar #btn-pdf:hover,
+.toolbar #btn-csv:hover,
+.toolbar #btn-email:hover{
+  color:#075f72;
+  background:#edf8f9;
+  border-color:rgba(17,137,148,.23);
+}
+
+/* ---------- P. Responsive ---------- */
+@media(max-width:1500px){
+  #planner-grid{
+    grid-template-columns:minmax(530px,.84fr) minmax(0,1.16fr);
+  }
+}
+@media(max-width:1280px){
+  #planner-grid{
+    grid-template-columns:1fr;
+    width:min(calc(100% - 24px),1160px);
+  }
+}
+@media(max-width:720px){
+  .city-row{
+    grid-template-columns:1fr 1fr !important;
+  }
+  .city-row .date-wrapper,
+  .hours-block{
+    grid-column:1 / -1;
+  }
+  .hours-header,
+  .hours-day{
+    grid-template-columns:minmax(58px,.42fr) minmax(0,1fr) minmax(0,1fr) !important;
+    gap:.38rem !important;
+  }
+  table.itinerary{
+    font-size:.74rem;
+  }
+  table.itinerary th,
+  table.itinerary td{
+    padding:.5rem .34rem;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .itbmo-affiliate-card,
+  .itbmo-affiliate-link{
+    transition:none !important;
+  }
+}
