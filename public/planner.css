@@ -4668,3 +4668,759 @@ input.end{
     animation:none !important;
   }
 }
+
+
+/* =========================================================
+   ITBMO · POLAR GLASS PREMIUM · v5
+   Final visual override layer.
+   - Cold, restrained, Apple-like visual language
+   - Stronger hierarchy and depth without heavy shadows
+   - More fluid Planner / Itinerary proportions
+   - Premium Astra / Info Chat emphasis
+   - Compact generation surface designed to fit desktop viewport
+   - No IDs, HTML contracts or planner/API logic changed
+========================================================= */
+
+:root{
+  --polar-navy:#081d35;
+  --polar-navy-2:#0d2946;
+  --polar-ink:#10263f;
+  --polar-slate:#60748b;
+  --polar-teal:#16878b;
+  --polar-teal-bright:#2ba8a8;
+  --polar-cyan:#63cfd0;
+  --polar-blue:#5d8fe8;
+  --polar-indigo:#7482f5;
+  --polar-ice:#eef8fa;
+  --polar-frost:#f6fafc;
+  --polar-glass:rgba(255,255,255,.82);
+  --polar-line:rgba(67,111,148,.16);
+  --polar-line-strong:rgba(54,111,149,.25);
+  --polar-shadow:0 18px 55px rgba(16,47,76,.085),0 2px 8px rgba(16,47,76,.035);
+  --polar-shadow-hover:0 24px 66px rgba(16,47,76,.12),0 5px 14px rgba(16,47,76,.05);
+  --polar-ease:cubic-bezier(.22,1,.36,1);
+}
+
+/* ---------- Canvas ---------- */
+html{
+  background:#f5fafc;
+}
+body{
+  color:var(--polar-ink);
+  background:
+    radial-gradient(ellipse at 0% 12%,rgba(69,190,194,.12),transparent 31rem),
+    radial-gradient(ellipse at 100% 8%,rgba(101,132,232,.11),transparent 34rem),
+    radial-gradient(ellipse at 72% 92%,rgba(111,214,202,.07),transparent 32rem),
+    linear-gradient(145deg,#f5fbfc 0%,#f9fbff 48%,#f4f9fb 100%);
+  background-attachment:fixed;
+}
+body::before{
+  background:radial-gradient(circle,rgba(91,202,202,.10),rgba(91,202,202,0) 70%);
+  opacity:.6;
+}
+body::after{
+  background:radial-gradient(circle,rgba(104,132,235,.09),rgba(104,132,235,0) 70%);
+  opacity:.6;
+}
+
+/* ---------- Brand bar: calmer, more architectural ---------- */
+.topbar{
+  min-height:76px;
+  padding:.92rem 1.35rem;
+  background:
+    linear-gradient(110deg,#081d35 0%,#0d3550 48%,#167e82 100%);
+  border-bottom:1px solid rgba(255,255,255,.13);
+  box-shadow:0 8px 24px rgba(7,30,53,.13);
+}
+.topbar .brand.brand-logo .brand-line-1{
+  font-size:1.72rem;
+  letter-spacing:-.052em;
+  background:linear-gradient(90deg,#fff 0%,#eefcff 68%,#bcebed 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+}
+.topbar .brand.brand-logo .brand-line-2{
+  color:rgba(235,249,251,.86);
+  font-size:1rem;
+  letter-spacing:.005em;
+}
+
+/* ---------- Main composition ---------- */
+#planner-grid{
+  width:min(calc(100% - 32px),1800px);
+  max-width:1800px;
+  margin:0 auto;
+  padding:1.45rem 0 2rem;
+  gap:1.25rem;
+  grid-template-columns:minmax(500px, .78fr) minmax(720px, 1.22fr);
+  align-items:start;
+}
+.sidebar,
+.main > .box,
+.itinerary-section{
+  border:1px solid rgba(65,111,148,.15);
+  background:
+    linear-gradient(145deg,rgba(255,255,255,.93),rgba(248,252,254,.86));
+  box-shadow:var(--polar-shadow);
+  border-radius:1.55rem;
+  backdrop-filter:blur(20px) saturate(122%);
+  -webkit-backdrop-filter:blur(20px) saturate(122%);
+  transition:border-color .35s ease,box-shadow .45s var(--polar-ease),transform .45s var(--polar-ease);
+}
+.sidebar:hover,
+.main > .box:hover{
+  border-color:rgba(47,133,155,.22);
+  box-shadow:var(--polar-shadow-hover);
+  transform:translateY(-1px);
+}
+.sidebar{
+  max-width:none;
+  padding:1.25rem;
+}
+.main{
+  min-width:0;
+}
+.main > .box,
+.itinerary-section{
+  padding:1.25rem;
+}
+
+/* Fine luminous edge instead of multicolor stripe */
+.sidebar::before,
+.main > .box::before,
+.itinerary-section::before{
+  inset:22px auto 22px 0;
+  width:3px;
+  border-radius:0 999px 999px 0;
+  background:linear-gradient(180deg,#38b8b8 0%,#65b8d7 50%,#7d87ed 100%);
+  box-shadow:0 0 16px rgba(60,174,188,.18);
+}
+
+/* ---------- Typography ---------- */
+.sidebar > h2,
+.itinerary-head h2{
+  color:var(--polar-navy);
+  font-weight:900;
+  letter-spacing:-.05em;
+}
+.sidebar > h2{
+  font-size:1.72rem;
+  margin:.05rem 0 1rem .1rem;
+}
+.itinerary-head h2{
+  font-size:1.72rem;
+}
+.box h3{
+  color:#17314d;
+  font-weight:850;
+  letter-spacing:-.022em;
+}
+
+/* ---------- Section cards: one coherent premium family ---------- */
+.sidebar > section.box,
+.box{
+  border-color:rgba(65,111,148,.14);
+  background:
+    radial-gradient(circle at 100% 0%,rgba(86,189,193,.045),transparent 35%),
+    linear-gradient(155deg,rgba(255,255,255,.97),rgba(247,251,253,.91));
+  box-shadow:0 6px 18px rgba(18,53,83,.04),inset 0 1px 0 rgba(255,255,255,.96);
+}
+.sidebar > section.box:nth-of-type(1),
+.account-box{
+  border-color:rgba(34,151,156,.22);
+  background:
+    radial-gradient(circle at 100% 100%,rgba(76,194,191,.09),transparent 42%),
+    linear-gradient(150deg,#fff,#f5fbfb);
+}
+.sidebar > section.box:nth-of-type(2){
+  border-color:rgba(78,142,169,.18);
+  background:
+    radial-gradient(circle at 100% 100%,rgba(93,164,193,.07),transparent 42%),
+    linear-gradient(150deg,#fff,#f7fbfd);
+}
+.sidebar > section.box:nth-of-type(3){
+  border-color:rgba(90,125,211,.17);
+  background:
+    radial-gradient(circle at 100% 100%,rgba(111,130,235,.065),transparent 42%),
+    linear-gradient(150deg,#fff,#f8f9ff);
+}
+.sidebar > section.box:nth-of-type(4){
+  border-color:rgba(43,155,159,.16);
+  background:
+    radial-gradient(circle at 100% 100%,rgba(62,182,184,.055),transparent 42%),
+    linear-gradient(150deg,#fff,#f7fbfc);
+}
+.box:hover{
+  border-color:rgba(47,137,157,.23);
+  box-shadow:0 13px 30px rgba(18,53,83,.07);
+  transform:translateY(-1px);
+}
+
+/* ---------- Form controls ---------- */
+.city-row input,
+.city-row select,
+input.start,
+input.end,
+.special-conditions textarea,
+#traveler-mode,
+#traveler-solo-panel select,
+#traveler-group-panel select,
+.chat-input input,
+.info-chat-modal .chat-input textarea,
+.account-form-grid input,
+.account-form-grid select{
+  border-color:rgba(66,106,140,.17);
+  background:rgba(255,255,255,.88);
+  color:var(--polar-ink);
+  border-radius:.82rem;
+  box-shadow:inset 0 1px 2px rgba(14,43,69,.02),0 1px 0 rgba(255,255,255,.95);
+}
+.city-row input:hover,
+.city-row select:hover,
+input.start:hover,
+input.end:hover,
+.special-conditions textarea:hover,
+#traveler-mode:hover,
+#traveler-solo-panel select:hover,
+#traveler-group-panel select:hover,
+.chat-input input:hover,
+.info-chat-modal .chat-input textarea:hover,
+.account-form-grid input:hover,
+.account-form-grid select:hover{
+  border-color:rgba(31,143,153,.34);
+}
+.city-row input:focus,
+.city-row select:focus,
+input.start:focus,
+input.end:focus,
+.special-conditions textarea:focus,
+#traveler-mode:focus,
+#traveler-solo-panel select:focus,
+#traveler-group-panel select:focus,
+.chat-input input:focus,
+.info-chat-modal .chat-input textarea:focus,
+.account-form-grid input:focus,
+.account-form-grid select:focus{
+  border-color:#2a9b9f;
+  box-shadow:0 0 0 4px rgba(42,155,159,.10),0 8px 20px rgba(24,76,102,.06);
+  transform:translateY(-1px);
+}
+
+/* ---------- Destination layout ---------- */
+.city-row{
+  grid-template-columns:minmax(120px,1.18fr) minmax(96px,.9fr) minmax(58px,.43fr) minmax(170px,1.35fr) auto;
+  border-color:rgba(70,113,148,.14);
+  background:
+    radial-gradient(circle at 100% 100%,rgba(79,159,191,.055),transparent 42%),
+    linear-gradient(145deg,#fff,#f8fbfc);
+}
+.city-row:nth-child(n){
+  background:
+    radial-gradient(circle at 100% 100%,rgba(79,159,191,.055),transparent 42%),
+    linear-gradient(145deg,#fff,#f8fbfc);
+}
+.city-row:hover{
+  border-color:rgba(39,148,157,.24);
+  box-shadow:0 12px 27px rgba(18,53,83,.07);
+}
+.city-row .remove{
+  background:#f6fafb;
+  color:#73879b;
+  border-color:rgba(84,117,145,.18);
+  box-shadow:none;
+}
+.city-row .remove:hover{
+  background:#eef5f7;
+  color:#35536e;
+  box-shadow:0 5px 12px rgba(30,70,96,.08);
+}
+
+/* ---------- Buttons: fewer colors, stronger hierarchy ---------- */
+.btn{
+  border-radius:.82rem;
+  font-weight:760;
+  box-shadow:0 2px 7px rgba(20,55,82,.035);
+}
+.btn:hover{
+  background:#f5fafb;
+  border-color:rgba(38,144,153,.28);
+  box-shadow:0 8px 18px rgba(19,58,84,.075);
+}
+.btn.primary,
+#save-destinations,
+#start-planning{
+  color:#fff;
+  border-color:rgba(25,124,134,.28);
+  background:linear-gradient(135deg,#11777d 0%,#209095 54%,#397cae 100%);
+  box-shadow:0 8px 18px rgba(24,119,134,.15),inset 0 1px 0 rgba(255,255,255,.23);
+}
+.btn.primary:hover,
+#save-destinations:hover,
+#start-planning:hover{
+  color:#fff;
+  background:linear-gradient(135deg,#0e6e74 0%,#1b878d 54%,#3374a4 100%);
+  box-shadow:0 11px 23px rgba(24,119,134,.20),inset 0 1px 0 rgba(255,255,255,.26);
+}
+.btn.ghost,
+#add-city-btn{
+  color:#276479;
+  background:linear-gradient(145deg,#f7fcfc,#edf7f8);
+  border:1px solid rgba(45,143,153,.24);
+  box-shadow:0 4px 10px rgba(25,87,105,.05);
+}
+.btn.ghost:hover,
+#add-city-btn:hover{
+  color:#17576b;
+  background:linear-gradient(145deg,#f2fbfb,#e5f4f5);
+  border-color:rgba(37,139,149,.36);
+}
+#reset-planner,
+.btn.warn{
+  color:#718397;
+  background:#f8fafb;
+  border-color:rgba(83,112,138,.14);
+  box-shadow:none;
+}
+#reset-planner:hover,
+.btn.warn:hover{
+  color:#445e74;
+  background:#f1f6f8;
+  border-color:rgba(74,112,143,.22);
+}
+
+/* ---------- ITBMO account ---------- */
+.account-user-badge{
+  color:#fff;
+  background:linear-gradient(135deg,#147b80,#258f94);
+  box-shadow:0 5px 12px rgba(24,119,128,.14);
+}
+.account-authenticated{
+  border-color:rgba(35,150,144,.20);
+  background:linear-gradient(135deg,rgba(237,249,247,.94),rgba(244,250,251,.92));
+}
+
+/* ---------- Info Chat CTA: unmistakable but sophisticated ---------- */
+.info-chat-floating,
+.itinerary-head .info-chat-floating{
+  min-width:238px;
+  min-height:56px;
+  color:#fff;
+  font-size:1rem;
+  font-weight:900;
+  letter-spacing:-.01em;
+  background:
+    linear-gradient(135deg,#0d2946 0%,#10516a 43%,#168a8d 100%) padding-box,
+    linear-gradient(125deg,#71e1df 0%,#6fb5f7 48%,#858cf7 100%) border-box;
+  border:1px solid transparent;
+  box-shadow:
+    0 9px 22px rgba(13,65,88,.17),
+    inset 0 1px 0 rgba(255,255,255,.25);
+  animation:polarInfoFloat 4.4s var(--polar-ease) infinite;
+}
+.info-chat-floating:hover,
+.itinerary-head .info-chat-floating:hover{
+  background:
+    linear-gradient(135deg,#0a253f 0%,#0f4b63 43%,#148184 100%) padding-box,
+    linear-gradient(125deg,#86eeeb 0%,#7dc1ff 48%,#969bff 100%) border-box;
+  transform:translateY(-3px) scale(1.025);
+  box-shadow:
+    0 14px 30px rgba(13,65,88,.22),
+    0 0 0 5px rgba(89,190,198,.055),
+    inset 0 1px 0 rgba(255,255,255,.28);
+}
+.info-chat-floating::before{
+  inset:-5px;
+  border-radius:999px;
+  background:linear-gradient(115deg,rgba(94,214,211,.48),rgba(94,159,235,.30),rgba(122,129,241,.42));
+  filter:blur(8px);
+  opacity:.25;
+  animation:polarInfoGlow 3.3s ease-in-out infinite;
+}
+.info-chat-floating::after,
+.info-chat-floating.pulse::after{
+  inset:-4px;
+  border-radius:999px;
+  background:transparent;
+  border:1px solid rgba(91,204,208,.32);
+  opacity:.48;
+  animation:polarInfoRing 3s ease-out infinite;
+}
+@keyframes polarInfoFloat{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-2px)}
+}
+@keyframes polarInfoGlow{
+  0%,100%{opacity:.18;transform:scale(.99)}
+  50%{opacity:.36;transform:scale(1.018)}
+}
+@keyframes polarInfoRing{
+  0%{opacity:.45;transform:scale(.99)}
+  75%{opacity:.08;transform:scale(1.075)}
+  100%{opacity:0;transform:scale(1.09)}
+}
+
+/* ---------- Main Astra conversation ---------- */
+.chat{
+  height:390px;
+  border-color:rgba(63,110,145,.15);
+  background:
+    radial-gradient(circle at 100% 0%,rgba(54,175,178,.055),transparent 36%),
+    linear-gradient(150deg,#fbfefe,#f5fafb);
+  box-shadow:0 10px 27px rgba(18,53,83,.06),inset 0 1px 0 #fff;
+}
+.chat-message.ai{
+  border-color:rgba(72,108,137,.09);
+  background:rgba(255,255,255,.97);
+}
+.chat-message.user{
+  background:linear-gradient(135deg,#e8f7f5,#eef5fa);
+}
+
+/* ---------- Itinerary ---------- */
+.city-tab:nth-child(n){
+  color:#31516d;
+  background:linear-gradient(145deg,#fff,#f4f9fb);
+  border-color:rgba(66,109,142,.15);
+}
+.city-tab.active{
+  color:#fff;
+  background:linear-gradient(135deg,#147c82,#337fa5);
+  box-shadow:0 7px 16px rgba(24,119,139,.16);
+}
+table.itinerary{
+  border-color:rgba(65,106,138,.15);
+  box-shadow:0 10px 27px rgba(18,53,83,.06);
+}
+table.itinerary th,
+table.itinerary th:nth-child(n){
+  color:#17334f;
+  background:linear-gradient(180deg,#edf7f7,#e8f2f5);
+  border-color:rgba(63,103,134,.09);
+}
+table.itinerary tbody tr:nth-child(n){
+  background:#fff;
+}
+table.itinerary tbody tr:nth-child(even){
+  background:#f9fbfc;
+}
+table.itinerary tbody tr:hover{
+  background:#f0f8f8;
+  box-shadow:inset 3px 0 0 #2b9b9e;
+}
+.pager button.active{
+  color:#fff;
+  background:linear-gradient(135deg,#147b80,#397fa9);
+  border-color:transparent;
+  box-shadow:0 6px 14px rgba(26,117,139,.16);
+}
+
+/* ---------- Export toolbar ---------- */
+.toolbar.itbmo-toolbar-ready{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:.7rem;
+}
+.toolbar #btn-pdf,
+.toolbar #btn-csv,
+.toolbar #btn-email{
+  color:#274760;
+  background:linear-gradient(145deg,#fff,#f4f9fa);
+  border-color:rgba(61,112,143,.17);
+  box-shadow:0 4px 11px rgba(20,58,84,.045);
+}
+.toolbar #btn-pdf:hover,
+.toolbar #btn-csv:hover,
+.toolbar #btn-email:hover{
+  color:#155a68;
+  background:linear-gradient(145deg,#fff,#eaf6f6);
+  border-color:rgba(35,145,153,.30);
+  box-shadow:0 8px 18px rgba(20,77,95,.08);
+}
+
+/* ---------- Affiliate shelf: bring it into the same product language ---------- */
+.itbmo-affiliate-surface::before{
+  background:
+    radial-gradient(circle at 18% 20%,rgba(82,166,211,.13),transparent 34%),
+    radial-gradient(circle at 82% 78%,rgba(91,198,194,.10),transparent 30%),
+    radial-gradient(circle at 68% 18%,rgba(111,125,244,.09),transparent 28%);
+  opacity:.58;
+}
+.itbmo-affiliate-shell{
+  --aff-ink:#102a45;
+  --aff-muted:#687b90;
+  --aff-line:rgba(64,108,144,.14);
+  border-color:rgba(73,119,160,.19);
+  background:
+    radial-gradient(circle at 8% 0%,rgba(78,170,204,.08),transparent 25%),
+    radial-gradient(circle at 96% 100%,rgba(88,195,190,.065),transparent 28%),
+    linear-gradient(145deg,rgba(255,255,255,.985),rgba(247,251,253,.96));
+  box-shadow:0 17px 45px rgba(20,53,82,.08),0 3px 12px rgba(20,53,82,.035),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-eyebrow{
+  color:#3e7892;
+}
+.itbmo-affiliate-spark{
+  color:#247f8b;
+  background:linear-gradient(145deg,#fff,#edf8f8);
+  border-color:rgba(45,150,158,.17);
+  box-shadow:0 6px 16px rgba(29,110,125,.09),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card{
+  border-color:rgba(65,107,141,.13);
+  background:linear-gradient(152deg,rgba(255,255,255,.97),rgba(248,251,253,.89));
+  box-shadow:0 7px 20px rgba(19,54,82,.045),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card:hover{
+  border-color:rgba(39,142,154,.24);
+  box-shadow:0 15px 32px rgba(19,64,88,.08),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card--featured{
+  border-color:rgba(69,130,185,.22);
+  background:
+    radial-gradient(circle at 8% 14%,rgba(94,151,220,.10),transparent 34%),
+    linear-gradient(135deg,#fff,#f1f7fb);
+  box-shadow:0 10px 25px rgba(31,80,116,.06),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-card--featured::after{
+  background:linear-gradient(120deg,rgba(71,169,190,.34),rgba(255,255,255,0) 44%,rgba(107,127,232,.18));
+}
+.itbmo-affiliate-link,
+.itbmo-affiliate-card--featured .itbmo-affiliate-link{
+  color:#24445e;
+  border-color:rgba(63,109,147,.16);
+  background:linear-gradient(145deg,#fff,#f5f9fb);
+  box-shadow:0 5px 13px rgba(21,60,87,.045),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-link:hover,
+.itbmo-affiliate-link:focus-visible{
+  border-color:rgba(39,143,153,.30);
+  background:linear-gradient(145deg,#fff,#edf7f8);
+  box-shadow:0 10px 22px rgba(20,77,94,.09),inset 0 1px 0 #fff;
+}
+.itbmo-affiliate-arrow{
+  background:linear-gradient(145deg,#2ca0a2,#197f88);
+  box-shadow:0 6px 14px rgba(25,126,136,.20),inset 0 1px 0 rgba(255,255,255,.28);
+}
+
+/* ---------- Info Chat modal ---------- */
+.info-chat-modal{
+  width:min(620px,calc(100% - 48px));
+  max-height:min(78vh,760px);
+  border:1px solid rgba(54,119,147,.20);
+  border-radius:1.5rem;
+  background:rgba(255,255,255,.96);
+  box-shadow:0 24px 64px rgba(9,42,68,.18),0 5px 18px rgba(9,42,68,.07);
+  backdrop-filter:blur(26px) saturate(126%);
+  -webkit-backdrop-filter:blur(26px) saturate(126%);
+}
+.info-chat-modal::before{
+  inset:-12px;
+  background:radial-gradient(circle at 55% 0%,rgba(72,187,191,.14),transparent 58%);
+  filter:blur(12px);
+  opacity:.55;
+  animation:none;
+}
+.info-chat-header{
+  padding:1rem 1.1rem;
+  color:#fff;
+  background:linear-gradient(110deg,#0b2743 0%,#11506a 52%,#168589 100%);
+  border-bottom:1px solid rgba(255,255,255,.12);
+}
+.info-chat-header h3{
+  color:#fff;
+  letter-spacing:-.02em;
+}
+#info-chat-close{
+  color:#fff;
+  background:rgba(255,255,255,.12);
+  border:1px solid rgba(255,255,255,.20);
+  box-shadow:none;
+}
+#info-chat-close:hover{
+  background:rgba(255,255,255,.20);
+  color:#fff;
+}
+.info-chat-modal .chat-messages{
+  background:linear-gradient(180deg,#fff,#f8fbfc);
+}
+.info-chat-modal #info-chat-send.btn.primary{
+  color:#fff;
+  background:linear-gradient(135deg,#147b80,#2a9698);
+  border-color:rgba(18,120,126,.30);
+  box-shadow:0 7px 16px rgba(22,120,130,.15);
+}
+
+/* ---------- Generation overlay: desktop should fit without internal vertical scroll ---------- */
+#loading-overlay{
+  padding:10px;
+  background:
+    radial-gradient(circle at 12% 18%,rgba(54,177,182,.13),transparent 28rem),
+    radial-gradient(circle at 88% 82%,rgba(98,129,225,.10),transparent 30rem),
+    rgba(242,248,250,.88);
+  backdrop-filter:blur(24px) saturate(126%);
+  -webkit-backdrop-filter:blur(24px) saturate(126%);
+}
+#loading-overlay .loader{
+  width:min(96vw,1180px);
+  max-width:1180px;
+  max-height:calc(100vh - 20px);
+  padding:.75rem .9rem .85rem;
+  border:1px solid rgba(58,111,145,.17);
+  border-radius:1.75rem;
+  background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(247,251,253,.96));
+  box-shadow:0 24px 65px rgba(15,48,77,.15),0 5px 18px rgba(15,48,77,.05),inset 0 1px 0 #fff;
+  overflow-x:hidden;
+  overflow-y:auto;
+}
+#loading-overlay .hourglass{
+  width:64px;
+  height:64px;
+  border-radius:20px;
+  margin-top:0;
+  background:conic-gradient(from 0deg,#19858a,#58c8c7,#7a93e8,#16848a);
+  box-shadow:0 12px 28px rgba(31,128,143,.16),0 0 0 9px rgba(255,255,255,.72);
+}
+#loading-overlay .hourglass::before{
+  inset:5px;
+  border-radius:15px;
+  color:#1c8790;
+  font-size:1.75rem;
+}
+#loading-overlay p{
+  margin:.75rem auto 0;
+  max-width:760px;
+  font-size:clamp(.96rem,1.35vw,1.08rem);
+  line-height:1.4;
+  color:#17304c;
+}
+#loading-overlay p::after{
+  width:min(330px,60%);
+  height:5px;
+  margin:.75rem auto 0;
+  background:linear-gradient(90deg,#16878b,#62c9c8,#6b93df,#16878b);
+  background-size:220% 100%;
+  box-shadow:0 3px 10px rgba(34,124,142,.10);
+}
+#loading-overlay .itbmo-affiliate-loading{
+  max-width:1080px;
+  margin:.62rem auto 0;
+}
+#loading-overlay .itbmo-affiliate-shell{
+  padding:.72rem;
+  border-radius:1.25rem;
+}
+#loading-overlay .itbmo-affiliate-heading{
+  padding:0 .05rem .48rem;
+}
+#loading-overlay .itbmo-affiliate-heading h3{
+  font-size:1.18rem;
+}
+#loading-overlay .itbmo-affiliate-heading p{
+  margin-top:.2rem;
+  font-size:.7rem;
+}
+#loading-overlay .itbmo-affiliate-grid{
+  gap:.42rem;
+}
+#loading-overlay .itbmo-affiliate-card{
+  padding:.52rem .58rem;
+  gap:.38rem;
+  border-radius:.85rem;
+}
+#loading-overlay .itbmo-affiliate-card--featured{
+  padding:.58rem .64rem;
+}
+#loading-overlay .itbmo-affiliate-icon{
+  width:2.2rem;
+  height:2.2rem;
+  flex-basis:2.2rem;
+  border-radius:.68rem;
+}
+#loading-overlay .itbmo-affiliate-icon svg{
+  width:1.22rem;
+  height:1.22rem;
+}
+#loading-overlay .itbmo-affiliate-card h4{
+  font-size:.76rem;
+}
+#loading-overlay .itbmo-affiliate-link{
+  min-height:2rem;
+  padding:.34rem .4rem .34rem .52rem;
+  font-size:.64rem;
+}
+#loading-overlay .itbmo-affiliate-arrow{
+  width:1.38rem;
+  height:1.38rem;
+  flex-basis:1.38rem;
+}
+#loading-overlay .itbmo-affiliate-trust{
+  margin-top:.38rem;
+  font-size:.57rem;
+}
+
+/* On normal desktop-height screens use a four-card second row and remove loader scroll. */
+@media(min-width:900px) and (min-height:700px){
+  #loading-overlay .loader{
+    overflow-y:hidden;
+  }
+  #loading-overlay .itbmo-affiliate-grid{
+    grid-template-columns:repeat(4,minmax(0,1fr));
+  }
+  #loading-overlay .itbmo-affiliate-card--featured{
+    grid-column:1 / -1;
+  }
+}
+
+/* ---------- Responsive ---------- */
+@media(max-width:1450px){
+  #planner-grid{
+    grid-template-columns:minmax(460px,.82fr) minmax(650px,1.18fr);
+  }
+}
+@media(max-width:1220px){
+  #planner-grid{
+    grid-template-columns:1fr;
+    width:min(calc(100% - 24px),1100px);
+  }
+  .sidebar,
+  .main{
+    width:100%;
+    max-width:none;
+  }
+}
+@media(max-width:768px){
+  #planner-grid{
+    width:calc(100% - 16px);
+    padding:.8rem 0 1.25rem;
+  }
+  .topbar{min-height:68px}
+  .sidebar,
+  .main > .box,
+  .itinerary-section{
+    border-radius:1.25rem;
+  }
+  .info-chat-modal{
+    width:calc(100% - 24px);
+    max-width:none;
+    right:12px;
+  }
+  .toolbar.itbmo-toolbar-ready{
+    grid-template-columns:1fr;
+  }
+}
+@media(max-width:640px){
+  .city-row{
+    grid-template-columns:1fr 1fr;
+  }
+}
+
+/* ---------- Reduced motion ---------- */
+@media(prefers-reduced-motion:reduce){
+  .info-chat-floating,
+  .info-chat-floating::before,
+  .info-chat-floating::after,
+  .info-chat-floating.pulse::after{
+    animation:none !important;
+  }
+}
