@@ -4132,3 +4132,539 @@ table.itinerary td:nth-child(2){
     animation:none !important;
   }
 }
+
+/* =========================================================
+   ITBMO AFFILIATES — WOW EMPHASIS v3
+   ULTRA-SURGICAL CSS-ONLY OVERRIDES
+   Goals:
+   1) Make partner links unmistakably actionable/premium.
+   2) Use more of the viewport during generation without horizontal overflow.
+   3) Keep ONLY the original Astra progress line.
+   4) Give Itinerary more width and stack before content is squeezed.
+   No HTML / JS / API / generation-copy changes.
+========================================================= */
+
+/* ---------- A. Keep only Astra's original progress line ---------- */
+/* The global #loading-overlay p::after also reaches affiliate copy.
+   Explicitly suppress pseudo progress bars inside the affiliate surface. */
+#loading-overlay .itbmo-affiliate-surface p::after,
+#loading-overlay .itbmo-affiliate-heading p::after,
+#loading-overlay .itbmo-affiliate-card p::after,
+#loading-overlay .itbmo-affiliate-trust::after{
+  content:none !important;
+  display:none !important;
+}
+
+/* ---------- B. Premium, unmistakable partner CTAs ---------- */
+.itbmo-affiliate-link{
+  min-height:3rem;
+  padding:.64rem .62rem .64rem .82rem;
+  border-width:1px;
+  border-color:rgba(88,103,177,.25);
+  background:
+    radial-gradient(circle at 100% 0%,rgba(129,140,248,.12),transparent 38%),
+    linear-gradient(145deg,#ffffff 0%,#fbfcff 62%,#f5f6ff 100%);
+  box-shadow:
+    0 9px 22px rgba(47,61,117,.115),
+    0 1px 0 rgba(255,255,255,1) inset,
+    0 -1px 0 rgba(82,95,168,.04) inset;
+  font-size:.79rem;
+  font-weight:880;
+  letter-spacing:-.012em;
+  cursor:pointer;
+  overflow:hidden;
+  isolation:isolate;
+}
+
+/* Subtle light sweep makes the control read as interactive, not static text. */
+.itbmo-affiliate-link::before{
+  content:"";
+  position:absolute;
+  inset:-1px;
+  z-index:-1;
+  pointer-events:none;
+  border-radius:inherit;
+  background:linear-gradient(110deg,transparent 20%,rgba(255,255,255,.9) 45%,transparent 68%);
+  transform:translateX(-135%);
+  opacity:0;
+  transition:transform .58s cubic-bezier(.16,1,.3,1),opacity .25s ease;
+}
+
+.itbmo-affiliate-link:hover::before,
+.itbmo-affiliate-link:focus-visible::before{
+  transform:translateX(135%);
+  opacity:.92;
+}
+
+.itbmo-affiliate-link:hover,
+.itbmo-affiliate-link:focus-visible{
+  transform:translateY(-4px) scale(1.012);
+  border-color:rgba(82,83,218,.48);
+  background:
+    radial-gradient(circle at 100% 0%,rgba(129,140,248,.2),transparent 40%),
+    linear-gradient(145deg,#ffffff,#f7f8ff);
+  box-shadow:
+    0 17px 34px rgba(57,68,137,.20),
+    0 0 0 3px rgba(129,140,248,.065),
+    inset 0 1px 0 #fff;
+}
+
+.itbmo-affiliate-brand{
+  color:#1c3154;
+  font-weight:900;
+}
+
+.itbmo-affiliate-arrow{
+  width:2.12rem;
+  height:2.12rem;
+  flex-basis:2.12rem;
+  background:
+    linear-gradient(145deg,#9595ff 0%,#6969e5 52%,#5557cc 100%);
+  box-shadow:
+    0 10px 22px rgba(78,79,196,.36),
+    0 0 0 4px rgba(112,113,230,.07),
+    inset 0 1px 0 rgba(255,255,255,.34);
+}
+
+.itbmo-affiliate-link:hover .itbmo-affiliate-arrow,
+.itbmo-affiliate-link:focus-visible .itbmo-affiliate-arrow{
+  transform:translate(3px,-3px) scale(1.11);
+  box-shadow:
+    0 13px 26px rgba(72,73,190,.43),
+    0 0 0 5px rgba(112,113,230,.09),
+    inset 0 1px 0 rgba(255,255,255,.38);
+}
+
+/* Category-specific tint: enough to guide the eye while keeping one premium system. */
+.itbmo-affiliate-card--featured .itbmo-affiliate-link{
+  border-color:rgba(101,107,225,.31);
+  background:
+    radial-gradient(circle at 100% 0%,rgba(129,140,248,.17),transparent 42%),
+    linear-gradient(145deg,#fff,#f5f6ff);
+}
+.itbmo-affiliate-card--hotels .itbmo-affiliate-link{
+  background:linear-gradient(145deg,#fff,#f3f8ff);
+}
+.itbmo-affiliate-card--experiences .itbmo-affiliate-link{
+  background:linear-gradient(145deg,#fff,#fff6fa);
+}
+.itbmo-affiliate-card--transport .itbmo-affiliate-link{
+  background:linear-gradient(145deg,#fff,#f2fbf7);
+}
+.itbmo-affiliate-card--esim .itbmo-affiliate-link{
+  background:linear-gradient(145deg,#fff,#fffbef);
+}
+
+/* ---------- C. Loading overlay: use the available viewport better ---------- */
+#loading-overlay{
+  padding:6px;
+}
+
+#loading-overlay .loader{
+  width:min(97vw,1120px);
+  max-width:1120px;
+  max-height:calc(100vh - 12px);
+  padding:.85rem 1rem 1rem;
+  overflow-y:auto;
+  overflow-x:hidden;
+  overscroll-behavior:contain;
+}
+
+/* Preserve Astra message exactly; only tighten surrounding geometry slightly. */
+#loading-overlay .hourglass{
+  margin-top:.05rem;
+}
+
+#loading-overlay .itbmo-affiliate-loading{
+  width:100%;
+  max-width:1000px;
+  margin:.72rem auto 0;
+}
+
+#loading-overlay .itbmo-affiliate-shell{
+  padding:.8rem;
+}
+
+#loading-overlay .itbmo-affiliate-heading{
+  padding:0 .05rem .56rem;
+}
+
+#loading-overlay .itbmo-affiliate-heading p{
+  margin-top:.28rem;
+}
+
+#loading-overlay .itbmo-affiliate-grid{
+  gap:.48rem;
+}
+
+#loading-overlay .itbmo-affiliate-card{
+  padding:.62rem .68rem;
+  gap:.48rem;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured{
+  padding:.68rem .74rem;
+}
+
+#loading-overlay .itbmo-affiliate-link{
+  min-height:2.42rem;
+  padding:.43rem .48rem .43rem .62rem;
+  font-size:.7rem;
+}
+
+#loading-overlay .itbmo-affiliate-arrow{
+  width:1.66rem;
+  height:1.66rem;
+  flex-basis:1.66rem;
+}
+
+#loading-overlay .itbmo-affiliate-trust{
+  margin-top:.48rem;
+}
+
+/* ---------- D. Planner / Itinerary responsive width allocation ---------- */
+/* Give data-heavy itinerary the larger share on wide screens. */
+#planner-grid{
+  grid-template-columns:minmax(360px,.72fr) minmax(0,1.28fr);
+  align-items:start;
+}
+
+.sidebar,
+.main{
+  min-width:0;
+}
+
+.main > .box,
+.itinerary-section,
+#itinerary-container{
+  min-width:0;
+  width:100%;
+  max-width:100%;
+}
+
+/* With the wider itinerary pane, use its full width before resorting to scrolling. */
+table.itinerary{
+  width:100%;
+  max-width:100%;
+}
+
+/* Stack earlier than before: content remains readable instead of being squeezed. */
+@media(max-width:1240px){
+  #planner-grid{
+    grid-template-columns:1fr;
+    max-width:1180px;
+    margin-inline:auto;
+  }
+
+  .sidebar,
+  .main,
+  .main > .box{
+    width:100%;
+    max-width:100%;
+  }
+}
+
+/* On large screens, table can fit naturally within the dominant itinerary pane. */
+@media(min-width:1241px){
+  #itinerary-container{
+    overflow-x:auto;
+  }
+}
+
+/* ---------- E. Small-screen safeguards ---------- */
+@media(max-width:720px){
+  #loading-overlay{
+    padding:3px;
+  }
+
+  #loading-overlay .loader{
+    width:calc(100vw - 6px);
+    max-height:calc(100vh - 6px);
+    padding:.7rem .62rem .8rem;
+    border-radius:1.25rem;
+  }
+
+  .itbmo-affiliate-link{
+    min-height:2.72rem;
+    font-size:.75rem;
+  }
+
+  .itbmo-affiliate-arrow{
+    width:1.92rem;
+    height:1.92rem;
+    flex-basis:1.92rem;
+  }
+
+  #loading-overlay .itbmo-affiliate-link{
+    min-height:2.35rem;
+  }
+}
+
+/* =========================================================
+   ITBMO PLANNER — COOL PREMIUM FLOW v4
+   ULTRA-SURGICAL CSS-ONLY OVERRIDES
+   Base preserved byte-for-byte above: WOW v3.
+   Scope:
+   1) Cooler premium palette / Apple-like surfaces.
+   2) Content-aware Planner / Itinerary widths.
+   3) Hours grid cannot overflow narrow Planner widths.
+   4) Export toolbar hidden by default; JS reveals it after generation.
+   5) Info Chat emphasis without the heavy halo/shadow.
+========================================================= */
+
+/* ---------- 1. Cooler, quieter premium system ---------- */
+:root{
+  --itbmo-cold-navy:#0b1f3b;
+  --itbmo-cold-ink:#12243f;
+  --itbmo-cold-teal:#157a80;
+  --itbmo-cold-teal-2:#2a9a9b;
+  --itbmo-cold-indigo:#6f7df4;
+  --itbmo-cold-blue:#4f8edc;
+  --itbmo-cold-mint:#dff5f2;
+  --itbmo-cold-ice:#eef8fa;
+  --itbmo-cold-lilac:#f1f2ff;
+  --itbmo-cold-line:rgba(72,112,151,.18);
+  --itbmo-cold-shadow:0 18px 50px rgba(25,54,87,.09);
+}
+
+body{
+  background:
+    radial-gradient(circle at 8% 16%, rgba(96,196,202,.12), transparent 26%),
+    radial-gradient(circle at 92% 18%, rgba(111,125,244,.10), transparent 25%),
+    linear-gradient(180deg,#f7fbfc 0%,#fbfcff 45%,#f8fbfc 100%);
+}
+
+.topbar{
+  background:linear-gradient(105deg,#0b1f3b 0%,#123b56 48%,#1c8587 100%);
+  border-bottom:1px solid rgba(255,255,255,.12);
+  box-shadow:0 8px 24px rgba(8,31,58,.12);
+}
+.topbar .brand,
+.topbar .brand.brand-logo .brand-line-1,
+.topbar .brand.brand-logo .brand-line-2{
+  color:#fff;
+}
+.topbar .brand.brand-logo .brand-line-2{opacity:.88}
+
+.sidebar,
+.itinerary-section{
+  background:rgba(255,255,255,.88);
+  border:1px solid rgba(87,132,168,.16);
+  box-shadow:var(--itbmo-cold-shadow);
+  backdrop-filter:blur(18px) saturate(120%);
+  -webkit-backdrop-filter:blur(18px) saturate(120%);
+}
+
+.sidebar::before,
+.itinerary-section::before{
+  background:linear-gradient(180deg,rgba(32,150,153,.78),rgba(111,125,244,.35));
+}
+
+.box{
+  background:linear-gradient(180deg,rgba(255,255,255,.96),rgba(248,252,253,.90));
+  border-color:rgba(80,123,158,.17);
+  box-shadow:0 6px 20px rgba(23,54,83,.045);
+}
+
+.account-box{
+  background:linear-gradient(145deg,rgba(239,250,250,.96),rgba(247,249,255,.94));
+  border-color:rgba(32,150,153,.20);
+}
+
+.city-row{
+  background:linear-gradient(145deg,rgba(255,255,255,.97),rgba(247,251,253,.96));
+  border-color:rgba(75,118,153,.16);
+}
+
+.btn.primary{
+  background:linear-gradient(135deg,#147b80 0%,#258f94 52%,#6079e7 100%);
+  border-color:rgba(21,122,128,.42);
+  box-shadow:0 8px 18px rgba(34,113,132,.15);
+}
+.btn.primary:hover{
+  background:linear-gradient(135deg,#106f75 0%,#21878c 50%,#5871df 100%);
+  box-shadow:0 12px 24px rgba(34,113,132,.20);
+}
+
+.city-tab.active{
+  background:linear-gradient(135deg,#147b80,#397fba);
+  color:#fff;
+  border-color:transparent;
+  box-shadow:0 7px 18px rgba(31,118,140,.18);
+}
+
+/* ---------- 2. Content-aware two-pane layout ---------- */
+/* Planner gets enough width for its controls; itinerary consumes the remaining space. */
+#planner-grid{
+  grid-template-columns:fit-content(610px) minmax(680px,1fr);
+  gap:1.35rem;
+  max-width:1760px;
+  width:min(100%,1760px);
+  align-items:start;
+}
+
+.sidebar{
+  width:100%;
+  min-width:0;
+  max-width:610px;
+}
+.main{
+  width:100%;
+  min-width:0;
+  max-width:none;
+}
+
+/* Stack only when the viewport genuinely cannot support two readable panes. */
+@media(max-width:1320px){
+  #planner-grid{
+    grid-template-columns:1fr;
+    max-width:1120px;
+    width:min(100%,1120px);
+  }
+  .sidebar,
+  .main{
+    max-width:none;
+    width:100%;
+  }
+}
+
+/* ---------- 3. Destinations + hours truly fluid ---------- */
+.city-row{
+  grid-template-columns:minmax(118px,1.15fr) minmax(92px,.82fr) minmax(56px,.42fr) minmax(168px,1.34fr) auto;
+  width:100%;
+  min-width:0;
+}
+.city-row > *,
+.city-row label,
+.city-row .date-wrapper,
+.hours-block,
+.hours-header,
+.hours-day,
+.hours-day > *{
+  min-width:0;
+  max-width:100%;
+}
+
+.hours-header,
+.hours-day{
+  grid-template-columns:minmax(72px,.72fr) minmax(0,1fr) minmax(0,1fr);
+  width:100%;
+}
+input.start,
+input.end{
+  width:100%;
+  min-width:0 !important;
+  max-width:100% !important;
+}
+
+@media(max-width:640px){
+  .city-row{
+    grid-template-columns:1fr 1fr;
+  }
+  .city-row .date-wrapper,
+  .city-row .hours-block{
+    grid-column:1 / -1;
+  }
+  .hours-header,
+  .hours-day{
+    grid-template-columns:minmax(64px,.7fr) minmax(0,1fr) minmax(0,1fr);
+  }
+}
+
+/* ---------- 4. Export actions appear only after a real itinerary exists ---------- */
+.toolbar{
+  display:none;
+}
+.toolbar.itbmo-toolbar-ready{
+  display:flex;
+  animation:itbmoToolbarReveal .45s cubic-bezier(.22,.8,.28,1) both;
+}
+@keyframes itbmoToolbarReveal{
+  from{opacity:0;transform:translateY(8px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* ---------- 5. Info Chat: premium emphasis, no oversized halo ---------- */
+.info-chat-floating{
+  color:#fff;
+  background:
+    linear-gradient(#173b59,#173b59) padding-box,
+    linear-gradient(125deg,#65d2cf 0%,#76a8ff 52%,#8b88ff 100%) border-box;
+  border:1px solid transparent;
+  box-shadow:
+    0 8px 18px rgba(17,63,91,.16),
+    0 0 0 1px rgba(255,255,255,.20) inset;
+  isolation:isolate;
+}
+.info-chat-floating:hover{
+  background:
+    linear-gradient(#143550,#143550) padding-box,
+    linear-gradient(125deg,#7ce0dc 0%,#83b6ff 52%,#9b95ff 100%) border-box;
+  transform:translateY(-2px) scale(1.025);
+  box-shadow:
+    0 12px 24px rgba(17,63,91,.20),
+    0 0 0 1px rgba(255,255,255,.24) inset;
+}
+
+/* Replace the previous diffuse glow with a thin living ring. */
+.info-chat-floating::before{
+  inset:-4px;
+  border-radius:999px;
+  background:linear-gradient(120deg,rgba(101,210,207,.42),rgba(118,168,255,.30),rgba(139,136,255,.38));
+  filter:blur(7px);
+  opacity:.34;
+  animation:itbmoInfoBreath 3.2s ease-in-out infinite;
+  z-index:-1;
+}
+.info-chat-floating.pulse::after,
+.info-chat-floating::after{
+  inset:-5px;
+  border-radius:999px;
+  background:transparent;
+  border:1px solid rgba(112,196,211,.34);
+  opacity:.58;
+  animation:itbmoInfoRing 2.8s ease-out infinite;
+  z-index:-1;
+}
+@keyframes itbmoInfoBreath{
+  0%,100%{opacity:.22;transform:scale(.985)}
+  50%{opacity:.42;transform:scale(1.018)}
+}
+@keyframes itbmoInfoRing{
+  0%{opacity:.50;transform:scale(.985)}
+  70%{opacity:.10;transform:scale(1.08)}
+  100%{opacity:0;transform:scale(1.10)}
+}
+
+/* ---------- 6. Cool-toned affiliate continuity ---------- */
+.itbmo-affiliate-shell{
+  border-color:rgba(104,126,227,.24);
+  background:
+    radial-gradient(circle at 8% 6%,rgba(88,171,214,.12),transparent 28%),
+    radial-gradient(circle at 92% 88%,rgba(111,125,244,.10),transparent 28%),
+    linear-gradient(145deg,rgba(255,255,255,.97),rgba(246,249,255,.95));
+}
+.itbmo-affiliate-card--featured{
+  background:
+    radial-gradient(circle at 12% 20%,rgba(110,142,255,.13),transparent 35%),
+    linear-gradient(145deg,#fbfcff,#f0f3ff);
+  border-color:rgba(111,125,244,.34);
+}
+.itbmo-affiliate-link{
+  border-color:rgba(84,110,187,.20);
+  box-shadow:0 7px 16px rgba(40,64,104,.07);
+}
+.itbmo-affiliate-link:hover,
+.itbmo-affiliate-link:focus-visible{
+  border-color:rgba(78,112,217,.38);
+  box-shadow:0 12px 24px rgba(47,78,132,.14);
+}
+
+@media(prefers-reduced-motion:reduce){
+  .toolbar.itbmo-toolbar-ready,
+  .info-chat-floating::before,
+  .info-chat-floating::after,
+  .info-chat-floating.pulse::after{
+    animation:none !important;
+  }
+}
