@@ -2278,3 +2278,332 @@ table.itinerary td:nth-child(8){width:16%}
     transition:none!important;
   }
 }
+
+
+/* =========================================================
+   ITBMO · TRAVEL GLASS CLEAN · v68
+   FINAL REFINEMENT LAYER ON CLEAN v67
+   ---------------------------------------------------------
+   - Fluid Destinations at 100% browser zoom.
+   - No zoom-detection JS: container queries + fluid sizing.
+   - Brighter, more harmonious Info Chat CTA and header.
+   - Slightly more compact Astra chat.
+   - Monetization cards gain controlled emphasis.
+   - Loading overlay flight area uses space more efficiently.
+========================================================= */
+
+/* ---------- 1. DESTINATIONS: FLUID BEFORE WRAPPING ---------- */
+.city-row{
+  container-type:inline-size;
+  grid-template-columns:
+    minmax(0,1.06fr)
+    minmax(0,.88fr)
+    minmax(46px,.34fr)
+    minmax(0,1.18fr)
+    30px;
+  gap:clamp(.3rem,.72cqi,.46rem);
+  padding:clamp(.68rem,1.35cqi,.9rem);
+}
+
+.city-row label{
+  gap:.22rem;
+  font-size:clamp(.76rem,1.8cqi,.88rem);
+}
+
+.city-row input,
+.city-row select{
+  min-height:clamp(39px,7.7cqi,44px);
+  padding:
+    clamp(.48rem,1.2cqi,.62rem)
+    clamp(.48rem,1.35cqi,.7rem);
+  font-size:clamp(.78rem,1.95cqi,.92rem);
+}
+
+.city-row .remove{
+  width:clamp(27px,5.5cqi,30px);
+  height:clamp(27px,5.5cqi,30px);
+}
+
+/* Date and hour rows scale with the real panel width. */
+.hours-header,
+.hours-day{
+  grid-template-columns:
+    minmax(54px,.30fr)
+    minmax(0,1fr)
+    minmax(0,1fr);
+  gap:clamp(.3rem,.8cqi,.48rem);
+}
+
+.hours-header{
+  font-size:clamp(.72rem,1.7cqi,.84rem);
+}
+
+.hours-day{
+  font-size:clamp(.78rem,1.9cqi,.9rem);
+}
+
+input.start,
+input.end,
+.hours-day input[type="time"]{
+  min-height:clamp(39px,7.7cqi,44px);
+  font-size:clamp(.78rem,1.9cqi,.9rem);
+}
+
+/* Keep all destination fields on one row longer.
+   Only truly narrow panels move to a 2×2 form. */
+@container (max-width:470px){
+  .city-row{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+  }
+
+  .city-row > label:nth-of-type(3){grid-column:1}
+  .city-row > label:nth-of-type(4){grid-column:2}
+  .city-row .remove{
+    grid-column:2;
+    justify-self:end;
+  }
+
+  .hours-block{grid-column:1 / -1}
+}
+
+/* Override the older 525px fallback from v67. */
+@container (min-width:471px) and (max-width:525px){
+  .city-row{
+    grid-template-columns:
+      minmax(0,1.06fr)
+      minmax(0,.88fr)
+      minmax(44px,.32fr)
+      minmax(0,1.16fr)
+      28px;
+  }
+
+  .city-row > label:nth-of-type(3),
+  .city-row > label:nth-of-type(4),
+  .city-row .remove{
+    grid-column:auto;
+  }
+}
+
+/* ---------- 2. INFO CHAT CTA: BRIGHTER AND BETTER INTEGRATED ---------- */
+.info-chat-floating,
+.itinerary-head .info-chat-floating{
+  color:#fff;
+  background:
+    radial-gradient(125% 190% at 12% -35%,rgba(150,234,255,.30),transparent 44%),
+    linear-gradient(105deg,#116fcb 0%,#0a8fc1 50%,#0ca9a8 100%);
+  border:1px solid rgba(255,255,255,.30);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.35) inset,
+    0 12px 28px rgba(12,119,166,.20),
+    0 0 0 1px rgba(19,159,190,.07);
+}
+
+.info-chat-floating:hover,
+.itinerary-head .info-chat-floating:hover{
+  background:
+    radial-gradient(125% 190% at 12% -35%,rgba(169,244,255,.34),transparent 44%),
+    linear-gradient(105deg,#0d68c3 0%,#0884b6 50%,#099c9d 100%);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.38) inset,
+    0 16px 34px rgba(12,119,166,.24),
+    0 0 0 5px rgba(46,182,211,.055);
+}
+
+.info-chat-floating::before{
+  background:
+    radial-gradient(
+      ellipse at center,
+      rgba(67,193,225,.23),
+      rgba(66,137,232,.08) 52%,
+      transparent 72%
+    );
+}
+
+.info-chat-floating::after{
+  border-color:rgba(82,204,223,.32);
+}
+
+/* ---------- 3. INFO CHAT MODAL: REMOVE THE HEAVY DARK HEADER ---------- */
+.info-chat-header{
+  color:#fff;
+  background:
+    radial-gradient(120% 180% at 100% 0%,rgba(119,228,235,.30),transparent 48%),
+    linear-gradient(108deg,#176fc2 0%,#0c8eba 52%,#0aa6a4 100%);
+  border-bottom:1px solid rgba(255,255,255,.16);
+}
+
+#info-chat-close{
+  background:rgba(255,255,255,.16);
+  border-color:rgba(255,255,255,.26);
+}
+
+#info-chat-close:hover{
+  background:rgba(255,255,255,.25);
+}
+
+/* Give the modal a lighter, more open visual field. */
+.info-chat-modal{
+  border-color:rgba(45,130,178,.16);
+  box-shadow:
+    0 4px 12px rgba(5,31,61,.035),
+    0 26px 68px rgba(24,86,123,.15);
+}
+
+.info-chat-modal .chat-messages{
+  background:
+    radial-gradient(520px 220px at 100% 0%,rgba(82,200,219,.075),transparent 68%),
+    linear-gradient(180deg,#fff,#f7fbfd);
+}
+
+/* ---------- 4. MAIN ASTRA CHAT: COMPACT BUT COMFORTABLE ---------- */
+.chat{
+  height:285px;
+  min-height:285px;
+}
+
+.chat-messages{
+  padding:.85rem;
+  gap:.58rem;
+}
+
+.chat-message{
+  max-width:88%;
+  padding:.64rem .82rem;
+  font-size:.88rem;
+  line-height:1.45;
+}
+
+.chat-input{
+  padding:.62rem;
+}
+
+/* ---------- 5. OVERLAY: OPTIMIZE FEATURED FLIGHT VERTICAL SPACE ---------- */
+#loading-overlay .itbmo-affiliate-grid{
+  grid-template-rows:minmax(0,.72fr) minmax(0,1.28fr);
+}
+
+#loading-overlay .itbmo-affiliate-card--featured{
+  padding:.64rem .72rem;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-card-top{
+  gap:.62rem;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-icon{
+  width:2.75rem;
+  height:2.75rem;
+  flex-basis:2.75rem;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-links{
+  margin-top:.12rem;
+}
+
+/* Slightly stronger card hierarchy, not more saturation. */
+#loading-overlay .itbmo-affiliate-card{
+  border-color:rgba(38,87,135,.15);
+  box-shadow:
+    0 2px 6px rgba(6,31,60,.025),
+    0 11px 27px rgba(18,65,102,.055);
+}
+
+#loading-overlay .itbmo-affiliate-card:hover{
+  border-color:rgba(8,119,249,.26);
+  box-shadow:
+    0 4px 10px rgba(6,31,60,.03),
+    0 16px 34px rgba(18,80,145,.085);
+}
+
+#loading-overlay .itbmo-affiliate-card h4{
+  color:#102f4e;
+  font-weight:900;
+}
+
+#loading-overlay .itbmo-affiliate-link{
+  background:
+    linear-gradient(180deg,rgba(255,255,255,1),rgba(248,251,253,.98));
+  font-weight:880;
+}
+
+#loading-overlay .itbmo-affiliate-link:hover{
+  background:#fff;
+}
+
+/* Slightly stronger category accents. */
+#loading-overlay .itbmo-affiliate-card--featured{
+  background:
+    radial-gradient(560px 210px at 0% 0%,rgba(8,119,249,.16),transparent 68%),
+    linear-gradient(145deg,#fff,#edf5ff);
+}
+
+#loading-overlay .itbmo-affiliate-card--hotels{
+  background:
+    radial-gradient(360px 190px at 100% 100%,rgba(53,191,209,.10),transparent 72%),
+    linear-gradient(145deg,#fff,#eef8ff);
+}
+
+#loading-overlay .itbmo-affiliate-card--experiences{
+  background:
+    radial-gradient(360px 190px at 100% 100%,rgba(216,88,145,.09),transparent 72%),
+    linear-gradient(145deg,#fff,#f8f1ff);
+}
+
+#loading-overlay .itbmo-affiliate-card--transport{
+  background:
+    radial-gradient(360px 190px at 100% 100%,rgba(55,185,142,.10),transparent 72%),
+    linear-gradient(145deg,#fff,#edfaf6);
+}
+
+#loading-overlay .itbmo-affiliate-card--esim{
+  background:
+    radial-gradient(360px 190px at 100% 100%,rgba(215,154,22,.09),transparent 72%),
+    linear-gradient(145deg,#fff,#fff9eb);
+}
+
+/* ---------- 6. DESKTOP FLUIDITY ---------- */
+/* As browser zoom increases, the CSS viewport gets narrower.
+   Rather than collapse early, rebalance the two panels smoothly. */
+@media(min-width:1081px) and (max-width:1450px){
+  #planner-grid{
+    grid-template-columns:minmax(455px,43.5%) minmax(0,56.5%);
+    gap:.9rem;
+  }
+
+  .sidebar,
+  .main > .box,
+  .itinerary-section{
+    padding:clamp(.95rem,1.35vw,1.2rem);
+  }
+
+  .sidebar > h2,
+  .itinerary-head h2{
+    font-size:clamp(1.5rem,2vw,1.7rem);
+  }
+}
+
+/* Only stack when the actual CSS viewport truly cannot sustain both panels. */
+@media(max-width:1080px){
+  #planner-grid{
+    grid-template-columns:1fr;
+  }
+}
+
+/* Info Chat stays fixed at the top even after the columns stack. */
+@media(min-width:769px){
+  .info-chat-floating,
+  .itinerary-head .info-chat-floating{
+    position:fixed;
+    top:94px;
+    right:30px;
+  }
+}
+
+/* ---------- 7. REDUCED MOTION ---------- */
+@media(prefers-reduced-motion:reduce){
+  .info-chat-floating,
+  .info-chat-floating::before,
+  .info-chat-floating::after{
+    animation:none!important;
+  }
+}
