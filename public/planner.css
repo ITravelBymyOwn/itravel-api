@@ -101,9 +101,9 @@ a{-webkit-tap-highlight-color:transparent}
   color:#fff;
   background:
     radial-gradient(560px 160px at 100% 0%,rgba(58,201,202,.18),transparent 70%),
-    linear-gradient(108deg,#071f3d 0%,#0a3554 48%,#078d92 100%);
+    linear-gradient(108deg,#0b5fa8 0%,#087fa5 48%,#0aa7a5 100%);
   border-bottom:1px solid rgba(255,255,255,.12);
-  box-shadow:0 10px 30px rgba(5,31,61,.14);
+  box-shadow:0 10px 30px rgba(9,92,132,.14);
 }
 
 .topbar .brand{
@@ -933,18 +933,7 @@ input.end.invalid{
   100%{opacity:0;transform:scale(1.08)}
 }
 
-/* Desktop: button remains visible even if main layout becomes one column */
-@media(min-width:769px){
-  .info-chat-floating,
-  .itinerary-head .info-chat-floating{
-    position:fixed;
-    top:94px;
-    right:30px;
-    left:auto;
-    bottom:auto;
-    margin:0;
-  }
-}
+/* Desktop placement is defined in the final responsive section below. */
 
 /* =========================================================
    MAIN CHAT
@@ -2281,11 +2270,12 @@ table.itinerary td:nth-child(8){width:16%}
 
 
 /* =========================================================
-   ITBMO · TRAVEL GLASS CLEAN · v68
-   FINAL REFINEMENT LAYER ON CLEAN v67
+   ITBMO · TRAVEL GLASS CLEAN · v69
+   PREMIUM RESPONSIVE REFINEMENT
    ---------------------------------------------------------
    - Fluid Destinations at 100% browser zoom.
    - No zoom-detection JS: container queries + fluid sizing.
+   - Consolidated overrides: superseded desktop CTA placement removed.
    - Brighter, more harmonious Info Chat CTA and header.
    - Slightly more compact Astra chat.
    - Monetization cards gain controlled emphasis.
@@ -2296,18 +2286,18 @@ table.itinerary td:nth-child(8){width:16%}
 .city-row{
   container-type:inline-size;
   grid-template-columns:
-    minmax(0,1.06fr)
-    minmax(0,.88fr)
-    minmax(46px,.34fr)
-    minmax(0,1.18fr)
-    30px;
+    minmax(82px,1.08fr)
+    minmax(72px,.92fr)
+    minmax(52px,.48fr)
+    minmax(92px,1.22fr)
+    28px;
   gap:clamp(.3rem,.72cqi,.46rem);
   padding:clamp(.68rem,1.35cqi,.9rem);
 }
 
 .city-row label{
   gap:.22rem;
-  font-size:clamp(.76rem,1.8cqi,.88rem);
+  font-size:clamp(.72rem,1.72cqi,.86rem);
 }
 
 .city-row input,
@@ -2316,7 +2306,7 @@ table.itinerary td:nth-child(8){width:16%}
   padding:
     clamp(.48rem,1.2cqi,.62rem)
     clamp(.48rem,1.35cqi,.7rem);
-  font-size:clamp(.78rem,1.95cqi,.92rem);
+  font-size:clamp(.74rem,1.82cqi,.90rem);
 }
 
 .city-row .remove{
@@ -2351,7 +2341,7 @@ input.end,
 
 /* Keep all destination fields on one row longer.
    Only truly narrow panels move to a 2×2 form. */
-@container (max-width:470px){
+@container (max-width:400px){
   .city-row{
     grid-template-columns:minmax(0,1fr) minmax(0,1fr);
   }
@@ -2367,14 +2357,14 @@ input.end,
 }
 
 /* Override the older 525px fallback from v67. */
-@container (min-width:471px) and (max-width:525px){
+@container (min-width:401px) and (max-width:525px){
   .city-row{
     grid-template-columns:
-      minmax(0,1.06fr)
-      minmax(0,.88fr)
-      minmax(44px,.32fr)
-      minmax(0,1.16fr)
-      28px;
+      minmax(78px,1.08fr)
+      minmax(68px,.90fr)
+      minmax(50px,.46fr)
+      minmax(88px,1.20fr)
+      26px;
   }
 
   .city-row > label:nth-of-type(3),
@@ -2428,7 +2418,7 @@ input.end,
   color:#fff;
   background:
     radial-gradient(120% 180% at 100% 0%,rgba(119,228,235,.30),transparent 48%),
-    linear-gradient(108deg,#176fc2 0%,#0c8eba 52%,#0aa6a4 100%);
+    linear-gradient(108deg,#1888d8 0%,#109bc3 50%,#10aaa7 100%);
   border-bottom:1px solid rgba(255,255,255,.16);
 }
 
@@ -2566,7 +2556,7 @@ input.end,
    Rather than collapse early, rebalance the two panels smoothly. */
 @media(min-width:1081px) and (max-width:1450px){
   #planner-grid{
-    grid-template-columns:minmax(455px,43.5%) minmax(0,56.5%);
+    grid-template-columns:minmax(470px,46%) minmax(0,54%);
     gap:.9rem;
   }
 
@@ -2589,13 +2579,24 @@ input.end,
   }
 }
 
-/* Info Chat stays fixed at the top even after the columns stack. */
+/* Info Chat stays anchored to the Itinerary header, never over the chat body. */
 @media(min-width:769px){
   .info-chat-floating,
   .itinerary-head .info-chat-floating{
-    position:fixed;
-    top:94px;
-    right:30px;
+    position:absolute;
+    top:76px;
+    right:24px;
+    left:auto;
+    bottom:auto;
+    margin:0;
+  }
+
+  .itinerary-section{
+    padding-top:1.25rem;
+  }
+
+  .itinerary-actions{
+    padding-right:min(250px,34%);
   }
 }
 
@@ -2605,5 +2606,55 @@ input.end,
   .info-chat-floating::before,
   .info-chat-floating::after{
     animation:none!important;
+  }
+}
+/* =========================================================
+   v69.1 · SURGICAL OVERLAY FLIGHT CARD FIX
+   Restores safe vertical geometry after v69 compaction.
+   No HTML / JS / palette changes.
+========================================================= */
+#loading-overlay .itbmo-affiliate-grid{
+  grid-template-rows:minmax(138px,.92fr) minmax(0,1.08fr);
+}
+
+#loading-overlay .itbmo-affiliate-card--featured{
+  min-height:138px;
+  padding:.72rem .78rem;
+  justify-content:flex-start;
+  gap:.52rem;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-card-top{
+  flex:0 0 auto;
+  min-height:46px;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-links{
+  flex:0 0 auto;
+  width:100%;
+  min-height:44px;
+  margin-top:auto;
+  gap:.5rem;
+}
+
+#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-link{
+  min-height:44px;
+  height:44px;
+  flex:1 1 0;
+}
+
+@media(max-height:760px) and (min-width:769px){
+  #loading-overlay .itbmo-affiliate-grid{
+    grid-template-rows:minmax(126px,.9fr) minmax(0,1.1fr);
+  }
+
+  #loading-overlay .itbmo-affiliate-card--featured{
+    min-height:126px;
+    padding:.62rem .72rem;
+  }
+
+  #loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-link{
+    min-height:40px;
+    height:40px;
   }
 }
