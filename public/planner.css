@@ -1200,18 +1200,32 @@ table.itinerary td:nth-child(8){width:16%}
 .toolbar #btn-pdf,
 .toolbar #btn-csv,
 .toolbar #btn-email{
-  color:#34556f;
-  background:linear-gradient(180deg,#fff,#f4f8fa);
-  border-color:rgba(36,79,119,.13);
-  box-shadow:none;
+  color:#fff;
+  border-color:transparent;
+  box-shadow:0 10px 24px rgba(15,45,78,.12);
+  transition:transform .18s var(--ease), box-shadow .18s var(--ease), filter .18s var(--ease);
+}
+
+.toolbar #btn-pdf{
+  background:linear-gradient(135deg,#ef476f 0%,#df3562 100%);
+}
+
+.toolbar #btn-csv{
+  background:linear-gradient(135deg,#20b486 0%,#079b78 100%);
+}
+
+.toolbar #btn-email{
+  background:linear-gradient(135deg,#9a6cf3 0%,#7b55e7 100%);
 }
 
 .toolbar #btn-pdf:hover,
 .toolbar #btn-csv:hover,
 .toolbar #btn-email:hover{
-  color:#075f72;
-  background:#edf8f9;
-  border-color:rgba(17,137,148,.23);
+  color:#fff;
+  border-color:transparent;
+  transform:translateY(-2px);
+  filter:saturate(1.08) brightness(1.03);
+  box-shadow:0 14px 30px rgba(15,45,78,.18);
 }
 
 .toolbar #btn-maps,
@@ -2584,7 +2598,7 @@ input.end,
   .info-chat-floating,
   .itinerary-head .info-chat-floating{
     position:absolute;
-    top:76px;
+    top:52px;
     right:24px;
     left:auto;
     bottom:auto;
