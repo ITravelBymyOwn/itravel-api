@@ -1206,6 +1206,28 @@ async function saveTripRecord(list, travelerState){
 const $btnPDF   = qs('#btn-pdf');
 const $btnCSV   = qs('#btn-csv');
 const $btnEmail = qs('#btn-email');
+const $exportToolbar = qs('.toolbar');
+
+/* =========================================================
+   QUIRÚRGICO v4 — Export actions visibility
+   - Hidden before generation.
+   - Revealed only when at least one real itinerary row exists.
+   - Does not alter export logic.
+========================================================= */
+function hasGeneratedItineraryRows(){
+  return Object.values(itineraries || {}).some(data=>
+    Object.values(data?.byDay || {}).some(rows=>Array.isArray(rows) && rows.length > 0)
+  );
+}
+
+function setExportToolbarVisibility(force){
+  if(!$exportToolbar) return;
+  const show = (typeof force === 'boolean') ? force : hasGeneratedItineraryRows();
+  $exportToolbar.classList.toggle('itbmo-toolbar-ready', !!show);
+  $exportToolbar.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+setExportToolbarVisibility(false);
 
 function chatMsg(html, who='ai'){
   if(!html) return;
@@ -1583,6 +1605,21 @@ async function saveDestinations(){
     };
     plannerState.budget = qs('#budget')?.value || '';
     plannerState.currency = qs('#currency')?.value || 'USD';
+  }
+
+  /* QUIRÚRGICO v4: a newly saved plan must generate before export actions return. */
+  setExportToolbarVisibility(false);
+
+  /* QUIRÚRGICO v4: after saving, take the user directly to Start planning. */
+  if($start && !$start.disabled){
+    requestAnimationFrame(()=>{
+      try{
+        $start.scrollIntoView({behavior:'smooth', block:'center', inline:'nearest'});
+        setTimeout(()=>{
+          try{ $start.focus({preventScroll:true}); }catch(_){ }
+        }, 420);
+      }catch(_){ }
+    });
   }
 }
 
@@ -4119,6 +4156,7 @@ ${buildIntake()}
 
 async function startPlanning(){
   if(savedDestinations.length===0) return;
+  setExportToolbarVisibility(false);
   $chatBox.style.display='flex';
   planningStarted = true;
   collectingHotels = true;
@@ -4466,6 +4504,7 @@ async function onSend(){
         await generateCityItinerary(city);
       }
       showWOW(false);
+      setExportToolbarVisibility();
       chatMsg(getPlannerCompletionMessage(), 'ai');
     })();
 
@@ -5377,6 +5416,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     collectingHotels = false;
     isItineraryLocked = false;
     activeCity = null;
+    setExportToolbarVisibility(false);
 
     try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
     qsa('.date-tooltip').forEach(t0 => t0.remove());
