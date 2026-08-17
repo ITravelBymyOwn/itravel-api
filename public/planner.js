@@ -30,6 +30,7 @@ const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
 const USER_API_URL = 'https://itravelbymyown-api.vercel.app/api/user';
 const TRIP_API_URL = 'https://itravelbymyown-api.vercel.app/api/trip';
+const PAYMENT_API_URL = 'https://itravelbymyown-api.vercel.app/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
@@ -5477,10 +5478,503 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   });
 });
 
-$start?.addEventListener('click', ()=>{
+
+
+/* =========================================================
+   ITBMO · COMMERCE + CUSTOMER CARE · v70
+   ---------------------------------------------------------
+   One switchboard controls the complete launch workflow.
+
+   BEFORE PAYMENT PROVIDERS ARE APPROVED:
+   previewMode: true
+   requirePayment: false
+   paypal.enabled: false
+   tilopay.enabled: false
+
+   PUBLIC LAUNCH WITHOUT PAYMENTS:
+   commerceEnabled: false
+
+   WHEN PAYMENTS GO LIVE:
+   commerceEnabled: true
+   previewMode: false
+   requirePayment: true
+   enable approved providers individually.
+========================================================= */
+const ITBMO_COMMERCE_CONFIG = {
+  commerceEnabled: true,
+  previewMode: true,
+  requirePayment: false,
+
+  currency: 'USD',
+  regularPrice: 5.99,
+  promoPrice: 2.99,
+  promotionCode: 'launch_offer',
+  promotionLabel: 'Limited-time launch offer',
+
+  support: {
+    enabled: true,
+    email: 'support@itravelbymyown.com'
+  },
+
+  paypal: {
+    enabled: false
+  },
+
+  tilopay: {
+    enabled: false
+  }
+};
+
+if(typeof window !== 'undefined'){
+  window.ITBMO_COMMERCE_CONFIG = ITBMO_COMMERCE_CONFIG;
+}
+
+const $checkoutModal = qs('#checkout-modal');
+const $checkoutClose = qs('#checkout-close');
+const $checkoutStatus = qs('#checkout-status');
+const $checkoutTilopay = qs('#checkout-tilopay');
+const $checkoutPayPalFallback = qs('#checkout-paypal-fallback');
+const $checkoutPreviewContinue = qs('#checkout-preview-continue');
+const $paypalButtonContainer = qs('#paypal-button-container');
+const $checkoutSupportLink = qs('#checkout-support-link');
+
+const $needHelp = qs('#need-help-floating');
+const $supportModal = qs('#support-modal');
+const $supportClose = qs('#support-close');
+const $supportEmailButton = qs('#support-email-button');
+
+let paymentGateSatisfiedTripId = null;
+let paypalSdkLoadingPromise = null;
+
+function _commerceCopy_(){
+  const es = getLang()==='es';
+  return es ? {
+    helpLabel:'¿Necesitas ayuda?',
+    supportEyebrow:'Atención al Cliente ITBMO',
+    supportTitle:'¿Necesitas una mano?',
+    supportCopy:'Si algo salió mal con tu itinerario, pago o cuenta, nuestro equipo está aquí para ayudarte.',
+    support1:'Problemas al generar el itinerario',
+    support2:'Pagos y reembolsos',
+    support3:'Ayuda con tu cuenta',
+    supportEmail:'Contactar Atención al Cliente',
+    supportFoot:'Incluiremos tu Trip ID automáticamente cuando esté disponible.',
+    checkoutEyebrow:'ITBMO Premium Journey',
+    checkoutTitle:'Tu viaje está listo para ser creado',
+    checkoutSub:'Desbloquea tu itinerario completo y personalizado con Astra.',
+    offer:'OFERTA DE LANZAMIENTO · TIEMPO LIMITADO',
+    priceNote:'Pago único · Viaje completo · Todas las ciudades configuradas',
+    inc1:'Itinerario personalizado completo',
+    inc2:'Inteligencia de viaje de Astra',
+    inc3:'Exportación PDF, CSV y Email',
+    cardTitle:'Tarjeta de crédito o débito',
+    cardCopy:'Visa · Mastercard · American Express',
+    secureTitle:'Procesamiento de pago seguro',
+    secureCopy:'Los pagos son procesados de forma segura por nuestros proveedores. ITBMO nunca almacena los datos de tu tarjeta.',
+    trust1:'Pago seguro',
+    trust2:'Política de reembolso clara',
+    trust3:'Atención humana',
+    supportLink:'¿Necesitas ayuda? Contacta Atención al Cliente',
+    preview:'Modo de prueba · Continuar con Astra',
+    providerSoon:'Este método todavía no está activado.',
+    processing:'Procesando pago…',
+    paid:'✓ Pago confirmado. Astra está lista.',
+    error:'No pudimos confirmar el pago. Inténtalo nuevamente o contacta soporte.'
+  } : {
+    helpLabel:'Need help?',
+    supportEyebrow:'ITBMO Customer Care',
+    supportTitle:'Need a hand?',
+    supportCopy:'If something went wrong with your itinerary, payment or account, our team is here to help.',
+    support1:'Itinerary generation issues',
+    support2:'Payments and refunds',
+    support3:'Account assistance',
+    supportEmail:'Contact Customer Support',
+    supportFoot:'We’ll include your Trip ID automatically when available.',
+    checkoutEyebrow:'ITBMO Premium Journey',
+    checkoutTitle:'Your journey is ready to be created',
+    checkoutSub:'Unlock your complete personalized itinerary with Astra.',
+    offer:'LIMITED-TIME LAUNCH OFFER',
+    priceNote:'One-time payment · Complete trip · All configured cities',
+    inc1:'Complete personalized itinerary',
+    inc2:'Astra travel intelligence',
+    inc3:'PDF, CSV and Email exports',
+    cardTitle:'Credit or Debit Card',
+    cardCopy:'Visa · Mastercard · American Express',
+    secureTitle:'Secure payment processing',
+    secureCopy:'Payments are securely handled by our payment providers. ITBMO never stores your card details.',
+    trust1:'Secure payment',
+    trust2:'Clear refund policy',
+    trust3:'Human customer support',
+    supportLink:'Need help? Contact Customer Support',
+    preview:'Preview mode · Continue to Astra',
+    providerSoon:'This payment method is not active yet.',
+    processing:'Processing payment…',
+    paid:'✓ Payment confirmed. Astra is ready.',
+    error:'We could not confirm the payment. Please try again or contact support.'
+  };
+}
+
+function applyCommerceI18n(){
+  const c = _commerceCopy_();
+  const map = {
+    '#need-help-label':c.helpLabel,
+    '#support-eyebrow':c.supportEyebrow,
+    '#support-title':c.supportTitle,
+    '#support-copy':c.supportCopy,
+    '#support-item-1':c.support1,
+    '#support-item-2':c.support2,
+    '#support-item-3':c.support3,
+    '#support-email-label':c.supportEmail,
+    '#support-footnote':c.supportFoot,
+    '#checkout-eyebrow':c.checkoutEyebrow,
+    '#checkout-title':c.checkoutTitle,
+    '#checkout-subtitle':c.checkoutSub,
+    '#checkout-offer-badge':c.offer,
+    '#checkout-price-note':c.priceNote,
+    '#checkout-inc-1':c.inc1,
+    '#checkout-inc-2':c.inc2,
+    '#checkout-inc-3':c.inc3,
+    '#checkout-card-title':c.cardTitle,
+    '#checkout-card-copy':c.cardCopy,
+    '#checkout-secure-title':c.secureTitle,
+    '#checkout-secure-copy':c.secureCopy,
+    '#checkout-trust-1':c.trust1,
+    '#checkout-trust-2':c.trust2,
+    '#checkout-trust-3':c.trust3,
+    '#checkout-support-link':c.supportLink,
+    '#checkout-preview-continue':c.preview
+  };
+  Object.entries(map).forEach(([sel,val])=>{
+    const el=qs(sel); if(el) el.textContent=val;
+  });
+
+  const oldP = qs('#checkout-price-old');
+  const newP = qs('#checkout-price-new');
+  if(oldP) oldP.textContent = `US$${Number(ITBMO_COMMERCE_CONFIG.regularPrice).toFixed(2)}`;
+  if(newP) newP.textContent = `US$${Number(ITBMO_COMMERCE_CONFIG.promoPrice).toFixed(2)}`;
+
+  if($needHelp) $needHelp.style.display = ITBMO_COMMERCE_CONFIG.support.enabled ? 'flex' : 'none';
+
+  if($checkoutPreviewContinue){
+    $checkoutPreviewContinue.style.display = ITBMO_COMMERCE_CONFIG.previewMode ? 'block' : 'none';
+  }
+
+  [$checkoutTilopay,$checkoutPayPalFallback].forEach(el=>el?.classList.remove('is-disabled'));
+  if($checkoutTilopay && !ITBMO_COMMERCE_CONFIG.tilopay.enabled && !ITBMO_COMMERCE_CONFIG.previewMode){
+    $checkoutTilopay.classList.add('is-disabled');
+  }
+  if($checkoutPayPalFallback && !ITBMO_COMMERCE_CONFIG.paypal.enabled && !ITBMO_COMMERCE_CONFIG.previewMode){
+    $checkoutPayPalFallback.classList.add('is-disabled');
+  }
+}
+
+function openSupportModal(){
+  if(!$supportModal || !ITBMO_COMMERCE_CONFIG.support.enabled) return;
+  $supportModal.classList.add('active');
+  $supportModal.setAttribute('aria-hidden','false');
+}
+
+function closeSupportModal(){
+  if(!$supportModal) return;
+  $supportModal.classList.remove('active');
+  $supportModal.setAttribute('aria-hidden','true');
+}
+
+function _supportMailto_(){
+  const es = getLang()==='es';
+  const userEmail = String(currentUser?.email || '').trim();
+  const username = String(currentUser?.username || '').trim();
+  const cities = (savedDestinations || []).map(x=>x?.city).filter(Boolean).join(', ');
+  const trip = currentTripId || 'Not available';
+  const subject = es
+    ? `ITBMO Support · Trip ${trip}`
+    : `ITBMO Support · Trip ${trip}`;
+
+  const body = es ? [
+    'Hola equipo de ITBMO,',
+    '',
+    'Necesito ayuda con mi viaje.',
+    '',
+    `Trip ID: ${trip}`,
+    `Usuario: ${username || 'N/A'}`,
+    `Email: ${userEmail || 'N/A'}`,
+    `Destino(s): ${cities || 'N/A'}`,
+    '',
+    'Describe el problema:',
+    '',
+    ''
+  ] : [
+    'Hi ITBMO Support,',
+    '',
+    'I need help with my trip.',
+    '',
+    `Trip ID: ${trip}`,
+    `Username: ${username || 'N/A'}`,
+    `Email: ${userEmail || 'N/A'}`,
+    `Destination(s): ${cities || 'N/A'}`,
+    '',
+    'Please describe the issue:',
+    '',
+    ''
+  ];
+
+  return `mailto:${encodeURIComponent(ITBMO_COMMERCE_CONFIG.support.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.join('\n'))}`;
+}
+
+function contactCustomerSupport(){
+  window.location.href = _supportMailto_();
+}
+
+function setCheckoutStatus(message='', type=''){
+  if(!$checkoutStatus) return;
+  $checkoutStatus.textContent = message || '';
+  $checkoutStatus.className = 'checkout-status' + (type ? ` ${type}` : '');
+}
+
+function openCheckoutModal(){
+  if(!$checkoutModal) return;
+  applyCommerceI18n();
+  setCheckoutStatus('');
+  $checkoutModal.classList.add('active');
+  $checkoutModal.setAttribute('aria-hidden','false');
+  renderPayPalButtonsIfAvailable();
+}
+
+function closeCheckoutModal(){
+  if(!$checkoutModal) return;
+  $checkoutModal.classList.remove('active');
+  $checkoutModal.setAttribute('aria-hidden','true');
+}
+
+async function paymentApi(payload){
+  const response = await fetch(PAYMENT_API_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload || {})
+  });
+  let data={};
+  try{ data=await response.json(); }catch(_){}
+  if(!response.ok || data?.ok===false){
+    throw new Error(data?.error || `PAYMENT_HTTP_${response.status}`);
+  }
+  return data;
+}
+
+async function hasValidPaymentForCurrentTrip(){
+  if(!ITBMO_COMMERCE_CONFIG.requirePayment) return true;
+  if(!currentTripId) return false;
+  if(paymentGateSatisfiedTripId === currentTripId) return true;
+
+  try{
+    const token = getSessionToken();
+    if(!token) return false;
+    const data = await paymentApi({
+      action:'status',
+      session_token:token,
+      trip_id:currentTripId
+    });
+    const paid = Boolean(data?.paid);
+    if(paid) paymentGateSatisfiedTripId=currentTripId;
+    return paid;
+  }catch(err){
+    console.warn('[PAYMENT STATUS]',err);
+    return false;
+  }
+}
+
+function completePaymentGate(){
+  paymentGateSatisfiedTripId = currentTripId || paymentGateSatisfiedTripId;
+  setCheckoutStatus(_commerceCopy_().paid,'success');
+  setTimeout(()=>{
+    closeCheckoutModal();
+    startPlanning();
+  },500);
+}
+
+async function requestPlanningStart(){
   if(!validateBaseDatesDMY()) return;
-  startPlanning();
-});
+
+  if(!ITBMO_COMMERCE_CONFIG.commerceEnabled){
+    startPlanning();
+    return;
+  }
+
+  const alreadyPaid = await hasValidPaymentForCurrentTrip();
+  if(alreadyPaid){
+    startPlanning();
+    return;
+  }
+
+  openCheckoutModal();
+}
+
+async function loadPayPalSdk(){
+  if(window.paypal) return window.paypal;
+  if(paypalSdkLoadingPromise) return paypalSdkLoadingPromise;
+  if(!ITBMO_COMMERCE_CONFIG.paypal.enabled) return null;
+
+  paypalSdkLoadingPromise = (async()=>{
+    const token=getSessionToken();
+    const cfg=await paymentApi({action:'config',session_token:token});
+    const clientId=String(cfg?.paypal_client_id || '').trim();
+    if(!clientId) throw new Error('PAYPAL_CLIENT_ID_NOT_AVAILABLE');
+
+    await new Promise((resolve,reject)=>{
+      const script=document.createElement('script');
+      script.src=`https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(ITBMO_COMMERCE_CONFIG.currency)}&intent=capture`;
+      script.async=true;
+      script.onload=resolve;
+      script.onerror=()=>reject(new Error('PAYPAL_SDK_LOAD_FAILED'));
+      document.head.appendChild(script);
+    });
+    return window.paypal;
+  })();
+
+  return paypalSdkLoadingPromise;
+}
+
+async function renderPayPalButtonsIfAvailable(){
+  if(!$paypalButtonContainer) return;
+  if(!ITBMO_COMMERCE_CONFIG.paypal.enabled){
+    $paypalButtonContainer.innerHTML='';
+    if($checkoutPayPalFallback) $checkoutPayPalFallback.style.display='flex';
+    return;
+  }
+
+  try{
+    const paypal = await loadPayPalSdk();
+    if(!paypal?.Buttons) return;
+
+    $paypalButtonContainer.innerHTML='';
+    if($checkoutPayPalFallback) $checkoutPayPalFallback.style.display='none';
+
+    await paypal.Buttons({
+      style:{layout:'vertical',shape:'rect',height:45,label:'paypal'},
+      createOrder: async()=>{
+        const token=getSessionToken();
+        const data=await paymentApi({
+          action:'paypal_create_order',
+          session_token:token,
+          trip_id:currentTripId,
+          promotion:ITBMO_COMMERCE_CONFIG.promotionCode
+        });
+        if(!data?.order_id) throw new Error('PAYPAL_ORDER_ID_MISSING');
+        return data.order_id;
+      },
+      onApprove: async(data)=>{
+        setCheckoutStatus(_commerceCopy_().processing);
+        const token=getSessionToken();
+        const result=await paymentApi({
+          action:'paypal_capture_order',
+          session_token:token,
+          trip_id:currentTripId,
+          order_id:data.orderID
+        });
+        if(!result?.paid) throw new Error('PAYPAL_CAPTURE_NOT_PAID');
+        completePaymentGate();
+      },
+      onCancel:()=>setCheckoutStatus(''),
+      onError:(err)=>{
+        console.error('[PAYPAL]',err);
+        setCheckoutStatus(_commerceCopy_().error,'error');
+      }
+    }).render('#paypal-button-container');
+  }catch(err){
+    console.error('[PAYPAL SDK]',err);
+    if($checkoutPayPalFallback) $checkoutPayPalFallback.style.display='flex';
+    setCheckoutStatus(_commerceCopy_().error,'error');
+  }
+}
+
+async function beginTilopayCheckout(){
+  if(ITBMO_COMMERCE_CONFIG.previewMode && !ITBMO_COMMERCE_CONFIG.tilopay.enabled){
+    setCheckoutStatus(_commerceCopy_().providerSoon);
+    return;
+  }
+  if(!ITBMO_COMMERCE_CONFIG.tilopay.enabled){
+    setCheckoutStatus(_commerceCopy_().providerSoon,'error');
+    return;
+  }
+
+  try{
+    setCheckoutStatus(_commerceCopy_().processing);
+    const token=getSessionToken();
+    const data=await paymentApi({
+      action:'tilopay_create_checkout',
+      session_token:token,
+      trip_id:currentTripId,
+      promotion:ITBMO_COMMERCE_CONFIG.promotionCode,
+      return_url:window.location.href
+    });
+
+    if(data?.paid){
+      completePaymentGate();
+      return;
+    }
+
+    if(data?.redirect_url){
+      window.open(data.redirect_url,'_blank','noopener,noreferrer');
+      setCheckoutStatus(getLang()==='es'
+        ? 'Completa el pago en la ventana segura de Tilopay y vuelve aquí.'
+        : 'Complete the payment in the secure Tilopay window and return here.');
+      return;
+    }
+
+    throw new Error('TILOPAY_CHECKOUT_NOT_AVAILABLE');
+  }catch(err){
+    console.error('[TILOPAY]',err);
+    setCheckoutStatus(_commerceCopy_().error,'error');
+  }
+}
+
+function initCommerceAndSupport(){
+  applyCommerceI18n();
+
+  $needHelp?.addEventListener('click',openSupportModal);
+  $supportClose?.addEventListener('click',closeSupportModal);
+  $supportEmailButton?.addEventListener('click',contactCustomerSupport);
+  $checkoutSupportLink?.addEventListener('click',()=>{
+    closeCheckoutModal();
+    openSupportModal();
+  });
+
+  $checkoutClose?.addEventListener('click',closeCheckoutModal);
+  $checkoutTilopay?.addEventListener('click',beginTilopayCheckout);
+  $checkoutPayPalFallback?.addEventListener('click',()=>{
+    if(ITBMO_COMMERCE_CONFIG.previewMode && !ITBMO_COMMERCE_CONFIG.paypal.enabled){
+      setCheckoutStatus(_commerceCopy_().providerSoon);
+      return;
+    }
+    renderPayPalButtonsIfAvailable();
+  });
+  $checkoutPreviewContinue?.addEventListener('click',()=>{
+    closeCheckoutModal();
+    startPlanning();
+  });
+
+  [$supportModal,$checkoutModal].forEach(modal=>{
+    modal?.addEventListener('click',(e)=>{
+      if(e.target===modal){
+        if(modal===$supportModal) closeSupportModal();
+        if(modal===$checkoutModal) closeCheckoutModal();
+      }
+    });
+  });
+
+  document.addEventListener('keydown',(e)=>{
+    if(e.key!=='Escape') return;
+    closeSupportModal();
+    closeCheckoutModal();
+  });
+}
+
+if(document.readyState==='loading'){
+  document.addEventListener('DOMContentLoaded',initCommerceAndSupport,{once:true});
+}else{
+  initCommerceAndSupport();
+}
+
+
+$start?.addEventListener('click', requestPlanningStart);
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
