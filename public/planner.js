@@ -1209,6 +1209,13 @@ const $btnCSV   = qs('#btn-csv');
 const $btnEmail = qs('#btn-email');
 const $exportToolbar = qs('.toolbar');
 
+function keepEmailExportComingSoon(){
+  if(!$btnEmail) return;
+  $btnEmail.disabled = true;
+  $btnEmail.setAttribute('aria-disabled','true');
+  $btnEmail.setAttribute('title', getLang()==='es' ? 'Próximamente' : 'Coming soon');
+}
+
 /* =========================================================
    QUIRÚRGICO v4 — Export actions visibility
    - Hidden before generation.
@@ -1229,6 +1236,7 @@ function setExportToolbarVisibility(force){
 }
 
 setExportToolbarVisibility(false);
+keepEmailExportComingSoon();
 
 function chatMsg(html, who='ai'){
   if(!html) return;
@@ -5375,10 +5383,12 @@ function bindExportListeners(){
     exportItineraryToCSV();
   });
 
-  $btnEmail?.addEventListener('click', (e)=>{
-    e.preventDefault();
-    sendItineraryByEmail();
-  });
+  /* MVP · Email export intentionally disabled until transactional email is activated. */
+  if($btnEmail){
+    $btnEmail.disabled = true;
+    $btnEmail.setAttribute('aria-disabled','true');
+    $btnEmail.setAttribute('title', getLang()==='es' ? 'Próximamente' : 'Coming soon');
+  }
 }
 
 // ⛔ Reset con confirmación modal (corregido: visible → active)
@@ -5565,7 +5575,7 @@ function _commerceCopy_(){
     priceNote:'Pago único · Viaje completo · Todas las ciudades configuradas',
     inc1:'Itinerario personalizado completo',
     inc2:'Inteligencia de viaje de Astra',
-    inc3:'Exportación PDF, CSV y Email',
+    inc3:'Exportación PDF y CSV · Email próximamente',
     cardTitle:'Tarjeta de crédito o débito',
     cardCopy:'Visa · Mastercard · American Express',
     secureTitle:'Procesamiento de pago seguro',
@@ -5596,7 +5606,7 @@ function _commerceCopy_(){
     priceNote:'One-time payment · Complete trip · All configured cities',
     inc1:'Complete personalized itinerary',
     inc2:'Astra travel intelligence',
-    inc3:'PDF, CSV and Email exports',
+    inc3:'PDF & CSV exports · Email coming soon',
     cardTitle:'Credit or Debit Card',
     cardCopy:'Visa · Mastercard · American Express',
     secureTitle:'Secure payment processing',
