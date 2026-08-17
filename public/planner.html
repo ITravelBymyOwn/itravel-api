@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=70" />
+  <link rel="stylesheet" href="./planner.css?v=71" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -310,7 +310,10 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <!-- 🆕 MVP: CSV para Excel -->
           <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
 
-          <button class="btn" id="btn-email">Enviar por Email</button>
+          <button class="btn email-coming-soon" id="btn-email" type="button" disabled aria-disabled="true" title="Coming soon">
+            <span class="email-action-label">Enviar por Email</span>
+            <span class="coming-soon-badge">Próximamente</span>
+          </button>
 
           <!-- ✅ MVP: ocultos (se reactivan después) -->
           <!--
@@ -399,7 +402,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
       <div class="checkout-includes">
         <div><span>✓</span><span id="checkout-inc-1">Complete personalized itinerary</span></div>
         <div><span>✓</span><span id="checkout-inc-2">Astra travel intelligence</span></div>
-        <div><span>✓</span><span id="checkout-inc-3">PDF, CSV and Email exports</span></div>
+        <div><span>✓</span><span id="checkout-inc-3">PDF & CSV exports · Email coming soon</span></div>
       </div>
 
       <div class="checkout-methods">
@@ -547,7 +550,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           send: "Send",
           export_pdf: "Export PDF",
           export_csv: "Export CSV (Excel)",
-          email: "Send by Email",
+          email: "Send by Email · Coming soon",
           choose_itinerary: "Choose this itinerary",
           info_header: "Info Chat · Astra 🌍",
           info_placeholder: "Ask me anything...",
@@ -606,7 +609,7 @@ This will help create an itinerary that truly matches you.
           send: "Enviar",
           export_pdf: "Exportar PDF",
           export_csv: "Exportar CSV (Excel)",
-          email: "Enviar por Email",
+          email: "Enviar por Email · Próximamente",
           choose_itinerary: "Elijo este itinerario",
           info_header: "Info Chat · Astra 🌍",
           info_placeholder: "Pregúntame lo que quieras…",
@@ -838,7 +841,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=70"></script>
+<script src="./planner.js?v=71"></script>
  
 </body>
 </html>
