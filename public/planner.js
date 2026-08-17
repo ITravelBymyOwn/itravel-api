@@ -5736,7 +5736,23 @@ function openCheckoutModal(){
   setCheckoutStatus('');
   $checkoutModal.classList.add('active');
   $checkoutModal.setAttribute('aria-hidden','false');
-  renderPayPalButtonsIfAvailable();
+
+  /* QUIRÚRGICO · Checkout visibility inside the auto-height Webflow iframe.
+     Bring the actual checkout card into the user's visible viewport immediately,
+     then re-center once PayPal finishes rendering and changes the card height. */
+  const focusCheckout = (behavior='smooth')=>{
+    try{
+      const card = $checkoutModal.querySelector('.checkout-card') || $checkoutModal;
+      card.scrollIntoView({behavior, block:'center', inline:'nearest'});
+    }catch(_){}
+  };
+
+  requestAnimationFrame(()=>focusCheckout('smooth'));
+
+  Promise.resolve(renderPayPalButtonsIfAvailable()).finally(()=>{
+    setTimeout(()=>focusCheckout('smooth'), 120);
+    setTimeout(()=>focusCheckout('auto'), 420);
+  });
 }
 
 function closeCheckoutModal(){
