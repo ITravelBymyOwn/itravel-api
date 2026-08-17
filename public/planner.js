@@ -5503,7 +5503,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 const ITBMO_COMMERCE_CONFIG = {
   commerceEnabled: true,
   previewMode: true,
-  requirePayment: false,
+  requirePayment: true,
 
   currency: 'USD',
   regularPrice: 5.99,
@@ -5765,7 +5765,7 @@ async function hasValidPaymentForCurrentTrip(){
   if(paymentGateSatisfiedTripId === currentTripId) return true;
 
   try{
-    const token = getSessionToken();
+    const token = getStoredSessionToken();
     if(!token) return false;
     const data = await paymentApi({
       action:'status',
@@ -5813,7 +5813,7 @@ async function loadPayPalSdk(){
   if(!ITBMO_COMMERCE_CONFIG.paypal.enabled) return null;
 
   paypalSdkLoadingPromise = (async()=>{
-    const token=getSessionToken();
+    const token=getStoredSessionToken();
     const cfg=await paymentApi({action:'config',session_token:token});
     const clientId=String(cfg?.paypal_client_id || '').trim();
     if(!clientId) throw new Error('PAYPAL_CLIENT_ID_NOT_AVAILABLE');
@@ -5850,7 +5850,7 @@ async function renderPayPalButtonsIfAvailable(){
     await paypal.Buttons({
       style:{layout:'vertical',shape:'rect',height:45,label:'paypal'},
       createOrder: async()=>{
-        const token=getSessionToken();
+        const token=getStoredSessionToken();
         const data=await paymentApi({
           action:'paypal_create_order',
           session_token:token,
@@ -5862,7 +5862,7 @@ async function renderPayPalButtonsIfAvailable(){
       },
       onApprove: async(data)=>{
         setCheckoutStatus(_commerceCopy_().processing);
-        const token=getSessionToken();
+        const token=getStoredSessionToken();
         const result=await paymentApi({
           action:'paypal_capture_order',
           session_token:token,
@@ -5897,7 +5897,7 @@ async function beginTilopayCheckout(){
 
   try{
     setCheckoutStatus(_commerceCopy_().processing);
-    const token=getSessionToken();
+    const token=getStoredSessionToken();
     const data=await paymentApi({
       action:'tilopay_create_checkout',
       session_token:token,
