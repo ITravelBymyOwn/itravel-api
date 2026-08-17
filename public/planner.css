@@ -3065,3 +3065,58 @@ input.end,
   }
   .checkout-includes{grid-template-columns:1fr}
 }
+
+
+/* =========================================================
+   ITBMO · EMAIL EXPORT · COMING SOON · v71
+   Visible after generation, intentionally unavailable for MVP.
+========================================================= */
+.toolbar #btn-email.email-coming-soon,
+.toolbar #btn-email:disabled{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:.48rem;
+  min-height:44px;
+  color:#66598d;
+  background:
+    linear-gradient(135deg,rgba(244,240,255,.98),rgba(236,244,255,.96));
+  border:1px solid rgba(126,97,202,.20);
+  box-shadow:0 7px 18px rgba(65,55,112,.07);
+  opacity:1;
+  filter:none;
+  cursor:not-allowed;
+  transform:none;
+}
+
+.toolbar #btn-email.email-coming-soon:hover,
+.toolbar #btn-email:disabled:hover{
+  color:#66598d;
+  background:
+    linear-gradient(135deg,rgba(244,240,255,.98),rgba(236,244,255,.96));
+  border-color:rgba(126,97,202,.20);
+  box-shadow:0 7px 18px rgba(65,55,112,.07);
+  transform:none;
+  filter:none;
+}
+
+.toolbar #btn-email .email-action-label{
+  font-weight:850;
+}
+
+.toolbar #btn-email .coming-soon-badge{
+  display:inline-flex;
+  align-items:center;
+  padding:.20rem .42rem;
+  color:#735bb6;
+  background:rgba(255,255,255,.82);
+  border:1px solid rgba(126,97,202,.16);
+  border-radius:999px;
+  font-size:.58rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:.035em;
+  text-transform:uppercase;
+  white-space:nowrap;
+}
