@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=64" />
+  <link rel="stylesheet" href="./planner.css?v=70" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -335,6 +335,123 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
   <footer class="footer">
     © 2026 ITravelByMyOwn
   </footer>
+
+
+  <!-- =========================================================
+       ITBMO · CUSTOMER CARE
+       Human support is intentionally separate from Astra Info Chat.
+  ========================================================== -->
+  <button id="need-help-floating" class="need-help-floating" type="button" title="Customer Support">
+    <span class="need-help-icon">?</span>
+    <span id="need-help-label">Need help?</span>
+  </button>
+
+  <div id="support-modal" class="support-modal" aria-hidden="true">
+    <div class="support-card" role="dialog" aria-modal="true" aria-labelledby="support-title">
+      <button id="support-close" class="support-close" type="button" aria-label="Close">✕</button>
+      <div class="support-symbol">✦</div>
+      <div class="support-eyebrow" id="support-eyebrow">ITBMO Customer Care</div>
+      <h3 id="support-title">Need a hand?</h3>
+      <p id="support-copy">If something went wrong with your itinerary, payment or account, our team is here to help.</p>
+
+      <div class="support-help-grid">
+        <div><span>✓</span><strong id="support-item-1">Itinerary generation issues</strong></div>
+        <div><span>✓</span><strong id="support-item-2">Payments and refunds</strong></div>
+        <div><span>✓</span><strong id="support-item-3">Account assistance</strong></div>
+      </div>
+
+      <button id="support-email-button" class="btn primary support-email-button" type="button">
+        ✉ <span id="support-email-label">Contact Customer Support</span>
+      </button>
+      <p class="support-footnote" id="support-footnote">We’ll include your Trip ID automatically when available.</p>
+    </div>
+  </div>
+
+  <!-- =========================================================
+       ITBMO · PREMIUM JOURNEY CHECKOUT
+       UI is complete. Provider activation is controlled in planner.js.
+  ========================================================== -->
+  <div id="checkout-modal" class="checkout-modal" aria-hidden="true">
+    <div class="checkout-card" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+      <button id="checkout-close" class="checkout-close" type="button" aria-label="Close">✕</button>
+
+      <div class="checkout-brand-row">
+        <div class="checkout-symbol">✦</div>
+        <div>
+          <div class="checkout-eyebrow" id="checkout-eyebrow">ITBMO Premium Journey</div>
+          <h3 id="checkout-title">Your journey is ready to be created</h3>
+        </div>
+      </div>
+
+      <p class="checkout-subtitle" id="checkout-subtitle">
+        Unlock your complete personalized itinerary with Astra.
+      </p>
+
+      <div class="checkout-offer">
+        <div class="checkout-offer-badge" id="checkout-offer-badge">LIMITED-TIME LAUNCH OFFER</div>
+        <div class="checkout-price-row">
+          <span class="checkout-price-old" id="checkout-price-old">US$5.99</span>
+          <span class="checkout-price-new" id="checkout-price-new">US$2.99</span>
+        </div>
+        <div class="checkout-price-note" id="checkout-price-note">One-time payment · Complete trip · All configured cities</div>
+      </div>
+
+      <div class="checkout-includes">
+        <div><span>✓</span><span id="checkout-inc-1">Complete personalized itinerary</span></div>
+        <div><span>✓</span><span id="checkout-inc-2">Astra travel intelligence</span></div>
+        <div><span>✓</span><span id="checkout-inc-3">PDF, CSV and Email exports</span></div>
+      </div>
+
+      <div class="checkout-methods">
+        <button id="checkout-tilopay" class="checkout-method checkout-method-card" type="button">
+          <span class="checkout-method-icon">💳</span>
+          <span>
+            <strong id="checkout-card-title">Credit or Debit Card</strong>
+            <small id="checkout-card-copy">Visa · Mastercard · American Express</small>
+          </span>
+          <span class="checkout-method-arrow">→</span>
+        </button>
+
+        <div id="checkout-paypal-wrap" class="checkout-paypal-wrap">
+          <div id="paypal-button-container"></div>
+          <button id="checkout-paypal-fallback" class="checkout-method checkout-method-paypal" type="button">
+            <span class="checkout-paypal-wordmark">PayPal</span>
+            <span class="checkout-method-arrow">→</span>
+          </button>
+        </div>
+
+        <button id="checkout-preview-continue" class="checkout-preview-continue" type="button">
+          Preview mode · Continue to Astra
+        </button>
+      </div>
+
+      <div id="checkout-status" class="checkout-status" aria-live="polite"></div>
+
+      <div class="checkout-trust">
+        <div class="checkout-lock">🔒</div>
+        <div>
+          <strong id="checkout-secure-title">Secure payment processing</strong>
+          <p id="checkout-secure-copy">Payments are securely handled by our payment providers. ITBMO never stores your card details.</p>
+        </div>
+      </div>
+
+      <div class="checkout-trust-row">
+        <span>🔒 <strong id="checkout-trust-1">Secure payment</strong></span>
+        <span>↩ <strong id="checkout-trust-2">Clear refund policy</strong></span>
+        <span>✉ <strong id="checkout-trust-3">Human customer support</strong></span>
+      </div>
+
+      <div class="checkout-legal">
+        <a id="checkout-refund-link" href="https://itravelbymyown.com/refund-policy" target="_blank" rel="noopener noreferrer">Refund Policy</a>
+        <span>·</span>
+        <a href="https://itravelbymyown.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy</a>
+        <span>·</span>
+        <a href="https://itravelbymyown.com/terms-and-conditions" target="_blank" rel="noopener noreferrer">Terms</a>
+      </div>
+
+      <button id="checkout-support-link" class="checkout-support-link" type="button">Need help? Contact Customer Support</button>
+    </div>
+  </div>
 
   <!-- Modal Info Chat -->
   <!-- ✅ Cambio quirúrgico: removido style="display:none;" para que el toggle por clase .active funcione -->
@@ -721,7 +838,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=60"></script>
+<script src="./planner.js?v=70"></script>
  
 </body>
 </html>
