@@ -5517,7 +5517,7 @@ const ITBMO_COMMERCE_CONFIG = {
   },
 
   paypal: {
-    enabled: false
+    enabled: true
   },
 
   tilopay: {
