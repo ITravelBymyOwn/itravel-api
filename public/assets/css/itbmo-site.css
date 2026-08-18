@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.4
+   ITBMO · HOME V4.5
    Premium / glass / travel-tech / Apple-like restraint
    ========================================================= */
 
@@ -1028,4 +1028,28 @@ img,svg,video{max-width:100%;display:block}
     min-width:156px;
     height:44px;
   }
+}
+
+
+/* =========================================================
+   V4.5 · COHERENT GRADIENT TITLE LANGUAGE
+   Surgical: applies the established ITBMO blue→teal→indigo
+   treatment only to highlighted phrases in major Home titles.
+   ========================================================= */
+.itinerary-preview__heading h3 span,
+.final-cta h2 span{
+  display:inline-block;
+  color:transparent;
+  background:linear-gradient(100deg,var(--blue),var(--teal),var(--indigo));
+  -webkit-background-clip:text;
+  background-clip:text;
+  padding-right:.035em;
+}
+
+/* Keep the final CTA readable on the dark gradient background.
+   The colored phrase uses a brighter version of the same brand spectrum. */
+.final-cta h2 span{
+  background:linear-gradient(100deg,#67d7ff,#51e0d0,#a8adff);
+  -webkit-background-clip:text;
+  background-clip:text;
 }
