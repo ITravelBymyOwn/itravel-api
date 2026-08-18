@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4
+   ITBMO · HOME V4.1
    Premium / glass / travel-tech / Apple-like restraint
    ========================================================= */
 
@@ -612,4 +612,198 @@ img,svg,video{max-width:100%;display:block}
 .verify-panel{
   border:1px solid rgba(215,154,22,.14);
   box-shadow:0 22px 60px rgba(111,81,10,.08),inset 0 1px 0 rgba(255,255,255,.96)
+}
+
+
+/* =========================================================
+   V4.1 · IMAGE SURFACES
+   Visible placeholders while assets are not uploaded.
+   ========================================================= */
+.image-slot{
+  position:relative;
+  overflow:hidden;
+  background:
+    radial-gradient(380px 220px at 12% 10%,rgba(53,191,209,.22),transparent 68%),
+    radial-gradient(420px 240px at 88% 88%,rgba(109,120,238,.20),transparent 72%),
+    linear-gradient(145deg,#edf8fb,#eef0ff);
+}
+.image-slot>img{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  opacity:0;
+  transition:opacity .45s var(--ease),transform 1.2s var(--ease);
+}
+.image-slot.has-image>img{opacity:1}
+.image-slot.has-image:hover>img{transform:scale(1.025)}
+.image-slot__placeholder{
+  position:absolute;
+  inset:0;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:.2rem;
+  color:#6f8799;
+  text-align:center;
+  pointer-events:none;
+  z-index:1;
+}
+.image-slot.has-image .image-slot__placeholder{display:none}
+.image-slot__placeholder span{
+  padding:.35rem .55rem;
+  border-radius:999px;
+  background:rgba(255,255,255,.64);
+  border:1px solid rgba(255,255,255,.80);
+  backdrop-filter:blur(10px);
+  font-size:.6rem;
+  font-weight:900;
+  letter-spacing:.08em;
+}
+.image-slot__placeholder small{
+  max-width:86%;
+  font-size:.52rem;
+  opacity:.76
+}
+
+.hero-photo-stage{
+  position:absolute;
+  inset:5% 4% 7% 2%;
+  border-radius:38px;
+  opacity:.56;
+  box-shadow:0 30px 72px rgba(16,56,88,.10);
+}
+.hero-photo-stage::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  background:
+    linear-gradient(90deg,rgba(246,250,252,.82) 0%,rgba(246,250,252,.18) 42%,rgba(7,31,61,.05) 100%),
+    linear-gradient(180deg,transparent 50%,rgba(7,31,61,.10));
+  z-index:2;
+  pointer-events:none;
+}
+.hero-photo-stage.has-image{opacity:.88}
+.hero-glass-card{z-index:4}
+.hero-orbit{z-index:3}
+
+.route-visual__photo>img{z-index:0}
+.route-visual__photo .image-slot__placeholder{z-index:1}
+.route-visual__photo::after{z-index:2}
+.route-visual__caption{z-index:3}
+
+.travel-photo-rail{
+  padding:0 0 clamp(3.7rem,5vw,5rem);
+}
+.travel-photo-rail__grid{
+  display:grid;
+  grid-template-columns:.9fr 1.35fr .9fr;
+  gap:.7rem;
+}
+.travel-photo-card{
+  position:relative;
+  min-height:260px;
+  margin:0;
+  border-radius:26px;
+}
+.travel-photo-card--wide{min-height:300px}
+.travel-photo-card::after{
+  content:"";
+  position:absolute;
+  inset:38% 0 0;
+  z-index:2;
+  background:linear-gradient(180deg,transparent,rgba(4,29,55,.72));
+  pointer-events:none;
+}
+.travel-photo-card figcaption{
+  position:absolute;
+  left:1rem;
+  right:1rem;
+  bottom:.9rem;
+  z-index:3;
+  color:#fff;
+}
+.travel-photo-card figcaption span{
+  display:block;
+  margin-bottom:.18rem;
+  font-size:.58rem;
+  font-weight:900;
+  letter-spacing:.09em;
+  text-transform:uppercase;
+  opacity:.78;
+}
+.travel-photo-card figcaption strong{
+  display:block;
+  max-width:430px;
+  font-size:1rem;
+  line-height:1.12;
+  letter-spacing:-.03em;
+}
+
+/* =========================================================
+   V4.1 · ADSENSE PREVIEW
+   Preview is intentionally subtle and premium.
+   ========================================================= */
+.ad-zone{
+  padding:.15rem 0 2rem;
+}
+.ad-preview{
+  position:relative;
+  min-height:112px;
+  overflow:hidden;
+  border:1px dashed rgba(72,111,140,.20);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      rgba(246,250,252,.72) 0,
+      rgba(246,250,252,.72) 12px,
+      rgba(240,247,250,.76) 12px,
+      rgba(240,247,250,.76) 24px
+    );
+}
+.ad-preview::before{
+  content:"";
+  position:absolute;
+  width:240px;
+  height:240px;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  border-radius:999px;
+  background:rgba(53,191,209,.08);
+  filter:blur(18px);
+}
+.ad-preview>*{position:relative;z-index:1}
+.ad-preview span{
+  color:#8799a6;
+  font-size:.54rem;
+  font-weight:850;
+  letter-spacing:.11em;
+}
+.ad-preview strong{
+  margin-top:.22rem;
+  color:#4d687b;
+  font-size:.84rem;
+}
+.ad-preview small{
+  margin-top:.15rem;
+  color:#91a0ab;
+  font-size:.62rem;
+}
+
+@media(max-width:900px){
+  .travel-photo-rail__grid{
+    grid-template-columns:1fr 1fr;
+  }
+  .travel-photo-card--wide{
+    grid-column:1/-1;
+    grid-row:1;
+  }
+}
+@media(max-width:680px){
+  .travel-photo-rail__grid{grid-template-columns:1fr}
+  .travel-photo-card--wide{grid-column:auto;grid-row:auto}
+  .travel-photo-card,.travel-photo-card--wide{min-height:240px}
 }
