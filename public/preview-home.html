@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ITBMO · Planea tu viaje con ASTRA</title>
-  <meta name="description" content="Crea un itinerario de viaje personalizado con ASTRA. Hasta 3 ciudades, preferencias, horarios, transporte, PDF, CSV e Info Chat.">
+  <meta name="description" content="Crea un itinerario de viaje personalizado con ASTRA. Hasta 5 ciudades, preferencias, horarios, transporte, PDF, CSV e Info Chat.">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
 
@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=3">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4">
 </head>
 
 <body>
@@ -22,22 +22,24 @@
   ========================================================== -->
   <header class="site-header" id="top">
     <div class="site-header__inner">
-      <a class="brand" href="#top" aria-label="I Travel By My Own - Inicio">
-        <span class="brand__main">I Travel</span>
-        <span class="brand__sub">By My Own</span>
+      <a class="brand brand--logo" href="/" aria-label="I Travel By My Own - Inicio">
+        <img src="./assets/img/itbmo-logo-premium.svg" alt="I Travel By My Own">
       </a>
 
       <nav class="site-nav" aria-label="Navegación principal">
+        <a href="/">Inicio</a>
         <a href="#how-it-works">Cómo funciona</a>
-        <a href="#what-you-get">Qué recibes</a>
-        <a href="#planner">Planificador</a>
+        <a href="#what-you-get">Ejemplo</a>
+        <a href="#planner">Planner</a>
         <a href="#travel-essentials">Para tu viaje</a>
-        <a href="#faq">Preguntas</a>
+        <a href="/pricing">Precios</a>
+        <a href="#faq">FAQ</a>
+        <a href="/help-support">Soporte</a>
       </nav>
 
       <div class="site-header__actions">
         <button class="language-toggle" type="button" aria-label="Cambiar idioma">ES</button>
-        <a class="button button--small button--glass" href="#planner">Mi viaje</a>
+        <a class="button button--small button--glass" href="/dashboard/my-trips">Mi viaje</a>
       </div>
     </div>
   </header>
@@ -63,11 +65,12 @@
 
           <p class="hero__lead">
             Dinos dónde vas, con quién viajas y qué es importante para ti.
-            ASTRA investiga, organiza y convierte tus ideas en una ruta que puedes seguir día por día.
+            ASTRA investiga, organiza y convierte tus ideas en una ruta que puedes seguir día por día,
+            considerando también dónde te hospedas para ordenar mejor cada jornada.
           </p>
 
           <div class="hero__features">
-            <span>Hasta 3 ciudades</span>
+            <span>Hasta 5 ciudades</span>
             <span>En tu idioma</span>
             <span>PDF + CSV</span>
             <span>Info Chat</span>
@@ -96,7 +99,7 @@
 
           <div class="hero-glass-card hero-glass-card--back">
             <span class="hero-glass-card__label">TU VIAJE</span>
-            <strong>3 ciudades</strong>
+            <strong>5 ciudades</strong>
             <small>Un solo plan</small>
           </div>
 
@@ -145,10 +148,10 @@
           <article class="how-card glass-card">
             <span class="how-card__number">02</span>
             <div class="how-card__icon">◇</div>
-            <h3>Dónde y cuándo</h3>
+            <h3>Hasta 5 ciudades</h3>
             <p>
-              Agrega país, ciudad, fecha de llegada y número de días. Puedes incluir hasta 3 ciudades.
-              Si ya conoces horarios disponibles, agrégalos; si no, déjalos en blanco.
+              Agrega país, ciudad, fecha de llegada y número de días. Puedes incluir hasta 5 ciudades
+              en una misma generación. Si necesitas más, crea otro itinerario para las ciudades adicionales.
             </p>
           </article>
 
@@ -157,19 +160,20 @@
             <div class="how-card__icon">✦</div>
             <h3>Hazlo realmente tuyo</h3>
             <p>
-              Escribe preferencias, restricciones y condiciones especiales: ritmo, intereses,
-              movilidad, niños, reservas existentes, actividades que quieres evitar o imperdibles.
+              Completa horarios si los conoces y escribe preferencias, restricciones y condiciones especiales:
+              ritmo, intereses, movilidad, niños, reservas existentes o lugares imprescindibles.
             </p>
           </article>
 
-          <article class="how-card glass-card">
+          <article class="how-card how-card--payment glass-card">
             <span class="how-card__number">04</span>
             <div class="how-card__icon">✓</div>
-            <h3>Contexto final</h3>
+            <h3>Guarda, revisa y paga solo al generar</h3>
             <p>
-              Guarda tus destinos e inicia la planificación. ASTRA preguntará hospedaje y transporte
-              para cada ciudad y, al final, el idioma en que deseas recibir el itinerario.
+              Guardar tus destinos no genera ningún cargo. El pago se solicita únicamente cuando presionas
+              <strong>Iniciar planificación</strong>. Después del pago se habilitan ASTRA e Info Chat.
             </p>
+            <span class="how-card__price">Lanzamiento $2.99 · hasta 5 ciudades</span>
           </article>
 
         </div>
@@ -177,24 +181,26 @@
         <!-- INFO CHAT integrado en las instrucciones -->
         <div class="info-instructions glass-panel">
           <div class="info-instructions__copy">
-            <div class="eyebrow glass-pill">Antes de guardar</div>
-            <h3>¿No sabes qué poner?<br><span>Pregúntale a Info Chat.</span></h3>
+            <div class="eyebrow glass-pill">Después del pago</div>
+            <h3>Info Chat se convierte en tu<br><span>concierge de las ciudades del viaje.</span></h3>
             <p>
-              Úsalo para investigar antes de bloquear tus destinos. Lo que descubras puede convertirse
-              en mejor contexto para ASTRA.
+              Se habilita cuando completas el pago y queda limitado a consultas relacionadas con las ciudades
+              que ingresaste en el Planner. Puedes usarlo mientras ASTRA solicita hospedaje y transporte,
+              y también después de recibir el itinerario.
             </p>
 
             <div class="prompt-grid">
-              <button type="button">“¿Cuál es la mejor zona para hospedarme en Roma?”</button>
-              <button type="button">“¿Vale la pena hacer un day trip a Segovia?”</button>
-              <button type="button">“¿Qué zona es mejor si viajo con niños?”</button>
+              <button type="button"><span>Ejemplo</span> “¿Cuál es la mejor zona para hospedarme en Roma?”</button>
+              <button type="button"><span>Ejemplo</span> “¿Vale la pena reservar este tour en Barcelona?”</button>
+              <button type="button"><span>Ejemplo</span> “¿Cómo funciona el transporte público en París?”</button>
             </div>
 
-            <div class="micro-note">
+            <div class="micro-note micro-note--info">
               <span>i</span>
               <p>
-                Una vez guardes destinos, Preferencias / Restricciones / Condiciones Especiales queda bloqueado.
-                Durante las preguntas de hospedaje y transporte todavía puedes consultar Info Chat para responder mejor a ASTRA.
+                Para proteger la velocidad y sostenibilidad del servicio, Info Chat tendrá un uso incluido por itinerario.
+                El límite se mostrará claramente antes de pagar. La recomendación inicial es hasta <strong>10 consultas</strong>,
+                con respuestas concisas y enfocadas en tus ciudades.
               </p>
             </div>
           </div>
@@ -205,12 +211,16 @@
               <strong>Info Chat</strong>
             </div>
             <div class="info-chat-mini__body">
+              <div class="info-chat-status">
+                <span>✓</span>
+                Habilitado después del pago
+              </div>
               <div class="bubble bubble--user">
-                ¿Cuál es una buena zona para quedarme en Roma si quiero moverme principalmente caminando?
+                ¿Qué zona de Roma funciona mejor para recorrer mis principales visitas caminando?
               </div>
               <div class="bubble bubble--astra">
-                Una ubicación céntrica entre Centro Storico, Monti y zonas próximas a Piazza Venezia puede facilitar muchos
-                recorridos a pie. Compara transporte, ruido nocturno y distancia real a los lugares que más quieres visitar.
+                Para las ciudades de tu viaje puedo ayudarte a comparar zonas, transporte, actividades,
+                reservas y logística antes y después de generar tu itinerario.
               </div>
             </div>
           </div>
@@ -235,8 +245,8 @@
             </h2>
             <p>
               ASTRA combina viajeros, preferencias, hospedaje, transporte y tiempo disponible para construir
-              una secuencia lógica. Evalúa imperdibles y day trips relevantes y organiza cada jornada para reducir
-              movimientos innecesarios y aprovechar mejor el viaje.
+              una secuencia lógica. Usa tu zona de hospedaje como base geográfica para ordenar las jornadas,
+              evalúa imperdibles y day trips relevantes y busca reducir movimientos innecesarios.
             </p>
 
             <div class="promise-facts">
@@ -246,6 +256,15 @@
               <span><b>04</b> Transporte</span>
               <span><b>05</b> Tiempo</span>
               <span><b>06</b> Imperdibles</span>
+            </div>
+
+            <div class="ai-variation-note">
+              <span>✦</span>
+              <p>
+                <strong>Cada generación es única.</strong> Al trabajar con IA, dos solicitudes idénticas pueden producir
+                pequeñas diferencias. ASTRA está diseñada para mantener los principios centrales: imperdibles,
+                lógica geográfica, optimización de rutas y adaptación al contexto que proporcionaste.
+              </p>
             </div>
           </div>
 
@@ -278,14 +297,14 @@
         </div>
 
         <!-- EJEMPLO REALISTA -->
-        <div class="itinerary-preview">
+        <div class="itinerary-preview example-zone">
           <div class="itinerary-preview__heading">
             <div>
-              <div class="eyebrow glass-pill">Así se ve el resultado</div>
+              <div class="eyebrow glass-pill glass-pill--example">Ejemplo · No es tu itinerario</div>
               <h3>Un día completo. En una tabla que sí puedes usar.</h3>
               <p>
-                El itinerario real incluye horarios, origen, destino, transporte, duración y notas detalladas.
-                Este es solo un día de ejemplo.
+                El siguiente contenido es únicamente una muestra visual del nivel de detalle que puede entregar ASTRA.
+                Tu resultado se generará específicamente para tu viaje.
               </p>
             </div>
             <div class="itinerary-preview__export">
@@ -297,10 +316,10 @@
           <div class="itinerary-card glass-card">
             <div class="itinerary-card__top">
               <div>
-                <span>Ejemplo de itinerario</span>
-                <strong>Reykjanes · Día 5</strong>
+                <span class="example-label">EJEMPLO DE ITINERARIO</span>
+                <strong>Reykjanes / Costa Sur · Día 3</strong>
               </div>
-              <div class="date-chip">24<small>ENE</small></div>
+              <div class="date-chip">22<small>ENE</small></div>
             </div>
 
             <div class="itinerary-table-wrap">
@@ -320,57 +339,115 @@
                 <tbody>
                   <tr>
                     <td>09:00</td>
-                    <td>09:50</td>
-                    <td><strong>Reykjanes – Traslado al Puente entre Continentes</strong></td>
-                    <td>Hospedaje</td>
-                    <td>Puente entre continentes</td>
+                    <td>10:45</td>
+                    <td><strong>Costa Sur · Traslado a Seljalandsfoss</strong></td>
+                    <td>Hospedaje / Jofurbas</td>
+                    <td>Seljalandsfoss</td>
                     <td>Vehículo alquilado</td>
-                    <td>Transporte: 35 min<br>Actividad: 15 min</td>
+                    <td>Transporte: ~1 h 45 min</td>
                     <td>
-                      Entrada a la península con un punto geológico muy fotogénico; breve parada para fotos.
-                      Aparcamiento limitado: deja el equipo solo lo necesario y protege del viento.
-                      En invierno comprueba estado de carreteras antes de salir y evita acercarte a bordes resbaladizos.
+                      Salida matinal hacia la Costa Sur. Lleva impermeable y calzado con buen agarre:
+                      en invierno los senderos próximos a la cascada pueden estar mojados o helados.
+                      Antes de salir confirma carreteras y condiciones meteorológicas; evita depender únicamente
+                      del tiempo estimado si el clima empeora.
                     </td>
                   </tr>
                   <tr>
-                    <td>09:50</td>
-                    <td>10:40</td>
-                    <td><strong>Puente entre continentes · visita breve</strong></td>
-                    <td>Puente entre continentes</td>
-                    <td>Puente entre continentes</td>
+                    <td>10:45</td>
+                    <td>11:45</td>
+                    <td><strong>Seljalandsfoss · visita y fotografía</strong></td>
+                    <td>Seljalandsfoss</td>
+                    <td>Seljalandsfoss</td>
                     <td>Caminata corta</td>
-                    <td>Transporte: 5 min<br>Actividad: 40 min</td>
+                    <td>Actividad: ~1 h</td>
                     <td>
-                      Siente la separación tectónica y aprovecha composiciones fotográficas únicas.
-                      En enero el viento puede complicar el acceso: revisa condiciones y evita zonas heladas.
-                      Si el clima empeora, reduce la estancia y prioriza seguridad.
+                      Explora los miradores y el sendero que bordea la cascada según las condiciones del día.
+                      En enero puede haber hielo y viento; prioriza plataformas y accesos señalizados.
+                      Si el paso posterior a la cascada está cerrado, disfruta los ángulos frontales y laterales.
                     </td>
                   </tr>
                   <tr>
-                    <td>11:05</td>
-                    <td>11:50</td>
-                    <td><strong>Gunnuhver · campo geotermal</strong></td>
-                    <td>Puente entre continentes</td>
-                    <td>Gunnuhver</td>
+                    <td>11:45</td>
+                    <td>13:00</td>
+                    <td><strong>Skógafoss · cascada y mirador</strong></td>
+                    <td>Seljalandsfoss</td>
+                    <td>Skógafoss</td>
                     <td>Vehículo alquilado</td>
-                    <td>Transporte: 15 min<br>Actividad: 30 min</td>
+                    <td>Transporte: ~25 min<br>Actividad: ~50 min</td>
                     <td>
-                      Área humeante con pasarelas que permiten observar actividad geotérmica; contraste costero muy fotogénico.
-                      Mantente en senderos señalizados y lleva prenda cortaviento: el vapor, olor a azufre y ráfagas son habituales.
+                      Skógafoss impresiona por volumen y permite combinar vistas desde la base con el mirador superior.
+                      Las escaleras pueden estar húmedas o heladas: sube únicamente si las condiciones son seguras.
+                      Reserva unos minutos para fotografías desde distintos ángulos antes de continuar.
                     </td>
                   </tr>
                   <tr>
-                    <td>12:15</td>
+                    <td>13:00</td>
+                    <td>14:00</td>
+                    <td><strong>Almuerzo en Skógar / ruta</strong></td>
+                    <td>Skógafoss</td>
+                    <td>Skógar</td>
+                    <td>Caminata / vehículo</td>
+                    <td>Actividad: ~1 h</td>
+                    <td>
+                      Pausa de almuerzo antes de continuar hacia la costa. En temporada invernal conviene confirmar
+                      horarios de restaurantes y mantener flexibilidad; si el servicio es limitado, utiliza una opción
+                      rápida para proteger el tiempo útil de luz de la tarde.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>14:00</td>
+                    <td>14:45</td>
+                    <td><strong>Dyrhólaey · mirador costero</strong></td>
+                    <td>Skógar</td>
+                    <td>Dyrhólaey</td>
+                    <td>Vehículo alquilado</td>
+                    <td>Transporte: ~30 min<br>Actividad: ~15 min</td>
+                    <td>
+                      Mirador con arcos marinos y vistas amplias de la costa negra. El viento puede ser intenso y
+                      algunos accesos pueden cerrar por condiciones invernales. Mantente en zonas permitidas y
+                      adapta la parada a la visibilidad y al estado de la carretera.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>14:45</td>
+                    <td>15:35</td>
+                    <td><strong>Playa de Reynisfjara</strong></td>
+                    <td>Dyrhólaey</td>
+                    <td>Reynisfjara</td>
+                    <td>Vehículo alquilado</td>
+                    <td>Transporte: ~10 min<br>Actividad: ~40 min</td>
+                    <td>
+                      Arena negra y columnas basálticas en un escenario muy fotogénico. Mantén una distancia amplia
+                      del mar: las olas pueden ser impredecibles y peligrosas. Respeta las advertencias locales y
+                      nunca des la espalda al océano durante la visita.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>15:35</td>
                     <td>16:15</td>
-                    <td><strong>Blue Lagoon · experiencia termal</strong></td>
-                    <td>Gunnuhver</td>
-                    <td>Blue Lagoon</td>
+                    <td><strong>Vík · parada breve</strong></td>
+                    <td>Reynisfjara</td>
+                    <td>Vík</td>
                     <td>Vehículo alquilado</td>
-                    <td>Transporte: 25 min<br>Actividad: 3 h 30 min</td>
+                    <td>Transporte: ~10 min<br>Actividad: ~30 min</td>
                     <td>
-                      Experiencia termal amplia y reparadora. Reserva con antelación y contempla tiempo para registro,
-                      vestuarios, inmersión y ducha final. Confirma hora de entrada y deja margen para cambiarse.
-                      El acceso sin reserva puede no estar disponible.
+                      Parada breve para caminar, tomar algo caliente o comprar provisiones antes del regreso.
+                      En invierno la luz cae rápidamente; evita prolongar la estancia si las condiciones de conducción
+                      comienzan a deteriorarse.
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>16:15</td>
+                    <td>18:45</td>
+                    <td><strong>Regreso al hospedaje</strong></td>
+                    <td>Vík</td>
+                    <td>Hospedaje / Jofurbas</td>
+                    <td>Vehículo alquilado</td>
+                    <td>Transporte: ~2 h 30 min</td>
+                    <td>
+                      Regreso conservador antes de que avance la noche. Revisa carretera, viento y visibilidad antes de salir.
+                      En Islandia los tiempos pueden aumentar con rapidez por clima o hielo; prioriza una conducción tranquila
+                      y añade margen adicional si las condiciones son adversas.
                     </td>
                   </tr>
                 </tbody>
@@ -378,8 +455,8 @@
             </div>
 
             <div class="itinerary-card__foot">
-              <span>Un ejemplo de un solo día.</span>
-              <strong>Tu itinerario se adapta a tus destinos, viajeros, horarios y condiciones.</strong>
+              <span>Contenido de muestra.</span>
+              <strong>Tu itinerario real se adapta a tus ciudades, hospedaje, viajeros, horarios y condiciones.</strong>
             </div>
           </div>
         </div>
@@ -397,7 +474,8 @@
           <div class="eyebrow glass-pill">Empieza aquí</div>
           <h2 id="planner-heading">Construye tu viaje con ASTRA.</h2>
           <p>
-            Ya sabes cómo funciona y qué vas a recibir. Ahora completa el Planner a tu ritmo.
+            Ya sabes cómo funciona y qué vas a recibir. Completa hasta 5 ciudades a tu ritmo;
+            el pago aparecerá únicamente cuando decidas iniciar la generación.
           </p>
         </div>
 
@@ -407,7 +485,7 @@
               <span class="status-dot"></span>
               ITBMO Planner
             </div>
-            <div class="planner-frame__hint">Hasta 3 ciudades</div>
+            <div class="planner-frame__hint">Hasta 5 ciudades</div>
           </div>
 
           <iframe
@@ -453,8 +531,8 @@
             </h2>
           </div>
           <p>
-            Accesos útiles para reservar, moverte y mantenerte conectado. Los partners monetizados
-            se activarán individualmente conforme sean aprobados.
+            Accesos útiles para reservar, moverte y mantenerte conectado. En esta vista de desarrollo
+            mostramos las seis integraciones previstas; en producción se activarán individualmente al recibir aprobación.
           </p>
         </div>
 
@@ -462,54 +540,54 @@
 
           <article class="partner-card glass-card" data-partner="booking">
             <span class="partner-card__state">Preview</span>
-            <div class="partner-card__icon">⌂</div>
+            <div class="partner-brand partner-brand--booking"><span>Booking.com</span></div>
             <small>Hospedaje</small>
-            <h3>Booking.com</h3>
+            <h3>Encuentra tu alojamiento</h3>
             <p>Busca y compara alojamiento para tus destinos.</p>
             <a href="#" data-partner-link="booking">Buscar hoteles <span>↗</span></a>
           </article>
 
           <article class="partner-card glass-card" data-partner="getyourguide">
             <span class="partner-card__state">Preview</span>
-            <div class="partner-card__icon">✦</div>
+            <div class="partner-brand partner-brand--gyg"><span>GetYourGuide</span></div>
             <small>Experiencias</small>
-            <h3>GetYourGuide</h3>
+            <h3>Reserva actividades</h3>
             <p>Tours, entradas y actividades en destino.</p>
             <a href="#" data-partner-link="getyourguide">Explorar experiencias <span>↗</span></a>
           </article>
 
           <article class="partner-card glass-card" data-partner="viator">
             <span class="partner-card__state">Preview</span>
-            <div class="partner-card__icon">◎</div>
+            <div class="partner-brand partner-brand--viator"><span>viator</span></div>
             <small>Experiencias</small>
-            <h3>Viator</h3>
+            <h3>Explora tours</h3>
             <p>Compara excursiones y actividades disponibles.</p>
             <a href="#" data-partner-link="viator">Ver actividades <span>↗</span></a>
           </article>
 
           <article class="partner-card glass-card" data-partner="omio">
             <span class="partner-card__state">Preview</span>
-            <div class="partner-card__icon">⇄</div>
+            <div class="partner-brand partner-brand--omio"><span>omio</span></div>
             <small>Transporte</small>
-            <h3>Omio</h3>
+            <h3>Conecta tus destinos</h3>
             <p>Trenes, autobuses y conexiones entre destinos.</p>
             <a href="#" data-partner-link="omio">Buscar transporte <span>↗</span></a>
           </article>
 
           <article class="partner-card glass-card" data-partner="airalo">
             <span class="partner-card__state">Preview</span>
-            <div class="partner-card__icon">⌁</div>
+            <div class="partner-brand partner-brand--airalo"><span>airalo</span></div>
             <small>eSIM</small>
-            <h3>Airalo</h3>
+            <h3>Llega conectado</h3>
             <p>Opciones de datos móviles para tu destino.</p>
             <a href="#" data-partner-link="airalo">Ver eSIM <span>↗</span></a>
           </article>
 
           <article class="partner-card glass-card" data-partner="holafly">
             <span class="partner-card__state">Preview</span>
-            <div class="partner-card__icon">◌</div>
+            <div class="partner-brand partner-brand--holafly"><span>Holafly</span></div>
             <small>eSIM</small>
-            <h3>Holafly</h3>
+            <h3>Datos para tu viaje</h3>
             <p>Alternativas para mantenerte conectado al viajar.</p>
             <a href="#" data-partner-link="holafly">Explorar conectividad <span>↗</span></a>
           </article>
@@ -548,6 +626,11 @@
       <div class="page-shell">
 
         <div class="verify-panel glass-panel">
+          <div class="verify-important">
+            <span>!</span>
+            <strong>Lee esto antes de viajar</strong>
+            <p>ASTRA te ayuda a planificar; la información crítica debe confirmarse con fuentes actuales.</p>
+          </div>
           <div class="verify-panel__head">
             <div>
               <div class="eyebrow glass-pill">Antes de viajar</div>
@@ -665,8 +748,9 @@
             </button>
             <div class="faq-answer">
               <p>
-                Sí. Para mantener el servicio rápido y sostenible, Info Chat tendrá un uso incluido por itinerario.
-                El número exacto de consultas se mostrará claramente antes de pagar. No utilizaremos “tokens” como concepto para el usuario.
+                Sí. La propuesta inicial es incluir hasta 10 consultas por itinerario pagado, limitadas a las ciudades
+                de ese viaje. El límite final se mostrará claramente antes de pagar; para el usuario hablaremos de consultas,
+                no de “tokens”.
               </p>
             </div>
           </article>
@@ -680,6 +764,33 @@
               <p>
                 Después de completar la información de todas las ciudades, ASTRA te preguntará una sola vez
                 en qué idioma deseas recibir el itinerario.
+              </p>
+            </div>
+          </article>
+
+          <article class="faq-item glass-card">
+            <button type="button" aria-expanded="false">
+              ¿Cuándo se realiza el pago?
+              <span>+</span>
+            </button>
+            <div class="faq-answer">
+              <p>
+                Puedes completar y revisar el Planner sin pagar. El checkout se abre únicamente cuando presionas
+                <strong>Iniciar planificación</strong>. El precio promocional de $2.99 cubre una generación de hasta 5 ciudades.
+              </p>
+            </div>
+          </article>
+
+          <article class="faq-item glass-card">
+            <button type="button" aria-expanded="false">
+              ¿Por qué dos generaciones del mismo viaje pueden ser diferentes?
+              <span>+</span>
+            </button>
+            <div class="faq-answer">
+              <p>
+                ASTRA utiliza inteligencia artificial, por lo que puede haber variaciones entre generaciones.
+                Está diseñada para conservar la lógica central del viaje: imperdibles, contexto del usuario,
+                hospedaje como base geográfica y una secuencia eficiente de visitas.
               </p>
             </div>
           </article>
@@ -735,9 +846,8 @@
 
       <div class="site-footer__top">
         <div class="site-footer__brand">
-          <a class="brand brand--footer" href="#top">
-            <span class="brand__main">I Travel</span>
-            <span class="brand__sub">By My Own</span>
+          <a class="brand brand--footer brand--logo" href="/">
+            <img src="./assets/img/itbmo-logo-premium.svg" alt="I Travel By My Own">
           </a>
           <p>Planea mejor. Viaja a tu manera.</p>
         </div>
@@ -753,22 +863,22 @@
           <strong>Viajes</strong>
           <a href="#planner">Planificador</a>
           <a href="#travel-essentials">Para tu viaje</a>
-          <a href="#" data-placeholder-link>Travel Guides</a>
+          <a href="/travel-guides">Travel Guides</a>
         </div>
 
         <div class="footer-column">
           <strong>Ayuda</strong>
-          <a href="#" data-placeholder-link>Soporte</a>
-          <a href="#" data-placeholder-link>Contacto</a>
-          <a href="#" data-placeholder-link>Mi perfil</a>
+          <a href="/help-support">Soporte</a>
+          <a href="/contact">Contacto</a>
+          <a href="/dashboard/my-trips">Mi perfil</a>
         </div>
 
         <div class="footer-column">
           <strong>Legal</strong>
-          <a href="#" data-placeholder-link>Política de privacidad</a>
-          <a href="#" data-placeholder-link>Términos de servicio</a>
-          <a href="#" data-placeholder-link>Política de cookies</a>
-          <a href="#" data-placeholder-link>Afiliados y publicidad</a>
+          <a href="/legal/privacy-policy">Política de privacidad</a>
+          <a href="/legal/terms-of-service">Términos de servicio</a>
+          <a href="/legal/cookies-policy">Política de cookies</a>
+          <a href="/legal/ads-affiliates-disclosure">Afiliados y publicidad</a>
         </div>
       </div>
 
@@ -780,6 +890,6 @@
     </div>
   </footer>
 
-  <script src="./assets/js/itbmo-site.js?v=3"></script>
+  <script src="./assets/js/itbmo-site.js?v=4"></script>
 </body>
 </html>
