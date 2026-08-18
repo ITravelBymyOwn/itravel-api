@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=71" />
+  <link rel="stylesheet" href="./planner.css?v=72" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -277,8 +277,9 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <h2>Itinerario</h2>
 
           <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
-          <button id="info-chat-floating" class="info-chat-floating pulse" title="Open Info Chat">
-            💬 Info Chat
+          <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
+                  title="Info Chat unlocks after payment" aria-disabled="true" disabled>
+            🔒 Info Chat
           </button>
         </div>
 
@@ -461,13 +462,23 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
   <div id="info-chat-modal" class="info-chat-modal">
     <div class="info-chat-panel">
       <div class="info-chat-header">
-        <h3>Info Chat · Astra 🌍</h3>
+        <div class="info-chat-heading">
+          <h3>Info Chat · Astra 🌍</h3>
+          <div id="info-chat-entitlement" class="info-chat-entitlement is-locked" aria-live="polite">
+            <span id="info-chat-entitlement-icon">🔒</span>
+            <span id="info-chat-entitlement-text">Available after payment</span>
+          </div>
+        </div>
         <button id="info-chat-close" class="btn ghost">✖</button>
+      </div>
+      <div id="info-chat-usage" class="info-chat-usage" aria-live="polite">
+        <span id="info-chat-usage-label">Info Chat locked</span>
+        <strong id="info-chat-remaining">0 / 10</strong>
       </div>
       <div id="info-chat-messages" class="chat-messages"></div>
       <div class="chat-input">
-        <textarea id="info-chat-input" placeholder="Ask me anything about travel..." rows="1"></textarea>
-        <button id="info-chat-send" class="btn primary">Send</button>
+        <textarea id="info-chat-input" placeholder="Info Chat unlocks after payment" rows="1" disabled></textarea>
+        <button id="info-chat-send" class="btn primary" disabled>Send</button>
       </div>
     </div>
   </div>
@@ -841,7 +852,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=71"></script>
+<script src="./planner.js?v=72"></script>
  
 </body>
 </html>
