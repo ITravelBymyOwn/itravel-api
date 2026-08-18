@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.3 JS
+   ITBMO · HOME V4.4 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
    - Affiliate preview/config
@@ -68,6 +68,25 @@
   ========================================================= */
   document.querySelectorAll('[data-placeholder-link],[data-utility-link]').forEach((link) => {
     link.addEventListener('click', (event) => event.preventDefault());
+  });
+
+  /* =========================================================
+     HOME / SCROLL TO TOP
+     Always returns to the top even if #top is already in the URL.
+  ========================================================= */
+  document.querySelectorAll('[data-scroll-top]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      event.preventDefault();
+
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
+
+      if (window.location.hash) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    });
   });
 
   /* =========================================================
