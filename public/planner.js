@@ -1598,10 +1598,9 @@ async function saveDestinations(){
   // ✅ Bloquear sidebar
   if ($sidebar) $sidebar.classList.add('disabled');
 
-  if ($infoFloating) {
-    $infoFloating.style.pointerEvents = 'none';
-    $infoFloating.style.opacity = '0.6';
-  }
+  /* Info Chat remains locked after Save Destinations.
+     It unlocks only after server-side payment/admin entitlement is confirmed. */
+  setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
 
   if (typeof plannerState !== 'undefined') {
     plannerState.destinations = [...savedDestinations];
@@ -2084,17 +2083,40 @@ ${buildIntake()}
       body: JSON.stringify({
         model: MODEL,
         messages,
-        mode: 'info'
+        mode: 'info',
+        session_token: getStoredSessionToken(),
+        trip_id: currentTripId
       })
     });
 
-    if(!res.ok){
-      const raw = await res.text().catch(()=> '');
-      console.error('API error (info):', res.status, res.statusText, raw);
-      return tone.fail;
+    const data = await res.json().catch(()=>({text:''}));
+
+    if(res.status===429 || data?.code==='INFO_CHAT_LIMIT_REACHED'){
+      const remaining=Number(data?.info_chat_remaining || 0);
+      return {
+        text: getLang()==='es'
+          ? 'Has utilizado las 10 consultas incluidas en este itinerario.'
+          : 'You have used the 10 Info Chat queries included with this itinerary.',
+        remaining,
+        quotaExceeded:true
+      };
     }
 
-    const data = await res.json().catch(()=>({text:''}));
+    if(res.status===401 || res.status===402 || data?.code==='INFO_CHAT_NOT_AUTHORIZED'){
+      setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+      return {
+        text: getLang()==='es'
+          ? 'Info Chat está disponible después de confirmar el pago de este itinerario.'
+          : 'Info Chat is available after payment for this itinerary is confirmed.',
+        remaining:0
+      };
+    }
+
+    if(!res.ok || data?.ok===false){
+      console.error('API error (info):', res.status, res.statusText, data);
+      return {text:tone.fail,remaining:infoChatQueriesRemaining};
+    }
+
     const answer = (data?.text || '').trim();
 
     infoSession.push({ role:'user',      content: text });
@@ -2104,17 +2126,23 @@ ${buildIntake()}
       try {
         const j = JSON.parse(answer);
         if (j?.destination || j?.rows || j?.followup) {
-          return 'The Info Chat response could not be parsed correctly. Check the API Key/URL in Vercel and try again.';
+          return {
+            text:'The Info Chat response could not be parsed correctly. Check the API Key/URL in Vercel and try again.',
+            remaining:Number(data?.info_chat_remaining ?? infoChatQueriesRemaining)
+          };
         }
       } catch { /* no-op */ }
     }
 
-    return answer || 'Is there anything else you would like to know?';
+    return {
+      text: answer || 'Is there anything else you would like to know?',
+      remaining: Number(data?.info_chat_remaining ?? infoChatQueriesRemaining)
+    };
   }catch(e){
     const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
     console.error("Info Chat request failed:", e);
-    if(isAbort) return '⚠️ Info Chat took too long to respond. Please try again.';
-    return tone.fail;
+    if(isAbort) return {text:'⚠️ Info Chat took too long to respond. Please try again.',remaining:infoChatQueriesRemaining};
+    return {text:tone.fail,remaining:infoChatQueriesRemaining};
   }finally{
     clearTimeout(timer);
     setInfoChatBusy(false);
@@ -5460,11 +5488,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // 🧹 Desbloquear sidebar tras reinicio
     if ($sidebar) $sidebar.classList.remove('disabled');
 
-    if ($infoFloating){
-      $infoFloating.style.pointerEvents = 'auto';
-      $infoFloating.style.opacity = '1';
-      $infoFloating.disabled = false;
-    }
+    paymentGateSatisfiedTripId = null;
+    setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
 
     if ($resetBtn) $resetBtn.setAttribute('disabled','true');
     updateSaveAvailability();
@@ -5512,7 +5537,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 ========================================================= */
 const ITBMO_COMMERCE_CONFIG = {
   commerceEnabled: true,
-  previewMode: true,
+  previewMode: false,
   requirePayment: true,
 
   currency: 'USD',
@@ -5555,6 +5580,99 @@ const $supportEmailButton = qs('#support-email-button');
 
 let paymentGateSatisfiedTripId = null;
 let paypalSdkLoadingPromise = null;
+
+/* ---------- Info Chat entitlement ---------- */
+const INFO_CHAT_MAX_QUERIES = 10;
+let infoChatAuthorizedTripId = null;
+let infoChatQueriesRemaining = 0;
+let infoChatQueriesUsed = 0;
+
+function _infoChatCopy_(){
+  const es = getLang()==='es';
+  return es ? {
+    locked:'Disponible después del pago',
+    unlocked:'Info Chat incluido',
+    exhausted:'Límite de Info Chat alcanzado',
+    lockedUsage:'Info Chat bloqueado',
+    remaining:(n)=>`${n} consulta${n===1?'':'s'} disponible${n===1?'':'s'}`,
+    placeholder:'Pregunta sobre las ciudades de tu viaje…',
+    lockedPlaceholder:'Info Chat se habilita después del pago',
+    exhaustedPlaceholder:'Has utilizado las 10 consultas incluidas'
+  } : {
+    locked:'Available after payment',
+    unlocked:'Info Chat included',
+    exhausted:'Info Chat limit reached',
+    lockedUsage:'Info Chat locked',
+    remaining:(n)=>`${n} quer${n===1?'y':'ies'} remaining`,
+    placeholder:'Ask about the cities in your trip…',
+    lockedPlaceholder:'Info Chat unlocks after payment',
+    exhaustedPlaceholder:'You have used the 10 included queries'
+  };
+}
+
+function setInfoChatEntitlement({authorized=false, remaining=0, used=0, tripId=null} = {}){
+  const copy=_infoChatCopy_();
+  const safeRemaining=Math.max(0,Math.min(INFO_CHAT_MAX_QUERIES,Number(remaining)||0));
+  const safeUsed=Math.max(0,Math.min(INFO_CHAT_MAX_QUERIES,Number(used)||0));
+  const exhausted=authorized && safeRemaining<=0;
+
+  infoChatAuthorizedTripId = authorized ? (tripId || currentTripId || infoChatAuthorizedTripId) : null;
+  infoChatQueriesRemaining = safeRemaining;
+  infoChatQueriesUsed = safeUsed;
+
+  const btn=qs('#info-chat-floating');
+  const input=qs('#info-chat-input');
+  const send=qs('#info-chat-send');
+  const entitlement=qs('#info-chat-entitlement');
+  const entText=qs('#info-chat-entitlement-text');
+  const entIcon=qs('#info-chat-entitlement-icon');
+  const usageLabel=qs('#info-chat-usage-label');
+  const remainingEl=qs('#info-chat-remaining');
+
+  if(btn){
+    btn.disabled=!authorized || exhausted;
+    btn.setAttribute('aria-disabled', String(!authorized || exhausted));
+    btn.classList.toggle('is-locked',!authorized);
+    btn.classList.toggle('is-unlocked',authorized && !exhausted);
+    btn.textContent = !authorized ? '🔒 Info Chat' : (exhausted ? '✓ Info Chat · 10/10' : `💬 Info Chat · ${safeRemaining}`);
+    btn.title = !authorized ? copy.locked : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
+    btn.style.pointerEvents = (!authorized || exhausted) ? 'none' : 'auto';
+    btn.style.opacity = (!authorized || exhausted) ? '0.62' : '1';
+  }
+
+  if(input){
+    input.disabled=!authorized || exhausted;
+    input.placeholder=!authorized ? copy.lockedPlaceholder : (exhausted ? copy.exhaustedPlaceholder : copy.placeholder);
+  }
+  if(send) send.disabled=!authorized || exhausted;
+
+  if(entitlement){
+    entitlement.classList.toggle('is-locked',!authorized);
+    entitlement.classList.toggle('is-unlocked',authorized && !exhausted);
+    entitlement.classList.toggle('is-exhausted',exhausted);
+  }
+  if(entText) entText.textContent=!authorized ? copy.locked : (exhausted ? copy.exhausted : copy.unlocked);
+  if(entIcon) entIcon.textContent=!authorized ? '🔒' : (exhausted ? '✓' : '✓');
+  if(usageLabel) usageLabel.textContent=!authorized ? copy.lockedUsage : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
+  if(remainingEl) remainingEl.textContent=`${safeUsed} / ${INFO_CHAT_MAX_QUERIES}`;
+}
+
+function applyInfoChatStatus(data){
+  const authorized=Boolean(data?.paid || data?.admin_bypass || data?.info_chat_authorized);
+  const remaining=Number.isFinite(Number(data?.info_chat_remaining))
+    ? Number(data.info_chat_remaining)
+    : (authorized ? INFO_CHAT_MAX_QUERIES : 0);
+  const used=Number.isFinite(Number(data?.info_chat_used))
+    ? Number(data.info_chat_used)
+    : Math.max(0,INFO_CHAT_MAX_QUERIES-remaining);
+
+  setInfoChatEntitlement({
+    authorized,
+    remaining,
+    used,
+    tripId:currentTripId
+  });
+}
 
 function _commerceCopy_(){
   const es = getLang()==='es';
@@ -5800,6 +5918,7 @@ async function hasValidPaymentForCurrentTrip(){
     });
     const paid = Boolean(data?.paid);
     if(paid) paymentGateSatisfiedTripId=currentTripId;
+    applyInfoChatStatus(data);
     return paid;
   }catch(err){
     console.warn('[PAYMENT STATUS]',err);
@@ -5807,9 +5926,25 @@ async function hasValidPaymentForCurrentTrip(){
   }
 }
 
-function completePaymentGate(){
+async function completePaymentGate(){
   paymentGateSatisfiedTripId = currentTripId || paymentGateSatisfiedTripId;
   setCheckoutStatus(_commerceCopy_().paid,'success');
+
+  /* Refresh authoritative entitlement + remaining Info Chat queries. */
+  try{
+    const token=getStoredSessionToken();
+    if(token && currentTripId){
+      const status=await paymentApi({
+        action:'status',
+        session_token:token,
+        trip_id:currentTripId
+      });
+      applyInfoChatStatus(status);
+    }
+  }catch(err){
+    console.warn('[INFO CHAT ENTITLEMENT AFTER PAYMENT]',err);
+  }
+
   setTimeout(()=>{
     closeCheckoutModal();
     startPlanning();
@@ -5896,7 +6031,7 @@ async function renderPayPalButtonsIfAvailable(){
           order_id:data.orderID
         });
         if(!result?.paid) throw new Error('PAYPAL_CAPTURE_NOT_PAID');
-        completePaymentGate();
+        await completePaymentGate();
       },
       onCancel:()=>setCheckoutStatus(''),
       onError:(err)=>{
@@ -5933,7 +6068,7 @@ async function beginTilopayCheckout(){
     });
 
     if(data?.paid){
-      completePaymentGate();
+      await completePaymentGate();
       return;
     }
 
@@ -5972,10 +6107,9 @@ function initCommerceAndSupport(){
     }
     renderPayPalButtonsIfAvailable();
   });
-  $checkoutPreviewContinue?.addEventListener('click',()=>{
-    closeCheckoutModal();
-    startPlanning();
-  });
+  /* Preview bypass removed from browser code.
+     Administrative testing is authorized only server-side in Vercel Preview. */
+  if($checkoutPreviewContinue) $checkoutPreviewContinue.style.display='none';
 
   [$supportModal,$checkoutModal].forEach(modal=>{
     modal?.addEventListener('click',(e)=>{
@@ -6038,6 +6172,9 @@ document.addEventListener('itbmo:addDays', e=>{
 
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
 function openInfoModal(){
+  if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
+    return;
+  }
   const modal = qs('#info-chat-modal');
   if(!modal) return;
   modal.style.display = 'flex';
@@ -6058,13 +6195,45 @@ async function sendInfoMessage(){
   const input = qs('#info-chat-input');
   const btn   = qs('#info-chat-send');
   if(!input || !btn) return;
+  if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
+    setInfoChatEntitlement({
+      authorized: infoChatAuthorizedTripId === currentTripId,
+      remaining: infoChatQueriesRemaining,
+      used: infoChatQueriesUsed,
+      tripId:currentTripId
+    });
+    return;
+  }
+
   const txt = (input.value||'').trim();
   if(!txt) return;
+
   infoChatMsg(txt,'user');
   input.value='';
-  resizeInfoChatComposer(input); // vuelve a una línea tras enviar
-  const ans = await callInfoAgent(txt);
-  infoChatMsg(ans||'');
+  resizeInfoChatComposer(input);
+
+  const result = await callInfoAgent(txt);
+
+  if(result?.text) infoChatMsg(result.text);
+
+  if(Number.isFinite(Number(result?.remaining))){
+    const remaining=Math.max(0,Number(result.remaining));
+    setInfoChatEntitlement({
+      authorized:true,
+      remaining,
+      used:INFO_CHAT_MAX_QUERIES-remaining,
+      tripId:currentTripId
+    });
+  }
+
+  if(result?.quotaExceeded){
+    setInfoChatEntitlement({
+      authorized:true,
+      remaining:0,
+      used:INFO_CHAT_MAX_QUERIES,
+      tripId:currentTripId
+    });
+  }
 }
 function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
@@ -6126,7 +6295,7 @@ function enhancePreferencesInfoChatCopy(){
   const copy = {
     en: {
       title:'💡 Not sure what to write?',
-      intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
+      intro:'After payment, <strong>Info Chat 🌐</strong> unlocks with up to <strong>10 trip-related queries</strong> for the cities in this itinerary.',
       examples:'For example:',
       items:[
         '🏨 Best area or neighborhood to stay',
@@ -6140,11 +6309,11 @@ function enhancePreferencesInfoChatCopy(){
         '❓ Anything else related to your trip'
       ],
       final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
-      placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
+      placeholder:'Tell Astra how you want to experience your trip... Info Chat unlocks after payment.'
     },
     es: {
       title:'💡 ¿No sabes qué escribir?',
-      intro:'Puedes abrir el <strong>Info Chat 🌐</strong> en cualquier momento, <strong>antes, durante o después de planificar</strong>, y consultar cualquier cosa sobre tu viaje.',
+      intro:'Después del pago se habilita <strong>Info Chat 🌐</strong> con hasta <strong>10 consultas relacionadas con las ciudades</strong> de este itinerario.',
       examples:'Por ejemplo:',
       items:[
         '🏨 Mejor zona o barrio para hospedarte',
@@ -6260,6 +6429,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   bindAccountListeners();
   restoreITBMOSession();
 
+  setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
   bindInfoChatListeners();
   enhancePreferencesInfoChatCopy();
 
