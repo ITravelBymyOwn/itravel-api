@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · TRAVEL GLASS CLEAN · v66
+   ITBMO · TRAVEL GLASS CLEAN · v67
    CLEAN CONSOLIDATED STYLESHEET
    ---------------------------------------------------------
    - No legacy visual layers.
@@ -3119,4 +3119,80 @@ input.end,
   letter-spacing:.035em;
   text-transform:uppercase;
   white-space:nowrap;
+}
+
+/* =========================================================
+   INFO CHAT · PAYMENT ENTITLEMENT + 10-QUERY LIMIT · v67
+   Surgical layer only. Existing modal geometry is preserved.
+   ========================================================= */
+.info-chat-floating.is-locked,
+.info-chat-floating:disabled{
+  cursor:not-allowed;
+  opacity:.62!important;
+  filter:saturate(.55);
+  box-shadow:none!important;
+  pointer-events:none;
+}
+.info-chat-floating.is-unlocked{
+  cursor:pointer;
+  opacity:1!important;
+  filter:none;
+}
+.info-chat-heading{
+  display:flex;
+  flex-direction:column;
+  gap:.28rem;
+  min-width:0;
+}
+.info-chat-entitlement{
+  display:inline-flex;
+  width:max-content;
+  max-width:100%;
+  align-items:center;
+  gap:.32rem;
+  padding:.25rem .46rem;
+  border-radius:999px;
+  font-size:.68rem;
+  font-weight:800;
+  line-height:1.2;
+}
+.info-chat-entitlement.is-locked{
+  color:#776f5a;
+  background:#fff7df;
+  border:1px solid rgba(215,154,22,.18);
+}
+.info-chat-entitlement.is-unlocked{
+  color:#176d5f;
+  background:#eaf8f3;
+  border:1px solid rgba(55,185,142,.16);
+}
+.info-chat-entitlement.is-exhausted{
+  color:#7a5361;
+  background:#fff0f4;
+  border:1px solid rgba(216,88,145,.16);
+}
+.info-chat-usage{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.75rem;
+  margin:.2rem 0 .65rem;
+  padding:.48rem .62rem;
+  border-radius:.78rem;
+  color:#60798e;
+  background:rgba(245,250,252,.90);
+  border:1px solid rgba(35,75,112,.08);
+  font-size:.7rem;
+}
+.info-chat-usage strong{
+  color:#31536b;
+  white-space:nowrap;
+}
+.info-chat-modal textarea:disabled,
+.info-chat-modal button:disabled{
+  cursor:not-allowed;
+}
+.info-chat-modal textarea:disabled{
+  color:#8293a1;
+  background:#f5f8fa;
 }
