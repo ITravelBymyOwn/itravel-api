@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.1
+   ITBMO · HOME V4.2
    Premium / glass / travel-tech / Apple-like restraint
    ========================================================= */
 
@@ -806,4 +806,111 @@ img,svg,video{max-width:100%;display:block}
   .travel-photo-rail__grid{grid-template-columns:1fr}
   .travel-photo-card--wide{grid-column:auto;grid-row:auto}
   .travel-photo-card,.travel-photo-card--wide{min-height:240px}
+}
+
+
+/* =========================================================
+   V4.2 · LOGO FALLBACK + CLEAR PHOTO SLOTS 01/02
+   ========================================================= */
+
+/* Logo robustness */
+.brand--logo{
+  position:relative;
+}
+.brand--logo img{
+  position:relative;
+  z-index:2;
+}
+.brand__fallback{
+  display:none;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
+  gap:.02rem;
+  line-height:1;
+}
+.brand--logo.logo-missing img{
+  display:none;
+}
+.brand--logo.logo-missing .brand__fallback{
+  display:flex;
+}
+.brand--footer.brand--logo.logo-missing{
+  filter:none;
+}
+.brand--footer.brand--logo.logo-missing .brand__main{
+  color:#fff;
+}
+.brand--footer.brand--logo.logo-missing .brand__sub{
+  color:rgba(233,246,251,.68);
+}
+
+/* Stronger visibility for photo 01 and 02 placeholders */
+.image-slot--hero{
+  border:1px dashed rgba(8,119,249,.24);
+  box-shadow:
+    inset 0 0 0 1px rgba(255,255,255,.48),
+    0 28px 72px rgba(16,56,88,.10);
+}
+.image-slot--astra{
+  border:1px dashed rgba(109,120,238,.24);
+}
+.image-slot__placeholder--prominent{
+  z-index:6;
+}
+.image-slot__placeholder--prominent span{
+  padding:.48rem .72rem;
+  color:#2f5f7d;
+  background:rgba(255,255,255,.84);
+  border:1px solid rgba(255,255,255,.94);
+  box-shadow:0 10px 26px rgba(18,55,90,.09);
+  font-size:.68rem;
+  letter-spacing:.09em;
+}
+.image-slot__placeholder--prominent small{
+  margin-top:.2rem;
+  padding:.24rem .42rem;
+  border-radius:999px;
+  color:#718799;
+  background:rgba(255,255,255,.66);
+  font-size:.54rem;
+}
+
+/* Keep the Hero glass cards readable, but do not hide FOTO 01 label */
+.hero-photo-stage::after{
+  z-index:2;
+}
+.hero-photo-stage .image-slot__placeholder{
+  z-index:3;
+}
+.hero-glass-card{z-index:4}
+
+/* Keep FOTO 02 label visible above the photo overlay while image is missing */
+.route-visual__photo .image-slot__placeholder{
+  z-index:4;
+}
+.route-visual__caption{
+  z-index:5;
+}
+.route-visual__photo.has-image .image-slot__placeholder{
+  display:none;
+}
+
+.travel-photo-rail__label{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+  margin:0 .1rem .55rem;
+  color:#7b8f9f;
+}
+.travel-photo-rail__label span{
+  font-size:.58rem;
+  font-weight:850;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+.travel-photo-rail__label strong{
+  font-size:.68rem;
+  color:#526f84;
 }
