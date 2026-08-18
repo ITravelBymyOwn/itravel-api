@@ -6,7 +6,7 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 /* =========================================================
-   ITBMO PAYMENTS API · v1.0
+   ITBMO PAYMENTS API · v1.1
    ---------------------------------------------------------
    Supported now:
    - Payment status by trip
@@ -40,6 +40,27 @@ const COMMERCE = {
 const PAYPAL_ENV = String(process.env.PAYPAL_ENV || "sandbox").trim().toLowerCase();
 const PAYPAL_CLIENT_ID = String(process.env.PAYPAL_CLIENT_ID || "").trim();
 const PAYPAL_CLIENT_SECRET = String(process.env.PAYPAL_CLIENT_SECRET || "").trim();
+
+/*
+  ADMIN TEST BYPASS
+  - Safe default: disabled.
+  - Works only in Vercel Preview unless ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION=true.
+  - Identify the admin by the Supabase user UUID, never by a browser-visible secret.
+*/
+const ITBMO_ADMIN_TEST_BYPASS =
+  String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
+const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
+const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
+  String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+const INFO_CHAT_MAX_QUERIES = 10;
+
+function isAdminTestBypass(userId) {
+  if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
+  if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
+
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+}
 
 const PAYPAL_API_BASE =
   PAYPAL_ENV === "live"
@@ -193,6 +214,17 @@ async function findPaidPayment(tripId, userId) {
   );
 
   return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function countInfoChatQueries(tripId, userId) {
+  const rows = await supabaseFetch(
+    `/user_events?select=id&` +
+      `trip_id=eq.${encodeURIComponent(tripId)}&` +
+      `user_id=eq.${encodeURIComponent(userId)}&` +
+      `event_name=eq.info_chat_query&limit=${INFO_CHAT_MAX_QUERIES + 20}`,
+    { method: "GET" }
+  );
+  return Array.isArray(rows) ? rows.length : 0;
 }
 
 async function findPaymentByPayPalOrder(orderId, tripId, userId) {
@@ -386,10 +418,21 @@ async function handleStatus(res, body, session) {
   }
 
   const payment = await findPaidPayment(trip.id, session.user_id);
+  const adminBypass = isAdminTestBypass(session.user_id);
+  const authorized = Boolean(payment) || adminBypass;
+  const infoUsed = authorized
+    ? Math.min(INFO_CHAT_MAX_QUERIES, await countInfoChatQueries(trip.id, session.user_id))
+    : 0;
 
   return res.status(200).json({
     ok: true,
-    paid: Boolean(payment),
+    paid: authorized,
+    admin_bypass: adminBypass,
+    entitlement_source: payment ? "payment" : (adminBypass ? "admin_test_bypass" : null),
+    info_chat_authorized: authorized,
+    info_chat_limit: INFO_CHAT_MAX_QUERIES,
+    info_chat_used: infoUsed,
+    info_chat_remaining: authorized ? Math.max(0, INFO_CHAT_MAX_QUERIES - infoUsed) : 0,
     payment: payment
       ? {
           id: payment.id,
