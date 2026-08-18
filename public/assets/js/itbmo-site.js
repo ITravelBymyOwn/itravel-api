@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4 JS
+   ITBMO · HOME V4.1 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
    - Affiliate preview/config
@@ -118,7 +118,21 @@
 
   document.querySelectorAll('[data-ad-slot]').forEach((slot) => {
     const cfg = adMap[slot.getAttribute('data-ad-slot')];
-    slot.hidden = !(cfg && cfg.enabled);
+
+    /*
+      Development preview:
+      - previewMode:true  => show the reserved AdSense surfaces
+      - production       => only show a slot when enabled:true
+    */
+    const visible = Boolean(
+      cfg && (ITBMO_HOME_CONFIG.previewMode || cfg.enabled)
+    );
+
+    slot.hidden = !visible;
+
+    if (visible) {
+      slot.classList.toggle('is-preview', ITBMO_HOME_CONFIG.previewMode && !cfg.enabled);
+    }
   });
 
   /* =========================================================
@@ -283,6 +297,33 @@
 
     pendingMessageHeight = h;
     schedulePlannerMeasure();
+  });
+
+  /* =========================================================
+     IMAGE SLOTS
+     If an image exists, reveal it. If not, keep the premium placeholder.
+     This lets images be uploaded later without changing HTML/CSS.
+  ========================================================= */
+  document.querySelectorAll('[data-image-slot]').forEach((slot) => {
+    const img = slot.querySelector('[data-image-asset]');
+    if (!img) return;
+
+    const markReady = () => {
+      if (img.naturalWidth > 1) {
+        slot.classList.add('has-image');
+      }
+    };
+
+    const markMissing = () => {
+      slot.classList.remove('has-image');
+    };
+
+    if (img.complete) {
+      markReady();
+    } else {
+      img.addEventListener('load', markReady, { once:true });
+      img.addEventListener('error', markMissing, { once:true });
+    }
   });
 
   /* =========================================================
