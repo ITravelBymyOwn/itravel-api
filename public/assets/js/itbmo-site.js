@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.1 JS
+   ITBMO · HOME V4.2 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
    - Affiliate preview/config
@@ -297,6 +297,33 @@
 
     pendingMessageHeight = h;
     schedulePlannerMeasure();
+  });
+
+  /* =========================================================
+     BRAND LOGO FALLBACK
+     If JPG is missing / wrong path, keep the brand visible in text
+     and mark the container so the issue is obvious without breaking layout.
+  ========================================================= */
+  document.querySelectorAll('[data-brand-logo]').forEach((img) => {
+    const brand = img.closest('.brand--logo');
+    if (!brand) return;
+
+    const ok = () => {
+      if (img.naturalWidth > 1) {
+        brand.classList.remove('logo-missing');
+      }
+    };
+
+    const fail = () => {
+      brand.classList.add('logo-missing');
+    };
+
+    if (img.complete) {
+      img.naturalWidth > 1 ? ok() : fail();
+    } else {
+      img.addEventListener('load', ok, { once:true });
+      img.addEventListener('error', fail, { once:true });
+    }
   });
 
   /* =========================================================
