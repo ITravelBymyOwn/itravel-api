@@ -97,6 +97,22 @@
           <div class="hero-orbit hero-orbit--1"></div>
           <div class="hero-orbit hero-orbit--2"></div>
 
+          <!-- FOTO 01 · HERO
+               Sube la imagen como:
+               public/assets/img/destinations/hero-travel.jpg
+               Si todavía no existe, el placeholder permanece visible. -->
+          <div class="hero-photo-stage image-slot" data-image-slot>
+            <img
+              src="./assets/img/destinations/hero-travel.jpg"
+              alt=""
+              data-image-asset
+            >
+            <div class="image-slot__placeholder">
+              <span>FOTO HERO</span>
+              <small>assets/img/destinations/hero-travel.jpg</small>
+            </div>
+          </div>
+
           <div class="hero-glass-card hero-glass-card--back">
             <span class="hero-glass-card__label">TU VIAJE</span>
             <strong>5 ciudades</strong>
@@ -269,8 +285,20 @@
           </div>
 
           <div class="route-visual">
-            <div class="route-visual__photo">
-              <span class="photo-placeholder">FOTOGRAFÍA DE DESTINO</span>
+            <!-- FOTO 02 · ASTRA / DESTINO
+                 Sube la imagen como:
+                 public/assets/img/destinations/astra-destination.jpg -->
+            <div class="route-visual__photo image-slot" data-image-slot>
+              <img
+                src="./assets/img/destinations/astra-destination.jpg"
+                alt=""
+                data-image-asset
+              >
+              <div class="image-slot__placeholder">
+                <span>FOTO DESTINO / ASTRA</span>
+                <small>assets/img/destinations/astra-destination.jpg</small>
+              </div>
+
               <div class="route-visual__caption">
                 <small>BARCELONA</small>
                 <strong>Una jornada que fluye.</strong>
@@ -465,6 +493,66 @@
     </section>
 
     <!-- =========================================================
+         EDITORIAL TRAVEL IMAGES · PREVIEW
+         These spaces are intentionally visible during design.
+         ========================================================== -->
+    <section class="travel-photo-rail" aria-label="Inspiración de destinos">
+      <div class="page-shell">
+        <div class="travel-photo-rail__grid">
+
+          <figure class="travel-photo-card image-slot glass-card" data-image-slot>
+            <img
+              src="./assets/img/destinations/travel-01.jpg"
+              alt="Destino de viaje"
+              data-image-asset
+            >
+            <div class="image-slot__placeholder">
+              <span>FOTO 03</span>
+              <small>travel-01.jpg</small>
+            </div>
+            <figcaption>
+              <span>Explora</span>
+              <strong>Ciudades que quieres vivir, no solo visitar.</strong>
+            </figcaption>
+          </figure>
+
+          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card" data-image-slot>
+            <img
+              src="./assets/img/destinations/travel-02.jpg"
+              alt="Experiencia de viaje"
+              data-image-asset
+            >
+            <div class="image-slot__placeholder">
+              <span>FOTO 04</span>
+              <small>travel-02.jpg</small>
+            </div>
+            <figcaption>
+              <span>Conecta</span>
+              <strong>ASTRA organiza el tiempo para que tú vivas el viaje.</strong>
+            </figcaption>
+          </figure>
+
+          <figure class="travel-photo-card image-slot glass-card" data-image-slot>
+            <img
+              src="./assets/img/destinations/travel-03.jpg"
+              alt="Paisaje de viaje"
+              data-image-asset
+            >
+            <div class="image-slot__placeholder">
+              <span>FOTO 05</span>
+              <small>travel-03.jpg</small>
+            </div>
+            <figcaption>
+              <span>Descubre</span>
+              <strong>Imperdibles, rutas lógicas y tiempo mejor aprovechado.</strong>
+            </figcaption>
+          </figure>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- =========================================================
          PLANNER
     ========================================================== -->
     <section class="planner-section" id="planner" aria-labelledby="planner-heading">
@@ -509,9 +597,9 @@
     <section class="ad-zone" data-ad-slot="home-01" hidden>
       <div class="page-shell">
         <div class="ad-preview glass-card">
-          <span>ADVERTISEMENT</span>
+          <span>ESPACIO RESERVADO · PUBLICIDAD</span>
           <strong>Google AdSense · Home 01</strong>
-          <small>Responsive ad slot</small>
+          <small>Formato responsive · se activará únicamente cuando AdSense esté habilitado</small>
         </div>
       </div>
     </section>
@@ -673,9 +761,9 @@
     <section class="ad-zone" data-ad-slot="home-02" hidden>
       <div class="page-shell">
         <div class="ad-preview glass-card">
-          <span>ADVERTISEMENT</span>
+          <span>ESPACIO RESERVADO · PUBLICIDAD</span>
           <strong>Google AdSense · Home 02</strong>
-          <small>Responsive ad slot</small>
+          <small>Formato responsive · se activará únicamente cuando AdSense esté habilitado</small>
         </div>
       </div>
     </section>
