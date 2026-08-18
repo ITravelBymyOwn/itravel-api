@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.3
+   ITBMO · HOME V4.4
    Premium / glass / travel-tech / Apple-like restraint
    ========================================================= */
 
@@ -988,5 +988,44 @@ img,svg,video{max-width:100%;display:block}
     width:138px;
     min-width:138px;
     height:42px;
+  }
+}
+
+
+/* =========================================================
+   V4.4 · SURGICAL LOGO SIZE ADJUSTMENT
+   - Keeps navbar height nearly unchanged
+   - Preserves aspect ratio
+   - No other visual changes
+   ========================================================= */
+.site-header .brand--logo{
+  width:220px;
+  min-width:220px;
+  height:52px;
+}
+.site-header .brand--logo img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  object-position:left center;
+}
+
+.site-footer .brand--logo{
+  width:215px;
+  height:70px;
+}
+
+@media(max-width:1180px){
+  .site-header .brand--logo{
+    width:188px;
+    min-width:188px;
+    height:48px;
+  }
+}
+@media(max-width:680px){
+  .site-header .brand--logo{
+    width:156px;
+    min-width:156px;
+    height:44px;
   }
 }
