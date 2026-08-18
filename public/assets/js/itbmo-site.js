@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.2 JS
+   ITBMO · HOME V4.3 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
    - Affiliate preview/config
@@ -300,30 +300,53 @@
   });
 
   /* =========================================================
-     BRAND LOGO FALLBACK
-     If JPG is missing / wrong path, keep the brand visible in text
-     and mark the container so the issue is obvious without breaking layout.
+     BRAND LOGO · ROBUST JPG/JPEG LOADER
+     The fallback text seen in the navbar means the image request failed;
+     it is not a space/layout problem.
+
+     We try the common JPG/JPEG case variants automatically so a Windows
+     filename-extension mismatch does not hide the brand.
   ========================================================= */
   document.querySelectorAll('[data-brand-logo]').forEach((img) => {
     const brand = img.closest('.brand--logo');
     if (!brand) return;
 
-    const ok = () => {
-      if (img.naturalWidth > 1) {
-        brand.classList.remove('logo-missing');
-      }
-    };
+    const base = img.getAttribute('data-logo-base') || './assets/img/itbmo-logo-premium';
+    const candidates = [
+      `${base}.jpg?v=43`,
+      `${base}.jpeg?v=43`,
+      `${base}.JPG?v=43`,
+      `${base}.JPEG?v=43`
+    ];
 
-    const fail = () => {
+    let index = 0;
+
+    const showFallback = () => {
       brand.classList.add('logo-missing');
     };
 
-    if (img.complete) {
-      img.naturalWidth > 1 ? ok() : fail();
-    } else {
-      img.addEventListener('load', ok, { once:true });
-      img.addEventListener('error', fail, { once:true });
-    }
+    const showLogo = () => {
+      if (img.naturalWidth > 1) {
+        brand.classList.remove('logo-missing');
+      } else {
+        tryNext();
+      }
+    };
+
+    const tryNext = () => {
+      if (index >= candidates.length) {
+        showFallback();
+        return;
+      }
+
+      const next = candidates[index++];
+      img.onload = showLogo;
+      img.onerror = tryNext;
+      img.src = next;
+    };
+
+    brand.classList.remove('logo-missing');
+    tryNext();
   });
 
   /* =========================================================
