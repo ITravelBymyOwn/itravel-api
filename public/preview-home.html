@@ -2,1241 +2,242 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-
   <title>ITBMO · Planea tu viaje con ASTRA</title>
-
-  <meta
-    name="description"
-    content="Crea itinerarios de viaje personalizados con ASTRA. Organiza hasta 3 ciudades, viajeros, preferencias, horarios, transporte y mucho más."
-  >
-
+  <meta name="description" content="Crea itinerarios de viaje personalizados con ASTRA. Organiza hasta 3 ciudades, viajeros, preferencias, horarios, transporte y mucho más.">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <!-- =========================================================
-       ITBMO · HOME PREVIEW
-       Esta página es laboratorio visual.
-       NO reemplaza todavía la Home de Webflow.
-  ========================================================== -->
-
   <meta name="robots" content="noindex,nofollow">
-
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-
-  <link
-    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap"
-    rel="stylesheet"
-  >
-
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=1">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=2">
 </head>
-
 <body>
-
-  <a class="skip-link" href="#planner">
-    Ir al planificador
-  </a>
+  <a class="skip-link" href="#how-it-works">Ir al contenido</a>
 
   <header class="site-header" id="top">
     <div class="site-header__inner">
-
       <a class="brand" href="#top" aria-label="I Travel By My Own - Inicio">
         <span class="brand__main">I Travel</span>
         <span class="brand__sub">By My Own</span>
       </a>
-
       <nav class="site-nav" aria-label="Navegación principal">
-        <a href="#planner">Planificador</a>
         <a href="#how-it-works">Cómo funciona</a>
+        <a href="#planner">Planificador</a>
         <a href="#astra">ASTRA</a>
         <a href="#travel-essentials">Para tu viaje</a>
         <a href="#faq">Preguntas</a>
       </nav>
-
       <div class="site-header__actions">
-        <button
-          class="language-toggle"
-          type="button"
-          aria-label="Cambiar idioma"
-          title="English version coming next"
-        >
-          ES
-        </button>
-
-        <a class="button button--small button--ghost" href="#planner">
-          Mi viaje
-        </a>
+        <button class="language-toggle" type="button" aria-label="Cambiar idioma">ES</button>
+        <a class="button button--small button--ghost" href="#planner">Mi viaje</a>
       </div>
-
     </div>
   </header>
 
   <main>
-
     <section class="hero" aria-labelledby="hero-title">
-
       <div class="hero__ambient hero__ambient--one"></div>
       <div class="hero__ambient hero__ambient--two"></div>
-
       <div class="page-shell hero__inner">
-
-        <div class="hero__badge">
-          <span class="spark">✦</span>
-          Powered by ASTRA
-        </div>
-
-        <h1 id="hero-title">
-          Tu viaje.
-          <span>Tu estilo.</span>
-          Una ruta creada para ti.
-        </h1>
-
-        <p class="hero__lead">
-          Dinos dónde vas, con quién viajas y qué es importante para ti.
-          ASTRA investiga, organiza y convierte tus ideas en un itinerario
-          inteligente, día por día.
-        </p>
-
+        <div class="hero__badge"><span class="spark">✦</span> Powered by ASTRA</div>
+        <h1 id="hero-title">Tu viaje. <span>Tu estilo.</span> Una ruta creada para ti.</h1>
+        <p class="hero__lead">Dinos dónde vas, con quién viajas y qué es importante para ti. ASTRA investiga, organiza y convierte tus ideas en un itinerario inteligente, día por día.</p>
         <div class="hero__features" aria-label="Características principales">
-          <span><strong>Hasta 3</strong> ciudades</span>
-          <span><strong>En tu</strong> idioma</span>
-          <span><strong>PDF + CSV</strong></span>
-          <span><strong>Info Chat</strong></span>
+          <span><strong>Hasta 3</strong> ciudades</span><span>Personalizado</span><span>En tu idioma</span><span>PDF + CSV</span><span>Info Chat</span>
         </div>
-
         <div class="hero__actions">
-          <a class="button button--primary button--large" href="#planner">
-            Crear mi viaje
-            <span aria-hidden="true">→</span>
-          </a>
-
-          <a class="button button--secondary button--large" href="#how-it-works">
-            Aprende a usar ITBMO
-          </a>
+          <a class="button button--primary button--large" href="#how-it-works">Ver cómo funciona <span>↓</span></a>
+          <a class="button button--secondary button--large" href="#planner">Ir al Planner</a>
         </div>
-
-        <div class="hero__price">
-          <span class="hero__price-label">Precio de lanzamiento</span>
-          <strong>$2.99</strong>
-          <span class="hero__price-regular">Precio regular $5.99</span>
-          <span class="hero__price-note">Sin suscripciones</span>
-        </div>
-
+        <div class="hero__price"><span class="hero__price-label">Precio de lanzamiento</span><strong>$2.99</strong><span class="hero__price-regular">Precio regular $5.99</span><span class="hero__price-note">Sin suscripciones</span></div>
       </div>
     </section>
 
-    <section
-      class="planner-section"
-      id="planner"
-      aria-labelledby="planner-heading"
-    >
-
-      <div class="page-shell page-shell--wide">
-
-        <div class="section-intro section-intro--compact">
-
-          <div class="eyebrow">
-            <span class="spark">✦</span>
-            Empieza aquí
-          </div>
-
-          <h2 id="planner-heading">
-            Construye tu viaje con ASTRA.
-          </h2>
-
-          <p>
-            Regístrate, agrega tus viajeros y destinos, cuéntanos qué es
-            importante para ti y deja que ASTRA haga el trabajo pesado.
-          </p>
-
+    <!-- CÓMO FUNCIONA: deliberadamente antes del Planner -->
+    <section class="v2-how" id="how-it-works" aria-labelledby="how-title">
+      <div class="page-shell">
+        <div class="v2-how__head">
+          <div><div class="eyebrow">Cómo funciona</div><h2 id="how-title">Cuéntanos el viaje.<br>ASTRA construye la ruta.</h2></div>
+          <p>Antes de empezar, esto es todo lo que necesitas saber. El proceso está diseñado para pedirte solo la información que realmente ayuda a personalizar tu itinerario.</p>
         </div>
+        <div class="v2-flow">
+          <article class="v2-flow__item"><span class="v2-flow__num">01 · Cuenta + viajeros</span><h3>Quién viaja</h3><p>Regístrate una sola vez y dinos si viajas solo o acompañado. Los datos básicos de tus acompañantes ayudan a ASTRA a adaptar la experiencia al grupo.</p><span class="v2-flow__arrow">→</span></article>
+          <article class="v2-flow__item"><span class="v2-flow__num">02 · Destinos</span><h3>Dónde y cuándo</h3><p>Agrega país, ciudad, fecha de llegada y número de días. Puedes incluir hasta 3 ciudades y, si ya los conoces, horarios disponibles para cada día.</p><span class="v2-flow__arrow">→</span></article>
+          <article class="v2-flow__item"><span class="v2-flow__num">03 · Tu forma de viajar</span><h3>Preferencias y condiciones</h3><p>Escribe lo que de verdad importa: intereses, ritmo, restricciones, movilidad, niños, actividades que quieres evitar o experiencias imprescindibles.</p><span class="v2-flow__arrow">→</span></article>
+          <article class="v2-flow__item"><span class="v2-flow__num">04 · ASTRA</span><h3>Contexto final y generación</h3><p>Guarda tus destinos e inicia la planificación. ASTRA preguntará hospedaje y transporte para cada ciudad y, al final, el idioma del itinerario.</p></article>
+        </div>
+        <div class="v2-how__tip"><span>✦</span><div><strong>Consejo:</strong> usa Info Chat antes de guardar destinos para investigar dudas y luego incorpora lo importante en Preferencias / Restricciones / Condiciones Especiales. Durante las preguntas de hospedaje y transporte también puedes consultarlo para responder mejor a ASTRA.</div></div>
+      </div>
+    </section>
 
+    <section class="planner-section" id="planner" aria-labelledby="planner-heading">
+      <div class="page-shell page-shell--wide">
+        <div class="section-intro section-intro--compact"><div class="eyebrow"><span class="spark">✦</span> Empieza aquí</div><h2 id="planner-heading">Construye tu viaje con ASTRA.</h2><p>Todo sucede aquí. Completa tu viaje a tu ritmo y deja en blanco cualquier horario que todavía no conozcas.</p></div>
         <div class="planner-frame">
-
-          <div class="planner-frame__top">
-
-            <div class="planner-frame__status">
-              <span class="status-dot"></span>
-              ITBMO Planner
-            </div>
-
-            <div class="planner-frame__hint">
-              Hasta 3 ciudades
-            </div>
-
-          </div>
-
-          <iframe
-            id="itbmo-planner"
-            class="planner-iframe"
-            title="ITBMO Trip Planner"
-            src="./planner.html?v=71"
-            loading="eager"
-            referrerpolicy="no-referrer"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-          ></iframe>
-
+          <div class="planner-frame__top"><div class="planner-frame__status"><span class="status-dot"></span> ITBMO Planner</div><div class="planner-frame__hint">Hasta 3 ciudades</div></div>
+          <iframe id="itbmo-planner" class="planner-iframe" title="ITBMO Trip Planner" src="./planner.html?v=71" loading="eager" referrerpolicy="no-referrer" scrolling="no" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"></iframe>
         </div>
-
-        <div class="planner-after">
-          <span class="planner-after__icon">↓</span>
-
-          <p>
-            ¿Es tu primera vez?
-            <a href="#how-it-works">
-              Mira cómo funciona en menos de dos minutos.
-            </a>
-          </p>
-        </div>
-
       </div>
     </section>
 
-    <section
-      class="section section--soft"
-      id="how-it-works"
-      aria-labelledby="how-title"
-    >
-
-      <div class="page-shell">
-
-        <div class="section-intro">
-          <div class="eyebrow">Cómo funciona</div>
-
-          <h2 id="how-title">
-            Planear un gran viaje no debería tomarte días.
-          </h2>
-
-          <p>
-            Tú nos cuentas el viaje. ASTRA organiza la información
-            y construye la ruta.
-          </p>
-        </div>
-
-        <div class="steps-grid">
-
-          <article class="step-card">
-            <div class="step-card__number">01</div>
-            <div class="step-card__icon" aria-hidden="true">◎</div>
-            <h3>Crea tu cuenta</h3>
-            <p>
-              Regístrate una sola vez. ITBMO reconoce tu sesión en ese
-              dispositivo para que puedas volver sin ingresar nuevamente
-              todos tus datos.
-            </p>
-            <p class="step-card__note">
-              ¿Otro dispositivo? Ingresa con tu usuario y correo electrónico.
-            </p>
-          </article>
-
-          <article class="step-card">
-            <div class="step-card__number">02</div>
-            <div class="step-card__icon" aria-hidden="true">◉</div>
-            <h3>Dinos quién viaja</h3>
-            <p>
-              Selecciona si viajas solo o acompañado. Si viajan más personas,
-              agrega sus datos básicos para que ASTRA pueda considerar las
-              características del grupo.
-            </p>
-            <div class="mini-tags">
-              <span>Solo</span>
-              <span>Pareja</span>
-              <span>Familia</span>
-              <span>Grupo</span>
-            </div>
-          </article>
-
-          <article class="step-card">
-            <div class="step-card__number">03</div>
-            <div class="step-card__icon" aria-hidden="true">◇</div>
-            <h3>Construye tu viaje</h3>
-            <p>
-              Agrega hasta 3 ciudades indicando país, fecha de llegada y
-              número de días.
-            </p>
-            <p>
-              Si ya conoces tus horas disponibles puedes agregarlas día por
-              día, especialmente en tu llegada y en el último día.
-            </p>
-            <p class="step-card__note">
-              ¿Todavía no conoces los horarios? Déjalos en blanco.
-            </p>
-          </article>
-
-          <article class="step-card step-card--featured">
-            <div class="step-card__number">04</div>
-            <div class="step-card__icon" aria-hidden="true">✦</div>
-            <h3>Hazlo realmente tuyo</h3>
-            <p>
-              En Preferencias / Restricciones / Condiciones Especiales,
-              cuéntale a ASTRA todo aquello que pueda cambiar la forma
-              de organizar tu viaje.
-            </p>
-            <div class="preference-tags">
-              <span>Viajo con niños</span>
-              <span>Evitar museos</span>
-              <span>Ritmo tranquilo</span>
-              <span>Movilidad reducida</span>
-              <span>Gastronomía</span>
-              <span>Ya tengo entradas</span>
-            </div>
-          </article>
-
-          <article class="step-card">
-            <div class="step-card__number">05</div>
-            <div class="step-card__icon" aria-hidden="true">✓</div>
-            <h3>Guarda y activa ASTRA</h3>
-            <p>
-              Cuando tu información esté lista, guarda los destinos y
-              selecciona <strong>Iniciar planificación</strong>.
-            </p>
-            <div class="mini-price">
-              <span>Lanzamiento</span>
-              <strong>$2.99</strong>
-              <small>Precio regular $5.99</small>
-            </div>
-            <p class="step-card__note">
-              Pagas por itinerario. Sin suscripción.
-            </p>
-          </article>
-
-          <article class="step-card">
-            <div class="step-card__number">06</div>
-            <div class="step-card__icon" aria-hidden="true">✧</div>
-            <h3>Completa el contexto</h3>
-            <p>
-              Para cada ciudad ASTRA te preguntará dónde te hospedarás y
-              cómo planeas desplazarte.
-            </p>
-            <p>
-              Cuando todas las ciudades estén listas, te preguntará
-              <strong>una sola vez</strong> en qué idioma quieres recibir
-              tu itinerario.
-            </p>
-          </article>
-
-        </div>
-
+    <section class="info-chat-section" aria-labelledby="info-title">
+      <div class="page-shell info-chat-layout">
+        <div class="info-chat-copy"><div class="eyebrow">Antes de guardar</div><h2 id="info-title">¿No sabes todavía qué poner? Pregúntale a Info Chat.</h2><p>Úsalo para investigar y aclarar dudas antes de guardar tus destinos. Lo que descubras puede ayudarte a darle mejor contexto a ASTRA.</p><div class="prompt-list"><div class="prompt-chip">“¿Cuál es la mejor zona para hospedarme en Roma?”</div><div class="prompt-chip">“¿Vale la pena hacer un day trip a Segovia?”</div><div class="prompt-chip">“¿Qué zona es mejor si viajo con niños?”</div></div></div>
+        <div class="info-chat-demo"><div class="info-chat-demo__bar"><span>● ● ●</span><strong>Info Chat</strong></div><div class="info-chat-demo__body"><div class="chat-bubble chat-bubble--user">¿Cuál es una buena zona para quedarme en Roma si quiero moverme principalmente caminando?</div><div class="chat-bubble chat-bubble--assistant">Una ubicación céntrica entre Centro Storico, Monti y zonas próximas a Piazza Venezia puede facilitar muchos recorridos a pie. Antes de reservar, compara acceso al transporte, ruido nocturno y distancia real a los lugares que quieres visitar.</div></div></div>
       </div>
     </section>
 
-    <section class="section info-before">
-
-      <div class="page-shell">
-
-        <div class="info-before__layout">
-
-          <div class="info-before__content">
-
-            <div class="eyebrow">
-              <span class="spark">✦</span>
-              Antes de guardar
-            </div>
-
-            <h2>
-              ¿No sabes todavía qué poner?
-              Pregúntale a Info Chat.
-            </h2>
-
-            <p>
-              Antes de guardar tus destinos puedes utilizar Info Chat para
-              investigar y aclarar dudas que después quieras incorporar
-              en tus preferencias.
-            </p>
-
-            <div class="chat-examples">
-              <div>“¿Cuál es la mejor zona para hospedarme en Roma?”</div>
-              <div>“¿Vale la pena hacer un day trip a Segovia?”</div>
-              <div>“¿Qué zona es mejor si viajo con niños?”</div>
-              <div>“¿Necesito alquilar un vehículo en Rovaniemi?”</div>
-            </div>
-
-            <div class="callout callout--important">
-              <strong>Importante</strong>
-
-              <p>
-                Utiliza esa información para completar
-                <strong>Preferencias / Restricciones / Condiciones Especiales</strong>
-                antes de guardar tus destinos. Una vez guardados, esa parte
-                del Planner queda bloqueada para continuar con la planificación.
-              </p>
-            </div>
-
-          </div>
-
-          <div class="product-mockup product-mockup--chat">
-
-            <div class="mockup-window">
-
-              <div class="mockup-window__bar">
-
-                <div class="mockup-dots">
-                  <span></span>
-                  <span></span>
-                  <span></span>
-                </div>
-
-                <strong>Info Chat</strong>
-
-              </div>
-
-              <div class="mockup-chat">
-
-                <div class="mockup-message mockup-message--user">
-                  ¿Cuál es una buena zona para quedarme en Roma si quiero
-                  moverme principalmente caminando?
-                </div>
-
-                <div class="mockup-message mockup-message--astra">
-                  Una ubicación céntrica entre Centro Storico, Monti y zonas
-                  próximas a Piazza Venezia puede facilitar muchos recorridos
-                  a pie. Antes de reservar, compara acceso al transporte,
-                  ruido nocturno y distancia real a los lugares que quieres visitar.
-                </div>
-
-              </div>
-
-            </div>
-
-          </div>
-
-        </div>
-
+    <section class="astra-section" id="astra" aria-labelledby="astra-title">
+      <div class="page-shell astra-layout">
+        <div class="astra-copy"><div class="eyebrow">El corazón de ITBMO</div><h2 id="astra-title">No es una lista de lugares.<br><span>Es una ruta.</span></h2><p>ASTRA combina el contexto de tu viaje para construir una secuencia lógica día por día, buscando que aproveches mejor tu tiempo, reduzcas desplazamientos innecesarios y no dejes fuera experiencias que realmente valen la pena.</p><div class="astra-points"><div class="astra-point"><span>01</span> Tus viajeros</div><div class="astra-point"><span>02</span> Tus preferencias</div><div class="astra-point"><span>03</span> Tu hospedaje</div><div class="astra-point"><span>04</span> Tu transporte</div><div class="astra-point"><span>05</span> Tu tiempo disponible</div><div class="astra-point"><span>06</span> Imperdibles y day trips</div></div></div>
+        <div class="v2-photo-card" aria-label="Espacio para fotografía editorial de destino"><div class="v2-photo-card__placeholder">Fotografía de destino · reemplazar</div><div class="v2-photo-card__caption"><small>Barcelona</small><strong>ASTRA conecta cada decisión.</strong></div></div>
       </div>
     </section>
 
-    <section class="section generation">
+    <div class="ad-slot" id="ad-google-home-01" data-enabled="false">Google AdSense · Home 01 · 970 × 90 / responsive</div>
 
-      <div class="generation__ambient generation__ambient--one"></div>
-      <div class="generation__ambient generation__ambient--two"></div>
-
-      <div class="page-shell generation__inner">
-
-        <div class="generation__symbol">✦</div>
-
-        <div class="eyebrow eyebrow--light">
-          Tu parte está lista
-        </div>
-
-        <h2>Ahora deja trabajar a ASTRA.</h2>
-
-        <p>
-          ASTRA comienza a investigar y organizar tu viaje utilizando
-          la información que proporcionaste.
-        </p>
-
-        <p class="generation__secondary">
-          Mientras se genera, puedes continuar explorando recursos útiles
-          para preparar tu viaje sin interrumpir el proceso.
-        </p>
-
-        <div class="generation-tools">
-          <div class="generation-tool">
-            <span>⌂</span>
-            <strong>Hospedaje</strong>
-          </div>
-
-          <div class="generation-tool">
-            <span>✦</span>
-            <strong>Experiencias</strong>
-          </div>
-
-          <div class="generation-tool">
-            <span>⇄</span>
-            <strong>Transporte</strong>
-          </div>
-
-          <div class="generation-tool">
-            <span>⌁</span>
-            <strong>eSIM</strong>
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <section
-      class="section astra-section"
-      id="astra"
-      aria-labelledby="astra-title"
-    >
-
-      <div class="page-shell">
-
-        <div class="astra-layout">
-
-          <div class="astra-copy">
-
-            <div class="eyebrow">
-              <span class="spark">✦</span>
-              El corazón de ITBMO
-            </div>
-
-            <h2 id="astra-title">
-              No es una lista de lugares.
-              <span>Es una ruta.</span>
-            </h2>
-
-            <p>
-              ASTRA utiliza el contexto de tu viaje para construir una
-              secuencia lógica día por día, buscando que aproveches mejor
-              tu tiempo y reduzcas desplazamientos innecesarios.
-            </p>
-
-            <div class="astra-inputs">
-              <div><span>01</span>Tus viajeros</div>
-              <div><span>02</span>Tus preferencias</div>
-              <div><span>03</span>Tu hospedaje</div>
-              <div><span>04</span>Tu transporte</div>
-              <div><span>05</span>Tu tiempo disponible</div>
-              <div><span>06</span>Imperdibles y day trips</div>
-            </div>
-
-          </div>
-
-          <div class="destination-stage" aria-label="Inspiración de destinos">
-
-            <div class="destination-stage__image" data-destination-stage>
-              <div class="destination-placeholder">
-                <span>FOTOGRAFÍA DESTINO</span>
-              </div>
-            </div>
-
-            <div class="destination-stage__overlay">
-              <span class="destination-stage__city">Barcelona</span>
-              <strong>ASTRA conecta cada decisión.</strong>
-              <p>Y la convierte en un día que puedes seguir.</p>
-            </div>
-
-          </div>
-
-        </div>
-
-      </div>
-    </section>
-
-    <section
-      class="section itinerary-showcase"
-      aria-labelledby="itinerary-showcase-title"
-    >
-
+    <section class="itinerary-demo-section" aria-labelledby="result-title">
       <div class="page-shell page-shell--wide">
-
-        <div class="section-intro">
-
-          <div class="eyebrow">El resultado</div>
-
-          <h2 id="itinerary-showcase-title">
-            Tu viaje, organizado día por día.
-          </h2>
-
-          <p>
-            Horarios, actividades, traslados, distancias, duración y notas
-            relevantes en una estructura clara y fácil de seguir.
-          </p>
-
-        </div>
-
+        <div class="section-intro"><div class="eyebrow">El resultado</div><h2 id="result-title">Tu viaje, organizado día por día.</h2><p>Horarios, actividades, traslados, distancias, duración y notas útiles en una estructura clara y fácil de seguir.</p></div>
         <div class="itinerary-demo">
-
-          <div class="itinerary-demo__header">
-
-            <div>
-              <span class="itinerary-demo__eyebrow">
-                Ejemplo de itinerario
-              </span>
-
-              <h3>Barcelona · Día 2</h3>
-
-              <p>
-                Un ejemplo de cómo ASTRA estructura un día de viaje.
-              </p>
-            </div>
-
-            <div class="itinerary-demo__date">
-              02
-              <small>ENE</small>
-            </div>
-
-          </div>
-
-          <div class="itinerary-table-wrap">
-
-            <table class="itinerary-table">
-
-              <thead>
-                <tr>
-                  <th>Inicio</th>
-                  <th>Final</th>
-                  <th>Actividad</th>
-                  <th>Desde</th>
-                  <th>Hacia</th>
-                  <th>Transporte</th>
-                  <th>Duración</th>
-                  <th>Notas</th>
-                </tr>
-              </thead>
-
-              <tbody>
-
-                <tr>
-                  <td data-label="Inicio">09:00</td>
-                  <td data-label="Final">10:45</td>
-                  <td data-label="Actividad"><strong>Sagrada Família</strong></td>
-                  <td data-label="Desde">Eixample</td>
-                  <td data-label="Hacia">Sagrada Família</td>
-                  <td data-label="Transporte">Metro / caminata</td>
-                  <td data-label="Duración">1 h 45 min</td>
-                  <td data-label="Notas">Reserva anticipada recomendada.</td>
-                </tr>
-
-                <tr>
-                  <td data-label="Inicio">10:45</td>
-                  <td data-label="Final">11:15</td>
-                  <td data-label="Actividad">Traslado</td>
-                  <td data-label="Desde">Sagrada Família</td>
-                  <td data-label="Hacia">Passeig de Gràcia</td>
-                  <td data-label="Transporte">Metro</td>
-                  <td data-label="Duración">~30 min</td>
-                  <td data-label="Notas">Verifica el tiempo real antes de salir.</td>
-                </tr>
-
-                <tr>
-                  <td data-label="Inicio">11:15</td>
-                  <td data-label="Final">12:45</td>
-                  <td data-label="Actividad"><strong>Casa Batlló + Passeig de Gràcia</strong></td>
-                  <td data-label="Desde">Passeig de Gràcia</td>
-                  <td data-label="Hacia">Casa Batlló</td>
-                  <td data-label="Transporte">Caminando</td>
-                  <td data-label="Duración">1 h 30 min</td>
-                  <td data-label="Notas">Ajusta la visita según la entrada reservada.</td>
-                </tr>
-
-                <tr>
-                  <td data-label="Inicio">13:00</td>
-                  <td data-label="Final">14:15</td>
-                  <td data-label="Actividad">Almuerzo</td>
-                  <td data-label="Desde">Passeig de Gràcia</td>
-                  <td data-label="Hacia">Eixample</td>
-                  <td data-label="Transporte">Caminando</td>
-                  <td data-label="Duración">1 h 15 min</td>
-                  <td data-label="Notas">Zona con múltiples opciones gastronómicas.</td>
-                </tr>
-
-                <tr>
-                  <td data-label="Inicio">14:30</td>
-                  <td data-label="Final">17:30</td>
-                  <td data-label="Actividad"><strong>Barrio Gótico + El Born</strong></td>
-                  <td data-label="Desde">Eixample</td>
-                  <td data-label="Hacia">Barri Gòtic</td>
-                  <td data-label="Transporte">Metro + caminata</td>
-                  <td data-label="Duración">3 h</td>
-                  <td data-label="Notas">
-                    Ruta pensada para explorar el área de forma continua.
-                  </td>
-                </tr>
-
-              </tbody>
-
-            </table>
-
-          </div>
-
-          <div class="itinerary-demo__footer">
-            <p>
-              <strong>Esto es solo un día de ejemplo.</strong>
-              Tu itinerario se genera según tus destinos, fechas,
-              viajeros y condiciones.
-            </p>
-
-            <div class="export-preview">
-              <span class="export-chip">PDF</span>
-              <span class="export-chip">CSV · Excel</span>
-            </div>
-          </div>
-
+          <div class="itinerary-demo__head"><div><span class="eyebrow">Ejemplo de itinerario</span><h3>Reykjanes · Día 5</h3><p>Un ejemplo de cómo ASTRA estructura un día de viaje.</p></div><div class="itinerary-demo__date">24<small>ENE</small></div></div>
+          <div class="itinerary-table-wrap"><table class="itinerary-table"><thead><tr><th>Start time</th><th>End time</th><th>Activity</th><th>From</th><th>To</th><th>Transport</th><th>Duration</th><th>Notes</th></tr></thead><tbody>
+            <tr><td>09:00</td><td>09:50</td><td>Reykjanes – Traslado al Puente entre Continentes</td><td>Hospedaje</td><td>Puente entre continentes</td><td>Vehículo alquilado</td><td>Transporte: 35 min<br>Actividad: 15 min</td><td>Entrada a la península con un punto geológico muy fotogénico. Haz una parada breve para caminar entre las placas y tomar fotografías. Si hay viento fuerte o hielo, reduce el tiempo exterior y prioriza superficies seguras.</td></tr>
+            <tr><td>09:50</td><td>10:40</td><td>Puente entre continentes · visita breve</td><td>Puente entre continentes</td><td>Puente entre continentes</td><td>Caminata corta</td><td>Actividad: 40 min</td><td>Siente la separación tectónica y aprovecha composiciones fotográficas únicas. En invierno comprueba el estado del acceso, usa calzado con buen agarre y evita salirte de senderos cuando las condiciones sean resbaladizas.</td></tr>
+            <tr><td>11:05</td><td>11:50</td><td>Gunnuhver · campo geotermal</td><td>Puente entre continentes</td><td>Gunnuhver</td><td>Vehículo alquilado</td><td>Transporte: 15 min<br>Actividad: 30 min</td><td>Área humeante con pasarelas que permiten observar la actividad geotérmica. Mantente estrictamente dentro de los senderos señalizados: el terreno puede estar muy caliente y el vapor puede cambiar de dirección con el viento.</td></tr>
+            <tr><td>12:15</td><td>16:15</td><td>Blue Lagoon · experiencia termal</td><td>Gunnuhver</td><td>Blue Lagoon</td><td>Vehículo alquilado</td><td>Transporte: 25 min<br>Actividad: 3 h 30 min</td><td>Experiencia termal amplia y reparadora. Reserva con anticipación y confirma la hora de entrada, condiciones de acceso y margen suficiente para registro, vestuarios y ducha. Los horarios y disponibilidad pueden cambiar; verifica directamente con el operador antes de viajar.</td></tr>
+            <tr><td>16:15</td><td>17:10</td><td>Brimketill · microparada costera</td><td>Blue Lagoon</td><td>Brimketill</td><td>Vehículo alquilado</td><td>Transporte: 20 min<br>Actividad: 35 min</td><td>Parada fotográfica opcional para cerrar la jornada con paisaje costero. Evalúa viento, luz y estado de la carretera antes de desviarte. No te acerques al borde cuando haya oleaje fuerte y conserva margen para regresar sin conducir con prisa.</td></tr>
+          </tbody></table></div>
+          <div class="itinerary-demo__foot"><span><strong>Este es solo un día de ejemplo.</strong> Tu itinerario se genera según tus destinos, fechas, viajeros y condiciones.</span><span>PDF &nbsp; · &nbsp; CSV / Excel</span></div>
         </div>
-
       </div>
     </section>
 
-    <section class="section concierge-section">
-
+    <section class="travel-hub" id="travel-essentials" aria-labelledby="travel-title">
       <div class="page-shell">
-
-        <div class="concierge-layout">
-
-          <div class="concierge-visual">
-
-            <span class="concierge-orb concierge-orb--1"></span>
-            <span class="concierge-orb concierge-orb--2"></span>
-
-            <div class="concierge-card">
-
-              <div class="concierge-card__icon">💬</div>
-
-              <div>
-                <span>Info Chat</span>
-                <strong>Tu concierge de viaje</strong>
-              </div>
-
-            </div>
-
-          </div>
-
-          <div class="concierge-copy">
-
-            <div class="eyebrow">Sigue investigando</div>
-
-            <h2>
-              ASTRA termina el itinerario.
-              Info Chat sigue contigo.
-            </h2>
-
-            <p>
-              Una vez generado tu plan puedes continuar preguntando sobre
-              tus destinos para resolver dudas y complementar tu viaje.
-            </p>
-
-            <div class="concierge-topics">
-              <span>Restaurantes</span>
-              <span>Transporte</span>
-              <span>Hospedaje</span>
-              <span>Entradas</span>
-              <span>Clima</span>
-              <span>Gastronomía</span>
-              <span>Seguridad</span>
-              <span>Equipaje</span>
-            </div>
-
-          </div>
-
+        <div class="travel-hub__head"><div class="eyebrow">Todo para tu viaje</div><h2 id="travel-title">Tu ruta está lista.<br>Ahora hazla realidad.</h2><p>Accede desde ITBMO a servicios útiles para reservar, comparar y continuar preparando tu viaje.</p></div>
+        <div class="partner-grid">
+          <article class="partner-card" id="affiliate-booking" data-enabled="false"><span class="partner-card__pending">Pendiente de activación</span><div class="partner-card__icon">⌂</div><span class="partner-card__type">Hospedaje</span><h3>Booking.com</h3><p>Busca y compara opciones de alojamiento para tus destinos.</p><a href="#" aria-disabled="true">Buscar hoteles ↗</a></article>
+          <article class="partner-card" id="affiliate-getyourguide" data-enabled="false"><span class="partner-card__pending">Pendiente de activación</span><div class="partner-card__icon">✦</div><span class="partner-card__type">Experiencias</span><h3>GetYourGuide</h3><p>Explora tours, entradas y actividades para tu viaje.</p><a href="#" aria-disabled="true">Explorar experiencias ↗</a></article>
+          <article class="partner-card" id="affiliate-viator" data-enabled="false"><span class="partner-card__pending">Pendiente de activación</span><div class="partner-card__icon">◎</div><span class="partner-card__type">Experiencias</span><h3>Viator</h3><p>Compara actividades y excursiones disponibles en destino.</p><a href="#" aria-disabled="true">Ver actividades ↗</a></article>
+          <article class="partner-card" id="affiliate-omio" data-enabled="false"><span class="partner-card__pending">Pendiente de activación</span><div class="partner-card__icon">⇄</div><span class="partner-card__type">Transporte</span><h3>Omio</h3><p>Explora opciones de tren, autobús y conexiones entre destinos.</p><a href="#" aria-disabled="true">Buscar transporte ↗</a></article>
+          <article class="partner-card" id="affiliate-airalo" data-enabled="false"><span class="partner-card__pending">Pendiente de activación</span><div class="partner-card__icon">⌁</div><span class="partner-card__type">eSIM</span><h3>Airalo</h3><p>Consulta opciones de conectividad móvil para tu destino.</p><a href="#" aria-disabled="true">Ver eSIM ↗</a></article>
+          <article class="partner-card" id="affiliate-holafly" data-enabled="false"><span class="partner-card__pending">Pendiente de activación</span><div class="partner-card__icon">◌</div><span class="partner-card__type">eSIM</span><h3>Holafly</h3><p>Explora alternativas de datos móviles para viajar conectado.</p><a href="#" aria-disabled="true">Explorar conectividad ↗</a></article>
         </div>
-
+        <div class="travel-tools"><div class="travel-tools__copy"><strong>Más herramientas para seguir planificando</strong><span>También podemos reunir accesos útiles aunque no exista una relación de afiliación. Antes de publicar logos o integraciones específicas se revisarán las condiciones de marca de cada servicio.</span></div><div class="travel-tools__links"><a href="#" data-placeholder-link>Airbnb</a><a href="#" data-placeholder-link>Google Maps</a><a href="#" data-placeholder-link>Rome2Rio</a><a href="#" data-placeholder-link>Tripadvisor</a></div></div>
+        <p class="affiliate-disclosure-short">Algunos enlaces de esta sección podrán ser enlaces de afiliado. ITBMO podría recibir una comisión si realizas una compra a través de ellos, sin costo adicional para ti.</p>
       </div>
     </section>
 
-    <section
-      class="section verify-section"
-      aria-labelledby="verify-title"
-    >
+    <div class="ad-slot" id="ad-google-home-02" data-enabled="false">Google AdSense · Home 02 · responsive</div>
 
+    <section class="verify-section" aria-labelledby="verify-title">
       <div class="page-shell">
-
-        <div class="verify-heading">
-
-          <div class="verify-symbol">✓</div>
-
-          <div>
-
-            <div class="eyebrow">Antes de viajar</div>
-
-            <h2 id="verify-title">
-              ASTRA planifica.
-              <span>Tú confirmas.</span>
-            </h2>
-
-            <p>
-              La información puede cambiar y algunas estimaciones pueden
-              contener imprecisiones. Una última comprobación protege
-              tu experiencia.
-            </p>
-
-          </div>
-
-        </div>
-
-        <div class="verify-grid">
-
-          <article class="verify-card">
-            <div class="verify-card__icon">⏱</div>
-            <h3>Tiempos de traslado</h3>
-            <p>
-              Tráfico, clima, obras, eventos y transporte público pueden
-              cambiar considerablemente los tiempos reales.
-            </p>
-          </article>
-
-          <article class="verify-card">
-            <div class="verify-card__icon">◫</div>
-            <h3>Horarios y reservas</h3>
-            <p>
-              Confirma horarios de apertura, disponibilidad, entradas,
-              precios y condiciones directamente con el proveedor.
-            </p>
-          </article>
-
-          <article class="verify-card">
-            <div class="verify-card__icon">⇄</div>
-            <h3>Vuelos, trenes y tours</h3>
-            <p>
-              Verifica siempre horarios, terminales y puntos de salida
-              directamente con el operador.
-            </p>
-          </article>
-
-          <article class="verify-card">
-            <div class="verify-card__icon">☼</div>
-            <h3>Clima y exteriores</h3>
-            <p>
-              Revisa condiciones actualizadas cuando una actividad pueda
-              verse afectada por el clima.
-            </p>
-          </article>
-
-          <article class="verify-card">
-            <div class="verify-card__icon">◉</div>
-            <h3>Rutas y navegación</h3>
-            <p>
-              Confirma tu recorrido con una aplicación de navegación
-              actualizada antes de desplazarte.
-            </p>
-          </article>
-
-          <article class="verify-card">
-            <div class="verify-card__icon">◇</div>
-            <h3>Requisitos oficiales</h3>
-            <p>
-              Visados, documentación, requisitos sanitarios y alertas
-              deben verificarse con fuentes oficiales.
-            </p>
-          </article>
-
-        </div>
-
-        <div class="critical-note">
-
-          <div class="critical-note__icon">!</div>
-
-          <p>
-            <strong>Especialmente importante:</strong>
-            nunca dependas únicamente de un tiempo de traslado estimado
-            para llegar a un vuelo, tren, ferry, tour o actividad con
-            una hora fija. Añade siempre un margen adecuado.
-          </p>
-
-        </div>
-
+        <div class="verify-head"><div><div class="eyebrow">Antes de viajar</div><h2 id="verify-title">ASTRA planifica.<br><span class="gradient-text">Tú confirmas.</span></h2></div><p>ASTRA puede ahorrarte horas de investigación, pero la información del mundo real cambia. Una última comprobación protege tu experiencia.</p></div>
+        <div class="verify-grid"><article class="verify-card"><span>◷</span><h3>Tiempos de traslado</h3><p>Tráfico, clima, obras y transporte público pueden cambiar considerablemente los tiempos reales.</p></article><article class="verify-card"><span>▣</span><h3>Horarios y reservas</h3><p>Confirma apertura, disponibilidad, entradas, precios y condiciones directamente con el proveedor.</p></article><article class="verify-card"><span>⇄</span><h3>Vuelos, trenes y tours</h3><p>Verifica horarios, terminales, puntos de salida y requisitos directamente con el operador.</p></article><article class="verify-card"><span>☼</span><h3>Clima y exteriores</h3><p>Revisa condiciones actualizadas cuando una actividad pueda verse afectada por el clima.</p></article><article class="verify-card"><span>◎</span><h3>Rutas y navegación</h3><p>Confirma tu recorrido con navegación actualizada antes de desplazarte.</p></article><article class="verify-card"><span>◇</span><h3>Requisitos oficiales</h3><p>Visados, documentación, requisitos sanitarios y alertas deben verificarse con fuentes oficiales.</p></article></div>
+        <div class="verify-alert"><strong>Especialmente importante:</strong> nunca dependas únicamente de un tiempo de traslado estimado para llegar a un vuelo, tren, ferry, tour o actividad con hora fija. Añade siempre un margen adecuado.</div>
       </div>
     </section>
 
-    <section
-      class="section travel-essentials"
-      id="travel-essentials"
-      aria-labelledby="essentials-title"
-      data-affiliate-preview="true"
-    >
-
-      <div class="page-shell">
-
-        <div class="section-intro">
-
-          <div class="eyebrow">Todo para tu viaje</div>
-
-          <h2 id="essentials-title">
-            Tu viaje está planeado.
-            <span>Ahora hazlo realidad.</span>
-          </h2>
-
-          <p>
-            Explora los servicios que puedes necesitar para convertir
-            tu itinerario en un viaje.
-          </p>
-
-          <div class="preview-badge">
-            Vista previa · Partners pendientes de activación
-          </div>
-
-        </div>
-
-        <div class="essentials-grid">
-
-          <article
-            class="essential-card essential-card--hotels"
-            data-affiliate-category="hotels"
-          >
-            <div class="essential-card__image">
-              <span>FOTOGRAFÍA</span>
-            </div>
-
-            <div class="essential-card__body">
-              <div class="essential-card__icon">⌂</div>
-
-              <div>
-                <span class="essential-card__type">Hospedaje</span>
-                <h3>Encuentra dónde quedarte</h3>
-                <p>Compara opciones de alojamiento para tus destinos.</p>
-              </div>
-            </div>
-
-            <button class="essential-card__link" type="button" data-preview-link>
-              Buscar hoteles
-              <span>↗</span>
-            </button>
-          </article>
-
-          <article
-            class="essential-card essential-card--experiences"
-            data-affiliate-category="experiences"
-          >
-            <div class="essential-card__image">
-              <span>FOTOGRAFÍA</span>
-            </div>
-
-            <div class="essential-card__body">
-              <div class="essential-card__icon">✦</div>
-
-              <div>
-                <span class="essential-card__type">Experiencias</span>
-                <h3>Reserva algo inolvidable</h3>
-                <p>Tours, entradas, actividades y experiencias para tu viaje.</p>
-              </div>
-            </div>
-
-            <button class="essential-card__link" type="button" data-preview-link>
-              Explorar experiencias
-              <span>↗</span>
-            </button>
-          </article>
-
-          <article
-            class="essential-card essential-card--transport"
-            data-affiliate-category="transport"
-          >
-            <div class="essential-card__image">
-              <span>FOTOGRAFÍA</span>
-            </div>
-
-            <div class="essential-card__body">
-              <div class="essential-card__icon">⇄</div>
-
-              <div>
-                <span class="essential-card__type">Transporte</span>
-                <h3>Muévete entre destinos</h3>
-                <p>Explora opciones de tren, autobús y otras conexiones.</p>
-              </div>
-            </div>
-
-            <button class="essential-card__link" type="button" data-preview-link>
-              Buscar transporte
-              <span>↗</span>
-            </button>
-          </article>
-
-          <article
-            class="essential-card essential-card--esim"
-            data-affiliate-category="esim"
-          >
-            <div class="essential-card__image">
-              <span>FOTOGRAFÍA</span>
-            </div>
-
-            <div class="essential-card__body">
-              <div class="essential-card__icon">⌁</div>
-
-              <div>
-                <span class="essential-card__type">Conectividad</span>
-                <h3>Llega conectado</h3>
-                <p>Explora opciones de eSIM para mantener datos durante tu viaje.</p>
-              </div>
-            </div>
-
-            <button class="essential-card__link" type="button" data-preview-link>
-              Ver opciones de eSIM
-              <span>↗</span>
-            </button>
-          </article>
-
-        </div>
-
-        <p class="affiliate-disclosure-short">
-          Algunos enlaces de esta sección podrán ser enlaces de afiliado.
-          ITBMO podría recibir una comisión si realizas una compra a través
-          de ellos, sin costo adicional para ti.
-        </p>
-
-      </div>
+    <section class="faq-section" id="faq" aria-labelledby="faq-title">
+      <div class="page-shell"><div class="section-intro"><div class="eyebrow">Preguntas frecuentes</div><h2 id="faq-title">Lo esencial antes de empezar.</h2></div><div class="faq-list">
+        <article class="faq-item"><button type="button" aria-expanded="false">¿Tengo que registrarme cada vez que uso ITBMO?<span>+</span></button><div class="faq-item__answer"><p>No. Después de registrarte, ITBMO puede reconocer tu sesión en ese dispositivo. Si utilizas otro dispositivo, podrás ingresar con el usuario y correo electrónico asociados a tu cuenta.</p></div></article>
+        <article class="faq-item"><button type="button" aria-expanded="false">¿Cuántas ciudades puedo incluir?<span>+</span></button><div class="faq-item__answer"><p>Puedes construir un viaje de hasta 3 ciudades por itinerario.</p></div></article>
+        <article class="faq-item"><button type="button" aria-expanded="false">¿Qué pasa si todavía no conozco mis horarios?<span>+</span></button><div class="faq-item__answer"><p>No hay problema. Puedes dejar los horarios en blanco. Si ya conoces algunos, son especialmente útiles para el día de llegada y el último día de cada ciudad.</p></div></article>
+        <article class="faq-item"><button type="button" aria-expanded="false">¿Cuándo debo usar Info Chat?<span>+</span></button><div class="faq-item__answer"><p>Antes de guardar destinos puedes usarlo para investigar dudas y luego incorporar la información importante en tus preferencias. Cuando ASTRA pregunte por hospedaje y transporte también puedes consultarlo para ayudarte a responder.</p></div></article>
+        <article class="faq-item"><button type="button" aria-expanded="false">¿Info Chat tendrá un límite de uso?<span>+</span></button><div class="faq-item__answer"><p>Sí. Para mantener el servicio rápido y sostenible, Info Chat tendrá un uso incluido por itinerario. El límite exacto se mostrará claramente antes del lanzamiento; no hablaremos de “tokens” al usuario.</p></div></article>
+        <article class="faq-item"><button type="button" aria-expanded="false">¿En qué idioma se genera el itinerario?<span>+</span></button><div class="faq-item__answer"><p>Después de completar la información de todas las ciudades, ASTRA te preguntará en qué idioma quieres recibir el itinerario.</p></div></article>
+        <article class="faq-item"><button type="button" aria-expanded="false">¿Debo verificar la información antes de viajar?<span>+</span></button><div class="faq-item__answer"><p>Sí. Horarios, precios, disponibilidad, clima, requisitos oficiales y tiempos de traslado pueden cambiar. Verifica especialmente cualquier dato crítico directamente con el operador o una fuente oficial.</p></div></article>
+      </div></div>
     </section>
 
-    <section
-      class="section faq-section"
-      id="faq"
-      aria-labelledby="faq-title"
-    >
-
-      <div class="page-shell page-shell--narrow">
-
-        <div class="section-intro">
-          <div class="eyebrow">Preguntas frecuentes</div>
-
-          <h2 id="faq-title">
-            Todo lo que necesitas saber antes de empezar.
-          </h2>
-        </div>
-
-        <div class="faq-list">
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Tengo que registrarme cada vez que uso ITBMO?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                No. Después del registro ITBMO puede conservar tu sesión en
-                ese dispositivo. Si utilizas otro dispositivo, puedes iniciar
-                sesión con tu usuario y correo electrónico.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Cuántas ciudades puedo incluir?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Actualmente puedes planificar hasta 3 ciudades dentro
-                del mismo viaje.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Qué pasa si todavía no conozco mis horarios?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Puedes dejarlos en blanco. Si conoces algunos horarios,
-                recomendamos indicar especialmente la hora disponible del
-                primer día y la hora límite del último día.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>
-                ¿Qué debo escribir en Preferencias / Restricciones /
-                Condiciones Especiales?
-              </span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Todo aquello que pueda afectar tu itinerario: intereses,
-                actividades que quieres evitar, lugares que deseas visitar,
-                reservas existentes, ritmo del viaje, movilidad, necesidades
-                del grupo u otra condición relevante.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Puedo usar Info Chat antes de generar?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Sí. Antes de guardar tus destinos puede ayudarte a investigar
-                información que después quieras incorporar a tus preferencias.
-                Durante las preguntas finales de ASTRA también puede ayudarte
-                a decidir aspectos como hospedaje o transporte.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿En qué idioma se genera el itinerario?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Al finalizar la captura de información de todas tus ciudades,
-                ASTRA te pregunta en qué idioma quieres recibir el itinerario.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Puedo descargar mi itinerario?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Sí. El Planner permite exportarlo a PDF o CSV, compatible
-                con Excel para que puedas realizar tus propios ajustes.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿ITBMO realiza automáticamente las reservas?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                No. ITBMO organiza tu planificación. Hoteles, entradas,
-                tours, transporte y otros servicios deben reservarse
-                directamente con sus respectivos proveedores.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Los tiempos de traslado son exactos?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                No deben considerarse tiempos garantizados. El tráfico,
-                clima, obras, eventos y cambios operativos pueden modificar
-                significativamente un traslado. Verifica siempre las
-                condiciones actuales antes de desplazarte.
-              </p>
-            </div>
-          </article>
-
-          <article class="faq-item">
-            <button class="faq-question" type="button" aria-expanded="false">
-              <span>¿Qué debo verificar antes de viajar?</span>
-              <span class="faq-plus">+</span>
-            </button>
-
-            <div class="faq-answer">
-              <p>
-                Confirma especialmente horarios, reservas, disponibilidad,
-                tiempos de traslado, rutas, clima, transporte y cualquier
-                requisito migratorio, sanitario o de seguridad utilizando
-                fuentes oficiales o proveedores directos.
-              </p>
-            </div>
-          </article>
-
-        </div>
-
-      </div>
-    </section>
-
-    <section class="final-cta">
-
-      <div class="final-cta__orb final-cta__orb--one"></div>
-      <div class="final-cta__orb final-cta__orb--two"></div>
-
-      <div class="page-shell final-cta__inner">
-
-        <div class="final-cta__symbol">✦</div>
-
-        <h2>
-          Ya tienes un destino.
-          <span>Ahora necesitas un plan.</span>
-        </h2>
-
-        <p>
-          Cuéntale a ASTRA cómo quieres viajar y deja que convierta
-          toda esa información en una ruta.
-        </p>
-
-        <div class="final-cta__features">
-          <span>Hasta 3 ciudades</span>
-          <span>Personalizado</span>
-          <span>En tu idioma</span>
-          <span>PDF + CSV</span>
-          <span>Info Chat</span>
-        </div>
-
-        <div class="final-cta__price">
-          <span>Lanzamiento</span>
-          <strong>$2.99</strong>
-          <small>Precio regular $5.99</small>
-        </div>
-
-        <a class="button button--white button--large" href="#planner">
-          Crear mi itinerario con ASTRA
-          <span>→</span>
-        </a>
-
-      </div>
-    </section>
-
+    <section class="final-cta"><div class="page-shell final-cta__inner"><div class="final-cta__icon">✦</div><div class="eyebrow eyebrow--light">Tu viaje empieza aquí</div><h2>Ya tienes un destino.<br>Ahora necesitas un plan.</h2><p>Cuéntale a ASTRA cómo quieres viajar y deja que convierta esa información en una ruta.</p><div class="final-cta__price"><span>Lanzamiento</span><strong>$2.99</strong><small>Precio regular $5.99</small></div><a class="button button--white button--large" href="#planner">Crear mi itinerario con ASTRA <span>→</span></a></div></section>
   </main>
 
-  <footer class="site-footer">
+  <footer class="site-footer"><div class="page-shell"><div class="site-footer__top"><div class="site-footer__brand"><a class="brand brand--footer" href="#top"><span class="brand__main">I Travel</span><span class="brand__sub">By My Own</span></a><p>Planea mejor. Viaja a tu manera.</p></div><div class="footer-column"><strong>ITBMO</strong><a href="#how-it-works">Cómo funciona</a><a href="#astra">ASTRA</a><a href="#faq">Preguntas frecuentes</a></div><div class="footer-column"><strong>Viajes</strong><a href="#planner">Planificador</a><a href="#travel-essentials">Para tu viaje</a><a href="#" data-placeholder-link>Travel Guides</a></div><div class="footer-column"><strong>Ayuda</strong><a href="#" data-placeholder-link>Soporte</a><a href="#" data-placeholder-link>Contacto</a><a href="#" data-placeholder-link>Mi perfil</a></div><div class="footer-column"><strong>Legal</strong><a href="#" data-placeholder-link>Política de privacidad</a><a href="#" data-placeholder-link>Términos de servicio</a><a href="#" data-placeholder-link>Política de cookies</a><a href="#" data-placeholder-link>Afiliados y publicidad</a></div></div><div class="site-footer__bottom"><p>© 2026 I Travel By My Own. Todos los derechos reservados.</p><p>Diseñado para viajeros de todo el mundo.</p></div></div></footer>
 
-    <div class="page-shell">
+  <script>
+  (() => {
+    /* FAQ */
+    document.querySelectorAll('.faq-item button').forEach((button) => {
+      button.addEventListener('click', () => {
+        const item = button.closest('.faq-item');
+        const open = button.getAttribute('aria-expanded') === 'true';
+        button.setAttribute('aria-expanded', String(!open));
+        item.classList.toggle('is-open', !open);
+      });
+    });
 
-      <div class="site-footer__top">
+    /* Placeholder links do nothing in preview */
+    document.querySelectorAll('[data-placeholder-link]').forEach((link) => {
+      link.addEventListener('click', (event) => event.preventDefault());
+    });
 
-        <div class="site-footer__brand">
+    /*
+      AUTO-RESIZE DEL PLANNER
+      Preview Home y planner.html viven en el mismo dominio de Vercel,
+      por lo que podemos medir el documento interno sin tocar la lógica de ASTRA.
+      ResizeObserver detecta registro, ciudades, generación e itinerarios largos.
+    */
+    const iframe = document.getElementById('itbmo-planner');
+    let plannerObserver = null;
+    let resizeTimer = null;
 
-          <a class="brand brand--footer" href="#top">
-            <span class="brand__main">I Travel</span>
-            <span class="brand__sub">By My Own</span>
-          </a>
+    function measurePlanner() {
+      if (!iframe) return;
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!doc) return;
+        const body = doc.body;
+        const html = doc.documentElement;
+        const height = Math.max(
+          body ? body.scrollHeight : 0,
+          body ? body.offsetHeight : 0,
+          html ? html.scrollHeight : 0,
+          html ? html.offsetHeight : 0,
+          html ? html.clientHeight : 0
+        );
+        if (height > 300) iframe.style.height = (height + 8) + 'px';
+      } catch (error) {
+        console.warn('ITBMO planner auto-resize: same-origin access unavailable.', error);
+      }
+    }
 
-          <p>
-            Planea mejor. Viaja a tu manera.
-          </p>
+    function scheduleMeasure() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(measurePlanner, 60);
+    }
 
-        </div>
+    function attachPlannerObserver() {
+      try {
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        if (!doc || !doc.documentElement) return;
+        if (plannerObserver) plannerObserver.disconnect();
+        plannerObserver = new ResizeObserver(scheduleMeasure);
+        plannerObserver.observe(doc.documentElement);
+        if (doc.body) plannerObserver.observe(doc.body);
+        new MutationObserver(scheduleMeasure).observe(doc.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          characterData: false
+        });
+        doc.addEventListener('click', scheduleMeasure, true);
+        doc.addEventListener('input', scheduleMeasure, true);
+        doc.addEventListener('change', scheduleMeasure, true);
+        measurePlanner();
+        setTimeout(measurePlanner, 300);
+        setTimeout(measurePlanner, 1000);
+      } catch (error) {
+        console.warn('ITBMO planner observer could not be attached.', error);
+      }
+    }
 
-        <div class="footer-column">
-          <strong>ITBMO</strong>
-          <a href="#how-it-works">Cómo funciona</a>
-          <a href="#astra">ASTRA</a>
-          <a href="#faq">Preguntas frecuentes</a>
-        </div>
-
-        <div class="footer-column">
-          <strong>Viajes</strong>
-          <a href="#planner">Planificador</a>
-          <a href="#travel-essentials">Para tu viaje</a>
-          <a href="#" data-placeholder-link>Travel Guides</a>
-        </div>
-
-        <div class="footer-column">
-          <strong>Ayuda</strong>
-          <a href="#" data-placeholder-link>Soporte</a>
-          <a href="#" data-placeholder-link>Contacto</a>
-          <a href="#" data-placeholder-link>Mi perfil</a>
-        </div>
-
-        <div class="footer-column">
-          <strong>Legal</strong>
-          <a href="#" data-placeholder-link>Política de privacidad</a>
-          <a href="#" data-placeholder-link>Términos de servicio</a>
-          <a href="#" data-placeholder-link>Política de cookies</a>
-          <a href="#" data-placeholder-link>Afiliados y publicidad</a>
-        </div>
-
-      </div>
-
-      <div class="site-footer__bottom">
-        <p>© 2026 I Travel By My Own. Todos los derechos reservados.</p>
-        <p>Diseñado para viajeros de todo el mundo.</p>
-      </div>
-
-    </div>
-  </footer>
-
-  <script src="./assets/js/itbmo-site.js?v=1"></script>
-
+    if (iframe) {
+      iframe.addEventListener('load', attachPlannerObserver);
+      window.addEventListener('resize', scheduleMeasure);
+    }
+  })();
+  </script>
 </body>
 </html>
