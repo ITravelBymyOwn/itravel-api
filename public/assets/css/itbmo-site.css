@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.2
+   ITBMO · HOME V4.3
    Premium / glass / travel-tech / Apple-like restraint
    ========================================================= */
 
@@ -913,4 +913,80 @@ img,svg,video{max-width:100%;display:block}
 .travel-photo-rail__label strong{
   font-size:.68rem;
   color:#526f84;
+}
+
+
+/* =========================================================
+   V4.3 · SURGICAL FIXES
+   1) FOTO 02 keeps absolute positioning (generic .image-slot
+      was overriding it to relative).
+   2) FOTO 01/02 labels sit in a visible corner instead of
+      underneath the decorative glass cards.
+   3) Logo sizing favors the horizontal JPG lockup.
+   ========================================================= */
+
+/* Critical fix: preserve the intended ASTRA photo geometry. */
+.route-visual__photo.image-slot{
+  position:absolute;
+  inset:0 14% 8% 0;
+  min-height:0;
+}
+
+/* Make FOTO 01 and FOTO 02 unmistakably visible before upload. */
+.image-slot__placeholder--corner{
+  inset:0;
+  align-items:flex-start;
+  justify-content:flex-start;
+  padding:1rem;
+  text-align:left;
+}
+.hero-photo-stage .image-slot__placeholder--corner{
+  padding:1rem 1.05rem;
+}
+.route-visual__photo .image-slot__placeholder--corner{
+  padding:1rem;
+}
+
+/* Give the empty slots a slightly clearer preview treatment. */
+.image-slot--hero:not(.has-image){
+  opacity:.82;
+  background:
+    radial-gradient(460px 280px at 18% 12%,rgba(53,191,209,.28),transparent 70%),
+    radial-gradient(480px 300px at 88% 88%,rgba(109,120,238,.26),transparent 72%),
+    linear-gradient(145deg,#e8f8fb,#ecefff);
+}
+.image-slot--astra:not(.has-image){
+  background:
+    radial-gradient(420px 260px at 16% 12%,rgba(53,191,209,.30),transparent 70%),
+    radial-gradient(460px 290px at 88% 88%,rgba(109,120,238,.28),transparent 72%),
+    linear-gradient(145deg,#e6f7fa,#e9ecff);
+}
+
+/* Horizontal brand lockup: more width, less height. */
+.site-header .brand--logo{
+  width:178px;
+  min-width:178px;
+  height:48px;
+}
+.site-header .brand--logo img{
+  object-fit:contain;
+  object-position:left center;
+}
+.site-footer .brand--logo{
+  width:190px;
+  height:64px;
+}
+
+@media(max-width:1180px){
+  .site-header .brand--logo{
+    width:154px;
+    min-width:154px;
+  }
+}
+@media(max-width:680px){
+  .site-header .brand--logo{
+    width:138px;
+    min-width:138px;
+    height:42px;
+  }
 }
