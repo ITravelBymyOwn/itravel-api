@@ -1,4 +1,4 @@
-// /api/chat.js — v65 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.1 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -7,12 +7,178 @@
 // ✅ SURGICAL ADJUSTMENT: Planner: forces use of ALL info in the Planner tab, especially Preferences/Restrictions/Special conditions + Travelers (if provided).
 
 import OpenAI from "openai";
+import crypto from "crypto";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+
+/* =========================================================
+   INFO CHAT ENTITLEMENT · payment gate + 10-query quota
+   Applied ONLY to mode:"info". Planner mode remains untouched.
+   ========================================================= */
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
+const SUPABASE_REST_URL = SUPABASE_URL ? `${SUPABASE_URL}/rest/v1` : "";
+const INFO_CHAT_MAX_QUERIES = 10;
+
+const ITBMO_ADMIN_TEST_BYPASS =
+  String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
+const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
+const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
+  String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+
+function _infoHashToken_(token) {
+  return crypto.createHash("sha256").update(String(token || "")).digest("hex");
+}
+
+function _infoAdminBypass_(userId) {
+  if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
+  if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+}
+
+async function _infoSupabaseFetch_(path, options = {}) {
+  if (!SUPABASE_REST_URL || !SUPABASE_SECRET_KEY) {
+    const error = new Error("Info Chat entitlement service is not configured");
+    error.code = "INFO_CHAT_SERVER_CONFIG";
+    throw error;
+  }
+
+  const response = await fetch(`${SUPABASE_REST_URL}${path}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_SECRET_KEY,
+      Authorization: `Bearer ${SUPABASE_SECRET_KEY}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(options.headers || {})
+    }
+  });
+
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try { data = JSON.parse(text); } catch { data = text; }
+  }
+  if (!response.ok) {
+    const error = new Error("Supabase entitlement request failed");
+    error.status = response.status;
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+async function _infoGetSession_(rawToken) {
+  if (!rawToken) return null;
+  const tokenHash = _infoHashToken_(rawToken);
+  const rows = await _infoSupabaseFetch_(
+    `/user_sessions?select=id,user_id,expires_at,revoked_at&token_hash=eq.${encodeURIComponent(tokenHash)}&limit=1`,
+    { method:"GET" }
+  );
+  const session = Array.isArray(rows) ? rows[0] || null : null;
+  if (!session || session.revoked_at) return null;
+  if (new Date(session.expires_at).getTime() <= Date.now()) return null;
+  return session;
+}
+
+async function _infoGetOwnedTrip_(tripId, userId) {
+  const rows = await _infoSupabaseFetch_(
+    `/trips?select=id,user_id&id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    { method:"GET" }
+  );
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function _infoFindPaid_(tripId, userId) {
+  const rows = await _infoSupabaseFetch_(
+    `/payments?select=id&trip_id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
+    { method:"GET" }
+  );
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function _infoCountQueries_(tripId, userId) {
+  const rows = await _infoSupabaseFetch_(
+    `/user_events?select=id&trip_id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&event_name=eq.info_chat_query&limit=${INFO_CHAT_MAX_QUERIES + 20}`,
+    { method:"GET" }
+  );
+  return Array.isArray(rows) ? rows.length : 0;
+}
+
+async function _infoReserveQuery_(session, tripId) {
+  const before = await _infoCountQueries_(tripId, session.user_id);
+  if (before >= INFO_CHAT_MAX_QUERIES) {
+    return { ok:false, used:before, remaining:0, eventId:null };
+  }
+
+  const rows = await _infoSupabaseFetch_("/user_events", {
+    method:"POST",
+    headers:{ Prefer:"return=representation" },
+    body:JSON.stringify({
+      user_id:session.user_id,
+      trip_id:tripId,
+      session_id:session.id,
+      event_name:"info_chat_query",
+      event_category:"info_chat",
+      properties:{ status:"reserved" }
+    })
+  });
+
+  const eventId = Array.isArray(rows) ? rows[0]?.id || null : null;
+  const after = await _infoCountQueries_(tripId, session.user_id);
+
+  /* Recheck after reservation to reduce concurrent overrun. */
+  if (after > INFO_CHAT_MAX_QUERIES) {
+    if (eventId) {
+      try {
+        await _infoSupabaseFetch_(`/user_events?id=eq.${encodeURIComponent(eventId)}`, { method:"DELETE" });
+      } catch {}
+    }
+    return { ok:false, used:INFO_CHAT_MAX_QUERIES, remaining:0, eventId:null };
+  }
+
+  return {
+    ok:true,
+    used:Math.min(INFO_CHAT_MAX_QUERIES, after),
+    remaining:Math.max(0, INFO_CHAT_MAX_QUERIES - after),
+    eventId
+  };
+}
+
+async function _infoReleaseReservation_(eventId) {
+  if (!eventId) return;
+  try {
+    await _infoSupabaseFetch_(`/user_events?id=eq.${encodeURIComponent(eventId)}`, { method:"DELETE" });
+  } catch {}
+}
+
+async function _authorizeInfoChat_(body) {
+  const sessionToken = String(body?.session_token || "").trim();
+  const tripId = String(body?.trip_id || "").trim();
+
+  if (!sessionToken || !tripId) {
+    return { ok:false, status:401, code:"INFO_CHAT_NOT_AUTHORIZED" };
+  }
+
+  const session = await _infoGetSession_(sessionToken);
+  if (!session) return { ok:false, status:401, code:"INFO_CHAT_NOT_AUTHORIZED" };
+
+  const trip = await _infoGetOwnedTrip_(tripId, session.user_id);
+  if (!trip) return { ok:false, status:404, code:"INFO_CHAT_TRIP_NOT_FOUND" };
+
+  const paid = await _infoFindPaid_(tripId, session.user_id);
+  const adminBypass = _infoAdminBypass_(session.user_id);
+  if (!paid && !adminBypass) {
+    return { ok:false, status:402, code:"INFO_CHAT_NOT_AUTHORIZED" };
+  }
+
+  return { ok:true, session, tripId, adminBypass };
+}
 
 // ==============================
 // Helpers
@@ -2000,16 +2166,64 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
-    // INFO mode remains unchanged.
+    // INFO mode: server-side entitlement + per-trip quota.
     if (mode === "info") {
-      const raw = await callStructured(
-        [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
-        0.45,
-        2600,
-        70000
-      );
-      const text = raw || "⚠️ No response was obtained from the assistant.";
-      return res.status(200).json({ text });
+      let auth = null;
+      let reservation = null;
+
+      try {
+        auth = await _authorizeInfoChat_(body);
+
+        if (!auth?.ok) {
+          return res.status(auth?.status || 402).json({
+            ok:false,
+            code:auth?.code || "INFO_CHAT_NOT_AUTHORIZED",
+            error:"Info Chat is available only after payment for this trip.",
+            info_chat_limit:INFO_CHAT_MAX_QUERIES,
+            info_chat_remaining:0
+          });
+        }
+
+        reservation = await _infoReserveQuery_(auth.session, auth.tripId);
+
+        if (!reservation?.ok) {
+          return res.status(429).json({
+            ok:false,
+            code:"INFO_CHAT_LIMIT_REACHED",
+            error:"Info Chat query limit reached.",
+            info_chat_limit:INFO_CHAT_MAX_QUERIES,
+            info_chat_used:INFO_CHAT_MAX_QUERIES,
+            info_chat_remaining:0
+          });
+        }
+
+        const raw = await callStructured(
+          [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
+          0.45,
+          2600,
+          70000
+        );
+
+        const text = raw || "⚠️ No response was obtained from the assistant.";
+
+        return res.status(200).json({
+          ok:true,
+          text,
+          info_chat_limit:INFO_CHAT_MAX_QUERIES,
+          info_chat_used:reservation.used,
+          info_chat_remaining:reservation.remaining,
+          admin_bypass:Boolean(auth.adminBypass)
+        });
+      } catch (infoError) {
+        await _infoReleaseReservation_(reservation?.eventId);
+        console.error("❌ Info Chat entitlement/request error:", infoError);
+        return res.status(500).json({
+          ok:false,
+          code:"INFO_CHAT_SERVICE_ERROR",
+          error:"Info Chat service error",
+          info_chat_limit:INFO_CHAT_MAX_QUERIES
+        });
+      }
     }
 
     const stage = detectPlannerStage(clientMessages);
