@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V3 JS
+   ITBMO · HOME V4 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
    - Affiliate preview/config
@@ -33,6 +33,14 @@
     ads: {
       home01: { enabled:false },
       home02: { enabled:false }
+    },
+
+    infoChatPolicy: {
+      enabledAfterPayment: true,
+      maxUserMessages: 10,
+      maxOutputTokensPerReply: 700,
+      maxTotalOutputTokens: 6000,
+      restrictToPlannerCities: true
     }
   };
 
@@ -123,7 +131,7 @@
        - gradual self-scrolling
        - vibration
        - huge blank space
-     V3 never measures viewport-dependent clientHeight.
+     V4 keeps the stable flow-only measurement and does not modify planner.html.
 
      In Vercel preview (same origin), we calculate only actual FLOW content:
        topbar + planner-grid + footer + other non-fixed body children.
