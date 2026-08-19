@@ -27,10 +27,10 @@ const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
 /* ---------- Config API ---------- */
-const API_URL = 'https://itravelbymyown-api.vercel.app/api/chat';
-const USER_API_URL = 'https://itravelbymyown-api.vercel.app/api/user';
-const TRIP_API_URL = 'https://itravelbymyown-api.vercel.app/api/trip';
-const PAYMENT_API_URL = 'https://itravelbymyown-api.vercel.app/api/payment';
+const API_URL = '/api/chat';
+const USER_API_URL = '/api/user';
+const TRIP_API_URL = '/api/trip';
+const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
