@@ -88,7 +88,7 @@ async function _infoGetSession_(rawToken) {
 
 async function _infoGetOwnedTrip_(tripId, userId) {
   const rows = await _infoSupabaseFetch_(
-    `/trips?select=id,user_id&id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    `/trips?select=id,user_id,trip_name,planner_input&id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
     { method:"GET" }
   );
   return Array.isArray(rows) ? rows[0] || null : null;
@@ -110,51 +110,72 @@ async function _infoCountQueries_(tripId, userId) {
   return Array.isArray(rows) ? rows.length : 0;
 }
 
-async function _infoReserveQuery_(session, tripId) {
+async function _infoReserveQueries_(session, tripId, topicCount = 1) {
+  const units = Math.max(1, Math.min(3, Number(topicCount) || 1));
   const before = await _infoCountQueries_(tripId, session.user_id);
-  if (before >= INFO_CHAT_MAX_QUERIES) {
-    return { ok:false, used:before, remaining:0, eventId:null };
+
+  if ((before + units) > INFO_CHAT_MAX_QUERIES) {
+    return {
+      ok:false,
+      used:Math.min(INFO_CHAT_MAX_QUERIES, before),
+      remaining:Math.max(0, INFO_CHAT_MAX_QUERIES - before),
+      eventIds:[]
+    };
   }
+
+  const payload = Array.from({ length:units }, (_, index)=>({
+    user_id:session.user_id,
+    trip_id:tripId,
+    session_id:session.id,
+    event_name:"info_chat_query",
+    event_category:"info_chat",
+    properties:{
+      status:"reserved",
+      thematic_units:units,
+      thematic_unit_index:index + 1
+    }
+  }));
 
   const rows = await _infoSupabaseFetch_("/user_events", {
     method:"POST",
     headers:{ Prefer:"return=representation" },
-    body:JSON.stringify({
-      user_id:session.user_id,
-      trip_id:tripId,
-      session_id:session.id,
-      event_name:"info_chat_query",
-      event_category:"info_chat",
-      properties:{ status:"reserved" }
-    })
+    body:JSON.stringify(payload)
   });
 
-  const eventId = Array.isArray(rows) ? rows[0]?.id || null : null;
+  const eventIds = Array.isArray(rows) ? rows.map(row=>row?.id).filter(Boolean) : [];
   const after = await _infoCountQueries_(tripId, session.user_id);
 
   /* Recheck after reservation to reduce concurrent overrun. */
   if (after > INFO_CHAT_MAX_QUERIES) {
-    if (eventId) {
-      try {
-        await _infoSupabaseFetch_(`/user_events?id=eq.${encodeURIComponent(eventId)}`, { method:"DELETE" });
-      } catch {}
-    }
-    return { ok:false, used:INFO_CHAT_MAX_QUERIES, remaining:0, eventId:null };
+    await _infoReleaseReservation_(eventIds);
+    return {
+      ok:false,
+      used:Math.min(INFO_CHAT_MAX_QUERIES, before),
+      remaining:Math.max(0, INFO_CHAT_MAX_QUERIES - before),
+      eventIds:[]
+    };
   }
 
   return {
     ok:true,
     used:Math.min(INFO_CHAT_MAX_QUERIES, after),
     remaining:Math.max(0, INFO_CHAT_MAX_QUERIES - after),
-    eventId
+    eventIds
   };
 }
 
-async function _infoReleaseReservation_(eventId) {
-  if (!eventId) return;
-  try {
-    await _infoSupabaseFetch_(`/user_events?id=eq.${encodeURIComponent(eventId)}`, { method:"DELETE" });
-  } catch {}
+async function _infoReleaseReservation_(eventIds) {
+  const ids = (Array.isArray(eventIds) ? eventIds : [eventIds]).filter(Boolean);
+  if (!ids.length) return;
+
+  for (const eventId of ids) {
+    try {
+      await _infoSupabaseFetch_(
+        `/user_events?id=eq.${encodeURIComponent(eventId)}`,
+        { method:"DELETE" }
+      );
+    } catch {}
+  }
 }
 
 async function _authorizeInfoChat_(body) {
@@ -177,7 +198,7 @@ async function _authorizeInfoChat_(body) {
     return { ok:false, status:402, code:"INFO_CHAT_NOT_AUTHORIZED" };
   }
 
-  return { ok:true, session, tripId, adminBypass };
+  return { ok:true, session, trip, tripId, adminBypass };
 }
 
 // ==============================
@@ -316,6 +337,108 @@ function detectUserLang(messages = []) {
   // If there are no clear signals, default to EN (so your fallback is consistent)
   if (!topScore) return "en";
   return topLang;
+}
+
+/* =========================================================
+   INFO CHAT · semantic scope + thematic query counting
+   ========================================================= */
+function _infoTripCities_(trip) {
+  let plannerInput = trip?.planner_input;
+
+  if (typeof plannerInput === "string") {
+    try { plannerInput = JSON.parse(plannerInput); } catch { plannerInput = null; }
+  }
+
+  const destinations = Array.isArray(plannerInput?.destinations)
+    ? plannerInput.destinations
+    : [];
+
+  const cities = destinations
+    .map(d=>String(d?.city || d?.name || "").trim())
+    .filter(Boolean);
+
+  if (cities.length) return [...new Set(cities)];
+
+  return String(trip?.trip_name || "")
+    .split("·")
+    .map(x=>x.trim())
+    .filter(Boolean);
+}
+
+async function _infoAnalyzeUserRequest_(userText, allowedCities = []) {
+  const cities = (allowedCities || []).map(x=>String(x || "").trim()).filter(Boolean);
+
+  if (!cities.length) {
+    const error = new Error("No itinerary cities are available for Info Chat scope validation");
+    error.code = "INFO_CHAT_SCOPE_CONTEXT_MISSING";
+    throw error;
+  }
+
+  const analysisPrompt = `
+You are the authorization and quota classifier for a travel concierge.
+
+AUTHORIZED ITINERARY CITIES:
+${cities.map(c=>`- ${c}`).join("\n")}
+
+USER MESSAGE:
+${String(userText || "").trim()}
+
+Return ONLY valid JSON with this exact shape:
+{
+  "in_scope": true,
+  "topic_count": 1,
+  "topic_labels": ["short label"],
+  "out_of_scope_locations": []
+}
+
+RULES:
+1. SCOPE
+- The user may ask about the authorized cities and about attractions, airports, neighborhoods, nearby places, excursions or day trips reasonably connected to those cities.
+- A nearby/day-trip place related to an authorized city is IN SCOPE even if that place is not itself in the itinerary.
+- If the message explicitly asks about an unrelated city/destination outside the itinerary, set "in_scope": false and list it in "out_of_scope_locations".
+- If a message mixes an authorized topic with an unrelated outside destination, reject the whole message: "in_scope": false.
+- Do not reject generic follow-ups that clearly refer to the existing conversation without naming a new outside destination.
+
+2. THEMATIC QUERY COUNT
+- Count independent travel decisions/topics, NOT grammatical questions or question marks.
+- Several sub-questions about the SAME subject/decision count as ONE thematic query.
+  Example: "Which restaurant near Sagrada Familia? Do I need a reservation? What should I order? How much should I tip?" = 1.
+- Questions about separate decisions count separately.
+  Example: restaurant choice + transport to Montserrat + shopping area = 3.
+- A comparison among alternatives for one decision counts as 1.
+- A request for multiple details needed to make one booking/choice counts as 1.
+- topic_count must be the number of independent thematic queries in this single user message.
+- If there are more than 3 independent topics, return the real number; do not cap it.
+
+3. OUTPUT
+- topic_labels must briefly identify each independent topic.
+- Do not answer the travel question.
+`.trim();
+
+  const raw = await callStructured(
+    [{ role:"system", content:analysisPrompt }],
+    0,
+    450,
+    25000
+  );
+
+  const parsed = cleanToJSON(raw);
+  if (!parsed || typeof parsed !== "object") {
+    const error = new Error("Info Chat semantic classifier returned invalid JSON");
+    error.code = "INFO_CHAT_SCOPE_CHECK_FAILED";
+    throw error;
+  }
+
+  const topicCount = Math.max(1, Number.parseInt(parsed.topic_count, 10) || 1);
+
+  return {
+    inScope: parsed.in_scope !== false,
+    topicCount,
+    topicLabels: Array.isArray(parsed.topic_labels) ? parsed.topic_labels.map(String).slice(0, 8) : [],
+    outOfScopeLocations: Array.isArray(parsed.out_of_scope_locations)
+      ? parsed.out_of_scope_locations.map(String).filter(Boolean).slice(0, 8)
+      : []
+  };
 }
 
 // v52.5-style robust JSON extraction (surgical: replaces cleanToJSON without changing external usage)
@@ -2099,13 +2222,14 @@ Respond with valid JSON only.
 // Base prompt ✨ (FREE INFO CHAT) — like ChatGPT: any topic + context + user's real language
 // ==============================
 const SYSTEM_PROMPT_INFO = `
-You are Astra, a general conversational assistant (like ChatGPT) inside ITravelByMyOwn.
+You are Astra, the travel concierge inside ITravelByMyOwn.
 
 GOAL:
-- Respond in a helpful, honest, and complete way about ANY topic.
+- Respond in a helpful, honest, and complete way about the user's authorized itinerary cities and travel context.
 - Maintain conversation context using the provided history (messages/history).
-- If key information is missing, ask 1–2 key questions (not 10).
+- If key information is missing, ask only the minimum clarification needed.
 - Do not invent data; if something isn't certain, say so.
+- Do not expand the conversation to unrelated destinations outside the authorized itinerary scope.
 
 LANGUAGE (CRITICAL, TRUE MULTI-LANGUAGE):
 - ALWAYS respond in the REAL language of the user's last message content (any language).
@@ -2115,6 +2239,8 @@ LANGUAGE (CRITICAL, TRUE MULTI-LANGUAGE):
 FORMAT:
 - Respond in natural text (not JSON).
 - Use clear structure (short paragraphs, lists when helpful).
+- If the user asks several related sub-questions about one decision, answer them together as one coherent topic.
+- If the user asks several independent allowed topics in one message, separate the answer clearly by topic.
 `.trim();
 
 // ==============================
@@ -2166,7 +2292,7 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
 
-    // INFO mode: server-side entitlement + per-trip quota.
+    // INFO mode: server-side entitlement + semantic scope + thematic per-trip quota.
     if (mode === "info") {
       let auth = null;
       let reservation = null;
@@ -2184,7 +2310,52 @@ export default async function handler(req, res) {
           });
         }
 
-        reservation = await _infoReserveQuery_(auth.session, auth.tripId);
+        const allowedCities = _infoTripCities_(auth.trip);
+        const userText = _lastUserText_(clientMessages);
+        const analysis = await _infoAnalyzeUserRequest_(userText, allowedCities);
+        const usedBefore = await _infoCountQueries_(auth.tripId, auth.session.user_id);
+        const remainingBefore = Math.max(0, INFO_CHAT_MAX_QUERIES - usedBefore);
+
+        if (!analysis.inScope) {
+          return res.status(422).json({
+            ok:false,
+            code:"INFO_CHAT_OUT_OF_SCOPE",
+            error:"This question is outside the cities included in this itinerary.",
+            allowed_cities:allowedCities,
+            out_of_scope_locations:analysis.outOfScopeLocations,
+            info_chat_limit:INFO_CHAT_MAX_QUERIES,
+            info_chat_used:usedBefore,
+            info_chat_remaining:remainingBefore
+          });
+        }
+
+        if (analysis.topicCount > 3) {
+          return res.status(400).json({
+            ok:false,
+            code:"INFO_CHAT_TOO_MANY_TOPICS",
+            error:"Please limit each message to a maximum of 3 independent topics.",
+            topic_count:analysis.topicCount,
+            topic_labels:analysis.topicLabels,
+            info_chat_limit:INFO_CHAT_MAX_QUERIES,
+            info_chat_used:usedBefore,
+            info_chat_remaining:remainingBefore
+          });
+        }
+
+        if (analysis.topicCount > remainingBefore) {
+          return res.status(429).json({
+            ok:false,
+            code:"INFO_CHAT_INSUFFICIENT_REMAINING",
+            error:"The message contains more thematic queries than remain for this itinerary.",
+            topic_count:analysis.topicCount,
+            topic_labels:analysis.topicLabels,
+            info_chat_limit:INFO_CHAT_MAX_QUERIES,
+            info_chat_used:usedBefore,
+            info_chat_remaining:remainingBefore
+          });
+        }
+
+        reservation = await _infoReserveQueries_(auth.session, auth.tripId, analysis.topicCount);
 
         if (!reservation?.ok) {
           return res.status(429).json({
@@ -2192,13 +2363,26 @@ export default async function handler(req, res) {
             code:"INFO_CHAT_LIMIT_REACHED",
             error:"Info Chat query limit reached.",
             info_chat_limit:INFO_CHAT_MAX_QUERIES,
-            info_chat_used:INFO_CHAT_MAX_QUERIES,
-            info_chat_remaining:0
+            info_chat_used:reservation?.used ?? INFO_CHAT_MAX_QUERIES,
+            info_chat_remaining:reservation?.remaining ?? 0
           });
         }
 
+        const scopePrompt = `
+AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
+- Authorized cities: ${allowedCities.join(", ")}.
+- You may also discuss attractions, neighborhoods, airports, nearby places, excursions and day trips reasonably related to those cities.
+- Do not introduce or answer about unrelated destinations outside this itinerary.
+- This user message contains ${analysis.topicCount} thematic ${analysis.topicCount === 1 ? "query" : "queries"}.
+- Treat related sub-questions within the same topic as one coherent decision and answer them together.
+`.trim();
+
         const raw = await callStructured(
-          [{ role: "system", content: SYSTEM_PROMPT_INFO }, ...clientMessages],
+          [
+            { role:"system", content:SYSTEM_PROMPT_INFO },
+            { role:"system", content:scopePrompt },
+            ...clientMessages
+          ],
           0.45,
           2600,
           70000
@@ -2212,14 +2396,17 @@ export default async function handler(req, res) {
           info_chat_limit:INFO_CHAT_MAX_QUERIES,
           info_chat_used:reservation.used,
           info_chat_remaining:reservation.remaining,
+          info_chat_consumed:analysis.topicCount,
+          info_chat_topics:analysis.topicLabels,
+          allowed_cities:allowedCities,
           admin_bypass:Boolean(auth.adminBypass)
         });
       } catch (infoError) {
-        await _infoReleaseReservation_(reservation?.eventId);
+        await _infoReleaseReservation_(reservation?.eventIds);
         console.error("❌ Info Chat entitlement/request error:", infoError);
         return res.status(500).json({
           ok:false,
-          code:"INFO_CHAT_SERVICE_ERROR",
+          code:infoError?.code || "INFO_CHAT_SERVICE_ERROR",
           error:"Info Chat service error",
           info_chat_limit:INFO_CHAT_MAX_QUERIES
         });
