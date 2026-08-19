@@ -309,7 +309,26 @@
   */
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (!data || data.type !== 'ITBMO_PLANNER_HEIGHT') return;
+    if (!data) return;
+
+    /* Critical Planner windows (checkout, loading, notices, support) must
+       always enter the user's visible area even inside a tall iframe. */
+    if (data.type === 'ITBMO_FOCUS_PLANNER_MODAL') {
+      if (!iframe || event.source !== iframe.contentWindow) return;
+
+      const top = Math.max(
+        0,
+        iframe.getBoundingClientRect().top + window.scrollY - 76
+      );
+
+      window.scrollTo({
+        top,
+        behavior:data.immediate ? 'auto' : 'smooth'
+      });
+      return;
+    }
+
+    if (data.type !== 'ITBMO_PLANNER_HEIGHT') return;
 
     const h = Number(data.height);
     if (!Number.isFinite(h) || h < 300) return;
