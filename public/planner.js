@@ -2057,7 +2057,8 @@ FORMAT:
 - Avoid enormous blocks of text and repetitive disclaimers.
 
 SCOPE:
-- Help with lodging areas, weather planning, transportation, restaurants, local food, hidden gems, photography, tickets, safety, customs, packing, budgets and any other travel question.
+- Help with lodging areas, weather planning, transportation, restaurants, local food, hidden gems, photography, tickets, safety, customs, packing, budgets and other travel questions related to the cities in this itinerary.
+- Do not answer about unrelated destinations outside the current itinerary. Nearby places, excursions and day trips reasonably connected to the itinerary cities are allowed.
 
 CURRENT PLANNER CONTEXT:
 ${buildIntake()}
@@ -2090,6 +2091,78 @@ ${buildIntake()}
     });
 
     const data = await res.json().catch(()=>({text:''}));
+
+    if(data?.code==='INFO_CHAT_OUT_OF_SCOPE'){
+      const remaining=Number(data?.info_chat_remaining ?? infoChatQueriesRemaining);
+      const cities=Array.isArray(data?.allowed_cities) ? data.allowed_cities.filter(Boolean) : [];
+      const outside=Array.isArray(data?.out_of_scope_locations) ? data.out_of_scope_locations.filter(Boolean) : [];
+      const es=getLang()==='es';
+
+      return {
+        text:'',
+        remaining,
+        notice:{
+          title:es ? 'Esta consulta está fuera de tu viaje' : 'This question is outside your trip',
+          message:es
+            ? `Info Chat está disponible para las ciudades de este itinerario: ${cities.join(', ') || 'las ciudades seleccionadas'}.${outside.length ? ` ${outside.join(', ')} no forma parte de este itinerario.` : ''} Los lugares, excursiones y day trips razonablemente relacionados con tus ciudades sí están incluidos.`
+            : `Info Chat is available for the cities in this itinerary: ${cities.join(', ') || 'your selected cities'}.${outside.length ? ` ${outside.join(', ')} is not part of this itinerary.` : ''} Places, excursions and reasonable day trips connected to your itinerary cities are included.`,
+          code:'INFO_CHAT_OUT_OF_SCOPE'
+        }
+      };
+    }
+
+    if(data?.code==='INFO_CHAT_TOO_MANY_TOPICS'){
+      const remaining=Number(data?.info_chat_remaining ?? infoChatQueriesRemaining);
+      const count=Math.max(4,Number(data?.topic_count || 4));
+      const es=getLang()==='es';
+
+      return {
+        text:'',
+        remaining,
+        notice:{
+          title:es ? 'Demasiados temas en un solo mensaje' : 'Too many topics in one message',
+          message:es
+            ? `Detecté ${count} temas independientes. Puedes incluir hasta 3 temas por mensaje. Las preguntas relacionadas con una misma decisión se consideran una sola consulta. Divide este mensaje y continúa.`
+            : `I detected ${count} independent topics. You can include up to 3 topics per message. Related questions about the same decision count as one query. Split this message and continue.`,
+          code:'INFO_CHAT_TOO_MANY_TOPICS'
+        }
+      };
+    }
+
+    if(data?.code==='INFO_CHAT_INSUFFICIENT_REMAINING'){
+      const remaining=Math.max(0,Number(data?.info_chat_remaining ?? infoChatQueriesRemaining));
+      const count=Math.max(1,Number(data?.topic_count || 1));
+      const es=getLang()==='es';
+
+      return {
+        text:'',
+        remaining,
+        notice:{
+          title:es
+            ? `Te ${remaining===1 ? 'queda' : 'quedan'} ${remaining} ${remaining===1 ? 'consulta' : 'consultas'}`
+            : `You have ${remaining} ${remaining===1 ? 'query' : 'queries'} left`,
+          message:es
+            ? `Este mensaje contiene ${count} temas independientes. Reduce el mensaje a un máximo de ${remaining} ${remaining===1 ? 'tema' : 'temas'} para continuar.`
+            : `This message contains ${count} independent topics. Reduce it to a maximum of ${remaining} ${remaining===1 ? 'topic' : 'topics'} to continue.`,
+          code:'INFO_CHAT_INSUFFICIENT_REMAINING'
+        }
+      };
+    }
+
+    if(data?.code==='INFO_CHAT_SCOPE_CHECK_FAILED' || data?.code==='INFO_CHAT_SCOPE_CONTEXT_MISSING'){
+      const es=getLang()==='es';
+      return {
+        text:'',
+        remaining:infoChatQueriesRemaining,
+        notice:{
+          title:es ? 'No pudimos validar esta consulta' : 'We could not validate this query',
+          message:es
+            ? 'No se consumió ninguna consulta. Inténtalo nuevamente en unos segundos.'
+            : 'No query was consumed. Please try again in a few seconds.',
+          code:data.code
+        }
+      };
+    }
 
     if(res.status===429 || data?.code==='INFO_CHAT_LIMIT_REACHED'){
       const remaining=Number(data?.info_chat_remaining || 0);
@@ -2925,6 +2998,7 @@ function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
   $overlayWOW.style.display = on ? 'flex' : 'none';
+  if(on) requestParentViewportFocus('loading-overlay', true);
 
   // Affiliate cards are anchors, not planner controls: they remain clickable
   // in a new tab while the generation request continues untouched.
@@ -5419,6 +5493,67 @@ function bindExportListeners(){
   }
 }
 
+/* =========================================================
+   MODAL VISIBILITY · planner iframe -> parent page
+   Critical windows request that the parent page brings the top of the
+   Planner into view. Standalone Vercel use falls back to window.scrollTo.
+   ========================================================= */
+function requestParentViewportFocus(reason='modal', immediate=false){
+  try{
+    if(window.parent && window.parent !== window){
+      window.parent.postMessage({
+        type:'ITBMO_FOCUS_PLANNER_MODAL',
+        reason:String(reason || 'modal'),
+        immediate:Boolean(immediate)
+      }, '*');
+    }else{
+      window.scrollTo({top:0,behavior:immediate ? 'auto' : 'smooth'});
+    }
+  }catch(_){}
+}
+
+function showPlannerNotice(title, message){
+  qsa('.itbmo-notice-overlay').forEach(el=>el.remove());
+
+  const overlay=document.createElement('div');
+  overlay.className='itbmo-notice-overlay';
+  overlay.setAttribute('role','presentation');
+
+  const card=document.createElement('div');
+  card.className='itbmo-notice-card';
+  card.setAttribute('role','dialog');
+  card.setAttribute('aria-modal','true');
+
+  const safeTitle=String(title || '');
+  const safeMessage=String(message || '');
+  const buttonLabel=getLang()==='es' ? 'Entendido' : 'Got it';
+
+  card.innerHTML=`
+    <button class="itbmo-notice-close" type="button" aria-label="${getLang()==='es' ? 'Cerrar' : 'Close'}">✕</button>
+    <div class="itbmo-notice-symbol">✦</div>
+    <h3></h3>
+    <p></p>
+    <button class="btn primary itbmo-notice-ok" type="button">${buttonLabel}</button>
+  `;
+
+  card.querySelector('h3').textContent=safeTitle;
+  card.querySelector('p').textContent=safeMessage;
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  const close=()=>{
+    overlay.classList.remove('active');
+    setTimeout(()=>overlay.remove(),220);
+  };
+
+  overlay.querySelector('.itbmo-notice-close')?.addEventListener('click',close);
+  overlay.querySelector('.itbmo-notice-ok')?.addEventListener('click',close);
+  overlay.addEventListener('click',(e)=>{ if(e.target===overlay) close(); });
+
+  requestParentViewportFocus('info-chat-notice', true);
+  requestAnimationFrame(()=>overlay.classList.add('active'));
+}
+
 // ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
@@ -5436,6 +5571,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   `;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
+  requestParentViewportFocus('reset-modal', true);
   setTimeout(()=>overlay.classList.add('active'), 10);
 
   const confirmReset = overlay.querySelector('#confirm-reset');
@@ -5797,6 +5933,10 @@ function applyCommerceI18n(){
 
 function openSupportModal(){
   if(!$supportModal || !ITBMO_COMMERCE_CONFIG.support.enabled) return;
+  requestParentViewportFocus('support-modal', true);
+  $supportModal.scrollTop=0;
+  const card=$supportModal.querySelector('.support-card');
+  if(card) card.scrollTop=0;
   $supportModal.classList.add('active');
   $supportModal.setAttribute('aria-hidden','false');
 }
@@ -5866,20 +6006,17 @@ function openCheckoutModal(){
   $checkoutModal.setAttribute('aria-hidden','false');
 
   /* QUIRÚRGICO · Checkout visibility inside the auto-height Webflow iframe.
-     Bring the actual checkout card into the user's visible viewport immediately,
-     then re-center once PayPal finishes rendering and changes the card height. */
-  const focusCheckout = (behavior='smooth')=>{
-    try{
-      const card = $checkoutModal.querySelector('.checkout-card') || $checkoutModal;
-      card.scrollIntoView({behavior, block:'center', inline:'nearest'});
-    }catch(_){}
-  };
-
-  requestAnimationFrame(()=>focusCheckout('smooth'));
+     The parent page is moved to the Planner top, while the modal itself always
+     opens from its own top. This avoids hiding checkout in a tall iframe. */
+  requestParentViewportFocus('checkout-modal', true);
+  $checkoutModal.scrollTop=0;
+  const checkoutCard=$checkoutModal.querySelector('.checkout-card');
+  if(checkoutCard) checkoutCard.scrollTop=0;
 
   Promise.resolve(renderPayPalButtonsIfAvailable()).finally(()=>{
-    setTimeout(()=>focusCheckout('smooth'), 120);
-    setTimeout(()=>focusCheckout('auto'), 420);
+    $checkoutModal.scrollTop=0;
+    if(checkoutCard) checkoutCard.scrollTop=0;
+    requestParentViewportFocus('checkout-modal', true);
   });
 }
 
@@ -6177,6 +6314,7 @@ function openInfoModal(){
   }
   const modal = qs('#info-chat-modal');
   if(!modal) return;
+  requestParentViewportFocus('info-chat-modal', true);
   modal.style.display = 'flex';
   modal.classList.add('active');
 
@@ -6214,7 +6352,11 @@ async function sendInfoMessage(){
 
   const result = await callInfoAgent(txt);
 
-  if(result?.text) infoChatMsg(result.text);
+  if(result?.notice){
+    showPlannerNotice(result.notice.title,result.notice.message);
+  }else if(result?.text){
+    infoChatMsg(result.text);
+  }
 
   if(Number.isFinite(Number(result?.remaining))){
     const remaining=Math.max(0,Number(result.remaining));
