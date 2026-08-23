@@ -1927,6 +1927,7 @@ table.itinerary td:nth-child(8){width:16%}
 }
 
 .info-chat-panel{
+  position:relative;
   display:flex;
   min-height:300px;
   height:auto;
@@ -1953,6 +1954,10 @@ table.itinerary td:nth-child(8){width:16%}
   font-weight:860;
 }
 
+.info-chat-header{cursor:grab;touch-action:none}
+.info-chat-modal.is-dragging .info-chat-header{cursor:grabbing}
+.info-chat-window-actions{display:flex;align-items:center;gap:.45rem;flex:0 0 auto}
+#info-chat-minimize,
 #info-chat-close{
   width:46px;
   height:46px;
@@ -1964,10 +1969,56 @@ table.itinerary td:nth-child(8){width:16%}
   box-shadow:none;
 }
 
+#info-chat-minimize:hover,
 #info-chat-close:hover{
   color:#fff;
   background:rgba(255,255,255,.20);
 }
+
+.info-chat-modal.is-minimized{
+  width:min(360px,calc(100vw - 40px));
+  max-height:78px;
+  cursor:pointer;
+}
+.info-chat-modal.is-minimized .info-chat-panel{min-height:0;height:78px;overflow:hidden}
+.info-chat-modal.is-minimized .info-chat-header{height:78px;min-height:78px;border-radius:1.55rem}
+.info-chat-modal.is-minimized .info-chat-entitlement,
+.info-chat-modal.is-minimized .info-chat-usage,
+.info-chat-modal.is-minimized .chat-messages,
+.info-chat-modal.is-minimized .chat-input,
+.info-chat-modal.is-minimized .info-chat-inline-notice{display:none!important}
+.info-chat-modal.is-minimized #info-chat-minimize{display:none}
+
+.info-chat-inline-notice{
+  position:absolute;
+  inset:78px 0 0;
+  z-index:25;
+  display:grid;
+  place-items:center;
+  padding:1rem;
+  visibility:hidden;
+  opacity:0;
+  pointer-events:none;
+  background:rgba(248,252,253,.78);
+  backdrop-filter:blur(10px) saturate(120%);
+  -webkit-backdrop-filter:blur(10px) saturate(120%);
+  transition:opacity .18s ease,visibility .18s ease;
+}
+.info-chat-inline-notice.is-visible{visibility:visible;opacity:1;pointer-events:auto}
+.info-chat-inline-notice__card{
+  width:min(420px,100%);
+  padding:1.15rem;
+  text-align:center;
+  color:var(--ink);
+  background:rgba(255,255,255,.98);
+  border:1px solid rgba(39,103,146,.14);
+  border-radius:1.25rem;
+  box-shadow:0 20px 54px rgba(8,38,67,.16);
+}
+.info-chat-inline-notice__symbol{display:grid;width:42px;height:42px;place-items:center;margin:0 auto .65rem;border-radius:.9rem;color:#fff;background:linear-gradient(135deg,var(--blue),var(--teal));font-weight:900}
+.info-chat-inline-notice__card h4{margin:.1rem 0 .45rem;font-size:1.12rem;letter-spacing:-.025em}
+.info-chat-inline-notice__card p{margin:0 0 .85rem;color:#587187;font-size:.88rem;line-height:1.5}
+.info-chat-inline-notice__card .btn{min-width:130px}
 
 .info-chat-modal .chat-messages{
   flex:1 1 auto;
@@ -3313,6 +3364,7 @@ input.end,
 .itbmo-affiliate-brand-body p{margin:0;color:var(--text);font-size:.66rem;line-height:1.38}
 .itbmo-affiliate-brand-body .itbmo-affiliate-link{margin-top:auto;min-height:38px;padding:.58rem .65rem;border-radius:11px;background:#f3f8fb;color:#245f7b}
 .itbmo-affiliate-brand-card--kayak .itbmo-affiliate-brand-head{background:#ff690f}
+.itbmo-affiliate-brand-card--skyscanner .itbmo-affiliate-brand-head{background:linear-gradient(135deg,#0770e3,#00a8e8)}
 .itbmo-affiliate-brand-card--booking .itbmo-affiliate-brand-head{background:#003b95}
 .itbmo-affiliate-brand-card--gyg .itbmo-affiliate-brand-head{background:#ff5533}
 .itbmo-affiliate-brand-card--viator .itbmo-affiliate-brand-head{background:#008768}
@@ -3345,3 +3397,12 @@ input.end,
 .itbmo-download-card>small{display:block;margin-top:.62rem;color:#718697;font-size:.6rem;line-height:1.4}
 @media(max-width:900px){.itbmo-affiliate-grid--brands,#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:560px){.itbmo-affiliate-grid--brands,#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:1fr}.itbmo-download-card{padding:1rem;border-radius:22px}}
+
+
+/* ITBMO · Info Chat mobile safety */
+@media (max-width:760px){
+  .info-chat-modal,
+  .info-chat-modal.is-minimized{left:12px!important;right:12px!important;top:92px!important;width:auto!important;max-width:none!important}
+  .info-chat-header{cursor:default;touch-action:auto}
+  .info-chat-inline-notice{inset:78px 0 0}
+}
