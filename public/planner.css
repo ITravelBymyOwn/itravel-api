@@ -3493,3 +3493,25 @@ input.end,
 #chat-container.is-planning-complete #send-btn{
   filter:saturate(.55);
 }
+
+/* =========================================================
+   v76c · PAYMENT RECEIPT BUTTON
+   Acción activa secundaria: visible sin competir con PDF / CSV.
+========================================================= */
+#btn-receipt{
+  background:linear-gradient(135deg,#eef6ff 0%,#e8f1ff 48%,#eef0ff 100%);
+  color:#0b2f5b;
+  border:1px solid rgba(53,107,181,.20);
+  box-shadow:0 10px 26px rgba(39,85,145,.10);
+}
+
+#btn-receipt:hover{
+  transform:translateY(-1px);
+  border-color:rgba(53,107,181,.34);
+  box-shadow:0 14px 30px rgba(39,85,145,.14);
+}
+
+#btn-receipt:focus-visible{
+  outline:3px solid rgba(24,134,240,.20);
+  outline-offset:2px;
+}
