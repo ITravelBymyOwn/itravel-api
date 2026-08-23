@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · HOME V4.4 JS
+   ITBMO · HOME V4.5 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
    - Affiliate preview/config
@@ -22,6 +22,7 @@
     previewMode: true,
 
     partners: {
+      kayak:        { enabled:false, url:'', previewUrl:'https://www.kayak.com/flights' },
       booking:      { enabled:false, url:'', previewUrl:'https://www.booking.com/' },
       getyourguide: { enabled:false, url:'', previewUrl:'https://www.getyourguide.com/' },
       viator:       { enabled:false, url:'', previewUrl:'https://www.viator.com/' },

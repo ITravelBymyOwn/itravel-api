@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.4">
-  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.7">
+  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.1">
 </head>
 <body class="legal-page support-page">
   <a class="skip-link" href="#support-content">Ir al contenido</a>
@@ -22,12 +22,16 @@
         <a href="./preview-home.html#how-it-works">Cómo funciona</a>
         <a href="./preview-home.html#what-you-get">Ejemplo</a>
         <a href="./preview-home.html#planner">Planner</a>
+        <a href="./preview-home.html#travel-essentials">Para tu viaje</a>
         <a href="./preview-home.html#faq">FAQ</a>
         <a aria-current="page" href="./support-contact.html">Soporte</a>
       </nav>
       <div class="site-header__actions">
-        <button class="language-toggle" type="button">ES</button>
-        <a class="button button--small button--glass" href="./preview-home.html#planner">Mi viaje</a>
+        <div class="language-switch" aria-label="Idioma de la página">
+          <span class="is-active">ES</span>
+          <span aria-hidden="true">·</span>
+          <button type="button" disabled aria-disabled="true" title="English version coming soon">EN</button>
+        </div>
       </div>
     </div>
   </header>
@@ -45,7 +49,7 @@
           <span class="legal-hero__summary-icon">?</span>
           <strong>Antes de escribir</strong>
           <p>
-            Si el problema ocurrió en el Planner, pago o generación, incluye la mayor cantidad posible
+            Si el problema ocurrió en el Planner, pago, generación o descarga, incluye la mayor cantidad posible
             de contexto sin compartir datos financieros sensibles.
           </p>
         </div>
@@ -97,6 +101,7 @@
             <div><b>03</b><span>Ciudad(es) del viaje y momento aproximado del incidente.</span></div>
             <div><b>04</b><span>Captura de pantalla si ayuda a explicar el problema.</span></div>
             <div><b>05</b><span>Si fue un pago: fecha, importe y referencia de PayPal disponible.</span></div>
+            <div><b>06</b><span>Si falló una descarga: indica cuál archivo no apareció (PDF, CSV o comprobante) y si probaste el botón individual de respaldo.</span></div>
           </div>
           <div class="legal-callout legal-callout--privacy">
             <span>No envíes</span>
@@ -118,6 +123,19 @@
             </p>
           </div>
           <a class="button button--primary button--large" href="mailto:support@itravelbymyown.com?subject=Pago%20confirmado%20sin%20itinerario">Reportar problema</a>
+        </div>
+
+        <div class="support-payment glass-panel">
+          <div>
+            <div class="eyebrow glass-pill">Descargas</div>
+            <h2>¿No aparecieron todos tus documentos?</h2>
+            <p>
+              Al finalizar una generación, ITBMO intenta iniciar en un solo clic la descarga del itinerario en PDF,
+              el CSV compatible con Excel y el comprobante de pago en PDF. Si el navegador bloquea o no muestra alguno,
+              utiliza los botones individuales que permanecen disponibles debajo del itinerario antes de cerrar o recargar la página.
+            </p>
+          </div>
+          <a class="button button--primary button--large" href="mailto:support@itravelbymyown.com?subject=Problema%20con%20descarga%20de%20documentos">Reportar descarga</a>
         </div>
 
         <div class="support-links glass-panel">

@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=72" />
+  <link rel="stylesheet" href="./planner.css?v=73" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -310,6 +310,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
           <!-- 🆕 MVP: CSV para Excel -->
           <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
+          <button class="btn" id="btn-receipt">Comprobante de pago</button>
 
           <button class="btn email-coming-soon" id="btn-email" type="button" disabled aria-disabled="true" title="Coming soon">
             <span class="email-action-label">Enviar por Email</span>
@@ -561,6 +562,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           send: "Send",
           export_pdf: "Export PDF",
           export_csv: "Export CSV (Excel)",
+          export_receipt: "Payment receipt",
           email: "Send by Email · Coming soon",
           choose_itinerary: "Choose this itinerary",
           info_header: "Info Chat · Astra 🌍",
@@ -620,6 +622,7 @@ This will help create an itinerary that truly matches you.
           send: "Enviar",
           export_pdf: "Exportar PDF",
           export_csv: "Exportar CSV (Excel)",
+          export_receipt: "Comprobante de pago",
           email: "Enviar por Email · Próximamente",
           choose_itinerary: "Elijo este itinerario",
           info_header: "Info Chat · Astra 🌍",
@@ -778,6 +781,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 
         setText(document.getElementById("btn-pdf"), t("export_pdf"));
         setText(document.getElementById("btn-csv"), t("export_csv"));
+        setText(document.getElementById("btn-receipt"), t("export_receipt"));
         setText(document.getElementById("btn-email"), t("email"));
         setText(document.getElementById("confirm-itinerary"), t("choose_itinerary"));
 
@@ -852,7 +856,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=72"></script>
+<script src="./planner.js?v=73"></script>
  
 </body>
 </html>

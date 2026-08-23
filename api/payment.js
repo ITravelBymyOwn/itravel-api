@@ -6,7 +6,7 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 /* =========================================================
-   ITBMO PAYMENTS API · v1.1
+   ITBMO PAYMENTS API · v1.2
    ---------------------------------------------------------
    Supported now:
    - Payment status by trip
@@ -439,7 +439,10 @@ async function handleStatus(res, body, session) {
           provider: payment.provider,
           amount: payment.amount,
           currency: payment.currency,
-          paid_at: payment.paid_at
+          paid_at: payment.paid_at,
+          status: payment.status,
+          provider_order_id: payment.provider_order_id,
+          provider_transaction_id: payment.provider_transaction_id
         }
       : null
   });
@@ -692,7 +695,10 @@ async function handlePayPalCaptureOrder(res, body, session) {
       payment_id: payment.id,
       provider: "paypal",
       amount: money(expectedValue),
-      currency: payment.currency
+      currency: payment.currency,
+      paid_at: paidAt,
+      provider_order_id: orderId,
+      provider_transaction_id: capture.id || null
     });
   } catch (error) {
     // Do not blindly mark failed on transport/API errors because the
