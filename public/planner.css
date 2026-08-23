@@ -3406,3 +3406,90 @@ input.end,
   .info-chat-header{cursor:default;touch-action:auto}
   .info-chat-inline-notice{inset:78px 0 0}
 }
+
+/* =========================================================
+   QUIRÚRGICO · LOADING OVERLAY SCROLL FIX · v74
+   Permite recorrer todos los afiliados durante la generación
+   sin desbloquear el Planner ni perder el overlay.
+========================================================= */
+#loading-overlay{
+  overflow-x:hidden;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+}
+
+#loading-overlay .loader{
+  height:auto;
+  min-height:calc(100dvh - 24px);
+  max-height:none;
+  overflow:visible;
+}
+
+#loading-overlay .itbmo-affiliate-loading{
+  height:auto;
+  min-height:0;
+  flex:0 0 auto;
+}
+
+#loading-overlay .itbmo-affiliate-shell{
+  min-height:auto;
+  flex:0 0 auto;
+}
+
+#loading-overlay .itbmo-affiliate-grid{
+  min-height:auto;
+  flex:0 0 auto;
+  grid-template-rows:none;
+  grid-auto-rows:minmax(250px,auto);
+}
+
+#loading-overlay .itbmo-affiliate-card{
+  height:auto;
+  min-height:250px;
+}
+
+@media (max-width:900px){
+  #loading-overlay .itbmo-affiliate-grid{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    grid-auto-rows:minmax(230px,auto);
+  }
+}
+
+@media (max-width:560px){
+  #loading-overlay{
+    padding:8px 6px;
+  }
+
+  #loading-overlay .loader{
+    min-height:calc(100dvh - 16px);
+    padding:.8rem .7rem .9rem;
+  }
+
+  #loading-overlay .itbmo-affiliate-grid{
+    grid-template-columns:1fr;
+    grid-auto-rows:auto;
+  }
+
+  #loading-overlay .itbmo-affiliate-card{
+    min-height:220px;
+  }
+}
+
+/* =========================================================
+   QUIRÚRGICO · PLANNING CHAT COMPLETE STATE · v75
+   Conserva visible el historial, pero bloquea nuevas entradas
+   después de generar el itinerario. La lógica histórica se mantiene.
+========================================================= */
+#chat-container.is-planning-complete .chat-input{
+  opacity:.68;
+}
+
+#chat-container.is-planning-complete #chat-input,
+#chat-container.is-planning-complete #send-btn{
+  cursor:not-allowed;
+}
+
+#chat-container.is-planning-complete #send-btn{
+  filter:saturate(.55);
+}
