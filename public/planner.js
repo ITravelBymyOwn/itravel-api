@@ -108,8 +108,8 @@ const I18N = {
   es: {
     hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
     askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
-    confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
-    doneAll: '🎉 ¡Tus itinerarios están listos! ¿Necesitas ayuda para elegir la mejor zona donde hospedarte, revisar el clima, encontrar restaurantes, entender el transporte, descubrir la gastronomía local, planear fotografías, verificar tickets, conocer lugares ocultos, revisar seguridad o costumbres, preparar el equipaje, organizar el presupuesto o resolver cualquier otra duda del viaje? Abre el Info Chat 🌐 y pregúntame lo que necesites.',
+    confirmAll: '✨ Listo.',
+    doneAll: '🎉 ¡Tus itinerarios están listos! Para dudas adicionales sobre las ciudades de este viaje, usa Info Chat 🌐.',
     fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
     askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
     humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
@@ -186,8 +186,8 @@ const I18N = {
   en: {
     hi: 'Hi! I’m Astra ✨, your travel concierge. Let’s build unforgettable itineraries 🌍',
     askHotelTransport: (city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental, public transit, taxi/uber, mixed, or “recommend”).`,
-    confirmAll: '✨ Great. I’m starting to generate your itineraries…',
-    doneAll: '🎉 Your itineraries are ready! Need help choosing the best area to stay, checking the weather, finding restaurants, understanding transportation, exploring local food, planning photography, verifying tickets, discovering hidden gems, reviewing safety or customs, deciding what to pack, managing your budget, or anything else about your trip? Open the Info Chat 🌐 and ask me anything.',
+    confirmAll: '✨ Ready.',
+    doneAll: '🎉 Your itineraries are ready! For additional questions about the cities in this trip, use Info Chat 🌐.',
     fail: '⚠️ Could not reach the assistant. Check console/Vercel (API Key, URL).',
     askConfirm: (summary)=>`Do you confirm? ${summary}<br><small>Reply “yes” to apply or “no” to cancel.</small>`,
     humanOk: 'Perfect 🙌 I adjusted your itinerary so you can use your time better. It’s going to be great! ✨',
@@ -2267,38 +2267,54 @@ function _durationLabels_(){
 
 function getPlannerCompletionMessage(){
   const lang = _plannerOutputLang_();
+  const cities = savedDestinations.map(d=>d.city).filter(Boolean);
+  const cityList = cities.join(', ');
+
   const messages = {
     en: `🎉 Your itineraries are ready!
 
-Need help choosing where to stay, checking the weather, finding great restaurants, discovering local food, understanding transportation, planning what to pack, exploring hidden gems, buying tickets, learning local customs, staying safe, managing your budget, or anything else about your trip?
+For additional questions about ${cityList || 'the cities in this trip'}, open Info Chat 🌐.
 
-Open the Info Chat 🌐 and ask me anything. I'm here to help you get the most out of your journey.`,
+It can help you with neighborhood and area comparisons, local transportation patterns, local cuisine and customs, general safety considerations, photography ideas, packing suggestions, approximate budgeting, and ways to organize your visits more efficiently.
+
+Info Chat is focused on the cities included in this itinerary and does not check live availability or real-time reservations.`,
     es: `🎉 ¡Tus itinerarios están listos!
 
-¿Necesitas ayuda para elegir dónde hospedarte, revisar el clima, encontrar excelentes restaurantes, descubrir la gastronomía local, entender el transporte, planear qué llevar, explorar lugares ocultos, comprar entradas, conocer las costumbres locales, viajar con seguridad, administrar tu presupuesto o resolver cualquier otra duda sobre tu viaje?
+Para consultas adicionales sobre ${cityList || 'las ciudades de este viaje'}, abre Info Chat 🌐.
 
-Abre el Info Chat 🌐 y pregúntame lo que necesites. Estoy aquí para ayudarte a aprovechar al máximo tu viaje.`,
+Puede ayudarte con comparación de zonas y barrios, formas habituales de transporte local, gastronomía y costumbres, consideraciones generales de seguridad, ideas de fotografía, qué llevar, presupuesto orientativo y cómo organizar mejor tus visitas.
+
+Info Chat está enfocado en las ciudades incluidas en este itinerario y no consulta disponibilidad ni reservaciones en tiempo real.`,
     pt: `🎉 Seus itinerários estão prontos!
 
-Precisa de ajuda para escolher onde ficar, verificar o clima, encontrar ótimos restaurantes, descobrir a gastronomia local, entender o transporte, planejar o que levar, explorar lugares escondidos, comprar ingressos, conhecer os costumes locais, viajar com segurança, administrar seu orçamento ou esclarecer qualquer outra dúvida sobre a viagem?
+Para dúvidas adicionais sobre ${cityList || 'as cidades desta viagem'}, abra o Info Chat 🌐.
 
-Abra o Info Chat 🌐 e pergunte o que quiser. Estou aqui para ajudar você a aproveitar ao máximo a sua viagem.`,
+Ele pode ajudar com comparação de bairros e áreas, transporte local, gastronomia e costumes, considerações gerais de segurança, ideias de fotografia, o que levar, orçamento aproximado e como organizar melhor suas visitas.
+
+O Info Chat é focado nas cidades incluídas neste itinerário e não consulta disponibilidade nem reservas em tempo real.`,
     fr: `🎉 Vos itinéraires sont prêts !
 
-Besoin d’aide pour choisir où séjourner, vérifier la météo, trouver d’excellents restaurants, découvrir la cuisine locale, comprendre les transports, préparer vos bagages, explorer des lieux méconnus, acheter des billets, connaître les coutumes locales, voyager en toute sécurité, gérer votre budget ou répondre à toute autre question sur votre voyage ?
+Pour toute question supplémentaire sur ${cityList || 'les villes de ce voyage'}, ouvrez Info Chat 🌐.
 
-Ouvrez l’Info Chat 🌐 et posez-moi toutes vos questions. Je suis là pour vous aider à profiter pleinement de votre voyage.`,
+Il peut vous aider à comparer les quartiers, comprendre les transports locaux, découvrir la gastronomie et les coutumes, aborder des considérations générales de sécurité, trouver des idées photo, préparer vos bagages, estimer un budget et mieux organiser vos visites.
+
+Info Chat se concentre sur les villes incluses dans cet itinéraire et ne vérifie pas les disponibilités ou réservations en temps réel.`,
     de: `🎉 Ihre Reisepläne sind fertig!
 
-Benötigen Sie Hilfe bei der Wahl der besten Unterkunft, beim Prüfen des Wetters, bei Restaurantempfehlungen, lokaler Küche, Verkehrsmitteln, der Packliste, versteckten Highlights, Tickets, lokalen Gepflogenheiten, Sicherheit, Budgetplanung oder bei einer anderen Frage zu Ihrer Reise?
+Für weitere Fragen zu ${cityList || 'den Städten dieser Reise'} öffnen Sie Info Chat 🌐.
 
-Öffnen Sie den Info Chat 🌐 und fragen Sie mich alles. Ich helfe Ihnen dabei, das Beste aus Ihrer Reise herauszuholen.`,
+Es kann bei der Auswahl von Vierteln, lokalen Verkehrsmöglichkeiten, Küche und Gepflogenheiten, allgemeinen Sicherheitshinweisen, Fotoideen, Packempfehlungen, grober Budgetplanung und einer besseren Organisation Ihrer Besuche helfen.
+
+Info Chat konzentriert sich auf die Städte dieses Reiseplans und prüft keine Live-Verfügbarkeiten oder Echtzeit-Reservierungen.`,
     it: `🎉 I tuoi itinerari sono pronti!
 
-Hai bisogno di aiuto per scegliere dove soggiornare, controllare il meteo, trovare ottimi ristoranti, scoprire la cucina locale, capire come muoverti, pianificare cosa mettere in valigia, esplorare luoghi nascosti, acquistare biglietti, conoscere le usanze locali, viaggiare in sicurezza, gestire il budget o chiarire qualsiasi altro dubbio sul viaggio?
+Per ulteriori domande su ${cityList || 'le città di questo viaggio'}, apri Info Chat 🌐.
 
-Apri l’Info Chat 🌐 e chiedimi qualsiasi cosa. Sono qui per aiutarti a ottenere il massimo dal tuo viaggio.`
+Può aiutarti a confrontare quartieri e zone, capire i trasporti locali, conoscere gastronomia e usanze, valutare considerazioni generali sulla sicurezza, trovare idee fotografiche, preparare i bagagli, stimare il budget e organizzare meglio le visite.
+
+Info Chat è focalizzato sulle città incluse in questo itinerario e non verifica disponibilità o prenotazioni in tempo reale.`
   };
+
   return messages[lang] || messages.en;
 }
 
@@ -4247,16 +4263,50 @@ ${buildIntake()}
   }
 }
 
+
+function getPlanningInfoChatPreparationMessage(){
+  const cities = savedDestinations.map(d=>d.city).filter(Boolean);
+  const list = cities.join(', ');
+  const es = getLang()==='es';
+  return es
+    ? `💡 <strong>Antes de continuar:</strong> si todavía no tienes clara la mejor <strong>zona para hospedarte</strong> o qué <strong>medio de transporte</strong> te conviene en ${list || 'alguna de tus ciudades'}, abre <strong>Info Chat 🌐</strong> ahora. Puede ayudarte a comparar zonas, barrios y formas habituales de moverte según el contexto de tu viaje. Luego vuelve aquí y dime tu decisión para cada ciudad.`
+    : `💡 <strong>Before we continue:</strong> if you are not sure about the best <strong>area to stay</strong> or which <strong>transport option</strong> makes most sense in ${list || 'one of your cities'}, open <strong>Info Chat 🌐</strong> now. It can help you compare neighborhoods, areas and common ways to get around based on your trip context. Then come back here and tell me your choice for each city.`;
+}
+
+function setPlanningChatLocked(locked){
+  if(!$chatBox || !$chatI || !$send) return;
+  const es = getLang()==='es';
+
+  $chatBox.classList.toggle('is-planning-complete', !!locked);
+  $chatI.disabled = !!locked;
+  $send.disabled = !!locked;
+  $chatI.setAttribute('aria-disabled', locked ? 'true' : 'false');
+  $send.setAttribute('aria-disabled', locked ? 'true' : 'false');
+
+  if(locked){
+    $chatI.value = '';
+    $chatI.placeholder = es
+      ? 'Planificación completada · usa Info Chat para consultas sobre tus ciudades.'
+      : 'Planning completed · use Info Chat for questions about your cities.';
+    $send.title = es ? 'Planificación completada' : 'Planning completed';
+  }else{
+    $chatI.placeholder = es ? 'Escribe tu mensaje...' : 'Type your message...';
+    $send.removeAttribute('title');
+  }
+}
+
 async function startPlanning(){
   if(savedDestinations.length===0) return;
   setExportToolbarVisibility(false);
   $chatBox.style.display='flex';
+  setPlanningChatLocked(false);
   planningStarted = true;
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
 
   chatMsg(`${tone.hi}`);
+  chatMsg(getPlanningInfoChatPreparationMessage(),'ai');
   askNextHotelTransport();
 }
 function askNextHotelTransport(){
@@ -4589,8 +4639,6 @@ async function onSend(){
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
 
-    chatMsg(tone.confirmAll, 'ai');
-
     (async ()=>{
       showWOW(true, t('overlayGenerating'));
       for(const {city} of savedDestinations){
@@ -4599,6 +4647,7 @@ async function onSend(){
       showWOW(false);
       setExportToolbarVisibility();
       chatMsg(getPlannerCompletionMessage(), 'ai');
+      setPlanningChatLocked(true);
       setTimeout(()=>showFinalDownloadModal(),260);
     })();
 
@@ -5522,10 +5571,17 @@ function showFinalDownloadModal(){
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
   overlay.querySelector('.itbmo-download-all').addEventListener('click',async()=>{
+    /*
+      Mantener las tres descargas dentro de la interacción directa del usuario.
+      Algunos navegadores bloquean descargas automáticas posteriores cuando se
+      disparan desde setTimeout. Los botones individuales permanecen como fallback.
+    */
     exportItineraryToPDF();
-    setTimeout(()=>exportItineraryToCSV(),180);
-    setTimeout(()=>exportPaymentReceiptToPDF(),360);
-    status.textContent=es?'✓ Las descargas fueron iniciadas. Si falta alguna, usa los botones individuales.':'✓ Downloads were started. If one is missing, use the individual buttons.';
+    exportItineraryToCSV();
+    await exportPaymentReceiptToPDF();
+    status.textContent=es
+      ? '✓ Se iniciaron 3 descargas: itinerario PDF, CSV y comprobante PDF. Revisa tu carpeta de Descargas. Si falta alguna, usa los botones individuales.'
+      : '✓ Three downloads were started: itinerary PDF, CSV and payment receipt PDF. Check your Downloads folder. If one is missing, use the individual buttons.';
   });
 }
 
@@ -6679,11 +6735,11 @@ function enhancePreferencesInfoChatCopy(){
       examples:'For example:',
       items:[
         '🏨 Best area or neighborhood to stay',
-        '🌦️ Weather and the best time for each activity',
+        '🧳 Seasonal context and what to pack',
         '🚇 Transportation and how to get around',
-        '🍽️ Restaurants, cafés and local food',
+        '🍽️ Local cuisine and dining areas',
         '📸 Hidden gems and photography spots',
-        '🎟️ Tickets, reservations and practical travel tips',
+        '🧭 Neighborhoods, customs and practical local context',
         '🧳 What to pack and local customs',
         '💰 Budget recommendations',
         '❓ Anything else related to your trip'
@@ -6697,11 +6753,11 @@ function enhancePreferencesInfoChatCopy(){
       examples:'Por ejemplo:',
       items:[
         '🏨 Mejor zona o barrio para hospedarte',
-        '🌦️ Clima y mejor horario para cada actividad',
+        '🧳 Contexto estacional y qué llevar',
         '🚇 Transporte y cómo desplazarte',
-        '🍽️ Restaurantes, cafés y gastronomía local',
+        '🍽️ Gastronomía local y zonas para comer',
         '📸 Lugares ocultos y puntos para fotografía',
-        '🎟️ Entradas, reservaciones y consejos prácticos',
+        '🧭 Barrios, costumbres y contexto práctico local',
         '🧳 Qué llevar y costumbres locales',
         '💰 Recomendaciones de presupuesto',
         '❓ Cualquier otra consulta relacionada con tu viaje'
@@ -6713,7 +6769,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Não sabe o que escrever?',
       intro:'Você pode abrir o <strong>Info Chat 🌐</strong> a qualquer momento, <strong>antes, durante ou depois do planejamento</strong>, e perguntar qualquer coisa sobre a viagem.',
       examples:'Por exemplo:',
-      items:['🏨 Melhor área ou bairro para ficar','🌦️ Clima e melhor horário para cada atividade','🚇 Transporte e como se locomover','🍽️ Restaurantes, cafés e gastronomia local','📸 Lugares escondidos e pontos para fotografia','🎟️ Ingressos, reservas e dicas práticas','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
+      items:['🏨 Melhor área ou bairro para ficar','🧳 Contexto sazonal e o que levar','🚇 Transporte e como se locomover','🍽️ Gastronomia local e áreas para comer','📸 Lugares escondidos e pontos para fotografia','🧭 Bairros, costumes e contexto local prático','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
       final:'📝 Cada detalhe ajuda a Astra a tomar decisões de planejamento mais inteligentes. Quanto mais você compartilhar, mais personalizado e otimizado será o seu itinerário.',
       placeholder:'Conte à Astra como você quer viver a viagem... Em dúvida? Abra o Info Chat 🌐 para se inspirar.'
     },
@@ -6721,7 +6777,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Vous ne savez pas quoi écrire ?',
       intro:'Vous pouvez ouvrir l’<strong>Info Chat 🌐</strong> à tout moment, <strong>avant, pendant ou après la planification</strong>, et poser toutes vos questions sur le voyage.',
       examples:'Par exemple :',
-      items:['🏨 Meilleur quartier où séjourner','🌦️ Météo et meilleur moment pour chaque activité','🚇 Transports et déplacements','🍽️ Restaurants, cafés et cuisine locale','📸 Lieux méconnus et spots photo','🎟️ Billets, réservations et conseils pratiques','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
+      items:['🏨 Meilleur quartier où séjourner','🧳 Contexte saisonnier et quoi emporter','🚇 Transports et déplacements','🍽️ Cuisine locale et quartiers où manger','📸 Lieux méconnus et spots photo','🧭 Quartiers, coutumes et contexte local pratique','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
       final:'📝 Chaque détail aide Astra à prendre de meilleures décisions de planification. Plus vous partagez d’informations, plus votre itinéraire sera personnalisé et optimisé.',
       placeholder:'Expliquez à Astra comment vous souhaitez vivre votre voyage... Besoin d’idées ? Ouvrez l’Info Chat 🌐.'
     },
@@ -6729,7 +6785,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Sie wissen nicht, was Sie schreiben sollen?',
       intro:'Sie können den <strong>Info Chat 🌐</strong> jederzeit <strong>vor, während oder nach der Planung</strong> öffnen und alles zu Ihrer Reise fragen.',
       examples:'Zum Beispiel:',
-      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🌦️ Wetter und beste Zeit für jede Aktivität','🚇 Verkehrsmittel und Fortbewegung','🍽️ Restaurants, Cafés und lokale Küche','📸 Versteckte Orte und Fotospots','🎟️ Tickets, Reservierungen und praktische Reisetipps','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
+      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🧳 Saisonaler Kontext und Packempfehlungen','🚇 Verkehrsmittel und Fortbewegung','🍽️ Lokale Küche und Gegenden zum Essen','📸 Versteckte Orte und Fotospots','🧭 Viertel, Gepflogenheiten und praktischer lokaler Kontext','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
       final:'📝 Jedes Detail hilft Astra, intelligentere Planungsentscheidungen zu treffen. Je mehr Sie mitteilen, desto persönlicher und besser optimiert wird Ihre Reiseroute.',
       placeholder:'Beschreiben Sie Astra, wie Sie Ihre Reise erleben möchten... Unsicher? Nutzen Sie den Info Chat 🌐 als Inspiration.'
     },
@@ -6737,7 +6793,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Non sai cosa scrivere?',
       intro:'Puoi aprire l’<strong>Info Chat 🌐</strong> in qualsiasi momento, <strong>prima, durante o dopo la pianificazione</strong>, e chiedere qualsiasi cosa sul viaggio.',
       examples:'Per esempio:',
-      items:['🏨 Zona o quartiere migliore dove soggiornare','🌦️ Meteo e momento migliore per ogni attività','🚇 Trasporti e come spostarsi','🍽️ Ristoranti, caffè e cucina locale','📸 Luoghi nascosti e punti fotografici','🎟️ Biglietti, prenotazioni e consigli pratici','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
+      items:['🏨 Zona o quartiere migliore dove soggiornare','🧳 Contesto stagionale e cosa portare','🚇 Trasporti e come spostarsi','🍽️ Cucina locale e zone dove mangiare','📸 Luoghi nascosti e punti fotografici','🧭 Quartieri, usanze e contesto locale pratico','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
       final:'📝 Ogni dettaglio aiuta Astra a prendere decisioni di pianificazione più intelligenti. Più informazioni condividi, più il tuo itinerario sarà personalizzato e ottimizzato.',
       placeholder:'Racconta ad Astra come vuoi vivere il viaggio... Hai dubbi? Apri l’Info Chat 🌐 per trovare ispirazione.'
     }
@@ -6747,7 +6803,7 @@ function enhancePreferencesInfoChatCopy(){
     title:'💡 Not sure what to write?',
     intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
     examples:'For example:',
-    items:['🏨 Best area or neighborhood to stay','🌦️ Weather and the best time for each activity','🚇 Transportation and how to get around','🍽️ Restaurants, cafés and local food','📸 Hidden gems and photography spots','🎟️ Tickets, reservations and practical travel tips','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
+    items:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
     final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
     placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
   };
