@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO PLANNER v64 — Precision Route & Anchor Upgrade
+   ITBMO PLANNER v64 · Final Download & Branded Affiliate Upgrade — Precision Route & Anchor Upgrade
 
    Base: v63
    API contract: compatible with API v65
@@ -351,13 +351,6 @@ const ITBMO_AFFILIATE_CONFIG = {
       name: 'KAYAK',
       category: 'flights'
     },
-    skyscanner: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.skyscanner.com/',
-      name: 'Skyscanner',
-      category: 'flights'
-    },
     booking: {
       enabled: false,
       url: '',
@@ -495,7 +488,7 @@ function _affiliateTrack_(partnerKey, placement){
 function _affiliateCategoryModel_(){
   const c = _affiliateCopy_();
   return [
-    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak','skyscanner'] },
+    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak'] },
     { key:'hotels', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
     { key:'experiences', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
     { key:'transport', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
@@ -503,92 +496,67 @@ function _affiliateCategoryModel_(){
   ];
 }
 
+function _affiliateBrandClass_(key){
+  const map={kayak:'kayak',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
+  return map[key] || 'default';
+}
+
+function _affiliatePartnerCopy_(key){
+  const es=getLang()==='es';
+  const copy={
+    kayak: es ? ['Vuelos','Compara tus vuelos','Explora opciones para llegar a tus destinos.','Buscar vuelos'] : ['Flights','Compare flights','Explore options to reach your destinations.','Search flights'],
+    booking: es ? ['Hospedaje','Encuentra tu alojamiento','Busca y compara alojamiento para tus destinos.','Buscar hoteles'] : ['Stays','Find your stay','Search and compare stays for your destinations.','Search hotels'],
+    getyourguide: es ? ['Experiencias','Reserva actividades','Tours, entradas y actividades en destino.','Explorar experiencias'] : ['Experiences','Book activities','Tours, tickets and activities at your destination.','Explore experiences'],
+    viator: es ? ['Experiencias','Explora tours','Compara excursiones y actividades disponibles.','Ver actividades'] : ['Experiences','Explore tours','Compare excursions and available activities.','View activities'],
+    omio: es ? ['Transporte','Conecta tus destinos','Trenes, autobuses y conexiones entre destinos.','Buscar transporte'] : ['Transport','Connect your destinations','Trains, buses and connections between destinations.','Search transport'],
+    airalo: es ? ['eSIM','Llega conectado','Opciones de datos móviles para tu destino.','Ver eSIM'] : ['eSIM','Land connected','Mobile data options for your destination.','View eSIM'],
+    holafly: es ? ['eSIM','Datos para tu viaje','Alternativas para mantenerte conectado al viajar.','Explorar conectividad'] : ['eSIM','Data for your trip','Alternatives to stay connected while traveling.','Explore connectivity']
+  };
+  return copy[key] || ['',key,'','Explorar'];
+}
+
 function renderAffiliateSurface(placement='loading'){
   const root = placement==='loading' ? $affiliateLoading : $affiliateAfter;
   if(!root) return false;
 
   const c = _affiliateCopy_();
-  const categories = _affiliateCategoryModel_()
-    .map(cat=>({
-      ...cat,
-      partners: cat.partners.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]))
-    }))
-    .filter(cat=>cat.partners.length);
+  const order=['kayak','booking','omio','getyourguide','viator','airalo','holafly'];
+  const visible=order.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]));
 
-  if(!categories.length){
+  if(!visible.length){
     root.innerHTML='';
     root.style.display='none';
     return false;
   }
 
-  const isLoading = placement==='loading';
-  const eyebrow = isLoading ? c.loadingEyebrow : c.afterEyebrow;
-  const title = isLoading ? c.loadingTitle : c.afterTitle;
-  const sub = isLoading ? c.loadingSub : c.afterSub;
+  const isLoading=placement==='loading';
+  const eyebrow=isLoading ? c.loadingEyebrow : c.afterEyebrow;
+  const title=isLoading ? c.loadingTitle : c.afterTitle;
+  const sub=isLoading ? c.loadingSub : c.afterSub;
 
-  root.innerHTML = `
+  root.innerHTML=`
     <div class="itbmo-affiliate-shell itbmo-affiliate-shell--${placement}">
-      <div class="itbmo-affiliate-orb itbmo-affiliate-orb--one" aria-hidden="true"></div>
-      <div class="itbmo-affiliate-orb itbmo-affiliate-orb--two" aria-hidden="true"></div>
-
       <div class="itbmo-affiliate-heading">
-        <div class="itbmo-affiliate-eyebrow">
-          <span class="itbmo-affiliate-spark" aria-hidden="true">✦</span>
-          <span>${eyebrow}</span>
-          ${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>` : ''}
-        </div>
-        <h3>${title}</h3>
-        <p>${sub}</p>
+        <div class="itbmo-affiliate-eyebrow"><span class="itbmo-affiliate-spark">✦</span><span>${eyebrow}</span>${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>`:''}</div>
+        <h3>${title}</h3><p>${sub}</p>
       </div>
-
-      <div class="itbmo-affiliate-grid" data-count="${categories.length}">
-        ${categories.map(cat=>`
-          <article class="itbmo-affiliate-card itbmo-affiliate-card--${cat.key}${cat.featured ? ' itbmo-affiliate-card--featured' : ''}">
-            <div class="itbmo-affiliate-card-top">
-              <div class="itbmo-affiliate-icon" aria-hidden="true">${_affiliateIcon_(cat.key)}</div>
-              <div class="itbmo-affiliate-card-copy">
-                <h4>${cat.title}</h4>
-                <p>${cat.desc}</p>
-              </div>
+      <div class="itbmo-affiliate-grid itbmo-affiliate-grid--brands" data-count="${visible.length}">
+        ${visible.map(key=>{
+          const p=ITBMO_AFFILIATE_CONFIG.partners[key];
+          const pc=_affiliatePartnerCopy_(key);
+          const url=_affiliatePartnerUrl_(p);
+          return `<article class="itbmo-affiliate-card itbmo-affiliate-brand-card itbmo-affiliate-brand-card--${_affiliateBrandClass_(key)}">
+            <div class="itbmo-affiliate-brand-head"><strong>${p.name}</strong>${ITBMO_AFFILIATE_CONFIG.previewMode?`<span>${c.preview}</span>`:''}</div>
+            <div class="itbmo-affiliate-brand-body"><small>${pc[0]}</small><h4>${pc[1]}</h4><p>${pc[2]}</p>
+              <a class="itbmo-affiliate-link" href="${url}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}"><span>${pc[3]}</span><span class="itbmo-affiliate-arrow">↗</span></a>
             </div>
-            <div class="itbmo-affiliate-links">
-              ${cat.partners.map(key=>{
-                const p = ITBMO_AFFILIATE_CONFIG.partners[key];
-                const url = _affiliatePartnerUrl_(p);
-                return `
-                  <a class="itbmo-affiliate-link"
-                     href="${url}"
-                     target="_blank"
-                     rel="sponsored noopener noreferrer"
-                     data-affiliate-partner="${key}"
-                     data-affiliate-placement="${placement}"
-                     aria-label="${c.explore} ${p.name}">
-                    <span class="itbmo-affiliate-brand">${p.name}</span>
-                    <span class="itbmo-affiliate-arrow" aria-hidden="true">
-                      <svg viewBox="0 0 20 20" fill="none"><path d="M6 14 14 6M8 6h6v6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                    </span>
-                  </a>`;
-              }).join('')}
-            </div>
-          </article>
-        `).join('')}
+          </article>`;
+        }).join('')}
       </div>
-
-      <div class="itbmo-affiliate-trust">
-        <span class="itbmo-affiliate-trust-dot" aria-hidden="true"></span>
-        <span>${c.trust}</span>
-      </div>
-    </div>
-  `;
-
+      <div class="itbmo-affiliate-trust"><span class="itbmo-affiliate-trust-dot"></span><span>${c.trust}</span></div>
+    </div>`;
   root.style.display='block';
-
-  qsa('[data-affiliate-partner]',root).forEach(a=>{
-    a.addEventListener('click',()=>{
-      _affiliateTrack_(a.dataset.affiliatePartner, a.dataset.affiliatePlacement || placement);
-    });
-  });
-
+  qsa('[data-affiliate-partner]',root).forEach(a=>a.addEventListener('click',()=>_affiliateTrack_(a.dataset.affiliatePartner,a.dataset.affiliatePlacement||placement)));
   return true;
 }
 
@@ -1206,6 +1174,7 @@ async function saveTripRecord(list, travelerState){
 /* 🆕 Export buttons (PDF / CSV / Email) */
 const $btnPDF   = qs('#btn-pdf');
 const $btnCSV   = qs('#btn-csv');
+const $btnReceipt = qs('#btn-receipt');
 const $btnEmail = qs('#btn-email');
 const $exportToolbar = qs('.toolbar');
 
@@ -4617,6 +4586,7 @@ async function onSend(){
       showWOW(false);
       setExportToolbarVisibility();
       chatMsg(getPlannerCompletionMessage(), 'ai');
+      setTimeout(()=>showFinalDownloadModal(),260);
     })();
 
     return;
@@ -5474,6 +5444,78 @@ function sendItineraryByEmail(){
   window.location.href = href;
 }
 
+async function getPaymentReceiptData(){
+  const token=getStoredSessionToken();
+  if(!token || !currentTripId) return null;
+  try{
+    const data=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+    if(data?.admin_bypass && !data?.payment){
+      return {test:true,id:`ADMIN-${String(currentTripId).slice(0,8).toUpperCase()}`,provider:'admin_test_bypass',amount:'0.00',currency:'USD',paid_at:new Date().toISOString(),provider_transaction_id:null};
+    }
+    return data?.payment ? {...data.payment,test:false} : null;
+  }catch(err){ console.warn('[RECEIPT STATUS]',err); return null; }
+}
+
+async function exportPaymentReceiptToPDF(){
+  if(!window.jspdf?.jsPDF){ alert(getLang()==='es'?'No se pudo preparar el comprobante PDF.':'Could not prepare the PDF receipt.'); return false; }
+  const payment=await getPaymentReceiptData();
+  if(!payment){ alert(getLang()==='es'?'No encontramos un pago confirmado para este viaje. Si acabas de pagar, espera unos segundos y vuelve a intentarlo.':'No confirmed payment was found for this trip.'); return false; }
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'a4'});
+  const es=getLang()==='es';
+  const cities=getOrderedCitiesForExport();
+  const receiptNo=payment.test ? payment.id : `ITBMO-${String(payment.id||'').slice(0,8).toUpperCase()}`;
+  doc.setFont('helvetica','bold'); doc.setFontSize(22); doc.text('I Travel',42,58); doc.setFontSize(11); doc.text('By My Own',43,74);
+  doc.setFontSize(18); doc.text(es?'Comprobante de pago':'Payment Receipt',42,118);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  const rows=[
+    [es?'Comprobante':'Receipt',receiptNo],
+    [es?'Fecha':'Date',payment.paid_at?new Date(payment.paid_at).toLocaleString(es?'es-CR':'en-US'):'—'],
+    [es?'Proveedor':'Provider',payment.test?'ADMIN TEST':String(payment.provider||'PayPal').toUpperCase()],
+    [es?'Importe':'Amount',`${payment.currency||'USD'} ${Number(payment.amount||0).toFixed(2)}`],
+    [es?'ID transacción PayPal':'PayPal transaction ID',payment.provider_transaction_id||'—'],
+    [es?'Viaje':'Trip',cities.join(' · ')||'—'],
+    ['Trip ID',currentTripId||'—']
+  ];
+  let y=154; rows.forEach(([a,b])=>{doc.setFont('helvetica','bold');doc.text(String(a),42,y);doc.setFont('helvetica','normal');doc.text(String(b),190,y,{maxWidth:350});y+=28;});
+  doc.setDrawColor(220); doc.line(42,y+4,553,y+4); y+=34;
+  doc.setFontSize(9); doc.setTextColor(80);
+  const note=payment.test
+    ? (es?'DOCUMENTO DE PRUEBA / ADMIN — NO REPRESENTA UN PAGO REAL.':'TEST / ADMIN DOCUMENT — DOES NOT REPRESENT A REAL PAYMENT.')
+    : (es?'Este documento es un comprobante de pago de ITBMO. No constituye factura ni comprobante fiscal.':'This document is an ITBMO payment receipt. It is not a tax invoice or fiscal document.');
+  doc.text(doc.splitTextToSize(note,500),42,y);
+  const d=new Date(); const stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  doc.save(`ITBMO-Payment-Receipt-${stamp}.pdf`);
+  return true;
+}
+
+function showFinalDownloadModal(){
+  if(document.querySelector('.itbmo-download-overlay')) return;
+  const es=getLang()==='es';
+  const overlay=document.createElement('div'); overlay.className='itbmo-download-overlay';
+  overlay.innerHTML=`<div class="itbmo-download-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-download-title">
+    <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ASTRA TERMINÓ':'ASTRA IS DONE'}</div>
+    <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
+    <p>${es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.'}</p>
+    <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
+    <button class="btn primary itbmo-download-all" type="button">${es?'Descargar mis documentos':'Download my documents'}</button>
+    <div class="itbmo-download-status" aria-live="polite"></div>
+    <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
+    <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
+    <small>${es?'Si alguna descarga no aparece, usa los botones individuales que quedan disponibles debajo del itinerario.':'If any download does not appear, use the individual buttons available below the itinerary.'}</small>
+  </div>`;
+  document.body.appendChild(overlay); requestParentViewportFocus('download-ready',true); requestAnimationFrame(()=>overlay.classList.add('active'));
+  const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
+  ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
+  close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
+  overlay.querySelector('.itbmo-download-all').addEventListener('click',async()=>{
+    exportItineraryToPDF();
+    setTimeout(()=>exportItineraryToCSV(),180);
+    setTimeout(()=>exportPaymentReceiptToPDF(),360);
+    status.textContent=es?'✓ Las descargas fueron iniciadas. Si falta alguna, usa los botones individuales.':'✓ Downloads were started. If one is missing, use the individual buttons.';
+  });
+}
+
 function bindExportListeners(){
   $btnPDF?.addEventListener('click', (e)=>{
     e.preventDefault();
@@ -5483,6 +5525,11 @@ function bindExportListeners(){
   $btnCSV?.addEventListener('click', (e)=>{
     e.preventDefault();
     exportItineraryToCSV();
+  });
+
+  $btnReceipt?.addEventListener('click', async (e)=>{
+    e.preventDefault();
+    await exportPaymentReceiptToPDF();
   });
 
   /* MVP · Email export intentionally disabled until transactional email is activated. */
