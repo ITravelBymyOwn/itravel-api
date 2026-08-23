@@ -384,7 +384,10 @@ img,svg,video{max-width:100%;display:block}
 
 /* TRAVEL HUB */
 .travel-hub{padding:clamp(4.5rem,7vw,7rem) 0;background:linear-gradient(180deg,#f6fafc,#fbfcff)}
-.partner-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem}
+.partner-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.65rem}
+.partner-grid>.partner-card{grid-column:span 2}
+.partner-grid>.partner-card:nth-last-child(2):nth-child(7){grid-column:2 / span 2}
+.partner-grid>.partner-card:last-child:nth-child(8){grid-column:4 / span 2}
 .partner-card{position:relative;min-height:220px;padding:1rem;border-radius:22px;display:flex;flex-direction:column}
 .partner-card__state{position:absolute;right:.75rem;top:.7rem;padding:.22rem .38rem;border-radius:999px;background:#fff7df;color:#8b6510;font-size:.54rem;font-weight:850}
 .partner-card__icon{width:36px;height:36px;display:grid;place-items:center;margin-bottom:.75rem;border-radius:12px;background:rgba(235,248,250,.82);color:#0b7690}
@@ -462,6 +465,9 @@ img,svg,video{max-width:100%;display:block}
   .how-flow{grid-template-columns:repeat(2,minmax(0,1fr))}
   .promise-hero{grid-template-columns:1fr .85fr}
   .partner-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .partner-grid>.partner-card,
+  .partner-grid>.partner-card:nth-last-child(2):nth-child(7),
+  .partner-grid>.partner-card:last-child:nth-child(8){grid-column:auto}
   .site-footer__top{grid-template-columns:1.4fr repeat(2,minmax(0,1fr))}
 }
 @media(max-width:900px){
@@ -523,6 +529,9 @@ img,svg,video{max-width:100%;display:block}
   .planner-iframe{min-height:900px}
 
   .partner-grid,.verify-grid{grid-template-columns:1fr}
+  .partner-grid>.partner-card,
+  .partner-grid>.partner-card:nth-last-child(2):nth-child(7),
+  .partner-grid>.partner-card:last-child:nth-child(8){grid-column:auto}
   .site-footer__top{grid-template-columns:1fr}
   .site-footer__bottom{align-items:flex-start;flex-direction:column}
 }
@@ -1057,13 +1066,18 @@ img,svg,video{max-width:100%;display:block}
 /* =========================================================
    ITBMO · HOME V4.7 · FINAL CLARITY + PARTNER BRAND SYSTEM
 ========================================================= */
-.language-switch{display:inline-flex;align-items:center;gap:.38rem;padding:.48rem .62rem;border:1px solid rgba(18,64,96,.10);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:0 8px 24px rgba(16,55,86,.06);font-size:.72rem;font-weight:850;color:#8aa0b0}
-.language-switch .is-active{color:var(--ink)}
-.language-switch button{appearance:none;border:0;background:none;padding:0;color:#a9b8c3;font:inherit;cursor:not-allowed}
+.language-switch{display:inline-flex;align-items:center;gap:.3rem;padding:.32rem .38rem;border:1px solid rgba(18,64,96,.10);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:0 8px 24px rgba(16,55,86,.06);font-size:.72rem;font-weight:850;color:#8aa0b0}
+.language-switch button{appearance:none;border:0;background:transparent;padding:.34rem .42rem;border-radius:999px;color:#7890a2;font:inherit;cursor:pointer;transition:background .18s ease,color .18s ease,box-shadow .18s ease,transform .18s ease}
+.language-switch button:hover{color:var(--ink);background:rgba(240,248,252,.92);transform:translateY(-1px)}
+.language-switch button.is-active{color:#fff;background:linear-gradient(135deg,var(--blue),var(--teal));box-shadow:0 6px 16px rgba(8,119,249,.17);cursor:default}
+.language-switch span{color:#9cafbd}
+.itbmo-language-toast{position:fixed;top:88px;right:24px;z-index:99999;max-width:min(340px,calc(100vw - 36px));padding:.72rem .9rem;border-radius:16px;color:var(--ink);background:rgba(255,255,255,.96);border:1px solid rgba(35,75,112,.12);box-shadow:0 18px 48px rgba(16,55,86,.16);font-size:.78rem;font-weight:720;opacity:0;transform:translateY(-8px);pointer-events:none;transition:opacity .2s ease,transform .2s ease}
+.itbmo-language-toast.is-visible{opacity:1;transform:translateY(0)}
 .planner-start-pill{background:linear-gradient(135deg,rgba(255,244,204,.94),rgba(255,232,151,.78));color:#7b5a00;border-color:rgba(219,166,31,.22)}
 .planner-generation-note{width:min(820px,100%);margin:.9rem auto 0;padding:.72rem .9rem;border:1px solid rgba(8,119,249,.13);border-radius:16px;background:linear-gradient(135deg,rgba(238,248,255,.92),rgba(242,252,250,.88));color:#315b73;font-size:.72rem;line-height:1.5;box-shadow:0 10px 28px rgba(31,91,126,.06)}
 .planner-generation-note strong{color:var(--ink)}
 .partner-brand--kayak{background:#ff690f;color:#fff;letter-spacing:-.02em}
+.partner-brand--skyscanner{background:linear-gradient(135deg,#0770e3,#00a8e8);color:#fff;letter-spacing:-.025em}
 .partner-brand--booking{background:#003b95}
 .partner-brand--gyg{background:#ff5533}
 .partner-brand--viator{background:#008768}

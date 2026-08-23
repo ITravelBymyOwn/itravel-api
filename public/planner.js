@@ -108,8 +108,8 @@ const I18N = {
   es: {
     hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
     askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
-    confirmAll: '✨ Listo. Empiezo a generar tus itinerarios…',
-    doneAll: '🎉 ¡Tus itinerarios están listos! ¿Necesitas ayuda para elegir la mejor zona donde hospedarte, revisar el clima, encontrar restaurantes, entender el transporte, descubrir la gastronomía local, planear fotografías, verificar tickets, conocer lugares ocultos, revisar seguridad o costumbres, preparar el equipaje, organizar el presupuesto o resolver cualquier otra duda del viaje? Abre el Info Chat 🌐 y pregúntame lo que necesites.',
+    confirmAll: '✨ Listo.',
+    doneAll: '🎉 ¡Tus itinerarios están listos! Para dudas adicionales sobre las ciudades de este viaje, usa Info Chat 🌐.',
     fail: '⚠️ No se pudo contactar con el asistente. Revisa consola/Vercel (API Key, URL).',
     askConfirm: (summary)=>`¿Confirmas? ${summary}<br><small>Responde “sí” para aplicar o “no” para cancelar.</small>`,
     humanOk: 'Perfecto 🙌 Ajusté tu itinerario para que aproveches mejor el tiempo. ¡Va a quedar genial! ✨',
@@ -186,8 +186,8 @@ const I18N = {
   en: {
     hi: 'Hi! I’m Astra ✨, your travel concierge. Let’s build unforgettable itineraries 🌍',
     askHotelTransport: (city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental, public transit, taxi/uber, mixed, or “recommend”).`,
-    confirmAll: '✨ Great. I’m starting to generate your itineraries…',
-    doneAll: '🎉 Your itineraries are ready! Need help choosing the best area to stay, checking the weather, finding restaurants, understanding transportation, exploring local food, planning photography, verifying tickets, discovering hidden gems, reviewing safety or customs, deciding what to pack, managing your budget, or anything else about your trip? Open the Info Chat 🌐 and ask me anything.',
+    confirmAll: '✨ Ready.',
+    doneAll: '🎉 Your itineraries are ready! For additional questions about the cities in this trip, use Info Chat 🌐.',
     fail: '⚠️ Could not reach the assistant. Check console/Vercel (API Key, URL).',
     askConfirm: (summary)=>`Do you confirm? ${summary}<br><small>Reply “yes” to apply or “no” to cancel.</small>`,
     humanOk: 'Perfect 🙌 I adjusted your itinerary so you can use your time better. It’s going to be great! ✨',
@@ -351,6 +351,13 @@ const ITBMO_AFFILIATE_CONFIG = {
       name: 'KAYAK',
       category: 'flights'
     },
+    skyscanner: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.skyscanner.com/',
+      name: 'Skyscanner',
+      category: 'flights'
+    },
     booking: {
       enabled: false,
       url: '',
@@ -488,7 +495,7 @@ function _affiliateTrack_(partnerKey, placement){
 function _affiliateCategoryModel_(){
   const c = _affiliateCopy_();
   return [
-    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak'] },
+    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak','skyscanner'] },
     { key:'hotels', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
     { key:'experiences', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
     { key:'transport', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
@@ -497,7 +504,7 @@ function _affiliateCategoryModel_(){
 }
 
 function _affiliateBrandClass_(key){
-  const map={kayak:'kayak',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
+  const map={kayak:'kayak',skyscanner:'skyscanner',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
   return map[key] || 'default';
 }
 
@@ -505,6 +512,7 @@ function _affiliatePartnerCopy_(key){
   const es=getLang()==='es';
   const copy={
     kayak: es ? ['Vuelos','Compara tus vuelos','Explora opciones para llegar a tus destinos.','Buscar vuelos'] : ['Flights','Compare flights','Explore options to reach your destinations.','Search flights'],
+    skyscanner: es ? ['Vuelos','Compara más opciones','Explora alternativas de vuelo para tus destinos.','Comparar vuelos'] : ['Flights','Compare more options','Explore additional flight options for your destinations.','Compare flights'],
     booking: es ? ['Hospedaje','Encuentra tu alojamiento','Busca y compara alojamiento para tus destinos.','Buscar hoteles'] : ['Stays','Find your stay','Search and compare stays for your destinations.','Search hotels'],
     getyourguide: es ? ['Experiencias','Reserva actividades','Tours, entradas y actividades en destino.','Explorar experiencias'] : ['Experiences','Book activities','Tours, tickets and activities at your destination.','Explore experiences'],
     viator: es ? ['Experiencias','Explora tours','Compara excursiones y actividades disponibles.','Ver actividades'] : ['Experiences','Explore tours','Compare excursions and available activities.','View activities'],
@@ -520,7 +528,7 @@ function renderAffiliateSurface(placement='loading'){
   if(!root) return false;
 
   const c = _affiliateCopy_();
-  const order=['kayak','booking','omio','getyourguide','viator','airalo','holafly'];
+  const order=['kayak','skyscanner','booking','omio','getyourguide','viator','airalo','holafly'];
   const visible=order.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]));
 
   if(!visible.length){
@@ -588,7 +596,12 @@ const $infoModal    = qs('#info-chat-modal');
 const $infoInput    = qs('#info-chat-input');
 const $infoSend     = qs('#info-chat-send');
 const $infoClose    = qs('#info-chat-close');
+const $infoMinimize = qs('#info-chat-minimize');
 const $infoMessages = qs('#info-chat-messages');
+const $infoInlineNotice = qs('#info-chat-inline-notice');
+const $infoInlineNoticeTitle = qs('#info-chat-inline-notice-title');
+const $infoInlineNoticeMessage = qs('#info-chat-inline-notice-message');
+const $infoInlineNoticeOk = qs('#info-chat-inline-notice-ok');
 const $infoFloating = qs('#info-chat-floating');
 
 const $sidebar = qs('.sidebar');
@@ -2026,7 +2039,7 @@ FORMAT:
 - Avoid enormous blocks of text and repetitive disclaimers.
 
 SCOPE:
-- Help with lodging areas, weather planning, transportation, restaurants, local food, hidden gems, photography, tickets, safety, customs, packing, budgets and other travel questions related to the cities in this itinerary.
+- Help with lodging areas, local transportation, neighborhoods, local food and gastronomy, general safety and customs, photography, packing, indicative budgets, route organization and other general travel guidance related to the cities in this itinerary.
 - Do not answer about unrelated destinations outside the current itinerary. Nearby places, excursions and day trips reasonably connected to the itinerary cities are allowed.
 
 CURRENT PLANNER CONTEXT:
@@ -2254,38 +2267,54 @@ function _durationLabels_(){
 
 function getPlannerCompletionMessage(){
   const lang = _plannerOutputLang_();
+  const cities = savedDestinations.map(d=>d.city).filter(Boolean);
+  const cityList = cities.join(', ');
+
   const messages = {
     en: `🎉 Your itineraries are ready!
 
-Need help choosing where to stay, checking the weather, finding great restaurants, discovering local food, understanding transportation, planning what to pack, exploring hidden gems, buying tickets, learning local customs, staying safe, managing your budget, or anything else about your trip?
+For additional questions about ${cityList || 'the cities in this trip'}, open Info Chat 🌐.
 
-Open the Info Chat 🌐 and ask me anything. I'm here to help you get the most out of your journey.`,
+It can help you with neighborhood and area comparisons, local transportation patterns, local cuisine and customs, general safety considerations, photography ideas, packing suggestions, approximate budgeting, and ways to organize your visits more efficiently.
+
+Info Chat is focused on the cities included in this itinerary and does not check live availability or real-time reservations.`,
     es: `🎉 ¡Tus itinerarios están listos!
 
-¿Necesitas ayuda para elegir dónde hospedarte, revisar el clima, encontrar excelentes restaurantes, descubrir la gastronomía local, entender el transporte, planear qué llevar, explorar lugares ocultos, comprar entradas, conocer las costumbres locales, viajar con seguridad, administrar tu presupuesto o resolver cualquier otra duda sobre tu viaje?
+Para consultas adicionales sobre ${cityList || 'las ciudades de este viaje'}, abre Info Chat 🌐.
 
-Abre el Info Chat 🌐 y pregúntame lo que necesites. Estoy aquí para ayudarte a aprovechar al máximo tu viaje.`,
+Puede ayudarte con comparación de zonas y barrios, formas habituales de transporte local, gastronomía y costumbres, consideraciones generales de seguridad, ideas de fotografía, qué llevar, presupuesto orientativo y cómo organizar mejor tus visitas.
+
+Info Chat está enfocado en las ciudades incluidas en este itinerario y no consulta disponibilidad ni reservaciones en tiempo real.`,
     pt: `🎉 Seus itinerários estão prontos!
 
-Precisa de ajuda para escolher onde ficar, verificar o clima, encontrar ótimos restaurantes, descobrir a gastronomia local, entender o transporte, planejar o que levar, explorar lugares escondidos, comprar ingressos, conhecer os costumes locais, viajar com segurança, administrar seu orçamento ou esclarecer qualquer outra dúvida sobre a viagem?
+Para dúvidas adicionais sobre ${cityList || 'as cidades desta viagem'}, abra o Info Chat 🌐.
 
-Abra o Info Chat 🌐 e pergunte o que quiser. Estou aqui para ajudar você a aproveitar ao máximo a sua viagem.`,
+Ele pode ajudar com comparação de bairros e áreas, transporte local, gastronomia e costumes, considerações gerais de segurança, ideias de fotografia, o que levar, orçamento aproximado e como organizar melhor suas visitas.
+
+O Info Chat é focado nas cidades incluídas neste itinerário e não consulta disponibilidade nem reservas em tempo real.`,
     fr: `🎉 Vos itinéraires sont prêts !
 
-Besoin d’aide pour choisir où séjourner, vérifier la météo, trouver d’excellents restaurants, découvrir la cuisine locale, comprendre les transports, préparer vos bagages, explorer des lieux méconnus, acheter des billets, connaître les coutumes locales, voyager en toute sécurité, gérer votre budget ou répondre à toute autre question sur votre voyage ?
+Pour toute question supplémentaire sur ${cityList || 'les villes de ce voyage'}, ouvrez Info Chat 🌐.
 
-Ouvrez l’Info Chat 🌐 et posez-moi toutes vos questions. Je suis là pour vous aider à profiter pleinement de votre voyage.`,
+Il peut vous aider à comparer les quartiers, comprendre les transports locaux, découvrir la gastronomie et les coutumes, aborder des considérations générales de sécurité, trouver des idées photo, préparer vos bagages, estimer un budget et mieux organiser vos visites.
+
+Info Chat se concentre sur les villes incluses dans cet itinéraire et ne vérifie pas les disponibilités ou réservations en temps réel.`,
     de: `🎉 Ihre Reisepläne sind fertig!
 
-Benötigen Sie Hilfe bei der Wahl der besten Unterkunft, beim Prüfen des Wetters, bei Restaurantempfehlungen, lokaler Küche, Verkehrsmitteln, der Packliste, versteckten Highlights, Tickets, lokalen Gepflogenheiten, Sicherheit, Budgetplanung oder bei einer anderen Frage zu Ihrer Reise?
+Für weitere Fragen zu ${cityList || 'den Städten dieser Reise'} öffnen Sie Info Chat 🌐.
 
-Öffnen Sie den Info Chat 🌐 und fragen Sie mich alles. Ich helfe Ihnen dabei, das Beste aus Ihrer Reise herauszuholen.`,
+Es kann bei der Auswahl von Vierteln, lokalen Verkehrsmöglichkeiten, Küche und Gepflogenheiten, allgemeinen Sicherheitshinweisen, Fotoideen, Packempfehlungen, grober Budgetplanung und einer besseren Organisation Ihrer Besuche helfen.
+
+Info Chat konzentriert sich auf die Städte dieses Reiseplans und prüft keine Live-Verfügbarkeiten oder Echtzeit-Reservierungen.`,
     it: `🎉 I tuoi itinerari sono pronti!
 
-Hai bisogno di aiuto per scegliere dove soggiornare, controllare il meteo, trovare ottimi ristoranti, scoprire la cucina locale, capire come muoverti, pianificare cosa mettere in valigia, esplorare luoghi nascosti, acquistare biglietti, conoscere le usanze locali, viaggiare in sicurezza, gestire il budget o chiarire qualsiasi altro dubbio sul viaggio?
+Per ulteriori domande su ${cityList || 'le città di questo viaggio'}, apri Info Chat 🌐.
 
-Apri l’Info Chat 🌐 e chiedimi qualsiasi cosa. Sono qui per aiutarti a ottenere il massimo dal tuo viaggio.`
+Può aiutarti a confrontare quartieri e zone, capire i trasporti locali, conoscere gastronomia e usanze, valutare considerazioni generali sulla sicurezza, trovare idee fotografiche, preparare i bagagli, stimare il budget e organizzare meglio le visite.
+
+Info Chat è focalizzato sulle città incluse in questo itinerario e non verifica disponibilità o prenotazioni in tempo reale.`
   };
+
   return messages[lang] || messages.en;
 }
 
@@ -4234,16 +4263,50 @@ ${buildIntake()}
   }
 }
 
+
+function getPlanningInfoChatPreparationMessage(){
+  const cities = savedDestinations.map(d=>d.city).filter(Boolean);
+  const list = cities.join(', ');
+  const es = getLang()==='es';
+  return es
+    ? `💡 <strong>Antes de continuar:</strong> si todavía no tienes clara la mejor <strong>zona para hospedarte</strong> o qué <strong>medio de transporte</strong> te conviene en ${list || 'alguna de tus ciudades'}, abre <strong>Info Chat 🌐</strong> ahora. Puede ayudarte a comparar zonas, barrios y formas habituales de moverte según el contexto de tu viaje. Luego vuelve aquí y dime tu decisión para cada ciudad.`
+    : `💡 <strong>Before we continue:</strong> if you are not sure about the best <strong>area to stay</strong> or which <strong>transport option</strong> makes most sense in ${list || 'one of your cities'}, open <strong>Info Chat 🌐</strong> now. It can help you compare neighborhoods, areas and common ways to get around based on your trip context. Then come back here and tell me your choice for each city.`;
+}
+
+function setPlanningChatLocked(locked){
+  if(!$chatBox || !$chatI || !$send) return;
+  const es = getLang()==='es';
+
+  $chatBox.classList.toggle('is-planning-complete', !!locked);
+  $chatI.disabled = !!locked;
+  $send.disabled = !!locked;
+  $chatI.setAttribute('aria-disabled', locked ? 'true' : 'false');
+  $send.setAttribute('aria-disabled', locked ? 'true' : 'false');
+
+  if(locked){
+    $chatI.value = '';
+    $chatI.placeholder = es
+      ? 'Planificación completada · usa Info Chat para consultas sobre tus ciudades.'
+      : 'Planning completed · use Info Chat for questions about your cities.';
+    $send.title = es ? 'Planificación completada' : 'Planning completed';
+  }else{
+    $chatI.placeholder = es ? 'Escribe tu mensaje...' : 'Type your message...';
+    $send.removeAttribute('title');
+  }
+}
+
 async function startPlanning(){
   if(savedDestinations.length===0) return;
   setExportToolbarVisibility(false);
   $chatBox.style.display='flex';
+  setPlanningChatLocked(false);
   planningStarted = true;
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
 
   chatMsg(`${tone.hi}`);
+  chatMsg(getPlanningInfoChatPreparationMessage(),'ai');
   askNextHotelTransport();
 }
 function askNextHotelTransport(){
@@ -4576,8 +4639,6 @@ async function onSend(){
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
 
-    chatMsg(tone.confirmAll, 'ai');
-
     (async ()=>{
       showWOW(true, t('overlayGenerating'));
       for(const {city} of savedDestinations){
@@ -4586,6 +4647,7 @@ async function onSend(){
       showWOW(false);
       setExportToolbarVisibility();
       chatMsg(getPlannerCompletionMessage(), 'ai');
+      setPlanningChatLocked(true);
       setTimeout(()=>showFinalDownloadModal(),260);
     })();
 
@@ -5239,10 +5301,17 @@ function exportItineraryToCSV(){
   const delim = detectCsvDelimiter();
   const lines = [];
 
-  // Header fijo (Excel-friendly)
-  lines.push([
-    'City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'
-  ].map(x=>csvEscape(x, delim)).join(delim));
+  // Header localizado según el idioma elegido por el usuario para el itinerario.
+  const csvHeadersByLang = {
+    es:['Ciudad','Día','Fecha','Hora inicio','Hora final','Actividad','Desde','Hacia','Transporte','Duración','Notas'],
+    en:['City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'],
+    pt:['Cidade','Dia','Data','Hora início','Hora final','Atividade','De','Para','Transporte','Duração','Notas'],
+    fr:['Ville','Jour','Date','Heure début','Heure fin','Activité','Depuis','Vers','Transport','Durée','Notes'],
+    de:['Stadt','Tag','Datum','Startzeit','Endzeit','Aktivität','Von','Nach','Transport','Dauer','Hinweise'],
+    it:['Città','Giorno','Data','Ora inizio','Ora fine','Attività','Da','A','Trasporto','Durata','Note']
+  };
+  const csvHeaders = csvHeadersByLang[_plannerOutputLang_()] || csvHeadersByLang.en;
+  lines.push(csvHeaders.map(x=>csvEscape(x, delim)).join(delim));
 
   cities.forEach(city=>{
     const days = getOrderedDaysForCity(city);
@@ -5457,35 +5526,307 @@ async function getPaymentReceiptData(){
 }
 
 async function exportPaymentReceiptToPDF(){
-  if(!window.jspdf?.jsPDF){ alert(getLang()==='es'?'No se pudo preparar el comprobante PDF.':'Could not prepare the PDF receipt.'); return false; }
-  const payment=await getPaymentReceiptData();
-  if(!payment){ alert(getLang()==='es'?'No encontramos un pago confirmado para este viaje. Si acabas de pagar, espera unos segundos y vuelve a intentarlo.':'No confirmed payment was found for this trip.'); return false; }
+  const lang = _plannerOutputLang_();
+
+  const copy = {
+    es:{
+      prep:'No se pudo preparar el comprobante PDF.',
+      noPayment:'No encontramos un pago confirmado para este viaje. Si acabas de pagar, espera unos segundos y vuelve a intentarlo.',
+      title:'COMPROBANTE DE PAGO',
+      summary:'Resumen de la transacción',
+      paid:'PAGADO', test:'PRUEBA',
+      payment:'Pago', trip:'Viaje',
+      date:'Fecha', provider:'Proveedor', amount:'Importe',
+      destinations:'Destino(s)', service:'Servicio',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 5 ciudades',
+      transaction:'REFERENCIA DE TRANSACCIÓN',
+      about:'Sobre este comprobante',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 5 ciudades. Se entrega para control y referencia del usuario.',
+      testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
+      important:'IMPORTANTE',
+      legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
+      operated:'Operado desde Costa Rica'
+    },
+    en:{
+      prep:'Could not prepare the PDF receipt.',
+      noPayment:'No confirmed payment was found for this trip. If you just paid, wait a few seconds and try again.',
+      title:'PAYMENT RECEIPT',
+      summary:'Transaction summary',
+      paid:'PAID', test:'TEST',
+      payment:'Payment', trip:'Trip',
+      date:'Date', provider:'Provider', amount:'Amount',
+      destinations:'Destination(s)', service:'Service',
+      serviceValue:'1 ITBMO itinerary generation · up to 5 cities',
+      transaction:'TRANSACTION REFERENCE',
+      about:'About this receipt',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 5 cities. It is provided for the user’s records and reference.',
+      testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
+      important:'IMPORTANT',
+      legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
+      operated:'Operated from Costa Rica'
+    },
+    pt:{
+      prep:'Não foi possível preparar o comprovante em PDF.',
+      noPayment:'Não encontramos um pagamento confirmado para esta viagem. Se você acabou de pagar, aguarde alguns segundos e tente novamente.',
+      title:'COMPROVANTE DE PAGAMENTO',
+      summary:'Resumo da transação',
+      paid:'PAGO', test:'TESTE',
+      payment:'Pagamento', trip:'Viagem',
+      date:'Data', provider:'Provedor', amount:'Valor',
+      destinations:'Destino(s)', service:'Serviço',
+      serviceValue:'1 geração de itinerário ITBMO · até 5 cidades',
+      transaction:'REFERÊNCIA DA TRANSAÇÃO',
+      about:'Sobre este comprovante',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 5 cidades. É fornecido para controle e referência do usuário.',
+      testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
+      important:'IMPORTANTE',
+      legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
+      operated:'Operado a partir da Costa Rica'
+    },
+    fr:{
+      prep:'Impossible de préparer le reçu PDF.',
+      noPayment:'Aucun paiement confirmé n’a été trouvé pour ce voyage. Si vous venez de payer, attendez quelques secondes puis réessayez.',
+      title:'REÇU DE PAIEMENT',
+      summary:'Résumé de la transaction',
+      paid:'PAYÉ', test:'TEST',
+      payment:'Paiement', trip:'Voyage',
+      date:'Date', provider:'Prestataire', amount:'Montant',
+      destinations:'Destination(s)', service:'Service',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 5 villes',
+      transaction:'RÉFÉRENCE DE TRANSACTION',
+      about:'À propos de ce reçu',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 5 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
+      important:'IMPORTANT',
+      legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
+      operated:'Exploité depuis le Costa Rica'
+    },
+    de:{
+      prep:'Der PDF-Zahlungsbeleg konnte nicht erstellt werden.',
+      noPayment:'Für diese Reise wurde keine bestätigte Zahlung gefunden. Wenn Sie gerade bezahlt haben, warten Sie einige Sekunden und versuchen Sie es erneut.',
+      title:'ZAHLUNGSBELEG',
+      summary:'Transaktionsübersicht',
+      paid:'BEZAHLT', test:'TEST',
+      payment:'Zahlung', trip:'Reise',
+      date:'Datum', provider:'Anbieter', amount:'Betrag',
+      destinations:'Reiseziel(e)', service:'Leistung',
+      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 5 Städte',
+      transaction:'TRANSAKTIONSREFERENZ',
+      about:'Über diesen Beleg',
+      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 5 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
+      testNote:'Dieses Dokument wurde über den administrativen Test-Bypass erstellt. Es wurde keine Zahlung verarbeitet und dieses Dokument stellt keine echte Transaktion dar.',
+      important:'WICHTIG',
+      legal:'Dieses Dokument ist ein Zahlungsbeleg und keine Steuerrechnung oder steuerliche Bescheinigung. Support: support@itravelbymyown.com',
+      operated:'Betrieben von Costa Rica aus'
+    },
+    it:{
+      prep:'Impossibile preparare la ricevuta PDF.',
+      noPayment:'Non è stato trovato un pagamento confermato per questo viaggio. Se hai appena pagato, attendi qualche secondo e riprova.',
+      title:'RICEVUTA DI PAGAMENTO',
+      summary:'Riepilogo della transazione',
+      paid:'PAGATO', test:'TEST',
+      payment:'Pagamento', trip:'Viaggio',
+      date:'Data', provider:'Provider', amount:'Importo',
+      destinations:'Destinazione/i', service:'Servizio',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 5 città',
+      transaction:'RIFERIMENTO TRANSAZIONE',
+      about:'Informazioni sulla ricevuta',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 5 città. È fornita per controllo e riferimento dell’utente.',
+      testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
+      important:'IMPORTANTE',
+      legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
+      operated:'Operato dalla Costa Rica'
+    }
+  };
+
+  const c = copy[lang] || copy.en;
+
+  if(!window.jspdf?.jsPDF){
+    alert(c.prep);
+    return false;
+  }
+
+  const payment = await getPaymentReceiptData();
+  if(!payment){
+    alert(c.noPayment);
+    return false;
+  }
+
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({unit:'pt',format:'a4'});
-  const es=getLang()==='es';
+  const W=595.28, H=841.89;
+  const M=42;
   const cities=getOrderedCitiesForExport();
-  const receiptNo=payment.test ? payment.id : `ITBMO-${String(payment.id||'').slice(0,8).toUpperCase()}`;
-  doc.setFont('helvetica','bold'); doc.setFontSize(22); doc.text('I Travel',42,58); doc.setFontSize(11); doc.text('By My Own',43,74);
-  doc.setFontSize(18); doc.text(es?'Comprobante de pago':'Payment Receipt',42,118);
-  doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  const rows=[
-    [es?'Comprobante':'Receipt',receiptNo],
-    [es?'Fecha':'Date',payment.paid_at?new Date(payment.paid_at).toLocaleString(es?'es-CR':'en-US'):'—'],
-    [es?'Proveedor':'Provider',payment.test?'ADMIN TEST':String(payment.provider||'PayPal').toUpperCase()],
-    [es?'Importe':'Amount',`${payment.currency||'USD'} ${Number(payment.amount||0).toFixed(2)}`],
-    [es?'ID transacción PayPal':'PayPal transaction ID',payment.provider_transaction_id||'—'],
-    [es?'Viaje':'Trip',cities.join(' · ')||'—'],
-    ['Trip ID',currentTripId||'—']
-  ];
-  let y=154; rows.forEach(([a,b])=>{doc.setFont('helvetica','bold');doc.text(String(a),42,y);doc.setFont('helvetica','normal');doc.text(String(b),190,y,{maxWidth:350});y+=28;});
-  doc.setDrawColor(220); doc.line(42,y+4,553,y+4); y+=34;
-  doc.setFontSize(9); doc.setTextColor(80);
-  const note=payment.test
-    ? (es?'DOCUMENTO DE PRUEBA / ADMIN — NO REPRESENTA UN PAGO REAL.':'TEST / ADMIN DOCUMENT — DOES NOT REPRESENT A REAL PAYMENT.')
-    : (es?'Este documento es un comprobante de pago de ITBMO. No constituye factura ni comprobante fiscal.':'This document is an ITBMO payment receipt. It is not a tax invoice or fiscal document.');
-  doc.text(doc.splitTextToSize(note,500),42,y);
-  const d=new Date(); const stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  doc.save(`ITBMO-Payment-Receipt-${stamp}.pdf`);
+  const paidDate = payment.paid_at ? new Date(payment.paid_at) : new Date();
+
+  const dateForId = `${paidDate.getFullYear()}${String(paidDate.getMonth()+1).padStart(2,'0')}${String(paidDate.getDate()).padStart(2,'0')}`;
+  const shortPaymentId = String(payment.id || currentTripId || '00000000')
+    .replace(/[^A-Za-z0-9]/g,'').slice(0,8).toUpperCase();
+
+  const receiptNo = payment.test
+    ? `ADMIN-TEST-${shortPaymentId}`
+    : `ITBMO-${dateForId}-${shortPaymentId}`;
+
+  const localeByLang = {
+    es:'es-CR', en:'en-GB', pt:'pt-BR', fr:'fr-FR', de:'de-DE', it:'it-IT'
+  };
+  const locale = localeByLang[lang] || 'en-GB';
+  const dateText = new Intl.DateTimeFormat(locale,{
+    day:'2-digit', month:'short', year:'numeric',
+    hour:'2-digit', minute:'2-digit'
+  }).format(paidDate);
+
+  const amountValue = Number(payment.amount || 0);
+  const currency = String(payment.currency || 'USD').toUpperCase();
+  const provider = payment.test ? 'ADMIN TEST' : String(payment.provider || 'PayPal').toUpperCase();
+  const paymentStatus = payment.test
+    ? c.test
+    : (String(payment.status || 'paid').toLowerCase()==='paid'
+        ? c.paid
+        : String(payment.status || '').toUpperCase());
+
+  // Fondo
+  doc.setFillColor(248,251,253);
+  doc.rect(0,0,W,H,'F');
+
+  // Cabecera de marca
+  doc.setFillColor(5,44,86);
+  doc.roundedRect(M,38,W-(M*2),82,14,14,'F');
+
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(24);
+  doc.text('I Travel',M+22,75);
+  doc.setFontSize(11);
+  doc.text('By My Own',M+23,94);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.text(c.title,W-M-22,66,{align:'right'});
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(12);
+  doc.text(receiptNo,W-M-22,88,{align:'right'});
+
+  // Título + estado
+  doc.setTextColor(7,34,66);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(22);
+  doc.text(c.summary,M,158);
+
+  const chipW = payment.test ? 100 : 82;
+  if(payment.test){
+    doc.setFillColor(238,241,246);
+    doc.setTextColor(82,92,112);
+  }else{
+    doc.setFillColor(228,248,239);
+    doc.setTextColor(22,120,77);
+  }
+  doc.roundedRect(W-M-chipW,138,chipW,28,14,14,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9);
+  doc.text(paymentStatus,W-M-(chipW/2),156,{align:'center'});
+
+  // Tarjetas
+  const cardY=184, cardH=164, gap=14;
+  const cardW=(W-(M*2)-gap)/2;
+
+  doc.setFillColor(255,255,255);
+  doc.setDrawColor(222,231,239);
+  doc.roundedRect(M,cardY,cardW,cardH,12,12,'FD');
+  doc.roundedRect(M+cardW+gap,cardY,cardW,cardH,12,12,'FD');
+
+  function labelValue(x,y,label,value,maxWidth=cardW-34){
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(102,124,145);
+    doc.text(String(label).toUpperCase(),x,y);
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(11);
+    doc.setTextColor(7,34,66);
+    const lines=doc.splitTextToSize(String(value || '—'),maxWidth);
+    doc.text(lines,x,y+17);
+  }
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(7,34,66);
+  doc.text(c.payment,M+17,cardY+24);
+  doc.text(c.trip,M+cardW+gap+17,cardY+24);
+
+  labelValue(M+17,cardY+49,c.date,dateText);
+  labelValue(M+17,cardY+91,c.provider,provider);
+  labelValue(M+17,cardY+133,c.amount,`${currency} ${amountValue.toFixed(2)}`);
+
+  const tripX=M+cardW+gap+17;
+  labelValue(tripX,cardY+49,c.destinations,cities.join(' · ') || '—');
+  labelValue(tripX,cardY+91,c.service,c.serviceValue);
+  labelValue(tripX,cardY+133,'Trip ID',currentTripId || '—');
+
+  // Referencia
+  const refY=370;
+  doc.setFillColor(242,248,251);
+  doc.setDrawColor(210,230,237);
+  doc.roundedRect(M,refY,W-(M*2),72,12,12,'FD');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(75,112,134);
+  doc.text(c.transaction,M+17,refY+23);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(11);
+  doc.setTextColor(7,34,66);
+  doc.text(
+    payment.test ? '—' : String(payment.provider_transaction_id || '—'),
+    M+17,refY+45,{maxWidth:W-(M*2)-34}
+  );
+
+  // Explicación
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(12);
+  doc.setTextColor(7,34,66);
+  doc.text(c.about,M,486);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(76,95,113);
+  doc.text(
+    doc.splitTextToSize(payment.test ? c.testNote : c.realNote,W-(M*2)),
+    M,507
+  );
+
+  // Legal / soporte
+  doc.setFillColor(255,250,235);
+  doc.setDrawColor(240,221,166);
+  doc.roundedRect(M,564,W-(M*2),74,12,12,'FD');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9);
+  doc.setTextColor(99,72,12);
+  doc.text(c.important,M+17,587);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9);
+  doc.text(doc.splitTextToSize(c.legal,W-(M*2)-34),M+17,607);
+
+  // Footer
+  doc.setDrawColor(224,231,237);
+  doc.line(M,704,W-M,704);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9);
+  doc.setTextColor(7,34,66);
+  doc.text('I Travel By My Own',M,727);
+
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100,116,132);
+  doc.text(c.operated,M,744);
+  doc.text('support@itravelbymyown.com',W-M,727,{align:'right'});
+  doc.text(receiptNo,W-M,744,{align:'right'});
+
+  const filename = payment.test
+    ? `ITBMO-ADMIN-TEST-Receipt-${dateForId}.pdf`
+    : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
+
+  doc.save(filename);
   return true;
 }
 
@@ -5509,10 +5850,17 @@ function showFinalDownloadModal(){
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
   overlay.querySelector('.itbmo-download-all').addEventListener('click',async()=>{
+    /*
+      Mantener las tres descargas dentro de la interacción directa del usuario.
+      Algunos navegadores bloquean descargas automáticas posteriores cuando se
+      disparan desde setTimeout. Los botones individuales permanecen como fallback.
+    */
     exportItineraryToPDF();
-    setTimeout(()=>exportItineraryToCSV(),180);
-    setTimeout(()=>exportPaymentReceiptToPDF(),360);
-    status.textContent=es?'✓ Las descargas fueron iniciadas. Si falta alguna, usa los botones individuales.':'✓ Downloads were started. If one is missing, use the individual buttons.';
+    exportItineraryToCSV();
+    await exportPaymentReceiptToPDF();
+    status.textContent=es
+      ? '✓ Se iniciaron 3 descargas: itinerario PDF, CSV y comprobante PDF. Revisa tu carpeta de Descargas. Si falta alguna, usa los botones individuales.'
+      : '✓ Three downloads were started: itinerary PDF, CSV and payment receipt PDF. Check your Downloads folder. If one is missing, use the individual buttons.';
   });
 }
 
@@ -6355,6 +6703,150 @@ document.addEventListener('itbmo:addDays', e=>{
 });
 
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
+let infoChatWelcomeTripId = null;
+let infoChatDragState = null;
+
+function _infoAllowedCities_(){
+  return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
+}
+
+function _infoCityListText_(){
+  const cities=_infoAllowedCities_();
+  const es=getLang()==='es';
+  if(!cities.length) return es ? 'las ciudades de tu itinerario' : 'the cities in your itinerary';
+  if(cities.length===1) return cities[0];
+  if(cities.length===2) return `${cities[0]} ${es?'y':'and'} ${cities[1]}`;
+  return `${cities.slice(0,-1).join(', ')} ${es?'y':'and'} ${cities.at(-1)}`;
+}
+
+function ensureInfoChatWelcome(){
+  if(!currentTripId || infoChatWelcomeTripId===currentTripId) return;
+  const container=qs('#info-chat-messages');
+  if(!container) return;
+  if(container.querySelector('.chat-message')){
+    infoChatWelcomeTripId=currentTripId;
+    return;
+  }
+  const es=getLang()==='es';
+  const cities=_infoCityListText_();
+  const html=es
+    ? `<strong>¡Hola! Soy Astra, tu concierge para ${cities}. 🌍</strong><br><br>¿En qué te ayudo ahora? Puedo orientarte sobre zonas para hospedarte, transporte local, barrios, gastronomía, costumbres, seguridad general, fotografía, equipaje, presupuesto orientativo y cómo organizar mejor tus visitas dentro de estas ciudades.`
+    : `<strong>Hi! I’m Astra, your concierge for ${cities}. 🌍</strong><br><br>How can I help? I can guide you on areas to stay, local transportation, neighborhoods, local food, customs, general safety, photography, packing, indicative budgets and how to organize your visits within these cities.`;
+  infoChatMsg(html,'ai');
+  infoChatWelcomeTripId=currentTripId;
+}
+
+function showInfoChatNotice(title,message){
+  const layer=qs('#info-chat-inline-notice');
+  if(!layer){
+    showPlannerNotice(title,message);
+    return;
+  }
+  const titleEl=qs('#info-chat-inline-notice-title');
+  const messageEl=qs('#info-chat-inline-notice-message');
+  const ok=qs('#info-chat-inline-notice-ok');
+  if(titleEl) titleEl.textContent=String(title || '');
+  if(messageEl) messageEl.textContent=String(message || '');
+  if(ok) ok.textContent=getLang()==='es' ? 'Entendido' : 'Got it';
+  layer.setAttribute('aria-hidden','false');
+  layer.classList.add('is-visible');
+}
+
+function hideInfoChatNotice(){
+  const layer=qs('#info-chat-inline-notice');
+  if(!layer) return;
+  layer.classList.remove('is-visible');
+  layer.setAttribute('aria-hidden','true');
+}
+
+function normalizeInfoCityText(value){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+
+/* Fast local guard for obvious out-of-itinerary city mentions.
+   It is intentionally conservative; the server remains authoritative. */
+function detectObviousOutsideCity(text){
+  const allowed=_infoAllowedCities_();
+  if(!allowed.length) return null;
+  const allowedNorm=allowed.map(normalizeInfoCityText);
+  const raw=String(text || '').trim();
+  const norm=normalizeInfoCityText(raw);
+  if(allowedNorm.some(c=>norm.includes(c))) return null;
+
+  const commonCities=[
+    'paris','london','rome','madrid','barcelona','lisbon','porto','amsterdam','berlin','munich','vienna','prague','budapest','venice','florence','milan','naples','reykjavik','dublin','edinburgh','athens','istanbul','zurich','geneva','lucerne','copenhagen','stockholm','oslo','helsinki','rovaniemi','tokyo','kyoto','osaka','seoul','bangkok','singapore','dubai','new york','boston','miami','los angeles','san francisco','chicago','toronto','vancouver','mexico city','cancun','lima','cusco','bogota','medellin','buenos aires','santiago','rio de janeiro','sao paulo','sydney','melbourne','auckland',
+    'parís','londres','roma','madrid','barcelona','lisboa','oporto','amsterdam','berlín','munich','múnich','viena','praga','budapest','venecia','florencia','milán','napoles','nápoles','reikiavik','dublin','dublín','edimburgo','atenas','estambul','zúrich','ginebra','lucerna','copenhague','estocolmo','oslo','helsinki','rovaniemi','tokio','kioto','osaka','seúl','bangkok','singapur','dubái','nueva york','miami','los angeles','los ángeles','san francisco','chicago','toronto','vancouver','ciudad de mexico','ciudad de méxico','cancún','lima','cusco','bogotá','medellín','buenos aires','santiago','rio de janeiro','río de janeiro','sao paulo','são paulo','sidney','melbourne','auckland'
+  ];
+  const normalizedCommon=[...new Set(commonCities.map(normalizeInfoCityText))]
+    .sort((a,b)=>b.length-a.length);
+  const hit=normalizedCommon.find(city=>{
+    if(allowedNorm.includes(city)) return false;
+    const esc=city.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp(`(^|[^a-z])${esc}([^a-z]|$)`,'i').test(norm);
+  });
+  if(!hit) return null;
+  const display=commonCities.find(c=>normalizeInfoCityText(c)===hit) || hit;
+  return display.replace(/\b\w/g,ch=>ch.toUpperCase());
+}
+
+function minimizeInfoModal(){
+  const modal=qs('#info-chat-modal');
+  if(!modal) return;
+  hideInfoChatNotice();
+  modal.classList.add('is-minimized');
+  modal.classList.add('active');
+  modal.style.display='flex';
+}
+
+function restoreInfoModal(){
+  const modal=qs('#info-chat-modal');
+  if(!modal) return;
+  modal.classList.remove('is-minimized');
+  modal.classList.add('active');
+  modal.style.display='flex';
+  ensureInfoChatWelcome();
+}
+
+function initInfoChatDrag(){
+  const modal=qs('#info-chat-modal');
+  const header=modal?.querySelector('.info-chat-header');
+  if(!modal || !header || header.dataset.dragBound==='1') return;
+  header.dataset.dragBound='1';
+
+  header.addEventListener('pointerdown',(e)=>{
+    if(window.matchMedia('(max-width: 760px)').matches) return;
+    if(e.target.closest('button,a,input,textarea')) return;
+    const rect=modal.getBoundingClientRect();
+    infoChatDragState={pointerId:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
+    header.setPointerCapture?.(e.pointerId);
+    modal.classList.add('is-dragging');
+    e.preventDefault();
+  });
+
+  header.addEventListener('pointermove',(e)=>{
+    if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+    const margin=10;
+    const rect=modal.getBoundingClientRect();
+    const maxLeft=Math.max(margin,window.innerWidth-rect.width-margin);
+    const maxTop=Math.max(margin,window.innerHeight-rect.height-margin);
+    const left=Math.min(Math.max(margin,e.clientX-infoChatDragState.dx),maxLeft);
+    const top=Math.min(Math.max(margin,e.clientY-infoChatDragState.dy),maxTop);
+    modal.style.left=`${left}px`;
+    modal.style.top=`${top}px`;
+    modal.style.right='auto';
+    modal.style.bottom='auto';
+  });
+
+  const end=(e)=>{
+    if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+    infoChatDragState=null;
+    modal.classList.remove('is-dragging');
+    try{ header.releasePointerCapture?.(e.pointerId); }catch(_){}
+  };
+  header.addEventListener('pointerup',end);
+  header.addEventListener('pointercancel',end);
+}
+
 function openInfoModal(){
   if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
     return;
@@ -6364,13 +6856,18 @@ function openInfoModal(){
   requestParentViewportFocus('info-chat-modal', true);
   modal.style.display = 'flex';
   modal.classList.add('active');
+  modal.classList.remove('is-minimized');
+  hideInfoChatNotice();
+  initInfoChatDrag();
+  ensureInfoChatWelcome();
 
   document.body.classList.add('itbmo-info-open');
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
-  modal.classList.remove('active');
+  modal.classList.remove('active','is-minimized');
+  hideInfoChatNotice();
   modal.style.display = 'none';
 
   // 🆕 Hook para CSS tipo ChatGPT
@@ -6393,6 +6890,18 @@ async function sendInfoMessage(){
   const txt = (input.value||'').trim();
   if(!txt) return;
 
+  const obviousOutsideCity=detectObviousOutsideCity(txt);
+  if(obviousOutsideCity){
+    const es=getLang()==='es';
+    showInfoChatNotice(
+      es ? 'Esta ciudad no está en tu itinerario' : 'This city is not in your itinerary',
+      es
+        ? `Info Chat está disponible para ${_infoCityListText_()}. ${obviousOutsideCity} no forma parte de este itinerario. No se consumió ninguna consulta.`
+        : `Info Chat is available for ${_infoCityListText_()}. ${obviousOutsideCity} is not part of this itinerary. No query was used.`
+    );
+    return;
+  }
+
   infoChatMsg(txt,'user');
   input.value='';
   resizeInfoChatComposer(input);
@@ -6400,7 +6909,7 @@ async function sendInfoMessage(){
   const result = await callInfoAgent(txt);
 
   if(result?.notice){
-    showPlannerNotice(result.notice.title,result.notice.message);
+    showInfoChatNotice(result.notice.title,result.notice.message);
   }else if(result?.text){
     infoChatMsg(result.text);
   }
@@ -6428,6 +6937,8 @@ function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
   const toggleFloating = qs('#info-chat-floating'); // 🆕 soporte flotante
   const close  = qs('#info-chat-close');
+  const minimize = qs('#info-chat-minimize');
+  const noticeOk = qs('#info-chat-inline-notice-ok');
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
@@ -6435,11 +6946,15 @@ function bindInfoChatListeners(){
   toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
+  minimize?.replaceWith(minimize.cloneNode(true));
+  noticeOk?.replaceWith(noticeOk.cloneNode(true));
   send?.replaceWith(send.cloneNode(true));
 
   const tTop = qs('#info-chat-toggle');
   const tFloat = qs('#info-chat-floating');
   const c2 = qs('#info-chat-close');
+  const m2 = qs('#info-chat-minimize');
+  const n2 = qs('#info-chat-inline-notice-ok');
   const s2 = qs('#info-chat-send');
   const i2 = qs('#info-chat-input');
 
@@ -6447,7 +6962,18 @@ function bindInfoChatListeners(){
     btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
   });
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
+  m2?.addEventListener('click', (e)=>{ e.preventDefault(); minimizeInfoModal(); });
+  n2?.addEventListener('click', (e)=>{ e.preventDefault(); hideInfoChatNotice(); });
   s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+
+  qs('#info-chat-modal')?.addEventListener('click',(e)=>{
+    const modal=qs('#info-chat-modal');
+    if(!modal?.classList.contains('is-minimized')) return;
+    if(e.target.closest('.info-chat-window-actions')) return;
+    restoreInfoModal();
+  });
+
+  initInfoChatDrag();
 
   // Chat estilo GPT: Enter = enviar / Shift+Enter = salto de línea
   i2?.addEventListener('keydown', (e)=>{
@@ -6488,11 +7014,11 @@ function enhancePreferencesInfoChatCopy(){
       examples:'For example:',
       items:[
         '🏨 Best area or neighborhood to stay',
-        '🌦️ Weather and the best time for each activity',
+        '🧳 Seasonal context and what to pack',
         '🚇 Transportation and how to get around',
-        '🍽️ Restaurants, cafés and local food',
+        '🍽️ Local cuisine and dining areas',
         '📸 Hidden gems and photography spots',
-        '🎟️ Tickets, reservations and practical travel tips',
+        '🧭 Neighborhoods, customs and practical local context',
         '🧳 What to pack and local customs',
         '💰 Budget recommendations',
         '❓ Anything else related to your trip'
@@ -6506,11 +7032,11 @@ function enhancePreferencesInfoChatCopy(){
       examples:'Por ejemplo:',
       items:[
         '🏨 Mejor zona o barrio para hospedarte',
-        '🌦️ Clima y mejor horario para cada actividad',
+        '🧳 Contexto estacional y qué llevar',
         '🚇 Transporte y cómo desplazarte',
-        '🍽️ Restaurantes, cafés y gastronomía local',
+        '🍽️ Gastronomía local y zonas para comer',
         '📸 Lugares ocultos y puntos para fotografía',
-        '🎟️ Entradas, reservaciones y consejos prácticos',
+        '🧭 Barrios, costumbres y contexto práctico local',
         '🧳 Qué llevar y costumbres locales',
         '💰 Recomendaciones de presupuesto',
         '❓ Cualquier otra consulta relacionada con tu viaje'
@@ -6522,7 +7048,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Não sabe o que escrever?',
       intro:'Você pode abrir o <strong>Info Chat 🌐</strong> a qualquer momento, <strong>antes, durante ou depois do planejamento</strong>, e perguntar qualquer coisa sobre a viagem.',
       examples:'Por exemplo:',
-      items:['🏨 Melhor área ou bairro para ficar','🌦️ Clima e melhor horário para cada atividade','🚇 Transporte e como se locomover','🍽️ Restaurantes, cafés e gastronomia local','📸 Lugares escondidos e pontos para fotografia','🎟️ Ingressos, reservas e dicas práticas','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
+      items:['🏨 Melhor área ou bairro para ficar','🧳 Contexto sazonal e o que levar','🚇 Transporte e como se locomover','🍽️ Gastronomia local e áreas para comer','📸 Lugares escondidos e pontos para fotografia','🧭 Bairros, costumes e contexto local prático','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
       final:'📝 Cada detalhe ajuda a Astra a tomar decisões de planejamento mais inteligentes. Quanto mais você compartilhar, mais personalizado e otimizado será o seu itinerário.',
       placeholder:'Conte à Astra como você quer viver a viagem... Em dúvida? Abra o Info Chat 🌐 para se inspirar.'
     },
@@ -6530,7 +7056,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Vous ne savez pas quoi écrire ?',
       intro:'Vous pouvez ouvrir l’<strong>Info Chat 🌐</strong> à tout moment, <strong>avant, pendant ou après la planification</strong>, et poser toutes vos questions sur le voyage.',
       examples:'Par exemple :',
-      items:['🏨 Meilleur quartier où séjourner','🌦️ Météo et meilleur moment pour chaque activité','🚇 Transports et déplacements','🍽️ Restaurants, cafés et cuisine locale','📸 Lieux méconnus et spots photo','🎟️ Billets, réservations et conseils pratiques','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
+      items:['🏨 Meilleur quartier où séjourner','🧳 Contexte saisonnier et quoi emporter','🚇 Transports et déplacements','🍽️ Cuisine locale et quartiers où manger','📸 Lieux méconnus et spots photo','🧭 Quartiers, coutumes et contexte local pratique','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
       final:'📝 Chaque détail aide Astra à prendre de meilleures décisions de planification. Plus vous partagez d’informations, plus votre itinéraire sera personnalisé et optimisé.',
       placeholder:'Expliquez à Astra comment vous souhaitez vivre votre voyage... Besoin d’idées ? Ouvrez l’Info Chat 🌐.'
     },
@@ -6538,7 +7064,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Sie wissen nicht, was Sie schreiben sollen?',
       intro:'Sie können den <strong>Info Chat 🌐</strong> jederzeit <strong>vor, während oder nach der Planung</strong> öffnen und alles zu Ihrer Reise fragen.',
       examples:'Zum Beispiel:',
-      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🌦️ Wetter und beste Zeit für jede Aktivität','🚇 Verkehrsmittel und Fortbewegung','🍽️ Restaurants, Cafés und lokale Küche','📸 Versteckte Orte und Fotospots','🎟️ Tickets, Reservierungen und praktische Reisetipps','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
+      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🧳 Saisonaler Kontext und Packempfehlungen','🚇 Verkehrsmittel und Fortbewegung','🍽️ Lokale Küche und Gegenden zum Essen','📸 Versteckte Orte und Fotospots','🧭 Viertel, Gepflogenheiten und praktischer lokaler Kontext','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
       final:'📝 Jedes Detail hilft Astra, intelligentere Planungsentscheidungen zu treffen. Je mehr Sie mitteilen, desto persönlicher und besser optimiert wird Ihre Reiseroute.',
       placeholder:'Beschreiben Sie Astra, wie Sie Ihre Reise erleben möchten... Unsicher? Nutzen Sie den Info Chat 🌐 als Inspiration.'
     },
@@ -6546,7 +7072,7 @@ function enhancePreferencesInfoChatCopy(){
       title:'💡 Non sai cosa scrivere?',
       intro:'Puoi aprire l’<strong>Info Chat 🌐</strong> in qualsiasi momento, <strong>prima, durante o dopo la pianificazione</strong>, e chiedere qualsiasi cosa sul viaggio.',
       examples:'Per esempio:',
-      items:['🏨 Zona o quartiere migliore dove soggiornare','🌦️ Meteo e momento migliore per ogni attività','🚇 Trasporti e come spostarsi','🍽️ Ristoranti, caffè e cucina locale','📸 Luoghi nascosti e punti fotografici','🎟️ Biglietti, prenotazioni e consigli pratici','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
+      items:['🏨 Zona o quartiere migliore dove soggiornare','🧳 Contesto stagionale e cosa portare','🚇 Trasporti e come spostarsi','🍽️ Cucina locale e zone dove mangiare','📸 Luoghi nascosti e punti fotografici','🧭 Quartieri, usanze e contesto locale pratico','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
       final:'📝 Ogni dettaglio aiuta Astra a prendere decisioni di pianificazione più intelligenti. Più informazioni condividi, più il tuo itinerario sarà personalizzato e ottimizzato.',
       placeholder:'Racconta ad Astra come vuoi vivere il viaggio... Hai dubbi? Apri l’Info Chat 🌐 per trovare ispirazione.'
     }
@@ -6556,7 +7082,7 @@ function enhancePreferencesInfoChatCopy(){
     title:'💡 Not sure what to write?',
     intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
     examples:'For example:',
-    items:['🏨 Best area or neighborhood to stay','🌦️ Weather and the best time for each activity','🚇 Transportation and how to get around','🍽️ Restaurants, cafés and local food','📸 Hidden gems and photography spots','🎟️ Tickets, reservations and practical travel tips','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
+    items:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
     final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
     placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
   };

@@ -23,6 +23,7 @@
 
     partners: {
       kayak:        { enabled:false, url:'', previewUrl:'https://www.kayak.com/flights' },
+      skyscanner:   { enabled:false, url:'', previewUrl:'https://www.skyscanner.com/' },
       booking:      { enabled:false, url:'', previewUrl:'https://www.booking.com/' },
       getyourguide: { enabled:false, url:'', previewUrl:'https://www.getyourguide.com/' },
       viator:       { enabled:false, url:'', previewUrl:'https://www.viator.com/' },
@@ -87,6 +88,49 @@
       if (window.location.hash) {
         history.replaceState(null, '', window.location.pathname + window.location.search);
       }
+    });
+  });
+
+  /* =========================================================
+     PAGE LANGUAGE SELECTOR
+     ---------------------------------------------------------
+     ES is the active page today. EN remains a real, clickable
+     selector without sending the user to a 404 while the English
+     page is not published yet.
+  ========================================================= */
+  const ITBMO_LANGUAGE_PAGES = {
+    es: './preview-home.html',
+    en: ''
+  };
+
+  function showLanguageAvailability(message) {
+    document.querySelector('.itbmo-language-toast')?.remove();
+    const toast = document.createElement('div');
+    toast.className = 'itbmo-language-toast';
+    toast.setAttribute('role', 'status');
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('is-visible'));
+    window.setTimeout(() => {
+      toast.classList.remove('is-visible');
+      window.setTimeout(() => toast.remove(), 220);
+    }, 2600);
+  }
+
+  document.querySelectorAll('[data-site-lang]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const lang = String(button.dataset.siteLang || '').toLowerCase();
+      if (!lang) return;
+      try { localStorage.setItem('itbmo_site_language', lang); } catch (_) {}
+
+      if (lang === 'es') return;
+      const target = ITBMO_LANGUAGE_PAGES[lang];
+      if (target) {
+        window.location.href = target;
+        return;
+      }
+
+      showLanguageAvailability('La versión en inglés estará disponible muy pronto.');
     });
   });
 
