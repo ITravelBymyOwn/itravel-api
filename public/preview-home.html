@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.7">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.8">
 </head>
 
 <body>
@@ -46,7 +46,11 @@
       </nav>
 
       <div class="site-header__actions">
-        <div class="language-switch" aria-label="Idioma de la página"><span class="is-active">ES</span><span aria-hidden="true">·</span><button type="button" disabled aria-disabled="true" title="English version coming soon">EN</button></div>
+        <div class="language-switch" aria-label="Idioma de la página">
+          <button class="is-active" type="button" data-site-lang="es" aria-pressed="true" title="Español">ES</button>
+          <span aria-hidden="true">·</span>
+          <button type="button" data-site-lang="en" aria-pressed="false" title="English">EN</button>
+        </div>
       </div>
     </div>
   </header>
@@ -645,7 +649,14 @@
             <p>Explora opciones de vuelo para llegar a tus destinos.</p>
             <a href="#" data-partner-link="kayak">Buscar vuelos <span>↗</span></a>
           </article>
-
+          <article class="partner-card glass-card" data-partner="skyscanner">
+            <span class="partner-card__state">Preview</span>
+            <div class="partner-brand partner-brand--skyscanner"><span>Skyscanner</span></div>
+            <small>Vuelos</small>
+            <h3>Compara más opciones</h3>
+            <p>Explora alternativas de vuelo para tus destinos.</p>
+            <a href="#" data-partner-link="skyscanner">Comparar vuelos <span>↗</span></a>
+          </article>
           <article class="partner-card glass-card" data-partner="booking">
             <span class="partner-card__state">Preview</span>
             <div class="partner-brand partner-brand--booking"><span>Booking.com</span></div>
@@ -654,25 +665,6 @@
             <p>Busca y compara alojamiento para tus destinos.</p>
             <a href="#" data-partner-link="booking">Buscar hoteles <span>↗</span></a>
           </article>
-
-          <article class="partner-card glass-card" data-partner="getyourguide">
-            <span class="partner-card__state">Preview</span>
-            <div class="partner-brand partner-brand--gyg"><span>GetYourGuide</span></div>
-            <small>Experiencias</small>
-            <h3>Reserva actividades</h3>
-            <p>Tours, entradas y actividades en destino.</p>
-            <a href="#" data-partner-link="getyourguide">Explorar experiencias <span>↗</span></a>
-          </article>
-
-          <article class="partner-card glass-card" data-partner="viator">
-            <span class="partner-card__state">Preview</span>
-            <div class="partner-brand partner-brand--viator"><span>viator</span></div>
-            <small>Experiencias</small>
-            <h3>Explora tours</h3>
-            <p>Compara excursiones y actividades disponibles.</p>
-            <a href="#" data-partner-link="viator">Ver actividades <span>↗</span></a>
-          </article>
-
           <article class="partner-card glass-card" data-partner="omio">
             <span class="partner-card__state">Preview</span>
             <div class="partner-brand partner-brand--omio"><span>omio</span></div>
@@ -681,7 +673,22 @@
             <p>Trenes, autobuses y conexiones entre destinos.</p>
             <a href="#" data-partner-link="omio">Buscar transporte <span>↗</span></a>
           </article>
-
+          <article class="partner-card glass-card" data-partner="getyourguide">
+            <span class="partner-card__state">Preview</span>
+            <div class="partner-brand partner-brand--gyg"><span>GetYourGuide</span></div>
+            <small>Experiencias</small>
+            <h3>Reserva actividades</h3>
+            <p>Tours, entradas y actividades en destino.</p>
+            <a href="#" data-partner-link="getyourguide">Explorar experiencias <span>↗</span></a>
+          </article>
+          <article class="partner-card glass-card" data-partner="viator">
+            <span class="partner-card__state">Preview</span>
+            <div class="partner-brand partner-brand--viator"><span>viator</span></div>
+            <small>Experiencias</small>
+            <h3>Explora tours</h3>
+            <p>Compara excursiones y actividades disponibles.</p>
+            <a href="#" data-partner-link="viator">Ver actividades <span>↗</span></a>
+          </article>
           <article class="partner-card glass-card" data-partner="airalo">
             <span class="partner-card__state">Preview</span>
             <div class="partner-brand partner-brand--airalo"><span>airalo</span></div>
@@ -690,7 +697,6 @@
             <p>Opciones de datos móviles para tu destino.</p>
             <a href="#" data-partner-link="airalo">Ver eSIM <span>↗</span></a>
           </article>
-
           <article class="partner-card glass-card" data-partner="holafly">
             <span class="partner-card__state">Preview</span>
             <div class="partner-brand partner-brand--holafly"><span>Holafly</span></div>
@@ -1088,6 +1094,6 @@
     </div>
   </footer>
 
-  <script src="./assets/js/itbmo-site.js?v=4.5"></script>
+  <script src="./assets/js/itbmo-site.js?v=4.6"></script>
 </body>
 </html>
