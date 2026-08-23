@@ -351,6 +351,13 @@ const ITBMO_AFFILIATE_CONFIG = {
       name: 'KAYAK',
       category: 'flights'
     },
+    skyscanner: {
+      enabled: false,
+      url: '',
+      previewUrl: 'https://www.skyscanner.com/',
+      name: 'Skyscanner',
+      category: 'flights'
+    },
     booking: {
       enabled: false,
       url: '',
@@ -488,7 +495,7 @@ function _affiliateTrack_(partnerKey, placement){
 function _affiliateCategoryModel_(){
   const c = _affiliateCopy_();
   return [
-    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak'] },
+    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak','skyscanner'] },
     { key:'hotels', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
     { key:'experiences', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
     { key:'transport', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
@@ -497,7 +504,7 @@ function _affiliateCategoryModel_(){
 }
 
 function _affiliateBrandClass_(key){
-  const map={kayak:'kayak',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
+  const map={kayak:'kayak',skyscanner:'skyscanner',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
   return map[key] || 'default';
 }
 
@@ -505,6 +512,7 @@ function _affiliatePartnerCopy_(key){
   const es=getLang()==='es';
   const copy={
     kayak: es ? ['Vuelos','Compara tus vuelos','Explora opciones para llegar a tus destinos.','Buscar vuelos'] : ['Flights','Compare flights','Explore options to reach your destinations.','Search flights'],
+    skyscanner: es ? ['Vuelos','Compara más opciones','Explora alternativas de vuelo para tus destinos.','Comparar vuelos'] : ['Flights','Compare more options','Explore additional flight options for your destinations.','Compare flights'],
     booking: es ? ['Hospedaje','Encuentra tu alojamiento','Busca y compara alojamiento para tus destinos.','Buscar hoteles'] : ['Stays','Find your stay','Search and compare stays for your destinations.','Search hotels'],
     getyourguide: es ? ['Experiencias','Reserva actividades','Tours, entradas y actividades en destino.','Explorar experiencias'] : ['Experiences','Book activities','Tours, tickets and activities at your destination.','Explore experiences'],
     viator: es ? ['Experiencias','Explora tours','Compara excursiones y actividades disponibles.','Ver actividades'] : ['Experiences','Explore tours','Compare excursions and available activities.','View activities'],
@@ -520,7 +528,7 @@ function renderAffiliateSurface(placement='loading'){
   if(!root) return false;
 
   const c = _affiliateCopy_();
-  const order=['kayak','booking','omio','getyourguide','viator','airalo','holafly'];
+  const order=['kayak','skyscanner','booking','omio','getyourguide','viator','airalo','holafly'];
   const visible=order.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]));
 
   if(!visible.length){
@@ -588,7 +596,12 @@ const $infoModal    = qs('#info-chat-modal');
 const $infoInput    = qs('#info-chat-input');
 const $infoSend     = qs('#info-chat-send');
 const $infoClose    = qs('#info-chat-close');
+const $infoMinimize = qs('#info-chat-minimize');
 const $infoMessages = qs('#info-chat-messages');
+const $infoInlineNotice = qs('#info-chat-inline-notice');
+const $infoInlineNoticeTitle = qs('#info-chat-inline-notice-title');
+const $infoInlineNoticeMessage = qs('#info-chat-inline-notice-message');
+const $infoInlineNoticeOk = qs('#info-chat-inline-notice-ok');
 const $infoFloating = qs('#info-chat-floating');
 
 const $sidebar = qs('.sidebar');
@@ -2026,7 +2039,7 @@ FORMAT:
 - Avoid enormous blocks of text and repetitive disclaimers.
 
 SCOPE:
-- Help with lodging areas, weather planning, transportation, restaurants, local food, hidden gems, photography, tickets, safety, customs, packing, budgets and other travel questions related to the cities in this itinerary.
+- Help with lodging areas, local transportation, neighborhoods, local food and gastronomy, general safety and customs, photography, packing, indicative budgets, route organization and other general travel guidance related to the cities in this itinerary.
 - Do not answer about unrelated destinations outside the current itinerary. Nearby places, excursions and day trips reasonably connected to the itinerary cities are allowed.
 
 CURRENT PLANNER CONTEXT:
@@ -6355,6 +6368,150 @@ document.addEventListener('itbmo:addDays', e=>{
 });
 
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
+let infoChatWelcomeTripId = null;
+let infoChatDragState = null;
+
+function _infoAllowedCities_(){
+  return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
+}
+
+function _infoCityListText_(){
+  const cities=_infoAllowedCities_();
+  const es=getLang()==='es';
+  if(!cities.length) return es ? 'las ciudades de tu itinerario' : 'the cities in your itinerary';
+  if(cities.length===1) return cities[0];
+  if(cities.length===2) return `${cities[0]} ${es?'y':'and'} ${cities[1]}`;
+  return `${cities.slice(0,-1).join(', ')} ${es?'y':'and'} ${cities.at(-1)}`;
+}
+
+function ensureInfoChatWelcome(){
+  if(!currentTripId || infoChatWelcomeTripId===currentTripId) return;
+  const container=qs('#info-chat-messages');
+  if(!container) return;
+  if(container.querySelector('.chat-message')){
+    infoChatWelcomeTripId=currentTripId;
+    return;
+  }
+  const es=getLang()==='es';
+  const cities=_infoCityListText_();
+  const html=es
+    ? `<strong>¡Hola! Soy Astra, tu concierge para ${cities}. 🌍</strong><br><br>¿En qué te ayudo ahora? Puedo orientarte sobre zonas para hospedarte, transporte local, barrios, gastronomía, costumbres, seguridad general, fotografía, equipaje, presupuesto orientativo y cómo organizar mejor tus visitas dentro de estas ciudades.`
+    : `<strong>Hi! I’m Astra, your concierge for ${cities}. 🌍</strong><br><br>How can I help? I can guide you on areas to stay, local transportation, neighborhoods, local food, customs, general safety, photography, packing, indicative budgets and how to organize your visits within these cities.`;
+  infoChatMsg(html,'ai');
+  infoChatWelcomeTripId=currentTripId;
+}
+
+function showInfoChatNotice(title,message){
+  const layer=qs('#info-chat-inline-notice');
+  if(!layer){
+    showPlannerNotice(title,message);
+    return;
+  }
+  const titleEl=qs('#info-chat-inline-notice-title');
+  const messageEl=qs('#info-chat-inline-notice-message');
+  const ok=qs('#info-chat-inline-notice-ok');
+  if(titleEl) titleEl.textContent=String(title || '');
+  if(messageEl) messageEl.textContent=String(message || '');
+  if(ok) ok.textContent=getLang()==='es' ? 'Entendido' : 'Got it';
+  layer.setAttribute('aria-hidden','false');
+  layer.classList.add('is-visible');
+}
+
+function hideInfoChatNotice(){
+  const layer=qs('#info-chat-inline-notice');
+  if(!layer) return;
+  layer.classList.remove('is-visible');
+  layer.setAttribute('aria-hidden','true');
+}
+
+function normalizeInfoCityText(value){
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+
+/* Fast local guard for obvious out-of-itinerary city mentions.
+   It is intentionally conservative; the server remains authoritative. */
+function detectObviousOutsideCity(text){
+  const allowed=_infoAllowedCities_();
+  if(!allowed.length) return null;
+  const allowedNorm=allowed.map(normalizeInfoCityText);
+  const raw=String(text || '').trim();
+  const norm=normalizeInfoCityText(raw);
+  if(allowedNorm.some(c=>norm.includes(c))) return null;
+
+  const commonCities=[
+    'paris','london','rome','madrid','barcelona','lisbon','porto','amsterdam','berlin','munich','vienna','prague','budapest','venice','florence','milan','naples','reykjavik','dublin','edinburgh','athens','istanbul','zurich','geneva','lucerne','copenhagen','stockholm','oslo','helsinki','rovaniemi','tokyo','kyoto','osaka','seoul','bangkok','singapore','dubai','new york','boston','miami','los angeles','san francisco','chicago','toronto','vancouver','mexico city','cancun','lima','cusco','bogota','medellin','buenos aires','santiago','rio de janeiro','sao paulo','sydney','melbourne','auckland',
+    'parís','londres','roma','madrid','barcelona','lisboa','oporto','amsterdam','berlín','munich','múnich','viena','praga','budapest','venecia','florencia','milán','napoles','nápoles','reikiavik','dublin','dublín','edimburgo','atenas','estambul','zúrich','ginebra','lucerna','copenhague','estocolmo','oslo','helsinki','rovaniemi','tokio','kioto','osaka','seúl','bangkok','singapur','dubái','nueva york','miami','los angeles','los ángeles','san francisco','chicago','toronto','vancouver','ciudad de mexico','ciudad de méxico','cancún','lima','cusco','bogotá','medellín','buenos aires','santiago','rio de janeiro','río de janeiro','sao paulo','são paulo','sidney','melbourne','auckland'
+  ];
+  const normalizedCommon=[...new Set(commonCities.map(normalizeInfoCityText))]
+    .sort((a,b)=>b.length-a.length);
+  const hit=normalizedCommon.find(city=>{
+    if(allowedNorm.includes(city)) return false;
+    const esc=city.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+    return new RegExp(`(^|[^a-z])${esc}([^a-z]|$)`,'i').test(norm);
+  });
+  if(!hit) return null;
+  const display=commonCities.find(c=>normalizeInfoCityText(c)===hit) || hit;
+  return display.replace(/\b\w/g,ch=>ch.toUpperCase());
+}
+
+function minimizeInfoModal(){
+  const modal=qs('#info-chat-modal');
+  if(!modal) return;
+  hideInfoChatNotice();
+  modal.classList.add('is-minimized');
+  modal.classList.add('active');
+  modal.style.display='flex';
+}
+
+function restoreInfoModal(){
+  const modal=qs('#info-chat-modal');
+  if(!modal) return;
+  modal.classList.remove('is-minimized');
+  modal.classList.add('active');
+  modal.style.display='flex';
+  ensureInfoChatWelcome();
+}
+
+function initInfoChatDrag(){
+  const modal=qs('#info-chat-modal');
+  const header=modal?.querySelector('.info-chat-header');
+  if(!modal || !header || header.dataset.dragBound==='1') return;
+  header.dataset.dragBound='1';
+
+  header.addEventListener('pointerdown',(e)=>{
+    if(window.matchMedia('(max-width: 760px)').matches) return;
+    if(e.target.closest('button,a,input,textarea')) return;
+    const rect=modal.getBoundingClientRect();
+    infoChatDragState={pointerId:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
+    header.setPointerCapture?.(e.pointerId);
+    modal.classList.add('is-dragging');
+    e.preventDefault();
+  });
+
+  header.addEventListener('pointermove',(e)=>{
+    if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+    const margin=10;
+    const rect=modal.getBoundingClientRect();
+    const maxLeft=Math.max(margin,window.innerWidth-rect.width-margin);
+    const maxTop=Math.max(margin,window.innerHeight-rect.height-margin);
+    const left=Math.min(Math.max(margin,e.clientX-infoChatDragState.dx),maxLeft);
+    const top=Math.min(Math.max(margin,e.clientY-infoChatDragState.dy),maxTop);
+    modal.style.left=`${left}px`;
+    modal.style.top=`${top}px`;
+    modal.style.right='auto';
+    modal.style.bottom='auto';
+  });
+
+  const end=(e)=>{
+    if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+    infoChatDragState=null;
+    modal.classList.remove('is-dragging');
+    try{ header.releasePointerCapture?.(e.pointerId); }catch(_){}
+  };
+  header.addEventListener('pointerup',end);
+  header.addEventListener('pointercancel',end);
+}
+
 function openInfoModal(){
   if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
     return;
@@ -6364,13 +6521,18 @@ function openInfoModal(){
   requestParentViewportFocus('info-chat-modal', true);
   modal.style.display = 'flex';
   modal.classList.add('active');
+  modal.classList.remove('is-minimized');
+  hideInfoChatNotice();
+  initInfoChatDrag();
+  ensureInfoChatWelcome();
 
   document.body.classList.add('itbmo-info-open');
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
   if(!modal) return;
-  modal.classList.remove('active');
+  modal.classList.remove('active','is-minimized');
+  hideInfoChatNotice();
   modal.style.display = 'none';
 
   // 🆕 Hook para CSS tipo ChatGPT
@@ -6393,6 +6555,18 @@ async function sendInfoMessage(){
   const txt = (input.value||'').trim();
   if(!txt) return;
 
+  const obviousOutsideCity=detectObviousOutsideCity(txt);
+  if(obviousOutsideCity){
+    const es=getLang()==='es';
+    showInfoChatNotice(
+      es ? 'Esta ciudad no está en tu itinerario' : 'This city is not in your itinerary',
+      es
+        ? `Info Chat está disponible para ${_infoCityListText_()}. ${obviousOutsideCity} no forma parte de este itinerario. No se consumió ninguna consulta.`
+        : `Info Chat is available for ${_infoCityListText_()}. ${obviousOutsideCity} is not part of this itinerary. No query was used.`
+    );
+    return;
+  }
+
   infoChatMsg(txt,'user');
   input.value='';
   resizeInfoChatComposer(input);
@@ -6400,7 +6574,7 @@ async function sendInfoMessage(){
   const result = await callInfoAgent(txt);
 
   if(result?.notice){
-    showPlannerNotice(result.notice.title,result.notice.message);
+    showInfoChatNotice(result.notice.title,result.notice.message);
   }else if(result?.text){
     infoChatMsg(result.text);
   }
@@ -6428,6 +6602,8 @@ function bindInfoChatListeners(){
   const toggleTop = qs('#info-chat-toggle');
   const toggleFloating = qs('#info-chat-floating'); // 🆕 soporte flotante
   const close  = qs('#info-chat-close');
+  const minimize = qs('#info-chat-minimize');
+  const noticeOk = qs('#info-chat-inline-notice-ok');
   const send   = qs('#info-chat-send');
   const input  = qs('#info-chat-input');
 
@@ -6435,11 +6611,15 @@ function bindInfoChatListeners(){
   toggleTop?.replaceWith(toggleTop.cloneNode(true));
   toggleFloating?.replaceWith(toggleFloating.cloneNode(true));
   close?.replaceWith(close.cloneNode(true));
+  minimize?.replaceWith(minimize.cloneNode(true));
+  noticeOk?.replaceWith(noticeOk.cloneNode(true));
   send?.replaceWith(send.cloneNode(true));
 
   const tTop = qs('#info-chat-toggle');
   const tFloat = qs('#info-chat-floating');
   const c2 = qs('#info-chat-close');
+  const m2 = qs('#info-chat-minimize');
+  const n2 = qs('#info-chat-inline-notice-ok');
   const s2 = qs('#info-chat-send');
   const i2 = qs('#info-chat-input');
 
@@ -6447,7 +6627,18 @@ function bindInfoChatListeners(){
     btn?.addEventListener('click', (e)=>{ e.preventDefault(); openInfoModal(); });
   });
   c2?.addEventListener('click', (e)=>{ e.preventDefault(); closeInfoModal(); });
+  m2?.addEventListener('click', (e)=>{ e.preventDefault(); minimizeInfoModal(); });
+  n2?.addEventListener('click', (e)=>{ e.preventDefault(); hideInfoChatNotice(); });
   s2?.addEventListener('click', (e)=>{ e.preventDefault(); sendInfoMessage(); });
+
+  qs('#info-chat-modal')?.addEventListener('click',(e)=>{
+    const modal=qs('#info-chat-modal');
+    if(!modal?.classList.contains('is-minimized')) return;
+    if(e.target.closest('.info-chat-window-actions')) return;
+    restoreInfoModal();
+  });
+
+  initInfoChatDrag();
 
   // Chat estilo GPT: Enter = enviar / Shift+Enter = salto de línea
   i2?.addEventListener('keydown', (e)=>{
