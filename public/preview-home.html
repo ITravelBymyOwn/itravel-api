@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <title>ITBMO · Planea tu viaje con ASTRA</title>
-  <meta name="description" content="Crea un itinerario de viaje personalizado con ASTRA. Hasta 5 ciudades, preferencias, horarios, transporte, PDF, CSV e Info Chat.">
+  <meta name="description" content="Crea un itinerario de viaje personalizado con ASTRA. Hasta 5 ciudades en una sola generación, preferencias, horarios, transporte, PDF, CSV, comprobante de pago e Info Chat.">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
 
@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.6">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.7">
 </head>
 
 <body>
@@ -46,8 +46,7 @@
       </nav>
 
       <div class="site-header__actions">
-        <button class="language-toggle" type="button" aria-label="Cambiar idioma">ES</button>
-        <a class="button button--small button--glass" href="/dashboard/my-trips">Mi viaje</a>
+        <div class="language-switch" aria-label="Idioma de la página"><span class="is-active">ES</span><span aria-hidden="true">·</span><button type="button" disabled aria-disabled="true" title="English version coming soon">EN</button></div>
       </div>
     </div>
   </header>
@@ -78,7 +77,7 @@
           </p>
 
           <div class="hero__features">
-            <span>Hasta 5 ciudades</span>
+            <span>1 generación · hasta 5 ciudades</span>
             <span>En tu idioma</span>
             <span>PDF + CSV</span>
             <span>Info Chat</span>
@@ -123,8 +122,8 @@
 
           <div class="hero-glass-card hero-glass-card--back">
             <span class="hero-glass-card__label">TU VIAJE</span>
-            <strong>5 ciudades</strong>
-            <small>Un solo plan</small>
+            <strong>Hasta 5 ciudades</strong>
+            <small>Una sola generación</small>
           </div>
 
           <div class="hero-glass-card hero-glass-card--front">
@@ -197,7 +196,7 @@
               Guardar tus destinos no genera ningún cargo. El pago se solicita únicamente cuando presionas
               <strong>Iniciar planificación</strong>. Después del pago se habilitan ASTRA e Info Chat.
             </p>
-            <span class="how-card__price">Lanzamiento $2.99 · hasta 5 ciudades</span>
+            <span class="how-card__price">Lanzamiento $2.99 · 1 generación · hasta 5 ciudades en ese itinerario</span>
           </article>
 
         </div>
@@ -352,7 +351,7 @@
             <div class="itinerary-card__top">
               <div>
                 <span class="example-label">EJEMPLO DE ITINERARIO</span>
-                <strong>Reykjanes / Costa Sur · Día 3</strong>
+                <strong>Islandia · Desde Reykjavík · Reykjanes / Costa Sur · Día 3 de 5</strong>
               </div>
               <div class="date-chip">22<small>ENE</small></div>
             </div>
@@ -490,7 +489,7 @@
             </div>
 
             <div class="itinerary-card__foot">
-              <span>Contenido de muestra.</span>
+              <span>Muestra · Islandia · generación de 5 días · inicio 20 ENE · aquí se muestra el Día 3.</span>
               <strong>Tu itinerario real se adapta a tus ciudades, hospedaje, viajeros, horarios y condiciones.</strong>
             </div>
           </div>
@@ -584,7 +583,7 @@
               <span class="status-dot"></span>
               ITBMO Planner
             </div>
-            <div class="planner-frame__hint">Hasta 5 ciudades</div>
+            <div class="planner-frame__hint">1 generación · hasta 5 ciudades</div>
           </div>
 
           <iframe
@@ -631,11 +630,20 @@
           </div>
           <p>
             Accesos útiles para reservar, moverte y mantenerte conectado. En esta vista de desarrollo
-            mostramos las seis integraciones previstas; en producción se activarán individualmente al recibir aprobación.
+            mostramos las integraciones previstas; en producción se activarán individualmente al recibir aprobación.
           </p>
         </div>
 
         <div class="partner-grid">
+
+          <article class="partner-card glass-card" data-partner="kayak">
+            <span class="partner-card__state">Preview</span>
+            <div class="partner-brand partner-brand--kayak"><span>KAYAK</span></div>
+            <small>Vuelos</small>
+            <h3>Compara tus vuelos</h3>
+            <p>Explora opciones de vuelo para llegar a tus destinos.</p>
+            <a href="#" data-partner-link="kayak">Buscar vuelos <span>↗</span></a>
+          </article>
 
           <article class="partner-card glass-card" data-partner="booking">
             <span class="partner-card__state">Preview</span>
@@ -855,7 +863,7 @@
               <p>
                 Puedes completar, revisar y guardar la información del Planner sin pagar.
                 El checkout se abre únicamente cuando presionas <strong>Iniciar planificación</strong>.
-                El precio promocional actual de <strong>$2.99</strong> corresponde a una generación de hasta 5 ciudades.
+                El precio promocional actual de <strong>$2.99</strong> corresponde a <strong>1 generación</strong>, que puede incluir hasta <strong>5 ciudades dentro de ese mismo itinerario</strong>.
               </p>
             </div>
           </article>
@@ -1056,7 +1064,7 @@
           <strong>Ayuda</strong>
           <a href="./support-contact.html">Soporte</a>
           <a href="./support-contact.html">Contacto</a>
-          <a href="/dashboard/my-trips">Mi perfil</a>
+          
         </div>
 
         <div class="footer-column">
@@ -1076,6 +1084,6 @@
     </div>
   </footer>
 
-  <script src="./assets/js/itbmo-site.js?v=4.4"></script>
+  <script src="./assets/js/itbmo-site.js?v=4.5"></script>
 </body>
 </html>
