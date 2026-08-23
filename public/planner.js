@@ -5301,10 +5301,17 @@ function exportItineraryToCSV(){
   const delim = detectCsvDelimiter();
   const lines = [];
 
-  // Header fijo (Excel-friendly)
-  lines.push([
-    'City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'
-  ].map(x=>csvEscape(x, delim)).join(delim));
+  // Header localizado según el idioma elegido por el usuario para el itinerario.
+  const csvHeadersByLang = {
+    es:['Ciudad','Día','Fecha','Hora inicio','Hora final','Actividad','Desde','Hacia','Transporte','Duración','Notas'],
+    en:['City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'],
+    pt:['Cidade','Dia','Data','Hora início','Hora final','Atividade','De','Para','Transporte','Duração','Notas'],
+    fr:['Ville','Jour','Date','Heure début','Heure fin','Activité','Depuis','Vers','Transport','Durée','Notes'],
+    de:['Stadt','Tag','Datum','Startzeit','Endzeit','Aktivität','Von','Nach','Transport','Dauer','Hinweise'],
+    it:['Città','Giorno','Data','Ora inizio','Ora fine','Attività','Da','A','Trasporto','Durata','Note']
+  };
+  const csvHeaders = csvHeadersByLang[_plannerOutputLang_()] || csvHeadersByLang.en;
+  lines.push(csvHeaders.map(x=>csvEscape(x, delim)).join(delim));
 
   cities.forEach(city=>{
     const days = getOrderedDaysForCity(city);
@@ -5519,35 +5526,307 @@ async function getPaymentReceiptData(){
 }
 
 async function exportPaymentReceiptToPDF(){
-  if(!window.jspdf?.jsPDF){ alert(getLang()==='es'?'No se pudo preparar el comprobante PDF.':'Could not prepare the PDF receipt.'); return false; }
-  const payment=await getPaymentReceiptData();
-  if(!payment){ alert(getLang()==='es'?'No encontramos un pago confirmado para este viaje. Si acabas de pagar, espera unos segundos y vuelve a intentarlo.':'No confirmed payment was found for this trip.'); return false; }
+  const lang = _plannerOutputLang_();
+
+  const copy = {
+    es:{
+      prep:'No se pudo preparar el comprobante PDF.',
+      noPayment:'No encontramos un pago confirmado para este viaje. Si acabas de pagar, espera unos segundos y vuelve a intentarlo.',
+      title:'COMPROBANTE DE PAGO',
+      summary:'Resumen de la transacción',
+      paid:'PAGADO', test:'PRUEBA',
+      payment:'Pago', trip:'Viaje',
+      date:'Fecha', provider:'Proveedor', amount:'Importe',
+      destinations:'Destino(s)', service:'Servicio',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 5 ciudades',
+      transaction:'REFERENCIA DE TRANSACCIÓN',
+      about:'Sobre este comprobante',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 5 ciudades. Se entrega para control y referencia del usuario.',
+      testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
+      important:'IMPORTANTE',
+      legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
+      operated:'Operado desde Costa Rica'
+    },
+    en:{
+      prep:'Could not prepare the PDF receipt.',
+      noPayment:'No confirmed payment was found for this trip. If you just paid, wait a few seconds and try again.',
+      title:'PAYMENT RECEIPT',
+      summary:'Transaction summary',
+      paid:'PAID', test:'TEST',
+      payment:'Payment', trip:'Trip',
+      date:'Date', provider:'Provider', amount:'Amount',
+      destinations:'Destination(s)', service:'Service',
+      serviceValue:'1 ITBMO itinerary generation · up to 5 cities',
+      transaction:'TRANSACTION REFERENCE',
+      about:'About this receipt',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 5 cities. It is provided for the user’s records and reference.',
+      testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
+      important:'IMPORTANT',
+      legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
+      operated:'Operated from Costa Rica'
+    },
+    pt:{
+      prep:'Não foi possível preparar o comprovante em PDF.',
+      noPayment:'Não encontramos um pagamento confirmado para esta viagem. Se você acabou de pagar, aguarde alguns segundos e tente novamente.',
+      title:'COMPROVANTE DE PAGAMENTO',
+      summary:'Resumo da transação',
+      paid:'PAGO', test:'TESTE',
+      payment:'Pagamento', trip:'Viagem',
+      date:'Data', provider:'Provedor', amount:'Valor',
+      destinations:'Destino(s)', service:'Serviço',
+      serviceValue:'1 geração de itinerário ITBMO · até 5 cidades',
+      transaction:'REFERÊNCIA DA TRANSAÇÃO',
+      about:'Sobre este comprovante',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 5 cidades. É fornecido para controle e referência do usuário.',
+      testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
+      important:'IMPORTANTE',
+      legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
+      operated:'Operado a partir da Costa Rica'
+    },
+    fr:{
+      prep:'Impossible de préparer le reçu PDF.',
+      noPayment:'Aucun paiement confirmé n’a été trouvé pour ce voyage. Si vous venez de payer, attendez quelques secondes puis réessayez.',
+      title:'REÇU DE PAIEMENT',
+      summary:'Résumé de la transaction',
+      paid:'PAYÉ', test:'TEST',
+      payment:'Paiement', trip:'Voyage',
+      date:'Date', provider:'Prestataire', amount:'Montant',
+      destinations:'Destination(s)', service:'Service',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 5 villes',
+      transaction:'RÉFÉRENCE DE TRANSACTION',
+      about:'À propos de ce reçu',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 5 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
+      important:'IMPORTANT',
+      legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
+      operated:'Exploité depuis le Costa Rica'
+    },
+    de:{
+      prep:'Der PDF-Zahlungsbeleg konnte nicht erstellt werden.',
+      noPayment:'Für diese Reise wurde keine bestätigte Zahlung gefunden. Wenn Sie gerade bezahlt haben, warten Sie einige Sekunden und versuchen Sie es erneut.',
+      title:'ZAHLUNGSBELEG',
+      summary:'Transaktionsübersicht',
+      paid:'BEZAHLT', test:'TEST',
+      payment:'Zahlung', trip:'Reise',
+      date:'Datum', provider:'Anbieter', amount:'Betrag',
+      destinations:'Reiseziel(e)', service:'Leistung',
+      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 5 Städte',
+      transaction:'TRANSAKTIONSREFERENZ',
+      about:'Über diesen Beleg',
+      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 5 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
+      testNote:'Dieses Dokument wurde über den administrativen Test-Bypass erstellt. Es wurde keine Zahlung verarbeitet und dieses Dokument stellt keine echte Transaktion dar.',
+      important:'WICHTIG',
+      legal:'Dieses Dokument ist ein Zahlungsbeleg und keine Steuerrechnung oder steuerliche Bescheinigung. Support: support@itravelbymyown.com',
+      operated:'Betrieben von Costa Rica aus'
+    },
+    it:{
+      prep:'Impossibile preparare la ricevuta PDF.',
+      noPayment:'Non è stato trovato un pagamento confermato per questo viaggio. Se hai appena pagato, attendi qualche secondo e riprova.',
+      title:'RICEVUTA DI PAGAMENTO',
+      summary:'Riepilogo della transazione',
+      paid:'PAGATO', test:'TEST',
+      payment:'Pagamento', trip:'Viaggio',
+      date:'Data', provider:'Provider', amount:'Importo',
+      destinations:'Destinazione/i', service:'Servizio',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 5 città',
+      transaction:'RIFERIMENTO TRANSAZIONE',
+      about:'Informazioni sulla ricevuta',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 5 città. È fornita per controllo e riferimento dell’utente.',
+      testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
+      important:'IMPORTANTE',
+      legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
+      operated:'Operato dalla Costa Rica'
+    }
+  };
+
+  const c = copy[lang] || copy.en;
+
+  if(!window.jspdf?.jsPDF){
+    alert(c.prep);
+    return false;
+  }
+
+  const payment = await getPaymentReceiptData();
+  if(!payment){
+    alert(c.noPayment);
+    return false;
+  }
+
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({unit:'pt',format:'a4'});
-  const es=getLang()==='es';
+  const W=595.28, H=841.89;
+  const M=42;
   const cities=getOrderedCitiesForExport();
-  const receiptNo=payment.test ? payment.id : `ITBMO-${String(payment.id||'').slice(0,8).toUpperCase()}`;
-  doc.setFont('helvetica','bold'); doc.setFontSize(22); doc.text('I Travel',42,58); doc.setFontSize(11); doc.text('By My Own',43,74);
-  doc.setFontSize(18); doc.text(es?'Comprobante de pago':'Payment Receipt',42,118);
-  doc.setFont('helvetica','normal'); doc.setFontSize(10);
-  const rows=[
-    [es?'Comprobante':'Receipt',receiptNo],
-    [es?'Fecha':'Date',payment.paid_at?new Date(payment.paid_at).toLocaleString(es?'es-CR':'en-US'):'—'],
-    [es?'Proveedor':'Provider',payment.test?'ADMIN TEST':String(payment.provider||'PayPal').toUpperCase()],
-    [es?'Importe':'Amount',`${payment.currency||'USD'} ${Number(payment.amount||0).toFixed(2)}`],
-    [es?'ID transacción PayPal':'PayPal transaction ID',payment.provider_transaction_id||'—'],
-    [es?'Viaje':'Trip',cities.join(' · ')||'—'],
-    ['Trip ID',currentTripId||'—']
-  ];
-  let y=154; rows.forEach(([a,b])=>{doc.setFont('helvetica','bold');doc.text(String(a),42,y);doc.setFont('helvetica','normal');doc.text(String(b),190,y,{maxWidth:350});y+=28;});
-  doc.setDrawColor(220); doc.line(42,y+4,553,y+4); y+=34;
-  doc.setFontSize(9); doc.setTextColor(80);
-  const note=payment.test
-    ? (es?'DOCUMENTO DE PRUEBA / ADMIN — NO REPRESENTA UN PAGO REAL.':'TEST / ADMIN DOCUMENT — DOES NOT REPRESENT A REAL PAYMENT.')
-    : (es?'Este documento es un comprobante de pago de ITBMO. No constituye factura ni comprobante fiscal.':'This document is an ITBMO payment receipt. It is not a tax invoice or fiscal document.');
-  doc.text(doc.splitTextToSize(note,500),42,y);
-  const d=new Date(); const stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  doc.save(`ITBMO-Payment-Receipt-${stamp}.pdf`);
+  const paidDate = payment.paid_at ? new Date(payment.paid_at) : new Date();
+
+  const dateForId = `${paidDate.getFullYear()}${String(paidDate.getMonth()+1).padStart(2,'0')}${String(paidDate.getDate()).padStart(2,'0')}`;
+  const shortPaymentId = String(payment.id || currentTripId || '00000000')
+    .replace(/[^A-Za-z0-9]/g,'').slice(0,8).toUpperCase();
+
+  const receiptNo = payment.test
+    ? `ADMIN-TEST-${shortPaymentId}`
+    : `ITBMO-${dateForId}-${shortPaymentId}`;
+
+  const localeByLang = {
+    es:'es-CR', en:'en-GB', pt:'pt-BR', fr:'fr-FR', de:'de-DE', it:'it-IT'
+  };
+  const locale = localeByLang[lang] || 'en-GB';
+  const dateText = new Intl.DateTimeFormat(locale,{
+    day:'2-digit', month:'short', year:'numeric',
+    hour:'2-digit', minute:'2-digit'
+  }).format(paidDate);
+
+  const amountValue = Number(payment.amount || 0);
+  const currency = String(payment.currency || 'USD').toUpperCase();
+  const provider = payment.test ? 'ADMIN TEST' : String(payment.provider || 'PayPal').toUpperCase();
+  const paymentStatus = payment.test
+    ? c.test
+    : (String(payment.status || 'paid').toLowerCase()==='paid'
+        ? c.paid
+        : String(payment.status || '').toUpperCase());
+
+  // Fondo
+  doc.setFillColor(248,251,253);
+  doc.rect(0,0,W,H,'F');
+
+  // Cabecera de marca
+  doc.setFillColor(5,44,86);
+  doc.roundedRect(M,38,W-(M*2),82,14,14,'F');
+
+  doc.setTextColor(255,255,255);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(24);
+  doc.text('I Travel',M+22,75);
+  doc.setFontSize(11);
+  doc.text('By My Own',M+23,94);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica','normal');
+  doc.text(c.title,W-M-22,66,{align:'right'});
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(12);
+  doc.text(receiptNo,W-M-22,88,{align:'right'});
+
+  // Título + estado
+  doc.setTextColor(7,34,66);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(22);
+  doc.text(c.summary,M,158);
+
+  const chipW = payment.test ? 100 : 82;
+  if(payment.test){
+    doc.setFillColor(238,241,246);
+    doc.setTextColor(82,92,112);
+  }else{
+    doc.setFillColor(228,248,239);
+    doc.setTextColor(22,120,77);
+  }
+  doc.roundedRect(W-M-chipW,138,chipW,28,14,14,'F');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9);
+  doc.text(paymentStatus,W-M-(chipW/2),156,{align:'center'});
+
+  // Tarjetas
+  const cardY=184, cardH=164, gap=14;
+  const cardW=(W-(M*2)-gap)/2;
+
+  doc.setFillColor(255,255,255);
+  doc.setDrawColor(222,231,239);
+  doc.roundedRect(M,cardY,cardW,cardH,12,12,'FD');
+  doc.roundedRect(M+cardW+gap,cardY,cardW,cardH,12,12,'FD');
+
+  function labelValue(x,y,label,value,maxWidth=cardW-34){
+    doc.setFont('helvetica','bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(102,124,145);
+    doc.text(String(label).toUpperCase(),x,y);
+
+    doc.setFont('helvetica','normal');
+    doc.setFontSize(11);
+    doc.setTextColor(7,34,66);
+    const lines=doc.splitTextToSize(String(value || '—'),maxWidth);
+    doc.text(lines,x,y+17);
+  }
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(11);
+  doc.setTextColor(7,34,66);
+  doc.text(c.payment,M+17,cardY+24);
+  doc.text(c.trip,M+cardW+gap+17,cardY+24);
+
+  labelValue(M+17,cardY+49,c.date,dateText);
+  labelValue(M+17,cardY+91,c.provider,provider);
+  labelValue(M+17,cardY+133,c.amount,`${currency} ${amountValue.toFixed(2)}`);
+
+  const tripX=M+cardW+gap+17;
+  labelValue(tripX,cardY+49,c.destinations,cities.join(' · ') || '—');
+  labelValue(tripX,cardY+91,c.service,c.serviceValue);
+  labelValue(tripX,cardY+133,'Trip ID',currentTripId || '—');
+
+  // Referencia
+  const refY=370;
+  doc.setFillColor(242,248,251);
+  doc.setDrawColor(210,230,237);
+  doc.roundedRect(M,refY,W-(M*2),72,12,12,'FD');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(75,112,134);
+  doc.text(c.transaction,M+17,refY+23);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(11);
+  doc.setTextColor(7,34,66);
+  doc.text(
+    payment.test ? '—' : String(payment.provider_transaction_id || '—'),
+    M+17,refY+45,{maxWidth:W-(M*2)-34}
+  );
+
+  // Explicación
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(12);
+  doc.setTextColor(7,34,66);
+  doc.text(c.about,M,486);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(76,95,113);
+  doc.text(
+    doc.splitTextToSize(payment.test ? c.testNote : c.realNote,W-(M*2)),
+    M,507
+  );
+
+  // Legal / soporte
+  doc.setFillColor(255,250,235);
+  doc.setDrawColor(240,221,166);
+  doc.roundedRect(M,564,W-(M*2),74,12,12,'FD');
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9);
+  doc.setTextColor(99,72,12);
+  doc.text(c.important,M+17,587);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(9);
+  doc.text(doc.splitTextToSize(c.legal,W-(M*2)-34),M+17,607);
+
+  // Footer
+  doc.setDrawColor(224,231,237);
+  doc.line(M,704,W-M,704);
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(9);
+  doc.setTextColor(7,34,66);
+  doc.text('I Travel By My Own',M,727);
+
+  doc.setFont('helvetica','normal');
+  doc.setTextColor(100,116,132);
+  doc.text(c.operated,M,744);
+  doc.text('support@itravelbymyown.com',W-M,727,{align:'right'});
+  doc.text(receiptNo,W-M,744,{align:'right'});
+
+  const filename = payment.test
+    ? `ITBMO-ADMIN-TEST-Receipt-${dateForId}.pdf`
+    : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
+
+  doc.save(filename);
   return true;
 }
 
