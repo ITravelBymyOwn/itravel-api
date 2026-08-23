@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · TRAVEL GLASS CLEAN · v67
+   ITBMO · TRAVEL GLASS CLEAN · v73
    CLEAN CONSOLIDATED STYLESHEET
    ---------------------------------------------------------
    - No legacy visual layers.
@@ -3299,3 +3299,49 @@ input.end,
   color:#8293a1;
   background:#f5f8fa;
 }
+
+/* =========================================================
+   v73 · BRANDED AFFILIATES + FINAL DOWNLOAD MODAL
+========================================================= */
+.itbmo-affiliate-grid--brands{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.72rem}
+.itbmo-affiliate-brand-card{padding:0!important;overflow:hidden;border-radius:20px;background:#fff;border:1px solid rgba(25,70,105,.10);box-shadow:0 12px 30px rgba(16,55,86,.08)}
+.itbmo-affiliate-brand-head{min-height:52px;display:flex;align-items:center;justify-content:space-between;padding:.7rem .82rem;color:#fff;font-size:1rem;font-weight:950;letter-spacing:-.035em}
+.itbmo-affiliate-brand-head>span{padding:.18rem .34rem;border-radius:999px;background:#fff4cf;color:#795b0a;font-size:.52rem;font-weight:900;letter-spacing:0}
+.itbmo-affiliate-brand-body{display:flex;min-height:145px;flex-direction:column;padding:.72rem .8rem .8rem}
+.itbmo-affiliate-brand-body small{color:#748a9b;font-size:.56rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+.itbmo-affiliate-brand-body h4{margin:.16rem 0 .3rem;font-size:.9rem;color:var(--ink)}
+.itbmo-affiliate-brand-body p{margin:0;color:var(--text);font-size:.66rem;line-height:1.38}
+.itbmo-affiliate-brand-body .itbmo-affiliate-link{margin-top:auto;min-height:38px;padding:.58rem .65rem;border-radius:11px;background:#f3f8fb;color:#245f7b}
+.itbmo-affiliate-brand-card--kayak .itbmo-affiliate-brand-head{background:#ff690f}
+.itbmo-affiliate-brand-card--booking .itbmo-affiliate-brand-head{background:#003b95}
+.itbmo-affiliate-brand-card--gyg .itbmo-affiliate-brand-head{background:#ff5533}
+.itbmo-affiliate-brand-card--viator .itbmo-affiliate-brand-head{background:#008768}
+.itbmo-affiliate-brand-card--omio .itbmo-affiliate-brand-head{background:linear-gradient(135deg,#14265f,#4c5bdc)}
+.itbmo-affiliate-brand-card--airalo .itbmo-affiliate-brand-head{background:linear-gradient(135deg,#5b2bd7,#8b46ef)}
+.itbmo-affiliate-brand-card--holafly .itbmo-affiliate-brand-head{background:#ff3b67}
+#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:auto!important}
+#loading-overlay .itbmo-affiliate-brand-card{height:auto;min-height:0}
+#loading-overlay .itbmo-affiliate-brand-body{min-height:118px;padding:.58rem .66rem .65rem}
+#loading-overlay .itbmo-affiliate-brand-head{min-height:43px;padding:.52rem .66rem;font-size:.88rem}
+#loading-overlay .itbmo-affiliate-brand-body p{font-size:.59rem}
+#loading-overlay .itbmo-affiliate-brand-body h4{font-size:.78rem}
+
+.itbmo-download-overlay{position:fixed;inset:0;z-index:70000;display:grid;place-items:start center;padding:clamp(18px,5vh,54px) 18px;background:rgba(5,25,45,.56);backdrop-filter:blur(18px);opacity:0;transition:opacity .22s ease;overflow:auto}
+.itbmo-download-overlay.active{opacity:1}
+.itbmo-download-card{width:min(94vw,620px);padding:1.35rem;border:1px solid rgba(255,255,255,.7);border-radius:26px;background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(244,251,252,.97));box-shadow:0 30px 90px rgba(4,27,49,.26);text-align:center;transform:translateY(12px) scale(.985);transition:transform .22s ease}
+.itbmo-download-overlay.active .itbmo-download-card{transform:none}
+.itbmo-download-spark{width:52px;height:52px;display:grid;place-items:center;margin:0 auto .6rem;border-radius:16px;background:linear-gradient(135deg,#0d8f91,#37b9c7);color:#fff;font-size:1.35rem;font-weight:950;box-shadow:0 12px 28px rgba(13,143,145,.22)}
+.itbmo-download-eyebrow{font-size:.58rem;font-weight:950;letter-spacing:.12em;color:#0c858a}
+.itbmo-download-card h3{margin:.25rem 0 .45rem;color:var(--ink);font-size:1.45rem;letter-spacing:-.035em}
+.itbmo-download-card>p{margin:0 auto .8rem;max-width:500px;color:var(--text);font-size:.78rem;line-height:1.5}
+.itbmo-download-files{display:flex;justify-content:center;flex-wrap:wrap;gap:.4rem;margin:.7rem 0}
+.itbmo-download-files span{padding:.34rem .52rem;border-radius:999px;background:#edf7fa;color:#28647b;font-size:.62rem;font-weight:850}
+.itbmo-download-all{width:100%;margin:.2rem 0 .55rem}
+.itbmo-download-status{min-height:1.2rem;color:#17756f;font-size:.66rem;font-weight:800}
+.itbmo-download-ack{display:flex;gap:.55rem;align-items:flex-start;margin:.7rem 0;padding:.65rem .72rem;border-radius:14px;background:#fff8e6;color:#6e571b;text-align:left;font-size:.67rem;line-height:1.42}
+.itbmo-download-ack input{margin-top:.12rem;accent-color:#0c8f91}
+.itbmo-download-close{width:100%}
+.itbmo-download-close:disabled{opacity:.42;cursor:not-allowed}
+.itbmo-download-card>small{display:block;margin-top:.62rem;color:#718697;font-size:.6rem;line-height:1.4}
+@media(max-width:900px){.itbmo-affiliate-grid--brands,#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.itbmo-affiliate-grid--brands,#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:1fr}.itbmo-download-card{padding:1rem;border-radius:22px}}
