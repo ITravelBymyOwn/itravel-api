@@ -470,8 +470,20 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
             <span id="info-chat-entitlement-text">Available after payment</span>
           </div>
         </div>
-        <button id="info-chat-close" class="btn ghost">✖</button>
+        <div class="info-chat-window-actions" aria-label="Controles de Info Chat">
+          <button id="info-chat-minimize" class="btn ghost" type="button" aria-label="Minimize Info Chat" title="Minimize">—</button>
+          <button id="info-chat-close" class="btn ghost" type="button" aria-label="Close Info Chat" title="Close">✖</button>
+        </div>
       </div>
+      <div id="info-chat-inline-notice" class="info-chat-inline-notice" aria-live="assertive" aria-hidden="true">
+        <div class="info-chat-inline-notice__card" role="dialog" aria-modal="false">
+          <div class="info-chat-inline-notice__symbol">✦</div>
+          <h4 id="info-chat-inline-notice-title"></h4>
+          <p id="info-chat-inline-notice-message"></p>
+          <button id="info-chat-inline-notice-ok" class="btn primary" type="button">Got it</button>
+        </div>
+      </div>
+
       <div id="info-chat-usage" class="info-chat-usage" aria-live="polite">
         <span id="info-chat-usage-label">Info Chat locked</span>
         <strong id="info-chat-remaining">0 / 10</strong>
@@ -856,7 +868,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=73"></script>
+<script src="./planner.js?v=74"></script>
  
 </body>
 </html>
