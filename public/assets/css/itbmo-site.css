@@ -1086,3 +1086,182 @@ img,svg,video{max-width:100%;display:block}
 .partner-brand--holafly{background:#ff3b67}
 .example-zone .itinerary-preview__heading p strong{color:var(--ink)}
 @media (max-width:760px){.language-switch{padding:.4rem .52rem}.planner-generation-note{font-size:.68rem}}
+
+/* =========================================================
+   ITBMO · HOME V4.8 · FINAL PHOTOGRAPHY SYSTEM
+   Clean Hero carousel + real editorial photography
+   ========================================================= */
+
+.hero__visual{
+  min-height:480px;
+}
+
+.hero-carousel{
+  position:absolute;
+  inset:0;
+  overflow:hidden;
+  border-radius:38px;
+  background:#eaf2f7;
+  border:1px solid rgba(255,255,255,.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    0 28px 72px rgba(16,56,88,.15);
+}
+
+.hero-carousel__slides{
+  position:absolute;
+  inset:0;
+}
+
+.hero-carousel__slide{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  opacity:0;
+  transform:scale(1.015);
+  transition:
+    opacity 1.05s var(--ease),
+    transform 5.8s cubic-bezier(.22,1,.36,1);
+  will-change:opacity,transform;
+}
+
+.hero-carousel__slide.is-active{
+  opacity:1;
+  transform:scale(1);
+}
+
+/* Individual focal points for the selected source images. */
+.hero-carousel__slide--santorini{object-position:center 54%}
+.hero-carousel__slide--skogafoss{object-position:center 48%}
+.hero-carousel__slide--paris{object-position:center 42%}
+.hero-carousel__slide--rome{object-position:center 48%}
+.hero-carousel__slide--istanbul{object-position:center 48%}
+
+.hero-carousel__dots{
+  position:absolute;
+  z-index:5;
+  left:50%;
+  bottom:14px;
+  transform:translateX(-50%);
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:7px 9px;
+  border-radius:999px;
+  background:rgba(7,31,61,.24);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  pointer-events:none;
+}
+
+.hero-carousel__dots span{
+  width:7px;
+  height:7px;
+  border-radius:999px;
+  background:rgba(255,255,255,.55);
+  box-shadow:0 0 0 1px rgba(7,31,61,.06);
+  transition:width .3s var(--ease),background .3s ease;
+}
+
+.hero-carousel__dots span.is-active{
+  width:22px;
+  background:#fff;
+}
+
+/* Legacy Hero decoration is intentionally removed from the final visual. */
+.hero-orbit,
+.hero-glass-card,
+.hero-photo-stage{
+  display:none!important;
+}
+
+/* Real destination image in the ASTRA section. */
+.route-visual__photo.has-image>img{
+  opacity:1;
+  transform:none;
+  object-fit:cover;
+  object-position:58% center;
+}
+
+.route-visual__photo.has-image:hover>img{
+  transform:scale(1.018);
+}
+
+/* Real editorial images. */
+.travel-photo-card.has-image>img{
+  opacity:1;
+  transform:none;
+  object-fit:cover;
+}
+
+.travel-photo-card.has-image:hover>img{
+  transform:scale(1.018);
+}
+
+.travel-photo-card:first-child>img{
+  object-position:center 40%;
+}
+
+.travel-photo-card--wide>img{
+  object-position:center 52%;
+}
+
+.travel-photo-card:last-child>img{
+  object-position:center 28%;
+}
+
+/* Preview-only photo labels/placeholders are no longer shown. */
+.image-slot__placeholder,
+.travel-photo-rail__label{
+  display:none!important;
+}
+
+@media(max-width:1180px){
+  .hero__visual{min-height:440px}
+}
+
+@media(max-width:900px){
+  .hero__visual{
+    min-height:500px;
+    margin-top:.5rem;
+  }
+
+  .hero-carousel{
+    border-radius:30px;
+  }
+}
+
+@media(max-width:680px){
+  .hero__visual{min-height:390px}
+
+  .hero-carousel{
+    border-radius:24px;
+  }
+
+  .hero-carousel__dots{
+    bottom:10px;
+    gap:6px;
+    padding:6px 8px;
+  }
+
+  .hero-carousel__dots span{
+    width:6px;
+    height:6px;
+  }
+
+  .hero-carousel__dots span.is-active{
+    width:18px;
+  }
+
+  .hero-carousel__slide--paris{object-position:center 38%}
+  .hero-carousel__slide--istanbul{object-position:center 42%}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .hero-carousel__slide{
+    transition:none;
+    transform:none;
+  }
+}
