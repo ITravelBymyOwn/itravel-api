@@ -105,41 +105,39 @@
         </div>
 
         <div class="hero__visual" aria-hidden="true">
-          <div class="hero-orbit hero-orbit--1"></div>
-          <div class="hero-orbit hero-orbit--2"></div>
-
-          <!-- FOTO 01 · HERO
-               Sube la imagen como:
-               public/assets/img/destinations/hero-travel.jpg
-               Si todavía no existe, el placeholder permanece visible. -->
-          <div class="hero-photo-stage image-slot image-slot--hero" data-image-slot>
-            <img
-              src="./assets/img/destinations/hero-travel.jpg"
-              alt=""
-              data-image-asset
-            >
-            <div class="image-slot__placeholder image-slot__placeholder--prominent image-slot__placeholder--corner">
-              <span>FOTO 01 · HERO</span>
-              <small>assets/img/destinations/hero-travel.jpg</small>
+          <div class="hero-carousel" data-hero-carousel>
+            <div class="hero-carousel__slides">
+              <img class="hero-carousel__slide is-active hero-carousel__slide--santorini"
+                   src="./assets/img/destinations/hero-santorini.jpeg" alt=""
+                   loading="eager" fetchpriority="high">
+              <img class="hero-carousel__slide hero-carousel__slide--skogafoss"
+                   src="./assets/img/destinations/hero-skogafoss.jpeg" alt=""
+                   loading="lazy">
+              <img class="hero-carousel__slide hero-carousel__slide--paris"
+                   src="./assets/img/destinations/hero-paris.jpg" alt=""
+                   loading="lazy">
+              <img class="hero-carousel__slide hero-carousel__slide--rome"
+                   src="./assets/img/destinations/hero-rome.jpeg" alt=""
+                   loading="lazy">
+              <img class="hero-carousel__slide hero-carousel__slide--istanbul"
+                   src="./assets/img/destinations/hero-istambul.jpg" alt=""
+                   loading="lazy">
             </div>
-          </div>
 
-          <div class="hero-glass-card hero-glass-card--back">
-            <span class="hero-glass-card__label">TU VIAJE</span>
-            <strong>Hasta 5 ciudades</strong>
-            <small>Una sola generación</small>
-          </div>
-
-          <div class="hero-glass-card hero-glass-card--front">
-            <span class="hero-glass-card__spark">✦</span>
-            <span class="hero-glass-card__label">ASTRA</span>
-            <strong>De decisiones<br>a una ruta.</strong>
-            <div class="hero-route-mini">
-              <i></i><b></b><i></i><b></b><i></i>
+            <div class="hero-carousel__dots" aria-hidden="true">
+              <span class="is-active"></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
             </div>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- =========================================================
+         CÓMO FUNCIONA + INFO CHAT      </div>
     </section>
 
     <!-- =========================================================
@@ -295,22 +293,13 @@
           </div>
 
           <div class="route-visual">
-            <!-- FOTO 02 · ASTRA / DESTINO
-                 Sube la imagen como:
-                 public/assets/img/destinations/astra-destination.jpg -->
-            <div class="route-visual__photo image-slot image-slot--astra" data-image-slot>
+            <div class="route-visual__photo image-slot image-slot--astra has-image">
               <img
-                src="./assets/img/destinations/astra-destination.jpg"
-                alt=""
-                data-image-asset
+                src="./assets/img/destinations/editorial-egypt.jpg"
+                alt="Viaje frente a las Pirámides de Giza, Egipto"
               >
-              <div class="image-slot__placeholder image-slot__placeholder--prominent image-slot__placeholder--corner">
-                <span>FOTO 02 · ASTRA</span>
-                <small>assets/img/destinations/astra-destination.jpg</small>
-              </div>
-
               <div class="route-visual__caption">
-                <small>BARCELONA</small>
+                <small>GIZA · EGIPTO</small>
                 <strong>Una jornada que fluye.</strong>
               </div>
             </div>
@@ -318,20 +307,23 @@
             <div class="route-visual__path">
               <div class="route-stop route-stop--active">
                 <span>09:00</span>
-                <strong>Sagrada Família</strong>
+                <strong>Pirámides de Giza</strong>
               </div>
               <i></i>
               <div class="route-stop">
-                <span>11:15</span>
-                <strong>Passeig de Gràcia</strong>
+                <span>11:30</span>
+                <strong>Gran Esfinge</strong>
               </div>
               <i></i>
               <div class="route-stop">
                 <span>14:30</span>
-                <strong>Barri Gòtic</strong>
+                <strong>Mirador panorámico</strong>
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- EJEMPLO REALISTA -->          </div>
         </div>
 
         <!-- EJEMPLO REALISTA -->
@@ -503,62 +495,45 @@
     </section>
 
     <!-- =========================================================
-         EDITORIAL TRAVEL IMAGES · PREVIEW
-         These spaces are intentionally visible during design.
+         INSPIRACIÓN DE VIAJE
          ========================================================== -->
     <section class="travel-photo-rail" aria-label="Inspiración de destinos">
       <div class="page-shell">
-        <div class="travel-photo-rail__label">
-          <span>Galería editorial</span>
-          <strong>Fotos 03, 04 y 05</strong>
-        </div>
         <div class="travel-photo-rail__grid">
 
-          <figure class="travel-photo-card image-slot glass-card" data-image-slot>
+          <figure class="travel-photo-card image-slot glass-card has-image">
             <img
-              src="./assets/img/destinations/travel-01.jpg"
-              alt="Destino de viaje"
-              data-image-asset
+              src="./assets/img/destinations/editorial-tromso.jpeg"
+              alt="Aurora boreal en Tromsø, Noruega"
+              loading="lazy"
             >
-            <div class="image-slot__placeholder">
-              <span>FOTO 03</span>
-              <small>travel-01.jpg</small>
-            </div>
             <figcaption>
-              <span>Explora</span>
-              <strong>Ciudades que quieres vivir, no solo visitar.</strong>
+              <span>Tromsø · Noruega</span>
+              <strong>Momentos que justifican el viaje.</strong>
             </figcaption>
           </figure>
 
-          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card" data-image-slot>
+          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card has-image">
             <img
-              src="./assets/img/destinations/travel-02.jpg"
-              alt="Experiencia de viaje"
-              data-image-asset
+              src="./assets/img/destinations/editoria-bariloche.jpeg"
+              alt="Viajeros junto a un lago y montañas en Bariloche, Argentina"
+              loading="lazy"
             >
-            <div class="image-slot__placeholder">
-              <span>FOTO 04</span>
-              <small>travel-02.jpg</small>
-            </div>
             <figcaption>
-              <span>Conecta</span>
-              <strong>ASTRA organiza el tiempo para que tú vivas el viaje.</strong>
+              <span>Bariloche · Argentina</span>
+              <strong>Naturaleza que se vive en primera persona.</strong>
             </figcaption>
           </figure>
 
-          <figure class="travel-photo-card image-slot glass-card" data-image-slot>
+          <figure class="travel-photo-card image-slot glass-card has-image">
             <img
-              src="./assets/img/destinations/travel-03.jpg"
-              alt="Paisaje de viaje"
-              data-image-asset
+              src="./assets/img/destinations/editorial-rio.jpeg"
+              alt="Cristo Redentor en Río de Janeiro, Brasil"
+              loading="lazy"
             >
-            <div class="image-slot__placeholder">
-              <span>FOTO 05</span>
-              <small>travel-03.jpg</small>
-            </div>
             <figcaption>
-              <span>Descubre</span>
-              <strong>Imperdibles, rutas lógicas y tiempo mejor aprovechado.</strong>
+              <span>Río de Janeiro · Brasil</span>
+              <strong>Iconos que se convierten en recuerdos.</strong>
             </figcaption>
           </figure>
 
@@ -567,6 +542,7 @@
     </section>
 
     <!-- =========================================================
+         PLANNER    <!-- =========================================================
          PLANNER
     ========================================================== -->
     <section class="planner-section" id="planner" aria-labelledby="planner-heading">
@@ -1086,5 +1062,47 @@
   </footer>
 
   <script src="./assets/js/itbmo-site.js?v=4.6"></script>
+  <script>
+    (() => {
+      const carousel = document.querySelector('[data-hero-carousel]');
+      if (!carousel) return;
+
+      const slides = Array.from(carousel.querySelectorAll('.hero-carousel__slide'));
+      const dots = Array.from(carousel.querySelectorAll('.hero-carousel__dots span'));
+      if (slides.length < 2) return;
+
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      let index = 0;
+      let timer = null;
+
+      const show = (nextIndex) => {
+        index = (nextIndex + slides.length) % slides.length;
+        slides.forEach((slide, i) => slide.classList.toggle('is-active', i === index));
+        dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));
+      };
+
+      const start = () => {
+        if (reduceMotion || timer) return;
+        timer = window.setInterval(() => show(index + 1), 5500);
+      };
+
+      const stop = () => {
+        if (!timer) return;
+        window.clearInterval(timer);
+        timer = null;
+      };
+
+      carousel.addEventListener('mouseenter', stop);
+      carousel.addEventListener('mouseleave', start);
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) stop();
+        else start();
+      });
+
+      show(0);
+      start();
+    })();
+  </script>
 </body>
 </html>
