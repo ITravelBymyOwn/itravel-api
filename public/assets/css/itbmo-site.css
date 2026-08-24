@@ -1086,3 +1086,401 @@ img,svg,video{max-width:100%;display:block}
 .partner-brand--holafly{background:#ff3b67}
 .example-zone .itinerary-preview__heading p strong{color:var(--ink)}
 @media (max-width:760px){.language-switch{padding:.4rem .52rem}.planner-generation-note{font-size:.68rem}}
+
+/* =========================================================
+   ITBMO · HOME V4.8 · FINAL PHOTOGRAPHY SYSTEM
+   Clean Hero carousel + real editorial photography
+   ========================================================= */
+
+.hero__visual{
+  min-height:480px;
+}
+
+.hero-carousel{
+  position:absolute;
+  inset:0;
+  overflow:hidden;
+  border-radius:38px;
+  background:#eaf2f7;
+  border:1px solid rgba(255,255,255,.86);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    0 28px 72px rgba(16,56,88,.15);
+}
+
+.hero-carousel__slides{
+  position:absolute;
+  inset:0;
+}
+
+.hero-carousel__slide{
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  opacity:0;
+  transform:scale(1.015);
+  transition:
+    opacity 1.05s var(--ease),
+    transform 5.8s cubic-bezier(.22,1,.36,1);
+  will-change:opacity,transform;
+}
+
+.hero-carousel__slide.is-active{
+  opacity:1;
+  transform:scale(1);
+}
+
+/* Individual focal points for the selected source images. */
+.hero-carousel__slide--santorini{object-position:center 54%}
+.hero-carousel__slide--skogafoss{object-position:center 48%}
+.hero-carousel__slide--paris{object-position:center 42%}
+.hero-carousel__slide--rome{object-position:center 48%}
+.hero-carousel__slide--istanbul{object-position:center 48%}
+
+.hero-carousel__dots{
+  position:absolute;
+  z-index:5;
+  left:50%;
+  bottom:14px;
+  transform:translateX(-50%);
+  display:flex;
+  align-items:center;
+  gap:7px;
+  padding:7px 9px;
+  border-radius:999px;
+  background:rgba(7,31,61,.24);
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  pointer-events:none;
+}
+
+.hero-carousel__dots span{
+  width:7px;
+  height:7px;
+  border-radius:999px;
+  background:rgba(255,255,255,.55);
+  box-shadow:0 0 0 1px rgba(7,31,61,.06);
+  transition:width .3s var(--ease),background .3s ease;
+}
+
+.hero-carousel__dots span.is-active{
+  width:22px;
+  background:#fff;
+}
+
+/* Legacy Hero decoration is intentionally removed from the final visual. */
+.hero-orbit,
+.hero-glass-card,
+.hero-photo-stage{
+  display:none!important;
+}
+
+/* Real destination image in the ASTRA section. */
+.route-visual__photo.has-image>img{
+  opacity:1;
+  transform:none;
+  object-fit:cover;
+  object-position:58% center;
+}
+
+.route-visual__photo.has-image:hover>img{
+  transform:scale(1.018);
+}
+
+/* Real editorial images. */
+.travel-photo-card.has-image>img{
+  opacity:1;
+  transform:none;
+  object-fit:cover;
+}
+
+.travel-photo-card.has-image:hover>img{
+  transform:scale(1.018);
+}
+
+.travel-photo-card:first-child>img{
+  object-position:center 40%;
+}
+
+.travel-photo-card--wide>img{
+  object-position:center 52%;
+}
+
+.travel-photo-card:last-child>img{
+  object-position:center 28%;
+}
+
+/* Preview-only photo labels/placeholders are no longer shown. */
+.image-slot__placeholder,
+.travel-photo-rail__label{
+  display:none!important;
+}
+
+@media(max-width:1180px){
+  .hero__visual{min-height:440px}
+}
+
+@media(max-width:900px){
+  .hero__visual{
+    min-height:500px;
+    margin-top:.5rem;
+  }
+
+  .hero-carousel{
+    border-radius:30px;
+  }
+}
+
+@media(max-width:680px){
+  .hero__visual{min-height:390px}
+
+  .hero-carousel{
+    border-radius:24px;
+  }
+
+  .hero-carousel__dots{
+    bottom:10px;
+    gap:6px;
+    padding:6px 8px;
+  }
+
+  .hero-carousel__dots span{
+    width:6px;
+    height:6px;
+  }
+
+  .hero-carousel__dots span.is-active{
+    width:18px;
+  }
+
+  .hero-carousel__slide--paris{object-position:center 38%}
+  .hero-carousel__slide--istanbul{object-position:center 42%}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .hero-carousel__slide{
+    transition:none;
+    transform:none;
+  }
+}
+
+/* =========================================================
+   ITBMO · PHOTOGRAPHY V2
+   Clean Photo 02 + full-image lightbox + Hero gallery
+   ========================================================= */
+
+.route-visual{min-height:490px}
+.route-visual__photo{inset:0}
+.route-visual__photo::after,
+.route-visual__caption,
+.route-visual__path{display:none!important}
+.route-visual__photo.has-image>img{
+  width:100%;height:100%;object-fit:cover;object-position:center center
+}
+
+[data-photo-lightbox]{cursor:zoom-in}
+.hero-carousel[data-photo-lightbox]{outline:none}
+.hero-carousel[data-photo-lightbox]:focus-visible,
+[data-photo-lightbox="single"]:focus-visible{
+  outline:3px solid rgba(8,119,249,.38);outline-offset:4px
+}
+
+html.photo-lightbox-open,
+body.photo-lightbox-open{overflow:hidden!important}
+.photo-lightbox[hidden]{display:none!important}
+.photo-lightbox{
+  position:fixed;inset:0;z-index:999999;display:grid;place-items:center;
+  opacity:0;transition:opacity .22s ease
+}
+.photo-lightbox.is-open{opacity:1}
+.photo-lightbox__backdrop{
+  position:absolute;inset:0;background:rgba(3,16,32,.88);
+  backdrop-filter:blur(18px) saturate(120%);-webkit-backdrop-filter:blur(18px) saturate(120%)
+}
+.photo-lightbox__dialog{
+  position:relative;z-index:2;width:min(94vw,1500px);height:min(92vh,980px);
+  display:grid;grid-template-columns:64px minmax(0,1fr) 64px;
+  grid-template-rows:minmax(0,1fr) auto;align-items:center;gap:12px
+}
+.photo-lightbox__stage{
+  grid-column:2;grid-row:1;width:100%;height:100%;min-height:0;
+  display:flex;align-items:center;justify-content:center
+}
+.photo-lightbox__image{
+  display:block;width:auto;height:auto;max-width:100%;max-height:calc(92vh - 54px);
+  object-fit:contain;border-radius:18px;box-shadow:0 28px 90px rgba(0,0,0,.38);background:transparent
+}
+.photo-lightbox__close{
+  position:absolute;z-index:5;top:0;right:0;width:46px;height:46px;display:grid;place-items:center;
+  border:1px solid rgba(255,255,255,.2);border-radius:999px;color:#fff;
+  background:rgba(255,255,255,.12);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  font-size:2rem;line-height:1;cursor:pointer
+}
+.photo-lightbox__nav{
+  width:52px;height:52px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.18);
+  border-radius:999px;color:#fff;background:rgba(255,255,255,.10);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);font-size:2.4rem;line-height:1;
+  cursor:pointer;transition:transform .2s var(--ease),background .2s ease
+}
+.photo-lightbox__nav:hover{transform:scale(1.06);background:rgba(255,255,255,.18)}
+.photo-lightbox__nav--prev{grid-column:1;grid-row:1;justify-self:center}
+.photo-lightbox__nav--next{grid-column:3;grid-row:1;justify-self:center}
+.photo-lightbox__counter{
+  grid-column:2;grid-row:2;justify-self:center;min-width:64px;padding:7px 12px;border-radius:999px;
+  color:#fff;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.13);
+  font-size:.74rem;font-weight:800;letter-spacing:.04em;text-align:center
+}
+@media(max-width:900px){
+  .photo-lightbox__dialog{width:96vw;height:94vh;grid-template-columns:48px minmax(0,1fr) 48px;gap:6px}
+  .photo-lightbox__nav{width:42px;height:42px;font-size:2rem}
+  .photo-lightbox__close{width:42px;height:42px;top:4px;right:4px}
+  .photo-lightbox__image{max-height:calc(94vh - 48px);border-radius:14px}
+}
+@media(max-width:680px){
+  .photo-lightbox__dialog{width:100vw;height:100svh;padding:10px;grid-template-columns:42px minmax(0,1fr) 42px}
+  .photo-lightbox__image{max-height:calc(100svh - 62px);border-radius:10px}
+  .photo-lightbox__nav{width:38px;height:38px;font-size:1.8rem}
+}
+
+
+
+/* V3 · Affordance más natural: mano, no lupa. */
+[data-photo-lightbox],
+[data-photo-lightbox] img,
+.hero-carousel[data-photo-lightbox],
+.hero-carousel[data-photo-lightbox] img{
+  cursor:pointer!important;
+}
+
+/* El fondo oscuro completo es clickeable para cerrar. */
+.photo-lightbox__backdrop{
+  cursor:pointer;
+}
+
+/* La imagen ampliada conserva cursor normal para no sugerir otro zoom. */
+.photo-lightbox__image{
+  cursor:default;
+}
+
+/* Controles mantienen cursor de acción. */
+.photo-lightbox__close,
+.photo-lightbox__nav{
+  cursor:pointer;
+}
+
+/* =========================================================
+   ITBMO · MOBILE HERO FIX
+   The legacy mobile rule hid .hero__visual. The final photo
+   carousel must remain visible on phones.
+   ========================================================= */
+@media(max-width:680px){
+  .hero__visual{
+    display:block!important;
+    width:100%;
+    min-height:410px;
+    margin-top:1.15rem;
+  }
+
+  .hero-carousel{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+  }
+}
+
+@media(max-width:430px){
+  .hero__visual{
+    min-height:360px;
+  }
+}
+
+/* =========================================================
+   ITBMO · SURGICAL CONTENT REFINEMENTS
+   ASTRA copy + four-step tagline + Info Chat italics
+   + editorial Egypt 4:3 framing
+   ========================================================= */
+
+/* Richer ASTRA message in Hero while preserving the current hierarchy. */
+.hero__lead--astra{
+  max-width:760px;
+}
+
+.hero__lead--astra p{
+  margin:0;
+}
+
+.hero__lead--astra p + p{
+  margin-top:.72rem;
+}
+
+.hero__astra-kicker{
+  color:var(--ink);
+  font-size:.96em;
+  line-height:1.45;
+}
+
+.hero__astra-emphasis{
+  color:#365d75;
+}
+
+/* Short editorial bridge under the "Cuatro pasos" title. */
+.how-section__tagline{
+  margin:.62rem 0 0;
+  color:#60798e;
+  font-size:clamp(.84rem,1.25vw,.98rem);
+  line-height:1.45;
+  letter-spacing:-.01em;
+}
+
+.how-section__tagline strong{
+  color:#0b7088;
+  font-weight:850;
+}
+
+/* Keep the example answer visually distinct from the user question. */
+.bubble--astra em{
+  font-style:italic;
+}
+
+/* New editorial-egypt.jpeg is 4:3.
+   Match the visual container to the source ratio so the complete image
+   is shown without distortion or unnecessary crop. */
+.route-visual{
+  min-height:0!important;
+  aspect-ratio:4 / 3;
+}
+
+.route-visual__photo{
+  inset:0!important;
+}
+
+.route-visual__photo.has-image>img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:center center;
+}
+
+@media(max-width:900px){
+  .hero__lead--astra{
+    max-width:none;
+  }
+
+  .route-visual{
+    width:100%;
+    aspect-ratio:4 / 3;
+  }
+}
+
+@media(max-width:680px){
+  .hero__lead--astra p + p{
+    margin-top:.62rem;
+  }
+
+  .how-section__tagline{
+    margin-top:.5rem;
+  }
+}
