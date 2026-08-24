@@ -74,11 +74,23 @@
             Una ruta creada para ti.
           </h1>
 
-          <p class="hero__lead">
-            Dinos dónde vas, con quién viajas y qué es importante para ti.
-            ASTRA investiga, organiza y convierte tus ideas en una ruta que puedes seguir día por día,
-            considerando también dónde te hospedas para ordenar mejor cada jornada.
-          </p>
+          <div class="hero__lead hero__lead--astra">
+            <p class="hero__astra-kicker"><strong>ASTRA — Tu viaje, pensado por ti. Organizado por ASTRA.</strong></p>
+            <p>
+              Cuéntale a ASTRA <strong>adónde quieres ir, con quién viajas y qué es importante para ti.</strong>
+              Nosotros hacemos el resto.
+            </p>
+            <p>
+              ASTRA investiga, organiza y optimiza tu viaje para crear una <strong>ruta hecha a tu medida</strong>,
+              considerando tus intereses, tu <strong>hospedaje</strong>, tus <strong>tiempos</strong> y tu <strong>presupuesto</strong>.
+            </p>
+            <p class="hero__astra-emphasis">
+              <strong>Ahorra horas de investigación y planificación y viaja con la tranquilidad de no dejar fuera nada importante de tu destino.</strong>
+            </p>
+            <p>
+              Sueña el viaje. <strong>ASTRA se encarga de hacerlo realidad, de forma óptima, flexible y económica.</strong>
+            </p>
+          </div>
 
           <div class="hero__features">
             <span>1 generación · hasta 5 ciudades</span>
@@ -105,41 +117,39 @@
         </div>
 
         <div class="hero__visual" aria-hidden="true">
-          <div class="hero-orbit hero-orbit--1"></div>
-          <div class="hero-orbit hero-orbit--2"></div>
-
-          <!-- FOTO 01 · HERO
-               Sube la imagen como:
-               public/assets/img/destinations/hero-travel.jpg
-               Si todavía no existe, el placeholder permanece visible. -->
-          <div class="hero-photo-stage image-slot image-slot--hero" data-image-slot>
-            <img
-              src="./assets/img/destinations/hero-travel.jpg"
-              alt=""
-              data-image-asset
-            >
-            <div class="image-slot__placeholder image-slot__placeholder--prominent image-slot__placeholder--corner">
-              <span>FOTO 01 · HERO</span>
-              <small>assets/img/destinations/hero-travel.jpg</small>
+          <div class="hero-carousel" data-hero-carousel data-photo-lightbox="hero" role="button" tabindex="0" aria-label="Abrir galería de fotos del viaje">
+            <div class="hero-carousel__slides">
+              <img class="hero-carousel__slide is-active hero-carousel__slide--santorini"
+                   src="./assets/img/destinations/hero-santorini.jpeg" alt=""
+                   loading="eager" fetchpriority="high">
+              <img class="hero-carousel__slide hero-carousel__slide--skogafoss"
+                   src="./assets/img/destinations/hero-skogafoss.jpeg" alt=""
+                   loading="lazy">
+              <img class="hero-carousel__slide hero-carousel__slide--paris"
+                   src="./assets/img/destinations/hero-paris.jpg" alt=""
+                   loading="lazy">
+              <img class="hero-carousel__slide hero-carousel__slide--rome"
+                   src="./assets/img/destinations/hero-rome.jpeg" alt=""
+                   loading="lazy">
+              <img class="hero-carousel__slide hero-carousel__slide--istanbul"
+                   src="./assets/img/destinations/hero-istambul.jpg" alt=""
+                   loading="lazy">
             </div>
-          </div>
 
-          <div class="hero-glass-card hero-glass-card--back">
-            <span class="hero-glass-card__label">TU VIAJE</span>
-            <strong>Hasta 5 ciudades</strong>
-            <small>Una sola generación</small>
-          </div>
-
-          <div class="hero-glass-card hero-glass-card--front">
-            <span class="hero-glass-card__spark">✦</span>
-            <span class="hero-glass-card__label">ASTRA</span>
-            <strong>De decisiones<br>a una ruta.</strong>
-            <div class="hero-route-mini">
-              <i></i><b></b><i></i><b></b><i></i>
+            <div class="hero-carousel__dots" aria-hidden="true">
+              <span class="is-active"></span>
+              <span></span>
+              <span></span>
+              <span></span>
+              <span></span>
             </div>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- =========================================================
+         CÓMO FUNCIONA + INFO CHAT      </div>
     </section>
 
     <!-- =========================================================
@@ -153,6 +163,7 @@
           <div>
             <div class="eyebrow glass-pill">Cómo funciona</div>
             <h2 id="how-title">Cuatro pasos.<br><span>Después, ASTRA trabaja.</span></h2>
+            <p class="how-section__tagline">Tú sueñas el viaje; <strong>ASTRA hace el trabajo.</strong></p>
           </div>
           <p>
             Lee esto una vez y tendrás claro cómo obtener un itinerario mucho más personalizado.
@@ -246,7 +257,7 @@
                 ¿Qué zona de Roma funciona mejor para recorrer mis principales visitas caminando?
               </div>
               <div class="bubble bubble--astra">
-                Centro Storico (alrededor del Panteón) — la mejor base para recorrer a pie la mayoría de monumentos (Panteón, Plaza Navona, Fontana di Trevi, Spanish Steps); Monti/Celio si tu prioridad es el Coliseo; Prati/Borgo si priorizas el Vaticano; Trastevere para ambiente nocturno; Termini si necesitas transporte y economía. Verifica entradas y horarios.
+                <em>Centro Storico (alrededor del Panteón) — la mejor base para recorrer a pie la mayoría de monumentos (Panteón, Plaza Navona, Fontana di Trevi, Spanish Steps); Monti/Celio si tu prioridad es el Coliseo; Prati/Borgo si priorizas el Vaticano; Trastevere para ambiente nocturno; Termini si necesitas transporte y economía. Verifica entradas y horarios.</em>
               </div>
             </div>
           </div>
@@ -295,43 +306,16 @@
           </div>
 
           <div class="route-visual">
-            <!-- FOTO 02 · ASTRA / DESTINO
-                 Sube la imagen como:
-                 public/assets/img/destinations/astra-destination.jpg -->
-            <div class="route-visual__photo image-slot image-slot--astra" data-image-slot>
+            <div class="route-visual__photo image-slot image-slot--astra has-image" data-photo-lightbox="single">
               <img
-                src="./assets/img/destinations/astra-destination.jpg"
-                alt=""
-                data-image-asset
+                src="./assets/img/destinations/editorial-egypt.jpeg"
+                alt="Viaje frente a las Pirámides de Giza, Egipto"
               >
-              <div class="image-slot__placeholder image-slot__placeholder--prominent image-slot__placeholder--corner">
-                <span>FOTO 02 · ASTRA</span>
-                <small>assets/img/destinations/astra-destination.jpg</small>
-              </div>
-
-              <div class="route-visual__caption">
-                <small>BARCELONA</small>
-                <strong>Una jornada que fluye.</strong>
-              </div>
-            </div>
-
-            <div class="route-visual__path">
-              <div class="route-stop route-stop--active">
-                <span>09:00</span>
-                <strong>Sagrada Família</strong>
-              </div>
-              <i></i>
-              <div class="route-stop">
-                <span>11:15</span>
-                <strong>Passeig de Gràcia</strong>
-              </div>
-              <i></i>
-              <div class="route-stop">
-                <span>14:30</span>
-                <strong>Barri Gòtic</strong>
-              </div>
             </div>
           </div>
+        </div>
+
+        <!-- EJEMPLO REALISTA -->          </div>
         </div>
 
         <!-- EJEMPLO REALISTA -->
@@ -503,62 +487,45 @@
     </section>
 
     <!-- =========================================================
-         EDITORIAL TRAVEL IMAGES · PREVIEW
-         These spaces are intentionally visible during design.
+         INSPIRACIÓN DE VIAJE
          ========================================================== -->
     <section class="travel-photo-rail" aria-label="Inspiración de destinos">
       <div class="page-shell">
-        <div class="travel-photo-rail__label">
-          <span>Galería editorial</span>
-          <strong>Fotos 03, 04 y 05</strong>
-        </div>
         <div class="travel-photo-rail__grid">
 
-          <figure class="travel-photo-card image-slot glass-card" data-image-slot>
+          <figure class="travel-photo-card image-slot glass-card has-image" data-photo-lightbox="single">
             <img
-              src="./assets/img/destinations/travel-01.jpg"
-              alt="Destino de viaje"
-              data-image-asset
+              src="./assets/img/destinations/editorial-tromso.jpeg"
+              alt="Aurora boreal en Tromsø, Noruega"
+              loading="lazy"
             >
-            <div class="image-slot__placeholder">
-              <span>FOTO 03</span>
-              <small>travel-01.jpg</small>
-            </div>
             <figcaption>
-              <span>Explora</span>
-              <strong>Ciudades que quieres vivir, no solo visitar.</strong>
+              <span>Tromsø · Noruega</span>
+              <strong>Momentos que justifican el viaje.</strong>
             </figcaption>
           </figure>
 
-          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card" data-image-slot>
+          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card has-image" data-photo-lightbox="single">
             <img
-              src="./assets/img/destinations/travel-02.jpg"
-              alt="Experiencia de viaje"
-              data-image-asset
+              src="./assets/img/destinations/editoria-bariloche.jpeg"
+              alt="Viajeros junto a un lago y montañas en Bariloche, Argentina"
+              loading="lazy"
             >
-            <div class="image-slot__placeholder">
-              <span>FOTO 04</span>
-              <small>travel-02.jpg</small>
-            </div>
             <figcaption>
-              <span>Conecta</span>
-              <strong>ASTRA organiza el tiempo para que tú vivas el viaje.</strong>
+              <span>Bariloche · Argentina</span>
+              <strong>Naturaleza que se vive en primera persona.</strong>
             </figcaption>
           </figure>
 
-          <figure class="travel-photo-card image-slot glass-card" data-image-slot>
+          <figure class="travel-photo-card image-slot glass-card has-image" data-photo-lightbox="single">
             <img
-              src="./assets/img/destinations/travel-03.jpg"
-              alt="Paisaje de viaje"
-              data-image-asset
+              src="./assets/img/destinations/editorial-rio.jpeg"
+              alt="Cristo Redentor en Río de Janeiro, Brasil"
+              loading="lazy"
             >
-            <div class="image-slot__placeholder">
-              <span>FOTO 05</span>
-              <small>travel-03.jpg</small>
-            </div>
             <figcaption>
-              <span>Descubre</span>
-              <strong>Imperdibles, rutas lógicas y tiempo mejor aprovechado.</strong>
+              <span>Río de Janeiro · Brasil</span>
+              <strong>Iconos que se convierten en recuerdos.</strong>
             </figcaption>
           </figure>
 
@@ -567,6 +534,7 @@
     </section>
 
     <!-- =========================================================
+         PLANNER    <!-- =========================================================
          PLANNER
     ========================================================== -->
     <section class="planner-section" id="planner" aria-labelledby="planner-heading">
@@ -1086,5 +1054,256 @@
   </footer>
 
   <script src="./assets/js/itbmo-site.js?v=4.6"></script>
+  <script>
+    (() => {
+      const initPhotography = () => {
+        const carousel = document.querySelector('[data-hero-carousel]');
+        const lightbox = document.getElementById('photo-lightbox');
+        if (!lightbox) return;
+
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        let slides = [];
+        let dots = [];
+        let heroIndex = 0;
+        let timer = null;
+
+        const showHero = (nextIndex) => {
+          if (!slides.length) return;
+          heroIndex = (nextIndex + slides.length) % slides.length;
+          slides.forEach((slide, i) => slide.classList.toggle('is-active', i === heroIndex));
+          dots.forEach((dot, i) => dot.classList.toggle('is-active', i === heroIndex));
+        };
+
+        const startHero = () => {
+          if (reduceMotion || timer || slides.length < 2) return;
+          timer = window.setInterval(() => showHero(heroIndex + 1), 5500);
+        };
+
+        const stopHero = () => {
+          if (!timer) return;
+          window.clearInterval(timer);
+          timer = null;
+        };
+
+        if (carousel) {
+          slides = Array.from(carousel.querySelectorAll('.hero-carousel__slide'));
+          dots = Array.from(carousel.querySelectorAll('.hero-carousel__dots span'));
+
+          carousel.addEventListener('mouseenter', stopHero);
+          carousel.addEventListener('mouseleave', startHero);
+
+          document.addEventListener('visibilitychange', () => {
+            if (document.hidden) stopHero();
+            else startHero();
+          });
+
+          showHero(0);
+          startHero();
+        }
+
+        const lightboxImage = lightbox.querySelector('.photo-lightbox__image');
+        const counter = lightbox.querySelector('.photo-lightbox__counter');
+        const prevButton = lightbox.querySelector('[data-lightbox-prev]');
+        const nextButton = lightbox.querySelector('[data-lightbox-next]');
+        const closeButtons = Array.from(lightbox.querySelectorAll('[data-lightbox-close]'));
+        const closeButton = lightbox.querySelector('.photo-lightbox__close');
+
+        let gallery = [];
+        let galleryIndex = 0;
+        let lastFocused = null;
+        let closing = false;
+
+        const setLightboxImage = (index) => {
+          if (!gallery.length) return;
+
+          galleryIndex = (index + gallery.length) % gallery.length;
+          const source = gallery[galleryIndex];
+
+          lightboxImage.src = source.src;
+          lightboxImage.alt = source.alt || '';
+
+          const multiple = gallery.length > 1;
+          prevButton.hidden = !multiple;
+          nextButton.hidden = !multiple;
+          counter.hidden = !multiple;
+          counter.textContent = multiple ? `${galleryIndex + 1} / ${gallery.length}` : '';
+        };
+
+        const openLightbox = (items, startIndex = 0, trigger = null) => {
+          gallery = items.filter(Boolean);
+          if (!gallery.length) return;
+
+          closing = false;
+          lastFocused = trigger || document.activeElement;
+          stopHero();
+          setLightboxImage(startIndex);
+
+          lightbox.hidden = false;
+          lightbox.setAttribute('aria-hidden', 'false');
+          document.documentElement.classList.add('photo-lightbox-open');
+          document.body.classList.add('photo-lightbox-open');
+
+          window.requestAnimationFrame(() => {
+            lightbox.classList.add('is-open');
+            closeButton?.focus();
+          });
+        };
+
+        const closeLightbox = () => {
+          if (lightbox.hidden || closing) return;
+          closing = true;
+
+          lightbox.classList.remove('is-open');
+          lightbox.setAttribute('aria-hidden', 'true');
+          document.documentElement.classList.remove('photo-lightbox-open');
+          document.body.classList.remove('photo-lightbox-open');
+
+          window.setTimeout(() => {
+            lightbox.hidden = true;
+            lightboxImage.removeAttribute('src');
+            lightboxImage.alt = '';
+            gallery = [];
+            closing = false;
+
+            if (lastFocused && typeof lastFocused.focus === 'function') {
+              lastFocused.focus();
+            }
+
+            startHero();
+          }, 220);
+        };
+
+        const heroItems = () => slides.map((img) => ({
+          src: img.currentSrc || img.src,
+          alt: img.alt || ''
+        }));
+
+        if (carousel) {
+          const openHero = () => openLightbox(heroItems(), heroIndex, carousel);
+
+          carousel.addEventListener('click', openHero);
+
+          carousel.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openHero();
+            }
+          });
+        }
+
+        document.querySelectorAll('[data-photo-lightbox="single"]').forEach((container) => {
+          const img = container.querySelector('img');
+          if (!img) return;
+
+          container.setAttribute('role', 'button');
+          container.setAttribute('tabindex', '0');
+          container.setAttribute(
+            'aria-label',
+            `Abrir fotografía${img.alt ? ': ' + img.alt : ''}`
+          );
+
+          const openSingle = () => {
+            openLightbox(
+              [{
+                src: img.currentSrc || img.src,
+                alt: img.alt || ''
+              }],
+              0,
+              container
+            );
+          };
+
+          container.addEventListener('click', openSingle);
+
+          container.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openSingle();
+            }
+          });
+        });
+
+        prevButton?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setLightboxImage(galleryIndex - 1);
+        });
+
+        nextButton?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setLightboxImage(galleryIndex + 1);
+        });
+
+        /* X y click sobre el fondo oscuro cierran la vista. */
+        closeButtons.forEach((button) => {
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeLightbox();
+          });
+        });
+
+        document.addEventListener('keydown', (event) => {
+          if (lightbox.hidden) return;
+
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            closeLightbox();
+            return;
+          }
+
+          if (event.key === 'ArrowLeft' && gallery.length > 1) {
+            event.preventDefault();
+            setLightboxImage(galleryIndex - 1);
+          }
+
+          if (event.key === 'ArrowRight' && gallery.length > 1) {
+            event.preventDefault();
+            setLightboxImage(galleryIndex + 1);
+          }
+        });
+
+        let touchStartX = null;
+
+        lightbox.addEventListener('touchstart', (event) => {
+          if (gallery.length < 2) return;
+          touchStartX = event.changedTouches[0]?.clientX ?? null;
+        }, { passive: true });
+
+        lightbox.addEventListener('touchend', (event) => {
+          if (gallery.length < 2 || touchStartX === null) return;
+
+          const endX = event.changedTouches[0]?.clientX ?? touchStartX;
+          const delta = endX - touchStartX;
+          touchStartX = null;
+
+          if (Math.abs(delta) < 45) return;
+
+          if (delta > 0) setLightboxImage(galleryIndex - 1);
+          else setLightboxImage(galleryIndex + 1);
+        }, { passive: true });
+      };
+
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPhotography, { once: true });
+      } else {
+        initPhotography();
+      }
+    })();
+  </script>
+
+  <div class="photo-lightbox" id="photo-lightbox" hidden aria-hidden="true">
+    <div class="photo-lightbox__backdrop" data-lightbox-close></div>
+    <div class="photo-lightbox__dialog" role="dialog" aria-modal="true" aria-label="Vista ampliada de fotografía">
+      <button class="photo-lightbox__close" type="button" aria-label="Cerrar fotografía" data-lightbox-close>×</button>
+      <button class="photo-lightbox__nav photo-lightbox__nav--prev" type="button" aria-label="Fotografía anterior" data-lightbox-prev>‹</button>
+      <div class="photo-lightbox__stage">
+        <img class="photo-lightbox__image" src="" alt="">
+      </div>
+      <button class="photo-lightbox__nav photo-lightbox__nav--next" type="button" aria-label="Fotografía siguiente" data-lightbox-next>›</button>
+      <div class="photo-lightbox__counter" aria-live="polite"></div>
+    </div>
+  </div>
+
 </body>
 </html>
