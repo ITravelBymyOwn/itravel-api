@@ -105,7 +105,7 @@
         </div>
 
         <div class="hero__visual" aria-hidden="true">
-          <div class="hero-carousel" data-hero-carousel>
+          <div class="hero-carousel" data-hero-carousel data-photo-lightbox="hero" role="button" tabindex="0" aria-label="Abrir galería de fotos del viaje">
             <div class="hero-carousel__slides">
               <img class="hero-carousel__slide is-active hero-carousel__slide--santorini"
                    src="./assets/img/destinations/hero-santorini.jpeg" alt=""
@@ -293,32 +293,11 @@
           </div>
 
           <div class="route-visual">
-            <div class="route-visual__photo image-slot image-slot--astra has-image">
+            <div class="route-visual__photo image-slot image-slot--astra has-image" data-photo-lightbox="single">
               <img
                 src="./assets/img/destinations/editorial-egypt.jpg"
                 alt="Viaje frente a las Pirámides de Giza, Egipto"
               >
-              <div class="route-visual__caption">
-                <small>GIZA · EGIPTO</small>
-                <strong>Una jornada que fluye.</strong>
-              </div>
-            </div>
-
-            <div class="route-visual__path">
-              <div class="route-stop route-stop--active">
-                <span>09:00</span>
-                <strong>Pirámides de Giza</strong>
-              </div>
-              <i></i>
-              <div class="route-stop">
-                <span>11:30</span>
-                <strong>Gran Esfinge</strong>
-              </div>
-              <i></i>
-              <div class="route-stop">
-                <span>14:30</span>
-                <strong>Mirador panorámico</strong>
-              </div>
             </div>
           </div>
         </div>
@@ -501,7 +480,7 @@
       <div class="page-shell">
         <div class="travel-photo-rail__grid">
 
-          <figure class="travel-photo-card image-slot glass-card has-image">
+          <figure class="travel-photo-card image-slot glass-card has-image" data-photo-lightbox="single">
             <img
               src="./assets/img/destinations/editorial-tromso.jpeg"
               alt="Aurora boreal en Tromsø, Noruega"
@@ -513,7 +492,7 @@
             </figcaption>
           </figure>
 
-          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card has-image">
+          <figure class="travel-photo-card travel-photo-card--wide image-slot glass-card has-image" data-photo-lightbox="single">
             <img
               src="./assets/img/destinations/editoria-bariloche.jpeg"
               alt="Viajeros junto a un lago y montañas en Bariloche, Argentina"
@@ -525,7 +504,7 @@
             </figcaption>
           </figure>
 
-          <figure class="travel-photo-card image-slot glass-card has-image">
+          <figure class="travel-photo-card image-slot glass-card has-image" data-photo-lightbox="single">
             <img
               src="./assets/img/destinations/editorial-rio.jpeg"
               alt="Cristo Redentor en Río de Janeiro, Brasil"
@@ -1065,44 +1044,168 @@
   <script>
     (() => {
       const carousel = document.querySelector('[data-hero-carousel]');
-      if (!carousel) return;
-
-      const slides = Array.from(carousel.querySelectorAll('.hero-carousel__slide'));
-      const dots = Array.from(carousel.querySelectorAll('.hero-carousel__dots span'));
-      if (slides.length < 2) return;
-
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      let index = 0;
+
+      let slides = [];
+      let dots = [];
+      let heroIndex = 0;
       let timer = null;
 
-      const show = (nextIndex) => {
-        index = (nextIndex + slides.length) % slides.length;
-        slides.forEach((slide, i) => slide.classList.toggle('is-active', i === index));
-        dots.forEach((dot, i) => dot.classList.toggle('is-active', i === index));
+      const showHero = (nextIndex) => {
+        if (!slides.length) return;
+        heroIndex = (nextIndex + slides.length) % slides.length;
+        slides.forEach((slide, i) => slide.classList.toggle('is-active', i === heroIndex));
+        dots.forEach((dot, i) => dot.classList.toggle('is-active', i === heroIndex));
       };
 
-      const start = () => {
-        if (reduceMotion || timer) return;
-        timer = window.setInterval(() => show(index + 1), 5500);
+      const startHero = () => {
+        if (reduceMotion || timer || slides.length < 2) return;
+        timer = window.setInterval(() => showHero(heroIndex + 1), 5500);
       };
 
-      const stop = () => {
+      const stopHero = () => {
         if (!timer) return;
         window.clearInterval(timer);
         timer = null;
       };
 
-      carousel.addEventListener('mouseenter', stop);
-      carousel.addEventListener('mouseleave', start);
+      if (carousel) {
+        slides = Array.from(carousel.querySelectorAll('.hero-carousel__slide'));
+        dots = Array.from(carousel.querySelectorAll('.hero-carousel__dots span'));
+        carousel.addEventListener('mouseenter', stopHero);
+        carousel.addEventListener('mouseleave', startHero);
+        document.addEventListener('visibilitychange', () => {
+          if (document.hidden) stopHero();
+          else startHero();
+        });
+        showHero(0);
+        startHero();
+      }
 
-      document.addEventListener('visibilitychange', () => {
-        if (document.hidden) stop();
-        else start();
+      const lightbox = document.getElementById('photo-lightbox');
+      if (!lightbox) return;
+
+      const lightboxImage = lightbox.querySelector('.photo-lightbox__image');
+      const counter = lightbox.querySelector('.photo-lightbox__counter');
+      const prevButton = lightbox.querySelector('[data-lightbox-prev]');
+      const nextButton = lightbox.querySelector('[data-lightbox-next]');
+      const closeButtons = Array.from(lightbox.querySelectorAll('[data-lightbox-close]'));
+
+      let gallery = [];
+      let galleryIndex = 0;
+      let lastFocused = null;
+
+      const setLightboxImage = (index) => {
+        if (!gallery.length) return;
+        galleryIndex = (index + gallery.length) % gallery.length;
+        const source = gallery[galleryIndex];
+        lightboxImage.src = source.src;
+        lightboxImage.alt = source.alt || '';
+        const multiple = gallery.length > 1;
+        prevButton.hidden = !multiple;
+        nextButton.hidden = !multiple;
+        counter.hidden = !multiple;
+        counter.textContent = multiple ? `${galleryIndex + 1} / ${gallery.length}` : '';
+      };
+
+      const openLightbox = (items, startIndex = 0, trigger = null) => {
+        gallery = items.filter(Boolean);
+        if (!gallery.length) return;
+        lastFocused = trigger || document.activeElement;
+        stopHero();
+        setLightboxImage(startIndex);
+        lightbox.hidden = false;
+        lightbox.setAttribute('aria-hidden', 'false');
+        document.documentElement.classList.add('photo-lightbox-open');
+        document.body.classList.add('photo-lightbox-open');
+        window.requestAnimationFrame(() => lightbox.classList.add('is-open'));
+        lightbox.querySelector('.photo-lightbox__close').focus();
+      };
+
+      const closeLightbox = () => {
+        lightbox.classList.remove('is-open');
+        lightbox.setAttribute('aria-hidden', 'true');
+        document.documentElement.classList.remove('photo-lightbox-open');
+        document.body.classList.remove('photo-lightbox-open');
+        window.setTimeout(() => {
+          lightbox.hidden = true;
+          lightboxImage.src = '';
+          gallery = [];
+          if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
+          startHero();
+        }, 220);
+      };
+
+      const heroItems = () => slides.map((img) => ({ src: img.currentSrc || img.src, alt: img.alt || '' }));
+
+      if (carousel) {
+        const openHero = () => openLightbox(heroItems(), heroIndex, carousel);
+        carousel.addEventListener('click', openHero);
+        carousel.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openHero();
+          }
+        });
+      }
+
+      document.querySelectorAll('[data-photo-lightbox="single"]').forEach((container) => {
+        const img = container.querySelector('img');
+        if (!img) return;
+        container.setAttribute('role', 'button');
+        container.setAttribute('tabindex', '0');
+        container.setAttribute('aria-label', `Ampliar fotografía${img.alt ? ': ' + img.alt : ''}`);
+        const openSingle = () => openLightbox([{ src: img.currentSrc || img.src, alt: img.alt || '' }], 0, container);
+        container.addEventListener('click', openSingle);
+        container.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            openSingle();
+          }
+        });
       });
 
-      show(0);
-      start();
+      prevButton.addEventListener('click', () => setLightboxImage(galleryIndex - 1));
+      nextButton.addEventListener('click', () => setLightboxImage(galleryIndex + 1));
+      closeButtons.forEach((button) => button.addEventListener('click', closeLightbox));
+
+      document.addEventListener('keydown', (event) => {
+        if (lightbox.hidden) return;
+        if (event.key === 'Escape') closeLightbox();
+        if (event.key === 'ArrowLeft' && gallery.length > 1) setLightboxImage(galleryIndex - 1);
+        if (event.key === 'ArrowRight' && gallery.length > 1) setLightboxImage(galleryIndex + 1);
+      });
+
+      let touchStartX = null;
+      lightbox.addEventListener('touchstart', (event) => {
+        if (gallery.length < 2) return;
+        touchStartX = event.changedTouches[0]?.clientX ?? null;
+      }, {passive:true});
+
+      lightbox.addEventListener('touchend', (event) => {
+        if (gallery.length < 2 || touchStartX === null) return;
+        const endX = event.changedTouches[0]?.clientX ?? touchStartX;
+        const delta = endX - touchStartX;
+        touchStartX = null;
+        if (Math.abs(delta) < 45) return;
+        if (delta > 0) setLightboxImage(galleryIndex - 1);
+        else setLightboxImage(galleryIndex + 1);
+      }, {passive:true});
     })();
   </script>
+
+  <div class="photo-lightbox" id="photo-lightbox" hidden aria-hidden="true">
+    <div class="photo-lightbox__backdrop" data-lightbox-close></div>
+    <div class="photo-lightbox__dialog" role="dialog" aria-modal="true" aria-label="Vista ampliada de fotografía">
+      <button class="photo-lightbox__close" type="button" aria-label="Cerrar fotografía" data-lightbox-close>×</button>
+      <button class="photo-lightbox__nav photo-lightbox__nav--prev" type="button" aria-label="Fotografía anterior" data-lightbox-prev>‹</button>
+      <div class="photo-lightbox__stage">
+        <img class="photo-lightbox__image" src="" alt="">
+      </div>
+      <button class="photo-lightbox__nav photo-lightbox__nav--next" type="button" aria-label="Fotografía siguiente" data-lightbox-next>›</button>
+      <div class="photo-lightbox__counter" aria-live="polite"></div>
+    </div>
+  </div>
+
 </body>
 </html>
