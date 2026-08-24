@@ -1369,3 +1369,30 @@ body.photo-lightbox-open{overflow:hidden!important}
 .photo-lightbox__nav{
   cursor:pointer;
 }
+
+/* =========================================================
+   ITBMO · MOBILE HERO FIX
+   The legacy mobile rule hid .hero__visual. The final photo
+   carousel must remain visible on phones.
+   ========================================================= */
+@media(max-width:680px){
+  .hero__visual{
+    display:block!important;
+    width:100%;
+    min-height:410px;
+    margin-top:1.15rem;
+  }
+
+  .hero-carousel{
+    position:absolute;
+    inset:0;
+    width:100%;
+    height:100%;
+  }
+}
+
+@media(max-width:430px){
+  .hero__visual{
+    min-height:360px;
+  }
+}
