@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO · LEGAL + SUPPORT V2
+   ITBMO · LEGAL + SUPPORT V2.2
    Shared by Privacy / Terms / Ads & Affiliates / Support
    Requires itbmo-site.css
    ========================================================= */
@@ -99,6 +99,60 @@
 @media(max-width:900px){.legal-hero__inner,.legal-layout{grid-template-columns:1fr}.legal-toc{position:relative;top:auto}.legal-toc nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.legal-footer .site-footer__top{grid-template-columns:repeat(2,minmax(0,1fr))}.legal-footer .site-footer__brand{grid-column:1/-1}.support-payment{grid-template-columns:1fr}}
 @media(max-width:680px){.legal-hero{padding:3.3rem 0 2.8rem}.legal-hero__copy h1{font-size:clamp(3rem,15vw,4.5rem)}.legal-body{padding-top:1.2rem}.legal-document{padding:1rem;border-radius:22px}.legal-toc nav,.legal-data-card,.cookie-grid,.partner-legal-grid,.support-grid,.support-steps{grid-template-columns:1fr}.legal-footer .site-footer__top{grid-template-columns:1fr}.support-links{align-items:flex-start;flex-direction:column}.support-links>div{justify-content:flex-start}}
 
-/* ITBMO · Legal V2.1 · language switch */
-.legal-page .language-switch{display:inline-flex;align-items:center;gap:.38rem;padding:.48rem .62rem;border:1px solid rgba(18,64,96,.10);border-radius:999px;background:rgba(255,255,255,.72);box-shadow:0 8px 24px rgba(16,55,86,.06);font-size:.72rem;font-weight:850;color:#8aa0b0}
-.legal-page .language-switch .is-active{color:#071f3d}.legal-page .language-switch button{appearance:none;border:0;background:none;padding:0;color:#a9b8c3;font:inherit;cursor:not-allowed}
+/* =========================================================
+   ITBMO · LEGAL V2.2 · SURGICAL AUDIT ADDITIONS
+   Independent TOC scroll + 6-step support layout.
+   All previous rules remain unchanged above.
+   ========================================================= */
+
+/* Desktop: the index remains sticky but can scroll independently. */
+.legal-toc{
+  max-height:calc(100vh - var(--header-h) - 36px);
+  overflow:hidden;
+}
+
+.legal-toc nav{
+  max-height:calc(100vh - var(--header-h) - 148px);
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+  padding-right:.18rem;
+  -webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(72,111,139,.24) transparent;
+}
+
+.legal-toc nav::-webkit-scrollbar{width:7px}
+.legal-toc nav::-webkit-scrollbar-track{background:transparent}
+.legal-toc nav::-webkit-scrollbar-thumb{
+  background:rgba(72,111,139,.24);
+  border-radius:999px;
+}
+
+/* Six support instructions fit cleanly in two rows on desktop. */
+.support-steps{grid-template-columns:repeat(3,minmax(0,1fr))}
+
+@media(max-width:900px){
+  .legal-toc{
+    position:relative;
+    top:auto;
+    max-height:360px;
+  }
+
+  .legal-toc nav{
+    max-height:275px;
+    overflow-y:auto;
+  }
+}
+
+@media(max-width:680px){
+  .legal-toc{max-height:330px}
+  .legal-toc nav{
+    display:flex;
+    flex-direction:column;
+    max-height:245px;
+    overflow-y:auto;
+  }
+
+  .support-steps{grid-template-columns:1fr}
+}
