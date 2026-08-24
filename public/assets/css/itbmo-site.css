@@ -1343,3 +1343,29 @@ body.photo-lightbox-open{overflow:hidden!important}
   .photo-lightbox__image{max-height:calc(100svh - 62px);border-radius:10px}
   .photo-lightbox__nav{width:38px;height:38px;font-size:1.8rem}
 }
+
+
+
+/* V3 · Affordance más natural: mano, no lupa. */
+[data-photo-lightbox],
+[data-photo-lightbox] img,
+.hero-carousel[data-photo-lightbox],
+.hero-carousel[data-photo-lightbox] img{
+  cursor:pointer!important;
+}
+
+/* El fondo oscuro completo es clickeable para cerrar. */
+.photo-lightbox__backdrop{
+  cursor:pointer;
+}
+
+/* La imagen ampliada conserva cursor normal para no sugerir otro zoom. */
+.photo-lightbox__image{
+  cursor:default;
+}
+
+/* Controles mantienen cursor de acción. */
+.photo-lightbox__close,
+.photo-lightbox__nav{
+  cursor:pointer;
+}
