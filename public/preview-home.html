@@ -1043,154 +1043,239 @@
   <script src="./assets/js/itbmo-site.js?v=4.6"></script>
   <script>
     (() => {
-      const carousel = document.querySelector('[data-hero-carousel]');
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const initPhotography = () => {
+        const carousel = document.querySelector('[data-hero-carousel]');
+        const lightbox = document.getElementById('photo-lightbox');
+        if (!lightbox) return;
 
-      let slides = [];
-      let dots = [];
-      let heroIndex = 0;
-      let timer = null;
+        const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      const showHero = (nextIndex) => {
-        if (!slides.length) return;
-        heroIndex = (nextIndex + slides.length) % slides.length;
-        slides.forEach((slide, i) => slide.classList.toggle('is-active', i === heroIndex));
-        dots.forEach((dot, i) => dot.classList.toggle('is-active', i === heroIndex));
-      };
+        let slides = [];
+        let dots = [];
+        let heroIndex = 0;
+        let timer = null;
 
-      const startHero = () => {
-        if (reduceMotion || timer || slides.length < 2) return;
-        timer = window.setInterval(() => showHero(heroIndex + 1), 5500);
-      };
+        const showHero = (nextIndex) => {
+          if (!slides.length) return;
+          heroIndex = (nextIndex + slides.length) % slides.length;
+          slides.forEach((slide, i) => slide.classList.toggle('is-active', i === heroIndex));
+          dots.forEach((dot, i) => dot.classList.toggle('is-active', i === heroIndex));
+        };
 
-      const stopHero = () => {
-        if (!timer) return;
-        window.clearInterval(timer);
-        timer = null;
-      };
+        const startHero = () => {
+          if (reduceMotion || timer || slides.length < 2) return;
+          timer = window.setInterval(() => showHero(heroIndex + 1), 5500);
+        };
 
-      if (carousel) {
-        slides = Array.from(carousel.querySelectorAll('.hero-carousel__slide'));
-        dots = Array.from(carousel.querySelectorAll('.hero-carousel__dots span'));
-        carousel.addEventListener('mouseenter', stopHero);
-        carousel.addEventListener('mouseleave', startHero);
-        document.addEventListener('visibilitychange', () => {
-          if (document.hidden) stopHero();
-          else startHero();
-        });
-        showHero(0);
-        startHero();
-      }
+        const stopHero = () => {
+          if (!timer) return;
+          window.clearInterval(timer);
+          timer = null;
+        };
 
-      const lightbox = document.getElementById('photo-lightbox');
-      if (!lightbox) return;
+        if (carousel) {
+          slides = Array.from(carousel.querySelectorAll('.hero-carousel__slide'));
+          dots = Array.from(carousel.querySelectorAll('.hero-carousel__dots span'));
 
-      const lightboxImage = lightbox.querySelector('.photo-lightbox__image');
-      const counter = lightbox.querySelector('.photo-lightbox__counter');
-      const prevButton = lightbox.querySelector('[data-lightbox-prev]');
-      const nextButton = lightbox.querySelector('[data-lightbox-next]');
-      const closeButtons = Array.from(lightbox.querySelectorAll('[data-lightbox-close]'));
+          carousel.addEventListener('mouseenter', stopHero);
+          carousel.addEventListener('mouseleave', startHero);
 
-      let gallery = [];
-      let galleryIndex = 0;
-      let lastFocused = null;
+          document.addEventListener('visibilitychange', () => {
+            if (document.hidden) stopHero();
+            else startHero();
+          });
 
-      const setLightboxImage = (index) => {
-        if (!gallery.length) return;
-        galleryIndex = (index + gallery.length) % gallery.length;
-        const source = gallery[galleryIndex];
-        lightboxImage.src = source.src;
-        lightboxImage.alt = source.alt || '';
-        const multiple = gallery.length > 1;
-        prevButton.hidden = !multiple;
-        nextButton.hidden = !multiple;
-        counter.hidden = !multiple;
-        counter.textContent = multiple ? `${galleryIndex + 1} / ${gallery.length}` : '';
-      };
-
-      const openLightbox = (items, startIndex = 0, trigger = null) => {
-        gallery = items.filter(Boolean);
-        if (!gallery.length) return;
-        lastFocused = trigger || document.activeElement;
-        stopHero();
-        setLightboxImage(startIndex);
-        lightbox.hidden = false;
-        lightbox.setAttribute('aria-hidden', 'false');
-        document.documentElement.classList.add('photo-lightbox-open');
-        document.body.classList.add('photo-lightbox-open');
-        window.requestAnimationFrame(() => lightbox.classList.add('is-open'));
-        lightbox.querySelector('.photo-lightbox__close').focus();
-      };
-
-      const closeLightbox = () => {
-        lightbox.classList.remove('is-open');
-        lightbox.setAttribute('aria-hidden', 'true');
-        document.documentElement.classList.remove('photo-lightbox-open');
-        document.body.classList.remove('photo-lightbox-open');
-        window.setTimeout(() => {
-          lightbox.hidden = true;
-          lightboxImage.src = '';
-          gallery = [];
-          if (lastFocused && typeof lastFocused.focus === 'function') lastFocused.focus();
+          showHero(0);
           startHero();
-        }, 220);
+        }
+
+        const lightboxImage = lightbox.querySelector('.photo-lightbox__image');
+        const counter = lightbox.querySelector('.photo-lightbox__counter');
+        const prevButton = lightbox.querySelector('[data-lightbox-prev]');
+        const nextButton = lightbox.querySelector('[data-lightbox-next]');
+        const closeButtons = Array.from(lightbox.querySelectorAll('[data-lightbox-close]'));
+        const closeButton = lightbox.querySelector('.photo-lightbox__close');
+
+        let gallery = [];
+        let galleryIndex = 0;
+        let lastFocused = null;
+        let closing = false;
+
+        const setLightboxImage = (index) => {
+          if (!gallery.length) return;
+
+          galleryIndex = (index + gallery.length) % gallery.length;
+          const source = gallery[galleryIndex];
+
+          lightboxImage.src = source.src;
+          lightboxImage.alt = source.alt || '';
+
+          const multiple = gallery.length > 1;
+          prevButton.hidden = !multiple;
+          nextButton.hidden = !multiple;
+          counter.hidden = !multiple;
+          counter.textContent = multiple ? `${galleryIndex + 1} / ${gallery.length}` : '';
+        };
+
+        const openLightbox = (items, startIndex = 0, trigger = null) => {
+          gallery = items.filter(Boolean);
+          if (!gallery.length) return;
+
+          closing = false;
+          lastFocused = trigger || document.activeElement;
+          stopHero();
+          setLightboxImage(startIndex);
+
+          lightbox.hidden = false;
+          lightbox.setAttribute('aria-hidden', 'false');
+          document.documentElement.classList.add('photo-lightbox-open');
+          document.body.classList.add('photo-lightbox-open');
+
+          window.requestAnimationFrame(() => {
+            lightbox.classList.add('is-open');
+            closeButton?.focus();
+          });
+        };
+
+        const closeLightbox = () => {
+          if (lightbox.hidden || closing) return;
+          closing = true;
+
+          lightbox.classList.remove('is-open');
+          lightbox.setAttribute('aria-hidden', 'true');
+          document.documentElement.classList.remove('photo-lightbox-open');
+          document.body.classList.remove('photo-lightbox-open');
+
+          window.setTimeout(() => {
+            lightbox.hidden = true;
+            lightboxImage.removeAttribute('src');
+            lightboxImage.alt = '';
+            gallery = [];
+            closing = false;
+
+            if (lastFocused && typeof lastFocused.focus === 'function') {
+              lastFocused.focus();
+            }
+
+            startHero();
+          }, 220);
+        };
+
+        const heroItems = () => slides.map((img) => ({
+          src: img.currentSrc || img.src,
+          alt: img.alt || ''
+        }));
+
+        if (carousel) {
+          const openHero = () => openLightbox(heroItems(), heroIndex, carousel);
+
+          carousel.addEventListener('click', openHero);
+
+          carousel.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openHero();
+            }
+          });
+        }
+
+        document.querySelectorAll('[data-photo-lightbox="single"]').forEach((container) => {
+          const img = container.querySelector('img');
+          if (!img) return;
+
+          container.setAttribute('role', 'button');
+          container.setAttribute('tabindex', '0');
+          container.setAttribute(
+            'aria-label',
+            `Abrir fotografía${img.alt ? ': ' + img.alt : ''}`
+          );
+
+          const openSingle = () => {
+            openLightbox(
+              [{
+                src: img.currentSrc || img.src,
+                alt: img.alt || ''
+              }],
+              0,
+              container
+            );
+          };
+
+          container.addEventListener('click', openSingle);
+
+          container.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openSingle();
+            }
+          });
+        });
+
+        prevButton?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setLightboxImage(galleryIndex - 1);
+        });
+
+        nextButton?.addEventListener('click', (event) => {
+          event.stopPropagation();
+          setLightboxImage(galleryIndex + 1);
+        });
+
+        /* X y click sobre el fondo oscuro cierran la vista. */
+        closeButtons.forEach((button) => {
+          button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            closeLightbox();
+          });
+        });
+
+        document.addEventListener('keydown', (event) => {
+          if (lightbox.hidden) return;
+
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            closeLightbox();
+            return;
+          }
+
+          if (event.key === 'ArrowLeft' && gallery.length > 1) {
+            event.preventDefault();
+            setLightboxImage(galleryIndex - 1);
+          }
+
+          if (event.key === 'ArrowRight' && gallery.length > 1) {
+            event.preventDefault();
+            setLightboxImage(galleryIndex + 1);
+          }
+        });
+
+        let touchStartX = null;
+
+        lightbox.addEventListener('touchstart', (event) => {
+          if (gallery.length < 2) return;
+          touchStartX = event.changedTouches[0]?.clientX ?? null;
+        }, { passive: true });
+
+        lightbox.addEventListener('touchend', (event) => {
+          if (gallery.length < 2 || touchStartX === null) return;
+
+          const endX = event.changedTouches[0]?.clientX ?? touchStartX;
+          const delta = endX - touchStartX;
+          touchStartX = null;
+
+          if (Math.abs(delta) < 45) return;
+
+          if (delta > 0) setLightboxImage(galleryIndex - 1);
+          else setLightboxImage(galleryIndex + 1);
+        }, { passive: true });
       };
 
-      const heroItems = () => slides.map((img) => ({ src: img.currentSrc || img.src, alt: img.alt || '' }));
-
-      if (carousel) {
-        const openHero = () => openLightbox(heroItems(), heroIndex, carousel);
-        carousel.addEventListener('click', openHero);
-        carousel.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openHero();
-          }
-        });
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initPhotography, { once: true });
+      } else {
+        initPhotography();
       }
-
-      document.querySelectorAll('[data-photo-lightbox="single"]').forEach((container) => {
-        const img = container.querySelector('img');
-        if (!img) return;
-        container.setAttribute('role', 'button');
-        container.setAttribute('tabindex', '0');
-        container.setAttribute('aria-label', `Ampliar fotografía${img.alt ? ': ' + img.alt : ''}`);
-        const openSingle = () => openLightbox([{ src: img.currentSrc || img.src, alt: img.alt || '' }], 0, container);
-        container.addEventListener('click', openSingle);
-        container.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            openSingle();
-          }
-        });
-      });
-
-      prevButton.addEventListener('click', () => setLightboxImage(galleryIndex - 1));
-      nextButton.addEventListener('click', () => setLightboxImage(galleryIndex + 1));
-      closeButtons.forEach((button) => button.addEventListener('click', closeLightbox));
-
-      document.addEventListener('keydown', (event) => {
-        if (lightbox.hidden) return;
-        if (event.key === 'Escape') closeLightbox();
-        if (event.key === 'ArrowLeft' && gallery.length > 1) setLightboxImage(galleryIndex - 1);
-        if (event.key === 'ArrowRight' && gallery.length > 1) setLightboxImage(galleryIndex + 1);
-      });
-
-      let touchStartX = null;
-      lightbox.addEventListener('touchstart', (event) => {
-        if (gallery.length < 2) return;
-        touchStartX = event.changedTouches[0]?.clientX ?? null;
-      }, {passive:true});
-
-      lightbox.addEventListener('touchend', (event) => {
-        if (gallery.length < 2 || touchStartX === null) return;
-        const endX = event.changedTouches[0]?.clientX ?? touchStartX;
-        const delta = endX - touchStartX;
-        touchStartX = null;
-        if (Math.abs(delta) < 45) return;
-        if (delta > 0) setLightboxImage(galleryIndex - 1);
-        else setLightboxImage(galleryIndex + 1);
-      }, {passive:true});
     })();
   </script>
 
