@@ -65,6 +65,10 @@ let hasSavedOnce = false;
 let preferencesStageTripId = null;
 let preferencesConfirmedTripId = null;
 
+/* Agent conversation language is independent from ES/EN site UI and from
+   the final itinerary language. It is locked from the user's first chat line. */
+let agentConversationLang = null;
+
 /* ---------- Defaults técnicos (NO rígidos) ---------- */
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
@@ -161,7 +165,7 @@ const I18N = {
 
     // Reset modal
     resetTitle: '¿Reiniciar planificación? 🧭',
-    resetBody: 'Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong>',
+    resetBody: 'Esto eliminará todos los destinos, preferencias, datos de planificación e itinerarios actuales.<br><br><strong>Antes de continuar, asegúrate de haber descargado tu itinerario, CSV y comprobante de pago.</strong><br><br>Si reinicias, tendrás que comenzar un nuevo viaje y <strong>realizar un nuevo pago para volver a generar un itinerario</strong>.<br><br><strong>Esta acción no se puede deshacer.</strong>',
     resetConfirm: 'Sí, reiniciar',
     resetCancel: 'Cancelar',
 
@@ -239,7 +243,7 @@ const I18N = {
 
     // Reset modal
     resetTitle: 'Reset planning? 🧭',
-    resetBody: 'This will delete all destinations, itineraries, and current data.<br><strong>This cannot be undone.</strong>',
+    resetBody: 'This will delete all current destinations, preferences, planning data, and itineraries.<br><br><strong>Before continuing, make sure you have downloaded your itinerary, CSV, and payment receipt.</strong><br><br>If you reset, you will need to start a new trip and <strong>make a new payment to generate another itinerary</strong>.<br><br><strong>This action cannot be undone.</strong>',
     resetConfirm: 'Yes, reset',
     resetCancel: 'Cancel',
 
@@ -775,7 +779,9 @@ function setAuthBusy(on){
 
 function updateSaveAvailability(){
   if(!$save) return;
-  $save.disabled = !currentUser;
+  const lockedForCurrentTrip = Boolean(hasSavedOnce || planningStarted);
+  $save.disabled = !currentUser || lockedForCurrentTrip;
+  $save.setAttribute('aria-disabled', String($save.disabled));
 }
 
 function showAccountMode(mode){
@@ -1501,6 +1507,26 @@ function setSavedSetupLocked(locked){
   }
 }
 
+function autoGrowPreferencesField(){
+  if(!$preferencesField) return;
+  const minHeight=92;
+  const maxHeight=260;
+  $preferencesField.style.height='auto';
+  const next=Math.max(minHeight,Math.min(maxHeight,$preferencesField.scrollHeight || minHeight));
+  $preferencesField.style.height=`${next}px`;
+  $preferencesField.style.overflowY=($preferencesField.scrollHeight > maxHeight) ? 'auto' : 'hidden';
+}
+
+function closePreferencesHelpPopovers(){
+  qsa('.preferences-help-popover.is-open').forEach(pop=>{
+    pop.classList.remove('is-open');
+    pop.setAttribute('aria-hidden','true');
+  });
+  qsa('.preferences-help-button[aria-expanded="true"]').forEach(btn=>{
+    btn.setAttribute('aria-expanded','false');
+  });
+}
+
 function applyPreferencesStageLanguage(){
   if(!$preferencesStage) return;
   const es=getLang()==='es';
@@ -1571,13 +1597,16 @@ function showPreferencesStage(){
     $preferencesContinue.removeAttribute('aria-disabled');
   }
 
-  /* Start Planning has already completed its job: payment + entitlement. */
+  /* Start Planning has already completed its job: payment + entitlement.
+     It stays permanently disabled for this trip until Reset. */
   if($start){
     $start.disabled=true;
     $start.setAttribute('aria-disabled','true');
+    $start.dataset.itbmoConsumed='1';
   }
 
   requestAnimationFrame(()=>{
+    autoGrowPreferencesField();
     try{
       $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
     }catch(_){}
@@ -1611,6 +1640,16 @@ function confirmPreferencesAndContinue(){
 
   /* Existing agent flow begins here, unchanged. */
   startPlanning();
+
+  /* UX only: move the user directly to the agent input after confirmation. */
+  setTimeout(()=>{
+    try{
+      $chatBox?.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
+      setTimeout(()=>{
+        try{ $chatI?.focus({preventScroll:true}); }catch(_){ try{ $chatI?.focus(); }catch(__){} }
+      },340);
+    }catch(_){}
+  },80);
 }
 
 async function saveDestinations(){
@@ -3194,6 +3233,15 @@ function showWOW(on, msg){
       }
     }
   });
+
+  /* Permanent trip-state guardrails after any global UI unlock. */
+  if(!on){
+    updateSaveAvailability();
+    if($start?.dataset.itbmoConsumed==='1'){
+      $start.disabled=true;
+      $start.setAttribute('aria-disabled','true');
+    }
+  }
 }
 
 /* =========================================================
@@ -4464,6 +4512,95 @@ function setPlanningChatLocked(locked){
   }
 }
 
+function detectAgentConversationLanguage(text){
+  const raw=String(text||'').trim();
+  if(!raw) return null;
+
+  /* Script-first detection for non-Latin languages. */
+  if(/[\u3040-\u30ff]/.test(raw)) return 'ja';
+  if(/[\uac00-\ud7af]/.test(raw)) return 'ko';
+  if(/[\u4e00-\u9fff]/.test(raw)) return 'zh';
+  if(/[\u0400-\u04ff]/.test(raw)) return 'ru';
+  if(/[\u0600-\u06ff]/.test(raw)) return 'ar';
+
+  const s=` ${raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')} `;
+  const patterns={
+    es:[/\b(quiero|voy|usar|usare|transporte|publico|hotel|zona|barrio|recomiendame|para|con|una|un|el|la|los|las|y)\b/g],
+    pt:[/\b(quero|vou|usar|transporte|publico|hotel|zona|bairro|recomende|para|com|uma|um|o|a|os|as|e)\b/g],
+    fr:[/\b(je|veux|vais|utiliser|transport|public|hotel|quartier|zone|recommande|pour|avec|un|une|le|la|les|et)\b/g],
+    de:[/\b(ich|mochte|will|nutzen|verkehr|offentlich|hotel|viertel|gebiet|empfehle|fur|mit|ein|eine|der|die|das|und)\b/g],
+    it:[/\b(voglio|usero|usare|trasporto|pubblico|hotel|zona|quartiere|consiglia|per|con|un|una|il|la|gli|le|e)\b/g],
+    en:[/\b(i|want|will|use|transport|public|hotel|area|neighborhood|recommend|for|with|a|an|the|and)\b/g]
+  };
+
+  let best=null, bestScore=0;
+  Object.entries(patterns).forEach(([lang,res])=>{
+    let score=0;
+    res.forEach(re=>{ score += (s.match(re)||[]).length; });
+    if(score>bestScore){ bestScore=score; best=lang; }
+  });
+
+  if(bestScore>=2) return best;
+
+  /* Browser language is safer than site-language when a short first reply
+     contains mostly proper nouns (e.g. "Eixample, metro"). */
+  const browser=String(navigator.language||'').slice(0,2).toLowerCase();
+  if(['es','en','pt','fr','de','it','ja','ko','zh','ru','ar'].includes(browser)) return browser;
+
+  return getLang()==='es' ? 'es' : 'en';
+}
+
+function agentConversationCopy(){
+  const lang=agentConversationLang || (getLang()==='es' ? 'es' : 'en');
+  const map={
+    es:{
+      hotel:(city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y tu <strong>transporte</strong> (vehículo alquilado, transporte público, taxi/Uber, mixto o “recomiéndame”).`,
+      itinerary:'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
+    },
+    en:{
+      hotel:(city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental car, public transit, taxi/Uber, mixed, or “recommend”).`,
+      itinerary:'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
+    },
+    pt:{
+      hotel:(city)=>`Para <strong>${city}</strong>, diga-me o seu <strong>hotel/área</strong> e o seu <strong>transporte</strong> (carro alugado, transporte público, táxi/Uber, misto ou “recomende”).`,
+      itinerary:'Antes de gerar: em que <strong>idioma</strong> você quer o seu itinerário? (Ex.: Português, Español, English, Français, Deutsch…)'
+    },
+    fr:{
+      hotel:(city)=>`Pour <strong>${city}</strong>, indiquez-moi votre <strong>hôtel/quartier</strong> et votre <strong>transport</strong> (voiture de location, transports publics, taxi/Uber, mixte ou « recommandez-moi »).`,
+      itinerary:'Avant de générer : dans quelle <strong>langue</strong> souhaitez-vous votre itinéraire ? (Ex. : Français, English, Español, Português, Deutsch…)'
+    },
+    de:{
+      hotel:(city)=>`Für <strong>${city}</strong>: Nenne mir bitte dein <strong>Hotel/Gebiet</strong> und dein <strong>Verkehrsmittel</strong> (Mietwagen, öffentliche Verkehrsmittel, Taxi/Uber, gemischt oder „empfehlen“).`,
+      itinerary:'Bevor ich den Reiseplan erstelle: In welcher <strong>Sprache</strong> möchtest du deinen Reiseplan? (z. B. Deutsch, English, Español, Português, Français…)'
+    },
+    it:{
+      hotel:(city)=>`Per <strong>${city}</strong>, indicami il tuo <strong>hotel/zona</strong> e il tuo <strong>trasporto</strong> (auto a noleggio, trasporto pubblico, taxi/Uber, misto o “consigliami”).`,
+      itinerary:'Prima di generare: in quale <strong>lingua</strong> vuoi il tuo itinerario? (Es.: Italiano, English, Español, Português, Français…)'
+    },
+    ja:{
+      hotel:(city)=>`<strong>${city}</strong>での<strong>ホテル／滞在エリア</strong>と<strong>移動手段</strong>（レンタカー、公共交通機関、タクシー/Uber、組み合わせ、または「おすすめ」）を教えてください。`,
+      itinerary:'生成する前に、旅程をどの<strong>言語</strong>で作成しますか？（例：日本語、English、Español、Português、Français…）'
+    },
+    ko:{
+      hotel:(city)=>`<strong>${city}</strong>에서의 <strong>호텔/숙박 지역</strong>과 <strong>교통수단</strong>(렌터카, 대중교통, 택시/Uber, 혼합 또는 “추천”)을 알려주세요.`,
+      itinerary:'생성하기 전에 여행 일정을 어떤 <strong>언어</strong>로 만들까요? (예: 한국어, English, Español, Português, Français…)'
+    },
+    zh:{
+      hotel:(city)=>`请告诉我您在<strong>${city}</strong>的<strong>酒店/住宿区域</strong>以及<strong>交通方式</strong>（租车、公共交通、出租车/Uber、混合或“推荐”）。`,
+      itinerary:'生成之前：您希望行程使用哪种<strong>语言</strong>？（例如：中文、English、Español、Português、Français…）'
+    },
+    ru:{
+      hotel:(city)=>`Для <strong>${city}</strong> укажите ваш <strong>отель/район</strong> и <strong>транспорт</strong> (арендованный автомобиль, общественный транспорт, такси/Uber, смешанный вариант или «порекомендуй»).`,
+      itinerary:'Перед созданием: на каком <strong>языке</strong> вы хотите получить маршрут? (например: Русский, English, Español, Português, Français…)'
+    },
+    ar:{
+      hotel:(city)=>`بالنسبة إلى <strong>${city}</strong>، أخبرني عن <strong>الفندق/المنطقة</strong> و<strong>وسيلة التنقل</strong> (سيارة مستأجرة، نقل عام، تاكسي/Uber، مزيج، أو «اقترح»).`,
+      itinerary:'قبل الإنشاء: بأي <strong>لغة</strong> تريد برنامج الرحلة؟ (مثال: العربية، English، Español، Português، Français…)'
+    }
+  };
+  return map[lang] || map.en;
+}
+
 async function startPlanning(){
   if(savedDestinations.length===0) return;
   setExportToolbarVisibility(false);
@@ -4473,6 +4610,7 @@ async function startPlanning(){
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
+  agentConversationLang = null;
 
   chatMsg(`${tone.hi}`);
   chatMsg(getPlanningInfoChatPreparationMessage(),'ai');
@@ -4486,18 +4624,14 @@ function askNextHotelTransport(){
       plannerState.collectingItineraryLang = true;
     }
 
-    chatMsg(
-      (getLang()==='es')
-        ? 'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
-        : 'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
-    , 'ai');
+    chatMsg(agentConversationCopy().itinerary, 'ai');
 
     return;
   }
 
   const city = savedDestinations[metaProgressIndex].city;
   setActiveCity(city); renderCityItinerary(city);
-  chatMsg(tone.askHotelTransport(city),'ai');
+  chatMsg(agentConversationCopy().hotel(city),'ai');
 }
 
 const WORD_NUM = {
@@ -4786,6 +4920,10 @@ async function onSend(){
   if(!text) return;
   chatMsg(text,'user');
   $chatI.value='';
+
+  if(!agentConversationLang){
+    agentConversationLang=detectAgentConversationLanguage(text);
+  }
 
   // Colecta hotel/transporte
   if(collectingHotels){
@@ -6155,13 +6293,19 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     collectingHotels = false;
     isItineraryLocked = false;
     activeCity = null;
+    agentConversationLang = null;
+    if($start){
+      delete $start.dataset.itbmoConsumed;
+      $start.disabled = true;
+      $start.setAttribute('aria-disabled','true');
+    }
     setExportToolbarVisibility(false);
 
     try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
     qsa('.date-tooltip').forEach(t0 => t0.remove());
 
     // 🔄 Restaurar formulario lateral a valores por defecto
-    const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
+    const $sc = qs('#special-conditions'); if($sc){ $sc.value = ''; $sc.style.height=''; $sc.style.overflowY='hidden'; }
     const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
     const $yo = qs('#p-young');    if($yo) $yo.value = '0';
     const $ch = qs('#p-children'); if($ch) $ch.value = '0';
@@ -7212,137 +7356,150 @@ function bindInfoChatListeners(){
 
 function enhancePreferencesInfoChatCopy(){
   const field=qs('#special-conditions');
-  if(!field || qs('#itbmo-preferences-infochat-note')) return;
+  if(!field || qs('#itbmo-preferences-help-row')) return;
 
   const lang = _plannerOutputLang_();
   const copy = {
-    en: {
-      title:'💡 Not sure what to write?',
-      intro:'<strong>Info Chat 🌐</strong> is now available with up to <strong>10 trip-related queries</strong> for the cities in this itinerary. Use it before continuing if you want more context for your preferences.',
-      examples:'For example:',
-      items:[
-        '🏨 Best area or neighborhood to stay',
-        '🧳 Seasonal context and what to pack',
-        '🚇 Transportation and how to get around',
-        '🍽️ Local cuisine and dining areas',
-        '📸 Hidden gems and photography spots',
-        '🧭 Neighborhoods, customs and practical local context',
-        '🧳 What to pack and local customs',
-        '💰 Budget recommendations',
-        '❓ Anything else related to your trip'
+    en:{
+      guideTitle:'✨ Tell Astra exactly how you want to live your trip',
+      guideSubtitle:'This will help create an itinerary that truly matches you.',
+      guideItems:[
+        '🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”',
+        '🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”',
+        '🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”',
+        '🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”',
+        '⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”',
+        '👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”'
       ],
-      final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
-      placeholder:'Tell Astra how you want to experience your trip... You can use Info Chat 🌐 before continuing.'
+      guideFinal:'📝 The more details you share, the more precise, smooth and personalized your itinerary will be.',
+      unsureTitle:'💡 Not sure what to write?',
+      unsureIntro:'Info Chat 🌐 is now available with up to 10 trip-related queries for the cities in this itinerary. Use it before continuing if you want more context for your preferences.',
+      unsureExamples:'For example:',
+      unsureItems:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
+      placeholder:'Write your preferences, restrictions or special conditions here…',
+      close:'Close'
     },
-    es: {
-      title:'💡 ¿No sabes qué escribir?',
-      intro:'<strong>Info Chat 🌐</strong> ya está disponible con hasta <strong>10 consultas relacionadas con las ciudades</strong> de este itinerario. Úsalo antes de continuar si necesitas más contexto para tus preferencias.',
-      examples:'Por ejemplo:',
-      items:[
-        '🏨 Mejor zona o barrio para hospedarte',
-        '🧳 Contexto estacional y qué llevar',
-        '🚇 Transporte y cómo desplazarte',
-        '🍽️ Gastronomía local y zonas para comer',
-        '📸 Lugares ocultos y puntos para fotografía',
-        '🧭 Barrios, costumbres y contexto práctico local',
-        '🧳 Qué llevar y costumbres locales',
-        '💰 Recomendaciones de presupuesto',
-        '❓ Cualquier otra consulta relacionada con tu viaje'
+    es:{
+      guideTitle:'✨ Cuéntale a ASTRA exactamente cómo quieres vivir tu viaje',
+      guideSubtitle:'Esta información permitirá crear un itinerario realmente alineado contigo.',
+      guideItems:[
+        '🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”',
+        '🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”',
+        '🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”',
+        '🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”',
+        '⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”',
+        '👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”'
       ],
-      final:'📝 Cada detalle ayuda a Astra a tomar decisiones de planificación más inteligentes. Cuanto más compartas, más personalizado y optimizado será tu itinerario.',
-      placeholder:'Cuéntale a Astra cómo quieres vivir tu viaje... ¿No estás seguro? Abre el Info Chat 🌐 para inspirarte.'
-    },
-    pt: {
-      title:'💡 Não sabe o que escrever?',
-      intro:'Você pode abrir o <strong>Info Chat 🌐</strong> a qualquer momento, <strong>antes, durante ou depois do planejamento</strong>, e perguntar qualquer coisa sobre a viagem.',
-      examples:'Por exemplo:',
-      items:['🏨 Melhor área ou bairro para ficar','🧳 Contexto sazonal e o que levar','🚇 Transporte e como se locomover','🍽️ Gastronomia local e áreas para comer','📸 Lugares escondidos e pontos para fotografia','🧭 Bairros, costumes e contexto local prático','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
-      final:'📝 Cada detalhe ajuda a Astra a tomar decisões de planejamento mais inteligentes. Quanto mais você compartilhar, mais personalizado e otimizado será o seu itinerário.',
-      placeholder:'Conte à Astra como você quer viver a viagem... Em dúvida? Abra o Info Chat 🌐 para se inspirar.'
-    },
-    fr: {
-      title:'💡 Vous ne savez pas quoi écrire ?',
-      intro:'Vous pouvez ouvrir l’<strong>Info Chat 🌐</strong> à tout moment, <strong>avant, pendant ou après la planification</strong>, et poser toutes vos questions sur le voyage.',
-      examples:'Par exemple :',
-      items:['🏨 Meilleur quartier où séjourner','🧳 Contexte saisonnier et quoi emporter','🚇 Transports et déplacements','🍽️ Cuisine locale et quartiers où manger','📸 Lieux méconnus et spots photo','🧭 Quartiers, coutumes et contexte local pratique','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
-      final:'📝 Chaque détail aide Astra à prendre de meilleures décisions de planification. Plus vous partagez d’informations, plus votre itinéraire sera personnalisé et optimisé.',
-      placeholder:'Expliquez à Astra comment vous souhaitez vivre votre voyage... Besoin d’idées ? Ouvrez l’Info Chat 🌐.'
-    },
-    de: {
-      title:'💡 Sie wissen nicht, was Sie schreiben sollen?',
-      intro:'Sie können den <strong>Info Chat 🌐</strong> jederzeit <strong>vor, während oder nach der Planung</strong> öffnen und alles zu Ihrer Reise fragen.',
-      examples:'Zum Beispiel:',
-      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🧳 Saisonaler Kontext und Packempfehlungen','🚇 Verkehrsmittel und Fortbewegung','🍽️ Lokale Küche und Gegenden zum Essen','📸 Versteckte Orte und Fotospots','🧭 Viertel, Gepflogenheiten und praktischer lokaler Kontext','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
-      final:'📝 Jedes Detail hilft Astra, intelligentere Planungsentscheidungen zu treffen. Je mehr Sie mitteilen, desto persönlicher und besser optimiert wird Ihre Reiseroute.',
-      placeholder:'Beschreiben Sie Astra, wie Sie Ihre Reise erleben möchten... Unsicher? Nutzen Sie den Info Chat 🌐 als Inspiration.'
-    },
-    it: {
-      title:'💡 Non sai cosa scrivere?',
-      intro:'Puoi aprire l’<strong>Info Chat 🌐</strong> in qualsiasi momento, <strong>prima, durante o dopo la pianificazione</strong>, e chiedere qualsiasi cosa sul viaggio.',
-      examples:'Per esempio:',
-      items:['🏨 Zona o quartiere migliore dove soggiornare','🧳 Contesto stagionale e cosa portare','🚇 Trasporti e come spostarsi','🍽️ Cucina locale e zone dove mangiare','📸 Luoghi nascosti e punti fotografici','🧭 Quartieri, usanze e contesto locale pratico','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
-      final:'📝 Ogni dettaglio aiuta Astra a prendere decisioni di pianificazione più intelligenti. Più informazioni condividi, più il tuo itinerario sarà personalizzato e ottimizzato.',
-      placeholder:'Racconta ad Astra come vuoi vivere il viaggio... Hai dubbi? Apri l’Info Chat 🌐 per trovare ispirazione.'
+      guideFinal:'📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.',
+      unsureTitle:'💡 ¿No sabes qué escribir?',
+      unsureIntro:'Info Chat 🌐 ya está disponible con hasta 10 consultas relacionadas con las ciudades de este itinerario. Úsalo antes de continuar si necesitas más contexto para tus preferencias.',
+      unsureExamples:'Por ejemplo:',
+      unsureItems:['🏨 Mejor zona o barrio para hospedarte','🧳 Contexto estacional y qué llevar','🚇 Transporte y cómo desplazarte','🍽️ Gastronomía local y zonas para comer','📸 Lugares ocultos y puntos para fotografía','🧭 Barrios, costumbres y contexto práctico local','🧳 Qué llevar y costumbres locales','💰 Recomendaciones de presupuesto','❓ Cualquier otra consulta relacionada con tu viaje'],
+      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…',
+      close:'Cerrar'
     }
   }[lang] || null;
 
-  const c = copy || {
-    title:'💡 Not sure what to write?',
-    intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
-    examples:'For example:',
-    items:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
-    final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
-    placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
+  const c=copy || {
+    guideTitle:'✨ Tell Astra exactly how you want to live your trip',
+    guideSubtitle:'This will help create an itinerary that truly matches you.',
+    guideItems:[
+      '🏞️ Style & activities → nature, landscapes, museums, authentic tours.',
+      '🚗 Transportation → rental car, public transport, taxi/Uber.',
+      '🏃 Pace & adventure level → relaxed, balanced, adventurous.',
+      '🧭 Must-dos → activities or experiences you do not want to miss.',
+      '⚕️ Health & restrictions → mobility, allergies or other limitations.',
+      '👨‍👩‍👧‍👦 Other important details → children, flexible hours, long walks.'
+    ],
+    guideFinal:'📝 The more details you share, the more personalized and optimized your itinerary becomes.',
+    unsureTitle:'💡 Not sure what to write?',
+    unsureIntro:'Use Info Chat 🌐 before continuing if you need more context about the cities in this itinerary.',
+    unsureExamples:'For example:',
+    unsureItems:['🏨 Best area to stay','🧳 Seasonal context and packing','🚇 Transportation','🍽️ Local cuisine','📸 Photography spots','🧭 Local context','💰 Budget recommendations'],
+    placeholder:'Write your preferences, restrictions or special conditions here…',
+    close:'Close'
   };
 
-  const note=document.createElement('div');
-  note.id='itbmo-preferences-infochat-note';
-  note.className='itbmo-preferences-infochat-note';
-  note.setAttribute('role','note');
-  note.style.cssText='margin:14px 0 18px;padding:16px 18px;border:1px solid rgba(63,120,255,.28);border-radius:14px;background:rgba(63,120,255,.08);box-shadow:0 8px 24px rgba(0,0,0,.06);line-height:1.5;';
-  note.innerHTML = `
-    <div style="font-size:1.05em;margin-bottom:8px;"><strong>${c.title}</strong></div>
-    <div style="margin-bottom:10px;">${c.intro}</div>
-    <div style="margin-bottom:6px;"><strong>${c.examples}</strong></div>
-    <div>${c.items.map(item=>`<div style="margin:3px 0;">${item}</div>`).join('')}</div>
+  const row=document.createElement('div');
+  row.id='itbmo-preferences-help-row';
+  row.className='preferences-help-row';
+
+  const buildHelp=(type,title,subtitle,bodyHtml)=>{
+    const item=document.createElement('div');
+    item.className='preferences-help-item';
+
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className=`preferences-help-button preferences-help-button--${type}`;
+    btn.setAttribute('aria-expanded','false');
+    btn.innerHTML=subtitle
+      ? `<span class="preferences-help-button__title">${title}</span><span class="preferences-help-button__subtitle">${subtitle}</span>`
+      : `<span class="preferences-help-button__title">${title}</span>`;
+
+    const pop=document.createElement('div');
+    pop.className='preferences-help-popover';
+    pop.setAttribute('aria-hidden','true');
+    pop.innerHTML=`
+      <button type="button" class="preferences-help-popover__close" aria-label="${c.close}">×</button>
+      <div class="preferences-help-popover__body">${bodyHtml}</div>
+    `;
+
+    btn.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const wasOpen=pop.classList.contains('is-open');
+      closePreferencesHelpPopovers();
+      if(!wasOpen){
+        pop.classList.add('is-open');
+        pop.setAttribute('aria-hidden','false');
+        btn.setAttribute('aria-expanded','true');
+      }
+    });
+
+    pop.querySelector('.preferences-help-popover__close')?.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      closePreferencesHelpPopovers();
+    });
+
+    pop.addEventListener('click',(e)=>e.stopPropagation());
+
+    item.append(btn,pop);
+    return item;
+  };
+
+  const guideBody=`
+    <div class="preferences-help-list">
+      ${c.guideItems.map(x=>`<p>${x}</p>`).join('')}
+    </div>
+    <div class="preferences-help-final">${c.guideFinal}</div>
   `;
 
-  const scope = field.closest('.preferences, .preferences-section, .form-group, .field-group, section') || field.parentElement;
-  let anchor = null;
-  if(scope){
-    const candidates = Array.from(scope.querySelectorAll('p, div, span'));
-    anchor = candidates.find(el=>/This will help create an itinerary that truly matches your travel style\.|Esto ayudará a crear un itinerario que realmente se adapte a tu estilo de viaje\./i.test(String(el.textContent||'').trim()));
-  }
-  if(anchor?.parentNode){
-    anchor.parentNode.insertBefore(note, anchor.nextSibling);
-  }else{
-    field.parentNode?.insertBefore(note,field);
-  }
+  const unsureBody=`
+    <p class="preferences-help-intro">${c.unsureIntro}</p>
+    <strong class="preferences-help-examples">${c.unsureExamples}</strong>
+    <div class="preferences-help-list preferences-help-list--compact">
+      ${c.unsureItems.map(x=>`<p>${x}</p>`).join('')}
+    </div>
+  `;
 
-  field.placeholder = c.placeholder;
+  row.append(
+    buildHelp('guide',c.guideTitle,c.guideSubtitle,guideBody),
+    buildHelp('unsure',c.unsureTitle,'',unsureBody)
+  );
 
-  if(scope){
-    const elements = Array.from(scope.querySelectorAll('p, div, span, small'));
-    const lastLine = elements.find(el=>{
-      const txt=String(el.textContent||'').trim();
-      return /^📝?\s*Every detail helps Astra/i.test(txt) || /^📝?\s*Cada detalle ayuda a Astra/i.test(txt);
-    });
-    if(lastLine) lastLine.textContent = c.final;
-  }
+  field.parentNode?.insertBefore(row,field);
+  field.placeholder=c.placeholder;
 
-  if(!scope || !scope.querySelector('#itbmo-preferences-final-line')){
-    const existingFinal = scope ? Array.from(scope.querySelectorAll('p, div, span, small')).find(el=>String(el.textContent||'').trim()===c.final) : null;
-    if(existingFinal){
-      existingFinal.id='itbmo-preferences-final-line';
-      existingFinal.style.fontWeight='600';
-    }else{
-      const finalLine=document.createElement('div');
-      finalLine.id='itbmo-preferences-final-line';
-      finalLine.style.cssText='margin-top:12px;font-weight:600;line-height:1.45;';
-      finalLine.textContent=c.final;
-      field.insertAdjacentElement('afterend', finalLine);
-    }
-  }
+  field.addEventListener('input',autoGrowPreferencesField);
+  field.addEventListener('click',closePreferencesHelpPopovers);
+  field.addEventListener('focus',closePreferencesHelpPopovers);
+
+  document.addEventListener('click',(e)=>{
+    if(!e.target.closest('#itbmo-preferences-help-row')) closePreferencesHelpPopovers();
+  });
+
+  autoGrowPreferencesField();
 }
 
 // Inicialización
