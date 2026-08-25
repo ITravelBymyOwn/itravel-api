@@ -59,6 +59,12 @@ let isItineraryLocked = false;
 let pendingChange = null;
 let hasSavedOnce = false;
 
+/* Post-payment preferences checkpoint.
+   This changes only WHEN specialConditions is confirmed.
+   The downstream plannerState / agent / generator contract remains unchanged. */
+let preferencesStageTripId = null;
+let preferencesConfirmedTripId = null;
+
 /* ---------- Defaults técnicos (NO rígidos) ---------- */
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
@@ -606,6 +612,10 @@ const $infoFloating = qs('#info-chat-floating');
 
 const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
+
+const $preferencesStage = qs('#preferences-stage');
+const $preferencesField = qs('#special-conditions');
+const $preferencesContinue = qs('#continue-with-astra');
 
 /* ---------- ITBMO Account / Supabase ---------- */
 const $accountGuest = qs('#account-guest');
@@ -1466,6 +1476,143 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 }
 
 
+/* =========================================================
+   POST-PAYMENT PREFERENCES CHECKPOINT
+   ---------------------------------------------------------
+   Guardrails:
+   - Account / travelers / destinations freeze after Save Destinations.
+   - Preferences stay hidden until payment entitlement is confirmed.
+   - Clicking Continue captures the SAME #special-conditions value into
+     plannerState.specialConditions, then freezes the field.
+   - startPlanning() itself is intentionally left unchanged.
+   ========================================================= */
+function setSavedSetupLocked(locked){
+  ['#account-box','#travelers-box','#destinations-box'].forEach(sel=>{
+    const el=qs(sel);
+    if(!el) return;
+    el.classList.toggle('is-setup-locked',!!locked);
+    try{ el.inert=!!locked; }catch(_){}
+    el.setAttribute('aria-disabled',locked?'true':'false');
+  });
+
+  if($save){
+    $save.disabled=!!locked || !currentUser;
+    $save.setAttribute('aria-disabled',String(!!locked || !currentUser));
+  }
+}
+
+function applyPreferencesStageLanguage(){
+  if(!$preferencesStage) return;
+  const es=getLang()==='es';
+  const set=(sel,value)=>{ const el=qs(sel); if(el) el.textContent=value; };
+
+  set('#preferences-stage-eyebrow', es ? 'Personalización ASTRA' : 'ASTRA personalization');
+  set('#preferences-stage-title', es ? 'Personaliza tu viaje' : 'Personalize your trip');
+  set(
+    '#preferences-stage-intro',
+    es
+      ? 'Info Chat ya está disponible. Úsalo si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntale a ASTRA cómo quieres vivir el viaje.'
+      : 'Info Chat is now available. Use it if you want to research anything about your destinations, then tell ASTRA how you want to experience the trip.'
+  );
+  set(
+    '#preferences-stage-field-title',
+    es
+      ? 'Preferencias / Restricciones / Condiciones especiales'
+      : 'Preferences / Restrictions / Special conditions'
+  );
+  set(
+    '#preferences-stage-optional',
+    es
+      ? 'Opcional · puedes continuar aunque no agregues información.'
+      : 'Optional · you can continue without adding any information.'
+  );
+
+  if($preferencesContinue && !preferencesConfirmedTripId){
+    $preferencesContinue.textContent=es ? 'Continuar con ASTRA →' : 'Continue with ASTRA →';
+  }
+}
+
+function hidePreferencesStage({reset=false}={}){
+  if(!$preferencesStage) return;
+  $preferencesStage.classList.add('is-stage-hidden');
+  $preferencesStage.classList.remove('is-stage-active','is-confirmed');
+  $preferencesStage.setAttribute('aria-hidden','true');
+
+  if(reset){
+    preferencesStageTripId=null;
+    preferencesConfirmedTripId=null;
+    if($preferencesField){
+      $preferencesField.readOnly=false;
+      $preferencesField.removeAttribute('aria-readonly');
+    }
+    if($preferencesContinue){
+      $preferencesContinue.disabled=false;
+      $preferencesContinue.removeAttribute('aria-disabled');
+    }
+  }
+}
+
+function showPreferencesStage(){
+  if(!$preferencesStage || !currentTripId) return;
+
+  preferencesStageTripId=currentTripId;
+  applyPreferencesStageLanguage();
+
+  $preferencesStage.classList.remove('is-stage-hidden');
+  $preferencesStage.classList.add('is-stage-active');
+  $preferencesStage.setAttribute('aria-hidden','false');
+
+  if($preferencesField){
+    $preferencesField.readOnly=false;
+    $preferencesField.removeAttribute('aria-readonly');
+  }
+  if($preferencesContinue){
+    $preferencesContinue.disabled=false;
+    $preferencesContinue.removeAttribute('aria-disabled');
+  }
+
+  /* Start Planning has already completed its job: payment + entitlement. */
+  if($start){
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+  }
+
+  requestAnimationFrame(()=>{
+    try{
+      $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
+    }catch(_){}
+  });
+}
+
+function confirmPreferencesAndContinue(){
+  if(!$preferencesStage || !$preferencesField || !currentTripId) return;
+  if(preferencesStageTripId!==currentTripId) return;
+
+  const confirmedValue=String($preferencesField.value || '').trim();
+
+  /* CRITICAL: preserve the existing generation contract exactly. */
+  if(typeof plannerState!=='undefined' && plannerState){
+    plannerState.specialConditions=confirmedValue;
+  }
+
+  preferencesConfirmedTripId=currentTripId;
+
+  $preferencesField.readOnly=true;
+  $preferencesField.setAttribute('aria-readonly','true');
+  $preferencesStage.classList.add('is-confirmed');
+
+  if($preferencesContinue){
+    $preferencesContinue.disabled=true;
+    $preferencesContinue.setAttribute('aria-disabled','true');
+    $preferencesContinue.textContent=getLang()==='es'
+      ? '✓ Preferencias confirmadas'
+      : '✓ Preferences confirmed';
+  }
+
+  /* Existing agent flow begins here, unchanged. */
+  startPlanning();
+}
+
 async function saveDestinations(){
   if(!currentUser || !getStoredSessionToken()){
     setAccountMessage(authCopy('loginRequired'),'error');
@@ -1577,24 +1724,46 @@ async function saveDestinations(){
     }
   }
 
-  // ✅ Bloquear sidebar
-  if ($sidebar) $sidebar.classList.add('disabled');
+  if(!planningStarted){
+    // Initial setup save: freeze only what has already been confirmed.
+    // Preferences remain a separate post-payment checkpoint.
+    setSavedSetupLocked(true);
+    hidePreferencesStage({reset:true});
 
-  /* Info Chat remains locked after Save Destinations.
-     It unlocks only after server-side payment/admin entitlement is confirmed. */
-  setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+    /* Info Chat remains locked after Save Destinations.
+       It unlocks only after server-side payment/admin entitlement is confirmed. */
+    setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
 
-  if (typeof plannerState !== 'undefined') {
-    plannerState.destinations = [...savedDestinations];
-    plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
-    plannerState.travelers = { ...travelerState.counts };
-    plannerState.travelerProfiles = {
-      mode: travelerState.mode,
-      primary: travelerState.primary,
-      companions: travelerState.companions
-    };
-    plannerState.budget = qs('#budget')?.value || '';
-    plannerState.currency = qs('#currency')?.value || 'USD';
+    if (typeof plannerState !== 'undefined') {
+      plannerState.destinations = [...savedDestinations];
+      /* specialConditions is intentionally confirmed AFTER payment. */
+      plannerState.specialConditions = '';
+      plannerState.travelers = { ...travelerState.counts };
+      plannerState.travelerProfiles = {
+        mode: travelerState.mode,
+        primary: travelerState.primary,
+        companions: travelerState.companions
+      };
+      plannerState.budget = qs('#budget')?.value || '';
+      plannerState.currency = qs('#currency')?.value || 'USD';
+    }
+  }else{
+    /* Existing post-start reuse path preserved as it behaved before this upgrade. */
+    if ($sidebar) $sidebar.classList.add('disabled');
+    setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+
+    if (typeof plannerState !== 'undefined') {
+      plannerState.destinations = [...savedDestinations];
+      plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
+      plannerState.travelers = { ...travelerState.counts };
+      plannerState.travelerProfiles = {
+        mode: travelerState.mode,
+        primary: travelerState.primary,
+        companions: travelerState.companions
+      };
+      plannerState.budget = qs('#budget')?.value || '';
+      plannerState.currency = qs('#currency')?.value || 'USD';
+    }
   }
 
   /* QUIRÚRGICO v4: a newly saved plan must generate before export actions return. */
@@ -6016,8 +6185,10 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     overlay.classList.remove('active');
     setTimeout(()=>overlay.remove(), 300);
 
-    // 🧹 Desbloquear sidebar tras reinicio
+    // Restore pre-save setup state and hide the post-payment preferences checkpoint.
     if ($sidebar) $sidebar.classList.remove('disabled');
+    setSavedSetupLocked(false);
+    hidePreferencesStage({reset:true});
 
     paymentGateSatisfiedTripId = null;
     setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
@@ -6479,7 +6650,7 @@ async function completePaymentGate(){
 
   setTimeout(()=>{
     closeCheckoutModal();
-    startPlanning();
+    showPreferencesStage();
   },500);
 }
 
@@ -6487,13 +6658,13 @@ async function requestPlanningStart(){
   if(!validateBaseDatesDMY()) return;
 
   if(!ITBMO_COMMERCE_CONFIG.commerceEnabled){
-    startPlanning();
+    showPreferencesStage();
     return;
   }
 
   const alreadyPaid = await hasValidPaymentForCurrentTrip();
   if(alreadyPaid){
-    startPlanning();
+    showPreferencesStage();
     return;
   }
 
@@ -6667,6 +6838,7 @@ if(document.readyState==='loading'){
 
 
 $start?.addEventListener('click', requestPlanningStart);
+$preferencesContinue?.addEventListener('click', confirmPreferencesAndContinue);
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
@@ -6705,6 +6877,7 @@ document.addEventListener('itbmo:addDays', e=>{
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
 let infoChatWelcomeTripId = null;
 let infoChatDragState = null;
+let infoChatSuppressRestoreClick = false;
 
 function _infoAllowedCities_(){
   return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
@@ -6817,14 +6990,34 @@ function initInfoChatDrag(){
     if(window.matchMedia('(max-width: 760px)').matches) return;
     if(e.target.closest('button,a,input,textarea')) return;
     const rect=modal.getBoundingClientRect();
-    infoChatDragState={pointerId:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
+    infoChatDragState={
+      pointerId:e.pointerId,
+      dx:e.clientX-rect.left,
+      dy:e.clientY-rect.top,
+      startX:e.clientX,
+      startY:e.clientY,
+      moved:false
+    };
     header.setPointerCapture?.(e.pointerId);
-    modal.classList.add('is-dragging');
     e.preventDefault();
   });
 
   header.addEventListener('pointermove',(e)=>{
     if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+
+    const distance=Math.hypot(
+      e.clientX-infoChatDragState.startX,
+      e.clientY-infoChatDragState.startY
+    );
+
+    /* Small pointer jitter remains a click. */
+    if(!infoChatDragState.moved && distance<7) return;
+
+    if(!infoChatDragState.moved){
+      infoChatDragState.moved=true;
+      modal.classList.add('is-dragging');
+    }
+
     const margin=10;
     const rect=modal.getBoundingClientRect();
     const maxLeft=Math.max(margin,window.innerWidth-rect.width-margin);
@@ -6839,9 +7032,16 @@ function initInfoChatDrag(){
 
   const end=(e)=>{
     if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+    const moved=Boolean(infoChatDragState.moved);
     infoChatDragState=null;
     modal.classList.remove('is-dragging');
     try{ header.releasePointerCapture?.(e.pointerId); }catch(_){}
+
+    /* A drag of the minimized window must not be interpreted as the click that restores it. */
+    if(moved && modal.classList.contains('is-minimized')){
+      infoChatSuppressRestoreClick=true;
+      setTimeout(()=>{ infoChatSuppressRestoreClick=false; },120);
+    }
   };
   header.addEventListener('pointerup',end);
   header.addEventListener('pointercancel',end);
@@ -6970,6 +7170,14 @@ function bindInfoChatListeners(){
     const modal=qs('#info-chat-modal');
     if(!modal?.classList.contains('is-minimized')) return;
     if(e.target.closest('.info-chat-window-actions')) return;
+
+    if(infoChatSuppressRestoreClick){
+      e.preventDefault();
+      e.stopPropagation();
+      infoChatSuppressRestoreClick=false;
+      return;
+    }
+
     restoreInfoModal();
   });
 
@@ -7010,7 +7218,7 @@ function enhancePreferencesInfoChatCopy(){
   const copy = {
     en: {
       title:'💡 Not sure what to write?',
-      intro:'After payment, <strong>Info Chat 🌐</strong> unlocks with up to <strong>10 trip-related queries</strong> for the cities in this itinerary.',
+      intro:'<strong>Info Chat 🌐</strong> is now available with up to <strong>10 trip-related queries</strong> for the cities in this itinerary. Use it before continuing if you want more context for your preferences.',
       examples:'For example:',
       items:[
         '🏨 Best area or neighborhood to stay',
@@ -7024,11 +7232,11 @@ function enhancePreferencesInfoChatCopy(){
         '❓ Anything else related to your trip'
       ],
       final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
-      placeholder:'Tell Astra how you want to experience your trip... Info Chat unlocks after payment.'
+      placeholder:'Tell Astra how you want to experience your trip... You can use Info Chat 🌐 before continuing.'
     },
     es: {
       title:'💡 ¿No sabes qué escribir?',
-      intro:'Después del pago se habilita <strong>Info Chat 🌐</strong> con hasta <strong>10 consultas relacionadas con las ciudades</strong> de este itinerario.',
+      intro:'<strong>Info Chat 🌐</strong> ya está disponible con hasta <strong>10 consultas relacionadas con las ciudades</strong> de este itinerario. Úsalo antes de continuar si necesitas más contexto para tus preferencias.',
       examples:'Por ejemplo:',
       items:[
         '🏨 Mejor zona o barrio para hospedarte',
@@ -7147,6 +7355,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
   bindInfoChatListeners();
   enhancePreferencesInfoChatCopy();
+  hidePreferencesStage({reset:true});
 
   bindTravelersListeners();
 
