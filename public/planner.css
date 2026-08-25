@@ -4200,3 +4200,69 @@ input.end,
     min-height:350px;
   }
 }
+
+
+
+/* =========================================================
+   ITBMO · v76g · LANGUAGE CTA + MOBILE PREFERENCES
+   ========================================================= */
+.planner-language-help{
+  min-height:42px;
+  padding:.56rem .88rem;
+  color:#063c5d;
+  background:radial-gradient(100px 60px at 12% 0%,rgba(255,255,255,.95),transparent 78%),linear-gradient(135deg,#ffffff 0%,#e9fbff 48%,#dff7f4 100%);
+  border:1px solid rgba(255,255,255,.92);
+  box-shadow:inset 0 1px 0 #fff,0 8px 24px rgba(2,47,83,.18),0 0 0 1px rgba(8,132,166,.14);
+  font-weight:900;
+}
+.planner-language-help:hover,.planner-language-help[aria-expanded="true"]{
+  color:#052f4b;
+  background:linear-gradient(135deg,#fff 0%,#e1f8ff 46%,#d6f5ef 100%);
+  border-color:#fff;
+  box-shadow:inset 0 1px 0 #fff,0 12px 30px rgba(2,47,83,.24),0 0 0 2px rgba(255,255,255,.28);
+}
+.planner-language-popover p{margin:.45rem 0 .72rem}
+.planner-language-popover small{margin-top:.15rem}
+
+@media(max-width:760px){
+  .preferences-help-row{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:.62rem !important;
+    width:100% !important;
+    overflow:visible !important;
+  }
+  .preferences-help-item{
+    display:block !important;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    overflow:visible !important;
+  }
+  .preferences-help-button{
+    display:flex !important;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    min-height:66px !important;
+    visibility:visible !important;
+    opacity:1 !important;
+  }
+  .preferences-help-button__title,.preferences-help-button__subtitle{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+  .planner-language-help{
+    min-height:38px;
+    padding:.46rem .66rem;
+    color:#063c5d;
+    background:linear-gradient(135deg,#fff,#e4faff);
+  }
+}
+@media(max-width:430px){
+  .planner-language-help{font-size:.61rem}
+  .preferences-help-button{padding:.72rem .78rem !important}
+  .preferences-help-button__title{font-size:.78rem !important;line-height:1.18 !important}
+  .preferences-help-button__subtitle{font-size:.64rem !important;line-height:1.3 !important}
+}
