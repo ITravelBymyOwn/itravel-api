@@ -3515,3 +3515,163 @@ input.end,
   outline:3px solid rgba(24,134,240,.20);
   outline-offset:2px;
 }
+
+
+/* =========================================================
+   ITBMO · v76d · POST-PAYMENT PREFERENCES CHECKPOINT
+   + MINIMIZED INFO CHAT DRAG POLISH
+   ---------------------------------------------------------
+   Existing renderer, itinerary tables, overlays and export styles
+   remain untouched above.
+   ========================================================= */
+
+/* Setup is frozen after Save Destinations without disabling the whole sidebar. */
+#account-box.is-setup-locked,
+#travelers-box.is-setup-locked,
+#destinations-box.is-setup-locked{
+  opacity:.62;
+  filter:saturate(.92);
+  box-shadow:0 2px 6px rgba(6,31,60,.018),0 8px 20px rgba(18,55,90,.028);
+}
+
+#account-box.is-setup-locked::after,
+#travelers-box.is-setup-locked::after,
+#destinations-box.is-setup-locked::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:3;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(180deg,rgba(248,252,253,.08),rgba(248,252,253,.18));
+}
+
+/* Hidden until payment/admin entitlement is authoritative. */
+.preferences-stage.is-stage-hidden{
+  display:none!important;
+}
+
+.preferences-stage.is-stage-active{
+  display:block;
+  border-color:rgba(10,151,153,.25);
+  background:
+    radial-gradient(520px 250px at 100% 0%,rgba(53,191,209,.13),transparent 70%),
+    radial-gradient(420px 220px at 0% 100%,rgba(109,120,238,.08),transparent 72%),
+    linear-gradient(145deg,#fff 34%,#effafa 100%);
+  box-shadow:
+    0 4px 12px rgba(5,31,61,.03),
+    0 24px 60px rgba(18,92,120,.10);
+  animation:preferencesStageIn .38s var(--ease) both;
+}
+
+@keyframes preferencesStageIn{
+  from{opacity:0;transform:translateY(12px)}
+  to{opacity:1;transform:none}
+}
+
+.preferences-stage-head{
+  margin-bottom:.85rem;
+}
+
+.preferences-stage-eyebrow{
+  display:inline-flex;
+  align-items:center;
+  width:max-content;
+  max-width:100%;
+  margin-bottom:.52rem;
+  padding:.38rem .65rem;
+  color:#08717f;
+  background:rgba(232,249,249,.90);
+  border:1px solid rgba(10,151,153,.14);
+  border-radius:999px;
+  font-size:.68rem;
+  font-weight:900;
+  letter-spacing:.045em;
+  text-transform:uppercase;
+}
+
+.preferences-stage-head h3{
+  margin:.05rem 0 .42rem;
+  color:var(--ink);
+  font-size:1.28rem;
+  line-height:1.12;
+  font-weight:900;
+  letter-spacing:-.035em;
+}
+
+.preferences-stage-intro{
+  margin:0;
+  color:#5b7387;
+  font-size:.83rem;
+  line-height:1.58;
+}
+
+.preferences-stage-field-title{
+  margin:.95rem 0 .45rem;
+  color:var(--ink-2);
+  font-size:.88rem;
+  font-weight:850;
+}
+
+.preferences-stage-actions{
+  display:flex;
+  align-items:center;
+  gap:.8rem;
+  flex-wrap:wrap;
+  margin-top:1rem;
+}
+
+.preferences-continue{
+  min-width:220px;
+  min-height:48px;
+  padding:.72rem 1rem;
+  border-radius:999px;
+  box-shadow:0 14px 32px rgba(8,119,249,.15);
+}
+
+.preferences-stage-actions small{
+  color:#718697;
+  font-size:.72rem;
+  line-height:1.4;
+}
+
+.preferences-stage.is-confirmed{
+  border-color:rgba(55,185,142,.25);
+  background:
+    radial-gradient(460px 220px at 100% 0%,rgba(55,185,142,.10),transparent 70%),
+    linear-gradient(145deg,#fff 38%,#f1fbf7 100%);
+}
+
+.preferences-stage.is-confirmed #special-conditions{
+  color:#4d6577;
+  background:#f6faf8;
+  border-color:rgba(55,185,142,.18);
+  cursor:default;
+}
+
+.preferences-stage.is-confirmed .preferences-continue{
+  color:#2c725b;
+  background:#e7f7f0;
+  border-color:rgba(55,185,142,.20);
+  box-shadow:none;
+}
+
+/* Drag only changes the cursor after the movement threshold is crossed. */
+.info-chat-modal.is-minimized .info-chat-header{
+  cursor:grab;
+}
+.info-chat-modal.is-minimized.is-dragging .info-chat-header{
+  cursor:grabbing;
+}
+
+@media(max-width:760px){
+  .preferences-stage-actions{
+    align-items:stretch;
+    flex-direction:column;
+  }
+
+  .preferences-continue{
+    width:100%;
+    min-width:0;
+  }
+}
