@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.8">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=5.1">
 </head>
 
 <body>
@@ -38,8 +38,8 @@
       <nav class="site-nav" aria-label="Navegación principal">
         <a href="#top" data-scroll-top>Inicio</a>
         <a href="#how-it-works">Cómo funciona</a>
-        <a href="#what-you-get">Ejemplo</a>
-        <a href="#planner">Planner</a>
+        <a href="#what-you-get" data-example-open>Ver ejemplo</a>
+        <a href="#planner" data-planner-open>Crear viaje</a>
         <a href="#travel-essentials">Para tu viaje</a>
         <a href="#faq">FAQ</a>
         <a href="./support-contact.html">Soporte</a>
@@ -51,9 +51,41 @@
           <span aria-hidden="true">·</span>
           <button type="button" data-site-lang="en" aria-pressed="false" title="English">EN</button>
         </div>
+        <button
+          class="mobile-menu-toggle"
+          type="button"
+          data-mobile-menu-toggle
+          aria-controls="mobile-navigation"
+          aria-expanded="false"
+          aria-label="Abrir menú"
+        >
+          <span></span><span></span><span></span>
+        </button>
       </div>
     </div>
   </header>
+
+  <div class="mobile-nav-backdrop" data-mobile-menu-backdrop hidden></div>
+  <nav
+    class="mobile-nav"
+    id="mobile-navigation"
+    aria-label="Navegación móvil"
+    aria-hidden="true"
+    hidden
+  >
+    <div class="mobile-nav__eyebrow">Explora ITBMO</div>
+    <a href="#top" data-scroll-top>Inicio <span>↗</span></a>
+    <a href="#how-it-works">Cómo funciona <span>↗</span></a>
+    <a href="#what-you-get" data-example-open>Ver ejemplo <span>↗</span></a>
+    <a href="#planner" data-planner-open>Crear viaje <span>↗</span></a>
+    <a href="#travel-essentials">Para tu viaje <span>↗</span></a>
+    <a href="#faq">FAQ <span>↗</span></a>
+    <a href="./support-contact.html">Soporte <span>↗</span></a>
+    <div class="mobile-nav__foot">
+      <span>✦</span>
+      <p>Tu viaje. Tu estilo. Una ruta creada para ti.</p>
+    </div>
+  </nav>
 
   <main>
 
@@ -76,6 +108,15 @@
 
           <div class="hero__lead hero__lead--astra">
             <p class="hero__astra-kicker"><strong>ASTRA — Tu viaje, pensado por ti. Organizado por ASTRA.</strong></p>
+
+            <button class="journey-launcher journey-launcher--planner" type="button" data-planner-open>
+              <span class="journey-launcher__icon" aria-hidden="true">✦</span>
+              <span class="journey-launcher__copy">
+                <strong>Empieza a planear tu viaje</strong>
+                <small>Abre el Planner y cuéntale a ASTRA cómo quieres viajar.</small>
+              </span>
+              <span class="journey-launcher__arrow" aria-hidden="true">→</span>
+            </button>
             <p>
               Cuéntale a ASTRA <strong>adónde quieres ir, con quién viajas y qué es importante para ti.</strong>
               Nosotros hacemos el resto.
@@ -102,9 +143,6 @@
           <div class="hero__actions">
             <a class="button button--primary button--large" href="#how-it-works">
               Descubre cómo funciona <span>↓</span>
-            </a>
-            <a class="button button--glass button--large" href="#planner">
-              Ir al Planner
             </a>
           </div>
 
@@ -315,11 +353,43 @@
           </div>
         </div>
 
-        <!-- EJEMPLO REALISTA -->          </div>
+        <div class="example-entry" aria-label="Vista previa del itinerario">
+          <div class="example-entry__copy">
+            <span class="example-entry__eyebrow">Un vistazo antes de empezar</span>
+            <h3>¿Quieres ver <span>qué recibirás?</span></h3>
+            <p>Descubre cómo se ve un día completo de un itinerario creado con ASTRA.</p>
+          </div>
+
+          <button class="journey-launcher journey-launcher--example" type="button" data-example-open>
+            <span class="journey-launcher__icon" aria-hidden="true">◇</span>
+            <span class="journey-launcher__copy">
+              <strong>Mira cómo será <span class="journey-launcher__gradient-text">tu itinerario</span></strong>
+              <small>Explora un día completo de un itinerario creado con ASTRA</small>
+            </span>
+            <span class="journey-launcher__arrow" aria-hidden="true">→</span>
+          </button>
         </div>
 
-        <!-- EJEMPLO REALISTA -->
-        <div class="itinerary-preview example-zone">
+      </div>
+
+      <!-- EJEMPLO REALISTA · disponible bajo demanda en Focus Mode -->
+      <div class="itinerary-preview example-zone example-focus-layer" data-example-focus aria-hidden="true">
+        <div class="example-focus-toolbar">
+          <button class="example-focus-back" type="button" data-example-focus-back>
+            <span class="example-focus-back__icon" aria-hidden="true">←</span>
+            <span>Volver a ITBMO</span>
+          </button>
+
+          <div class="example-focus-brand" aria-hidden="true">
+            <span class="example-focus-brand__spark">◇</span>
+            <span>
+              <strong>Ejemplo de itinerario</strong>
+              <small>Un día completo creado con ASTRA</small>
+            </span>
+          </div>
+
+          <button class="example-focus-close" type="button" data-example-focus-close aria-label="Cerrar ejemplo">×</button>
+        </div>
           <div class="itinerary-preview__heading">
             <div>
               <div class="eyebrow glass-pill glass-pill--example">Ejemplo · No es tu itinerario</div>
@@ -481,9 +551,24 @@
               <strong>Tu itinerario real se adapta a tus ciudades, hospedaje, viajeros, horarios y condiciones.</strong>
             </div>
           </div>
+
+          <div class="example-focus-convert glass-panel">
+            <div>
+              <span>¿Te gusta lo que ves?</span>
+              <strong>Ahora crea un viaje pensado para ti.</strong>
+            </div>
+            <button class="journey-launcher journey-launcher--planner journey-launcher--compact" type="button" data-example-to-planner>
+              <span class="journey-launcher__icon" aria-hidden="true">✦</span>
+              <span class="journey-launcher__copy">
+                <strong>Empieza a planear tu viaje</strong>
+                <small>Hasta 5 ciudades · Planner guiado por ASTRA</small>
+              </span>
+              <span class="journey-launcher__arrow" aria-hidden="true">→</span>
+            </button>
+          </div>
         </div>
 
-      </div>
+      <div class="example-focus-backdrop" data-example-focus-backdrop hidden aria-hidden="true"></div>
     </section>
 
     <!-- =========================================================
@@ -537,7 +622,7 @@
          PLANNER    <!-- =========================================================
          PLANNER
     ========================================================== -->
-    <section class="planner-section" id="planner" aria-labelledby="planner-heading">
+    <section class="planner-section planner-section--focus-only" id="planner" aria-labelledby="planner-heading">
       <div class="page-shell page-shell--wide">
 
         <div class="section-heading section-heading--center">
@@ -550,7 +635,30 @@
           </p>
         </div>
 
-        <div class="planner-frame glass-frame">
+        <div
+          class="planner-frame glass-frame"
+          data-planner-focus-frame
+          aria-label="ITBMO Planner"
+        >
+          <div class="planner-focus-toolbar" aria-hidden="true">
+            <button class="planner-focus-back" type="button" data-planner-focus-back>
+              <span class="planner-focus-back__icon" aria-hidden="true">←</span>
+              <span>Volver a ITBMO</span>
+            </button>
+
+            <div class="planner-focus-brand" aria-hidden="true">
+              <span class="planner-focus-brand__spark">✦</span>
+              <span>
+                <strong>ASTRA Planner</strong>
+                <small>Tu viaje, sin distracciones</small>
+              </span>
+            </div>
+
+            <div class="planner-focus-chip" aria-hidden="true">
+              1 generación · hasta 5 ciudades
+            </div>
+          </div>
+
           <div class="planner-frame__top">
             <div class="planner-frame__status">
               <span class="status-dot"></span>
@@ -563,13 +671,15 @@
             id="itbmo-planner"
             class="planner-iframe"
             title="ITBMO Trip Planner"
-            src="./planner.html?v=76c"
+            src="./planner.html?v=76d"
             loading="eager"
             referrerpolicy="no-referrer"
-            scrolling="no"
+            scrolling="auto"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
           ></iframe>
         </div>
+
+        <div class="planner-focus-backdrop" data-planner-focus-backdrop hidden aria-hidden="true"></div>
 
       </div>
     </section>
@@ -996,7 +1106,7 @@
           <del>$5.99</del>
         </div>
 
-        <a class="button button--white button--large" href="#planner">
+        <a class="button button--white button--large" href="#planner" data-planner-open>
           Crear mi itinerario con ASTRA <span>→</span>
         </a>
       </div>
@@ -1018,13 +1128,13 @@
         <div class="footer-column">
           <strong>ITBMO</strong>
           <a href="#how-it-works">Cómo funciona</a>
-          <a href="#what-you-get">Qué recibes</a>
+          <a href="#what-you-get" data-example-open>Ver ejemplo</a>
           <a href="#faq">Preguntas frecuentes</a>
         </div>
 
         <div class="footer-column">
           <strong>Viajes</strong>
-          <a href="#planner">Planificador</a>
+          <a href="#planner" data-planner-open>Crear viaje</a>
           <a href="#travel-essentials">Para tu viaje</a>
           <a href="/travel-guides">Travel Guides</a>
         </div>
@@ -1053,7 +1163,7 @@
     </div>
   </footer>
 
-  <script src="./assets/js/itbmo-site.js?v=4.6"></script>
+  <script src="./assets/js/itbmo-site.js?v=4.8"></script>
   <script>
     (() => {
       const initPhotography = () => {

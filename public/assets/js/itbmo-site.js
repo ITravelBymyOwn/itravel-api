@@ -135,6 +135,63 @@
   });
 
   /* =========================================================
+     MOBILE / TABLET NAVIGATION
+     The desktop nav stays untouched. This drawer only appears where the
+     existing responsive CSS hides .site-nav.
+  ========================================================= */
+  const mobileMenuToggle = document.querySelector('[data-mobile-menu-toggle]');
+  const mobileNav = document.getElementById('mobile-navigation');
+  const mobileNavBackdrop = document.querySelector('[data-mobile-menu-backdrop]');
+  let mobileMenuOpen = false;
+  let mobileMenuTimer = 0;
+
+  function setMobileMenu(open) {
+    if (!mobileMenuToggle || !mobileNav || !mobileNavBackdrop) return;
+    if (mobileMenuOpen === open) return;
+
+    mobileMenuOpen = open;
+    window.clearTimeout(mobileMenuTimer);
+
+    mobileMenuToggle.classList.toggle('is-open', open);
+    mobileMenuToggle.setAttribute('aria-expanded', String(open));
+    mobileMenuToggle.setAttribute('aria-label', open ? 'Cerrar menú' : 'Abrir menú');
+    document.documentElement.classList.toggle('mobile-menu-open', open);
+    document.body.classList.toggle('mobile-menu-open', open);
+
+    if (open) {
+      mobileNav.hidden = false;
+      mobileNavBackdrop.hidden = false;
+      mobileNav.setAttribute('aria-hidden', 'false');
+
+      requestAnimationFrame(() => {
+        mobileNav.classList.add('is-open');
+        mobileNavBackdrop.classList.add('is-visible');
+      });
+    } else {
+      mobileNav.classList.remove('is-open');
+      mobileNavBackdrop.classList.remove('is-visible');
+      mobileNav.setAttribute('aria-hidden', 'true');
+
+      mobileMenuTimer = window.setTimeout(() => {
+        if (mobileMenuOpen) return;
+        mobileNav.hidden = true;
+        mobileNavBackdrop.hidden = true;
+      }, 280);
+    }
+  }
+
+  mobileMenuToggle?.addEventListener('click', () => setMobileMenu(!mobileMenuOpen));
+  mobileNavBackdrop?.addEventListener('click', () => setMobileMenu(false));
+
+  mobileNav?.querySelectorAll('a').forEach((link) => {
+    link.addEventListener('click', () => setMobileMenu(false));
+  });
+
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 1180 && mobileMenuOpen) setMobileMenu(false);
+  }, { passive:true });
+
+  /* =========================================================
      AFFILIATES
   ========================================================= */
   document.querySelectorAll('[data-partner]').forEach((card) => {
@@ -218,6 +275,229 @@
   ========================================================= */
   const iframe = document.getElementById('itbmo-planner');
 
+  /* =========================================================
+     PLANNER FOCUS MODE
+     ---------------------------------------------------------
+     Same iframe. Same DOM. Same session. No reload and no duplicate Planner.
+     The frame is temporarily lifted into a fixed immersive layer and returns
+     to the exact Home scroll position when the user taps "Volver a ITBMO".
+  ========================================================= */
+  const plannerFrame = iframe?.closest('[data-planner-focus-frame]') || iframe?.closest('.planner-frame');
+  const plannerFocusBackdrop = document.querySelector('[data-planner-focus-backdrop]');
+  const plannerFocusBack = plannerFrame?.querySelector('[data-planner-focus-back]');
+
+  let plannerFocusActive = false;
+  let plannerFocusReturnY = 0;
+  let plannerFocusCloseTimer = 0;
+
+  function setPlannerFocusRect(rect) {
+    if (!plannerFrame || !rect) return;
+    plannerFrame.style.setProperty('--planner-focus-from-top', `${rect.top}px`);
+    plannerFrame.style.setProperty('--planner-focus-from-left', `${rect.left}px`);
+    plannerFrame.style.setProperty('--planner-focus-from-width', `${rect.width}px`);
+    plannerFrame.style.setProperty('--planner-focus-from-height', `${rect.height}px`);
+  }
+
+  function enterPlannerFocus({ immediate=false, sourceRect=null } = {}) {
+    if (!iframe || !plannerFrame || plannerFocusActive) return;
+
+    /* Never leave the mobile navigation floating above the Planner. */
+    if (typeof setMobileMenu === 'function') setMobileMenu(false);
+
+    plannerFocusActive = true;
+    plannerFocusReturnY = window.scrollY || window.pageYOffset || 0;
+    window.clearTimeout(plannerFocusCloseTimer);
+
+    const rect = sourceRect || plannerFrame.getBoundingClientRect();
+    setPlannerFocusRect(rect);
+
+    plannerFrame.classList.add('planner-frame--focus-layer');
+    plannerFrame.setAttribute('role', 'dialog');
+    plannerFrame.setAttribute('aria-modal', 'true');
+
+    if (plannerFocusBackdrop) {
+      plannerFocusBackdrop.hidden = false;
+    }
+
+    document.documentElement.classList.add('planner-focus-open');
+    document.body.classList.add('planner-focus-open');
+
+    /* Lock its first fixed frame at the exact on-page rectangle before expansion. */
+    plannerFrame.getBoundingClientRect();
+
+    const expand = () => {
+      plannerFrame.classList.add('is-focus-mode');
+      plannerFocusBackdrop?.classList.add('is-visible');
+
+      /* The viewport is now finite; Planner scroll belongs inside its same iframe. */
+      iframe.setAttribute('scrolling', 'auto');
+      iframe.style.height = '100%';
+    };
+
+    if (immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      expand();
+    } else {
+      requestAnimationFrame(() => requestAnimationFrame(expand));
+    }
+  }
+
+  function exitPlannerFocus({ immediate=false } = {}) {
+    if (!iframe || !plannerFrame || !plannerFocusActive) return;
+
+    plannerFocusActive = false;
+    window.clearTimeout(plannerFocusCloseTimer);
+
+    plannerFrame.classList.remove('is-focus-mode');
+    plannerFocusBackdrop?.classList.remove('is-visible');
+
+    const finish = () => {
+      plannerFrame.classList.remove('planner-frame--focus-layer');
+      plannerFrame.removeAttribute('role');
+      plannerFrame.removeAttribute('aria-modal');
+
+      plannerFrame.style.removeProperty('--planner-focus-from-top');
+      plannerFrame.style.removeProperty('--planner-focus-from-left');
+      plannerFrame.style.removeProperty('--planner-focus-from-width');
+      plannerFrame.style.removeProperty('--planner-focus-from-height');
+
+      document.documentElement.classList.remove('planner-focus-open');
+      document.body.classList.remove('planner-focus-open');
+
+      if (plannerFocusBackdrop) plannerFocusBackdrop.hidden = true;
+
+      /*
+        Restore auto-height on the very same iframe. Resetting lastAppliedHeight
+        forces a fresh measurement even when the numerical height happens to match.
+      */
+      iframe.style.height = '';
+      lastAppliedHeight = 0;
+
+      window.scrollTo({ top:plannerFocusReturnY, behavior:'auto' });
+      schedulePlannerMeasure();
+      setTimeout(schedulePlannerMeasure, 120);
+    };
+
+    if (immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      finish();
+    } else {
+      plannerFocusCloseTimer = window.setTimeout(finish, 470);
+    }
+  }
+
+  plannerFocusBack?.addEventListener('click', () => exitPlannerFocus());
+
+  /* =========================================================
+     PRODUCT LAUNCH ACTIONS
+     Navbar, Hero, final CTA and footer all open the SAME Planner iframe.
+  ========================================================= */
+  function getLauncherRect(trigger) {
+    if (!trigger?.getBoundingClientRect) return null;
+    const r = trigger.getBoundingClientRect();
+    const minWidth = Math.min(420, Math.max(260, window.innerWidth - 32));
+    const width = Math.max(r.width, minWidth);
+    const height = Math.max(r.height, 150);
+    const centerX = r.left + (r.width / 2);
+    const centerY = r.top + (r.height / 2);
+    const margin = 12;
+    const left = Math.min(
+      Math.max(margin, centerX - (width / 2)),
+      Math.max(margin, window.innerWidth - width - margin)
+    );
+    const top = Math.min(
+      Math.max(margin, centerY - (height / 2)),
+      Math.max(margin, window.innerHeight - height - margin)
+    );
+    return { top, left, width, height };
+  }
+
+  document.querySelectorAll('[data-planner-open]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (typeof setMobileMenu === 'function') setMobileMenu(false);
+      enterPlannerFocus({ sourceRect:getLauncherRect(trigger) });
+    });
+  });
+
+  /* =========================================================
+     EXAMPLE FOCUS MODE
+     The existing one-day sample is not duplicated; it simply leaves the
+     document flow and becomes an immersive on-demand preview.
+  ========================================================= */
+  const exampleFocus = document.querySelector('[data-example-focus]');
+  const exampleFocusBack = exampleFocus?.querySelector('[data-example-focus-back]');
+  const exampleFocusClose = exampleFocus?.querySelector('[data-example-focus-close]');
+  const exampleFocusBackdrop = document.querySelector('[data-example-focus-backdrop]');
+
+  let exampleFocusActive = false;
+  let exampleFocusReturnY = 0;
+  let exampleFocusTimer = 0;
+
+  function enterExampleFocus() {
+    if (!exampleFocus || exampleFocusActive) return;
+    if (typeof setMobileMenu === 'function') setMobileMenu(false);
+
+    exampleFocusActive = true;
+    exampleFocusReturnY = window.scrollY || window.pageYOffset || 0;
+    window.clearTimeout(exampleFocusTimer);
+
+    exampleFocus.setAttribute('aria-hidden', 'false');
+    if (exampleFocusBackdrop) exampleFocusBackdrop.hidden = false;
+
+    document.documentElement.classList.add('example-focus-open');
+    document.body.classList.add('example-focus-open');
+
+    requestAnimationFrame(() => {
+      exampleFocus.classList.add('is-open');
+      exampleFocusBackdrop?.classList.add('is-visible');
+      exampleFocus.scrollTop = 0;
+    });
+  }
+
+  function exitExampleFocus({ immediate=false, restoreScroll=true } = {}) {
+    if (!exampleFocus || !exampleFocusActive) return;
+
+    exampleFocusActive = false;
+    window.clearTimeout(exampleFocusTimer);
+    exampleFocus.classList.remove('is-open');
+    exampleFocusBackdrop?.classList.remove('is-visible');
+
+    const finish = () => {
+      exampleFocus.setAttribute('aria-hidden', 'true');
+      document.documentElement.classList.remove('example-focus-open');
+      document.body.classList.remove('example-focus-open');
+      if (exampleFocusBackdrop) exampleFocusBackdrop.hidden = true;
+      if (restoreScroll) window.scrollTo({ top:exampleFocusReturnY, behavior:'auto' });
+    };
+
+    if (immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      finish();
+    } else {
+      exampleFocusTimer = window.setTimeout(finish, 340);
+    }
+  }
+
+  document.querySelectorAll('[data-example-open]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      enterExampleFocus();
+    });
+  });
+
+  exampleFocusBack?.addEventListener('click', () => exitExampleFocus());
+  exampleFocusClose?.addEventListener('click', () => exitExampleFocus());
+  exampleFocusBackdrop?.addEventListener('click', () => exitExampleFocus());
+
+  document.querySelectorAll('[data-example-to-planner]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      exitExampleFocus({ immediate:true, restoreScroll:false });
+      requestAnimationFrame(() => {
+        enterPlannerFocus({ sourceRect:getLauncherRect(trigger) });
+      });
+    });
+  });
+
+
   let plannerResizeObserver = null;
   let plannerMutationObserver = null;
   let rafId = 0;
@@ -266,7 +546,7 @@
   }
 
   function applyPlannerHeight(nextHeight) {
-    if (!iframe) return;
+    if (!iframe || plannerFocusActive) return;
 
     const h = Math.max(720, Math.ceil(Number(nextHeight) || 0));
     if (!h) return;
@@ -354,22 +634,18 @@
   */
   window.addEventListener('message', (event) => {
     const data = event.data;
-    if (!data) return;
+    if (!data || !iframe || event.source !== iframe.contentWindow) return;
 
-    /* Critical Planner windows (checkout, loading, notices, support) must
-       always enter the user's visible area even inside a tall iframe. */
-    if (data.type === 'ITBMO_FOCUS_PLANNER_MODAL') {
-      if (!iframe || event.source !== iframe.contentWindow) return;
-
-      const top = Math.max(
-        0,
-        iframe.getBoundingClientRect().top + window.scrollY - 76
-      );
-
-      window.scrollTo({
-        top,
-        behavior:data.immediate ? 'auto' : 'smooth'
-      });
+    /*
+      First real Planner interaction requests Focus Mode.
+      Critical checkout/loading/notices also request it, so generation remains
+      immersive even if the user had returned to the Home beforehand.
+    */
+    if (
+      data.type === 'ITBMO_REQUEST_PLANNER_FOCUS' ||
+      data.type === 'ITBMO_FOCUS_PLANNER_MODAL'
+    ) {
+      enterPlannerFocus({ immediate:Boolean(data.immediate) });
       return;
     }
 
@@ -379,7 +655,7 @@
     if (!Number.isFinite(h) || h < 300) return;
 
     pendingMessageHeight = h;
-    schedulePlannerMeasure();
+    if (!plannerFocusActive) schedulePlannerMeasure();
   });
 
   /* =========================================================
@@ -464,7 +740,7 @@
   ========================================================= */
   const revealTargets = [
     ...document.querySelectorAll(
-      '.how-card,.info-instructions,.promise-hero,.itinerary-preview,.partner-card,.utility-strip,.verify-panel,.faq-item'
+      '.how-card,.info-instructions,.promise-hero,.example-entry,.partner-card,.utility-strip,.verify-panel,.faq-item'
     )
   ];
 
@@ -483,5 +759,14 @@
 
     revealTargets.forEach((el) => io.observe(el));
   }
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (exampleFocusActive) {
+      exitExampleFocus();
+      return;
+    }
+    if (mobileMenuOpen) setMobileMenu(false);
+  });
 
 })();

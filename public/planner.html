@@ -869,6 +869,39 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 <!-- jsPDF AutoTable (required for tables) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 
+<!-- Focus bridge: same Planner iframe asks the parent Home to enter immersive mode.
+     It does not alter Planner state, payment, ASTRA, Info Chat or generation logic. -->
+<script>
+  (() => {
+    let lastFocusSignal = 0;
+
+    const requestPlannerFocus = (reason) => {
+      const now = Date.now();
+      if (now - lastFocusSignal < 220) return;
+      lastFocusSignal = now;
+
+      try {
+        if (window.parent && window.parent !== window) {
+          window.parent.postMessage({
+            type: 'ITBMO_REQUEST_PLANNER_FOCUS',
+            reason: String(reason || 'interaction')
+          }, '*');
+        }
+      } catch (_) {}
+    };
+
+    /* Capture happens before the eventual click/input action, so the first
+       interaction is preserved while the parent starts the visual transition. */
+    document.addEventListener('pointerdown', () => requestPlannerFocus('pointer'), {
+      capture:true,
+      passive:true
+    });
+
+    /* Keyboard users entering a Planner field receive the same Focus Mode. */
+    document.addEventListener('focusin', () => requestPlannerFocus('keyboard'), true);
+  })();
+</script>
+
 <!-- Tu JS del planner (después de los dos de arriba) -->
 <script src="./planner.js?v=76c"></script>
  
