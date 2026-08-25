@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=76c" />
+  <link rel="stylesheet" href="./planner.css?v=76d" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -143,7 +143,7 @@
       </section>
 
       <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
-      <section class="box">
+      <section class="box" id="travelers-box">
         <h3>Viajeros</h3>
 
         <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
@@ -226,7 +226,7 @@
         </div>
       </section>
 
-      <section class="box">
+      <section class="box" id="destinations-box">
         <h3>Destinos</h3>
         <div id="city-list"></div>
         <div class="row-actions">
@@ -243,8 +243,19 @@
         -->
       </section>
 
-      <section class="box special-conditions">
-        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
+      <section class="box special-conditions preferences-stage is-stage-hidden" id="preferences-stage" aria-hidden="true">
+        <div class="preferences-stage-head">
+          <span class="preferences-stage-eyebrow" id="preferences-stage-eyebrow">Personalización ASTRA</span>
+          <h3 id="preferences-stage-title">Personaliza tu viaje</h3>
+          <p class="preferences-stage-intro" id="preferences-stage-intro">
+            Usa Info Chat si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntale a ASTRA cómo quieres vivir el viaje.
+          </p>
+        </div>
+
+        <div class="preferences-stage-field-title" id="preferences-stage-field-title">
+          Preferencias / Restricciones / Condiciones especiales
+        </div>
+
         <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
 Esta información permitirá crear un itinerario 100 % alineado contigo.
 
@@ -256,6 +267,13 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
 
 📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
+
+        <div class="preferences-stage-actions">
+          <button class="btn primary preferences-continue" id="continue-with-astra" type="button">
+            Continuar con ASTRA →
+          </button>
+          <small id="preferences-stage-optional">Opcional · puedes continuar aunque no agregues información.</small>
+        </div>
       </section>
 
       <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
@@ -903,7 +921,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=76c"></script>
+<script src="./planner.js?v=76d"></script>
  
 </body>
 </html>
