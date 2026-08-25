@@ -3898,3 +3898,305 @@ input.end,
     transform-origin:top left;
   }
 }
+
+
+/* =========================================================
+   ITBMO · v76f · PREMIUM PREFERENCES + MULTILINGUAL WOW
+   ---------------------------------------------------------
+   Visual/UX refinements only. Generation, renderer, API and exports
+   remain untouched.
+   ========================================================= */
+
+/* ---------- ALWAYS-VISIBLE MULTILINGUAL CAPABILITY ---------- */
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+}
+
+.planner-language-capability{
+  position:relative;
+  margin-left:auto;
+}
+
+.planner-language-help{
+  display:inline-flex;
+  align-items:center;
+  gap:.42rem;
+  min-height:38px;
+  padding:.48rem .72rem;
+  color:#fff;
+  background:
+    linear-gradient(135deg,rgba(255,255,255,.16),rgba(255,255,255,.08));
+  border:1px solid rgba(255,255,255,.28);
+  border-radius:999px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.25),
+    0 8px 22px rgba(2,47,83,.14);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  font-size:.72rem;
+  font-weight:850;
+  cursor:pointer;
+  transition:transform .2s var(--ease),background .2s ease,box-shadow .2s var(--ease);
+}
+
+.planner-language-help:hover{
+  transform:translateY(-1px);
+  background:linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,.12));
+  box-shadow:0 12px 28px rgba(2,47,83,.18);
+}
+
+.planner-language-popover{
+  position:absolute;
+  z-index:4000;
+  top:calc(100% + 9px);
+  right:0;
+  width:min(430px,calc(100vw - 28px));
+  padding:1rem;
+  color:#36566d;
+  background:#fff;
+  border:1px solid rgba(30,96,136,.14);
+  border-radius:18px;
+  opacity:0;
+  visibility:hidden;
+  transform:translateY(-5px) scale(.985);
+  transform-origin:top right;
+  box-shadow:0 24px 60px rgba(8,42,68,.22);
+  transition:opacity .18s ease,transform .22s var(--ease),visibility .18s ease;
+}
+
+.planner-language-popover.is-open{
+  opacity:1;
+  visibility:visible;
+  transform:none;
+}
+
+.planner-language-popover__close{
+  position:absolute;
+  top:.7rem;
+  right:.7rem;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  color:#527084;
+  background:#f6fafc;
+  border:1px solid rgba(35,75,112,.10);
+  border-radius:999px;
+  cursor:pointer;
+  font-size:1.05rem;
+}
+
+.planner-language-popover strong{
+  display:block;
+  padding-right:2.3rem;
+  color:#123c59;
+  font-size:.88rem;
+  font-weight:900;
+}
+
+.planner-language-popover p{
+  margin:.45rem 0 .75rem;
+  color:#58758a;
+  font-size:.72rem;
+  line-height:1.5;
+}
+
+.planner-language-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:.34rem;
+}
+
+.planner-language-list span{
+  padding:.34rem .48rem;
+  color:#176d82;
+  background:#edf9fa;
+  border:1px solid rgba(15,130,150,.10);
+  border-radius:999px;
+  font-size:.62rem;
+  font-weight:800;
+}
+
+.planner-language-popover small{
+  display:block;
+  margin-top:.72rem;
+  padding-top:.68rem;
+  color:#718697;
+  border-top:1px solid rgba(35,75,112,.08);
+  font-size:.62rem;
+  line-height:1.45;
+}
+
+/* ---------- PREFERENCES HELP BUTTONS · STRONGER PREMIUM COLOR ---------- */
+.preferences-help-row{
+  gap:.68rem;
+  margin:.78rem 0 .9rem;
+}
+
+.preferences-help-button{
+  position:relative;
+  overflow:hidden;
+  min-height:74px;
+  padding:.8rem .9rem;
+  border-radius:18px;
+  border:1px solid rgba(10,135,166,.18);
+  background:
+    radial-gradient(240px 120px at 100% 0%,rgba(53,191,209,.22),transparent 72%),
+    linear-gradient(145deg,#f5fdff 0%,#e8f9fb 52%,#edf5ff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 12px 28px rgba(16,91,123,.10);
+}
+
+.preferences-help-button::after{
+  content:"";
+  position:absolute;
+  width:120px;
+  height:120px;
+  right:-46px;
+  top:-66px;
+  border-radius:999px;
+  background:rgba(255,255,255,.28);
+  pointer-events:none;
+}
+
+.preferences-help-button--guide{
+  border-color:rgba(8,119,249,.18);
+  background:
+    radial-gradient(250px 120px at 100% 0%,rgba(53,191,209,.26),transparent 72%),
+    linear-gradient(135deg,#edf8ff 0%,#e6fbfa 58%,#edf3ff 100%);
+}
+
+.preferences-help-button--unsure{
+  border-color:rgba(109,120,238,.20);
+  background:
+    radial-gradient(230px 120px at 100% 0%,rgba(109,120,238,.18),transparent 72%),
+    linear-gradient(135deg,#f4f4ff 0%,#eef8ff 52%,#eafafa 100%);
+}
+
+.preferences-help-button:hover{
+  transform:translateY(-3px);
+  border-color:rgba(8,119,249,.30);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 18px 38px rgba(17,87,126,.15);
+}
+
+.preferences-help-button__title{
+  position:relative;
+  z-index:1;
+  color:#0f4565;
+  font-size:.82rem;
+  font-weight:900;
+}
+
+.preferences-help-button__subtitle{
+  position:relative;
+  z-index:1;
+  color:#5f7e92;
+  font-size:.67rem;
+  font-weight:700;
+}
+
+/* ---------- HELP WINDOWS · FIXED, OPAQUE, NO BLEED-THROUGH ---------- */
+.preferences-help-popover,
+.preferences-help-item:last-child .preferences-help-popover{
+  position:fixed;
+  z-index:12000;
+  top:clamp(88px,14vh,150px);
+  left:50%;
+  right:auto;
+  width:min(560px,calc(100vw - 34px));
+  max-height:min(470px,58vh);
+  padding:1.08rem 1.12rem;
+  transform:translate(-50%,-8px) scale(.985);
+  transform-origin:top center;
+  color:#36566d;
+  background:#fff;
+  border:1px solid rgba(30,96,136,.15);
+  border-radius:22px;
+  box-shadow:
+    0 30px 80px rgba(6,32,58,.26),
+    0 10px 30px rgba(18,92,120,.10);
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+}
+
+.preferences-help-popover.is-open{
+  transform:translate(-50%,0) scale(1);
+}
+
+.preferences-help-popover__body{
+  font-size:.76rem;
+  line-height:1.52;
+}
+
+.preferences-help-popover__close{
+  position:sticky;
+  top:0;
+  z-index:2;
+  width:34px;
+  height:34px;
+  margin:-.22rem -.22rem .2rem .7rem;
+  background:#f5fafc;
+  box-shadow:0 5px 14px rgba(18,55,90,.07);
+}
+
+/* ---------- AGENT CHAT · SLIGHTLY TALLER ---------- */
+.chat{
+  height:clamp(360px,44vh,405px);
+  min-height:360px;
+}
+
+.chat-messages{
+  padding:1.05rem;
+}
+
+.chat-message{
+  max-width:88%;
+}
+
+/* ---------- MOBILE ---------- */
+@media(max-width:760px){
+  .topbar{
+    gap:.55rem;
+  }
+
+  .planner-language-help{
+    min-height:34px;
+    padding:.4rem .56rem;
+    font-size:.64rem;
+  }
+
+  .planner-language-popover{
+    position:fixed;
+    top:72px;
+    left:12px;
+    right:12px;
+    width:auto;
+    max-height:55vh;
+    overflow:auto;
+  }
+
+  .preferences-help-button{
+    min-height:64px;
+  }
+
+  .preferences-help-popover,
+  .preferences-help-item:last-child .preferences-help-popover{
+    top:86px;
+    left:50%;
+    right:auto;
+    width:calc(100vw - 24px);
+    max-height:56vh;
+  }
+
+  .chat{
+    height:clamp(350px,48vh,390px);
+    min-height:350px;
+  }
+}
