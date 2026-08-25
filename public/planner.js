@@ -617,6 +617,14 @@ const $infoFloating = qs('#info-chat-floating');
 const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
 
+const $plannerLanguageHelp = qs('#planner-language-help');
+const $plannerLanguageHelpLabel = qs('#planner-language-help-label');
+const $plannerLanguagePopover = qs('#planner-language-popover');
+const $plannerLanguagePopoverClose = qs('#planner-language-popover-close');
+const $plannerLanguagePopoverTitle = qs('#planner-language-popover-title');
+const $plannerLanguagePopoverCopy = qs('#planner-language-popover-copy');
+const $plannerLanguagePopoverNote = qs('#planner-language-popover-note');
+
 const $preferencesStage = qs('#preferences-stage');
 const $preferencesField = qs('#special-conditions');
 const $preferencesContinue = qs('#continue-with-astra');
@@ -1481,6 +1489,70 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   $cityList.appendChild(row);
 }
 
+
+/* =========================================================
+   MULTILINGUAL PLANNER CAPABILITY
+   ---------------------------------------------------------
+   The site UI remains ES/EN, while free-text Planner interaction can
+   use any currently supported language listed in the capability popover.
+   ========================================================= */
+function applyPlannerLanguageCapabilityCopy(){
+  const es=getLang()==='es';
+
+  if($plannerLanguageHelpLabel){
+    $plannerLanguageHelpLabel.textContent=es ? 'Escribe en tu idioma' : 'Write in your language';
+  }
+  if($plannerLanguagePopoverTitle){
+    $plannerLanguagePopoverTitle.textContent=es ? 'Usa tu idioma con ASTRA' : 'Use your language with ASTRA';
+  }
+  if($plannerLanguagePopoverCopy){
+    $plannerLanguagePopoverCopy.textContent=es
+      ? 'Escribe tus respuestas de texto libre en cualquiera de los idiomas actualmente soportados. ASTRA continuará la conversación de planificación en el idioma de tu primera respuesta.'
+      : 'Write your free-text answers in any currently supported language. ASTRA will continue the planning conversation in the language of your first reply.';
+  }
+  if($plannerLanguagePopoverNote){
+    $plannerLanguagePopoverNote.textContent=es
+      ? 'El idioma final del itinerario se selecciona más adelante durante la planificación.'
+      : 'The final itinerary language is selected later in the planning flow.';
+  }
+  if($plannerLanguagePopoverClose){
+    $plannerLanguagePopoverClose.setAttribute('aria-label',es ? 'Cerrar' : 'Close');
+  }
+}
+
+function setPlannerLanguagePopover(open){
+  if(!$plannerLanguageHelp || !$plannerLanguagePopover) return;
+  $plannerLanguageHelp.setAttribute('aria-expanded',String(!!open));
+  $plannerLanguagePopover.setAttribute('aria-hidden',String(!open));
+  $plannerLanguagePopover.classList.toggle('is-open',!!open);
+}
+
+function bindPlannerLanguageCapability(){
+  if(!$plannerLanguageHelp || !$plannerLanguagePopover) return;
+  applyPlannerLanguageCapabilityCopy();
+
+  $plannerLanguageHelp.addEventListener('click',(e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    setPlannerLanguagePopover(!$plannerLanguagePopover.classList.contains('is-open'));
+  });
+
+  $plannerLanguagePopoverClose?.addEventListener('click',(e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    setPlannerLanguagePopover(false);
+  });
+
+  $plannerLanguagePopover.addEventListener('click',(e)=>e.stopPropagation());
+
+  document.addEventListener('click',()=>{
+    setPlannerLanguagePopover(false);
+  });
+
+  document.addEventListener('keydown',(e)=>{
+    if(e.key==='Escape') setPlannerLanguagePopover(false);
+  });
+}
 
 /* =========================================================
    POST-PAYMENT PREFERENCES CHECKPOINT
@@ -4915,6 +4987,45 @@ ${buildIntake()}
   }
 }
 
+function detectTransportFromUserText(text){
+  const s=String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+  if(/\b(recomiendame|recomienda|recommend|recommande|recommandez|empfehle|empfehlung|consiglia|consigliami|recomende|おすすめ|추천|推荐|порекомендуй|рекомендуй|اقترح)\b/i.test(s)){
+    return 'recomiéndame';
+  }
+
+  if(/\b(alquilad|rent(?:al|ed)?|vehiculo|coche|auto|carro|voiture\s+de\s+location|location\s+de\s+voiture|mietwagen|noleggio|auto\s+a\s+noleggio|carro\s+alugado|aluguel\s+de\s+carro|レンタカー|렌터카|租车|арендованн|аренда\s+авто|سيارة\s+مستأجرة)\b/i.test(s)){
+    return 'vehículo alquilado';
+  }
+
+  if(/\b(metro|tren|train|bus|autobus|publico|public\s+transit|public\s+transport|transports?\s+publics?|transport\s+public|offentliche|verkehrsmittel|trasporto\s+pubblico|transporte\s+publico|公共交通|대중교통|公共交通機関|общественн|نقل\s+عام)\b/i.test(s)){
+    return 'transporte público';
+  }
+
+  if(/\b(uber|taxi|cabify|lyft|такси|出租车|택시|タクシー|تاكسي)\b/i.test(s)){
+    return 'otros (Uber/Taxi)';
+  }
+
+  return '';
+}
+
+function stripRecognizedTransportTail(text){
+  const raw=String(text||'').trim();
+  if(!raw) return '';
+
+  /*
+    Keep this conservative: it only strips an obvious transport phrase at the
+    end. If unsure, the full user text is retained as lodging context so no
+    information is discarded.
+  */
+  return raw
+    .replace(
+      /(?:,|;|\||\band\b|\by\b|\bet\b|\bund\b|\be\b|\be\b|\bou\b|\boder\b|\bo\b|\bor\b)?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|je\s+vais\s+utiliser|j['’]utiliserai|ich\s+nutze|ich\s+werde|user[oò]|vou\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|tren|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|voiture\s+de\s+location|transports?\s+publics?|mietwagen|[oö]ffentliche\s+verkehrsmittel|auto\s+a\s+noleggio|trasporto\s+pubblico|carro\s+alugado|transporte\s+p[uú]blico|レンタカー|公共交通機関|タクシー|렌터카|대중교통|택시|租车|公共交通|出租车|арендованн\w*\s+автомобил\w*|общественн\w*\s+транспорт\w*|такси|سيارة\s+مستأجرة|نقل\s+عام|تاكسي|recomi[eé]ndame|recommend|recommande|empfehle|consigliami|recomende|おすすめ|추천|推荐|порекомендуй|اقترح)\s*$/i,
+      ''
+    )
+    .trim() || raw;
+}
+
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
@@ -4928,14 +5039,8 @@ async function onSend(){
   // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
-    const transport = (/recom/i.test(text)) ? 'recomiéndame'
-      : (/alquilad|rent|veh[ií]culo|coche|auto|carro/i.test(text)) ? 'vehículo alquilado'
-      : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
-      : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
-      : '';
-    const lodgingText = String(text||'')
-      .replace(/(?:,|;|\|| and | y )?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|recomi[eé]ndame|recommend(?:\s+me)?)\s*$/i,'')
-      .trim() || text;
+    const transport = detectTransportFromUserText(text);
+    const lodgingText = stripRecognizedTransportTail(text);
     upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
     askNextHotelTransport();
@@ -7511,6 +7616,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
   bindInfoChatListeners();
+  bindPlannerLanguageCapability();
   enhancePreferencesInfoChatCopy();
   hidePreferencesStage({reset:true});
 
