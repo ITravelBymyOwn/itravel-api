@@ -1507,13 +1507,13 @@ function applyPlannerLanguageCapabilityCopy(){
   }
   if($plannerLanguagePopoverCopy){
     $plannerLanguagePopoverCopy.textContent=es
-      ? 'Escribe tus respuestas de texto libre en cualquiera de los idiomas actualmente soportados. ASTRA continuará la conversación de planificación en el idioma de tu primera respuesta.'
-      : 'Write your free-text answers in any currently supported language. ASTRA will continue the planning conversation in the language of your first reply.';
+      ? 'Escribe naturalmente en cualquier idioma soportado por el chat. ASTRA continuará la conversación de planificación en el idioma que utilices.'
+      : 'Write naturally in any language supported by the chat. ASTRA will continue the planning conversation in the language you use.';
   }
   if($plannerLanguagePopoverNote){
     $plannerLanguagePopoverNote.textContent=es
-      ? 'El idioma final del itinerario se selecciona más adelante durante la planificación.'
-      : 'The final itinerary language is selected later in the planning flow.';
+      ? 'Si un idioma no es soportado, ASTRA te lo indicará en el chat. El idioma final del itinerario se selecciona más adelante durante la planificación.'
+      : 'If a language is not supported, ASTRA will let you know in the chat. The final itinerary language is selected later in the planning flow.';
   }
   if($plannerLanguagePopoverClose){
     $plannerLanguagePopoverClose.setAttribute('aria-label',es ? 'Cerrar' : 'Close');
