@@ -298,7 +298,7 @@
     plannerFrame.style.setProperty('--planner-focus-from-height', `${rect.height}px`);
   }
 
-  function enterPlannerFocus({ immediate=false } = {}) {
+  function enterPlannerFocus({ immediate=false, sourceRect=null } = {}) {
     if (!iframe || !plannerFrame || plannerFocusActive) return;
 
     /* Never leave the mobile navigation floating above the Planner. */
@@ -308,7 +308,7 @@
     plannerFocusReturnY = window.scrollY || window.pageYOffset || 0;
     window.clearTimeout(plannerFocusCloseTimer);
 
-    const rect = plannerFrame.getBoundingClientRect();
+    const rect = sourceRect || plannerFrame.getBoundingClientRect();
     setPlannerFocusRect(rect);
 
     plannerFrame.classList.add('planner-frame--focus-layer');
@@ -385,6 +385,117 @@
   }
 
   plannerFocusBack?.addEventListener('click', () => exitPlannerFocus());
+
+  /* =========================================================
+     PRODUCT LAUNCH ACTIONS
+     Navbar, Hero, final CTA and footer all open the SAME Planner iframe.
+  ========================================================= */
+  function getLauncherRect(trigger) {
+    if (!trigger?.getBoundingClientRect) return null;
+    const r = trigger.getBoundingClientRect();
+    const minWidth = Math.min(420, Math.max(260, window.innerWidth - 32));
+    const width = Math.max(r.width, minWidth);
+    const height = Math.max(r.height, 150);
+    const centerX = r.left + (r.width / 2);
+    const centerY = r.top + (r.height / 2);
+    const margin = 12;
+    const left = Math.min(
+      Math.max(margin, centerX - (width / 2)),
+      Math.max(margin, window.innerWidth - width - margin)
+    );
+    const top = Math.min(
+      Math.max(margin, centerY - (height / 2)),
+      Math.max(margin, window.innerHeight - height - margin)
+    );
+    return { top, left, width, height };
+  }
+
+  document.querySelectorAll('[data-planner-open]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      if (typeof setMobileMenu === 'function') setMobileMenu(false);
+      enterPlannerFocus({ sourceRect:getLauncherRect(trigger) });
+    });
+  });
+
+  /* =========================================================
+     EXAMPLE FOCUS MODE
+     The existing one-day sample is not duplicated; it simply leaves the
+     document flow and becomes an immersive on-demand preview.
+  ========================================================= */
+  const exampleFocus = document.querySelector('[data-example-focus]');
+  const exampleFocusBack = exampleFocus?.querySelector('[data-example-focus-back]');
+  const exampleFocusClose = exampleFocus?.querySelector('[data-example-focus-close]');
+  const exampleFocusBackdrop = document.querySelector('[data-example-focus-backdrop]');
+
+  let exampleFocusActive = false;
+  let exampleFocusReturnY = 0;
+  let exampleFocusTimer = 0;
+
+  function enterExampleFocus() {
+    if (!exampleFocus || exampleFocusActive) return;
+    if (typeof setMobileMenu === 'function') setMobileMenu(false);
+
+    exampleFocusActive = true;
+    exampleFocusReturnY = window.scrollY || window.pageYOffset || 0;
+    window.clearTimeout(exampleFocusTimer);
+
+    exampleFocus.setAttribute('aria-hidden', 'false');
+    if (exampleFocusBackdrop) exampleFocusBackdrop.hidden = false;
+
+    document.documentElement.classList.add('example-focus-open');
+    document.body.classList.add('example-focus-open');
+
+    requestAnimationFrame(() => {
+      exampleFocus.classList.add('is-open');
+      exampleFocusBackdrop?.classList.add('is-visible');
+      exampleFocus.scrollTop = 0;
+    });
+  }
+
+  function exitExampleFocus({ immediate=false, restoreScroll=true } = {}) {
+    if (!exampleFocus || !exampleFocusActive) return;
+
+    exampleFocusActive = false;
+    window.clearTimeout(exampleFocusTimer);
+    exampleFocus.classList.remove('is-open');
+    exampleFocusBackdrop?.classList.remove('is-visible');
+
+    const finish = () => {
+      exampleFocus.setAttribute('aria-hidden', 'true');
+      document.documentElement.classList.remove('example-focus-open');
+      document.body.classList.remove('example-focus-open');
+      if (exampleFocusBackdrop) exampleFocusBackdrop.hidden = true;
+      if (restoreScroll) window.scrollTo({ top:exampleFocusReturnY, behavior:'auto' });
+    };
+
+    if (immediate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      finish();
+    } else {
+      exampleFocusTimer = window.setTimeout(finish, 340);
+    }
+  }
+
+  document.querySelectorAll('[data-example-open]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      enterExampleFocus();
+    });
+  });
+
+  exampleFocusBack?.addEventListener('click', () => exitExampleFocus());
+  exampleFocusClose?.addEventListener('click', () => exitExampleFocus());
+  exampleFocusBackdrop?.addEventListener('click', () => exitExampleFocus());
+
+  document.querySelectorAll('[data-example-to-planner]').forEach((trigger) => {
+    trigger.addEventListener('click', (event) => {
+      event.preventDefault();
+      exitExampleFocus({ immediate:true, restoreScroll:false });
+      requestAnimationFrame(() => {
+        enterPlannerFocus({ sourceRect:getLauncherRect(trigger) });
+      });
+    });
+  });
 
 
   let plannerResizeObserver = null;
@@ -629,7 +740,7 @@
   ========================================================= */
   const revealTargets = [
     ...document.querySelectorAll(
-      '.how-card,.info-instructions,.promise-hero,.itinerary-preview,.partner-card,.utility-strip,.verify-panel,.faq-item'
+      '.how-card,.info-instructions,.promise-hero,.example-entry,.partner-card,.utility-strip,.verify-panel,.faq-item'
     )
   ];
 
@@ -650,7 +761,12 @@
   }
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && mobileMenuOpen) setMobileMenu(false);
+    if (event.key !== 'Escape') return;
+    if (exampleFocusActive) {
+      exitExampleFocus();
+      return;
+    }
+    if (mobileMenuOpen) setMobileMenu(false);
   });
 
 })();
