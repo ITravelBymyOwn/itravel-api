@@ -2509,13 +2509,115 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
 }
 
 /* =========================================================
-   ITBMO · LAUNCH OFFER V5.2
-   Surgical addition: premium 50% launch promotion.
+   ITBMO · PROMOTION CONVERSION V5.3
+   Surgical refinement: stronger 50% savings visibility without
+   launch/new-product language or artificial urgency.
    ========================================================= */
-.hero__price--promo,.final-cta__price--promo{flex-wrap:wrap}
-.promo-badge{display:inline-flex;align-items:center;justify-content:center;padding:.38rem .62rem;border-radius:999px;background:linear-gradient(120deg,#dff9ef,#e7fbff);border:1px solid rgba(10,167,165,.18);color:#08786f;font-size:.68rem;font-style:normal;font-weight:900;letter-spacing:.035em;text-transform:uppercase;box-shadow:0 8px 22px rgba(10,167,165,.10)}
-.hero__price--promo strong{font-size:1.72rem}
-.hero__price--promo del{font-weight:750}
-.promo-badge--dark{color:#072d3f;background:linear-gradient(120deg,#aef4dd,#c9f6ff);border-color:rgba(255,255,255,.30);box-shadow:0 10px 28px rgba(0,0,0,.10)}
-.how-card__price strong{color:#08786f}
-@media(max-width:680px){.hero__price--promo{align-items:center}.promo-badge{width:max-content}.final-cta__price--promo{justify-content:center}}
+.hero__price--promo,.final-cta__price--promo{
+  flex-wrap:wrap;
+  column-gap:.62rem;
+  row-gap:.46rem;
+  align-items:center;
+}
+
+.hero__price--promo > span:first-child,
+.final-cta__price--promo > span:first-child{
+  font-weight:720;
+  letter-spacing:.01em;
+}
+
+.hero__price--promo > strong{
+  font-size:1.86rem;
+}
+
+.hero__price--promo del,
+.final-cta__price--promo del{
+  opacity:.58;
+  font-weight:780;
+}
+
+.promo-badge{
+  position:relative;
+  isolation:isolate;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:42px;
+  padding:.54rem .92rem;
+  border-radius:999px;
+  color:#5d3a00;
+  background:
+    radial-gradient(90px 50px at 18% 0%,rgba(255,255,255,.88),transparent 72%),
+    linear-gradient(120deg,#fff2ad 0%,#ffd96b 48%,#ffc56b 100%);
+  border:1px solid rgba(185,120,0,.20);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90),
+    0 10px 26px rgba(202,139,16,.18),
+    0 0 0 4px rgba(255,214,103,.10);
+  font-size:.82rem;
+  font-style:normal;
+  font-weight:950;
+  letter-spacing:.035em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  transform:translateZ(0);
+}
+
+.promo-badge b{
+  font:inherit;
+}
+
+.promo-badge::after{
+  content:"";
+  position:absolute;
+  inset:-3px;
+  z-index:-1;
+  border-radius:inherit;
+  border:1px solid rgba(255,202,65,.24);
+  opacity:.7;
+  animation:itbmoPromoPulse 6.5s ease-in-out infinite;
+}
+
+@keyframes itbmoPromoPulse{
+  0%,78%,100%{transform:scale(1);opacity:.24}
+  84%{transform:scale(1.055);opacity:.58}
+  91%{transform:scale(1);opacity:.24}
+}
+
+.promo-badge--dark{
+  color:#513400;
+  background:
+    radial-gradient(90px 50px at 18% 0%,rgba(255,255,255,.90),transparent 72%),
+    linear-gradient(120deg,#fff3a5 0%,#ffd45d 50%,#ffbd64 100%);
+  border-color:rgba(255,255,255,.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    0 12px 30px rgba(0,0,0,.13),
+    0 0 0 4px rgba(255,220,108,.10);
+}
+
+.how-card__price strong{
+  color:#9b6500;
+  font-weight:900;
+}
+
+@media(max-width:680px){
+  .hero__price--promo{
+    align-items:center;
+  }
+  .promo-badge{
+    width:max-content;
+    min-height:40px;
+    padding:.5rem .82rem;
+    font-size:.77rem;
+  }
+  .final-cta__price--promo{
+    justify-content:center;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .promo-badge::after{
+    animation:none;
+  }
+}
