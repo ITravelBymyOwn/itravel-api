@@ -5,13 +5,14 @@
   <title>ITBMO · Planea tu viaje con ASTRA</title>
   <meta name="description" content="Crea un itinerario de viaje personalizado con ASTRA. Hasta 5 ciudades en una sola generación, preferencias, horarios, transporte, PDF, CSV, comprobante de pago e Info Chat.">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
+  <meta name="robots" content="index,follow,max-image-preview:large">
+  <link rel="canonical" href="https://itravelbymyown.com/">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=5.1">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=5.2">
 </head>
 
 <body>
@@ -146,8 +147,8 @@
             </a>
           </div>
 
-          <div class="hero__price">
-            <span>Lanzamiento</span>
+          <div class="hero__price hero__price--promo" aria-label="Oferta de lanzamiento: 50 por ciento de descuento, precio 2 dólares con 99 centavos, precio regular 5 dólares con 99 centavos">
+            <span class="promo-badge">Lanzamiento · 50% OFF</span>
             <strong>$2.99</strong>
             <del>$5.99</del>
             <em>Sin suscripciones</em>
@@ -234,22 +235,22 @@
           <article class="how-card glass-card">
             <span class="how-card__number">03</span>
             <div class="how-card__icon">✦</div>
-            <h3>Hazlo realmente tuyo</h3>
+            <h3>Guarda y revisa tu viaje</h3>
             <p>
-              Completa horarios si los conoces y escribe preferencias, restricciones y condiciones especiales:
-              ritmo, intereses, movilidad, niños, reservas existentes o lugares imprescindibles.
+              Completa los datos que conozcas, guarda tus destinos y revisa que ciudades, fechas y viajeros estén correctos.
+              Guardar no genera ningún cargo.
             </p>
           </article>
 
           <article class="how-card how-card--payment glass-card">
             <span class="how-card__number">04</span>
             <div class="how-card__icon">✓</div>
-            <h3>Guarda, revisa y paga solo al generar</h3>
+            <h3>Paga solo cuando estés listo</h3>
             <p>
-              Guardar tus destinos no genera ningún cargo. El pago se solicita únicamente cuando presionas
-              <strong>Iniciar planificación</strong>. Después del pago se habilitan ASTRA e Info Chat.
+              El pago se solicita únicamente al presionar <strong>Iniciar planificación</strong>. Después del pago se habilitan
+              Info Chat y la personalización final; luego ASTRA solicita el contexto necesario y genera tu itinerario.
             </p>
-            <span class="how-card__price">Lanzamiento $2.99 · 1 generación · hasta 5 ciudades en ese itinerario</span>
+            <span class="how-card__price"><strong>50% OFF</strong> · Lanzamiento $2.99 · 1 generación · hasta 5 ciudades</span>
           </article>
 
         </div>
@@ -261,8 +262,8 @@
             <h3>Info Chat se convierte en tu<br><span>concierge de las ciudades del viaje.</span></h3>
             <p>
               Se habilita cuando completas el pago y queda limitado a consultas relacionadas con las ciudades
-              que ingresaste en el Planner. Puedes usarlo mientras ASTRA solicita hospedaje y transporte,
-              y también después de recibir el itinerario.
+              que ingresaste en el Planner. Úsalo para resolver dudas mientras completas tus preferencias y durante
+              la planificación; también permanece disponible después de recibir el itinerario mientras la sesión siga activa.
             </p>
 
             <div class="prompt-grid">
@@ -1100,8 +1101,8 @@
           Cuéntale a ASTRA cómo quieres viajar y deja que convierta toda esa información en una ruta.
         </p>
 
-        <div class="final-cta__price">
-          <span>Lanzamiento</span>
+        <div class="final-cta__price final-cta__price--promo">
+          <span class="promo-badge promo-badge--dark">Lanzamiento · 50% OFF</span>
           <strong>$2.99</strong>
           <del>$5.99</del>
         </div>
@@ -1163,7 +1164,7 @@
     </div>
   </footer>
 
-  <script src="./assets/js/itbmo-site.js?v=4.8"></script>
+  <script src="./assets/js/itbmo-site.js?v=4.9"></script>
   <script>
     (() => {
       const initPhotography = () => {
