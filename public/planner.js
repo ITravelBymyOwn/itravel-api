@@ -3635,6 +3635,8 @@ function _normalizeLodgingInput_(value=''){
 function _preferenceConstraintPolicy_(){
   return {
     rule:'Treat every stated preference and restriction as an operational planning constraint, not as decorative notes.',
+    precedence:'Explicit user preferences, restrictions, must-dos and special conditions take priority over generic tourism defaults whenever they are compatible with safety, feasibility and hard time boundaries.',
+    completeness:'Do not silently drop a stated preference, restriction or must-do. Apply it in the itinerary when feasible; if a conflict makes it impossible, preserve the closest practical interpretation instead of ignoring it.',
     examples:[
       'Photography: favor strong light, sunrise, sunset, blue hour or suitable viewpoints when seasonally realistic.',
       'Avoid crowds: use earlier, later or lower-congestion sequencing when practical.',
@@ -3693,6 +3695,7 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
     preference_constraint_policy:_preferenceConstraintPolicy_(),
     special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
+    special_conditions_instruction:'Use special_conditions as authoritative user input throughout strategic distribution, activity selection, sequencing, logistics and validation. Never treat it as optional commentary.',
     travelers:plannerState?.travelers || null,
     traveler_profiles:plannerState?.travelerProfiles || null,
     budget:plannerState?.budget || null,
