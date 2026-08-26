@@ -770,3 +770,28 @@
   });
 
 })();
+
+/* =========================================================
+   ITBMO · EXTERNAL FOCUS DEEP LINKS V4.9
+   Allows legal/support pages to return directly to Planner or Example.
+   Example: preview-home.html?open=planner#planner
+   ========================================================= */
+(() => {
+  const params = new URLSearchParams(window.location.search);
+  const openTarget = String(params.get('open') || '').toLowerCase();
+  if (!openTarget) return;
+  const launch = () => {
+    if (openTarget === 'planner') {
+      const trigger = document.querySelector('[data-planner-open]');
+      if (trigger) trigger.click();
+    } else if (openTarget === 'example') {
+      const trigger = document.querySelector('[data-example-open]');
+      if (trigger) trigger.click();
+    }
+    params.delete('open');
+    const query = params.toString();
+    history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => setTimeout(launch, 80), { once:true });
+  else setTimeout(launch, 80);
+})();
