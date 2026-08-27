@@ -161,7 +161,7 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. El tiempo depende del número de ciudades, días y la complejidad del viaje y puede tomar varios minutos. No cierres esta pestaña: este es el trabajo que te ahorra horas de investigación y planificación.',
+    overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. ⏳ En viajes complejos, la generación puede tomar 5 minutos o más. NO CIERRES ESTA PESTAÑA: este proceso está haciendo por ti horas de investigación, selección y planificación.',
     overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo, ciudad por ciudad y día por día. ⏳ En viajes complejos, la generación puede tomar 5 minutos o más. NO CIERRES ESTA PESTAÑA: ASTRA está haciendo por ti horas de investigación, selección y planificación.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
@@ -239,7 +239,7 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. Generation time depends on the number of cities, days and trip complexity and may take several minutes. Don’t close this tab: this is the work designed to save you hours of research and planning.',
+    overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. ⏳ For complex trips, generation may take 5 minutes or more. DO NOT CLOSE THIS TAB: this process is doing hours of research, selection and planning for you.',
     overlayGenerating: '✨ ASTRA is building and optimizing your complete trip, city by city and day by day. ⏳ For complex trips, generation may take 5 minutes or more. DO NOT CLOSE THIS TAB: ASTRA is doing hours of research, selection and planning for you.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
@@ -2350,6 +2350,17 @@ function openImmersiveItinerary(city){
     }
   }catch(_){}
 
+  /* Defensive UI reset: these controls may have been disabled by the
+     generation overlay. They must always be interactive once the viewer opens. */
+  ['#itinerary-focus-back','#itinerary-focus-close','#itinerary-focus-prev','#itinerary-focus-next']
+    .forEach(sel=>{
+      const el=qs(sel);
+      if(el){
+        el.disabled=false;
+        el.removeAttribute('aria-disabled');
+      }
+    });
+
   modal.classList.add('is-open');
   modal.setAttribute('aria-hidden','false');
   document.body.classList.add('itinerary-focus-open');
@@ -3732,7 +3743,12 @@ function showWOW(on, msg){
     }
 
     if(on){
-      el._prevDisabled = el.disabled;
+      /* Parallel city generation can call showWOW(true) several times.
+         Preserve the ORIGINAL disabled state only once; do not overwrite it
+         with the temporary disabled=true state from a previous nested call. */
+      if(typeof el._prevDisabled === 'undefined'){
+        el._prevDisabled = el.disabled;
+      }
       el.disabled = true;
     }else{
       if(typeof el._prevDisabled !== 'undefined'){
