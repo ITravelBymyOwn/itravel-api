@@ -5189,3 +5189,155 @@ body.itinerary-focus-open{
   background:linear-gradient(90deg,#0877f9 0%,#0aa7a5 48%,#d79a16 100%);
   box-shadow:0 0 17px rgba(10,151,153,.18);
 }
+
+/* =========================================================
+   ITBMO · v78 · FINAL IMMERSIVE UX POLISH
+   Surgical presentation/performance companion layer only.
+   ========================================================= */
+
+/* More breathing room between itinerary actions and monetization. */
+.itbmo-affiliate-after{
+  margin:2.6rem 0 .35rem;
+}
+
+.itbmo-affiliate-after::before{
+  content:"";
+  display:block;
+  width:min(180px,32%);
+  height:3px;
+  margin:0 auto 1.35rem;
+  border-radius:999px;
+  background:linear-gradient(90deg,rgba(8,119,249,0),rgba(53,191,209,.55),rgba(10,151,153,.55),rgba(109,120,238,0));
+}
+
+/* Focus header: stronger travel-reward moment while preserving readability. */
+.itinerary-focus-header{
+  background:
+    radial-gradient(460px 160px at 15% 0%,rgba(53,191,209,.10),transparent 72%),
+    radial-gradient(460px 160px at 85% 0%,rgba(109,120,238,.08),transparent 72%),
+    rgba(255,255,255,.93);
+}
+
+/* Back to Planner gets clear visual hierarchy and a reassuring return affordance. */
+.itinerary-focus-back{
+  color:#fff;
+  background:linear-gradient(120deg,#0877f9 0%,#078fb0 50%,#0aa7a5 100%);
+  border-color:transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.28),
+    0 10px 24px rgba(5,99,146,.16);
+  transition:transform .22s var(--ease),box-shadow .22s var(--ease),filter .22s ease;
+}
+
+.itinerary-focus-back:hover{
+  color:#fff;
+  transform:translateY(-2px);
+  filter:saturate(1.04) brightness(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    0 14px 30px rgba(5,99,146,.21);
+}
+
+.itinerary-focus-back:focus-visible{
+  outline:none;
+  box-shadow:
+    0 0 0 4px rgba(8,119,249,.15),
+    0 14px 30px rgba(5,99,146,.21);
+}
+
+/* The title deserves color, but not a solid saturated fill.
+   Gradient text keeps it premium and coherent with ASTRA. */
+.itinerary-focus-heading h2{
+  color:transparent;
+  background:linear-gradient(100deg,#0877f9 0%,#078fae 48%,#0a9799 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+}
+
+.itinerary-focus-eyebrow{
+  color:#0a8293;
+}
+
+/* Day card has more personality without adding noise to the table itself. */
+.itinerary-focus-day-head{
+  background:
+    radial-gradient(360px 145px at 100% 0%,rgba(53,191,209,.16),transparent 70%),
+    radial-gradient(300px 130px at 0% 100%,rgba(8,119,249,.07),transparent 70%),
+    linear-gradient(180deg,#ffffff 0%,#f2fbfc 100%);
+}
+
+.itinerary-focus-day-count{
+  color:#6b4b00;
+  background:linear-gradient(120deg,#fff5c8 0%,#ffe69a 100%);
+  border-color:rgba(185,120,0,.15);
+  box-shadow:0 5px 15px rgba(200,143,25,.08);
+}
+
+/* Navigation arrows become more discoverable but remain secondary to city tabs. */
+.itinerary-focus-nav{
+  color:#fff;
+  background:linear-gradient(145deg,#0877f9 0%,#0a9e9c 100%);
+  border-color:transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.26),
+    0 14px 30px rgba(7,105,148,.17);
+}
+
+.itinerary-focus-nav:hover:not(:disabled){
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    0 18px 36px rgba(7,105,148,.22);
+}
+
+.itinerary-focus-nav:disabled{
+  color:#7ca5b1;
+  background:#edf6f8;
+  border:1px solid rgba(35,75,112,.08);
+  box-shadow:none;
+  opacity:.5;
+}
+
+/* Small transition between days/cities, intentionally fast. */
+.itinerary-focus-day-card{
+  animation:itbmoDayCardIn .22s var(--ease) both;
+}
+
+@keyframes itbmoDayCardIn{
+  from{opacity:.82;transform:translateX(7px)}
+  to{opacity:1;transform:none}
+}
+
+@media(max-width:760px){
+  .itbmo-affiliate-after{
+    margin-top:2rem;
+  }
+
+  .itbmo-affiliate-after::before{
+    margin-bottom:1rem;
+  }
+
+  .itinerary-focus-back{
+    background:linear-gradient(135deg,#0877f9,#0aa7a5);
+  }
+
+  .itinerary-focus-heading h2{
+    font-size:1.14rem;
+  }
+
+  .itinerary-focus-nav{
+    background:rgba(255,255,255,.96);
+    color:#087b94;
+    border:1px solid rgba(8,119,249,.14);
+    box-shadow:0 10px 24px rgba(17,68,104,.12);
+  }
+
+  .itinerary-focus-nav:disabled{
+    opacity:.38;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .itinerary-focus-day-card{
+    animation:none;
+  }
+}
