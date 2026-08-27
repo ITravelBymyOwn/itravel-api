@@ -33,6 +33,12 @@ const TRIP_API_URL = '/api/trip';
 const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
+/* MVP generation limit + wall-clock optimization.
+   Each city's internal planning pipeline remains unchanged.
+   Independent cities may run concurrently, up to the MVP limit of 3. */
+const MAX_ITINERARY_CITIES = 3;
+const MAX_PARALLEL_CITY_GENERATIONS = 3;
+
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
@@ -1437,9 +1443,29 @@ function makeHoursBlock(days){
   return wrap;
 }
 
+function _cityLimitCopy_(){
+  return getLang()==='es'
+    ? `Puedes incluir hasta ${MAX_ITINERARY_CITIES} ciudades por generación.`
+    : `You can include up to ${MAX_ITINERARY_CITIES} cities per generation.`;
+}
+
+function _syncCityLimitUI_(){
+  if(!$addCity || !$cityList) return;
+  const count=qsa('.city-row',$cityList).length;
+  const atLimit=count>=MAX_ITINERARY_CITIES;
+  $addCity.disabled=atLimit;
+  $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
+  $addCity.title=atLimit ? _cityLimitCopy_() : '';
+}
+
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   if(!$cityList){
     console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
+    return;
+  }
+
+  if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
+    _syncCityLimitUI_();
     return;
   }
 
@@ -1485,8 +1511,12 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     }
   });
 
-  qs('.remove',row).addEventListener('click', ()=> row.remove());
+  qs('.remove',row).addEventListener('click', ()=>{
+    row.remove();
+    _syncCityLimitUI_();
+  });
   $cityList.appendChild(row);
+  _syncCityLimitUI_();
 }
 
 
@@ -1766,6 +1796,10 @@ async function saveDestinations(){
   });
 
   if(list.length === 0) return;
+  if(list.length > MAX_ITINERARY_CITIES){
+    alert(_cityLimitCopy_());
+    return;
+  }
 
   const previousSaveLabel = $save?.textContent || '';
   if($save){
@@ -2546,6 +2580,14 @@ async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
   const globalStyle = `
 You are "Astra", an international travel planner.
+
+CONVERSATIONAL INTELLIGENCE:
+- Understand natural, incomplete and colloquial answers; never require the user to follow a rigid wording.
+- Reuse information already provided and never ask again for a detail that is clear from the conversation.
+- If one message gives hotel/area, transport or corrections for several itinerary cities, extract and apply every city-specific answer.
+- Treat a correction as the new source of truth. If two details genuinely conflict, ask only the minimum targeted clarification.
+- Accept instructions such as “recommend it”, “you choose”, or their equivalent in the user's language as permission to select the most practical option.
+- Keep the planning conversation in the language naturally used by the user, independently from the final itinerary language selected later.
 
 CRITICAL RULE:
 - When asked for an itinerary, output ONLY valid JSON (no extra text, no markdown).
@@ -3761,6 +3803,7 @@ const _astraGenerationMetrics_ = {
   startedAt:0,
   finishedAt:0,
   calls:0,
+  model:null,
   inputTokens:0,
   outputTokens:0,
   totalTokens:0,
@@ -3781,6 +3824,7 @@ function _resetAstraGenerationMetrics_(){
   _astraGenerationMetrics_.startedAt=performance.now();
   _astraGenerationMetrics_.finishedAt=0;
   _astraGenerationMetrics_.calls=0;
+  _astraGenerationMetrics_.model=null;
   _astraGenerationMetrics_.inputTokens=0;
   _astraGenerationMetrics_.outputTokens=0;
   _astraGenerationMetrics_.totalTokens=0;
@@ -3814,17 +3858,32 @@ function _extractExactUsage_(data){
     (input+output)
   ) || (input+output);
 
+  const modelCalls=Math.max(1,Number(
+    usage.model_calls ??
+    usage.modelCalls ??
+    1
+  ) || 1);
+
+  const model=String(
+    usage.model ??
+    data?.model ??
+    ''
+  ).trim() || null;
+
   if(input<=0 && output<=0 && total<=0) return null;
-  return {input,output,total};
+  return {input,output,total,modelCalls,model};
 }
 
 function _captureExactUsage_(data){
   if(!_astraGenerationMetrics_.active) return;
-  _astraGenerationMetrics_.calls++;
-
   const usage=_extractExactUsage_(data);
-  if(!usage) return;
+  if(!usage){
+    _astraGenerationMetrics_.calls++;
+    return;
+  }
 
+  _astraGenerationMetrics_.calls+=usage.modelCalls;
+  if(usage.model) _astraGenerationMetrics_.model=usage.model;
   _astraGenerationMetrics_.inputTokens+=usage.input;
   _astraGenerationMetrics_.outputTokens+=usage.output;
   _astraGenerationMetrics_.totalTokens+=usage.total;
@@ -3841,6 +3900,7 @@ function _finishAstraGenerationMetrics_(){
   const snapshot={
     totalMs:Math.round(totalMs),
     total:_formatGenerationDuration_(totalMs),
+    model:_astraGenerationMetrics_.model,
     modelCalls:_astraGenerationMetrics_.calls,
     cities:_astraGenerationMetrics_.cities.map(x=>({...x})),
     tokenUsageAvailable,
@@ -3857,7 +3917,7 @@ function _finishAstraGenerationMetrics_(){
 
   if(tokenUsageAvailable){
     console.log(
-      `[ASTRA TOKENS] Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
+      `[ASTRA TOKENS] Model: ${snapshot.model || 'API model'} · Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
     );
   }else{
     console.info(
@@ -3872,7 +3932,7 @@ function _finishAstraGenerationMetrics_(){
   return snapshot;
 }
 
-async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, plannerStage=''){
   const history = useHistory ? session : [];
 
   // timeout to avoid hangs (same pattern as SECTION 12)
@@ -3897,7 +3957,12 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        mode: 'planner',
+        ...(plannerStage ? {planner_stage:plannerStage} : {})
+      })
     });
 
     if(!res.ok){
@@ -4255,7 +4320,7 @@ ${JSON.stringify(facts)}
 `.trim();
 
   console.log(`[MASTER PLAN] Requesting ${city} (${totalDays} days)...`);
-  const raw=await _callPlannerSystemPrompt_(prompt,false);
+  const raw=await _callPlannerSystemPrompt_(prompt,false,'master_plan');
   const parsed=parseJSON(raw);
   const out=_extractMasterPlanDays_(parsed,city,totalDays);
   console.log(`[MASTER PLAN] ${out.length===totalDays?'OK':'FAIL'}`,out);
@@ -4340,7 +4405,7 @@ ${JSON.stringify(windows)}
 
   const label=`${dayNums[0]}${dayNums.length>1?'-'+dayNums.at(-1):''}`;
   console.log(`[BLOCK ${label}] Requesting rows with global ledger...`);
-  const raw=await _callPlannerSystemPrompt_(prompt,false);
+  const raw=await _callPlannerSystemPrompt_(prompt,false,'itinerary');
   const parsed=parseJSON(raw);
   if(!parsed) return [];
 
@@ -4777,7 +4842,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - JSON only.
 `.trim();
 
-  const raw=await _callPlannerSystemPrompt_(prompt,false);
+  const raw=await _callPlannerSystemPrompt_(prompt,false,'itinerary');
   const parsed=parseJSON(raw);
   if(!parsed) return null;
 
@@ -4835,7 +4900,8 @@ async function _finalTripWideRepair_(
     )
   };
 }
-async function generateCityItinerary(city){
+async function generateCityItinerary(city, options={}){
+  const manageOverlay=options?.manageOverlay!==false;
   const _cityGenerationStartedAt_=performance.now();
   const _recordCityGenerationTime_=()=>{
     if(!_astraGenerationMetrics_.active) return;
@@ -4863,7 +4929,7 @@ async function generateCityItinerary(city){
   const transport=cityMeta[city]?.transport||'recommend me';
   const forceReplan=!!plannerState?.forceReplan?.[city];
 
-  showWOW(true,t('overlayDefault'));
+  if(manageOverlay) showWOW(true,t('overlayDefault'));
 
   try{
     const masterDays=await _buildCityMasterPlan_(city,dest.days,perDay,baseDate,hotel,transport);
@@ -4906,7 +4972,7 @@ async function generateCityItinerary(city){
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
-    showWOW(false);
+    if(manageOverlay) showWOW(false);
     console.log(`[CITY ${city}] SUCCESS v63`,{
       rows:finalRows.length,
       repaired:finalResult.repaired,
@@ -4949,7 +5015,7 @@ HARD RULES:
 - Use one selected language consistently, including duration labels.
 `.trim();
 
-    const raw=await _callPlannerSystemPrompt_(prompt,false);
+    const raw=await _callPlannerSystemPrompt_(prompt,false,'itinerary');
     const parsed=parseJSON(raw);
     let rows=_dedupeRows_(_extractPlannerRows_(parsed,city));
     if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error('ONE_SHOT_INVALID');
@@ -4969,13 +5035,13 @@ HARD RULES:
     renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
-    showWOW(false);
+    if(manageOverlay) showWOW(false);
     _recordCityGenerationTime_();
     return;
   }catch(err2){
     console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
-    showWOW(false);
+    if(manageOverlay) showWOW(false);
   }
 
   _recordCityGenerationTime_();
@@ -5060,7 +5126,7 @@ ${buildIntake()}
   showWOW(true, t('overlayDefault'));
 
   // ✅ SURGICAL (CRITICAL): prompt as SYSTEM, language anchor as USER
-  const ans = await _callPlannerSystemPrompt_(prompt, true);
+  const ans = await _callPlannerSystemPrompt_(prompt, true, 'itinerary');
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
@@ -5586,9 +5652,21 @@ async function onSend(){
     (async ()=>{
       _resetAstraGenerationMetrics_();
       showWOW(true, t('overlayGenerating'));
-      for(const {city} of savedDestinations){
-        await generateCityItinerary(city);
+
+      const generationCities=savedDestinations
+        .slice(0,MAX_ITINERARY_CITIES)
+        .map(({city})=>city);
+
+      /* Independent cities run concurrently.
+         IMPORTANT: generateCityItinerary's internal Master Plan -> blocks ->
+         trip-wide repair pipeline remains unchanged for each city. */
+      for(let i=0;i<generationCities.length;i+=MAX_PARALLEL_CITY_GENERATIONS){
+        const batch=generationCities.slice(i,i+MAX_PARALLEL_CITY_GENERATIONS);
+        await Promise.all(
+          batch.map(city=>generateCityItinerary(city,{manageOverlay:false}))
+        );
       }
+
       _finishAstraGenerationMetrics_();
       showWOW(false);
       setExportToolbarVisibility();
@@ -5892,7 +5970,13 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-$addCity?.addEventListener('click', ()=>addCityRow());
+$addCity?.addEventListener('click', ()=>{
+  if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
+    _syncCityLimitUI_();
+    return;
+  }
+  addCityRow();
+});
 
 function validateBaseDatesDMY(){
   // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
@@ -6464,10 +6548,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pago', trip:'Viaje',
       date:'Fecha', provider:'Proveedor', amount:'Importe',
       destinations:'Destino(s)', service:'Servicio',
-      serviceValue:'1 generación de itinerario ITBMO · hasta 5 ciudades',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 3 ciudades',
       transaction:'REFERENCIA DE TRANSACCIÓN',
       about:'Sobre este comprobante',
-      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 5 ciudades. Se entrega para control y referencia del usuario.',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 3 ciudades. Se entrega para control y referencia del usuario.',
       testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
       important:'IMPORTANTE',
       legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
@@ -6482,10 +6566,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Payment', trip:'Trip',
       date:'Date', provider:'Provider', amount:'Amount',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 ITBMO itinerary generation · up to 5 cities',
+      serviceValue:'1 ITBMO itinerary generation · up to 3 cities',
       transaction:'TRANSACTION REFERENCE',
       about:'About this receipt',
-      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 5 cities. It is provided for the user’s records and reference.',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 3 cities. It is provided for the user’s records and reference.',
       testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
       important:'IMPORTANT',
       legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
@@ -6500,10 +6584,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viagem',
       date:'Data', provider:'Provedor', amount:'Valor',
       destinations:'Destino(s)', service:'Serviço',
-      serviceValue:'1 geração de itinerário ITBMO · até 5 cidades',
+      serviceValue:'1 geração de itinerário ITBMO · até 3 cidades',
       transaction:'REFERÊNCIA DA TRANSAÇÃO',
       about:'Sobre este comprovante',
-      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 5 cidades. É fornecido para controle e referência do usuário.',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 3 cidades. É fornecido para controle e referência do usuário.',
       testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
       important:'IMPORTANTE',
       legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
@@ -6518,10 +6602,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Paiement', trip:'Voyage',
       date:'Date', provider:'Prestataire', amount:'Montant',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 5 villes',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 3 villes',
       transaction:'RÉFÉRENCE DE TRANSACTION',
       about:'À propos de ce reçu',
-      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 5 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 3 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
       testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
       important:'IMPORTANT',
       legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
@@ -6554,10 +6638,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viaggio',
       date:'Data', provider:'Provider', amount:'Importo',
       destinations:'Destinazione/i', service:'Servizio',
-      serviceValue:'1 generazione itinerario ITBMO · fino a 5 città',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 3 città',
       transaction:'RIFERIMENTO TRANSAZIONE',
       about:'Informazioni sulla ricevuta',
-      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 5 città. È fornita per controllo e riferimento dell’utente.',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 3 città. È fornita per controllo e riferimento dell’utente.',
       testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
       important:'IMPORTANTE',
       legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
