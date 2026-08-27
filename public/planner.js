@@ -33,12 +33,6 @@ const TRIP_API_URL = '/api/trip';
 const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
-/* MVP generation limit + wall-clock optimization.
-   Each city's internal planning pipeline remains unchanged.
-   Independent cities may run concurrently, up to the MVP limit of 3. */
-const MAX_ITINERARY_CITIES = 3;
-const MAX_PARALLEL_CITY_GENERATIONS = 3;
-
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
@@ -162,7 +156,7 @@ const I18N = {
 
     // Overlay
     overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. El tiempo depende del número de ciudades, días y la complejidad del viaje y puede tomar varios minutos. No cierres esta pestaña: este es el trabajo que te ahorra horas de investigación y planificación.',
-    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo, ciudad por ciudad y día por día. ⏳ En viajes complejos, la generación puede tomar 5 minutos o más. NO CIERRES ESTA PESTAÑA: ASTRA está haciendo por ti horas de investigación, selección y planificación.',
+    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo. El tiempo depende del número de ciudades, días y la complejidad del itinerario. Puede tomar varios minutos. No cierres esta pestaña: ASTRA está haciendo por ti horas de investigación y planificación.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -240,7 +234,7 @@ const I18N = {
 
     // Overlay
     overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. Generation time depends on the number of cities, days and trip complexity and may take several minutes. Don’t close this tab: this is the work designed to save you hours of research and planning.',
-    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip, city by city and day by day. ⏳ For complex trips, generation may take 5 minutes or more. DO NOT CLOSE THIS TAB: ASTRA is doing hours of research, selection and planning for you.',
+    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip. Generation time depends on the number of cities, days and itinerary complexity. It may take several minutes. Don’t close this tab: ASTRA is doing hours of research and planning for you.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -1443,29 +1437,9 @@ function makeHoursBlock(days){
   return wrap;
 }
 
-function _cityLimitCopy_(){
-  return getLang()==='es'
-    ? `Puedes incluir hasta ${MAX_ITINERARY_CITIES} ciudades por generación.`
-    : `You can include up to ${MAX_ITINERARY_CITIES} cities per generation.`;
-}
-
-function _syncCityLimitUI_(){
-  if(!$addCity || !$cityList) return;
-  const count=qsa('.city-row',$cityList).length;
-  const atLimit=count>=MAX_ITINERARY_CITIES;
-  $addCity.disabled=atLimit;
-  $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
-  $addCity.title=atLimit ? _cityLimitCopy_() : '';
-}
-
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   if(!$cityList){
     console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
-    return;
-  }
-
-  if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
-    _syncCityLimitUI_();
     return;
   }
 
@@ -1511,12 +1485,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     }
   });
 
-  qs('.remove',row).addEventListener('click', ()=>{
-    row.remove();
-    _syncCityLimitUI_();
-  });
+  qs('.remove',row).addEventListener('click', ()=> row.remove());
   $cityList.appendChild(row);
-  _syncCityLimitUI_();
 }
 
 
@@ -1796,10 +1766,6 @@ async function saveDestinations(){
   });
 
   if(list.length === 0) return;
-  if(list.length > MAX_ITINERARY_CITIES){
-    alert(_cityLimitCopy_());
-    return;
-  }
 
   const previousSaveLabel = $save?.textContent || '';
   if($save){
@@ -2334,28 +2300,25 @@ function _immersiveMoveDay_(delta){
 
 function openImmersiveItinerary(city){
   const modal=qs('#itinerary-focus-modal');
-  const availableCities=_immersiveAvailableCities_();
-  if(!modal || !availableCities.length) return;
+  if(!modal || !_immersiveAvailableCities_().length) return;
 
-  immersiveItineraryCity=city && availableCities.includes(city)
+  immersiveItineraryCity=city && _immersiveAvailableCities_().includes(city)
     ? city
-    : (activeCity && availableCities.includes(activeCity) ? activeCity : availableCities[0]);
+    : (activeCity && _immersiveAvailableCities_().includes(activeCity) ? activeCity : _immersiveAvailableCities_()[0]);
 
   const days=_immersiveDaysForCity_(immersiveItineraryCity);
   const preferred=Number(itineraries?.[immersiveItineraryCity]?.currentDay);
   immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
-
-  /* Open the local itinerary viewer FIRST. The parent Home focus transition is
-     secondary and must never be able to cancel the CTA interaction. */
-  modal.classList.add('is-open');
-  modal.setAttribute('aria-hidden','false');
-  document.body.classList.add('itinerary-focus-open');
 
   try{
     if(window.parent && window.parent!==window){
       window.parent.postMessage({type:'ITBMO_REQUEST_PLANNER_FOCUS',reason:'itinerary-viewer'},'*');
     }
   }catch(_){}
+
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('itinerary-focus-open');
 
   // Let the focus surface paint first, then build the day table.
   // This prevents the CTA click from carrying the full table-render cost.
@@ -2382,11 +2345,7 @@ function bindImmersiveItineraryViewer(){
   const modal=qs('#itinerary-focus-modal');
   if(!launch || !modal) return;
 
-  launch.addEventListener('click',(event)=>{
-    event.preventDefault();
-    event.stopPropagation();
-    openImmersiveItinerary();
-  });
+  launch.addEventListener('click',()=>openImmersiveItinerary());
   qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);
   qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);
   qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);
@@ -2557,11 +2516,6 @@ Meals:
 Aurora:
 - Include aurora only when plausible by latitude and season.
 - Treat it as a conditional opportunity in notes unless the user explicitly requested a fixed outing.
-- When the user explicitly requests an aurora / northern-lights tour, treat it as a protected reservation anchor, not a short sightseeing row.
-- A guided aurora outing should normally occupy at least 4 hours door-to-door and often longer; never compress it to create room for filler.
-- Unless the user explicitly chooses the final night, schedule a requested aurora tour on an earlier suitable night so there is another night available if weather causes cancellation or poor conditions.
-- Prefer the first or second logistically sensible night after arrival; avoid the final night when another suitable night exists.
-- On an aurora-tour day, keep the preceding schedule realistic and lighter when needed so the traveler has time for an early meal, warm clothing, preparation and a late return.
 - Avoid identical notes on consecutive nights.
 - State that visibility is not guaranteed and that cloud cover, geomagnetic activity and road conditions must be checked.
 
@@ -2592,14 +2546,6 @@ async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
   const globalStyle = `
 You are "Astra", an international travel planner.
-
-CONVERSATIONAL INTELLIGENCE:
-- Understand natural, incomplete and colloquial answers; never require the user to follow a rigid wording.
-- Reuse information already provided and never ask again for a detail that is clear from the conversation.
-- If one message gives hotel/area, transport or corrections for several itinerary cities, extract and apply every city-specific answer.
-- Treat a correction as the new source of truth. If two details genuinely conflict, ask only the minimum targeted clarification.
-- Accept instructions such as “recommend it”, “you choose”, or their equivalent in the user's language as permission to select the most practical option.
-- Keep the planning conversation in the language naturally used by the user, independently from the final itinerary language selected later.
 
 CRITICAL RULE:
 - When asked for an itinerary, output ONLY valid JSON (no extra text, no markdown).
@@ -2632,7 +2578,6 @@ Quality & coherence:
 - Validate each row mathematically so its time interval approximately equals transport plus activity. Correct any significant mismatch before output.
 - A row's activity must happen at its concrete To place. Do not write an activity at the From place while using To for the next destination.
 - Protect ticketed/reservation anchor experiences as complete blocks, including realistic operational time. Never shorten a spa, cruise, major attraction or substantial tour to make room for extra stops, and never leave its real visit time as an unexplained gap.
-- Treat substantial organized experiences (cruises, guided excursions, wildlife tours, aurora tours, spas and comparable booked activities) as ATOMIC blocks: never insert an unrelated itinerary row inside their start/end window. If the experience itself contains sub-stops, keep them inside that anchor row/notes unless the itinerary explicitly models the whole experience as a coherent sequence instead of a single blocking row.
 - Enforce intelligent category-based dwell times and reject 5–10 minute visits unless explicitly justified as photographic micro-stops.
 - Detect duplicate experiences semantically across aliases, districts and closely overlapping descriptions.
 - If the user doesn't specify a specific day, review and adjust the entire city's itinerary, avoiding duplicates and absurd plans.
@@ -3816,7 +3761,6 @@ const _astraGenerationMetrics_ = {
   startedAt:0,
   finishedAt:0,
   calls:0,
-  model:null,
   inputTokens:0,
   outputTokens:0,
   totalTokens:0,
@@ -3837,7 +3781,6 @@ function _resetAstraGenerationMetrics_(){
   _astraGenerationMetrics_.startedAt=performance.now();
   _astraGenerationMetrics_.finishedAt=0;
   _astraGenerationMetrics_.calls=0;
-  _astraGenerationMetrics_.model=null;
   _astraGenerationMetrics_.inputTokens=0;
   _astraGenerationMetrics_.outputTokens=0;
   _astraGenerationMetrics_.totalTokens=0;
@@ -3871,32 +3814,17 @@ function _extractExactUsage_(data){
     (input+output)
   ) || (input+output);
 
-  const modelCalls=Math.max(1,Number(
-    usage.model_calls ??
-    usage.modelCalls ??
-    1
-  ) || 1);
-
-  const model=String(
-    usage.model ??
-    data?.model ??
-    ''
-  ).trim() || null;
-
   if(input<=0 && output<=0 && total<=0) return null;
-  return {input,output,total,modelCalls,model};
+  return {input,output,total};
 }
 
 function _captureExactUsage_(data){
   if(!_astraGenerationMetrics_.active) return;
-  const usage=_extractExactUsage_(data);
-  if(!usage){
-    _astraGenerationMetrics_.calls++;
-    return;
-  }
+  _astraGenerationMetrics_.calls++;
 
-  _astraGenerationMetrics_.calls+=usage.modelCalls;
-  if(usage.model) _astraGenerationMetrics_.model=usage.model;
+  const usage=_extractExactUsage_(data);
+  if(!usage) return;
+
   _astraGenerationMetrics_.inputTokens+=usage.input;
   _astraGenerationMetrics_.outputTokens+=usage.output;
   _astraGenerationMetrics_.totalTokens+=usage.total;
@@ -3913,7 +3841,6 @@ function _finishAstraGenerationMetrics_(){
   const snapshot={
     totalMs:Math.round(totalMs),
     total:_formatGenerationDuration_(totalMs),
-    model:_astraGenerationMetrics_.model,
     modelCalls:_astraGenerationMetrics_.calls,
     cities:_astraGenerationMetrics_.cities.map(x=>({...x})),
     tokenUsageAvailable,
@@ -3930,7 +3857,7 @@ function _finishAstraGenerationMetrics_(){
 
   if(tokenUsageAvailable){
     console.log(
-      `[ASTRA TOKENS] Model: ${snapshot.model || 'API model'} · Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
+      `[ASTRA TOKENS] Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
     );
   }else{
     console.info(
@@ -3945,7 +3872,7 @@ function _finishAstraGenerationMetrics_(){
   return snapshot;
 }
 
-async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, plannerStage=''){
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
   // timeout to avoid hangs (same pattern as SECTION 12)
@@ -3970,12 +3897,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, plannerS
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      body: JSON.stringify({
-        model: MODEL,
-        messages,
-        mode: 'planner',
-        ...(plannerStage ? {planner_stage:plannerStage} : {})
-      })
+      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
     });
 
     if(!res.ok){
@@ -4321,8 +4243,6 @@ TRIP-WIDE RULES:
 - Prefer strong unused regional/signature buckets over generic city filler when the comparison clearly favors them, but never displace unmet core city highlights.
 - Use the normalized lodging base as the primary geographic anchor and reserve corridors that minimize unnecessary transfers.
 - Convert all preferences and restrictions into actual day identities, timing and routing decisions.
-- If the user explicitly requested an aurora / northern-lights tour and the destination/date is plausible, reserve it as a protected anchor on an EARLIER suitable night, preferably the first or second logistically sensible night after arrival. Do not reserve it for the final night unless the user explicitly asked for the final night or no earlier suitable night exists.
-- Keep the daytime schedule on an aurora-tour day compatible with a long evening outing and late return.
 - Apply the first/intermediate/final-day time policy contained in KNOWN USER FACTS.
 - If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
 - Respect the actual daily windows, season, useful daylight, travelers, base and transport.
@@ -4335,7 +4255,7 @@ ${JSON.stringify(facts)}
 `.trim();
 
   console.log(`[MASTER PLAN] Requesting ${city} (${totalDays} days)...`);
-  const raw=await _callPlannerSystemPrompt_(prompt,false,'master_plan');
+  const raw=await _callPlannerSystemPrompt_(prompt,false);
   const parsed=parseJSON(raw);
   const out=_extractMasterPlanDays_(parsed,city,totalDays);
   console.log(`[MASTER PLAN] ${out.length===totalDays?'OK':'FAIL'}`,out);
@@ -4397,9 +4317,6 @@ HARD RULES:
 - One To and one primary transport choice per row; alternatives belong in notes.
 - Every row interval must realistically contain transport plus activity. No overlaps and no unexplained
   gap over about 20 minutes.
-- Treat every substantial organized/ticketed experience as one protected time block. Do not place any unrelated row inside a cruise, guided excursion, wildlife tour, aurora tour, thermal/spa visit or comparable booked experience.
-- If the user explicitly requested an aurora tour, give it a realistic door-to-door block of normally at least 4 hours and do not compress it to fit extra sightseeing.
-- Unless the user explicitly requested the final night, do not place a requested aurora tour on the final night when an earlier suitable night exists; preserve an additional night as weather/cancellation contingency.
 - Scenic outdoor visits must fit plausible useful daylight for the date/latitude. Driving, indoor
   activities, meals and thermal experiences may use darker hours.
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
@@ -4423,7 +4340,7 @@ ${JSON.stringify(windows)}
 
   const label=`${dayNums[0]}${dayNums.length>1?'-'+dayNums.at(-1):''}`;
   console.log(`[BLOCK ${label}] Requesting rows with global ledger...`);
-  const raw=await _callPlannerSystemPrompt_(prompt,false,'itinerary');
+  const raw=await _callPlannerSystemPrompt_(prompt,false);
   const parsed=parseJSON(raw);
   if(!parsed) return [];
 
@@ -4533,33 +4450,6 @@ function _isAuroraActivityRow_(row={}){
   );
 }
 
-function _isAuroraTourRow_(row={}){
-  const text=`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`.replace(/\s+/g,' ');
-  const hasAurora=/\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(text);
-  const hasTour=/\b(tour|guided|gu[ií]ado|chase|hunt|cacer[ií]a|minivan|excursion|excursi[oó]n)\b/i.test(text);
-  return hasAurora && hasTour;
-}
-
-function _explicitlyRequestedAuroraOnFinalNight_(){
-  const text=String(plannerState?.specialConditions||'').replace(/\s+/g,' ');
-  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(text) &&
-    /\b(final night|last night|última noche|ultima noche|noche final|dernier soir|letzte nacht|ultima notte|última noite)\b/i.test(text);
-}
-
-function _isAtomicOrganizedExperienceRow_(row={}){
-  const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
-  return _isAuroraTourRow_(row) ||
-    /\b(cruise|crucero|guided tour|tour guiado|guided excursion|excursi[oó]n guiada|whale watching|avistamiento de ballenas|wildlife tour|wildlife cruise|marine safari|safari marino|spa complex|thermal lagoon|laguna termal|hot spring complex|complejo termal|theme park|parque tem[aá]tico)\b/i.test(text);
-}
-
-function _rowSpanMinutes_(row={}){
-  const start=_hhmmToMinutes_(row?.start), end=_hhmmToMinutes_(row?.end);
-  if(start==null || end==null) return null;
-  let span=end-start;
-  if(span<=0) span+=1440;
-  return span;
-}
-
 function _explicitlyRequestedFixedAurora_(){
   return /\b(fixed aurora|aurora tour|northern lights tour|tour de auroras|cacer[ií]a de auroras|reservar aurora|book aurora|actividad fija de aurora)\b/i.test(String(plannerState?.specialConditions||'').replace(/\s+/g,' '));
 }
@@ -4577,9 +4467,6 @@ function _genericPlaceReason_(value=''){
 function _activityProfile_(row={}){
   const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
 
-  if(_isAuroraTourRow_(row)){
-    return {type:'AURORA_TOUR',min:210};
-  }
   if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
     return {type:'MAJOR_THERMAL',min:180};
   }
@@ -4628,8 +4515,7 @@ function _auditSeverity_(error={}){
   const critical=new Set([
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
-    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'AURORA_TOUR_TOO_SHORT','AURORA_ON_FINAL_NIGHT','ATOMIC_EXPERIENCE_OVERLAP'
+    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -4760,26 +4646,6 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         });
       }
 
-      if(_isAuroraTourRow_(r)){
-        const auroraSpan=_rowSpanMinutes_(r);
-        if(auroraSpan!=null && auroraSpan<240){
-          errors.push({
-            code:'AURORA_TOUR_TOO_SHORT',
-            day,row,
-            actual_span_minutes:auroraSpan,
-            required_minimum_span_minutes:240,
-            instruction:'Expand the guided aurora outing to a realistic door-to-door block of at least 4 hours; do not compress it to fit filler.'
-          });
-        }
-        if(day===totalDays && totalDays>1 && !_explicitlyRequestedAuroraOnFinalNight_()){
-          errors.push({
-            code:'AURORA_ON_FINAL_NIGHT',
-            day,row,
-            instruction:'Move the requested aurora tour to an earlier suitable night so another night remains available for weather/cancellation contingency. Use the final night only if the user explicitly chose it or no earlier night is feasible.'
-          });
-        }
-      }
-
       if(profile && i<dayRows.length-1){
         const nextStart=_hhmmToMinutes_(dayRows[i+1]?.start);
         if(end!=null && nextStart!=null){
@@ -4801,40 +4667,6 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
           day,row,
           instruction:'Move aurora guidance into suitable evening notes unless the user explicitly requested a fixed outing.'
         });
-      }
-    }
-
-    // Atomic experiences cannot contain unrelated itinerary rows inside their reserved window.
-    for(let a=0;a<dayRows.length;a++){
-      const anchorRow=dayRows[a];
-      if(!_isAtomicOrganizedExperienceRow_(anchorRow)) continue;
-      const aStart=_hhmmToMinutes_(anchorRow.start), aEndRaw=_hhmmToMinutes_(anchorRow.end);
-      if(aStart==null || aEndRaw==null) continue;
-      const aEnd=aEndRaw<=aStart ? aEndRaw+1440 : aEndRaw;
-
-      for(let b=0;b<dayRows.length;b++){
-        if(a===b) continue;
-        const other=dayRows[b];
-        const bStartRaw=_hhmmToMinutes_(other.start), bEndRaw=_hhmmToMinutes_(other.end);
-        if(bStartRaw==null || bEndRaw==null) continue;
-        let bStart=bStartRaw, bEnd=bEndRaw<=bStartRaw ? bEndRaw+1440 : bEndRaw;
-        if(bStart<aStart && bEnd<=aStart) continue;
-        if(bStart>=aEnd) continue;
-
-        const overlaps=bStart<aEnd && bEnd>aStart;
-        if(overlaps){
-          errors.push({
-            code:'ATOMIC_EXPERIENCE_OVERLAP',
-            day,
-            anchor_activity:anchorRow.activity,
-            anchor_start:anchorRow.start,
-            anchor_end:anchorRow.end,
-            conflicting_activity:other.activity,
-            conflicting_start:other.start,
-            conflicting_end:other.end,
-            instruction:'Keep the organized experience as one protected block. Remove or move the unrelated conflicting row outside its reserved window.'
-          });
-        }
       }
     }
 
@@ -4870,46 +4702,6 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
     errors
   };
 }
-
-function _removeRowsNestedInsideAtomicAnchors_(rows=[]){
-  const byDay=_rowsByDayObject_(rows);
-  const kept=[];
-
-  Object.entries(byDay).forEach(([dayKey,dayRows])=>{
-    const drop=new Set();
-
-    dayRows.forEach((anchorRow,anchorIndex)=>{
-      if(!_isAtomicOrganizedExperienceRow_(anchorRow)) return;
-      const aStart=_hhmmToMinutes_(anchorRow.start), aEndRaw=_hhmmToMinutes_(anchorRow.end);
-      if(aStart==null || aEndRaw==null) return;
-      const aEnd=aEndRaw<=aStart ? aEndRaw+1440 : aEndRaw;
-
-      dayRows.forEach((other,otherIndex)=>{
-        if(anchorIndex===otherIndex || drop.has(otherIndex)) return;
-        const bStartRaw=_hhmmToMinutes_(other.start), bEndRaw=_hhmmToMinutes_(other.end);
-        if(bStartRaw==null || bEndRaw==null) return;
-        const bStart=bStartRaw;
-        const bEnd=bEndRaw<=bStartRaw ? bEndRaw+1440 : bEndRaw;
-
-        const fullyNested=bStart>=aStart && bEnd<=aEnd;
-        if(!fullyNested) return;
-
-        // If both rows look atomic, preserve both for the model repair to resolve rather than
-        // deleting one deterministically. For a long atomic anchor containing a short unrelated
-        // sightseeing row, preserve the anchor and drop only the conflicting nested row.
-        if(_isAtomicOrganizedExperienceRow_(other)) return;
-        drop.add(otherIndex);
-      });
-    });
-
-    dayRows.forEach((row,index)=>{
-      if(!drop.has(index)) kept.push(row);
-    });
-  });
-
-  return _dedupeRows_(kept);
-}
-
 async function _runTripWideRepairCall_(
   city,rows,totalDays,masterDays,facts,report,forceReplan=false,precisionPass=false
 ){
@@ -4954,10 +4746,6 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The To field is the concrete place visited in that row. The next row's From must continue from it.
 - The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
-- Treat every substantial organized/ticketed experience as an ATOMIC block. No unrelated row may start before that block ends. This applies to cruises, guided excursions, wildlife tours, aurora tours, spas and comparable booked experiences.
-- If an aurora/northern-lights tour was explicitly requested, schedule a realistic long outing: normally at least 4 hours door-to-door, often longer. Never reduce it to a 60–90 minute row.
-- Unless the user explicitly requested the final night, place a requested aurora tour on an earlier suitable night (preferably the first or second logistically sensible night after arrival) so another night remains available if weather/cancellation prevents the outing.
-- On an aurora-tour day, keep earlier activities realistic and leave time for an early meal, warm clothing/preparation and a late return.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
@@ -4989,7 +4777,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - JSON only.
 `.trim();
 
-  const raw=await _callPlannerSystemPrompt_(prompt,false,'itinerary');
+  const raw=await _callPlannerSystemPrompt_(prompt,false);
   const parsed=parseJSON(raw);
   if(!parsed) return null;
 
@@ -5039,16 +4827,6 @@ async function _finalTripWideRepair_(
     }
   }
 
-  // Final deterministic safety pass: if a long organized experience still contains
-  // unrelated nested rows after model repair, preserve the anchor and remove only the nested conflict.
-  const safeguardedRows=_removeRowsNestedInsideAtomicAnchors_(currentRows);
-  if(safeguardedRows.length!==currentRows.length){
-    currentRows=safeguardedRows;
-    currentReport=_localGlobalAudit_(
-      city,currentRows,totalDays,masterDays,perDay,baseDate
-    );
-  }
-
   return {
     rows:currentRows,
     report:currentReport,
@@ -5057,8 +4835,7 @@ async function _finalTripWideRepair_(
     )
   };
 }
-async function generateCityItinerary(city, options={}){
-  const manageOverlay=options?.manageOverlay!==false;
+async function generateCityItinerary(city){
   const _cityGenerationStartedAt_=performance.now();
   const _recordCityGenerationTime_=()=>{
     if(!_astraGenerationMetrics_.active) return;
@@ -5086,7 +4863,7 @@ async function generateCityItinerary(city, options={}){
   const transport=cityMeta[city]?.transport||'recommend me';
   const forceReplan=!!plannerState?.forceReplan?.[city];
 
-  if(manageOverlay) showWOW(true,t('overlayDefault'));
+  showWOW(true,t('overlayDefault'));
 
   try{
     const masterDays=await _buildCityMasterPlan_(city,dest.days,perDay,baseDate,hotel,transport);
@@ -5123,16 +4900,13 @@ async function generateCityItinerary(city, options={}){
     // Replace every generated day atomically; do not merge stale rows.
     pushRows(city,finalRows,true);
 
-    if(manageOverlay){
-      renderCityTabs();
-      setActiveCity(city);
-      renderCityItinerary(city);
-      syncImmersiveItineraryLauncher();
-    }
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
-    if(manageOverlay) showWOW(false);
+    showWOW(false);
     console.log(`[CITY ${city}] SUCCESS v63`,{
       rows:finalRows.length,
       repaired:finalResult.repaired,
@@ -5170,14 +4944,12 @@ HARD RULES:
   regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops and explicit return to the lodging/base.
-- Aurora, when plausible, belongs mainly as conditional guidance in notes unless the user explicitly requested a fixed aurora outing.
-- If the user explicitly requested an aurora tour, treat it as a protected anchor of normally at least 4 hours door-to-door and schedule it on an earlier suitable night rather than the final night unless the final night was explicitly requested or no earlier night is feasible.
-- Treat cruises, guided excursions, wildlife tours, aurora tours, spas and comparable booked experiences as atomic blocks: never place unrelated rows inside their start/end interval.
+- Aurora, when plausible, belongs mainly as conditional guidance in notes.
 - One concrete To and one transport choice per row.
 - Use one selected language consistently, including duration labels.
 `.trim();
 
-    const raw=await _callPlannerSystemPrompt_(prompt,false,'itinerary');
+    const raw=await _callPlannerSystemPrompt_(prompt,false);
     const parsed=parseJSON(raw);
     let rows=_dedupeRows_(_extractPlannerRows_(parsed,city));
     if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error('ONE_SHOT_INVALID');
@@ -5192,21 +4964,18 @@ HARD RULES:
     pushRows(city,rows,true);
     itineraries[city].audit=finalResult.report;
 
-    if(manageOverlay){
-      renderCityTabs();
-      setActiveCity(city);
-      renderCityItinerary(city);
-      syncImmersiveItineraryLauncher();
-    }
+    renderCityTabs();
+    setActiveCity(city);
+    renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
-    if(manageOverlay) showWOW(false);
+    showWOW(false);
     _recordCityGenerationTime_();
     return;
   }catch(err2){
     console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
-    if(manageOverlay) showWOW(false);
+    showWOW(false);
   }
 
   _recordCityGenerationTime_();
@@ -5291,7 +5060,7 @@ ${buildIntake()}
   showWOW(true, t('overlayDefault'));
 
   // ✅ SURGICAL (CRITICAL): prompt as SYSTEM, language anchor as USER
-  const ans = await _callPlannerSystemPrompt_(prompt, true, 'itinerary');
+  const ans = await _callPlannerSystemPrompt_(prompt, true);
   const parsed = parseJSON(ans);
   if(parsed && (parsed.rows || parsed.destinations || parsed.itineraries || parsed.city_day)){
     let rows = _extractPlannerRows_(parsed, city);
@@ -5817,34 +5586,9 @@ async function onSend(){
     (async ()=>{
       _resetAstraGenerationMetrics_();
       showWOW(true, t('overlayGenerating'));
-
-      const generationCities=savedDestinations
-        .slice(0,MAX_ITINERARY_CITIES)
-        .map(({city})=>city);
-
-      /* Independent cities run concurrently.
-         IMPORTANT: generateCityItinerary's internal Master Plan -> blocks ->
-         trip-wide repair pipeline remains unchanged for each city. */
-      for(let i=0;i<generationCities.length;i+=MAX_PARALLEL_CITY_GENERATIONS){
-        const batch=generationCities.slice(i,i+MAX_PARALLEL_CITY_GENERATIONS);
-        await Promise.all(
-          batch.map(city=>generateCityItinerary(city,{manageOverlay:false}))
-        );
+      for(const {city} of savedDestinations){
+        await generateCityItinerary(city);
       }
-
-      // All city pipelines are now complete. Synchronize shared UI state ONCE,
-      // after parallel generation, so Focus Mode never inherits a race between cities.
-      const readyCities=_immersiveAvailableCities_();
-      if(readyCities.length){
-        const preferredCity=generationCities.find(city=>readyCities.includes(city)) || readyCities[0];
-        immersiveItineraryCity=null;
-        immersiveItineraryDay=null;
-        renderCityTabs();
-        setActiveCity(preferredCity);
-        renderCityItinerary(preferredCity);
-      }
-      syncImmersiveItineraryLauncher();
-
       _finishAstraGenerationMetrics_();
       showWOW(false);
       setExportToolbarVisibility();
@@ -6148,13 +5892,7 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-$addCity?.addEventListener('click', ()=>{
-  if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
-    _syncCityLimitUI_();
-    return;
-  }
-  addCityRow();
-});
+$addCity?.addEventListener('click', ()=>addCityRow());
 
 function validateBaseDatesDMY(){
   // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
@@ -6726,10 +6464,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pago', trip:'Viaje',
       date:'Fecha', provider:'Proveedor', amount:'Importe',
       destinations:'Destino(s)', service:'Servicio',
-      serviceValue:'1 generación de itinerario ITBMO · hasta 3 ciudades',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 5 ciudades',
       transaction:'REFERENCIA DE TRANSACCIÓN',
       about:'Sobre este comprobante',
-      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 3 ciudades. Se entrega para control y referencia del usuario.',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 5 ciudades. Se entrega para control y referencia del usuario.',
       testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
       important:'IMPORTANTE',
       legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
@@ -6744,10 +6482,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Payment', trip:'Trip',
       date:'Date', provider:'Provider', amount:'Amount',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 ITBMO itinerary generation · up to 3 cities',
+      serviceValue:'1 ITBMO itinerary generation · up to 5 cities',
       transaction:'TRANSACTION REFERENCE',
       about:'About this receipt',
-      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 3 cities. It is provided for the user’s records and reference.',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 5 cities. It is provided for the user’s records and reference.',
       testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
       important:'IMPORTANT',
       legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
@@ -6762,10 +6500,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viagem',
       date:'Data', provider:'Provedor', amount:'Valor',
       destinations:'Destino(s)', service:'Serviço',
-      serviceValue:'1 geração de itinerário ITBMO · até 3 cidades',
+      serviceValue:'1 geração de itinerário ITBMO · até 5 cidades',
       transaction:'REFERÊNCIA DA TRANSAÇÃO',
       about:'Sobre este comprovante',
-      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 3 cidades. É fornecido para controle e referência do usuário.',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 5 cidades. É fornecido para controle e referência do usuário.',
       testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
       important:'IMPORTANTE',
       legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
@@ -6780,10 +6518,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Paiement', trip:'Voyage',
       date:'Date', provider:'Prestataire', amount:'Montant',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 3 villes',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 5 villes',
       transaction:'RÉFÉRENCE DE TRANSACTION',
       about:'À propos de ce reçu',
-      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 3 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 5 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
       testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
       important:'IMPORTANT',
       legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
@@ -6816,10 +6554,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viaggio',
       date:'Data', provider:'Provider', amount:'Importo',
       destinations:'Destinazione/i', service:'Servizio',
-      serviceValue:'1 generazione itinerario ITBMO · fino a 3 città',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 5 città',
       transaction:'RIFERIMENTO TRANSAZIONE',
       about:'Informazioni sulla ricevuta',
-      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 3 città. È fornita per controllo e riferimento dell’utente.',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 5 città. È fornita per controllo e riferimento dell’utente.',
       testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
       important:'IMPORTANTE',
       legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
