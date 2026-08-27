@@ -980,20 +980,35 @@
       } catch (_) {}
     };
 
-    /* Capture happens before the eventual click/input action, so the first
-       interaction is preserved while the parent starts the visual transition. */
-    document.addEventListener('pointerdown', () => requestPlannerFocus('pointer'), {
+    /* The immersive itinerary viewer owns its own opening sequence.
+       IMPORTANT: do not lift/reposition the iframe on pointerdown before the
+       CTA's click can fire, otherwise the moving iframe can cancel that click. */
+    const shouldSkipFocusBridge = (target) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(target.closest('#open-itinerary-focus, #itinerary-focus-modal'));
+    };
+
+    /* Capture happens before the eventual click/input action for normal Planner
+       interactions. The itinerary CTA/modal are intentionally excluded. */
+    document.addEventListener('pointerdown', (event) => {
+      if (shouldSkipFocusBridge(event.target)) return;
+      requestPlannerFocus('pointer');
+    }, {
       capture:true,
       passive:true
     });
 
-    /* Keyboard users entering a Planner field receive the same Focus Mode. */
-    document.addEventListener('focusin', () => requestPlannerFocus('keyboard'), true);
+    /* Keyboard users entering a normal Planner field receive the same Focus Mode.
+       Focus changes inside the immersive itinerary viewer stay local to the viewer. */
+    document.addEventListener('focusin', (event) => {
+      if (shouldSkipFocusBridge(event.target)) return;
+      requestPlannerFocus('keyboard');
+    }, true);
   })();
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=78"></script>
+<script src="./planner.js?v=80.1"></script>
  
 </body>
 </html>
