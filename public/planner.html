@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=76h" />
+  <link rel="stylesheet" href="./planner.css?v=77" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -336,8 +336,27 @@
           </div>
         </div>
 
-        <div class="city-tabs" id="city-tabs"></div>
-        <div id="itinerary-container"></div>
+        <!-- =========================================================
+             ITBMO · IMMERSIVE ITINERARY VIEWER
+             The generated itinerary data remains in the existing JS state.
+             The legacy renderer stays mounted below (hidden visually) so its
+             existing contracts remain available without changing generation.
+        ========================================================== -->
+        <section id="itinerary-focus-launch" class="itinerary-focus-launch" aria-hidden="true">
+          <button id="open-itinerary-focus" class="itinerary-focus-cta" type="button">
+            <span class="itinerary-focus-cta__icon" aria-hidden="true">✦</span>
+            <span class="itinerary-focus-cta__copy">
+              <strong id="itinerary-focus-cta-title">Explore your day-by-day itinerary</strong>
+              <small id="itinerary-focus-cta-subtitle">Open every city and move through each day in an immersive view.</small>
+              <span id="itinerary-focus-cta-meta" class="itinerary-focus-cta__meta"></span>
+            </span>
+            <span class="itinerary-focus-cta__arrow" aria-hidden="true">→</span>
+          </button>
+        </section>
+
+        <!-- Technical legacy renderer: intentionally preserved, hidden only by CSS. -->
+        <div class="city-tabs itinerary-legacy-flat" id="city-tabs" aria-hidden="true"></div>
+        <div id="itinerary-container" class="itinerary-legacy-flat" aria-hidden="true"></div>
 
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
@@ -378,6 +397,58 @@
         <!-- <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button> -->
       </section>
     </main>
+  </div>
+
+  <!-- =========================================================
+       ITBMO · DAY-BY-DAY ITINERARY FOCUS MODE
+       Full-screen viewer only. Does not duplicate or mutate itinerary data.
+  ========================================================== -->
+  <div id="itinerary-focus-modal" class="itinerary-focus-modal" aria-hidden="true">
+    <div class="itinerary-focus-backdrop" data-itinerary-focus-close></div>
+
+    <section class="itinerary-focus-shell" role="dialog" aria-modal="true" aria-labelledby="itinerary-focus-title">
+      <header class="itinerary-focus-header">
+        <button id="itinerary-focus-back" class="itinerary-focus-back" type="button">
+          <span aria-hidden="true">←</span>
+          <span id="itinerary-focus-back-label">Back to Planner</span>
+        </button>
+
+        <div class="itinerary-focus-heading">
+          <span id="itinerary-focus-eyebrow" class="itinerary-focus-eyebrow">YOUR ASTRA ITINERARY</span>
+          <h2 id="itinerary-focus-title">Your trip, day by day.</h2>
+          <p id="itinerary-focus-subtitle">Choose a city, then move through each day at your own pace.</p>
+        </div>
+
+        <button id="itinerary-focus-close" class="itinerary-focus-close" type="button" aria-label="Close itinerary">
+          ×
+        </button>
+      </header>
+
+      <nav id="itinerary-focus-cities" class="itinerary-focus-cities" aria-label="Itinerary cities"></nav>
+
+      <div class="itinerary-focus-stage">
+        <button id="itinerary-focus-prev" class="itinerary-focus-nav itinerary-focus-nav--prev" type="button" aria-label="Previous day">
+          <span aria-hidden="true">‹</span>
+        </button>
+
+        <article class="itinerary-focus-day-card">
+          <div class="itinerary-focus-day-head">
+            <div>
+              <span id="itinerary-focus-city-label" class="itinerary-focus-city-label"></span>
+              <h3 id="itinerary-focus-day-title"></h3>
+            </div>
+            <span id="itinerary-focus-day-count" class="itinerary-focus-day-count"></span>
+          </div>
+
+          <div id="itinerary-focus-day-content" class="itinerary-focus-day-content"></div>
+          <div id="itinerary-focus-dots" class="itinerary-focus-dots" aria-label="Itinerary days"></div>
+        </article>
+
+        <button id="itinerary-focus-next" class="itinerary-focus-nav itinerary-focus-nav--next" type="button" aria-label="Next day">
+          <span aria-hidden="true">›</span>
+        </button>
+      </div>
+    </section>
   </div>
 
   <footer class="footer">
@@ -922,7 +993,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=76h"></script>
+<script src="./planner.js?v=77"></script>
  
 </body>
 </html>
