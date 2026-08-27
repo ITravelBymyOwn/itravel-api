@@ -1,4 +1,4 @@
-// /api/chat.js — v65.1 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.2 (MVP WOW: schema-wide validation + surgical repair; stage-safe + exact usage metrics) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -1042,7 +1042,8 @@ async function _v64RepairMasterPlanOnce_(
   report,
   effectivePrompt,
   clientMessages,
-  expectedDays
+  expectedDays,
+  usageCollector = null
 ) {
   if (!parsed || report.ok) return null;
 
@@ -1073,7 +1074,8 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     6000,
-    85000
+    85000,
+    usageCollector
   );
 
   const repaired = cleanToJSON(raw);
@@ -1679,7 +1681,8 @@ async function _v62RepairFinalOnce_(
   parsed,
   report,
   effectivePrompt,
-  clientMessages
+  clientMessages,
+  usageCollector = null
 ) {
   if (!ITBMO_FINAL_REPAIR_ENABLED || report.ok) return null;
 
@@ -1716,7 +1719,8 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     9000,
-    85000
+    85000,
+    usageCollector
   );
 
   const repaired = cleanToJSON(raw);
@@ -2244,9 +2248,48 @@ FORMAT:
 `.trim();
 
 // ==============================
+// Exact OpenAI usage aggregation (request-scoped)
+// Keeps the external {text} contract and only adds optional usage metadata.
+// ==============================
+function _newUsageCollector_() {
+  return {
+    model: MODEL,
+    model_calls: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+  };
+}
+
+function _accumulateUsage_(collector, resp) {
+  if (!collector || !resp) return;
+  const usage = resp?.usage || {};
+  const input = Number(usage?.input_tokens || 0) || 0;
+  const output = Number(usage?.output_tokens || 0) || 0;
+  const total = Number(usage?.total_tokens || (input + output)) || (input + output);
+
+  collector.model = String(resp?.model || collector.model || MODEL);
+  collector.model_calls += 1;
+  collector.input_tokens += input;
+  collector.output_tokens += output;
+  collector.total_tokens += total;
+}
+
+function _usagePayload_(collector) {
+  if (!collector) return null;
+  return {
+    model: String(collector.model || MODEL),
+    model_calls: Number(collector.model_calls || 0),
+    input_tokens: Number(collector.input_tokens || 0),
+    output_tokens: Number(collector.output_tokens || 0),
+    total_tokens: Number(collector.total_tokens || 0),
+  };
+}
+
+// ==============================
 // Model call (with soft timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
+async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null) {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
 
   const controller = new AbortController();
@@ -2264,6 +2307,8 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   },
   { signal: controller.signal }
 );
+
+    _accumulateUsage_(usageCollector, resp);
 
     const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 
@@ -2291,6 +2336,7 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
+    const plannerUsage = mode === "planner" ? _newUsageCollector_() : null;
 
     // INFO mode: server-side entitlement + semantic scope + thematic per-trip quota.
     if (mode === "info") {
@@ -2413,7 +2459,10 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
       }
     }
 
-    const stage = detectPlannerStage(clientMessages);
+    const requestedStage = String(body?.planner_stage || "").trim().toLowerCase();
+    const stage = ["master_plan","itinerary","one_shot"].includes(requestedStage)
+      ? requestedStage
+      : detectPlannerStage(clientMessages);
     console.log("🧭 ITBMO PLANNER STAGE:", stage);
 
     const override = detectLanguageOverride(clientMessages);
@@ -2435,7 +2484,8 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
       [{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages],
       stage === "master_plan" ? 0.2 : 0.24,
       primaryTokens,
-      primaryTimeout
+      primaryTimeout,
+      plannerUsage
     );
 
     let parsed = cleanToJSON(raw);
@@ -2474,7 +2524,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         [{ role: "system", content: strictPrompt }, ...clientMessages],
         stage === "master_plan" ? 0.14 : 0.16,
         stage === "master_plan" ? 5500 : 10500,
-        stage === "master_plan" ? 85000 : 115000
+        stage === "master_plan" ? 85000 : 115000,
+        plannerUsage
       );
       parsed = cleanToJSON(raw);
     }
@@ -2505,7 +2556,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
               masterReport,
               SYSTEM_PROMPT_EFFECTIVE,
               clientMessages,
-              expectedDays
+              expectedDays,
+              plannerUsage
             );
 
             if (repairedMaster) {
@@ -2530,7 +2582,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         }
       }
 
-      return res.status(200).json({ text: JSON.stringify(parsed) });
+      return res.status(200).json({
+        text: JSON.stringify(parsed),
+        usage: _usagePayload_(plannerUsage)
+      });
     }
 
     // Final itinerary/one-shot normalization.
@@ -2554,7 +2609,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
             parsed,
             report,
             SYSTEM_PROMPT_EFFECTIVE,
-            clientMessages
+            clientMessages,
+            plannerUsage
           );
 
           if (repaired) {
@@ -2589,7 +2645,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       }
     } catch {}
 
-    return res.status(200).json({ text: JSON.stringify(parsed) });
+    return res.status(200).json({
+      text: JSON.stringify(parsed),
+      usage: _usagePayload_(plannerUsage)
+    });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
