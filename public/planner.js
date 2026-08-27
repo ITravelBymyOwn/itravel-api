@@ -2334,25 +2334,28 @@ function _immersiveMoveDay_(delta){
 
 function openImmersiveItinerary(city){
   const modal=qs('#itinerary-focus-modal');
-  if(!modal || !_immersiveAvailableCities_().length) return;
+  const availableCities=_immersiveAvailableCities_();
+  if(!modal || !availableCities.length) return;
 
-  immersiveItineraryCity=city && _immersiveAvailableCities_().includes(city)
+  immersiveItineraryCity=city && availableCities.includes(city)
     ? city
-    : (activeCity && _immersiveAvailableCities_().includes(activeCity) ? activeCity : _immersiveAvailableCities_()[0]);
+    : (activeCity && availableCities.includes(activeCity) ? activeCity : availableCities[0]);
 
   const days=_immersiveDaysForCity_(immersiveItineraryCity);
   const preferred=Number(itineraries?.[immersiveItineraryCity]?.currentDay);
   immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
+
+  /* Open the local itinerary viewer FIRST. The parent Home focus transition is
+     secondary and must never be able to cancel the CTA interaction. */
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('itinerary-focus-open');
 
   try{
     if(window.parent && window.parent!==window){
       window.parent.postMessage({type:'ITBMO_REQUEST_PLANNER_FOCUS',reason:'itinerary-viewer'},'*');
     }
   }catch(_){}
-
-  modal.classList.add('is-open');
-  modal.setAttribute('aria-hidden','false');
-  document.body.classList.add('itinerary-focus-open');
 
   // Let the focus surface paint first, then build the day table.
   // This prevents the CTA click from carrying the full table-render cost.
@@ -2379,7 +2382,11 @@ function bindImmersiveItineraryViewer(){
   const modal=qs('#itinerary-focus-modal');
   if(!launch || !modal) return;
 
-  launch.addEventListener('click',()=>openImmersiveItinerary());
+  launch.addEventListener('click',(event)=>{
+    event.preventDefault();
+    event.stopPropagation();
+    openImmersiveItinerary();
+  });
   qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);
   qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);
   qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);
