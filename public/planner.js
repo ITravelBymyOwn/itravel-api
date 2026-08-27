@@ -155,8 +155,8 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.',
-    overlayGenerating: 'Astra está generando itinerarios…',
+    overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. El tiempo depende del número de ciudades, días y la complejidad del viaje y puede tomar varios minutos. No cierres esta pestaña: este es el trabajo que te ahorra horas de investigación y planificación.',
+    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo. El tiempo depende del número de ciudades, días y la complejidad del itinerario. Puede tomar varios minutos. No cierres esta pestaña: ASTRA está haciendo por ti horas de investigación y planificación.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -233,8 +233,8 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ Astra is creating your full itinerary… This may take a few minutes. Don’t close this tab: you’re saving hours of planning.',
-    overlayGenerating: 'Astra is generating itineraries…',
+    overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. Generation time depends on the number of cities, days and trip complexity and may take several minutes. Don’t close this tab: this is the work designed to save you hours of research and planning.',
+    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip. Generation time depends on the number of cities, days and itinerary complexity. It may take several minutes. Don’t close this tab: ASTRA is doing hours of research and planning for you.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -3751,6 +3751,127 @@ function _userLanguageAnchor_(){
   return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
 }
 
+
+/* =========================================================
+   ITBMO · GENERATION DIAGNOSTICS
+   Observability only. Does not change the generation flow.
+   ========================================================= */
+const _astraGenerationMetrics_ = {
+  active:false,
+  startedAt:0,
+  finishedAt:0,
+  calls:0,
+  inputTokens:0,
+  outputTokens:0,
+  totalTokens:0,
+  tokenUsageSamples:0,
+  cities:[]
+};
+
+function _formatGenerationDuration_(ms){
+  const safe=Math.max(0,Number(ms)||0);
+  const totalSeconds=Math.round(safe/1000);
+  const minutes=Math.floor(totalSeconds/60);
+  const seconds=totalSeconds%60;
+  return minutes>0 ? `${minutes}m ${String(seconds).padStart(2,'0')}s` : `${seconds}s`;
+}
+
+function _resetAstraGenerationMetrics_(){
+  _astraGenerationMetrics_.active=true;
+  _astraGenerationMetrics_.startedAt=performance.now();
+  _astraGenerationMetrics_.finishedAt=0;
+  _astraGenerationMetrics_.calls=0;
+  _astraGenerationMetrics_.inputTokens=0;
+  _astraGenerationMetrics_.outputTokens=0;
+  _astraGenerationMetrics_.totalTokens=0;
+  _astraGenerationMetrics_.tokenUsageSamples=0;
+  _astraGenerationMetrics_.cities=[];
+}
+
+function _extractExactUsage_(data){
+  const usage=data?.usage || data?.token_usage || data?.meta?.usage || data?.meta?.token_usage || null;
+  if(!usage || typeof usage!=='object') return null;
+
+  const input=Number(
+    usage.input_tokens ??
+    usage.prompt_tokens ??
+    usage.inputTokens ??
+    usage.promptTokens ??
+    0
+  ) || 0;
+
+  const output=Number(
+    usage.output_tokens ??
+    usage.completion_tokens ??
+    usage.outputTokens ??
+    usage.completionTokens ??
+    0
+  ) || 0;
+
+  const total=Number(
+    usage.total_tokens ??
+    usage.totalTokens ??
+    (input+output)
+  ) || (input+output);
+
+  if(input<=0 && output<=0 && total<=0) return null;
+  return {input,output,total};
+}
+
+function _captureExactUsage_(data){
+  if(!_astraGenerationMetrics_.active) return;
+  _astraGenerationMetrics_.calls++;
+
+  const usage=_extractExactUsage_(data);
+  if(!usage) return;
+
+  _astraGenerationMetrics_.inputTokens+=usage.input;
+  _astraGenerationMetrics_.outputTokens+=usage.output;
+  _astraGenerationMetrics_.totalTokens+=usage.total;
+  _astraGenerationMetrics_.tokenUsageSamples++;
+}
+
+function _finishAstraGenerationMetrics_(){
+  _astraGenerationMetrics_.finishedAt=performance.now();
+  _astraGenerationMetrics_.active=false;
+
+  const totalMs=_astraGenerationMetrics_.finishedAt-_astraGenerationMetrics_.startedAt;
+  const tokenUsageAvailable=_astraGenerationMetrics_.tokenUsageSamples>0;
+
+  const snapshot={
+    totalMs:Math.round(totalMs),
+    total:_formatGenerationDuration_(totalMs),
+    modelCalls:_astraGenerationMetrics_.calls,
+    cities:_astraGenerationMetrics_.cities.map(x=>({...x})),
+    tokenUsageAvailable,
+    inputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.inputTokens : null,
+    outputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.outputTokens : null,
+    totalTokens:tokenUsageAvailable ? _astraGenerationMetrics_.totalTokens : null
+  };
+
+  window.__ITBMO_LAST_GENERATION_METRICS__=snapshot;
+
+  console.log(`%c[ASTRA TIMER] FULL TRIP TOTAL: ${snapshot.total}`, 'font-weight:900;color:#087f9f;');
+  console.log(`[ASTRA TIMER] Model/API calls during generation: ${snapshot.modelCalls}`);
+  if(snapshot.cities.length) console.table(snapshot.cities);
+
+  if(tokenUsageAvailable){
+    console.log(
+      `[ASTRA TOKENS] Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
+    );
+  }else{
+    console.info(
+      '[ASTRA TOKENS] Exact token counts are not available because /api/chat did not expose usage metadata to the browser. No estimate was invented.'
+    );
+  }
+
+  console.info(
+    '[ASTRA METRICS] Type __ITBMO_LAST_GENERATION_METRICS__ in the console to inspect the last complete generation.'
+  );
+
+  return snapshot;
+}
+
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
@@ -3786,6 +3907,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
     }
 
     const data = await res.json().catch(()=>({text:''}));
+    _captureExactUsage_(data);
     return data?.text || '';
   }catch(e){
     const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
@@ -4714,6 +4836,24 @@ async function _finalTripWideRepair_(
   };
 }
 async function generateCityItinerary(city){
+  const _cityGenerationStartedAt_=performance.now();
+  const _recordCityGenerationTime_=()=>{
+    if(!_astraGenerationMetrics_.active) return;
+    const elapsed=performance.now()-_cityGenerationStartedAt_;
+    const existing=_astraGenerationMetrics_.cities.find(x=>x.city===city);
+    if(existing){
+      existing.ms=Math.round(elapsed);
+      existing.duration=_formatGenerationDuration_(elapsed);
+    }else{
+      _astraGenerationMetrics_.cities.push({
+        city,
+        ms:Math.round(elapsed),
+        duration:_formatGenerationDuration_(elapsed)
+      });
+    }
+    console.log(`[ASTRA TIMER] ${city}: ${_formatGenerationDuration_(elapsed)}`);
+  };
+
   const dest=savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
@@ -4772,6 +4912,7 @@ async function generateCityItinerary(city){
       repaired:finalResult.repaired,
       remainingIssues:finalResult.report?.errors?.length||0
     });
+    _recordCityGenerationTime_();
     return;
   }catch(err){
     console.error(`[CITY ${city}] v63 staged flow failed; using coherent one-shot recovery`,err);
@@ -4829,12 +4970,15 @@ HARD RULES:
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
     showWOW(false);
+    _recordCityGenerationTime_();
     return;
   }catch(err2){
     console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
     showWOW(false);
   }
+
+  _recordCityGenerationTime_();
 
   const msg=getLang()==='es'
     ? 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.'
@@ -5440,10 +5584,12 @@ async function onSend(){
     plannerState.itineraryLang = String(text || '').trim();
 
     (async ()=>{
+      _resetAstraGenerationMetrics_();
       showWOW(true, t('overlayGenerating'));
       for(const {city} of savedDestinations){
         await generateCityItinerary(city);
       }
+      _finishAstraGenerationMetrics_();
       showWOW(false);
       setExportToolbarVisibility();
       chatMsg(getPlannerCompletionMessage(), 'ai');
