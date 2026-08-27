@@ -2033,6 +2033,19 @@ let immersiveItineraryCity = null;
 let immersiveItineraryDay = null;
 let immersiveTouchStartX = null;
 let immersiveTouchStartY = null;
+let immersiveRenderFrame = null;
+
+function scheduleImmersiveItineraryRender(){
+  if(immersiveRenderFrame!=null){
+    cancelAnimationFrame(immersiveRenderFrame);
+  }
+  immersiveRenderFrame=requestAnimationFrame(()=>{
+    immersiveRenderFrame=requestAnimationFrame(()=>{
+      immersiveRenderFrame=null;
+      renderImmersiveItinerary();
+    });
+  });
+}
 
 function _immersiveViewerCopy_(){
   const es = getLang()==='es';
@@ -2184,7 +2197,7 @@ function _immersiveRenderCities_(){
       const days=_immersiveDaysForCity_(city);
       const preferred=Number(itineraries?.[city]?.currentDay);
       immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
-      renderImmersiveItinerary();
+      scheduleImmersiveItineraryRender();
     });
     nav.appendChild(b);
   });
@@ -2259,7 +2272,7 @@ function renderImmersiveItinerary(){
       b.innerHTML=`<span>${i+1}</span>`;
       b.addEventListener('click',()=>{
         immersiveItineraryDay=day;
-        renderImmersiveItinerary();
+        scheduleImmersiveItineraryRender();
       });
       dots.appendChild(b);
     });
@@ -2282,7 +2295,7 @@ function _immersiveMoveDay_(delta){
   const nextIndex=Math.max(0,Math.min(days.length-1,currentIndex+delta));
   if(nextIndex===currentIndex) return;
   immersiveItineraryDay=days[nextIndex];
-  renderImmersiveItinerary();
+  scheduleImmersiveItineraryRender();
 }
 
 function openImmersiveItinerary(city){
@@ -2306,7 +2319,10 @@ function openImmersiveItinerary(city){
   modal.classList.add('is-open');
   modal.setAttribute('aria-hidden','false');
   document.body.classList.add('itinerary-focus-open');
-  renderImmersiveItinerary();
+
+  // Let the focus surface paint first, then build the day table.
+  // This prevents the CTA click from carrying the full table-render cost.
+  scheduleImmersiveItineraryRender();
 
   setTimeout(()=>qs('#itinerary-focus-close')?.focus(),80);
 }
@@ -2314,6 +2330,10 @@ function openImmersiveItinerary(city){
 function closeImmersiveItinerary(){
   const modal=qs('#itinerary-focus-modal');
   if(!modal) return;
+  if(immersiveRenderFrame!=null){
+    cancelAnimationFrame(immersiveRenderFrame);
+    immersiveRenderFrame=null;
+  }
   modal.classList.remove('is-open');
   modal.setAttribute('aria-hidden','true');
   document.body.classList.remove('itinerary-focus-open');
@@ -3201,10 +3221,19 @@ function _isAnchorExperienceRow_(row={}){
 }
 
 function _reconcileDayRows_(rows=[]){
-  const sorted=(rows||[]).slice().sort((a,b)=>{
-    const aa=_hhmmToMinutes_(a?.start), bb=_hhmmToMinutes_(b?.start);
-    return (aa==null?99999:aa)-(bb==null?99999:bb);
+  const source=(rows||[]).slice();
+  const hasLateEvening=source.some(r=>{
+    const m=_hhmmToMinutes_(r?.start);
+    return m!=null && m>=18*60;
   });
+  const logicalStartMinute=(row)=>{
+    const m=_hhmmToMinutes_(row?.start);
+    if(m==null) return 99999;
+    // If a logical itinerary day continues after midnight, keep that return
+    // after the evening activity instead of placing 00:xx at the top.
+    return (hasLateEvening && m<4*60) ? m+(24*60) : m;
+  };
+  const sorted=source.sort((a,b)=>logicalStartMinute(a)-logicalStartMinute(b));
 
   // First enforce deterministic minimum dwell and row math.
   for(let i=0;i<sorted.length;i++){
@@ -5700,29 +5729,9 @@ Instrucción del usuario: ${text}
   }
 }
 
-function addRowReorderControls(row){
-  const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display='flex';
-  ctrlWrap.style.gap='.35rem';
-  ctrlWrap.style.alignItems='center';
-  const up = document.createElement('button'); up.textContent='↑'; up.className='btn ghost';
-  const down = document.createElement('button'); down.textContent='↓'; down.className='btn ghost';
-  ctrlWrap.appendChild(up); ctrlWrap.appendChild(down);
-  row.appendChild(ctrlWrap);
-
-  up.addEventListener('click', ()=>{
-    if(row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
-  });
-  down.addEventListener('click', ()=>{
-    if(row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
-  });
-}
-const origAddCityRow = addCityRow;
-addCityRow = function(pref){
-  origAddCityRow(pref);
-  const row = $cityList.lastElementChild;
-  if(row) addRowReorderControls(row);
-};
+/* City order controls intentionally removed for the MVP.
+   Destination order is defined by the order in which the user enters the cities.
+   This keeps the Planner cleaner and avoids accidental reordering. */
 
 // País: solo letras y espacios (protección suave en input)
 document.addEventListener('input', (e)=>{
