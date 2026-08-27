@@ -162,7 +162,7 @@ const I18N = {
 
     // Overlay
     overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. El tiempo depende del número de ciudades, días y la complejidad del viaje y puede tomar varios minutos. No cierres esta pestaña: este es el trabajo que te ahorra horas de investigación y planificación.',
-    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo. El tiempo depende del número de ciudades, días y la complejidad del itinerario. Puede tomar varios minutos. No cierres esta pestaña: ASTRA está haciendo por ti horas de investigación y planificación.',
+    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo, ciudad por ciudad y día por día. ⏳ En viajes complejos, la generación puede tomar 5 minutos o más. NO CIERRES ESTA PESTAÑA: ASTRA está haciendo por ti horas de investigación, selección y planificación.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -240,7 +240,7 @@ const I18N = {
 
     // Overlay
     overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. Generation time depends on the number of cities, days and trip complexity and may take several minutes. Don’t close this tab: this is the work designed to save you hours of research and planning.',
-    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip. Generation time depends on the number of cities, days and itinerary complexity. It may take several minutes. Don’t close this tab: ASTRA is doing hours of research and planning for you.',
+    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip, city by city and day by day. ⏳ For complex trips, generation may take 5 minutes or more. DO NOT CLOSE THIS TAB: ASTRA is doing hours of research, selection and planning for you.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -2550,6 +2550,11 @@ Meals:
 Aurora:
 - Include aurora only when plausible by latitude and season.
 - Treat it as a conditional opportunity in notes unless the user explicitly requested a fixed outing.
+- When the user explicitly requests an aurora / northern-lights tour, treat it as a protected reservation anchor, not a short sightseeing row.
+- A guided aurora outing should normally occupy at least 4 hours door-to-door and often longer; never compress it to create room for filler.
+- Unless the user explicitly chooses the final night, schedule a requested aurora tour on an earlier suitable night so there is another night available if weather causes cancellation or poor conditions.
+- Prefer the first or second logistically sensible night after arrival; avoid the final night when another suitable night exists.
+- On an aurora-tour day, keep the preceding schedule realistic and lighter when needed so the traveler has time for an early meal, warm clothing, preparation and a late return.
 - Avoid identical notes on consecutive nights.
 - State that visibility is not guaranteed and that cloud cover, geomagnetic activity and road conditions must be checked.
 
@@ -2620,6 +2625,7 @@ Quality & coherence:
 - Validate each row mathematically so its time interval approximately equals transport plus activity. Correct any significant mismatch before output.
 - A row's activity must happen at its concrete To place. Do not write an activity at the From place while using To for the next destination.
 - Protect ticketed/reservation anchor experiences as complete blocks, including realistic operational time. Never shorten a spa, cruise, major attraction or substantial tour to make room for extra stops, and never leave its real visit time as an unexplained gap.
+- Treat substantial organized experiences (cruises, guided excursions, wildlife tours, aurora tours, spas and comparable booked activities) as ATOMIC blocks: never insert an unrelated itinerary row inside their start/end window. If the experience itself contains sub-stops, keep them inside that anchor row/notes unless the itinerary explicitly models the whole experience as a coherent sequence instead of a single blocking row.
 - Enforce intelligent category-based dwell times and reject 5–10 minute visits unless explicitly justified as photographic micro-stops.
 - Detect duplicate experiences semantically across aliases, districts and closely overlapping descriptions.
 - If the user doesn't specify a specific day, review and adjust the entire city's itinerary, avoiding duplicates and absurd plans.
@@ -4308,6 +4314,8 @@ TRIP-WIDE RULES:
 - Prefer strong unused regional/signature buckets over generic city filler when the comparison clearly favors them, but never displace unmet core city highlights.
 - Use the normalized lodging base as the primary geographic anchor and reserve corridors that minimize unnecessary transfers.
 - Convert all preferences and restrictions into actual day identities, timing and routing decisions.
+- If the user explicitly requested an aurora / northern-lights tour and the destination/date is plausible, reserve it as a protected anchor on an EARLIER suitable night, preferably the first or second logistically sensible night after arrival. Do not reserve it for the final night unless the user explicitly asked for the final night or no earlier suitable night exists.
+- Keep the daytime schedule on an aurora-tour day compatible with a long evening outing and late return.
 - Apply the first/intermediate/final-day time policy contained in KNOWN USER FACTS.
 - If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
 - Respect the actual daily windows, season, useful daylight, travelers, base and transport.
@@ -4382,6 +4390,9 @@ HARD RULES:
 - One To and one primary transport choice per row; alternatives belong in notes.
 - Every row interval must realistically contain transport plus activity. No overlaps and no unexplained
   gap over about 20 minutes.
+- Treat every substantial organized/ticketed experience as one protected time block. Do not place any unrelated row inside a cruise, guided excursion, wildlife tour, aurora tour, thermal/spa visit or comparable booked experience.
+- If the user explicitly requested an aurora tour, give it a realistic door-to-door block of normally at least 4 hours and do not compress it to fit extra sightseeing.
+- Unless the user explicitly requested the final night, do not place a requested aurora tour on the final night when an earlier suitable night exists; preserve an additional night as weather/cancellation contingency.
 - Scenic outdoor visits must fit plausible useful daylight for the date/latitude. Driving, indoor
   activities, meals and thermal experiences may use darker hours.
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
@@ -4515,6 +4526,33 @@ function _isAuroraActivityRow_(row={}){
   );
 }
 
+function _isAuroraTourRow_(row={}){
+  const text=`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`.replace(/\s+/g,' ');
+  const hasAurora=/\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(text);
+  const hasTour=/\b(tour|guided|gu[ií]ado|chase|hunt|cacer[ií]a|minivan|excursion|excursi[oó]n)\b/i.test(text);
+  return hasAurora && hasTour;
+}
+
+function _explicitlyRequestedAuroraOnFinalNight_(){
+  const text=String(plannerState?.specialConditions||'').replace(/\s+/g,' ');
+  return /\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(text) &&
+    /\b(final night|last night|última noche|ultima noche|noche final|dernier soir|letzte nacht|ultima notte|última noite)\b/i.test(text);
+}
+
+function _isAtomicOrganizedExperienceRow_(row={}){
+  const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
+  return _isAuroraTourRow_(row) ||
+    /\b(cruise|crucero|guided tour|tour guiado|guided excursion|excursi[oó]n guiada|whale watching|avistamiento de ballenas|wildlife tour|wildlife cruise|marine safari|safari marino|spa complex|thermal lagoon|laguna termal|hot spring complex|complejo termal|theme park|parque tem[aá]tico)\b/i.test(text);
+}
+
+function _rowSpanMinutes_(row={}){
+  const start=_hhmmToMinutes_(row?.start), end=_hhmmToMinutes_(row?.end);
+  if(start==null || end==null) return null;
+  let span=end-start;
+  if(span<=0) span+=1440;
+  return span;
+}
+
 function _explicitlyRequestedFixedAurora_(){
   return /\b(fixed aurora|aurora tour|northern lights tour|tour de auroras|cacer[ií]a de auroras|reservar aurora|book aurora|actividad fija de aurora)\b/i.test(String(plannerState?.specialConditions||'').replace(/\s+/g,' '));
 }
@@ -4532,6 +4570,9 @@ function _genericPlaceReason_(value=''){
 function _activityProfile_(row={}){
   const text=_canonicalText_(`${row?.activity||''} ${row?.to||''} ${row?.transport||''} ${row?.notes||''}`);
 
+  if(_isAuroraTourRow_(row)){
+    return {type:'AURORA_TOUR',min:210};
+  }
   if(/\b(blue lagoon|thermal lagoon|termal lagoon|spa complex|hot spring complex|laguna termal|complejo termal)\b/.test(text)){
     return {type:'MAJOR_THERMAL',min:180};
   }
@@ -4580,7 +4621,8 @@ function _auditSeverity_(error={}){
   const critical=new Set([
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
-    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO'
+    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
+    'AURORA_TOUR_TOO_SHORT','AURORA_ON_FINAL_NIGHT','ATOMIC_EXPERIENCE_OVERLAP'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -4711,6 +4753,26 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         });
       }
 
+      if(_isAuroraTourRow_(r)){
+        const auroraSpan=_rowSpanMinutes_(r);
+        if(auroraSpan!=null && auroraSpan<240){
+          errors.push({
+            code:'AURORA_TOUR_TOO_SHORT',
+            day,row,
+            actual_span_minutes:auroraSpan,
+            required_minimum_span_minutes:240,
+            instruction:'Expand the guided aurora outing to a realistic door-to-door block of at least 4 hours; do not compress it to fit filler.'
+          });
+        }
+        if(day===totalDays && totalDays>1 && !_explicitlyRequestedAuroraOnFinalNight_()){
+          errors.push({
+            code:'AURORA_ON_FINAL_NIGHT',
+            day,row,
+            instruction:'Move the requested aurora tour to an earlier suitable night so another night remains available for weather/cancellation contingency. Use the final night only if the user explicitly chose it or no earlier night is feasible.'
+          });
+        }
+      }
+
       if(profile && i<dayRows.length-1){
         const nextStart=_hhmmToMinutes_(dayRows[i+1]?.start);
         if(end!=null && nextStart!=null){
@@ -4732,6 +4794,40 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
           day,row,
           instruction:'Move aurora guidance into suitable evening notes unless the user explicitly requested a fixed outing.'
         });
+      }
+    }
+
+    // Atomic experiences cannot contain unrelated itinerary rows inside their reserved window.
+    for(let a=0;a<dayRows.length;a++){
+      const anchorRow=dayRows[a];
+      if(!_isAtomicOrganizedExperienceRow_(anchorRow)) continue;
+      const aStart=_hhmmToMinutes_(anchorRow.start), aEndRaw=_hhmmToMinutes_(anchorRow.end);
+      if(aStart==null || aEndRaw==null) continue;
+      const aEnd=aEndRaw<=aStart ? aEndRaw+1440 : aEndRaw;
+
+      for(let b=0;b<dayRows.length;b++){
+        if(a===b) continue;
+        const other=dayRows[b];
+        const bStartRaw=_hhmmToMinutes_(other.start), bEndRaw=_hhmmToMinutes_(other.end);
+        if(bStartRaw==null || bEndRaw==null) continue;
+        let bStart=bStartRaw, bEnd=bEndRaw<=bStartRaw ? bEndRaw+1440 : bEndRaw;
+        if(bStart<aStart && bEnd<=aStart) continue;
+        if(bStart>=aEnd) continue;
+
+        const overlaps=bStart<aEnd && bEnd>aStart;
+        if(overlaps){
+          errors.push({
+            code:'ATOMIC_EXPERIENCE_OVERLAP',
+            day,
+            anchor_activity:anchorRow.activity,
+            anchor_start:anchorRow.start,
+            anchor_end:anchorRow.end,
+            conflicting_activity:other.activity,
+            conflicting_start:other.start,
+            conflicting_end:other.end,
+            instruction:'Keep the organized experience as one protected block. Remove or move the unrelated conflicting row outside its reserved window.'
+          });
+        }
       }
     }
 
@@ -4767,6 +4863,46 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
     errors
   };
 }
+
+function _removeRowsNestedInsideAtomicAnchors_(rows=[]){
+  const byDay=_rowsByDayObject_(rows);
+  const kept=[];
+
+  Object.entries(byDay).forEach(([dayKey,dayRows])=>{
+    const drop=new Set();
+
+    dayRows.forEach((anchorRow,anchorIndex)=>{
+      if(!_isAtomicOrganizedExperienceRow_(anchorRow)) return;
+      const aStart=_hhmmToMinutes_(anchorRow.start), aEndRaw=_hhmmToMinutes_(anchorRow.end);
+      if(aStart==null || aEndRaw==null) return;
+      const aEnd=aEndRaw<=aStart ? aEndRaw+1440 : aEndRaw;
+
+      dayRows.forEach((other,otherIndex)=>{
+        if(anchorIndex===otherIndex || drop.has(otherIndex)) return;
+        const bStartRaw=_hhmmToMinutes_(other.start), bEndRaw=_hhmmToMinutes_(other.end);
+        if(bStartRaw==null || bEndRaw==null) return;
+        const bStart=bStartRaw;
+        const bEnd=bEndRaw<=bStartRaw ? bEndRaw+1440 : bEndRaw;
+
+        const fullyNested=bStart>=aStart && bEnd<=aEnd;
+        if(!fullyNested) return;
+
+        // If both rows look atomic, preserve both for the model repair to resolve rather than
+        // deleting one deterministically. For a long atomic anchor containing a short unrelated
+        // sightseeing row, preserve the anchor and drop only the conflicting nested row.
+        if(_isAtomicOrganizedExperienceRow_(other)) return;
+        drop.add(otherIndex);
+      });
+    });
+
+    dayRows.forEach((row,index)=>{
+      if(!drop.has(index)) kept.push(row);
+    });
+  });
+
+  return _dedupeRows_(kept);
+}
+
 async function _runTripWideRepairCall_(
   city,rows,totalDays,masterDays,facts,report,forceReplan=false,precisionPass=false
 ){
@@ -4811,6 +4947,10 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The To field is the concrete place visited in that row. The next row's From must continue from it.
 - The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
+- Treat every substantial organized/ticketed experience as an ATOMIC block. No unrelated row may start before that block ends. This applies to cruises, guided excursions, wildlife tours, aurora tours, spas and comparable booked experiences.
+- If an aurora/northern-lights tour was explicitly requested, schedule a realistic long outing: normally at least 4 hours door-to-door, often longer. Never reduce it to a 60–90 minute row.
+- Unless the user explicitly requested the final night, place a requested aurora tour on an earlier suitable night (preferably the first or second logistically sensible night after arrival) so another night remains available if weather/cancellation prevents the outing.
+- On an aurora-tour day, keep earlier activities realistic and leave time for an early meal, warm clothing/preparation and a late return.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
@@ -4892,6 +5032,16 @@ async function _finalTripWideRepair_(
     }
   }
 
+  // Final deterministic safety pass: if a long organized experience still contains
+  // unrelated nested rows after model repair, preserve the anchor and remove only the nested conflict.
+  const safeguardedRows=_removeRowsNestedInsideAtomicAnchors_(currentRows);
+  if(safeguardedRows.length!==currentRows.length){
+    currentRows=safeguardedRows;
+    currentReport=_localGlobalAudit_(
+      city,currentRows,totalDays,masterDays,perDay,baseDate
+    );
+  }
+
   return {
     rows:currentRows,
     report:currentReport,
@@ -4966,9 +5116,12 @@ async function generateCityItinerary(city, options={}){
     // Replace every generated day atomically; do not merge stale rows.
     pushRows(city,finalRows,true);
 
-    renderCityTabs();
-    setActiveCity(city);
-    renderCityItinerary(city);
+    if(manageOverlay){
+      renderCityTabs();
+      setActiveCity(city);
+      renderCityItinerary(city);
+      syncImmersiveItineraryLauncher();
+    }
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
 
@@ -5010,7 +5163,9 @@ HARD RULES:
   regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops and explicit return to the lodging/base.
-- Aurora, when plausible, belongs mainly as conditional guidance in notes.
+- Aurora, when plausible, belongs mainly as conditional guidance in notes unless the user explicitly requested a fixed aurora outing.
+- If the user explicitly requested an aurora tour, treat it as a protected anchor of normally at least 4 hours door-to-door and schedule it on an earlier suitable night rather than the final night unless the final night was explicitly requested or no earlier night is feasible.
+- Treat cruises, guided excursions, wildlife tours, aurora tours, spas and comparable booked experiences as atomic blocks: never place unrelated rows inside their start/end interval.
 - One concrete To and one transport choice per row.
 - Use one selected language consistently, including duration labels.
 `.trim();
@@ -5030,9 +5185,12 @@ HARD RULES:
     pushRows(city,rows,true);
     itineraries[city].audit=finalResult.report;
 
-    renderCityTabs();
-    setActiveCity(city);
-    renderCityItinerary(city);
+    if(manageOverlay){
+      renderCityTabs();
+      setActiveCity(city);
+      renderCityItinerary(city);
+      syncImmersiveItineraryLauncher();
+    }
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
     if(manageOverlay) showWOW(false);
@@ -5666,6 +5824,19 @@ async function onSend(){
           batch.map(city=>generateCityItinerary(city,{manageOverlay:false}))
         );
       }
+
+      // All city pipelines are now complete. Synchronize shared UI state ONCE,
+      // after parallel generation, so Focus Mode never inherits a race between cities.
+      const readyCities=_immersiveAvailableCities_();
+      if(readyCities.length){
+        const preferredCity=generationCities.find(city=>readyCities.includes(city)) || readyCities[0];
+        immersiveItineraryCity=null;
+        immersiveItineraryDay=null;
+        renderCityTabs();
+        setActiveCity(preferredCity);
+        renderCityItinerary(preferredCity);
+      }
+      syncImmersiveItineraryLauncher();
 
       _finishAstraGenerationMetrics_();
       showWOW(false);
