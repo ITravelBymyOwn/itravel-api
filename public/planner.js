@@ -161,8 +161,8 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. ⏳ En viajes complejos, la generación puede tomar 5 minutos o más. NO CIERRES ESTA PESTAÑA: este proceso está haciendo por ti horas de investigación, selección y planificación.',
-    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo, ciudad por ciudad y día por día. ⏳ En viajes complejos, la generación puede tomar 5 minutos o más. NO CIERRES ESTA PESTAÑA: ASTRA está haciendo por ti horas de investigación, selección y planificación.',
+    overlayDefault: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día. ⏳ Los viajes complejos pueden tomar 5 minutos o más. MANTÉN ESTA PESTAÑA ABIERTA mientras ASTRA investiga, selecciona y optimiza tu viaje.',
+    overlayGenerating: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día. ⏳ Los viajes complejos pueden tomar 5 minutos o más. MANTÉN ESTA PESTAÑA ABIERTA mientras ASTRA investiga, selecciona y optimiza tu viaje.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -239,8 +239,8 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. ⏳ For complex trips, generation may take 5 minutes or more. DO NOT CLOSE THIS TAB: this process is doing hours of research, selection and planning for you.',
-    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip, city by city and day by day. ⏳ For complex trips, generation may take 5 minutes or more. DO NOT CLOSE THIS TAB: ASTRA is doing hours of research, selection and planning for you.',
+    overlayDefault: '✨ ASTRA is building your itinerary — city by city, day by day. ⏳ Complex trips may take 5 minutes or more. KEEP THIS TAB OPEN while ASTRA researches, selects and optimizes your journey.',
+    overlayGenerating: '✨ ASTRA is building your itinerary — city by city, day by day. ⏳ Complex trips may take 5 minutes or more. KEEP THIS TAB OPEN while ASTRA researches, selects and optimizes your journey.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
