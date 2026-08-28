@@ -715,13 +715,13 @@ For stays of five or more days:
 - Do not schedule a macro-route plus its anchor experience on one day and then repeat that anchor
   or route as a separate day.
 - The arrival and final days must have different scopes and reserved anchors.
-- Aurora opportunities are NOT standalone strategic day buckets. When plausible, reserve them as conditional guidance for the final row/notes of an appropriate day, preferably an earlier suitable night with a backup opportunity when trip length permits.
+- Aurora opportunities are NOT standalone strategic day buckets. When plausible, require an additional aurora note in the FINAL row/notes of EVERY day in that city. This applies even when auroras were explicitly requested in Preferences; the preference must not consume a day or become a standalone row.
 - If the requested duration is longer than the premium inventory, a lighter day is preferable to
   repetition. Do not fabricate novelty.
 
 DATE, DAYLIGHT AND ANCHOR TIME
 - Use actual dates, latitude/season, daily windows, lodging/base and transport.
-- If the user did not provide an end time for a day, reserve a realistic plan that reaches at least approximately 19:00 local time when worthwhile content remains. Treat 19:00 as a minimum planning target, NOT a ceiling. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.
+- If the user did not provide an end time for a day, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, NOT a ceiling. Finishing materially earlier requires a real logistical/safety/daylight constraint, not mere convenience or rest. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not add filler merely to reach the clock. Any explicit user end time remains a hard boundary.
 - On Day 1, the traveler reaches the lodging and completes check-in or luggage drop BEFORE sightseeing. If arrival transport details were not provided, never invent an airport, flight, station or transfer origin.
 - Protect plausible useful daylight for landscape-dependent outdoor buckets.
 - Use darkness for transfers, indoor activities, meals, thermal experiences and optional night
@@ -784,7 +784,7 @@ day's scope or omit it. Never publish a misleadingly short visit.
 
 4. TIME MATHEMATICS AND TRANSFERS
 - Every row interval must contain transport plus activity.
-- If the user did not provide an end time, treat approximately 19:00 local time as the minimum planning target, not a ceiling; do not routinely finish earlier, and continue later when high-value evening experiences materially improve the itinerary. Respect any explicit user end time as a hard boundary.
+- If the user did not provide an end time, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, not a ceiling. Finishing materially earlier requires a real constraint; continue later when high-value evening experiences materially improve the itinerary. Respect any explicit user end time as a hard boundary.
 - On Day 1, lodging arrival/check-in or luggage drop occurs before sightseeing. If arrival origin/transport was not provided, do not invent airport, flight, station or transfer details.
 - On full days spanning lunch, include a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On regional/day-trip days, keep the meal on-route and preserve route continuity.
 - Minimum transport + minimum activity must fit between start and end.
@@ -824,10 +824,10 @@ day's scope or omit it. Never publish a misleadingly short visit.
 7. CONDITIONAL AURORA / NIGHT OPPORTUNITIES
 - Aurora content is forbidden outside plausible auroral latitude and season.
 - Do NOT create a standalone aurora activity row by default.
-- When plausible, place concise aurora guidance in the NOTES of the FINAL row of a suitable day.
-- Prefer an earlier suitable night and preserve at least one backup opportunity when trip length permits; avoid relying only on the final night.
+- When auroras are plausible for the city/date, place concise aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
+- Because the final-row note is present on EVERY plausible day, the traveler has multiple weather-dependent opportunities across the stay; do not select only one aurora night.
 - The note must give a plausible dark-hour window, explain the guided-tour option (and safe independent viewing only when appropriate), state that visibility is not guaranteed, and require checks for cloud cover, geomagnetic activity, road conditions and local safety.
-- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference through the FINAL-row note and guided-tour recommendation. The preference itself must NEVER create a standalone aurora row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
+- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference by adding the aurora guidance to the FINAL-row note of EVERY plausible day. The preference itself must NEVER create a standalone aurora row or reserve a whole day. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
 - Do not repeat an identical aurora note every night.
 
 8. QUALITY
@@ -1707,8 +1707,8 @@ FINAL SURGICAL REPAIR:
 - Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
-- Aurora, when plausible, should normally be a concise opportunity in the NOTES of the FINAL row of a suitable day, not a standalone row. Prefer an earlier suitable night with a backup opportunity when possible; an explicit aurora preference alone must remain in the final-row notes; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
-- If a day has no user-provided end, rebuild it to reach at least approximately 19:00 local when worthwhile content remains; 19:00 is a minimum target, not a ceiling, and the day may continue later for high-value evening experiences.
+- Aurora, when plausible, must be an ADDITIONAL opportunity note in the NOTES of the FINAL row of EVERY day in that city, not a standalone row. This applies even when auroras or an aurora tour were explicitly requested in Preferences. Each day should preserve a weather-dependent opportunity; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
+- If a day has no user-provided end, rebuild it so the final row normally reaches at least approximately 19:00 local. 19:00 is a minimum requirement, not a ceiling. Finishing materially earlier requires a real constraint; the day may continue later for high-value evening experiences.
 - Day 1 must reach the lodging/check in or drop luggage before sightseeing, without inventing unknown arrival transport.
 - Full days spanning lunch need a realistic meal break; day-trip meals remain on-route.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
@@ -1870,7 +1870,7 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
   • If there are multiple rows on a day, the first row MUST end before the next row starts.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
-- For every day with no user-provided end time, approximately 19:00 local is the minimum planning target, not a ceiling. Do not routinely finish earlier; continue later when worthwhile evening content materially improves the itinerary. Any explicit user end time remains a hard boundary.
+- For every day with no user-provided end time, approximately 19:00 local is the minimum planning REQUIREMENT, not a ceiling. The day should not finish materially earlier unless a genuine logistical, daylight, safety, arrival/departure or user-driven constraint requires it. Continue later when worthwhile evening content materially improves the itinerary. Any explicit user end time remains a hard boundary.
 - On the arrival day, reaching the lodging and completing check-in/luggage drop is the FIRST step before sightseeing. If arrival transport details are unknown, do not invent airport/flight/station/transfer information.
 - CRITICAL: absence of hours is NOT permission to create a short day, an almost empty day, or a generic free day.
 - If a day has no provided hours, you MUST still build a full, well-paced day with realistic expert timing.
@@ -2101,8 +2101,8 @@ AURORAS (GLOBAL CONDITIONAL-NOTE RULE):
 - FORBIDDEN unless latitude, season and darkness make them genuinely plausible.
 - Do NOT create a standalone aurora activity row by default.
 - When plausible, never guarantee visibility and do not displace a stronger daytime plan.
-- Put the aurora opportunity in the NOTES of the FINAL row of a suitable day, beginning only after a plausible dark hour.
-- Prefer an earlier suitable night and keep at least one backup opportunity when trip length permits; avoid relying only on the final night.
+- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, beginning only after a plausible dark hour.
+- Repeat the opportunity on EVERY plausible day so the traveler naturally has multiple weather-dependent backup opportunities across the stay.
 - Explain the paid guided-tour option and, only when appropriate, safe independent viewing.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
 - An explicit aurora preference alone must remain in the FINAL-row notes. Only if the user separately provides a genuinely confirmed aurora booking with a fixed time and explicitly asks to schedule that booking may it be represented as a row.
