@@ -156,8 +156,8 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO PROMEDIO ESTIMADO\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.\n✈️ Mientras ASTRA trabaja, sigue dando forma a tu viaje con los enlaces de abajo: vuelos, hospedaje, transporte y experiencias.',
-    overlayGenerating: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO PROMEDIO ESTIMADO\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.\n✈️ Mientras ASTRA trabaja, sigue dando forma a tu viaje con los enlaces de abajo: vuelos, hospedaje, transporte y experiencias.',
+    overlayDefault: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.\n✈️ Mientras ASTRA trabaja, sigue dando forma a tu viaje con los enlaces de abajo: vuelos, hospedaje, transporte y experiencias.',
+    overlayGenerating: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.\n✈️ Mientras ASTRA trabaja, sigue dando forma a tu viaje con los enlaces de abajo: vuelos, hospedaje, transporte y experiencias.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -234,8 +234,8 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ AVERAGE ESTIMATED TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.\n✈️ While ASTRA works, keep shaping your trip with the links below: flights, stays, transport and experiences.',
-    overlayGenerating: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ AVERAGE ESTIMATED TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.\n✈️ While ASTRA works, keep shaping your trip with the links below: flights, stays, transport and experiences.',
+    overlayDefault: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.\n✈️ While ASTRA works, keep shaping your trip with the links below: flights, stays, transport and experiences.',
+    overlayGenerating: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.\n✈️ While ASTRA works, keep shaping your trip with the links below: flights, stays, transport and experiences.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -3696,7 +3696,23 @@ Contexto:
 ================================= */
 function setOverlayMessage(msg=t('overlayDefault')){
   const p = $overlayWOW?.querySelector('p');
-  if(p) p.textContent = msg;
+  if(!p) return;
+
+  const isMainGenerationMessage =
+    msg === t('overlayDefault') ||
+    msg === t('overlayGenerating');
+
+  if(!isMainGenerationMessage){
+    p.classList.remove('astra-overlay-copy');
+    p.textContent = msg;
+    return;
+  }
+
+  const isEs = getLang() === 'es';
+  p.classList.add('astra-overlay-copy');
+  p.innerHTML = isEs
+    ? `<span class="astra-overlay-hero"><strong>✨ ASTRA está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ASTRA compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong> Mientras ASTRA trabaja, explora los enlaces de abajo para vuelos, hospedaje, transporte y experiencias.</span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ASTRA is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ASTRA compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong> While ASTRA works, explore the links below for flights, stays, transport and experiences.</span>`;
 }
 
 function showWOW(on, msg){
