@@ -6326,9 +6326,15 @@ function isMobileFileExperience(){
 
 async function deliverGeneratedFile(blob, filename){
   if(isMobileFileExperience()){
+    let webShareAllowed=true;
+    try{
+      const policy=document.permissionsPolicy || document.featurePolicy;
+      if(policy?.allowsFeature) webShareAllowed=policy.allowsFeature('web-share');
+    }catch(_){ }
+
     try{
       const file=new File([blob],filename,{type:blob.type || 'application/octet-stream'});
-      if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+      if(webShareAllowed && navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
         await navigator.share({files:[file],title:filename});
         return;
       }
@@ -6339,12 +6345,15 @@ async function deliverGeneratedFile(blob, filename){
     }
 
     const mobileUrl=URL.createObjectURL(blob);
-    const opened=window.open(mobileUrl,'_blank','noopener,noreferrer');
-    if(opened){
-      setTimeout(()=>URL.revokeObjectURL(mobileUrl),120000);
-      return;
-    }
-    URL.revokeObjectURL(mobileUrl);
+    const mobileLink=document.createElement('a');
+    mobileLink.href=mobileUrl;
+    mobileLink.target='_blank';
+    mobileLink.rel='noopener noreferrer';
+    document.body.appendChild(mobileLink);
+    mobileLink.click();
+    mobileLink.remove();
+    setTimeout(()=>URL.revokeObjectURL(mobileUrl),120000);
+    return;
   }
 
   const url = URL.createObjectURL(blob);
@@ -6687,7 +6696,7 @@ async function getPaymentReceiptData(){
   }catch(err){ console.warn('[RECEIPT STATUS]',err); return null; }
 }
 
-async function exportPaymentReceiptToPDF(){
+async function exportPaymentReceiptToPDF(preloadedPayment=null){
   const lang = _plannerOutputLang_();
 
   const copy = {
@@ -6808,7 +6817,7 @@ async function exportPaymentReceiptToPDF(){
     return false;
   }
 
-  const payment = await getPaymentReceiptData();
+  const payment = preloadedPayment || await getPaymentReceiptData();
   if(!payment){
     alert(c.noPayment);
     return false;
@@ -7005,25 +7014,53 @@ function showFinalDownloadModal(){
       ? (es?'Abre y comparte ahora tus documentos. Podrás enviarlos por correo, WhatsApp u otra aplicación, o guardarlos en tu dispositivo.':'Open and share your documents now. You can send them by email, WhatsApp or another app, or save them on your device.')
       : (es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.')}</p>
     <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
-    <button class="btn primary itbmo-download-all" type="button">${mobileFiles
-      ? (es?'Abrir / compartir documentos':'Open / share documents')
-      : (es?'Descargar mis documentos':'Download my documents')}</button>
+    ${mobileFiles ? `<div class="itbmo-mobile-file-actions" style="display:grid;gap:.65rem;width:100%;margin:.9rem 0">
+      <button class="btn primary itbmo-mobile-open-pdf" type="button">${es?'Abrir / compartir itinerario PDF':'Open / share itinerary PDF'}</button>
+      <button class="btn primary itbmo-mobile-open-csv" type="button">${es?'Abrir / compartir CSV':'Open / share CSV'}</button>
+      <button class="btn primary itbmo-mobile-open-receipt" type="button" disabled>${es?'Preparando comprobante…':'Preparing receipt…'}</button>
+    </div>` : `<button class="btn primary itbmo-download-all" type="button">${es?'Descargar mis documentos':'Download my documents'}</button>`}
     <div class="itbmo-download-status" aria-live="polite"></div>
     <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
     <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
-    <small>${es?'Si alguna descarga no aparece, usa los botones individuales que quedan disponibles debajo del itinerario.':'If any download does not appear, use the individual buttons available below the itinerary.'}</small>
+    <small>${mobileFiles
+      ? (es?'Cada botón abrirá el archivo o mostrará las opciones disponibles para compartirlo y guardarlo.':'Each button will open the file or show the available options to share and save it.')
+      : (es?'Si alguna descarga no aparece, usa los botones individuales que quedan disponibles debajo del itinerario.':'If any download does not appear, use the individual buttons available below the itinerary.')}</small>
   </div>`;
   document.body.appendChild(overlay); requestParentViewportFocus('download-ready',true); requestAnimationFrame(()=>overlay.classList.add('active'));
   const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
-  overlay.querySelector('.itbmo-download-all').addEventListener('click',async()=>{
-    if(mobileFiles){
-      status.textContent=es
-        ? 'Usa los botones individuales debajo del itinerario para abrir o compartir cada archivo. El teléfono mostrará sus opciones disponibles.'
-        : 'Use the individual buttons below the itinerary to open or share each file. Your phone will show its available options.';
-      return;
-    }
+  if(mobileFiles){
+    const pdfButton=overlay.querySelector('.itbmo-mobile-open-pdf');
+    const csvButton=overlay.querySelector('.itbmo-mobile-open-csv');
+    const receiptButton=overlay.querySelector('.itbmo-mobile-open-receipt');
+    let preparedReceipt=null;
+
+    getPaymentReceiptData().then(payment=>{
+      preparedReceipt=payment;
+      if(receiptButton){
+        receiptButton.disabled=!payment;
+        receiptButton.textContent=payment
+          ? (es?'Abrir / compartir comprobante PDF':'Open / share receipt PDF')
+          : (es?'Comprobante no disponible':'Receipt unavailable');
+      }
+    });
+
+    pdfButton?.addEventListener('click',async()=>{
+      await exportItineraryToPDF();
+      status.textContent=es ? '✓ Itinerario PDF preparado.' : '✓ Itinerary PDF prepared.';
+    });
+    csvButton?.addEventListener('click',async()=>{
+      await exportItineraryToCSV();
+      status.textContent=es ? '✓ CSV preparado.' : '✓ CSV prepared.';
+    });
+    receiptButton?.addEventListener('click',async()=>{
+      if(!preparedReceipt) return;
+      await exportPaymentReceiptToPDF(preparedReceipt);
+      status.textContent=es ? '✓ Comprobante PDF preparado.' : '✓ Receipt PDF prepared.';
+    });
+  }else{
+    overlay.querySelector('.itbmo-download-all')?.addEventListener('click',async()=>{
     /*
       Mantener las tres descargas dentro de la interacción directa del usuario.
       Algunos navegadores bloquean descargas automáticas posteriores cuando se
@@ -7035,7 +7072,8 @@ function showFinalDownloadModal(){
     status.textContent=es
       ? '✓ Se iniciaron 3 descargas: itinerario PDF, CSV y comprobante PDF. Revisa tu carpeta de Descargas. Si falta alguna, usa los botones individuales.'
       : '✓ Three downloads were started: itinerary PDF, CSV and payment receipt PDF. Check your Downloads folder. If one is missing, use the individual buttons.';
-  });
+    });
+  }
 }
 
 function bindExportListeners(){
