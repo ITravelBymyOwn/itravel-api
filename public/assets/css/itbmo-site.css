@@ -2904,3 +2904,116 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
   .astra-starting-point p{font-size:.65rem}
 }
 
+/* =========================================================
+   V5.5 · HOW STEP 03 · PREMIUM PRICE CARD
+   Surgical: only replaces the compact price line inside the
+   "Guarda y paga solo al iniciar" card.
+   ========================================================= */
+
+.how-card__price-card{
+  position:relative;
+  width:min(100%,330px);
+  margin-top:.9rem;
+  padding:.78rem .86rem .74rem;
+  overflow:hidden;
+  border-radius:18px;
+  background:
+    radial-gradient(180px 90px at 0% 0%,rgba(53,191,209,.14),transparent 74%),
+    linear-gradient(145deg,rgba(255,255,255,.95),rgba(239,250,249,.88));
+  border:1px solid rgba(24,127,143,.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 12px 28px rgba(16,90,108,.07);
+}
+
+.how-card__price-card::after{
+  content:"";
+  position:absolute;
+  width:110px;
+  height:110px;
+  right:-62px;
+  bottom:-70px;
+  border-radius:999px;
+  background:rgba(53,191,209,.08);
+  pointer-events:none;
+}
+
+.how-card__price-card-top{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.55rem;
+  margin-bottom:.28rem;
+}
+
+.how-card__price-label{
+  color:#4b7183;
+  font-size:.62rem;
+  font-weight:850;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+}
+
+.how-card__price-save{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:24px;
+  padding:.22rem .48rem;
+  border-radius:999px;
+  color:#7a5708;
+  background:linear-gradient(180deg,#fff4c9,#ffe49a);
+  border:1px solid rgba(215,154,22,.22);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72);
+  font-size:.58rem;
+  font-weight:950;
+  letter-spacing:.035em;
+  white-space:nowrap;
+}
+
+.how-card__price-main{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:flex-end;
+  min-height:44px;
+}
+
+.how-card__price-main strong{
+  color:var(--ink);
+  font-size:2rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.055em;
+}
+
+.how-card__price-meta{
+  position:relative;
+  z-index:1;
+  margin-top:.28rem;
+  color:#4f7383;
+  font-size:.66rem;
+  font-weight:760;
+  letter-spacing:-.01em;
+}
+
+/* Old compact price line remains available elsewhere, but not used in Step 03. */
+
+@media(max-width:680px){
+  .how-card__price-card{
+    width:100%;
+    padding:.72rem .78rem .7rem;
+    border-radius:16px;
+  }
+
+  .how-card__price-main strong{
+    font-size:1.8rem;
+  }
+
+  .how-card__price-meta{
+    font-size:.64rem;
+  }
+}
+
