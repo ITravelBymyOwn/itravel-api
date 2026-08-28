@@ -3033,12 +3033,11 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
 
 .how-card__price-old{
   color:#83919b;
-  font-size:.68rem;
+  font-size:.8rem;
   line-height:1;
   font-weight:760;
   letter-spacing:-.01em;
   text-decoration-line:line-through;
-  text-decoration-thickness:1.5px;
-  text-decoration-color:rgba(79,93,103,.72);
+  text-decoration-thickness:1px;
+  text-decoration-color:rgba(79,93,103,.62);
 }
-
