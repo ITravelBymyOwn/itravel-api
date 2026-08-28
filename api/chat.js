@@ -1,4 +1,4 @@
-// /api/chat.js — v65.2 (MVP WOW: quality-sync with parallel Planner; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.1 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -748,8 +748,6 @@ Apply these rules only when producing actual itinerary rows.
   neighborhoods, macro-routes and experience types distinct.
 - One coherent macro-route may appear on only one day. One major anchor may appear on only one day.
 - If the theme is intentionally light, keep it light. Never recycle earlier icons to make it look full.
-- Every reserved Anchor named in the supplied day theme must appear in an actual row's activity or To field unless it is genuinely infeasible; never silently skip a reserved anchor and then jump to a return row.
-- A row may not begin from an attraction/corridor that never appeared in a previous row. If the itinerary reaches Passeig de Gràcia, a harbor, a trailhead, a station, etc., the route must explicitly show how it got there.
 
 2. DATE, SEASON AND USEFUL DAYLIGHT
 - The actual date and destination latitude are hard planning inputs.
@@ -786,10 +784,6 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - Include parking, walking from parking, check-in, security, boarding, changing or pickup time when
   operationally necessary.
 - No overlaps, teleporting or unexplained giant gaps.
-- A gap of roughly 3 hours or more between itinerary rows is NEVER acceptable unless it is an explicit, user-meaningful rest/free block shown as a row or is forced by a real reservation/transport constraint.
-- Do not hide missing attractions inside a large blank interval.
-- If the user did not provide an end time, do not terminate a normal full day early merely to return to the lodging. Continue with worthwhile evening content when the destination, traveler profile and pacing justify it.
-- Use evening/night hours selectively for high-value dining, atmospheric districts, shows, viewpoints, night markets, nightlife, cultural experiences or seasonal night activities. Do not force nightlife every night, but do not systematically stop all days at 15:00–17:00 when valuable safe evening options exist.
 - Every regional/day-trip day must end with an explicit return to the lodging/base unless the user
   sleeps elsewhere.
 - Estimate long returns conservatively from the actual final stop to the actual lodging/base.
@@ -822,15 +816,10 @@ day's scope or omit it. Never publish a misleadingly short visit.
 
 7. CONDITIONAL AURORA / NIGHT OPPORTUNITIES
 - Aurora content is forbidden outside plausible auroral latitude and season.
-- If the user did NOT explicitly request a fixed aurora outing, treat aurora as conditional guidance and do not promise sightings.
-- If the user DID explicitly request an aurora/northern-lights tour, treat it as a protected real reservation anchor:
-  • schedule it on an earlier suitable night when feasible, preferably not the final night;
-  • normally reserve at least 4 hours door-to-door for the outing, often longer depending on operator/logistics;
-  • never compress the actual tour into a 60–90 minute placeholder;
-  • the tour must be part of a LIGHT BUT REAL day — do not let preparation, coffee, equipment checks or briefing replace the whole morning/afternoon;
-  • keep earlier activities geographically sensible and moderate so the traveler can eat, prepare and handle a late return.
-- When no fixed tour was requested, add concise guidance to 1–3 suitable evening/end-of-day notes beginning only after a plausible dark hour.
-- Explain that the traveler may either use a safe independent option when appropriate or book a paid guided tour.
+- When plausible, do not promise sightings and do not force a rigid main activity row.
+- Add a concise note to 1–3 suitable evening/end-of-day rows, beginning only after a plausible dark hour.
+- Explain that the traveler may either drive independently to a safe dark area when roads/weather
+  permit or book a paid guided tour.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
 - Do not repeat an identical aurora note every night.
 
@@ -838,9 +827,8 @@ day's scope or omit it. Never publish a misleadingly short visit.
 - Use one selected language for all user-facing values.
 - Preserve official proper names but translate generic instructions.
 - Remove debug, placeholder and internal-planning wording.
-- Silently audit the requested block for scope fidelity, reserved-anchor coverage, duplicates, daylight, duration mathematics,
-  transfers, continuity, unexplained gaps, full-day utilization, evening opportunities, returns and language before returning JSON.
-- A normal day with a usable window of roughly 6+ hours should normally contain at least 4 useful rows unless a long atomic experience, genuine arrival/departure constraint, user-requested rest or other real constraint justifies fewer.
+- Silently audit the requested block for scope fidelity, duplicates, daylight, duration mathematics,
+  transfers, continuity, returns and language before returning JSON.
 `.trim();
 
 function buildStagePrompt(basePrompt, stage) {
@@ -1054,8 +1042,7 @@ async function _v64RepairMasterPlanOnce_(
   report,
   effectivePrompt,
   clientMessages,
-  expectedDays,
-  usageCollector = null
+  expectedDays
 ) {
   if (!parsed || report.ok) return null;
 
@@ -1086,8 +1073,7 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     6000,
-    85000,
-    usageCollector
+    85000
   );
 
   const repaired = cleanToJSON(raw);
@@ -1331,13 +1317,6 @@ function _v64ExperienceProfile_(row = {}) {
     `${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`
   );
 
-  if (
-    /\b(aurora|northern lights|luces del norte|aurore boreale|nordlicht)\b/.test(text) &&
-    /\b(tour|guided|guiado|chase|hunt|caceria|cacería|excursion|excursion guiada|excursión|excursión guiada)\b/.test(text)
-  ) {
-    return { type: "guided_aurora_tour", minimumActivityMinutes: 180 };
-  }
-
   if (/\bblue lagoon\b|\bbl[aá]a l[oó]ni[dð]\b/.test(text)) {
     return { type: "iconic_thermal_lagoon", minimumActivityMinutes: 180 };
   }
@@ -1513,22 +1492,11 @@ function _v62ValidateFinal_(parsed, options = {}) {
     const rows = Array.isArray(block?.rows) ? block.rows : [];
     let previousEnd = null;
     let previousTo = "";
-    let firstValidStart = null;
-    let lastValidEnd = null;
-    let hasLongAnchor = false;
 
     rows.forEach((row, index) => {
       const rowNumber = index + 1;
       const start = _v62ParseTime_(row?.start);
-      const rawEnd = _v62ParseTime_(row?.end);
-      const rowText = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""} ${row?.notes || ""}`);
-      const overnightEligible =
-        start != null &&
-        rawEnd != null &&
-        start >= (17 * 60) &&
-        rawEnd <= (6 * 60) &&
-        /\b(aurora|northern lights|night tour|nightlife|late show|concert|luces del norte|noche|nocturn)\b/.test(rowText);
-      const end = rawEnd != null && overnightEligible ? rawEnd + 1440 : rawEnd;
+      const end = _v62ParseTime_(row?.end);
 
       if (start == null || end == null || start >= end) {
         errors.push({ code: "INVALID_TIME", day, row: rowNumber });
@@ -1537,21 +1505,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
       if (previousEnd != null && start != null && start < previousEnd) {
         errors.push({ code: "TIME_OVERLAP", day, row: rowNumber });
       }
-
-      if (previousEnd != null && start != null) {
-        const gap = start - previousEnd;
-        if (gap >= 180) {
-          errors.push({
-            code: "UNEXPLAINED_LARGE_GAP",
-            day,
-            row: rowNumber,
-            gap_minutes: gap,
-          });
-        }
-      }
-
-      if (start != null && firstValidStart == null) firstValidStart = start;
-      if (end != null) lastValidEnd = end;
 
       const transport = _v62DurationBounds_(
         _v62ExtractDurationPart_(row?.duration, ["Transport", "Transporte"])
@@ -1582,10 +1535,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
         }
 
         const profile = _v64ExperienceProfile_(row);
-        if (profile.minimumActivityMinutes >= 150 || available >= 210) {
-          hasLongAnchor = true;
-        }
-
         if (
           profile.minimumActivityMinutes > 0 &&
           activity.min < profile.minimumActivityMinutes
@@ -1679,22 +1628,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
       previousEnd = end;
       previousTo = row?.to || "";
     });
-
-    const daySpan =
-      firstValidStart != null && lastValidEnd != null
-        ? lastValidEnd - firstValidStart
-        : 0;
-
-    if (rows.length <= 2 && daySpan >= 300 && !hasLongAnchor) {
-      errors.push({
-        code: "SPARSE_FULL_DAY",
-        day,
-        row_count: rows.length,
-        span_minutes: daySpan,
-        instruction:
-          "Rebuild this as a meaningful full day using the reserved day scope; do not leave a multi-hour day with only one attraction plus a return row.",
-      });
-    }
   }
 
   const entries = [...poiMap.entries()];
@@ -1746,8 +1679,7 @@ async function _v62RepairFinalOnce_(
   parsed,
   report,
   effectivePrompt,
-  clientMessages,
-  usageCollector = null
+  clientMessages
 ) {
   if (!ITBMO_FINAL_REPAIR_ENABLED || report.ok) return null;
 
@@ -1766,15 +1698,6 @@ FINAL SURGICAL REPAIR:
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
 - Aurora, when plausible, should normally be a concise note with independent-drive and paid-tour options, not a forced fixed row unless explicitly requested.
-- If a fixed aurora/northern-lights tour was explicitly requested:
-  • preserve it as a real long anchor (normally at least 4 hours door-to-door);
-  • move it off the final night when an earlier suitable night exists, unless the user explicitly chose the final night;
-  • build a light but meaningful daytime before it — never replace the day with preparation, coffee, battery checks or briefing.
-- Eliminate unexplained multi-hour gaps. If a day has a large blank interval, either schedule coherent reserved anchors there or show a genuine explicit rest/free block only when justified.
-- Restore every reserved Master Plan anchor that was silently omitted from the actual rows.
-- Never start a return row from a place that the itinerary never visited.
-- If only a start time is provided, do not end the day prematurely. If only an end time is provided, do not start the day late without a real reason.
-- Use worthwhile evening content selectively when no hard end prevents it; do not systematically end normal city days in mid-afternoon.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
 - Remove rental-car wording from hotel/from/to fields.
 - Use walking in compact urban clusters when practical.
@@ -1793,8 +1716,7 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     9000,
-    85000,
-    usageCollector
+    85000
   );
 
   const repaired = cleanToJSON(raw);
@@ -1876,17 +1798,6 @@ MASTER DAY PLAN RULES (CRITICAL — INTERNAL ONLY):
 - Days 5+ must NOT repeat the identity, rhythm, corridor, or experience type of earlier days.
 - If two days would both be classified as weak "urban culture", replace one of them with the strongest remaining unused bucket.
 - If the final itinerary would contain repeated day shapes, rebuild the affected day internally before returning JSON.
-- NIGHT-ANCHOR COMPOSITION (CRITICAL):
-  • A requested evening/night experience (aurora, night tour, concert, show, special dinner, etc.) must normally be EMBEDDED into a real day, not consume the whole day by itself.
-  • When the night anchor starts late, reserve a LIGHT but meaningful daytime program before it: 2–4 worthwhile daytime activities/meal/rest blocks as geography and traveler profile allow.
-  • Preparation, changing clothes, coffee, battery charging, briefing and pickup logistics are SUPPORTING logistics, not substitutes for sightseeing or meaningful daytime content.
-  • If the user explicitly requests an aurora/northern-lights tour, reserve it on an earlier suitable night when feasible, not the final night, so another night remains available for weather/cancellation contingency.
-  • Do not reserve the final night for aurora unless the user explicitly requests that night or no earlier feasible night exists.
-- FULL-DAY UTILIZATION (CRITICAL):
-  • Missing start/end hours are flexibility, not permission for a short or half-empty day.
-  • If the user gives only a start time, continue the day with expert pacing into the appropriate afternoon/evening when valuable content remains.
-  • If the user gives only an end time, choose a normal expert morning start unless late-night recovery, arrival/departure or another real constraint justifies a later start.
-  • A provided end time is a latest boundary, not a reason to stop 3–5 hours early when strong feasible content remains.
 
 BUCKET EXHAUSTION RULE (CRITICAL — INTERNAL ONLY):
 - Before using a weak urban filler bucket, verify that stronger unused buckets are not available.
@@ -1947,10 +1858,6 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
 - CRITICAL: absence of hours is NOT permission to create a short day, an almost empty day, or a generic free day.
 - If a day has no provided hours, you MUST still build a full, well-paced day with realistic expert timing.
-- If only a start time is provided, that is the earliest allowed start, NOT a signal to end early.
-- If only an end time is provided, that is the latest allowed finish, NOT a signal to start late.
-- When no hard end exists, use an appropriate portion of the evening when it adds real value; do not routinely return to lodging at 15:00–17:00 if strong safe activities remain.
-- When a hard final end exists, use the available window intelligently; do not finish many hours before it unless pacing, safety, daylight, late-night recovery or departure logistics justify doing so.
 
 CONTEXT USAGE (CRITICAL):
 - You must use ALL information provided by the user in the Planner tab.
@@ -2038,9 +1945,6 @@ GENERAL RULES:
 ANTI-EMPTY DAYS:
 - If a day has a normal daytime window (>=6h) and no strict limitations, provide at least 4–15 rows (not 1–2).
 - If a night-only item exists (e.g., aurora), do NOT make it the only row unless the user explicitly made that day night-only.
-- A requested night anchor must not erase the daytime itinerary. Build a lighter daytime around it unless the user explicitly requested a night-only/rest day.
-- Preparation, hotel changing time, coffee, equipment checks and briefing may be included as concise support logistics when truly useful, but must never be used to fake a full tourism day.
-- If a day has fewer than 3 meaningful rows while 5+ hours of usable time remain, rebuild it with coherent unused anchors from that day's reserved scope before returning JSON.
 - For multi-day itineraries, you MUST distribute meaningful rows across ALL days.
 - A day is NOT valid if it only contains a trivial placeholder like "free day", "last moments", or one single short stop, unless the user explicitly requested a light/rest day or the available time window is genuinely short.
 - If the itinerary still has unscheduled key highlights and a day remains weak, you MUST use that day to place coherent remaining highlights.
@@ -2340,48 +2244,9 @@ FORMAT:
 `.trim();
 
 // ==============================
-// Exact OpenAI usage aggregation (request-scoped)
-// Keeps the external {text} contract and only adds optional usage metadata.
-// ==============================
-function _newUsageCollector_() {
-  return {
-    model: MODEL,
-    model_calls: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    total_tokens: 0,
-  };
-}
-
-function _accumulateUsage_(collector, resp) {
-  if (!collector || !resp) return;
-  const usage = resp?.usage || {};
-  const input = Number(usage?.input_tokens || 0) || 0;
-  const output = Number(usage?.output_tokens || 0) || 0;
-  const total = Number(usage?.total_tokens || (input + output)) || (input + output);
-
-  collector.model = String(resp?.model || collector.model || MODEL);
-  collector.model_calls += 1;
-  collector.input_tokens += input;
-  collector.output_tokens += output;
-  collector.total_tokens += total;
-}
-
-function _usagePayload_(collector) {
-  if (!collector) return null;
-  return {
-    model: String(collector.model || MODEL),
-    model_calls: Number(collector.model_calls || 0),
-    input_tokens: Number(collector.input_tokens || 0),
-    output_tokens: Number(collector.output_tokens || 0),
-    total_tokens: Number(collector.total_tokens || 0),
-  };
-}
-
-// ==============================
 // Model call (with soft timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null) {
+async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
 
   const controller = new AbortController();
@@ -2400,8 +2265,6 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   { signal: controller.signal }
 );
 
-    _accumulateUsage_(usageCollector, resp);
-
     const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 
     console.log("🛰️ RAW RESPONSE:", text);
@@ -2414,23 +2277,6 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   }
 }
 
-
-function _v65CriticalIssueCount_(report = {}) {
-  const critical = new Set([
-    "INVALID_TIME",
-    "TIME_OVERLAP",
-    "DURATION_DOES_NOT_FIT",
-    "CONTINUITY",
-    "UNEXPLAINED_LARGE_GAP",
-    "SPARSE_FULL_DAY",
-    "ANCHOR_DWELL_TOO_SHORT",
-    "BASE_NOT_RESPECTED",
-    "TRANSPORT_NOT_RESPECTED",
-  ]);
-  return (Array.isArray(report?.errors) ? report.errors : [])
-    .filter((error) => critical.has(String(error?.code || "")))
-    .length;
-}
 
 // ==============================
 // Correct ESM export — v62 stage-aware, backward compatible
@@ -2445,7 +2291,6 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const plannerUsage = mode === "planner" ? _newUsageCollector_() : null;
 
     // INFO mode: server-side entitlement + semantic scope + thematic per-trip quota.
     if (mode === "info") {
@@ -2568,10 +2413,7 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
       }
     }
 
-    const requestedStage = String(body?.planner_stage || "").trim().toLowerCase();
-    const stage = ["master_plan","itinerary","one_shot"].includes(requestedStage)
-      ? requestedStage
-      : detectPlannerStage(clientMessages);
+    const stage = detectPlannerStage(clientMessages);
     console.log("🧭 ITBMO PLANNER STAGE:", stage);
 
     const override = detectLanguageOverride(clientMessages);
@@ -2593,8 +2435,7 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
       [{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages],
       stage === "master_plan" ? 0.2 : 0.24,
       primaryTokens,
-      primaryTimeout,
-      plannerUsage
+      primaryTimeout
     );
 
     let parsed = cleanToJSON(raw);
@@ -2633,8 +2474,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         [{ role: "system", content: strictPrompt }, ...clientMessages],
         stage === "master_plan" ? 0.14 : 0.16,
         stage === "master_plan" ? 5500 : 10500,
-        stage === "master_plan" ? 85000 : 115000,
-        plannerUsage
+        stage === "master_plan" ? 85000 : 115000
       );
       parsed = cleanToJSON(raw);
     }
@@ -2665,8 +2505,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
               masterReport,
               SYSTEM_PROMPT_EFFECTIVE,
               clientMessages,
-              expectedDays,
-              plannerUsage
+              expectedDays
             );
 
             if (repairedMaster) {
@@ -2691,21 +2530,17 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         }
       }
 
-      return res.status(200).json({
-        text: JSON.stringify(parsed),
-        usage: _usagePayload_(plannerUsage)
-      });
+      return res.status(200).json({ text: JSON.stringify(parsed) });
     }
 
     // Final itinerary/one-shot normalization.
     if (!parsed) parsed = fallbackJSON(lang);
     parsed = _v65NormalizeEverySchema_(parsed);
 
-    // Deterministic audit runs on every renderable itinerary schema.
-    // IMPORTANT: the staged Planner block calls use {"rows":[...]}, not only city_day.
+    // Deterministic audit runs only on actual city_day output.
     // One bounded surgical repair is allowed; if it fails, the valid original draft is retained
     // so the planner workflow is never broken by the quality layer.
-    if (_v65GetItineraryBlocks_(parsed).length) {
+    if (Array.isArray(parsed?.city_day) && parsed.city_day.length) {
       const report = _v62ValidateFinal_(parsed, { messages: clientMessages });
 
       if (!report.ok) {
@@ -2719,20 +2554,12 @@ MANDATORY FINAL-ITINERARY RECOVERY:
             parsed,
             report,
             SYSTEM_PROMPT_EFFECTIVE,
-            clientMessages,
-            plannerUsage
+            clientMessages
           );
 
           if (repaired) {
             const repairedReport = _v62ValidateFinal_(repaired, { messages: clientMessages });
-            const repairedCritical = _v65CriticalIssueCount_(repairedReport);
-            if (
-              repairedReport.ok ||
-              (
-                repairedCritical === 0 &&
-                repairedReport.errors.length <= Math.max(0, Math.floor(report.errors.length * 0.35))
-              )
-            ) {
+            if (repairedReport.ok || repairedReport.errors.length <= Math.max(0, Math.floor(report.errors.length * 0.35))) {
               parsed = repaired;
             }
           }
@@ -2762,10 +2589,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       }
     } catch {}
 
-    return res.status(200).json({
-      text: JSON.stringify(parsed),
-      usage: _usagePayload_(plannerUsage)
-    });
+    return res.status(200).json({ text: JSON.stringify(parsed) });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
