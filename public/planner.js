@@ -72,6 +72,7 @@ let agentConversationLang = null;
 /* ---------- Defaults técnicos (NO rígidos) ---------- */
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
+const MAX_ITINERARY_CITIES = 3;
 
 let plannerState = {
   destinations: [],
@@ -155,8 +156,8 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario ciudad por ciudad y día por día. El tiempo depende del número de ciudades, días y la complejidad del viaje y puede tomar varios minutos. No cierres esta pestaña: este es el trabajo que te ahorra horas de investigación y planificación.',
-    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo. El tiempo depende del número de ciudades, días y la complejidad del itinerario. Puede tomar varios minutos. No cierres esta pestaña: ASTRA está haciendo por ti horas de investigación y planificación.',
+    overlayDefault: '✨ ASTRA está investigando, organizando y optimizando tu itinerario — ciudad por ciudad, día por día.\n⏳ Tiempo estimado promedio: 1 ciudad 4–5 min · 2 ciudades 8–10 min · 3 ciudades 12–15 min.\nASTRA está comparando rutas, tiempos, traslados, prioridades, tus preferencias y la coherencia completa del viaje para ahorrarte horas de investigación. MANTÉN ESTA PESTAÑA ABIERTA. Mientras ASTRA trabaja, puedes usar los enlaces de abajo para seguir dando forma a tu viaje: vuelos, alojamiento, transporte y experiencias.',
+    overlayGenerating: '✨ ASTRA está construyendo y optimizando tu viaje completo — ciudad por ciudad, día por día.\n⏳ Tiempo estimado promedio: 1 ciudad 4–5 min · 2 ciudades 8–10 min · 3 ciudades 12–15 min.\nNo es una lista automática: ASTRA compara rutas, tiempos, traslados, prioridades, tus preferencias y la coherencia del itinerario para ahorrarte horas de investigación. MANTÉN ESTA PESTAÑA ABIERTA. Mientras genera, puedes explorar los enlaces de abajo para seguir dando forma a tu viaje.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -233,8 +234,8 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary city by city and day by day. Generation time depends on the number of cities, days and trip complexity and may take several minutes. Don’t close this tab: this is the work designed to save you hours of research and planning.',
-    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip. Generation time depends on the number of cities, days and itinerary complexity. It may take several minutes. Don’t close this tab: ASTRA is doing hours of research and planning for you.',
+    overlayDefault: '✨ ASTRA is researching, organizing and optimizing your itinerary — city by city, day by day.\n⏳ Average estimated generation time: 1 city 4–5 min · 2 cities 8–10 min · 3 cities 12–15 min.\nASTRA is comparing routes, timing, transfers, priorities, your preferences and full-trip coherence to save you hours of research. KEEP THIS TAB OPEN. While ASTRA works, use the links below to keep shaping your trip: flights, stays, transport and experiences.',
+    overlayGenerating: '✨ ASTRA is building and optimizing your complete trip — city by city, day by day.\n⏳ Average estimated generation time: 1 city 4–5 min · 2 cities 8–10 min · 3 cities 12–15 min.\nThis is not an automatic list: ASTRA compares routes, timing, transfers, priorities, your preferences and itinerary coherence to save you hours of research. KEEP THIS TAB OPEN. While it generates, explore the links below to keep shaping your trip.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -1437,9 +1438,31 @@ function makeHoursBlock(days){
   return wrap;
 }
 
+function updateAddCityButtonState(){
+  if(!$addCity || !$cityList) return;
+  const count=qsa('.city-row',$cityList).length;
+  const atLimit=count>=MAX_ITINERARY_CITIES;
+  $addCity.disabled=atLimit;
+  $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
+  $addCity.title=atLimit
+    ? (getLang()==='es' ? 'Máximo 3 ciudades por generación.' : 'Maximum 3 cities per generation.')
+    : '';
+}
+
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   if(!$cityList){
     console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
+    return;
+  }
+
+  const currentCount=qsa('.city-row',$cityList).length;
+  if(currentCount>=MAX_ITINERARY_CITIES){
+    updateAddCityButtonState();
+    if(pref?.city){
+      alert(getLang()==='es'
+        ? 'Puedes incluir un máximo de 3 ciudades por generación.'
+        : 'You can include a maximum of 3 cities per generation.');
+    }
     return;
   }
 
@@ -1485,8 +1508,12 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     }
   });
 
-  qs('.remove',row).addEventListener('click', ()=> row.remove());
+  qs('.remove',row).addEventListener('click', ()=>{
+    row.remove();
+    updateAddCityButtonState();
+  });
   $cityList.appendChild(row);
+  updateAddCityButtonState();
 }
 
 
@@ -1741,6 +1768,13 @@ async function saveDestinations(){
   writeLegacyTravelerCounts(travelerState.counts);
 
   const rows = qsa('.city-row', $cityList);
+  if(rows.length>MAX_ITINERARY_CITIES){
+    alert(getLang()==='es'
+      ? 'Puedes incluir un máximo de 3 ciudades por generación.'
+      : 'You can include a maximum of 3 cities per generation.');
+    updateAddCityButtonState();
+    return;
+  }
   const list = [];
 
   rows.forEach(r=>{
@@ -2481,6 +2515,8 @@ Mandatory rules:
 - Major destination spas and thermal complexes normally require at least 3 hours of activity time, excluding the incoming road transfer. Small local baths may be shorter only when clearly identified as such. Large museums normally require at least 90 minutes unless the row explicitly states a selective highlights-only visit.
 - Detect semantic duplicate experiences, not only matching names. Merge or remove aliases, sub-area labels and repeated experiences that deliver essentially the same visit.
 - Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
+- If an end time is blank, plan the day to reach at least approximately 19:00 local time when worthwhile content remains. Treat 19:00 as a minimum planning target, not a ceiling. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.
+- On Day 1, the traveler reaches the lodging/checks in or drops luggage BEFORE sightseeing. The first sightseeing row must begin after that lodging step. Never invent an airport, flight or transfer origin if the user did not provide one.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
 - Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
 - Treat preferences and restrictions as binding planning constraints, not merely note content. Translate them into concrete scheduling, routing, meal and activity decisions.
@@ -2509,15 +2545,19 @@ Duration:
 - The interval from start to end must contain both transport and activity.
 
 Meals:
-- Meals are optional.
-- When included, choose a concrete place or a clearly defined food district.
+- Respect realistic local meal timing. On a full day that spans the local lunch period, include a real lunch/meal break unless the user explicitly prefers otherwise or a long fixed experience makes a different arrangement necessary.
+- As a fallback when local customs are uncertain, place lunch roughly within 12:00–15:00; adapt to the destination's normal dining culture.
+- When included, choose a concrete place or a clearly defined food district and give enough time to eat comfortably.
 - Do not repeat the same named restaurant on another day.
+- Dinner is optional; include it when it genuinely improves the itinerary, especially when the day naturally extends beyond 19:00 for worthwhile evening content.
 
 Aurora:
-- Include aurora only when plausible by latitude and season.
-- Treat it as a conditional opportunity in notes unless the user explicitly requested a fixed outing.
+- Include aurora only when plausible by latitude, season and darkness.
+- Do NOT create a standalone aurora activity row by default.
+- Put aurora guidance in the NOTES of the FINAL row of a suitable day, with a realistic dark-hour window, a guided-tour option, weather/cloud/geomagnetic/road checks and a clear statement that visibility is not guaranteed.
+- Prefer an earlier suitable night and preserve at least one backup opportunity when the stay length allows; avoid using only the final night.
+- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference through the final-row NOTE and guided-tour recommendation. Do not convert the preference itself into a standalone row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
 - Avoid identical notes on consecutive nights.
-- State that visibility is not guaranteed and that cloud cover, geomagnetic activity and road conditions must be checked.
 
 Intelligent day-trip selection:
 - Evaluate the complete trip before assigning days. Compare the marginal value of secondary city activities against nearby excursions using total trip length, the number of days required for the core city, relative tourism value, transfer time, season, traveler fit and route coherence.
@@ -2590,19 +2630,21 @@ Itinerary rules (aligned with API v52.5):
 - duration must be 2 lines with \\n:
   "Transport: ...\\nActivity: ..."
   (no 0m, and do not use commas to separate).
-- Meals: not mandatory; if included, not generic.
+- Meals: use realistic local meal timing. A full day spanning lunch should normally include a concrete lunch/meal break; if local customs are uncertain, use roughly 12:00–15:00 as a fallback. Dinner is optional; include it when the itinerary naturally extends into the evening and it adds real value.
 - Intelligent day trips: evaluate the entire stay and decide whether a nearby excursion has greater tourism value than remaining secondary city activities. Consider total trip length, core-city coverage, relative quality, transfer time, season, traveler fit and logistical coherence. Substitute only lower-priority filler, never core unmet highlights. This rule is global and destination-agnostic.
 - Lodging base: when hotel, Airbnb, address, coordinates or area are provided, use them as the primary geographic anchor; minimize transfers and start/end there whenever sensible.
 - Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
-- Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial.
+- Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial. If an end time is blank, treat about 19:00 local as a minimum target, not a ceiling; do not routinely finish earlier, and continue later when high-value evening content materially improves the day. Day 1 reaches lodging/check-in or luggage drop before sightseeing.
 - Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
 - Macro-tours/day trips: first evaluate a broad candidate pool, then curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final localized return row to the base. On a full-day scenic route, normally aim for roughly 4–8 meaningful visit stops when daylight, safety and the user window allow; this is a flexible quality range, never a quota. Do not compress anchor experiences or add filler. Avoid the final day when stronger scheduling alternatives exist.
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
 
 Auroras (only if plausible by latitude/season):
-- Avoid consecutive nights if possible. Avoid last day; if only possible there, mark conditional.
-- Must be nighttime local.
-- Notes include: "valid:" + clouds/weather + low-cost nearby alternative.
+- Do NOT create a standalone aurora row by default.
+- Put the aurora opportunity in the NOTES of the FINAL row of a suitable day.
+- Prefer an earlier suitable night and preserve a backup opportunity when trip length permits; avoid relying only on the final night.
+- The note must include a realistic dark-hour window, guided-tour option, cloud/weather/geomagnetic/road checks and no-visibility guarantee.
+- If the user explicitly provides a confirmed aurora booking/time and asks to schedule it, that confirmed fixed booking may be represented as a row.
 
 Safety:
 - Don't propose activities in areas with relevant risks, impossible hours, or obvious restrictions.
@@ -4158,9 +4200,11 @@ function _preferenceConstraintPolicy_(){
 
 function _globalTimeWindowPolicy_(totalDays, perDay=[]){
   return {
-    first_day:'Any provided start time is a hard boundary.',
+    first_day:'Any provided start time is a hard boundary. Before sightseeing on the arrival day, the traveler first reaches the lodging and completes check-in or luggage drop.',
     final_day:'Any provided end time is a hard boundary.',
     intermediate_days:'Provided start/end times are preferences. They may be optimized only when this materially improves quality or logistics, without creating impractical hours.',
+    default_end_when_missing:'19:00 local time is the minimum planning target, not a ceiling. If the user did not provide an end time, do not routinely finish before about 19:00. Continue later when a high-value evening experience, show, concert, atmospheric district, night viewpoint, special dinner or other destination-defining activity materially improves the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.',
+    arrival_day_lodging_first:'Day 1 must reach the lodging/check-in or luggage drop before any sightseeing. Never schedule sightseeing before the lodging. If arrival transport details are unknown, do not invent an airport, flight or transfer origin.',
     windows:perDay,
     total_days:totalDays
   };
@@ -4196,7 +4240,7 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     lodging_base:lodging.normalized||null,
     lodging_original:lodging.original||null,
     lodging_normalization_applied:!!(lodging.original && lodging.normalized!==lodging.original),
-    lodging_policy:'Use lodging_base as the principal geographic anchor. Minimize unnecessary transfers and start/end there whenever sensible.',
+    lodging_policy:'Use lodging_base as the principal geographic anchor. On Day 1, lodging arrival/check-in or luggage drop happens before sightseeing. Minimize unnecessary transfers and start/end there whenever sensible. Never invent airport/flight arrival details when they were not provided.',
     transport:transport||null,
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
@@ -4299,7 +4343,9 @@ HARD RULES:
 - Detect semantic duplicate experiences, including aliases and overlapping district/sub-area descriptions, and keep only the strongest representation.
 - Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
-- Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial.
+- On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
+- Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
+- On Day 1, lodging arrival/check-in or luggage drop MUST occur before sightseeing. If arrival origin is unknown, do not invent an airport, flight or transfer; begin the tourism sequence only after the lodging step.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
 - When the approved identity is a regional route or macro-tour, enrich it like an expert guide: evaluate iconic or highly recommendable low-detour viewpoints, minor waterfalls, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops.
@@ -4322,9 +4368,8 @@ HARD RULES:
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
 - Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
   with an explicit return to the lodging/base.
-- Do not force a rigid aurora row unless the user explicitly requested one. When plausible, add
-  concise conditional guidance to 1–3 suitable evening notes: sensible dark-hour window, safe self-drive option, guided-tour option, cloud/
-  geomagnetic/road checks and no guarantee.
+- Do not create a standalone aurora row by default. When plausible, put concise conditional aurora guidance in the NOTES of the FINAL row of a suitable day: realistic dark-hour window, safe self-drive when appropriate, guided-tour option, cloud/geomagnetic/road checks and no guarantee.
+- Prefer an earlier suitable night and preserve a backup opportunity when the stay length permits; avoid relying only on the final night. An explicit aurora preference alone NEVER becomes a dedicated row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may become a dedicated row.
 - Preserve official proper names; all generic user-facing text and duration labels must use the
   selected itinerary language.
 - Never use generic destinations such as "nearby village", "local restaurant", "services",
@@ -4747,6 +4792,9 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
+- When an end time is blank, use the day meaningfully through approximately 19:00 local; do not finish a normal day before 18:30 without a real constraint. Respect any explicit earlier/later user end.
+- Day 1 must complete lodging arrival/check-in or luggage drop before sightseeing. Do not invent arrival transport details.
+- A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
 - Reject generic destinations such as "nearby village", "local restaurant", "services" or "similar option".
@@ -4765,8 +4813,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - For a full-day scenic route, evaluate a broad candidate pool and normally retain roughly 4–8 meaningful visit stops when daylight, safety and timing allow. This is not a quota: preserve realistic dwell at anchor experiences and remove weak filler.
 - For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
 - Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
-- Aurora must be conditional guidance in suitable evening notes unless the user explicitly requested
-  a fixed aurora outing. State that sightings are not guaranteed.
+- Aurora must normally be conditional guidance in the NOTES of the FINAL row of a suitable day, not a standalone row. Prefer an earlier suitable night, preserve a backup opportunity when possible and state that sightings are not guaranteed. Only a user-confirmed fixed booking/time explicitly requested for scheduling may remain as a dedicated row.
 - Use the selected itinerary language consistently, including duration labels.
 - Write like an expert human concierge:
   * specific, practical and destination-aware;
@@ -4930,7 +4977,8 @@ KNOWN USER FACTS:
 ${JSON.stringify(facts)}
 
 HARD RULES:
-- Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful.
+- Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
+- Day 1 reaches the lodging/checks in or drops luggage before any sightseeing; do not invent airport/flight/arrival transport details when unknown.
 - Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
 - Enforce every preference and restriction through actual planning choices, not merely notes.
 - Intelligently evaluate nearby day trips against remaining secondary city content using trip length, core coverage, relative tourism value, transfer time and logistics.
@@ -4943,8 +4991,8 @@ HARD RULES:
 - Every interval must contain transport plus activity; use realistic category dwell and conservative
   regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
-- Regional days require logical micro-stops and explicit return to the lodging/base.
-- Aurora, when plausible, belongs mainly as conditional guidance in notes.
+- Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
+- Aurora, when plausible, belongs in the NOTES of the FINAL row of a suitable day rather than a standalone activity; prefer an earlier suitable night and preserve a backup opportunity when possible.
 - One concrete To and one transport choice per row.
 - Use one selected language consistently, including duration labels.
 `.trim();
@@ -5499,8 +5547,11 @@ ${forceReplanBlock}
 
 Instrucción:
 - Optimiza el día con criterio experto (flujo lógico, zonas, ritmo).
-- Si el día fue largo, AÚN puedes proponer actividades nocturnas si son icónicas y realistas.
-- Day trips: decide libremente si aportan valor; si los propones, hazlos completos y realistas.
+- Si el usuario no indicó hora final, usa aproximadamente las 19:00 como objetivo mínimo, no como límite. No cierres rutinariamente el día antes de esa hora y extiéndelo más tarde cuando haya shows, espectáculos, miradores nocturnos, barrios con ambiente, cenas especiales u otras experiencias de alto valor que realmente mejoren el itinerario.
+- En el Día 1, el ingreso/check-in o depósito de equipaje en el alojamiento ocurre antes de cualquier visita.
+- Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
+- Las auroras plausibles van normalmente en las notas de la ÚLTIMA fila de un día adecuado, no como fila independiente, salvo una reserva fija confirmada y explícitamente solicitada.
+- Day trips: decide libremente si aportan valor; si los propones, hazlos completos, realistas, con comida en ruta cuando corresponda y regreso coherente con la hora final.
 - No limites trayectos por regla fija; usa sentido común y experiencia turística real.
 - Valida plausibilidad global y seguridad.
 - Notes siempre útiles (nunca vacías ni "seed").
@@ -5746,6 +5797,16 @@ async function onSend(){
 
   // 7) Agregar ciudad
   if(intent.type==='add_city' && intent.city){
+    if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
+      chatMsg(
+        getLang()==='es'
+          ? 'Puedes incluir un máximo de <strong>3 ciudades</strong> por generación.'
+          : 'You can include a maximum of <strong>3 cities</strong> per generation.',
+        'ai'
+      );
+      updateAddCityButtonState();
+      return;
+    }
     const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
     const days = intent.days || 2;
     addCityRow({city:name, days:'', baseDate:intent.baseDate||''});
@@ -5835,7 +5896,7 @@ Instrucción del usuario: ${text}
 
 - Integra lo pedido sin borrar lo existente.
 - Si no se indica día concreto, reoptimiza TODA la ciudad.
-- Para auroras: propone al menos una noche plausible si aplica.
+- Para auroras: si aplica, colócalas normalmente como oportunidad condicional en las notas de la ÚLTIMA fila de un día adecuado, preferentemente no la última noche y con respaldo cuando sea posible; no crees una fila independiente por el simple hecho de que el usuario la pida en sus preferencias; solo una reserva real confirmada con hora fija, indicada separadamente por el usuario, puede representarse como fila.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
@@ -5892,7 +5953,13 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-$addCity?.addEventListener('click', ()=>addCityRow());
+$addCity?.addEventListener('click', ()=>{
+  if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
+    updateAddCityButtonState();
+    return;
+  }
+  addCityRow();
+});
 
 function validateBaseDatesDMY(){
   // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
@@ -6464,10 +6531,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pago', trip:'Viaje',
       date:'Fecha', provider:'Proveedor', amount:'Importe',
       destinations:'Destino(s)', service:'Servicio',
-      serviceValue:'1 generación de itinerario ITBMO · hasta 5 ciudades',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 3 ciudades',
       transaction:'REFERENCIA DE TRANSACCIÓN',
       about:'Sobre este comprobante',
-      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 5 ciudades. Se entrega para control y referencia del usuario.',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 3 ciudades. Se entrega para control y referencia del usuario.',
       testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
       important:'IMPORTANTE',
       legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
@@ -6482,10 +6549,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Payment', trip:'Trip',
       date:'Date', provider:'Provider', amount:'Amount',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 ITBMO itinerary generation · up to 5 cities',
+      serviceValue:'1 ITBMO itinerary generation · up to 3 cities',
       transaction:'TRANSACTION REFERENCE',
       about:'About this receipt',
-      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 5 cities. It is provided for the user’s records and reference.',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 3 cities. It is provided for the user’s records and reference.',
       testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
       important:'IMPORTANT',
       legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
@@ -6500,10 +6567,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viagem',
       date:'Data', provider:'Provedor', amount:'Valor',
       destinations:'Destino(s)', service:'Serviço',
-      serviceValue:'1 geração de itinerário ITBMO · até 5 cidades',
+      serviceValue:'1 geração de itinerário ITBMO · até 3 cidades',
       transaction:'REFERÊNCIA DA TRANSAÇÃO',
       about:'Sobre este comprovante',
-      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 5 cidades. É fornecido para controle e referência do usuário.',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 3 cidades. É fornecido para controle e referência do usuário.',
       testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
       important:'IMPORTANTE',
       legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
@@ -6518,10 +6585,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Paiement', trip:'Voyage',
       date:'Date', provider:'Prestataire', amount:'Montant',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 5 villes',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 3 villes',
       transaction:'RÉFÉRENCE DE TRANSACTION',
       about:'À propos de ce reçu',
-      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 5 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 3 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
       testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
       important:'IMPORTANT',
       legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
@@ -6536,10 +6603,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Zahlung', trip:'Reise',
       date:'Datum', provider:'Anbieter', amount:'Betrag',
       destinations:'Reiseziel(e)', service:'Leistung',
-      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 5 Städte',
+      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 3 Städte',
       transaction:'TRANSAKTIONSREFERENZ',
       about:'Über diesen Beleg',
-      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 5 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
+      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 3 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
       testNote:'Dieses Dokument wurde über den administrativen Test-Bypass erstellt. Es wurde keine Zahlung verarbeitet und dieses Dokument stellt keine echte Transaktion dar.',
       important:'WICHTIG',
       legal:'Dieses Dokument ist ein Zahlungsbeleg und keine Steuerrechnung oder steuerliche Bescheinigung. Support: support@itravelbymyown.com',
@@ -6554,10 +6621,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viaggio',
       date:'Data', provider:'Provider', amount:'Importo',
       destinations:'Destinazione/i', service:'Servizio',
-      serviceValue:'1 generazione itinerario ITBMO · fino a 5 città',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 3 città',
       transaction:'RIFERIMENTO TRANSAZIONE',
       about:'Informazioni sulla ricevuta',
-      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 5 città. È fornita per controllo e riferimento dell’utente.',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 3 città. È fornita per controllo e riferimento dell’utente.',
       testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
       important:'IMPORTANTE',
       legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
