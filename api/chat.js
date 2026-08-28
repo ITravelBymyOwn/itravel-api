@@ -2352,6 +2352,67 @@ export default async function handler(req, res) {
     const lang = detectUserLang(clientMessages);
     const plannerUsage = mode === "planner" ? _newUsageCollector_() : null;
 
+    /* CITY NORMALIZATION · isolated pre-save validation.
+       It never changes the planner or Info Chat contracts. */
+    if (mode === "normalize_destinations") {
+      const destinations = Array.isArray(body.destinations)
+        ? body.destinations.slice(0, 3).map((item, index) => ({
+            index,
+            city:String(item?.city || "").trim(),
+            country:String(item?.country || "").trim()
+          })).filter(item => item.city)
+        : [];
+
+      if (!destinations.length) {
+        return res.status(400).json({
+          ok:false,
+          code:"DESTINATIONS_REQUIRED",
+          error:"At least one destination is required."
+        });
+      }
+
+      const normalizationPrompt = `
+You validate destination names immediately before a travel-planning form is saved.
+
+Return ONLY valid JSON with this exact shape:
+{"destinations":[{"index":0,"status":"confirmed|corrected|ambiguous","city":"Canonical city name","country":"Canonical country name","question":""}]}
+
+Rules:
+- Correct obvious typing, keyboard-neighbor, transposition and phonetic mistakes when the intended real city is clear from the city plus country. Example: "Msdris" with Spain means "Madrid", "Spain".
+- Use the destination's standard internationally recognizable city and country names. Preserve native diacritics when appropriate.
+- If the input is already a valid real destination, return status "confirmed" and do not replace it with a nearby or better-known city.
+- Never invent a correction when two or more plausible destinations remain. Return status "ambiguous", preserve the original city/country, and write one short clarification question in the user's language.
+- A missing country alone is not ambiguous when the city is globally unambiguous; fill the canonical country.
+- Keep every input index exactly once and in the same order.
+- Do not add destinations.
+
+USER LANGUAGE: ${String(body.language || lang || "en")}
+DESTINATIONS:
+${JSON.stringify(destinations)}
+`.trim();
+
+      const rawNormalization = await callStructured(
+        [{role:"system",content:normalizationPrompt}],
+        0,
+        900,
+        30000
+      );
+      const parsedNormalization = cleanToJSON(rawNormalization);
+      const normalized = Array.isArray(parsedNormalization?.destinations)
+        ? parsedNormalization.destinations
+        : [];
+
+      if (normalized.length !== destinations.length) {
+        return res.status(502).json({
+          ok:false,
+          code:"DESTINATION_NORMALIZATION_FAILED",
+          error:"Destination validation could not be completed."
+        });
+      }
+
+      return res.status(200).json({ok:true,destinations:normalized});
+    }
+
     // INFO mode: server-side entitlement + semantic scope + thematic per-trip quota.
     if (mode === "info") {
       let auth = null;
