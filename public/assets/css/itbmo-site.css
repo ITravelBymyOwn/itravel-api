@@ -3017,3 +3017,28 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
   }
 }
 
+/* =========================================================
+   V5.6 · STEP 03 · PREVIOUS PRICE
+   Surgical addition: old price below the 50% savings badge.
+   ========================================================= */
+
+.how-card__price-promo{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:.18rem;
+  flex:0 0 auto;
+}
+
+.how-card__price-old{
+  color:#83919b;
+  font-size:.68rem;
+  line-height:1;
+  font-weight:760;
+  letter-spacing:-.01em;
+  text-decoration-line:line-through;
+  text-decoration-thickness:1.5px;
+  text-decoration-color:rgba(79,93,103,.72);
+}
+
