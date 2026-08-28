@@ -2621,3 +2621,286 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
     animation:none;
   }
 }
+
+/* =========================================================
+   V5.4 · ASTRA STORYTELLING · PREMIUM VALUE LAYER
+   Surgical addition: uses the existing blue/teal/indigo,
+   glass, spacing and Apple-like restraint of the Home.
+   ========================================================= */
+
+.astra-story-intro{
+  position:relative;
+  display:flex;
+  gap:.82rem;
+  align-items:flex-start;
+  margin:1rem 0 1.05rem;
+  padding:.92rem 1rem;
+  overflow:hidden;
+  border-radius:20px;
+  background:
+    radial-gradient(260px 120px at 0% 0%,rgba(53,191,209,.13),transparent 72%),
+    linear-gradient(135deg,rgba(247,252,255,.90),rgba(244,247,255,.82));
+  border:1px solid rgba(72,118,160,.10);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 12px 34px rgba(18,55,90,.05);
+}
+.astra-story-intro::after{
+  content:"";
+  position:absolute;
+  width:150px;height:150px;
+  right:-78px;bottom:-90px;
+  border-radius:999px;
+  background:rgba(109,120,238,.08);
+  filter:blur(2px);
+  pointer-events:none;
+}
+.astra-story-intro__spark{
+  position:relative;z-index:1;
+  width:34px;height:34px;flex:0 0 34px;
+  display:grid;place-items:center;
+  border-radius:11px;
+  color:#fff;
+  background:linear-gradient(135deg,var(--blue),var(--teal));
+  box-shadow:0 9px 22px rgba(8,119,249,.16);
+  font-weight:900;
+}
+.astra-story-intro>div{position:relative;z-index:1}
+.astra-story-intro strong{
+  display:block;
+  color:var(--ink);
+  font-size:.92rem;
+  line-height:1.35;
+  letter-spacing:-.02em;
+}
+.astra-story-intro p{
+  margin:.28rem 0 0;
+  color:var(--text);
+  font-size:.76rem;
+  line-height:1.55;
+}
+
+.astra-value-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.58rem;
+  margin-top:.85rem;
+}
+.astra-value-card{
+  position:relative;
+  min-height:184px;
+  padding:1rem 1rem .92rem;
+  overflow:hidden;
+  border-radius:20px;
+  background:linear-gradient(150deg,rgba(255,255,255,.92),rgba(248,251,253,.70));
+  border:1px solid rgba(34,91,128,.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    0 12px 34px rgba(18,55,90,.055);
+  transition:transform .28s var(--ease),box-shadow .28s var(--ease),border-color .28s ease;
+}
+.astra-value-card:hover{
+  transform:translateY(-3px);
+  border-color:rgba(30,102,146,.14);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.98),0 18px 42px rgba(18,55,90,.085);
+}
+.astra-value-card::before{
+  content:"";
+  position:absolute;
+  inset:0 auto 0 0;
+  width:3px;
+  background:linear-gradient(180deg,var(--blue),var(--teal),var(--indigo));
+  opacity:.72;
+}
+.astra-value-card::after{
+  content:"";
+  position:absolute;
+  width:120px;height:120px;
+  right:-70px;top:-65px;
+  border-radius:999px;
+  background:rgba(53,191,209,.07);
+  pointer-events:none;
+}
+.astra-value-card--route::after{background:rgba(109,120,238,.08)}
+.astra-value-card--time::after{background:rgba(215,154,22,.09)}
+.astra-value-card--you::after{background:rgba(53,185,142,.08)}
+
+.astra-value-card__number{
+  position:absolute;
+  right:.82rem;top:.58rem;
+  color:rgba(7,31,61,.055);
+  font-size:2.05rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.07em;
+}
+.astra-value-card__icon{
+  width:34px;height:34px;
+  display:grid;place-items:center;
+  margin-bottom:.68rem;
+  border-radius:11px;
+  color:#087b93;
+  background:linear-gradient(145deg,#eefbfc,#e8f6fb);
+  border:1px solid rgba(10,127,153,.09);
+  font-size:.9rem;
+  font-weight:900;
+}
+.astra-value-card--route .astra-value-card__icon{
+  color:#6358c6;background:linear-gradient(145deg,#f3f0ff,#eef1ff)
+}
+.astra-value-card--time .astra-value-card__icon{
+  color:#956d0f;background:linear-gradient(145deg,#fff8e8,#fff4d9)
+}
+.astra-value-card--you .astra-value-card__icon{
+  color:#19745f;background:linear-gradient(145deg,#edf9f4,#e7f7f0)
+}
+.astra-value-card h3{
+  position:relative;z-index:1;
+  max-width:92%;
+  margin:0 0 .38rem;
+  color:var(--ink);
+  font-size:.91rem;
+  line-height:1.24;
+  letter-spacing:-.027em;
+}
+.astra-value-card p{
+  position:relative;z-index:1;
+  margin:0;
+  color:var(--text);
+  font-size:.73rem;
+  line-height:1.53;
+}
+.astra-value-card p strong{color:#315f78}
+.astra-value-card small{
+  position:relative;z-index:1;
+  display:block;
+  margin-top:.5rem;
+  padding-top:.48rem;
+  border-top:1px solid rgba(35,75,112,.07);
+  color:#7b8995;
+  font-size:.62rem;
+  line-height:1.45;
+}
+
+.astra-language-strip{
+  position:relative;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  gap:.78rem;
+  align-items:center;
+  margin-top:.65rem;
+  padding:.82rem .9rem;
+  overflow:hidden;
+  border-radius:18px;
+  color:#fff;
+  background:
+    radial-gradient(260px 140px at 0% 0%,rgba(53,191,209,.24),transparent 70%),
+    radial-gradient(280px 150px at 100% 100%,rgba(109,120,238,.24),transparent 72%),
+    linear-gradient(110deg,#075b8f 0%,#087f93 52%,#087f7e 100%);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 15px 36px rgba(7,93,126,.13);
+}
+.astra-language-strip::after{
+  content:"";
+  position:absolute;
+  width:170px;height:170px;
+  right:-92px;top:-105px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);
+}
+.astra-language-strip__icon{
+  position:relative;z-index:1;
+  width:42px;height:42px;
+  display:grid;place-items:center;
+  border-radius:13px;
+  color:#fff;
+  background:rgba(255,255,255,.12);
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.15);
+  font-weight:900;
+}
+.astra-language-strip>div:last-child{position:relative;z-index:1}
+.astra-language-strip strong{
+  display:block;
+  font-size:.82rem;
+  letter-spacing:-.015em;
+}
+.astra-language-strip p{
+  margin:.22rem 0 0;
+  max-width:720px;
+  color:rgba(239,249,252,.80);
+  font-size:.68rem;
+  line-height:1.5;
+}
+
+.astra-starting-point{
+  display:flex;
+  gap:.62rem;
+  align-items:flex-start;
+  margin-top:.62rem;
+  padding:.72rem .78rem;
+  border-radius:16px;
+  background:rgba(246,249,255,.76);
+  border:1px solid rgba(109,120,238,.09);
+}
+.astra-starting-point>span{
+  color:var(--indigo);
+  font-weight:950;
+}
+.astra-starting-point p{
+  margin:0;
+  color:#63798d;
+  font-size:.69rem;
+  line-height:1.48;
+}
+.astra-starting-point strong{color:var(--ink-2)}
+
+/* The story should feel integrated, not make the section visually heavy. */
+.promise-copy .ai-variation-note{
+  margin-top:.64rem;
+}
+.promise-copy .ai-variation-note + *{
+  margin-top:.6rem;
+}
+
+@media(max-width:900px){
+  .astra-value-grid{grid-template-columns:1fr 1fr}
+  .astra-value-card{min-height:170px}
+}
+
+@media(max-width:680px){
+  .astra-story-intro{
+    gap:.62rem;
+    padding:.78rem;
+    border-radius:17px;
+  }
+  .astra-story-intro__spark{
+    width:30px;height:30px;flex-basis:30px;border-radius:10px;
+  }
+  .astra-story-intro strong{font-size:.84rem}
+  .astra-story-intro p{font-size:.7rem}
+
+  .astra-value-grid{grid-template-columns:1fr;gap:.48rem}
+  .astra-value-card{
+    min-height:auto;
+    padding:.86rem .88rem .82rem;
+    border-radius:17px;
+  }
+  .astra-value-card__number{font-size:1.8rem}
+  .astra-value-card h3{font-size:.87rem}
+  .astra-value-card p{font-size:.7rem}
+
+  .astra-language-strip{
+    grid-template-columns:auto minmax(0,1fr);
+    gap:.62rem;
+    padding:.76rem;
+    border-radius:16px;
+  }
+  .astra-language-strip__icon{
+    width:36px;height:36px;border-radius:11px;
+  }
+  .astra-language-strip strong{font-size:.78rem}
+  .astra-language-strip p{font-size:.64rem}
+
+  .astra-starting-point{padding:.66rem .7rem}
+  .astra-starting-point p{font-size:.65rem}
+}
+
