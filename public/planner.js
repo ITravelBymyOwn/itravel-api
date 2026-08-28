@@ -1357,6 +1357,30 @@ if($infoInput){
   });
 }
 
+/* Nested chat scroll handoff.
+   When a chat has reached its own edge, the existing Webflow parent bridge
+   receives the remaining wheel movement so the embedded Planner does not
+   trap page scrolling. */
+function bindChatScrollHandoff(container){
+  if(!container || container.dataset.itbmoScrollHandoff==='1') return;
+  container.dataset.itbmoScrollHandoff='1';
+  container.addEventListener('wheel',(event)=>{
+    const atTop=container.scrollTop<=1;
+    const atBottom=container.scrollTop+container.clientHeight>=container.scrollHeight-1;
+    if(!((event.deltaY<0 && atTop) || (event.deltaY>0 && atBottom))) return;
+    try{
+      if(window.parent && window.parent!==window){
+        window.parent.postMessage({type:'itbmo-scroll',deltaY:event.deltaY},'*');
+      }else{
+        window.scrollBy({top:event.deltaY,left:0,behavior:'auto'});
+      }
+    }catch(_){ }
+  },{passive:true});
+}
+
+bindChatScrollHandoff($chatM);
+bindChatScrollHandoff($infoMessages);
+
 function autoFormatDMYInput(el){
   // 🆕 Placeholder visible + tooltip (UI consistente con DD/MM/AAAA)
   el.placeholder = 'DD/MM/AAAA';
@@ -1751,6 +1775,55 @@ function confirmPreferencesAndContinue(){
   },80);
 }
 
+async function normalizeDestinationsBeforeSave(list, rows){
+  const response = await fetch(API_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      mode:'normalize_destinations',
+      language:getLang(),
+      destinations:list.map(({city,country})=>({city,country}))
+    })
+  });
+
+  let data=null;
+  try{ data=await response.json(); }catch(_){ }
+  if(!response.ok || !data?.ok || !Array.isArray(data.destinations) || data.destinations.length!==list.length){
+    throw new Error(data?.code || 'DESTINATION_NORMALIZATION_FAILED');
+  }
+
+  const normalized=list.map((item,index)=>{
+    const result=data.destinations.find(x=>Number(x?.index)===index);
+    if(!result) throw new Error('DESTINATION_NORMALIZATION_INCOMPLETE');
+
+    const status=String(result.status || '').toLowerCase();
+    if(status==='ambiguous'){
+      const question=String(result.question || '').trim();
+      const fallback=getLang()==='es'
+        ? `No pudimos confirmar con seguridad la ciudad “${item.city}”. Revísala e indica también el país.`
+        : `We could not safely confirm the city “${item.city}”. Please review it and include the country.`;
+      const error=new Error('DESTINATION_AMBIGUOUS');
+      error.userMessage=question || fallback;
+      error.rowIndex=index;
+      throw error;
+    }
+
+    const city=String(result.city || '').trim();
+    const country=String(result.country || item.country || '').trim();
+    if(!city) throw new Error('DESTINATION_NORMALIZATION_INCOMPLETE');
+
+    const row=rows[index];
+    const cityInput=qs('.city',row);
+    const countryInput=qs('.country',row);
+    if(cityInput) cityInput.value=city;
+    if(countryInput && country) countryInput.value=country;
+
+    return {...item,city,country};
+  });
+
+  return normalized;
+}
+
 async function saveDestinations(){
   if(!currentUser || !getStoredSessionToken()){
     setAccountMessage(authCopy('loginRequired'),'error');
@@ -1775,7 +1848,7 @@ async function saveDestinations(){
     updateAddCityButtonState();
     return;
   }
-  const list = [];
+  let list = [];
 
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
@@ -1808,10 +1881,21 @@ async function saveDestinations(){
   }
 
   try{
+    list = await normalizeDestinationsBeforeSave(list, rows);
     await saveTripRecord(list, travelerState);
   }catch(err){
     console.error('ITBMO trip save error:', err);
-    alert(authCopy('tripFail'));
+    if(err?.userMessage){
+      alert(err.userMessage);
+      const row=rows[Number(err.rowIndex) || 0];
+      try{ qs('.city',row)?.focus(); }catch(_){ }
+    }else if(String(err?.message || '').startsWith('DESTINATION_NORMALIZATION')){
+      alert(getLang()==='es'
+        ? 'No pudimos validar los destinos en este momento. Revísalos e inténtalo nuevamente.'
+        : 'We could not validate the destinations right now. Please review them and try again.');
+    }else{
+      alert(authCopy('tripFail'));
+    }
     if($save){
       $save.textContent = previousSaveLabel;
       updateSaveAvailability();
@@ -6235,7 +6319,34 @@ function safeFilePart(s){
     .slice(0, 80);
 }
 
-function downloadBlob(blob, filename){
+function isMobileFileExperience(){
+  return window.matchMedia?.('(max-width: 820px)').matches ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+
+async function deliverGeneratedFile(blob, filename){
+  if(isMobileFileExperience()){
+    try{
+      const file=new File([blob],filename,{type:blob.type || 'application/octet-stream'});
+      if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+        await navigator.share({files:[file],title:filename});
+        return;
+      }
+    }catch(err){
+      /* A user-cancelled share sheet must not trigger a second action. */
+      if(err?.name==='AbortError') return;
+      console.warn('[ITBMO MOBILE SHARE FALLBACK]',err);
+    }
+
+    const mobileUrl=URL.createObjectURL(blob);
+    const opened=window.open(mobileUrl,'_blank','noopener,noreferrer');
+    if(opened){
+      setTimeout(()=>URL.revokeObjectURL(mobileUrl),120000);
+      return;
+    }
+    URL.revokeObjectURL(mobileUrl);
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -6399,10 +6510,10 @@ function exportItineraryToCSV(){
   const dd = String(d.getDate()).padStart(2,'0');
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`;
 
-  downloadBlob(blob, filename);
+  return deliverGeneratedFile(blob, filename);
 }
 
-function exportItineraryToPDF(){
+async function exportItineraryToPDF(){
   // jsPDF verificación
   if(!window.jspdf || !window.jspdf.jsPDF){
     alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');
@@ -6532,7 +6643,8 @@ function exportItineraryToPDF(){
   });
 
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
-  doc.save(filename);
+  const blob=doc.output('blob');
+  await deliverGeneratedFile(blob,filename);
 }
 
 function sendItineraryByEmail(){
@@ -6876,20 +6988,26 @@ async function exportPaymentReceiptToPDF(){
     ? `ITBMO-ADMIN-TEST-Receipt-${dateForId}.pdf`
     : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
 
-  doc.save(filename);
+  const blob=doc.output('blob');
+  await deliverGeneratedFile(blob,filename);
   return true;
 }
 
 function showFinalDownloadModal(){
   if(document.querySelector('.itbmo-download-overlay')) return;
   const es=getLang()==='es';
+  const mobileFiles=isMobileFileExperience();
   const overlay=document.createElement('div'); overlay.className='itbmo-download-overlay';
   overlay.innerHTML=`<div class="itbmo-download-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-download-title">
     <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ASTRA TERMINÓ':'ASTRA IS DONE'}</div>
     <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
-    <p>${es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.'}</p>
+    <p>${mobileFiles
+      ? (es?'Abre y comparte ahora tus documentos. Podrás enviarlos por correo, WhatsApp u otra aplicación, o guardarlos en tu dispositivo.':'Open and share your documents now. You can send them by email, WhatsApp or another app, or save them on your device.')
+      : (es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.')}</p>
     <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
-    <button class="btn primary itbmo-download-all" type="button">${es?'Descargar mis documentos':'Download my documents'}</button>
+    <button class="btn primary itbmo-download-all" type="button">${mobileFiles
+      ? (es?'Abrir / compartir documentos':'Open / share documents')
+      : (es?'Descargar mis documentos':'Download my documents')}</button>
     <div class="itbmo-download-status" aria-live="polite"></div>
     <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
     <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
@@ -6900,6 +7018,12 @@ function showFinalDownloadModal(){
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
   overlay.querySelector('.itbmo-download-all').addEventListener('click',async()=>{
+    if(mobileFiles){
+      status.textContent=es
+        ? 'Usa los botones individuales debajo del itinerario para abrir o compartir cada archivo. El teléfono mostrará sus opciones disponibles.'
+        : 'Use the individual buttons below the itinerary to open or share each file. Your phone will show its available options.';
+      return;
+    }
     /*
       Mantener las tres descargas dentro de la interacción directa del usuario.
       Algunos navegadores bloquean descargas automáticas posteriores cuando se
@@ -6915,6 +7039,12 @@ function showFinalDownloadModal(){
 }
 
 function bindExportListeners(){
+  if(isMobileFileExperience()){
+    if($btnPDF) $btnPDF.textContent=getLang()==='es' ? 'Abrir / compartir PDF' : 'Open / share PDF';
+    if($btnCSV) $btnCSV.textContent=getLang()==='es' ? 'Abrir / compartir CSV' : 'Open / share CSV';
+    if($btnReceipt) $btnReceipt.textContent=getLang()==='es' ? 'Abrir / compartir comprobante' : 'Open / share receipt';
+  }
+
   $btnPDF?.addEventListener('click', (e)=>{
     e.preventDefault();
     exportItineraryToPDF();
