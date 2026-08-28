@@ -2554,8 +2554,8 @@ Meals:
 Aurora:
 - Include aurora only when plausible by latitude, season and darkness.
 - Do NOT create a standalone aurora activity row by default.
-- Put aurora guidance in the NOTES of the FINAL row of a suitable day, with a realistic dark-hour window, a guided-tour option, weather/cloud/geomagnetic/road checks and a clear statement that visibility is not guaranteed.
-- Prefer an earlier suitable night and preserve at least one backup opportunity when the stay length allows; avoid using only the final night.
+- When auroras are plausible for the city/date, put aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, with a realistic dark-hour window, a guided-tour option, weather/cloud/geomagnetic/road checks and a clear statement that visibility is not guaranteed.
+- Because the aurora note is present on EVERY plausible day, the traveler automatically has multiple weather-dependent opportunities across the stay; never rely on only one selected night.
 - Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference through the final-row NOTE and guided-tour recommendation. Do not convert the preference itself into a standalone row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
 - Avoid identical notes on consecutive nights.
 
@@ -2641,8 +2641,8 @@ Itinerary rules (aligned with API v52.5):
 
 Auroras (only if plausible by latitude/season):
 - Do NOT create a standalone aurora row by default.
-- Put the aurora opportunity in the NOTES of the FINAL row of a suitable day.
-- Prefer an earlier suitable night and preserve a backup opportunity when trip length permits; avoid relying only on the final night.
+- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day when auroras are plausible for the city/date.
+- Repeat the opportunity on EVERY plausible day so weather-dependent backup opportunities are naturally preserved across the stay.
 - The note must include a realistic dark-hour window, guided-tour option, cloud/weather/geomagnetic/road checks and no-visibility guarantee.
 - If the user explicitly provides a confirmed aurora booking/time and asks to schedule it, that confirmed fixed booking may be represented as a row.
 
@@ -4368,8 +4368,8 @@ HARD RULES:
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
 - Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
   with an explicit return to the lodging/base.
-- Do not create a standalone aurora row by default. When plausible, put concise conditional aurora guidance in the NOTES of the FINAL row of a suitable day: realistic dark-hour window, safe self-drive when appropriate, guided-tour option, cloud/geomagnetic/road checks and no guarantee.
-- Prefer an earlier suitable night and preserve a backup opportunity when the stay length permits; avoid relying only on the final night. An explicit aurora preference alone NEVER becomes a dedicated row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may become a dedicated row.
+- Do not create a standalone aurora row by default. When plausible, put concise conditional aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city: realistic dark-hour window, safe self-drive when appropriate, guided-tour option, cloud/geomagnetic/road checks and no guarantee.
+- The final-row aurora note must appear on EVERY plausible day, including when auroras were explicitly requested in Preferences. An explicit aurora preference alone NEVER becomes a dedicated row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may become a dedicated row.
 - Preserve official proper names; all generic user-facing text and duration labels must use the
   selected itinerary language.
 - Never use generic destinations such as "nearby village", "local restaurant", "services",
@@ -4496,7 +4496,11 @@ function _isAuroraActivityRow_(row={}){
 }
 
 function _explicitlyRequestedFixedAurora_(){
-  return /\b(fixed aurora|aurora tour|northern lights tour|tour de auroras|cacer[ií]a de auroras|reservar aurora|book aurora|actividad fija de aurora)\b/i.test(String(plannerState?.specialConditions||'').replace(/\s+/g,' '));
+  const text=String(plannerState?.specialConditions||'').replace(/\s+/g,' ');
+  const hasAurora=/\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(text);
+  const hasConfirmedBooking=/\b(confirmed|confirmad[oa]|booked|reservad[oa]|reservation confirmed|reserva confirmada|booking confirmed)\b/i.test(text);
+  const hasFixedTime=/\b(?:[01]?\d|2[0-3]):[0-5]\d\b/.test(text);
+  return hasAurora && hasConfirmedBooking && hasFixedTime;
 }
 
 function _genericPlaceReason_(value=''){
@@ -4560,7 +4564,8 @@ function _auditSeverity_(error={}){
   const critical=new Set([
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
-    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO'
+    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
+    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -4710,13 +4715,48 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         errors.push({
           code:'RIGID_AURORA_ROW',
           day,row,
-          instruction:'Move aurora guidance into suitable evening notes unless the user explicitly requested a fixed outing.'
+          instruction:'Remove the standalone aurora row. Even when auroras or an aurora tour were explicitly requested in Preferences, aurora guidance belongs as an ADDITIONAL note in the FINAL row of EVERY plausible day. Only a genuinely confirmed fixed-time booking may remain as a row.'
         });
       }
     }
 
     if(_regionalDayLooksThin_(dayRows)){
       errors.push({code:'REGIONAL_DAY_TOO_THIN',day,row_count:dayRows.length});
+    }
+
+    // HARD QUALITY RULE: when the user leaves the end time blank,
+    // ~19:00 is the minimum planning target, not a ceiling.
+    const dayWindow=(perDay||[]).find(x=>Number(x?.day)===day) || {};
+    if(dayRows.length && !dayWindow?.end_provided){
+      const lastRow=dayRows[dayRows.length-1] || {};
+      const lastStart=_hhmmToMinutes_(lastRow.start);
+      let lastEnd=_hhmmToMinutes_(lastRow.end);
+      if(lastStart!=null && lastEnd!=null && lastEnd<=lastStart) lastEnd+=1440;
+
+      if(lastEnd!=null && lastEnd < (19*60)){
+        errors.push({
+          code:'END_BEFORE_MINIMUM_TARGET',
+          day,
+          actual_end:lastRow.end,
+          minimum_target:'19:00',
+          instruction:'The user did not provide an end time. Rebuild the day so useful planning reaches at least approximately 19:00. It may continue later for genuinely high-value evening experiences. Do not add filler merely to reach the clock.'
+        });
+      }
+    }
+
+    // HARD QUALITY RULE: in a plausible aurora city/season, EVERY day must carry
+    // an additional aurora opportunity note in the Notes of that day's FINAL row.
+    // An explicit aurora preference still remains a note; it does not become a row.
+    if(dayRows.length && _isHighLatitudeWinterContext_(city,baseDate)){
+      const lastRow=dayRows[dayRows.length-1] || {};
+      if(!_isAuroraRow_({notes:lastRow.notes||''})){
+        errors.push({
+          code:'MISSING_AURORA_FINAL_NOTE',
+          day,
+          row:dayRows.length,
+          instruction:'Add an aurora opportunity as an ADDITIONAL note in the Notes field of this day\'s FINAL row. Do this for every day in this city when latitude/season/darkness make auroras plausible, even if the user explicitly requested auroras in Preferences. Mention clear/cloud conditions, geomagnetic conditions, no guarantee, and guided-tour option. Do not create a standalone aurora row.'
+        });
+      }
     }
   }
 
@@ -4792,7 +4832,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
-- When an end time is blank, use the day meaningfully through approximately 19:00 local; do not finish a normal day before 18:30 without a real constraint. Respect any explicit earlier/later user end.
+- When an end time is blank, approximately 19:00 local is a MINIMUM planning target, not a ceiling. Do not finish a normal day before about 19:00 without a real constraint. Continue later when genuinely high-value evening content improves the itinerary. Respect any explicit user end time as a hard boundary.
 - Day 1 must complete lodging arrival/check-in or luggage drop before sightseeing. Do not invent arrival transport details.
 - A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
@@ -4813,7 +4853,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - For a full-day scenic route, evaluate a broad candidate pool and normally retain roughly 4–8 meaningful visit stops when daylight, safety and timing allow. This is not a quota: preserve realistic dwell at anchor experiences and remove weak filler.
 - For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
 - Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
-- Aurora must normally be conditional guidance in the NOTES of the FINAL row of a suitable day, not a standalone row. Prefer an earlier suitable night, preserve a backup opportunity when possible and state that sightings are not guaranteed. Only a user-confirmed fixed booking/time explicitly requested for scheduling may remain as a dedicated row.
+- In every city/date where auroras are plausible, add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day, not just one selected night. This applies even when the user explicitly requested auroras or an aurora tour in Preferences. Each daily note should mention that visibility is not guaranteed and depends on clear/cloud conditions and geomagnetic activity, and should mention the guided-tour option. Do not create a standalone aurora row. Only a genuinely confirmed fixed-time booking separately provided by the user may remain as a dedicated row.
 - Use the selected itinerary language consistently, including duration labels.
 - Write like an expert human concierge:
   * specific, practical and destination-aware;
@@ -4992,7 +5032,7 @@ HARD RULES:
   regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
-- Aurora, when plausible, belongs in the NOTES of the FINAL row of a suitable day rather than a standalone activity; prefer an earlier suitable night and preserve a backup opportunity when possible.
+- Aurora, when plausible, belongs as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city rather than a standalone activity. This applies even when explicitly requested in Preferences.
 - One concrete To and one transport choice per row.
 - Use one selected language consistently, including duration labels.
 `.trim();
@@ -5079,9 +5119,10 @@ TRANSPORT (smart priority, no invention):
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible):
-- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
-- Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
-- Notes must include "valid:" + a nearby low-cost alternative.
+- Do NOT create a standalone aurora activity merely because the user asked for auroras.
+- Add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
+- Each note must use a realistic dark-hour window, explain that visibility is not guaranteed and depends on clouds/weather and geomagnetic activity, and mention a guided-tour option.
+- Only a genuinely confirmed fixed-time booking separately supplied by the user may be represented as a dedicated row.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
@@ -5550,7 +5591,7 @@ Instrucción:
 - Si el usuario no indicó hora final, usa aproximadamente las 19:00 como objetivo mínimo, no como límite. No cierres rutinariamente el día antes de esa hora y extiéndelo más tarde cuando haya shows, espectáculos, miradores nocturnos, barrios con ambiente, cenas especiales u otras experiencias de alto valor que realmente mejoren el itinerario.
 - En el Día 1, el ingreso/check-in o depósito de equipaje en el alojamiento ocurre antes de cualquier visita.
 - Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
-- Las auroras plausibles van normalmente en las notas de la ÚLTIMA fila de un día adecuado, no como fila independiente, salvo una reserva fija confirmada y explícitamente solicitada.
+- Cuando las auroras sean plausibles por ubicación, época y oscuridad, agrega una nota adicional sobre auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica incluso si el usuario pidió auroras explícitamente en Preferencias. No crees una fila independiente salvo una reserva real confirmada con hora fija y explícitamente solicitada.
 - Day trips: decide libremente si aportan valor; si los propones, hazlos completos, realistas, con comida en ruta cuando corresponda y regreso coherente con la hora final.
 - No limites trayectos por regla fija; usa sentido común y experiencia turística real.
 - Valida plausibilidad global y seguridad.
@@ -5896,7 +5937,7 @@ Instrucción del usuario: ${text}
 
 - Integra lo pedido sin borrar lo existente.
 - Si no se indica día concreto, reoptimiza TODA la ciudad.
-- Para auroras: si aplica, colócalas normalmente como oportunidad condicional en las notas de la ÚLTIMA fila de un día adecuado, preferentemente no la última noche y con respaldo cuando sea posible; no crees una fila independiente por el simple hecho de que el usuario la pida en sus preferencias; solo una reserva real confirmada con hora fija, indicada separadamente por el usuario, puede representarse como fila.
+- Para auroras: si aplican por ubicación, época y oscuridad, agrega una nota adicional de oportunidad de auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica aunque el usuario las pida explícitamente en Preferencias. No crees una fila independiente por esa preferencia; solo una reserva real confirmada con hora fija, indicada separadamente por el usuario, puede representarse como fila.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
