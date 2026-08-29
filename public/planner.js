@@ -34,6 +34,7 @@ const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
+const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -58,6 +59,13 @@ let isItineraryLocked = false;
 
 let pendingChange = null;
 let hasSavedOnce = false;
+
+/* Paid-generation recovery. Normal successful generations add only small
+   checkpoint writes; retries run only after a real technical failure. */
+const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
+const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,15000];
+let paidGenerationRunning = false;
+let generationRecoveryState = null;
 
 /* Post-payment preferences checkpoint.
    This changes only WHEN specialConditions is confirmed.
@@ -781,6 +789,18 @@ function clearSessionToken(){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
 }
 
+function getStoredActiveTripId(){
+  try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }
+  catch(_){ return ''; }
+}
+
+function storeActiveTripId(tripId){
+  try{
+    if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId));
+    else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY);
+  }catch(_){ }
+}
+
 function setAuthBusy(on){
   [$accountRegisterSubmit,$accountLoginSubmit,$accountRegisterToggle,$accountLoginToggle]
     .forEach(el=>{ if(el) el.disabled = !!on; });
@@ -956,6 +976,7 @@ async function registerITBMOUser(){
       authReady = true;
       setAccountMessage('');
       renderAuthState();
+      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
       return;
     }
 
@@ -1000,6 +1021,7 @@ async function loginITBMOUser(){
       authReady = true;
       setAccountMessage('');
       renderAuthState();
+      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
       return;
     }
 
@@ -1040,6 +1062,7 @@ async function restoreITBMOSession(){
   }finally{
     authReady = true;
     renderAuthState();
+    if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
   }
 }
 
@@ -1206,7 +1229,25 @@ async function saveTripRecord(list, travelerState){
   }
 
   currentTripId = data.trip.id;
+  storeActiveTripId(currentTripId);
   return data.trip;
+}
+
+async function tripApi(payload){
+  const response=await fetch(TRIP_API_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload || {})
+  });
+  let data={};
+  try{ data=await response.json(); }catch(_){ }
+  if(!response.ok || data?.ok===false){
+    const error=new Error(data?.error || `TRIP_HTTP_${response.status}`);
+    error.code=data?.code || `TRIP_HTTP_${response.status}`;
+    error.status=response.status;
+    throw error;
+  }
+  return data;
 }
 
 /* 🆕 Export buttons (PDF / CSV / Email) */
@@ -5022,7 +5063,7 @@ async function _finalTripWideRepair_(
     )
   };
 }
-async function generateCityItinerary(city){
+async function generateCityItinerary(city,{silentFailure=false}={}){
   const _cityGenerationStartedAt_=performance.now();
   const _recordCityGenerationTime_=()=>{
     if(!_astraGenerationMetrics_.active) return;
@@ -5100,7 +5141,7 @@ async function generateCityItinerary(city){
       remainingIssues:finalResult.report?.errors?.length||0
     });
     _recordCityGenerationTime_();
-    return;
+    return true;
   }catch(err){
     console.error(`[CITY ${city}] v63 staged flow failed; using coherent one-shot recovery`,err);
   }
@@ -5159,7 +5200,7 @@ HARD RULES:
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
     showWOW(false);
     _recordCityGenerationTime_();
-    return;
+    return true;
   }catch(err2){
     console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
@@ -5171,7 +5212,8 @@ HARD RULES:
   const msg=getLang()==='es'
     ? 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.'
     : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
-  chatMsg(msg,'ai');
+  if(!silentFailure) chatMsg(msg,'ai');
+  return false;
 }
 
 /* =========================================================
@@ -5392,6 +5434,364 @@ function agentConversationCopy(){
     }
   };
   return map[lang] || map.en;
+}
+
+function _generationISOToDMY_(value){
+  const match=String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || '');
+}
+
+function _generationCityComplete_(city){
+  const destination=savedDestinations.find(x=>x.city===city);
+  const totalDays=Math.max(0,Number(destination?.days || 0));
+  const byDay=itineraries?.[city]?.byDay || {};
+  if(!totalDays) return false;
+  for(let day=1;day<=totalDays;day++){
+    if(!Array.isArray(byDay[day]) || byDay[day].length===0) return false;
+  }
+  return true;
+}
+
+function _generationCheckpointSnapshot_(extra={}){
+  const completed=[...new Set(
+    (generationRecoveryState?.completed_cities || [])
+      .filter(city=>_generationCityComplete_(city))
+  )];
+  return {
+    schema_version:1,
+    completed_cities:completed,
+    pending_cities:savedDestinations.map(x=>x.city).filter(city=>!completed.includes(city)),
+    city_attempts:{...(generationRecoveryState?.city_attempts || {})},
+    itineraries,
+    city_meta:cityMeta,
+    planner_state:{
+      specialConditions:plannerState?.specialConditions || '',
+      travelers:plannerState?.travelers || {},
+      travelerProfiles:plannerState?.travelerProfiles || null,
+      itineraryLang:plannerState?.itineraryLang || ''
+    },
+    last_error:generationRecoveryState?.last_error || null,
+    ...extra
+  };
+}
+
+async function _persistGenerationCheckpoint_(status='generating',extra={}){
+  const token=getStoredSessionToken();
+  if(!token || !currentTripId) throw new Error('GENERATION_SESSION_REQUIRED');
+  const checkpoint=_generationCheckpointSnapshot_(extra);
+  generationRecoveryState=checkpoint;
+
+  let lastError=null;
+  for(let attempt=0;attempt<3;attempt++){
+    if(!navigator.onLine) await _waitForGenerationConnection_();
+    try{
+      return await tripApi({
+        action:'generation_checkpoint',
+        session_token:token,
+        trip_id:currentTripId,
+        status,
+        checkpoint
+      });
+    }catch(err){
+      lastError=err;
+      if(attempt<2) await new Promise(resolve=>setTimeout(resolve,1500*(attempt+1)));
+    }
+  }
+  throw lastError || new Error('GENERATION_CHECKPOINT_FAILED');
+}
+
+async function _waitForGenerationConnection_(){
+  if(navigator.onLine) return;
+  showWOW(true,getLang()==='es'
+    ? 'Conexión interrumpida. ASTRA continuará automáticamente cuando vuelva internet…'
+    : 'Connection interrupted. ASTRA will continue automatically when internet returns…');
+  await new Promise(resolve=>window.addEventListener('online',resolve,{once:true}));
+}
+
+function _hydrateGenerationTrip_(trip){
+  if(!trip?.id) return false;
+  currentTripId=trip.id;
+  storeActiveTripId(currentTripId);
+
+  const rawDestinations=Array.isArray(trip.destinations) ? trip.destinations : [];
+  savedDestinations=rawDestinations.map(destination=>({
+    city:String(destination?.city || '').trim(),
+    country:String(destination?.country || '').trim(),
+    days:Math.max(1,Number(destination?.days || 1)),
+    baseDate:_generationISOToDMY_(destination?.base_date || destination?.baseDate || ''),
+    perDay:Array.isArray(destination?.per_day)
+      ? destination.per_day
+      : (Array.isArray(destination?.perDay) ? destination.perDay : [])
+  })).filter(destination=>destination.city);
+  if(!savedDestinations.length) return false;
+
+  const checkpoint=(trip.itinerary_data && typeof trip.itinerary_data==='object')
+    ? trip.itinerary_data
+    : {};
+  generationRecoveryState={
+    ...checkpoint,
+    completed_cities:Array.isArray(checkpoint.completed_cities) ? checkpoint.completed_cities : [],
+    city_attempts:(checkpoint.city_attempts && typeof checkpoint.city_attempts==='object')
+      ? checkpoint.city_attempts
+      : {},
+    generation_count:Number(trip.generation_count || 0)
+  };
+
+  itineraries=(checkpoint.itineraries && typeof checkpoint.itineraries==='object')
+    ? checkpoint.itineraries
+    : {};
+  cityMeta=(checkpoint.city_meta && typeof checkpoint.city_meta==='object')
+    ? checkpoint.city_meta
+    : {};
+
+  const persistedPlanner=(trip.planner_input && typeof trip.planner_input==='object')
+    ? trip.planner_input
+    : {};
+  const checkpointPlanner=(checkpoint.planner_state && typeof checkpoint.planner_state==='object')
+    ? checkpoint.planner_state
+    : {};
+  plannerState={...plannerState,...persistedPlanner,...checkpointPlanner,destinations:[...savedDestinations]};
+
+  savedDestinations.forEach(destination=>{
+    if(!itineraries[destination.city]){
+      itineraries[destination.city]={byDay:{},currentDay:1,baseDate:destination.baseDate||null,masterPlan:[],audit:null};
+    }
+    if(!cityMeta[destination.city]){
+      cityMeta[destination.city]={baseDate:destination.baseDate||null,start:null,end:null,hotel:'',transport:'',perDay:destination.perDay||[]};
+    }
+  });
+
+  if($cityList){
+    $cityList.innerHTML='';
+    savedDestinations.forEach(destination=>{
+      addCityRow(destination);
+      const row=qsa('.city-row',$cityList).at(-1);
+      const windows=destination.perDay || [];
+      qsa('.hours-day',row).forEach((dayRow,index)=>{
+        const windowData=windows[index] || {};
+        const start=qs('.start',dayRow);
+        const end=qs('.end',dayRow);
+        if(start) start.value=windowData.start || '';
+        if(end) end.value=windowData.end || '';
+      });
+    });
+    updateAddCityButtonState();
+  }
+
+  hasSavedOnce=true;
+  planningStarted=true;
+  collectingHotels=false;
+  paymentGateSatisfiedTripId=currentTripId;
+  setSavedSetupLocked(true);
+  hidePreferencesStage({reset:false});
+  if($preferencesField){
+    $preferencesField.value=plannerState.specialConditions || trip.special_conditions || '';
+    $preferencesField.readOnly=true;
+  }
+  if($start){
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+    $start.dataset.itbmoConsumed='1';
+  }
+  if($chatBox) $chatBox.style.display='flex';
+  renderCityTabs();
+  setExportToolbarVisibility(trip.status==='generated');
+  return true;
+}
+
+function _showGenerationRetry_(reason=''){
+  showWOW(false);
+  setPlanningChatLocked(true);
+  qs('#itbmo-generation-retry')?.remove();
+
+  const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
+  const message=exhausted
+    ? (getLang()==='es'
+      ? 'ASTRA no pudo completar el itinerario después de los intentos de recuperación. Tu pago permanece registrado; contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.'
+      : 'ASTRA could not complete the itinerary after the recovery attempts. Your payment remains recorded; contact Support for assistance, replacement or refund as applicable.')
+    : (getLang()==='es'
+      ? 'ASTRA no pudo completar todas las ciudades por un fallo técnico. Tu pago continúa activo y puedes reintentar sin volver a pagar.'
+      : 'ASTRA could not complete every city because of a technical failure. Your payment remains active and you can retry without paying again.');
+  const row=chatMsg(message,'ai');
+  if(!row || exhausted) return;
+
+  const button=document.createElement('button');
+  button.id='itbmo-generation-retry';
+  button.type='button';
+  button.className='btn primary';
+  button.textContent=getLang()==='es' ? 'Reintentar generación' : 'Retry generation';
+  button.addEventListener('click',()=>{
+    button.disabled=true;
+    button.remove();
+    runPaidGeneration({manualRetry:true});
+  });
+  row.appendChild(document.createElement('br'));
+  row.appendChild(button);
+  if(reason) console.warn('[GENERATION RECOVERY]',reason);
+}
+
+async function runPaidGeneration({manualRetry=false}={}){
+  if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
+  paidGenerationRunning=true;
+  setPlanningChatLocked(true);
+  qs('#itbmo-generation-retry')?.remove();
+  _resetAstraGenerationMetrics_();
+
+  try{
+    const token=getStoredSessionToken();
+    const begin=await tripApi({
+      action:'generation_begin',
+      session_token:token,
+      trip_id:currentTripId
+    });
+
+    if(begin?.already_completed){
+      _hydrateGenerationTrip_(begin.trip);
+      showWOW(false);
+      setExportToolbarVisibility(true);
+      setPlanningChatLocked(true);
+      return;
+    }
+
+    const serverCheckpoint=begin?.trip?.itinerary_data || generationRecoveryState || {};
+    generationRecoveryState={
+      ...serverCheckpoint,
+      completed_cities:Array.isArray(serverCheckpoint.completed_cities) ? serverCheckpoint.completed_cities : [],
+      city_attempts:(serverCheckpoint.city_attempts && typeof serverCheckpoint.city_attempts==='object')
+        ? serverCheckpoint.city_attempts
+        : {},
+      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
+    };
+
+    if(begin?.new_run && manualRetry){
+      savedDestinations.forEach(({city})=>{
+        if(!_generationCityComplete_(city)) generationRecoveryState.city_attempts[city]=0;
+      });
+    }
+
+    await _persistGenerationCheckpoint_('generating');
+
+    for(const {city} of savedDestinations){
+      if(_generationCityComplete_(city)){
+        if(!generationRecoveryState.completed_cities.includes(city)){
+          generationRecoveryState.completed_cities.push(city);
+          await _persistGenerationCheckpoint_('generating');
+        }
+        continue;
+      }
+
+      let attempts=Math.max(0,Number(generationRecoveryState.city_attempts[city] || 0));
+      let completed=false;
+
+      while(attempts<ITBMO_CITY_GENERATION_MAX_ATTEMPTS && !completed){
+        await _waitForGenerationConnection_();
+        const delay=ITBMO_CITY_RETRY_DELAYS_MS[Math.min(attempts,ITBMO_CITY_RETRY_DELAYS_MS.length-1)] || 0;
+        if(delay) await new Promise(resolve=>setTimeout(resolve,delay));
+
+        attempts+=1;
+        generationRecoveryState.city_attempts[city]=attempts;
+        generationRecoveryState.last_error=null;
+        await _persistGenerationCheckpoint_('generating',{active_city:city});
+
+        showWOW(true,t('overlayGenerating'));
+        const success=await generateCityItinerary(city,{silentFailure:true});
+        completed=Boolean(success && _generationCityComplete_(city));
+
+        if(completed){
+          if(!generationRecoveryState.completed_cities.includes(city)){
+            generationRecoveryState.completed_cities.push(city);
+          }
+          generationRecoveryState.last_error=null;
+          await _persistGenerationCheckpoint_('generating',{active_city:null});
+        }else{
+          generationRecoveryState.last_error={
+            city,
+            attempt:attempts,
+            code:'CITY_GENERATION_FAILED',
+            at:new Date().toISOString()
+          };
+          await _persistGenerationCheckpoint_('generating',{active_city:city});
+        }
+      }
+    }
+
+    const allComplete=savedDestinations.every(({city})=>_generationCityComplete_(city));
+    if(!allComplete){
+      await _persistGenerationCheckpoint_('failed',{active_city:null});
+      _showGenerationRetry_('One or more cities remained incomplete.');
+      return;
+    }
+
+    await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    _finishAstraGenerationMetrics_();
+    showWOW(false);
+    setExportToolbarVisibility();
+    chatMsg(getPlannerCompletionMessage(),'ai');
+    setPlanningChatLocked(true);
+    setTimeout(()=>showFinalDownloadModal(),260);
+  }catch(err){
+    console.error('[PAID GENERATION ORCHESTRATOR]',err);
+    if(err?.code==='GENERATION_RECOVERY_EXHAUSTED'){
+      generationRecoveryState={...(generationRecoveryState || {}),generation_count:2};
+    }
+    try{
+      if(err?.code!=='GENERATION_PAYMENT_REQUIRED'){
+        await _persistGenerationCheckpoint_('failed',{
+          active_city:null,
+          last_error:{code:err?.code || 'GENERATION_ORCHESTRATOR_FAILED',at:new Date().toISOString()}
+        });
+      }
+    }catch(_){ }
+    _showGenerationRetry_(err?.code || err?.message || 'Generation failed');
+  }finally{
+    paidGenerationRunning=false;
+    showWOW(false);
+  }
+}
+
+async function restorePaidGenerationIfNeeded(){
+  if(paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
+  try{
+    const token=getStoredSessionToken();
+    let tripId=getStoredActiveTripId();
+    let trip=null;
+
+    if(tripId){
+      try{
+        const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+        trip=data?.trip || null;
+      }catch(err){
+        if(err?.status===404) storeActiveTripId(null);
+        else throw err;
+      }
+    }
+
+    if(!trip){
+      const data=await tripApi({action:'recoverable',session_token:token});
+      trip=data?.trip || null;
+    }
+    if(!trip || !['generating','failed','generated'].includes(trip.status)) return;
+    if(!_hydrateGenerationTrip_(trip)) return;
+
+    try{
+      const paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      applyInfoChatStatus(paymentStatus);
+    }catch(_){ }
+
+    if(trip.status==='generating'){
+      chatMsg(getLang()==='es'
+        ? 'ASTRA detectó una generación interrumpida y continuará desde la última ciudad guardada.'
+        : 'ASTRA detected an interrupted generation and will continue from the last saved city.','ai');
+      setTimeout(()=>runPaidGeneration(),180);
+    }else if(trip.status==='failed'){
+      _showGenerationRetry_();
+    }else{
+      setExportToolbarVisibility(true);
+      setPlanningChatLocked(true);
+    }
+  }catch(err){
+    console.warn('[GENERATION RESTORE]',err);
+  }
 }
 
 async function startPlanning(){
@@ -5775,19 +6175,7 @@ async function onSend(){
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
 
-    (async ()=>{
-      _resetAstraGenerationMetrics_();
-      showWOW(true, t('overlayGenerating'));
-      for(const {city} of savedDestinations){
-        await generateCityItinerary(city);
-      }
-      _finishAstraGenerationMetrics_();
-      showWOW(false);
-      setExportToolbarVisibility();
-      chatMsg(getPlannerCompletionMessage(), 'ai');
-      setPlanningChatLocked(true);
-      setTimeout(()=>showFinalDownloadModal(),260);
-    })();
+    runPaidGeneration();
 
     return;
   }
@@ -7200,6 +7588,9 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
     currentTripId = null;
+    storeActiveTripId(null);
+    generationRecoveryState = null;
+    paidGenerationRunning = false;
 
     planningStarted = false;
     metaProgressIndex = 0;
@@ -7543,6 +7934,12 @@ function applyCommerceI18n(){
 
   if($checkoutPreviewContinue){
     $checkoutPreviewContinue.style.display = ITBMO_COMMERCE_CONFIG.previewMode ? 'block' : 'none';
+  }
+
+  /* PayPal-only launch: hide the inactive card/Tilopay bar completely. */
+  if($checkoutTilopay && !ITBMO_COMMERCE_CONFIG.tilopay.enabled){
+    $checkoutTilopay.style.display='none';
+    $checkoutTilopay.setAttribute('aria-hidden','true');
   }
 
   [$checkoutTilopay,$checkoutPayPalFallback].forEach(el=>el?.classList.remove('is-disabled'));
