@@ -2534,6 +2534,8 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
 .final-cta__price--promo del{
   opacity:.58;
   font-weight:780;
+  font-size:.92rem;
+  line-height:1.05;
 }
 
 .promo-badge{
@@ -3033,8 +3035,8 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
 
 .how-card__price-old{
   color:#83919b;
-  font-size:.8rem;
-  line-height:1;
+  font-size:.92rem;
+  line-height:1.05;
   font-weight:760;
   letter-spacing:-.01em;
   text-decoration-line:line-through;
