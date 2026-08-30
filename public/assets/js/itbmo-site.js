@@ -97,9 +97,12 @@
      Webflow Localize publishes Spanish at / and English at /en/.
   ========================================================= */
   const ITBMO_LANGUAGE_PAGES = {
-    es: '/',
-    en: '/en/'
+    es: 'https://itravelbymyown.com/',
+    en: 'https://itravelbymyown.com/en/'
   };
+
+  const ITBMO_CURRENT_SITE_LANGUAGE =
+    String(document.documentElement.lang || 'es').toLowerCase().slice(0, 2);
 
   function showLanguageAvailability(message) {
     document.querySelector('.itbmo-language-toast')?.remove();
@@ -121,10 +124,14 @@
       if (!lang) return;
       try { localStorage.setItem('itbmo_site_language', lang); } catch (_) {}
 
-      if (lang === 'es') return;
+      if (lang === ITBMO_CURRENT_SITE_LANGUAGE) return;
       const target = ITBMO_LANGUAGE_PAGES[lang];
       if (target) {
-        window.location.href = target;
+        try {
+          window.top.location.href = target;
+        } catch (_) {
+          window.location.href = target;
+        }
         return;
       }
 
