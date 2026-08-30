@@ -96,13 +96,47 @@
      ---------------------------------------------------------
      Webflow Localize publishes Spanish at / and English at /en/.
   ========================================================= */
-  const ITBMO_LANGUAGE_PAGES = {
-    es: 'https://itravelbymyown.com/',
-    en: 'https://itravelbymyown.com/en/'
-  };
-
   const ITBMO_CURRENT_SITE_LANGUAGE =
     String(document.documentElement.lang || 'es').toLowerCase().slice(0, 2);
+
+  function getITBMOWebflowOrigin() {
+    try {
+      const parentUrl = new URL(document.referrer);
+      const host = parentUrl.hostname.toLowerCase();
+      if (host === 'itravelbymyown.com' || host === 'www.itravelbymyown.com' || host.endsWith('.webflow.io')) {
+        return parentUrl.origin;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function getITBMOWebflowPath() {
+    const page = window.location.pathname.split('/').pop() || '';
+    if (page.includes('support-contact')) return '/soporte-contacto';
+    if (page.includes('privacy-cookies')) return '/privacidad-cookies';
+    if (page.includes('terms')) return '/terminos';
+    if (page.includes('ads-affiliates')) return '/publicidad-afiliados';
+    return '/';
+  }
+
+  function getITBMOLanguageTarget(lang) {
+    const parentOrigin = getITBMOWebflowOrigin();
+    if (parentOrigin) {
+      const pagePath = getITBMOWebflowPath();
+      if (lang === 'en') return `${parentOrigin}/en${pagePath}`.replace(/\/$/, pagePath === '/' ? '/' : '');
+      return `${parentOrigin}${pagePath}`;
+    }
+
+    const url = new URL(window.location.href);
+    if (lang === 'en') {
+      url.pathname = url.pathname.replace(/(?:-en)?\.html$/, '-en.html');
+    } else {
+      url.pathname = url.pathname.replace(/-en\.html$/, '.html');
+    }
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  }
 
   function showLanguageAvailability(message) {
     document.querySelector('.itbmo-language-toast')?.remove();
@@ -125,7 +159,7 @@
       try { localStorage.setItem('itbmo_site_language', lang); } catch (_) {}
 
       if (lang === ITBMO_CURRENT_SITE_LANGUAGE) return;
-      const target = ITBMO_LANGUAGE_PAGES[lang];
+      const target = getITBMOLanguageTarget(lang);
       if (target) {
         try {
           window.top.location.href = target;
