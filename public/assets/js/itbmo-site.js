@@ -121,7 +121,7 @@
 
   function getITBMOWebflowPath(lang, pathname = window.location.pathname) {
     const routes = {
-      home:       { es:'/',                      en:'/en' },
+      home:       { es:'/',                      en:'/english' },
       support:    { es:'/soporte-contacto',      en:'/support-contact' },
       privacy:    { es:'/privacidad-cookies',    en:'/privacy-cookies' },
       terms:      { es:'/terminos',              en:'/terms' },
