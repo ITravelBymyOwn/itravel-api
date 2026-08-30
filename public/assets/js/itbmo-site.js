@@ -19,7 +19,7 @@
        ad slots enabled:false
   ========================================================= */
   const ITBMO_HOME_CONFIG = {
-    previewMode: true,
+    previewMode: false,
 
     partners: {
       kayak:        { enabled:false, url:'', previewUrl:'https://www.kayak.com/flights' },
@@ -68,7 +68,7 @@
   /* =========================================================
      PLACEHOLDER / UTILITY LINKS
   ========================================================= */
-  document.querySelectorAll('[data-placeholder-link],[data-utility-link]').forEach((link) => {
+  document.querySelectorAll('[data-placeholder-link]').forEach((link) => {
     link.addEventListener('click', (event) => event.preventDefault());
   });
 
@@ -94,13 +94,11 @@
   /* =========================================================
      PAGE LANGUAGE SELECTOR
      ---------------------------------------------------------
-     ES is the active page today. EN remains a real, clickable
-     selector without sending the user to a 404 while the English
-     page is not published yet.
+     Webflow Localize publishes Spanish at / and English at /en/.
   ========================================================= */
   const ITBMO_LANGUAGE_PAGES = {
-    es: './preview-home.html',
-    en: ''
+    es: '/',
+    en: '/en/'
   };
 
   function showLanguageAvailability(message) {
