@@ -545,6 +545,41 @@ async function handleGet(res, body, session) {
   });
 }
 
+async function handleArchive(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+
+  if (trip.status === "archived") {
+    return res.status(200).json({ ok:true, action:"archive", trip });
+  }
+
+  const now = new Date().toISOString();
+  const checkpoint = generationCheckpoint(trip.itinerary_data);
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    status:"archived",
+    itinerary_data:{
+      ...checkpoint,
+      run_status:"archived",
+      archived_at:now,
+      updated_at:now
+    }
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"archive",
+    trip:updated
+  });
+}
+
 async function handleGenerationBegin(res, body, session) {
   const tripId = String(body.trip_id || "").trim();
   if (!tripId) {
@@ -558,6 +593,10 @@ async function handleGenerationBegin(res, body, session) {
 
   if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
     return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
   }
 
   const checkpoint = generationCheckpoint(trip.itinerary_data);
@@ -640,6 +679,9 @@ async function handleGenerationCheckpoint(res, body, session) {
   }
   if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
     return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
   }
   if (trip.status === "generated" && status !== "generated") {
     return res.status(409).json({ ok:false, code:"GENERATION_ALREADY_COMPLETED", error:"Generation already completed" });
@@ -751,6 +793,10 @@ export default async function handler(req, res) {
 
     if (action === "get") {
       return await handleGet(res, body, session);
+    }
+
+    if (action === "archive") {
+      return await handleArchive(res, body, session);
     }
 
     if (action === "generation_begin") {
