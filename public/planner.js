@@ -66,6 +66,7 @@ const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
 const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,15000];
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
+let generationResetInProgress = false;
 
 /* Post-payment preferences checkpoint.
    This changes only WHEN specialConditions is confirmed.
@@ -5593,6 +5594,7 @@ function _hydrateGenerationTrip_(trip){
     $start.setAttribute('aria-disabled','true');
     $start.dataset.itbmoConsumed='1';
   }
+  $resetBtn?.removeAttribute('disabled');
   if($chatBox) $chatBox.style.display='flex';
   renderCityTabs();
   setExportToolbarVisibility(trip.status==='generated');
@@ -5750,7 +5752,7 @@ async function runPaidGeneration({manualRetry=false}={}){
 }
 
 async function restorePaidGenerationIfNeeded(){
-  if(paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
+  if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   try{
     const token=getStoredSessionToken();
     let tripId=getStoredActiveTripId();
@@ -5770,6 +5772,7 @@ async function restorePaidGenerationIfNeeded(){
       const data=await tripApi({action:'recoverable',session_token:token});
       trip=data?.trip || null;
     }
+    if(generationResetInProgress) return;
     if(!trip || !['generating','failed','generated'].includes(trip.status)) return;
     if(!_hydrateGenerationTrip_(trip)) return;
 
@@ -7578,7 +7581,38 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const confirmReset = overlay.querySelector('#confirm-reset');
   const cancelReset  = overlay.querySelector('#cancel-reset');
 
-  confirmReset.addEventListener('click', ()=>{
+  confirmReset.addEventListener('click', async ()=>{
+    if(paidGenerationRunning) return;
+
+    generationResetInProgress = true;
+    confirmReset.disabled = true;
+
+    const tripIdToArchive = currentTripId || getStoredActiveTripId();
+    const sessionToken = getStoredSessionToken();
+    if(tripIdToArchive && sessionToken){
+      try{
+        await tripApi({
+          action:'archive',
+          session_token:sessionToken,
+          trip_id:tripIdToArchive
+        });
+      }catch(err){
+        console.warn('[RESET ARCHIVE]',err);
+        generationResetInProgress = false;
+        confirmReset.disabled = false;
+        let errorMessage = overlay.querySelector('.reset-error');
+        if(!errorMessage){
+          errorMessage = document.createElement('p');
+          errorMessage.className = 'reset-error';
+          modal.insertBefore(errorMessage, modal.querySelector('.reset-actions'));
+        }
+        errorMessage.textContent = getLang()==='es'
+          ? 'No pudimos cerrar este viaje. Verifica tu conexión e inténtalo nuevamente.'
+          : 'We could not close this trip. Check your connection and try again.';
+        return;
+      }
+    }
+
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
     addCityRow();
     $start.disabled = true;
@@ -7647,6 +7681,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // UX: enfocar primer input de ciudad
     const firstCity = qs('.city-row .city');
     if (firstCity) firstCity.focus();
+    generationResetInProgress = false;
   });
 
   cancelReset.addEventListener('click', ()=>{
