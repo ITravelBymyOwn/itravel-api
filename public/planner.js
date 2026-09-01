@@ -847,7 +847,7 @@ function renderAuthState(){
   updateSaveAvailability();
   if(logged){
     if(activeAstraCoach?.key==='account') closeAstraCoach({remember:false});
-    showNextPlannerGuide({focus:false,force:false,delay:420});
+    scheduleAstraCoach('travelers','#travelers-box',520,{force:true});
   }
 }
 
@@ -1707,7 +1707,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     baseDatePicker.dataset.autoSuggested='0';
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
-    showNextPlannerGuide({focus:true,force:true,delay:280});
+    scheduleAstraCoach('schedule',()=>qs('.hours-block',row),360,{force:true});
   });
 
   let hoursWrap = pref.days ? makeHoursBlock(pref.days) : document.createElement('div');
@@ -1727,7 +1727,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     hoursWrap=nextHoursWrap;
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
-    showNextPlannerGuide({focus:true,force:true,delay:260});
+    scheduleAstraCoach('date',()=>qs('.baseDatePicker',row),320,{force:true});
   });
 
   qs('.remove',row).addEventListener('click', ()=>{
@@ -1937,7 +1937,7 @@ function showPreferencesStage(){
       $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
     }catch(_){}
   });
-  showNextPlannerGuide({focus:true,force:true,delay:420});
+  scheduleAstraCoach('preferences',$preferencesField||'#preferences-stage',520,{force:true});
 }
 
 function confirmPreferencesAndContinue(){
@@ -6899,7 +6899,7 @@ function bindTravelersListeners(){
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
       }
       setTravelerButtonsState();
-      if(v) showNextPlannerGuide({focus:true,force:true,delay:320});
+      if(v) scheduleAstraCoach('destinations','#destinations-box',420,{force:true});
     });
   }
 
@@ -9227,10 +9227,15 @@ function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}
     const rect=target.getBoundingClientRect();
     const b=bubble.getBoundingClientRect();
     const margin=12;
-    const top=rect.bottom+10;
+    const below=rect.bottom+b.height+margin<window.innerHeight;
+    const preferredTop=below?rect.bottom+10:rect.top-b.height-10;
+    const top=Math.min(
+      Math.max(margin,preferredTop),
+      Math.max(margin,window.innerHeight-b.height-margin)
+    );
     const left=Math.min(Math.max(margin,rect.left),Math.max(margin,window.innerWidth-b.width-margin));
     bubble.style.left=`${left}px`; bubble.style.top=`${top}px`;
-    bubble.classList.remove('is-above');
+    bubble.classList.toggle('is-above',!below);
   };
   const interaction=()=>closeAstraCoach({remember:true});
   activeAstraCoach={bubble,key,target,position,interaction};
@@ -9325,8 +9330,8 @@ function getNextPlannerGuideStep(){
 function focusPlannerGuideStep(step){
   const target=resolveCoachTarget(step?.focus||step?.target);
   if(!target) return;
-  try{target.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});}catch(_){ }
   try{target.focus({preventScroll:true});}catch(_){ }
+  try{target.scrollIntoView({behavior:'auto',block:'center',inline:'nearest'});}catch(_){ }
 }
 
 function showNextPlannerGuide({focus=false,force=false,delay=220}={}){
@@ -9335,14 +9340,14 @@ function showNextPlannerGuide({focus=false,force=false,delay=220}={}){
     const step=getNextPlannerGuideStep();
     if(!step){closeAstraCoach({remember:false});return;}
     if(focus) focusPlannerGuideStep(step);
-    requestAnimationFrame(()=>showAstraCoach(step.key,step.target,{...step,force}));
+    showAstraCoach(step.key,step.target,{...step,force});
   },delay);
 }
 
 function bindProgressivePlannerGuide(){
   document.addEventListener('change',(event)=>{
     const field=event.target;
-    if(!field?.matches?.('#traveler-mode,.traveler-profile select,.city-row .city,.city-row .country,.city-row .days,.city-row .baseDatePicker,.time-selector select,.same-schedule')) return;
+    if(!field?.matches?.('.traveler-profile select,.city-row .city,.city-row .country,.time-selector select,.same-schedule')) return;
     const row=field.closest('.city-row');
     if(field.matches('.same-schedule') && field.checked && row){
       const firstDay=qs('.hours-day',row);
