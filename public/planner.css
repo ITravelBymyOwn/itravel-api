@@ -5886,3 +5886,6 @@ body.itinerary-focus-open{
   #save-destinations:not(:disabled),#start-planning:not(:disabled),#continue-with-astra:not(:disabled){animation:itbmoCtaBreath 2.8s ease-in-out infinite}
   @keyframes itbmoCtaBreath{0%,100%{filter:brightness(1)}50%{filter:brightness(1.07)}}
 }
+
+/* v82 · Coach marks live beside their fields inside the auto-height iframe. */
+.astra-coach{position:absolute!important}
