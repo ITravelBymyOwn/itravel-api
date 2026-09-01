@@ -3043,3 +3043,66 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
   text-decoration-thickness:1px;
   text-decoration-color:rgba(79,93,103,.62);
 }
+
+/* =========================================================
+   V5.8 · HOME BRAND SIGNATURE
+   Exact visual order and brand colors from the hero.
+   ========================================================= */
+
+.brand-signature{
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  padding:clamp(4.6rem,8vw,7.5rem) 0;
+  background:
+    radial-gradient(720px 420px at 14% 18%,rgba(53,191,209,.16),transparent 70%),
+    radial-gradient(790px 460px at 82% 5%,rgba(109,120,238,.16),transparent 72%),
+    linear-gradient(180deg,#f8fcfd,#f6f8ff);
+}
+
+.brand-signature__inner{
+  max-width:1080px;
+}
+
+.brand-signature__line{
+  margin:0;
+  color:var(--ink);
+  font-size:clamp(3.1rem,7.15vw,6.4rem);
+  line-height:.93;
+  letter-spacing:-.058em;
+  font-weight:900;
+}
+
+.brand-signature__line span{
+  display:inline-block;
+  color:transparent;
+  background:linear-gradient(100deg,var(--blue),var(--teal),var(--indigo));
+  -webkit-background-clip:text;
+  background-clip:text;
+  padding-right:.065em;
+  margin-right:.035em;
+}
+
+.site-footer--home .site-footer__top{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+
+@media(max-width:900px){
+  .site-footer--home .site-footer__top{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media(max-width:680px){
+  .brand-signature{
+    padding:3.8rem 0 4.2rem;
+  }
+
+  .brand-signature__line{
+    font-size:clamp(2.65rem,12.8vw,4.1rem);
+  }
+
+  .site-footer--home .site-footer__top{
+    grid-template-columns:1fr;
+  }
+}
