@@ -99,6 +99,11 @@
 @media(max-width:900px){.legal-hero__inner,.legal-layout{grid-template-columns:1fr}.legal-toc{position:relative;top:auto}.legal-toc nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.legal-footer .site-footer__top{grid-template-columns:repeat(2,minmax(0,1fr))}.legal-footer .site-footer__brand{grid-column:1/-1}.support-payment{grid-template-columns:1fr}}
 @media(max-width:680px){.legal-hero{padding:3.3rem 0 2.8rem}.legal-hero__copy h1{font-size:clamp(3rem,15vw,4.5rem)}.legal-body{padding-top:1.2rem}.legal-document{padding:1rem;border-radius:22px}.legal-toc nav,.legal-data-card,.cookie-grid,.partner-legal-grid,.support-grid,.support-steps{grid-template-columns:1fr}.legal-footer .site-footer__top{grid-template-columns:1fr}.support-links{align-items:flex-start;flex-direction:column}.support-links>div{justify-content:flex-start}}
 
+/* V2.3 · Match secondary-page footers to the Home footer. */
+.legal-footer.site-footer--home .site-footer__top{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media(max-width:900px){.legal-footer.site-footer--home .site-footer__top{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:680px){.legal-footer.site-footer--home .site-footer__top{grid-template-columns:1fr}}
+
 /* =========================================================
    ITBMO · LEGAL V2.2 · SURGICAL AUDIT ADDITIONS
    Independent TOC scroll + 6-step support layout.
