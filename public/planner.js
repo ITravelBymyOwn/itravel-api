@@ -61,6 +61,7 @@ let pendingChange = null;
 let hasSavedOnce = false;
 let saveLockWarningAccepted = false;
 let paymentWarningAcceptedTripId = null;
+let plannerGuideRouteComplete = false;
 
 /* Paid-generation recovery. Normal successful generations add only small
    checkpoint writes; retries run only after a real technical failure. */
@@ -147,10 +148,10 @@ const I18N = {
     uiDays: 'Días',
     uiStart: 'Primer día',
     uiDateFormatSmall: 'Selecciona una fecha válida',
-    uiTimeHint: '⏰ Indica tu tiempo útil en el destino. El Día 1 comienza cuando llegas al alojamiento; el último día termina antes de salir hacia el aeropuerto o estación.',
+    uiTimeHint: '⏰ Indica tu tiempo útil en el destino. Si aún no conoces los horarios, puedes omitirlos: ASTRA propondrá horas razonables de inicio y final.',
     uiStartTime: 'Hora Inicio',
     uiEndTime: 'Hora Final',
-    uiSameSchedule: 'Usar el horario del Día 1 en todos los días',
+    uiSameSchedule: 'Copiar el horario del Día 1 en todos los días',
     uiTripRange: (start,end,days)=>`${start}–${end} · ${days} ${days===1?'día':'días'}`,
     uiDay: (d)=>`Día ${d}`,
     uiAriaStart: 'Hora inicio',
@@ -227,10 +228,10 @@ const I18N = {
     uiDays: 'Days',
     uiStart: 'First day',
     uiDateFormatSmall: 'Choose a valid date',
-    uiTimeHint: '⏰ Enter your usable time at the destination. Day 1 starts when you reach your lodging; the final day ends before you leave for the airport or station.',
+    uiTimeHint: '⏰ Enter your usable time at the destination. If you do not know the times yet, you may leave them blank and ASTRA will suggest reasonable start and end times.',
     uiStartTime: 'Start time',
     uiEndTime: 'End time',
-    uiSameSchedule: 'Use Day 1 schedule for every day',
+    uiSameSchedule: 'Copy the Day 1 schedule to every day',
     uiTripRange: (start,end,days)=>`${start}–${end} · ${days} ${days===1?'day':'days'}`,
     uiDay: (d)=>`Day ${d}`,
     uiAriaStart: 'Start time',
@@ -844,7 +845,10 @@ function renderAuthState(){
   }
 
   updateSaveAvailability();
-  if(logged) scheduleAstraCoach('travelers','#travelers-box',520);
+  if(logged){
+    if(activeAstraCoach?.key==='account') closeAstraCoach({remember:false});
+    showNextPlannerGuide({focus:false,force:false,delay:420});
+  }
 }
 
 function applyAuthLanguage(){
@@ -1591,15 +1595,25 @@ function makeHoursBlock(days){
   const refreshMirrorState=()=>{
     const sameForAll=Boolean(toggle?.checked);
     wrap.classList.toggle('is-same-schedule',sameForAll);
-    dayRows.slice(1).forEach(row=>{
-      qsa('.time-hour,.time-minute',row).forEach(select=>{select.disabled=sameForAll;});
-    });
-    if(sameForAll) mirrorFirstDaySchedule(wrap);
+    wrap.dataset.scheduleCopied='0';
+    wrap.dataset.scheduleManualOverrides='0';
+    if(sameForAll && qs('.start',dayRows[0])?.value && qs('.end',dayRows[0])?.value){
+      mirrorFirstDaySchedule(wrap);
+      wrap.dataset.scheduleCopied='1';
+    }
   };
   qsa('.time-selector',wrap).forEach(group=>{
     qsa('select',group).forEach(select=>select.addEventListener('change',()=>{
       syncTimeSelector(group);
-      if(toggle?.checked && group.closest('.hours-day')===dayRows[0]) mirrorFirstDaySchedule(wrap);
+      const row=group.closest('.city-row');
+      const firstComplete=Boolean(qs('.start',dayRows[0])?.value && qs('.end',dayRows[0])?.value);
+      const isFirstDay=group.closest('.hours-day')===dayRows[0];
+      if(toggle?.checked && !isFirstDay) wrap.dataset.scheduleManualOverrides='1';
+      if(toggle?.checked && isFirstDay && firstComplete && wrap.dataset.scheduleManualOverrides!=='1'){
+        mirrorFirstDaySchedule(wrap);
+        wrap.dataset.scheduleCopied='1';
+      }
+      if(row && firstComplete) row.dataset.scheduleResolved='1';
     }));
   });
   toggle?.addEventListener('change',refreshMirrorState);
@@ -1693,7 +1707,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     baseDatePicker.dataset.autoSuggested='0';
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
-    scheduleAstraCoach('schedule',()=>qs('.hours-block',row),360);
+    showNextPlannerGuide({focus:true,force:true,delay:280});
   });
 
   const hoursWrap = document.createElement('div');
@@ -1716,7 +1730,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     }
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
-    scheduleAstraCoach('date',()=>qs('.baseDatePicker',row),320);
+    showNextPlannerGuide({focus:true,force:true,delay:260});
   });
 
   qs('.remove',row).addEventListener('click', ()=>{
@@ -1926,7 +1940,7 @@ function showPreferencesStage(){
       $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
     }catch(_){}
   });
-  scheduleAstraCoach('preferences','#preferences-stage',520);
+  showNextPlannerGuide({focus:true,force:true,delay:420});
 }
 
 function confirmPreferencesAndContinue(){
@@ -2219,6 +2233,7 @@ async function saveDestinations(){
         $start.scrollIntoView({behavior:'smooth', block:'center', inline:'nearest'});
         setTimeout(()=>{
           try{ $start.focus({preventScroll:true}); }catch(_){ }
+          showNextPlannerGuide({focus:false,force:true,delay:80});
         }, 420);
       }catch(_){ }
     });
@@ -6671,7 +6686,9 @@ $addCity?.addEventListener('click', ()=>{
     updateAddCityButtonState();
     return;
   }
+  plannerGuideRouteComplete=false;
   addCityRow();
+  showNextPlannerGuide({focus:true,force:true,delay:180});
 });
 
 function validateBaseDatesDMY(){
@@ -6885,7 +6902,7 @@ function bindTravelersListeners(){
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
       }
       setTravelerButtonsState();
-      if(v) scheduleAstraCoach('destinations','#destinations-box',420);
+      if(v) showNextPlannerGuide({focus:true,force:true,delay:320});
     });
   }
 
@@ -7862,6 +7879,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     session = []; hasSavedOnce=false; pendingChange=null;
     saveLockWarningAccepted=false;
     paymentWarningAcceptedTripId=null;
+    plannerGuideRouteComplete=false;
     currentTripId = null;
     storeActiveTripId(null);
     generationRecoveryState = null;
@@ -7922,6 +7940,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // UX: enfocar primer input de ciudad
     const firstCity = qs('.city-row .city');
     if (firstCity) firstCity.focus();
+    showNextPlannerGuide({focus:false,force:true,delay:220});
     generationResetInProgress = false;
   });
 
@@ -9124,7 +9143,7 @@ function enhancePreferencesInfoChatCopy(){
    One calm, contextual coach mark at a time. It never advances on a timer.
    The guide disappears as soon as the traveler starts interacting.
 ========================================================= */
-const ASTRA_COACH_STORAGE_KEY='itbmo_astra_coach_v1';
+const ASTRA_COACH_STORAGE_KEY='itbmo_astra_coach_v2';
 let activeAstraCoach=null;
 let astraCoachTimer=null;
 
@@ -9144,8 +9163,17 @@ function astraCoachCopy(key){
       ? ['Primer día en el destino','Selecciona la fecha en que llegarás al hotel o apartamento y tendrás tiempo disponible. Las siguientes ciudades se sugerirán automáticamente sin permitir fechas imposibles o superpuestas.']
       : ['First day at the destination','Choose the date when you will reach your hotel or apartment and have usable time. Following cities will be suggested automatically without impossible or overlapping dates.'],
     schedule:es
-      ? ['Tu tiempo útil, no la hora del vuelo','En el Día 1 indica la hora aproximada en que estarás listo en el alojamiento, después del traslado y el equipaje. En el último día indica hasta cuándo puedes hacer actividades antes de salir al aeropuerto o estación.']
-      : ['Usable time, not flight time','For Day 1, enter when you expect to be ready at your lodging after transfer and luggage. For the final day, enter how late you can explore before leaving for the airport or station.'],
+      ? ['Tus horarios son opcionales','Si los conoces, indica cuándo estarás listo en el alojamiento y hasta qué hora puedes hacer actividades. Puedes copiar el Día 1 y luego ajustar cualquier día. Si aún no los tienes, omítelos y ASTRA propondrá un horario inteligente.']
+      : ['Your schedule is optional','If known, enter when you will be ready at your lodging and how late you can explore. You may copy Day 1 and then edit any day. If you do not know yet, skip this step and ASTRA will suggest a smart schedule.'],
+    route:es
+      ? ['¿Agregarás otra ciudad?','Si tu viaje continúa, agrega la siguiente ciudad. Si esta ruta ya está completa, continúa con Guardar destinos.']
+      : ['Will you add another city?','If your trip continues, add the next city. If the route is complete, continue with Save destinations.'],
+    save:es
+      ? ['Guarda la configuración','Revisa la ruta y guarda los destinos para proteger toda la información que acabas de ingresar.']
+      : ['Save your setup','Review the route and save destinations to protect all the information you just entered.'],
+    start:es
+      ? ['Tu configuración está lista','El siguiente paso es hacer clic en Iniciar planificación. Revisaremos el pago antes de que ASTRA comience a crear tu viaje.']
+      : ['Your setup is ready','Next, click Start planning. We will review payment before ASTRA begins creating your trip.'],
     preferences:es
       ? ['Ahora, hazlo verdaderamente tuyo','Añade intereses, ritmo, actividades imperdibles, restricciones o necesidades especiales. Es opcional: puedes continuar sin escribir nada.']
       : ['Now make it truly yours','Add interests, pace, must-do activities, restrictions or special needs. This is optional: you can continue without entering anything.']
@@ -9169,6 +9197,7 @@ function closeAstraCoach({remember=true}={}){
   window.removeEventListener('scroll',position,true);
   target?.removeEventListener('pointerdown',interaction,true);
   target?.removeEventListener('focusin',interaction,true);
+  target?.classList.remove('astra-guide-target');
   bubble?.classList.remove('is-visible');
   setTimeout(()=>bubble?.remove(),180);
   if(remember) markAstraCoachSeen(key);
@@ -9177,32 +9206,42 @@ function closeAstraCoach({remember=true}={}){
 function resolveCoachTarget(target){
   try{return typeof target==='function'?target():qs(target);}catch(_){return null;}
 }
-function showAstraCoach(key,targetRef,{force=false}={}){
+function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}={}){
   if(!force && astraCoachSeen()[key]) return;
   const target=resolveCoachTarget(targetRef);
   if(!target || target.offsetParent===null) return;
   closeAstraCoach();
   const [title,message]=astraCoachCopy(key);
+  target.classList.add('astra-guide-target');
   const bubble=document.createElement('aside');
   bubble.className='astra-coach';
   bubble.setAttribute('role','status');
   bubble.innerHTML=`
     <div class="astra-coach__avatar">✦</div>
-    <div class="astra-coach__content"><small>ASTRA · ${getLang()==='es'?'GUÍA':'GUIDE'}</small><strong></strong><p></p></div>
+    <div class="astra-coach__content"><small>ASTRA · ${getLang()==='es'?'GUÍA':'GUIDE'}</small><strong></strong><p></p>${actionLabel?'<button class="astra-coach__action" type="button"></button>':''}</div>
     <button class="astra-coach__close" type="button" aria-label="${getLang()==='es'?'Ocultar ayuda':'Hide help'}">×</button>`;
   bubble.querySelector('strong').textContent=title;
   bubble.querySelector('p').textContent=message;
+  const action=bubble.querySelector('.astra-coach__action');
+  if(action){
+    action.textContent=actionLabel;
+    action.addEventListener('click',(event)=>{
+      event.preventDefault();
+      event.stopPropagation();
+      closeAstraCoach({remember:true});
+      if(typeof onAction==='function') onAction();
+    });
+  }
   document.body.appendChild(bubble);
   const position=()=>{
     if(!document.body.contains(target)) return closeAstraCoach();
     const rect=target.getBoundingClientRect();
     const b=bubble.getBoundingClientRect();
     const margin=12;
-    const below=rect.bottom+b.height+margin<window.innerHeight;
-    const top=below?rect.bottom+10:Math.max(margin,rect.top-b.height-10);
+    const top=rect.bottom+10;
     const left=Math.min(Math.max(margin,rect.left),Math.max(margin,window.innerWidth-b.width-margin));
     bubble.style.left=`${left}px`; bubble.style.top=`${top}px`;
-    bubble.classList.toggle('is-above',!below);
+    bubble.classList.remove('is-above');
   };
   const interaction=()=>closeAstraCoach({remember:true});
   activeAstraCoach={bubble,key,target,position,interaction};
@@ -9219,6 +9258,126 @@ function scheduleAstraCoach(key,target,delay=260,options={}){
   clearTimeout(astraCoachTimer);
   astraCoachTimer=setTimeout(()=>showAstraCoach(key,target,options),delay);
 }
+
+function plannerGuideFieldComplete(element){
+  if(!element) return false;
+  if(element.matches('input,select,textarea')) return String(element.value||'').trim()!=='';
+  return true;
+}
+
+function firstIncompleteTravelerField(){
+  if(!$travelerMode?.value) return $travelerMode;
+  if(String($travelerMode.value).toLowerCase()!=='group') return null;
+  return qsa('.traveler-profile select',$travelerProfiles).find(field=>!plannerGuideFieldComplete(field)) || null;
+}
+
+function firstIncompleteDestinationField(){
+  const rows=qsa('.city-row',$cityList);
+  for(const row of rows){
+    for(const selector of ['.city','.country','.days','.baseDatePicker']){
+      const field=qs(selector,row);
+      if(!plannerGuideFieldComplete(field)) return {field,row,selector};
+    }
+    const firstDay=qs('.hours-day',row);
+    const hasStart=Boolean(qs('.start',firstDay)?.value);
+    const hasEnd=Boolean(qs('.end',firstDay)?.value);
+    if(row.dataset.scheduleResolved!=='1' && !(hasStart&&hasEnd)){
+      return {field:qs('.hours-block',row),row,selector:'.hours-block',schedule:true};
+    }
+  }
+  return null;
+}
+
+function getNextPlannerGuideStep(){
+  if(!currentUser) return {key:'account',target:'#account-box',focus:'#account-register-toggle'};
+  if(hasSavedOnce && $start && !$start.disabled && !$start.dataset.itbmoConsumed){
+    return {key:'start',target:$start,focus:$start};
+  }
+  if($preferencesStage && !$preferencesStage.classList.contains('is-stage-hidden')){
+    return {key:'preferences',target:$preferencesField||$preferencesStage,focus:$preferencesField};
+  }
+  const travelerField=firstIncompleteTravelerField();
+  if(travelerField) return {key:'travelers',target:travelerField,focus:travelerField};
+  const destination=firstIncompleteDestinationField();
+  if(destination){
+    if(destination.schedule){
+      const firstDay=qs('.hours-day',destination.row);
+      const scheduleFocus=!qs('.start',firstDay)?.value
+        ? qs('[data-time-type="start"] .time-hour',firstDay)
+        : qs('[data-time-type="end"] .time-hour',firstDay);
+      return {
+        key:'schedule',target:destination.field,focus:scheduleFocus,
+        actionLabel:getLang()==='es'?'Omitir horarios':'Skip schedule',
+        onAction:()=>{
+          destination.row.dataset.scheduleResolved='1';
+          plannerGuideRouteComplete=false;
+          showNextPlannerGuide({focus:true,force:true,delay:120});
+        }
+      };
+    }
+    const key=destination.selector==='.baseDatePicker'?'date':'destinations';
+    return {key,target:destination.field,focus:destination.field};
+  }
+  if(!plannerGuideRouteComplete && qsa('.city-row',$cityList).length<MAX_ITINERARY_CITIES){
+    return {
+      key:'route',target:$addCity,focus:$addCity,
+      actionLabel:getLang()==='es'?'Mi ruta está completa':'My route is complete',
+      onAction:()=>{
+        plannerGuideRouteComplete=true;
+        showNextPlannerGuide({focus:true,force:true,delay:120});
+      }
+    };
+  }
+  if($save && !$save.disabled) return {key:'save',target:$save,focus:$save};
+  return null;
+}
+
+function focusPlannerGuideStep(step){
+  const target=resolveCoachTarget(step?.focus||step?.target);
+  if(!target) return;
+  try{target.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});}catch(_){ }
+  setTimeout(()=>{try{target.focus({preventScroll:true});}catch(_){ }},300);
+}
+
+function showNextPlannerGuide({focus=false,force=false,delay=220}={}){
+  clearTimeout(astraCoachTimer);
+  astraCoachTimer=setTimeout(()=>{
+    const step=getNextPlannerGuideStep();
+    if(!step){closeAstraCoach({remember:false});return;}
+    if(focus) focusPlannerGuideStep(step);
+    setTimeout(()=>showAstraCoach(step.key,step.target,{...step,force}),focus?340:0);
+  },delay);
+}
+
+function bindProgressivePlannerGuide(){
+  document.addEventListener('change',(event)=>{
+    const field=event.target;
+    if(!field?.matches?.('#traveler-mode,.traveler-profile select,.city-row .city,.city-row .country,.city-row .days,.city-row .baseDatePicker,.time-selector select,.same-schedule')) return;
+    const row=field.closest('.city-row');
+    if(field.matches('.same-schedule') && field.checked && row){
+      const firstDay=qs('.hours-day',row);
+      if(qs('.start',firstDay)?.value && qs('.end',firstDay)?.value) row.dataset.scheduleResolved='1';
+    }
+    if(field.matches('.time-selector select') && row){
+      const firstDay=qs('.hours-day',row);
+      if(qs('.start',firstDay)?.value && qs('.end',firstDay)?.value) row.dataset.scheduleResolved='1';
+    }
+    const guideDelay=field.matches('.time-hour')?900:180;
+    showNextPlannerGuide({focus:true,force:true,delay:guideDelay});
+  });
+  document.addEventListener('focusout',(event)=>{
+    const field=event.target;
+    if(!field?.matches?.('.city-row .city,.city-row .country')) return;
+    if(plannerGuideFieldComplete(field)) showNextPlannerGuide({focus:true,force:true,delay:180});
+  });
+  document.addEventListener('keydown',(event)=>{
+    const field=event.target;
+    if(event.key!=='Enter' || !field?.matches?.('.city-row .city,.city-row .country')) return;
+    event.preventDefault();
+    if(plannerGuideFieldComplete(field)) showNextPlannerGuide({focus:true,force:true,delay:80});
+  });
+}
+
 function initAstraCoach(){
   if(!document.querySelector('.astra-guide-replay')){
     const replay=document.createElement('button');
@@ -9226,13 +9385,12 @@ function initAstraCoach(){
     replay.className='astra-guide-replay';
     replay.innerHTML=`<span>✦</span>${getLang()==='es'?'Ver guía':'View guide'}`;
     replay.addEventListener('click',()=>{
-      try{localStorage.removeItem(ASTRA_COACH_STORAGE_KEY);}catch(_){}
       closeAstraCoach({remember:false});
-      scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',80,{force:true});
+      showNextPlannerGuide({focus:true,force:true,delay:80});
     });
     document.body.appendChild(replay);
   }
-  scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',900);
+  showNextPlannerGuide({focus:false,force:false,delay:500});
 }
 
 // Inicialización
@@ -9240,7 +9398,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
   bindAccountListeners();
-  restoreITBMOSession();
+  const sessionRestore=Promise.resolve(restoreITBMOSession()).catch(()=>null);
 
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
   bindInfoChatListeners();
@@ -9249,10 +9407,11 @@ document.addEventListener('DOMContentLoaded', ()=>{
   hidePreferencesStage({reset:true});
 
   bindTravelersListeners();
+  bindProgressivePlannerGuide();
 
   renumberTravelerProfiles();
   setTravelerButtonsState();
 
   bindExportListeners();
-  initAstraCoach();
+  sessionRestore.finally(()=>initAstraCoach());
 });
