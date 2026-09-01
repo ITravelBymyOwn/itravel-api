@@ -59,6 +59,8 @@ let isItineraryLocked = false;
 
 let pendingChange = null;
 let hasSavedOnce = false;
+let saveLockWarningAccepted = false;
+let paymentWarningAcceptedTripId = null;
 
 /* Paid-generation recovery. Normal successful generations add only small
    checkpoint writes; retries run only after a real technical failure. */
@@ -143,11 +145,13 @@ const I18N = {
     uiCity: 'Ciudad',
     uiCountry: 'País',
     uiDays: 'Días',
-    uiStart: 'Inicio',
-    uiDateFormatSmall: 'DD/MM/AAAA',
-    uiTimeHint: '⏰ Usa horario de 24 h — Ej: 08:30 (mañana) · 21:00 (noche)',
+    uiStart: 'Primer día',
+    uiDateFormatSmall: 'Selecciona una fecha válida',
+    uiTimeHint: '⏰ Indica tu tiempo útil en el destino. El Día 1 comienza cuando llegas al alojamiento; el último día termina antes de salir hacia el aeropuerto o estación.',
     uiStartTime: 'Hora Inicio',
     uiEndTime: 'Hora Final',
+    uiSameSchedule: 'Usar el horario del Día 1 en todos los días',
+    uiTripRange: (start,end,days)=>`${start}–${end} · ${days} ${days===1?'día':'días'}`,
     uiDay: (d)=>`Día ${d}`,
     uiAriaStart: 'Hora inicio',
     uiAriaEnd: 'Hora final',
@@ -171,7 +175,7 @@ const I18N = {
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
     // Tooltip fechas
-    tooltipDateMissing: 'Por favor ingresa la fecha de inicio (DD/MM/AAAA) para cada ciudad 🗓️',
+    tooltipDateMissing: 'Selecciona una fecha futura válida para cada ciudad 🗓️',
 
     // Reset modal
     resetTitle: '¿Reiniciar planificación? 🧭',
@@ -221,11 +225,13 @@ const I18N = {
     uiCity: 'City',
     uiCountry: 'Country',
     uiDays: 'Days',
-    uiStart: 'Start',
-    uiDateFormatSmall: 'DD/MM/YYYY',
-    uiTimeHint: '⏰ Use 24h time — e.g., 08:30 (morning) · 21:00 (night)',
+    uiStart: 'First day',
+    uiDateFormatSmall: 'Choose a valid date',
+    uiTimeHint: '⏰ Enter your usable time at the destination. Day 1 starts when you reach your lodging; the final day ends before you leave for the airport or station.',
     uiStartTime: 'Start time',
     uiEndTime: 'End time',
+    uiSameSchedule: 'Use Day 1 schedule for every day',
+    uiTripRange: (start,end,days)=>`${start}–${end} · ${days} ${days===1?'day':'days'}`,
     uiDay: (d)=>`Day ${d}`,
     uiAriaStart: 'Start time',
     uiAriaEnd: 'End time',
@@ -249,7 +255,7 @@ const I18N = {
     overlayRebalancing: 'Adding days and re-optimizing…',
 
     // Tooltip fechas
-    tooltipDateMissing: 'Please enter the start date (DD/MM/YYYY) for each city 🗓️',
+    tooltipDateMissing: 'Choose a valid future date for every city 🗓️',
 
     // Reset modal
     resetTitle: 'Reset planning? 🧭',
@@ -838,6 +844,7 @@ function renderAuthState(){
   }
 
   updateSaveAvailability();
+  if(logged) scheduleAstraCoach('travelers','#travelers-box',520);
 }
 
 function applyAuthLanguage(){
@@ -1465,11 +1472,83 @@ function formatDMY(d){
   return `${dd}/${mm}/${yy}`;
 }
 function addDays(d, n){ const x=new Date(d.getTime()); x.setDate(x.getDate()+n); return x; }
+function formatISODate(d){
+  if(!(d instanceof Date) || Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function parsePlannerDate(value){
+  const raw=String(value||'').trim();
+  const iso=/^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if(iso){
+    const d=new Date(Number(iso[1]),Number(iso[2])-1,Number(iso[3]));
+    if(d.getFullYear()===Number(iso[1]) && d.getMonth()===Number(iso[2])-1 && d.getDate()===Number(iso[3])) return d;
+    return null;
+  }
+  return parseDMY(raw);
+}
+function plannerDateMin(){
+  const d=new Date(); d.setHours(0,0,0,0); return formatISODate(d);
+}
+function plannerDateMax(){
+  const d=new Date(); d.setFullYear(d.getFullYear()+5); d.setHours(0,0,0,0); return formatISODate(d);
+}
+function dateToPlannerStorage(value){
+  const d=parsePlannerDate(value);
+  return d ? formatDMY(d) : '';
+}
 function addMinutes(hhmm, min){
   const [H,M] = (hhmm||DEFAULT_START).split(':').map(n=>parseInt(n||'0',10));
   const d = new Date(2000,0,1,H||0,M||0,0);
   d.setMinutes(d.getMinutes()+min);
   return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+
+function timeSelectOptions(kind='hour'){
+  if(kind==='minute'){
+    return `<option value="">00</option>${['15','30','45'].map(v=>`<option value="${v}">${v}</option>`).join('')}`;
+  }
+  const values=Array.from({length:24},(_,i)=>String(i).padStart(2,'0'));
+  return `<option value="">--</option>${values.map(v=>`<option value="${v}">${v}</option>`).join('')}`;
+}
+
+function timeSelectorMarkup(type,ariaLabel){
+  return `<div class="time-selector" data-time-type="${type}" role="group" aria-label="${ariaLabel}">
+    <select class="time-hour" aria-label="${ariaLabel} · ${getLang()==='es'?'hora':'hour'}">${timeSelectOptions('hour')}</select>
+    <span aria-hidden="true">:</span>
+    <select class="time-minute" aria-label="${ariaLabel} · ${getLang()==='es'?'minutos':'minutes'}">${timeSelectOptions('minute')}</select>
+    <input class="${type}" type="hidden" value="">
+  </div>`;
+}
+
+function syncTimeSelector(group){
+  if(!group) return '';
+  const hour=qs('.time-hour',group)?.value || '';
+  const minute=qs('.time-minute',group)?.value || '00';
+  const value=hour!=='' ? `${hour}:${minute}` : '';
+  const hidden=qs('input[type="hidden"]',group);
+  if(hidden) hidden.value=value;
+  return value;
+}
+
+function setTimeSelectorValue(group,value=''){
+  if(!group) return;
+  const normalized=/^(\d{2}):(\d{2})$/.exec(String(value||''));
+  const hour=qs('.time-hour',group);
+  const minute=qs('.time-minute',group);
+  if(hour) hour.value=normalized?.[1] || '';
+  if(minute) minute.value=['15','30','45'].includes(normalized?.[2]) ? normalized[2] : '';
+  syncTimeSelector(group);
+}
+
+function mirrorFirstDaySchedule(wrap){
+  const rows=qsa('.hours-day',wrap);
+  if(rows.length<2) return;
+  const firstStart=qs('.start',rows[0])?.value || '';
+  const firstEnd=qs('.end',rows[0])?.value || '';
+  rows.slice(1).forEach(row=>{
+    setTimeSelectorValue(qs('[data-time-type="start"]',row),firstStart);
+    setTimeSelectorValue(qs('[data-time-type="end"]',row),firstEnd);
+  });
 }
 
 function makeHoursBlock(days){
@@ -1481,6 +1560,11 @@ function makeHoursBlock(days){
   guide.className = 'time-hint';
   guide.textContent = t('uiTimeHint');
   wrap.appendChild(guide);
+
+  const same=document.createElement('label');
+  same.className='same-schedule-toggle';
+  same.innerHTML=`<input class="same-schedule" type="checkbox"><span class="same-schedule-ui" aria-hidden="true"></span><span>${t('uiSameSchedule')}</span>`;
+  wrap.appendChild(same);
 
   const header = document.createElement('div');
   header.className = 'hours-header';
@@ -1496,12 +1580,63 @@ function makeHoursBlock(days){
     row.className = 'hours-day';
     row.innerHTML = `
       <span>${t('uiDay', d)}</span>
-      <input class="start" type="time" aria-label="${t('uiAriaStart')}" placeholder="HH:MM">
-      <input class="end"   type="time" aria-label="${t('uiAriaEnd')}"  placeholder="HH:MM">
+      ${timeSelectorMarkup('start',t('uiAriaStart'))}
+      ${timeSelectorMarkup('end',t('uiAriaEnd'))}
     `;
     wrap.appendChild(row);
   }
+
+  const toggle=qs('.same-schedule',wrap);
+  const dayRows=qsa('.hours-day',wrap);
+  const refreshMirrorState=()=>{
+    const sameForAll=Boolean(toggle?.checked);
+    wrap.classList.toggle('is-same-schedule',sameForAll);
+    dayRows.slice(1).forEach(row=>{
+      qsa('.time-hour,.time-minute',row).forEach(select=>{select.disabled=sameForAll;});
+    });
+    if(sameForAll) mirrorFirstDaySchedule(wrap);
+  };
+  qsa('.time-selector',wrap).forEach(group=>{
+    qsa('select',group).forEach(select=>select.addEventListener('change',()=>{
+      syncTimeSelector(group);
+      if(toggle?.checked && group.closest('.hours-day')===dayRows[0]) mirrorFirstDaySchedule(wrap);
+    }));
+  });
+  toggle?.addEventListener('change',refreshMirrorState);
+  refreshMirrorState();
   return wrap;
+}
+
+function updateCityDateSummary(row){
+  if(!row) return;
+  const summary=qs('.date-summary',row);
+  const hidden=qs('.baseDate',row);
+  const days=Math.max(1,Number(qs('.days',row)?.value || 1));
+  const start=parsePlannerDate(hidden?.value || '');
+  if(!summary || !start){ if(summary) summary.textContent=''; return; }
+  const end=addDays(start,days-1);
+  summary.textContent=t('uiTripRange',formatDMY(start),formatDMY(end),days);
+}
+
+function suggestFollowingCityDates(sourceRow){
+  const rows=qsa('.city-row',$cityList);
+  const sourceIndex=rows.indexOf(sourceRow);
+  if(sourceIndex<0) return;
+  for(let i=sourceIndex+1;i<rows.length;i++){
+    const previous=rows[i-1];
+    const current=rows[i];
+    const previousDate=parsePlannerDate(qs('.baseDate',previous)?.value || '');
+    const previousDays=Math.max(1,Number(qs('.days',previous)?.value || 1));
+    const picker=qs('.baseDatePicker',current);
+    const hidden=qs('.baseDate',current);
+    if(!previousDate || !picker || !hidden) break;
+    if(picker.value && picker.dataset.autoSuggested!=='1') break;
+    const suggested=addDays(previousDate,previousDays);
+    picker.value=formatISODate(suggested);
+    picker.dataset.autoSuggested='1';
+    hidden.value=formatDMY(suggested);
+    updateCityDateSummary(current);
+  }
 }
 
 function updateAddCityButtonState(){
@@ -1532,6 +1667,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     return;
   }
 
+  const initialDate=parsePlannerDate(pref.baseDate||'');
   const row = document.createElement('div');
   row.className = 'city-row';
   row.innerHTML = `
@@ -1541,18 +1677,24 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label class="date-label">
       ${t('uiStart')}
       <div class="date-wrapper">
-        <input class="baseDate" placeholder="__/__/____" value="${pref.baseDate||''}">
+        <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
+        <input class="baseDate" type="hidden" value="${initialDate?formatDMY(initialDate):''}">
         <small class="date-format">${t('uiDateFormatSmall')}</small>
+        <small class="date-summary" aria-live="polite"></small>
       </div>
     </label>
     <button class="remove" type="button">✕</button>
   `;
 
   const baseDateEl = qs('.baseDate', row);
-
-  if(baseDateEl){
-    autoFormatDMYInput(baseDateEl);
-  }
+  const baseDatePicker = qs('.baseDatePicker', row);
+  baseDatePicker?.addEventListener('change',()=>{
+    if(baseDateEl) baseDateEl.value=dateToPlannerStorage(baseDatePicker.value);
+    baseDatePicker.dataset.autoSuggested='0';
+    updateCityDateSummary(row);
+    suggestFollowingCityDates(row);
+    scheduleAstraCoach('schedule',()=>qs('.hours-block',row),360);
+  });
 
   const hoursWrap = document.createElement('div');
   hoursWrap.className = 'hours-block';
@@ -1572,6 +1714,9 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
       const tmp = makeHoursBlock(n).children;
       Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
     }
+    updateCityDateSummary(row);
+    suggestFollowingCityDates(row);
+    scheduleAstraCoach('date',()=>qs('.baseDatePicker',row),320);
   });
 
   qs('.remove',row).addEventListener('click', ()=>{
@@ -1579,6 +1724,11 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     updateAddCityButtonState();
   });
   $cityList.appendChild(row);
+  updateCityDateSummary(row);
+
+  const allRows=qsa('.city-row',$cityList);
+  const previous=allRows[allRows.length-2];
+  if(previous && !baseDatePicker?.value) suggestFollowingCityDates(previous);
   updateAddCityButtonState();
 }
 
@@ -1776,6 +1926,7 @@ function showPreferencesStage(){
       $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
     }catch(_){}
   });
+  scheduleAstraCoach('preferences','#preferences-stage',520);
 }
 
 function confirmPreferencesAndContinue(){
@@ -1882,6 +2033,8 @@ async function saveDestinations(){
 
   writeLegacyTravelerCounts(travelerState.counts);
 
+  if(!validateBaseDatesDMY()) return;
+
   const rows = qsa('.city-row', $cityList);
   if(rows.length>MAX_ITINERARY_CITIES){
     alert(getLang()==='es'
@@ -1915,6 +2068,20 @@ async function saveDestinations(){
   });
 
   if(list.length === 0) return;
+
+  if(!saveLockWarningAccepted){
+    const es=getLang()==='es';
+    const confirmed=await showPlannerDecision({
+      title:es?'¿Todo listo para guardar?':'Ready to save?',
+      message:es
+        ? 'Al guardar, bloquearemos viajeros, ciudades, fechas y horarios para proteger la coherencia del viaje. Todavía podrás usar Reiniciar planificación y comenzar de nuevo sin pagar mientras no hayas realizado el pago.'
+        : 'After saving, travelers, cities, dates and schedules will be locked to protect trip consistency. You can still use Reset planning and start again without paying as long as payment has not been completed.',
+      cancelLabel:es?'Revisar información':'Review information',
+      confirmLabel:es?'Sí, guardar destinos':'Yes, save destinations'
+    });
+    if(!confirmed) return;
+    saveLockWarningAccepted=true;
+  }
 
   const previousSaveLabel = $save?.textContent || '';
   if($save){
@@ -2039,6 +2206,11 @@ async function saveDestinations(){
 
   /* QUIRÚRGICO v4: a newly saved plan must generate before export actions return. */
   setExportToolbarVisibility(false);
+
+  /* UX performance: warm up PayPal while the user reviews the next step. */
+  if(ITBMO_COMMERCE_CONFIG?.commerceEnabled && ITBMO_COMMERCE_CONFIG?.paypal?.enabled){
+    setTimeout(()=>{ loadPayPalSdk().catch(()=>{}); },0);
+  }
 
   /* QUIRÚRGICO v4: after saving, take the user directly to Start planning. */
   if($start && !$start.disabled){
@@ -2633,7 +2805,7 @@ Mandatory rules:
 - Return no more than 20 rows per day.
 - Optimize affected days globally: minimize unnecessary transfers, group logical zones, respect all daily windows and preserve continuity.
 - Before finalizing each day, compare plausible sequences and choose the geographically strongest order: minimize door-to-door travel, avoid backtracking, cluster nearby areas, respect the natural direction of the route, and avoid returning to a previously completed district unless operationally necessary.
-- Validate every row mathematically: the start-to-end interval must approximately equal transport time plus activity time. If the unexplained difference is significant, correct the schedule or regenerate only the affected row.
+- Validate every row mathematically: pure movement rows equal their transport time; visit rows equal transport plus activity time. Correct any significant unexplained difference.
 - The activity described in a row MUST occur at that row's concrete "to" location. Never describe a visit at "from" while setting "to" to the following stop. Use a separate transfer/departure row only when operationally useful.
 - Protect reservation-based and destination-anchor experiences as complete visit blocks. Ticketed attractions, spas, thermal complexes, cruises, substantial tours and similar anchors must include realistic check-in, changing/boarding, core experience and exit time where applicable. Never compress an anchor merely to insert more stops.
 - Do not leave an unexplained gap immediately after an anchor experience. Either include the full experience in its activity duration, add an explicit meaningful buffer/free-time row when justified, or schedule the next row continuously.
@@ -2642,7 +2814,7 @@ Mandatory rules:
 - Detect semantic duplicate experiences, not only matching names. Merge or remove aliases, sub-area labels and repeated experiences that deliver essentially the same visit.
 - Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
 - If an end time is blank, plan the day to reach at least approximately 19:00 local time when worthwhile content remains. Treat 19:00 as a minimum planning target, not a ceiling. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.
-- On Day 1, the traveler reaches the lodging/checks in or drops luggage BEFORE sightseeing. The first sightseeing row must begin after that lodging step. Never invent an airport, flight or transfer origin if the user did not provide one.
+- The Day 1 start is the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing; never invent an airport, flight or inbound transfer.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
 - Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
 - Treat preferences and restrictions as binding planning constraints, not merely note content. Translate them into concrete scheduling, routing, meal and activity decisions.
@@ -2663,12 +2835,14 @@ Activity:
 - Avoid generic labels such as "museum", "nearby village", "local restaurant" or "city walk".
 
 Duration:
-- Exactly two lines separated by \\n:
+- Pure movement rows use kind "transport" and exactly one line: "Transport: <realistic estimate or range>".
+- Visit rows use kind "activity" and exactly two lines separated by \\n:
   "Transport: <realistic estimate or range>"
   "Activity: <realistic estimate or range>"
+- Never invent an activity duration for a transfer or return.
 - Use localized labels in the selected itinerary language.
 - Never use zero-minute values.
-- The interval from start to end must contain both transport and activity.
+- The interval contains transport only for pure movement rows, or transport plus activity for visit rows.
 
 Meals:
 - Respect realistic local meal timing. On a full day that spans the local lunch period, include a real lunch/meal break unless the user explicitly prefers otherwise or a long fixed experience makes a different arrangement necessary.
@@ -2741,7 +2915,7 @@ Quality & coherence:
 - Use common sense: geography, seasons, time windows, distances and basic logistics.
 - Prioritize iconic daytime + nighttime highlights; if time is limited, focus on essentials.
 - Optimize the actual visit sequence, not merely feasibility: compare plausible orders, minimize travel time, prevent backtracking, cluster nearby zones and preserve the natural direction of travel.
-- Validate each row mathematically so its time interval approximately equals transport plus activity. Correct any significant mismatch before output.
+- Validate every row mathematically: a pure movement row equals its transport time; a visit row equals transport plus activity. Correct any significant unexplained mismatch before output.
 - A row's activity must happen at its concrete To place. Do not write an activity at the From place while using To for the next destination.
 - Protect ticketed/reservation anchor experiences as complete blocks, including realistic operational time. Never shorten a spa, cruise, major attraction or substantial tour to make room for extra stops, and never leave its real visit time as an unexplained gap.
 - Enforce intelligent category-based dwell times and reject 5–10 minute visits unless explicitly justified as photographic micro-stops.
@@ -2753,14 +2927,14 @@ Itinerary rules (aligned with API v52.5):
 - Max 20 rows per day.
 - Non-empty fields: activity/from/to/transport/duration/notes (no "seed").
 - Prefer activity format: "DESTINATION – Specific sub-stop" (avoid generic).
-- duration must be 2 lines with \\n:
-  "Transport: ...\\nActivity: ..."
-  (no 0m, and do not use commas to separate).
+- Use kind:"transport" for a pure movement whose purpose is only getting from one place to another. Its duration has exactly one line: "Transport: ..." and its interval equals that transport time.
+- Use kind:"activity" for a real visit, meal or experience. Its duration has exactly two lines separated by \\n: "Transport: ...\\nActivity: ...". The interval equals both times combined.
+- Never invent check-in, settling, parking or an activity merely to force a second duration line. Never use 0m or commas to separate duration lines.
 - Meals: use realistic local meal timing. A full day spanning lunch should normally include a concrete lunch/meal break; if local customs are uncertain, use roughly 12:00–15:00 as a fallback. Dinner is optional; include it when the itinerary naturally extends into the evening and it adds real value.
 - Intelligent day trips: evaluate the entire stay and decide whether a nearby excursion has greater tourism value than remaining secondary city activities. Consider total trip length, core-city coverage, relative quality, transfer time, season, traveler fit and logistical coherence. Substitute only lower-priority filler, never core unmet highlights. This rule is global and destination-agnostic.
 - Lodging base: when hotel, Airbnb, address, coordinates or area are provided, use them as the primary geographic anchor; minimize transfers and start/end there whenever sensible.
 - Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
-- Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial. If an end time is blank, treat about 19:00 local as a minimum target, not a ceiling; do not routinely finish earlier, and continue later when high-value evening content materially improves the day. Day 1 reaches lodging/check-in or luggage drop before sightseeing.
+- Time policy: the Day 1 start already represents the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing, but never invent an airport, flight, station or inbound transfer. The final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial. If an end time is blank, treat about 19:00 local as a minimum target, not a ceiling; do not routinely finish earlier, and continue later when high-value evening content materially improves the day.
 - Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
 - Macro-tours/day trips: first evaluate a broad candidate pool, then curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final localized return row to the base. On a full-day scenic route, normally aim for roughly 4–8 meaningful visit stops when daylight, safety and the user window allow; this is a flexible quality range, never a quota. Do not compress anchor experiences or add filler. Avoid the final day when stronger scheduling alternatives exist.
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
@@ -3305,9 +3479,17 @@ function _sanitizeDurationLines_(raw, transportField=''){
   return `${transportLabel}: Verificar\n${activityLabel}: Verificar`;
 }
 
-function _durationTotalBounds_(duration){
+function _isPureTransportRow_(row={}){
+  const kind=_canonicalText_(row?.kind||'');
+  if(/^(transport|transfer|transit|traslado|transporte|retorno|return)$/.test(kind)) return true;
+  const duration=String(row?.duration||'');
+  return Boolean(_extractDurationPart_(duration,'transport')) && !_extractDurationPart_(duration,'activity');
+}
+
+function _durationTotalBounds_(duration,row={}){
   const t=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
   const a=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
+  if(t && _isPureTransportRow_({...row,duration})) return {min:t.min,max:t.max};
   if(!t || !a) return null;
   return {min:t.min+a.min,max:t.max+a.max};
 }
@@ -3315,7 +3497,7 @@ function _durationTotalBounds_(duration){
 function _reconcileRowTimeline_(row={}){
   const startMin=_hhmmToMinutes_(row.start);
   let endMin=_hhmmToMinutes_(row.end);
-  const total=_durationTotalBounds_(row.duration);
+  const total=_durationTotalBounds_(row.duration,row);
   if(startMin==null || endMin==null || !total) return row;
 
   let span=endMin-startMin;
@@ -3436,13 +3618,15 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const trans    = r.transport ?? r.transportMode ?? r.modo_transporte ?? '';
   const durRaw   = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes    = r.notes ?? r.nota ?? r.comentarios ?? '';
+  const kindRaw  = r.kind ?? r.type ?? r.tipo ?? '';
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
 
   let start = String(startRaw||'').trim();
   let end = String(endRaw||'').trim();
   let startMin=_hhmmToMinutes_(start), endMin=_hhmmToMinutes_(end);
   const duration=_sanitizeDurationLines_(durRaw, trans);
-  const total=_durationTotalBounds_(duration);
+  const kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
+  const total=_durationTotalBounds_(duration,{kind});
 
   // Infer only genuinely missing times. Do not rewrite valid model schedules.
   if(startMin!=null && endMin==null && total){
@@ -3475,7 +3659,8 @@ function normalizeRow(r = {}, fallbackDay = 1){
     to:safeTo,
     transport:safeTransport,
     duration,
-    notes:safeNotes
+    notes:safeNotes,
+    kind
   }));
 }
 
@@ -4342,11 +4527,11 @@ function _preferenceConstraintPolicy_(){
 
 function _globalTimeWindowPolicy_(totalDays, perDay=[]){
   return {
-    first_day:'Any provided start time is a hard boundary. Before sightseeing on the arrival day, the traveler first reaches the lodging and completes check-in or luggage drop.',
+    first_day:'Any provided start time is a hard boundary and represents the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing.',
     final_day:'Any provided end time is a hard boundary.',
     intermediate_days:'Provided start/end times are preferences. They may be optimized only when this materially improves quality or logistics, without creating impractical hours.',
     default_end_when_missing:'19:00 local time is the minimum planning target, not a ceiling. If the user did not provide an end time, do not routinely finish before about 19:00. Continue later when a high-value evening experience, show, concert, atmospheric district, night viewpoint, special dinner or other destination-defining activity materially improves the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.',
-    arrival_day_lodging_first:'Day 1 must reach the lodging/check-in or luggage drop before any sightseeing. Never schedule sightseeing before the lodging. If arrival transport details are unknown, do not invent an airport, flight or transfer origin.',
+    arrival_day_lodging_first:'Day 1 starts AT the lodging at the provided time. Complete check-in or luggage drop before sightseeing. Never invent an airport, flight, station or inbound transfer origin.',
     windows:perDay,
     total_days:totalDays
   };
@@ -4382,7 +4567,7 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     lodging_base:lodging.normalized||null,
     lodging_original:lodging.original||null,
     lodging_normalization_applied:!!(lodging.original && lodging.normalized!==lodging.original),
-    lodging_policy:'Use lodging_base as the principal geographic anchor. On Day 1, lodging arrival/check-in or luggage drop happens before sightseeing. Minimize unnecessary transfers and start/end there whenever sensible. Never invent airport/flight arrival details when they were not provided.',
+    lodging_policy:'Use lodging_base as the principal geographic anchor. On Day 1, the supplied start time is when the traveler is ready at that lodging; complete check-in or luggage drop before sightseeing. Minimize unnecessary transfers and start/end there whenever sensible. Never invent airport/flight arrival details when they were not provided.',
     transport:transport||null,
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
@@ -4480,14 +4665,14 @@ HARD RULES:
 - Generate rows only for days ${dayNums.join(', ')}.
 - Follow each day's approved identity/corridor and reserved anchors.
 - For each day, compare plausible geographic sequences and select the best one: minimize travel time, avoid backtracking, cluster nearby zones, respect the natural route direction and avoid returning to a completed district unless necessary.
-- Validate every row mathematically before returning it: start-to-end must approximately equal transport plus activity. Correct or regenerate only the inconsistent row.
+- Validate every row mathematically before returning it: a pure movement interval equals transport time; a visit interval equals transport plus activity. Correct or regenerate only the inconsistent row.
 - Apply intelligent minimum dwell times by experience category. Never create 5–10 minute activities except clearly labeled photographic micro-stops.
 - Detect semantic duplicate experiences, including aliases and overlapping district/sub-area descriptions, and keep only the strongest representation.
 - Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
 - Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
-- On Day 1, lodging arrival/check-in or luggage drop MUST occur before sightseeing. If arrival origin is unknown, do not invent an airport, flight or transfer; begin the tourism sequence only after the lodging step.
+- On Day 1, the supplied start time means the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent an airport, flight, station or inbound transfer.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
 - When the approved identity is a regional route or macro-tour, enrich it like an expert guide: evaluate iconic or highly recommendable low-detour viewpoints, minor waterfalls, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops.
@@ -4503,8 +4688,7 @@ HARD RULES:
 - Its To field must be that same concrete primary destination, not the next attraction.
 - The following row's From must continue from the preceding To.
 - One To and one primary transport choice per row; alternatives belong in notes.
-- Every row interval must realistically contain transport plus activity. No overlaps and no unexplained
-  gap over about 20 minutes.
+- Pure movement rows use kind:"transport", contain only one "Transport: ..." duration line and their interval equals that time. Visit rows use kind:"activity", contain "Transport: ...\\nActivity: ..." and their interval equals both. No overlaps and no unexplained gap over about 20 minutes.
 - Scenic outdoor visits must fit plausible useful daylight for the date/latitude. Driving, indoor
   activities, meals and thermal experiences may use darker hours.
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
@@ -4751,7 +4935,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         let span=end-start;
         if(span<=0) span+=1440;
 
-        const total=_durationTotalBounds_(r.duration);
+        const total=_durationTotalBounds_(r.duration,r);
         if(total){
           if(total.min>span+5){
             errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min});
@@ -4975,12 +5159,12 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
 - When an end time is blank, approximately 19:00 local is a MINIMUM planning target, not a ceiling. Do not finish a normal day before about 19:00 without a real constraint. Continue later when genuinely high-value evening content improves the itinerary. Respect any explicit user end time as a hard boundary.
-- Day 1 must complete lodging arrival/check-in or luggage drop before sightseeing. Do not invent arrival transport details.
+- The Day 1 start is when the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent arrival transport details.
 - A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
 - Reject generic destinations such as "nearby village", "local restaurant", "services" or "similar option".
-- Every row interval must contain transport plus activity with no more than about 20 minutes unexplained.
+- A pure movement row contains only transport time; a visit row contains transport plus activity. Keep no more than about 20 minutes unexplained.
 - Reconcile duration with the transport field and preserve realistic long ranges.
 - Keep category dwell realistic:
   * major thermal experience: at least 3 hours when comparable to a destination spa;
@@ -5160,7 +5344,7 @@ ${JSON.stringify(facts)}
 
 HARD RULES:
 - Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
-- Day 1 reaches the lodging/checks in or drops luggage before any sightseeing; do not invent airport/flight/arrival transport details when unknown.
+- Day 1 starts AT the lodging at the user-provided time; complete check-in or luggage drop before sightseeing and do not invent airport/flight/arrival transport details.
 - Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
 - Enforce every preference and restriction through actual planning choices, not merely notes.
 - Intelligently evaluate nearby day trips against remaining secondary city content using trip length, core coverage, relative tourism value, transfer time and logistics.
@@ -5170,8 +5354,7 @@ HARD RULES:
 - No major POI, district, restaurant, museum, viewpoint, thermal experience or macro-route may repeat.
 - Arrival and final days must be different.
 - To is the place visited in the same row; the next From continues from it.
-- Every interval must contain transport plus activity; use realistic category dwell and conservative
-  regional transfers.
+- A pure movement interval contains only transport; a visit interval contains transport plus activity. Use realistic category dwell and conservative regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
 - Aurora, when plausible, belongs as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city rather than a standalone activity. This applies even when explicitly requested in Preferences.
@@ -5570,10 +5753,8 @@ function _hydrateGenerationTrip_(trip){
       const windows=destination.perDay || [];
       qsa('.hours-day',row).forEach((dayRow,index)=>{
         const windowData=windows[index] || {};
-        const start=qs('.start',dayRow);
-        const end=qs('.end',dayRow);
-        if(start) start.value=windowData.start || '';
-        if(end) end.value=windowData.end || '';
+        setTimeSelectorValue(dayRow,'start',windowData.start || '');
+        setTimeSelectorValue(dayRow,'end',windowData.end || '');
       });
     });
     updateAddCityButtonState();
@@ -6092,7 +6273,7 @@ ${forceReplanBlock}
 Instrucción:
 - Optimiza el día con criterio experto (flujo lógico, zonas, ritmo).
 - Si el usuario no indicó hora final, usa aproximadamente las 19:00 como objetivo mínimo, no como límite. No cierres rutinariamente el día antes de esa hora y extiéndelo más tarde cuando haya shows, espectáculos, miradores nocturnos, barrios con ambiente, cenas especiales u otras experiencias de alto valor que realmente mejoren el itinerario.
-- En el Día 1, el ingreso/check-in o depósito de equipaje en el alojamiento ocurre antes de cualquier visita.
+- En el Día 1, la hora indicada significa que el viajero ya está en el alojamiento; completa el check-in o depósito de equipaje antes de cualquier visita y no inventes el traslado de llegada.
 - Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
 - Cuando las auroras sean plausibles por ubicación, época y oscuridad, agrega una nota adicional sobre auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica incluso si el usuario pidió auroras explícitamente en Preferencias. No crees una fila independiente salvo una reserva real confirmada con hora fija y explícitamente solicitada.
 - Day trips: decide libremente si aportan valor; si los propones, hazlos completos, realistas, con comida en ruta cuando corresponda y regreso coherente con la hora final.
@@ -6494,24 +6675,40 @@ $addCity?.addEventListener('click', ()=>{
 });
 
 function validateBaseDatesDMY(){
-  // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
+  // Valida el calendario visual sin alterar el DD/MM/AAAA que consume el contrato existente.
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
+  let message=t('tooltipDateMissing');
+  let previousEnd=null;
+  const today=parsePlannerDate(plannerDateMin());
+  const maximum=parsePlannerDate(plannerDateMax());
   for(const r of rows){
-    const el = qs('.baseDate', r);
-    const v = (el?.value||'').trim();
-    if(!v || !/^(\d{2})\/(\d{2})\/(\d{4})$/.test(v) || !parseDMY(v)){
-      firstInvalid = el;
+    const hidden = qs('.baseDate', r);
+    const picker = qs('.baseDatePicker', r);
+    const date=parsePlannerDate(hidden?.value || '');
+    const days=Math.max(1,Number(qs('.days',r)?.value || 1));
+    if(!date || date<today || date>maximum){
+      firstInvalid = picker || hidden;
       // microanimación
-      el?.classList.add('shake-highlight');
-      setTimeout(()=>el?.classList.remove('shake-highlight'), 800);
+      firstInvalid?.classList.add('shake-highlight');
+      setTimeout(()=>firstInvalid?.classList.remove('shake-highlight'), 800);
       break;
     }
+    if(previousEnd && date<=previousEnd){
+      firstInvalid=picker || hidden;
+      message=getLang()==='es'
+        ? 'Esta ciudad se superpone con la anterior. Elige una fecha posterior al último día del destino previo.'
+        : 'This city overlaps the previous one. Choose a date after the prior destination ends.';
+      firstInvalid?.classList.add('shake-highlight');
+      setTimeout(()=>firstInvalid?.classList.remove('shake-highlight'),800);
+      break;
+    }
+    previousEnd=addDays(date,days-1);
   }
   if(firstInvalid){
     const tooltip = document.createElement('div');
     tooltip.className = 'date-tooltip';
-    tooltip.textContent = t('tooltipDateMissing');
+    tooltip.textContent = message;
     document.body.appendChild(tooltip);
     const rect = firstInvalid.getBoundingClientRect();
     tooltip.style.left = rect.left + window.scrollX + 'px';
@@ -6628,6 +6825,9 @@ function addTravelerProfile(){
   $travelerProfiles.appendChild(card);
   renumberTravelerProfiles();
   setTravelerButtonsState();
+  requestAnimationFrame(()=>{
+    try{ qs('.traveler-profile-actions')?.scrollIntoView({behavior:'smooth',block:'nearest'}); }catch(_){}
+  });
 }
 
 function removeTravelerProfile(){
@@ -6685,6 +6885,7 @@ function bindTravelersListeners(){
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
       }
       setTravelerButtonsState();
+      if(v) scheduleAstraCoach('destinations','#destinations-box',420);
     });
   }
 
@@ -7396,75 +7597,71 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null){
 function showFinalDownloadModal(){
   if(document.querySelector('.itbmo-download-overlay')) return;
   const es=getLang()==='es';
-  const mobileFiles=isMobileFileExperience();
   const overlay=document.createElement('div'); overlay.className='itbmo-download-overlay';
   overlay.innerHTML=`<div class="itbmo-download-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-download-title">
     <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ASTRA TERMINÓ':'ASTRA IS DONE'}</div>
     <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
-    <p>${mobileFiles
-      ? (es?'Abre y comparte ahora tus documentos. Podrás enviarlos por correo, WhatsApp u otra aplicación, o guardarlos en tu dispositivo.':'Open and share your documents now. You can send them by email, WhatsApp or another app, or save them on your device.')
-      : (es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.')}</p>
+    <p>${es?'Descarga cada documento por separado. Así tu navegador no bloqueará ninguno y podrás guardarlos con seguridad.':'Download each document separately. This prevents your browser from blocking any file and lets you save them safely.'}</p>
     <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
-    ${mobileFiles ? `<div class="itbmo-mobile-file-actions" style="display:grid;gap:.65rem;width:100%;margin:.9rem 0">
-      <button class="btn primary itbmo-mobile-open-pdf" type="button">${es?'Abrir / compartir itinerario PDF':'Open / share itinerary PDF'}</button>
-      <button class="btn primary itbmo-mobile-open-csv" type="button">${es?'Abrir / compartir CSV':'Open / share CSV'}</button>
-      <button class="btn primary itbmo-mobile-open-receipt" type="button" disabled>${es?'Preparando comprobante…':'Preparing receipt…'}</button>
-    </div>` : `<button class="btn primary itbmo-download-all" type="button">${es?'Descargar mis documentos':'Download my documents'}</button>`}
+    <div class="itbmo-download-actions">
+      <button class="btn primary itbmo-open-pdf" type="button"><span>01</span>${es?'Descargar itinerario PDF':'Download itinerary PDF'}</button>
+      <button class="btn primary itbmo-open-csv" type="button"><span>02</span>${es?'Descargar archivo Excel / CSV':'Download Excel / CSV file'}</button>
+      <button class="btn primary itbmo-open-receipt" type="button" disabled><span>03</span>${es?'Preparando comprobante…':'Preparing receipt…'}</button>
+    </div>
     <div class="itbmo-download-status" aria-live="polite"></div>
     <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
     <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
-    <small>${mobileFiles
-      ? (es?'Cada botón abrirá el archivo o mostrará las opciones disponibles para compartirlo y guardarlo.':'Each button will open the file or show the available options to share and save it.')
-      : (es?'Si alguna descarga no aparece, usa los botones individuales que quedan disponibles debajo del itinerario.':'If any download does not appear, use the individual buttons available below the itinerary.')}</small>
+    <small>${es?'En móvil podrás abrir, compartir o guardar cada archivo mediante las opciones del dispositivo.':'On mobile, you can open, share or save each file using your device options.'}</small>
   </div>`;
   document.body.appendChild(overlay); requestParentViewportFocus('download-ready',true); requestAnimationFrame(()=>overlay.classList.add('active'));
   const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
-  if(mobileFiles){
-    const pdfButton=overlay.querySelector('.itbmo-mobile-open-pdf');
-    const csvButton=overlay.querySelector('.itbmo-mobile-open-csv');
-    const receiptButton=overlay.querySelector('.itbmo-mobile-open-receipt');
-    let preparedReceipt=null;
+  const pdfButton=overlay.querySelector('.itbmo-open-pdf');
+  const csvButton=overlay.querySelector('.itbmo-open-csv');
+  const receiptButton=overlay.querySelector('.itbmo-open-receipt');
+  let preparedReceipt=null;
 
-    getPaymentReceiptData().then(payment=>{
-      preparedReceipt=payment;
-      if(receiptButton){
-        receiptButton.disabled=!payment;
-        receiptButton.textContent=payment
-          ? (es?'Abrir / compartir comprobante PDF':'Open / share receipt PDF')
-          : (es?'Comprobante no disponible':'Receipt unavailable');
-      }
-    });
+  getPaymentReceiptData().then(payment=>{
+    preparedReceipt=payment;
+    if(!receiptButton) return;
+    receiptButton.disabled=!payment;
+    receiptButton.innerHTML=payment
+      ? `<span>03</span>${es?'Descargar comprobante PDF':'Download payment receipt PDF'}`
+      : `<span>03</span>${es?'Comprobante no disponible':'Receipt unavailable'}`;
+  }).catch(()=>{
+    if(receiptButton){
+      receiptButton.disabled=true;
+      receiptButton.innerHTML=`<span>03</span>${es?'Comprobante no disponible':'Receipt unavailable'}`;
+    }
+  });
 
-    pdfButton?.addEventListener('click',async()=>{
+  const completeButton=(button,label)=>{
+    button?.classList.add('is-complete');
+    if(button) button.dataset.completeLabel=label;
+  };
+  pdfButton?.addEventListener('click',async()=>{
+    try{
       await exportItineraryToPDF();
+      completeButton(pdfButton,es?'PDF listo':'PDF ready');
       status.textContent=es ? '✓ Itinerario PDF preparado.' : '✓ Itinerary PDF prepared.';
-    });
-    csvButton?.addEventListener('click',async()=>{
+    }catch(_){status.textContent=es?'No se pudo preparar el PDF. Inténtalo de nuevo.':'The PDF could not be prepared. Please try again.';}
+  });
+  csvButton?.addEventListener('click',async()=>{
+    try{
       await exportItineraryToCSV();
+      completeButton(csvButton,es?'CSV listo':'CSV ready');
       status.textContent=es ? '✓ CSV preparado.' : '✓ CSV prepared.';
-    });
-    receiptButton?.addEventListener('click',async()=>{
-      if(!preparedReceipt) return;
+    }catch(_){status.textContent=es?'No se pudo preparar el CSV. Inténtalo de nuevo.':'The CSV could not be prepared. Please try again.';}
+  });
+  receiptButton?.addEventListener('click',async()=>{
+    if(!preparedReceipt) return;
+    try{
       await exportPaymentReceiptToPDF(preparedReceipt);
+      completeButton(receiptButton,es?'Comprobante listo':'Receipt ready');
       status.textContent=es ? '✓ Comprobante PDF preparado.' : '✓ Receipt PDF prepared.';
-    });
-  }else{
-    overlay.querySelector('.itbmo-download-all')?.addEventListener('click',async()=>{
-    /*
-      Mantener las tres descargas dentro de la interacción directa del usuario.
-      Algunos navegadores bloquean descargas automáticas posteriores cuando se
-      disparan desde setTimeout. Los botones individuales permanecen como fallback.
-    */
-    exportItineraryToPDF();
-    exportItineraryToCSV();
-    await exportPaymentReceiptToPDF();
-    status.textContent=es
-      ? '✓ Se iniciaron 3 descargas: itinerario PDF, CSV y comprobante PDF. Revisa tu carpeta de Descargas. Si falta alguna, usa los botones individuales.'
-      : '✓ Three downloads were started: itinerary PDF, CSV and payment receipt PDF. Check your Downloads folder. If one is missing, use the individual buttons.';
-    });
-  }
+    }catch(_){status.textContent=es?'No se pudo preparar el comprobante. Inténtalo de nuevo.':'The receipt could not be prepared. Please try again.';}
+  });
 }
 
 function bindExportListeners(){
@@ -7558,6 +7755,48 @@ function showPlannerNotice(title, message){
   requestAnimationFrame(()=>overlay.classList.add('active'));
 }
 
+function showPlannerDecision({title,message,confirmLabel,cancelLabel,variant='primary'}={}){
+  qsa('.itbmo-decision-overlay').forEach(el=>el.remove());
+  return new Promise(resolve=>{
+    const overlay=document.createElement('div');
+    overlay.className='itbmo-decision-overlay';
+    const card=document.createElement('div');
+    card.className='itbmo-decision-card';
+    card.setAttribute('role','dialog');
+    card.setAttribute('aria-modal','true');
+    card.innerHTML=`
+      <div class="itbmo-decision-symbol">✦</div>
+      <div class="itbmo-decision-eyebrow">ASTRA · ${getLang()==='es'?'CONFIRMACIÓN':'CONFIRMATION'}</div>
+      <h3></h3><p></p>
+      <div class="itbmo-decision-actions">
+        <button class="btn ghost itbmo-decision-cancel" type="button"></button>
+        <button class="btn ${variant==='payment'?'itbmo-decision-pay':'primary'} itbmo-decision-confirm" type="button"></button>
+      </div>`;
+    card.querySelector('h3').textContent=String(title||'');
+    card.querySelector('p').textContent=String(message||'');
+    card.querySelector('.itbmo-decision-cancel').textContent=String(cancelLabel||'Cancel');
+    card.querySelector('.itbmo-decision-confirm').textContent=String(confirmLabel||'Continue');
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    let settled=false;
+    const finish=(value)=>{
+      if(settled) return;
+      settled=true;
+      document.removeEventListener('keydown',onKey);
+      overlay.classList.remove('active');
+      setTimeout(()=>overlay.remove(),220);
+      resolve(Boolean(value));
+    };
+    const onKey=(e)=>{if(e.key==='Escape') finish(false);};
+    card.querySelector('.itbmo-decision-cancel')?.addEventListener('click',()=>finish(false));
+    card.querySelector('.itbmo-decision-confirm')?.addEventListener('click',()=>finish(true));
+    overlay.addEventListener('click',(e)=>{if(e.target===overlay) finish(false);});
+    document.addEventListener('keydown',onKey);
+    requestParentViewportFocus('planner-confirmation',true);
+    requestAnimationFrame(()=>overlay.classList.add('active'));
+  });
+}
+
 // ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
   const overlay = document.createElement('div');
@@ -7621,6 +7860,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     syncImmersiveItineraryLauncher();
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
+    saveLockWarningAccepted=false;
+    paymentWarningAcceptedTripId=null;
     currentTripId = null;
     storeActiveTripId(null);
     generationRecoveryState = null;
@@ -7878,7 +8119,7 @@ function _commerceCopy_(){
     priceNote:'Pago único · Viaje completo · Todas las ciudades configuradas',
     inc1:'Itinerario personalizado completo',
     inc2:'Inteligencia de viaje de Astra',
-    inc3:'Exportación PDF y CSV · Email próximamente',
+    inc3:'Exportación PDF y CSV',
     cardTitle:'Tarjeta de crédito o débito',
     cardCopy:'Visa · Mastercard · American Express',
     secureTitle:'Procesamiento de pago seguro',
@@ -7909,7 +8150,7 @@ function _commerceCopy_(){
     priceNote:'One-time payment · Complete trip · All configured cities',
     inc1:'Complete personalized itinerary',
     inc2:'Astra travel intelligence',
-    inc3:'PDF & CSV exports · Email coming soon',
+    inc3:'PDF & CSV exports',
     cardTitle:'Credit or Debit Card',
     cardCopy:'Visa · Mastercard · American Express',
     secureTitle:'Secure payment processing',
@@ -8056,7 +8297,8 @@ function setCheckoutStatus(message='', type=''){
 function openCheckoutModal(){
   if(!$checkoutModal) return;
   applyCommerceI18n();
-  setCheckoutStatus('');
+  const loadingMessage=getLang()==='es'?'Cargando opciones seguras de pago…':'Loading secure payment options…';
+  setCheckoutStatus(loadingMessage);
   $checkoutModal.classList.add('active');
   $checkoutModal.setAttribute('aria-hidden','false');
 
@@ -8069,6 +8311,7 @@ function openCheckoutModal(){
   if(checkoutCard) checkoutCard.scrollTop=0;
 
   Promise.resolve(renderPayPalButtonsIfAvailable()).finally(()=>{
+    if($checkoutStatus?.textContent===loadingMessage) setCheckoutStatus('');
     $checkoutModal.scrollTop=0;
     if(checkoutCard) checkoutCard.scrollTop=0;
     requestParentViewportFocus('checkout-modal', true);
@@ -8151,13 +8394,42 @@ async function requestPlanningStart(){
     return;
   }
 
-  const alreadyPaid = await hasValidPaymentForCurrentTrip();
-  if(alreadyPaid){
-    showPreferencesStage();
-    return;
+  if(paymentGateSatisfiedTripId !== currentTripId && paymentWarningAcceptedTripId !== currentTripId){
+    const es=getLang()==='es';
+    const confirmed=await showPlannerDecision({
+      title:es?'Última revisión antes del pago':'Final review before payment',
+      message:es
+        ? 'Después de completar el pago, ASTRA generará el itinerario con los viajeros, ciudades, fechas y horarios que acabas de guardar. Esa información no podrá modificarse para este viaje. Si después deseas cambiarla, tendrás que reiniciar y generar un nuevo viaje con un nuevo pago.'
+        : 'After payment, ASTRA will generate the itinerary using the travelers, cities, dates and schedules you saved. That information cannot be changed for this trip. To change it later, you will need to reset and generate a new trip with a new payment.',
+      cancelLabel:es?'Cancelar y revisar':'Cancel and review',
+      confirmLabel:es?'Continuar al pago':'Continue to payment',
+      variant:'payment'
+    });
+    if(!confirmed) return;
+    paymentWarningAcceptedTripId=currentTripId;
   }
 
-  openCheckoutModal();
+  const previousLabel=$start?.textContent || '';
+  if($start){
+    $start.disabled=true;
+    $start.textContent=getLang()==='es'?'Preparando pago seguro…':'Preparing secure payment…';
+    $start.classList.add('is-busy');
+  }
+
+  try{
+    const alreadyPaid = await hasValidPaymentForCurrentTrip();
+    if(alreadyPaid){
+      showPreferencesStage();
+      return;
+    }
+    openCheckoutModal();
+  }finally{
+    if($start){
+      $start.textContent=previousLabel;
+      $start.classList.remove('is-busy');
+      if(!$start.dataset.itbmoConsumed) $start.disabled=false;
+    }
+  }
 }
 
 async function loadPayPalSdk(){
@@ -8847,6 +9119,122 @@ function enhancePreferencesInfoChatCopy(){
   autoGrowPreferencesField();
 }
 
+/* =========================================================
+   ASTRA CONTEXTUAL GUIDE
+   One calm, contextual coach mark at a time. It never advances on a timer.
+   The guide disappears as soon as the traveler starts interacting.
+========================================================= */
+const ASTRA_COACH_STORAGE_KEY='itbmo_astra_coach_v1';
+let activeAstraCoach=null;
+let astraCoachTimer=null;
+
+function astraCoachCopy(key){
+  const es=getLang()==='es';
+  const copy={
+    account:es
+      ? ['Tu punto de partida','Crea tu cuenta o inicia sesión. Así podremos guardar este viaje de forma segura antes de comenzar.']
+      : ['Your starting point','Create your account or sign in so we can save this trip safely before you begin.'],
+    travelers:es
+      ? ['¿Quiénes vivirán este viaje?','Indica si viajas solo o acompañado. Las edades y necesidades del grupo ayudan a ASTRA a ajustar ritmos, actividades y desplazamientos.']
+      : ['Who will experience this trip?','Tell us whether you are traveling solo or with others. Ages and group needs help ASTRA adjust pacing, activities and transportation.'],
+    destinations:es
+      ? ['Construye la ruta','Agrega hasta tres ciudades, su país y la cantidad de días. El orden en que las ingreses será el orden del viaje.']
+      : ['Build your route','Add up to three cities, their country and number of days. The order you enter them will be the trip order.'],
+    date:es
+      ? ['Primer día en el destino','Selecciona la fecha en que llegarás al hotel o apartamento y tendrás tiempo disponible. Las siguientes ciudades se sugerirán automáticamente sin permitir fechas imposibles o superpuestas.']
+      : ['First day at the destination','Choose the date when you will reach your hotel or apartment and have usable time. Following cities will be suggested automatically without impossible or overlapping dates.'],
+    schedule:es
+      ? ['Tu tiempo útil, no la hora del vuelo','En el Día 1 indica la hora aproximada en que estarás listo en el alojamiento, después del traslado y el equipaje. En el último día indica hasta cuándo puedes hacer actividades antes de salir al aeropuerto o estación.']
+      : ['Usable time, not flight time','For Day 1, enter when you expect to be ready at your lodging after transfer and luggage. For the final day, enter how late you can explore before leaving for the airport or station.'],
+    preferences:es
+      ? ['Ahora, hazlo verdaderamente tuyo','Añade intereses, ritmo, actividades imperdibles, restricciones o necesidades especiales. Es opcional: puedes continuar sin escribir nada.']
+      : ['Now make it truly yours','Add interests, pace, must-do activities, restrictions or special needs. This is optional: you can continue without entering anything.']
+  };
+  return copy[key] || ['', ''];
+}
+
+function astraCoachSeen(){
+  try{return JSON.parse(localStorage.getItem(ASTRA_COACH_STORAGE_KEY)||'{}')||{};}catch(_){return {};}
+}
+function markAstraCoachSeen(key){
+  try{
+    const seen=astraCoachSeen(); seen[key]=true;
+    localStorage.setItem(ASTRA_COACH_STORAGE_KEY,JSON.stringify(seen));
+  }catch(_){}
+}
+function closeAstraCoach({remember=true}={}){
+  if(!activeAstraCoach) return;
+  const {bubble,key,target,position,interaction}=activeAstraCoach;
+  window.removeEventListener('resize',position);
+  window.removeEventListener('scroll',position,true);
+  target?.removeEventListener('pointerdown',interaction,true);
+  target?.removeEventListener('focusin',interaction,true);
+  bubble?.classList.remove('is-visible');
+  setTimeout(()=>bubble?.remove(),180);
+  if(remember) markAstraCoachSeen(key);
+  activeAstraCoach=null;
+}
+function resolveCoachTarget(target){
+  try{return typeof target==='function'?target():qs(target);}catch(_){return null;}
+}
+function showAstraCoach(key,targetRef,{force=false}={}){
+  if(!force && astraCoachSeen()[key]) return;
+  const target=resolveCoachTarget(targetRef);
+  if(!target || target.offsetParent===null) return;
+  closeAstraCoach();
+  const [title,message]=astraCoachCopy(key);
+  const bubble=document.createElement('aside');
+  bubble.className='astra-coach';
+  bubble.setAttribute('role','status');
+  bubble.innerHTML=`
+    <div class="astra-coach__avatar">✦</div>
+    <div class="astra-coach__content"><small>ASTRA · ${getLang()==='es'?'GUÍA':'GUIDE'}</small><strong></strong><p></p></div>
+    <button class="astra-coach__close" type="button" aria-label="${getLang()==='es'?'Ocultar ayuda':'Hide help'}">×</button>`;
+  bubble.querySelector('strong').textContent=title;
+  bubble.querySelector('p').textContent=message;
+  document.body.appendChild(bubble);
+  const position=()=>{
+    if(!document.body.contains(target)) return closeAstraCoach();
+    const rect=target.getBoundingClientRect();
+    const b=bubble.getBoundingClientRect();
+    const margin=12;
+    const below=rect.bottom+b.height+margin<window.innerHeight;
+    const top=below?rect.bottom+10:Math.max(margin,rect.top-b.height-10);
+    const left=Math.min(Math.max(margin,rect.left),Math.max(margin,window.innerWidth-b.width-margin));
+    bubble.style.left=`${left}px`; bubble.style.top=`${top}px`;
+    bubble.classList.toggle('is-above',!below);
+  };
+  const interaction=()=>closeAstraCoach({remember:true});
+  activeAstraCoach={bubble,key,target,position,interaction};
+  target.addEventListener('pointerdown',interaction,true);
+  target.addEventListener('focusin',interaction,true);
+  bubble.querySelector('.astra-coach__close')?.addEventListener('click',interaction);
+  window.addEventListener('resize',position);
+  window.addEventListener('scroll',position,true);
+  position();
+  requestAnimationFrame(()=>bubble.classList.add('is-visible'));
+}
+function scheduleAstraCoach(key,target,delay=260,options={}){
+  if(!options.force && astraCoachSeen()[key]) return;
+  clearTimeout(astraCoachTimer);
+  astraCoachTimer=setTimeout(()=>showAstraCoach(key,target,options),delay);
+}
+function initAstraCoach(){
+  if(!document.querySelector('.astra-guide-replay')){
+    const replay=document.createElement('button');
+    replay.type='button';
+    replay.className='astra-guide-replay';
+    replay.innerHTML=`<span>✦</span>${getLang()==='es'?'Ver guía':'View guide'}`;
+    replay.addEventListener('click',()=>{
+      try{localStorage.removeItem(ASTRA_COACH_STORAGE_KEY);}catch(_){}
+      closeAstraCoach({remember:false});
+      scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',80,{force:true});
+    });
+    document.body.appendChild(replay);
+  }
+  scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',900);
+}
+
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
@@ -8866,4 +9254,5 @@ document.addEventListener('DOMContentLoaded', ()=>{
   setTravelerButtonsState();
 
   bindExportListeners();
+  initAstraCoach();
 });
