@@ -5887,5 +5887,5 @@ body.itinerary-focus-open{
   @keyframes itbmoCtaBreath{0%,100%{filter:brightness(1)}50%{filter:brightness(1.07)}}
 }
 
-/* v82 · Coach marks live beside their fields inside the auto-height iframe. */
-.astra-coach{position:absolute!important}
+/* v83 · Stable coach positioning restored for the Webflow iframe. */
+.astra-coach{position:fixed!important}
