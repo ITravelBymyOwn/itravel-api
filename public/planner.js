@@ -1710,24 +1710,21 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     showNextPlannerGuide({focus:true,force:true,delay:280});
   });
 
-  const hoursWrap = document.createElement('div');
-  hoursWrap.className = 'hours-block';
+  let hoursWrap = pref.days ? makeHoursBlock(pref.days) : document.createElement('div');
+  if(!pref.days) hoursWrap.className = 'hours-block';
   row.appendChild(hoursWrap);
 
   const daysSelect = qs('.days', row);
   if(pref.days){
     daysSelect.value = String(pref.days);
-    const tmp = makeHoursBlock(pref.days).children;
-    Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
   }
 
   daysSelect.addEventListener('change', ()=>{
     const n = Math.max(0, parseInt(daysSelect.value||0,10));
-    hoursWrap.innerHTML='';
-    if(n>0){
-      const tmp = makeHoursBlock(n).children;
-      Array.from(tmp).forEach(c=>hoursWrap.appendChild(c));
-    }
+    const nextHoursWrap=n>0 ? makeHoursBlock(n) : document.createElement('div');
+    if(n<=0) nextHoursWrap.className='hours-block';
+    hoursWrap.replaceWith(nextHoursWrap);
+    hoursWrap=nextHoursWrap;
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
     showNextPlannerGuide({focus:true,force:true,delay:260});
@@ -9143,7 +9140,6 @@ function enhancePreferencesInfoChatCopy(){
    One calm, contextual coach mark at a time. It never advances on a timer.
    The guide disappears as soon as the traveler starts interacting.
 ========================================================= */
-const ASTRA_COACH_STORAGE_KEY='itbmo_astra_coach_v2';
 let activeAstraCoach=null;
 let astraCoachTimer=null;
 
@@ -9181,15 +9177,6 @@ function astraCoachCopy(key){
   return copy[key] || ['', ''];
 }
 
-function astraCoachSeen(){
-  try{return JSON.parse(localStorage.getItem(ASTRA_COACH_STORAGE_KEY)||'{}')||{};}catch(_){return {};}
-}
-function markAstraCoachSeen(key){
-  try{
-    const seen=astraCoachSeen(); seen[key]=true;
-    localStorage.setItem(ASTRA_COACH_STORAGE_KEY,JSON.stringify(seen));
-  }catch(_){}
-}
 function closeAstraCoach({remember=true}={}){
   if(!activeAstraCoach) return;
   const {bubble,key,target,position,interaction}=activeAstraCoach;
@@ -9200,14 +9187,12 @@ function closeAstraCoach({remember=true}={}){
   target?.classList.remove('astra-guide-target');
   bubble?.classList.remove('is-visible');
   setTimeout(()=>bubble?.remove(),180);
-  if(remember) markAstraCoachSeen(key);
   activeAstraCoach=null;
 }
 function resolveCoachTarget(target){
   try{return typeof target==='function'?target():qs(target);}catch(_){return null;}
 }
 function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}={}){
-  if(!force && astraCoachSeen()[key]) return;
   const target=resolveCoachTarget(targetRef);
   if(!target || target.offsetParent===null) return;
   closeAstraCoach();
@@ -9254,7 +9239,6 @@ function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}
   requestAnimationFrame(()=>bubble.classList.add('is-visible'));
 }
 function scheduleAstraCoach(key,target,delay=260,options={}){
-  if(!options.force && astraCoachSeen()[key]) return;
   clearTimeout(astraCoachTimer);
   astraCoachTimer=setTimeout(()=>showAstraCoach(key,target,options),delay);
 }
