@@ -5887,5 +5887,5 @@ body.itinerary-focus-open{
   @keyframes itbmoCtaBreath{0%,100%{filter:brightness(1)}50%{filter:brightness(1.07)}}
 }
 
-/* v83 · Stable coach positioning restored for the Webflow iframe. */
+/* v84 · Stable coach positioning restored from the verified working guide. */
 .astra-coach{position:fixed!important}
