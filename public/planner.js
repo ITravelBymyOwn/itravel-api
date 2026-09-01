@@ -9142,6 +9142,8 @@ function enhancePreferencesInfoChatCopy(){
 ========================================================= */
 let activeAstraCoach=null;
 let astraCoachTimer=null;
+let astraCoachDisplayTimer=null;
+let astraCoachRequestId=0;
 
 function astraCoachCopy(key){
   const es=getLang()==='es';
@@ -9170,6 +9172,9 @@ function astraCoachCopy(key){
     start:es
       ? ['Tu configuración está lista','El siguiente paso es hacer clic en Iniciar planificación. Revisaremos el pago antes de que ASTRA comience a crear tu viaje.']
       : ['Your setup is ready','Next, click Start planning. We will review payment before ASTRA begins creating your trip.'],
+    complete:es
+      ? ['No hay campos pendientes','La configuración actual ya fue completada. Para crear otro itinerario, utiliza Reiniciar planificación y la guía volverá a acompañarte desde el primer campo.']
+      : ['No fields are pending','The current setup is complete. To create another itinerary, use Reset planning and the guide will accompany you again from the first field.'],
     preferences:es
       ? ['Ahora, hazlo verdaderamente tuyo','Añade intereses, ritmo, actividades imperdibles, restricciones o necesidades especiales. Es opcional: puedes continuar sin escribir nada.']
       : ['Now make it truly yours','Add interests, pace, must-do activities, restrictions or special needs. This is optional: you can continue without entering anything.']
@@ -9178,6 +9183,8 @@ function astraCoachCopy(key){
 }
 
 function closeAstraCoach({remember=true}={}){
+  clearTimeout(astraCoachTimer);
+  clearTimeout(astraCoachDisplayTimer);
   if(!activeAstraCoach) return;
   const {bubble,key,target,position,interaction}=activeAstraCoach;
   window.removeEventListener('resize',position);
@@ -9223,8 +9230,12 @@ function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}
     const rect=target.getBoundingClientRect();
     const b=bubble.getBoundingClientRect();
     const margin=12;
-    const top=rect.bottom+10;
-    const left=Math.min(Math.max(margin,rect.left),Math.max(margin,window.innerWidth-b.width-margin));
+    const top=rect.bottom+window.scrollY+10;
+    const viewportLeft=window.scrollX;
+    const left=Math.min(
+      Math.max(viewportLeft+margin,rect.left+window.scrollX),
+      Math.max(viewportLeft+margin,viewportLeft+window.innerWidth-b.width-margin)
+    );
     bubble.style.left=`${left}px`; bubble.style.top=`${top}px`;
     bubble.classList.remove('is-above');
   };
@@ -9313,6 +9324,8 @@ function getNextPlannerGuideStep(){
     };
   }
   if($save && !$save.disabled) return {key:'save',target:$save,focus:$save};
+  const reset=qs('#reset-planner');
+  if(reset && !reset.disabled) return {key:'complete',target:reset,focus:reset};
   return null;
 }
 
@@ -9324,12 +9337,18 @@ function focusPlannerGuideStep(step){
 }
 
 function showNextPlannerGuide({focus=false,force=false,delay=220}={}){
+  const requestId=++astraCoachRequestId;
   clearTimeout(astraCoachTimer);
+  clearTimeout(astraCoachDisplayTimer);
   astraCoachTimer=setTimeout(()=>{
+    if(requestId!==astraCoachRequestId) return;
     const step=getNextPlannerGuideStep();
     if(!step){closeAstraCoach({remember:false});return;}
     if(focus) focusPlannerGuideStep(step);
-    setTimeout(()=>showAstraCoach(step.key,step.target,{...step,force}),focus?340:0);
+    astraCoachDisplayTimer=setTimeout(()=>{
+      if(requestId!==astraCoachRequestId) return;
+      showAstraCoach(step.key,step.target,{...step,force});
+    },focus?340:0);
   },delay);
 }
 
