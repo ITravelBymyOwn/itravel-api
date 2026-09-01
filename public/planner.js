@@ -34,6 +34,7 @@ const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
+const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -59,9 +60,28 @@ let isItineraryLocked = false;
 let pendingChange = null;
 let hasSavedOnce = false;
 
+/* Paid-generation recovery. Normal successful generations add only small
+   checkpoint writes; retries run only after a real technical failure. */
+const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
+const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,15000];
+let paidGenerationRunning = false;
+let generationRecoveryState = null;
+let generationResetInProgress = false;
+
+/* Post-payment preferences checkpoint.
+   This changes only WHEN specialConditions is confirmed.
+   The downstream plannerState / agent / generator contract remains unchanged. */
+let preferencesStageTripId = null;
+let preferencesConfirmedTripId = null;
+
+/* Agent conversation language is independent from ES/EN site UI and from
+   the final itinerary language. It is locked from the user's first chat line. */
+let agentConversationLang = null;
+
 /* ---------- Defaults técnicos (NO rígidos) ---------- */
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
+const MAX_ITINERARY_CITIES = 3;
 
 let plannerState = {
   destinations: [],
@@ -145,8 +165,8 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.',
-    overlayGenerating: 'Astra está generando itinerarios…',
+    overlayDefault: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
+    overlayGenerating: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
     overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -155,7 +175,7 @@ const I18N = {
 
     // Reset modal
     resetTitle: '¿Reiniciar planificación? 🧭',
-    resetBody: 'Esto eliminará todos los destinos, itinerarios y datos actuales.<br><strong>No se podrá deshacer.</strong>',
+    resetBody: 'Esto eliminará todos los destinos, preferencias, datos de planificación e itinerarios actuales.<br><br><strong>Antes de continuar, asegúrate de haber descargado tu itinerario, CSV y comprobante de pago.</strong><br><br>Si reinicias, tendrás que comenzar un nuevo viaje y <strong>realizar un nuevo pago para volver a generar un itinerario</strong>.<br><br><strong>Esta acción no se puede deshacer.</strong>',
     resetConfirm: 'Sí, reiniciar',
     resetCancel: 'Cancelar',
 
@@ -223,8 +243,8 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ Astra is creating your full itinerary… This may take a few minutes. Don’t close this tab: you’re saving hours of planning.',
-    overlayGenerating: 'Astra is generating itineraries…',
+    overlayDefault: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
+    overlayGenerating: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
     overlayRebalancingCity: 'Astra is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -233,7 +253,7 @@ const I18N = {
 
     // Reset modal
     resetTitle: 'Reset planning? 🧭',
-    resetBody: 'This will delete all destinations, itineraries, and current data.<br><strong>This cannot be undone.</strong>',
+    resetBody: 'This will delete all current destinations, preferences, planning data, and itineraries.<br><br><strong>Before continuing, make sure you have downloaded your itinerary, CSV, and payment receipt.</strong><br><br>If you reset, you will need to start a new trip and <strong>make a new payment to generate another itinerary</strong>.<br><br><strong>This action cannot be undone.</strong>',
     resetConfirm: 'Yes, reset',
     resetCancel: 'Cancel',
 
@@ -341,7 +361,7 @@ const $affiliateAfter   = qs('#itbmo-affiliate-after');
    - If GA4/gtag is available, clicks emit affiliate_click.
 ========================================================= */
 const ITBMO_AFFILIATE_CONFIG = {
-  previewMode: true, // TEST NOW. Set false immediately before public launch.
+  previewMode: false, // Public launch: show only approved and enabled partners.
 
   partners: {
     kayak: {
@@ -607,6 +627,18 @@ const $infoFloating = qs('#info-chat-floating');
 const $sidebar = qs('.sidebar');
 const $resetBtn = qs('#reset-planner');
 
+const $plannerLanguageHelp = qs('#planner-language-help');
+const $plannerLanguageHelpLabel = qs('#planner-language-help-label');
+const $plannerLanguagePopover = qs('#planner-language-popover');
+const $plannerLanguagePopoverClose = qs('#planner-language-popover-close');
+const $plannerLanguagePopoverTitle = qs('#planner-language-popover-title');
+const $plannerLanguagePopoverCopy = qs('#planner-language-popover-copy');
+const $plannerLanguagePopoverNote = qs('#planner-language-popover-note');
+
+const $preferencesStage = qs('#preferences-stage');
+const $preferencesField = qs('#special-conditions');
+const $preferencesContinue = qs('#continue-with-astra');
+
 /* ---------- ITBMO Account / Supabase ---------- */
 const $accountGuest = qs('#account-guest');
 const $accountAuthenticated = qs('#account-authenticated');
@@ -758,6 +790,18 @@ function clearSessionToken(){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
 }
 
+function getStoredActiveTripId(){
+  try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }
+  catch(_){ return ''; }
+}
+
+function storeActiveTripId(tripId){
+  try{
+    if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId));
+    else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY);
+  }catch(_){ }
+}
+
 function setAuthBusy(on){
   [$accountRegisterSubmit,$accountLoginSubmit,$accountRegisterToggle,$accountLoginToggle]
     .forEach(el=>{ if(el) el.disabled = !!on; });
@@ -765,7 +809,9 @@ function setAuthBusy(on){
 
 function updateSaveAvailability(){
   if(!$save) return;
-  $save.disabled = !currentUser;
+  const lockedForCurrentTrip = Boolean(hasSavedOnce || planningStarted);
+  $save.disabled = !currentUser || lockedForCurrentTrip;
+  $save.setAttribute('aria-disabled', String($save.disabled));
 }
 
 function showAccountMode(mode){
@@ -931,6 +977,7 @@ async function registerITBMOUser(){
       authReady = true;
       setAccountMessage('');
       renderAuthState();
+      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
       return;
     }
 
@@ -975,6 +1022,7 @@ async function loginITBMOUser(){
       authReady = true;
       setAccountMessage('');
       renderAuthState();
+      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
       return;
     }
 
@@ -1015,6 +1063,7 @@ async function restoreITBMOSession(){
   }finally{
     authReady = true;
     renderAuthState();
+    if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
   }
 }
 
@@ -1181,7 +1230,25 @@ async function saveTripRecord(list, travelerState){
   }
 
   currentTripId = data.trip.id;
+  storeActiveTripId(currentTripId);
   return data.trip;
+}
+
+async function tripApi(payload){
+  const response=await fetch(TRIP_API_URL,{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(payload || {})
+  });
+  let data={};
+  try{ data=await response.json(); }catch(_){ }
+  if(!response.ok || data?.ok===false){
+    const error=new Error(data?.error || `TRIP_HTTP_${response.status}`);
+    error.code=data?.code || `TRIP_HTTP_${response.status}`;
+    error.status=response.status;
+    throw error;
+  }
+  return data;
 }
 
 /* 🆕 Export buttons (PDF / CSV / Email) */
@@ -1332,6 +1399,30 @@ if($infoInput){
   });
 }
 
+/* Nested chat scroll handoff.
+   When a chat has reached its own edge, the existing Webflow parent bridge
+   receives the remaining wheel movement so the embedded Planner does not
+   trap page scrolling. */
+function bindChatScrollHandoff(container){
+  if(!container || container.dataset.itbmoScrollHandoff==='1') return;
+  container.dataset.itbmoScrollHandoff='1';
+  container.addEventListener('wheel',(event)=>{
+    const atTop=container.scrollTop<=1;
+    const atBottom=container.scrollTop+container.clientHeight>=container.scrollHeight-1;
+    if(!((event.deltaY<0 && atTop) || (event.deltaY>0 && atBottom))) return;
+    try{
+      if(window.parent && window.parent!==window){
+        window.parent.postMessage({type:'itbmo-scroll',deltaY:event.deltaY},'*');
+      }else{
+        window.scrollBy({top:event.deltaY,left:0,behavior:'auto'});
+      }
+    }catch(_){ }
+  },{passive:true});
+}
+
+bindChatScrollHandoff($chatM);
+bindChatScrollHandoff($infoMessages);
+
 function autoFormatDMYInput(el){
   // 🆕 Placeholder visible + tooltip (UI consistente con DD/MM/AAAA)
   el.placeholder = 'DD/MM/AAAA';
@@ -1413,9 +1504,31 @@ function makeHoursBlock(days){
   return wrap;
 }
 
+function updateAddCityButtonState(){
+  if(!$addCity || !$cityList) return;
+  const count=qsa('.city-row',$cityList).length;
+  const atLimit=count>=MAX_ITINERARY_CITIES;
+  $addCity.disabled=atLimit;
+  $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
+  $addCity.title=atLimit
+    ? (getLang()==='es' ? 'Máximo 3 ciudades por generación.' : 'Maximum 3 cities per generation.')
+    : '';
+}
+
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   if(!$cityList){
     console.error('[ITBMO] #city-list no encontrado. No se puede insertar city-row.');
+    return;
+  }
+
+  const currentCount=qsa('.city-row',$cityList).length;
+  if(currentCount>=MAX_ITINERARY_CITIES){
+    updateAddCityButtonState();
+    if(pref?.city){
+      alert(getLang()==='es'
+        ? 'Puedes incluir un máximo de 3 ciudades por generación.'
+        : 'You can include a maximum of 3 cities per generation.');
+    }
     return;
   }
 
@@ -1461,10 +1574,297 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     }
   });
 
-  qs('.remove',row).addEventListener('click', ()=> row.remove());
+  qs('.remove',row).addEventListener('click', ()=>{
+    row.remove();
+    updateAddCityButtonState();
+  });
   $cityList.appendChild(row);
+  updateAddCityButtonState();
 }
 
+
+/* =========================================================
+   MULTILINGUAL PLANNER CAPABILITY
+   ---------------------------------------------------------
+   The site UI remains ES/EN, while free-text Planner interaction can
+   use any currently supported language listed in the capability popover.
+   ========================================================= */
+function applyPlannerLanguageCapabilityCopy(){
+  const es=getLang()==='es';
+
+  if($plannerLanguageHelpLabel){
+    $plannerLanguageHelpLabel.textContent=es ? 'Escribe en tu idioma' : 'Write in your language';
+  }
+  if($plannerLanguagePopoverTitle){
+    $plannerLanguagePopoverTitle.textContent=es ? 'Usa tu idioma con ASTRA' : 'Use your language with ASTRA';
+  }
+  if($plannerLanguagePopoverCopy){
+    $plannerLanguagePopoverCopy.textContent=es
+      ? 'Escribe naturalmente en cualquier idioma soportado por el chat. ASTRA continuará la conversación de planificación en el idioma que utilices.'
+      : 'Write naturally in any language supported by the chat. ASTRA will continue the planning conversation in the language you use.';
+  }
+  if($plannerLanguagePopoverNote){
+    $plannerLanguagePopoverNote.textContent=es
+      ? 'Si un idioma no es soportado, ASTRA te lo indicará en el chat. El idioma final del itinerario se selecciona más adelante durante la planificación.'
+      : 'If a language is not supported, ASTRA will let you know in the chat. The final itinerary language is selected later in the planning flow.';
+  }
+  if($plannerLanguagePopoverClose){
+    $plannerLanguagePopoverClose.setAttribute('aria-label',es ? 'Cerrar' : 'Close');
+  }
+}
+
+function setPlannerLanguagePopover(open){
+  if(!$plannerLanguageHelp || !$plannerLanguagePopover) return;
+  $plannerLanguageHelp.setAttribute('aria-expanded',String(!!open));
+  $plannerLanguagePopover.setAttribute('aria-hidden',String(!open));
+  $plannerLanguagePopover.classList.toggle('is-open',!!open);
+}
+
+function bindPlannerLanguageCapability(){
+  if(!$plannerLanguageHelp || !$plannerLanguagePopover) return;
+  applyPlannerLanguageCapabilityCopy();
+
+  $plannerLanguageHelp.addEventListener('click',(e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    setPlannerLanguagePopover(!$plannerLanguagePopover.classList.contains('is-open'));
+  });
+
+  $plannerLanguagePopoverClose?.addEventListener('click',(e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    setPlannerLanguagePopover(false);
+  });
+
+  $plannerLanguagePopover.addEventListener('click',(e)=>e.stopPropagation());
+
+  document.addEventListener('click',()=>{
+    setPlannerLanguagePopover(false);
+  });
+
+  document.addEventListener('keydown',(e)=>{
+    if(e.key==='Escape') setPlannerLanguagePopover(false);
+  });
+}
+
+/* =========================================================
+   POST-PAYMENT PREFERENCES CHECKPOINT
+   ---------------------------------------------------------
+   Guardrails:
+   - Account / travelers / destinations freeze after Save Destinations.
+   - Preferences stay hidden until payment entitlement is confirmed.
+   - Clicking Continue captures the SAME #special-conditions value into
+     plannerState.specialConditions, then freezes the field.
+   - startPlanning() itself is intentionally left unchanged.
+   ========================================================= */
+function setSavedSetupLocked(locked){
+  ['#account-box','#travelers-box','#destinations-box'].forEach(sel=>{
+    const el=qs(sel);
+    if(!el) return;
+    el.classList.toggle('is-setup-locked',!!locked);
+    try{ el.inert=!!locked; }catch(_){}
+    el.setAttribute('aria-disabled',locked?'true':'false');
+  });
+
+  if($save){
+    $save.disabled=!!locked || !currentUser;
+    $save.setAttribute('aria-disabled',String(!!locked || !currentUser));
+  }
+}
+
+function autoGrowPreferencesField(){
+  if(!$preferencesField) return;
+  const minHeight=92;
+  const maxHeight=260;
+  $preferencesField.style.height='auto';
+  const next=Math.max(minHeight,Math.min(maxHeight,$preferencesField.scrollHeight || minHeight));
+  $preferencesField.style.height=`${next}px`;
+  $preferencesField.style.overflowY=($preferencesField.scrollHeight > maxHeight) ? 'auto' : 'hidden';
+}
+
+function closePreferencesHelpPopovers(){
+  qsa('.preferences-help-popover.is-open').forEach(pop=>{
+    pop.classList.remove('is-open');
+    pop.setAttribute('aria-hidden','true');
+  });
+  qsa('.preferences-help-button[aria-expanded="true"]').forEach(btn=>{
+    btn.setAttribute('aria-expanded','false');
+  });
+}
+
+function applyPreferencesStageLanguage(){
+  if(!$preferencesStage) return;
+  const es=getLang()==='es';
+  const set=(sel,value)=>{ const el=qs(sel); if(el) el.textContent=value; };
+
+  set('#preferences-stage-eyebrow', es ? 'Personalización ASTRA' : 'ASTRA personalization');
+  set('#preferences-stage-title', es ? 'Personaliza tu viaje' : 'Personalize your trip');
+  set(
+    '#preferences-stage-intro',
+    es
+      ? 'Info Chat ya está disponible. Úsalo si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntale a ASTRA cómo quieres vivir el viaje.'
+      : 'Info Chat is now available. Use it if you want to research anything about your destinations, then tell ASTRA how you want to experience the trip.'
+  );
+  set(
+    '#preferences-stage-field-title',
+    es
+      ? 'Preferencias / Restricciones / Condiciones especiales'
+      : 'Preferences / Restrictions / Special conditions'
+  );
+  set(
+    '#preferences-stage-optional',
+    es
+      ? 'Opcional · puedes continuar aunque no agregues información.'
+      : 'Optional · you can continue without adding any information.'
+  );
+
+  if($preferencesContinue && !preferencesConfirmedTripId){
+    $preferencesContinue.textContent=es ? 'Continuar con ASTRA →' : 'Continue with ASTRA →';
+  }
+}
+
+function hidePreferencesStage({reset=false}={}){
+  if(!$preferencesStage) return;
+  $preferencesStage.classList.add('is-stage-hidden');
+  $preferencesStage.classList.remove('is-stage-active','is-confirmed');
+  $preferencesStage.setAttribute('aria-hidden','true');
+
+  if(reset){
+    preferencesStageTripId=null;
+    preferencesConfirmedTripId=null;
+    if($preferencesField){
+      $preferencesField.readOnly=false;
+      $preferencesField.removeAttribute('aria-readonly');
+    }
+    if($preferencesContinue){
+      $preferencesContinue.disabled=false;
+      $preferencesContinue.removeAttribute('aria-disabled');
+    }
+  }
+}
+
+function showPreferencesStage(){
+  if(!$preferencesStage || !currentTripId) return;
+
+  preferencesStageTripId=currentTripId;
+  applyPreferencesStageLanguage();
+
+  $preferencesStage.classList.remove('is-stage-hidden');
+  $preferencesStage.classList.add('is-stage-active');
+  $preferencesStage.setAttribute('aria-hidden','false');
+
+  if($preferencesField){
+    $preferencesField.readOnly=false;
+    $preferencesField.removeAttribute('aria-readonly');
+  }
+  if($preferencesContinue){
+    $preferencesContinue.disabled=false;
+    $preferencesContinue.removeAttribute('aria-disabled');
+  }
+
+  /* Start Planning has already completed its job: payment + entitlement.
+     It stays permanently disabled for this trip until Reset. */
+  if($start){
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+    $start.dataset.itbmoConsumed='1';
+  }
+
+  requestAnimationFrame(()=>{
+    autoGrowPreferencesField();
+    try{
+      $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
+    }catch(_){}
+  });
+}
+
+function confirmPreferencesAndContinue(){
+  if(!$preferencesStage || !$preferencesField || !currentTripId) return;
+  if(preferencesStageTripId!==currentTripId) return;
+
+  const confirmedValue=String($preferencesField.value || '').trim();
+
+  /* CRITICAL: preserve the existing generation contract exactly. */
+  if(typeof plannerState!=='undefined' && plannerState){
+    plannerState.specialConditions=confirmedValue;
+  }
+
+  preferencesConfirmedTripId=currentTripId;
+
+  $preferencesField.readOnly=true;
+  $preferencesField.setAttribute('aria-readonly','true');
+  $preferencesStage.classList.add('is-confirmed');
+
+  if($preferencesContinue){
+    $preferencesContinue.disabled=true;
+    $preferencesContinue.setAttribute('aria-disabled','true');
+    $preferencesContinue.textContent=getLang()==='es'
+      ? '✓ Preferencias confirmadas'
+      : '✓ Preferences confirmed';
+  }
+
+  /* Existing agent flow begins here, unchanged. */
+  startPlanning();
+
+  /* UX only: move the user directly to the agent input after confirmation. */
+  setTimeout(()=>{
+    try{
+      $chatBox?.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
+      setTimeout(()=>{
+        try{ $chatI?.focus({preventScroll:true}); }catch(_){ try{ $chatI?.focus(); }catch(__){} }
+      },340);
+    }catch(_){}
+  },80);
+}
+
+async function normalizeDestinationsBeforeSave(list, rows){
+  const response = await fetch(API_URL, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      mode:'normalize_destinations',
+      language:getLang(),
+      destinations:list.map(({city,country})=>({city,country}))
+    })
+  });
+
+  let data=null;
+  try{ data=await response.json(); }catch(_){ }
+  if(!response.ok || !data?.ok || !Array.isArray(data.destinations) || data.destinations.length!==list.length){
+    throw new Error(data?.code || 'DESTINATION_NORMALIZATION_FAILED');
+  }
+
+  const normalized=list.map((item,index)=>{
+    const result=data.destinations.find(x=>Number(x?.index)===index);
+    if(!result) throw new Error('DESTINATION_NORMALIZATION_INCOMPLETE');
+
+    const status=String(result.status || '').toLowerCase();
+    if(status==='ambiguous'){
+      const question=String(result.question || '').trim();
+      const fallback=getLang()==='es'
+        ? `No pudimos confirmar con seguridad la ciudad “${item.city}”. Revísala e indica también el país.`
+        : `We could not safely confirm the city “${item.city}”. Please review it and include the country.`;
+      const error=new Error('DESTINATION_AMBIGUOUS');
+      error.userMessage=question || fallback;
+      error.rowIndex=index;
+      throw error;
+    }
+
+    const city=String(result.city || '').trim();
+    const country=String(result.country || item.country || '').trim();
+    if(!city) throw new Error('DESTINATION_NORMALIZATION_INCOMPLETE');
+
+    const row=rows[index];
+    const cityInput=qs('.city',row);
+    const countryInput=qs('.country',row);
+    if(cityInput) cityInput.value=city;
+    if(countryInput && country) countryInput.value=country;
+
+    return {...item,city,country};
+  });
+
+  return normalized;
+}
 
 async function saveDestinations(){
   if(!currentUser || !getStoredSessionToken()){
@@ -1483,7 +1883,14 @@ async function saveDestinations(){
   writeLegacyTravelerCounts(travelerState.counts);
 
   const rows = qsa('.city-row', $cityList);
-  const list = [];
+  if(rows.length>MAX_ITINERARY_CITIES){
+    alert(getLang()==='es'
+      ? 'Puedes incluir un máximo de 3 ciudades por generación.'
+      : 'You can include a maximum of 3 cities per generation.');
+    updateAddCityButtonState();
+    return;
+  }
+  let list = [];
 
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
@@ -1516,10 +1923,21 @@ async function saveDestinations(){
   }
 
   try{
+    list = await normalizeDestinationsBeforeSave(list, rows);
     await saveTripRecord(list, travelerState);
   }catch(err){
     console.error('ITBMO trip save error:', err);
-    alert(authCopy('tripFail'));
+    if(err?.userMessage){
+      alert(err.userMessage);
+      const row=rows[Number(err.rowIndex) || 0];
+      try{ qs('.city',row)?.focus(); }catch(_){ }
+    }else if(String(err?.message || '').startsWith('DESTINATION_NORMALIZATION')){
+      alert(getLang()==='es'
+        ? 'No pudimos validar los destinos en este momento. Revísalos e inténtalo nuevamente.'
+        : 'We could not validate the destinations right now. Please review them and try again.');
+    }else{
+      alert(authCopy('tripFail'));
+    }
     if($save){
       $save.textContent = previousSaveLabel;
       updateSaveAvailability();
@@ -1577,24 +1995,46 @@ async function saveDestinations(){
     }
   }
 
-  // ✅ Bloquear sidebar
-  if ($sidebar) $sidebar.classList.add('disabled');
+  if(!planningStarted){
+    // Initial setup save: freeze only what has already been confirmed.
+    // Preferences remain a separate post-payment checkpoint.
+    setSavedSetupLocked(true);
+    hidePreferencesStage({reset:true});
 
-  /* Info Chat remains locked after Save Destinations.
-     It unlocks only after server-side payment/admin entitlement is confirmed. */
-  setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+    /* Info Chat remains locked after Save Destinations.
+       It unlocks only after server-side payment/admin entitlement is confirmed. */
+    setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
 
-  if (typeof plannerState !== 'undefined') {
-    plannerState.destinations = [...savedDestinations];
-    plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
-    plannerState.travelers = { ...travelerState.counts };
-    plannerState.travelerProfiles = {
-      mode: travelerState.mode,
-      primary: travelerState.primary,
-      companions: travelerState.companions
-    };
-    plannerState.budget = qs('#budget')?.value || '';
-    plannerState.currency = qs('#currency')?.value || 'USD';
+    if (typeof plannerState !== 'undefined') {
+      plannerState.destinations = [...savedDestinations];
+      /* specialConditions is intentionally confirmed AFTER payment. */
+      plannerState.specialConditions = '';
+      plannerState.travelers = { ...travelerState.counts };
+      plannerState.travelerProfiles = {
+        mode: travelerState.mode,
+        primary: travelerState.primary,
+        companions: travelerState.companions
+      };
+      plannerState.budget = qs('#budget')?.value || '';
+      plannerState.currency = qs('#currency')?.value || 'USD';
+    }
+  }else{
+    /* Existing post-start reuse path preserved as it behaved before this upgrade. */
+    if ($sidebar) $sidebar.classList.add('disabled');
+    setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+
+    if (typeof plannerState !== 'undefined') {
+      plannerState.destinations = [...savedDestinations];
+      plannerState.specialConditions = (qs('#special-conditions')?.value || '').trim();
+      plannerState.travelers = { ...travelerState.counts };
+      plannerState.travelerProfiles = {
+        mode: travelerState.mode,
+        primary: travelerState.primary,
+        companions: travelerState.companions
+      };
+      plannerState.budget = qs('#budget')?.value || '';
+      plannerState.currency = qs('#currency')?.value || 'USD';
+    }
   }
 
   /* QUIRÚRGICO v4: a newly saved plan must generate before export actions return. */
@@ -1652,6 +2092,7 @@ function renderCityItinerary(city){
   if(!days.length){
     $itWrap.innerHTML = `<p>${t('uiNoActivities')}</p>`;
     if($affiliateAfter) $affiliateAfter.style.display='none';
+    syncImmersiveItineraryLauncher();
     return;
   }
 
@@ -1733,7 +2174,382 @@ function renderCityItinerary(city){
 
   // Post-itinerary monetization surface: independent of itinerary rendering.
   refreshPostItineraryAffiliate();
+
+  // Immersive viewer launcher mirrors the already-generated state only.
+  syncImmersiveItineraryLauncher();
 }
+
+/* =========================================================
+   ITBMO · IMMERSIVE ITINERARY VIEWER · v77
+   ---------------------------------------------------------
+   Presentation-only layer:
+   - Reads from the existing itineraries / cityMeta objects.
+   - Does NOT call the itinerary API.
+   - Does NOT mutate generated rows.
+   - Does NOT change PDF / CSV / receipt logic.
+   - The legacy flat renderer remains mounted but hidden by CSS.
+========================================================= */
+let immersiveItineraryCity = null;
+let immersiveItineraryDay = null;
+let immersiveTouchStartX = null;
+let immersiveTouchStartY = null;
+let immersiveRenderFrame = null;
+
+function scheduleImmersiveItineraryRender(){
+  if(immersiveRenderFrame!=null){
+    cancelAnimationFrame(immersiveRenderFrame);
+  }
+  immersiveRenderFrame=requestAnimationFrame(()=>{
+    immersiveRenderFrame=requestAnimationFrame(()=>{
+      immersiveRenderFrame=null;
+      renderImmersiveItinerary();
+    });
+  });
+}
+
+function _immersiveViewerCopy_(){
+  const es = getLang()==='es';
+  return es ? {
+    ctaTitle:'Explora tu itinerario día a día',
+    ctaSub:'Abre cada ciudad y recorre cada día en una vista inmersiva.',
+    citySingular:'ciudad',
+    cityPlural:'ciudades',
+    daySingular:'día',
+    dayPlural:'días',
+    ready:'listos para explorar',
+    eyebrow:'TU ITINERARIO ASTRA',
+    title:'Tu viaje, día a día.',
+    subtitle:'Elige una ciudad y recorre cada día a tu propio ritmo.',
+    back:'Volver al Planner',
+    close:'Cerrar itinerario',
+    prev:'Día anterior',
+    next:'Día siguiente',
+    of:'de'
+  } : {
+    ctaTitle:'Explore your day-by-day itinerary',
+    ctaSub:'Open every city and move through each day in an immersive view.',
+    citySingular:'city',
+    cityPlural:'cities',
+    daySingular:'day',
+    dayPlural:'days',
+    ready:'ready to explore',
+    eyebrow:'YOUR ASTRA ITINERARY',
+    title:'Your trip, day by day.',
+    subtitle:'Choose a city, then move through each day at your own pace.',
+    back:'Back to Planner',
+    close:'Close itinerary',
+    prev:'Previous day',
+    next:'Next day',
+    of:'of'
+  };
+}
+
+function _immersiveAvailableCities_(){
+  const ordered = (savedDestinations||[]).map(x=>x.city).filter(Boolean);
+  const extras = Object.keys(itineraries||{}).filter(city=>!ordered.includes(city));
+  return [...ordered,...extras].filter(city=>{
+    const byDay = itineraries?.[city]?.byDay || {};
+    return Object.values(byDay).some(rows=>Array.isArray(rows) && rows.length);
+  });
+}
+
+function _immersiveDaysForCity_(city){
+  return Object.keys(itineraries?.[city]?.byDay || {})
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((a,b)=>a-b);
+}
+
+function syncImmersiveItineraryLauncher(){
+  const wrap = qs('#itinerary-focus-launch');
+  const btn = qs('#open-itinerary-focus');
+  if(!wrap || !btn) return;
+
+  const cities = _immersiveAvailableCities_();
+  const totalDays = cities.reduce((sum,city)=>sum + _immersiveDaysForCity_(city).length,0);
+  const hasRows = cities.length>0 && totalDays>0;
+  const copy = _immersiveViewerCopy_();
+
+  wrap.classList.toggle('is-ready',hasRows);
+  wrap.setAttribute('aria-hidden',hasRows?'false':'true');
+  btn.disabled = !hasRows;
+  btn.setAttribute('aria-disabled',hasRows?'false':'true');
+
+  const title = qs('#itinerary-focus-cta-title');
+  const sub = qs('#itinerary-focus-cta-subtitle');
+  const meta = qs('#itinerary-focus-cta-meta');
+  if(title) title.textContent = copy.ctaTitle;
+  if(sub) sub.textContent = copy.ctaSub;
+  if(meta){
+    const cityLabel = cities.length===1 ? copy.citySingular : copy.cityPlural;
+    const dayLabel = totalDays===1 ? copy.daySingular : copy.dayPlural;
+    meta.textContent = hasRows ? `${cities.length} ${cityLabel} · ${totalDays} ${dayLabel} · ${copy.ready}` : '';
+  }
+}
+
+function _immersiveFormatDuration_(val,transport=''){
+  if(!val) return '';
+  return _sanitizeDurationLines_(val,transport);
+}
+
+function _immersiveRenderDayTable_(city,dayNum){
+  const target = qs('#itinerary-focus-day-content');
+  if(!target) return;
+
+  const rows = itineraries?.[city]?.byDay?.[dayNum] || [];
+  if(!rows.length){
+    target.innerHTML = `<p class="itinerary-focus-empty">${t('uiNoActivities')}</p>`;
+    return;
+  }
+
+  const headers = [
+    t('thStart'),t('thEnd'),t('thActivity'),t('thFrom'),
+    t('thTo'),t('thTransport'),t('thDuration'),t('thNotes')
+  ];
+
+  const table = document.createElement('table');
+  table.className='itinerary itinerary-focus-table';
+  table.innerHTML=`
+    <thead>
+      <tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr>
+    </thead>
+    <tbody></tbody>
+  `;
+
+  const tbody = qs('tbody',table);
+  rows.forEach(r=>{
+    const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i,'');
+    const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim();
+    const values = [
+      r.start||'',
+      r.end||'',
+      cleanActivity,
+      r.from||'',
+      r.to||'',
+      r.transport||'',
+      _immersiveFormatDuration_(r.duration||'',r.transport||''),
+      cleanNotes
+    ];
+
+    const tr=document.createElement('tr');
+    tr.innerHTML=values.map((value,i)=>`<td data-label="${headers[i]}">${value}</td>`).join('');
+    tbody.appendChild(tr);
+  });
+
+  target.replaceChildren(table);
+}
+
+function _immersiveRenderCities_(){
+  const nav = qs('#itinerary-focus-cities');
+  if(!nav) return;
+  const cities = _immersiveAvailableCities_();
+  nav.innerHTML='';
+
+  cities.forEach((city,index)=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='itinerary-focus-city-btn' + (city===immersiveItineraryCity?' active':'');
+    b.dataset.city=city;
+    b.innerHTML=`<span>${index+1}</span><strong>${city}</strong>`;
+    b.addEventListener('click',()=>{
+      immersiveItineraryCity=city;
+      setActiveCity(city);
+      const days=_immersiveDaysForCity_(city);
+      const preferred=Number(itineraries?.[city]?.currentDay);
+      immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
+      scheduleImmersiveItineraryRender();
+    });
+    nav.appendChild(b);
+  });
+}
+
+function renderImmersiveItinerary(){
+  const modal=qs('#itinerary-focus-modal');
+  if(!modal) return;
+
+  const cities=_immersiveAvailableCities_();
+  if(!cities.length){
+    closeImmersiveItinerary();
+    syncImmersiveItineraryLauncher();
+    return;
+  }
+
+  if(!immersiveItineraryCity || !cities.includes(immersiveItineraryCity)){
+    immersiveItineraryCity=activeCity && cities.includes(activeCity) ? activeCity : cities[0];
+  }
+
+  const days=_immersiveDaysForCity_(immersiveItineraryCity);
+  if(!days.length) return;
+
+  if(!days.includes(Number(immersiveItineraryDay))){
+    const preferred=Number(itineraries?.[immersiveItineraryCity]?.currentDay);
+    immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
+  }
+
+  itineraries[immersiveItineraryCity].currentDay=immersiveItineraryDay;
+  setActiveCity(immersiveItineraryCity);
+
+  const copy=_immersiveViewerCopy_();
+  const data=itineraries[immersiveItineraryCity];
+  const base=parseDMY(data?.baseDate || cityMeta?.[immersiveItineraryCity]?.baseDate || '');
+  const dateLabel=base ? formatDMY(addDays(base,immersiveItineraryDay-1)) : '';
+  const dayIndex=days.indexOf(immersiveItineraryDay);
+
+  const eyebrow=qs('#itinerary-focus-eyebrow');
+  const title=qs('#itinerary-focus-title');
+  const subtitle=qs('#itinerary-focus-subtitle');
+  const backLabel=qs('#itinerary-focus-back-label');
+  const close=qs('#itinerary-focus-close');
+  const prev=qs('#itinerary-focus-prev');
+  const next=qs('#itinerary-focus-next');
+  const cityLabel=qs('#itinerary-focus-city-label');
+  const dayTitle=qs('#itinerary-focus-day-title');
+  const dayCount=qs('#itinerary-focus-day-count');
+
+  if(eyebrow) eyebrow.textContent=copy.eyebrow;
+  if(title) title.textContent=copy.title;
+  if(subtitle) subtitle.textContent=copy.subtitle;
+  if(backLabel) backLabel.textContent=copy.back;
+  if(close) close.setAttribute('aria-label',copy.close);
+  if(prev) prev.setAttribute('aria-label',copy.prev);
+  if(next) next.setAttribute('aria-label',copy.next);
+  if(cityLabel) cityLabel.textContent=immersiveItineraryCity;
+  if(dayTitle) dayTitle.textContent=`${t('uiDayTitle',immersiveItineraryDay)}${dateLabel ? ` · ${dateLabel}` : ''}`;
+  if(dayCount) dayCount.textContent=`${dayIndex+1} ${copy.of} ${days.length}`;
+
+  _immersiveRenderCities_();
+  _immersiveRenderDayTable_(immersiveItineraryCity,immersiveItineraryDay);
+
+  const dots=qs('#itinerary-focus-dots');
+  if(dots){
+    dots.innerHTML='';
+    days.forEach((day,i)=>{
+      const b=document.createElement('button');
+      b.type='button';
+      b.className='itinerary-focus-dot' + (day===immersiveItineraryDay?' active':'');
+      b.setAttribute('aria-label',t('uiDayTitle',day));
+      b.title=t('uiDayTitle',day);
+      b.innerHTML=`<span>${i+1}</span>`;
+      b.addEventListener('click',()=>{
+        immersiveItineraryDay=day;
+        scheduleImmersiveItineraryRender();
+      });
+      dots.appendChild(b);
+    });
+  }
+
+  if(prev){
+    prev.disabled=dayIndex<=0;
+    prev.setAttribute('aria-disabled',dayIndex<=0?'true':'false');
+  }
+  if(next){
+    next.disabled=dayIndex>=days.length-1;
+    next.setAttribute('aria-disabled',dayIndex>=days.length-1?'true':'false');
+  }
+}
+
+function _immersiveMoveDay_(delta){
+  const days=_immersiveDaysForCity_(immersiveItineraryCity);
+  if(!days.length) return;
+  const currentIndex=Math.max(0,days.indexOf(Number(immersiveItineraryDay)));
+  const nextIndex=Math.max(0,Math.min(days.length-1,currentIndex+delta));
+  if(nextIndex===currentIndex) return;
+  immersiveItineraryDay=days[nextIndex];
+  scheduleImmersiveItineraryRender();
+}
+
+function openImmersiveItinerary(city){
+  const modal=qs('#itinerary-focus-modal');
+  if(!modal || !_immersiveAvailableCities_().length) return;
+
+  immersiveItineraryCity=city && _immersiveAvailableCities_().includes(city)
+    ? city
+    : (activeCity && _immersiveAvailableCities_().includes(activeCity) ? activeCity : _immersiveAvailableCities_()[0]);
+
+  const days=_immersiveDaysForCity_(immersiveItineraryCity);
+  const preferred=Number(itineraries?.[immersiveItineraryCity]?.currentDay);
+  immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
+
+  try{
+    if(window.parent && window.parent!==window){
+      window.parent.postMessage({type:'ITBMO_REQUEST_PLANNER_FOCUS',reason:'itinerary-viewer'},'*');
+    }
+  }catch(_){}
+
+  modal.classList.add('is-open');
+  modal.setAttribute('aria-hidden','false');
+  document.body.classList.add('itinerary-focus-open');
+
+  // Let the focus surface paint first, then build the day table.
+  // This prevents the CTA click from carrying the full table-render cost.
+  scheduleImmersiveItineraryRender();
+
+  setTimeout(()=>qs('#itinerary-focus-close')?.focus(),80);
+}
+
+function closeImmersiveItinerary(){
+  const modal=qs('#itinerary-focus-modal');
+  if(!modal) return;
+  if(immersiveRenderFrame!=null){
+    cancelAnimationFrame(immersiveRenderFrame);
+    immersiveRenderFrame=null;
+  }
+  modal.classList.remove('is-open');
+  modal.setAttribute('aria-hidden','true');
+  document.body.classList.remove('itinerary-focus-open');
+  setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);
+}
+
+function bindImmersiveItineraryViewer(){
+  const launch=qs('#open-itinerary-focus');
+  const modal=qs('#itinerary-focus-modal');
+  if(!launch || !modal) return;
+
+  launch.addEventListener('click',()=>openImmersiveItinerary());
+  qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);
+  qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);
+  qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);
+  qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));
+  qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));
+
+  modal.addEventListener('touchstart',(e)=>{
+    const p=e.touches?.[0];
+    if(!p) return;
+    immersiveTouchStartX=p.clientX;
+    immersiveTouchStartY=p.clientY;
+  },{passive:true});
+
+  modal.addEventListener('touchend',(e)=>{
+    if(immersiveTouchStartX==null || immersiveTouchStartY==null) return;
+    const p=e.changedTouches?.[0];
+    if(!p) return;
+    const dx=p.clientX-immersiveTouchStartX;
+    const dy=p.clientY-immersiveTouchStartY;
+    immersiveTouchStartX=null;
+    immersiveTouchStartY=null;
+    if(Math.abs(dx)>58 && Math.abs(dx)>Math.abs(dy)*1.25){
+      _immersiveMoveDay_(dx<0?1:-1);
+    }
+  },{passive:true});
+
+  document.addEventListener('keydown',(e)=>{
+    if(!modal.classList.contains('is-open')) return;
+    if(e.key==='Escape'){
+      e.preventDefault();
+      closeImmersiveItinerary();
+    }else if(e.key==='ArrowLeft'){
+      e.preventDefault();
+      _immersiveMoveDay_(-1);
+    }else if(e.key==='ArrowRight'){
+      e.preventDefault();
+      _immersiveMoveDay_(1);
+    }
+  });
+
+  syncImmersiveItineraryLauncher();
+}
+
+bindImmersiveItineraryViewer();
 
 function getFrontendSnapshot(){
   return JSON.stringify(
@@ -1825,6 +2641,8 @@ Mandatory rules:
 - Major destination spas and thermal complexes normally require at least 3 hours of activity time, excluding the incoming road transfer. Small local baths may be shorter only when clearly identified as such. Large museums normally require at least 90 minutes unless the row explicitly states a selective highlights-only visit.
 - Detect semantic duplicate experiences, not only matching names. Merge or remove aliases, sub-area labels and repeated experiences that deliver essentially the same visit.
 - Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
+- If an end time is blank, plan the day to reach at least approximately 19:00 local time when worthwhile content remains. Treat 19:00 as a minimum planning target, not a ceiling. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.
+- On Day 1, the traveler reaches the lodging/checks in or drops luggage BEFORE sightseeing. The first sightseeing row must begin after that lodging step. Never invent an airport, flight or transfer origin if the user did not provide one.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
 - Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
 - Treat preferences and restrictions as binding planning constraints, not merely note content. Translate them into concrete scheduling, routing, meal and activity decisions.
@@ -1853,15 +2671,19 @@ Duration:
 - The interval from start to end must contain both transport and activity.
 
 Meals:
-- Meals are optional.
-- When included, choose a concrete place or a clearly defined food district.
+- Respect realistic local meal timing. On a full day that spans the local lunch period, include a real lunch/meal break unless the user explicitly prefers otherwise or a long fixed experience makes a different arrangement necessary.
+- As a fallback when local customs are uncertain, place lunch roughly within 12:00–15:00; adapt to the destination's normal dining culture.
+- When included, choose a concrete place or a clearly defined food district and give enough time to eat comfortably.
 - Do not repeat the same named restaurant on another day.
+- Dinner is optional; include it when it genuinely improves the itinerary, especially when the day naturally extends beyond 19:00 for worthwhile evening content.
 
 Aurora:
-- Include aurora only when plausible by latitude and season.
-- Treat it as a conditional opportunity in notes unless the user explicitly requested a fixed outing.
+- Include aurora only when plausible by latitude, season and darkness.
+- Do NOT create a standalone aurora activity row by default.
+- When auroras are plausible for the city/date, put aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, with a realistic dark-hour window, a guided-tour option, weather/cloud/geomagnetic/road checks and a clear statement that visibility is not guaranteed.
+- Because the aurora note is present on EVERY plausible day, the traveler automatically has multiple weather-dependent opportunities across the stay; never rely on only one selected night.
+- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference through the final-row NOTE and guided-tour recommendation. Do not convert the preference itself into a standalone row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
 - Avoid identical notes on consecutive nights.
-- State that visibility is not guaranteed and that cloud cover, geomagnetic activity and road conditions must be checked.
 
 Intelligent day-trip selection:
 - Evaluate the complete trip before assigning days. Compare the marginal value of secondary city activities against nearby excursions using total trip length, the number of days required for the core city, relative tourism value, transfer time, season, traveler fit and route coherence.
@@ -1934,19 +2756,21 @@ Itinerary rules (aligned with API v52.5):
 - duration must be 2 lines with \\n:
   "Transport: ...\\nActivity: ..."
   (no 0m, and do not use commas to separate).
-- Meals: not mandatory; if included, not generic.
+- Meals: use realistic local meal timing. A full day spanning lunch should normally include a concrete lunch/meal break; if local customs are uncertain, use roughly 12:00–15:00 as a fallback. Dinner is optional; include it when the itinerary naturally extends into the evening and it adds real value.
 - Intelligent day trips: evaluate the entire stay and decide whether a nearby excursion has greater tourism value than remaining secondary city activities. Consider total trip length, core-city coverage, relative quality, transfer time, season, traveler fit and logistical coherence. Substitute only lower-priority filler, never core unmet highlights. This rule is global and destination-agnostic.
 - Lodging base: when hotel, Airbnb, address, coordinates or area are provided, use them as the primary geographic anchor; minimize transfers and start/end there whenever sensible.
 - Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
-- Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial.
+- Time policy: day 1 respects the provided start, the final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial. If an end time is blank, treat about 19:00 local as a minimum target, not a ceiling; do not routinely finish earlier, and continue later when high-value evening content materially improves the day. Day 1 reaches lodging/check-in or luggage drop before sightseeing.
 - Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
 - Macro-tours/day trips: first evaluate a broad candidate pool, then curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final localized return row to the base. On a full-day scenic route, normally aim for roughly 4–8 meaningful visit stops when daylight, safety and the user window allow; this is a flexible quality range, never a quota. Do not compress anchor experiences or add filler. Avoid the final day when stronger scheduling alternatives exist.
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
 
 Auroras (only if plausible by latitude/season):
-- Avoid consecutive nights if possible. Avoid last day; if only possible there, mark conditional.
-- Must be nighttime local.
-- Notes include: "valid:" + clouds/weather + low-cost nearby alternative.
+- Do NOT create a standalone aurora row by default.
+- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day when auroras are plausible for the city/date.
+- Repeat the opportunity on EVERY plausible day so weather-dependent backup opportunities are naturally preserved across the stay.
+- The note must include a realistic dark-hour window, guided-tour option, cloud/weather/geomagnetic/road checks and no-visibility guarantee.
+- If the user explicitly provides a confirmed aurora booking/time and asks to schedule it, that confirmed fixed booking may be represented as a row.
 
 Safety:
 - Don't propose activities in areas with relevant risks, impossible hours, or obvious restrictions.
@@ -2565,10 +3389,19 @@ function _isAnchorExperienceRow_(row={}){
 }
 
 function _reconcileDayRows_(rows=[]){
-  const sorted=(rows||[]).slice().sort((a,b)=>{
-    const aa=_hhmmToMinutes_(a?.start), bb=_hhmmToMinutes_(b?.start);
-    return (aa==null?99999:aa)-(bb==null?99999:bb);
+  const source=(rows||[]).slice();
+  const hasLateEvening=source.some(r=>{
+    const m=_hhmmToMinutes_(r?.start);
+    return m!=null && m>=18*60;
   });
+  const logicalStartMinute=(row)=>{
+    const m=_hhmmToMinutes_(row?.start);
+    if(m==null) return 99999;
+    // If a logical itinerary day continues after midnight, keep that return
+    // after the evening activity instead of placing 00:xx at the top.
+    return (hasLateEvening && m<4*60) ? m+(24*60) : m;
+  };
+  const sorted=source.sort((a,b)=>logicalStartMinute(a)-logicalStartMinute(b));
 
   // First enforce deterministic minimum dwell and row math.
   for(let i=0;i<sorted.length;i++){
@@ -2989,7 +3822,23 @@ Contexto:
 ================================= */
 function setOverlayMessage(msg=t('overlayDefault')){
   const p = $overlayWOW?.querySelector('p');
-  if(p) p.textContent = msg;
+  if(!p) return;
+
+  const isMainGenerationMessage =
+    msg === t('overlayDefault') ||
+    msg === t('overlayGenerating');
+
+  if(!isMainGenerationMessage){
+    p.classList.remove('astra-overlay-copy');
+    p.textContent = msg;
+    return;
+  }
+
+  const isEs = getLang() === 'es';
+  p.classList.add('astra-overlay-copy');
+  p.innerHTML = isEs
+    ? `<span class="astra-overlay-hero"><strong>✨ ASTRA está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ASTRA compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong> Mientras ASTRA trabaja, explora los enlaces de abajo para vuelos, hospedaje, transporte y experiencias.</span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ASTRA is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ASTRA compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong> While ASTRA works, explore the links below for flights, stays, transport and experiences.</span>`;
 }
 
 function showWOW(on, msg){
@@ -3025,6 +3874,15 @@ function showWOW(on, msg){
       }
     }
   });
+
+  /* Permanent trip-state guardrails after any global UI unlock. */
+  if(!on){
+    updateSaveAvailability();
+    if($start?.dataset.itbmoConsumed==='1'){
+      $start.disabled=true;
+      $start.setAttribute('aria-disabled','true');
+    }
+  }
 }
 
 /* =========================================================
@@ -3077,6 +3935,127 @@ function _userLanguageAnchor_(){
   return (getLang()==='es') ? 'Please generate the itinerary.' : 'Please generate the itinerary.';
 }
 
+
+/* =========================================================
+   ITBMO · GENERATION DIAGNOSTICS
+   Observability only. Does not change the generation flow.
+   ========================================================= */
+const _astraGenerationMetrics_ = {
+  active:false,
+  startedAt:0,
+  finishedAt:0,
+  calls:0,
+  inputTokens:0,
+  outputTokens:0,
+  totalTokens:0,
+  tokenUsageSamples:0,
+  cities:[]
+};
+
+function _formatGenerationDuration_(ms){
+  const safe=Math.max(0,Number(ms)||0);
+  const totalSeconds=Math.round(safe/1000);
+  const minutes=Math.floor(totalSeconds/60);
+  const seconds=totalSeconds%60;
+  return minutes>0 ? `${minutes}m ${String(seconds).padStart(2,'0')}s` : `${seconds}s`;
+}
+
+function _resetAstraGenerationMetrics_(){
+  _astraGenerationMetrics_.active=true;
+  _astraGenerationMetrics_.startedAt=performance.now();
+  _astraGenerationMetrics_.finishedAt=0;
+  _astraGenerationMetrics_.calls=0;
+  _astraGenerationMetrics_.inputTokens=0;
+  _astraGenerationMetrics_.outputTokens=0;
+  _astraGenerationMetrics_.totalTokens=0;
+  _astraGenerationMetrics_.tokenUsageSamples=0;
+  _astraGenerationMetrics_.cities=[];
+}
+
+function _extractExactUsage_(data){
+  const usage=data?.usage || data?.token_usage || data?.meta?.usage || data?.meta?.token_usage || null;
+  if(!usage || typeof usage!=='object') return null;
+
+  const input=Number(
+    usage.input_tokens ??
+    usage.prompt_tokens ??
+    usage.inputTokens ??
+    usage.promptTokens ??
+    0
+  ) || 0;
+
+  const output=Number(
+    usage.output_tokens ??
+    usage.completion_tokens ??
+    usage.outputTokens ??
+    usage.completionTokens ??
+    0
+  ) || 0;
+
+  const total=Number(
+    usage.total_tokens ??
+    usage.totalTokens ??
+    (input+output)
+  ) || (input+output);
+
+  if(input<=0 && output<=0 && total<=0) return null;
+  return {input,output,total};
+}
+
+function _captureExactUsage_(data){
+  if(!_astraGenerationMetrics_.active) return;
+  _astraGenerationMetrics_.calls++;
+
+  const usage=_extractExactUsage_(data);
+  if(!usage) return;
+
+  _astraGenerationMetrics_.inputTokens+=usage.input;
+  _astraGenerationMetrics_.outputTokens+=usage.output;
+  _astraGenerationMetrics_.totalTokens+=usage.total;
+  _astraGenerationMetrics_.tokenUsageSamples++;
+}
+
+function _finishAstraGenerationMetrics_(){
+  _astraGenerationMetrics_.finishedAt=performance.now();
+  _astraGenerationMetrics_.active=false;
+
+  const totalMs=_astraGenerationMetrics_.finishedAt-_astraGenerationMetrics_.startedAt;
+  const tokenUsageAvailable=_astraGenerationMetrics_.tokenUsageSamples>0;
+
+  const snapshot={
+    totalMs:Math.round(totalMs),
+    total:_formatGenerationDuration_(totalMs),
+    modelCalls:_astraGenerationMetrics_.calls,
+    cities:_astraGenerationMetrics_.cities.map(x=>({...x})),
+    tokenUsageAvailable,
+    inputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.inputTokens : null,
+    outputTokens:tokenUsageAvailable ? _astraGenerationMetrics_.outputTokens : null,
+    totalTokens:tokenUsageAvailable ? _astraGenerationMetrics_.totalTokens : null
+  };
+
+  window.__ITBMO_LAST_GENERATION_METRICS__=snapshot;
+
+  console.log(`%c[ASTRA TIMER] FULL TRIP TOTAL: ${snapshot.total}`, 'font-weight:900;color:#087f9f;');
+  console.log(`[ASTRA TIMER] Model/API calls during generation: ${snapshot.modelCalls}`);
+  if(snapshot.cities.length) console.table(snapshot.cities);
+
+  if(tokenUsageAvailable){
+    console.log(
+      `[ASTRA TOKENS] Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
+    );
+  }else{
+    console.info(
+      '[ASTRA TOKENS] Exact token counts are not available because /api/chat did not expose usage metadata to the browser. No estimate was invented.'
+    );
+  }
+
+  console.info(
+    '[ASTRA METRICS] Type __ITBMO_LAST_GENERATION_METRICS__ in the console to inspect the last complete generation.'
+  );
+
+  return snapshot;
+}
+
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
   const history = useHistory ? session : [];
 
@@ -3112,6 +4091,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
     }
 
     const data = await res.json().catch(()=>({text:''}));
+    _captureExactUsage_(data);
     return data?.text || '';
   }catch(e){
     const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
@@ -3346,6 +4326,8 @@ function _normalizeLodgingInput_(value=''){
 function _preferenceConstraintPolicy_(){
   return {
     rule:'Treat every stated preference and restriction as an operational planning constraint, not as decorative notes.',
+    precedence:'Explicit user preferences, restrictions, must-dos and special conditions take priority over generic tourism defaults whenever they are compatible with safety, feasibility and hard time boundaries.',
+    completeness:'Do not silently drop a stated preference, restriction or must-do. Apply it in the itinerary when feasible; if a conflict makes it impossible, preserve the closest practical interpretation instead of ignoring it.',
     examples:[
       'Photography: favor strong light, sunrise, sunset, blue hour or suitable viewpoints when seasonally realistic.',
       'Avoid crowds: use earlier, later or lower-congestion sequencing when practical.',
@@ -3360,9 +4342,11 @@ function _preferenceConstraintPolicy_(){
 
 function _globalTimeWindowPolicy_(totalDays, perDay=[]){
   return {
-    first_day:'Any provided start time is a hard boundary.',
+    first_day:'Any provided start time is a hard boundary. Before sightseeing on the arrival day, the traveler first reaches the lodging and completes check-in or luggage drop.',
     final_day:'Any provided end time is a hard boundary.',
     intermediate_days:'Provided start/end times are preferences. They may be optimized only when this materially improves quality or logistics, without creating impractical hours.',
+    default_end_when_missing:'19:00 local time is the minimum planning target, not a ceiling. If the user did not provide an end time, do not routinely finish before about 19:00. Continue later when a high-value evening experience, show, concert, atmospheric district, night viewpoint, special dinner or other destination-defining activity materially improves the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.',
+    arrival_day_lodging_first:'Day 1 must reach the lodging/check-in or luggage drop before any sightseeing. Never schedule sightseeing before the lodging. If arrival transport details are unknown, do not invent an airport, flight or transfer origin.',
     windows:perDay,
     total_days:totalDays
   };
@@ -3398,12 +4382,13 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     lodging_base:lodging.normalized||null,
     lodging_original:lodging.original||null,
     lodging_normalization_applied:!!(lodging.original && lodging.normalized!==lodging.original),
-    lodging_policy:'Use lodging_base as the principal geographic anchor. Minimize unnecessary transfers and start/end there whenever sensible.',
+    lodging_policy:'Use lodging_base as the principal geographic anchor. On Day 1, lodging arrival/check-in or luggage drop happens before sightseeing. Minimize unnecessary transfers and start/end there whenever sensible. Never invent airport/flight arrival details when they were not provided.',
     transport:transport||null,
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
     preference_constraint_policy:_preferenceConstraintPolicy_(),
     special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
+    special_conditions_instruction:'Use special_conditions as authoritative user input throughout strategic distribution, activity selection, sequencing, logistics and validation. Never treat it as optional commentary.',
     travelers:plannerState?.travelers || null,
     traveler_profiles:plannerState?.travelerProfiles || null,
     budget:plannerState?.budget || null,
@@ -3500,7 +4485,9 @@ HARD RULES:
 - Detect semantic duplicate experiences, including aliases and overlapping district/sub-area descriptions, and keep only the strongest representation.
 - Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
-- Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial.
+- On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
+- Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
+- On Day 1, lodging arrival/check-in or luggage drop MUST occur before sightseeing. If arrival origin is unknown, do not invent an airport, flight or transfer; begin the tourism sequence only after the lodging step.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
 - When the approved identity is a regional route or macro-tour, enrich it like an expert guide: evaluate iconic or highly recommendable low-detour viewpoints, minor waterfalls, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops.
@@ -3523,9 +4510,8 @@ HARD RULES:
 - For winter paths, do not claim unconditional access; require verification and give a safe fallback.
 - Macro-routes must be geographically sequential, contain meaningful separate micro-stops and end
   with an explicit return to the lodging/base.
-- Do not force a rigid aurora row unless the user explicitly requested one. When plausible, add
-  concise conditional guidance to 1–3 suitable evening notes: sensible dark-hour window, safe self-drive option, guided-tour option, cloud/
-  geomagnetic/road checks and no guarantee.
+- Do not create a standalone aurora row by default. When plausible, put concise conditional aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city: realistic dark-hour window, safe self-drive when appropriate, guided-tour option, cloud/geomagnetic/road checks and no guarantee.
+- The final-row aurora note must appear on EVERY plausible day, including when auroras were explicitly requested in Preferences. An explicit aurora preference alone NEVER becomes a dedicated row. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may become a dedicated row.
 - Preserve official proper names; all generic user-facing text and duration labels must use the
   selected itinerary language.
 - Never use generic destinations such as "nearby village", "local restaurant", "services",
@@ -3652,7 +4638,11 @@ function _isAuroraActivityRow_(row={}){
 }
 
 function _explicitlyRequestedFixedAurora_(){
-  return /\b(fixed aurora|aurora tour|northern lights tour|tour de auroras|cacer[ií]a de auroras|reservar aurora|book aurora|actividad fija de aurora)\b/i.test(String(plannerState?.specialConditions||'').replace(/\s+/g,' '));
+  const text=String(plannerState?.specialConditions||'').replace(/\s+/g,' ');
+  const hasAurora=/\b(aurora|northern lights|luces del norte|aurore bor[eé]ale|nordlicht)\b/i.test(text);
+  const hasConfirmedBooking=/\b(confirmed|confirmad[oa]|booked|reservad[oa]|reservation confirmed|reserva confirmada|booking confirmed)\b/i.test(text);
+  const hasFixedTime=/\b(?:[01]?\d|2[0-3]):[0-5]\d\b/.test(text);
+  return hasAurora && hasConfirmedBooking && hasFixedTime;
 }
 
 function _genericPlaceReason_(value=''){
@@ -3716,7 +4706,8 @@ function _auditSeverity_(error={}){
   const critical=new Set([
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
-    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO'
+    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
+    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -3866,13 +4857,48 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         errors.push({
           code:'RIGID_AURORA_ROW',
           day,row,
-          instruction:'Move aurora guidance into suitable evening notes unless the user explicitly requested a fixed outing.'
+          instruction:'Remove the standalone aurora row. Even when auroras or an aurora tour were explicitly requested in Preferences, aurora guidance belongs as an ADDITIONAL note in the FINAL row of EVERY plausible day. Only a genuinely confirmed fixed-time booking may remain as a row.'
         });
       }
     }
 
     if(_regionalDayLooksThin_(dayRows)){
       errors.push({code:'REGIONAL_DAY_TOO_THIN',day,row_count:dayRows.length});
+    }
+
+    // HARD QUALITY RULE: when the user leaves the end time blank,
+    // ~19:00 is the minimum planning target, not a ceiling.
+    const dayWindow=(perDay||[]).find(x=>Number(x?.day)===day) || {};
+    if(dayRows.length && !dayWindow?.end_provided){
+      const lastRow=dayRows[dayRows.length-1] || {};
+      const lastStart=_hhmmToMinutes_(lastRow.start);
+      let lastEnd=_hhmmToMinutes_(lastRow.end);
+      if(lastStart!=null && lastEnd!=null && lastEnd<=lastStart) lastEnd+=1440;
+
+      if(lastEnd!=null && lastEnd < (19*60)){
+        errors.push({
+          code:'END_BEFORE_MINIMUM_TARGET',
+          day,
+          actual_end:lastRow.end,
+          minimum_target:'19:00',
+          instruction:'The user did not provide an end time. Rebuild the day so useful planning reaches at least approximately 19:00. It may continue later for genuinely high-value evening experiences. Do not add filler merely to reach the clock.'
+        });
+      }
+    }
+
+    // HARD QUALITY RULE: in a plausible aurora city/season, EVERY day must carry
+    // an additional aurora opportunity note in the Notes of that day's FINAL row.
+    // An explicit aurora preference still remains a note; it does not become a row.
+    if(dayRows.length && _isHighLatitudeWinterContext_(city,baseDate)){
+      const lastRow=dayRows[dayRows.length-1] || {};
+      if(!_isAuroraRow_({notes:lastRow.notes||''})){
+        errors.push({
+          code:'MISSING_AURORA_FINAL_NOTE',
+          day,
+          row:dayRows.length,
+          instruction:'Add an aurora opportunity as an ADDITIONAL note in the Notes field of this day\'s FINAL row. Do this for every day in this city when latitude/season/darkness make auroras plausible, even if the user explicitly requested auroras in Preferences. Mention clear/cloud conditions, geomagnetic conditions, no guarantee, and guided-tour option. Do not create a standalone aurora row.'
+        });
+      }
     }
   }
 
@@ -3948,6 +4974,9 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
+- When an end time is blank, approximately 19:00 local is a MINIMUM planning target, not a ceiling. Do not finish a normal day before about 19:00 without a real constraint. Continue later when genuinely high-value evening content improves the itinerary. Respect any explicit user end time as a hard boundary.
+- Day 1 must complete lodging arrival/check-in or luggage drop before sightseeing. Do not invent arrival transport details.
+- A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
 - Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
 - Reject generic destinations such as "nearby village", "local restaurant", "services" or "similar option".
@@ -3966,8 +4995,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - For a full-day scenic route, evaluate a broad candidate pool and normally retain roughly 4–8 meaningful visit stops when daylight, safety and timing allow. This is not a quota: preserve realistic dwell at anchor experiences and remove weak filler.
 - For macro-tours, evaluate low-detour viewpoints, villages, beaches, churches, bridges, monuments, geological formations, short trails and photographic stops; retain only those with strong incremental tourism value.
 - Prefer experience diversity over repetitive minor variants, and never add rows merely to fill space.
-- Aurora must be conditional guidance in suitable evening notes unless the user explicitly requested
-  a fixed aurora outing. State that sightings are not guaranteed.
+- In every city/date where auroras are plausible, add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day, not just one selected night. This applies even when the user explicitly requested auroras or an aurora tour in Preferences. Each daily note should mention that visibility is not guaranteed and depends on clear/cloud conditions and geomagnetic activity, and should mention the guided-tour option. Do not create a standalone aurora row. Only a genuinely confirmed fixed-time booking separately provided by the user may remain as a dedicated row.
 - Use the selected itinerary language consistently, including duration labels.
 - Write like an expert human concierge:
   * specific, practical and destination-aware;
@@ -4036,7 +5064,25 @@ async function _finalTripWideRepair_(
     )
   };
 }
-async function generateCityItinerary(city){
+async function generateCityItinerary(city,{silentFailure=false}={}){
+  const _cityGenerationStartedAt_=performance.now();
+  const _recordCityGenerationTime_=()=>{
+    if(!_astraGenerationMetrics_.active) return;
+    const elapsed=performance.now()-_cityGenerationStartedAt_;
+    const existing=_astraGenerationMetrics_.cities.find(x=>x.city===city);
+    if(existing){
+      existing.ms=Math.round(elapsed);
+      existing.duration=_formatGenerationDuration_(elapsed);
+    }else{
+      _astraGenerationMetrics_.cities.push({
+        city,
+        ms:Math.round(elapsed),
+        duration:_formatGenerationDuration_(elapsed)
+      });
+    }
+    console.log(`[ASTRA TIMER] ${city}: ${_formatGenerationDuration_(elapsed)}`);
+  };
+
   const dest=savedDestinations.find(x=>x.city===city);
   if(!dest) return;
 
@@ -4095,7 +5141,8 @@ async function generateCityItinerary(city){
       repaired:finalResult.repaired,
       remainingIssues:finalResult.report?.errors?.length||0
     });
-    return;
+    _recordCityGenerationTime_();
+    return true;
   }catch(err){
     console.error(`[CITY ${city}] v63 staged flow failed; using coherent one-shot recovery`,err);
   }
@@ -4112,7 +5159,8 @@ KNOWN USER FACTS:
 ${JSON.stringify(facts)}
 
 HARD RULES:
-- Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful.
+- Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
+- Day 1 reaches the lodging/checks in or drops luggage before any sightseeing; do not invent airport/flight/arrival transport details when unknown.
 - Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
 - Enforce every preference and restriction through actual planning choices, not merely notes.
 - Intelligently evaluate nearby day trips against remaining secondary city content using trip length, core coverage, relative tourism value, transfer time and logistics.
@@ -4125,8 +5173,8 @@ HARD RULES:
 - Every interval must contain transport plus activity; use realistic category dwell and conservative
   regional transfers.
 - Scenic outdoor stops must fit plausible useful daylight.
-- Regional days require logical micro-stops and explicit return to the lodging/base.
-- Aurora, when plausible, belongs mainly as conditional guidance in notes.
+- Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
+- Aurora, when plausible, belongs as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city rather than a standalone activity. This applies even when explicitly requested in Preferences.
 - One concrete To and one transport choice per row.
 - Use one selected language consistently, including duration labels.
 `.trim();
@@ -4152,17 +5200,21 @@ HARD RULES:
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
     showWOW(false);
-    return;
+    _recordCityGenerationTime_();
+    return true;
   }catch(err2){
     console.error(`[CITY ${city}] v61 recovery failed`,err2);
   }finally{
     showWOW(false);
   }
 
+  _recordCityGenerationTime_();
+
   const msg=getLang()==='es'
     ? 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.'
     : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
-  chatMsg(msg,'ai');
+  if(!silentFailure) chatMsg(msg,'ai');
+  return false;
 }
 
 /* =========================================================
@@ -4210,9 +5262,10 @@ TRANSPORT (smart priority, no invention):
 - Avoid generic "Bus" label for day trips if it's actually a tour: use "Guided Tour (Bus/Van)" or the fallback above.
 
 AURORAS (if plausible):
-- Include at least 1 aurora night in a realistic night window (20:00–02:00 approx.).
-- Avoid consecutive days if there is margin; avoid leaving it only at the end (if it only fits there, mark conditional).
-- Notes must include "valid:" + a nearby low-cost alternative.
+- Do NOT create a standalone aurora activity merely because the user asked for auroras.
+- Add an aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
+- Each note must use a realistic dark-hour window, explain that visibility is not guaranteed and depends on clouds/weather and geomagnetic activity, and mention a guided-tour option.
+- Only a genuinely confirmed fixed-time booking separately supplied by the user may be represented as a dedicated row.
 
 DAY TRIPS / MACRO-TOURS (no hard limits, with judgment):
 - You may include day trips if they add value (no fixed rule). Decide intelligently.
@@ -4295,6 +5348,455 @@ function setPlanningChatLocked(locked){
   }
 }
 
+function detectAgentConversationLanguage(text){
+  const raw=String(text||'').trim();
+  if(!raw) return null;
+
+  /* Script-first detection for non-Latin languages. */
+  if(/[\u3040-\u30ff]/.test(raw)) return 'ja';
+  if(/[\uac00-\ud7af]/.test(raw)) return 'ko';
+  if(/[\u4e00-\u9fff]/.test(raw)) return 'zh';
+  if(/[\u0400-\u04ff]/.test(raw)) return 'ru';
+  if(/[\u0600-\u06ff]/.test(raw)) return 'ar';
+
+  const s=` ${raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')} `;
+  const patterns={
+    es:[/\b(quiero|voy|usar|usare|transporte|publico|hotel|zona|barrio|recomiendame|para|con|una|un|el|la|los|las|y)\b/g],
+    pt:[/\b(quero|vou|usar|transporte|publico|hotel|zona|bairro|recomende|para|com|uma|um|o|a|os|as|e)\b/g],
+    fr:[/\b(je|veux|vais|utiliser|transport|public|hotel|quartier|zone|recommande|pour|avec|un|une|le|la|les|et)\b/g],
+    de:[/\b(ich|mochte|will|nutzen|verkehr|offentlich|hotel|viertel|gebiet|empfehle|fur|mit|ein|eine|der|die|das|und)\b/g],
+    it:[/\b(voglio|usero|usare|trasporto|pubblico|hotel|zona|quartiere|consiglia|per|con|un|una|il|la|gli|le|e)\b/g],
+    en:[/\b(i|want|will|use|transport|public|hotel|area|neighborhood|recommend|for|with|a|an|the|and)\b/g]
+  };
+
+  let best=null, bestScore=0;
+  Object.entries(patterns).forEach(([lang,res])=>{
+    let score=0;
+    res.forEach(re=>{ score += (s.match(re)||[]).length; });
+    if(score>bestScore){ bestScore=score; best=lang; }
+  });
+
+  if(bestScore>=2) return best;
+
+  /* Browser language is safer than site-language when a short first reply
+     contains mostly proper nouns (e.g. "Eixample, metro"). */
+  const browser=String(navigator.language||'').slice(0,2).toLowerCase();
+  if(['es','en','pt','fr','de','it','ja','ko','zh','ru','ar'].includes(browser)) return browser;
+
+  return getLang()==='es' ? 'es' : 'en';
+}
+
+function agentConversationCopy(){
+  const lang=agentConversationLang || (getLang()==='es' ? 'es' : 'en');
+  const map={
+    es:{
+      hotel:(city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y tu <strong>transporte</strong> (vehículo alquilado, transporte público, taxi/Uber, mixto o “recomiéndame”).`,
+      itinerary:'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
+    },
+    en:{
+      hotel:(city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental car, public transit, taxi/Uber, mixed, or “recommend”).`,
+      itinerary:'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
+    },
+    pt:{
+      hotel:(city)=>`Para <strong>${city}</strong>, diga-me o seu <strong>hotel/área</strong> e o seu <strong>transporte</strong> (carro alugado, transporte público, táxi/Uber, misto ou “recomende”).`,
+      itinerary:'Antes de gerar: em que <strong>idioma</strong> você quer o seu itinerário? (Ex.: Português, Español, English, Français, Deutsch…)'
+    },
+    fr:{
+      hotel:(city)=>`Pour <strong>${city}</strong>, indiquez-moi votre <strong>hôtel/quartier</strong> et votre <strong>transport</strong> (voiture de location, transports publics, taxi/Uber, mixte ou « recommandez-moi »).`,
+      itinerary:'Avant de générer : dans quelle <strong>langue</strong> souhaitez-vous votre itinéraire ? (Ex. : Français, English, Español, Português, Deutsch…)'
+    },
+    de:{
+      hotel:(city)=>`Für <strong>${city}</strong>: Nenne mir bitte dein <strong>Hotel/Gebiet</strong> und dein <strong>Verkehrsmittel</strong> (Mietwagen, öffentliche Verkehrsmittel, Taxi/Uber, gemischt oder „empfehlen“).`,
+      itinerary:'Bevor ich den Reiseplan erstelle: In welcher <strong>Sprache</strong> möchtest du deinen Reiseplan? (z. B. Deutsch, English, Español, Português, Français…)'
+    },
+    it:{
+      hotel:(city)=>`Per <strong>${city}</strong>, indicami il tuo <strong>hotel/zona</strong> e il tuo <strong>trasporto</strong> (auto a noleggio, trasporto pubblico, taxi/Uber, misto o “consigliami”).`,
+      itinerary:'Prima di generare: in quale <strong>lingua</strong> vuoi il tuo itinerario? (Es.: Italiano, English, Español, Português, Français…)'
+    },
+    ja:{
+      hotel:(city)=>`<strong>${city}</strong>での<strong>ホテル／滞在エリア</strong>と<strong>移動手段</strong>（レンタカー、公共交通機関、タクシー/Uber、組み合わせ、または「おすすめ」）を教えてください。`,
+      itinerary:'生成する前に、旅程をどの<strong>言語</strong>で作成しますか？（例：日本語、English、Español、Português、Français…）'
+    },
+    ko:{
+      hotel:(city)=>`<strong>${city}</strong>에서의 <strong>호텔/숙박 지역</strong>과 <strong>교통수단</strong>(렌터카, 대중교통, 택시/Uber, 혼합 또는 “추천”)을 알려주세요.`,
+      itinerary:'생성하기 전에 여행 일정을 어떤 <strong>언어</strong>로 만들까요? (예: 한국어, English, Español, Português, Français…)'
+    },
+    zh:{
+      hotel:(city)=>`请告诉我您在<strong>${city}</strong>的<strong>酒店/住宿区域</strong>以及<strong>交通方式</strong>（租车、公共交通、出租车/Uber、混合或“推荐”）。`,
+      itinerary:'生成之前：您希望行程使用哪种<strong>语言</strong>？（例如：中文、English、Español、Português、Français…）'
+    },
+    ru:{
+      hotel:(city)=>`Для <strong>${city}</strong> укажите ваш <strong>отель/район</strong> и <strong>транспорт</strong> (арендованный автомобиль, общественный транспорт, такси/Uber, смешанный вариант или «порекомендуй»).`,
+      itinerary:'Перед созданием: на каком <strong>языке</strong> вы хотите получить маршрут? (например: Русский, English, Español, Português, Français…)'
+    },
+    ar:{
+      hotel:(city)=>`بالنسبة إلى <strong>${city}</strong>، أخبرني عن <strong>الفندق/المنطقة</strong> و<strong>وسيلة التنقل</strong> (سيارة مستأجرة، نقل عام، تاكسي/Uber، مزيج، أو «اقترح»).`,
+      itinerary:'قبل الإنشاء: بأي <strong>لغة</strong> تريد برنامج الرحلة؟ (مثال: العربية، English، Español، Português، Français…)'
+    }
+  };
+  return map[lang] || map.en;
+}
+
+function _generationISOToDMY_(value){
+  const match=String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : String(value || '');
+}
+
+function _generationCityComplete_(city){
+  const destination=savedDestinations.find(x=>x.city===city);
+  const totalDays=Math.max(0,Number(destination?.days || 0));
+  const byDay=itineraries?.[city]?.byDay || {};
+  if(!totalDays) return false;
+  for(let day=1;day<=totalDays;day++){
+    if(!Array.isArray(byDay[day]) || byDay[day].length===0) return false;
+  }
+  return true;
+}
+
+function _generationCheckpointSnapshot_(extra={}){
+  const completed=[...new Set(
+    (generationRecoveryState?.completed_cities || [])
+      .filter(city=>_generationCityComplete_(city))
+  )];
+  return {
+    schema_version:1,
+    completed_cities:completed,
+    pending_cities:savedDestinations.map(x=>x.city).filter(city=>!completed.includes(city)),
+    city_attempts:{...(generationRecoveryState?.city_attempts || {})},
+    itineraries,
+    city_meta:cityMeta,
+    planner_state:{
+      specialConditions:plannerState?.specialConditions || '',
+      travelers:plannerState?.travelers || {},
+      travelerProfiles:plannerState?.travelerProfiles || null,
+      itineraryLang:plannerState?.itineraryLang || ''
+    },
+    last_error:generationRecoveryState?.last_error || null,
+    ...extra
+  };
+}
+
+async function _persistGenerationCheckpoint_(status='generating',extra={}){
+  const token=getStoredSessionToken();
+  if(!token || !currentTripId) throw new Error('GENERATION_SESSION_REQUIRED');
+  const checkpoint=_generationCheckpointSnapshot_(extra);
+  generationRecoveryState=checkpoint;
+
+  let lastError=null;
+  for(let attempt=0;attempt<3;attempt++){
+    if(!navigator.onLine) await _waitForGenerationConnection_();
+    try{
+      return await tripApi({
+        action:'generation_checkpoint',
+        session_token:token,
+        trip_id:currentTripId,
+        status,
+        checkpoint
+      });
+    }catch(err){
+      lastError=err;
+      if(attempt<2) await new Promise(resolve=>setTimeout(resolve,1500*(attempt+1)));
+    }
+  }
+  throw lastError || new Error('GENERATION_CHECKPOINT_FAILED');
+}
+
+async function _waitForGenerationConnection_(){
+  if(navigator.onLine) return;
+  showWOW(true,getLang()==='es'
+    ? 'Conexión interrumpida. ASTRA continuará automáticamente cuando vuelva internet…'
+    : 'Connection interrupted. ASTRA will continue automatically when internet returns…');
+  await new Promise(resolve=>window.addEventListener('online',resolve,{once:true}));
+}
+
+function _hydrateGenerationTrip_(trip){
+  if(!trip?.id) return false;
+  currentTripId=trip.id;
+  storeActiveTripId(currentTripId);
+
+  const rawDestinations=Array.isArray(trip.destinations) ? trip.destinations : [];
+  savedDestinations=rawDestinations.map(destination=>({
+    city:String(destination?.city || '').trim(),
+    country:String(destination?.country || '').trim(),
+    days:Math.max(1,Number(destination?.days || 1)),
+    baseDate:_generationISOToDMY_(destination?.base_date || destination?.baseDate || ''),
+    perDay:Array.isArray(destination?.per_day)
+      ? destination.per_day
+      : (Array.isArray(destination?.perDay) ? destination.perDay : [])
+  })).filter(destination=>destination.city);
+  if(!savedDestinations.length) return false;
+
+  const checkpoint=(trip.itinerary_data && typeof trip.itinerary_data==='object')
+    ? trip.itinerary_data
+    : {};
+  generationRecoveryState={
+    ...checkpoint,
+    completed_cities:Array.isArray(checkpoint.completed_cities) ? checkpoint.completed_cities : [],
+    city_attempts:(checkpoint.city_attempts && typeof checkpoint.city_attempts==='object')
+      ? checkpoint.city_attempts
+      : {},
+    generation_count:Number(trip.generation_count || 0)
+  };
+
+  itineraries=(checkpoint.itineraries && typeof checkpoint.itineraries==='object')
+    ? checkpoint.itineraries
+    : {};
+  cityMeta=(checkpoint.city_meta && typeof checkpoint.city_meta==='object')
+    ? checkpoint.city_meta
+    : {};
+
+  const persistedPlanner=(trip.planner_input && typeof trip.planner_input==='object')
+    ? trip.planner_input
+    : {};
+  const checkpointPlanner=(checkpoint.planner_state && typeof checkpoint.planner_state==='object')
+    ? checkpoint.planner_state
+    : {};
+  plannerState={...plannerState,...persistedPlanner,...checkpointPlanner,destinations:[...savedDestinations]};
+
+  savedDestinations.forEach(destination=>{
+    if(!itineraries[destination.city]){
+      itineraries[destination.city]={byDay:{},currentDay:1,baseDate:destination.baseDate||null,masterPlan:[],audit:null};
+    }
+    if(!cityMeta[destination.city]){
+      cityMeta[destination.city]={baseDate:destination.baseDate||null,start:null,end:null,hotel:'',transport:'',perDay:destination.perDay||[]};
+    }
+  });
+
+  if($cityList){
+    $cityList.innerHTML='';
+    savedDestinations.forEach(destination=>{
+      addCityRow(destination);
+      const row=qsa('.city-row',$cityList).at(-1);
+      const windows=destination.perDay || [];
+      qsa('.hours-day',row).forEach((dayRow,index)=>{
+        const windowData=windows[index] || {};
+        const start=qs('.start',dayRow);
+        const end=qs('.end',dayRow);
+        if(start) start.value=windowData.start || '';
+        if(end) end.value=windowData.end || '';
+      });
+    });
+    updateAddCityButtonState();
+  }
+
+  hasSavedOnce=true;
+  planningStarted=true;
+  collectingHotels=false;
+  paymentGateSatisfiedTripId=currentTripId;
+  setSavedSetupLocked(true);
+  hidePreferencesStage({reset:false});
+  if($preferencesField){
+    $preferencesField.value=plannerState.specialConditions || trip.special_conditions || '';
+    $preferencesField.readOnly=true;
+  }
+  if($start){
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+    $start.dataset.itbmoConsumed='1';
+  }
+  $resetBtn?.removeAttribute('disabled');
+  if($chatBox) $chatBox.style.display='flex';
+  renderCityTabs();
+  setExportToolbarVisibility(trip.status==='generated');
+  return true;
+}
+
+function _showGenerationRetry_(reason=''){
+  showWOW(false);
+  setPlanningChatLocked(true);
+  qs('#itbmo-generation-retry')?.remove();
+
+  const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
+  const message=exhausted
+    ? (getLang()==='es'
+      ? 'ASTRA no pudo completar el itinerario después de los intentos de recuperación. Tu pago permanece registrado; contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.'
+      : 'ASTRA could not complete the itinerary after the recovery attempts. Your payment remains recorded; contact Support for assistance, replacement or refund as applicable.')
+    : (getLang()==='es'
+      ? 'ASTRA no pudo completar todas las ciudades por un fallo técnico. Tu pago continúa activo y puedes reintentar sin volver a pagar.'
+      : 'ASTRA could not complete every city because of a technical failure. Your payment remains active and you can retry without paying again.');
+  const row=chatMsg(message,'ai');
+  if(!row || exhausted) return;
+
+  const button=document.createElement('button');
+  button.id='itbmo-generation-retry';
+  button.type='button';
+  button.className='btn primary';
+  button.textContent=getLang()==='es' ? 'Reintentar generación' : 'Retry generation';
+  button.addEventListener('click',()=>{
+    button.disabled=true;
+    button.remove();
+    runPaidGeneration({manualRetry:true});
+  });
+  row.appendChild(document.createElement('br'));
+  row.appendChild(button);
+  if(reason) console.warn('[GENERATION RECOVERY]',reason);
+}
+
+async function runPaidGeneration({manualRetry=false}={}){
+  if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
+  paidGenerationRunning=true;
+  setPlanningChatLocked(true);
+  qs('#itbmo-generation-retry')?.remove();
+  _resetAstraGenerationMetrics_();
+
+  try{
+    const token=getStoredSessionToken();
+    const begin=await tripApi({
+      action:'generation_begin',
+      session_token:token,
+      trip_id:currentTripId
+    });
+
+    if(begin?.already_completed){
+      _hydrateGenerationTrip_(begin.trip);
+      showWOW(false);
+      setExportToolbarVisibility(true);
+      setPlanningChatLocked(true);
+      return;
+    }
+
+    const serverCheckpoint=begin?.trip?.itinerary_data || generationRecoveryState || {};
+    generationRecoveryState={
+      ...serverCheckpoint,
+      completed_cities:Array.isArray(serverCheckpoint.completed_cities) ? serverCheckpoint.completed_cities : [],
+      city_attempts:(serverCheckpoint.city_attempts && typeof serverCheckpoint.city_attempts==='object')
+        ? serverCheckpoint.city_attempts
+        : {},
+      generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
+    };
+
+    if(begin?.new_run && manualRetry){
+      savedDestinations.forEach(({city})=>{
+        if(!_generationCityComplete_(city)) generationRecoveryState.city_attempts[city]=0;
+      });
+    }
+
+    await _persistGenerationCheckpoint_('generating');
+
+    for(const {city} of savedDestinations){
+      if(_generationCityComplete_(city)){
+        if(!generationRecoveryState.completed_cities.includes(city)){
+          generationRecoveryState.completed_cities.push(city);
+          await _persistGenerationCheckpoint_('generating');
+        }
+        continue;
+      }
+
+      let attempts=Math.max(0,Number(generationRecoveryState.city_attempts[city] || 0));
+      let completed=false;
+
+      while(attempts<ITBMO_CITY_GENERATION_MAX_ATTEMPTS && !completed){
+        await _waitForGenerationConnection_();
+        const delay=ITBMO_CITY_RETRY_DELAYS_MS[Math.min(attempts,ITBMO_CITY_RETRY_DELAYS_MS.length-1)] || 0;
+        if(delay) await new Promise(resolve=>setTimeout(resolve,delay));
+
+        attempts+=1;
+        generationRecoveryState.city_attempts[city]=attempts;
+        generationRecoveryState.last_error=null;
+        await _persistGenerationCheckpoint_('generating',{active_city:city});
+
+        showWOW(true,t('overlayGenerating'));
+        const success=await generateCityItinerary(city,{silentFailure:true});
+        completed=Boolean(success && _generationCityComplete_(city));
+
+        if(completed){
+          if(!generationRecoveryState.completed_cities.includes(city)){
+            generationRecoveryState.completed_cities.push(city);
+          }
+          generationRecoveryState.last_error=null;
+          await _persistGenerationCheckpoint_('generating',{active_city:null});
+        }else{
+          generationRecoveryState.last_error={
+            city,
+            attempt:attempts,
+            code:'CITY_GENERATION_FAILED',
+            at:new Date().toISOString()
+          };
+          await _persistGenerationCheckpoint_('generating',{active_city:city});
+        }
+      }
+    }
+
+    const allComplete=savedDestinations.every(({city})=>_generationCityComplete_(city));
+    if(!allComplete){
+      await _persistGenerationCheckpoint_('failed',{active_city:null});
+      _showGenerationRetry_('One or more cities remained incomplete.');
+      return;
+    }
+
+    await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    _finishAstraGenerationMetrics_();
+    showWOW(false);
+    setExportToolbarVisibility();
+    chatMsg(getPlannerCompletionMessage(),'ai');
+    setPlanningChatLocked(true);
+    setTimeout(()=>showFinalDownloadModal(),260);
+  }catch(err){
+    console.error('[PAID GENERATION ORCHESTRATOR]',err);
+    if(err?.code==='GENERATION_RECOVERY_EXHAUSTED'){
+      generationRecoveryState={...(generationRecoveryState || {}),generation_count:2};
+    }
+    try{
+      if(err?.code!=='GENERATION_PAYMENT_REQUIRED'){
+        await _persistGenerationCheckpoint_('failed',{
+          active_city:null,
+          last_error:{code:err?.code || 'GENERATION_ORCHESTRATOR_FAILED',at:new Date().toISOString()}
+        });
+      }
+    }catch(_){ }
+    _showGenerationRetry_(err?.code || err?.message || 'Generation failed');
+  }finally{
+    paidGenerationRunning=false;
+    showWOW(false);
+  }
+}
+
+async function restorePaidGenerationIfNeeded(){
+  if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
+  try{
+    const token=getStoredSessionToken();
+    let tripId=getStoredActiveTripId();
+    let trip=null;
+
+    if(tripId){
+      try{
+        const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+        trip=data?.trip || null;
+      }catch(err){
+        if(err?.status===404) storeActiveTripId(null);
+        else throw err;
+      }
+    }
+
+    if(!trip){
+      const data=await tripApi({action:'recoverable',session_token:token});
+      trip=data?.trip || null;
+    }
+    if(generationResetInProgress) return;
+    if(!trip || !['generating','failed','generated'].includes(trip.status)) return;
+    if(!_hydrateGenerationTrip_(trip)) return;
+
+    try{
+      const paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      applyInfoChatStatus(paymentStatus);
+    }catch(_){ }
+
+    if(trip.status==='generating'){
+      chatMsg(getLang()==='es'
+        ? 'ASTRA detectó una generación interrumpida y continuará desde la última ciudad guardada.'
+        : 'ASTRA detected an interrupted generation and will continue from the last saved city.','ai');
+      setTimeout(()=>runPaidGeneration(),180);
+    }else if(trip.status==='failed'){
+      _showGenerationRetry_();
+    }else{
+      setExportToolbarVisibility(true);
+      setPlanningChatLocked(true);
+    }
+  }catch(err){
+    console.warn('[GENERATION RESTORE]',err);
+  }
+}
+
 async function startPlanning(){
   if(savedDestinations.length===0) return;
   setExportToolbarVisibility(false);
@@ -4304,6 +5806,7 @@ async function startPlanning(){
   collectingHotels = true;
   session = [];
   metaProgressIndex = 0;
+  agentConversationLang = null;
 
   chatMsg(`${tone.hi}`);
   chatMsg(getPlanningInfoChatPreparationMessage(),'ai');
@@ -4317,18 +5820,14 @@ function askNextHotelTransport(){
       plannerState.collectingItineraryLang = true;
     }
 
-    chatMsg(
-      (getLang()==='es')
-        ? 'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
-        : 'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
-    , 'ai');
+    chatMsg(agentConversationCopy().itinerary, 'ai');
 
     return;
   }
 
   const city = savedDestinations[metaProgressIndex].city;
   setActiveCity(city); renderCityItinerary(city);
-  chatMsg(tone.askHotelTransport(city),'ai');
+  chatMsg(agentConversationCopy().hotel(city),'ai');
 }
 
 const WORD_NUM = {
@@ -4592,8 +6091,11 @@ ${forceReplanBlock}
 
 Instrucción:
 - Optimiza el día con criterio experto (flujo lógico, zonas, ritmo).
-- Si el día fue largo, AÚN puedes proponer actividades nocturnas si son icónicas y realistas.
-- Day trips: decide libremente si aportan valor; si los propones, hazlos completos y realistas.
+- Si el usuario no indicó hora final, usa aproximadamente las 19:00 como objetivo mínimo, no como límite. No cierres rutinariamente el día antes de esa hora y extiéndelo más tarde cuando haya shows, espectáculos, miradores nocturnos, barrios con ambiente, cenas especiales u otras experiencias de alto valor que realmente mejoren el itinerario.
+- En el Día 1, el ingreso/check-in o depósito de equipaje en el alojamiento ocurre antes de cualquier visita.
+- Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
+- Cuando las auroras sean plausibles por ubicación, época y oscuridad, agrega una nota adicional sobre auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica incluso si el usuario pidió auroras explícitamente en Preferencias. No crees una fila independiente salvo una reserva real confirmada con hora fija y explícitamente solicitada.
+- Day trips: decide libremente si aportan valor; si los propones, hazlos completos, realistas, con comida en ruta cuando corresponda y regreso coherente con la hora final.
 - No limites trayectos por regla fija; usa sentido común y experiencia turística real.
 - Valida plausibilidad global y seguridad.
 - Notes siempre útiles (nunca vacías ni "seed").
@@ -4612,23 +6114,60 @@ ${buildIntake()}
   }
 }
 
+function detectTransportFromUserText(text){
+  const s=String(text||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+  if(/\b(recomiendame|recomienda|recommend|recommande|recommandez|empfehle|empfehlung|consiglia|consigliami|recomende|おすすめ|추천|推荐|порекомендуй|рекомендуй|اقترح)\b/i.test(s)){
+    return 'recomiéndame';
+  }
+
+  if(/\b(alquilad|rent(?:al|ed)?|vehiculo|coche|auto|carro|voiture\s+de\s+location|location\s+de\s+voiture|mietwagen|noleggio|auto\s+a\s+noleggio|carro\s+alugado|aluguel\s+de\s+carro|レンタカー|렌터카|租车|арендованн|аренда\s+авто|سيارة\s+مستأجرة)\b/i.test(s)){
+    return 'vehículo alquilado';
+  }
+
+  if(/\b(metro|tren|train|bus|autobus|publico|public\s+transit|public\s+transport|transports?\s+publics?|transport\s+public|offentliche|verkehrsmittel|trasporto\s+pubblico|transporte\s+publico|公共交通|대중교통|公共交通機関|общественн|نقل\s+عام)\b/i.test(s)){
+    return 'transporte público';
+  }
+
+  if(/\b(uber|taxi|cabify|lyft|такси|出租车|택시|タクシー|تاكسي)\b/i.test(s)){
+    return 'otros (Uber/Taxi)';
+  }
+
+  return '';
+}
+
+function stripRecognizedTransportTail(text){
+  const raw=String(text||'').trim();
+  if(!raw) return '';
+
+  /*
+    Keep this conservative: it only strips an obvious transport phrase at the
+    end. If unsure, the full user text is retained as lodging context so no
+    information is discarded.
+  */
+  return raw
+    .replace(
+      /(?:,|;|\||\band\b|\by\b|\bet\b|\bund\b|\be\b|\be\b|\bou\b|\boder\b|\bo\b|\bor\b)?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|je\s+vais\s+utiliser|j['’]utiliserai|ich\s+nutze|ich\s+werde|user[oò]|vou\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|tren|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|voiture\s+de\s+location|transports?\s+publics?|mietwagen|[oö]ffentliche\s+verkehrsmittel|auto\s+a\s+noleggio|trasporto\s+pubblico|carro\s+alugado|transporte\s+p[uú]blico|レンタカー|公共交通機関|タクシー|렌터카|대중교통|택시|租车|公共交通|出租车|арендованн\w*\s+автомобил\w*|общественн\w*\s+транспорт\w*|такси|سيارة\s+مستأجرة|نقل\s+عام|تاكسي|recomi[eé]ndame|recommend|recommande|empfehle|consigliami|recomende|おすすめ|추천|推荐|порекомендуй|اقترح)\s*$/i,
+      ''
+    )
+    .trim() || raw;
+}
+
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
   chatMsg(text,'user');
   $chatI.value='';
 
+  if(!agentConversationLang){
+    agentConversationLang=detectAgentConversationLanguage(text);
+  }
+
   // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
-    const transport = (/recom/i.test(text)) ? 'recomiéndame'
-      : (/alquilad|rent|veh[ií]culo|coche|auto|carro/i.test(text)) ? 'vehículo alquilado'
-      : (/metro|tren|bus|autob[uú]s|p[uú]blico/i.test(text)) ? 'transporte público'
-      : (/uber|taxi|cabify|lyft/i.test(text)) ? 'otros (Uber/Taxi)'
-      : '';
-    const lodgingText = String(text||'')
-      .replace(/(?:,|;|\|| and | y )?\s*(?:i(?:'|’)ll\s+use|i\s+will\s+use|usar[eé]|voy\s+a\s+usar|transport(?:e)?\s*[:=-]?)?\s*(?:rental\s*car|public\s*transit|public\s*transport|metro|train|bus|taxi|uber|cabify|lyft|veh[ií]culo\s*alquilado|auto\s*alquilado|coche\s*alquilado|transporte\s*p[uú]blico|recomi[eé]ndame|recommend(?:\s+me)?)\s*$/i,'')
-      .trim() || text;
+    const transport = detectTransportFromUserText(text);
+    const lodgingText = stripRecognizedTransportTail(text);
     upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
     askNextHotelTransport();
@@ -4639,17 +6178,7 @@ async function onSend(){
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
 
-    (async ()=>{
-      showWOW(true, t('overlayGenerating'));
-      for(const {city} of savedDestinations){
-        await generateCityItinerary(city);
-      }
-      showWOW(false);
-      setExportToolbarVisibility();
-      chatMsg(getPlannerCompletionMessage(), 'ai');
-      setPlanningChatLocked(true);
-      setTimeout(()=>showFinalDownloadModal(),260);
-    })();
+    runPaidGeneration();
 
     return;
   }
@@ -4800,6 +6329,16 @@ async function onSend(){
 
   // 7) Agregar ciudad
   if(intent.type==='add_city' && intent.city){
+    if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
+      chatMsg(
+        getLang()==='es'
+          ? 'Puedes incluir un máximo de <strong>3 ciudades</strong> por generación.'
+          : 'You can include a maximum of <strong>3 cities</strong> per generation.',
+        'ai'
+      );
+      updateAddCityButtonState();
+      return;
+    }
     const name = intent.city.trim().replace(/\s+/g,' ').replace(/^./,c=>c.toUpperCase());
     const days = intent.days || 2;
     addCityRow({city:name, days:'', baseDate:intent.baseDate||''});
@@ -4889,7 +6428,7 @@ Instrucción del usuario: ${text}
 
 - Integra lo pedido sin borrar lo existente.
 - Si no se indica día concreto, reoptimiza TODA la ciudad.
-- Para auroras: propone al menos una noche plausible si aplica.
+- Para auroras: si aplican por ubicación, época y oscuridad, agrega una nota adicional de oportunidad de auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica aunque el usuario las pida explícitamente en Preferencias. No crees una fila independiente por esa preferencia; solo una reserva real confirmada con hora fija, indicada separadamente por el usuario, puede representarse como fila.
 - Devuelve formato B {"destination":"${city}","rows":[...],"replace": false}.
 `.trim();
 
@@ -4929,29 +6468,9 @@ Instrucción del usuario: ${text}
   }
 }
 
-function addRowReorderControls(row){
-  const ctrlWrap = document.createElement('div');
-  ctrlWrap.style.display='flex';
-  ctrlWrap.style.gap='.35rem';
-  ctrlWrap.style.alignItems='center';
-  const up = document.createElement('button'); up.textContent='↑'; up.className='btn ghost';
-  const down = document.createElement('button'); down.textContent='↓'; down.className='btn ghost';
-  ctrlWrap.appendChild(up); ctrlWrap.appendChild(down);
-  row.appendChild(ctrlWrap);
-
-  up.addEventListener('click', ()=>{
-    if(row.previousElementSibling) $cityList.insertBefore(row, row.previousElementSibling);
-  });
-  down.addEventListener('click', ()=>{
-    if(row.nextElementSibling) $cityList.insertBefore(row.nextElementSibling, row);
-  });
-}
-const origAddCityRow = addCityRow;
-addCityRow = function(pref){
-  origAddCityRow(pref);
-  const row = $cityList.lastElementChild;
-  if(row) addRowReorderControls(row);
-};
+/* City order controls intentionally removed for the MVP.
+   Destination order is defined by the order in which the user enters the cities.
+   This keeps the Planner cleaner and avoids accidental reordering. */
 
 // País: solo letras y espacios (protección suave en input)
 document.addEventListener('input', (e)=>{
@@ -4966,7 +6485,13 @@ document.addEventListener('input', (e)=>{
   }
 });
 
-$addCity?.addEventListener('click', ()=>addCityRow());
+$addCity?.addEventListener('click', ()=>{
+  if(qsa('.city-row',$cityList).length>=MAX_ITINERARY_CITIES){
+    updateAddCityButtonState();
+    return;
+  }
+  addCityRow();
+});
 
 function validateBaseDatesDMY(){
   // Valida inputs .baseDate (DD/MM/AAAA) y muestra tooltip si falta alguno
@@ -5185,7 +6710,43 @@ function safeFilePart(s){
     .slice(0, 80);
 }
 
-function downloadBlob(blob, filename){
+function isMobileFileExperience(){
+  return window.matchMedia?.('(max-width: 820px)').matches ||
+    /Android|iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+
+async function deliverGeneratedFile(blob, filename){
+  if(isMobileFileExperience()){
+    let webShareAllowed=true;
+    try{
+      const policy=document.permissionsPolicy || document.featurePolicy;
+      if(policy?.allowsFeature) webShareAllowed=policy.allowsFeature('web-share');
+    }catch(_){ }
+
+    try{
+      const file=new File([blob],filename,{type:blob.type || 'application/octet-stream'});
+      if(webShareAllowed && navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){
+        await navigator.share({files:[file],title:filename});
+        return;
+      }
+    }catch(err){
+      /* A user-cancelled share sheet must not trigger a second action. */
+      if(err?.name==='AbortError') return;
+      console.warn('[ITBMO MOBILE SHARE FALLBACK]',err);
+    }
+
+    const mobileUrl=URL.createObjectURL(blob);
+    const mobileLink=document.createElement('a');
+    mobileLink.href=mobileUrl;
+    mobileLink.target='_blank';
+    mobileLink.rel='noopener noreferrer';
+    document.body.appendChild(mobileLink);
+    mobileLink.click();
+    mobileLink.remove();
+    setTimeout(()=>URL.revokeObjectURL(mobileUrl),120000);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -5349,10 +6910,10 @@ function exportItineraryToCSV(){
   const dd = String(d.getDate()).padStart(2,'0');
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`;
 
-  downloadBlob(blob, filename);
+  return deliverGeneratedFile(blob, filename);
 }
 
-function exportItineraryToPDF(){
+async function exportItineraryToPDF(){
   // jsPDF verificación
   if(!window.jspdf || !window.jspdf.jsPDF){
     alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');
@@ -5482,7 +7043,8 @@ function exportItineraryToPDF(){
   });
 
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
-  doc.save(filename);
+  const blob=doc.output('blob');
+  await deliverGeneratedFile(blob,filename);
 }
 
 function sendItineraryByEmail(){
@@ -5525,7 +7087,7 @@ async function getPaymentReceiptData(){
   }catch(err){ console.warn('[RECEIPT STATUS]',err); return null; }
 }
 
-async function exportPaymentReceiptToPDF(){
+async function exportPaymentReceiptToPDF(preloadedPayment=null){
   const lang = _plannerOutputLang_();
 
   const copy = {
@@ -5538,10 +7100,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pago', trip:'Viaje',
       date:'Fecha', provider:'Proveedor', amount:'Importe',
       destinations:'Destino(s)', service:'Servicio',
-      serviceValue:'1 generación de itinerario ITBMO · hasta 5 ciudades',
+      serviceValue:'1 generación de itinerario ITBMO · hasta 3 ciudades',
       transaction:'REFERENCIA DE TRANSACCIÓN',
       about:'Sobre este comprobante',
-      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 5 ciudades. Se entrega para control y referencia del usuario.',
+      realNote:'Este comprobante confirma el pago registrado por ITBMO para una generación de itinerario de hasta 3 ciudades. Se entrega para control y referencia del usuario.',
       testNote:'Este documento fue generado mediante el bypass administrativo de pruebas. No se procesó ningún pago y este documento no representa una transacción real.',
       important:'IMPORTANTE',
       legal:'Este documento es un comprobante de pago y no constituye factura ni comprobante fiscal. Para soporte: support@itravelbymyown.com',
@@ -5556,10 +7118,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Payment', trip:'Trip',
       date:'Date', provider:'Provider', amount:'Amount',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 ITBMO itinerary generation · up to 5 cities',
+      serviceValue:'1 ITBMO itinerary generation · up to 3 cities',
       transaction:'TRANSACTION REFERENCE',
       about:'About this receipt',
-      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 5 cities. It is provided for the user’s records and reference.',
+      realNote:'This receipt confirms the payment recorded by ITBMO for one itinerary generation of up to 3 cities. It is provided for the user’s records and reference.',
       testNote:'This document was generated through the administrative test bypass. No payment was processed and this document does not represent a real transaction.',
       important:'IMPORTANT',
       legal:'This document is a payment receipt and is not a tax invoice or fiscal document. For support: support@itravelbymyown.com',
@@ -5574,10 +7136,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viagem',
       date:'Data', provider:'Provedor', amount:'Valor',
       destinations:'Destino(s)', service:'Serviço',
-      serviceValue:'1 geração de itinerário ITBMO · até 5 cidades',
+      serviceValue:'1 geração de itinerário ITBMO · até 3 cidades',
       transaction:'REFERÊNCIA DA TRANSAÇÃO',
       about:'Sobre este comprovante',
-      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 5 cidades. É fornecido para controle e referência do usuário.',
+      realNote:'Este comprovante confirma o pagamento registrado pela ITBMO para uma geração de itinerário de até 3 cidades. É fornecido para controle e referência do usuário.',
       testNote:'Este documento foi gerado pelo bypass administrativo de testes. Nenhum pagamento foi processado e este documento não representa uma transação real.',
       important:'IMPORTANTE',
       legal:'Este documento é um comprovante de pagamento e não constitui nota fiscal ou documento fiscal. Suporte: support@itravelbymyown.com',
@@ -5592,10 +7154,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Paiement', trip:'Voyage',
       date:'Date', provider:'Prestataire', amount:'Montant',
       destinations:'Destination(s)', service:'Service',
-      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 5 villes',
+      serviceValue:'1 génération d’itinéraire ITBMO · jusqu’à 3 villes',
       transaction:'RÉFÉRENCE DE TRANSACTION',
       about:'À propos de ce reçu',
-      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 5 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
+      realNote:'Ce reçu confirme le paiement enregistré par ITBMO pour une génération d’itinéraire allant jusqu’à 3 villes. Il est fourni pour les dossiers et la référence de l’utilisateur.',
       testNote:'Ce document a été généré via le mode de test administratif. Aucun paiement n’a été traité et ce document ne représente pas une transaction réelle.',
       important:'IMPORTANT',
       legal:'Ce document est un reçu de paiement et ne constitue pas une facture fiscale ni un document fiscal. Support : support@itravelbymyown.com',
@@ -5610,10 +7172,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Zahlung', trip:'Reise',
       date:'Datum', provider:'Anbieter', amount:'Betrag',
       destinations:'Reiseziel(e)', service:'Leistung',
-      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 5 Städte',
+      serviceValue:'1 ITBMO-Reiseplangenerierung · bis zu 3 Städte',
       transaction:'TRANSAKTIONSREFERENZ',
       about:'Über diesen Beleg',
-      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 5 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
+      realNote:'Dieser Beleg bestätigt die von ITBMO registrierte Zahlung für eine Reiseplangenerierung mit bis zu 3 Städten. Er dient den Unterlagen und der Referenz des Nutzers.',
       testNote:'Dieses Dokument wurde über den administrativen Test-Bypass erstellt. Es wurde keine Zahlung verarbeitet und dieses Dokument stellt keine echte Transaktion dar.',
       important:'WICHTIG',
       legal:'Dieses Dokument ist ein Zahlungsbeleg und keine Steuerrechnung oder steuerliche Bescheinigung. Support: support@itravelbymyown.com',
@@ -5628,10 +7190,10 @@ async function exportPaymentReceiptToPDF(){
       payment:'Pagamento', trip:'Viaggio',
       date:'Data', provider:'Provider', amount:'Importo',
       destinations:'Destinazione/i', service:'Servizio',
-      serviceValue:'1 generazione itinerario ITBMO · fino a 5 città',
+      serviceValue:'1 generazione itinerario ITBMO · fino a 3 città',
       transaction:'RIFERIMENTO TRANSAZIONE',
       about:'Informazioni sulla ricevuta',
-      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 5 città. È fornita per controllo e riferimento dell’utente.',
+      realNote:'Questa ricevuta conferma il pagamento registrato da ITBMO per una generazione di itinerario fino a 3 città. È fornita per controllo e riferimento dell’utente.',
       testNote:'Questo documento è stato generato tramite il bypass amministrativo di test. Nessun pagamento è stato elaborato e questo documento non rappresenta una transazione reale.',
       important:'IMPORTANTE',
       legal:'Questo documento è una ricevuta di pagamento e non costituisce fattura fiscale o documento fiscale. Supporto: support@itravelbymyown.com',
@@ -5646,7 +7208,7 @@ async function exportPaymentReceiptToPDF(){
     return false;
   }
 
-  const payment = await getPaymentReceiptData();
+  const payment = preloadedPayment || await getPaymentReceiptData();
   if(!payment){
     alert(c.noPayment);
     return false;
@@ -5826,30 +7388,70 @@ async function exportPaymentReceiptToPDF(){
     ? `ITBMO-ADMIN-TEST-Receipt-${dateForId}.pdf`
     : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
 
-  doc.save(filename);
+  const blob=doc.output('blob');
+  await deliverGeneratedFile(blob,filename);
   return true;
 }
 
 function showFinalDownloadModal(){
   if(document.querySelector('.itbmo-download-overlay')) return;
   const es=getLang()==='es';
+  const mobileFiles=isMobileFileExperience();
   const overlay=document.createElement('div'); overlay.className='itbmo-download-overlay';
   overlay.innerHTML=`<div class="itbmo-download-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-download-title">
     <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ASTRA TERMINÓ':'ASTRA IS DONE'}</div>
     <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
-    <p>${es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.'}</p>
+    <p>${mobileFiles
+      ? (es?'Abre y comparte ahora tus documentos. Podrás enviarlos por correo, WhatsApp u otra aplicación, o guardarlos en tu dispositivo.':'Open and share your documents now. You can send them by email, WhatsApp or another app, or save them on your device.')
+      : (es?'Descarga ahora tus documentos. ITBMO no conserva permanentemente estos archivos, así que guárdalos en tu dispositivo.':'Download your documents now. ITBMO does not permanently store these files, so save them on your device.')}</p>
     <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
-    <button class="btn primary itbmo-download-all" type="button">${es?'Descargar mis documentos':'Download my documents'}</button>
+    ${mobileFiles ? `<div class="itbmo-mobile-file-actions" style="display:grid;gap:.65rem;width:100%;margin:.9rem 0">
+      <button class="btn primary itbmo-mobile-open-pdf" type="button">${es?'Abrir / compartir itinerario PDF':'Open / share itinerary PDF'}</button>
+      <button class="btn primary itbmo-mobile-open-csv" type="button">${es?'Abrir / compartir CSV':'Open / share CSV'}</button>
+      <button class="btn primary itbmo-mobile-open-receipt" type="button" disabled>${es?'Preparando comprobante…':'Preparing receipt…'}</button>
+    </div>` : `<button class="btn primary itbmo-download-all" type="button">${es?'Descargar mis documentos':'Download my documents'}</button>`}
     <div class="itbmo-download-status" aria-live="polite"></div>
     <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
     <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
-    <small>${es?'Si alguna descarga no aparece, usa los botones individuales que quedan disponibles debajo del itinerario.':'If any download does not appear, use the individual buttons available below the itinerary.'}</small>
+    <small>${mobileFiles
+      ? (es?'Cada botón abrirá el archivo o mostrará las opciones disponibles para compartirlo y guardarlo.':'Each button will open the file or show the available options to share and save it.')
+      : (es?'Si alguna descarga no aparece, usa los botones individuales que quedan disponibles debajo del itinerario.':'If any download does not appear, use the individual buttons available below the itinerary.')}</small>
   </div>`;
   document.body.appendChild(overlay); requestParentViewportFocus('download-ready',true); requestAnimationFrame(()=>overlay.classList.add('active'));
   const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
-  overlay.querySelector('.itbmo-download-all').addEventListener('click',async()=>{
+  if(mobileFiles){
+    const pdfButton=overlay.querySelector('.itbmo-mobile-open-pdf');
+    const csvButton=overlay.querySelector('.itbmo-mobile-open-csv');
+    const receiptButton=overlay.querySelector('.itbmo-mobile-open-receipt');
+    let preparedReceipt=null;
+
+    getPaymentReceiptData().then(payment=>{
+      preparedReceipt=payment;
+      if(receiptButton){
+        receiptButton.disabled=!payment;
+        receiptButton.textContent=payment
+          ? (es?'Abrir / compartir comprobante PDF':'Open / share receipt PDF')
+          : (es?'Comprobante no disponible':'Receipt unavailable');
+      }
+    });
+
+    pdfButton?.addEventListener('click',async()=>{
+      await exportItineraryToPDF();
+      status.textContent=es ? '✓ Itinerario PDF preparado.' : '✓ Itinerary PDF prepared.';
+    });
+    csvButton?.addEventListener('click',async()=>{
+      await exportItineraryToCSV();
+      status.textContent=es ? '✓ CSV preparado.' : '✓ CSV prepared.';
+    });
+    receiptButton?.addEventListener('click',async()=>{
+      if(!preparedReceipt) return;
+      await exportPaymentReceiptToPDF(preparedReceipt);
+      status.textContent=es ? '✓ Comprobante PDF preparado.' : '✓ Receipt PDF prepared.';
+    });
+  }else{
+    overlay.querySelector('.itbmo-download-all')?.addEventListener('click',async()=>{
     /*
       Mantener las tres descargas dentro de la interacción directa del usuario.
       Algunos navegadores bloquean descargas automáticas posteriores cuando se
@@ -5861,10 +7463,17 @@ function showFinalDownloadModal(){
     status.textContent=es
       ? '✓ Se iniciaron 3 descargas: itinerario PDF, CSV y comprobante PDF. Revisa tu carpeta de Descargas. Si falta alguna, usa los botones individuales.'
       : '✓ Three downloads were started: itinerary PDF, CSV and payment receipt PDF. Check your Downloads folder. If one is missing, use the individual buttons.';
-  });
+    });
+  }
 }
 
 function bindExportListeners(){
+  if(isMobileFileExperience()){
+    if($btnPDF) $btnPDF.textContent=getLang()==='es' ? 'Abrir / compartir PDF' : 'Open / share PDF';
+    if($btnCSV) $btnCSV.textContent=getLang()==='es' ? 'Abrir / compartir CSV' : 'Open / share CSV';
+    if($btnReceipt) $btnReceipt.textContent=getLang()==='es' ? 'Abrir / compartir comprobante' : 'Open / share receipt';
+  }
+
   $btnPDF?.addEventListener('click', (e)=>{
     e.preventDefault();
     exportItineraryToPDF();
@@ -5972,27 +7581,69 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const confirmReset = overlay.querySelector('#confirm-reset');
   const cancelReset  = overlay.querySelector('#cancel-reset');
 
-  confirmReset.addEventListener('click', ()=>{
+  confirmReset.addEventListener('click', async ()=>{
+    if(paidGenerationRunning) return;
+
+    generationResetInProgress = true;
+    confirmReset.disabled = true;
+
+    const tripIdToArchive = currentTripId || getStoredActiveTripId();
+    const sessionToken = getStoredSessionToken();
+    if(tripIdToArchive && sessionToken){
+      try{
+        await tripApi({
+          action:'archive',
+          session_token:sessionToken,
+          trip_id:tripIdToArchive
+        });
+      }catch(err){
+        console.warn('[RESET ARCHIVE]',err);
+        generationResetInProgress = false;
+        confirmReset.disabled = false;
+        let errorMessage = overlay.querySelector('.reset-error');
+        if(!errorMessage){
+          errorMessage = document.createElement('p');
+          errorMessage.className = 'reset-error';
+          modal.insertBefore(errorMessage, modal.querySelector('.reset-actions'));
+        }
+        errorMessage.textContent = getLang()==='es'
+          ? 'No pudimos cerrar este viaje. Verifica tu conexión e inténtalo nuevamente.'
+          : 'We could not close this trip. Check your connection and try again.';
+        return;
+      }
+    }
+
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
     addCityRow();
     $start.disabled = true;
     $tabs.innerHTML=''; $itWrap.innerHTML='';
+    closeImmersiveItinerary();
+    syncImmersiveItineraryLauncher();
     $chatBox.style.display='none'; $chatM.innerHTML='';
     session = []; hasSavedOnce=false; pendingChange=null;
     currentTripId = null;
+    storeActiveTripId(null);
+    generationRecoveryState = null;
+    paidGenerationRunning = false;
 
     planningStarted = false;
     metaProgressIndex = 0;
     collectingHotels = false;
     isItineraryLocked = false;
     activeCity = null;
+    agentConversationLang = null;
+    if($start){
+      delete $start.dataset.itbmoConsumed;
+      $start.disabled = true;
+      $start.setAttribute('aria-disabled','true');
+    }
     setExportToolbarVisibility(false);
 
     try { $overlayWOW && ($overlayWOW.style.display = 'none'); } catch(_) {}
     qsa('.date-tooltip').forEach(t0 => t0.remove());
 
     // 🔄 Restaurar formulario lateral a valores por defecto
-    const $sc = qs('#special-conditions'); if($sc) $sc.value = '';
+    const $sc = qs('#special-conditions'); if($sc){ $sc.value = ''; $sc.style.height=''; $sc.style.overflowY='hidden'; }
     const $ad = qs('#p-adults');   if($ad) $ad.value = '1';
     const $yo = qs('#p-young');    if($yo) $yo.value = '0';
     const $ch = qs('#p-children'); if($ch) $ch.value = '0';
@@ -6016,8 +7667,10 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     overlay.classList.remove('active');
     setTimeout(()=>overlay.remove(), 300);
 
-    // 🧹 Desbloquear sidebar tras reinicio
+    // Restore pre-save setup state and hide the post-payment preferences checkpoint.
     if ($sidebar) $sidebar.classList.remove('disabled');
+    setSavedSetupLocked(false);
+    hidePreferencesStage({reset:true});
 
     paymentGateSatisfiedTripId = null;
     setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
@@ -6028,6 +7681,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // UX: enfocar primer input de ciudad
     const firstCity = qs('.city-row .city');
     if (firstCity) firstCity.focus();
+    generationResetInProgress = false;
   });
 
   cancelReset.addEventListener('click', ()=>{
@@ -6317,6 +7971,12 @@ function applyCommerceI18n(){
     $checkoutPreviewContinue.style.display = ITBMO_COMMERCE_CONFIG.previewMode ? 'block' : 'none';
   }
 
+  /* PayPal-only launch: hide the inactive card/Tilopay bar completely. */
+  if($checkoutTilopay && !ITBMO_COMMERCE_CONFIG.tilopay.enabled){
+    $checkoutTilopay.style.display='none';
+    $checkoutTilopay.setAttribute('aria-hidden','true');
+  }
+
   [$checkoutTilopay,$checkoutPayPalFallback].forEach(el=>el?.classList.remove('is-disabled'));
   if($checkoutTilopay && !ITBMO_COMMERCE_CONFIG.tilopay.enabled && !ITBMO_COMMERCE_CONFIG.previewMode){
     $checkoutTilopay.classList.add('is-disabled');
@@ -6479,7 +8139,7 @@ async function completePaymentGate(){
 
   setTimeout(()=>{
     closeCheckoutModal();
-    startPlanning();
+    showPreferencesStage();
   },500);
 }
 
@@ -6487,13 +8147,13 @@ async function requestPlanningStart(){
   if(!validateBaseDatesDMY()) return;
 
   if(!ITBMO_COMMERCE_CONFIG.commerceEnabled){
-    startPlanning();
+    showPreferencesStage();
     return;
   }
 
   const alreadyPaid = await hasValidPaymentForCurrentTrip();
   if(alreadyPaid){
-    startPlanning();
+    showPreferencesStage();
     return;
   }
 
@@ -6667,6 +8327,7 @@ if(document.readyState==='loading'){
 
 
 $start?.addEventListener('click', requestPlanningStart);
+$preferencesContinue?.addEventListener('click', confirmPreferencesAndContinue);
 $send?.addEventListener('click', onSend);
 
 // Chat: Enter envía (sin Shift)
@@ -6705,6 +8366,7 @@ document.addEventListener('itbmo:addDays', e=>{
 /* ====== Info Chat: IDs #info-chat-* + control de display ====== */
 let infoChatWelcomeTripId = null;
 let infoChatDragState = null;
+let infoChatSuppressRestoreClick = false;
 
 function _infoAllowedCities_(){
   return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
@@ -6817,14 +8479,34 @@ function initInfoChatDrag(){
     if(window.matchMedia('(max-width: 760px)').matches) return;
     if(e.target.closest('button,a,input,textarea')) return;
     const rect=modal.getBoundingClientRect();
-    infoChatDragState={pointerId:e.pointerId,dx:e.clientX-rect.left,dy:e.clientY-rect.top};
+    infoChatDragState={
+      pointerId:e.pointerId,
+      dx:e.clientX-rect.left,
+      dy:e.clientY-rect.top,
+      startX:e.clientX,
+      startY:e.clientY,
+      moved:false
+    };
     header.setPointerCapture?.(e.pointerId);
-    modal.classList.add('is-dragging');
     e.preventDefault();
   });
 
   header.addEventListener('pointermove',(e)=>{
     if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+
+    const distance=Math.hypot(
+      e.clientX-infoChatDragState.startX,
+      e.clientY-infoChatDragState.startY
+    );
+
+    /* Small pointer jitter remains a click. */
+    if(!infoChatDragState.moved && distance<7) return;
+
+    if(!infoChatDragState.moved){
+      infoChatDragState.moved=true;
+      modal.classList.add('is-dragging');
+    }
+
     const margin=10;
     const rect=modal.getBoundingClientRect();
     const maxLeft=Math.max(margin,window.innerWidth-rect.width-margin);
@@ -6839,9 +8521,16 @@ function initInfoChatDrag(){
 
   const end=(e)=>{
     if(!infoChatDragState || infoChatDragState.pointerId!==e.pointerId) return;
+    const moved=Boolean(infoChatDragState.moved);
     infoChatDragState=null;
     modal.classList.remove('is-dragging');
     try{ header.releasePointerCapture?.(e.pointerId); }catch(_){}
+
+    /* A drag of the minimized window must not be interpreted as the click that restores it. */
+    if(moved && modal.classList.contains('is-minimized')){
+      infoChatSuppressRestoreClick=true;
+      setTimeout(()=>{ infoChatSuppressRestoreClick=false; },120);
+    }
   };
   header.addEventListener('pointerup',end);
   header.addEventListener('pointercancel',end);
@@ -6970,6 +8659,14 @@ function bindInfoChatListeners(){
     const modal=qs('#info-chat-modal');
     if(!modal?.classList.contains('is-minimized')) return;
     if(e.target.closest('.info-chat-window-actions')) return;
+
+    if(infoChatSuppressRestoreClick){
+      e.preventDefault();
+      e.stopPropagation();
+      infoChatSuppressRestoreClick=false;
+      return;
+    }
+
     restoreInfoModal();
   });
 
@@ -7004,137 +8701,150 @@ function bindInfoChatListeners(){
 
 function enhancePreferencesInfoChatCopy(){
   const field=qs('#special-conditions');
-  if(!field || qs('#itbmo-preferences-infochat-note')) return;
+  if(!field || qs('#itbmo-preferences-help-row')) return;
 
   const lang = _plannerOutputLang_();
   const copy = {
-    en: {
-      title:'💡 Not sure what to write?',
-      intro:'After payment, <strong>Info Chat 🌐</strong> unlocks with up to <strong>10 trip-related queries</strong> for the cities in this itinerary.',
-      examples:'For example:',
-      items:[
-        '🏨 Best area or neighborhood to stay',
-        '🧳 Seasonal context and what to pack',
-        '🚇 Transportation and how to get around',
-        '🍽️ Local cuisine and dining areas',
-        '📸 Hidden gems and photography spots',
-        '🧭 Neighborhoods, customs and practical local context',
-        '🧳 What to pack and local customs',
-        '💰 Budget recommendations',
-        '❓ Anything else related to your trip'
+    en:{
+      guideTitle:'✨ Tell Astra exactly how you want to live your trip',
+      guideSubtitle:'This will help create an itinerary that truly matches you.',
+      guideItems:[
+        '🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”',
+        '🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”',
+        '🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”',
+        '🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”',
+        '⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”',
+        '👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”'
       ],
-      final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
-      placeholder:'Tell Astra how you want to experience your trip... Info Chat unlocks after payment.'
+      guideFinal:'📝 The more details you share, the more precise, smooth and personalized your itinerary will be.',
+      unsureTitle:'💡 Not sure what to write?',
+      unsureIntro:'Info Chat 🌐 is now available with up to 10 trip-related queries for the cities in this itinerary. Use it before continuing if you want more context for your preferences.',
+      unsureExamples:'For example:',
+      unsureItems:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
+      placeholder:'Write your preferences, restrictions or special conditions here…',
+      close:'Close'
     },
-    es: {
-      title:'💡 ¿No sabes qué escribir?',
-      intro:'Después del pago se habilita <strong>Info Chat 🌐</strong> con hasta <strong>10 consultas relacionadas con las ciudades</strong> de este itinerario.',
-      examples:'Por ejemplo:',
-      items:[
-        '🏨 Mejor zona o barrio para hospedarte',
-        '🧳 Contexto estacional y qué llevar',
-        '🚇 Transporte y cómo desplazarte',
-        '🍽️ Gastronomía local y zonas para comer',
-        '📸 Lugares ocultos y puntos para fotografía',
-        '🧭 Barrios, costumbres y contexto práctico local',
-        '🧳 Qué llevar y costumbres locales',
-        '💰 Recomendaciones de presupuesto',
-        '❓ Cualquier otra consulta relacionada con tu viaje'
+    es:{
+      guideTitle:'✨ Cuéntale a ASTRA exactamente cómo quieres vivir tu viaje',
+      guideSubtitle:'Esta información permitirá crear un itinerario realmente alineado contigo.',
+      guideItems:[
+        '🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”',
+        '🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”',
+        '🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”',
+        '🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”',
+        '⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”',
+        '👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”'
       ],
-      final:'📝 Cada detalle ayuda a Astra a tomar decisiones de planificación más inteligentes. Cuanto más compartas, más personalizado y optimizado será tu itinerario.',
-      placeholder:'Cuéntale a Astra cómo quieres vivir tu viaje... ¿No estás seguro? Abre el Info Chat 🌐 para inspirarte.'
-    },
-    pt: {
-      title:'💡 Não sabe o que escrever?',
-      intro:'Você pode abrir o <strong>Info Chat 🌐</strong> a qualquer momento, <strong>antes, durante ou depois do planejamento</strong>, e perguntar qualquer coisa sobre a viagem.',
-      examples:'Por exemplo:',
-      items:['🏨 Melhor área ou bairro para ficar','🧳 Contexto sazonal e o que levar','🚇 Transporte e como se locomover','🍽️ Gastronomia local e áreas para comer','📸 Lugares escondidos e pontos para fotografia','🧭 Bairros, costumes e contexto local prático','🧳 O que levar e costumes locais','💰 Recomendações de orçamento','❓ Qualquer outra dúvida sobre a viagem'],
-      final:'📝 Cada detalhe ajuda a Astra a tomar decisões de planejamento mais inteligentes. Quanto mais você compartilhar, mais personalizado e otimizado será o seu itinerário.',
-      placeholder:'Conte à Astra como você quer viver a viagem... Em dúvida? Abra o Info Chat 🌐 para se inspirar.'
-    },
-    fr: {
-      title:'💡 Vous ne savez pas quoi écrire ?',
-      intro:'Vous pouvez ouvrir l’<strong>Info Chat 🌐</strong> à tout moment, <strong>avant, pendant ou après la planification</strong>, et poser toutes vos questions sur le voyage.',
-      examples:'Par exemple :',
-      items:['🏨 Meilleur quartier où séjourner','🧳 Contexte saisonnier et quoi emporter','🚇 Transports et déplacements','🍽️ Cuisine locale et quartiers où manger','📸 Lieux méconnus et spots photo','🧭 Quartiers, coutumes et contexte local pratique','🧳 Bagages et coutumes locales','💰 Recommandations de budget','❓ Toute autre question concernant le voyage'],
-      final:'📝 Chaque détail aide Astra à prendre de meilleures décisions de planification. Plus vous partagez d’informations, plus votre itinéraire sera personnalisé et optimisé.',
-      placeholder:'Expliquez à Astra comment vous souhaitez vivre votre voyage... Besoin d’idées ? Ouvrez l’Info Chat 🌐.'
-    },
-    de: {
-      title:'💡 Sie wissen nicht, was Sie schreiben sollen?',
-      intro:'Sie können den <strong>Info Chat 🌐</strong> jederzeit <strong>vor, während oder nach der Planung</strong> öffnen und alles zu Ihrer Reise fragen.',
-      examples:'Zum Beispiel:',
-      items:['🏨 Beste Gegend oder bestes Viertel zum Übernachten','🧳 Saisonaler Kontext und Packempfehlungen','🚇 Verkehrsmittel und Fortbewegung','🍽️ Lokale Küche und Gegenden zum Essen','📸 Versteckte Orte und Fotospots','🧭 Viertel, Gepflogenheiten und praktischer lokaler Kontext','🧳 Packliste und lokale Gepflogenheiten','💰 Budgetempfehlungen','❓ Jede andere Frage zu Ihrer Reise'],
-      final:'📝 Jedes Detail hilft Astra, intelligentere Planungsentscheidungen zu treffen. Je mehr Sie mitteilen, desto persönlicher und besser optimiert wird Ihre Reiseroute.',
-      placeholder:'Beschreiben Sie Astra, wie Sie Ihre Reise erleben möchten... Unsicher? Nutzen Sie den Info Chat 🌐 als Inspiration.'
-    },
-    it: {
-      title:'💡 Non sai cosa scrivere?',
-      intro:'Puoi aprire l’<strong>Info Chat 🌐</strong> in qualsiasi momento, <strong>prima, durante o dopo la pianificazione</strong>, e chiedere qualsiasi cosa sul viaggio.',
-      examples:'Per esempio:',
-      items:['🏨 Zona o quartiere migliore dove soggiornare','🧳 Contesto stagionale e cosa portare','🚇 Trasporti e come spostarsi','🍽️ Cucina locale e zone dove mangiare','📸 Luoghi nascosti e punti fotografici','🧭 Quartieri, usanze e contesto locale pratico','🧳 Cosa portare e usanze locali','💰 Consigli sul budget','❓ Qualsiasi altra domanda relativa al viaggio'],
-      final:'📝 Ogni dettaglio aiuta Astra a prendere decisioni di pianificazione più intelligenti. Più informazioni condividi, più il tuo itinerario sarà personalizzato e ottimizzato.',
-      placeholder:'Racconta ad Astra come vuoi vivere il viaggio... Hai dubbi? Apri l’Info Chat 🌐 per trovare ispirazione.'
+      guideFinal:'📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.',
+      unsureTitle:'💡 ¿No sabes qué escribir?',
+      unsureIntro:'Info Chat 🌐 ya está disponible con hasta 10 consultas relacionadas con las ciudades de este itinerario. Úsalo antes de continuar si necesitas más contexto para tus preferencias.',
+      unsureExamples:'Por ejemplo:',
+      unsureItems:['🏨 Mejor zona o barrio para hospedarte','🧳 Contexto estacional y qué llevar','🚇 Transporte y cómo desplazarte','🍽️ Gastronomía local y zonas para comer','📸 Lugares ocultos y puntos para fotografía','🧭 Barrios, costumbres y contexto práctico local','🧳 Qué llevar y costumbres locales','💰 Recomendaciones de presupuesto','❓ Cualquier otra consulta relacionada con tu viaje'],
+      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…',
+      close:'Cerrar'
     }
   }[lang] || null;
 
-  const c = copy || {
-    title:'💡 Not sure what to write?',
-    intro:'You can open the <strong>Info Chat 🌐</strong> anytime <strong>before, during or after planning</strong> and ask anything about your trip.',
-    examples:'For example:',
-    items:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
-    final:'📝 Every detail helps Astra make smarter planning decisions. The more you share, the more personalized and optimized your itinerary becomes.',
-    placeholder:'Tell Astra how you want to experience your trip... Not sure? Open the Info Chat 🌐 for inspiration.'
+  const c=copy || {
+    guideTitle:'✨ Tell Astra exactly how you want to live your trip',
+    guideSubtitle:'This will help create an itinerary that truly matches you.',
+    guideItems:[
+      '🏞️ Style & activities → nature, landscapes, museums, authentic tours.',
+      '🚗 Transportation → rental car, public transport, taxi/Uber.',
+      '🏃 Pace & adventure level → relaxed, balanced, adventurous.',
+      '🧭 Must-dos → activities or experiences you do not want to miss.',
+      '⚕️ Health & restrictions → mobility, allergies or other limitations.',
+      '👨‍👩‍👧‍👦 Other important details → children, flexible hours, long walks.'
+    ],
+    guideFinal:'📝 The more details you share, the more personalized and optimized your itinerary becomes.',
+    unsureTitle:'💡 Not sure what to write?',
+    unsureIntro:'Use Info Chat 🌐 before continuing if you need more context about the cities in this itinerary.',
+    unsureExamples:'For example:',
+    unsureItems:['🏨 Best area to stay','🧳 Seasonal context and packing','🚇 Transportation','🍽️ Local cuisine','📸 Photography spots','🧭 Local context','💰 Budget recommendations'],
+    placeholder:'Write your preferences, restrictions or special conditions here…',
+    close:'Close'
   };
 
-  const note=document.createElement('div');
-  note.id='itbmo-preferences-infochat-note';
-  note.className='itbmo-preferences-infochat-note';
-  note.setAttribute('role','note');
-  note.style.cssText='margin:14px 0 18px;padding:16px 18px;border:1px solid rgba(63,120,255,.28);border-radius:14px;background:rgba(63,120,255,.08);box-shadow:0 8px 24px rgba(0,0,0,.06);line-height:1.5;';
-  note.innerHTML = `
-    <div style="font-size:1.05em;margin-bottom:8px;"><strong>${c.title}</strong></div>
-    <div style="margin-bottom:10px;">${c.intro}</div>
-    <div style="margin-bottom:6px;"><strong>${c.examples}</strong></div>
-    <div>${c.items.map(item=>`<div style="margin:3px 0;">${item}</div>`).join('')}</div>
+  const row=document.createElement('div');
+  row.id='itbmo-preferences-help-row';
+  row.className='preferences-help-row';
+
+  const buildHelp=(type,title,subtitle,bodyHtml)=>{
+    const item=document.createElement('div');
+    item.className='preferences-help-item';
+
+    const btn=document.createElement('button');
+    btn.type='button';
+    btn.className=`preferences-help-button preferences-help-button--${type}`;
+    btn.setAttribute('aria-expanded','false');
+    btn.innerHTML=subtitle
+      ? `<span class="preferences-help-button__title">${title}</span><span class="preferences-help-button__subtitle">${subtitle}</span>`
+      : `<span class="preferences-help-button__title">${title}</span>`;
+
+    const pop=document.createElement('div');
+    pop.className='preferences-help-popover';
+    pop.setAttribute('aria-hidden','true');
+    pop.innerHTML=`
+      <button type="button" class="preferences-help-popover__close" aria-label="${c.close}">×</button>
+      <div class="preferences-help-popover__body">${bodyHtml}</div>
+    `;
+
+    btn.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      const wasOpen=pop.classList.contains('is-open');
+      closePreferencesHelpPopovers();
+      if(!wasOpen){
+        pop.classList.add('is-open');
+        pop.setAttribute('aria-hidden','false');
+        btn.setAttribute('aria-expanded','true');
+      }
+    });
+
+    pop.querySelector('.preferences-help-popover__close')?.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      closePreferencesHelpPopovers();
+    });
+
+    pop.addEventListener('click',(e)=>e.stopPropagation());
+
+    item.append(btn,pop);
+    return item;
+  };
+
+  const guideBody=`
+    <div class="preferences-help-list">
+      ${c.guideItems.map(x=>`<p>${x}</p>`).join('')}
+    </div>
+    <div class="preferences-help-final">${c.guideFinal}</div>
   `;
 
-  const scope = field.closest('.preferences, .preferences-section, .form-group, .field-group, section') || field.parentElement;
-  let anchor = null;
-  if(scope){
-    const candidates = Array.from(scope.querySelectorAll('p, div, span'));
-    anchor = candidates.find(el=>/This will help create an itinerary that truly matches your travel style\.|Esto ayudará a crear un itinerario que realmente se adapte a tu estilo de viaje\./i.test(String(el.textContent||'').trim()));
-  }
-  if(anchor?.parentNode){
-    anchor.parentNode.insertBefore(note, anchor.nextSibling);
-  }else{
-    field.parentNode?.insertBefore(note,field);
-  }
+  const unsureBody=`
+    <p class="preferences-help-intro">${c.unsureIntro}</p>
+    <strong class="preferences-help-examples">${c.unsureExamples}</strong>
+    <div class="preferences-help-list preferences-help-list--compact">
+      ${c.unsureItems.map(x=>`<p>${x}</p>`).join('')}
+    </div>
+  `;
 
-  field.placeholder = c.placeholder;
+  row.append(
+    buildHelp('guide',c.guideTitle,c.guideSubtitle,guideBody),
+    buildHelp('unsure',c.unsureTitle,'',unsureBody)
+  );
 
-  if(scope){
-    const elements = Array.from(scope.querySelectorAll('p, div, span, small'));
-    const lastLine = elements.find(el=>{
-      const txt=String(el.textContent||'').trim();
-      return /^📝?\s*Every detail helps Astra/i.test(txt) || /^📝?\s*Cada detalle ayuda a Astra/i.test(txt);
-    });
-    if(lastLine) lastLine.textContent = c.final;
-  }
+  field.parentNode?.insertBefore(row,field);
+  field.placeholder=c.placeholder;
 
-  if(!scope || !scope.querySelector('#itbmo-preferences-final-line')){
-    const existingFinal = scope ? Array.from(scope.querySelectorAll('p, div, span, small')).find(el=>String(el.textContent||'').trim()===c.final) : null;
-    if(existingFinal){
-      existingFinal.id='itbmo-preferences-final-line';
-      existingFinal.style.fontWeight='600';
-    }else{
-      const finalLine=document.createElement('div');
-      finalLine.id='itbmo-preferences-final-line';
-      finalLine.style.cssText='margin-top:12px;font-weight:600;line-height:1.45;';
-      finalLine.textContent=c.final;
-      field.insertAdjacentElement('afterend', finalLine);
-    }
-  }
+  field.addEventListener('input',autoGrowPreferencesField);
+  field.addEventListener('click',closePreferencesHelpPopovers);
+  field.addEventListener('focus',closePreferencesHelpPopovers);
+
+  document.addEventListener('click',(e)=>{
+    if(!e.target.closest('#itbmo-preferences-help-row')) closePreferencesHelpPopovers();
+  });
+
+  autoGrowPreferencesField();
 }
 
 // Inicialización
@@ -7146,7 +8856,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
   bindInfoChatListeners();
+  bindPlannerLanguageCapability();
   enhancePreferencesInfoChatCopy();
+  hidePreferencesStage({reset:true});
 
   bindTravelersListeners();
 

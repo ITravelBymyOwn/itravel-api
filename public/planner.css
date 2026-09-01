@@ -813,11 +813,42 @@ input.end.invalid{
   transform:translateY(-2px);
 }
 
-.btn.ghost,
-#add-city-btn{
+.btn.ghost{
   color:#11677c;
   background:linear-gradient(180deg,#f7ffff,#e9f9fa);
   border-color:rgba(13,143,153,.24);
+}
+
+/* Add City is a primary planning action until the 3-city cap is reached. */
+#add-city-btn{
+  color:#fff;
+  background:linear-gradient(110deg,#0877f9 0%,#0b97bf 48%,#0aa7a5 100%);
+  border:1px solid rgba(7,119,173,.32);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.28),
+    0 10px 24px rgba(8,119,249,.17),
+    0 5px 16px rgba(10,167,165,.11);
+  font-weight:850;
+}
+
+#add-city-btn:hover:not(:disabled){
+  color:#fff;
+  background:linear-gradient(110deg,#066fe9 0%,#078caf 48%,#079b9a 100%);
+  transform:translateY(-2px);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    0 14px 30px rgba(8,119,249,.22),
+    0 7px 19px rgba(10,167,165,.14);
+}
+
+#add-city-btn:disabled{
+  color:#6f8493;
+  background:linear-gradient(180deg,#f3f7f8,#e9f0f2);
+  border-color:rgba(35,75,112,.12);
+  box-shadow:none;
+  opacity:.72;
+  cursor:not-allowed;
+  transform:none;
 }
 
 .btn.warn,
@@ -3499,19 +3530,2069 @@ input.end,
    Acción activa secundaria: visible sin competir con PDF / CSV.
 ========================================================= */
 #btn-receipt{
-  background:linear-gradient(135deg,#eef6ff 0%,#e8f1ff 48%,#eef0ff 100%);
-  color:#0b2f5b;
-  border:1px solid rgba(53,107,181,.20);
-  box-shadow:0 10px 26px rgba(39,85,145,.10);
+  color:#fff;
+  background:linear-gradient(135deg,#0b5fa8 0%,#087fa5 52%,#0a9c9e 100%);
+  border:1px solid rgba(8,108,151,.24);
+  box-shadow:0 12px 28px rgba(20,104,146,.18);
 }
 
 #btn-receipt:hover{
-  transform:translateY(-1px);
-  border-color:rgba(53,107,181,.34);
-  box-shadow:0 14px 30px rgba(39,85,145,.14);
+  transform:translateY(-2px);
+  border-color:rgba(8,108,151,.34);
+  box-shadow:0 18px 36px rgba(20,104,146,.24);
 }
 
 #btn-receipt:focus-visible{
-  outline:3px solid rgba(24,134,240,.20);
+  outline:3px solid rgba(8,127,165,.22);
   outline-offset:2px;
 }
+
+
+/* =========================================================
+   ITBMO · v76d · POST-PAYMENT PREFERENCES CHECKPOINT
+   + MINIMIZED INFO CHAT DRAG POLISH
+   ---------------------------------------------------------
+   Existing renderer, itinerary tables, overlays and export styles
+   remain untouched above.
+   ========================================================= */
+
+/* Setup is frozen after Save Destinations without disabling the whole sidebar. */
+#account-box.is-setup-locked,
+#travelers-box.is-setup-locked,
+#destinations-box.is-setup-locked{
+  opacity:.62;
+  filter:saturate(.92);
+  box-shadow:0 2px 6px rgba(6,31,60,.018),0 8px 20px rgba(18,55,90,.028);
+}
+
+#account-box.is-setup-locked::after,
+#travelers-box.is-setup-locked::after,
+#destinations-box.is-setup-locked::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:3;
+  border-radius:inherit;
+  pointer-events:none;
+  background:linear-gradient(180deg,rgba(248,252,253,.08),rgba(248,252,253,.18));
+}
+
+/* Hidden until payment/admin entitlement is authoritative. */
+.preferences-stage.is-stage-hidden{
+  display:none!important;
+}
+
+.preferences-stage.is-stage-active{
+  display:block;
+  border-color:rgba(10,151,153,.25);
+  background:
+    radial-gradient(520px 250px at 100% 0%,rgba(53,191,209,.13),transparent 70%),
+    radial-gradient(420px 220px at 0% 100%,rgba(109,120,238,.08),transparent 72%),
+    linear-gradient(145deg,#fff 34%,#effafa 100%);
+  box-shadow:
+    0 4px 12px rgba(5,31,61,.03),
+    0 24px 60px rgba(18,92,120,.10);
+  animation:preferencesStageIn .38s var(--ease) both;
+}
+
+@keyframes preferencesStageIn{
+  from{opacity:0;transform:translateY(12px)}
+  to{opacity:1;transform:none}
+}
+
+.preferences-stage-head{
+  margin-bottom:.85rem;
+}
+
+.preferences-stage-eyebrow{
+  display:inline-flex;
+  align-items:center;
+  width:max-content;
+  max-width:100%;
+  margin-bottom:.52rem;
+  padding:.38rem .65rem;
+  color:#08717f;
+  background:rgba(232,249,249,.90);
+  border:1px solid rgba(10,151,153,.14);
+  border-radius:999px;
+  font-size:.68rem;
+  font-weight:900;
+  letter-spacing:.045em;
+  text-transform:uppercase;
+}
+
+.preferences-stage-head h3{
+  margin:.05rem 0 .42rem;
+  color:var(--ink);
+  font-size:1.28rem;
+  line-height:1.12;
+  font-weight:900;
+  letter-spacing:-.035em;
+}
+
+.preferences-stage-intro{
+  margin:0;
+  color:#5b7387;
+  font-size:.83rem;
+  line-height:1.58;
+}
+
+.preferences-stage-field-title{
+  margin:.95rem 0 .45rem;
+  color:var(--ink-2);
+  font-size:.88rem;
+  font-weight:850;
+}
+
+.preferences-stage-actions{
+  display:flex;
+  align-items:center;
+  gap:.8rem;
+  flex-wrap:wrap;
+  margin-top:1rem;
+}
+
+.preferences-continue{
+  min-width:220px;
+  min-height:48px;
+  padding:.72rem 1rem;
+  border-radius:999px;
+  box-shadow:0 14px 32px rgba(8,119,249,.15);
+}
+
+.preferences-stage-actions small{
+  color:#718697;
+  font-size:.72rem;
+  line-height:1.4;
+}
+
+.preferences-stage.is-confirmed{
+  border-color:rgba(55,185,142,.25);
+  background:
+    radial-gradient(460px 220px at 100% 0%,rgba(55,185,142,.10),transparent 70%),
+    linear-gradient(145deg,#fff 38%,#f1fbf7 100%);
+}
+
+.preferences-stage.is-confirmed #special-conditions{
+  color:#4d6577;
+  background:#f6faf8;
+  border-color:rgba(55,185,142,.18);
+  cursor:default;
+}
+
+.preferences-stage.is-confirmed .preferences-continue{
+  color:#2c725b;
+  background:#e7f7f0;
+  border-color:rgba(55,185,142,.20);
+  box-shadow:none;
+}
+
+/* Drag only changes the cursor after the movement threshold is crossed. */
+.info-chat-modal.is-minimized .info-chat-header{
+  cursor:grab;
+}
+.info-chat-modal.is-minimized.is-dragging .info-chat-header{
+  cursor:grabbing;
+}
+
+@media(max-width:760px){
+  .preferences-stage-actions{
+    align-items:stretch;
+    flex-direction:column;
+  }
+
+  .preferences-continue{
+    width:100%;
+    min-width:0;
+  }
+}
+
+
+/* =========================================================
+   ITBMO · v76e · COMPACT PREFERENCES EXPERIENCE
+   ---------------------------------------------------------
+   Visual-only refinements around the existing preferences field.
+   No itinerary renderer / generation / export structure is changed.
+   ========================================================= */
+
+/* Remove the old generated label because the guidance now lives in two explicit buttons. */
+.preferences-stage.special-conditions::before{
+  display:none!important;
+}
+
+.preferences-stage #special-conditions{
+  min-height:92px!important;
+  height:92px;
+  max-height:260px;
+  padding:.82rem .9rem;
+  resize:none;
+  overflow-y:hidden;
+  line-height:1.55;
+  border-radius:15px;
+  background:rgba(255,255,255,.94);
+  transition:
+    height .16s ease,
+    border-color .2s ease,
+    box-shadow .22s ease,
+    background .2s ease;
+}
+
+.preferences-help-row{
+  position:relative;
+  display:grid;
+  grid-template-columns:minmax(0,1.42fr) minmax(190px,.72fr);
+  gap:.55rem;
+  margin:.72rem 0 .78rem;
+  align-items:stretch;
+}
+
+.preferences-help-item{
+  position:relative;
+  min-width:0;
+}
+
+.preferences-help-button{
+  width:100%;
+  min-height:66px;
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  justify-content:center;
+  gap:.18rem;
+  padding:.68rem .78rem;
+  text-align:left;
+  color:#244a65;
+  background:
+    radial-gradient(220px 90px at 100% 0%,rgba(53,191,209,.10),transparent 70%),
+    rgba(255,255,255,.82);
+  border:1px solid rgba(31,105,145,.13);
+  border-radius:15px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    0 8px 22px rgba(18,70,100,.055);
+  cursor:pointer;
+  transition:transform .2s var(--ease),border-color .2s ease,box-shadow .25s var(--ease),background .2s ease;
+}
+
+.preferences-help-button:hover{
+  transform:translateY(-2px);
+  border-color:rgba(17,131,163,.24);
+  background:#fff;
+  box-shadow:0 14px 30px rgba(18,70,100,.09);
+}
+
+.preferences-help-button[aria-expanded="true"]{
+  border-color:rgba(8,119,249,.28);
+  box-shadow:0 0 0 3px rgba(8,119,249,.06),0 14px 30px rgba(18,70,100,.10);
+}
+
+.preferences-help-button__title{
+  color:#123c59;
+  font-size:.78rem;
+  font-weight:850;
+  line-height:1.25;
+}
+
+.preferences-help-button__subtitle{
+  color:#718899;
+  font-size:.64rem;
+  font-weight:650;
+  line-height:1.35;
+}
+
+.preferences-help-button--unsure{
+  justify-content:center;
+  background:
+    radial-gradient(180px 90px at 100% 0%,rgba(109,120,238,.10),transparent 72%),
+    linear-gradient(145deg,rgba(255,255,255,.90),rgba(244,247,255,.82));
+}
+
+.preferences-help-popover{
+  position:absolute;
+  z-index:250;
+  top:calc(100% + 8px);
+  left:0;
+  width:min(430px,calc(100vw - 48px));
+  max-height:min(430px,62vh);
+  overflow:auto;
+  padding:1rem;
+  border:1px solid rgba(30,96,136,.14);
+  border-radius:18px;
+  opacity:0;
+  visibility:hidden;
+  transform:translateY(-5px) scale(.985);
+  transform-origin:top left;
+  color:#36566d;
+  background:
+    radial-gradient(280px 130px at 100% 0%,rgba(53,191,209,.10),transparent 72%),
+    rgba(255,255,255,.97);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 24px 60px rgba(8,42,68,.18);
+  backdrop-filter:blur(20px) saturate(135%);
+  -webkit-backdrop-filter:blur(20px) saturate(135%);
+  transition:opacity .18s ease,transform .22s var(--ease),visibility .18s ease;
+}
+
+.preferences-help-item:last-child .preferences-help-popover{
+  left:auto;
+  right:0;
+  transform-origin:top right;
+}
+
+.preferences-help-popover.is-open{
+  opacity:1;
+  visibility:visible;
+  transform:none;
+}
+
+.preferences-help-popover__close{
+  position:sticky;
+  float:right;
+  top:0;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  margin:-.28rem -.28rem .25rem .55rem;
+  padding:0;
+  color:#527084;
+  background:rgba(247,251,253,.96);
+  border:1px solid rgba(35,75,112,.10);
+  border-radius:999px;
+  cursor:pointer;
+  font-size:1.1rem;
+  line-height:1;
+}
+
+.preferences-help-popover__body{
+  font-size:.72rem;
+  line-height:1.48;
+}
+
+.preferences-help-intro{
+  margin:0 0 .65rem;
+}
+
+.preferences-help-examples{
+  display:block;
+  margin-bottom:.38rem;
+  color:#1c4a66;
+}
+
+.preferences-help-list p{
+  margin:.32rem 0;
+}
+
+.preferences-help-list--compact p{
+  margin:.24rem 0;
+}
+
+.preferences-help-final{
+  margin-top:.72rem;
+  padding-top:.68rem;
+  border-top:1px solid rgba(35,75,112,.08);
+  color:#40647a;
+  font-weight:750;
+}
+
+.preferences-stage.is-confirmed .preferences-help-row{
+  opacity:.55;
+  pointer-events:none;
+}
+
+.preferences-stage.is-confirmed #special-conditions{
+  overflow-y:auto!important;
+}
+
+/* Strong visual distinction from disabled Send by Email. */
+.toolbar #btn-receipt{
+  opacity:1;
+  filter:none;
+}
+
+@media(max-width:760px){
+  .preferences-help-row{
+    grid-template-columns:1fr;
+  }
+
+  .preferences-help-button{
+    min-height:58px;
+  }
+
+  .preferences-help-popover,
+  .preferences-help-item:last-child .preferences-help-popover{
+    left:0;
+    right:auto;
+    width:min(420px,calc(100vw - 42px));
+    max-height:54vh;
+    transform-origin:top left;
+  }
+}
+
+
+/* =========================================================
+   ITBMO · v76f · PREMIUM PREFERENCES + MULTILINGUAL WOW
+   ---------------------------------------------------------
+   Visual/UX refinements only. Generation, renderer, API and exports
+   remain untouched.
+   ========================================================= */
+
+/* ---------- ALWAYS-VISIBLE MULTILINGUAL CAPABILITY ---------- */
+.topbar{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+}
+
+.planner-language-capability{
+  position:relative;
+  margin-left:auto;
+}
+
+.planner-language-help{
+  display:inline-flex;
+  align-items:center;
+  gap:.42rem;
+  min-height:38px;
+  padding:.48rem .72rem;
+  color:#fff;
+  background:
+    linear-gradient(135deg,rgba(255,255,255,.16),rgba(255,255,255,.08));
+  border:1px solid rgba(255,255,255,.28);
+  border-radius:999px;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.25),
+    0 8px 22px rgba(2,47,83,.14);
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+  font-size:.72rem;
+  font-weight:850;
+  cursor:pointer;
+  transition:transform .2s var(--ease),background .2s ease,box-shadow .2s var(--ease);
+}
+
+.planner-language-help:hover{
+  transform:translateY(-1px);
+  background:linear-gradient(135deg,rgba(255,255,255,.22),rgba(255,255,255,.12));
+  box-shadow:0 12px 28px rgba(2,47,83,.18);
+}
+
+.planner-language-popover{
+  position:absolute;
+  z-index:4000;
+  top:calc(100% + 9px);
+  right:0;
+  width:min(430px,calc(100vw - 28px));
+  padding:1rem;
+  color:#36566d;
+  background:#fff;
+  border:1px solid rgba(30,96,136,.14);
+  border-radius:18px;
+  opacity:0;
+  visibility:hidden;
+  transform:translateY(-5px) scale(.985);
+  transform-origin:top right;
+  box-shadow:0 24px 60px rgba(8,42,68,.22);
+  transition:opacity .18s ease,transform .22s var(--ease),visibility .18s ease;
+}
+
+.planner-language-popover.is-open{
+  opacity:1;
+  visibility:visible;
+  transform:none;
+}
+
+.planner-language-popover__close{
+  position:absolute;
+  top:.7rem;
+  right:.7rem;
+  width:30px;
+  height:30px;
+  display:grid;
+  place-items:center;
+  padding:0;
+  color:#527084;
+  background:#f6fafc;
+  border:1px solid rgba(35,75,112,.10);
+  border-radius:999px;
+  cursor:pointer;
+  font-size:1.05rem;
+}
+
+.planner-language-popover strong{
+  display:block;
+  padding-right:2.3rem;
+  color:#123c59;
+  font-size:.88rem;
+  font-weight:900;
+}
+
+.planner-language-popover p{
+  margin:.45rem 0 .75rem;
+  color:#58758a;
+  font-size:.72rem;
+  line-height:1.5;
+}
+
+.planner-language-list{
+  display:flex;
+  flex-wrap:wrap;
+  gap:.34rem;
+}
+
+.planner-language-list span{
+  padding:.34rem .48rem;
+  color:#176d82;
+  background:#edf9fa;
+  border:1px solid rgba(15,130,150,.10);
+  border-radius:999px;
+  font-size:.62rem;
+  font-weight:800;
+}
+
+.planner-language-popover small{
+  display:block;
+  margin-top:.72rem;
+  padding-top:.68rem;
+  color:#718697;
+  border-top:1px solid rgba(35,75,112,.08);
+  font-size:.62rem;
+  line-height:1.45;
+}
+
+/* ---------- PREFERENCES HELP BUTTONS · STRONGER PREMIUM COLOR ---------- */
+.preferences-help-row{
+  gap:.68rem;
+  margin:.78rem 0 .9rem;
+}
+
+.preferences-help-button{
+  position:relative;
+  overflow:hidden;
+  min-height:74px;
+  padding:.8rem .9rem;
+  border-radius:18px;
+  border:1px solid rgba(10,135,166,.18);
+  background:
+    radial-gradient(240px 120px at 100% 0%,rgba(53,191,209,.22),transparent 72%),
+    linear-gradient(145deg,#f5fdff 0%,#e8f9fb 52%,#edf5ff 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 12px 28px rgba(16,91,123,.10);
+}
+
+.preferences-help-button::after{
+  content:"";
+  position:absolute;
+  width:120px;
+  height:120px;
+  right:-46px;
+  top:-66px;
+  border-radius:999px;
+  background:rgba(255,255,255,.28);
+  pointer-events:none;
+}
+
+.preferences-help-button--guide{
+  border-color:rgba(8,119,249,.18);
+  background:
+    radial-gradient(250px 120px at 100% 0%,rgba(53,191,209,.26),transparent 72%),
+    linear-gradient(135deg,#edf8ff 0%,#e6fbfa 58%,#edf3ff 100%);
+}
+
+.preferences-help-button--unsure{
+  border-color:rgba(109,120,238,.20);
+  background:
+    radial-gradient(230px 120px at 100% 0%,rgba(109,120,238,.18),transparent 72%),
+    linear-gradient(135deg,#f4f4ff 0%,#eef8ff 52%,#eafafa 100%);
+}
+
+.preferences-help-button:hover{
+  transform:translateY(-3px);
+  border-color:rgba(8,119,249,.30);
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 18px 38px rgba(17,87,126,.15);
+}
+
+.preferences-help-button__title{
+  position:relative;
+  z-index:1;
+  color:#0f4565;
+  font-size:.82rem;
+  font-weight:900;
+}
+
+.preferences-help-button__subtitle{
+  position:relative;
+  z-index:1;
+  color:#5f7e92;
+  font-size:.67rem;
+  font-weight:700;
+}
+
+/* ---------- HELP WINDOWS · FIXED, OPAQUE, NO BLEED-THROUGH ---------- */
+.preferences-help-popover,
+.preferences-help-item:last-child .preferences-help-popover{
+  position:fixed;
+  z-index:12000;
+  top:clamp(88px,14vh,150px);
+  left:50%;
+  right:auto;
+  width:min(560px,calc(100vw - 34px));
+  max-height:min(470px,58vh);
+  padding:1.08rem 1.12rem;
+  transform:translate(-50%,-8px) scale(.985);
+  transform-origin:top center;
+  color:#36566d;
+  background:#fff;
+  border:1px solid rgba(30,96,136,.15);
+  border-radius:22px;
+  box-shadow:
+    0 30px 80px rgba(6,32,58,.26),
+    0 10px 30px rgba(18,92,120,.10);
+  backdrop-filter:none;
+  -webkit-backdrop-filter:none;
+}
+
+.preferences-help-popover.is-open{
+  transform:translate(-50%,0) scale(1);
+}
+
+.preferences-help-popover__body{
+  font-size:.76rem;
+  line-height:1.52;
+}
+
+.preferences-help-popover__close{
+  position:sticky;
+  top:0;
+  z-index:2;
+  width:34px;
+  height:34px;
+  margin:-.22rem -.22rem .2rem .7rem;
+  background:#f5fafc;
+  box-shadow:0 5px 14px rgba(18,55,90,.07);
+}
+
+/* ---------- AGENT CHAT · SLIGHTLY TALLER ---------- */
+.chat{
+  height:clamp(360px,44vh,405px);
+  min-height:360px;
+}
+
+.chat-messages{
+  padding:1.05rem;
+}
+
+.chat-message{
+  max-width:88%;
+}
+
+/* ---------- MOBILE ---------- */
+@media(max-width:760px){
+  .topbar{
+    gap:.55rem;
+  }
+
+  .planner-language-help{
+    min-height:34px;
+    padding:.4rem .56rem;
+    font-size:.64rem;
+  }
+
+  .planner-language-popover{
+    position:fixed;
+    top:72px;
+    left:12px;
+    right:12px;
+    width:auto;
+    max-height:55vh;
+    overflow:auto;
+  }
+
+  .preferences-help-button{
+    min-height:64px;
+  }
+
+  .preferences-help-popover,
+  .preferences-help-item:last-child .preferences-help-popover{
+    top:86px;
+    left:50%;
+    right:auto;
+    width:calc(100vw - 24px);
+    max-height:56vh;
+  }
+
+  .chat{
+    height:clamp(350px,48vh,390px);
+    min-height:350px;
+  }
+}
+
+
+
+/* =========================================================
+   ITBMO · v76g · LANGUAGE CTA + MOBILE PREFERENCES
+   ========================================================= */
+.planner-language-help{
+  min-height:42px;
+  padding:.56rem .88rem;
+  color:#063c5d;
+  background:radial-gradient(100px 60px at 12% 0%,rgba(255,255,255,.95),transparent 78%),linear-gradient(135deg,#ffffff 0%,#e9fbff 48%,#dff7f4 100%);
+  border:1px solid rgba(255,255,255,.92);
+  box-shadow:inset 0 1px 0 #fff,0 8px 24px rgba(2,47,83,.18),0 0 0 1px rgba(8,132,166,.14);
+  font-weight:900;
+}
+.planner-language-help:hover,.planner-language-help[aria-expanded="true"]{
+  color:#052f4b;
+  background:linear-gradient(135deg,#fff 0%,#e1f8ff 46%,#d6f5ef 100%);
+  border-color:#fff;
+  box-shadow:inset 0 1px 0 #fff,0 12px 30px rgba(2,47,83,.24),0 0 0 2px rgba(255,255,255,.28);
+}
+.planner-language-popover p{margin:.45rem 0 .72rem}
+.planner-language-popover small{margin-top:.15rem}
+
+@media(max-width:760px){
+  .preferences-help-row{
+    display:grid !important;
+    grid-template-columns:1fr !important;
+    gap:.62rem !important;
+    width:100% !important;
+    overflow:visible !important;
+  }
+  .preferences-help-item{
+    display:block !important;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    overflow:visible !important;
+  }
+  .preferences-help-button{
+    display:flex !important;
+    width:100% !important;
+    min-width:0 !important;
+    max-width:none !important;
+    min-height:66px !important;
+    visibility:visible !important;
+    opacity:1 !important;
+  }
+  .preferences-help-button__title,.preferences-help-button__subtitle{
+    white-space:normal !important;
+    overflow:visible !important;
+    text-overflow:clip !important;
+  }
+  .planner-language-help{
+    min-height:38px;
+    padding:.46rem .66rem;
+    color:#063c5d;
+    background:linear-gradient(135deg,#fff,#e4faff);
+  }
+}
+@media(max-width:430px){
+  .planner-language-help{font-size:.61rem}
+  .preferences-help-button{padding:.72rem .78rem !important}
+  .preferences-help-button__title{font-size:.78rem !important;line-height:1.18 !important}
+  .preferences-help-button__subtitle{font-size:.64rem !important;line-height:1.3 !important}
+}
+
+
+/* =========================================================
+   ITBMO · v76h · PREMIUM GENERATION OVERLAY
+   ---------------------------------------------------------
+   Visual emphasis only. Generation logic and affiliate surface are unchanged.
+   ========================================================= */
+
+#loading-overlay{
+  background:
+    radial-gradient(980px 680px at 2% -4%,rgba(8,119,249,.19),transparent 68%),
+    radial-gradient(980px 680px at 100% 104%,rgba(53,191,209,.18),transparent 68%),
+    radial-gradient(700px 440px at 50% 30%,rgba(109,120,238,.07),transparent 72%),
+    rgba(239,248,251,.965);
+  backdrop-filter:blur(24px) saturate(132%);
+  -webkit-backdrop-filter:blur(24px) saturate(132%);
+}
+
+#loading-overlay .loader{
+  border:1px solid rgba(8,119,249,.18);
+  background:
+    radial-gradient(680px 320px at 0% 0%,rgba(53,191,209,.13),transparent 68%),
+    radial-gradient(680px 350px at 100% 100%,rgba(109,120,238,.11),transparent 68%),
+    linear-gradient(180deg,#ffffff 0%,#fbfdff 100%);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,.84) inset,
+    0 16px 38px rgba(8,84,125,.10),
+    0 38px 96px rgba(15,49,80,.20);
+}
+
+#loading-overlay .hourglass{
+  width:78px;
+  height:78px;
+  color:#079aa0;
+  background:
+    radial-gradient(circle at 30% 20%,rgba(255,255,255,.98),rgba(232,250,251,.94));
+  border:1px solid rgba(8,119,249,.18);
+  box-shadow:
+    0 16px 38px rgba(24,105,125,.16),
+    0 0 0 8px rgba(224,247,249,.86),
+    0 0 42px rgba(53,191,209,.18);
+}
+
+#loading-overlay .hourglass::before{
+  font-size:2.15rem;
+  text-shadow:0 0 18px rgba(53,191,209,.20);
+}
+
+/* Main generation message: unmistakably the focal point */
+#loading-overlay .loader > p{
+  position:relative;
+  width:min(92vw,940px);
+  max-width:940px;
+  margin:.88rem auto .15rem;
+  padding:1rem 1.18rem 1.05rem;
+  border:1px solid rgba(8,119,249,.13);
+  border-radius:20px;
+  background:
+    radial-gradient(340px 150px at 0% 0%,rgba(53,191,209,.10),transparent 72%),
+    radial-gradient(340px 150px at 100% 100%,rgba(109,120,238,.08),transparent 72%),
+    rgba(255,255,255,.88);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 14px 34px rgba(10,82,121,.10);
+  font-size:clamp(1.04rem,1.65vw,1.32rem);
+  line-height:1.38;
+  font-weight:950;
+  letter-spacing:-.018em;
+  color:transparent;
+  background-clip:padding-box;
+  -webkit-background-clip:padding-box;
+}
+
+/* Gradient is applied to the actual glyphs through a positioned duplicate effect
+   without changing the HTML or localization string. */
+#loading-overlay .loader > p{
+  -webkit-text-fill-color:transparent;
+  background-image:
+    linear-gradient(100deg,#075fb5 0%,#078eb5 32%,#0a9c9e 64%,#5868d8 100%),
+    radial-gradient(340px 150px at 0% 0%,rgba(53,191,209,.10),transparent 72%),
+    radial-gradient(340px 150px at 100% 100%,rgba(109,120,238,.08),transparent 72%),
+    linear-gradient(180deg,rgba(255,255,255,.96),rgba(249,253,255,.92));
+  -webkit-background-clip:text,padding-box,padding-box,padding-box;
+  background-clip:text,padding-box,padding-box,padding-box;
+}
+
+/* Preserve a visible card border despite text clipping. */
+#loading-overlay .loader > p::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  border-radius:inherit;
+  background:
+    radial-gradient(340px 150px at 0% 0%,rgba(53,191,209,.10),transparent 72%),
+    radial-gradient(340px 150px at 100% 100%,rgba(109,120,238,.08),transparent 72%),
+    rgba(255,255,255,.94);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 14px 34px rgba(10,82,121,.10);
+}
+
+#loading-overlay .loader > p::after{
+  width:min(420px,56%);
+  height:5px;
+  margin:.88rem auto 0;
+  box-shadow:0 0 18px rgba(35,165,173,.17);
+}
+
+/* The affiliate area stays secondary to the generation status. */
+#loading-overlay .itbmo-affiliate-loading{
+  margin-top:.35rem;
+}
+
+@media(max-width:760px){
+  #loading-overlay .loader > p{
+    width:calc(100% - 8px);
+    padding:.86rem .88rem .92rem;
+    border-radius:17px;
+    font-size:clamp(.96rem,4.25vw,1.12rem);
+  }
+
+  #loading-overlay .hourglass{
+    width:68px;
+    height:68px;
+  }
+}
+
+
+/* =========================================================
+   ITBMO · v76i · GENERATION MESSAGE — HIGH CONTRAST PREMIUM
+   Only the generation-message card is changed.
+   ========================================================= */
+
+#loading-overlay .loader > p{
+  border:1px solid rgba(255,255,255,.34);
+  background:
+    radial-gradient(520px 180px at 8% 0%,rgba(62,196,214,.28),transparent 68%),
+    radial-gradient(480px 190px at 100% 100%,rgba(92,112,225,.24),transparent 70%),
+    linear-gradient(118deg,#075f96 0%,#087fa2 44%,#079c9c 100%);
+  color:#ffffff;
+  -webkit-text-fill-color:#ffffff;
+  -webkit-background-clip:padding-box;
+  background-clip:padding-box;
+  text-shadow:0 2px 12px rgba(0,38,72,.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.24),
+    0 18px 42px rgba(4,74,111,.20),
+    0 8px 22px rgba(7,156,156,.12);
+}
+
+/* Remove the pale under-card from v76h so the new blue/teal surface is the card itself. */
+#loading-overlay .loader > p::before{
+  background:transparent;
+  box-shadow:none;
+}
+
+/* Keep the progress accent visible against the darker card. */
+#loading-overlay .loader > p::after{
+  background:linear-gradient(90deg,#8ee9f2 0%,#ffffff 48%,#9ee8dc 100%);
+  box-shadow:0 0 18px rgba(255,255,255,.34);
+}
+
+@media(max-width:760px){
+  #loading-overlay .loader > p{
+    border-color:rgba(255,255,255,.30);
+    text-shadow:0 2px 10px rgba(0,38,72,.20);
+  }
+}
+
+
+/* =========================================================
+   ITBMO · v77 · IMMERSIVE DAY-BY-DAY ITINERARY
+   Presentation-only layer. Existing itinerary state, renderer and exports
+   remain intact.
+   ========================================================= */
+
+/* Legacy flat renderer stays mounted for compatibility but is no longer visible. */
+.itinerary-legacy-flat{
+  display:none!important;
+}
+
+/* ---------- MAIN PLANNER CTA ---------- */
+.itinerary-focus-launch{
+  display:none;
+  width:100%;
+  margin:.95rem 0 .15rem;
+}
+
+.itinerary-focus-launch.is-ready{
+  display:block;
+  animation:itineraryFocusReveal .5s var(--ease) both;
+}
+
+@keyframes itineraryFocusReveal{
+  from{opacity:0;transform:translateY(10px) scale(.99)}
+  to{opacity:1;transform:none}
+}
+
+.itinerary-focus-cta{
+  position:relative;
+  isolation:isolate;
+  display:grid;
+  width:100%;
+  min-height:116px;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:1rem;
+  padding:1.08rem 1.12rem;
+  overflow:hidden;
+  text-align:left;
+  color:#fff;
+  background:
+    radial-gradient(260px 150px at 8% 0%,rgba(255,255,255,.20),transparent 72%),
+    radial-gradient(360px 190px at 100% 100%,rgba(109,120,238,.22),transparent 72%),
+    linear-gradient(118deg,#0877f9 0%,#078fb0 48%,#0aa7a5 100%);
+  border:1px solid rgba(255,255,255,.32);
+  border-radius:1.5rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.26),
+    0 18px 44px rgba(5,94,143,.18),
+    0 5px 16px rgba(9,127,153,.10);
+  cursor:pointer;
+  transition:transform .28s var(--ease),box-shadow .28s var(--ease),filter .25s ease;
+}
+
+.itinerary-focus-cta::after{
+  content:"";
+  position:absolute;
+  width:220px;
+  height:220px;
+  right:-90px;
+  top:-120px;
+  z-index:-1;
+  border-radius:999px;
+  background:rgba(255,255,255,.13);
+}
+
+.itinerary-focus-cta:hover{
+  transform:translateY(-3px);
+  filter:saturate(1.05);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    0 24px 54px rgba(5,94,143,.23),
+    0 8px 20px rgba(9,127,153,.13);
+}
+
+.itinerary-focus-cta:focus-visible{
+  outline:none;
+  box-shadow:
+    0 0 0 4px rgba(8,119,249,.16),
+    0 24px 54px rgba(5,94,143,.23);
+}
+
+.itinerary-focus-cta__icon{
+  display:grid;
+  width:58px;
+  height:58px;
+  place-items:center;
+  color:#fff;
+  background:rgba(255,255,255,.14);
+  border:1px solid rgba(255,255,255,.32);
+  border-radius:1.05rem;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 10px 24px rgba(4,61,108,.13);
+  font-size:1.45rem;
+}
+
+.itinerary-focus-cta__copy{
+  display:flex;
+  min-width:0;
+  flex-direction:column;
+  gap:.15rem;
+}
+
+.itinerary-focus-cta__copy strong{
+  color:#fff;
+  font-size:1.12rem;
+  line-height:1.15;
+  font-weight:950;
+  letter-spacing:-.035em;
+}
+
+.itinerary-focus-cta__copy small{
+  color:rgba(245,253,255,.88);
+  font-size:.74rem;
+  line-height:1.4;
+  font-weight:650;
+}
+
+.itinerary-focus-cta__meta{
+  display:inline-flex;
+  width:max-content;
+  max-width:100%;
+  margin-top:.34rem;
+  padding:.32rem .55rem;
+  color:#064f65;
+  background:rgba(255,255,255,.88);
+  border:1px solid rgba(255,255,255,.72);
+  border-radius:999px;
+  font-size:.62rem;
+  line-height:1.2;
+  font-weight:900;
+}
+
+.itinerary-focus-cta__arrow{
+  display:grid;
+  width:48px;
+  height:48px;
+  place-items:center;
+  color:#07657f;
+  background:#fff;
+  border-radius:999px;
+  box-shadow:0 10px 24px rgba(4,61,108,.15);
+  font-size:1.35rem;
+  font-weight:900;
+  transition:transform .28s var(--ease);
+}
+
+.itinerary-focus-cta:hover .itinerary-focus-cta__arrow{
+  transform:translateX(4px);
+}
+
+/* Toolbar now reads as the action row directly under the immersive itinerary CTA. */
+.itinerary-focus-launch.is-ready + .itinerary-legacy-flat + .itinerary-legacy-flat + .toolbar,
+.toolbar.itbmo-toolbar-ready{
+  margin-top:.72rem;
+}
+
+/* ---------- FULL-SCREEN FOCUS MODE ---------- */
+body.itinerary-focus-open{
+  overflow:hidden!important;
+}
+
+.itinerary-focus-modal{
+  position:fixed;
+  inset:0;
+  z-index:62000;
+  display:grid;
+  place-items:stretch;
+  padding:0;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  transition:opacity .24s ease,visibility .24s ease;
+}
+
+.itinerary-focus-modal.is-open{
+  opacity:1;
+  visibility:visible;
+  pointer-events:auto;
+}
+
+.itinerary-focus-backdrop{
+  position:absolute;
+  inset:0;
+  background:
+    radial-gradient(1000px 700px at 0% 0%,rgba(53,191,209,.18),transparent 66%),
+    radial-gradient(1000px 700px at 100% 100%,rgba(109,120,238,.18),transparent 68%),
+    rgba(232,243,248,.96);
+  backdrop-filter:blur(22px) saturate(125%);
+  -webkit-backdrop-filter:blur(22px) saturate(125%);
+}
+
+.itinerary-focus-shell{
+  position:relative;
+  z-index:1;
+  display:grid;
+  width:100%;
+  height:100dvh;
+  grid-template-rows:auto auto minmax(0,1fr);
+  overflow:hidden;
+  color:var(--ink);
+  background:
+    radial-gradient(900px 470px at -6% 0%,rgba(53,191,209,.11),transparent 70%),
+    radial-gradient(900px 470px at 106% 0%,rgba(109,120,238,.10),transparent 70%),
+    linear-gradient(180deg,#f8fcfd 0%,#f5fafc 100%);
+}
+
+.itinerary-focus-header{
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:1rem;
+  padding:.86rem clamp(1rem,3vw,2rem);
+  background:rgba(255,255,255,.88);
+  border-bottom:1px solid rgba(35,75,112,.09);
+  box-shadow:0 9px 30px rgba(14,52,82,.06);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px);
+}
+
+.itinerary-focus-back,
+.itinerary-focus-close{
+  border:0;
+  cursor:pointer;
+}
+
+.itinerary-focus-back{
+  display:inline-flex;
+  align-items:center;
+  gap:.45rem;
+  min-height:42px;
+  padding:.5rem .76rem;
+  color:#31576f;
+  background:#fff;
+  border:1px solid rgba(35,75,112,.11);
+  border-radius:999px;
+  box-shadow:0 7px 18px rgba(15,55,86,.06);
+  font-size:.7rem;
+  font-weight:850;
+}
+
+.itinerary-focus-back:hover{
+  color:#0b6e84;
+  border-color:rgba(10,151,153,.24);
+  transform:translateY(-1px);
+}
+
+.itinerary-focus-heading{
+  min-width:0;
+  text-align:center;
+}
+
+.itinerary-focus-eyebrow{
+  display:block;
+  color:#168396;
+  font-size:.58rem;
+  line-height:1.1;
+  font-weight:950;
+  letter-spacing:.10em;
+  text-transform:uppercase;
+}
+
+.itinerary-focus-heading h2{
+  margin:.12rem 0 0;
+  color:var(--ink);
+  font-size:clamp(1.28rem,2.4vw,1.9rem);
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.055em;
+}
+
+.itinerary-focus-heading p{
+  margin:.25rem 0 0;
+  color:#668095;
+  font-size:.69rem;
+  line-height:1.3;
+  font-weight:650;
+}
+
+.itinerary-focus-close{
+  display:grid;
+  width:42px;
+  height:42px;
+  place-items:center;
+  padding:0;
+  color:#45687e;
+  background:#fff;
+  border:1px solid rgba(35,75,112,.11);
+  border-radius:999px;
+  box-shadow:0 7px 18px rgba(15,55,86,.06);
+  font-size:1.38rem;
+  line-height:1;
+}
+
+.itinerary-focus-close:hover{
+  color:#0a7087;
+  transform:rotate(4deg) scale(1.04);
+}
+
+.itinerary-focus-cities{
+  position:relative;
+  z-index:3;
+  display:flex;
+  justify-content:center;
+  gap:.55rem;
+  width:100%;
+  padding:.78rem 1rem;
+  overflow-x:auto;
+  background:rgba(247,252,253,.88);
+  border-bottom:1px solid rgba(35,75,112,.08);
+  scrollbar-width:none;
+}
+
+.itinerary-focus-cities::-webkit-scrollbar{display:none}
+
+.itinerary-focus-city-btn{
+  display:inline-flex;
+  flex:0 0 auto;
+  align-items:center;
+  gap:.48rem;
+  min-height:46px;
+  padding:.5rem .78rem;
+  color:#31596f;
+  background:#fff;
+  border:1px solid rgba(35,75,112,.12);
+  border-radius:999px;
+  box-shadow:0 7px 18px rgba(20,52,80,.05);
+  cursor:pointer;
+  transition:transform .22s var(--ease),box-shadow .22s var(--ease),background .22s ease,color .22s ease;
+}
+
+.itinerary-focus-city-btn span{
+  display:grid;
+  width:28px;
+  height:28px;
+  place-items:center;
+  color:#15798b;
+  background:#eaf9fa;
+  border-radius:999px;
+  font-size:.62rem;
+  font-weight:950;
+}
+
+.itinerary-focus-city-btn strong{
+  font-size:.76rem;
+  font-weight:900;
+}
+
+.itinerary-focus-city-btn:hover{
+  transform:translateY(-2px);
+  box-shadow:0 11px 24px rgba(20,52,80,.09);
+}
+
+.itinerary-focus-city-btn.active{
+  color:#fff;
+  background:linear-gradient(120deg,#0877f9 0%,#078eb0 48%,#0aa7a5 100%);
+  border-color:transparent;
+  box-shadow:0 12px 28px rgba(8,119,249,.18);
+}
+
+.itinerary-focus-city-btn.active span{
+  color:#08738c;
+  background:#fff;
+}
+
+.itinerary-focus-stage{
+  position:relative;
+  display:grid;
+  min-height:0;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:.8rem;
+  padding:1rem clamp(.8rem,2.4vw,1.6rem) 1.15rem;
+  overflow:hidden;
+}
+
+.itinerary-focus-day-card{
+  display:grid;
+  width:min(100%,1440px);
+  height:100%;
+  min-height:0;
+  grid-template-rows:auto minmax(0,1fr) auto;
+  justify-self:center;
+  overflow:hidden;
+  background:#fff;
+  border:1px solid rgba(35,75,112,.11);
+  border-radius:1.55rem;
+  box-shadow:0 4px 10px rgba(5,31,61,.035),0 24px 60px rgba(18,55,90,.10);
+}
+
+.itinerary-focus-day-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1rem;
+  padding:.8rem 1rem;
+  background:
+    radial-gradient(320px 130px at 100% 0%,rgba(53,191,209,.10),transparent 70%),
+    linear-gradient(180deg,#fff,#f8fcfd);
+  border-bottom:1px solid rgba(35,75,112,.08);
+}
+
+.itinerary-focus-city-label{
+  display:block;
+  margin-bottom:.12rem;
+  color:#128296;
+  font-size:.6rem;
+  font-weight:950;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}
+
+.itinerary-focus-day-head h3{
+  margin:0;
+  color:var(--ink);
+  font-size:1.05rem;
+  line-height:1.15;
+  font-weight:950;
+  letter-spacing:-.035em;
+}
+
+.itinerary-focus-day-count{
+  flex:0 0 auto;
+  padding:.35rem .58rem;
+  color:#526f84;
+  background:#f1f8fa;
+  border:1px solid rgba(35,75,112,.08);
+  border-radius:999px;
+  font-size:.63rem;
+  font-weight:850;
+}
+
+.itinerary-focus-day-content{
+  min-height:0;
+  padding:.75rem .85rem;
+  overflow:auto;
+  overscroll-behavior:contain;
+}
+
+.itinerary-focus-table{
+  margin:0;
+  font-size:.78rem;
+}
+
+.itinerary-focus-table th{
+  position:sticky;
+  top:0;
+  z-index:2;
+}
+
+.itinerary-focus-dots{
+  display:flex;
+  justify-content:center;
+  gap:.35rem;
+  padding:.62rem .8rem .7rem;
+  overflow-x:auto;
+  border-top:1px solid rgba(35,75,112,.07);
+  scrollbar-width:none;
+}
+
+.itinerary-focus-dots::-webkit-scrollbar{display:none}
+
+.itinerary-focus-dot{
+  display:grid;
+  width:29px;
+  height:29px;
+  flex:0 0 auto;
+  place-items:center;
+  padding:0;
+  color:#6a8091;
+  background:#f3f8fa;
+  border:1px solid rgba(35,75,112,.10);
+  border-radius:999px;
+  cursor:pointer;
+  font-size:.58rem;
+  font-weight:900;
+  transition:transform .2s ease,background .2s ease,color .2s ease;
+}
+
+.itinerary-focus-dot.active{
+  color:#fff;
+  background:linear-gradient(135deg,#0877f9,#0aa7a5);
+  border-color:transparent;
+  transform:scale(1.08);
+}
+
+.itinerary-focus-nav{
+  display:grid;
+  width:54px;
+  height:54px;
+  place-items:center;
+  padding:0;
+  color:#08738b;
+  background:#fff;
+  border:1px solid rgba(35,75,112,.10);
+  border-radius:999px;
+  box-shadow:0 12px 28px rgba(17,68,104,.10);
+  cursor:pointer;
+  font-size:2rem;
+  line-height:1;
+  transition:transform .22s var(--ease),box-shadow .22s var(--ease),opacity .2s ease;
+}
+
+.itinerary-focus-nav:hover:not(:disabled){
+  transform:scale(1.06);
+  box-shadow:0 16px 34px rgba(17,68,104,.14);
+}
+
+.itinerary-focus-nav:disabled{
+  opacity:.28;
+  cursor:default;
+}
+
+.itinerary-focus-empty{
+  margin:1rem;
+  color:#6b8192;
+  text-align:center;
+}
+
+/* ---------- MOBILE: itinerary rows become premium activity cards ---------- */
+@media(max-width:760px){
+  .itinerary-focus-cta{
+    min-height:108px;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:.72rem;
+    padding:.92rem;
+    border-radius:1.25rem;
+  }
+
+  .itinerary-focus-cta__icon{
+    width:48px;
+    height:48px;
+    border-radius:.9rem;
+    font-size:1.15rem;
+  }
+
+  .itinerary-focus-cta__copy strong{
+    font-size:.98rem;
+  }
+
+  .itinerary-focus-cta__copy small{
+    font-size:.66rem;
+  }
+
+  .itinerary-focus-cta__meta{
+    font-size:.56rem;
+  }
+
+  .itinerary-focus-cta__arrow{
+    width:40px;
+    height:40px;
+    font-size:1.05rem;
+  }
+
+  .itinerary-focus-header{
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:.55rem;
+    padding:.62rem .68rem;
+  }
+
+  .itinerary-focus-back{
+    width:40px;
+    height:40px;
+    justify-content:center;
+    padding:0;
+  }
+
+  .itinerary-focus-back span:last-child{
+    display:none;
+  }
+
+  .itinerary-focus-heading p{
+    display:none;
+  }
+
+  .itinerary-focus-heading h2{
+    font-size:1.12rem;
+  }
+
+  .itinerary-focus-eyebrow{
+    font-size:.5rem;
+  }
+
+  .itinerary-focus-close{
+    width:40px;
+    height:40px;
+  }
+
+  .itinerary-focus-cities{
+    justify-content:flex-start;
+    padding:.62rem .65rem;
+  }
+
+  .itinerary-focus-city-btn{
+    min-height:42px;
+    padding:.42rem .62rem;
+  }
+
+  .itinerary-focus-stage{
+    grid-template-columns:1fr;
+    gap:.55rem;
+    padding:.62rem;
+  }
+
+  .itinerary-focus-nav{
+    position:absolute;
+    z-index:5;
+    top:50%;
+    width:42px;
+    height:42px;
+    transform:translateY(-50%);
+    background:rgba(255,255,255,.94);
+    font-size:1.55rem;
+  }
+
+  .itinerary-focus-nav:hover:not(:disabled){
+    transform:translateY(-50%) scale(1.04);
+  }
+
+  .itinerary-focus-nav--prev{left:.38rem}
+  .itinerary-focus-nav--next{right:.38rem}
+
+  .itinerary-focus-day-card{
+    width:100%;
+    height:100%;
+    border-radius:1.2rem;
+  }
+
+  .itinerary-focus-day-head{
+    padding:.68rem .8rem;
+  }
+
+  .itinerary-focus-day-head h3{
+    font-size:.94rem;
+  }
+
+  .itinerary-focus-day-content{
+    padding:.62rem;
+  }
+
+  .itinerary-focus-table,
+  .itinerary-focus-table tbody,
+  .itinerary-focus-table tr,
+  .itinerary-focus-table td{
+    display:block;
+    width:100%!important;
+  }
+
+  .itinerary-focus-table{
+    border:0;
+    background:transparent;
+    box-shadow:none;
+  }
+
+  .itinerary-focus-table thead{
+    display:none;
+  }
+
+  .itinerary-focus-table tbody{
+    display:grid;
+    gap:.62rem;
+  }
+
+  .itinerary-focus-table tr{
+    overflow:hidden;
+    background:#fff!important;
+    border:1px solid rgba(35,75,112,.10);
+    border-radius:1rem;
+    box-shadow:0 9px 24px rgba(20,52,80,.055);
+  }
+
+  .itinerary-focus-table td{
+    display:grid!important;
+    grid-template-columns:minmax(84px,.7fr) minmax(0,1.3fr);
+    gap:.7rem;
+    padding:.52rem .65rem!important;
+    text-align:left!important;
+    white-space:normal!important;
+    border:0!important;
+    border-bottom:1px solid rgba(35,75,112,.06)!important;
+    font-size:.72rem;
+    line-height:1.42;
+  }
+
+  .itinerary-focus-table td:last-child{
+    border-bottom:0!important;
+  }
+
+  .itinerary-focus-table td::before{
+    content:attr(data-label);
+    color:#19788c;
+    font-size:.58rem;
+    line-height:1.35;
+    font-weight:900;
+    letter-spacing:.03em;
+    text-transform:uppercase;
+  }
+}
+
+@media(max-width:430px){
+  .itinerary-focus-cta{
+    grid-template-columns:auto minmax(0,1fr);
+  }
+
+  .itinerary-focus-cta__arrow{
+    display:none;
+  }
+
+  .itinerary-focus-cta__meta{
+    width:100%;
+    white-space:normal;
+  }
+
+  .itinerary-focus-day-count{
+    font-size:.58rem;
+  }
+}
+
+/* =========================================================
+   ITBMO · v77 · GENERATION MESSAGE — CHAMPAGNE GOLD
+   ---------------------------------------------------------
+   Honest UX choice: use the warm yellow family as a premium highlight,
+   but not the same saturated "discount badge" treatment. This keeps
+   generation visually important without making it look like an ad/warning.
+   ========================================================= */
+
+#loading-overlay .loader > p{
+  border:1px solid rgba(200,150,24,.26);
+  background:
+    radial-gradient(420px 170px at 8% 0%,rgba(255,255,255,.72),transparent 72%),
+    radial-gradient(480px 190px at 100% 100%,rgba(255,198,75,.20),transparent 72%),
+    linear-gradient(118deg,#fff9df 0%,#ffedaa 50%,#ffe4a0 100%);
+  color:#083f63;
+  -webkit-text-fill-color:#083f63;
+  -webkit-background-clip:padding-box;
+  background-clip:padding-box;
+  text-shadow:none;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.94),
+    0 18px 42px rgba(130,94,12,.13),
+    0 7px 20px rgba(12,104,136,.08);
+}
+
+#loading-overlay .loader > p::before{
+  background:transparent;
+  box-shadow:none;
+}
+
+#loading-overlay .loader > p::after{
+  background:linear-gradient(90deg,#0877f9 0%,#0aa7a5 48%,#d79a16 100%);
+  box-shadow:0 0 17px rgba(10,151,153,.18);
+}
+
+/* =========================================================
+   ITBMO · v78 · FINAL IMMERSIVE UX POLISH
+   Surgical presentation/performance companion layer only.
+   ========================================================= */
+
+/* More breathing room between itinerary actions and monetization. */
+.itbmo-affiliate-after{
+  margin:2.6rem 0 .35rem;
+}
+
+.itbmo-affiliate-after::before{
+  content:"";
+  display:block;
+  width:min(180px,32%);
+  height:3px;
+  margin:0 auto 1.35rem;
+  border-radius:999px;
+  background:linear-gradient(90deg,rgba(8,119,249,0),rgba(53,191,209,.55),rgba(10,151,153,.55),rgba(109,120,238,0));
+}
+
+/* Focus header: stronger travel-reward moment while preserving readability. */
+.itinerary-focus-header{
+  background:
+    radial-gradient(460px 160px at 15% 0%,rgba(53,191,209,.10),transparent 72%),
+    radial-gradient(460px 160px at 85% 0%,rgba(109,120,238,.08),transparent 72%),
+    rgba(255,255,255,.93);
+}
+
+/* Back to Planner gets clear visual hierarchy and a reassuring return affordance. */
+.itinerary-focus-back{
+  color:#fff;
+  background:linear-gradient(120deg,#0877f9 0%,#078fb0 50%,#0aa7a5 100%);
+  border-color:transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.28),
+    0 10px 24px rgba(5,99,146,.16);
+  transition:transform .22s var(--ease),box-shadow .22s var(--ease),filter .22s ease;
+}
+
+.itinerary-focus-back:hover{
+  color:#fff;
+  transform:translateY(-2px);
+  filter:saturate(1.04) brightness(1.02);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    0 14px 30px rgba(5,99,146,.21);
+}
+
+.itinerary-focus-back:focus-visible{
+  outline:none;
+  box-shadow:
+    0 0 0 4px rgba(8,119,249,.15),
+    0 14px 30px rgba(5,99,146,.21);
+}
+
+/* The title deserves color, but not a solid saturated fill.
+   Gradient text keeps it premium and coherent with ASTRA. */
+.itinerary-focus-heading h2{
+  color:transparent;
+  background:linear-gradient(100deg,#0877f9 0%,#078fae 48%,#0a9799 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+}
+
+.itinerary-focus-eyebrow{
+  color:#0a8293;
+}
+
+/* Day card has more personality without adding noise to the table itself. */
+.itinerary-focus-day-head{
+  background:
+    radial-gradient(360px 145px at 100% 0%,rgba(53,191,209,.16),transparent 70%),
+    radial-gradient(300px 130px at 0% 100%,rgba(8,119,249,.07),transparent 70%),
+    linear-gradient(180deg,#ffffff 0%,#f2fbfc 100%);
+}
+
+.itinerary-focus-day-count{
+  color:#6b4b00;
+  background:linear-gradient(120deg,#fff5c8 0%,#ffe69a 100%);
+  border-color:rgba(185,120,0,.15);
+  box-shadow:0 5px 15px rgba(200,143,25,.08);
+}
+
+/* Navigation arrows become more discoverable but remain secondary to city tabs. */
+.itinerary-focus-nav{
+  color:#fff;
+  background:linear-gradient(145deg,#0877f9 0%,#0a9e9c 100%);
+  border-color:transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.26),
+    0 14px 30px rgba(7,105,148,.17);
+}
+
+.itinerary-focus-nav:hover:not(:disabled){
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.30),
+    0 18px 36px rgba(7,105,148,.22);
+}
+
+.itinerary-focus-nav:disabled{
+  color:#7ca5b1;
+  background:#edf6f8;
+  border:1px solid rgba(35,75,112,.08);
+  box-shadow:none;
+  opacity:.5;
+}
+
+/* Small transition between days/cities, intentionally fast. */
+.itinerary-focus-day-card{
+  animation:itbmoDayCardIn .22s var(--ease) both;
+}
+
+@keyframes itbmoDayCardIn{
+  from{opacity:.82;transform:translateX(7px)}
+  to{opacity:1;transform:none}
+}
+
+@media(max-width:760px){
+  .itbmo-affiliate-after{
+    margin-top:2rem;
+  }
+
+  .itbmo-affiliate-after::before{
+    margin-bottom:1rem;
+  }
+
+  .itinerary-focus-back{
+    background:linear-gradient(135deg,#0877f9,#0aa7a5);
+  }
+
+  .itinerary-focus-heading h2{
+    font-size:1.14rem;
+  }
+
+  .itinerary-focus-nav{
+    background:rgba(255,255,255,.96);
+    color:#087b94;
+    border:1px solid rgba(8,119,249,.14);
+    box-shadow:0 10px 24px rgba(17,68,104,.12);
+  }
+
+  .itinerary-focus-nav:disabled{
+    opacity:.38;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .itinerary-focus-day-card{
+    animation:none;
+  }
+}
+
+/* =========================================================
+   ITBMO · SURGICAL OVERLAY COPY LAYOUT
+   Keeps the existing champagne-gold visual treatment.
+   ========================================================= */
+#loading-overlay .loader > p{
+  white-space:pre-line;
+  text-wrap:balance;
+  max-width:1080px;
+  line-height:1.42;
+}
+
+/* =========================================================
+   ITBMO · ASTRA LOADING OVERLAY · PREMIUM 3-LEVEL COPY FIX
+   ---------------------------------------------------------
+   Surgical presentation-only override.
+   Keeps the existing champagne-gold generation card and
+   gives the structured JS markup a real visual hierarchy.
+   ========================================================= */
+
+#loading-overlay .loader > p.astra-overlay-copy{
+  position:relative;
+  display:flex;
+  width:min(92vw,1040px);
+  max-width:1040px;
+  flex-direction:column;
+  align-items:center;
+  gap:.82rem;
+
+  margin:.88rem auto .15rem;
+  padding:1.08rem 1.3rem 1.12rem;
+
+  color:#083f63;
+  -webkit-text-fill-color:currentColor;
+  font-size:1rem;
+  font-weight:600;
+  line-height:1.4;
+  letter-spacing:normal;
+  text-align:center;
+  text-shadow:none;
+  white-space:normal;
+
+  border:1px solid rgba(200,150,24,.26);
+  border-radius:20px;
+  background:
+    radial-gradient(420px 170px at 8% 0%,rgba(255,255,255,.72),transparent 72%),
+    radial-gradient(480px 190px at 100% 100%,rgba(255,198,75,.20),transparent 72%),
+    linear-gradient(118deg,#fff9df 0%,#ffedaa 50%,#ffe4a0 100%);
+  -webkit-background-clip:padding-box;
+  background-clip:padding-box;
+
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.94),
+    0 18px 42px rgba(130,94,12,.13),
+    0 7px 20px rgba(12,104,136,.08);
+}
+
+/* Reset the old global text-fill behavior on every structured child. */
+#loading-overlay .loader > p.astra-overlay-copy *{
+  -webkit-text-fill-color:currentColor;
+}
+
+/* Existing legacy under-card must remain disabled. */
+#loading-overlay .loader > p.astra-overlay-copy::before{
+  content:"";
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  background:transparent;
+  box-shadow:none;
+  pointer-events:none;
+}
+
+/* Progress accent stays visually secondary. */
+#loading-overlay .loader > p.astra-overlay-copy::after{
+  content:"";
+  display:block;
+  width:min(390px,48%);
+  height:5px;
+  margin:.08rem auto 0;
+  border-radius:999px;
+  background:linear-gradient(90deg,#0877f9 0%,#0aa7a5 48%,#d79a16 100%);
+  box-shadow:0 0 17px rgba(10,151,153,.18);
+}
+
+/* LEVEL 1 · Main message */
+#loading-overlay .astra-overlay-hero{
+  display:flex;
+  max-width:900px;
+  flex-direction:column;
+  align-items:center;
+  gap:.18rem;
+}
+
+#loading-overlay .astra-overlay-hero > strong{
+  display:block;
+  color:#083f63;
+  font-size:clamp(1.28rem,2vw,1.72rem);
+  line-height:1.14;
+  font-weight:950;
+  letter-spacing:-.035em;
+  text-wrap:balance;
+}
+
+#loading-overlay .astra-overlay-hero > span{
+  display:block;
+  color:#118294;
+  font-size:clamp(.88rem,1.18vw,1.02rem);
+  line-height:1.25;
+  font-weight:850;
+  letter-spacing:.015em;
+}
+
+/* LEVEL 2 · Time pill */
+#loading-overlay .astra-overlay-time{
+  display:flex;
+  width:min(100%,820px);
+  flex-direction:column;
+  align-items:center;
+  gap:.28rem;
+  padding:.62rem 1rem .68rem;
+
+  color:#083f63;
+  background:
+    linear-gradient(180deg,rgba(255,255,255,.94),rgba(255,255,255,.72));
+  border:1px solid rgba(178,133,15,.20);
+  border-radius:1rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 8px 22px rgba(123,91,12,.065);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+
+#loading-overlay .astra-overlay-time-label{
+  color:#7a5906;
+  font-size:.76rem;
+  line-height:1.2;
+  font-weight:900;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+}
+
+#loading-overlay .astra-overlay-time-ranges{
+  display:block;
+  color:#083f63;
+  font-size:clamp(.96rem,1.38vw,1.12rem);
+  line-height:1.3;
+  font-weight:930;
+  letter-spacing:-.018em;
+  text-wrap:balance;
+}
+
+#loading-overlay .astra-overlay-time-ranges i{
+  padding:0 .22rem;
+  color:#d09510;
+  font-style:normal;
+}
+
+/* LEVEL 3 · Value + instruction */
+#loading-overlay .astra-overlay-value{
+  display:block;
+  max-width:880px;
+  color:#52697b;
+  font-size:clamp(.80rem,1.08vw,.94rem);
+  line-height:1.48;
+  font-weight:630;
+  text-wrap:balance;
+}
+
+#loading-overlay .astra-overlay-value strong{
+  color:#083f63;
+  font-weight:930;
+}
+
+/* Mobile: preserve hierarchy without making the card too tall. */
+@media(max-width:760px){
+  #loading-overlay .loader > p.astra-overlay-copy{
+    width:calc(100% - 8px);
+    gap:.64rem;
+    padding:.88rem .74rem .94rem;
+    border-radius:17px;
+  }
+
+  #loading-overlay .astra-overlay-hero > strong{
+    font-size:clamp(1.02rem,5vw,1.28rem);
+  }
+
+  #loading-overlay .astra-overlay-hero > span{
+    font-size:.82rem;
+  }
+
+  #loading-overlay .astra-overlay-time{
+    width:100%;
+    padding:.55rem .62rem .6rem;
+    border-radius:.9rem;
+  }
+
+  #loading-overlay .astra-overlay-time-label{
+    font-size:.69rem;
+  }
+
+  #loading-overlay .astra-overlay-time-ranges{
+    max-width:330px;
+    font-size:.86rem;
+    line-height:1.38;
+  }
+
+  #loading-overlay .astra-overlay-value{
+    max-width:350px;
+    font-size:.76rem;
+    line-height:1.43;
+  }
+
+  #loading-overlay .astra-overlay-value br{
+    display:none;
+  }
+
+  #loading-overlay .loader > p.astra-overlay-copy::after{
+    width:min(260px,62%);
+    height:4px;
+  }
+}
+

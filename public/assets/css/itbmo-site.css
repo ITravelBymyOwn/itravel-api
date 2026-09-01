@@ -2507,3 +2507,555 @@ body.example-focus-open{overflow:hidden!important;overscroll-behavior:none}
     animation:none!important;
   }
 }
+
+/* =========================================================
+   ITBMO · PROMOTION CONVERSION V5.3
+   Surgical refinement: stronger 50% savings visibility without
+   launch/new-product language or artificial urgency.
+   ========================================================= */
+.hero__price--promo,.final-cta__price--promo{
+  flex-wrap:wrap;
+  column-gap:.62rem;
+  row-gap:.46rem;
+  align-items:center;
+}
+
+.hero__price--promo > span:first-child,
+.final-cta__price--promo > span:first-child{
+  font-weight:720;
+  letter-spacing:.01em;
+}
+
+.hero__price--promo > strong{
+  font-size:1.86rem;
+}
+
+.hero__price--promo del,
+.final-cta__price--promo del{
+  opacity:.58;
+  font-weight:780;
+  font-size:.92rem;
+  line-height:1.05;
+}
+
+.promo-badge{
+  position:relative;
+  isolation:isolate;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:42px;
+  padding:.54rem .92rem;
+  border-radius:999px;
+  color:#5d3a00;
+  background:
+    radial-gradient(90px 50px at 18% 0%,rgba(255,255,255,.88),transparent 72%),
+    linear-gradient(120deg,#fff2ad 0%,#ffd96b 48%,#ffc56b 100%);
+  border:1px solid rgba(185,120,0,.20);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.90),
+    0 10px 26px rgba(202,139,16,.18),
+    0 0 0 4px rgba(255,214,103,.10);
+  font-size:.82rem;
+  font-style:normal;
+  font-weight:950;
+  letter-spacing:.035em;
+  text-transform:uppercase;
+  white-space:nowrap;
+  transform:translateZ(0);
+}
+
+.promo-badge b{
+  font:inherit;
+}
+
+.promo-badge::after{
+  content:"";
+  position:absolute;
+  inset:-3px;
+  z-index:-1;
+  border-radius:inherit;
+  border:1px solid rgba(255,202,65,.24);
+  opacity:.7;
+  animation:itbmoPromoPulse 6.5s ease-in-out infinite;
+}
+
+@keyframes itbmoPromoPulse{
+  0%,78%,100%{transform:scale(1);opacity:.24}
+  84%{transform:scale(1.055);opacity:.58}
+  91%{transform:scale(1);opacity:.24}
+}
+
+.promo-badge--dark{
+  color:#513400;
+  background:
+    radial-gradient(90px 50px at 18% 0%,rgba(255,255,255,.90),transparent 72%),
+    linear-gradient(120deg,#fff3a5 0%,#ffd45d 50%,#ffbd64 100%);
+  border-color:rgba(255,255,255,.34);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.92),
+    0 12px 30px rgba(0,0,0,.13),
+    0 0 0 4px rgba(255,220,108,.10);
+}
+
+.how-card__price strong{
+  color:#9b6500;
+  font-weight:900;
+}
+
+@media(max-width:680px){
+  .hero__price--promo{
+    align-items:center;
+  }
+  .promo-badge{
+    width:max-content;
+    min-height:40px;
+    padding:.5rem .82rem;
+    font-size:.77rem;
+  }
+  .final-cta__price--promo{
+    justify-content:center;
+  }
+}
+
+@media(prefers-reduced-motion:reduce){
+  .promo-badge::after{
+    animation:none;
+  }
+}
+
+/* =========================================================
+   V5.4 · ASTRA STORYTELLING · PREMIUM VALUE LAYER
+   Surgical addition: uses the existing blue/teal/indigo,
+   glass, spacing and Apple-like restraint of the Home.
+   ========================================================= */
+
+.astra-story-intro{
+  position:relative;
+  display:flex;
+  gap:.82rem;
+  align-items:flex-start;
+  margin:1rem 0 1.05rem;
+  padding:.92rem 1rem;
+  overflow:hidden;
+  border-radius:20px;
+  background:
+    radial-gradient(260px 120px at 0% 0%,rgba(53,191,209,.13),transparent 72%),
+    linear-gradient(135deg,rgba(247,252,255,.90),rgba(244,247,255,.82));
+  border:1px solid rgba(72,118,160,.10);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.95),0 12px 34px rgba(18,55,90,.05);
+}
+.astra-story-intro::after{
+  content:"";
+  position:absolute;
+  width:150px;height:150px;
+  right:-78px;bottom:-90px;
+  border-radius:999px;
+  background:rgba(109,120,238,.08);
+  filter:blur(2px);
+  pointer-events:none;
+}
+.astra-story-intro__spark{
+  position:relative;z-index:1;
+  width:34px;height:34px;flex:0 0 34px;
+  display:grid;place-items:center;
+  border-radius:11px;
+  color:#fff;
+  background:linear-gradient(135deg,var(--blue),var(--teal));
+  box-shadow:0 9px 22px rgba(8,119,249,.16);
+  font-weight:900;
+}
+.astra-story-intro>div{position:relative;z-index:1}
+.astra-story-intro strong{
+  display:block;
+  color:var(--ink);
+  font-size:.92rem;
+  line-height:1.35;
+  letter-spacing:-.02em;
+}
+.astra-story-intro p{
+  margin:.28rem 0 0;
+  color:var(--text);
+  font-size:.76rem;
+  line-height:1.55;
+}
+
+.astra-value-grid{
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.58rem;
+  margin-top:.85rem;
+}
+.astra-value-card{
+  position:relative;
+  min-height:184px;
+  padding:1rem 1rem .92rem;
+  overflow:hidden;
+  border-radius:20px;
+  background:linear-gradient(150deg,rgba(255,255,255,.92),rgba(248,251,253,.70));
+  border:1px solid rgba(34,91,128,.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.96),
+    0 12px 34px rgba(18,55,90,.055);
+  transition:transform .28s var(--ease),box-shadow .28s var(--ease),border-color .28s ease;
+}
+.astra-value-card:hover{
+  transform:translateY(-3px);
+  border-color:rgba(30,102,146,.14);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.98),0 18px 42px rgba(18,55,90,.085);
+}
+.astra-value-card::before{
+  content:"";
+  position:absolute;
+  inset:0 auto 0 0;
+  width:3px;
+  background:linear-gradient(180deg,var(--blue),var(--teal),var(--indigo));
+  opacity:.72;
+}
+.astra-value-card::after{
+  content:"";
+  position:absolute;
+  width:120px;height:120px;
+  right:-70px;top:-65px;
+  border-radius:999px;
+  background:rgba(53,191,209,.07);
+  pointer-events:none;
+}
+.astra-value-card--route::after{background:rgba(109,120,238,.08)}
+.astra-value-card--time::after{background:rgba(215,154,22,.09)}
+.astra-value-card--you::after{background:rgba(53,185,142,.08)}
+
+.astra-value-card__number{
+  position:absolute;
+  right:.82rem;top:.58rem;
+  color:rgba(7,31,61,.055);
+  font-size:2.05rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.07em;
+}
+.astra-value-card__icon{
+  width:34px;height:34px;
+  display:grid;place-items:center;
+  margin-bottom:.68rem;
+  border-radius:11px;
+  color:#087b93;
+  background:linear-gradient(145deg,#eefbfc,#e8f6fb);
+  border:1px solid rgba(10,127,153,.09);
+  font-size:.9rem;
+  font-weight:900;
+}
+.astra-value-card--route .astra-value-card__icon{
+  color:#6358c6;background:linear-gradient(145deg,#f3f0ff,#eef1ff)
+}
+.astra-value-card--time .astra-value-card__icon{
+  color:#956d0f;background:linear-gradient(145deg,#fff8e8,#fff4d9)
+}
+.astra-value-card--you .astra-value-card__icon{
+  color:#19745f;background:linear-gradient(145deg,#edf9f4,#e7f7f0)
+}
+.astra-value-card h3{
+  position:relative;z-index:1;
+  max-width:92%;
+  margin:0 0 .38rem;
+  color:var(--ink);
+  font-size:.91rem;
+  line-height:1.24;
+  letter-spacing:-.027em;
+}
+.astra-value-card p{
+  position:relative;z-index:1;
+  margin:0;
+  color:var(--text);
+  font-size:.73rem;
+  line-height:1.53;
+}
+.astra-value-card p strong{color:#315f78}
+.astra-value-card small{
+  position:relative;z-index:1;
+  display:block;
+  margin-top:.5rem;
+  padding-top:.48rem;
+  border-top:1px solid rgba(35,75,112,.07);
+  color:#7b8995;
+  font-size:.62rem;
+  line-height:1.45;
+}
+
+.astra-language-strip{
+  position:relative;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr);
+  gap:.78rem;
+  align-items:center;
+  margin-top:.65rem;
+  padding:.82rem .9rem;
+  overflow:hidden;
+  border-radius:18px;
+  color:#fff;
+  background:
+    radial-gradient(260px 140px at 0% 0%,rgba(53,191,209,.24),transparent 70%),
+    radial-gradient(280px 150px at 100% 100%,rgba(109,120,238,.24),transparent 72%),
+    linear-gradient(110deg,#075b8f 0%,#087f93 52%,#087f7e 100%);
+  border:1px solid rgba(255,255,255,.12);
+  box-shadow:0 15px 36px rgba(7,93,126,.13);
+}
+.astra-language-strip::after{
+  content:"";
+  position:absolute;
+  width:170px;height:170px;
+  right:-92px;top:-105px;
+  border-radius:999px;
+  border:1px solid rgba(255,255,255,.10);
+}
+.astra-language-strip__icon{
+  position:relative;z-index:1;
+  width:42px;height:42px;
+  display:grid;place-items:center;
+  border-radius:13px;
+  color:#fff;
+  background:rgba(255,255,255,.12);
+  border:1px solid rgba(255,255,255,.16);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.15);
+  font-weight:900;
+}
+.astra-language-strip>div:last-child{position:relative;z-index:1}
+.astra-language-strip strong{
+  display:block;
+  font-size:.82rem;
+  letter-spacing:-.015em;
+}
+.astra-language-strip p{
+  margin:.22rem 0 0;
+  max-width:720px;
+  color:rgba(239,249,252,.80);
+  font-size:.68rem;
+  line-height:1.5;
+}
+
+.astra-starting-point{
+  display:flex;
+  gap:.62rem;
+  align-items:flex-start;
+  margin-top:.62rem;
+  padding:.72rem .78rem;
+  border-radius:16px;
+  background:rgba(246,249,255,.76);
+  border:1px solid rgba(109,120,238,.09);
+}
+.astra-starting-point>span{
+  color:var(--indigo);
+  font-weight:950;
+}
+.astra-starting-point p{
+  margin:0;
+  color:#63798d;
+  font-size:.69rem;
+  line-height:1.48;
+}
+.astra-starting-point strong{color:var(--ink-2)}
+
+/* The story should feel integrated, not make the section visually heavy. */
+.promise-copy .ai-variation-note{
+  margin-top:.64rem;
+}
+.promise-copy .ai-variation-note + *{
+  margin-top:.6rem;
+}
+
+@media(max-width:900px){
+  .astra-value-grid{grid-template-columns:1fr 1fr}
+  .astra-value-card{min-height:170px}
+}
+
+@media(max-width:680px){
+  .astra-story-intro{
+    gap:.62rem;
+    padding:.78rem;
+    border-radius:17px;
+  }
+  .astra-story-intro__spark{
+    width:30px;height:30px;flex-basis:30px;border-radius:10px;
+  }
+  .astra-story-intro strong{font-size:.84rem}
+  .astra-story-intro p{font-size:.7rem}
+
+  .astra-value-grid{grid-template-columns:1fr;gap:.48rem}
+  .astra-value-card{
+    min-height:auto;
+    padding:.86rem .88rem .82rem;
+    border-radius:17px;
+  }
+  .astra-value-card__number{font-size:1.8rem}
+  .astra-value-card h3{font-size:.87rem}
+  .astra-value-card p{font-size:.7rem}
+
+  .astra-language-strip{
+    grid-template-columns:auto minmax(0,1fr);
+    gap:.62rem;
+    padding:.76rem;
+    border-radius:16px;
+  }
+  .astra-language-strip__icon{
+    width:36px;height:36px;border-radius:11px;
+  }
+  .astra-language-strip strong{font-size:.78rem}
+  .astra-language-strip p{font-size:.64rem}
+
+  .astra-starting-point{padding:.66rem .7rem}
+  .astra-starting-point p{font-size:.65rem}
+}
+
+/* =========================================================
+   V5.5 · HOW STEP 03 · PREMIUM PRICE CARD
+   Surgical: only replaces the compact price line inside the
+   "Guarda y paga solo al iniciar" card.
+   ========================================================= */
+
+.how-card__price-card{
+  position:relative;
+  width:min(100%,330px);
+  margin-top:.9rem;
+  padding:.78rem .86rem .74rem;
+  overflow:hidden;
+  border-radius:18px;
+  background:
+    radial-gradient(180px 90px at 0% 0%,rgba(53,191,209,.14),transparent 74%),
+    linear-gradient(145deg,rgba(255,255,255,.95),rgba(239,250,249,.88));
+  border:1px solid rgba(24,127,143,.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,.98),
+    0 12px 28px rgba(16,90,108,.07);
+}
+
+.how-card__price-card::after{
+  content:"";
+  position:absolute;
+  width:110px;
+  height:110px;
+  right:-62px;
+  bottom:-70px;
+  border-radius:999px;
+  background:rgba(53,191,209,.08);
+  pointer-events:none;
+}
+
+.how-card__price-card-top{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:.55rem;
+  margin-bottom:.28rem;
+}
+
+.how-card__price-label{
+  color:#4b7183;
+  font-size:.62rem;
+  font-weight:850;
+  letter-spacing:.055em;
+  text-transform:uppercase;
+}
+
+.how-card__price-save{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:24px;
+  padding:.22rem .48rem;
+  border-radius:999px;
+  color:#7a5708;
+  background:linear-gradient(180deg,#fff4c9,#ffe49a);
+  border:1px solid rgba(215,154,22,.22);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.72);
+  font-size:.58rem;
+  font-weight:950;
+  letter-spacing:.035em;
+  white-space:nowrap;
+}
+
+.how-card__price-main{
+  position:relative;
+  z-index:1;
+  display:flex;
+  align-items:flex-end;
+  min-height:44px;
+}
+
+.how-card__price-main strong{
+  color:var(--ink);
+  font-size:2rem;
+  line-height:1;
+  font-weight:950;
+  letter-spacing:-.055em;
+}
+
+.how-card__price-meta{
+  position:relative;
+  z-index:1;
+  margin-top:.28rem;
+  color:#4f7383;
+  font-size:.66rem;
+  font-weight:760;
+  letter-spacing:-.01em;
+}
+
+/* Old compact price line remains available elsewhere, but not used in Step 03. */
+
+@media(max-width:680px){
+  .how-card__price-card{
+    width:100%;
+    padding:.72rem .78rem .7rem;
+    border-radius:16px;
+  }
+
+  .how-card__price-main strong{
+    font-size:1.8rem;
+  }
+
+  .how-card__price-meta{
+    font-size:.64rem;
+  }
+}
+
+/* =========================================================
+   V5.6 · STEP 03 · PREVIOUS PRICE
+   Surgical addition: old price below the 50% savings badge.
+   ========================================================= */
+
+.how-card__price-promo{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:.18rem;
+  flex:0 0 auto;
+}
+
+.how-card__price-old{
+  color:#83919b;
+  font-size:.92rem;
+  line-height:1.05;
+  font-weight:760;
+  letter-spacing:-.01em;
+  text-decoration-line:line-through;
+  text-decoration-thickness:1px;
+  text-decoration-color:rgba(79,93,103,.62);
+}
+
+.site-footer--home .site-footer__top{
+  grid-template-columns:repeat(4,minmax(0,1fr));
+}
+
+@media(max-width:900px){
+  .site-footer--home .site-footer__top{
+    grid-template-columns:repeat(2,minmax(0,1fr));
+  }
+}
+
+@media(max-width:680px){
+  .site-footer--home .site-footer__top{
+    grid-template-columns:1fr;
+  }
+}

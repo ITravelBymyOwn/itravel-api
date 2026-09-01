@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=76c" />
+  <link rel="stylesheet" href="./planner.css?v=78" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -22,6 +22,39 @@
     <div class="brand brand-logo" aria-label="I Travel By My Own">
       <div class="brand-line-1">I Travel</div>
       <div class="brand-line-2">By My Own</div>
+    </div>
+
+    <div class="planner-language-capability">
+      <button
+        id="planner-language-help"
+        class="planner-language-help"
+        type="button"
+        aria-expanded="false"
+        aria-controls="planner-language-popover"
+      >
+        <span aria-hidden="true">🌐</span>
+        <span id="planner-language-help-label">Write in your language</span>
+      </button>
+
+      <div
+        id="planner-language-popover"
+        class="planner-language-popover"
+        aria-hidden="true"
+      >
+        <button
+          id="planner-language-popover-close"
+          class="planner-language-popover__close"
+          type="button"
+          aria-label="Close"
+        >×</button>
+        <strong id="planner-language-popover-title">Use your language with ASTRA</strong>
+        <p id="planner-language-popover-copy">
+          Write naturally in any language supported by the chat. ASTRA will continue the planning conversation in the language you use.
+        </p>
+        <small id="planner-language-popover-note">
+          If a language is not supported, ASTRA will let you know in the chat. The final itinerary language is selected later in the planning flow.
+        </small>
+      </div>
     </div>
 
     <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
@@ -101,9 +134,9 @@
               <input id="account-legal-consent" type="checkbox" />
               <span id="account-legal-copy">
                 I agree to the
-                <a id="account-terms-link" href="https://itravelbymyown.com/terms-and-conditions" target="_blank" rel="noopener noreferrer">Terms of Use</a>
+                <a id="account-terms-link" href="https://itravelbymyown.com/terminos" target="_blank" rel="noopener noreferrer">Terms of Use</a>
                 and acknowledge the
-                <a id="account-privacy-link" href="https://itravelbymyown.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+                <a id="account-privacy-link" href="https://itravelbymyown.com/privacidad-cookies" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
               </span>
             </label>
 
@@ -143,7 +176,7 @@
       </section>
 
       <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
-      <section class="box">
+      <section class="box" id="travelers-box">
         <h3>Viajeros</h3>
 
         <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
@@ -226,7 +259,7 @@
         </div>
       </section>
 
-      <section class="box">
+      <section class="box" id="destinations-box">
         <h3>Destinos</h3>
         <div id="city-list"></div>
         <div class="row-actions">
@@ -243,19 +276,27 @@
         -->
       </section>
 
-      <section class="box special-conditions">
-        <h3>Preferencias / Restricciones / Condiciones especiales</h3>
-        <textarea id="special-conditions" placeholder="✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
-Esta información permitirá crear un itinerario 100 % alineado contigo.
+      <section class="box special-conditions preferences-stage is-stage-hidden" id="preferences-stage" aria-hidden="true">
+        <div class="preferences-stage-head">
+          <span class="preferences-stage-eyebrow" id="preferences-stage-eyebrow">Personalización ASTRA</span>
+          <h3 id="preferences-stage-title">Personaliza tu viaje</h3>
+          <p class="preferences-stage-intro" id="preferences-stage-intro">
+            Usa Info Chat si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntale a ASTRA cómo quieres vivir el viaje.
+          </p>
+        </div>
 
-🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
-🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
-🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
-🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
-⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
-👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
+        <div class="preferences-stage-field-title" id="preferences-stage-field-title">
+          Preferencias / Restricciones / Condiciones especiales
+        </div>
 
-📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario."></textarea>
+        <textarea id="special-conditions" rows="3" placeholder="Escribe aquí tus preferencias, restricciones o condiciones especiales…"></textarea>
+
+        <div class="preferences-stage-actions">
+          <button class="btn primary preferences-continue" id="continue-with-astra" type="button">
+            Continuar con ASTRA →
+          </button>
+          <small id="preferences-stage-optional">Opcional · puedes continuar aunque no agregues información.</small>
+        </div>
       </section>
 
       <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
@@ -295,8 +336,27 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           </div>
         </div>
 
-        <div class="city-tabs" id="city-tabs"></div>
-        <div id="itinerary-container"></div>
+        <!-- =========================================================
+             ITBMO · IMMERSIVE ITINERARY VIEWER
+             The generated itinerary data remains in the existing JS state.
+             The legacy renderer stays mounted below (hidden visually) so its
+             existing contracts remain available without changing generation.
+        ========================================================== -->
+        <section id="itinerary-focus-launch" class="itinerary-focus-launch" aria-hidden="true">
+          <button id="open-itinerary-focus" class="itinerary-focus-cta" type="button">
+            <span class="itinerary-focus-cta__icon" aria-hidden="true">✦</span>
+            <span class="itinerary-focus-cta__copy">
+              <strong id="itinerary-focus-cta-title">Explore your day-by-day itinerary</strong>
+              <small id="itinerary-focus-cta-subtitle">Open every city and move through each day in an immersive view.</small>
+              <span id="itinerary-focus-cta-meta" class="itinerary-focus-cta__meta"></span>
+            </span>
+            <span class="itinerary-focus-cta__arrow" aria-hidden="true">→</span>
+          </button>
+        </section>
+
+        <!-- Technical legacy renderer: intentionally preserved, hidden only by CSS. -->
+        <div class="city-tabs itinerary-legacy-flat" id="city-tabs" aria-hidden="true"></div>
+        <div id="itinerary-container" class="itinerary-legacy-flat" aria-hidden="true"></div>
 
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
@@ -305,7 +365,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
           <button class="btn" id="btn-receipt">Comprobante de pago</button>
 
-          <button class="btn email-coming-soon" id="btn-email" type="button" disabled aria-disabled="true" title="Coming soon">
+          <button class="btn email-coming-soon" id="btn-email" type="button" disabled aria-disabled="true" aria-hidden="true" title="Coming soon" hidden style="display:none;">
             <span class="email-action-label">Enviar por Email</span>
             <span class="coming-soon-badge">Próximamente</span>
           </button>
@@ -337,6 +397,58 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
         <!-- <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button> -->
       </section>
     </main>
+  </div>
+
+  <!-- =========================================================
+       ITBMO · DAY-BY-DAY ITINERARY FOCUS MODE
+       Full-screen viewer only. Does not duplicate or mutate itinerary data.
+  ========================================================== -->
+  <div id="itinerary-focus-modal" class="itinerary-focus-modal" aria-hidden="true">
+    <div class="itinerary-focus-backdrop" data-itinerary-focus-close></div>
+
+    <section class="itinerary-focus-shell" role="dialog" aria-modal="true" aria-labelledby="itinerary-focus-title">
+      <header class="itinerary-focus-header">
+        <button id="itinerary-focus-back" class="itinerary-focus-back" type="button">
+          <span aria-hidden="true">←</span>
+          <span id="itinerary-focus-back-label">Back to Planner</span>
+        </button>
+
+        <div class="itinerary-focus-heading">
+          <span id="itinerary-focus-eyebrow" class="itinerary-focus-eyebrow">YOUR ASTRA ITINERARY</span>
+          <h2 id="itinerary-focus-title">Your trip, day by day.</h2>
+          <p id="itinerary-focus-subtitle">Choose a city, then move through each day at your own pace.</p>
+        </div>
+
+        <button id="itinerary-focus-close" class="itinerary-focus-close" type="button" aria-label="Close itinerary">
+          ×
+        </button>
+      </header>
+
+      <nav id="itinerary-focus-cities" class="itinerary-focus-cities" aria-label="Itinerary cities"></nav>
+
+      <div class="itinerary-focus-stage">
+        <button id="itinerary-focus-prev" class="itinerary-focus-nav itinerary-focus-nav--prev" type="button" aria-label="Previous day">
+          <span aria-hidden="true">‹</span>
+        </button>
+
+        <article class="itinerary-focus-day-card">
+          <div class="itinerary-focus-day-head">
+            <div>
+              <span id="itinerary-focus-city-label" class="itinerary-focus-city-label"></span>
+              <h3 id="itinerary-focus-day-title"></h3>
+            </div>
+            <span id="itinerary-focus-day-count" class="itinerary-focus-day-count"></span>
+          </div>
+
+          <div id="itinerary-focus-day-content" class="itinerary-focus-day-content"></div>
+          <div id="itinerary-focus-dots" class="itinerary-focus-dots" aria-label="Itinerary days"></div>
+        </article>
+
+        <button id="itinerary-focus-next" class="itinerary-focus-nav itinerary-focus-nav--next" type="button" aria-label="Next day">
+          <span aria-hidden="true">›</span>
+        </button>
+      </div>
+    </section>
   </div>
 
   <footer class="footer">
@@ -449,11 +561,11 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
       </div>
 
       <div class="checkout-legal">
-        <a id="checkout-refund-link" href="https://itravelbymyown.com/refund-policy" target="_blank" rel="noopener noreferrer">Refund Policy</a>
+        <a id="checkout-refund-link" href="https://itravelbymyown.com/terminos#refunds" target="_blank" rel="noopener noreferrer">Refund Policy</a>
         <span>·</span>
-        <a href="https://itravelbymyown.com/privacy-policy" target="_blank" rel="noopener noreferrer">Privacy</a>
+        <a href="https://itravelbymyown.com/privacidad-cookies" target="_blank" rel="noopener noreferrer">Privacy</a>
         <span>·</span>
-        <a href="https://itravelbymyown.com/terms-and-conditions" target="_blank" rel="noopener noreferrer">Terms</a>
+        <a href="https://itravelbymyown.com/terminos" target="_blank" rel="noopener noreferrer">Terms</a>
       </div>
 
       <button id="checkout-support-link" class="checkout-support-link" type="button">Need help? Contact Customer Support</button>
@@ -582,18 +694,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
           info_header: "Info Chat · Astra 🌍",
           info_placeholder: "Ask me anything...",
           loading_text: "✨ Astra is creating your full itinerary… This may take several minutes. Don’t close this tab: you’re saving hours of planning.",
-          special_placeholder:
-`✨ Tell Astra exactly how you want to live your trip.
-This will help create an itinerary that truly matches you.
-
-🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”
-🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”
-🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”
-🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”
-⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”
-👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”
-
-📝 The more details you share, the more precise, smooth and personalized your itinerary will be.`
+          special_placeholder: "Write your preferences, restrictions or special conditions here…"
         },
         es: {
           planner_title: "Planificador",
@@ -642,18 +743,7 @@ This will help create an itinerary that truly matches you.
           info_header: "Info Chat · Astra 🌍",
           info_placeholder: "Pregúntame lo que quieras…",
           loading_text: "✨ Astra está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.",
-          special_placeholder:
-`✨ Cuéntale a Astra exactamente cómo quieres vivir tu viaje.
-Esta información permitirá crear un itinerario 100 % alineado contigo.
-
-🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”
-🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”
-🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”
-🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”
-⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”
-👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”
-
-📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.`
+          special_placeholder: "Escribe aquí tus preferencias, restricciones o condiciones especiales…"
         }
       };
 
@@ -903,7 +993,7 @@ Esta información permitirá crear un itinerario 100 % alineado contigo.
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=76c"></script>
+<script src="./planner.js?v=78"></script>
  
 </body>
 </html>

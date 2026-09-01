@@ -19,7 +19,7 @@
        ad slots enabled:false
   ========================================================= */
   const ITBMO_HOME_CONFIG = {
-    previewMode: true,
+    previewMode: false,
 
     partners: {
       kayak:        { enabled:false, url:'', previewUrl:'https://www.kayak.com/flights' },
@@ -68,7 +68,7 @@
   /* =========================================================
      PLACEHOLDER / UTILITY LINKS
   ========================================================= */
-  document.querySelectorAll('[data-placeholder-link],[data-utility-link]').forEach((link) => {
+  document.querySelectorAll('[data-placeholder-link]').forEach((link) => {
     link.addEventListener('click', (event) => event.preventDefault());
   });
 
@@ -94,14 +94,59 @@
   /* =========================================================
      PAGE LANGUAGE SELECTOR
      ---------------------------------------------------------
-     ES is the active page today. EN remains a real, clickable
-     selector without sending the user to a 404 while the English
-     page is not published yet.
+     Spanish and English are published as independent Webflow pages.
   ========================================================= */
-  const ITBMO_LANGUAGE_PAGES = {
-    es: './preview-home.html',
-    en: ''
-  };
+  const ITBMO_CURRENT_SITE_LANGUAGE =
+    String(document.documentElement.lang || 'es').toLowerCase().slice(0, 2);
+
+  function getITBMOWebflowOrigin() {
+    try {
+      const parentUrl = new URL(document.referrer);
+      const host = parentUrl.hostname.toLowerCase();
+      if (host === 'itravelbymyown.com' || host === 'www.itravelbymyown.com' || host.endsWith('.webflow.io')) {
+        return parentUrl.origin;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function getITBMOPageKey(pathname = window.location.pathname) {
+    const page = String(pathname || '').split('/').pop() || '';
+    if (page.includes('support-contact')) return 'support';
+    if (page.includes('privacy-cookies')) return 'privacy';
+    if (page.includes('terms')) return 'terms';
+    if (page.includes('ads-affiliates')) return 'affiliates';
+    return 'home';
+  }
+
+  function getITBMOWebflowPath(lang, pathname = window.location.pathname) {
+    const routes = {
+      home:       { es:'/',                      en:'/english' },
+      support:    { es:'/soporte-contacto',      en:'/support-contact' },
+      privacy:    { es:'/privacidad-cookies',    en:'/privacy-cookies' },
+      terms:      { es:'/terminos',              en:'/terms' },
+      affiliates: { es:'/publicidad-afiliados',  en:'/advertising-affiliates' }
+    };
+    const key = getITBMOPageKey(pathname);
+    return routes[key]?.[lang] || routes.home[lang];
+  }
+
+  function getITBMOLanguageTarget(lang) {
+    const parentOrigin = getITBMOWebflowOrigin();
+    if (parentOrigin) {
+      return `${parentOrigin}${getITBMOWebflowPath(lang)}`;
+    }
+
+    const url = new URL(window.location.href);
+    if (lang === 'en') {
+      url.pathname = url.pathname.replace(/(?:-en)?\.html$/, '-en.html');
+    } else {
+      url.pathname = url.pathname.replace(/-en\.html$/, '.html');
+    }
+    url.search = '';
+    url.hash = '';
+    return url.href;
+  }
 
   function showLanguageAvailability(message) {
     document.querySelector('.itbmo-language-toast')?.remove();
@@ -123,15 +168,41 @@
       if (!lang) return;
       try { localStorage.setItem('itbmo_site_language', lang); } catch (_) {}
 
-      if (lang === 'es') return;
-      const target = ITBMO_LANGUAGE_PAGES[lang];
+      if (lang === ITBMO_CURRENT_SITE_LANGUAGE) return;
+      const target = getITBMOLanguageTarget(lang);
       if (target) {
-        window.location.href = target;
+        try {
+          window.top.location.href = target;
+        } catch (_) {
+          window.location.href = target;
+        }
         return;
       }
 
       showLanguageAvailability('La versión en inglés estará disponible muy pronto.');
     });
+  });
+
+  /* Keep Webflow's top-level URL in sync when a Vercel page links to
+     another ITBMO page from inside the full-screen iframe. */
+  document.addEventListener('click', (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const link = event.target.closest('a[href]');
+    if (!link) return;
+
+    const rawHref = String(link.getAttribute('href') || '').trim();
+    if (!rawHref || rawHref.startsWith('#') || /^(mailto:|tel:|javascript:)/i.test(rawHref)) return;
+
+    let url;
+    try { url = new URL(rawHref, window.location.href); } catch (_) { return; }
+    if (url.origin !== window.location.origin || !/\/(preview-home|support-contact|privacy-cookies|terms|ads-affiliates)(?:-en)?\.html$/i.test(url.pathname)) return;
+
+    const parentOrigin = getITBMOWebflowOrigin();
+    if (!parentOrigin) return;
+
+    const lang = /-en\.html$/i.test(url.pathname) ? 'en' : 'es';
+    event.preventDefault();
+    window.top.location.href = `${parentOrigin}${getITBMOWebflowPath(lang, url.pathname)}${url.search}${url.hash}`;
   });
 
   /* =========================================================
@@ -769,4 +840,35 @@
     if (mobileMenuOpen) setMobileMenu(false);
   });
 
+})();
+
+/* =========================================================
+   ITBMO · EXTERNAL FOCUS DEEP LINKS V4.9
+   Surgical addition: legal/support pages can reopen the existing
+   Planner or Example Focus Mode without duplicating either surface.
+   ========================================================= */
+(() => {
+  const params = new URLSearchParams(window.location.search);
+  const openTarget = String(params.get('open') || '').toLowerCase();
+  if (!openTarget) return;
+
+  const launch = () => {
+    if (openTarget === 'planner') {
+      const trigger = document.querySelector('[data-planner-open]');
+      if (trigger) trigger.click();
+    } else if (openTarget === 'example') {
+      const trigger = document.querySelector('[data-example-open]');
+      if (trigger) trigger.click();
+    }
+
+    params.delete('open');
+    const query = params.toString();
+    history.replaceState(null, '', window.location.pathname + (query ? `?${query}` : '') + window.location.hash);
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(launch, 80), { once:true });
+  } else {
+    setTimeout(launch, 80);
+  }
 })();

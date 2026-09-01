@@ -5,12 +5,13 @@
   <title>Soporte y Contacto · I Travel By My Own</title>
   <meta name="description" content="Soporte y contacto de I Travel By My Own (ITBMO).">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://itravelbymyown.com/support-contact.html">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.7">
-  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.2">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=5.2">
+  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.3">
 </head>
 <body class="legal-page support-page">
   <a class="skip-link" href="#support-content">Ir al contenido</a>
@@ -20,17 +21,16 @@
       <nav class="site-nav legal-main-nav" aria-label="Navegación principal">
         <a href="./preview-home.html#top">Inicio</a>
         <a href="./preview-home.html#how-it-works">Cómo funciona</a>
-        <a href="./preview-home.html#what-you-get">Ejemplo</a>
-        <a href="./preview-home.html#planner">Planner</a>
-        <a href="./preview-home.html#travel-essentials">Para tu viaje</a>
+        <a href="./preview-home.html?open=example#what-you-get">Ver ejemplo</a>
+        <a href="./preview-home.html?open=planner#planner">Crear viaje</a>
         <a href="./preview-home.html#faq">FAQ</a>
         <a aria-current="page" href="./support-contact.html">Soporte</a>
       </nav>
       <div class="site-header__actions">
         <div class="language-switch" aria-label="Idioma de la página">
-          <span class="is-active">ES</span>
+          <button class="is-active" type="button" data-site-lang="es" aria-pressed="true" title="Español">ES</button>
           <span aria-hidden="true">·</span>
-          <button type="button" disabled aria-disabled="true" title="English version coming soon">EN</button>
+          <button type="button" data-site-lang="en" aria-pressed="false" title="English">EN</button>
         </div>
       </div>
     </div>
@@ -49,7 +49,7 @@
           <span class="legal-hero__summary-icon">?</span>
           <strong>Antes de escribir</strong>
           <p>
-            Si el problema ocurrió en el Planner, pago, generación o descarga, incluye la mayor cantidad posible
+            Si el problema ocurrió en el Planner, pago, personalización, generación, Reset o descarga, incluye la mayor cantidad posible
             de contexto sin compartir datos financieros sensibles.
           </p>
         </div>
@@ -63,7 +63,7 @@
             <div class="support-card__icon">◎</div>
             <span>Ayuda al usuario</span>
             <h2>support@itravelbymyown.com</h2>
-            <p>Problemas de acceso, Planner, generación, descarga, Info Chat o pagos.</p>
+            <p>Problemas de acceso, Planner, preferencias, generación, descarga, Info Chat, Reset o pagos.</p>
             <a class="button button--primary" href="mailto:support@itravelbymyown.com?subject=ITBMO%20Support">Escribir a soporte</a>
           </article>
 
@@ -79,7 +79,7 @@
             <div class="support-card__icon">◇</div>
             <span>Privacidad</span>
             <h2>privacy@itravelbymyown.com</h2>
-            <p>Solicitudes sobre datos personales, cookies, acceso, corrección o eliminación.</p>
+            <p>Solicitudes sobre datos personales, cookies, acceso, corrección, eliminación u opciones de privacidad.</p>
             <a class="button button--glass" href="mailto:privacy@itravelbymyown.com?subject=ITBMO%20Privacy">Privacidad</a>
           </article>
 
@@ -101,7 +101,7 @@
             <div><b>03</b><span>Ciudad(es) del viaje y momento aproximado del incidente.</span></div>
             <div><b>04</b><span>Captura de pantalla si ayuda a explicar el problema.</span></div>
             <div><b>05</b><span>Si fue un pago: fecha, importe y referencia de PayPal disponible.</span></div>
-            <div><b>06</b><span>Si falló una descarga: indica cuál archivo no apareció (PDF, CSV o comprobante) y si probaste el botón individual de respaldo.</span></div>
+            <div><b>06</b><span>Si falló un archivo: indica cuál no apareció (PDF, CSV o comprobante), el dispositivo utilizado y si probaste el botón individual de respaldo.</span></div>
           </div>
           <div class="legal-callout legal-callout--privacy">
             <span>No envíes</span>
@@ -118,8 +118,10 @@
             <div class="eyebrow glass-pill">Pago / Generación</div>
             <h2>¿Pagaste pero no recibiste un itinerario?</h2>
             <p>
-              Escríbenos antes de repetir la compra. Revisaremos si corresponde reintentar la generación,
-              otorgar un reemplazo o gestionar un reembolso según los Términos y la legislación aplicable.
+              ITBMO conserva el avance necesario e intenta reanudar una generación pagada después de una desconexión,
+              interrupción o recarga. Las ciudades ya completadas se mantienen y ASTRA reintenta únicamente las pendientes.
+              Si el Planner indica que se agotaron los intentos, no repitas la compra: utiliza la opción de reintento disponible
+              o escríbenos para revisar si corresponde otorgar un reemplazo o gestionar un reembolso según los Términos y la legislación aplicable.
             </p>
           </div>
           <a class="button button--primary button--large" href="mailto:support@itravelbymyown.com?subject=Pago%20confirmado%20sin%20itinerario">Reportar problema</a>
@@ -130,9 +132,12 @@
             <div class="eyebrow glass-pill">Descargas</div>
             <h2>¿No aparecieron todos tus documentos?</h2>
             <p>
-              Al finalizar una generación, ITBMO intenta iniciar en un solo clic la descarga del itinerario en PDF,
-              el CSV compatible con Excel y el comprobante de pago en PDF. Si el navegador bloquea o no muestra alguno,
-              utiliza los botones individuales que permanecen disponibles debajo del itinerario antes de cerrar o recargar la página.
+              Al finalizar una generación, ITBMO prepara el itinerario en PDF, el CSV compatible con Excel y el comprobante
+              de pago en PDF. En computadoras puedes descargarlos; en dispositivos móviles, ITBMO intentará abrir o compartir
+              los archivos mediante las opciones disponibles en el navegador y el sistema. Si alguno no aparece, utiliza los
+              botones individuales que permanecen disponibles debajo del itinerario antes de cerrar o recargar la página.
+              Antes de usar <strong>Reset</strong>, asegúrate de haber guardado los archivos que quieras conservar: el reinicio puede
+              eliminar el viaje activo de la interfaz y una nueva generación requerirá un nuevo pago, salvo que soporte otorgue un reemplazo.
             </p>
           </div>
           <a class="button button--primary button--large" href="mailto:support@itravelbymyown.com?subject=Problema%20con%20descarga%20de%20documentos">Reportar descarga</a>
@@ -151,16 +156,17 @@
     </section>
   </main>
 
-  <footer class="site-footer legal-footer">
+  <footer class="site-footer legal-footer site-footer--home">
     <div class="page-shell">
       <div class="site-footer__top">
-        <div class="site-footer__brand"><a class="brand brand--footer brand--logo" href="./preview-home.html#top"><img src="./assets/img/itbmo-logo-premium.jpg" alt="I Travel By My Own"></a><p>Planea mejor. Viaja a tu manera.</p></div>
-        <div class="footer-column"><strong>ITBMO</strong><a href="./preview-home.html#planner">Planner</a><a href="./preview-home.html#faq">FAQ</a></div>
-        <div class="footer-column"><strong>Ayuda</strong><a aria-current="page" href="./support-contact.html">Soporte / Contacto</a></div>
-        <div class="footer-column"><strong>Legal</strong><a href="./privacy-cookies.html">Privacidad & Cookies</a><a href="./terms.html">Términos de Servicio</a><a href="./ads-affiliates.html">Publicidad & Afiliados</a></div>
+        <div class="footer-column"><strong>ITBMO</strong><a href="./preview-home.html#how-it-works">Cómo funciona</a><a href="./preview-home.html?open=example#what-you-get">Ver ejemplo</a><a href="./preview-home.html#faq">Preguntas frecuentes</a></div>
+        <div class="footer-column"><strong>Viajes</strong><a href="./preview-home.html?open=planner#planner">Crear viaje</a></div>
+        <div class="footer-column"><strong>Ayuda</strong><a aria-current="page" href="./support-contact.html">Soporte</a><a aria-current="page" href="./support-contact.html">Contacto</a></div>
+        <div class="footer-column"><strong>Legal</strong><a href="./privacy-cookies.html">Política de privacidad</a><a href="./terms.html">Términos de servicio</a><a href="./privacy-cookies.html">Política de cookies</a><a href="./ads-affiliates.html">Afiliados y publicidad</a></div>
       </div>
       <div class="site-footer__bottom"><p>© 2026 I Travel By My Own. Todos los derechos reservados.</p><p>Operado desde Costa Rica.</p></div>
     </div>
   </footer>
+  <script src="./assets/js/itbmo-site.js?v=5.2"></script>
 </body>
 </html>

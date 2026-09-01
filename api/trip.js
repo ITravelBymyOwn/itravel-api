@@ -4,6 +4,13 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
+const MAX_GENERATION_RUNS = 2;
+
+const ITBMO_ADMIN_TEST_BYPASS =
+  String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
+const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
+const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
+  String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
 
 function jsonHeaders(extra = {}) {
   return {
@@ -71,6 +78,53 @@ async function getActiveSession(rawToken) {
   }
 
   return session;
+}
+
+function generationAdminBypass(userId) {
+  if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
+  if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+}
+
+async function getOwnedTripForGeneration(tripId, userId) {
+  const rows = await supabaseFetch(
+    `/trips?select=id,user_id,status,destinations,planner_input,itinerary_data,` +
+    `generation_count,generated_at,created_at,updated_at&` +
+    `id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    { method: "GET" }
+  );
+  return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+async function hasGenerationEntitlement(tripId, userId) {
+  if (generationAdminBypass(userId)) return true;
+  const rows = await supabaseFetch(
+    `/payments?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
+    { method: "GET" }
+  );
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+function generationCheckpoint(value) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : {};
+}
+
+async function patchOwnedTrip(tripId, userId, patch) {
+  const rows = await supabaseFetch(
+    `/trips?id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch)
+    }
+  );
+  return Array.isArray(rows) ? rows[0] || null : null;
 }
 
 function validDateOrNull(value) {
@@ -466,7 +520,7 @@ async function handleGet(res, body, session) {
     `/trips?` +
     `select=id,trip_name,status,start_date,end_date,travelers_count,` +
     `travel_style,transportation,special_conditions,language,` +
-    `destinations,planner_version,api_version,generation_count,` +
+    `destinations,planner_input,itinerary_data,planner_version,api_version,generation_count,` +
     `generated_at,created_at,updated_at&` +
     `id=eq.${encodeURIComponent(tripId)}&` +
     `user_id=eq.${encodeURIComponent(session.user_id)}&limit=1`,
@@ -489,6 +543,198 @@ async function handleGet(res, body, session) {
     action: "get",
     trip
   });
+}
+
+async function handleArchive(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+
+  if (trip.status === "archived") {
+    return res.status(200).json({ ok:true, action:"archive", trip });
+  }
+
+  const now = new Date().toISOString();
+  const checkpoint = generationCheckpoint(trip.itinerary_data);
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    status:"archived",
+    itinerary_data:{
+      ...checkpoint,
+      run_status:"archived",
+      archived_at:now,
+      updated_at:now
+    }
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"archive",
+    trip:updated
+  });
+}
+
+async function handleGenerationBegin(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+
+  const checkpoint = generationCheckpoint(trip.itinerary_data);
+  if (trip.status === "generated") {
+    return res.status(200).json({
+      ok:true,
+      action:"generation_begin",
+      already_completed:true,
+      new_run:false,
+      trip
+    });
+  }
+
+  const previousRuns = Math.max(0, Number(trip.generation_count || 0));
+  const newRun = trip.status !== "generating";
+  if (newRun && previousRuns >= MAX_GENERATION_RUNS) {
+    return res.status(409).json({
+      ok:false,
+      code:"GENERATION_RECOVERY_EXHAUSTED",
+      error:"Automatic generation recovery limit reached"
+    });
+  }
+
+  const nextRuns = newRun ? previousRuns + 1 : Math.max(1, previousRuns);
+  const completed = Array.isArray(checkpoint.completed_cities)
+    ? checkpoint.completed_cities.map(String)
+    : [];
+  const attempts = generationCheckpoint(checkpoint.city_attempts);
+
+  if (newRun && trip.status === "failed") {
+    const destinations = Array.isArray(trip.destinations) ? trip.destinations : [];
+    destinations.forEach(destination => {
+      const city = String(destination?.city || "").trim();
+      if (city && !completed.includes(city)) attempts[city] = 0;
+    });
+  }
+
+  const nextCheckpoint = {
+    ...checkpoint,
+    schema_version:1,
+    run_status:"generating",
+    completed_cities:completed,
+    city_attempts:attempts,
+    last_error:null,
+    started_at:newRun ? new Date().toISOString() : (checkpoint.started_at || new Date().toISOString()),
+    updated_at:new Date().toISOString()
+  };
+
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    status:"generating",
+    generation_count:nextRuns,
+    itinerary_data:nextCheckpoint
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"generation_begin",
+    already_completed:false,
+    new_run:newRun,
+    max_generation_runs:MAX_GENERATION_RUNS,
+    trip:updated
+  });
+}
+
+async function handleGenerationCheckpoint(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  const status = String(body.status || "generating").trim().toLowerCase();
+  const checkpoint = generationCheckpoint(body.checkpoint);
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+  if (!["generating", "failed", "generated"].includes(status)) {
+    return res.status(400).json({ ok:false, error:"Invalid generation status" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+  if (trip.status === "generated" && status !== "generated") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ALREADY_COMPLETED", error:"Generation already completed" });
+  }
+
+  const destinations = Array.isArray(trip.destinations) ? trip.destinations : [];
+  const expectedCities = destinations.map(x => String(x?.city || "").trim()).filter(Boolean);
+  const completedCities = Array.isArray(checkpoint.completed_cities)
+    ? checkpoint.completed_cities.map(String)
+    : [];
+
+  if (status === "generated" && !expectedCities.every(city => completedCities.includes(city))) {
+    return res.status(400).json({
+      ok:false,
+      code:"GENERATION_INCOMPLETE",
+      error:"Not every destination is complete"
+    });
+  }
+
+  const now = new Date().toISOString();
+  const persistedCheckpoint = {
+    ...checkpoint,
+    schema_version:1,
+    run_status:status,
+    updated_at:now,
+    ...(status === "generated" ? { completed_at:now, last_error:null } : {})
+  };
+
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    status,
+    itinerary_data:persistedCheckpoint,
+    ...(status === "generated" ? { generated_at:now } : {})
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"generation_checkpoint",
+    trip:updated
+  });
+}
+
+async function handleRecoverable(res, session) {
+  const rows = await supabaseFetch(
+    `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
+    `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
+    `status=in.(generating,failed)&order=updated_at.desc&limit=1`,
+    { method:"GET" }
+  );
+  const trip = Array.isArray(rows) ? rows[0] || null : null;
+  if (!trip || !(await hasGenerationEntitlement(trip.id, session.user_id))) {
+    return res.status(200).json({ ok:true, action:"recoverable", trip:null });
+  }
+  return res.status(200).json({ ok:true, action:"recoverable", trip });
 }
 
 export default async function handler(req, res) {
@@ -547,6 +793,22 @@ export default async function handler(req, res) {
 
     if (action === "get") {
       return await handleGet(res, body, session);
+    }
+
+    if (action === "archive") {
+      return await handleArchive(res, body, session);
+    }
+
+    if (action === "generation_begin") {
+      return await handleGenerationBegin(res, body, session);
+    }
+
+    if (action === "generation_checkpoint") {
+      return await handleGenerationCheckpoint(res, body, session);
+    }
+
+    if (action === "recoverable") {
+      return await handleRecoverable(res, session);
     }
 
     return res.status(400).json({

@@ -5,12 +5,13 @@
   <title>Privacidad y Cookies · I Travel By My Own</title>
   <meta name="description" content="Política de Privacidad y Cookies de I Travel By My Own (ITBMO).">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://itravelbymyown.com/privacy-cookies.html">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.7">
-  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.2.2">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=5.2">
+  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.3">
 </head>
 <body class="legal-page">
   <a class="skip-link" href="#legal-content">Ir al contenido</a>
@@ -23,17 +24,16 @@
       <nav class="site-nav legal-main-nav" aria-label="Navegación principal">
         <a href="./preview-home.html#top">Inicio</a>
         <a href="./preview-home.html#how-it-works">Cómo funciona</a>
-        <a href="./preview-home.html#what-you-get">Ejemplo</a>
-        <a href="./preview-home.html#planner">Planner</a>
-        <a href="./preview-home.html#travel-essentials">Para tu viaje</a>
+        <a href="./preview-home.html?open=example#what-you-get">Ver ejemplo</a>
+        <a href="./preview-home.html?open=planner#planner">Crear viaje</a>
         <a href="./preview-home.html#faq">FAQ</a>
         <a href="./support-contact.html">Soporte</a>
       </nav>
       <div class="site-header__actions">
         <div class="language-switch" aria-label="Idioma de la página">
-          <span class="is-active">ES</span>
+          <button class="is-active" type="button" data-site-lang="es" aria-pressed="true" title="Español">ES</button>
           <span aria-hidden="true">·</span>
-          <button type="button" disabled aria-disabled="true" title="English version coming soon">EN</button>
+          <button type="button" data-site-lang="en" aria-pressed="false" title="English">EN</button>
         </div>
       </div>
     </div>
@@ -49,7 +49,7 @@
           <h1>Privacidad<br><span>& Cookies.</span></h1>
           <p>Información clara sobre qué datos utiliza ITBMO, por qué los utiliza y qué opciones tienes.</p>
           <div class="legal-meta">
-            <span>Última actualización: 24 agosto 2026</span>
+            <span>Última actualización: 26 agosto 2026</span>
             <span>Operador: Esteban Rojas Abarca · Costa Rica</span>
           </div>
         </div>
@@ -268,6 +268,10 @@
               ITBMO procurará respetarla cuando el Servicio quede sujeto a esa obligación. Esto puede incluir señales
               como Global Privacy Control (GPC) cuando resulten aplicables.
             </p>
+            <p>
+              Cuando una ley aplicable exija un aviso en el punto de recopilación, ITBMO mostrará o enlazará información
+              sobre las categorías de datos recopilados, sus finalidades y esta Política antes o en el momento de la recopilación.
+            </p>
           </section>
 
           <section class="legal-section" id="ads">
@@ -341,8 +345,9 @@
               <p>
                 Los archivos descargables del itinerario —PDF, CSV y el PDF del comprobante de pago—
                 se generan para su descarga y <strong>no se conservan permanentemente como archivos en ITBMO</strong>.
-                El usuario debe guardarlos en su dispositivo. Podemos conservar los metadatos necesarios de cuenta,
-                viaje y transacción para operar el Servicio, soporte, seguridad y obligaciones legales aplicables.
+                El usuario debe guardarlos en su dispositivo. Podemos conservar los datos estructurados y metadatos necesarios
+                de cuenta, viaje, avance de generación y transacción para operar el Servicio, recuperar una generación interrumpida,
+                prestar soporte, proteger la seguridad y cumplir obligaciones legales aplicables.
               </p>
             </div>
           </section>
@@ -383,6 +388,19 @@
               Cuando una ley estatal resulte aplicable a ITBMO, pueden existir derechos de acceso,
               corrección, eliminación, portabilidad y exclusión de ciertos usos como publicidad dirigida,
               venta o sharing según sus definiciones legales.
+            </p>
+            <h3>California</h3>
+            <p>
+              Si ITBMO queda sujeto a la California Consumer Privacy Act (CCPA), según sus modificaciones,
+              los consumidores de California podrán ejercer los derechos que correspondan, incluidos conocimiento/acceso,
+              corrección, eliminación, portabilidad cuando aplique, exclusión de la venta o <em>sharing</em> de información
+              personal, limitación de ciertos usos de información personal sensible y no discriminación por ejercer sus derechos.
+            </p>
+            <p>
+              Cuando resulte legalmente exigible, ITBMO reconocerá señales de preferencia de exclusión como
+              Global Privacy Control (GPC) y ofrecerá los mecanismos de privacidad que correspondan.
+              ITBMO no afirma que la CCPA resulte aplicable únicamente porque una persona de California visite el Servicio;
+              su aplicación depende de los requisitos y umbrales legales vigentes.
             </p>
             <p>
               Cuando corresponda, también puedes presentar una reclamación ante la autoridad de protección
@@ -443,31 +461,30 @@
     </section>
   </main>
 
-  <footer class="site-footer legal-footer">
+  <footer class="site-footer legal-footer site-footer--home">
     <div class="page-shell">
       <div class="site-footer__top">
-        <div class="site-footer__brand">
-          <a class="brand brand--footer brand--logo" href="./preview-home.html#top">
-            <img src="./assets/img/itbmo-logo-premium.jpg" alt="I Travel By My Own">
-          </a>
-          <p>Planea mejor. Viaja a tu manera.</p>
-        </div>
         <div class="footer-column">
           <strong>ITBMO</strong>
           <a href="./preview-home.html#how-it-works">Cómo funciona</a>
-          <a href="./preview-home.html#what-you-get">Ejemplo</a>
-          <a href="./preview-home.html#planner">Planner</a>
+          <a href="./preview-home.html?open=example#what-you-get">Ver ejemplo</a>
+          <a href="./preview-home.html#faq">Preguntas frecuentes</a>
+        </div>
+        <div class="footer-column">
+          <strong>Viajes</strong>
+          <a href="./preview-home.html?open=planner#planner">Crear viaje</a>
         </div>
         <div class="footer-column">
           <strong>Ayuda</strong>
-          <a href="./preview-home.html#faq">FAQ</a>
-          <a href="./support-contact.html">Soporte / Contacto</a>
+          <a href="./support-contact.html">Soporte</a>
+          <a href="./support-contact.html">Contacto</a>
         </div>
         <div class="footer-column">
           <strong>Legal</strong>
-          <a aria-current="page" href="./privacy-cookies.html">Privacidad & Cookies</a>
-          <a href="./terms.html">Términos de Servicio</a>
-          <a href="./ads-affiliates.html">Publicidad & Afiliados</a>
+          <a aria-current="page" href="./privacy-cookies.html">Política de privacidad</a>
+          <a href="./terms.html">Términos de servicio</a>
+          <a aria-current="page" href="./privacy-cookies.html">Política de cookies</a>
+          <a href="./ads-affiliates.html">Afiliados y publicidad</a>
         </div>
       </div>
       <div class="site-footer__bottom">
@@ -476,5 +493,6 @@
       </div>
     </div>
   </footer>
+  <script src="./assets/js/itbmo-site.js?v=5.2"></script>
 </body>
 </html>

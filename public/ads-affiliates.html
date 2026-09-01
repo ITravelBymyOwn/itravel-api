@@ -5,12 +5,13 @@
   <title>Publicidad y Afiliados · I Travel By My Own</title>
   <meta name="description" content="Divulgación de publicidad y afiliados de I Travel By My Own (ITBMO).">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
+  <meta name="robots" content="index,follow">
+  <link rel="canonical" href="https://itravelbymyown.com/ads-affiliates.html">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;650;700;750;800;850;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=4.7">
-  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.2.1">
+  <link rel="stylesheet" href="./assets/css/itbmo-site.css?v=5.2">
+  <link rel="stylesheet" href="./assets/css/itbmo-legal.css?v=2.3">
 </head>
 <body class="legal-page">
   <a class="skip-link" href="#legal-content">Ir al contenido</a>
@@ -20,14 +21,13 @@
       <nav class="site-nav legal-main-nav" aria-label="Navegación principal">
         <a href="./preview-home.html#top">Inicio</a>
         <a href="./preview-home.html#how-it-works">Cómo funciona</a>
-        <a href="./preview-home.html#what-you-get">Ejemplo</a>
-        <a href="./preview-home.html#planner">Planner</a>
-        <a href="./preview-home.html#travel-essentials">Para tu viaje</a>
+        <a href="./preview-home.html?open=example#what-you-get">Ver ejemplo</a>
+        <a href="./preview-home.html?open=planner#planner">Crear viaje</a>
         <a href="./preview-home.html#faq">FAQ</a>
         <a href="./support-contact.html">Soporte</a>
       </nav>
       <div class="site-header__actions">
-        <div class="language-switch" aria-label="Idioma de la página"><span class="is-active">ES</span><span aria-hidden="true">·</span><button type="button" disabled aria-disabled="true" title="English version coming soon">EN</button></div>
+        <div class="language-switch" aria-label="Idioma de la página"><button class="is-active" type="button" data-site-lang="es" aria-pressed="true" title="Español">ES</button><span aria-hidden="true">·</span><button type="button" data-site-lang="en" aria-pressed="false" title="English">EN</button></div>
       </div>
     </div>
   </header>
@@ -40,7 +40,7 @@
           <div class="eyebrow glass-pill">Legal · Transparencia</div>
           <h1>Publicidad<br><span>& Afiliados.</span></h1>
           <p>Cómo monetiza ITBMO y qué significa cuando utilizas un enlace comercial.</p>
-          <div class="legal-meta"><span>Última actualización: 24 agosto 2026</span><span>ITBMO · Costa Rica</span></div>
+          <div class="legal-meta"><span>Última actualización: 26 agosto 2026</span><span>ITBMO · Costa Rica</span></div>
         </div>
         <div class="legal-hero__summary glass-panel">
           <span class="legal-hero__summary-icon">↗</span>
@@ -193,6 +193,11 @@
               ITBMO procurará respetarlas cuando el Servicio quede sujeto a esa obligación.
               Consulta <a href="./privacy-cookies.html#cookies">Privacidad & Cookies</a>.
             </p>
+            <p>
+              Para consumidores de California, cuando la CCPA u otra normativa aplicable considere determinada
+              publicidad, atribución o transferencia como “sale” o “sharing”, ITBMO implementará los mecanismos
+              de exclusión legalmente exigibles y reconocerá señales como Global Privacy Control (GPC) cuando corresponda.
+            </p>
           </section>
 
           <section class="legal-section" id="brands">
@@ -231,16 +236,17 @@
     </section>
   </main>
 
-  <footer class="site-footer legal-footer">
+  <footer class="site-footer legal-footer site-footer--home">
     <div class="page-shell">
       <div class="site-footer__top">
-        <div class="site-footer__brand"><a class="brand brand--footer brand--logo" href="./preview-home.html#top"><img src="./assets/img/itbmo-logo-premium.jpg" alt="I Travel By My Own"></a><p>Planea mejor. Viaja a tu manera.</p></div>
-        <div class="footer-column"><strong>ITBMO</strong><a href="./preview-home.html#planner">Planner</a><a href="./preview-home.html#faq">FAQ</a></div>
-        <div class="footer-column"><strong>Ayuda</strong><a href="./support-contact.html">Soporte / Contacto</a></div>
-        <div class="footer-column"><strong>Legal</strong><a href="./privacy-cookies.html">Privacidad & Cookies</a><a href="./terms.html">Términos de Servicio</a><a aria-current="page" href="./ads-affiliates.html">Publicidad & Afiliados</a></div>
+        <div class="footer-column"><strong>ITBMO</strong><a href="./preview-home.html#how-it-works">Cómo funciona</a><a href="./preview-home.html?open=example#what-you-get">Ver ejemplo</a><a href="./preview-home.html#faq">Preguntas frecuentes</a></div>
+        <div class="footer-column"><strong>Viajes</strong><a href="./preview-home.html?open=planner#planner">Crear viaje</a></div>
+        <div class="footer-column"><strong>Ayuda</strong><a href="./support-contact.html">Soporte</a><a href="./support-contact.html">Contacto</a></div>
+        <div class="footer-column"><strong>Legal</strong><a href="./privacy-cookies.html">Política de privacidad</a><a href="./terms.html">Términos de servicio</a><a href="./privacy-cookies.html">Política de cookies</a><a aria-current="page" href="./ads-affiliates.html">Afiliados y publicidad</a></div>
       </div>
       <div class="site-footer__bottom"><p>© 2026 I Travel By My Own. Todos los derechos reservados.</p><p>Operado desde Costa Rica.</p></div>
     </div>
   </footer>
+  <script src="./assets/js/itbmo-site.js?v=5.2"></script>
 </body>
 </html>

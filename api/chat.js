@@ -1,4 +1,4 @@
-// /api/chat.js — v65.1 (MVP WOW: schema-wide validation + surgical repair; stage-safe) — ESM compatible on Vercel
+// /api/chat.js — v65.2 (MVP WOW: stable quality rules + exact usage metadata; stage-safe) — ESM compatible on Vercel
 // ✅ Keeps v58 interface: receives {mode, input/history/messages} and returns { text: "<string>" }.
 // ✅ Does NOT break "info" mode: returns free text.
 // ✅ Adjusts ONLY the planner prompt + parse/guardrails to enforce strong rules (prefer city_day, 2-line duration, auroras, macro-tours, etc.).
@@ -715,14 +715,18 @@ For stays of five or more days:
 - Do not schedule a macro-route plus its anchor experience on one day and then repeat that anchor
   or route as a separate day.
 - The arrival and final days must have different scopes and reserved anchors.
+- Aurora opportunities are NOT standalone strategic day buckets. When plausible, require an additional aurora note in the FINAL row/notes of EVERY day in that city. This applies even when auroras were explicitly requested in Preferences; the preference must not consume a day or become a standalone row.
 - If the requested duration is longer than the premium inventory, a lighter day is preferable to
   repetition. Do not fabricate novelty.
 
 DATE, DAYLIGHT AND ANCHOR TIME
 - Use actual dates, latitude/season, daily windows, lodging/base and transport.
+- If the user did not provide an end time for a day, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, NOT a ceiling. Finishing materially earlier requires a real logistical/safety/daylight constraint, not mere convenience or rest. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not add filler merely to reach the clock. Any explicit user end time remains a hard boundary.
+- On Day 1, the traveler reaches the lodging and completes check-in or luggage drop BEFORE sightseeing. If arrival transport details were not provided, never invent an airport, flight, station or transfer origin.
 - Protect plausible useful daylight for landscape-dependent outdoor buckets.
 - Use darkness for transfers, indoor activities, meals, thermal experiences and optional night
   opportunities.
+- A full day spanning the local lunch period should reserve a realistic meal break. Use local dining customs; if uncertain, roughly 12:00–15:00 is a safe fallback. Regional/day-trip lunches must remain on-route.
 - Reserve realistic dwell for immersive anchors: thermal lagoons/spas, wildlife or whale-watching
   cruises, guided tours, large museums, theme parks, archaeological complexes and substantial
   hikes. Do not assign more daytime stops than can realistically coexist with the anchor.
@@ -780,6 +784,9 @@ day's scope or omit it. Never publish a misleadingly short visit.
 
 4. TIME MATHEMATICS AND TRANSFERS
 - Every row interval must contain transport plus activity.
+- If the user did not provide an end time, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, not a ceiling. Finishing materially earlier requires a real constraint; continue later when high-value evening experiences materially improve the itinerary. Respect any explicit user end time as a hard boundary.
+- On Day 1, lodging arrival/check-in or luggage drop occurs before sightseeing. If arrival origin/transport was not provided, do not invent airport, flight, station or transfer details.
+- On full days spanning lunch, include a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On regional/day-trip days, keep the meal on-route and preserve route continuity.
 - Minimum transport + minimum activity must fit between start and end.
 - Include parking, walking from parking, check-in, security, boarding, changing or pickup time when
   operationally necessary.
@@ -816,11 +823,11 @@ day's scope or omit it. Never publish a misleadingly short visit.
 
 7. CONDITIONAL AURORA / NIGHT OPPORTUNITIES
 - Aurora content is forbidden outside plausible auroral latitude and season.
-- When plausible, do not promise sightings and do not force a rigid main activity row.
-- Add a concise note to 1–3 suitable evening/end-of-day rows, beginning only after a plausible dark hour.
-- Explain that the traveler may either drive independently to a safe dark area when roads/weather
-  permit or book a paid guided tour.
-- State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
+- Do NOT create a standalone aurora activity row by default.
+- When auroras are plausible for the city/date, place concise aurora guidance as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city.
+- Because the final-row note is present on EVERY plausible day, the traveler has multiple weather-dependent opportunities across the stay; do not select only one aurora night.
+- The note must give a plausible dark-hour window, explain the guided-tour option (and safe independent viewing only when appropriate), state that visibility is not guaranteed, and require checks for cloud cover, geomagnetic activity, road conditions and local safety.
+- Even when the user explicitly requests auroras or an aurora tour in Preferences / Restrictions / Special conditions, satisfy that preference by adding the aurora guidance to the FINAL-row note of EVERY plausible day. The preference itself must NEVER create a standalone aurora row or reserve a whole day. Only a genuinely confirmed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may be represented as a row.
 - Do not repeat an identical aurora note every night.
 
 8. QUALITY
@@ -1042,7 +1049,8 @@ async function _v64RepairMasterPlanOnce_(
   report,
   effectivePrompt,
   clientMessages,
-  expectedDays
+  expectedDays,
+  usageCollector = null
 ) {
   if (!parsed || report.ok) return null;
 
@@ -1073,7 +1081,8 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     6000,
-    85000
+    85000,
+    usageCollector
   );
 
   const repaired = cleanToJSON(raw);
@@ -1679,7 +1688,8 @@ async function _v62RepairFinalOnce_(
   parsed,
   report,
   effectivePrompt,
-  clientMessages
+  clientMessages,
+  usageCollector = null
 ) {
   if (!ITBMO_FINAL_REPAIR_ENABLED || report.ok) return null;
 
@@ -1697,7 +1707,10 @@ FINAL SURGICAL REPAIR:
 - Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
-- Aurora, when plausible, should normally be a concise note with independent-drive and paid-tour options, not a forced fixed row unless explicitly requested.
+- Aurora, when plausible, must be an ADDITIONAL opportunity note in the NOTES of the FINAL row of EVERY day in that city, not a standalone row. This applies even when auroras or an aurora tour were explicitly requested in Preferences. Each day should preserve a weather-dependent opportunity; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
+- If a day has no user-provided end, rebuild it so the final row normally reaches at least approximately 19:00 local. 19:00 is a minimum requirement, not a ceiling. Finishing materially earlier requires a real constraint; the day may continue later for high-value evening experiences.
+- Day 1 must reach the lodging/check in or drop luggage before sightseeing, without inventing unknown arrival transport.
+- Full days spanning lunch need a realistic meal break; day-trip meals remain on-route.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
 - Remove rental-car wording from hotel/from/to fields.
 - Use walking in compact urban clusters when practical.
@@ -1716,7 +1729,8 @@ ${JSON.stringify(parsed)}
     [{ role: "system", content: repairPrompt }, ...clientMessages],
     0.12,
     9000,
-    85000
+    85000,
+    usageCollector
   );
 
   const repaired = cleanToJSON(raw);
@@ -1856,6 +1870,8 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
   • If there are multiple rows on a day, the first row MUST end before the next row starts.
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
+- For every day with no user-provided end time, approximately 19:00 local is the minimum planning REQUIREMENT, not a ceiling. The day should not finish materially earlier unless a genuine logistical, daylight, safety, arrival/departure or user-driven constraint requires it. Continue later when worthwhile evening content materially improves the itinerary. Any explicit user end time remains a hard boundary.
+- On the arrival day, reaching the lodging and completing check-in/luggage drop is the FIRST step before sightseeing. If arrival transport details are unknown, do not invent airport/flight/station/transfer information.
 - CRITICAL: absence of hours is NOT permission to create a short day, an almost empty day, or a generic free day.
 - If a day has no provided hours, you MUST still build a full, well-paced day with realistic expert timing.
 
@@ -2061,10 +2077,11 @@ MANDATORY ROW CONTRACT:
   + condition/alternative if applicable
   + when relevant, add nearby logical pair information.
 
-MEALS (Flexible rule):
-- NOT mandatory.
-- Include ONLY if they add real value to the flow.
-- If included, NOT generic ("dinner at a local restaurant" forbidden).
+MEALS (Realistic timing rule):
+- On a normal full day that spans the local lunch period, include a realistic lunch/meal break unless the user explicitly prefers otherwise or a long fixed experience requires a different arrangement.
+- Follow local dining customs; if uncertain, use roughly 12:00–15:00 as a fallback lunch window.
+- Dinner is optional; include it when it adds real value, especially when worthwhile evening activities naturally extend the itinerary beyond 19:00.
+- If included, a meal must NOT be generic ("dinner at a local restaurant" forbidden).
 - Meal stops must be specific enough to be useful:
   • use a named venue, a clearly identified food hall/harbor/market/street, or a concrete area with recognizable dining value.
   • avoid vague placeholders like "local restaurant" or "restaurant near attraction" as the main sub-stop.
@@ -2082,13 +2099,14 @@ NIGHT TOURS (GLOBAL, when applicable):
 
 AURORAS (GLOBAL CONDITIONAL-NOTE RULE):
 - FORBIDDEN unless latitude, season and darkness make them genuinely plausible.
+- Do NOT create a standalone aurora activity row by default.
 - When plausible, never guarantee visibility and do not displace a stronger daytime plan.
-- Add a concise conditional note to 1–3 suitable evening/end-of-day rows, beginning only after a
-  plausible dark hour.
-- Explain that the traveler may either drive independently to a safe dark viewing area when
-  weather/roads permit or book a paid guided aurora tour.
+- Put the aurora opportunity as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city, beginning only after a plausible dark hour.
+- Repeat the opportunity on EVERY plausible day so the traveler naturally has multiple weather-dependent backup opportunities across the stay.
+- Explain the paid guided-tour option and, only when appropriate, safe independent viewing.
 - State that cloud cover, geomagnetic activity, road conditions and visibility must be checked.
-- Do not repeat the same note every night; keep at least one backup opportunity when trip length permits.
+- An explicit aurora preference alone must remain in the FINAL-row notes. Only if the user separately provides a genuinely confirmed aurora booking with a fixed time and explicitly asks to schedule that booking may it be represented as a row.
+- Do not repeat the same note every night.
 
 DAY TRIPS / MACRO-TOURS:
 - If you create a day trip, you must break it down into 5–15 sub-stops (rows) WHEN IT ADDS REAL VALUE.
@@ -2105,7 +2123,8 @@ DAY TRIPS / MACRO-TOURS:
 - Always close with a dedicated return row:
   • Use the macro-tour "DESTINATION": "<Macro-tour> – Return to {Base city}".
 - Avoid the last day if there are options, unless the last day has enough time and it is the best remaining bucket.
-- For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative.
+- For day trips, avoid optimistic timing: return from the LAST point must be realistic/conservative. If the user did not provide another end time, design the route so the realistic return to the lodging/base is not routinely before approximately 19:00. For day trips, do not force a late return merely to fill time; if a genuinely high-value evening experience remains in the base city and logistics are realistic, the itinerary may continue later. Remove weaker optional stops rather than publishing an unrealistic return.
+- A day trip spanning lunch must include a realistic on-route meal break using local dining customs; never create major backtracking only for a meal.
 - CRITICAL: after the return row, do NOT jump "from" back to "Hotel" unless you add a realistic transfer row or the return row ends at/near the hotel.
 - Do NOT propose a day trip just because it is theoretically possible.
   • A day trip must be good in real traveler experience, not dominated by exhausting transit.
@@ -2244,9 +2263,47 @@ FORMAT:
 `.trim();
 
 // ==============================
+// Exact OpenAI usage aggregation (request-scoped)
+// ==============================
+function _newUsageCollector_() {
+  return {
+    model: MODEL,
+    model_calls: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    total_tokens: 0,
+  };
+}
+
+function _accumulateUsage_(collector, resp) {
+  if (!collector || !resp) return;
+  const usage = resp?.usage || {};
+  const input = Number(usage?.input_tokens || 0) || 0;
+  const output = Number(usage?.output_tokens || 0) || 0;
+  const total = Number(usage?.total_tokens || (input + output)) || (input + output);
+
+  collector.model = String(resp?.model || collector.model || MODEL);
+  collector.model_calls += 1;
+  collector.input_tokens += input;
+  collector.output_tokens += output;
+  collector.total_tokens += total;
+}
+
+function _usagePayload_(collector) {
+  if (!collector) return null;
+  return {
+    model: String(collector.model || MODEL),
+    model_calls: Number(collector.model_calls || 0),
+    input_tokens: Number(collector.input_tokens || 0),
+    output_tokens: Number(collector.output_tokens || 0),
+    total_tokens: Number(collector.total_tokens || 0),
+  };
+}
+
+// ==============================
 // Model call (with soft timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000) {
+async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null) {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
 
   const controller = new AbortController();
@@ -2264,6 +2321,8 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   },
   { signal: controller.signal }
 );
+
+    _accumulateUsage_(usageCollector, resp);
 
     const text = resp?.output_text?.trim() || resp?.output?.[0]?.content?.[0]?.text?.trim() || "";
 
@@ -2291,6 +2350,68 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
+    const plannerUsage = mode === "planner" ? _newUsageCollector_() : null;
+
+    /* CITY NORMALIZATION · isolated pre-save validation.
+       It never changes the planner or Info Chat contracts. */
+    if (mode === "normalize_destinations") {
+      const destinations = Array.isArray(body.destinations)
+        ? body.destinations.slice(0, 3).map((item, index) => ({
+            index,
+            city:String(item?.city || "").trim(),
+            country:String(item?.country || "").trim()
+          })).filter(item => item.city)
+        : [];
+
+      if (!destinations.length) {
+        return res.status(400).json({
+          ok:false,
+          code:"DESTINATIONS_REQUIRED",
+          error:"At least one destination is required."
+        });
+      }
+
+      const normalizationPrompt = `
+You validate destination names immediately before a travel-planning form is saved.
+
+Return ONLY valid JSON with this exact shape:
+{"destinations":[{"index":0,"status":"confirmed|corrected|ambiguous","city":"Canonical city name","country":"Canonical country name","question":""}]}
+
+Rules:
+- Correct obvious typing, keyboard-neighbor, transposition and phonetic mistakes when the intended real city is clear from the city plus country. Example: "Msdris" with Spain means "Madrid", "Spain".
+- Use the destination's standard internationally recognizable city and country names. Preserve native diacritics when appropriate.
+- If the input is already a valid real destination, return status "confirmed" and do not replace it with a nearby or better-known city.
+- Never invent a correction when two or more plausible destinations remain. Return status "ambiguous", preserve the original city/country, and write one short clarification question in the user's language.
+- A missing country alone is not ambiguous when the city is globally unambiguous; fill the canonical country.
+- Keep every input index exactly once and in the same order.
+- Do not add destinations.
+
+USER LANGUAGE: ${String(body.language || lang || "en")}
+DESTINATIONS:
+${JSON.stringify(destinations)}
+`.trim();
+
+      const rawNormalization = await callStructured(
+        [{role:"system",content:normalizationPrompt}],
+        0,
+        900,
+        30000
+      );
+      const parsedNormalization = cleanToJSON(rawNormalization);
+      const normalized = Array.isArray(parsedNormalization?.destinations)
+        ? parsedNormalization.destinations
+        : [];
+
+      if (normalized.length !== destinations.length) {
+        return res.status(502).json({
+          ok:false,
+          code:"DESTINATION_NORMALIZATION_FAILED",
+          error:"Destination validation could not be completed."
+        });
+      }
+
+      return res.status(200).json({ok:true,destinations:normalized});
+    }
 
     // INFO mode: server-side entitlement + semantic scope + thematic per-trip quota.
     if (mode === "info") {
@@ -2435,7 +2556,8 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
       [{ role: "system", content: SYSTEM_PROMPT_EFFECTIVE }, ...clientMessages],
       stage === "master_plan" ? 0.2 : 0.24,
       primaryTokens,
-      primaryTimeout
+      primaryTimeout,
+      plannerUsage
     );
 
     let parsed = cleanToJSON(raw);
@@ -2474,7 +2596,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         [{ role: "system", content: strictPrompt }, ...clientMessages],
         stage === "master_plan" ? 0.14 : 0.16,
         stage === "master_plan" ? 5500 : 10500,
-        stage === "master_plan" ? 85000 : 115000
+        stage === "master_plan" ? 85000 : 115000,
+        plannerUsage
       );
       parsed = cleanToJSON(raw);
     }
@@ -2505,7 +2628,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
               masterReport,
               SYSTEM_PROMPT_EFFECTIVE,
               clientMessages,
-              expectedDays
+              expectedDays,
+              plannerUsage
             );
 
             if (repairedMaster) {
@@ -2530,7 +2654,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
         }
       }
 
-      return res.status(200).json({ text: JSON.stringify(parsed) });
+      return res.status(200).json({
+        text: JSON.stringify(parsed),
+        usage: _usagePayload_(plannerUsage)
+      });
     }
 
     // Final itinerary/one-shot normalization.
@@ -2554,7 +2681,8 @@ MANDATORY FINAL-ITINERARY RECOVERY:
             parsed,
             report,
             SYSTEM_PROMPT_EFFECTIVE,
-            clientMessages
+            clientMessages,
+            plannerUsage
           );
 
           if (repaired) {
@@ -2589,7 +2717,10 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       }
     } catch {}
 
-    return res.status(200).json({ text: JSON.stringify(parsed) });
+    return res.status(200).json({
+      text: JSON.stringify(parsed),
+      usage: _usagePayload_(plannerUsage)
+    });
   } catch (err) {
     console.error("❌ /api/chat error:", err);
 
