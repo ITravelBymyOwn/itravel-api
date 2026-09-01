@@ -9142,8 +9142,6 @@ function enhancePreferencesInfoChatCopy(){
 ========================================================= */
 let activeAstraCoach=null;
 let astraCoachTimer=null;
-let astraCoachDisplayTimer=null;
-let astraCoachRequestId=0;
 
 function astraCoachCopy(key){
   const es=getLang()==='es';
@@ -9184,7 +9182,6 @@ function astraCoachCopy(key){
 
 function closeAstraCoach({remember=true}={}){
   clearTimeout(astraCoachTimer);
-  clearTimeout(astraCoachDisplayTimer);
   if(!activeAstraCoach) return;
   const {bubble,key,target,position,interaction}=activeAstraCoach;
   window.removeEventListener('resize',position);
@@ -9230,12 +9227,8 @@ function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}
     const rect=target.getBoundingClientRect();
     const b=bubble.getBoundingClientRect();
     const margin=12;
-    const top=rect.bottom+window.scrollY+10;
-    const viewportLeft=window.scrollX;
-    const left=Math.min(
-      Math.max(viewportLeft+margin,rect.left+window.scrollX),
-      Math.max(viewportLeft+margin,viewportLeft+window.innerWidth-b.width-margin)
-    );
+    const top=rect.bottom+10;
+    const left=Math.min(Math.max(margin,rect.left),Math.max(margin,window.innerWidth-b.width-margin));
     bubble.style.left=`${left}px`; bubble.style.top=`${top}px`;
     bubble.classList.remove('is-above');
   };
@@ -9333,22 +9326,16 @@ function focusPlannerGuideStep(step){
   const target=resolveCoachTarget(step?.focus||step?.target);
   if(!target) return;
   try{target.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});}catch(_){ }
-  setTimeout(()=>{try{target.focus({preventScroll:true});}catch(_){ }},300);
+  try{target.focus({preventScroll:true});}catch(_){ }
 }
 
 function showNextPlannerGuide({focus=false,force=false,delay=220}={}){
-  const requestId=++astraCoachRequestId;
   clearTimeout(astraCoachTimer);
-  clearTimeout(astraCoachDisplayTimer);
   astraCoachTimer=setTimeout(()=>{
-    if(requestId!==astraCoachRequestId) return;
     const step=getNextPlannerGuideStep();
     if(!step){closeAstraCoach({remember:false});return;}
     if(focus) focusPlannerGuideStep(step);
-    astraCoachDisplayTimer=setTimeout(()=>{
-      if(requestId!==astraCoachRequestId) return;
-      showAstraCoach(step.key,step.target,{...step,force});
-    },focus?340:0);
+    requestAnimationFrame(()=>showAstraCoach(step.key,step.target,{...step,force}));
   },delay);
 }
 
@@ -9381,7 +9368,7 @@ function bindProgressivePlannerGuide(){
   });
 }
 
-function initAstraCoach(){
+function initAstraCoach({deferFirstBubble=false}={}){
   if(!document.querySelector('.astra-guide-replay')){
     const replay=document.createElement('button');
     replay.type='button';
@@ -9393,7 +9380,7 @@ function initAstraCoach(){
     });
     document.body.appendChild(replay);
   }
-  showNextPlannerGuide({focus:false,force:false,delay:500});
+  if(!deferFirstBubble) showNextPlannerGuide({focus:false,force:false,delay:500});
 }
 
 // Inicialización
@@ -9416,5 +9403,10 @@ document.addEventListener('DOMContentLoaded', ()=>{
   setTravelerButtonsState();
 
   bindExportListeners();
-  sessionRestore.finally(()=>initAstraCoach());
+  initAstraCoach({deferFirstBubble:true});
+  const guideRestoreFallback=setTimeout(()=>showNextPlannerGuide({focus:false,force:true,delay:0}),1800);
+  sessionRestore.finally(()=>{
+    clearTimeout(guideRestoreFallback);
+    showNextPlannerGuide({focus:false,force:true,delay:80});
+  });
 });
