@@ -48,6 +48,217 @@
 }
 
 /* =========================================================
+   ITBMO · ASTRA GUIDED LUXURY UX · v74
+   Surgical overrides for guided setup, calendar, time selectors,
+   confirmations, downloads and resizable Info Chat.
+========================================================= */
+
+.traveler-profile-actions{
+  position:sticky;
+  bottom:.35rem;
+  z-index:4;
+  display:flex;
+  justify-content:flex-end;
+  gap:.65rem;
+  margin-top:.9rem;
+  padding:.65rem;
+  border:1px solid rgba(12,166,192,.18);
+  border-radius:1rem;
+  background:linear-gradient(135deg,rgba(248,253,255,.96),rgba(232,250,249,.96));
+  box-shadow:0 12px 28px rgba(9,61,89,.10);
+  backdrop-filter:blur(12px);
+}
+.traveler-control{
+  min-width:118px;
+  min-height:44px;
+  border-radius:999px!important;
+  font-weight:850!important;
+  transition:transform .18s ease,box-shadow .18s ease,filter .18s ease!important;
+}
+.traveler-control--add{
+  color:#fff!important;
+  border-color:transparent!important;
+  background:linear-gradient(135deg,#087df1,#08aeb4)!important;
+  box-shadow:0 10px 24px rgba(8,126,211,.26)!important;
+}
+.traveler-control--remove{
+  color:#075b72!important;
+  border-color:rgba(8,126,177,.24)!important;
+  background:rgba(255,255,255,.96)!important;
+}
+.traveler-control:not(:disabled):hover{transform:translateY(-2px);filter:saturate(1.08)}
+.traveler-control:disabled{opacity:.42!important;box-shadow:none!important}
+
+.city-row .date-wrapper{gap:.28rem!important}
+.city-row input.baseDatePicker{
+  width:100%;
+  min-height:48px;
+  color:var(--ink);
+  font-weight:750;
+  cursor:pointer;
+  color-scheme:light;
+}
+.city-row input.baseDatePicker::-webkit-calendar-picker-indicator{
+  width:20px;height:20px;cursor:pointer;opacity:.72;
+}
+.date-format{color:#71869b!important;font-size:.68rem!important}
+.date-summary{
+  display:block;
+  min-height:1.05rem;
+  color:#087b92;
+  font-size:.7rem;
+  font-weight:800;
+  line-height:1.35;
+}
+
+.hours-block{
+  position:relative;
+  padding-top:.8rem!important;
+}
+.same-schedule-toggle{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  width:max-content;
+  max-width:100%;
+  margin:.2rem 0 .8rem;
+  padding:.5rem .7rem;
+  border:1px solid rgba(7,148,171,.18);
+  border-radius:999px;
+  color:#0b6076;
+  background:rgba(236,251,251,.88);
+  font-size:.72rem!important;
+  font-weight:800!important;
+  cursor:pointer;
+}
+.same-schedule-toggle>input{position:absolute;opacity:0;pointer-events:none}
+.same-schedule-ui{
+  position:relative;
+  width:34px;height:20px;flex:0 0 34px;
+  border-radius:999px;
+  background:#b8c9d2;
+  transition:.2s ease;
+}
+.same-schedule-ui::after{
+  content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;
+  box-shadow:0 2px 6px rgba(0,24,48,.22);transition:.2s ease;
+}
+.same-schedule-toggle>input:checked+.same-schedule-ui{background:linear-gradient(135deg,#087df1,#08aeb4)}
+.same-schedule-toggle>input:checked+.same-schedule-ui::after{transform:translateX(14px)}
+.same-schedule-toggle>input:focus-visible+.same-schedule-ui{outline:3px solid rgba(16,132,255,.2);outline-offset:2px}
+.time-selector{
+  display:grid;
+  grid-template-columns:minmax(64px,1fr) auto minmax(64px,1fr);
+  align-items:center;
+  gap:.32rem;
+  min-width:0;
+}
+.time-selector>span{color:#6d8294;font-weight:900;text-align:center}
+.time-selector select{
+  width:100%;
+  min-width:0;
+  min-height:46px;
+  padding:.45rem .5rem!important;
+  border:1px solid rgba(33,76,111,.16)!important;
+  border-radius:.75rem!important;
+  color:var(--ink)!important;
+  background:#fff!important;
+  font-weight:750!important;
+  text-align:center;
+}
+.hours-block.is-same-schedule .hours-day:not(:first-of-type){opacity:.72}
+.hours-block.is-same-schedule .hours-day:not(:first-of-type) select{background:#edf5f7!important;cursor:not-allowed}
+
+.itbmo-decision-overlay{
+  position:fixed;inset:0;z-index:61000;display:grid;place-items:center;padding:20px;
+  background:rgba(2,22,43,.58);backdrop-filter:blur(12px);
+  opacity:0;visibility:hidden;transition:opacity .22s ease,visibility .22s ease;
+}
+.itbmo-decision-overlay.active{opacity:1;visibility:visible}
+.itbmo-decision-card{
+  width:min(94vw,560px);padding:1.6rem;border:1px solid rgba(255,255,255,.72);border-radius:28px;
+  color:var(--ink);background:linear-gradient(145deg,rgba(255,255,255,.99),rgba(238,251,251,.98));
+  box-shadow:0 34px 100px rgba(1,23,45,.34);transform:translateY(14px) scale(.985);transition:transform .22s ease;
+}
+.itbmo-decision-overlay.active .itbmo-decision-card{transform:none}
+.itbmo-decision-symbol{display:grid;place-items:center;width:48px;height:48px;border-radius:15px;color:#fff;background:linear-gradient(135deg,#1388f4,#05aeb5);box-shadow:0 12px 26px rgba(10,145,194,.28);font-size:1.3rem}
+.itbmo-decision-eyebrow{margin-top:.9rem;color:#08778d;font-size:.66rem;font-weight:900;letter-spacing:.13em}
+.itbmo-decision-card h3{margin:.35rem 0 .55rem;font-size:1.42rem;letter-spacing:-.035em}
+.itbmo-decision-card p{margin:0;color:#536d82;font-size:.88rem;line-height:1.62}
+.itbmo-decision-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:.7rem;margin-top:1.25rem}
+.itbmo-decision-actions .btn{min-height:48px;border-radius:14px;font-weight:850}
+.itbmo-decision-pay{color:#082b59!important;border-color:#ffbf29!important;background:linear-gradient(135deg,#ffd25a,#ffb91f)!important;box-shadow:0 12px 28px rgba(244,169,0,.23)!important}
+
+.astra-guide-replay{
+  position:fixed;left:16px;bottom:16px;z-index:45000;display:flex;align-items:center;gap:.42rem;
+  min-height:38px;padding:.46rem .72rem;border:1px solid rgba(255,255,255,.72);border-radius:999px;
+  color:#075f77;background:rgba(250,254,255,.93);box-shadow:0 10px 30px rgba(5,43,70,.16);
+  backdrop-filter:blur(14px);font:800 .7rem/1 Inter,sans-serif;cursor:pointer;
+}
+.astra-guide-replay span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#fff;background:linear-gradient(135deg,#158af1,#05adb4)}
+.astra-coach{
+  position:fixed;z-index:60000;display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;
+  width:min(340px,calc(100vw - 24px));padding:.9rem;border:1px solid rgba(130,220,229,.5);border-radius:20px;
+  color:var(--ink);background:linear-gradient(145deg,rgba(255,255,255,.99),rgba(235,251,251,.98));
+  box-shadow:0 24px 65px rgba(2,40,68,.25);opacity:0;transform:translateY(8px) scale(.985);pointer-events:auto;
+  transition:opacity .18s ease,transform .18s ease;
+}
+.astra-coach.is-visible{opacity:1;transform:none}
+.astra-coach__avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1288f2,#04adb4);box-shadow:0 9px 20px rgba(10,145,194,.24)}
+.astra-coach__content small{display:block;margin-bottom:.18rem;color:#078098;font-size:.56rem;font-weight:900;letter-spacing:.12em}
+.astra-coach__content strong{display:block;font-size:.83rem;line-height:1.25}
+.astra-coach__content p{margin:.3rem 0 0;color:#587083;font-size:.7rem;line-height:1.45}
+.astra-coach__close{align-self:start;width:26px;height:26px;padding:0;border:0;border-radius:50%;color:#60798c;background:rgba(221,238,242,.72);font-size:1rem;cursor:pointer}
+
+.preferences-help-button{
+  box-shadow:0 13px 30px rgba(7,129,170,.13)!important;
+  transform:translateZ(0);
+}
+.preferences-help-button--guide{border-color:rgba(10,160,182,.34)!important;background:linear-gradient(135deg,#f4feff,#ddf8f7)!important}
+.preferences-help-button--unsure{border-color:rgba(81,101,225,.26)!important;background:linear-gradient(135deg,#f7f9ff,#eef1ff)!important}
+.preferences-help-button:hover{transform:translateY(-2px)!important;box-shadow:0 18px 38px rgba(7,110,156,.2)!important}
+
+.info-chat-modal:not(.is-minimized){
+  resize:both;
+  overflow:hidden!important;
+  min-width:360px;
+  min-height:430px;
+  max-width:calc(100vw - 20px)!important;
+  max-height:calc(100vh - 20px)!important;
+}
+.info-chat-modal:not(.is-minimized) .info-chat-panel{width:100%;height:100%;min-height:0!important}
+.info-chat-modal:not(.is-minimized) .chat-messages{min-height:120px;overflow-y:auto!important}
+.info-chat-modal:not(.is-minimized)::after{
+  content:"";position:absolute;right:5px;bottom:5px;width:15px;height:15px;pointer-events:none;
+  background:linear-gradient(135deg,transparent 0 48%,#0794a9 49% 57%,transparent 58% 68%,#0794a9 69% 77%,transparent 78%);
+  opacity:.7;
+}
+
+.itbmo-download-actions{display:grid;gap:.62rem;width:100%;margin:.9rem 0}
+.itbmo-download-actions .btn{display:grid;grid-template-columns:34px 1fr;align-items:center;gap:.65rem;width:100%;min-height:48px;text-align:left;border-radius:14px}
+.itbmo-download-actions .btn>span{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;color:#08748c;background:rgba(255,255,255,.82);font-size:.65rem;font-weight:900}
+.itbmo-download-actions .btn.is-complete{background:linear-gradient(135deg,#0b9f87,#09aeb4)!important}
+.itbmo-download-actions .btn.is-complete::after{content:"✓";justify-self:end;margin-right:.25rem;font-weight:900}
+#start-planning.is-busy{position:relative;cursor:progress;opacity:.82}
+
+@media(max-width:760px){
+  .traveler-profile-actions{position:sticky;justify-content:stretch}
+  .traveler-control{flex:1;min-width:0}
+  .hours-header{display:none!important}
+  .hours-day{grid-template-columns:58px 1fr!important;gap:.5rem!important}
+  .hours-day>.time-selector{grid-column:2}
+  .same-schedule-toggle{width:100%;border-radius:14px}
+  .itbmo-decision-actions{grid-template-columns:1fr}
+  .itbmo-decision-actions .itbmo-decision-confirm{grid-row:1}
+  .astra-guide-replay{left:10px;bottom:10px}
+  .info-chat-modal:not(.is-minimized){resize:none;min-width:0;min-height:0;max-width:none!important;max-height:none!important}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .astra-coach,.itbmo-decision-card,.traveler-control{transition:none!important}
+}
+
+/* =========================================================
    BASE
 ========================================================= */
 *{box-sizing:border-box}
@@ -5590,9 +5801,19 @@ body.itinerary-focus-open{
     display:none;
   }
 
-  #loading-overlay .loader > p.astra-overlay-copy::after{
+#loading-overlay .loader > p.astra-overlay-copy::after{
     width:min(260px,62%);
     height:4px;
   }
 }
 
+/* Final precedence guard for the v79 guided controls. */
+.traveler-profile-actions{position:sticky;bottom:.35rem;z-index:12}
+.time-selector{display:grid!important;grid-template-columns:minmax(64px,1fr) auto minmax(64px,1fr)!important}
+.info-chat-modal:not(.is-minimized){resize:both!important;overflow:hidden!important;min-width:360px;min-height:430px;max-width:calc(100vw - 20px)!important;max-height:calc(100vh - 20px)!important}
+.info-chat-modal:not(.is-minimized) .info-chat-panel{width:100%!important;height:100%!important;min-height:0!important}
+.info-chat-modal:not(.is-minimized) .chat-messages{min-height:120px!important;overflow-y:auto!important}
+@media(max-width:760px){
+  .info-chat-modal:not(.is-minimized){resize:none!important;min-width:0;min-height:0;max-width:none!important;max-height:none!important}
+  .time-selector{grid-template-columns:minmax(58px,1fr) auto minmax(58px,1fr)!important}
+}
