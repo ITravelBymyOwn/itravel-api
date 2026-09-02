@@ -189,13 +189,6 @@
 .itbmo-decision-actions .btn{min-height:48px;border-radius:14px;font-weight:850}
 .itbmo-decision-pay{color:#082b59!important;border-color:#ffbf29!important;background:linear-gradient(135deg,#ffd25a,#ffb91f)!important;box-shadow:0 12px 28px rgba(244,169,0,.23)!important}
 
-.astra-guide-replay{
-  position:fixed;left:16px;bottom:16px;z-index:45000;display:flex;align-items:center;gap:.42rem;
-  min-height:38px;padding:.46rem .72rem;border:1px solid rgba(255,255,255,.72);border-radius:999px;
-  color:#075f77;background:rgba(250,254,255,.93);box-shadow:0 10px 30px rgba(5,43,70,.16);
-  backdrop-filter:blur(14px);font:800 .7rem/1 Inter,sans-serif;cursor:pointer;
-}
-.astra-guide-replay span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#fff;background:linear-gradient(135deg,#158af1,#05adb4)}
 .astra-coach{
   position:fixed;z-index:60000;display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;
   width:min(340px,calc(100vw - 24px));padding:.9rem;border:1px solid rgba(130,220,229,.5);border-radius:20px;
@@ -250,7 +243,6 @@
   .same-schedule-toggle{width:100%;border-radius:14px}
   .itbmo-decision-actions{grid-template-columns:1fr}
   .itbmo-decision-actions .itbmo-decision-confirm{grid-row:1}
-  .astra-guide-replay{left:10px;bottom:10px}
   .info-chat-modal:not(.is-minimized){resize:none;min-width:0;min-height:0;max-width:none!important;max-height:none!important}
 }
 
@@ -5970,4 +5962,18 @@ body.itinerary-focus-open{
   .time-selector-label{font-size:.66rem}
   .time-selector-inputs select{min-height:36px!important;font-size:.86rem!important}
   .date-picker-placeholder{font-size:.76rem}
+}
+
+/* =========================================================
+   ITBMO · v86 · Automatic guide + distinct preference CTAs
+========================================================= */
+.preferences-help-button--guide{
+  border-color:rgba(0,106,154,.48)!important;
+  background:linear-gradient(135deg,#006fd6 0%,#009ab4 52%,#00a78f 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 14px 32px rgba(0,112,151,.27)!important;
+}
+.preferences-help-button--unsure{
+  border-color:rgba(98,34,174,.48)!important;
+  background:linear-gradient(135deg,#6226b8 0%,#8b2fc2 48%,#c72c82 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.27),0 14px 32px rgba(104,35,158,.26)!important;
 }
