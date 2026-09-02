@@ -9190,7 +9190,6 @@ function astraCoachCopy(key){
 }
 
 function closeAstraCoach({remember=true}={}){
-  clearTimeout(astraCoachTimer);
   if(!activeAstraCoach) return;
   const {bubble,key,target,position,interaction}=activeAstraCoach;
   window.removeEventListener('resize',position);
@@ -9334,7 +9333,8 @@ function getNextPlannerGuideStep(){
 function focusPlannerGuideStep(step){
   const target=resolveCoachTarget(step?.focus||step?.target);
   if(!target) return;
-  try{target.focus({preventScroll:true});}catch(_){ }
+  /* Keep the verified guide behavior: move the field into view without
+     focusing it programmatically. A real user focus closes the bubble. */
   try{target.scrollIntoView({behavior:'auto',block:'center',inline:'nearest'});}catch(_){ }
 }
 
