@@ -2515,6 +2515,54 @@ table.itinerary td:nth-child(8){width:16%}
   }
 }
 
+/* ITBMO · v91 · Siguiente viaje, sin añadir otra sección pesada */
+.new-planning-cta{
+  display:none;
+  align-items:center;
+  justify-content:flex-end;
+  gap:.72rem;
+  width:100%;
+  margin-top:.72rem;
+  color:#557187;
+  font-size:.82rem;
+  font-weight:760;
+}
+.new-planning-cta.is-ready{
+  display:flex;
+  animation:toolbarReveal .4s var(--ease) both;
+}
+.new-planning-button{
+  min-height:38px;
+  padding:.55rem .9rem;
+  color:#075f7d;
+  background:#fff;
+  border:1px solid rgba(7,126,160,.34);
+  border-radius:999px;
+  box-shadow:0 7px 18px rgba(7,77,111,.09);
+  cursor:pointer;
+  font:inherit;
+  font-weight:900;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,color .18s ease;
+}
+.new-planning-button:hover{
+  color:#034fc5;
+  border-color:rgba(3,79,197,.55);
+  box-shadow:0 11px 24px rgba(3,79,197,.15);
+  transform:translateY(-2px);
+}
+.new-planning-button:focus-visible{
+  outline:3px solid rgba(8,125,240,.32);
+  outline-offset:3px;
+}
+@media(max-width:760px){
+  .new-planning-cta.is-ready{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:.48rem;
+  }
+  .new-planning-button{width:100%}
+}
+
 @media(max-width:900px){
   #loading-overlay{
     align-items:flex-start;
@@ -6003,5 +6051,22 @@ body.itinerary-focus-open{
     width:100%;
     min-height:58px;
     padding:.9rem 1rem!important;
+  }
+}
+
+/* ITBMO · v90 · Separación segura entre Planificación e Info Chat */
+@media(min-width:769px){
+  .itinerary-actions{
+    width:calc(100% - 270px);
+    padding-right:0!important;
+  }
+  #start-planning:not(:disabled){
+    width:100%;
+    max-width:520px;
+  }
+  .itinerary-head .info-chat-floating{
+    width:236px;
+    min-width:236px;
+    max-width:236px;
   }
 }
