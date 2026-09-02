@@ -5889,3 +5889,85 @@ body.itinerary-focus-open{
 
 /* v84 · Stable coach positioning restored from the verified working guide. */
 .astra-coach{position:fixed!important}
+
+/* =========================================================
+   ITBMO · v85 · Clear date and compact HH:MM controls
+========================================================= */
+.date-picker-shell{
+  position:relative;
+  display:block;
+  width:100%;
+}
+.date-picker-placeholder{
+  position:absolute;
+  inset:0 2.7rem 0 .9rem;
+  display:flex;
+  align-items:center;
+  color:#557187;
+  font-size:.78rem;
+  font-weight:800;
+  pointer-events:none;
+  transition:opacity .16s ease;
+}
+.date-wrapper.has-value .date-picker-placeholder{opacity:0}
+.date-wrapper:not(.has-value) .baseDatePicker{
+  color:transparent!important;
+  background:linear-gradient(180deg,#fff,#f7fcfd)!important;
+  box-shadow:inset 0 0 0 1px rgba(8,133,177,.15),0 7px 18px rgba(4,83,123,.08)!important;
+}
+.date-wrapper:not(.has-value) .baseDatePicker:focus{
+  box-shadow:inset 0 0 0 2px rgba(8,125,241,.58),0 0 0 5px rgba(8,165,183,.10)!important;
+}
+
+.hours-header{display:none!important}
+.time-selector{
+  display:flex!important;
+  min-width:0;
+  flex-direction:column;
+  gap:.22rem!important;
+  padding:.42rem .48rem .46rem;
+  border:1px solid rgba(29,82,120,.18);
+  border-radius:.9rem;
+  background:linear-gradient(180deg,#fff,#f8fcfd);
+  box-shadow:0 5px 14px rgba(5,63,96,.055);
+}
+.time-selector-label{
+  display:block;
+  color:#49677e!important;
+  font-size:.62rem;
+  line-height:1.1;
+  font-weight:850!important;
+  text-align:left!important;
+}
+.time-selector-inputs{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important;
+  align-items:center;
+  gap:.12rem!important;
+  width:100%;
+}
+.time-selector-inputs select{
+  min-height:34px!important;
+  padding:.22rem 1.18rem .22rem .28rem!important;
+  border:0!important;
+  border-radius:.5rem!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  font-size:.82rem!important;
+  text-align:center;
+}
+.time-selector-colon{
+  color:#547086!important;
+  font-size:.88rem;
+  font-weight:950!important;
+  text-align:center!important;
+}
+
+@media(max-width:760px){
+  .hours-day{grid-template-columns:54px minmax(0,1fr)!important;gap:.42rem!important;align-items:start}
+  .hours-day>.time-selector{grid-column:2!important;width:100%}
+  .time-selector{padding:.38rem .44rem .42rem}
+  .time-selector-label{font-size:.66rem}
+  .time-selector-inputs select{min-height:36px!important;font-size:.86rem!important}
+  .date-picker-placeholder{font-size:.76rem}
+}
