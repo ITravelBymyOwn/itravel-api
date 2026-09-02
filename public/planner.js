@@ -847,7 +847,7 @@ function renderAuthState(){
   updateSaveAvailability();
   if(logged){
     if(activeAstraCoach?.key==='account') closeAstraCoach({remember:false});
-    scheduleAstraCoach('travelers','#travelers-box',520,{force:true});
+    showNextPlannerGuide({focus:true,force:true,delay:520});
   }
 }
 
@@ -1716,7 +1716,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     baseDatePicker.dataset.autoSuggested='0';
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
-    scheduleAstraCoach('schedule',()=>qs('.hours-block',row),360,{force:true});
+    showNextPlannerGuide({focus:true,force:true,delay:360});
   });
 
   let hoursWrap = pref.days ? makeHoursBlock(pref.days) : document.createElement('div');
@@ -1736,7 +1736,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     hoursWrap=nextHoursWrap;
     updateCityDateSummary(row);
     suggestFollowingCityDates(row);
-    scheduleAstraCoach('date',()=>qs('.baseDatePicker',row),320,{force:true});
+    showNextPlannerGuide({focus:true,force:true,delay:320});
   });
 
   qs('.remove',row).addEventListener('click', ()=>{
@@ -1946,7 +1946,7 @@ function showPreferencesStage(){
       $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
     }catch(_){}
   });
-  scheduleAstraCoach('preferences',$preferencesField||'#preferences-stage',520,{force:true});
+  showNextPlannerGuide({focus:true,force:true,delay:520});
 }
 
 function confirmPreferencesAndContinue(){
@@ -6908,7 +6908,7 @@ function bindTravelersListeners(){
         if($travelerGroupPanel) $travelerGroupPanel.style.display = 'none';
       }
       setTravelerButtonsState();
-      if(v) scheduleAstraCoach('destinations','#destinations-box',420,{force:true});
+      if(v) showNextPlannerGuide({focus:true,force:true,delay:420});
     });
   }
 
@@ -9146,8 +9146,8 @@ function enhancePreferencesInfoChatCopy(){
 
 /* =========================================================
    ASTRA CONTEXTUAL GUIDE
-   One calm, contextual coach mark at a time. It never advances on a timer.
-   The guide disappears as soon as the traveler starts interacting.
+   One contextual coach mark at a time, always anchored to the next
+   incomplete field or action in the planner sequence.
 ========================================================= */
 let activeAstraCoach=null;
 let astraCoachTimer=null;
@@ -9174,8 +9174,8 @@ function astraCoachCopy(key){
       ? ['¿Agregarás otra ciudad?','Si tu viaje continúa, agrega la siguiente ciudad. Si esta ruta ya está completa, continúa con Guardar destinos.']
       : ['Will you add another city?','If your trip continues, add the next city. If the route is complete, continue with Save destinations.'],
     save:es
-      ? ['Guarda la configuración','Revisa la ruta y guarda los destinos para proteger toda la información que acabas de ingresar.']
-      : ['Save your setup','Review the route and save destinations to protect all the information you just entered.'],
+      ? ['Confirma y guarda tu ruta','Revisa cuidadosamente la información. Después de Guardar destinos no podrás cambiar ciudades, viajeros, fechas ni horarios en este viaje; si necesitas corregirlos, podrás usar Reiniciar planificación antes de pagar.']
+      : ['Confirm and save your route','Review everything carefully. After Save destinations, you cannot change cities, travelers, dates or times for this trip; if needed, use Reset planning before paying.'],
     start:es
       ? ['Tu configuración está lista','El siguiente paso es hacer clic en Iniciar planificación. Revisaremos el pago antes de que ASTRA comience a crear tu viaje.']
       : ['Your setup is ready','Next, click Start planning. We will review payment before ASTRA begins creating your trip.'],
@@ -9183,8 +9183,8 @@ function astraCoachCopy(key){
       ? ['No hay campos pendientes','La configuración actual ya fue completada. Para crear otro itinerario, utiliza Reiniciar planificación y la guía volverá a acompañarte desde el primer campo.']
       : ['No fields are pending','The current setup is complete. To create another itinerary, use Reset planning and the guide will accompany you again from the first field.'],
     preferences:es
-      ? ['Ahora, hazlo verdaderamente tuyo','Añade intereses, ritmo, actividades imperdibles, restricciones o necesidades especiales. Es opcional: puedes continuar sin escribir nada.']
-      : ['Now make it truly yours','Add interests, pace, must-do activities, restrictions or special needs. This is optional: you can continue without entering anything.']
+      ? ['Ahora, hazlo verdaderamente tuyo','Escribe en este espacio tus intereses, ritmo, actividades imperdibles, restricciones o necesidades especiales. Esta información es opcional: si no deseas agregar nada, puedes continuar directamente con ASTRA.']
+      : ['Now make it truly yours','Use this field for interests, pace, must-do activities, restrictions or special needs. This information is optional: if you have nothing to add, continue directly with ASTRA.']
   };
   return copy[key] || ['', ''];
 }
@@ -9256,11 +9256,6 @@ function showAstraCoach(key,targetRef,{force=false,actionLabel='',onAction=null}
   position();
   requestAnimationFrame(()=>bubble.classList.add('is-visible'));
 }
-function scheduleAstraCoach(key,target,delay=260,options={}){
-  clearTimeout(astraCoachTimer);
-  astraCoachTimer=setTimeout(()=>showAstraCoach(key,target,options),delay);
-}
-
 function plannerGuideFieldComplete(element){
   if(!element) return false;
   if(element.matches('input,select,textarea')) return String(element.value||'').trim()!=='';
@@ -9392,16 +9387,6 @@ function bindProgressivePlannerGuide(){
 }
 
 function initAstraCoach({deferFirstBubble=false}={}){
-  if(!document.querySelector('.astra-guide-replay')){
-    const replay=document.createElement('button');
-    replay.type='button';
-    replay.className='astra-guide-replay';
-    replay.innerHTML=`<span>✦</span>${getLang()==='es'?'Ver guía':'View guide'}`;
-    replay.addEventListener('click',()=>{
-      revealNextPlannerGuide({focus:true,force:true});
-    });
-    document.body.appendChild(replay);
-  }
   if(!deferFirstBubble) showNextPlannerGuide({focus:false,force:false,delay:500});
 }
 
@@ -9426,9 +9411,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   bindExportListeners();
   initAstraCoach({deferFirstBubble:true});
-  const guideRestoreFallback=setTimeout(()=>revealNextPlannerGuide({focus:false,force:true}),1800);
+  const guideRestoreFallback=setTimeout(()=>revealNextPlannerGuide({focus:true,force:true}),1800);
   sessionRestore.finally(()=>{
     clearTimeout(guideRestoreFallback);
-    setTimeout(()=>revealNextPlannerGuide({focus:false,force:true}),320);
+    setTimeout(()=>revealNextPlannerGuide({focus:true,force:true}),320);
   });
 });
