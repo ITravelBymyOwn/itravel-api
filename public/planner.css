@@ -5977,3 +5977,5 @@ body.itinerary-focus-open{
   background:linear-gradient(135deg,#6226b8 0%,#8b2fc2 48%,#c72c82 100%)!important;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.27),0 14px 32px rgba(104,35,158,.26)!important;
 }
+
+/* v87 · The verified coach remains visible until real user interaction. */
