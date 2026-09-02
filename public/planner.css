@@ -2515,39 +2515,63 @@ table.itinerary td:nth-child(8){width:16%}
   }
 }
 
-/* ITBMO · v91 · Siguiente viaje, sin añadir otra sección pesada */
+/* ITBMO · v93 · CTA visible para planificar otro viaje */
 .new-planning-cta{
   display:none;
   align-items:center;
-  justify-content:flex-end;
-  gap:.72rem;
+  justify-content:flex-start;
+  gap:.78rem;
   width:100%;
-  margin-top:.72rem;
-  color:#557187;
-  font-size:.82rem;
-  font-weight:760;
+  margin-top:.78rem;
+  padding:.7rem .76rem .7rem .82rem;
+  color:#173f5c;
+  background:linear-gradient(135deg,rgba(231,247,255,.96) 0%,rgba(229,251,249,.96) 100%);
+  border:1px solid rgba(8,133,177,.22);
+  border-radius:1rem;
+  box-shadow:0 9px 24px rgba(5,83,123,.08);
+  font-size:.88rem;
+  font-weight:820;
 }
 .new-planning-cta.is-ready{
   display:flex;
   animation:toolbarReveal .4s var(--ease) both;
 }
-.new-planning-button{
-  min-height:38px;
-  padding:.55rem .9rem;
-  color:#075f7d;
-  background:#fff;
-  border:1px solid rgba(7,126,160,.34);
+.new-planning-icon{
+  display:grid;
+  flex:0 0 34px;
+  width:34px;
+  height:34px;
+  place-items:center;
+  color:#fff;
+  background:linear-gradient(135deg,#087df0,#00a9a5);
   border-radius:999px;
-  box-shadow:0 7px 18px rgba(7,77,111,.09);
+  box-shadow:0 7px 16px rgba(5,115,191,.22);
+  font-size:1.15rem;
+  font-weight:900;
+}
+#new-planning-copy{
+  flex:1 1 auto;
+  line-height:1.25;
+}
+.new-planning-button{
+  flex:0 0 auto;
+  min-height:44px;
+  padding:.68rem 1.05rem;
+  color:#fff;
+  background:linear-gradient(135deg,#0567e8 0%,#0789f5 52%,#02a6b4 100%);
+  border:1px solid rgba(2,79,178,.46);
+  border-radius:999px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 10px 23px rgba(5,103,210,.24);
   cursor:pointer;
   font:inherit;
-  font-weight:900;
-  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,color .18s ease;
+  font-weight:950;
+  text-shadow:0 1px 1px rgba(0,35,80,.2);
+  transition:transform .18s ease,box-shadow .18s ease,filter .18s ease;
 }
 .new-planning-button:hover{
-  color:#034fc5;
-  border-color:rgba(3,79,197,.55);
-  box-shadow:0 11px 24px rgba(3,79,197,.15);
+  color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 15px 30px rgba(5,103,210,.32);
+  filter:saturate(1.1) brightness(1.04);
   transform:translateY(-2px);
 }
 .new-planning-button:focus-visible{
@@ -2558,8 +2582,11 @@ table.itinerary td:nth-child(8){width:16%}
   .new-planning-cta.is-ready{
     align-items:flex-start;
     flex-direction:column;
-    gap:.48rem;
+    gap:.58rem;
+    padding:.82rem;
   }
+  .new-planning-icon{display:none}
+  #new-planning-copy{width:100%;text-align:center}
   .new-planning-button{width:100%}
 }
 
