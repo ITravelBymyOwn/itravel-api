@@ -1516,10 +1516,14 @@ function timeSelectOptions(kind='hour'){
 }
 
 function timeSelectorMarkup(type,ariaLabel){
+  const visibleLabel=type==='start' ? t('uiStartTime') : t('uiEndTime');
   return `<div class="time-selector" data-time-type="${type}" role="group" aria-label="${ariaLabel}">
-    <select class="time-hour" aria-label="${ariaLabel} · ${getLang()==='es'?'hora':'hour'}">${timeSelectOptions('hour')}</select>
-    <span aria-hidden="true">:</span>
-    <select class="time-minute" aria-label="${ariaLabel} · ${getLang()==='es'?'minutos':'minutes'}">${timeSelectOptions('minute')}</select>
+    <span class="time-selector-label">${visibleLabel}</span>
+    <div class="time-selector-inputs">
+      <select class="time-hour" aria-label="${ariaLabel} · ${getLang()==='es'?'hora':'hour'}">${timeSelectOptions('hour')}</select>
+      <span class="time-selector-colon" aria-hidden="true">:</span>
+      <select class="time-minute" aria-label="${ariaLabel} · ${getLang()==='es'?'minutos':'minutes'}">${timeSelectOptions('minute')}</select>
+    </div>
     <input class="${type}" type="hidden" value="">
   </div>`;
 }
@@ -1625,6 +1629,8 @@ function updateCityDateSummary(row){
   if(!row) return;
   const summary=qs('.date-summary',row);
   const hidden=qs('.baseDate',row);
+  const picker=qs('.baseDatePicker',row);
+  qs('.date-wrapper',row)?.classList.toggle('has-value',Boolean(picker?.value));
   const days=Math.max(1,Number(qs('.days',row)?.value || 1));
   const start=parsePlannerDate(hidden?.value || '');
   if(!summary || !start){ if(summary) summary.textContent=''; return; }
@@ -1690,8 +1696,11 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
       ${t('uiStart')}
-      <div class="date-wrapper">
-        <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
+      <div class="date-wrapper${initialDate?' has-value':''}">
+        <span class="date-picker-shell">
+          <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
+          <span class="date-picker-placeholder" aria-hidden="true">📅 ${getLang()==='es'?'Seleccionar fecha':'Select date'}</span>
+        </span>
         <input class="baseDate" type="hidden" value="${initialDate?formatDMY(initialDate):''}">
         <small class="date-format">${t('uiDateFormatSmall')}</small>
         <small class="date-summary" aria-live="polite"></small>
@@ -9344,6 +9353,15 @@ function showNextPlannerGuide({focus=false,force=false,delay=220}={}){
   },delay);
 }
 
+function revealNextPlannerGuide({focus=true,force=true}={}){
+  clearTimeout(astraCoachTimer);
+  closeAstraCoach({remember:false});
+  const step=getNextPlannerGuideStep();
+  if(!step) return;
+  if(focus) focusPlannerGuideStep(step);
+  showAstraCoach(step.key,step.target,{...step,force});
+}
+
 function bindProgressivePlannerGuide(){
   document.addEventListener('change',(event)=>{
     const field=event.target;
@@ -9380,8 +9398,7 @@ function initAstraCoach({deferFirstBubble=false}={}){
     replay.className='astra-guide-replay';
     replay.innerHTML=`<span>✦</span>${getLang()==='es'?'Ver guía':'View guide'}`;
     replay.addEventListener('click',()=>{
-      closeAstraCoach({remember:false});
-      showNextPlannerGuide({focus:true,force:true,delay:80});
+      revealNextPlannerGuide({focus:true,force:true});
     });
     document.body.appendChild(replay);
   }
@@ -9409,9 +9426,9 @@ document.addEventListener('DOMContentLoaded', ()=>{
 
   bindExportListeners();
   initAstraCoach({deferFirstBubble:true});
-  const guideRestoreFallback=setTimeout(()=>showNextPlannerGuide({focus:false,force:true,delay:0}),1800);
+  const guideRestoreFallback=setTimeout(()=>revealNextPlannerGuide({focus:false,force:true}),1800);
   sessionRestore.finally(()=>{
     clearTimeout(guideRestoreFallback);
-    showNextPlannerGuide({focus:false,force:true,delay:80});
+    setTimeout(()=>revealNextPlannerGuide({focus:false,force:true}),320);
   });
 });
