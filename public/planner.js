@@ -1300,11 +1300,11 @@ function setExportToolbarVisibility(force){
     $newPlanningCta.setAttribute('aria-hidden',show ? 'false' : 'true');
   }
   if($newPlanningCopy) $newPlanningCopy.textContent=getLang()==='es'
-    ? '¿Quieres planificar otro viaje?'
-    : 'Want to plan another trip?';
+    ? '¿Listo para planificar otro viaje?'
+    : 'Ready to plan another trip?';
   if($newPlanningButton) $newPlanningButton.textContent=getLang()==='es'
-    ? 'Nueva planificación →'
-    : 'New planning →';
+    ? 'Planificar otro viaje →'
+    : 'Plan another trip →';
 }
 
 setExportToolbarVisibility(false);
@@ -7945,6 +7945,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     }
 
     clearInfoChatStateForTrip(tripIdToArchive);
+    try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
+    closeAstraCoach({remember:false});
 
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
     addCityRow();
@@ -8016,6 +8018,12 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     // UX: enfocar primer input de ciudad
     const firstCity = qs('.city-row .city');
     if (firstCity) firstCity.focus();
+    scheduleAstraCoach(
+      currentUser ? 'travelers' : 'account',
+      currentUser ? '#travelers-box' : '#account-box',
+      360,
+      {force:true}
+    );
     generationResetInProgress = false;
   });
 
