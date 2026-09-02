@@ -52,6 +52,8 @@ let session = [];                // historial para el agente principal
 let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
+const ITBMO_INFO_CHAT_STATE_KEY_PREFIX = 'itbmo_info_chat_state_v1_';
+
 let planningStarted = false;
 let metaProgressIndex = 0;
 let collectingHotels = false;
@@ -1264,6 +1266,9 @@ const $btnCSV   = qs('#btn-csv');
 const $btnReceipt = qs('#btn-receipt');
 const $btnEmail = qs('#btn-email');
 const $exportToolbar = qs('.toolbar');
+const $newPlanningCta = qs('#new-planning-cta');
+const $newPlanningButton = qs('#new-planning-button');
+const $newPlanningCopy = qs('#new-planning-copy');
 
 function keepEmailExportComingSoon(){
   if(!$btnEmail) return;
@@ -1289,6 +1294,17 @@ function setExportToolbarVisibility(force){
   const show = (typeof force === 'boolean') ? force : hasGeneratedItineraryRows();
   $exportToolbar.classList.toggle('itbmo-toolbar-ready', !!show);
   $exportToolbar.setAttribute('aria-hidden', show ? 'false' : 'true');
+  if($newPlanningCta){
+    $newPlanningCta.hidden=!show;
+    $newPlanningCta.classList.toggle('is-ready',!!show);
+    $newPlanningCta.setAttribute('aria-hidden',show ? 'false' : 'true');
+  }
+  if($newPlanningCopy) $newPlanningCopy.textContent=getLang()==='es'
+    ? '¿Quieres planificar otro viaje?'
+    : 'Want to plan another trip?';
+  if($newPlanningButton) $newPlanningButton.textContent=getLang()==='es'
+    ? 'Nueva planificación →'
+    : 'New planning →';
 }
 
 setExportToolbarVisibility(false);
@@ -1338,6 +1354,66 @@ function infoChatMsg(html, who='ai'){
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
+}
+
+function _infoChatStateKey_(tripId=currentTripId){
+  const safeTripId=String(tripId || '').trim();
+  return safeTripId ? `${ITBMO_INFO_CHAT_STATE_KEY_PREFIX}${safeTripId}` : '';
+}
+
+function persistInfoChatState(){
+  const key=_infoChatStateKey_();
+  if(!key || infoChatAuthorizedTripId!==currentTripId) return;
+  try{
+    const history=(Array.isArray(infoSession) ? infoSession : [])
+      .filter(message=>message && (message.role==='user' || message.role==='assistant'))
+      .slice(-40)
+      .map(message=>({role:message.role,content:String(message.content || '').slice(0,12000)}));
+    localStorage.setItem(key,JSON.stringify({
+      trip_id:currentTripId,
+      authorized:true,
+      remaining:infoChatQueriesRemaining,
+      used:infoChatQueriesUsed,
+      history,
+      updated_at:new Date().toISOString()
+    }));
+  }catch(_){ }
+}
+
+function restoreInfoChatStateForTrip(tripId=currentTripId){
+  const key=_infoChatStateKey_(tripId);
+  if(!key || String(tripId)!==String(currentTripId)) return false;
+  let cached=null;
+  try{ cached=JSON.parse(localStorage.getItem(key) || 'null'); }catch(_){ cached=null; }
+  if(!cached || String(cached.trip_id)!==String(currentTripId) || !cached.authorized) return false;
+
+  infoSession=Array.isArray(cached.history)
+    ? cached.history.filter(message=>message && (message.role==='user' || message.role==='assistant'))
+      .map(message=>({role:message.role,content:String(message.content || '')}))
+    : [];
+
+  setInfoChatEntitlement({
+    authorized:true,
+    remaining:Number(cached.remaining),
+    used:Number(cached.used),
+    tripId:currentTripId
+  });
+
+  const container=$infoMessages || qs('#info-chat-messages');
+  if(container) container.innerHTML='';
+  infoChatWelcomeTripId=null;
+  ensureInfoChatWelcome();
+  infoSession.forEach(message=>infoChatMsg(message.content,message.role==='user'?'user':'ai'));
+  return true;
+}
+
+function clearInfoChatStateForTrip(tripId){
+  const key=_infoChatStateKey_(tripId);
+  try{ if(key) localStorage.removeItem(key); }catch(_){ }
+  infoSession=[];
+  infoChatWelcomeTripId=null;
+  const container=$infoMessages || qs('#info-chat-messages');
+  if(container) container.innerHTML='';
 }
 
 let infoTypingTimer = null;
@@ -3188,6 +3264,7 @@ ${buildIntake()}
 
     infoSession.push({ role:'user',      content: text });
     infoSession.push({ role:'assistant', content: answer });
+    persistInfoChatState();
 
     if (/^\s*\{/.test(answer)) {
       try {
@@ -5793,6 +5870,7 @@ function _hydrateGenerationTrip_(trip){
   if($chatBox) $chatBox.style.display='flex';
   renderCityTabs();
   setExportToolbarVisibility(trip.status==='generated');
+  restoreInfoChatStateForTrip(currentTripId);
   return true;
 }
 
@@ -7866,6 +7944,8 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       }
     }
 
+    clearInfoChatStateForTrip(tripIdToArchive);
+
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
     addCityRow();
     $start.disabled = true;
@@ -8095,6 +8175,7 @@ function setInfoChatEntitlement({authorized=false, remaining=0, used=0, tripId=n
   if(entIcon) entIcon.textContent=!authorized ? '🔒' : (exhausted ? '✓' : '✓');
   if(usageLabel) usageLabel.textContent=!authorized ? copy.lockedUsage : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
   if(remainingEl) remainingEl.textContent=`${safeUsed} / ${INFO_CHAT_MAX_QUERIES}`;
+  if(authorized) persistInfoChatState();
 }
 
 function applyInfoChatStatus(data){
@@ -8985,6 +9066,13 @@ function bindInfoChatListeners(){
   });
 }
 
+function bindNewPlanningListener(){
+  $newPlanningButton?.addEventListener('click',(event)=>{
+    event.preventDefault();
+    $resetBtn?.click();
+  });
+}
+
 function enhancePreferencesInfoChatCopy(){
   const field=qs('#special-conditions');
   if(!field || qs('#itbmo-preferences-help-row')) return;
@@ -9268,5 +9356,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   setTravelerButtonsState();
 
   bindExportListeners();
+  bindNewPlanningListener();
   initAstraCoach();
 });
