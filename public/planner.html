@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=78" />
+  <link rel="stylesheet" href="./planner.css?v=93" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -196,10 +196,6 @@
           <div class="box" style="margin:0; padding:.9rem; border-style:dashed;">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem;">
               <strong id="traveler-profiles-title" style="font-size:.95rem;">Perfiles de viajeros</strong>
-              <div style="display:flex; gap:.4rem;">
-                <button id="traveler-add" class="btn ghost" type="button" style="padding:.45rem .7rem;">+ Agregar</button>
-                <button id="traveler-remove" class="btn ghost" type="button" style="padding:.45rem .7rem;">− Quitar</button>
-              </div>
             </div>
 
             <div id="traveler-profiles" style="display:grid; grid-template-columns:1fr; gap:.75rem; margin-top:.75rem;">
@@ -241,6 +237,11 @@
                 </div>
               </div>
               <!-- /Perfil 1 -->
+            </div>
+
+            <div class="traveler-profile-actions" aria-label="Controles de acompañantes">
+              <button id="traveler-remove" class="btn traveler-control traveler-control--remove" type="button">− Quitar</button>
+              <button id="traveler-add" class="btn traveler-control traveler-control--add" type="button">+ Agregar</button>
             </div>
 
             <p style="margin:.75rem 0 0; font-size:.85rem; color:rgba(11,31,59,.68);">
@@ -325,7 +326,7 @@
         </div>
 
         <div class="itinerary-actions">
-          <button id="start-planning" class="btn primary" disabled>Iniciar planificación</button>
+          <button id="start-planning" class="btn primary" disabled>Continuar: iniciar planificación →</button>
         </div>
 
         <div id="chat-container" class="chat" style="display:none;">
@@ -382,6 +383,12 @@
           <button class="btn" id="btn-lodging">Hospedaje</button>
           <button class="btn" id="btn-localinfo">Info Local</button>
           -->
+        </div>
+
+        <div id="new-planning-cta" class="new-planning-cta" hidden aria-hidden="true">
+          <span class="new-planning-icon" aria-hidden="true">＋</span>
+          <span id="new-planning-copy">¿Listo para planificar otro viaje?</span>
+          <button id="new-planning-button" class="new-planning-button" type="button">Planificar otro viaje →</button>
         </div>
 
         <!-- =========================================================
@@ -518,7 +525,7 @@
       <div class="checkout-includes">
         <div><span>✓</span><span id="checkout-inc-1">Complete personalized itinerary</span></div>
         <div><span>✓</span><span id="checkout-inc-2">Astra travel intelligence</span></div>
-        <div><span>✓</span><span id="checkout-inc-3">PDF & CSV exports · Email coming soon</span></div>
+        <div><span>✓</span><span id="checkout-inc-3">PDF & CSV exports</span></div>
       </div>
 
       <div class="checkout-methods">
@@ -683,7 +690,7 @@
           mvp_note: "*These profiles are used to adapt the itinerary to the ages and needs of the group.",
           itinerary_title: "Itinerary",
           open_info_chat: "Open Info Chat",
-          start_planning: "Start planning",
+          start_planning: "Continue: start planning →",
           type_message: "Type your message...",
           send: "Send",
           export_pdf: "Export PDF",
@@ -732,7 +739,7 @@
           mvp_note: "*Estos perfiles se usan para adaptar el itinerario a las edades y necesidades del grupo.",
           itinerary_title: "Itinerario",
           open_info_chat: "Open Info Chat",
-          start_planning: "Iniciar planificación",
+          start_planning: "Continuar: iniciar planificación →",
           type_message: "Escribe tu mensaje...",
           send: "Enviar",
           export_pdf: "Exportar PDF",
@@ -993,7 +1000,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=78"></script>
+<script src="./planner.js?v=93"></script>
  
 </body>
 </html>

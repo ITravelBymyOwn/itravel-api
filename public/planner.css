@@ -48,6 +48,217 @@
 }
 
 /* =========================================================
+   ITBMO · ASTRA GUIDED LUXURY UX · v74
+   Surgical overrides for guided setup, calendar, time selectors,
+   confirmations, downloads and resizable Info Chat.
+========================================================= */
+
+.traveler-profile-actions{
+  position:sticky;
+  bottom:.35rem;
+  z-index:4;
+  display:flex;
+  justify-content:flex-end;
+  gap:.65rem;
+  margin-top:.9rem;
+  padding:.65rem;
+  border:1px solid rgba(12,166,192,.18);
+  border-radius:1rem;
+  background:linear-gradient(135deg,rgba(248,253,255,.96),rgba(232,250,249,.96));
+  box-shadow:0 12px 28px rgba(9,61,89,.10);
+  backdrop-filter:blur(12px);
+}
+.traveler-control{
+  min-width:118px;
+  min-height:44px;
+  border-radius:999px!important;
+  font-weight:850!important;
+  transition:transform .18s ease,box-shadow .18s ease,filter .18s ease!important;
+}
+.traveler-control--add{
+  color:#fff!important;
+  border-color:transparent!important;
+  background:linear-gradient(135deg,#087df1,#08aeb4)!important;
+  box-shadow:0 10px 24px rgba(8,126,211,.26)!important;
+}
+.traveler-control--remove{
+  color:#075b72!important;
+  border-color:rgba(8,126,177,.24)!important;
+  background:rgba(255,255,255,.96)!important;
+}
+.traveler-control:not(:disabled):hover{transform:translateY(-2px);filter:saturate(1.08)}
+.traveler-control:disabled{opacity:.42!important;box-shadow:none!important}
+
+.city-row .date-wrapper{gap:.28rem!important}
+.city-row input.baseDatePicker{
+  width:100%;
+  min-height:48px;
+  color:var(--ink);
+  font-weight:750;
+  cursor:pointer;
+  color-scheme:light;
+}
+.city-row input.baseDatePicker::-webkit-calendar-picker-indicator{
+  width:20px;height:20px;cursor:pointer;opacity:.72;
+}
+.date-format{color:#71869b!important;font-size:.68rem!important}
+.date-summary{
+  display:block;
+  min-height:1.05rem;
+  color:#087b92;
+  font-size:.7rem;
+  font-weight:800;
+  line-height:1.35;
+}
+
+.hours-block{
+  position:relative;
+  padding-top:.8rem!important;
+}
+.same-schedule-toggle{
+  display:flex;
+  align-items:center;
+  gap:.55rem;
+  width:max-content;
+  max-width:100%;
+  margin:.2rem 0 .8rem;
+  padding:.5rem .7rem;
+  border:1px solid rgba(7,148,171,.18);
+  border-radius:999px;
+  color:#0b6076;
+  background:rgba(236,251,251,.88);
+  font-size:.72rem!important;
+  font-weight:800!important;
+  cursor:pointer;
+}
+.same-schedule-toggle>input{position:absolute;opacity:0;pointer-events:none}
+.same-schedule-ui{
+  position:relative;
+  width:34px;height:20px;flex:0 0 34px;
+  border-radius:999px;
+  background:#b8c9d2;
+  transition:.2s ease;
+}
+.same-schedule-ui::after{
+  content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:#fff;
+  box-shadow:0 2px 6px rgba(0,24,48,.22);transition:.2s ease;
+}
+.same-schedule-toggle>input:checked+.same-schedule-ui{background:linear-gradient(135deg,#087df1,#08aeb4)}
+.same-schedule-toggle>input:checked+.same-schedule-ui::after{transform:translateX(14px)}
+.same-schedule-toggle>input:focus-visible+.same-schedule-ui{outline:3px solid rgba(16,132,255,.2);outline-offset:2px}
+.time-selector{
+  display:grid;
+  grid-template-columns:minmax(64px,1fr) auto minmax(64px,1fr);
+  align-items:center;
+  gap:.32rem;
+  min-width:0;
+}
+.time-selector>span{color:#6d8294;font-weight:900;text-align:center}
+.time-selector select{
+  width:100%;
+  min-width:0;
+  min-height:46px;
+  padding:.45rem .5rem!important;
+  border:1px solid rgba(33,76,111,.16)!important;
+  border-radius:.75rem!important;
+  color:var(--ink)!important;
+  background:#fff!important;
+  font-weight:750!important;
+  text-align:center;
+}
+.hours-block.is-same-schedule .hours-day:not(:first-of-type){opacity:.72}
+.hours-block.is-same-schedule .hours-day:not(:first-of-type) select{background:#edf5f7!important;cursor:not-allowed}
+
+.itbmo-decision-overlay{
+  position:fixed;inset:0;z-index:61000;display:grid;place-items:center;padding:20px;
+  background:rgba(2,22,43,.58);backdrop-filter:blur(12px);
+  opacity:0;visibility:hidden;transition:opacity .22s ease,visibility .22s ease;
+}
+.itbmo-decision-overlay.active{opacity:1;visibility:visible}
+.itbmo-decision-card{
+  width:min(94vw,560px);padding:1.6rem;border:1px solid rgba(255,255,255,.72);border-radius:28px;
+  color:var(--ink);background:linear-gradient(145deg,rgba(255,255,255,.99),rgba(238,251,251,.98));
+  box-shadow:0 34px 100px rgba(1,23,45,.34);transform:translateY(14px) scale(.985);transition:transform .22s ease;
+}
+.itbmo-decision-overlay.active .itbmo-decision-card{transform:none}
+.itbmo-decision-symbol{display:grid;place-items:center;width:48px;height:48px;border-radius:15px;color:#fff;background:linear-gradient(135deg,#1388f4,#05aeb5);box-shadow:0 12px 26px rgba(10,145,194,.28);font-size:1.3rem}
+.itbmo-decision-eyebrow{margin-top:.9rem;color:#08778d;font-size:.66rem;font-weight:900;letter-spacing:.13em}
+.itbmo-decision-card h3{margin:.35rem 0 .55rem;font-size:1.42rem;letter-spacing:-.035em}
+.itbmo-decision-card p{margin:0;color:#536d82;font-size:.88rem;line-height:1.62}
+.itbmo-decision-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:.7rem;margin-top:1.25rem}
+.itbmo-decision-actions .btn{min-height:48px;border-radius:14px;font-weight:850}
+.itbmo-decision-pay{color:#082b59!important;border-color:#ffbf29!important;background:linear-gradient(135deg,#ffd25a,#ffb91f)!important;box-shadow:0 12px 28px rgba(244,169,0,.23)!important}
+
+.astra-guide-replay{
+  position:fixed;left:16px;bottom:16px;z-index:45000;display:flex;align-items:center;gap:.42rem;
+  min-height:38px;padding:.46rem .72rem;border:1px solid rgba(255,255,255,.72);border-radius:999px;
+  color:#075f77;background:rgba(250,254,255,.93);box-shadow:0 10px 30px rgba(5,43,70,.16);
+  backdrop-filter:blur(14px);font:800 .7rem/1 Inter,sans-serif;cursor:pointer;
+}
+.astra-guide-replay span{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;color:#fff;background:linear-gradient(135deg,#158af1,#05adb4)}
+.astra-coach{
+  position:fixed;z-index:60000;display:grid;grid-template-columns:auto 1fr auto;gap:.7rem;
+  width:min(340px,calc(100vw - 24px));padding:.9rem;border:1px solid rgba(130,220,229,.5);border-radius:20px;
+  color:var(--ink);background:linear-gradient(145deg,rgba(255,255,255,.99),rgba(235,251,251,.98));
+  box-shadow:0 24px 65px rgba(2,40,68,.25);opacity:0;transform:translateY(8px) scale(.985);pointer-events:auto;
+  transition:opacity .18s ease,transform .18s ease;
+}
+.astra-coach.is-visible{opacity:1;transform:none}
+.astra-coach__avatar{display:grid;place-items:center;width:38px;height:38px;border-radius:13px;color:#fff;background:linear-gradient(135deg,#1288f2,#04adb4);box-shadow:0 9px 20px rgba(10,145,194,.24)}
+.astra-coach__content small{display:block;margin-bottom:.18rem;color:#078098;font-size:.56rem;font-weight:900;letter-spacing:.12em}
+.astra-coach__content strong{display:block;font-size:.83rem;line-height:1.25}
+.astra-coach__content p{margin:.3rem 0 0;color:#587083;font-size:.7rem;line-height:1.45}
+.astra-coach__close{align-self:start;width:26px;height:26px;padding:0;border:0;border-radius:50%;color:#60798c;background:rgba(221,238,242,.72);font-size:1rem;cursor:pointer}
+
+.preferences-help-button{
+  box-shadow:0 13px 30px rgba(7,129,170,.13)!important;
+  transform:translateZ(0);
+}
+.preferences-help-button--guide{border-color:rgba(10,160,182,.34)!important;background:linear-gradient(135deg,#f4feff,#ddf8f7)!important}
+.preferences-help-button--unsure{border-color:rgba(81,101,225,.26)!important;background:linear-gradient(135deg,#f7f9ff,#eef1ff)!important}
+.preferences-help-button:hover{transform:translateY(-2px)!important;box-shadow:0 18px 38px rgba(7,110,156,.2)!important}
+
+.info-chat-modal:not(.is-minimized){
+  resize:both;
+  overflow:hidden!important;
+  min-width:360px;
+  min-height:430px;
+  max-width:calc(100vw - 20px)!important;
+  max-height:calc(100vh - 20px)!important;
+}
+.info-chat-modal:not(.is-minimized) .info-chat-panel{width:100%;height:100%;min-height:0!important}
+.info-chat-modal:not(.is-minimized) .chat-messages{min-height:120px;overflow-y:auto!important}
+.info-chat-modal:not(.is-minimized)::after{
+  content:"";position:absolute;right:5px;bottom:5px;width:15px;height:15px;pointer-events:none;
+  background:linear-gradient(135deg,transparent 0 48%,#0794a9 49% 57%,transparent 58% 68%,#0794a9 69% 77%,transparent 78%);
+  opacity:.7;
+}
+
+.itbmo-download-actions{display:grid;gap:.62rem;width:100%;margin:.9rem 0}
+.itbmo-download-actions .btn{display:grid;grid-template-columns:34px 1fr;align-items:center;gap:.65rem;width:100%;min-height:48px;text-align:left;border-radius:14px}
+.itbmo-download-actions .btn>span{display:grid;place-items:center;width:30px;height:30px;border-radius:9px;color:#08748c;background:rgba(255,255,255,.82);font-size:.65rem;font-weight:900}
+.itbmo-download-actions .btn.is-complete{background:linear-gradient(135deg,#0b9f87,#09aeb4)!important}
+.itbmo-download-actions .btn.is-complete::after{content:"✓";justify-self:end;margin-right:.25rem;font-weight:900}
+#start-planning.is-busy{position:relative;cursor:progress;opacity:.82}
+
+@media(max-width:760px){
+  .traveler-profile-actions{position:sticky;justify-content:stretch}
+  .traveler-control{flex:1;min-width:0}
+  .hours-header{display:none!important}
+  .hours-day{grid-template-columns:58px 1fr!important;gap:.5rem!important}
+  .hours-day>.time-selector{grid-column:2}
+  .same-schedule-toggle{width:100%;border-radius:14px}
+  .itbmo-decision-actions{grid-template-columns:1fr}
+  .itbmo-decision-actions .itbmo-decision-confirm{grid-row:1}
+  .astra-guide-replay{left:10px;bottom:10px}
+  .info-chat-modal:not(.is-minimized){resize:none;min-width:0;min-height:0;max-width:none!important;max-height:none!important}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .astra-coach,.itbmo-decision-card,.traveler-control{transition:none!important}
+}
+
+/* =========================================================
    BASE
 ========================================================= */
 *{box-sizing:border-box}
@@ -2302,6 +2513,81 @@ table.itinerary td:nth-child(8){width:16%}
     top:94px;
     right:30px;
   }
+}
+
+/* ITBMO · v93 · CTA visible para planificar otro viaje */
+.new-planning-cta{
+  display:none;
+  align-items:center;
+  justify-content:flex-start;
+  gap:.78rem;
+  width:100%;
+  margin-top:.78rem;
+  padding:.7rem .76rem .7rem .82rem;
+  color:#173f5c;
+  background:linear-gradient(135deg,rgba(231,247,255,.96) 0%,rgba(229,251,249,.96) 100%);
+  border:1px solid rgba(8,133,177,.22);
+  border-radius:1rem;
+  box-shadow:0 9px 24px rgba(5,83,123,.08);
+  font-size:.88rem;
+  font-weight:820;
+}
+.new-planning-cta.is-ready{
+  display:flex;
+  animation:toolbarReveal .4s var(--ease) both;
+}
+.new-planning-icon{
+  display:grid;
+  flex:0 0 34px;
+  width:34px;
+  height:34px;
+  place-items:center;
+  color:#fff;
+  background:linear-gradient(135deg,#087df0,#00a9a5);
+  border-radius:999px;
+  box-shadow:0 7px 16px rgba(5,115,191,.22);
+  font-size:1.15rem;
+  font-weight:900;
+}
+#new-planning-copy{
+  flex:1 1 auto;
+  line-height:1.25;
+}
+.new-planning-button{
+  flex:0 0 auto;
+  min-height:44px;
+  padding:.68rem 1.05rem;
+  color:#fff;
+  background:linear-gradient(135deg,#0567e8 0%,#0789f5 52%,#02a6b4 100%);
+  border:1px solid rgba(2,79,178,.46);
+  border-radius:999px;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 10px 23px rgba(5,103,210,.24);
+  cursor:pointer;
+  font:inherit;
+  font-weight:950;
+  text-shadow:0 1px 1px rgba(0,35,80,.2);
+  transition:transform .18s ease,box-shadow .18s ease,filter .18s ease;
+}
+.new-planning-button:hover{
+  color:#fff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 15px 30px rgba(5,103,210,.32);
+  filter:saturate(1.1) brightness(1.04);
+  transform:translateY(-2px);
+}
+.new-planning-button:focus-visible{
+  outline:3px solid rgba(8,125,240,.32);
+  outline-offset:3px;
+}
+@media(max-width:760px){
+  .new-planning-cta.is-ready{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:.58rem;
+    padding:.82rem;
+  }
+  .new-planning-icon{display:none}
+  #new-planning-copy{width:100%;text-align:center}
+  .new-planning-button{width:100%}
 }
 
 @media(max-width:900px){
@@ -5590,9 +5876,224 @@ body.itinerary-focus-open{
     display:none;
   }
 
-  #loading-overlay .loader > p.astra-overlay-copy::after{
+#loading-overlay .loader > p.astra-overlay-copy::after{
     width:min(260px,62%);
     height:4px;
   }
 }
 
+/* Final precedence guard for the v79 guided controls. */
+.traveler-profile-actions{position:sticky;bottom:.35rem;z-index:12}
+.time-selector{display:grid!important;grid-template-columns:minmax(64px,1fr) auto minmax(64px,1fr)!important}
+.info-chat-modal:not(.is-minimized){resize:both!important;overflow:hidden!important;min-width:360px;min-height:430px;max-width:calc(100vw - 20px)!important;max-height:calc(100vh - 20px)!important}
+.info-chat-modal:not(.is-minimized) .info-chat-panel{width:100%!important;height:100%!important;min-height:0!important}
+.info-chat-modal:not(.is-minimized) .chat-messages{min-height:120px!important;overflow-y:auto!important}
+@media(max-width:760px){
+  .info-chat-modal:not(.is-minimized){resize:none!important;min-width:0;min-height:0;max-width:none!important;max-height:none!important}
+  .time-selector{grid-template-columns:minmax(58px,1fr) auto minmax(58px,1fr)!important}
+}
+
+/* =========================================================
+   ITBMO · v88 · Non-guide UX improvements
+   The existing ASTRA coach styles above remain untouched.
+========================================================= */
+.hours-block.is-same-schedule .hours-day:not(:first-of-type){opacity:1!important}
+.hours-block.is-same-schedule .hours-day:not(:first-of-type) select{background:#fff!important;cursor:pointer!important}
+
+.btn.primary:not(:disabled),
+#save-destinations:not(:disabled),
+#start-planning:not(:disabled),
+#continue-with-astra:not(:disabled),
+#send-btn:not(:disabled),
+#info-chat-send:not(:disabled){
+  color:#fff!important;
+  border:1px solid rgba(2,79,178,.52)!important;
+  background:linear-gradient(135deg,#0567e8 0%,#0789f5 52%,#02a6b4 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 13px 30px rgba(5,103,210,.30)!important;
+  text-shadow:0 1px 1px rgba(0,35,80,.22);
+}
+.btn.primary:not(:disabled):hover,
+#save-destinations:not(:disabled):hover,
+#start-planning:not(:disabled):hover,
+#continue-with-astra:not(:disabled):hover{
+  filter:saturate(1.12) brightness(1.04);
+  transform:translateY(-3px)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 18px 38px rgba(5,103,210,.38)!important;
+}
+#add-city-btn:not(:disabled),.traveler-control--add:not(:disabled){
+  color:#fff!important;
+  border-color:rgba(0,105,128,.45)!important;
+  background:linear-gradient(135deg,#0879ef 0%,#04a8bc 55%,#08a878 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.35),0 13px 30px rgba(3,135,170,.29)!important;
+}
+.traveler-control--remove:not(:disabled),#reset-planner:not(:disabled),.btn.ghost:not(:disabled){
+  color:#075d7a!important;
+  border:2px solid rgba(5,128,166,.42)!important;
+  background:#fff!important;
+  box-shadow:0 8px 20px rgba(7,77,111,.11)!important;
+}
+.preferences-help-button--guide,
+.preferences-help-button--unsure{
+  border:1px solid rgba(255,255,255,.45)!important;
+}
+.preferences-help-button--guide{
+  border-color:rgba(0,106,154,.48)!important;
+  background:linear-gradient(135deg,#006fd6 0%,#009ab4 52%,#00a78f 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 14px 32px rgba(0,112,151,.27)!important;
+}
+.preferences-help-button--unsure{
+  border-color:rgba(98,34,174,.48)!important;
+  background:linear-gradient(135deg,#6226b8 0%,#8b2fc2 48%,#c72c82 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.27),0 14px 32px rgba(104,35,158,.26)!important;
+}
+.preferences-help-button__title,.preferences-help-button__subtitle{color:#fff!important;text-shadow:0 1px 1px rgba(0,30,70,.24)}
+.preferences-help-button:hover{filter:saturate(1.12) brightness(1.05);transform:translateY(-3px)!important}
+
+@media(prefers-reduced-motion:no-preference){
+  #save-destinations:not(:disabled),#start-planning:not(:disabled),#continue-with-astra:not(:disabled){animation:itbmoCtaBreath 2.8s ease-in-out infinite}
+  @keyframes itbmoCtaBreath{0%,100%{filter:brightness(1)}50%{filter:brightness(1.07)}}
+}
+
+.date-picker-shell{
+  position:relative;
+  display:block;
+  width:100%;
+}
+.date-picker-placeholder{
+  position:absolute;
+  inset:0 2.7rem 0 .9rem;
+  display:flex;
+  align-items:center;
+  color:#557187;
+  font-size:.78rem;
+  font-weight:800;
+  pointer-events:none;
+  transition:opacity .16s ease;
+}
+.date-wrapper.has-value .date-picker-placeholder{opacity:0}
+.date-wrapper:not(.has-value) .baseDatePicker{
+  color:transparent!important;
+  background:linear-gradient(180deg,#fff,#f7fcfd)!important;
+  box-shadow:inset 0 0 0 1px rgba(8,133,177,.15),0 7px 18px rgba(4,83,123,.08)!important;
+}
+.date-wrapper:not(.has-value) .baseDatePicker:focus{
+  box-shadow:inset 0 0 0 2px rgba(8,125,241,.58),0 0 0 5px rgba(8,165,183,.10)!important;
+}
+
+.hours-header{display:none!important}
+.time-selector{
+  display:flex!important;
+  min-width:0;
+  flex-direction:column;
+  gap:.22rem!important;
+  padding:.42rem .48rem .46rem;
+  border:1px solid rgba(29,82,120,.18);
+  border-radius:.9rem;
+  background:linear-gradient(180deg,#fff,#f8fcfd);
+  box-shadow:0 5px 14px rgba(5,63,96,.055);
+}
+.time-selector-label{
+  display:block;
+  color:#49677e!important;
+  font-size:.62rem;
+  line-height:1.1;
+  font-weight:850!important;
+  text-align:left!important;
+}
+.time-selector-inputs{
+  display:grid!important;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)!important;
+  align-items:center;
+  gap:.12rem!important;
+  width:100%;
+}
+.time-selector-inputs select{
+  min-height:34px!important;
+  padding:.22rem 1.18rem .22rem .28rem!important;
+  border:0!important;
+  border-radius:.5rem!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  font-size:.82rem!important;
+  text-align:center;
+}
+.time-selector-colon{
+  color:#547086!important;
+  font-size:.88rem;
+  font-weight:950!important;
+  text-align:center!important;
+}
+
+@media(max-width:760px){
+  .hours-day{grid-template-columns:54px minmax(0,1fr)!important;gap:.42rem!important;align-items:start}
+  .hours-day>.time-selector{grid-column:2!important;width:100%}
+  .time-selector{padding:.38rem .44rem .42rem}
+  .time-selector-label{font-size:.66rem}
+  .time-selector-inputs select{min-height:36px!important;font-size:.86rem!important}
+  .date-picker-placeholder{font-size:.76rem}
+}
+
+/* ITBMO · v89 · CTA principal para continuar la planificación */
+#start-planning:not(:disabled){
+  isolation:isolate;
+  width:min(100%,520px);
+  min-height:60px;
+  padding:.94rem 1.35rem!important;
+  border:1px solid rgba(255,255,255,.58)!important;
+  border-radius:18px!important;
+  color:#fff!important;
+  background:linear-gradient(135deg,#034fc5 0%,#087df0 48%,#00a9a5 100%)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 17px 38px rgba(3,79,197,.28)!important;
+  font-size:clamp(.98rem,1.5vw,1.1rem)!important;
+  font-weight:950!important;
+  letter-spacing:-.015em;
+  line-height:1.15;
+  text-align:center;
+  text-shadow:0 1px 2px rgba(0,39,94,.22);
+}
+#start-planning:not(:disabled)::before{
+  content:"✦";
+  display:inline-block;
+  margin-right:.5rem;
+  color:#dffcff;
+  font-size:1.05em;
+  filter:drop-shadow(0 1px 2px rgba(0,48,91,.24));
+}
+#start-planning:not(:disabled):hover{
+  transform:translateY(-3px) scale(1.01)!important;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.38),0 22px 48px rgba(3,79,197,.36)!important;
+  filter:saturate(1.08) brightness(1.04);
+}
+#start-planning:not(:disabled):active{
+  transform:translateY(-1px) scale(.995)!important;
+}
+#start-planning:not(:disabled):focus-visible{
+  outline:3px solid #fff!important;
+  outline-offset:3px;
+  box-shadow:0 0 0 6px rgba(8,125,240,.42),0 20px 44px rgba(3,79,197,.34)!important;
+}
+
+@media(max-width:760px){
+  #start-planning:not(:disabled){
+    width:100%;
+    min-height:58px;
+    padding:.9rem 1rem!important;
+  }
+}
+
+/* ITBMO · v90 · Separación segura entre Planificación e Info Chat */
+@media(min-width:769px){
+  .itinerary-actions{
+    width:calc(100% - 270px);
+    padding-right:0!important;
+  }
+  #start-planning:not(:disabled){
+    width:100%;
+    max-width:520px;
+  }
+  .itinerary-head .info-chat-floating{
+    width:236px;
+    min-width:236px;
+    max-width:236px;
+  }
+}

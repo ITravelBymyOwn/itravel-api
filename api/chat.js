@@ -722,7 +722,7 @@ For stays of five or more days:
 DATE, DAYLIGHT AND ANCHOR TIME
 - Use actual dates, latitude/season, daily windows, lodging/base and transport.
 - If the user did not provide an end time for a day, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, NOT a ceiling. Finishing materially earlier requires a real logistical/safety/daylight constraint, not mere convenience or rest. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not add filler merely to reach the clock. Any explicit user end time remains a hard boundary.
-- On Day 1, the traveler reaches the lodging and completes check-in or luggage drop BEFORE sightseeing. If arrival transport details were not provided, never invent an airport, flight, station or transfer origin.
+- Day 1 begins at the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop BEFORE sightseeing; never invent an airport, flight, station or inbound transfer.
 - Protect plausible useful daylight for landscape-dependent outdoor buckets.
 - Use darkness for transfers, indoor activities, meals, thermal experiences and optional night
   opportunities.
@@ -783,11 +783,12 @@ If an experience cannot receive its useful minimum inside the user's window, mov
 day's scope or omit it. Never publish a misleadingly short visit.
 
 4. TIME MATHEMATICS AND TRANSFERS
-- Every row interval must contain transport plus activity.
+- Every visit row interval must contain transport plus activity.
 - If the user did not provide an end time, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, not a ceiling. Finishing materially earlier requires a real constraint; continue later when high-value evening experiences materially improve the itinerary. Respect any explicit user end time as a hard boundary.
-- On Day 1, lodging arrival/check-in or luggage drop occurs before sightseeing. If arrival origin/transport was not provided, do not invent airport, flight, station or transfer details.
+- Day 1 starts AT the lodging at the user-provided time. Complete check-in/luggage drop before sightseeing and do not invent an inbound transfer.
 - On full days spanning lunch, include a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On regional/day-trip days, keep the meal on-route and preserve route continuity.
-- Minimum transport + minimum activity must fit between start and end.
+- For visit rows, minimum transport + minimum activity must fit between start and end.
+- For a pure movement row, only the realistic transport time must fit; never invent activity time.
 - Include parking, walking from parking, check-in, security, boarding, changing or pickup time when
   operationally necessary.
 - No overlaps, teleporting or unexplained giant gaps.
@@ -795,8 +796,9 @@ day's scope or omit it. Never publish a misleadingly short visit.
   sleeps elsewhere.
 - Estimate long returns conservatively from the actual final stop to the actual lodging/base.
 - Do not shorten a return simply to fit the requested end time; instead remove an optional stop.
-- A pure return row must use only a short arrival/parking/settling activity buffer, normally 5–20m.
-- Duration must have exactly two lines:
+- Pure transfers and returns must use kind "transport" and exactly one duration line:
+  Transport: <realistic estimate or range>
+- Every row with a real visit/experience must use kind "activity" and exactly two duration lines:
   Transport: <realistic estimate or range>
   Activity: <realistic estimate or range>
 - Under one hour use minutes. From one hour onward use hours/minutes. Never use 0h or 0m.
@@ -1236,6 +1238,10 @@ function _v62NormalizeDuration_(row = {}) {
   const transport = _v62DurationBounds_(transportRaw);
   const activity = _v62DurationBounds_(activityRaw);
 
+  if (_v65IsPureTransportRow_(row) && transport) {
+    return `Transport: ${_v62FormatMinutes_(transport.min)}`;
+  }
+
   if (transport && activity) {
     return `Transport: ${_v62FormatMinutes_(transport.min)}\nActivity: ${_v62FormatMinutes_(activity.min)}`;
   }
@@ -1529,7 +1535,20 @@ function _v62ValidateFinal_(parsed, options = {}) {
         ])
       );
 
-      if (start != null && end != null && transport && activity) {
+      const pureTransport = _v65IsPureTransportRow_(row);
+
+      if (start != null && end != null && pureTransport && transport) {
+        const available = end - start;
+        if (transport.min > available + 5) {
+          errors.push({
+            code: "TRANSPORT_DURATION_DOES_NOT_FIT",
+            day,
+            row: rowNumber,
+            available_minutes: available,
+            required_minutes: transport.min,
+          });
+        }
+      } else if (start != null && end != null && transport && activity) {
         const available = end - start;
         const needed = transport.min + activity.min;
 
@@ -1558,14 +1577,6 @@ function _v62ValidateFinal_(parsed, options = {}) {
           });
         }
 
-        if (_v64IsReturnRow_(row) && activity.min > 30) {
-          errors.push({
-            code: "RETURN_ACTIVITY_TOO_LONG",
-            day,
-            row: rowNumber,
-            actual_activity_minutes: activity.min,
-          });
-        }
       }
 
       if (
@@ -1701,15 +1712,15 @@ FINAL SURGICAL REPAIR:
 - Preserve all strong, distinct regional/signature days and all explicit must-includes.
 - Do not replace a difficult regional day with repeated city attractions.
 - Rebuild every affected day chronologically when needed: no row may overlap the next row.
-- NEVER create an umbrella row whose interval covers later rows. Each row is one leg plus one activity.
-- Recalculate every affected row so minimum transport + minimum activity fits inside start/end.
+- NEVER create an umbrella row whose interval covers later rows. Each row is either one pure movement or one leg plus one activity.
+- Recalculate every affected row so pure movements contain only transport time, while visit rows contain transport + activity inside start/end.
 - Preserve the exact lodging/base and selected transport from the user input. Do not invent a city-center hotel, airport transfer, Flybus, taxi or guided tour when a rental car was selected.
 - Blue Lagoon or an equivalent iconic thermal lagoon requires at least 3h of ACTIVITY plus logistics.
 - Whale watching or a wildlife cruise normally requires at least 2h30 of ACTIVITY plus check-in/boarding.
 - Long regional returns must be conservative; remove optional stops rather than shortening the return.
 - Aurora, when plausible, must be an ADDITIONAL opportunity note in the NOTES of the FINAL row of EVERY day in that city, not a standalone row. This applies even when auroras or an aurora tour were explicitly requested in Preferences. Each day should preserve a weather-dependent opportunity; only a genuinely confirmed fixed booking with a fixed time, separately provided by the user and explicitly requested for scheduling, may remain as a dedicated row.
 - If a day has no user-provided end, rebuild it so the final row normally reaches at least approximately 19:00 local. 19:00 is a minimum requirement, not a ceiling. Finishing materially earlier requires a real constraint; the day may continue later for high-value evening experiences.
-- Day 1 must reach the lodging/check in or drop luggage before sightseeing, without inventing unknown arrival transport.
+- Day 1 starts at the lodging at the user-provided time and completes check-in/luggage drop before sightseeing, without inventing inbound transport.
 - Full days spanning lunch need a realistic meal break; day-trip meals remain on-route.
 - Remove duplicate major POIs across days, including aliases and subtitle variants.
 - Remove rental-car wording from hotel/from/to fields.
@@ -1871,7 +1882,7 @@ TIME WINDOWS (PER-DAY HOURS) (CRITICAL):
 - If a day has missing hours, do NOT invent strict limits; schedule with expert realistic hours.
 - If only Day 1 start and Last Day end are provided, enforce those only; keep other days flexible.
 - For every day with no user-provided end time, approximately 19:00 local is the minimum planning REQUIREMENT, not a ceiling. The day should not finish materially earlier unless a genuine logistical, daylight, safety, arrival/departure or user-driven constraint requires it. Continue later when worthwhile evening content materially improves the itinerary. Any explicit user end time remains a hard boundary.
-- On the arrival day, reaching the lodging and completing check-in/luggage drop is the FIRST step before sightseeing. If arrival transport details are unknown, do not invent airport/flight/station/transfer information.
+- The Day 1 start supplied by the Planner represents the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Begin with check-in/luggage drop before sightseeing; do not add or invent an airport/flight/station transfer unless the user explicitly supplied it.
 - CRITICAL: absence of hours is NOT permission to create a short day, an almost empty day, or a generic free day.
 - If a day has no provided hours, you MUST still build a full, well-paced day with realistic expert timing.
 
@@ -1895,9 +1906,9 @@ A) {
         "from":"Origin place",
         "to":"Destination place",
         "transport":"Realistic transport",
-        "duration":"Transport: ...\\nActivity: ...",
+        "duration":"Transport: ...\\nActivity: ... (visit row) OR Transport: ... (pure movement row)",
         "notes":"(>=20 chars) 1 emotional sentence + 1 logistical tip (+ alternative/condition if applicable)",
-        "kind":"",
+        "kind":"activity or transport",
         "zone":""
       }
     ]}
@@ -2067,9 +2078,13 @@ MANDATORY ROW CONTRACT:
     • If the stop is clearly outside the base city, do NOT label it as "<Base city> – <Outside stop>" unless it is explicitly a departure or return row.
     • For out-of-city attractions, prefer the real area / corridor / macro-tour name as DESTINATION.
     • Example: avoid "Reykjavik – Blue Lagoon" as the main visit row; prefer a real external area/macro-tour label.
-- duration: EXACTLY 2 lines with \\n:
-  "Transport: <realistic estimate or ~range>"
-  "Activity: <realistic estimate or ~range>"
+- duration and kind:
+  • A real visit/experience uses kind "activity" and EXACTLY 2 lines with \\n:
+    "Transport: <realistic estimate or ~range>"
+    "Activity: <realistic estimate or ~range>"
+  • A row that only moves the traveler from one place to another uses kind "transport" and EXACTLY 1 line:
+    "Transport: <realistic estimate or ~range>"
+  • Never invent check-in, settling, parking or arrival as an activity merely to fill the second line.
   FORBIDDEN: "Transport: 0m" or "Activity: 0m"
 - notes: required (>=20 chars), motivating and useful:
   1) 1 emotional sentence
@@ -2589,7 +2604,7 @@ MANDATORY FINAL-ITINERARY RECOVERY:
 - Include city_day (preferred), rows or destinations with renderable rows.
 - Include every requested day.
 - Preserve strong regional/signature days and all must-includes.
-- Recalculate row clocks so transport plus activity fits.
+- Recalculate row clocks so pure movements contain only transport time and visit rows contain transport plus activity.
 - No commentary outside JSON.`);
 
       raw = await callStructured(
@@ -2748,4 +2763,14 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       return res.status(200).json({ text: JSON.stringify(fallbackJSON("en")) });
     }
   }
+}
+
+function _v65IsPureTransportRow_(row = {}) {
+  const kind = _v62NormKey_(row?.kind || "");
+  if (/^(transport|transfer|transit|traslado|transporte|retorno|return)$/.test(kind)) return true;
+
+  const text = _v62NormKey_(`${row?.activity || ""} ${row?.to || ""}`);
+  const movement = /\b(transfer to|transport to|return to|back to|travel to|drive to|train to|bus to|flight to|ferry to|traslado a|traslado al|regreso a|regreso al|volver a|retorno a|desplazamiento a)\b/.test(text);
+  const visit = /\b(visit|explore|tour|museum|market|viewpoint|walk|experience|restaurant|lunch|dinner|visita|explora|recorrido|museo|mercado|mirador|paseo|experiencia|restaurante|almuerzo|cena)\b/.test(text);
+  return movement && !visit;
 }
