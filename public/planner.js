@@ -26,6 +26,49 @@
 const qs  = (s, ctx=document)=>ctx.querySelector(s);
 const qsa = (s, ctx=document)=>Array.from(ctx.querySelectorAll(s));
 
+/* ---------- Analytics bridge: Planner (Vercel) -> Webflow -> GTM/GA4 ----------
+   Sends only allow-listed, non-personal operational data. */
+const ITBMO_ANALYTICS_EVENT_NAMES = new Set([
+  'planner_started','destinations_saved','checkout_opened','payment_approved',
+  'payment_cancelled','payment_failed','itinerary_generated','export_pdf',
+  'export_csv','export_receipt','info_chat_question','affiliate_click',
+  'new_planning_started'
+]);
+
+function trackITBMOEvent(eventName, parameters={}){
+  try{
+    const name=String(eventName || '').trim();
+    if(!ITBMO_ANALYTICS_EVENT_NAMES.has(name)) return;
+    const allowedKeys=new Set([
+      'language','city_count','days_total','payment_provider','currency',
+      'generation_mode','partner','partner_name','placement','destination',
+      'queries_used','queries_remaining','file_type','error_stage'
+    ]);
+    const clean={};
+    Object.entries(parameters || {}).forEach(([key,value])=>{
+      if(!allowedKeys.has(key) || value===undefined || value===null) return;
+      if(typeof value==='number' && Number.isFinite(value)) clean[key]=value;
+      else if(typeof value==='boolean') clean[key]=value;
+      else clean[key]=String(value).slice(0,100);
+    });
+    if(!clean.language) clean.language=getLang?.() || document.documentElement.lang || 'en';
+    const payload={type:'ITBMO_ANALYTICS_EVENT',event_name:name,parameters:clean};
+    if(window.parent && window.parent!==window){
+      window.parent.postMessage(payload,'*');
+    }else{
+      window.dataLayer=window.dataLayer || [];
+      window.dataLayer.push({event:'itbmo_event',itbmo_event_name:name,...clean});
+    }
+  }catch(_){ }
+}
+
+let itbmoPlannerStartTracked=false;
+document.addEventListener('input',(event)=>{
+  if(itbmoPlannerStartTracked || !event.target?.closest?.('#planner-sidebar, .sidebar')) return;
+  itbmoPlannerStartTracked=true;
+  trackITBMOEvent('planner_started');
+},{capture:true,passive:true});
+
 /* ---------- Config API ---------- */
 const API_URL = '/api/chat';
 const USER_API_URL = '/api/user';
@@ -509,14 +552,12 @@ function _affiliateTrack_(partnerKey, placement){
   try{
     const partner = ITBMO_AFFILIATE_CONFIG.partners[partnerKey];
     const destination = activeCity || savedDestinations?.[0]?.city || '';
-    if(typeof window !== 'undefined' && typeof window.gtag === 'function'){
-      window.gtag('event','affiliate_click',{
-        partner: partnerKey,
-        partner_name: partner?.name || partnerKey,
-        placement,
-        destination
-      });
-    }
+    trackITBMOEvent('affiliate_click',{
+      partner:partnerKey,
+      partner_name:partner?.name || partnerKey,
+      placement,
+      destination
+    });
   }catch(_){}
 }
 
@@ -2220,6 +2261,10 @@ async function saveDestinations(){
   });
 
   savedDestinations = list;
+  trackITBMOEvent('destinations_saved',{
+    city_count:list.length,
+    days_total:list.reduce((sum,item)=>sum+(Number(item?.days)||0),0)
+  });
   savedDestinations.forEach(({city,days,baseDate,perDay})=>{
     if(!itineraries[city]) itineraries[city] = { byDay:{}, currentDay:1, baseDate: baseDate||null, masterPlan:[], audit:null };
     if(!cityMeta[city]) cityMeta[city] = { baseDate: baseDate||null, start:null, end:null, hotel:'', transport:'', perDay: perDay||[] };
@@ -5998,6 +6043,11 @@ async function runPaidGeneration({manualRetry=false}={}){
     }
 
     await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    trackITBMOEvent('itinerary_generated',{
+      city_count:savedDestinations.length,
+      days_total:savedDestinations.reduce((sum,item)=>sum+(Number(item?.days)||0),0),
+      generation_mode:manualRetry?'recovery':'standard'
+    });
     _finishAstraGenerationMetrics_();
     showWOW(false);
     setExportToolbarVisibility();
@@ -7202,7 +7252,7 @@ function exportItineraryToCSV(){
   const mm = String(d.getMonth()+1).padStart(2,'0');
   const dd = String(d.getDate()).padStart(2,'0');
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`;
-
+  trackITBMOEvent('export_csv',{file_type:'csv'});
   return deliverGeneratedFile(blob, filename);
 }
 
@@ -7338,6 +7388,7 @@ async function exportItineraryToPDF(){
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
   const blob=doc.output('blob');
   await deliverGeneratedFile(blob,filename);
+  trackITBMOEvent('export_pdf',{file_type:'pdf'});
 }
 
 function sendItineraryByEmail(){
@@ -7683,6 +7734,7 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null){
 
   const blob=doc.output('blob');
   await deliverGeneratedFile(blob,filename);
+  trackITBMOEvent('export_receipt',{file_type:'payment_receipt_pdf'});
   return true;
 }
 
@@ -7962,6 +8014,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     storeActiveTripId(null);
     generationRecoveryState = null;
     paidGenerationRunning = false;
+    itbmoPlannerStartTracked = false;
 
     planningStarted = false;
     metaProgressIndex = 0;
@@ -8525,6 +8578,12 @@ async function requestPlanningStart(){
       showPreferencesStage();
       return;
     }
+    trackITBMOEvent('checkout_opened',{
+      city_count:savedDestinations.length,
+      days_total:savedDestinations.reduce((sum,item)=>sum+(Number(item?.days)||0),0),
+      payment_provider:'paypal',
+      currency:ITBMO_COMMERCE_CONFIG.currency
+    });
     openCheckoutModal();
   }finally{
     if($start){
@@ -8598,11 +8657,20 @@ async function renderPayPalButtonsIfAvailable(){
           order_id:data.orderID
         });
         if(!result?.paid) throw new Error('PAYPAL_CAPTURE_NOT_PAID');
+        trackITBMOEvent('payment_approved',{
+          payment_provider:'paypal',
+          currency:ITBMO_COMMERCE_CONFIG.currency,
+          city_count:savedDestinations.length
+        });
         await completePaymentGate();
       },
-      onCancel:()=>setCheckoutStatus(''),
+      onCancel:()=>{
+        trackITBMOEvent('payment_cancelled',{payment_provider:'paypal'});
+        setCheckoutStatus('');
+      },
       onError:(err)=>{
         console.error('[PAYPAL]',err);
+        trackITBMOEvent('payment_failed',{payment_provider:'paypal',error_stage:'paypal_buttons'});
         setCheckoutStatus(_commerceCopy_().error,'error');
       }
     }).render('#paypal-button-container');
@@ -8967,6 +9035,10 @@ async function sendInfoMessage(){
   }
 
   infoChatMsg(txt,'user');
+  trackITBMOEvent('info_chat_question',{
+    queries_used:infoChatQueriesUsed+1,
+    queries_remaining:Math.max(0,infoChatQueriesRemaining-1)
+  });
   input.value='';
   resizeInfoChatComposer(input);
 
@@ -9077,6 +9149,7 @@ function bindInfoChatListeners(){
 function bindNewPlanningListener(){
   $newPlanningButton?.addEventListener('click',(event)=>{
     event.preventDefault();
+    trackITBMOEvent('new_planning_started');
     $resetBtn?.click();
   });
 }
