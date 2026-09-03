@@ -32,7 +32,7 @@ const ITBMO_ANALYTICS_EVENT_NAMES = new Set([
   'planner_started','destinations_saved','checkout_opened','payment_approved',
   'payment_cancelled','payment_failed','itinerary_generated','export_pdf',
   'export_csv','export_receipt','info_chat_question','affiliate_click',
-  'new_planning_started'
+  'new_planning_started','start_chat'
 ]);
 
 function trackITBMOEvent(eventName, parameters={}){
@@ -63,6 +63,7 @@ function trackITBMOEvent(eventName, parameters={}){
 }
 
 let itbmoPlannerStartTracked=false;
+let itbmoPlanningChatStarted=false;
 document.addEventListener('input',(event)=>{
   if(itbmoPlannerStartTracked || !event.target?.closest?.('#planner-sidebar, .sidebar')) return;
   itbmoPlannerStartTracked=true;
@@ -6479,6 +6480,10 @@ function stripRecognizedTransportTail(text){
 async function onSend(){
   const text = ($chatI.value||'').trim();
   if(!text) return;
+  if(!itbmoPlanningChatStarted){
+    itbmoPlanningChatStarted=true;
+    trackITBMOEvent('start_chat');
+  }
   chatMsg(text,'user');
   $chatI.value='';
 
@@ -8015,6 +8020,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     generationRecoveryState = null;
     paidGenerationRunning = false;
     itbmoPlannerStartTracked = false;
+    itbmoPlanningChatStarted = false;
 
     planningStarted = false;
     metaProgressIndex = 0;
