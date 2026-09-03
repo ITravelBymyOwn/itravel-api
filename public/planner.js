@@ -53,8 +53,11 @@ function trackITBMOEvent(eventName, parameters={}){
     });
     if(!clean.language) clean.language=getLang?.() || document.documentElement.lang || 'en';
     const payload={type:'ITBMO_ANALYTICS_EVENT',event_name:name,parameters:clean};
-    if(window.parent && window.parent!==window){
-      window.parent.postMessage(payload,'*');
+    /* The Planner is nested inside preview-home, which is itself embedded in
+       Webflow. Send analytics to the top Webflow window, not only to the
+       immediate preview-home parent. */
+    if(window.top && window.top!==window){
+      window.top.postMessage(payload,'*');
     }else{
       window.dataLayer=window.dataLayer || [];
       window.dataLayer.push({event:'itbmo_event',itbmo_event_name:name,...clean});
