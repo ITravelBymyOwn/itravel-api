@@ -103,7 +103,7 @@
 }
 .date-format{color:#71869b!important;font-size:.68rem!important}
 .date-summary{
-  display:block;
+  display:none!important;
   min-height:1.05rem;
   color:#087b92;
   font-size:.7rem;
@@ -190,7 +190,7 @@
 .itbmo-decision-pay{color:#082b59!important;border-color:#ffbf29!important;background:linear-gradient(135deg,#ffd25a,#ffb91f)!important;box-shadow:0 12px 28px rgba(244,169,0,.23)!important}
 
 .astra-guide-replay{
-  position:fixed;left:16px;bottom:16px;z-index:45000;display:flex;align-items:center;gap:.42rem;
+  position:fixed;left:16px;bottom:16px;z-index:45000;display:none!important;align-items:center;gap:.42rem;
   min-height:38px;padding:.46rem .72rem;border:1px solid rgba(255,255,255,.72);border-radius:999px;
   color:#075f77;background:rgba(250,254,255,.93);box-shadow:0 10px 30px rgba(5,43,70,.16);
   backdrop-filter:blur(14px);font:800 .7rem/1 Inter,sans-serif;cursor:pointer;
