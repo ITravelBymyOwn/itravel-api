@@ -455,8 +455,8 @@ const ITBMO_AFFILIATE_CONFIG = {
       category: 'experiences'
     },
     omio: {
-      enabled: false,
-      url: '',
+      enabled: true,
+      url: 'https://omio.sjv.io/PzvDjY',
       previewUrl: 'https://www.omio.com/',
       name: 'Omio',
       category: 'transport'
@@ -477,6 +477,40 @@ const ITBMO_AFFILIATE_CONFIG = {
     }
   }
 };
+
+const ITBMO_AFFILIATE_CONTEXT_KEY = 'itbmo_affiliate_context_v1';
+
+function _affiliateContext_(){
+  const destinations=(Array.isArray(savedDestinations) ? savedDestinations : [])
+    .map(item=>({
+      city:String(item?.city || '').trim(),
+      country:String(item?.country || '').trim(),
+      startDate:String(item?.baseDate || '').trim(),
+      days:Math.max(1,Number(item?.days || 1))
+    }))
+    .filter(item=>item.city)
+    .slice(0,3);
+  const routes=destinations.slice(0,-1).map((from,index)=>({
+    from:from.city,
+    to:destinations[index+1].city,
+    date:destinations[index+1].startDate || ''
+  }));
+  return {version:1,destinations,routes,updatedAt:new Date().toISOString()};
+}
+
+function syncAffiliateContext({clear=false}={}){
+  const context=clear
+    ? {version:1,destinations:[],routes:[],updatedAt:new Date().toISOString()}
+    : _affiliateContext_();
+  try{
+    if(clear) localStorage.removeItem(ITBMO_AFFILIATE_CONTEXT_KEY);
+    else localStorage.setItem(ITBMO_AFFILIATE_CONTEXT_KEY,JSON.stringify(context));
+  }catch(_){}
+  const payload={type:'ITBMO_AFFILIATE_CONTEXT',context,clear:Boolean(clear)};
+  try{ if(window.parent && window.parent!==window) window.parent.postMessage(payload,'*'); }catch(_){}
+  try{ if(window.top && window.top!==window && window.top!==window.parent) window.top.postMessage(payload,'*'); }catch(_){}
+  return context;
+}
 
 if (typeof window !== 'undefined') {
   window.ITBMO_AFFILIATE_CONFIG = ITBMO_AFFILIATE_CONFIG;
@@ -552,6 +586,24 @@ function _affiliatePartnerUrl_(partner){
   return '';
 }
 
+function _affiliateEscape_(value){
+  return String(value ?? '').replace(/[&<>'"]/g,char=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'
+  }[char]));
+}
+
+function _affiliatePartnerLinks_(key,partner,placement,buttonLabel){
+  const url=_affiliatePartnerUrl_(partner);
+  if(!url) return '';
+  const context=_affiliateContext_();
+  const routes=key==='omio' ? context.routes : [];
+  const links=routes.length ? routes.map(route=>({
+    label:`${route.from} → ${route.to}`,
+    route:`${route.from} > ${route.to}`
+  })) : [{label:buttonLabel,route:''}];
+  return links.map(link=>`<a class="itbmo-affiliate-link" href="${_affiliateEscape_(url)}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}" data-affiliate-route="${_affiliateEscape_(link.route)}"><span>${_affiliateEscape_(link.label)}</span><span class="itbmo-affiliate-arrow">↗</span></a>`).join('');
+}
+
 function _affiliateTrack_(partnerKey, placement){
   try{
     const partner = ITBMO_AFFILIATE_CONFIG.partners[partnerKey];
@@ -625,11 +677,10 @@ function renderAffiliateSurface(placement='loading'){
         ${visible.map(key=>{
           const p=ITBMO_AFFILIATE_CONFIG.partners[key];
           const pc=_affiliatePartnerCopy_(key);
-          const url=_affiliatePartnerUrl_(p);
           return `<article class="itbmo-affiliate-card itbmo-affiliate-brand-card itbmo-affiliate-brand-card--${_affiliateBrandClass_(key)}">
             <div class="itbmo-affiliate-brand-head"><strong>${p.name}</strong>${ITBMO_AFFILIATE_CONFIG.previewMode?`<span>${c.preview}</span>`:''}</div>
             <div class="itbmo-affiliate-brand-body"><small>${pc[0]}</small><h4>${pc[1]}</h4><p>${pc[2]}</p>
-              <a class="itbmo-affiliate-link" href="${url}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}"><span>${pc[3]}</span><span class="itbmo-affiliate-arrow">↗</span></a>
+              ${_affiliatePartnerLinks_(key,p,placement,pc[3])}
             </div>
           </article>`;
         }).join('')}
@@ -2265,6 +2316,7 @@ async function saveDestinations(){
   });
 
   savedDestinations = list;
+  syncAffiliateContext();
   trackITBMOEvent('destinations_saved',{
     city_count:list.length,
     days_total:list.reduce((sum,item)=>sum+(Number(item?.days)||0),0)
@@ -5848,6 +5900,7 @@ function _hydrateGenerationTrip_(trip){
       : (Array.isArray(destination?.perDay) ? destination.perDay : [])
   })).filter(destination=>destination.city);
   if(!savedDestinations.length) return false;
+  syncAffiliateContext();
 
   const checkpoint=(trip.itinerary_data && typeof trip.itinerary_data==='object')
     ? trip.itinerary_data
@@ -6692,6 +6745,7 @@ async function onSend(){
     savedDestinations = savedDestinations.filter(x=>x.city!==name);
     delete itineraries[name];
     delete cityMeta[name];
+    syncAffiliateContext();
     renderCityTabs();
     chatMsg(
       (getLang()==='es')
@@ -8009,6 +8063,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     closeAstraCoach({remember:false});
 
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
+    syncAffiliateContext({clear:true});
     addCityRow();
     $start.disabled = true;
     $tabs.innerHTML=''; $itWrap.innerHTML='';
