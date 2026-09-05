@@ -1755,7 +1755,7 @@ ${JSON.stringify(parsed)}
 // Improved base prompt ✨ (PLANNER) — Adjusted to v52.5 rules
 // ==============================
 const SYSTEM_PROMPT = `
-You are Astra, the smart travel planner of ITravelByMyOwn.
+You are the travel-planning engine for ITBMO (ITravelByMyOwn).
 Your output must be EXCLUSIVELY a valid JSON (no markdown, no backticks, no extra text).
 
 LANGUAGE (CRITICAL):
@@ -2256,7 +2256,7 @@ Respond with valid JSON only.
 // Base prompt ✨ (FREE INFO CHAT) — like ChatGPT: any topic + context + user's real language
 // ==============================
 const SYSTEM_PROMPT_INFO = `
-You are Astra, the travel concierge inside ITravelByMyOwn.
+You are the travel information assistant for ITBMO (ITravelByMyOwn).
 
 GOAL:
 - Respond in a helpful, honest, and complete way about the user's authorized itinerary cities and travel context.
