@@ -177,7 +177,7 @@ let plannerState = {
 
 const I18N = {
   es: {
-    hi: '¡Hola! Soy Astra ✨, tu concierge de viajes. Vamos a crear itinerarios inolvidables 🌍',
+    hi: '¡Hola! Soy tu asistente de viaje de ITBMO ✨. Vamos a crear un itinerario inolvidable 🌍',
     askHotelTransport: (city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y el <strong>medio de transporte</strong> (alquiler, público, taxi/uber, combinado o “recomiéndame”).`,
     confirmAll: '✨ Listo.',
     doneAll: '🎉 ¡Tus itinerarios están listos! Para dudas adicionales sobre las ciudades de este viaje, usa Info Chat 🌐.',
@@ -188,7 +188,7 @@ const I18N = {
     cityAdded: (c)=>`✅ Añadí <strong>${c}</strong> y generé su itinerario.`,
     cityRemoved: (c)=>`🗑️ Eliminé <strong>${c}</strong> de tu plan y reoptimicé las pestañas.`,
     cannotFindCity: 'No identifiqué la ciudad. Dímela con exactitud, por favor.',
-    thinking: 'Astra está pensando…',
+    thinking: 'ITBMO está preparando la respuesta…',
 
     // UI / Sidebar cities
     uiCity: 'Ciudad',
@@ -196,7 +196,7 @@ const I18N = {
     uiDays: 'Días',
     uiStart: 'Primer día',
     uiDateFormatSmall: 'Selecciona una fecha válida',
-    uiTimeHint: '⏰ Indica tu tiempo útil en el destino. Si aún no conoces los horarios, puedes omitirlos: ASTRA propondrá horas razonables de inicio y final.',
+    uiTimeHint: '⏰ Indica tu tiempo útil en el destino. Si aún no conoces los horarios, puedes omitirlos: ITBMO propondrá horas razonables de inicio y final.',
     uiStartTime: 'Hora Inicio',
     uiEndTime: 'Hora Final',
     uiSameSchedule: 'Copiar el horario del Día 1 en todos los días',
@@ -218,9 +218,9 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
-    overlayGenerating: '✨ ASTRA está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ASTRA investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
-    overlayRebalancingCity: 'Astra está reequilibrando la ciudad…',
+    overlayDefault: '✨ ITBMO está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ITBMO investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
+    overlayGenerating: '✨ ITBMO está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ITBMO investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
+    overlayRebalancingCity: 'ITBMO está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
     // Tooltip fechas
@@ -257,7 +257,7 @@ const I18N = {
   },
 
   en: {
-    hi: 'Hi! I’m Astra ✨, your travel concierge. Let’s build unforgettable itineraries 🌍',
+    hi: 'Hi! I’m ITBMO’s travel assistant ✨. Let’s build an unforgettable itinerary 🌍',
     askHotelTransport: (city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental, public transit, taxi/uber, mixed, or “recommend”).`,
     confirmAll: '✨ Ready.',
     doneAll: '🎉 Your itineraries are ready! For additional questions about the cities in this trip, use Info Chat 🌐.',
@@ -268,7 +268,7 @@ const I18N = {
     cityAdded: (c)=>`✅ I added <strong>${c}</strong> and generated its itinerary.`,
     cityRemoved: (c)=>`🗑️ I removed <strong>${c}</strong> from your plan and re-optimized the tabs.`,
     cannotFindCity: 'I couldn’t identify the city. Please tell me the exact name.',
-    thinking: 'Astra is thinking…',
+    thinking: 'ITBMO is preparing the answer…',
 
     // UI / Sidebar cities
     uiCity: 'City',
@@ -276,7 +276,7 @@ const I18N = {
     uiDays: 'Days',
     uiStart: 'First day',
     uiDateFormatSmall: 'Choose a valid date',
-    uiTimeHint: '⏰ Enter your usable time at the destination. If you do not know the times yet, you may leave them blank and ASTRA will suggest reasonable start and end times.',
+    uiTimeHint: '⏰ Enter your usable time at the destination. If you do not know the times yet, you may leave them blank and ITBMO will suggest reasonable start and end times.',
     uiStartTime: 'Start time',
     uiEndTime: 'End time',
     uiSameSchedule: 'Copy the Day 1 schedule to every day',
@@ -298,9 +298,9 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
-    overlayGenerating: '✨ ASTRA is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ASTRA researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
-    overlayRebalancingCity: 'Astra is rebalancing the city…',
+    overlayDefault: '✨ ITBMO is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ITBMO researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
+    overlayGenerating: '✨ ITBMO is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ITBMO researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
+    overlayRebalancingCity: 'ITBMO is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
     // Tooltip fechas
@@ -485,9 +485,9 @@ if (typeof window !== 'undefined') {
 function _affiliateCopy_(){
   const es = getLang()==='es';
   return es ? {
-    loadingEyebrow: 'Mientras Astra crea tu viaje',
+    loadingEyebrow: 'Mientras ITBMO crea tu viaje',
     loadingTitle: 'Tu viaje empieza antes de que termine de generarse',
-    loadingSub: 'Explora vuelos, hospedaje y experiencias mientras Astra sigue trabajando en esta pestaña.',
+    loadingSub: 'Explora vuelos, hospedaje y experiencias mientras ITBMO sigue trabajando en esta pestaña.',
     afterEyebrow: 'Tu viaje ya tomó forma',
     afterTitle: 'Ahora hazlo realidad',
     afterSub: 'Da el siguiente paso. Compara, explora y reserva lo esencial para tu aventura.',
@@ -506,9 +506,9 @@ function _affiliateCopy_(){
     preview: 'Vista previa',
     trust: 'Se abre en una pestaña nueva · ITBMO continúa aquí'
   } : {
-    loadingEyebrow: 'While Astra builds your trip',
+    loadingEyebrow: 'While ITBMO builds your trip',
     loadingTitle: 'Your journey can start right now',
-    loadingSub: 'Explore flights, stays and experiences while Astra keeps working in this tab.',
+    loadingSub: 'Explore flights, stays and experiences while ITBMO keeps working in this tab.',
     afterEyebrow: 'Your trip has taken shape',
     afterTitle: 'Now make it happen',
     afterSub: 'Take the next step. Compare, explore and book the essentials for your adventure.',
@@ -1881,17 +1881,17 @@ function applyPlannerLanguageCapabilityCopy(){
     $plannerLanguageHelpLabel.textContent=es ? 'Escribe en tu idioma' : 'Write in your language';
   }
   if($plannerLanguagePopoverTitle){
-    $plannerLanguagePopoverTitle.textContent=es ? 'Usa tu idioma con ASTRA' : 'Use your language with ASTRA';
+    $plannerLanguagePopoverTitle.textContent=es ? 'Planifica en tu idioma' : 'Plan in your language';
   }
   if($plannerLanguagePopoverCopy){
     $plannerLanguagePopoverCopy.textContent=es
-      ? 'Escribe naturalmente en cualquier idioma soportado por el chat. ASTRA continuará la conversación de planificación en el idioma que utilices.'
-      : 'Write naturally in any language supported by the chat. ASTRA will continue the planning conversation in the language you use.';
+      ? 'Escribe naturalmente en cualquier idioma soportado por el chat. ITBMO continuará la conversación de planificación en el idioma que utilices.'
+      : 'Write naturally in any language supported by the chat. ITBMO will continue the planning conversation in the language you use.';
   }
   if($plannerLanguagePopoverNote){
     $plannerLanguagePopoverNote.textContent=es
-      ? 'Si un idioma no es soportado, ASTRA te lo indicará en el chat. El idioma final del itinerario se selecciona más adelante durante la planificación.'
-      : 'If a language is not supported, ASTRA will let you know in the chat. The final itinerary language is selected later in the planning flow.';
+      ? 'Si un idioma no es soportado, ITBMO te lo indicará en el chat. El idioma final del itinerario se selecciona más adelante durante la planificación.'
+      : 'If a language is not supported, ITBMO will let you know in the chat. The final itinerary language is selected later in the planning flow.';
   }
   if($plannerLanguagePopoverClose){
     $plannerLanguagePopoverClose.setAttribute('aria-label',es ? 'Cerrar' : 'Close');
@@ -1982,13 +1982,13 @@ function applyPreferencesStageLanguage(){
   const es=getLang()==='es';
   const set=(sel,value)=>{ const el=qs(sel); if(el) el.textContent=value; };
 
-  set('#preferences-stage-eyebrow', es ? 'Personalización ASTRA' : 'ASTRA personalization');
+  set('#preferences-stage-eyebrow', es ? 'Personalización de tu viaje' : 'Personalize your trip');
   set('#preferences-stage-title', es ? 'Personaliza tu viaje' : 'Personalize your trip');
   set(
     '#preferences-stage-intro',
     es
-      ? 'Info Chat ya está disponible. Úsalo si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntale a ASTRA cómo quieres vivir el viaje.'
-      : 'Info Chat is now available. Use it if you want to research anything about your destinations, then tell ASTRA how you want to experience the trip.'
+      ? 'Info Chat ya está disponible. Úsalo si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntanos cómo quieres vivir el viaje.'
+      : 'Info Chat is now available. Use it to research your destinations and, when you are ready, tell us how you want to experience the trip.'
   );
   set(
     '#preferences-stage-field-title',
@@ -2004,7 +2004,7 @@ function applyPreferencesStageLanguage(){
   );
 
   if($preferencesContinue && !preferencesConfirmedTripId){
-    $preferencesContinue.textContent=es ? 'Continuar con ASTRA →' : 'Continue with ASTRA →';
+    $preferencesContinue.textContent=es ? 'Continuar con ITBMO →' : 'Continue with ITBMO →';
   }
 }
 
@@ -2528,7 +2528,7 @@ function _immersiveViewerCopy_(){
     daySingular:'día',
     dayPlural:'días',
     ready:'listos para explorar',
-    eyebrow:'TU ITINERARIO ASTRA',
+    eyebrow:'TU ITINERARIO ITBMO',
     title:'Tu viaje, día a día.',
     subtitle:'Elige una ciudad y recorre cada día a tu propio ritmo.',
     back:'Volver al Planner',
@@ -2544,7 +2544,7 @@ function _immersiveViewerCopy_(){
     daySingular:'day',
     dayPlural:'days',
     ready:'ready to explore',
-    eyebrow:'YOUR ASTRA ITINERARY',
+    eyebrow:'YOUR ITBMO ITINERARY',
     title:'Your trip, day by day.',
     subtitle:'Choose a city, then move through each day at your own pace.',
     back:'Back to Planner',
@@ -3024,7 +3024,7 @@ Merge behavior:
 async function callAgent(text, useHistory = true){
   const history = useHistory ? session : [];
   const globalStyle = `
-You are "Astra", an international travel planner.
+You are the international travel-planning assistant for ITBMO.
 
 CRITICAL RULE:
 - When asked for an itinerary, output ONLY valid JSON (no extra text, no markdown).
@@ -3151,7 +3151,7 @@ function parseJSON(s){
 async function callInfoAgent(text){
   const history = infoSession;
   const globalStyle = `
-You are "Astra", a premium expert travel concierge with the natural conversational quality of ChatGPT.
+You are the expert travel information assistant for ITBMO, with a natural conversational style.
 
 ROLE AND BEHAVIOR:
 - Think like an expert travel concierge, not a search engine.
@@ -4014,7 +4014,7 @@ function addMultipleDaysToCity(city, extraDays){
   }
 
   // 🧠 Rebalanceo automático sólo en el rango afectado
-  showWOW(true, 'Astra está reequilibrando la ciudad…');
+  showWOW(true, 'ITBMO está reequilibrando la ciudad…');
   rebalanceWholeCity(city, { start: rebalanceStart, end: rebalanceEnd })
     .catch(err => console.error('Error en rebalance automático:', err))
     .finally(() => showWOW(false));
@@ -4162,8 +4162,8 @@ function setOverlayMessage(msg=t('overlayDefault')){
   const isEs = getLang() === 'es';
   p.classList.add('astra-overlay-copy');
   p.innerHTML = isEs
-    ? `<span class="astra-overlay-hero"><strong>✨ ASTRA está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ASTRA compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong> Mientras ASTRA trabaja, explora los enlaces de abajo para vuelos, hospedaje, transporte y experiencias.</span>`
-    : `<span class="astra-overlay-hero"><strong>✨ ASTRA is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ASTRA compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong> While ASTRA works, explore the links below for flights, stays, transport and experiences.</span>`;
+    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong> Mientras ITBMO trabaja, explora los enlaces de abajo para vuelos, hospedaje, transporte y experiencias.</span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong> While ITBMO works, explore the links below for flights, stays, transport and experiences.</span>`;
 }
 
 function showWOW(on, msg){
@@ -4360,22 +4360,22 @@ function _finishAstraGenerationMetrics_(){
 
   window.__ITBMO_LAST_GENERATION_METRICS__=snapshot;
 
-  console.log(`%c[ASTRA TIMER] FULL TRIP TOTAL: ${snapshot.total}`, 'font-weight:900;color:#087f9f;');
-  console.log(`[ASTRA TIMER] Model/API calls during generation: ${snapshot.modelCalls}`);
+  console.log(`%c[ITBMO TIMER] FULL TRIP TOTAL: ${snapshot.total}`, 'font-weight:900;color:#087f9f;');
+  console.log(`[ITBMO TIMER] Model/API calls during generation: ${snapshot.modelCalls}`);
   if(snapshot.cities.length) console.table(snapshot.cities);
 
   if(tokenUsageAvailable){
     console.log(
-      `[ASTRA TOKENS] Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
+      `[ITBMO TOKENS] Input: ${snapshot.inputTokens.toLocaleString()} · Output: ${snapshot.outputTokens.toLocaleString()} · Total: ${snapshot.totalTokens.toLocaleString()}`
     );
   }else{
     console.info(
-      '[ASTRA TOKENS] Exact token counts are not available because /api/chat did not expose usage metadata to the browser. No estimate was invented.'
+      '[ITBMO TOKENS] Exact token counts are not available because /api/chat did not expose usage metadata to the browser. No estimate was invented.'
     );
   }
 
   console.info(
-    '[ASTRA METRICS] Type __ITBMO_LAST_GENERATION_METRICS__ in the console to inspect the last complete generation.'
+    '[ITBMO METRICS] Type __ITBMO_LAST_GENERATION_METRICS__ in the console to inspect the last complete generation.'
   );
 
   return snapshot;
@@ -4729,7 +4729,7 @@ async function _buildCityMasterPlan_(city,totalDays,perDay,baseDate='',hotel='',
   const facts=_knownUserFactsForCity_(city,totalDays,perDay,baseDate,hotel,transport);
   const prompt=`
 ${FORMAT}
-ROLE: Astra. Produce STRATEGIC DISTRIBUTION METADATA ONLY for "${city}".
+ROLE: Travel-planning engine for ITBMO. Produce STRATEGIC DISTRIBUTION METADATA ONLY for "${city}".
 
 Return exactly:
 {"destination":"${city}","rows":[...]}
@@ -4784,7 +4784,7 @@ async function _generateBlockFromThemes_(
 
   const prompt=`
 ${FORMAT}
-ROLE: Astra. Generate FINAL itinerary rows ONLY for days ${dayNums.join(', ')} of "${city}".
+ROLE: Travel-planning engine for ITBMO. Generate FINAL itinerary rows ONLY for days ${dayNums.join(', ')} of "${city}".
 
 Return:
 {"destination":"${city}","rows":[...],"replace":${forceReplan?'true':'false'}}
@@ -5262,7 +5262,7 @@ async function _runTripWideRepairCall_(
 
   const prompt=`
 ${FORMAT}
-ROLE: Astra, expert final itinerary auditor and concierge.
+ROLE: Expert final itinerary auditor for ITBMO.
 
 ${passTitle}
 
@@ -5404,7 +5404,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
         duration:_formatGenerationDuration_(elapsed)
       });
     }
-    console.log(`[ASTRA TIMER] ${city}: ${_formatGenerationDuration_(elapsed)}`);
+    console.log(`[ITBMO TIMER] ${city}: ${_formatGenerationDuration_(elapsed)}`);
   };
 
   const dest=savedDestinations.find(x=>x.city===city);
@@ -5476,7 +5476,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const facts=_knownUserFactsForCity_(city,dest.days,perDay,baseDate,hotel,transport);
     const prompt=`
 ${FORMAT}
-ROLE: Astra. Generate the COMPLETE final itinerary for "${city}" covering days 1–${dest.days}.
+ROLE: Travel-planning engine for ITBMO. Generate the COMPLETE final itinerary for "${city}" covering days 1–${dest.days}.
 Return {"destination":"${city}","rows":[...],"replace":true} and JSON only.
 
 KNOWN USER FACTS:
@@ -5827,8 +5827,8 @@ async function _persistGenerationCheckpoint_(status='generating',extra={}){
 async function _waitForGenerationConnection_(){
   if(navigator.onLine) return;
   showWOW(true,getLang()==='es'
-    ? 'Conexión interrumpida. ASTRA continuará automáticamente cuando vuelva internet…'
-    : 'Connection interrupted. ASTRA will continue automatically when internet returns…');
+    ? 'Conexión interrumpida. ITBMO continuará automáticamente cuando vuelva internet…'
+    : 'Connection interrupted. ITBMO will continue automatically when internet returns…');
   await new Promise(resolve=>window.addEventListener('online',resolve,{once:true}));
 }
 
@@ -5931,11 +5931,11 @@ function _showGenerationRetry_(reason=''){
   const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
   const message=exhausted
     ? (getLang()==='es'
-      ? 'ASTRA no pudo completar el itinerario después de los intentos de recuperación. Tu pago permanece registrado; contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.'
-      : 'ASTRA could not complete the itinerary after the recovery attempts. Your payment remains recorded; contact Support for assistance, replacement or refund as applicable.')
+      ? 'ITBMO no pudo completar el itinerario después de los intentos de recuperación. Tu pago permanece registrado; contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.'
+      : 'ITBMO could not complete the itinerary after the recovery attempts. Your payment remains recorded; contact Support for assistance, replacement or refund as applicable.')
     : (getLang()==='es'
-      ? 'ASTRA no pudo completar todas las ciudades por un fallo técnico. Tu pago continúa activo y puedes reintentar sin volver a pagar.'
-      : 'ASTRA could not complete every city because of a technical failure. Your payment remains active and you can retry without paying again.');
+      ? 'ITBMO no pudo completar todas las ciudades por un fallo técnico. Tu pago continúa activo y puedes reintentar sin volver a pagar.'
+      : 'ITBMO could not complete every city because of a technical failure. Your payment remains active and you can retry without paying again.');
   const row=chatMsg(message,'ai');
   if(!row || exhausted) return;
 
@@ -6110,8 +6110,8 @@ async function restorePaidGenerationIfNeeded(){
 
     if(trip.status==='generating'){
       chatMsg(getLang()==='es'
-        ? 'ASTRA detectó una generación interrumpida y continuará desde la última ciudad guardada.'
-        : 'ASTRA detected an interrupted generation and will continue from the last saved city.','ai');
+        ? 'ITBMO detectó una generación interrumpida y continuará desde la última ciudad guardada.'
+        : 'ITBMO detected an interrupted generation and will continue from the last saved city.','ai');
       setTimeout(()=>runPaidGeneration(),180);
     }else if(trip.status==='failed'){
       _showGenerationRetry_();
@@ -7751,7 +7751,7 @@ function showFinalDownloadModal(){
   const es=getLang()==='es';
   const overlay=document.createElement('div'); overlay.className='itbmo-download-overlay';
   overlay.innerHTML=`<div class="itbmo-download-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-download-title">
-    <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ASTRA TERMINÓ':'ASTRA IS DONE'}</div>
+    <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ITBMO TERMINÓ':'ITBMO IS DONE'}</div>
     <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
     <p>${es?'Descarga cada documento por separado. Así tu navegador no bloqueará ninguno y podrás guardarlos con seguridad.':'Download each document separately. This prevents your browser from blocking any file and lets you save them safely.'}</p>
     <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
@@ -7918,7 +7918,7 @@ function showPlannerDecision({title,message,confirmLabel,cancelLabel,variant='pr
     card.setAttribute('aria-modal','true');
     card.innerHTML=`
       <div class="itbmo-decision-symbol">✦</div>
-      <div class="itbmo-decision-eyebrow">ASTRA · ${getLang()==='es'?'CONFIRMACIÓN':'CONFIRMATION'}</div>
+      <div class="itbmo-decision-eyebrow">ITBMO · ${getLang()==='es'?'CONFIRMACIÓN':'CONFIRMATION'}</div>
       <h3></h3><p></p>
       <div class="itbmo-decision-actions">
         <button class="btn ghost itbmo-decision-cancel" type="button"></button>
@@ -8279,11 +8279,11 @@ function _commerceCopy_(){
     supportFoot:'Incluiremos tu Trip ID automáticamente cuando esté disponible.',
     checkoutEyebrow:'ITBMO Premium Journey',
     checkoutTitle:'Tu viaje está listo para ser creado',
-    checkoutSub:'Desbloquea tu itinerario completo y personalizado con Astra.',
+    checkoutSub:'Desbloquea tu itinerario completo y personalizado con ITBMO.',
     offer:'OFERTA DE LANZAMIENTO · TIEMPO LIMITADO',
     priceNote:'Pago único · Viaje completo · Todas las ciudades configuradas',
     inc1:'Itinerario personalizado completo',
-    inc2:'Inteligencia de viaje de Astra',
+    inc2:'Inteligencia de viaje de ITBMO',
     inc3:'Exportación PDF y CSV',
     cardTitle:'Tarjeta de crédito o débito',
     cardCopy:'Visa · Mastercard · American Express',
@@ -8293,10 +8293,10 @@ function _commerceCopy_(){
     trust2:'Política de reembolso clara',
     trust3:'Atención humana',
     supportLink:'¿Necesitas ayuda? Contacta Atención al Cliente',
-    preview:'Modo de prueba · Continuar con Astra',
+    preview:'Modo de prueba · Continuar con ITBMO',
     providerSoon:'Este método todavía no está activado.',
     processing:'Procesando pago…',
-    paid:'✓ Pago confirmado. Astra está lista.',
+    paid:'✓ Pago confirmado. Todo está listo.',
     error:'No pudimos confirmar el pago. Inténtalo nuevamente o contacta soporte.'
   } : {
     helpLabel:'Need help?',
@@ -8310,11 +8310,11 @@ function _commerceCopy_(){
     supportFoot:'We’ll include your Trip ID automatically when available.',
     checkoutEyebrow:'ITBMO Premium Journey',
     checkoutTitle:'Your journey is ready to be created',
-    checkoutSub:'Unlock your complete personalized itinerary with Astra.',
+    checkoutSub:'Unlock your complete personalized itinerary with ITBMO.',
     offer:'LIMITED-TIME LAUNCH OFFER',
     priceNote:'One-time payment · Complete trip · All configured cities',
     inc1:'Complete personalized itinerary',
-    inc2:'Astra travel intelligence',
+    inc2:'ITBMO travel intelligence',
     inc3:'PDF & CSV exports',
     cardTitle:'Credit or Debit Card',
     cardCopy:'Visa · Mastercard · American Express',
@@ -8324,10 +8324,10 @@ function _commerceCopy_(){
     trust2:'Clear refund policy',
     trust3:'Human customer support',
     supportLink:'Need help? Contact Customer Support',
-    preview:'Preview mode · Continue to Astra',
+    preview:'Preview mode · Continue to ITBMO',
     providerSoon:'This payment method is not active yet.',
     processing:'Processing payment…',
-    paid:'✓ Payment confirmed. Astra is ready.',
+    paid:'✓ Payment confirmed. Everything is ready.',
     error:'We could not confirm the payment. Please try again or contact support.'
   };
 }
@@ -8564,8 +8564,8 @@ async function requestPlanningStart(){
     const confirmed=await showPlannerDecision({
       title:es?'Última revisión antes del pago':'Final review before payment',
       message:es
-        ? 'Después de completar el pago, ASTRA generará el itinerario con los viajeros, ciudades, fechas y horarios que acabas de guardar. Esa información no podrá modificarse para este viaje. Si después deseas cambiarla, tendrás que reiniciar y generar un nuevo viaje con un nuevo pago.'
-        : 'After payment, ASTRA will generate the itinerary using the travelers, cities, dates and schedules you saved. That information cannot be changed for this trip. To change it later, you will need to reset and generate a new trip with a new payment.',
+        ? 'Después de completar el pago, ITBMO generará el itinerario con los viajeros, ciudades, fechas y horarios que acabas de guardar. Esa información no podrá modificarse para este viaje. Si después deseas cambiarla, tendrás que reiniciar y generar un nuevo viaje con un nuevo pago.'
+        : 'After payment, ITBMO will generate the itinerary using the travelers, cities, dates and schedules you saved. That information cannot be changed for this trip. To change it later, you will need to reset and generate a new trip with a new payment.',
       cancelLabel:es?'Cancelar y revisar':'Cancel and review',
       confirmLabel:es?'Continuar al pago':'Continue to payment',
       variant:'payment'
@@ -8844,8 +8844,8 @@ function ensureInfoChatWelcome(){
   const es=getLang()==='es';
   const cities=_infoCityListText_();
   const html=es
-    ? `<strong>¡Hola! Soy Astra, tu concierge para ${cities}. 🌍</strong><br><br>¿En qué te ayudo ahora? Puedo orientarte sobre zonas para hospedarte, transporte local, barrios, gastronomía, costumbres, seguridad general, fotografía, equipaje, presupuesto orientativo y cómo organizar mejor tus visitas dentro de estas ciudades.`
-    : `<strong>Hi! I’m Astra, your concierge for ${cities}. 🌍</strong><br><br>How can I help? I can guide you on areas to stay, local transportation, neighborhoods, local food, customs, general safety, photography, packing, indicative budgets and how to organize your visits within these cities.`;
+    ? `<strong>¡Hola! Soy tu asistente de viaje de ITBMO para ${cities}. 🌍</strong><br><br>¿En qué te ayudo ahora? Puedo orientarte sobre zonas para hospedarte, transporte local, barrios, gastronomía, costumbres, seguridad general, fotografía, equipaje, presupuesto orientativo y cómo organizar mejor tus visitas dentro de estas ciudades.`
+    : `<strong>Hi! I’m ITBMO’s travel assistant for ${cities}. 🌍</strong><br><br>How can I help? I can guide you on areas to stay, local transportation, neighborhoods, local food, customs, general safety, photography, packing, indicative budgets and how to organize your visits within these cities.`;
   infoChatMsg(html,'ai');
   infoChatWelcomeTripId=currentTripId;
 }
@@ -9170,7 +9170,7 @@ function enhancePreferencesInfoChatCopy(){
   const lang = _plannerOutputLang_();
   const copy = {
     en:{
-      guideTitle:'✨ Tell Astra exactly how you want to live your trip',
+      guideTitle:'✨ Tell us exactly how you want to experience your trip',
       guideSubtitle:'This will help create an itinerary that truly matches you.',
       guideItems:[
         '🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”',
@@ -9189,7 +9189,7 @@ function enhancePreferencesInfoChatCopy(){
       close:'Close'
     },
     es:{
-      guideTitle:'✨ Cuéntale a ASTRA exactamente cómo quieres vivir tu viaje',
+      guideTitle:'✨ Cuéntanos exactamente cómo quieres vivir tu viaje',
       guideSubtitle:'Esta información permitirá crear un itinerario realmente alineado contigo.',
       guideItems:[
         '🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”',
@@ -9210,7 +9210,7 @@ function enhancePreferencesInfoChatCopy(){
   }[lang] || null;
 
   const c=copy || {
-    guideTitle:'✨ Tell Astra exactly how you want to live your trip',
+    guideTitle:'✨ Tell us exactly how you want to experience your trip',
     guideSubtitle:'This will help create an itinerary that truly matches you.',
     guideItems:[
       '🏞️ Style & activities → nature, landscapes, museums, authentic tours.',
@@ -9312,7 +9312,7 @@ function enhancePreferencesInfoChatCopy(){
 }
 
 /* =========================================================
-   ASTRA CONTEXTUAL GUIDE
+   ITBMO CONTEXTUAL GUIDE
    One calm, contextual coach mark at a time. It never advances on a timer.
    The guide disappears as soon as the traveler starts interacting.
 ========================================================= */
@@ -9327,8 +9327,8 @@ function astraCoachCopy(key){
       ? ['Tu punto de partida','Crea tu cuenta o inicia sesión. Así podremos guardar este viaje de forma segura antes de comenzar.']
       : ['Your starting point','Create your account or sign in so we can save this trip safely before you begin.'],
     travelers:es
-      ? ['¿Quiénes vivirán este viaje?','Indica si viajas solo o acompañado. Las edades y necesidades del grupo ayudan a ASTRA a ajustar ritmos, actividades y desplazamientos.']
-      : ['Who will experience this trip?','Tell us whether you are traveling solo or with others. Ages and group needs help ASTRA adjust pacing, activities and transportation.'],
+      ? ['¿Quiénes vivirán este viaje?','Indica si viajas solo o acompañado. Las edades y necesidades del grupo ayudan a ITBMO a ajustar ritmos, actividades y desplazamientos.']
+      : ['Who will experience this trip?','Tell us whether you are traveling solo or with others. Ages and group needs help ITBMO adjust pacing, activities and transportation.'],
     destinations:es
       ? ['Construye la ruta','Agrega hasta tres ciudades, su país y la cantidad de días. El orden en que las ingreses será el orden del viaje.']
       : ['Build your route','Add up to three cities, their country and number of days. The order you enter them will be the trip order.'],
@@ -9380,7 +9380,7 @@ function showAstraCoach(key,targetRef,{force=false}={}){
   bubble.setAttribute('role','status');
   bubble.innerHTML=`
     <div class="astra-coach__avatar">✦</div>
-    <div class="astra-coach__content"><small>ASTRA · ${getLang()==='es'?'GUÍA':'GUIDE'}</small><strong></strong><p></p></div>
+    <div class="astra-coach__content"><small>ITBMO · ${getLang()==='es'?'GUÍA':'GUIDE'}</small><strong></strong><p></p></div>
     <button class="astra-coach__close" type="button" aria-label="${getLang()==='es'?'Ocultar ayuda':'Hide help'}">×</button>`;
   bubble.querySelector('strong').textContent=title;
   bubble.querySelector('p').textContent=message;
