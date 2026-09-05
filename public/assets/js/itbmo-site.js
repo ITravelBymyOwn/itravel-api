@@ -27,7 +27,7 @@
       booking:      { enabled:false, url:'', previewUrl:'https://www.booking.com/' },
       getyourguide: { enabled:false, url:'', previewUrl:'https://www.getyourguide.com/' },
       viator:       { enabled:false, url:'', previewUrl:'https://www.viator.com/' },
-      omio:         { enabled:false, url:'', previewUrl:'https://www.omio.com/' },
+      omio:         { enabled:true, url:'https://omio.sjv.io/PzvDjY', previewUrl:'https://www.omio.com/' },
       airalo:       { enabled:false, url:'', previewUrl:'https://www.airalo.com/' },
       holafly:      { enabled:false, url:'', previewUrl:'https://esim.holafly.com/' }
     },
@@ -265,7 +265,19 @@
   /* =========================================================
      AFFILIATES
   ========================================================= */
-  document.querySelectorAll('[data-partner]').forEach((card) => {
+  const ITBMO_AFFILIATE_CONTEXT_KEY = 'itbmo_affiliate_context_v1';
+  let itbmoAffiliateContext = { version:1, destinations:[], routes:[] };
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(ITBMO_AFFILIATE_CONTEXT_KEY) || 'null');
+    if (cached && Array.isArray(cached.destinations) && Array.isArray(cached.routes)) {
+      itbmoAffiliateContext = cached;
+    }
+  } catch (_) {}
+
+  function renderHomeAffiliates() {
+    let visibleCount = 0;
+    document.querySelectorAll('[data-partner]').forEach((card) => {
     const key = card.getAttribute('data-partner');
     const config = ITBMO_HOME_CONFIG.partners[key];
     if (!config) {
@@ -276,10 +288,19 @@
     const visible = ITBMO_HOME_CONFIG.previewMode || config.enabled;
     card.hidden = !visible;
     if (!visible) return;
+    visibleCount += 1;
 
     const state = card.querySelector('.partner-card__state');
     const link = card.querySelector(`[data-partner-link="${key}"]`);
+    const description = card.querySelector('p');
     const url = ITBMO_HOME_CONFIG.previewMode ? config.previewUrl : config.url;
+
+    if (description && !description.dataset.itbmoDefaultText) {
+      description.dataset.itbmoDefaultText = description.textContent;
+    }
+    if (description?.dataset.itbmoDefaultText) {
+      description.textContent = description.dataset.itbmoDefaultText;
+    }
 
     if (state) {
       state.textContent = ITBMO_HOME_CONFIG.previewMode ? 'Preview' : 'Partner';
@@ -296,6 +317,36 @@
         link.addEventListener('click', (event) => event.preventDefault());
       }
     }
+
+    if (key === 'omio' && itbmoAffiliateContext.routes.length) {
+      const routes = itbmoAffiliateContext.routes
+        .map(route => `${route.from} → ${route.to}`)
+        .join(' · ');
+      if (description) description.textContent = routes;
+      link?.setAttribute('aria-label', `${link.textContent.trim()}: ${routes}`);
+    } else {
+      link?.removeAttribute('aria-label');
+    }
+    });
+
+    document.querySelectorAll('.travel-hub').forEach(section => {
+      section.hidden = visibleCount === 0;
+    });
+  }
+
+  renderHomeAffiliates();
+
+  window.addEventListener('message', (event) => {
+    const data = event.data;
+    if (!data || data.type !== 'ITBMO_AFFILIATE_CONTEXT') return;
+    const context = data.context;
+    if (!context || !Array.isArray(context.destinations) || !Array.isArray(context.routes)) return;
+    itbmoAffiliateContext = context;
+    try {
+      if (data.clear) localStorage.removeItem(ITBMO_AFFILIATE_CONTEXT_KEY);
+      else localStorage.setItem(ITBMO_AFFILIATE_CONTEXT_KEY, JSON.stringify(context));
+    } catch (_) {}
+    renderHomeAffiliates();
   });
 
   /* =========================================================
