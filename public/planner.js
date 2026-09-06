@@ -1462,20 +1462,24 @@ function clearInfoChatStateForTrip(tripId){
 }
 
 let infoTypingTimer = null;
+let infoChatRequestInFlight = false;
 const $infoTyping = document.createElement('div');
 $infoTyping.className = 'chat-message ai typing';
 // ✅ Puntos más grandes y llamativos
 $infoTyping.innerHTML = `<span class="dot">•</span><span class="dot">•</span><span class="dot">•</span>`;
 
 function setInfoChatBusy(on){
-  const input = $infoInput || qs('#info-chat-input');
-  const send  = $infoSend  || qs('#info-chat-send');
+  /* bindInfoChatListeners replaces the send button with a clone. Always
+     resolve the live nodes so mobile keeps the real composer in sync. */
+  const input = qs('#info-chat-input');
+  const send  = qs('#info-chat-send');
   if(input) input.disabled = on;
   if(send)  send.disabled  = on;
 
   const container = $infoMessages || qs('#info-chat-messages');
   if(container){
     if(on){
+      clearInterval(infoTypingTimer);
       if(!container.contains($infoTyping)){
         container.appendChild($infoTyping);
         container.scrollTop = container.scrollHeight;
@@ -1520,7 +1524,7 @@ if($infoInput){
   $infoInput.addEventListener('keydown', e=>{
     if(e.key === 'Enter' && !e.shiftKey){
       e.preventDefault();
-      const btn = $infoSend || qs('#info-chat-send');
+      const btn = qs('#info-chat-send');
       if(btn) btn.click();
     }
     // Shift+Enter deja pasar para crear nueva línea
@@ -3186,6 +3190,7 @@ ${buildIntake()}
   const controller = new AbortController();
   const timeoutMs = 45000; // 45s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  infoChatRequestInFlight = true;
 
   try{
     setInfoChatBusy(true);
@@ -3338,6 +3343,7 @@ ${buildIntake()}
     return {text:tone.fail,remaining:infoChatQueriesRemaining};
   }finally{
     clearTimeout(timer);
+    infoChatRequestInFlight = false;
     setInfoChatBusy(false);
   }
 }
@@ -8819,6 +8825,91 @@ document.addEventListener('itbmo:addDays', e=>{
 let infoChatWelcomeTripId = null;
 let infoChatDragState = null;
 let infoChatSuppressRestoreClick = false;
+let infoChatViewportLayoutBound = false;
+
+function applyInfoChatViewportLayout(){
+  const modal=qs('#info-chat-modal');
+  const messages=qs('#info-chat-messages');
+  const input=qs('#info-chat-input');
+  const send=qs('#info-chat-send');
+  if(!modal || !messages || !input) return;
+
+  const mobile=window.matchMedia('(max-width: 760px)').matches;
+  const viewport=window.visualViewport;
+
+  modal.style.display=modal.classList.contains('active') ? 'flex' : modal.style.display;
+  modal.style.flexDirection='column';
+  modal.style.overflow='hidden';
+
+  messages.style.flex='1 1 auto';
+  messages.style.minHeight='0';
+  messages.style.overflowY='auto';
+  messages.style.overscrollBehavior='contain';
+  messages.style.webkitOverflowScrolling='touch';
+
+  input.style.maxHeight=mobile ? '132px' : '220px';
+  resizeInfoChatComposer(input);
+
+  /* Keep the input/send row outside the scrolling history. */
+  let composer=input.parentElement;
+  while(composer && composer!==modal && send && !composer.contains(send)) composer=composer.parentElement;
+  if(composer && composer!==modal){
+    composer.style.flex='0 0 auto';
+    composer.style.position='relative';
+    composer.style.zIndex='3';
+  }
+
+  if(!mobile){
+    if(modal.dataset.mobileViewportLayout==='1'){
+      ['left','top','right','bottom','width','height','maxWidth','maxHeight','transform'].forEach(prop=>{
+        modal.style[prop]='';
+      });
+      delete modal.dataset.mobileViewportLayout;
+    }
+    modal.style.maxHeight='';
+    return;
+  }
+
+  const width=Math.max(280,Math.floor(viewport?.width || window.innerWidth));
+  const height=Math.floor(viewport?.height || window.innerHeight);
+  const offsetLeft=Math.floor(viewport?.offsetLeft || 0);
+  const offsetTop=Math.floor(viewport?.offsetTop || 0);
+  const margin=8;
+
+  modal.dataset.mobileViewportLayout='1';
+  modal.style.position='fixed';
+  modal.style.left=`${offsetLeft+margin}px`;
+  modal.style.top=`${offsetTop+margin}px`;
+  modal.style.right='auto';
+  modal.style.bottom='auto';
+  modal.style.width=`${Math.max(264,width-(margin*2))}px`;
+  modal.style.height=`${Math.max(180,height-(margin*2))}px`;
+  modal.style.maxWidth=`${Math.max(264,width-(margin*2))}px`;
+  modal.style.maxHeight=`${Math.max(180,height-(margin*2))}px`;
+  modal.style.transform='none';
+}
+
+function bindInfoChatViewportLayout(){
+  if(infoChatViewportLayoutBound) return;
+  infoChatViewportLayoutBound=true;
+  const refresh=()=>{
+    const modal=qs('#info-chat-modal');
+    if(modal?.classList.contains('active') && !modal.classList.contains('is-minimized')){
+      applyInfoChatViewportLayout();
+    }
+  };
+  window.addEventListener('resize',refresh,{passive:true});
+  window.addEventListener('orientationchange',refresh,{passive:true});
+  window.visualViewport?.addEventListener('resize',refresh,{passive:true});
+  window.visualViewport?.addEventListener('scroll',refresh,{passive:true});
+  qs('#info-chat-input')?.addEventListener('focus',()=>{
+    requestAnimationFrame(()=>{
+      applyInfoChatViewportLayout();
+      const messages=qs('#info-chat-messages');
+      if(messages) messages.scrollTop=messages.scrollHeight;
+    });
+  },{passive:true});
+}
 
 function _infoAllowedCities_(){
   return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
@@ -8907,6 +8998,12 @@ function minimizeInfoModal(){
   const modal=qs('#info-chat-modal');
   if(!modal) return;
   hideInfoChatNotice();
+  if(modal.dataset.mobileViewportLayout==='1'){
+    ['left','top','right','bottom','width','height','maxWidth','maxHeight','transform'].forEach(prop=>{
+      modal.style[prop]='';
+    });
+    delete modal.dataset.mobileViewportLayout;
+  }
   modal.classList.add('is-minimized');
   modal.classList.add('active');
   modal.style.display='flex';
@@ -8918,6 +9015,7 @@ function restoreInfoModal(){
   modal.classList.remove('is-minimized');
   modal.classList.add('active');
   modal.style.display='flex';
+  applyInfoChatViewportLayout();
   ensureInfoChatWelcome();
 }
 
@@ -9000,6 +9098,8 @@ function openInfoModal(){
   modal.classList.remove('is-minimized');
   hideInfoChatNotice();
   initInfoChatDrag();
+  bindInfoChatViewportLayout();
+  applyInfoChatViewportLayout();
   ensureInfoChatWelcome();
 
   document.body.classList.add('itbmo-info-open');
@@ -9018,6 +9118,7 @@ async function sendInfoMessage(){
   const input = qs('#info-chat-input');
   const btn   = qs('#info-chat-send');
   if(!input || !btn) return;
+  if(infoChatRequestInFlight) return;
   if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
     setInfoChatEntitlement({
       authorized: infoChatAuthorizedTripId === currentTripId,
