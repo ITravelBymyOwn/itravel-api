@@ -512,6 +512,7 @@ input.end,
 #traveler-solo-panel select,
 #traveler-group-panel select,
 .chat-input input,
+.chat-input > textarea,
 .info-chat-modal .chat-input textarea,
 .account-form-grid input,
 .account-form-grid select{
@@ -548,6 +549,7 @@ input.end:hover,
 #traveler-solo-panel select:hover,
 #traveler-group-panel select:hover,
 .chat-input input:hover,
+.chat-input > textarea:hover,
 .info-chat-modal .chat-input textarea:hover,
 .account-form-grid input:hover,
 .account-form-grid select:hover{
@@ -564,6 +566,7 @@ input.end:focus,
 #traveler-solo-panel select:focus,
 #traveler-group-panel select:focus,
 .chat-input input:focus,
+.chat-input > textarea:focus,
 .info-chat-modal .chat-input textarea:focus,
 .account-form-grid input:focus,
 .account-form-grid select:focus{
@@ -1239,9 +1242,22 @@ input.end.invalid{
   border-top:1px solid var(--line);
 }
 
-.chat-input input{
+.chat-input input,
+.chat-input textarea{
   flex:1;
   padding:.65rem .75rem;
+}
+
+.chat-input textarea{
+  min-height:4.35rem;
+  max-height:10.5rem;
+  resize:none;
+  overflow-y:hidden;
+  line-height:1.45;
+}
+
+.chat-input textarea.is-scrollable{
+  overflow-y:auto;
 }
 
 .chat-message.ai.typing .dot{
@@ -6097,3 +6113,17 @@ body.itinerary-focus-open{
     max-width:236px;
   }
 }
+
+/* ITBMO · País → Destino autocomplete (surgical UX layer) */
+.city-row input.country.is-valid-country{
+  padding-right:2.2rem;
+}
+.city-row input.city:disabled{
+  opacity:.68;
+  cursor:not-allowed;
+}
+.city-row input.itbmo-field-error{
+  outline:2px solid rgba(220,38,38,.22);
+  border-color:#dc2626!important;
+}
+
