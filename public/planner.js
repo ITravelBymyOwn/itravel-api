@@ -100,6 +100,7 @@ let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
 const ITBMO_INFO_CHAT_STATE_KEY_PREFIX = 'itbmo_info_chat_state_v1_';
+const ITBMO_POST_PAYMENT_STATE_KEY_PREFIX = 'itbmo_post_payment_state_v1_';
 
 let planningStarted = false;
 let metaProgressIndex = 0;
@@ -1305,6 +1306,156 @@ async function tripApi(payload){
   return data;
 }
 
+
+function _postPaymentStateKey_(tripId=currentTripId){
+  const safeTripId=String(tripId || '').trim();
+  return safeTripId ? `${ITBMO_POST_PAYMENT_STATE_KEY_PREFIX}${safeTripId}` : '';
+}
+
+function _planningChatHistorySnapshot_(){
+  if(!$chatM) return [];
+  return qsa('.chat-message',$chatM).slice(-80).map(node=>({
+    who:node.classList.contains('user') ? 'user' : 'ai',
+    html:String(node.innerHTML || '').slice(0,12000)
+  }));
+}
+
+function _postPaymentProgressSnapshot_(phase=''){
+  const resolvedPhase=String(phase || '').trim() || (
+    plannerState?.collectingItineraryLang ? 'collecting_language' :
+    collectingHotels ? 'collecting_hotels' :
+    (preferencesConfirmedTripId===currentTripId ? 'collecting_hotels' : 'preferences')
+  );
+  return {
+    schema_version:1,
+    phase:resolvedPhase,
+    preferences_confirmed:preferencesConfirmedTripId===currentTripId,
+    preferences_value:String($preferencesField?.value ?? plannerState?.specialConditions ?? '').trim(),
+    meta_progress_index:Math.max(0,Number(metaProgressIndex || 0)),
+    collecting_hotels:Boolean(collectingHotels),
+    collecting_itinerary_lang:Boolean(plannerState?.collectingItineraryLang),
+    itinerary_lang:String(plannerState?.itineraryLang || '').trim(),
+    agent_conversation_lang:agentConversationLang || null,
+    city_meta:cityMeta,
+    planning_chat_history:_planningChatHistorySnapshot_(),
+    updated_at:new Date().toISOString()
+  };
+}
+
+function _storePostPaymentProgressLocal_(checkpoint,tripId=currentTripId){
+  const key=_postPaymentStateKey_(tripId);
+  if(!key || !checkpoint) return;
+  try{ localStorage.setItem(key,JSON.stringify(checkpoint)); }catch(_){ }
+}
+
+function _readPostPaymentProgressLocal_(tripId=currentTripId){
+  const key=_postPaymentStateKey_(tripId);
+  if(!key) return null;
+  try{
+    const parsed=JSON.parse(localStorage.getItem(key) || 'null');
+    return parsed && typeof parsed==='object' && !Array.isArray(parsed) ? parsed : null;
+  }catch(_){ return null; }
+}
+
+function _clearPostPaymentProgressLocal_(tripId){
+  const key=_postPaymentStateKey_(tripId);
+  try{ if(key) localStorage.removeItem(key); }catch(_){ }
+}
+
+async function _persistPostPaymentProgress_(phase=''){
+  const token=getStoredSessionToken();
+  if(!token || !currentTripId) return null;
+  const checkpoint=_postPaymentProgressSnapshot_(phase);
+  _storePostPaymentProgressLocal_(checkpoint,currentTripId);
+  try{
+    return await tripApi({
+      action:'post_payment_checkpoint',
+      session_token:token,
+      trip_id:currentTripId,
+      checkpoint
+    });
+  }catch(err){
+    console.warn('[POST-PAYMENT CHECKPOINT]',err);
+    return null;
+  }
+}
+
+function _latestPostPaymentProgress_(trip){
+  const server=(trip?.planner_input?.post_payment_progress && typeof trip.planner_input.post_payment_progress==='object')
+    ? trip.planner_input.post_payment_progress
+    : null;
+  const local=_readPostPaymentProgressLocal_(trip?.id || currentTripId);
+  if(!server) return local;
+  if(!local) return server;
+  const serverTime=Date.parse(server.updated_at || '') || 0;
+  const localTime=Date.parse(local.updated_at || '') || 0;
+  return localTime>serverTime ? local : server;
+}
+
+function _restorePlanningChatHistory_(history){
+  if(!$chatM) return;
+  $chatM.innerHTML='';
+  (Array.isArray(history) ? history : []).forEach(message=>{
+    if(!message || !message.html) return;
+    chatMsg(message.html,message.who==='user'?'user':'ai');
+  });
+}
+
+function _restorePostPaymentProgress_(trip){
+  const checkpoint=_latestPostPaymentProgress_(trip);
+  if(!checkpoint) return false;
+
+  preferencesStageTripId=currentTripId;
+  if(checkpoint.preferences_confirmed) preferencesConfirmedTripId=currentTripId;
+
+  const special=String(checkpoint.preferences_value ?? plannerState?.specialConditions ?? '').trim();
+  plannerState.specialConditions=special;
+  if($preferencesField) $preferencesField.value=special;
+
+  if(checkpoint.city_meta && typeof checkpoint.city_meta==='object' && !Array.isArray(checkpoint.city_meta)){
+    cityMeta=checkpoint.city_meta;
+  }
+  metaProgressIndex=Math.max(0,Number(checkpoint.meta_progress_index || 0));
+  collectingHotels=Boolean(checkpoint.collecting_hotels);
+  plannerState.collectingItineraryLang=Boolean(checkpoint.collecting_itinerary_lang);
+  plannerState.itineraryLang=String(checkpoint.itinerary_lang || '').trim();
+  agentConversationLang=checkpoint.agent_conversation_lang || null;
+  planningStarted=true;
+
+  _restorePlanningChatHistory_(checkpoint.planning_chat_history);
+
+  const phase=String(checkpoint.phase || '').trim();
+  if(phase==='preferences' || !checkpoint.preferences_confirmed){
+    hidePreferencesStage({reset:true});
+    showPreferencesStage();
+    return true;
+  }
+
+  showPreferencesStage();
+  preferencesConfirmedTripId=currentTripId;
+  if($preferencesField){
+    $preferencesField.readOnly=true;
+    $preferencesField.setAttribute('aria-readonly','true');
+  }
+  $preferencesStage?.classList.add('is-confirmed');
+  if($preferencesContinue){
+    $preferencesContinue.disabled=true;
+    $preferencesContinue.setAttribute('aria-disabled','true');
+    $preferencesContinue.textContent=getLang()==='es' ? '✓ Preferencias confirmadas' : '✓ Preferences confirmed';
+  }
+
+  if($chatBox) $chatBox.style.display='flex';
+  setPlanningChatLocked(false);
+
+  if(phase==='generation_requested'){
+    collectingHotels=false;
+    plannerState.collectingItineraryLang=false;
+    setPlanningChatLocked(true);
+    setTimeout(()=>runPaidGeneration(),180);
+  }
+  return true;
+}
+
 /* 🆕 Export buttons (PDF / CSV / Email) */
 const $btnPDF   = qs('#btn-pdf');
 const $btnCSV   = qs('#btn-csv');
@@ -2068,7 +2219,7 @@ function showPreferencesStage(){
   scheduleAstraCoach('preferences','#preferences-stage',520);
 }
 
-function confirmPreferencesAndContinue(){
+async function confirmPreferencesAndContinue(){
   if(!$preferencesStage || !$preferencesField || !currentTripId) return;
   if(preferencesStageTripId!==currentTripId) return;
 
@@ -2095,6 +2246,7 @@ function confirmPreferencesAndContinue(){
 
   /* Existing agent flow begins here, unchanged. */
   startPlanning();
+  await _persistPostPaymentProgress_('collecting_hotels');
 
   /* UX only: move the user directly to the agent input after confirmation. */
   setTimeout(()=>{
@@ -6106,15 +6258,20 @@ async function restorePaidGenerationIfNeeded(){
       trip=data?.trip || null;
     }
     if(generationResetInProgress) return;
-    if(!trip || !['generating','failed','generated'].includes(trip.status)) return;
+    if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
     if(!_hydrateGenerationTrip_(trip)) return;
 
+    let paymentStatus=null;
     try{
-      const paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
       applyInfoChatStatus(paymentStatus);
     }catch(_){ }
 
-    if(trip.status==='generating'){
+    if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized) return;
+
+    if(trip.status==='saved'){
+      if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
+    }else if(trip.status==='generating'){
       chatMsg(getLang()==='es'
         ? 'ITBMO detectó una generación interrumpida y continuará desde la última ciudad guardada.'
         : 'ITBMO detected an interrupted generation and will continue from the last saved city.','ai');
@@ -6508,6 +6665,7 @@ async function onSend(){
     upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
     askNextHotelTransport();
+    await _persistPostPaymentProgress_(collectingHotels ? 'collecting_hotels' : 'collecting_language');
     return;
   }
 
@@ -6515,6 +6673,7 @@ async function onSend(){
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
 
+    await _persistPostPaymentProgress_('generation_requested');
     runPaidGeneration();
 
     return;
@@ -8011,6 +8170,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     }
 
     clearInfoChatStateForTrip(tripIdToArchive);
+    _clearPostPaymentProgressLocal_(tripIdToArchive);
     try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
     closeAstraCoach({remember:false});
 
@@ -8550,6 +8710,8 @@ async function completePaymentGate(){
   }catch(err){
     console.warn('[INFO CHAT ENTITLEMENT AFTER PAYMENT]',err);
   }
+
+  await _persistPostPaymentProgress_('preferences');
 
   setTimeout(()=>{
     closeCheckoutModal();
