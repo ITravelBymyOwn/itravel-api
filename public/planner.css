@@ -6127,3 +6127,77 @@ body.itinerary-focus-open{
   border-color:#dc2626!important;
 }
 
+
+/* =========================================================
+   ITBMO · País → Destino · autocomplete multiplataforma
+   Sustituye el datalist nativo para una UX consistente en
+   desktop, tablet y móvil. No modifica la lógica del Planner.
+========================================================= */
+.city-row .itbmo-autocomplete-field{
+  position:relative;
+  z-index:2;
+}
+.city-row .itbmo-autocomplete-field:focus-within{
+  z-index:40;
+}
+.itbmo-autocomplete-menu{
+  position:absolute;
+  z-index:80;
+  top:calc(100% + .38rem);
+  left:0;
+  width:max(100%,220px);
+  max-width:min(340px,calc(100vw - 32px));
+  max-height:260px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding:.34rem;
+  border:1px solid rgba(39,91,128,.16);
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 16px 38px rgba(17,51,83,.18),0 3px 10px rgba(17,51,83,.08);
+  -webkit-overflow-scrolling:touch;
+}
+.itbmo-autocomplete-menu[hidden]{display:none!important}
+.itbmo-autocomplete-option{
+  display:block;
+  width:100%;
+  min-height:42px;
+  padding:.62rem .72rem;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:#17324f;
+  font:inherit;
+  font-size:.86rem;
+  font-weight:720;
+  line-height:1.28;
+  text-align:left;
+  cursor:pointer;
+  touch-action:manipulation;
+}
+.itbmo-autocomplete-option:hover,
+.itbmo-autocomplete-option:focus-visible{
+  outline:none;
+  background:#edf8fb;
+  color:#075f79;
+}
+.itbmo-autocomplete-empty{
+  padding:.7rem .76rem;
+  color:#60798d;
+  font-size:.80rem;
+  font-weight:650;
+  line-height:1.4;
+}
+@media(max-width:760px){
+  .itbmo-autocomplete-menu{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    max-height:min(240px,42vh);
+  }
+  .itbmo-autocomplete-option{
+    min-height:46px;
+    padding:.72rem .76rem;
+    font-size:.9rem;
+  }
+}
