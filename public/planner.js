@@ -1998,10 +1998,20 @@ function _escapeAttr_(value=''){
 function _normalizeSearch_(value=''){
   return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 }
+function _syncAutocompleteReserve_(menu){
+  const row=menu?.closest?.('.city-row');
+  if(!row) return;
+  requestAnimationFrame(()=>{
+    const openMenus=[...row.querySelectorAll('.itbmo-autocomplete-menu:not([hidden])')];
+    const reserve=openMenus.length ? Math.max(...openMenus.map(x=>Math.min(x.scrollHeight||0,260))) + 10 : 0;
+    row.style.setProperty('--itbmo-autocomplete-reserve',`${reserve}px`);
+  });
+}
 function _closeAutocompleteMenu_(menu){
   if(!menu) return;
   menu.innerHTML='';
   menu.hidden=true;
+  _syncAutocompleteReserve_(menu);
 }
 function _renderAutocompleteMenu_(menu,items,{emptyText='',onSelect=null}={}){
   if(!menu) return;
@@ -2016,6 +2026,7 @@ function _renderAutocompleteMenu_(menu,items,{emptyText='',onSelect=null}={}){
     }else{
       menu.hidden=true;
     }
+    _syncAutocompleteReserve_(menu);
     return;
   }
   const frag=document.createDocumentFragment();
@@ -2031,6 +2042,7 @@ function _renderAutocompleteMenu_(menu,items,{emptyText='',onSelect=null}={}){
   });
   menu.appendChild(frag);
   menu.hidden=false;
+  _syncAutocompleteReserve_(menu);
 }
 function _countrySuggestions_(query=''){
   const needle=_normalizeSearch_(query);
@@ -2095,7 +2107,15 @@ async function _loadDestinationSuggestions_(row){
   const menu=qs('.itbmo-destination-menu',row);
   const match=_countryMatch_(country?.value || '');
   const query=String(input?.value || '').trim();
-  if(!match || !input || !menu || query.length<2){ _closeAutocompleteMenu_(menu); return; }
+  if(!match || !input || !menu || !query){ _closeAutocompleteMenu_(menu); return; }
+  if(query.length<3){
+    _renderAutocompleteMenu_(menu,[],{
+      emptyText:getLang()==='es'
+        ? 'Escribe al menos 3 letras para ver sugerencias. También puedes escribir el destino completo.'
+        : 'Type at least 3 letters to see suggestions. You can also type the full destination.'
+    });
+    return;
+  }
 
   _renderAutocompleteMenu_(menu,[],{
     emptyText:getLang()==='es'?'Buscando destinos…':'Searching destinations…'
@@ -2105,7 +2125,7 @@ async function _loadDestinationSuggestions_(row){
   let suggestions=destinationSuggestionCache.get(key);
   if(!suggestions){
     try{
-      const url=`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&q=${encodeURIComponent(query)}`;
+      const url=`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&countryCode=${encodeURIComponent(match.code)}&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(query)}`;
       const response=await fetch(url,{headers:{Accept:'application/json'}});
       const data=await response.json().catch(()=>({}));
       suggestions=response.ok && Array.isArray(data?.suggestions) ? data.suggestions : [];
@@ -2154,11 +2174,11 @@ function _bindCountryDestinationAutocomplete_(row){
 
   destination?.addEventListener('input',()=>{
     clearTimeout(timer);
-    if(String(destination.value||'').trim().length<2){ _closeAutocompleteMenu_(destinationMenu); return; }
+    if(!String(destination.value||'').trim()){ _closeAutocompleteMenu_(destinationMenu); return; }
     timer=setTimeout(()=>_loadDestinationSuggestions_(row),220);
   });
   destination?.addEventListener('focus',()=>{
-    if(String(destination.value||'').trim().length>=2) _loadDestinationSuggestions_(row);
+    if(String(destination.value||'').trim()) _loadDestinationSuggestions_(row);
   });
   destination?.addEventListener('keydown',event=>{
     if(event.key==='Escape') _closeAutocompleteMenu_(destinationMenu);
@@ -5105,6 +5125,27 @@ function _globalDayTripPolicy_(){
   };
 }
 
+function _calendarDatesForStay_(baseDate='',totalDays=0){
+  const base=_parseBaseDate_(baseDate);
+  if(!base) return [];
+  return Array.from({length:Math.max(0,Number(totalDays||0))},(_,index)=>{
+    const date=addDays(base,index);
+    return {day:index+1,date:formatISODate(date)};
+  });
+}
+
+function _specialCalendarEventPolicy_(){
+  return {
+    rule:'Actively inspect the real calendar date of every itinerary day for destination-relevant special dates, major public celebrations, culturally important observances or exceptional events that can materially change the best plan for that day.',
+    anchor_behavior:'When such a date creates a genuinely destination-defining experience, treat the relevant celebration/event as a day anchor and organize earlier activities, routing, meals and arrival timing around it instead of allowing a generic sightseeing plan to crowd it out.',
+    midnight_behavior:'For events whose defining moment occurs at or after midnight, such as New Year celebrations, keep the itinerary active through the meaningful countdown/celebration window and a reasonable immediate post-event margin when compatible with the user hard boundaries. A normal default evening target must never cause the defining moment to be missed.',
+    user_precedence:'If the user specifies where or how to experience the celebration, that explicit preference is authoritative whenever safe and feasible.',
+    verification:'The planning model has no live web access. Never invent an annual program, exact fireworks location, temporary closure, ticket requirement or event timetable that has not been provided. Use stable calendar knowledge conservatively, clearly mark year-specific operational details for verification when needed, and still protect the special-date experience in the schedule.',
+    examples:['New Year’s Eve / New Year countdown','Christmas or major local holiday celebrations','major destination-defining festivals or public observances that coincide with the stay'],
+    prohibition:'Do not hardcode destination-specific event lists. Evaluate special dates from the supplied calendar dates and destination context.'
+  };
+}
+
 function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, transport){
   const lodging=_normalizeLodgingInput_(hotel);
   return {
@@ -5119,6 +5160,8 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     transport:transport||null,
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
+    calendar_dates:_calendarDatesForStay_(baseDate,totalDays),
+    special_calendar_event_policy:_specialCalendarEventPolicy_(),
     preference_constraint_policy:_preferenceConstraintPolicy_(),
     special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
     special_conditions_instruction:'Use special_conditions as authoritative user input throughout strategic distribution, activity selection, sequencing, logistics and validation. Never treat it as optional commentary.',
@@ -5163,6 +5206,7 @@ TRIP-WIDE RULES:
 - Use the normalized lodging base as the primary geographic anchor and reserve corridors that minimize unnecessary transfers.
 - Convert all preferences and restrictions into actual day identities, timing and routing decisions.
 - Apply the first/intermediate/final-day time policy contained in KNOWN USER FACTS.
+- Inspect calendar_dates and apply special_calendar_event_policy before finalizing each day identity. A meaningful special-date anchor must not be displaced by generic sightseeing.
 - If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
 - Respect the actual daily windows, season, useful daylight, travelers, base and transport.
 - Do not invent flight, airport, check-out, rental company or car-return logistics.
@@ -5220,6 +5264,7 @@ HARD RULES:
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
 - Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
+- Apply special_calendar_event_policy using the exact calendar_dates in KNOWN USER FACTS. When a meaningful celebration defines that date, protect it as an anchor, schedule sufficient arrival time, and continue through its defining moment (including after midnight when appropriate) unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - On Day 1, the supplied start time means the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent an airport, flight, station or inbound transfer.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
@@ -5707,6 +5752,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
 - When an end time is blank, approximately 19:00 local is a MINIMUM planning target, not a ceiling. Do not finish a normal day before about 19:00 without a real constraint. Continue later when genuinely high-value evening content improves the itinerary. Respect any explicit user end time as a hard boundary.
+- Preserve every meaningful special-date anchor required by special_calendar_event_policy. A repair must not remove or shorten the defining celebration/countdown moment merely to simplify the day, and it must not invent year-specific event details.
 - The Day 1 start is when the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent arrival transport details.
 - A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
@@ -5892,6 +5938,7 @@ ${JSON.stringify(facts)}
 
 HARD RULES:
 - Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
+- Inspect calendar_dates and enforce special_calendar_event_policy. Protect a destination-defining special-date celebration as an anchor and continue through its defining moment, including after midnight when appropriate, unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - Day 1 starts AT the lodging at the user-provided time; complete check-in or luggage drop before sightseeing and do not invent airport/flight/arrival transport details.
 - Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
 - Enforce every preference and restriction through actual planning choices, not merely notes.
