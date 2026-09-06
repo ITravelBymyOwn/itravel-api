@@ -763,6 +763,60 @@ async function handlePostPaymentCheckpoint(res, body, session) {
   });
 }
 
+
+async function handleInfoChatCheckpoint(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  const checkpoint = generationCheckpoint(body.checkpoint);
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"INFO_CHAT_NOT_AUTHORIZED", error:"Payment required" });
+  }
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+
+  const plannerInput = generationCheckpoint(trip.planner_input);
+  const history = Array.isArray(checkpoint.history)
+    ? checkpoint.history
+        .filter(message => message && (message.role === "user" || message.role === "assistant"))
+        .slice(-40)
+        .map(message => ({
+          role: message.role,
+          content: String(message.content || "").slice(0, 12000)
+        }))
+    : [];
+
+  const persistedCheckpoint = {
+    trip_id: tripId,
+    authorized: true,
+    remaining: Math.max(0, Math.min(10, Number(checkpoint.remaining) || 0)),
+    used: Math.max(0, Math.min(10, Number(checkpoint.used) || 0)),
+    history,
+    updated_at: new Date().toISOString()
+  };
+
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    planner_input:{
+      ...plannerInput,
+      info_chat_state:persistedCheckpoint
+    }
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"info_chat_checkpoint",
+    trip:updated
+  });
+}
+
 async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
@@ -853,6 +907,10 @@ export default async function handler(req, res) {
 
     if (action === "post_payment_checkpoint") {
       return await handlePostPaymentCheckpoint(res, body, session);
+    }
+
+    if (action === "info_chat_checkpoint") {
+      return await handleInfoChatCheckpoint(res, body, session);
     }
 
     if (action === "recoverable") {
