@@ -1995,9 +1995,77 @@ function _countryMatch_(value=''){
 function _escapeAttr_(value=''){
   return String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function _populateCountryDatalist_(listEl){
-  if(!listEl) return;
-  listEl.innerHTML=_countryOptions_().map(item=>`<option value="${_escapeAttr_(item.label)}"></option>`).join('');
+function _normalizeSearch_(value=''){
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+function _closeAutocompleteMenu_(menu){
+  if(!menu) return;
+  menu.innerHTML='';
+  menu.hidden=true;
+}
+function _renderAutocompleteMenu_(menu,items,{emptyText='',onSelect=null}={}){
+  if(!menu) return;
+  menu.innerHTML='';
+  if(!Array.isArray(items) || !items.length){
+    if(emptyText){
+      const empty=document.createElement('div');
+      empty.className='itbmo-autocomplete-empty';
+      empty.textContent=emptyText;
+      menu.appendChild(empty);
+      menu.hidden=false;
+    }else{
+      menu.hidden=true;
+    }
+    return;
+  }
+  const frag=document.createDocumentFragment();
+  items.forEach(item=>{
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='itbmo-autocomplete-option';
+    button.setAttribute('role','option');
+    button.textContent=typeof item==='string' ? item : item.label;
+    button.addEventListener('pointerdown',event=>event.preventDefault());
+    button.addEventListener('click',()=>onSelect?.(item));
+    frag.appendChild(button);
+  });
+  menu.appendChild(frag);
+  menu.hidden=false;
+}
+function _countrySuggestions_(query=''){
+  const needle=_normalizeSearch_(query);
+  const options=_countryOptions_();
+  if(!needle) return options;
+  const starts=[];
+  const contains=[];
+  options.forEach(item=>{
+    const label=_normalizeSearch_(item.label);
+    const english=_normalizeSearch_(item.apiName);
+    const haystack=`${label} ${english} ${item.code.toLowerCase()}`;
+    if(!haystack.includes(needle)) return;
+    if(label.startsWith(needle) || english.startsWith(needle) || item.code.toLowerCase().startsWith(needle)) starts.push(item);
+    else contains.push(item);
+  });
+  return [...starts,...contains];
+}
+function _showCountrySuggestions_(row){
+  const input=qs('.country',row);
+  const menu=qs('.itbmo-country-menu',row);
+  if(!input || !menu) return;
+  const items=_countrySuggestions_(input.value).slice(0,40);
+  _renderAutocompleteMenu_(menu,items,{
+    emptyText:getLang()==='es'?'No encontramos ese país.':'We could not find that country.',
+    onSelect:item=>{
+      input.value=item.label;
+      input.dataset.countryCode=item.code;
+      input.dataset.countryApiName=item.apiName;
+      input.classList.add('is-valid-country');
+      _closeAutocompleteMenu_(menu);
+      const destination=qs('.city',row);
+      _syncCountrySelection_(row);
+      if(destination){ destination.value=''; destination.focus(); }
+    }
+  });
 }
 function _syncCountrySelection_(row){
   const input=qs('.country',row);
@@ -2012,23 +2080,27 @@ function _syncCountrySelection_(row){
     destination.disabled=!match;
     destination.setAttribute('aria-disabled',String(!match));
     destination.placeholder=match
-      ? (getLang()==='es'?'Escribe o selecciona un destino':'Type or select a destination')
+      ? (getLang()==='es'?'Escribe un destino':'Type a destination')
       : (getLang()==='es'?'Selecciona primero el país':'Select the country first');
-    if(!match) destination.removeAttribute('list');
-    else if(destination.dataset.listId) destination.setAttribute('list',destination.dataset.listId);
+    if(!match){
+      destination.value='';
+      _closeAutocompleteMenu_(qs('.itbmo-destination-menu',row));
+    }
   }
   return match;
-}
-function _normalizeSearch_(value=''){
-  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
 }
 async function _loadDestinationSuggestions_(row){
   const country=qs('.country',row);
   const input=qs('.city',row);
-  const list=input?.dataset.listId ? (document.getElementById(input.dataset.listId) || qsa('datalist',row).find(el=>el.id===input.dataset.listId)) : null;
+  const menu=qs('.itbmo-destination-menu',row);
   const match=_countryMatch_(country?.value || '');
   const query=String(input?.value || '').trim();
-  if(!match || !input || !list || query.length<2){ if(list) list.innerHTML=''; return; }
+  if(!match || !input || !menu || query.length<2){ _closeAutocompleteMenu_(menu); return; }
+
+  _renderAutocompleteMenu_(menu,[],{
+    emptyText:getLang()==='es'?'Buscando destinos…':'Searching destinations…'
+  });
+
   const key=`${match.code}|${_normalizeSearch_(query)}`;
   let suggestions=destinationSuggestionCache.get(key);
   if(!suggestions){
@@ -2040,26 +2112,59 @@ async function _loadDestinationSuggestions_(row){
       destinationSuggestionCache.set(key,suggestions);
     }catch(_){ suggestions=[]; }
   }
-  list.innerHTML=suggestions.slice(0,12).map(name=>`<option value="${_escapeAttr_(name)}"></option>`).join('');
+
+  /* Ignore a stale async response if the user kept typing or changed country. */
+  if(String(input.value||'').trim()!==query || _countryMatch_(country?.value||'')?.code!==match.code) return;
+
+  _renderAutocompleteMenu_(menu,suggestions.slice(0,12),{
+    emptyText:getLang()==='es'
+      ? 'No hay sugerencias para este texto. Puedes escribir el destino de todas formas.'
+      : 'No suggestions found for this text. You can type the destination anyway.',
+    onSelect:name=>{
+      input.value=name;
+      _closeAutocompleteMenu_(menu);
+      input.focus();
+    }
+  });
 }
 function _bindCountryDestinationAutocomplete_(row){
   const country=qs('.country',row);
   const destination=qs('.city',row);
-  const countryList=country?.dataset.listId ? (document.getElementById(country.dataset.listId) || qsa('datalist',row).find(el=>el.id===country.dataset.listId)) : null;
-  _populateCountryDatalist_(countryList);
+  const countryMenu=qs('.itbmo-country-menu',row);
+  const destinationMenu=qs('.itbmo-destination-menu',row);
   let timer=null;
-  const sync=()=>{ _syncCountrySelection_(row); if(destination?.value) _loadDestinationSuggestions_(row); };
+
+  const sync=()=>{
+    _syncCountrySelection_(row);
+    _showCountrySuggestions_(row);
+  };
+
+  country?.addEventListener('focus',()=>_showCountrySuggestions_(row));
   country?.addEventListener('input',sync);
-  country?.addEventListener('change',sync);
+  country?.addEventListener('change',()=>_syncCountrySelection_(row));
+  country?.addEventListener('keydown',event=>{
+    if(event.key==='Escape') _closeAutocompleteMenu_(countryMenu);
+  });
   country?.addEventListener('blur',()=>{
     const match=_countryMatch_(country.value);
     if(match) country.value=match.label;
     _syncCountrySelection_(row);
+    setTimeout(()=>_closeAutocompleteMenu_(countryMenu),120);
   });
+
   destination?.addEventListener('input',()=>{
     clearTimeout(timer);
+    if(String(destination.value||'').trim().length<2){ _closeAutocompleteMenu_(destinationMenu); return; }
     timer=setTimeout(()=>_loadDestinationSuggestions_(row),220);
   });
+  destination?.addEventListener('focus',()=>{
+    if(String(destination.value||'').trim().length>=2) _loadDestinationSuggestions_(row);
+  });
+  destination?.addEventListener('keydown',event=>{
+    if(event.key==='Escape') _closeAutocompleteMenu_(destinationMenu);
+  });
+  destination?.addEventListener('blur',()=>setTimeout(()=>_closeAutocompleteMenu_(destinationMenu),120));
+
   _syncCountrySelection_(row);
 }
 
@@ -2084,11 +2189,11 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const row = document.createElement('div');
   row.className = 'city-row';
   const autocompleteId=`itbmo-destination-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
-  const countryListId=`${autocompleteId}-countries`;
-  const destinationListId=`${autocompleteId}-destinations`;
+  const countryFieldName=`itbmo-country-${autocompleteId}`;
+  const destinationFieldName=`itbmo-destination-${autocompleteId}`;
   row.innerHTML = `
-    <label>${t('uiCountry')}<input class="country" list="${countryListId}" data-list-id="${countryListId}" autocomplete="off" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${pref.country||''}"><datalist id="${countryListId}"></datalist></label>
-    <label>${t('uiCity')}<input class="city" data-list-id="${destinationListId}" autocomplete="off" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${pref.city||''}"><datalist id="${destinationListId}"></datalist></label>
+    <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
+    <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
     <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
       ${t('uiStart')}
