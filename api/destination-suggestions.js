@@ -1,8 +1,33 @@
-const OPEN_METEO_GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search";
-const COUNTRIES_NOW_CITIES_URL = "https://countriesnow.space/api/v0.1/countries/cities";
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const queryCache = new Map();
-const countryCache = new Map();
+import { readFileSync } from "node:fs";
+
+/*
+  ITBMO destination autocomplete — local GeoNames index.
+  Source dataset: GeoNames cities5000 (CC BY 4.0).
+  No external request is made by this endpoint.
+*/
+const DATA = JSON.parse(
+  readFileSync(new URL("./data/destinations.min.json", import.meta.url), "utf8")
+);
+
+const TOURISM_EXTRAS = {
+  IT: [
+    ["Cinque Terre", ["Cinque Terre"]],
+    ["Costa Amalfitana", ["Amalfi Coast", "Costiera Amalfitana"]],
+    ["Lago di Como", ["Lake Como", "Como Lake"]],
+    ["Dolomitas", ["Dolomites", "Dolomiti"]]
+  ],
+  ID: [["Bali", ["Bali Island"]]],
+  GR: [["Santorini", ["Thira", "Thera"]], ["Mykonos", ["Mikonos"]]],
+  PF: [["Bora Bora", ["Bora-Bora"]]],
+  US: [["Maui", ["Maui Island"]], ["Big Island", ["Hawaii Island", "Island of Hawaii"]]],
+  CL: [["Isla de Pascua", ["Easter Island", "Rapa Nui"]]],
+  TZ: [["Zanzíbar", ["Zanzibar"]]],
+  ES: [["Islas Canarias", ["Canary Islands", "Canarias"]]],
+  HR: [["Lagos de Plitvice", ["Plitvice Lakes", "Plitvička jezera"]]],
+  CH: [["Jungfrau Region", ["Jungfrau"]]],
+  PT: [["Madeira", ["Madeira Island"]]],
+  FR: [["Costa Azul", ["French Riviera", "Côte d’Azur", "Cote d'Azur"]]]
+};
 
 function normalizeSearch(value = "") {
   return String(value)
@@ -12,83 +37,69 @@ function normalizeSearch(value = "") {
     .trim();
 }
 
-function uniqueStrings(values) {
-  return [...new Set(
-    (Array.isArray(values) ? values : [])
-      .map(value => String(value || "").trim())
-      .filter(Boolean)
-  )];
-}
-
-async function fetchJson(url, options = {}, timeoutMs = 4500) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP_${response.status}`);
-    return await response.json();
-  } finally {
-    clearTimeout(timer);
+function matchesRecord(record, needle) {
+  const name = normalizeSearch(record?.[0]);
+  const ascii = normalizeSearch(record?.[1]);
+  const aliases = Array.isArray(record?.[3]) ? record[3] : [];
+  const primary = [name, ascii].filter(Boolean);
+  const alternate = aliases.map(normalizeSearch).filter(Boolean);
+  let best = 99;
+  for (const value of primary) {
+    if (value === needle) best = Math.min(best, 0);
+    else if (value.startsWith(needle)) best = Math.min(best, 1);
+    else if (value.includes(needle)) best = Math.min(best, 3);
   }
-}
-
-async function searchOpenMeteo(query, countryCode, lang) {
-  if (String(query || "").trim().length < 3 || !/^[A-Z]{2}$/.test(countryCode)) return [];
-
-  const params = new URLSearchParams({
-    name: String(query).trim(),
-    count: "40",
-    format: "json",
-    language: lang === "es" ? "es" : "en",
-    countryCode
-  });
-
-  const payload = await fetchJson(`${OPEN_METEO_GEOCODING_URL}?${params.toString()}`);
-  const rows = Array.isArray(payload?.results) ? payload.results : [];
-
-  return uniqueStrings(rows.map(item => item?.name));
-}
-
-async function getCountryCities(country) {
-  const key = normalizeSearch(country);
-  const cached = countryCache.get(key);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.cities;
-
-  const payload = await fetchJson(COUNTRIES_NOW_CITIES_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json"
-    },
-    body: JSON.stringify({ country })
-  }, 6000);
-
-  if (!payload || payload.error || !Array.isArray(payload.data)) {
-    throw new Error("COUNTRIES_NOW_INVALID_RESPONSE");
+  for (const value of alternate) {
+    if (value === needle) best = Math.min(best, 0);
+    else if (value.startsWith(needle)) best = Math.min(best, 2);
   }
-
-  const cities = uniqueStrings(payload.data);
-  countryCache.set(key, { at: Date.now(), cities });
-  return cities;
+  return best;
 }
 
-async function searchCountriesNow(query, country) {
-  const cities = await getCountryCities(country);
+function localSuggestions(countryCode, query) {
   const needle = normalizeSearch(query);
-  const starts = [];
-  const contains = [];
+  const rows = Array.isArray(DATA[countryCode]) ? DATA[countryCode] : [];
+  const ranked = [];
 
-  for (const city of cities) {
-    const normalized = normalizeSearch(city);
-    if (!normalized.includes(needle)) continue;
-    if (normalized.startsWith(needle)) starts.push(city);
-    else contains.push(city);
+  for (const row of rows) {
+    const rank = matchesRecord(row, needle);
+    if (rank > 3) continue;
+    ranked.push({
+      label: String(row[0] || "").trim(),
+      rank,
+      population: Number(row[2] || 0)
+    });
   }
 
-  const sorter = (a, b) => a.localeCompare(b, undefined, { sensitivity: "base" });
-  starts.sort(sorter);
-  contains.sort(sorter);
-  return [...starts, ...contains];
+  for (const extra of TOURISM_EXTRAS[countryCode] || []) {
+    const label = String(extra?.[0] || "").trim();
+    const aliases = Array.isArray(extra?.[1]) ? extra[1] : [];
+    const values = [label, ...aliases].map(normalizeSearch);
+    let rank = 99;
+    for (const value of values) {
+      if (value === needle) rank = Math.min(rank, 0);
+      else if (value.startsWith(needle)) rank = Math.min(rank, 1);
+      else if (value.includes(needle)) rank = Math.min(rank, 2);
+    }
+    if (rank <= 2) ranked.push({ label, rank, population: Number.MAX_SAFE_INTEGER });
+  }
+
+  ranked.sort((a, b) =>
+    a.rank - b.rank ||
+    b.population - a.population ||
+    a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+  );
+
+  const seen = new Set();
+  const suggestions = [];
+  for (const item of ranked) {
+    const key = normalizeSearch(item.label);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    suggestions.push(item.label);
+    if (suggestions.length >= 12) break;
+  }
+  return suggestions;
 }
 
 export default async function handler(req, res) {
@@ -96,46 +107,15 @@ export default async function handler(req, res) {
     return res.status(405).json({ ok: false, error: "Method not allowed" });
   }
 
-  const country = String(req.query?.country || "").trim().slice(0, 120);
   const countryCode = String(req.query?.countryCode || "").trim().toUpperCase().slice(0, 2);
   const query = String(req.query?.q || "").trim().slice(0, 120);
-  const lang = String(req.query?.lang || "en").trim().toLowerCase() === "es" ? "es" : "en";
 
-  if (!country || !/^[A-Z]{2}$/.test(countryCode) || query.length < 3) {
+  if (!/^[A-Z]{2}$/.test(countryCode) || query.length < 3) {
     return res.status(200).json({ ok: true, suggestions: [] });
   }
 
-  const cacheKey = `${countryCode}|${lang}|${normalizeSearch(query)}`;
-  const cached = queryCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
-    return res.status(200).json({ ok: true, suggestions: cached.suggestions });
-  }
-
-  let suggestions = [];
-
-  /* Primary source: filtered server-side geocoding. This is independent from
-     the planning model; the LLM itself still has no live web access. */
-  try {
-    suggestions = await searchOpenMeteo(query, countryCode, lang);
-  } catch (error) {
-    console.warn("ITBMO Open-Meteo destination suggestions unavailable:", error?.message || error);
-  }
-
-  /* Fallback: country city list. It also helps when the primary source has
-     sparse matching for a smaller locality. Failure never blocks free text. */
-  if (suggestions.length < 6) {
-    try {
-      suggestions = uniqueStrings([
-        ...suggestions,
-        ...(await searchCountriesNow(query, country))
-      ]);
-    } catch (error) {
-      console.warn("ITBMO CountriesNow destination suggestions unavailable:", error?.message || error);
-    }
-  }
-
-  suggestions = suggestions.slice(0, 12);
-  queryCache.set(cacheKey, { at: Date.now(), suggestions });
-
-  return res.status(200).json({ ok: true, suggestions });
+  return res.status(200).json({
+    ok: true,
+    suggestions: localSuggestions(countryCode, query)
+  });
 }
