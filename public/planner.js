@@ -192,7 +192,7 @@ const I18N = {
     thinking: 'ITBMO está preparando la respuesta…',
 
     // UI / Sidebar cities
-    uiCity: 'Ciudad',
+    uiCity: 'Destino',
     uiCountry: 'País',
     uiDays: 'Días',
     uiStart: 'Primer día',
@@ -272,7 +272,7 @@ const I18N = {
     thinking: 'ITBMO is preparing the answer…',
 
     // UI / Sidebar cities
-    uiCity: 'City',
+    uiCity: 'Destination',
     uiCountry: 'Country',
     uiDays: 'Days',
     uiStart: 'First day',
@@ -1446,6 +1446,7 @@ function _restorePostPaymentProgress_(trip){
 
   if($chatBox) $chatBox.style.display='flex';
   setPlanningChatLocked(false);
+  if(collectingHotels) _setHotelTransportComposerTemplate_();
 
   if(phase==='generation_requested'){
     collectingHotels=false;
@@ -1557,30 +1558,54 @@ function _infoChatStateKey_(tripId=currentTripId){
   return safeTripId ? `${ITBMO_INFO_CHAT_STATE_KEY_PREFIX}${safeTripId}` : '';
 }
 
-function persistInfoChatState(){
-  const key=_infoChatStateKey_();
-  if(!key || infoChatAuthorizedTripId!==currentTripId) return;
-  try{
-    const history=(Array.isArray(infoSession) ? infoSession : [])
+function _infoChatStateSnapshot_(){
+  return {
+    trip_id:currentTripId,
+    authorized:infoChatAuthorizedTripId===currentTripId,
+    remaining:infoChatQueriesRemaining,
+    used:infoChatQueriesUsed,
+    history:(Array.isArray(infoSession) ? infoSession : [])
       .filter(message=>message && (message.role==='user' || message.role==='assistant'))
       .slice(-40)
-      .map(message=>({role:message.role,content:String(message.content || '').slice(0,12000)}));
-    localStorage.setItem(key,JSON.stringify({
-      trip_id:currentTripId,
-      authorized:true,
-      remaining:infoChatQueriesRemaining,
-      used:infoChatQueriesUsed,
-      history,
-      updated_at:new Date().toISOString()
-    }));
-  }catch(_){ }
+      .map(message=>({role:message.role,content:String(message.content || '').slice(0,12000)})),
+    updated_at:new Date().toISOString()
+  };
 }
 
-function restoreInfoChatStateForTrip(tripId=currentTripId){
+function persistInfoChatState({server=true}={}){
+  const key=_infoChatStateKey_();
+  if(!key || infoChatAuthorizedTripId!==currentTripId) return;
+  const snapshot=_infoChatStateSnapshot_();
+  try{ localStorage.setItem(key,JSON.stringify(snapshot)); }catch(_){ }
+
+  /* Server copy protects the conversation if the page is refreshed after the
+     local state is lost/overwritten, and also keeps the history tied to the
+     paid trip instead of only to this browser. Fire-and-forget by design. */
+  if(server && getStoredSessionToken() && currentTripId){
+    tripApi({
+      action:'info_chat_checkpoint',
+      session_token:getStoredSessionToken(),
+      trip_id:currentTripId,
+      checkpoint:snapshot
+    }).catch(err=>console.warn('[INFO CHAT CHECKPOINT]',err));
+  }
+}
+
+function _latestInfoChatState_(tripId=currentTripId,serverState=null){
   const key=_infoChatStateKey_(tripId);
-  if(!key || String(tripId)!==String(currentTripId)) return false;
-  let cached=null;
-  try{ cached=JSON.parse(localStorage.getItem(key) || 'null'); }catch(_){ cached=null; }
+  let local=null;
+  try{ local=key ? JSON.parse(localStorage.getItem(key) || 'null') : null; }catch(_){ local=null; }
+  const server=(serverState && typeof serverState==='object' && !Array.isArray(serverState)) ? serverState : null;
+  if(!server) return local;
+  if(!local) return server;
+  const serverTime=Date.parse(server.updated_at || '') || 0;
+  const localTime=Date.parse(local.updated_at || '') || 0;
+  return localTime>serverTime ? local : server;
+}
+
+function restoreInfoChatStateForTrip(tripId=currentTripId,serverState=null){
+  if(!tripId || String(tripId)!==String(currentTripId)) return false;
+  const cached=_latestInfoChatState_(tripId,serverState);
   if(!cached || String(cached.trip_id)!==String(currentTripId) || !cached.authorized) return false;
 
   infoSession=Array.isArray(cached.history)
@@ -1936,8 +1961,106 @@ function updateAddCityButtonState(){
   $addCity.disabled=atLimit;
   $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
   $addCity.title=atLimit
-    ? (getLang()==='es' ? 'Máximo 3 ciudades por generación.' : 'Maximum 3 cities per generation.')
+    ? (getLang()==='es' ? 'Máximo 3 destinos por generación.' : 'Maximum 3 destinations per generation.')
     : '';
+}
+
+
+const ITBMO_COUNTRY_CODES = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW`.split(/\s+/);
+const ITBMO_DESTINATION_SUGGESTIONS_URL='/api/destination-suggestions';
+const destinationSuggestionCache=new Map();
+
+function _countryDisplayNames_(locale=getLang()){
+  try{ return new Intl.DisplayNames([locale==='es'?'es':'en'],{type:'region'}); }
+  catch(_){ return new Intl.DisplayNames(['en'],{type:'region'}); }
+}
+function _countryEnglishNames_(){
+  try{ return new Intl.DisplayNames(['en'],{type:'region'}); }
+  catch(_){ return null; }
+}
+function _countryOptions_(){
+  const display=_countryDisplayNames_();
+  const english=_countryEnglishNames_();
+  return ITBMO_COUNTRY_CODES.map(code=>({
+    code,
+    label:String(display?.of(code) || code),
+    apiName:String(english?.of(code) || code)
+  })).sort((a,b)=>a.label.localeCompare(b.label,getLang(),{sensitivity:'base'}));
+}
+function _countryMatch_(value=''){
+  const needle=String(value||'').trim();
+  if(!needle) return null;
+  return _countryOptions_().find(item=>item.label.localeCompare(needle,getLang(),{sensitivity:'base'})===0 || item.apiName.localeCompare(needle,'en',{sensitivity:'base'})===0 || item.code===needle.toUpperCase()) || null;
+}
+function _escapeAttr_(value=''){
+  return String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function _populateCountryDatalist_(listEl){
+  if(!listEl) return;
+  listEl.innerHTML=_countryOptions_().map(item=>`<option value="${_escapeAttr_(item.label)}"></option>`).join('');
+}
+function _syncCountrySelection_(row){
+  const input=qs('.country',row);
+  const destination=qs('.city',row);
+  const match=_countryMatch_(input?.value || '');
+  if(input){
+    input.dataset.countryCode=match?.code || '';
+    input.dataset.countryApiName=match?.apiName || '';
+    input.classList.toggle('is-valid-country',Boolean(match));
+  }
+  if(destination){
+    destination.disabled=!match;
+    destination.setAttribute('aria-disabled',String(!match));
+    destination.placeholder=match
+      ? (getLang()==='es'?'Escribe o selecciona un destino':'Type or select a destination')
+      : (getLang()==='es'?'Selecciona primero el país':'Select the country first');
+    if(!match) destination.removeAttribute('list');
+    else if(destination.dataset.listId) destination.setAttribute('list',destination.dataset.listId);
+  }
+  return match;
+}
+function _normalizeSearch_(value=''){
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+async function _loadDestinationSuggestions_(row){
+  const country=qs('.country',row);
+  const input=qs('.city',row);
+  const list=input?.dataset.listId ? (document.getElementById(input.dataset.listId) || qsa('datalist',row).find(el=>el.id===input.dataset.listId)) : null;
+  const match=_countryMatch_(country?.value || '');
+  const query=String(input?.value || '').trim();
+  if(!match || !input || !list || query.length<2){ if(list) list.innerHTML=''; return; }
+  const key=`${match.code}|${_normalizeSearch_(query)}`;
+  let suggestions=destinationSuggestionCache.get(key);
+  if(!suggestions){
+    try{
+      const url=`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&q=${encodeURIComponent(query)}`;
+      const response=await fetch(url,{headers:{Accept:'application/json'}});
+      const data=await response.json().catch(()=>({}));
+      suggestions=response.ok && Array.isArray(data?.suggestions) ? data.suggestions : [];
+      destinationSuggestionCache.set(key,suggestions);
+    }catch(_){ suggestions=[]; }
+  }
+  list.innerHTML=suggestions.slice(0,12).map(name=>`<option value="${_escapeAttr_(name)}"></option>`).join('');
+}
+function _bindCountryDestinationAutocomplete_(row){
+  const country=qs('.country',row);
+  const destination=qs('.city',row);
+  const countryList=country?.dataset.listId ? (document.getElementById(country.dataset.listId) || qsa('datalist',row).find(el=>el.id===country.dataset.listId)) : null;
+  _populateCountryDatalist_(countryList);
+  let timer=null;
+  const sync=()=>{ _syncCountrySelection_(row); if(destination?.value) _loadDestinationSuggestions_(row); };
+  country?.addEventListener('input',sync);
+  country?.addEventListener('change',sync);
+  country?.addEventListener('blur',()=>{
+    const match=_countryMatch_(country.value);
+    if(match) country.value=match.label;
+    _syncCountrySelection_(row);
+  });
+  destination?.addEventListener('input',()=>{
+    clearTimeout(timer);
+    timer=setTimeout(()=>_loadDestinationSuggestions_(row),220);
+  });
+  _syncCountrySelection_(row);
 }
 
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
@@ -1951,8 +2074,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     updateAddCityButtonState();
     if(pref?.city){
       alert(getLang()==='es'
-        ? 'Puedes incluir un máximo de 3 ciudades por generación.'
-        : 'You can include a maximum of 3 cities per generation.');
+        ? 'Puedes incluir un máximo de 3 destinos por generación.'
+        : 'You can include a maximum of 3 destinations per generation.');
     }
     return;
   }
@@ -1960,9 +2083,12 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const initialDate=parsePlannerDate(pref.baseDate||'');
   const row = document.createElement('div');
   row.className = 'city-row';
+  const autocompleteId=`itbmo-destination-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const countryListId=`${autocompleteId}-countries`;
+  const destinationListId=`${autocompleteId}-destinations`;
   row.innerHTML = `
-    <label>${t('uiCity')}<input class="city" placeholder="${t('uiCity')}" value="${pref.city||''}"></label>
-    <label>${t('uiCountry')}<input class="country" placeholder="${t('uiCountry')}" value="${pref.country||''}"></label>
+    <label>${t('uiCountry')}<input class="country" list="${countryListId}" data-list-id="${countryListId}" autocomplete="off" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${pref.country||''}"><datalist id="${countryListId}"></datalist></label>
+    <label>${t('uiCity')}<input class="city" data-list-id="${destinationListId}" autocomplete="off" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${pref.city||''}"><datalist id="${destinationListId}"></datalist></label>
     <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
       ${t('uiStart')}
@@ -1978,6 +2104,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     </label>
     <button class="remove" type="button">✕</button>
   `;
+
+  _bindCountryDestinationAutocomplete_(row);
 
   const baseDateEl = qs('.baseDate', row);
   const baseDatePicker = qs('.baseDatePicker', row);
@@ -2284,8 +2412,8 @@ async function normalizeDestinationsBeforeSave(list, rows){
     if(status==='ambiguous'){
       const question=String(result.question || '').trim();
       const fallback=getLang()==='es'
-        ? `No pudimos confirmar con seguridad la ciudad “${item.city}”. Revísala e indica también el país.`
-        : `We could not safely confirm the city “${item.city}”. Please review it and include the country.`;
+        ? `No pudimos confirmar con seguridad el destino “${item.city}”. Revísalo e indica también el país.`
+        : `We could not safely confirm the destination “${item.city}”. Please review it and include the country.`;
       const error=new Error('DESTINATION_AMBIGUOUS');
       error.userMessage=question || fallback;
       error.rowIndex=index;
@@ -2329,21 +2457,30 @@ async function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   if(rows.length>MAX_ITINERARY_CITIES){
     alert(getLang()==='es'
-      ? 'Puedes incluir un máximo de 3 ciudades por generación.'
-      : 'You can include a maximum of 3 cities per generation.');
+      ? 'Puedes incluir un máximo de 3 destinos por generación.'
+      : 'You can include a maximum of 3 destinations per generation.');
     updateAddCityButtonState();
     return;
   }
   let list = [];
+  let invalidCountryRow=null;
 
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
-    const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
+    const countryInput=qs('.country',r);
+    const countryMatch=_countryMatch_(countryInput?.value || '');
+    const country  = countryMatch?.label || String(countryInput?.value || '').trim();
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
     const baseDate = qs('.baseDate',r).value.trim();
 
     if(!city) return;
+    if(!countryMatch){
+      invalidCountryRow=invalidCountryRow || r;
+      countryInput?.classList.add('itbmo-field-error');
+      return;
+    }
+    countryInput?.classList.remove('itbmo-field-error');
 
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
@@ -2357,6 +2494,14 @@ async function saveDestinations(){
 
     list.push({ city, country, days, baseDate, perDay });
   });
+
+  if(invalidCountryRow){
+    alert(getLang()==='es'
+      ? 'Selecciona un país válido de la lista antes de continuar.'
+      : 'Select a valid country from the list before continuing.');
+    try{ qs('.country',invalidCountryRow)?.focus(); }catch(_){ }
+    return;
+  }
 
   if(list.length === 0) return;
 
@@ -5871,11 +6016,11 @@ function agentConversationCopy(){
   const lang=agentConversationLang || (getLang()==='es' ? 'es' : 'en');
   const map={
     es:{
-      hotel:(city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y tu <strong>transporte</strong> (vehículo alquilado, transporte público, taxi/Uber, mixto o “recomiéndame”).`,
+      hotel:(city)=>`Para <strong>${city}</strong>, completa estos dos datos. Si todavía no tienes alguno claro, escribe <strong>“recomiéndame”</strong>.`,
       itinerary:'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
     },
     en:{
-      hotel:(city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental car, public transit, taxi/Uber, mixed, or “recommend”).`,
+      hotel:(city)=>`For <strong>${city}</strong>, complete these two details. If you are not sure about either one yet, type <strong>“recommend”</strong>.`,
       itinerary:'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
     },
     pt:{
@@ -5916,6 +6061,80 @@ function agentConversationCopy(){
     }
   };
   return map[lang] || map.en;
+}
+
+function _hotelTransportComposerLabels_(){
+  const lang=agentConversationLang || (getLang()==='es' ? 'es' : 'en');
+  const labels={
+    es:{lodging:'Hospedaje',transport:'Medio de transporte'},
+    en:{lodging:'Lodging',transport:'Transport'},
+    pt:{lodging:'Hospedagem',transport:'Meio de transporte'},
+    fr:{lodging:'Hébergement',transport:'Moyen de transport'},
+    de:{lodging:'Unterkunft',transport:'Verkehrsmittel'},
+    it:{lodging:'Alloggio',transport:'Mezzo di trasporto'},
+    ja:{lodging:'宿泊先',transport:'移動手段'},
+    ko:{lodging:'숙소',transport:'교통수단'},
+    zh:{lodging:'住宿',transport:'交通方式'},
+    ru:{lodging:'Проживание',transport:'Транспорт'},
+    ar:{lodging:'الإقامة',transport:'وسيلة النقل'}
+  };
+  return labels[lang] || labels.en;
+}
+
+function _autoGrowPlanningChatInput_(){
+  if(!$chatI || $chatI.tagName!=='TEXTAREA') return;
+  $chatI.style.height='auto';
+  const computed=getComputedStyle($chatI);
+  const maxHeight=parseFloat(computed.maxHeight) || 168;
+  const target=Math.min($chatI.scrollHeight,maxHeight);
+  $chatI.style.height=`${target}px`;
+  $chatI.classList.toggle('is-scrollable',$chatI.scrollHeight>maxHeight+1);
+}
+
+function _setHotelTransportComposerTemplate_(){
+  if(!$chatI || !collectingHotels || metaProgressIndex>=savedDestinations.length) return;
+  const labels=_hotelTransportComposerLabels_();
+  $chatI.value=`${labels.lodging}:\n\n${labels.transport}:`;
+  _autoGrowPlanningChatInput_();
+  const cursor=labels.lodging.length+1;
+  requestAnimationFrame(()=>{
+    try{
+      $chatI.focus({preventScroll:true});
+      $chatI.setSelectionRange(cursor,cursor);
+    }catch(_){
+      try{ $chatI.focus(); }catch(__){}
+    }
+  });
+}
+
+function _parseStructuredHotelTransport_(text){
+  const raw=String(text||'');
+  const labels=[
+    ['Hospedaje','Medio de transporte'],
+    ['Lodging','Transport'],
+    ['Hospedagem','Meio de transporte'],
+    ['Hébergement','Moyen de transport'],
+    ['Unterkunft','Verkehrsmittel'],
+    ['Alloggio','Mezzo di trasporto'],
+    ['宿泊先','移動手段'],
+    ['숙소','교통수단'],
+    ['住宿','交通方式'],
+    ['Проживание','Транспорт'],
+    ['الإقامة','وسيلة النقل']
+  ];
+  const escapeRegExp=value=>String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+
+  for(const [lodgingLabel,transportLabel] of labels){
+    const re=new RegExp(`^\\s*${escapeRegExp(lodgingLabel)}\\s*:\\s*([\\s\\S]*?)\\s*${escapeRegExp(transportLabel)}\\s*:\\s*([\\s\\S]*)$`,'i');
+    const match=raw.match(re);
+    if(!match) continue;
+    return {
+      structured:true,
+      hotel:String(match[1]||'').trim(),
+      transport:String(match[2]||'').trim() || 'recomiéndame'
+    };
+  }
+  return {structured:false,hotel:'',transport:''};
 }
 
 function _generationISOToDMY_(value){
@@ -6051,8 +6270,8 @@ function _hydrateGenerationTrip_(trip){
       const windows=destination.perDay || [];
       qsa('.hours-day',row).forEach((dayRow,index)=>{
         const windowData=windows[index] || {};
-        setTimeSelectorValue(dayRow,'start',windowData.start || '');
-        setTimeSelectorValue(dayRow,'end',windowData.end || '');
+        setTimeSelectorValue(qs('[data-time-type="start"]',dayRow),windowData.start || '');
+        setTimeSelectorValue(qs('[data-time-type="end"]',dayRow),windowData.end || '');
       });
     });
     updateAddCityButtonState();
@@ -6077,7 +6296,7 @@ function _hydrateGenerationTrip_(trip){
   if($chatBox) $chatBox.style.display='flex';
   renderCityTabs();
   setExportToolbarVisibility(trip.status==='generated');
-  restoreInfoChatStateForTrip(currentTripId);
+  restoreInfoChatStateForTrip(currentTripId,persistedPlanner.info_chat_state);
   return true;
 }
 
@@ -6318,6 +6537,7 @@ function askNextHotelTransport(){
   const city = savedDestinations[metaProgressIndex].city;
   setActiveCity(city); renderCityItinerary(city);
   chatMsg(agentConversationCopy().hotel(city),'ai');
+  _setHotelTransportComposerTemplate_();
 }
 
 const WORD_NUM = {
@@ -6652,16 +6872,30 @@ async function onSend(){
   }
   chatMsg(text,'user');
   $chatI.value='';
+  _autoGrowPlanningChatInput_();
+
+  const structuredHotelTransport = collectingHotels
+    ? _parseStructuredHotelTransport_(text)
+    : null;
 
   if(!agentConversationLang){
-    agentConversationLang=detectAgentConversationLanguage(text);
+    const languageSource = structuredHotelTransport?.structured
+      ? `${structuredHotelTransport.hotel}
+${structuredHotelTransport.transport==='recomiéndame' ? '' : structuredHotelTransport.transport}`.trim()
+      : text;
+    agentConversationLang=detectAgentConversationLanguage(languageSource || text);
   }
 
   // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
-    const transport = detectTransportFromUserText(text);
-    const lodgingText = stripRecognizedTransportTail(text);
+    const structured = structuredHotelTransport || _parseStructuredHotelTransport_(text);
+    const transport = structured.structured
+      ? structured.transport
+      : detectTransportFromUserText(text);
+    const lodgingText = structured.structured
+      ? structured.hotel
+      : stripRecognizedTransportTail(text);
     upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
     askNextHotelTransport();
@@ -8411,8 +8645,8 @@ function setInfoChatEntitlement({authorized=false, remaining=0, used=0, tripId=n
   if(entIcon) entIcon.textContent=!authorized ? '🔒' : (exhausted ? '✓' : '✓');
   if(usageLabel) usageLabel.textContent=!authorized ? copy.lockedUsage : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
   if(remainingEl) remainingEl.textContent=`${safeUsed} / ${INFO_CHAT_MAX_QUERIES}`;
-  if(authorized) persistInfoChatState();
 }
+
 
 function applyInfoChatStatus(data){
   const authorized=Boolean(data?.paid || data?.admin_bypass || data?.info_chat_authorized);
@@ -8950,6 +9184,9 @@ $start?.addEventListener('click', requestPlanningStart);
 $preferencesContinue?.addEventListener('click', confirmPreferencesAndContinue);
 $send?.addEventListener('click', onSend);
 
+// Chat: textarea crece hasta su máximo; después usa scroll interno.
+$chatI?.addEventListener('input', _autoGrowPlanningChatInput_);
+
 // Chat: Enter envía (sin Shift)
 $chatI?.addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey){
@@ -9330,6 +9567,7 @@ async function sendInfoMessage(){
       used:INFO_CHAT_MAX_QUERIES-remaining,
       tripId:currentTripId
     });
+    persistInfoChatState();
   }
 
   if(result?.quotaExceeded){
@@ -9339,6 +9577,7 @@ async function sendInfoMessage(){
       used:INFO_CHAT_MAX_QUERIES,
       tripId:currentTripId
     });
+    persistInfoChatState();
   }
 }
 function bindInfoChatListeners(){
@@ -9593,8 +9832,8 @@ function astraCoachCopy(key){
       ? ['¿Quiénes vivirán este viaje?','Indica si viajas solo o acompañado. Las edades y necesidades del grupo ayudan a ITBMO a ajustar ritmos, actividades y desplazamientos.']
       : ['Who will experience this trip?','Tell us whether you are traveling solo or with others. Ages and group needs help ITBMO adjust pacing, activities and transportation.'],
     destinations:es
-      ? ['Construye la ruta','Agrega hasta tres ciudades, su país y la cantidad de días. El orden en que las ingreses será el orden del viaje.']
-      : ['Build your route','Add up to three cities, their country and number of days. The order you enter them will be the trip order.'],
+      ? ['Construye la ruta','Selecciona primero el país y luego escribe tu destino. Puedes elegir una sugerencia de la lista o, si tu destino no aparece, escribirlo igualmente. Agrega hasta tres destinos; el orden en que los ingreses será el orden del viaje.']
+      : ['Build your route','Select the country first, then enter your destination. Choose a suggestion from the list or, if your destination does not appear, simply type it anyway. Add up to three destinations; the order you enter them will be the trip order.'],
     date:es
       ? ['Primer día en el destino','Selecciona la fecha en que llegarás al hotel o apartamento y tendrás tiempo disponible. Las siguientes ciudades se sugerirán automáticamente sin permitir fechas imposibles o superpuestas.']
       : ['First day at the destination','Choose the date when you will reach your hotel or apartment and have usable time. Following cities will be suggested automatically without impossible or overlapping dates.'],
