@@ -2781,6 +2781,9 @@ table.itinerary td:nth-child(8){width:16%}
 /* ---------- 1. DESTINATIONS: FLUID BEFORE WRAPPING ---------- */
 .city-row{
   container-type:inline-size;
+  --itbmo-autocomplete-reserve:0px;
+  margin-bottom:calc(.8rem + var(--itbmo-autocomplete-reserve));
+  transition:margin-bottom .16s ease;
   grid-template-columns:
     minmax(82px,1.08fr)
     minmax(72px,.92fr)
