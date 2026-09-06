@@ -456,7 +456,7 @@ const ITBMO_AFFILIATE_CONFIG = {
     },
     omio: {
       enabled: true,
-      url: 'https://omio.sjv.io/PzvDjY',
+      url: 'https://omio.sjv.io/c/7727455/4002436/7385',
       previewUrl: 'https://www.omio.com/',
       name: 'Omio',
       category: 'transport'
@@ -563,6 +563,22 @@ function _affiliateCopy_(){
   };
 }
 
+function _affiliateOmioSlug_(value){
+  return String(value || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+}
+
+function _affiliateOmioUrl_(trackingBase,route){
+  const from=_affiliateOmioSlug_(route?.from);
+  const to=_affiliateOmioSlug_(route?.to);
+  if(!trackingBase || !from || !to) return trackingBase || '';
+  const landing=getLang()==='es'
+    ? `https://www.omio.es/viajes/${from}/${to}`
+    : `https://www.omio.com/travel/${from}/${to}`;
+  return `${trackingBase}?u=${encodeURIComponent(landing)}`;
+}
+
 function _affiliateIcon_(key){
   const common = 'viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"';
   const icons = {
@@ -599,9 +615,10 @@ function _affiliatePartnerLinks_(key,partner,placement,buttonLabel){
   const routes=key==='omio' ? context.routes : [];
   const links=routes.length ? routes.map(route=>({
     label:`${route.from} → ${route.to}`,
-    route:`${route.from} > ${route.to}`
-  })) : [{label:buttonLabel,route:''}];
-  return links.map(link=>`<a class="itbmo-affiliate-link" href="${_affiliateEscape_(url)}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}" data-affiliate-route="${_affiliateEscape_(link.route)}"><span>${_affiliateEscape_(link.label)}</span><span class="itbmo-affiliate-arrow">↗</span></a>`).join('');
+    route:`${route.from} > ${route.to}`,
+    url:_affiliateOmioUrl_(url,route)
+  })) : [{label:buttonLabel,route:'',url}];
+  return links.map(link=>`<a class="itbmo-affiliate-link" href="${_affiliateEscape_(link.url)}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}" data-affiliate-route="${_affiliateEscape_(link.route)}"><span>${_affiliateEscape_(link.label)}</span><span class="itbmo-affiliate-arrow">↗</span></a>`).join('');
 }
 
 function _affiliateTrack_(partnerKey, placement){
@@ -666,12 +683,19 @@ function renderAffiliateSurface(placement='loading'){
   const eyebrow=isLoading ? c.loadingEyebrow : c.afterEyebrow;
   const title=isLoading ? c.loadingTitle : c.afterTitle;
   const sub=isLoading ? c.loadingSub : c.afterSub;
+  const onlyOmio=visible.length===1 && visible[0]==='omio';
+  const contextualTitle=onlyOmio
+    ? (getLang()==='es' ? 'Conecta las ciudades de tu viaje' : 'Connect the cities in your trip')
+    : title;
+  const contextualSub=onlyOmio
+    ? (getLang()==='es' ? 'Compara trenes, autobuses, vuelos y ferris para cada tramo mientras ITBMO continúa aquí.' : 'Compare trains, buses, flights and ferries for each leg while ITBMO keeps working here.')
+    : sub;
 
   root.innerHTML=`
-    <div class="itbmo-affiliate-shell itbmo-affiliate-shell--${placement}">
+    <div class="itbmo-affiliate-shell itbmo-affiliate-shell--${placement}${onlyOmio?' itbmo-affiliate-shell--single':''}">
       <div class="itbmo-affiliate-heading">
         <div class="itbmo-affiliate-eyebrow"><span class="itbmo-affiliate-spark">✦</span><span>${eyebrow}</span>${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>`:''}</div>
-        <h3>${title}</h3><p>${sub}</p>
+        <h3>${contextualTitle}</h3><p>${contextualSub}</p>
       </div>
       <div class="itbmo-affiliate-grid itbmo-affiliate-grid--brands" data-count="${visible.length}">
         ${visible.map(key=>{
