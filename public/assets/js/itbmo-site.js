@@ -27,7 +27,7 @@
       booking:      { enabled:false, url:'', previewUrl:'https://www.booking.com/' },
       getyourguide: { enabled:false, url:'', previewUrl:'https://www.getyourguide.com/' },
       viator:       { enabled:false, url:'', previewUrl:'https://www.viator.com/' },
-      omio:         { enabled:true, url:'https://omio.sjv.io/PzvDjY', previewUrl:'https://www.omio.com/' },
+      omio:         { enabled:true, url:'https://omio.sjv.io/c/7727455/4002436/7385', previewUrl:'https://www.omio.com/' },
       airalo:       { enabled:false, url:'', previewUrl:'https://www.airalo.com/' },
       holafly:      { enabled:false, url:'', previewUrl:'https://esim.holafly.com/' }
     },
@@ -319,12 +319,48 @@
     }
 
     if (key === 'omio' && itbmoAffiliateContext.routes.length) {
+      const omioSlug = value => String(value || '')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+      const omioUrl = route => {
+        const from = omioSlug(route.from);
+        const to = omioSlug(route.to);
+        if (!from || !to) return config.url;
+        const landing = ITBMO_CURRENT_SITE_LANGUAGE === 'es'
+          ? `https://www.omio.es/viajes/${from}/${to}`
+          : `https://www.omio.com/travel/${from}/${to}`;
+        return `${config.url}?u=${encodeURIComponent(landing)}`;
+      };
       const routes = itbmoAffiliateContext.routes
         .map(route => `${route.from} → ${route.to}`)
         .join(' · ');
       if (description) description.textContent = routes;
-      link?.setAttribute('aria-label', `${link.textContent.trim()}: ${routes}`);
+      if (link) {
+        card.querySelectorAll('[data-itbmo-omio-route-link]').forEach(item => item.remove());
+        const originalLabel = link.dataset.itbmoDefaultLabel || link.textContent.trim();
+        link.dataset.itbmoDefaultLabel = originalLabel;
+        itbmoAffiliateContext.routes.forEach((route, index) => {
+          const routeLink = index === 0 ? link : link.cloneNode(true);
+          routeLink.href = omioUrl(route);
+          routeLink.setAttribute('aria-label', `${originalLabel}: ${route.from} a ${route.to}`);
+          routeLink.textContent = `${route.from} → ${route.to} `;
+          const arrow = document.createElement('span');
+          arrow.textContent = '↗';
+          routeLink.appendChild(arrow);
+          if (index > 0) {
+            routeLink.dataset.itbmoOmioRouteLink = '1';
+            link.insertAdjacentElement('afterend', routeLink);
+          }
+        });
+      }
     } else {
+      card.querySelectorAll('[data-itbmo-omio-route-link]').forEach(item => item.remove());
+      if (link?.dataset.itbmoDefaultLabel) {
+        link.textContent = `${link.dataset.itbmoDefaultLabel} `;
+        const arrow = document.createElement('span');
+        arrow.textContent = '↗';
+        link.appendChild(arrow);
+      }
       link?.removeAttribute('aria-label');
     }
     });
