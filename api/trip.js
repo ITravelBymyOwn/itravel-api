@@ -723,18 +723,62 @@ async function handleGenerationCheckpoint(res, body, session) {
   });
 }
 
+async function handlePostPaymentCheckpoint(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  const checkpoint = generationCheckpoint(body.checkpoint);
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+
+  const plannerInput = generationCheckpoint(trip.planner_input);
+  const persistedCheckpoint = {
+    ...checkpoint,
+    schema_version:1,
+    updated_at:new Date().toISOString()
+  };
+
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    planner_input:{
+      ...plannerInput,
+      post_payment_progress:persistedCheckpoint
+    }
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"post_payment_checkpoint",
+    trip:updated
+  });
+}
+
 async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    `status=in.(generating,failed)&order=updated_at.desc&limit=1`,
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=10`,
     { method:"GET" }
   );
-  const trip = Array.isArray(rows) ? rows[0] || null : null;
-  if (!trip || !(await hasGenerationEntitlement(trip.id, session.user_id))) {
-    return res.status(200).json({ ok:true, action:"recoverable", trip:null });
+
+  const candidates = Array.isArray(rows) ? rows : [];
+  for (const trip of candidates) {
+    if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
+      return res.status(200).json({ ok:true, action:"recoverable", trip });
+    }
   }
-  return res.status(200).json({ ok:true, action:"recoverable", trip });
+
+  return res.status(200).json({ ok:true, action:"recoverable", trip:null });
 }
 
 export default async function handler(req, res) {
@@ -805,6 +849,10 @@ export default async function handler(req, res) {
 
     if (action === "generation_checkpoint") {
       return await handleGenerationCheckpoint(res, body, session);
+    }
+
+    if (action === "post_payment_checkpoint") {
+      return await handlePostPaymentCheckpoint(res, body, session);
     }
 
     if (action === "recoverable") {
