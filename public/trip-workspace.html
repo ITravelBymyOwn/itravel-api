@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f7fbfc" />
   <title>ITBMO · Tu viaje</title>
-  <link rel="stylesheet" href="./trip-workspace.css?v=1" />
+  <link rel="stylesheet" href="./trip-workspace.css?v=2" />
 </head>
 <body>
   <div class="tw-shell">
@@ -39,7 +39,7 @@
           <div class="tw-city-identity"><span id="tw-city-kicker" class="tw-kicker">TU CIUDAD</span><h1 id="tw-city-name">París</h1><p id="tw-city-dates"></p></div>
           <div class="tw-mode" role="tablist">
             <button id="tw-mode-itinerary" class="active" type="button" role="tab" aria-selected="true"><span>↝</span><b>Itinerario</b></button>
-            <button id="tw-mode-prepare" type="button" role="tab" aria-selected="false"><span>✦</span><b>Para tu viaje</b></button>
+            <button id="tw-mode-prepare" class="tw-mode-prepare" type="button" role="tab" aria-selected="false"><span>✦</span><b>Para tu viaje</b><em id="tw-prepare-badge">Explora</em></button>
           </div>
         </div>
         <nav id="tw-days" class="tw-days" aria-label="Días del itinerario"></nav>
@@ -51,6 +51,6 @@
       </section>
     </main>
   </div>
-  <script src="./trip-workspace.js?v=1"></script>
+  <script src="./trip-workspace.js?v=2"></script>
 </body>
 </html>
