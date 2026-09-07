@@ -902,6 +902,25 @@ async function handleInfoChatCheckpoint(res, body, session) {
   });
 }
 
+
+async function handleList(res, body, session) {
+  const requestedLimit = Number(body.limit || 12);
+  const limit = Math.max(1, Math.min(30, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 12));
+
+  const rows = await supabaseFetch(
+    `/trips?select=id,trip_name,status,destinations,planner_input,itinerary_data,generation_count,` +
+    `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=${limit}`,
+    { method:"GET" }
+  );
+
+  return res.status(200).json({
+    ok:true,
+    action:"list",
+    trips:Array.isArray(rows) ? rows : []
+  });
+}
+
 async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
@@ -1003,6 +1022,10 @@ export default async function handler(req, res) {
 
     if (action === "recoverable") {
       return await handleRecoverable(res, session);
+    }
+
+    if (action === "list") {
+      return await handleList(res, body, session);
     }
 
     return res.status(400).json({
