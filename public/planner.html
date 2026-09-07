@@ -456,67 +456,70 @@
   </div>
 
   <!-- =========================================================
-       ITBMO · DAY-BY-DAY ITINERARY FOCUS MODE
-       Full-screen viewer only. Does not duplicate or mutate itinerary data.
+       ITBMO · TRIP WORKSPACE · PHASE 2
+       Level 1: trip overview / city gateway.
+       Level 2: true city Focus Mode with Itinerary | For your trip.
+       Presentation only: existing generated itinerary remains untouched.
   ========================================================== -->
   <div id="itinerary-focus-modal" class="itinerary-focus-modal" aria-hidden="true">
     <div class="itinerary-focus-backdrop" data-itinerary-focus-close></div>
-
     <section class="itinerary-focus-shell" role="dialog" aria-modal="true" aria-labelledby="itinerary-focus-title">
       <header class="itinerary-focus-header">
         <button id="itinerary-focus-back" class="itinerary-focus-back" type="button">
-          <span aria-hidden="true">←</span>
-          <span id="itinerary-focus-back-label">Back to Planner</span>
+          <span aria-hidden="true">←</span><span id="itinerary-focus-back-label">Back to Planner</span>
         </button>
-
         <div class="itinerary-focus-heading">
-          <span id="itinerary-focus-eyebrow" class="itinerary-focus-eyebrow">YOUR ITBMO ITINERARY</span>
-          <h2 id="itinerary-focus-title">Your trip, day by day.</h2>
-          <p id="itinerary-focus-subtitle">Choose a city, then move through each day at your own pace.</p>
+          <span id="itinerary-focus-eyebrow" class="itinerary-focus-eyebrow">YOUR ITBMO TRIP</span>
+          <h2 id="itinerary-focus-title">Explore and prepare your trip.</h2>
+          <p id="itinerary-focus-subtitle">Everything organized by city, without losing sight of the whole journey.</p>
         </div>
-
-        <button id="itinerary-focus-close" class="itinerary-focus-close" type="button" aria-label="Close itinerary">
-          ×
-        </button>
+        <button id="itinerary-focus-close" class="itinerary-focus-close" type="button" aria-label="Close trip">×</button>
       </header>
 
-      <nav id="itinerary-focus-cities" class="itinerary-focus-cities" aria-label="Itinerary cities"></nav>
-
-      <div class="itinerary-focus-workspace-nav" role="tablist" aria-label="Trip workspace">
-        <button id="itinerary-focus-mode-itinerary" class="itinerary-focus-mode-btn active" type="button" role="tab" aria-selected="true">
-          <span class="itinerary-focus-mode-icon" aria-hidden="true">⌁</span>
-          <span id="itinerary-focus-mode-itinerary-label">Itinerary</span>
-        </button>
-        <button id="itinerary-focus-mode-prepare" class="itinerary-focus-mode-btn" type="button" role="tab" aria-selected="false">
-          <span class="itinerary-focus-mode-icon" aria-hidden="true">✓</span>
-          <span id="itinerary-focus-mode-prepare-label">Prepare trip</span>
-        </button>
-      </div>
-
-      <nav id="itinerary-focus-days" class="itinerary-focus-days" aria-label="Itinerary days"></nav>
-
-      <div class="itinerary-focus-stage">
-        <button id="itinerary-focus-prev" class="itinerary-focus-nav itinerary-focus-nav--prev" type="button" aria-label="Previous day">
-          <span aria-hidden="true">‹</span>
-        </button>
-
-        <article class="itinerary-focus-day-card">
-          <div class="itinerary-focus-day-head">
-            <div>
-              <span id="itinerary-focus-city-label" class="itinerary-focus-city-label"></span>
-              <h3 id="itinerary-focus-day-title"></h3>
-            </div>
-            <span id="itinerary-focus-day-count" class="itinerary-focus-day-count"></span>
+      <main id="itinerary-workspace-overview" class="itinerary-workspace-overview">
+        <section class="itinerary-workspace-hero">
+          <span id="itinerary-workspace-kicker" class="itinerary-workspace-kicker">YOUR JOURNEY</span>
+          <h3 id="itinerary-workspace-title">Where do you want to start?</h3>
+          <p id="itinerary-workspace-intro">Open a city to see its itinerary day by day and everything worth preparing for it.</p>
+          <div id="itinerary-workspace-summary" class="itinerary-workspace-summary"></div>
+        </section>
+        <section id="itinerary-workspace-cities" class="itinerary-workspace-city-grid" aria-label="Trip cities"></section>
+        <section class="itinerary-workspace-trip-tools" aria-labelledby="itinerary-workspace-trip-tools-title">
+          <div class="itinerary-workspace-trip-tools__icon" aria-hidden="true">✦</div>
+          <div>
+            <span id="itinerary-workspace-trip-tools-kicker">FOR YOUR WHOLE TRIP</span>
+            <h4 id="itinerary-workspace-trip-tools-title">The essentials that travel with you.</h4>
+            <p id="itinerary-workspace-trip-tools-copy">Trip-level services will live here, only when they are useful to your journey.</p>
           </div>
+          <span class="itinerary-workspace-coming" id="itinerary-workspace-coming">Coming next</span>
+        </section>
+      </main>
 
-          <div id="itinerary-focus-day-content" class="itinerary-focus-day-content"></div>
-          <div id="itinerary-focus-dots" class="itinerary-focus-dots" aria-label="Itinerary days"></div>
-        </article>
-
-        <button id="itinerary-focus-next" class="itinerary-focus-nav itinerary-focus-nav--next" type="button" aria-label="Next day">
-          <span aria-hidden="true">›</span>
-        </button>
-      </div>
+      <main id="itinerary-city-focus" class="itinerary-city-focus" hidden>
+        <div class="itinerary-city-focus-topbar">
+          <button id="itinerary-city-focus-back" class="itinerary-city-focus-back" type="button"><span aria-hidden="true">←</span><span id="itinerary-city-focus-back-label">All cities</span></button>
+          <div class="itinerary-city-focus-identity"><span id="itinerary-city-focus-kicker">CITY FOCUS</span><strong id="itinerary-city-focus-name"></strong></div>
+          <div class="itinerary-city-focus-spacer" aria-hidden="true"></div>
+        </div>
+        <div class="itinerary-city-focus-controls">
+          <div class="itinerary-focus-workspace-nav" role="tablist" aria-label="City workspace">
+            <button id="itinerary-focus-mode-itinerary" class="itinerary-focus-mode-btn active" type="button" role="tab" aria-selected="true"><span class="itinerary-focus-mode-icon" aria-hidden="true">⌁</span><span id="itinerary-focus-mode-itinerary-label">Itinerary</span></button>
+            <button id="itinerary-focus-mode-prepare" class="itinerary-focus-mode-btn" type="button" role="tab" aria-selected="false"><span class="itinerary-focus-mode-icon" aria-hidden="true">✦</span><span id="itinerary-focus-mode-prepare-label">For your trip</span></button>
+          </div>
+          <nav id="itinerary-focus-days" class="itinerary-focus-days" aria-label="Itinerary days"></nav>
+        </div>
+        <section class="itinerary-city-focus-canvas">
+          <button id="itinerary-focus-prev" class="itinerary-focus-nav itinerary-focus-nav--prev" type="button" aria-label="Previous day"><span aria-hidden="true">‹</span></button>
+          <article class="itinerary-focus-day-card">
+            <div class="itinerary-focus-day-head">
+              <div><span id="itinerary-focus-city-label" class="itinerary-focus-city-label"></span><h3 id="itinerary-focus-day-title"></h3></div>
+              <span id="itinerary-focus-day-count" class="itinerary-focus-day-count"></span>
+            </div>
+            <div id="itinerary-focus-day-content" class="itinerary-focus-day-content"></div>
+          </article>
+          <button id="itinerary-focus-next" class="itinerary-focus-nav itinerary-focus-nav--next" type="button" aria-label="Next day"><span aria-hidden="true">›</span></button>
+        </section>
+      </main>
     </section>
   </div>
 
