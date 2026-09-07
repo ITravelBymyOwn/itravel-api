@@ -3314,7 +3314,39 @@ function renderImmersiveItinerary(){
   const prev=qs('#itinerary-focus-prev'),next=qs('#itinerary-focus-next');prev.hidden=!itineraryMode;next.hidden=!itineraryMode;prev.disabled=dayIndex<=0;next.disabled=dayIndex>=days.length-1;prev.setAttribute('aria-label',copy.prev);next.setAttribute('aria-label',copy.next);
 }
 function _immersiveMoveDay_(delta){if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const days=_immersiveDaysForCity_(immersiveItineraryCity),i=days.indexOf(Number(immersiveItineraryDay)),n=Math.max(0,Math.min(days.length-1,i+delta));if(n!==i){immersiveItineraryDay=days[n];scheduleImmersiveItineraryRender();}}
-function openImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal||!_immersiveAvailableCities_().length)return;immersiveWorkspaceLevel='overview';immersiveItineraryMode='itinerary';try{if(window.parent&&window.parent!==window)window.parent.postMessage({type:'ITBMO_REQUEST_PLANNER_FOCUS',reason:'trip-workspace'},'*');}catch(_){}modal.classList.add('is-open');modal.setAttribute('aria-hidden','false');document.body.classList.add('itinerary-focus-open');scheduleImmersiveItineraryRender();setTimeout(()=>qs('#itinerary-focus-close')?.focus(),80);}
+function openImmersiveItinerary(){
+  const cities=_immersiveAvailableCities_();
+  if(!cities.length)return;
+
+  /* Phase 3: the Trip Workspace is a true standalone Vercel page.
+     We only hand off an immutable presentation snapshot through same-origin
+     localStorage. No API call, payment state, generation state or itinerary
+     row is changed here. */
+  const snapshot={
+    schema_version:1,
+    created_at:new Date().toISOString(),
+    lang:getLang()==='es'?'es':'en',
+    trip_id:currentTripId || null,
+    destinations:(savedDestinations||[]).map(d=>({
+      city:d?.city||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
+    })).filter(d=>d.city),
+    city_meta:cityMeta||{},
+    itineraries:Object.fromEntries(cities.map(city=>[
+      city,
+      {
+        baseDate:itineraries?.[city]?.baseDate || cityMeta?.[city]?.baseDate || null,
+        currentDay:itineraries?.[city]?.currentDay || 1,
+        byDay:itineraries?.[city]?.byDay || {}
+      }
+    ]))
+  };
+  try{ localStorage.setItem('itbmo_trip_workspace_snapshot_v1',JSON.stringify(snapshot)); }
+  catch(err){ console.warn('[ITBMO WORKSPACE SNAPSHOT]',err); }
+
+  const url='./trip-workspace.html'+(snapshot.lang==='es'?'?lang=es':'?lang=en');
+  const opened=window.open(url,'_blank','noopener,noreferrer');
+  if(!opened) window.location.href=url;
+}
 function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
 function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch||!modal)return;launch.addEventListener('click',openImmersiveItinerary);qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
   modal.addEventListener('touchstart',e=>{if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const p=e.touches?.[0];if(p){immersiveTouchStartX=p.clientX;immersiveTouchStartY=p.clientY;}},{passive:true});modal.addEventListener('touchend',e=>{if(immersiveTouchStartX==null)return;const p=e.changedTouches?.[0];if(!p)return;const dx=p.clientX-immersiveTouchStartX,dy=p.clientY-immersiveTouchStartY;immersiveTouchStartX=immersiveTouchStartY=null;if(Math.abs(dx)>58&&Math.abs(dx)>Math.abs(dy)*1.25)_immersiveMoveDay_(dx<0?1:-1);},{passive:true});
