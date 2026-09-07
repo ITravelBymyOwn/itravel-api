@@ -6331,30 +6331,84 @@ html.itbmo-save-transition-open body{overflow:hidden!important}
   box-shadow:0 9px 22px rgba(62,77,160,.10)!important;
 }
 .account-authenticated{
+  display:flex;
+  flex-direction:column;
+  gap:.8rem;
   align-items:stretch;
 }
 .account-authenticated-copy{
-  flex:1 1 58%;
+  position:relative;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:1rem;
+  width:100%;
+}
+.account-authenticated-text{
+  flex:1 1 auto;
   min-width:0;
 }
+.account-authenticated-copy p{
+  margin:.35rem 0 0;
+}
+.account-logout{
+  flex:0 0 auto;
+  border:0;
+  background:transparent;
+  color:#6b7f90;
+  font:inherit;
+  font-size:.78rem;
+  font-weight:700;
+  line-height:1;
+  padding:.28rem .18rem;
+  cursor:pointer;
+  text-decoration:underline;
+  text-decoration-color:rgba(107,127,144,.35);
+  text-underline-offset:3px;
+}
+.account-logout:hover{
+  color:#36566b;
+  text-decoration-color:currentColor;
+}
 .account-guest-upgrade{
-  flex:0 1 42%;
-  min-width:220px;
+  width:100%;
+  display:flex;
   align-items:center;
-  justify-content:flex-end;
-  gap:.7rem;
-  padding-left:.8rem;
-  border-left:1px solid rgba(22,150,143,.16);
+  justify-content:space-between;
+  gap:1.25rem;
+  padding:.95rem 1rem;
+  border:1px solid rgba(22,150,143,.15);
+  border-radius:16px;
+  background:rgba(255,255,255,.48);
+}
+.account-guest-upgrade-text{
+  flex:1 1 auto;
+  min-width:0;
+}
+.account-guest-upgrade-text strong{
+  display:block;
+  margin:0 0 .25rem;
+  color:#102c47;
+  font-size:.92rem;
 }
 .account-guest-upgrade p{
   margin:0;
-  max-width:330px;
-  font-size:.76rem;
+  max-width:680px;
+  font-size:.82rem;
+  line-height:1.45;
 }
 #account-upgrade-toggle{
   flex:0 0 auto;
   white-space:nowrap;
-  padding:.72rem .95rem;
+  padding:.72rem 1.05rem;
+}
+.account-upgrade-email-hint{
+  display:block;
+  margin-top:.38rem;
+  color:#667f92;
+  font-size:.72rem;
+  font-weight:600;
+  line-height:1.35;
 }
 #account-email[readonly]{
   background:#f3f7fa;
@@ -6362,16 +6416,18 @@ html.itbmo-save-transition-open body{overflow:hidden!important}
   cursor:not-allowed;
 }
 @media(max-width:720px){
-  .account-authenticated{flex-direction:column;}
+  .account-authenticated-copy{
+    gap:.65rem;
+  }
+  .account-logout{
+    font-size:.74rem;
+  }
   .account-guest-upgrade{
-    width:100%;
-    min-width:0;
     align-items:flex-start;
-    justify-content:flex-start;
     flex-direction:column;
-    padding:.75rem 0 0;
-    border-left:0;
-    border-top:1px solid rgba(22,150,143,.16);
+    gap:.7rem;
+    padding:.85rem;
   }
   #account-upgrade-toggle{width:100%;}
 }
+
