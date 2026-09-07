@@ -98,6 +98,7 @@
               <label>
                 <span id="label-email">Email</span>
                 <input id="account-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+                <small id="account-upgrade-email-hint" class="account-upgrade-email-hint" style="display:none;">You may keep your guest email or use a different email for your account.</small>
               </label>
 
               <label>
@@ -207,11 +208,17 @@
 
         <div id="account-authenticated" class="account-authenticated" style="display:none;">
           <div class="account-authenticated-copy">
-            <strong id="account-welcome">Welcome back.</strong>
-            <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
+            <div class="account-authenticated-text">
+              <strong id="account-welcome">Welcome back.</strong>
+              <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
+            </div>
+            <button id="account-logout" class="account-logout" type="button">Sign out</button>
           </div>
           <div id="account-guest-upgrade" class="account-guest-upgrade" style="display:none;">
-            <p id="account-guest-upgrade-copy">Create an account to access your planning from other devices during the available recovery period.</p>
+            <div class="account-guest-upgrade-text">
+              <strong id="account-guest-upgrade-title">Want access from another device?</strong>
+              <p id="account-guest-upgrade-copy">Create an account to access your planning from other devices during the available recovery period.</p>
+            </div>
             <button class="btn primary" id="account-upgrade-toggle" type="button">Create account</button>
           </div>
         </div>
