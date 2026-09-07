@@ -89,6 +89,7 @@ const ITBMO_MARKETING_VERSION = '1.0';
 let currentUser = null;
 let currentTripId = null;
 let authReady = false;
+let guestUpgradeFormOpen = false;
 
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
@@ -728,6 +729,11 @@ const $accountLoginPassword = qs('#account-login-password');
 const $accountGuestName = qs('#account-guest-name');
 const $accountGuestEmail = qs('#account-guest-email');
 const $accountGuestLegalConsent = qs('#account-guest-legal-consent');
+const $accountModeActions = qs('#account-mode-actions');
+const $accountUpgradeToggle = qs('#account-upgrade-toggle');
+const $accountUpgradeCancel = qs('#account-upgrade-cancel');
+const $accountGuestUpgrade = qs('#account-guest-upgrade');
+const $accountGuestUpgradeCopy = qs('#account-guest-upgrade-copy');
 const $accountForgotEmail = qs('#account-forgot-email');
 const $accountResetPassword = qs('#account-reset-password');
 const $accountResetPasswordConfirm = qs('#account-reset-password-confirm');
@@ -762,7 +768,10 @@ const AUTH_COPY = {
     marketing:'Quiero recibir inspiración de viaje, recomendaciones y ofertas especiales de ITBMO.',
     welcome:(name)=>`Hola, ${name} 👋`,
     readyRegistered:'Tu cuenta está activa en este dispositivo. Continúa planificando normalmente.',
-    readyGuest:'Estás usando ITBMO como invitado en este dispositivo. Continúa planificando normalmente.',
+    readyGuest:'Estás usando ITBMO como invitado en este dispositivo. Puedes continuar planificando normalmente.',
+    readyPending:'Tu cuenta está pendiente de confirmación. Revisa el correo que te enviamos; mientras tanto puedes continuar en este dispositivo.',
+    upgradeCopy:'Crea una cuenta para acceder a tu planificación desde otros dispositivos durante el período disponible.',
+    upgradeAction:'Crear cuenta', upgradeCancel:'Cancelar',
     registering:'Creando tu cuenta…', signingIn:'Iniciando sesión…', guestStarting:'Preparando tu sesión…', sendingReset:'Enviando enlace…', resetting:'Actualizando contraseña…', confirming:'Confirmando tu cuenta…',
     required:'Completa todos los campos obligatorios.', legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
     emailInvalid:'Ingresa un email válido.', passwordRule:'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número.', passwordMismatch:'Las contraseñas no coinciden.',
@@ -785,7 +794,10 @@ const AUTH_COPY = {
     marketing:'Send me travel inspiration, recommendations and special offers from ITBMO.',
     welcome:(name)=>`Hi, ${name} 👋`,
     readyRegistered:'Your account is active on this device. Continue planning normally.',
-    readyGuest:'You are using ITBMO as a guest on this device. Continue planning normally.',
+    readyGuest:'You are using ITBMO as a guest on this device. You can continue planning normally.',
+    readyPending:'Your account is awaiting confirmation. Check the email we sent you; meanwhile you can continue on this device.',
+    upgradeCopy:'Create an account to access your planning from other devices during the available recovery period.',
+    upgradeAction:'Create account', upgradeCancel:'Cancel',
     registering:'Creating your account…', signingIn:'Signing in…', guestStarting:'Preparing your session…', sendingReset:'Sending reset link…', resetting:'Updating password…', confirming:'Confirming your account…',
     required:'Complete all required fields.', legalRequired:'You must accept the Terms of Use and Privacy Policy.',
     emailInvalid:'Enter a valid email.', passwordRule:'Password must be at least 8 characters and include an uppercase letter, lowercase letter and number.', passwordMismatch:'Passwords do not match.',
@@ -844,7 +856,7 @@ function legalPayload(prefix='account'){
 }
 
 function setAuthBusy(on){
-  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack]
+  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack,$accountUpgradeToggle,$accountUpgradeCancel]
     .forEach(el=>{ if(el) el.disabled = !!on; });
 }
 
@@ -912,16 +924,56 @@ function applyAuthPlannerGate(unlocked){
 }
 
 function showAccountMode(mode){
-  if(currentUser) return;
+  const logged=Boolean(currentUser && getStoredSessionToken());
+  const guestCanUpgrade=logged && currentUser && !currentUser.is_registered;
+  if(logged && !guestCanUpgrade) return;
+  if(logged && guestCanUpgrade && mode !== 'register') return;
+
   const panels = { register:$accountRegisterPanel, login:$accountLoginPanel, guest:$accountGuestPanel, forgot:$accountForgotPanel, reset:$accountResetPanel };
   Object.entries(panels).forEach(([key,panel])=>{ if(panel) panel.style.display = key === mode ? 'block' : 'none'; });
   if(mode !== 'reset') setAccountMessage('');
 }
 
+function openGuestAccountUpgrade(){
+  if(!currentUser || currentUser.is_registered) return;
+  guestUpgradeFormOpen=true;
+  if($accountFirstName) $accountFirstName.value=String(currentUser.first_name || '').trim();
+  if($accountEmail){
+    $accountEmail.value=String(currentUser.email || '').trim().toLowerCase();
+    $accountEmail.readOnly=true;
+  }
+  if($accountLegalConsent) $accountLegalConsent.checked=false;
+  if($accountMarketingConsent) $accountMarketingConsent.checked=false;
+  if($accountPassword) $accountPassword.value='';
+  if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+  showAccountMode('register');
+  renderAuthState();
+  setTimeout(()=>{ try{$accountPassword?.focus();}catch(_){} },40);
+}
+
+function closeGuestAccountUpgrade(){
+  guestUpgradeFormOpen=false;
+  if($accountEmail) $accountEmail.readOnly=false;
+  if($accountPassword) $accountPassword.value='';
+  if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+  setAccountMessage('');
+  renderAuthState();
+}
+
 function renderAuthState(){
   const logged = Boolean(currentUser && getStoredSessionToken());
-  if($accountGuest) $accountGuest.style.display = logged ? 'none' : 'block';
+  const registered = Boolean(logged && currentUser?.is_registered);
+  const pending = Boolean(logged && currentUser?.registration_pending);
+  const guest = Boolean(logged && !registered);
+
+  if($accountGuest) $accountGuest.style.display = (!logged || (guest && guestUpgradeFormOpen)) ? 'block' : 'none';
   if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
+  if($accountModeActions) $accountModeActions.style.display = (guest && guestUpgradeFormOpen) ? 'none' : '';
+  if($accountGuestToggle) $accountGuestToggle.style.display = (guest && guestUpgradeFormOpen) ? 'none' : '';
+  if($accountUpgradeCancel) $accountUpgradeCancel.style.display = (guest && guestUpgradeFormOpen) ? 'block' : 'none';
+  if($accountGuestUpgrade) $accountGuestUpgrade.style.display = (guest && !pending && !guestUpgradeFormOpen) ? 'flex' : 'none';
+
+  if(!guestUpgradeFormOpen && $accountEmail) $accountEmail.readOnly=false;
 
   if($accountUserBadge){
     $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
@@ -936,7 +988,9 @@ function renderAuthState(){
 
   if(logged && currentUser){
     if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || 'Traveler');
-    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(currentUser.is_registered ? 'readyRegistered' : 'readyGuest');
+    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(registered ? 'readyRegistered' : (pending ? 'readyPending' : 'readyGuest'));
+    if($accountGuestUpgradeCopy) $accountGuestUpgradeCopy.textContent = authCopy('upgradeCopy');
+    if($accountUpgradeToggle) $accountUpgradeToggle.textContent = authCopy('upgradeAction');
   }
 
   applyAuthPlannerGate(logged);
@@ -963,7 +1017,7 @@ function applyAuthLanguage(){
   set('#label-forgot-email',authCopy('email')); set('#label-reset-password',authCopy('newPassword')); set('#label-reset-password-confirm',authCopy('newPasswordConfirm'));
   set('#account-register-submit',authCopy('create')); set('#account-login-submit',authCopy('signIn')); set('#account-guest-submit',authCopy('guestContinue'));
   set('#account-forgot-password',authCopy('forgot')); set('#account-forgot-submit',authCopy('sendReset')); set('#account-forgot-back',authCopy('backToLogin')); set('#account-reset-submit',authCopy('updatePassword'));
-  set('#account-marketing-copy',authCopy('marketing'));
+  set('#account-marketing-copy',authCopy('marketing')); set('#account-guest-upgrade-copy',authCopy('upgradeCopy')); set('#account-upgrade-toggle',authCopy('upgradeAction')); set('#account-upgrade-cancel',authCopy('upgradeCancel'));
   setLegalLanguage('#account-legal-copy','#account-terms-link','#account-privacy-link');
   setLegalLanguage('#account-guest-legal-copy','#account-guest-terms-link','#account-guest-privacy-link');
   renderAuthState();
@@ -989,8 +1043,16 @@ async function registerITBMOUser(){
   try{
     const {response,data}=await postUserAction({ action:'sign_up', name,email,password,password_confirmation:passwordConfirmation, session_token:getStoredSessionToken() || null, ...authTrackingPayload(), ...legalPayload('account') });
     if(response.ok && data?.ok){
-      setAccountMessage(authCopy('confirmationSent'),'success');
-      if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+      if(currentUser && getStoredSessionToken()){
+        currentUser={...currentUser,...(data.user || {}),is_registered:false,registration_pending:true,email_verified:false};
+        guestUpgradeFormOpen=false;
+        if($accountEmail) $accountEmail.readOnly=false;
+        if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+        renderAuthState();
+      }else{
+        setAccountMessage(authCopy('confirmationSent'),'success');
+        if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+      }
       return;
     }
     if(response.status===409 || data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
@@ -1112,6 +1174,8 @@ function bindAccountListeners(){
   $accountGuestSubmit?.addEventListener('click',continueAsGuest);
   $accountForgotSubmit?.addEventListener('click',sendForgotPassword);
   $accountResetSubmit?.addEventListener('click',resetITBMOPassword);
+  $accountUpgradeToggle?.addEventListener('click',openGuestAccountUpgrade);
+  $accountUpgradeCancel?.addEventListener('click',closeGuestAccountUpgrade);
   applyAuthLanguage(); updateSaveAvailability();
 }
 
@@ -10020,8 +10084,8 @@ function astraCoachCopy(key){
   const es=getLang()==='es';
   const copy={
     account:es
-      ? ['Tu punto de partida','Crea tu cuenta o inicia sesión. Así podremos guardar este viaje de forma segura antes de comenzar.']
-      : ['Your starting point','Create your account or sign in so we can save this trip safely before you begin.'],
+      ? ['Tu punto de partida','Elige cómo continuar: crea una cuenta, inicia sesión o usa ITBMO como invitado. Con cuenta podrás recuperar tu planificación desde otros dispositivos durante el período disponible; como invitado, la recuperación queda vinculada a este dispositivo.']
+      : ['Your starting point','Choose how to continue: create an account, sign in, or use ITBMO as a guest. With an account you can recover your planning from other devices during the available period; as a guest, recovery stays linked to this device.'],
     travelers:es
       ? ['¿Quiénes vivirán este viaje?','Indica si viajas solo o acompañado. Las edades y necesidades del grupo ayudan a ITBMO a ajustar ritmos, actividades y desplazamientos.']
       : ['Who will experience this trip?','Tell us whether you are traveling solo or with others. Ages and group needs help ITBMO adjust pacing, activities and transportation.'],
