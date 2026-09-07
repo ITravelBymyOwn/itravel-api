@@ -7906,3 +7906,553 @@ body {
     min-width:0;
   }
 }
+
+/* =========================================================
+   ITBMO · PHASE 4.3 · PREMIUM SEQUENTIAL FLOW
+   Corrects excessive whitespace, stage jumps and CTA placement.
+========================================================= */
+
+:root {
+  --planner-content: 1220px;
+  --planner-radius-xl: 30px;
+  --planner-radius-lg: 24px;
+  --planner-shadow-soft: 0 18px 54px rgba(16,24,40,.06);
+}
+
+/* Tighter, editorial hero: premium without consuming a full screen. */
+.planner-experience-hero {
+  width: min(var(--planner-content), 92vw) !important;
+  margin-top: 24px !important;
+}
+
+.planner-experience-hero .planner-canvas-intro {
+  min-height: 285px !important;
+  padding: clamp(42px,5vw,64px) !important;
+  border-radius: 34px !important;
+}
+
+#planner-grid {
+  width: min(var(--planner-content),92vw) !important;
+  padding-top: 18px !important;
+  padding-bottom: 56px !important;
+}
+
+.sidebar.planner-builder-workspace {
+  gap: 18px !important;
+}
+
+.planner-stage-nav {
+  top: 78px !important;
+  margin-bottom: 0 !important;
+}
+
+/* More compact intro strip. */
+.planner-builder-intro--compact {
+  min-height: 0 !important;
+  padding: 24px 28px !important;
+  border-radius: 24px !important;
+}
+
+/* Cards use whitespace deliberately rather than expansively. */
+.planner-stage-card,
+.sidebar > .box {
+  padding: clamp(24px,2.5vw,34px) !important;
+  border-radius: var(--planner-radius-xl) !important;
+  box-shadow: var(--planner-shadow-soft) !important;
+}
+
+.planner-stage-card__head {
+  margin-bottom: 22px !important;
+}
+
+/* Account becomes a compact utility band instead of a giant stage. */
+#account-box {
+  padding: 22px 26px !important;
+}
+#account-box .planner-inline-guide--account {
+  margin-bottom: 14px !important;
+  padding: 12px 14px !important;
+}
+#account-box .planner-stage-card__number {
+  display:none !important;
+}
+#account-authenticated .account-authenticated-copy {
+  min-height: 58px;
+}
+#account-authenticated .account-authenticated-text {
+  max-width: 760px;
+}
+
+/* Enforce the actual sequential order. */
+#account-box { order:0 !important; }
+#travelers-box { order:1 !important; }
+#destinations-box { order:2 !important; }
+#preferences-stage { order:3 !important; }
+#planner-inline-info-slot { order:4 !important; }
+#planner-agent-flow { order:5 !important; }
+#reset-planner { order:6 !important; }
+
+/* Travelers: compact two-column stage on desktop. */
+#travelers-box {
+  display:grid !important;
+  grid-template-columns: minmax(0,1.05fr) minmax(320px,.95fr);
+  column-gap: 48px;
+  align-items:center;
+}
+#travelers-box .planner-stage-card__head {
+  grid-column:1;
+  margin:0 !important;
+}
+#travelers-box > label,
+#traveler-group-panel,
+#traveler-grid {
+  grid-column:2;
+}
+#travelers-box > label {
+  width:100%;
+  max-width:none !important;
+}
+#traveler-mode {
+  width:100%;
+}
+#traveler-group-panel {
+  margin-top:14px;
+}
+
+/* Route guidance: elegant and contained. */
+#destinations-box .planner-route-tip {
+  margin: -2px 0 20px !important;
+  padding: 14px 16px !important;
+}
+
+/* Destination cards are horizontal travel cards, not 1/3-width form tiles. */
+#city-list {
+  display:flex !important;
+  flex-direction:column;
+  gap:16px !important;
+}
+
+.city-row {
+  position:relative;
+  display:grid !important;
+  grid-template-columns: minmax(330px,.82fr) minmax(0,1.18fr) !important;
+  gap:0 !important;
+  width:100%;
+  min-height:0;
+  padding:0 !important;
+  overflow:visible !important;
+  border-radius:26px !important;
+  background:#fff !important;
+  box-shadow:0 14px 38px rgba(16,24,40,.055) !important;
+}
+
+.city-row::before {
+  display:none !important;
+}
+
+.city-card-main {
+  padding:24px 24px 22px;
+  border-right:1px solid rgba(16,24,40,.07);
+  background:
+    radial-gradient(circle at 100% 0%,rgba(14,164,122,.08),transparent 13rem),
+    linear-gradient(180deg,#fff 0%,#fbfdfc 100%);
+  border-radius:26px 0 0 26px;
+}
+
+.city-card-kicker {
+  display:flex;
+  align-items:center;
+  gap:9px;
+  margin-bottom:18px;
+  color:#0b8664;
+  font-size:.66rem;
+  font-weight:900;
+  letter-spacing:.16em;
+}
+.city-card-kicker span {
+  display:grid;
+  place-items:center;
+  width:30px;
+  height:30px;
+  border-radius:10px;
+  color:#fff;
+  background:linear-gradient(145deg,#08785c,#0ea47a);
+  letter-spacing:0;
+  box-shadow:0 7px 18px rgba(14,164,122,.18);
+}
+
+.city-card-fields {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:14px;
+}
+.city-card-fields > label {
+  min-width:0;
+  margin:0 !important;
+}
+.city-card-fields input,
+.city-card-fields select,
+.city-card-fields .date-picker-shell {
+  min-height:48px !important;
+  border-radius:14px !important;
+}
+
+.city-card-schedule {
+  min-width:0;
+  padding:22px 24px;
+  border-radius:0 26px 26px 0;
+  background:
+    radial-gradient(circle at 100% 0%,rgba(28,166,208,.055),transparent 13rem),
+    #fcfefe;
+}
+.city-card-schedule__head {
+  display:flex;
+  align-items:baseline;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:12px;
+}
+.city-card-schedule__head > span {
+  color:#08785c;
+  font-size:.67rem;
+  font-weight:900;
+  letter-spacing:.15em;
+}
+.city-card-schedule__head > small {
+  color:#98a2b3;
+  font-size:.72rem;
+}
+.city-card-schedule__body .hours-block {
+  width:100% !important;
+  margin:0 !important;
+  padding:0 !important;
+  border:0 !important;
+}
+.city-card-schedule .time-hint {
+  margin:0 0 10px !important;
+  font-size:.74rem !important;
+}
+.city-card-schedule .same-schedule-toggle {
+  margin-bottom:12px !important;
+}
+.city-card-schedule .hours-header,
+.city-card-schedule .hours-day {
+  grid-template-columns:48px minmax(0,1fr) minmax(0,1fr) !important;
+  gap:10px !important;
+}
+.city-card-schedule .hours-day {
+  padding:6px 0;
+}
+
+.city-row .remove {
+  top:14px !important;
+  right:14px !important;
+  z-index:5;
+}
+
+#destinations-box .row-actions {
+  margin:18px 0 0 !important;
+}
+
+/* Primary route actions remain physically inside Destinations. */
+.planner-route-actions {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(300px,390px);
+  gap:24px;
+  align-items:center;
+  margin-top:20px;
+  padding:22px 24px;
+  border:1px solid rgba(14,164,122,.13);
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 100% 0%,rgba(14,164,122,.10),transparent 14rem),
+    linear-gradient(135deg,#f9fdfb,#f4fbf8);
+}
+.planner-route-actions__copy span {
+  display:block;
+  margin-bottom:5px;
+  color:#0b8664;
+  font-size:.66rem;
+  font-weight:900;
+  letter-spacing:.14em;
+}
+.planner-route-actions__copy strong {
+  display:block;
+  color:#101828;
+  font-size:1rem;
+}
+.planner-route-actions__copy small {
+  display:block;
+  margin-top:6px;
+  color:#667085;
+  line-height:1.45;
+}
+.planner-route-actions__buttons {
+  display:grid;
+  gap:10px;
+}
+.planner-route-actions__buttons .btn {
+  width:100% !important;
+  min-height:52px;
+  border-radius:16px !important;
+  margin:0 !important;
+}
+.planner-start-cta:not(:disabled) {
+  background:linear-gradient(105deg,#08785c,#0ea47a) !important;
+  box-shadow:0 14px 28px rgba(14,164,122,.19) !important;
+}
+.planner-start-cta:disabled {
+  background:#e8eef3 !important;
+  color:#98a2b3 !important;
+  box-shadow:none !important;
+}
+
+/* Preferences gets a purposeful action area. */
+#preferences-stage {
+  margin-top:0 !important;
+}
+#preferences-stage .preferences-stage-actions {
+  margin-top:16px !important;
+  padding-top:16px;
+  border-top:1px solid rgba(16,24,40,.07);
+}
+#preferences-stage .preferences-continue {
+  min-width:280px;
+}
+
+/* Info Chat CTA: intentionally easy to discover, but still product UI—not an ad. */
+#info-chat-floating {
+  min-width:250px !important;
+  min-height:56px !important;
+  padding:0 22px !important;
+  border-radius:18px !important;
+  color:#fff !important;
+  background:
+    radial-gradient(circle at 95% 0%,rgba(255,255,255,.20),transparent 8rem),
+    linear-gradient(105deg,#08785c,#0ea47a 58%,#18a9bd) !important;
+  border:1px solid rgba(255,255,255,.24) !important;
+  box-shadow:0 16px 36px rgba(14,164,122,.22) !important;
+  font-size:1rem !important;
+  font-weight:900 !important;
+}
+#info-chat-floating.is-unlocked {
+  animation:itbmoInfoGlow 2.8s ease-in-out infinite;
+}
+#info-chat-floating.is-locked {
+  background:linear-gradient(105deg,#98a2b3,#b6c3cc) !important;
+  box-shadow:none !important;
+}
+@keyframes itbmoInfoGlow {
+  0%,100% { transform:translateY(0); box-shadow:0 16px 36px rgba(14,164,122,.18); }
+  50% { transform:translateY(-2px); box-shadow:0 19px 42px rgba(14,164,122,.29); }
+}
+
+/* Inline Info Chat lives immediately below Personalize. */
+.planner-inline-info-slot {
+  width:100%;
+}
+.planner-inline-info-slot:empty {
+  display:none;
+}
+.planner-inline-info-slot .info-chat-modal {
+  position:relative !important;
+  inset:auto !important;
+  z-index:20 !important;
+  display:none;
+  width:100% !important;
+  min-width:0 !important;
+  max-width:none !important;
+  min-height:0 !important;
+  max-height:none !important;
+  margin:0 !important;
+  resize:none !important;
+  overflow:hidden !important;
+  visibility:hidden;
+  opacity:0;
+  pointer-events:none;
+  transform:translateY(-8px);
+  border-radius:28px !important;
+  border:1px solid rgba(14,164,122,.14) !important;
+  box-shadow:0 20px 58px rgba(16,24,40,.07) !important;
+  transition:opacity .22s ease,transform .22s ease,visibility .22s ease;
+}
+.planner-inline-info-slot .info-chat-modal.active {
+  display:flex !important;
+  visibility:visible;
+  opacity:1;
+  pointer-events:auto;
+  transform:translateY(0);
+}
+.planner-inline-info-slot .info-chat-panel {
+  width:100% !important;
+  height:auto !important;
+  min-height:390px !important;
+  max-height:none !important;
+}
+.planner-inline-info-slot .info-chat-header {
+  cursor:default !important;
+  touch-action:auto !important;
+  min-height:72px !important;
+}
+.planner-inline-info-slot .info-chat-modal .chat-messages {
+  min-height:220px !important;
+  max-height:420px !important;
+}
+.planner-inline-info-slot .info-chat-modal.is-minimized {
+  width:100% !important;
+  max-height:78px !important;
+}
+
+/* Agent chat appears directly after Personalize; no giant blank final stage. */
+.planner-agent-flow {
+  width:100%;
+}
+.planner-agent-flow #chat-container {
+  width:100%;
+  height:auto !important;
+  min-height:0 !important;
+  margin:0 !important;
+  border-radius:26px !important;
+  box-shadow:0 18px 52px rgba(16,24,40,.06);
+}
+.planner-agent-flow #chat-container[style*="display:none"],
+.planner-agent-flow #chat-container[style*="display: none"] {
+  display:none !important;
+}
+.planner-agent-flow #chat-container:not([style*="display:none"]):not([style*="display: none"]) {
+  min-height:320px !important;
+}
+
+/* Reset is a secondary utility, never a floating stage. */
+#reset-planner {
+  order:6 !important;
+  margin:0 auto !important;
+  min-height:46px;
+}
+
+/* The lower itinerary surface exists only after real generation. */
+.planner-post-generation {
+  display:none !important;
+  margin-top:18px !important;
+}
+.planner-post-generation.is-ready {
+  display:block !important;
+}
+.planner-post-generation__intro,
+.planner-post-generation__head {
+  display:none !important;
+}
+
+/* Keep post-generation CTA/export content compact and centered. */
+.planner-post-generation.is-ready {
+  padding:28px !important;
+}
+
+/* Smooth progressive reveal. */
+#preferences-stage.is-stage-active,
+.planner-inline-info-slot .info-chat-modal.active,
+.planner-agent-flow #chat-container:not([style*="display:none"]):not([style*="display: none"]) {
+  animation:itbmoStageReveal .34s cubic-bezier(.2,.75,.25,1) both;
+}
+@keyframes itbmoStageReveal {
+  from { opacity:0; transform:translateY(14px); }
+  to { opacity:1; transform:translateY(0); }
+}
+
+@media (max-width: 980px) {
+  #travelers-box {
+    display:block !important;
+  }
+  #travelers-box .planner-stage-card__head {
+    margin-bottom:20px !important;
+  }
+  .city-row {
+    grid-template-columns:1fr !important;
+  }
+  .city-card-main {
+    border-right:0;
+    border-bottom:1px solid rgba(16,24,40,.07);
+    border-radius:24px 24px 0 0;
+  }
+  .city-card-schedule {
+    border-radius:0 0 24px 24px;
+  }
+  .planner-route-actions {
+    grid-template-columns:1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .planner-experience-hero .planner-canvas-intro {
+    min-height:250px !important;
+    padding:32px 24px !important;
+  }
+  .city-card-fields {
+    grid-template-columns:1fr !important;
+  }
+  .city-card-main,
+  .city-card-schedule {
+    padding:20px 17px;
+  }
+  .city-card-schedule__head {
+    display:block;
+  }
+  .city-card-schedule__head small {
+    display:block;
+    margin-top:5px;
+  }
+  .planner-route-actions {
+    padding:19px 17px;
+  }
+  .planner-route-actions__buttons {
+    width:100%;
+  }
+  #info-chat-floating {
+    width:100% !important;
+    min-width:0 !important;
+  }
+  .planner-inline-info-slot .info-chat-panel {
+    min-height:330px !important;
+  }
+}
+
+
+/* Info Chat discovery callout inside Personalize. */
+.planner-info-chat-callout {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:24px;
+  align-items:center;
+  margin:18px 0 22px;
+  padding:18px 20px;
+  border:1px solid rgba(14,164,122,.15);
+  border-radius:22px;
+  background:
+    radial-gradient(circle at 92% 0%,rgba(25,174,195,.11),transparent 13rem),
+    linear-gradient(135deg,#f7fdfa,#f3fbfb);
+}
+.planner-info-chat-callout__copy span {
+  display:block;
+  margin-bottom:4px;
+  color:#0b8664;
+  font-size:.64rem;
+  font-weight:900;
+  letter-spacing:.14em;
+}
+.planner-info-chat-callout__copy strong {
+  display:block;
+  color:#101828;
+  font-size:1rem;
+}
+.planner-info-chat-callout__copy small {
+  display:block;
+  max-width:720px;
+  margin-top:5px;
+  color:#667085;
+  line-height:1.45;
+}
+@media (max-width:720px){
+  .planner-info-chat-callout {
+    grid-template-columns:1fr;
+  }
+}
