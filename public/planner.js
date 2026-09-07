@@ -6672,6 +6672,177 @@ async function runPaidGeneration({manualRetry=false}={}){
   }
 }
 
+
+/* =========================================================
+   ITBMO · JOURNEY HOME · PHASE 4
+   Returning generated trips are presented as choices instead of being
+   silently restored. Interrupted paid generations retain legacy recovery.
+========================================================= */
+let journeyHomeLatestTrip = null;
+let journeyHistoryTrips = [];
+let journeyHomeBusy = false;
+
+function _journeyEsc_(value){
+  return String(value ?? '').replace(/[&<>"']/g,ch=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+  }[ch]));
+}
+function _journeyDestinations_(trip){
+  return (Array.isArray(trip?.destinations)?trip.destinations:[])
+    .map(d=>String(d?.city||'').trim()).filter(Boolean);
+}
+function _journeyDateLabel_(trip){
+  const ds=Array.isArray(trip?.destinations)?trip.destinations:[];
+  const dates=ds.map(d=>d?.base_date||d?.baseDate||'').filter(Boolean);
+  const fmt=(raw)=>{
+    const value=String(raw||'').trim();
+    let date=null;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(value)) date=new Date(value+'T12:00:00');
+    else if(/^\d{2}\/\d{2}\/\d{4}$/.test(value)){
+      const [dd,mm,yyyy]=value.split('/'); date=new Date(`${yyyy}-${mm}-${dd}T12:00:00`);
+    }
+    if(!date || Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat(getLang()==='es'?'es-CR':'en-US',{day:'numeric',month:'short',year:'numeric'}).format(date);
+  };
+  return dates.length ? fmt(dates[0]) : '';
+}
+function _journeyTripLabel_(trip){
+  const cities=_journeyDestinations_(trip);
+  return cities.join(' · ') || (getLang()==='es'?'Viaje ITBMO':'ITBMO trip');
+}
+function _journeyTripMeta_(trip){
+  const cities=_journeyDestinations_(trip);
+  const days=(Array.isArray(trip?.destinations)?trip.destinations:[])
+    .reduce((sum,d)=>sum+(Number(d?.days)||0),0);
+  const date=_journeyDateLabel_(trip);
+  const parts=[];
+  if(date) parts.push(date);
+  if(cities.length) parts.push(`${cities.length} ${getLang()==='es'?(cities.length===1?'ciudad':'ciudades'):(cities.length===1?'city':'cities')}`);
+  if(days) parts.push(`${days} ${getLang()==='es'?(days===1?'día':'días'):(days===1?'day':'days')}`);
+  return parts.join(' · ');
+}
+function _journeyCopy_(){
+  const es=getLang()==='es';
+  return es ? {
+    eyebrow:'TU VIAJE SIGUE AQUÍ',
+    title:'¿Qué quieres hacer hoy?',
+    copy:'Continúa donde lo dejaste o empieza una nueva aventura. Tus viajes anteriores permanecen disponibles para que vuelvas a ellos cuando los necesites.',
+    resumeKicker:'ÚLTIMO VIAJE',
+    resumeTitle:'Continuar con mi último viaje',
+    resumeAction:'Abrir Trip Workspace',
+    newKicker:'NUEVA AVENTURA',
+    newTitle:'Planificar un nuevo viaje',
+    newCopy:'Empieza desde cero sin borrar los viajes que ya creaste.',
+    newAction:'Crear nuevo itinerario',
+    historyEyebrow:'TU HISTORIAL',
+    historyTitle:'Mis viajes',
+    tripCount:n=>`${n} ${n===1?'viaje guardado':'viajes guardados'}`,
+    open:'Abrir viaje',
+    myTrips:'Mis viajes'
+  } : {
+    eyebrow:'YOUR TRIP IS STILL HERE',
+    title:'What would you like to do today?',
+    copy:'Continue where you left off or start a new adventure. Your previous trips stay available whenever you need them.',
+    resumeKicker:'LATEST TRIP',
+    resumeTitle:'Continue my latest trip',
+    resumeAction:'Open Trip Workspace',
+    newKicker:'NEW ADVENTURE',
+    newTitle:'Plan a new trip',
+    newCopy:'Start from scratch without deleting the trips you already created.',
+    newAction:'Create new itinerary',
+    historyEyebrow:'YOUR HISTORY',
+    historyTitle:'My trips',
+    tripCount:n=>`${n} saved ${n===1?'trip':'trips'}`,
+    open:'Open trip',
+    myTrips:'My trips'
+  };
+}
+function _journeyApplyCopy_(){
+  const c=_journeyCopy_();
+  const set=(id,value)=>{const el=qs('#'+id);if(el)el.textContent=value;};
+  set('journey-home-eyebrow',c.eyebrow);set('journey-home-title',c.title);set('journey-home-copy',c.copy);
+  set('journey-home-resume-kicker',c.resumeKicker);set('journey-home-resume-title',c.resumeTitle);
+  set('journey-home-new-kicker',c.newKicker);set('journey-home-new-title',c.newTitle);set('journey-home-new-copy',c.newCopy);
+  set('journey-history-eyebrow',c.historyEyebrow);set('journey-history-title',c.historyTitle);set('planner-my-trips-label',c.myTrips);
+  const resumeAction=qs('#journey-home-resume-action');if(resumeAction)resumeAction.innerHTML=`${_journeyEsc_(c.resumeAction)} <i aria-hidden="true">→</i>`;
+  const newAction=qs('#journey-home-new-action');if(newAction)newAction.innerHTML=`${_journeyEsc_(c.newAction)} <i aria-hidden="true">→</i>`;
+}
+async function _journeyLoadHistory_(){
+  const token=getStoredSessionToken();
+  if(!token) return [];
+  try{
+    const data=await tripApi({action:'list',session_token:token,limit:12});
+    journeyHistoryTrips=Array.isArray(data?.trips)?data.trips.filter(t=>t?.status==='generated'):[];
+  }catch(err){
+    console.warn('[JOURNEY HISTORY]',err);
+    journeyHistoryTrips=journeyHomeLatestTrip?[journeyHomeLatestTrip]:[];
+  }
+  return journeyHistoryTrips;
+}
+function _journeyRenderHistory_(){
+  const c=_journeyCopy_(),section=qs('#journey-history'),grid=qs('#journey-history-grid'),count=qs('#journey-history-count');
+  if(!section||!grid)return;
+  const trips=journeyHistoryTrips.filter(t=>t?.id);
+  section.hidden=trips.length===0;
+  if(count)count.textContent=c.tripCount(trips.length);
+  grid.innerHTML='';
+  trips.slice(0,9).forEach((trip,index)=>{
+    const card=document.createElement('button');
+    card.type='button';card.className='journey-trip-card';card.dataset.tripId=trip.id;
+    card.innerHTML=`<span class="journey-trip-card__number">${String(index+1).padStart(2,'0')}</span><strong>${_journeyEsc_(_journeyTripLabel_(trip))}</strong><small>${_journeyEsc_(_journeyTripMeta_(trip))}</small><span class="journey-trip-card__open">${_journeyEsc_(c.open)} →</span>`;
+    card.addEventListener('click',()=>_journeyOpenTrip_(trip.id));
+    grid.appendChild(card);
+  });
+}
+async function showJourneyReturnGate(trip){
+  if(!trip?.id)return;
+  journeyHomeLatestTrip=trip;
+  _journeyApplyCopy_();
+  const gate=qs('#journey-home');
+  if(!gate)return;
+  const meta=qs('#journey-home-resume-meta');if(meta)meta.textContent=`${_journeyTripLabel_(trip)}${_journeyTripMeta_(trip)?' · '+_journeyTripMeta_(trip):''}`;
+  gate.hidden=false;gate.setAttribute('aria-hidden','false');document.body.classList.add('journey-home-open');
+  const myTrips=qs('#planner-my-trips');if(myTrips)myTrips.hidden=false;
+  await _journeyLoadHistory_();_journeyRenderHistory_();
+}
+function hideJourneyReturnGate(){
+  const gate=qs('#journey-home');if(gate){gate.hidden=true;gate.setAttribute('aria-hidden','true');}
+  document.body.classList.remove('journey-home-open');
+}
+async function _journeyOpenTrip_(tripId){
+  if(journeyHomeBusy||!tripId)return;
+  journeyHomeBusy=true;
+  try{
+    const token=getStoredSessionToken();
+    const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+    const trip=data?.trip;
+    if(!trip||!_hydrateGenerationTrip_(trip))throw new Error('TRIP_NOT_AVAILABLE');
+    let paymentStatus=null;
+    try{paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});applyInfoChatStatus(paymentStatus);}catch(_){}
+    setExportToolbarVisibility(true);setPlanningChatLocked(true);hideJourneyReturnGate();
+    openImmersiveItinerary();
+  }catch(err){console.warn('[JOURNEY OPEN]',err);}
+  finally{journeyHomeBusy=false;}
+}
+function _journeyStartNew_(){
+  /* This is intentionally NOT Reset: no trip is archived or deleted.
+     We only detach the old active-trip pointer and reload a clean Planner. */
+  storeActiveTripId(null);
+  try{sessionStorage.removeItem('itbmo_trip_workspace_snapshot_v1');}catch(_){}
+  const url=new URL(window.location.href);
+  url.searchParams.set('mode','new');
+  window.location.href=url.toString();
+}
+function bindJourneyHome(){
+  qs('#journey-home-resume')?.addEventListener('click',()=>_journeyOpenTrip_(journeyHomeLatestTrip?.id));
+  qs('#journey-home-new')?.addEventListener('click',_journeyStartNew_);
+  qs('#planner-my-trips')?.addEventListener('click',async()=>{
+    if(journeyHomeLatestTrip){await showJourneyReturnGate(journeyHomeLatestTrip);return;}
+    const trips=await _journeyLoadHistory_();
+    if(trips[0]){journeyHomeLatestTrip=trips[0];await showJourneyReturnGate(trips[0]);}
+  });
+}
+
 async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   try{
@@ -6695,6 +6866,19 @@ async function restorePaidGenerationIfNeeded(){
     }
     if(generationResetInProgress) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
+
+    const plannerMode=new URLSearchParams(window.location.search).get('mode');
+    if(trip.status==='generated'){
+      if(plannerMode==='new'){
+        storeActiveTripId(null);
+        const myTrips=qs('#planner-my-trips'); if(myTrips) myTrips.hidden=false;
+        _journeyLoadHistory_().then(()=>_journeyRenderHistory_()).catch(()=>{});
+        return;
+      }
+      await showJourneyReturnGate(trip);
+      return;
+    }
+
     if(!_hydrateGenerationTrip_(trip)) return;
 
     let paymentStatus=null;
@@ -10155,6 +10339,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   applyAuthPlannerGate(false);
 
   bindAccountListeners();
+  bindJourneyHome();
   restoreITBMOSession();
 
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
