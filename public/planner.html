@@ -81,7 +81,7 @@
         </div>
 
         <div id="account-guest">
-          <div class="account-mode-actions">
+          <div class="account-mode-actions" id="account-mode-actions">
             <button class="btn primary account-mode-btn" id="account-register-toggle" type="button">Create account</button>
             <button class="btn ghost account-mode-btn" id="account-login-toggle" type="button">Sign in</button>
           </div>
@@ -128,6 +128,7 @@
             </label>
 
             <button class="btn primary w-100" id="account-register-submit" type="button">Create account</button>
+            <button class="btn ghost w-100" id="account-upgrade-cancel" type="button" style="display:none; margin-top:.55rem;">Cancel</button>
           </div>
 
           <div id="account-login-panel" class="account-panel" style="display:none;">
@@ -205,9 +206,13 @@
         </div>
 
         <div id="account-authenticated" class="account-authenticated" style="display:none;">
-          <div>
+          <div class="account-authenticated-copy">
             <strong id="account-welcome">Welcome back.</strong>
             <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
+          </div>
+          <div id="account-guest-upgrade" class="account-guest-upgrade" style="display:none;">
+            <p id="account-guest-upgrade-copy">Create an account to access your planning from other devices during the available recovery period.</p>
+            <button class="btn primary" id="account-upgrade-toggle" type="button">Create account</button>
           </div>
         </div>
       </section>
