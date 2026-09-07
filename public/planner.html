@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=94" />
+  <link rel="stylesheet" href="./planner.css?v=95" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -135,9 +135,9 @@
     <!-- SIDEBAR -->
     <section class="sidebar planner-builder-workspace">
       <nav class="planner-stage-nav" aria-label="Flujo de planificación">
-        <span class="planner-stage-nav__item is-active"><b>01</b><span id="planner-stage-route-label">Ruta</span></span>
+        <span class="planner-stage-nav__item is-active"><b>01</b><span id="planner-stage-travelers-label">Viajeros</span></span>
         <span class="planner-stage-nav__line" aria-hidden="true"></span>
-        <span class="planner-stage-nav__item"><b>02</b><span id="planner-stage-travelers-label">Viajeros</span></span>
+        <span class="planner-stage-nav__item"><b>02</b><span id="planner-stage-route-label">Ruta</span></span>
         <span class="planner-stage-nav__line" aria-hidden="true"></span>
         <span class="planner-stage-nav__item"><b>03</b><span id="planner-stage-personalize-label">Personaliza</span></span>
         <span class="planner-stage-nav__line" aria-hidden="true"></span>
@@ -321,7 +321,7 @@
       <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
       <section class="box planner-stage-card planner-stage-card--travelers" id="travelers-box">
         <div class="planner-stage-card__head">
-          <div class="planner-stage-card__index">02</div>
+          <div class="planner-stage-card__index">01</div>
           <div>
             <span class="planner-stage-card__eyebrow" id="planner-travelers-eyebrow">QUIÉN VIAJA</span>
             <h3>Viajeros</h3>
@@ -412,7 +412,7 @@
 
       <section class="box planner-stage-card planner-stage-card--destinations" id="destinations-box">
         <div class="planner-stage-card__head">
-          <div class="planner-stage-card__index">01</div>
+          <div class="planner-stage-card__index">02</div>
           <div>
             <span class="planner-stage-card__eyebrow" id="planner-route-eyebrow">CONSTRUYE TU RUTA</span>
             <h3>Destinos</h3>
@@ -428,14 +428,17 @@
           <button class="btn ghost" id="add-city-btn">+ Agregar destino</button>
         </div>
 
-        <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
-        <!-- <button class="btn primary w-100" id="save-destinations">Guardar destinos</button> -->
-        <!-- 🆕 Botón de reinicio reubicado -->
-        <!--
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-          Reiniciar planificación
-        </button>
-        -->
+        <div class="planner-route-actions" id="planner-route-actions">
+          <div class="planner-route-actions__copy">
+            <span id="planner-save-eyebrow">CUANDO TU RUTA ESTÉ LISTA</span>
+            <strong id="planner-save-title">Confirma la ruta para continuar.</strong>
+            <small id="planner-save-subtitle">Después podrás iniciar la planificación sin perder de vista esta sección.</small>
+          </div>
+          <div class="planner-route-actions__buttons">
+            <button class="btn primary" id="save-destinations" disabled>Guardar destinos</button>
+            <button id="start-planning" class="btn primary planner-start-cta" disabled>Continuar: iniciar planificación →</button>
+          </div>
+        </div>
       </section>
 
       <section class="box special-conditions preferences-stage is-stage-hidden planner-stage-card planner-stage-card--preferences" id="preferences-stage" aria-hidden="true">
@@ -446,6 +449,18 @@
           <p class="preferences-stage-intro" id="preferences-stage-intro">
             Usa Info Chat si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntanos cómo quieres vivir el viaje.
           </p>
+
+          <div class="planner-info-chat-callout">
+            <div class="planner-info-chat-callout__copy">
+              <span id="planner-info-chat-kicker">INVESTIGA ANTES DE DECIDIR</span>
+              <strong id="planner-info-chat-title">¿Te falta contexto sobre tu destino?</strong>
+              <small id="planner-info-chat-copy">Usa Info Chat para consultar zonas, transporte, barrios, gastronomía y otros datos útiles antes de definir tus preferencias.</small>
+            </div>
+            <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
+                  title="Info Chat unlocks after payment" aria-disabled="true" disabled>
+            🔒 Info Chat
+          </button>
+          </div>
         </div>
 
         <div class="preferences-stage-field-title" id="preferences-stage-field-title">
@@ -470,14 +485,20 @@
         </div>
       </section>
 
-      <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
-      <div class="planner-stage-transition planner-stage-transition--save">
-        <div>
-          <span id="planner-save-eyebrow">CUANDO TU RUTA ESTÉ LISTA</span>
-          <strong id="planner-save-title">Confirma la ruta para personalizar el viaje.</strong>
+      <div id="planner-inline-info-slot" class="planner-inline-info-slot" aria-live="polite"></div>
+
+      <div class="planner-agent-flow" id="planner-agent-flow">
+<div id="chat-container" class="chat" style="display:none;">
+          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+          <div class="chat-input">
+            <textarea id="chat-input" rows="2" placeholder="Escribe tu mensaje..."></textarea>
+            <button id="send-btn" class="btn primary">Enviar</button>
+          </div>
         </div>
-        <button class="btn primary w-100" id="save-destinations" disabled>Guardar destinos</button>
       </div>
+
+      <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
+      
       <!-- 🆕 Botón de reinicio reubicado -->
       <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
         Reiniciar planificación
@@ -488,42 +509,13 @@
 
     <!-- MAIN -->
     <main class="main">
-      
-      </div>
-      <section class="box itinerary-section planner-stage-card planner-stage-card--create">
-        <div class="planner-stage-card__head planner-stage-card__head--create">
+      <section class="box itinerary-section planner-stage-card planner-stage-card--create planner-post-generation" id="planner-post-generation">
+        <div class="planner-stage-card__head planner-stage-card__head--create planner-post-generation__intro">
           <div class="planner-stage-card__index">04</div>
           <div>
             <span class="planner-stage-card__eyebrow" id="planner-create-eyebrow">LISTO PARA CREAR</span>
             <h3 id="planner-create-title">Tu viaje toma forma aquí.</h3>
             <p id="planner-create-copy">Cuando completes la ruta y la personalización, ITBMO organizará el itinerario ciudad por ciudad y día por día.</p>
-          </div>
-        </div>
-
-        <!-- ✅ Header: Título + botón Info Chat arriba (como el HTML donde sí se veía) -->
-        <div class="itinerary-head">
-          <h2>Itinerario</h2>
-          <div class="planner-create-status" id="planner-create-status">
-            <span class="planner-create-status__dot" aria-hidden="true"></span>
-            <span id="planner-create-status-copy">Completa los pasos anteriores para comenzar.</span>
-          </div>
-
-          <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
-          <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
-                  title="Info Chat unlocks after payment" aria-disabled="true" disabled>
-            🔒 Info Chat
-          </button>
-        </div>
-
-        <div class="itinerary-actions">
-          <button id="start-planning" class="btn primary" disabled>Continuar: iniciar planificación →</button>
-        </div>
-
-        <div id="chat-container" class="chat" style="display:none;">
-          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
-          <div class="chat-input">
-            <textarea id="chat-input" rows="2" placeholder="Escribe tu mensaje..."></textarea>
-            <button id="send-btn" class="btn primary">Enviar</button>
           </div>
         </div>
 
@@ -1206,7 +1198,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=96"></script>
+<script src="./planner.js?v=97"></script>
  
 </body>
 </html>
