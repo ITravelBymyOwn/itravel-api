@@ -1243,6 +1243,90 @@ async function restoreITBMOSession(){
   finally{ authReady=true; renderAuthState(); if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0); }
 }
 
+function clearPlannerUIForLogout(){
+  const tripIdToClear=currentTripId || getStoredActiveTripId();
+
+  // Logout is NOT a trip reset: do not archive or modify the trip in Supabase.
+  // We only remove private trip state from this browser so another person using
+  // the same device cannot see the previous user's itinerary while signed out.
+  clearInfoChatStateForTrip(tripIdToClear);
+  _clearPostPaymentProgressLocal_(tripIdToClear);
+  closeAstraCoach({remember:false});
+
+  savedDestinations=[];
+  itineraries={};
+  cityMeta={};
+  session=[];
+  hasSavedOnce=false;
+  pendingChange=null;
+  saveLockWarningAccepted=false;
+  paymentWarningAcceptedTripId=null;
+  paymentGateSatisfiedTripId=null;
+  generationRecoveryState=null;
+  paidGenerationRunning=false;
+  planningStarted=false;
+  metaProgressIndex=0;
+  collectingHotels=false;
+  isItineraryLocked=false;
+  activeCity=null;
+  agentConversationLang=null;
+  preferencesStageTripId=null;
+  preferencesConfirmedTripId=null;
+  currentTripId=null;
+  storeActiveTripId(null);
+
+  if($cityList){
+    $cityList.innerHTML='';
+    addCityRow();
+  }
+  if($tabs) $tabs.innerHTML='';
+  if($itWrap) $itWrap.innerHTML='';
+  closeImmersiveItinerary();
+  syncImmersiveItineraryLauncher();
+
+  if($chatBox) $chatBox.style.display='none';
+  if($chatM) $chatM.innerHTML='';
+  setPlanningChatLocked(true);
+
+  hidePreferencesStage({reset:true});
+  if($preferencesField){
+    $preferencesField.value='';
+    $preferencesField.style.height='';
+    $preferencesField.style.overflowY='hidden';
+  }
+
+  resetTravelersUI();
+  if(typeof plannerState !== 'undefined' && plannerState){
+    plannerState.destinations=[];
+    plannerState.specialConditions='';
+    plannerState.travelers={adults:1,young:0,children:0,infants:0,seniors:0};
+    plannerState.travelerProfiles=null;
+    plannerState.budget='';
+    plannerState.currency='USD';
+    plannerState.collectingItineraryLang=false;
+    plannerState.itineraryLang='';
+    plannerState.forceReplan={};
+  }
+
+  if($start){
+    delete $start.dataset.itbmoConsumed;
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+  }
+  setExportToolbarVisibility(false);
+  setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+  if($affiliateAfter){
+    $affiliateAfter.innerHTML='';
+    $affiliateAfter.style.display='none';
+  }
+  try{ if($overlayWOW) $overlayWOW.style.display='none'; }catch(_){}
+  qsa('.date-tooltip').forEach(node=>node.remove());
+
+  if($sidebar) $sidebar.classList.remove('disabled');
+  setSavedSetupLocked(false);
+  updateAddCityButtonState();
+}
+
 async function logoutITBMOUser(){
   const token=getStoredSessionToken();
   setAuthBusy(true);
@@ -1252,11 +1336,15 @@ async function logoutITBMOUser(){
   finally{
     stopPendingVerificationWatch();
     clearSessionToken();
+    clearPlannerUIForLogout();
     currentUser=null;
     authReady=true;
     guestUpgradeFormOpen=false;
     setAccountMessage('');
-    showAccountMode('register');
+
+    // Signed-out state starts neutral: show the three account choices, but do
+    // not leave Create account / Sign in / Guest fields expanded automatically.
+    showAccountMode(null);
     renderAuthState();
     setAuthBusy(false);
   }
