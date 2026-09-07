@@ -2495,7 +2495,10 @@ function bindPlannerLanguageCapability(){
    - startPlanning() itself is intentionally left unchanged.
    ========================================================= */
 function setSavedSetupLocked(locked){
-  ['#account-box','#travelers-box','#destinations-box'].forEach(sel=>{
+  // Auth/account controls must remain usable after Save Destinations.
+  // In particular, Sign out must never become inert because trip setup is locked.
+  // Only trip-definition sections are frozen here; Auth has its own independent gate.
+  ['#travelers-box','#destinations-box'].forEach(sel=>{
     const el=qs(sel);
     if(!el) return;
     el.classList.toggle('is-setup-locked',!!locked);
