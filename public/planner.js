@@ -855,6 +855,62 @@ function updateSaveAvailability(){
   $save.setAttribute('aria-disabled', String($save.disabled));
 }
 
+/* =========================================================
+   AUTH GATE — additive safety layer only
+   ---------------------------------------------------------
+   The Planner must start locked until ITBMO has a valid user
+   (registered account or guest session). This gate does NOT
+   replace the Planner's existing saved-trip / generation locks.
+   When auth is released, any existing setup lock remains intact.
+   ========================================================= */
+function ensureAuthPlannerGateStyles(){
+  if(document.getElementById('itbmo-auth-gate-style')) return;
+  const style=document.createElement('style');
+  style.id='itbmo-auth-gate-style';
+  style.textContent=`
+    #travelers-box.itbmo-auth-locked,
+    #destinations-box.itbmo-auth-locked,
+    #preferences-stage.itbmo-auth-locked{
+      opacity:.52;
+      filter:saturate(.65);
+      pointer-events:none;
+      user-select:none;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function applyAuthPlannerGate(unlocked){
+  ensureAuthPlannerGateStyles();
+  const authLocked=!unlocked;
+
+  ['#travelers-box','#destinations-box','#preferences-stage'].forEach(sel=>{
+    const el=qs(sel);
+    if(!el) return;
+    el.classList.toggle('itbmo-auth-locked',authLocked);
+
+    if(authLocked){
+      try{ el.inert=true; }catch(_){}
+      el.setAttribute('aria-disabled','true');
+    }else{
+      // Never undo the existing post-Save Destinations setup lock.
+      const setupLocked=el.classList.contains('is-setup-locked');
+      try{ el.inert=setupLocked; }catch(_){}
+      el.setAttribute('aria-disabled',setupLocked?'true':'false');
+    }
+  });
+
+  // These controls already have their own Planner-state rules.
+  // Auth can force them OFF, but never force them ON.
+  if(authLocked){
+    if($save){ $save.disabled=true; $save.setAttribute('aria-disabled','true'); }
+    if($start){ $start.disabled=true; $start.setAttribute('aria-disabled','true'); }
+    if($resetBtn){ $resetBtn.disabled=true; $resetBtn.setAttribute('aria-disabled','true'); }
+  }else{
+    updateSaveAvailability();
+  }
+}
+
 function showAccountMode(mode){
   if(currentUser) return;
   const panels = { register:$accountRegisterPanel, login:$accountLoginPanel, guest:$accountGuestPanel, forgot:$accountForgotPanel, reset:$accountResetPanel };
@@ -863,18 +919,27 @@ function showAccountMode(mode){
 }
 
 function renderAuthState(){
-  const logged = !!currentUser;
+  const logged = Boolean(currentUser && getStoredSessionToken());
   if($accountGuest) $accountGuest.style.display = logged ? 'none' : 'block';
   if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
+
   if($accountUserBadge){
     $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
-    const label = currentUser?.is_registered ? (currentUser.email || currentUser.first_name || '') : (currentUser.first_name || currentUser.email || '');
-    $accountUserBadge.textContent = logged ? label : '';
+    let label='';
+    if(logged && currentUser){
+      label=currentUser.is_registered
+        ? (currentUser.email || currentUser.first_name || '')
+        : (currentUser.first_name || currentUser.email || '');
+    }
+    $accountUserBadge.textContent=label;
   }
-  if(logged){
+
+  if(logged && currentUser){
     if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || 'Traveler');
-    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(currentUser?.is_registered ? 'readyRegistered' : 'readyGuest');
+    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(currentUser.is_registered ? 'readyRegistered' : 'readyGuest');
   }
+
+  applyAuthPlannerGate(logged);
   updateSaveAvailability();
   if(logged) scheduleAstraCoach('travelers','#travelers-box',520);
 }
@@ -10061,6 +10126,9 @@ function initAstraCoach(){
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+  // Security/UX default: Planner is locked before any async session restore.
+  applyAuthPlannerGate(false);
 
   bindAccountListeners();
   restoreITBMOSession();
