@@ -3229,6 +3229,7 @@ let immersiveItineraryDay = null;
 let immersiveTouchStartX = null;
 let immersiveTouchStartY = null;
 let immersiveRenderFrame = null;
+let immersiveItineraryMode = 'itinerary';
 
 function scheduleImmersiveItineraryRender(){
   if(immersiveRenderFrame!=null){
@@ -3245,40 +3246,61 @@ function scheduleImmersiveItineraryRender(){
 function _immersiveViewerCopy_(){
   const es = getLang()==='es';
   return es ? {
-    ctaTitle:'Explora tu itinerario día a día',
-    ctaSub:'Abre cada ciudad y recorre cada día en una vista inmersiva.',
+    ctaTitle:'Explora y prepara tu viaje',
+    ctaSub:'Recorre tu itinerario día a día y, cuando quieras, prepara lo necesario para vivirlo.',
     citySingular:'ciudad',
     cityPlural:'ciudades',
     daySingular:'día',
     dayPlural:'días',
     ready:'listos para explorar',
-    eyebrow:'TU ITINERARIO ITBMO',
-    title:'Tu viaje, día a día.',
-    subtitle:'Elige una ciudad y recorre cada día a tu propio ritmo.',
+    eyebrow:'TU VIAJE ITBMO',
+    title:'Tu viaje, claro y a tu ritmo.',
+    subtitle:'Elige una ciudad y un día. Nosotros mantenemos todo organizado para ti.',
     back:'Volver al Planner',
-    close:'Cerrar itinerario',
+    close:'Cerrar viaje',
     prev:'Día anterior',
     next:'Día siguiente',
-    of:'de'
+    of:'de',
+    itinerary:'Itinerario',
+    prepare:'Preparar viaje',
+    prepareTitle:'Prepara tu viaje',
+    prepareIntro:'Aquí encontrarás, de forma contextual, lo que conviene resolver para ejecutar este itinerario: entradas, reservas, tours, transporte y otros servicios relevantes.',
+    prepareSafe:'Estamos preparando esta experiencia. Tu itinerario actual permanece intacto.',
+    details:'Ver detalles',
+    hideDetails:'Ocultar detalles',
+    route:'Trayecto',
+    duration:'Duración',
+    transport:'Transporte',
+    notes:'Detalles'
   } : {
-    ctaTitle:'Explore your day-by-day itinerary',
-    ctaSub:'Open every city and move through each day in an immersive view.',
+    ctaTitle:'Explore and prepare your trip',
+    ctaSub:'Move through your itinerary day by day and, when you are ready, prepare what you need to make it happen.',
     citySingular:'city',
     cityPlural:'cities',
     daySingular:'day',
     dayPlural:'days',
     ready:'ready to explore',
-    eyebrow:'YOUR ITBMO ITINERARY',
-    title:'Your trip, day by day.',
-    subtitle:'Choose a city, then move through each day at your own pace.',
+    eyebrow:'YOUR ITBMO TRIP',
+    title:'Your trip, clear and at your pace.',
+    subtitle:'Choose a city and a day. We keep everything organized for you.',
     back:'Back to Planner',
-    close:'Close itinerary',
+    close:'Close trip',
     prev:'Previous day',
     next:'Next day',
-    of:'of'
+    of:'of',
+    itinerary:'Itinerary',
+    prepare:'Prepare trip',
+    prepareTitle:'Prepare your trip',
+    prepareIntro:'This is where you will find, contextually, what is worth arranging to execute this itinerary: tickets, reservations, tours, transport and other relevant services.',
+    prepareSafe:'We are preparing this experience. Your current itinerary remains unchanged.',
+    details:'View details',
+    hideDetails:'Hide details',
+    route:'Route',
+    duration:'Duration',
+    transport:'Transport',
+    notes:'Details'
   };
 }
-
 function _immersiveAvailableCities_(){
   const ordered = (savedDestinations||[]).map(x=>x.city).filter(Boolean);
   const extras = Object.keys(itineraries||{}).filter(city=>!ordered.includes(city));
@@ -3327,53 +3349,107 @@ function _immersiveFormatDuration_(val,transport=''){
   return _sanitizeDurationLines_(val,transport);
 }
 
-function _immersiveRenderDayTable_(city,dayNum){
+function _immersiveEscapeHtml_(value){
+  return String(value ?? '')
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#039;');
+}
+
+function _immersiveRenderDayTimeline_(city,dayNum){
   const target = qs('#itinerary-focus-day-content');
   if(!target) return;
 
   const rows = itineraries?.[city]?.byDay?.[dayNum] || [];
   if(!rows.length){
-    target.innerHTML = `<p class="itinerary-focus-empty">${t('uiNoActivities')}</p>`;
+    target.innerHTML = `<p class="itinerary-focus-empty">${_immersiveEscapeHtml_(t('uiNoActivities'))}</p>`;
     return;
   }
 
-  const headers = [
-    t('thStart'),t('thEnd'),t('thActivity'),t('thFrom'),
-    t('thTo'),t('thTransport'),t('thDuration'),t('thNotes')
-  ];
+  const copy=_immersiveViewerCopy_();
+  const timeline=document.createElement('div');
+  timeline.className='itinerary-focus-timeline';
 
-  const table = document.createElement('table');
-  table.className='itinerary itinerary-focus-table';
-  table.innerHTML=`
-    <thead>
-      <tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr>
-    </thead>
-    <tbody></tbody>
-  `;
-
-  const tbody = qs('tbody',table);
-  rows.forEach(r=>{
-    const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i,'');
+  rows.forEach((r,index)=>{
+    const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i,'').trim();
     const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim();
-    const values = [
-      r.start||'',
-      r.end||'',
-      cleanActivity,
-      r.from||'',
-      r.to||'',
-      r.transport||'',
-      _immersiveFormatDuration_(r.duration||'',r.transport||''),
-      cleanNotes
-    ];
+    const routeFrom=String(r.from||'').trim();
+    const routeTo=String(r.to||'').trim();
+    const transport=String(r.transport||'').trim();
+    const duration=_immersiveFormatDuration_(r.duration||'',transport);
+    const start=String(r.start||'').trim();
+    const end=String(r.end||'').trim();
+    const hasDetails=Boolean(cleanNotes || routeFrom || routeTo || transport || duration);
+    const detailId=`itbmo-focus-detail-${dayNum}-${index}`;
 
-    const tr=document.createElement('tr');
-    tr.innerHTML=values.map((value,i)=>`<td data-label="${headers[i]}">${value}</td>`).join('');
-    tbody.appendChild(tr);
+    const item=document.createElement('article');
+    item.className='itinerary-focus-activity';
+    item.innerHTML=`
+      <div class="itinerary-focus-activity-time">
+        <strong>${_immersiveEscapeHtml_(start || '—')}</strong>
+        ${end ? `<span>${_immersiveEscapeHtml_(end)}</span>` : ''}
+      </div>
+      <div class="itinerary-focus-activity-rail" aria-hidden="true">
+        <span></span>
+      </div>
+      <div class="itinerary-focus-activity-card">
+        <div class="itinerary-focus-activity-main">
+          <h4>${_immersiveEscapeHtml_(cleanActivity || '—')}</h4>
+          <div class="itinerary-focus-activity-meta">
+            ${duration ? `<span>${_immersiveEscapeHtml_(duration)}</span>` : ''}
+            ${transport ? `<span>${_immersiveEscapeHtml_(transport)}</span>` : ''}
+          </div>
+        </div>
+        ${hasDetails ? `
+          <button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false" aria-controls="${detailId}">
+            <span>${_immersiveEscapeHtml_(copy.details)}</span><i aria-hidden="true">＋</i>
+          </button>
+          <div id="${detailId}" class="itinerary-focus-activity-details" hidden>
+            ${(routeFrom || routeTo) ? `<div class="itinerary-focus-detail-row"><span>${_immersiveEscapeHtml_(copy.route)}</span><strong>${_immersiveEscapeHtml_([routeFrom,routeTo].filter(Boolean).join(' → '))}</strong></div>` : ''}
+            ${transport ? `<div class="itinerary-focus-detail-row"><span>${_immersiveEscapeHtml_(copy.transport)}</span><strong>${_immersiveEscapeHtml_(transport)}</strong></div>` : ''}
+            ${duration ? `<div class="itinerary-focus-detail-row"><span>${_immersiveEscapeHtml_(copy.duration)}</span><strong>${_immersiveEscapeHtml_(duration)}</strong></div>` : ''}
+            ${cleanNotes ? `<div class="itinerary-focus-detail-note"><span>${_immersiveEscapeHtml_(copy.notes)}</span><p>${_immersiveEscapeHtml_(cleanNotes)}</p></div>` : ''}
+          </div>` : ''}
+      </div>`;
+
+    const toggle=qs('.itinerary-focus-detail-toggle',item);
+    if(toggle){
+      toggle.addEventListener('click',()=>{
+        const details=qs('.itinerary-focus-activity-details',item);
+        const expanded=toggle.getAttribute('aria-expanded')==='true';
+        toggle.setAttribute('aria-expanded',expanded?'false':'true');
+        if(details) details.hidden=expanded;
+        const label=qs('span',toggle);
+        if(label) label.textContent=expanded?copy.details:copy.hideDetails;
+        const icon=qs('i',toggle);
+        if(icon) icon.textContent=expanded?'＋':'−';
+      });
+    }
+
+    timeline.appendChild(item);
   });
 
-  target.replaceChildren(table);
+  target.replaceChildren(timeline);
 }
 
+function _immersiveRenderPrepareShell_(city){
+  const target=qs('#itinerary-focus-day-content');
+  if(!target) return;
+  const copy=_immersiveViewerCopy_();
+  target.innerHTML=`
+    <section class="itinerary-focus-prepare-shell">
+      <div class="itinerary-focus-prepare-mark" aria-hidden="true">✦</div>
+      <span class="itinerary-focus-prepare-city">${_immersiveEscapeHtml_(city)}</span>
+      <h4>${_immersiveEscapeHtml_(copy.prepareTitle)}</h4>
+      <p>${_immersiveEscapeHtml_(copy.prepareIntro)}</p>
+      <div class="itinerary-focus-prepare-preview" aria-hidden="true">
+        <span>🎟</span><span>◌</span><span>↗</span><span>⌁</span>
+      </div>
+      <small>${_immersiveEscapeHtml_(copy.prepareSafe)}</small>
+    </section>`;
+}
 function _immersiveRenderCities_(){
   const nav = qs('#itinerary-focus-cities');
   if(!nav) return;
@@ -3396,6 +3472,30 @@ function _immersiveRenderCities_(){
     });
     nav.appendChild(b);
   });
+}
+
+function _immersiveRenderDays_(){
+  const nav=qs('#itinerary-focus-days');
+  if(!nav) return;
+  const days=_immersiveDaysForCity_(immersiveItineraryCity);
+  nav.innerHTML='';
+  nav.hidden=immersiveItineraryMode!=='itinerary';
+  if(nav.hidden) return;
+
+  days.forEach(day=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='itinerary-focus-day-btn' + (day===immersiveItineraryDay?' active':'');
+    b.setAttribute('aria-current',day===immersiveItineraryDay?'true':'false');
+    b.textContent=t('uiDayTitle',day);
+    b.addEventListener('click',()=>{
+      immersiveItineraryDay=day;
+      scheduleImmersiveItineraryRender();
+    });
+    nav.appendChild(b);
+  });
+
+  requestAnimationFrame(()=>nav.querySelector('.active')?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}));
 }
 
 function renderImmersiveItinerary(){
@@ -3429,6 +3529,7 @@ function renderImmersiveItinerary(){
   const base=parseDMY(data?.baseDate || cityMeta?.[immersiveItineraryCity]?.baseDate || '');
   const dateLabel=base ? formatDMY(addDays(base,immersiveItineraryDay-1)) : '';
   const dayIndex=days.indexOf(immersiveItineraryDay);
+  const itineraryMode=immersiveItineraryMode==='itinerary';
 
   const eyebrow=qs('#itinerary-focus-eyebrow');
   const title=qs('#itinerary-focus-title');
@@ -3440,6 +3541,11 @@ function renderImmersiveItinerary(){
   const cityLabel=qs('#itinerary-focus-city-label');
   const dayTitle=qs('#itinerary-focus-day-title');
   const dayCount=qs('#itinerary-focus-day-count');
+  const itineraryModeBtn=qs('#itinerary-focus-mode-itinerary');
+  const prepareModeBtn=qs('#itinerary-focus-mode-prepare');
+  const itineraryModeLabel=qs('#itinerary-focus-mode-itinerary-label');
+  const prepareModeLabel=qs('#itinerary-focus-mode-prepare-label');
+  const dots=qs('#itinerary-focus-dots');
 
   if(eyebrow) eyebrow.textContent=copy.eyebrow;
   if(title) title.textContent=copy.title;
@@ -3448,41 +3554,61 @@ function renderImmersiveItinerary(){
   if(close) close.setAttribute('aria-label',copy.close);
   if(prev) prev.setAttribute('aria-label',copy.prev);
   if(next) next.setAttribute('aria-label',copy.next);
+  if(itineraryModeLabel) itineraryModeLabel.textContent=copy.itinerary;
+  if(prepareModeLabel) prepareModeLabel.textContent=copy.prepare;
+  if(itineraryModeBtn){
+    itineraryModeBtn.classList.toggle('active',itineraryMode);
+    itineraryModeBtn.setAttribute('aria-selected',itineraryMode?'true':'false');
+  }
+  if(prepareModeBtn){
+    prepareModeBtn.classList.toggle('active',!itineraryMode);
+    prepareModeBtn.setAttribute('aria-selected',itineraryMode?'false':'true');
+  }
   if(cityLabel) cityLabel.textContent=immersiveItineraryCity;
-  if(dayTitle) dayTitle.textContent=`${t('uiDayTitle',immersiveItineraryDay)}${dateLabel ? ` · ${dateLabel}` : ''}`;
-  if(dayCount) dayCount.textContent=`${dayIndex+1} ${copy.of} ${days.length}`;
+  if(dayTitle) dayTitle.textContent=itineraryMode
+    ? `${t('uiDayTitle',immersiveItineraryDay)}${dateLabel ? ` · ${dateLabel}` : ''}`
+    : copy.prepareTitle;
+  if(dayCount){
+    dayCount.hidden=!itineraryMode;
+    dayCount.textContent=`${dayIndex+1} ${copy.of} ${days.length}`;
+  }
 
   _immersiveRenderCities_();
-  _immersiveRenderDayTable_(immersiveItineraryCity,immersiveItineraryDay);
+  _immersiveRenderDays_();
+  if(itineraryMode) _immersiveRenderDayTimeline_(immersiveItineraryCity,immersiveItineraryDay);
+  else _immersiveRenderPrepareShell_(immersiveItineraryCity);
 
-  const dots=qs('#itinerary-focus-dots');
   if(dots){
     dots.innerHTML='';
-    days.forEach((day,i)=>{
-      const b=document.createElement('button');
-      b.type='button';
-      b.className='itinerary-focus-dot' + (day===immersiveItineraryDay?' active':'');
-      b.setAttribute('aria-label',t('uiDayTitle',day));
-      b.title=t('uiDayTitle',day);
-      b.innerHTML=`<span>${i+1}</span>`;
-      b.addEventListener('click',()=>{
-        immersiveItineraryDay=day;
-        scheduleImmersiveItineraryRender();
+    dots.hidden=!itineraryMode;
+    if(itineraryMode){
+      days.forEach((day,i)=>{
+        const b=document.createElement('button');
+        b.type='button';
+        b.className='itinerary-focus-dot' + (day===immersiveItineraryDay?' active':'');
+        b.setAttribute('aria-label',t('uiDayTitle',day));
+        b.title=t('uiDayTitle',day);
+        b.innerHTML=`<span>${i+1}</span>`;
+        b.addEventListener('click',()=>{
+          immersiveItineraryDay=day;
+          scheduleImmersiveItineraryRender();
+        });
+        dots.appendChild(b);
       });
-      dots.appendChild(b);
-    });
+    }
   }
 
   if(prev){
+    prev.hidden=!itineraryMode;
     prev.disabled=dayIndex<=0;
     prev.setAttribute('aria-disabled',dayIndex<=0?'true':'false');
   }
   if(next){
+    next.hidden=!itineraryMode;
     next.disabled=dayIndex>=days.length-1;
     next.setAttribute('aria-disabled',dayIndex>=days.length-1?'true':'false');
   }
 }
-
 function _immersiveMoveDay_(delta){
   const days=_immersiveDaysForCity_(immersiveItineraryCity);
   if(!days.length) return;
@@ -3496,6 +3622,8 @@ function _immersiveMoveDay_(delta){
 function openImmersiveItinerary(city){
   const modal=qs('#itinerary-focus-modal');
   if(!modal || !_immersiveAvailableCities_().length) return;
+
+  immersiveItineraryMode='itinerary';
 
   immersiveItineraryCity=city && _immersiveAvailableCities_().includes(city)
     ? city
@@ -3546,6 +3674,8 @@ function bindImmersiveItineraryViewer(){
   qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);
   qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));
   qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));
+  qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{ immersiveItineraryMode='itinerary'; scheduleImmersiveItineraryRender(); });
+  qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{ immersiveItineraryMode='prepare'; scheduleImmersiveItineraryRender(); });
 
   modal.addEventListener('touchstart',(e)=>{
     const p=e.touches?.[0];
