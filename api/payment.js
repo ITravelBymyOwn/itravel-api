@@ -55,11 +55,18 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const INFO_CHAT_MAX_QUERIES = 10;
 
 function isAdminTestBypass(userId) {
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+
+  // Every Vercel Preview deployment is a test environment. A valid ITBMO
+  // session may exercise the complete Planner flow there without opening
+  // PayPal or creating a real payment. Production remains payment-gated.
+  if (!isProduction) return Boolean(userId);
+
+  // Optional explicit production bypass remains restricted to the configured
+  // admin UUID and requires the separate allow-production switch.
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
-
-  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
-  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+  return ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
 }
 
 const PAYPAL_API_BASE =
