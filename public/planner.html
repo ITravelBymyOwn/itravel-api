@@ -18,11 +18,18 @@
 <body>
   <!-- TOPBAR -->
   <div class="topbar">
+    <a class="planner-home-link" href="./preview-home.html" aria-label="Volver a I Travel By My Own">
+      <span aria-hidden="true">←</span><span class="planner-home-link__label">Inicio</span>
+    </a>
     <!-- ✅ Brand estilo logo (2 líneas) -->
     <div class="brand brand-logo" aria-label="I Travel By My Own">
       <div class="brand-line-1">I Travel</div>
       <div class="brand-line-2">By My Own</div>
     </div>
+
+    <button id="planner-my-trips" class="planner-my-trips" type="button" hidden>
+      <span aria-hidden="true">✦</span><span id="planner-my-trips-label">Mis viajes</span>
+    </button>
 
     <div class="planner-language-capability">
       <button
@@ -61,10 +68,66 @@
     <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
 
+
+  <!-- =========================================================
+       ITBMO · JOURNEY HOME
+       Presentation layer for returning travelers.
+       Existing Planner DOM remains mounted and untouched below.
+  ========================================================== -->
+  <section id="journey-home" class="journey-home" hidden aria-hidden="true">
+    <div class="journey-home__aurora journey-home__aurora--one" aria-hidden="true"></div>
+    <div class="journey-home__aurora journey-home__aurora--two" aria-hidden="true"></div>
+
+    <div class="journey-home__shell">
+      <div class="journey-home__intro">
+        <span class="journey-home__eyebrow" id="journey-home-eyebrow">TU VIAJE SIGUE AQUÍ</span>
+        <h1 id="journey-home-title">¿Qué quieres hacer hoy?</h1>
+        <p id="journey-home-copy">Continúa donde lo dejaste o empieza una nueva aventura. Tus viajes anteriores permanecen disponibles para que vuelvas a ellos cuando los necesites.</p>
+      </div>
+
+      <div class="journey-home__primary-grid">
+        <button id="journey-home-resume" class="journey-home-card journey-home-card--resume" type="button">
+          <span class="journey-home-card__glow" aria-hidden="true"></span>
+          <span class="journey-home-card__icon" aria-hidden="true">↗</span>
+          <span class="journey-home-card__kicker" id="journey-home-resume-kicker">ÚLTIMO VIAJE</span>
+          <strong id="journey-home-resume-title">Continuar con mi último viaje</strong>
+          <span id="journey-home-resume-meta" class="journey-home-card__meta"></span>
+          <span class="journey-home-card__action" id="journey-home-resume-action">Abrir Trip Workspace <i aria-hidden="true">→</i></span>
+        </button>
+
+        <button id="journey-home-new" class="journey-home-card journey-home-card--new" type="button">
+          <span class="journey-home-card__icon" aria-hidden="true">＋</span>
+          <span class="journey-home-card__kicker" id="journey-home-new-kicker">NUEVA AVENTURA</span>
+          <strong id="journey-home-new-title">Planificar un nuevo viaje</strong>
+          <span class="journey-home-card__meta" id="journey-home-new-copy">Empieza desde cero sin borrar los viajes que ya creaste.</span>
+          <span class="journey-home-card__action" id="journey-home-new-action">Crear nuevo itinerario <i aria-hidden="true">→</i></span>
+        </button>
+      </div>
+
+      <section id="journey-history" class="journey-history" hidden>
+        <div class="journey-history__head">
+          <div>
+            <span class="journey-history__eyebrow" id="journey-history-eyebrow">TU HISTORIAL</span>
+            <h2 id="journey-history-title">Mis viajes</h2>
+          </div>
+          <span id="journey-history-count" class="journey-history__count"></span>
+        </div>
+        <div id="journey-history-grid" class="journey-history__grid"></div>
+      </section>
+    </div>
+  </section>
+
   <div id="planner-grid">
     <!-- SIDEBAR -->
     <aside class="sidebar">
-      <h2>Planificador</h2>
+      <div class="planner-builder-intro">
+        <span class="planner-builder-intro__eyebrow" id="planner-builder-eyebrow">DISEÑA TU VIAJE</span>
+        <h1 id="planner-builder-title">Vamos a construir algo inolvidable.</h1>
+        <p id="planner-builder-copy">Cuéntanos lo esencial. ITBMO convierte tus decisiones en un viaje organizado, coherente y listo para vivir.</p>
+        <div class="planner-progress-rail" aria-hidden="true">
+          <span class="is-active"></span><span></span><span></span><span></span>
+        </div>
+      </div>
 
       <!-- =========================================================
            ITBMO ACCOUNT — Supabase Auth + Guest
@@ -361,6 +424,18 @@
 
     <!-- MAIN -->
     <main class="main">
+      <div class="planner-canvas-intro" id="planner-canvas-intro">
+        <span class="planner-canvas-intro__eyebrow" id="planner-canvas-eyebrow">TU VIAJE EMPIEZA AQUÍ</span>
+        <h2 id="planner-canvas-title">Menos formularios.<br><span>Más ganas de viajar.</span></h2>
+        <p id="planner-canvas-copy">Agrega hasta 3 ciudades, define quién viaja y deja que ITBMO conecte las piezas.</p>
+        <div class="planner-canvas-orbit" aria-hidden="true">
+          <span class="planner-canvas-orbit__ring"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--1"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--2"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--3"></span>
+          <span class="planner-canvas-orbit__core">✦</span>
+        </div>
+      </div>
       <section class="box itinerary-section">
 
         <!-- ✅ Header: Título + botón Info Chat arriba (como el HTML donde sí se veía) -->
