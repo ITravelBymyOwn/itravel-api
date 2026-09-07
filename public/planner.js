@@ -10311,25 +10311,111 @@ function showAstraCoach(key,targetRef,{force=false}={}){
   requestAnimationFrame(()=>bubble.classList.add('is-visible'));
 }
 function scheduleAstraCoach(key,target,delay=260,options={}){
-  if(!options.force && astraCoachSeen()[key]) return;
-  clearTimeout(astraCoachTimer);
-  astraCoachTimer=setTimeout(()=>showAstraCoach(key,target,options),delay);
+  /* Phase 4.2: contextual guidance is permanently embedded in the workspace.
+     Bubble coaching is intentionally disabled to reduce interruption and visual noise. */
+  return;
 }
 function initAstraCoach(){
-  if(!document.querySelector('.astra-guide-replay')){
-    const replay=document.createElement('button');
-    replay.type='button';
-    replay.className='astra-guide-replay';
-    replay.innerHTML=`<span>✦</span>${getLang()==='es'?'Ver guía':'View guide'}`;
-    replay.addEventListener('click',()=>{
-      try{localStorage.removeItem(ASTRA_COACH_STORAGE_KEY);}catch(_){}
-      closeAstraCoach({remember:false});
-      scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',80,{force:true});
-    });
-    document.body.appendChild(replay);
-  }
-  scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',900);
+  /* Phase 4.2: inline guidance replaces floating coach bubbles. */
+  closeAstraCoach({remember:false});
 }
+
+
+function applyTravelBuilderWorkspaceCopy(){
+  const es=getLang()==='es';
+  const values=es ? {
+    'planner-stage-route-label':'Ruta',
+    'planner-stage-travelers-label':'Viajeros',
+    'planner-stage-personalize-label':'Personaliza',
+    'planner-stage-create-label':'Crear',
+    'planner-account-guide-title':'Tu acceso a ITBMO',
+    'planner-account-guide-copy':'Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.',
+    'planner-route-eyebrow':'CONSTRUYE TU RUTA',
+    'planner-route-guide':'Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.',
+    'planner-route-tip-copy':'Usa tu tiempo útil, no la hora del vuelo. En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.',
+    'planner-travelers-eyebrow':'QUIÉN VIAJA',
+    'planner-travelers-guide':'Indica si viajas solo o acompañado. Las edades del grupo ayudan a ajustar ritmos, actividades y desplazamientos.',
+    'planner-save-eyebrow':'CUANDO TU RUTA ESTÉ LISTA',
+    'planner-save-title':'Confirma la ruta para personalizar el viaje.',
+    'planner-create-eyebrow':'LISTO PARA CREAR',
+    'planner-create-title':'Tu viaje toma forma aquí.',
+    'planner-create-copy':'Cuando completes la ruta y la personalización, ITBMO organizará el itinerario ciudad por ciudad y día por día.',
+    'planner-create-status-copy':'Completa los pasos anteriores para comenzar.'
+  } : {
+    'planner-stage-route-label':'Route',
+    'planner-stage-travelers-label':'Travelers',
+    'planner-stage-personalize-label':'Personalize',
+    'planner-stage-create-label':'Create',
+    'planner-account-guide-title':'Your ITBMO access',
+    'planner-account-guide-copy':'Sign in, create an account, or continue as a guest. With an account you can return to your trips from other devices.',
+    'planner-route-eyebrow':'BUILD YOUR ROUTE',
+    'planner-route-guide':'Add up to 3 cities in the actual order of your trip. For each city, enter the number of days, start date, and the useful time you will have to explore.',
+    'planner-route-tip-copy':'Use your useful travel time, not your flight time. On day one, enter when you expect to be ready after reaching your lodging; on the last day, enter how late you can explore before leaving.',
+    'planner-travelers-eyebrow':'WHO IS TRAVELING',
+    'planner-travelers-guide':'Tell us whether you are traveling solo or with others. Group ages help adjust pace, activities, and transportation.',
+    'planner-save-eyebrow':'WHEN YOUR ROUTE IS READY',
+    'planner-save-title':'Confirm the route to personalize your trip.',
+    'planner-create-eyebrow':'READY TO CREATE',
+    'planner-create-title':'Your trip takes shape here.',
+    'planner-create-copy':'Once the route and personalization are complete, ITBMO will organize your itinerary city by city and day by day.',
+    'planner-create-status-copy':'Complete the previous steps to begin.'
+  };
+  Object.entries(values).forEach(([id,value])=>{
+    const el=qs('#'+id);
+    if(!el) return;
+    if(id==='planner-route-tip-copy'){
+      el.innerHTML=es
+        ? '<strong>Usa tu tiempo útil, no la hora del vuelo.</strong> En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.'
+        : '<strong>Use your useful travel time, not your flight time.</strong> On day one, enter when you expect to be ready after reaching your lodging; on the last day, enter how late you can explore before leaving.';
+    }else el.textContent=value;
+  });
+}
+
+function updateTravelBuilderProgress(){
+  const items=qsa('.planner-stage-nav__item');
+  if(!items.length) return;
+  const hasRoute=qsa('.city-row','#city-list').some(row=>{
+    return Boolean(qs('.country',row)?.value?.trim() && qs('.city',row)?.value?.trim() && qs('.days',row)?.value && qs('.baseDate',row)?.value);
+  });
+  const hasTravelers=Boolean(qs('#traveler-mode')?.value);
+  const preferencesVisible=qs('#preferences-stage')?.getAttribute('aria-hidden')==='false' || !qs('#preferences-stage')?.classList.contains('is-stage-hidden');
+  const canCreate=!qs('#start-planning')?.disabled;
+
+  items.forEach((item,index)=>{
+    const active =
+      index===0 ? true :
+      index===1 ? hasRoute :
+      index===2 ? preferencesVisible || hasTravelers :
+      canCreate;
+    item.classList.toggle('is-active',active);
+  });
+
+  const status=qs('#planner-create-status-copy');
+  const dot=qs('.planner-create-status__dot');
+  if(status){
+    if(canCreate) status.textContent=getLang()==='es'?'Todo listo. Puedes iniciar la planificación.':'Everything is ready. You can start planning.';
+    else if(preferencesVisible) status.textContent=getLang()==='es'?'Personaliza tu viaje o continúa sin agregar información.':'Personalize your trip or continue without adding information.';
+    else if(hasRoute && hasTravelers) status.textContent=getLang()==='es'?'Guarda tu ruta para continuar.':'Save your route to continue.';
+    else status.textContent=getLang()==='es'?'Completa ruta y viajeros para continuar.':'Complete route and travelers to continue.';
+  }
+  if(dot){
+    dot.style.background=canCreate?'#0ea47a':'#d0d5dd';
+    dot.style.boxShadow=canCreate?'0 0 0 5px rgba(14,164,122,.16)':'0 0 0 5px rgba(208,213,221,.22)';
+  }
+}
+
+function bindTravelBuilderProgress(){
+  const root=qs('#planner-grid');
+  if(!root) return;
+  root.addEventListener('input',()=>requestAnimationFrame(updateTravelBuilderProgress),true);
+  root.addEventListener('change',()=>requestAnimationFrame(updateTravelBuilderProgress),true);
+  root.addEventListener('click',()=>setTimeout(updateTravelBuilderProgress,0),true);
+  const observer=new MutationObserver(()=>requestAnimationFrame(updateTravelBuilderProgress));
+  observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','class','aria-hidden']});
+  applyTravelBuilderWorkspaceCopy();
+  updateTravelBuilderProgress();
+}
+
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
