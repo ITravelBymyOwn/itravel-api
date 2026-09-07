@@ -351,13 +351,59 @@ async function handleGuest(req, res, body) {
     });
   }
 
-  const profile = await createMinimalProfile({
-    name,
-    email,
-    preferredLanguage: body.preferred_language || null,
-    registrationSource: body.registration_source || "planner_guest",
-    body
-  });
+  const existingProfiles = await findProfilesByEmail(email);
+  const registeredProfile = existingProfiles.find((profile) => profile.auth_user_id);
+
+  if (registeredProfile) {
+    return res.status(409).json({
+      ok: false,
+      error: "Account already exists",
+      account_exists: true
+    });
+  }
+
+  let profile = existingProfiles.find(
+    (candidate) => !candidate.auth_user_id && candidate.account_status === "active"
+  ) || null;
+  const isReturningGuest = Boolean(profile);
+
+  if (profile) {
+    const existingName = normalizeName(profile.first_name || "").toLocaleLowerCase();
+    const providedName = normalizeName(name).toLocaleLowerCase();
+
+    if (!existingName || existingName !== providedName) {
+      return res.status(403).json({
+        ok: false,
+        error: "Guest details do not match",
+        guest_mismatch: true
+      });
+    }
+
+    const updatedProfiles = await supabaseFetch(
+      `/profiles?id=eq.${encodeURIComponent(profile.id)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          preferred_language: body.preferred_language || profile.preferred_language || null,
+          last_seen_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+      }
+    );
+
+    profile = Array.isArray(updatedProfiles)
+      ? updatedProfiles[0] || profile
+      : profile;
+  } else {
+    profile = await createMinimalProfile({
+      name,
+      email,
+      preferredLanguage: body.preferred_language || null,
+      registrationSource: body.registration_source || "planner_guest",
+      body
+    });
+  }
 
   const { rawToken, session } = await createSession(profile.id, "mvp_weak");
 
@@ -368,22 +414,25 @@ async function handleGuest(req, res, body) {
     body: JSON.stringify({
       user_id: profile.id,
       session_id: session?.id || null,
-      event_name: "guest_session_created",
+      event_name: isReturningGuest ? "guest_session_reentered" : "guest_session_created",
       event_category: "account",
       properties: {
-        registration_source: body.registration_source || "planner_guest"
+        registration_source: body.registration_source || "planner_guest",
+        returning_guest: isReturningGuest
       }
     })
   });
 
-  return res.status(201).json({
+  return res.status(isReturningGuest ? 200 : 201).json({
     ok: true,
     action: "guest",
+    returning_guest: isReturningGuest,
     user: {
       id: profile.id,
       first_name: profile.first_name,
       email: profile.email,
       is_registered: false,
+      registration_pending: false,
       email_verified: false
     },
     session_token: rawToken,
@@ -429,19 +478,6 @@ async function handleSignUp(req, res, body) {
     });
   }
 
-  const existingProfiles = await findProfilesByEmail(email);
-  const registeredProfile = existingProfiles.find(
-    (profile) => profile.auth_user_id
-  );
-
-  if (registeredProfile) {
-    return res.status(409).json({
-      ok: false,
-      error: "Account already exists",
-      email_taken: true
-    });
-  }
-
   let guestSession = null;
   let guestProfile = null;
 
@@ -461,18 +497,33 @@ async function handleSignUp(req, res, body) {
       if (
         candidate &&
         !candidate.auth_user_id &&
-        candidate.account_status === "active" &&
-        candidate.email === email
+        candidate.account_status === "active"
       ) {
         guestProfile = candidate;
       }
     }
   }
 
-  const redirectTo = resolveRedirectUrl(body);
+  const existingProfiles = await findProfilesByEmail(email);
+  const conflictingProfile = existingProfiles.find(
+    (profile) => !guestProfile || profile.id !== guestProfile.id
+  );
+
+  if (conflictingProfile) {
+    return res.status(409).json({
+      ok: false,
+      error: conflictingProfile.auth_user_id ? "Account already exists" : "Email already in use",
+      email_taken: true,
+      account_exists: Boolean(conflictingProfile.auth_user_id)
+    });
+  }
+
   const language = String(body.preferred_language || body.language || "en")
     .trim()
     .toLowerCase();
+  const origin = String(body.origin || "").trim().replace(/\/$/, "");
+  const redirectTo = String(body.redirect_to || "").trim() ||
+    `${origin || "https://itravelbymyown.com"}/auth-confirmed.html?lang=${encodeURIComponent(language)}`;
 
   const authData = await authFetch(
     `/signup?redirect_to=${encodeURIComponent(redirectTo)}`,
@@ -553,7 +604,7 @@ async function handleSignUp(req, res, body) {
     user: {
       id: profile.id,
       first_name: profile.first_name,
-      email: profile.email,
+      email,
       is_registered: false,
       registration_pending: true,
       email_verified: false
@@ -738,6 +789,9 @@ async function handleCompleteAuth(req, res, body) {
         Prefer: "return=representation"
       },
       body: JSON.stringify({
+        email: normalizeEmail(authUser.email),
+        first_name: normalizeName(authUser.user_metadata?.name || profile.first_name || "Traveler"),
+        preferred_language: authUser.user_metadata?.language || profile.preferred_language || null,
         email_verified: true,
         last_seen_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -749,10 +803,15 @@ async function handleCompleteAuth(req, res, body) {
     ? updatedProfiles[0] || profile
     : profile;
 
-  const { rawToken, session } = await createSession(
-    profile.id,
-    "supabase_auth"
-  );
+  const verificationOnly = body.verification_only === true;
+  let rawToken = null;
+  let session = null;
+
+  if (!verificationOnly) {
+    const created = await createSession(profile.id, "supabase_auth");
+    rawToken = created.rawToken;
+    session = created.session;
+  }
 
   await supabaseFetch("/user_events", {
     method: "POST",
@@ -762,7 +821,8 @@ async function handleCompleteAuth(req, res, body) {
       event_name: "email_confirmed",
       event_category: "account",
       properties: {
-        auth_level: "supabase_auth"
+        auth_level: "supabase_auth",
+        verification_only: verificationOnly
       }
     })
   });
@@ -1080,7 +1140,7 @@ async function handleSession(req, res, body) {
   const tokenHash = hashToken(rawToken);
 
   const sessions = await supabaseFetch(
-    `/user_sessions?select=id,user_id,expires_at,revoked_at&token_hash=eq.${encodeURIComponent(
+    `/user_sessions?select=id,user_id,auth_level,expires_at,revoked_at&token_hash=eq.${encodeURIComponent(
       tokenHash
     )}&limit=1`,
     { method: "GET" }
@@ -1115,11 +1175,29 @@ async function handleSession(req, res, body) {
     });
   }
 
+  let sessionAuthLevel = session.auth_level || "mvp_weak";
+
+  if (
+    sessionAuthLevel === "mvp_weak" &&
+    profile.auth_user_id &&
+    profile.email_verified
+  ) {
+    const upgradeEvents = await supabaseFetch(
+      `/user_events?select=id&session_id=eq.${encodeURIComponent(session.id)}&event_name=eq.guest_account_upgrade_started&limit=1`,
+      { method: "GET" }
+    );
+
+    if (Array.isArray(upgradeEvents) && upgradeEvents.length > 0) {
+      sessionAuthLevel = "supabase_auth";
+    }
+  }
+
   await supabaseFetch(
     `/user_sessions?id=eq.${encodeURIComponent(session.id)}`,
     {
       method: "PATCH",
       body: JSON.stringify({
+        auth_level: sessionAuthLevel,
         last_seen_at: new Date().toISOString()
       })
     }
