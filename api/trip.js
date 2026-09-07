@@ -5,6 +5,7 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
 const MAX_GENERATION_RUNS = 2;
+const MAX_DAYS_PER_DESTINATION = 10;
 
 const ITBMO_ADMIN_TEST_BYPASS =
   String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
@@ -139,6 +140,19 @@ function validDateOrNull(value) {
   return value;
 }
 
+function hasDestinationOverDayLimit(destinations) {
+  if (!Array.isArray(destinations)) return false;
+
+  return destinations.some(destination => {
+    if (!destination || destination.days === undefined || destination.days === null || destination.days === "") {
+      return false;
+    }
+
+    const days = Number(destination.days);
+    return Number.isFinite(days) && days > MAX_DAYS_PER_DESTINATION;
+  });
+}
+
 function normalizeString(value, maxLength = 500) {
   if (value === null || value === undefined) {
     return null;
@@ -162,6 +176,13 @@ async function handleCreate(res, body, session) {
     return res.status(400).json({
       ok: false,
       error: "At least one destination is required"
+    });
+  }
+
+  if (hasDestinationOverDayLimit(destinations)) {
+    return res.status(400).json({
+      ok: false,
+      error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
     });
   }
 
@@ -421,6 +442,13 @@ async function handleUpdate(res, body, session) {
       return res.status(400).json({
         ok: false,
         error: "Destinations must be an array"
+      });
+    }
+
+    if (hasDestinationOverDayLimit(body.destinations)) {
+      return res.status(400).json({
+        ok: false,
+        error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
       });
     }
 
