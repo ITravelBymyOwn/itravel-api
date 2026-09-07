@@ -716,6 +716,7 @@ const $accountForgotSubmit = qs('#account-forgot-submit');
 const $accountForgotBack = qs('#account-forgot-back');
 const $accountResetSubmit = qs('#account-reset-submit');
 const $accountMessage = qs('#account-message');
+const $accountSubtitle = qs('#account-subtitle');
 const $accountUserBadge = qs('#account-user-badge');
 const $accountWelcome = qs('#account-welcome');
 const $accountReadyCopy = qs('#account-ready-copy');
@@ -764,6 +765,7 @@ const $travelerRemove   = qs('#traveler-remove');
 const AUTH_COPY = {
   es: {
     title:'Tu cuenta ITBMO', subtitle:'Crea una cuenta, inicia sesión o continúa como invitado.',
+    subtitleGuest:'Estás usando ITBMO como invitado.', subtitlePending:'Confirma tu correo para activar tu cuenta.', subtitleRegistered:'Tu cuenta está activa.',
     register:'Crear cuenta', login:'Iniciar sesión', guest:'Continuar como invitado',
     name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña',
     create:'Crear cuenta', signIn:'Iniciar sesión', forgot:'¿Olvidaste tu contraseña?',
@@ -790,6 +792,7 @@ const AUTH_COPY = {
   },
   en: {
     title:'Your ITBMO account', subtitle:'Create an account, sign in, or continue as a guest.',
+    subtitleGuest:'You are using ITBMO as a guest.', subtitlePending:'Confirm your email to activate your account.', subtitleRegistered:'Your account is active.',
     register:'Create account', login:'Sign in', guest:'Continue as guest',
     name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password',
     create:'Create account', signIn:'Sign in', forgot:'Forgot your password?',
@@ -1048,6 +1051,12 @@ function renderAuthState(){
     $accountUserBadge.textContent=label;
   }
 
+  if($accountSubtitle){
+    $accountSubtitle.textContent = !logged
+      ? authCopy('subtitle')
+      : authCopy(registered ? 'subtitleRegistered' : (pending ? 'subtitlePending' : 'subtitleGuest'));
+  }
+
   if(logged && currentUser){
     if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || 'Traveler');
     if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(registered ? 'readyRegistered' : (pending ? 'readyPending' : 'readyGuest'));
@@ -1057,8 +1066,9 @@ function renderAuthState(){
     if($accountLogout) $accountLogout.textContent = authCopy('logout');
   }
 
-  // Guest can plan. A newly-created account remains locked until email confirmation.
-  applyAuthPlannerGate(Boolean(logged && !pending));
+  // Guest can plan normally. While the guest is actively creating an account,
+  // or while email verification is pending, the Planner stays temporarily locked.
+  applyAuthPlannerGate(Boolean(logged && !pending && !guestUpgradeFormOpen));
   syncPendingVerificationWatch(pending);
   updateSaveAvailability();
   if(logged && !pending) scheduleAstraCoach('travelers','#travelers-box',520);
@@ -9266,10 +9276,10 @@ async function hasValidPaymentForCurrentTrip(){
       session_token:token,
       trip_id:currentTripId
     });
-    const paid = Boolean(data?.paid);
-    if(paid) paymentGateSatisfiedTripId=currentTripId;
+    const authorized = Boolean(data?.paid || data?.admin_bypass);
+    if(authorized) paymentGateSatisfiedTripId=currentTripId;
     applyInfoChatStatus(data);
-    return paid;
+    return authorized;
   }catch(err){
     console.warn('[PAYMENT STATUS]',err);
     return false;
