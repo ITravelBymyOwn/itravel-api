@@ -555,6 +555,7 @@ async function handleSignUp(req, res, body) {
       first_name: profile.first_name,
       email: profile.email,
       is_registered: false,
+      registration_pending: true,
       email_verified: false
     }
   });
@@ -1139,7 +1140,8 @@ async function handleSession(req, res, body) {
     action: "session",
     user: {
       ...profile,
-      is_registered: Boolean(profile.auth_user_id),
+      is_registered: Boolean(profile.auth_user_id && profile.email_verified),
+      registration_pending: Boolean(profile.auth_user_id && !profile.email_verified),
       email_verified: Boolean(profile.email_verified)
     }
   });
