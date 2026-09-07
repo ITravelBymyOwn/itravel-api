@@ -134,6 +134,7 @@ let agentConversationLang = null;
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
 const MAX_ITINERARY_CITIES = 3;
+const MAX_DAYS_PER_DESTINATION = 10;
 
 let plannerState = {
   destinations: [],
@@ -1857,6 +1858,7 @@ function mirrorFirstDaySchedule(wrap){
 }
 
 function makeHoursBlock(days){
+  days=Math.min(MAX_DAYS_PER_DESTINATION, Math.max(1, Number(days) || 1));
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
 
@@ -2214,7 +2216,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   row.innerHTML = `
     <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
     <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
-    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:MAX_DAYS_PER_DESTINATION},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
       ${t('uiStart')}
       <div class="date-wrapper${initialDate?' has-value':''}">
@@ -2248,7 +2250,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 
   const daysSelect = qs('.days', row);
   if(pref.days){
-    daysSelect.value = String(pref.days);
+    daysSelect.value = String(Math.min(MAX_DAYS_PER_DESTINATION, Math.max(1, Number(pref.days) || 1)));
   }
 
   daysSelect.addEventListener('change', ()=>{
@@ -2561,6 +2563,58 @@ async function normalizeDestinationsBeforeSave(list, rows){
   return normalized;
 }
 
+function ensureSaveTransitionOverlay(){
+  let overlay=qs('#itbmo-save-transition-overlay');
+  if(overlay) return overlay;
+
+  overlay=document.createElement('div');
+  overlay.id='itbmo-save-transition-overlay';
+  overlay.className='itbmo-save-transition-overlay';
+  overlay.setAttribute('aria-hidden','true');
+  overlay.innerHTML=`
+    <div class="itbmo-save-transition-card" role="status" aria-live="polite" aria-atomic="true">
+      <div class="itbmo-orbit-loader" aria-hidden="true">
+        <div class="itbmo-orbit-ring"></div>
+        <div class="itbmo-mini-globe">
+          <svg viewBox="0 0 64 64" focusable="false" aria-hidden="true">
+            <circle cx="32" cy="32" r="29" class="itbmo-globe-ocean"/>
+            <path class="itbmo-globe-land" d="M17 18c4-5 9-8 14-9l3 6-4 4 3 4-6 3-5-2-4 3-5-3 4-6Zm20 5 7-3 7 5 2 8-5 3-2 7-6 4-4-5 2-5-4-4 3-10ZM21 39l7 1 4 6-3 9-7-3-3-7 2-6Z"/>
+            <path class="itbmo-globe-shine" d="M18 13c-7 5-11 13-11 22 0 8 3 15 9 20"/>
+          </svg>
+        </div>
+        <div class="itbmo-plane-orbit">
+          <svg class="itbmo-mini-plane" viewBox="0 0 32 32" focusable="false" aria-hidden="true">
+            <path d="M29.4 14.2 18.8 9.9 16 2.7c-.3-.8-1.1-1.3-2-1.2l-1.4.2.7 7.2-7.7-2.4-2.2-3-1.5.3 1 4.1 6.9 4.3-6.9 4.3-1 4.1 1.5.3 2.2-3 7.7-2.4-.7 7.2 1.4.2c.9.1 1.7-.4 2-1.2l2.8-7.2 10.6-4.3c.8-.3 1.3-1.1 1.3-2s-.5-1.7-1.3-2Z"/>
+          </svg>
+        </div>
+      </div>
+      <div class="itbmo-save-transition-title"></div>
+      <div class="itbmo-save-transition-subtitle"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function showSaveTransitionOverlay(){
+  const overlay=ensureSaveTransitionOverlay();
+  const es=getLang()==='es';
+  const title=qs('.itbmo-save-transition-title',overlay);
+  const subtitle=qs('.itbmo-save-transition-subtitle',overlay);
+  if(title) title.textContent=es?'Preparando tu viaje…':'Preparing your trip…';
+  if(subtitle) subtitle.textContent=es?'Organizando tus destinos y preferencias.':'Organizing your destinations and preferences.';
+  overlay.classList.add('active');
+  overlay.setAttribute('aria-hidden','false');
+  document.documentElement.classList.add('itbmo-save-transition-open');
+}
+
+function hideSaveTransitionOverlay(){
+  const overlay=qs('#itbmo-save-transition-overlay');
+  if(!overlay) return;
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden','true');
+  document.documentElement.classList.remove('itbmo-save-transition-open');
+}
+
 async function saveDestinations(){
   if(!currentUser || !getStoredSessionToken()){
     setAccountMessage(authCopy('loginRequired'),'error');
@@ -2589,6 +2643,7 @@ async function saveDestinations(){
   }
   let list = [];
   let invalidCountryRow=null;
+  let invalidDaysRow=null;
 
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
@@ -2598,6 +2653,11 @@ async function saveDestinations(){
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
     const baseDate = qs('.baseDate',r).value.trim();
+
+    if(days > MAX_DAYS_PER_DESTINATION){
+      invalidDaysRow=invalidDaysRow || r;
+      return;
+    }
 
     if(!city) return;
     if(!countryMatch){
@@ -2628,6 +2688,14 @@ async function saveDestinations(){
     return;
   }
 
+  if(invalidDaysRow){
+    alert(getLang()==='es'
+      ? `Puedes seleccionar un máximo de ${MAX_DAYS_PER_DESTINATION} días por destino.`
+      : `You can select a maximum of ${MAX_DAYS_PER_DESTINATION} days per destination.`);
+    try{ qs('.days',invalidDaysRow)?.focus(); }catch(_){ }
+    return;
+  }
+
   if(list.length === 0) return;
 
   if(!saveLockWarningAccepted){
@@ -2650,10 +2718,14 @@ async function saveDestinations(){
     $save.textContent = authCopy('tripSaving');
   }
 
+  showSaveTransitionOverlay();
+
   try{
     list = await normalizeDestinationsBeforeSave(list, rows);
     await saveTripRecord(list, travelerState);
+    hideSaveTransitionOverlay();
   }catch(err){
+    hideSaveTransitionOverlay();
     console.error('ITBMO trip save error:', err);
     if(err?.userMessage){
       alert(err.userMessage);
