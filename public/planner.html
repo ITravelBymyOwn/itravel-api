@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=93" />
+  <link rel="stylesheet" href="./planner.css?v=94" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -117,16 +117,39 @@
     </div>
   </section>
 
+  <section class="planner-experience-hero">
+    <div class="planner-canvas-intro" id="planner-canvas-intro">
+        <span class="planner-canvas-intro__eyebrow" id="planner-canvas-eyebrow">TU VIAJE EMPIEZA AQUÍ</span>
+        <h2 id="planner-canvas-title">Menos formularios.<br><span>Más ganas de viajar.</span></h2>
+        <p id="planner-canvas-copy">Agrega hasta 3 ciudades, define quién viaja y deja que ITBMO conecte las piezas.</p>
+        <div class="planner-canvas-orbit" aria-hidden="true">
+          <span class="planner-canvas-orbit__ring"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--1"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--2"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--3"></span>
+          <span class="planner-canvas-orbit__core">✦</span>
+        </div>
+  </section>
+
   <div id="planner-grid">
     <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <div class="planner-builder-intro">
-        <span class="planner-builder-intro__eyebrow" id="planner-builder-eyebrow">DISEÑA TU VIAJE</span>
-        <h1 id="planner-builder-title">Vamos a construir algo inolvidable.</h1>
-        <p id="planner-builder-copy">Cuéntanos lo esencial. ITBMO convierte tus decisiones en un viaje organizado, coherente y listo para vivir.</p>
-        <div class="planner-progress-rail" aria-hidden="true">
-          <span class="is-active"></span><span></span><span></span><span></span>
+    <section class="sidebar planner-builder-workspace">
+      <nav class="planner-stage-nav" aria-label="Flujo de planificación">
+        <span class="planner-stage-nav__item is-active"><b>01</b><span id="planner-stage-route-label">Ruta</span></span>
+        <span class="planner-stage-nav__line" aria-hidden="true"></span>
+        <span class="planner-stage-nav__item"><b>02</b><span id="planner-stage-travelers-label">Viajeros</span></span>
+        <span class="planner-stage-nav__line" aria-hidden="true"></span>
+        <span class="planner-stage-nav__item"><b>03</b><span id="planner-stage-personalize-label">Personaliza</span></span>
+        <span class="planner-stage-nav__line" aria-hidden="true"></span>
+        <span class="planner-stage-nav__item"><b>04</b><span id="planner-stage-create-label">Crear</span></span>
+      </nav>
+      <div class="planner-builder-intro planner-builder-intro--compact">
+        <div>
+          <span class="planner-builder-intro__eyebrow" id="planner-builder-eyebrow">DISEÑA TU VIAJE</span>
+          <h1 id="planner-builder-title">Construye la ruta a tu manera.</h1>
         </div>
+        <p id="planner-builder-copy">Avanza paso a paso. Nada técnico: solo lo que realmente necesitamos para organizar bien tu viaje.</p>
+      </div>
       </div>
 
       <!-- =========================================================
@@ -134,7 +157,15 @@
            La autenticación visual vive en el Planner.
            La persistencia real se procesa en /api/user (Vercel → Supabase).
       ========================================================== -->
-      <section class="box account-box" id="account-box">
+      <section class="box account-box planner-stage-card planner-stage-card--account" id="account-box">
+        <div class="planner-stage-card__number" aria-hidden="true">00</div>
+        <div class="planner-inline-guide planner-inline-guide--account">
+          <span class="planner-inline-guide__icon" aria-hidden="true">✓</span>
+          <div>
+            <strong id="planner-account-guide-title">Tu acceso a ITBMO</strong>
+            <p id="planner-account-guide-copy">Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.</p>
+          </div>
+        </div>
         <div class="account-head">
           <div>
             <h3 id="account-title">Your ITBMO account</h3>
@@ -288,8 +319,15 @@
       </section>
 
       <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
-      <section class="box" id="travelers-box">
-        <h3>Viajeros</h3>
+      <section class="box planner-stage-card planner-stage-card--travelers" id="travelers-box">
+        <div class="planner-stage-card__head">
+          <div class="planner-stage-card__index">02</div>
+          <div>
+            <span class="planner-stage-card__eyebrow" id="planner-travelers-eyebrow">QUIÉN VIAJA</span>
+            <h3>Viajeros</h3>
+            <p id="planner-travelers-guide">Indica si viajas solo o acompañado. Las edades del grupo ayudan a ajustar ritmos, actividades y desplazamientos.</p>
+          </div>
+        </div>
 
         <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
           ¿Con quién viajas?
@@ -372,8 +410,19 @@
         </div>
       </section>
 
-      <section class="box" id="destinations-box">
-        <h3>Destinos</h3>
+      <section class="box planner-stage-card planner-stage-card--destinations" id="destinations-box">
+        <div class="planner-stage-card__head">
+          <div class="planner-stage-card__index">01</div>
+          <div>
+            <span class="planner-stage-card__eyebrow" id="planner-route-eyebrow">CONSTRUYE TU RUTA</span>
+            <h3>Destinos</h3>
+            <p id="planner-route-guide">Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.</p>
+          </div>
+        </div>
+        <div class="planner-route-tip">
+          <span aria-hidden="true">✦</span>
+          <p id="planner-route-tip-copy"><strong>Usa tu tiempo útil, no la hora del vuelo.</strong> En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.</p>
+        </div>
         <div id="city-list"></div>
         <div class="row-actions">
           <button class="btn ghost" id="add-city-btn">+ Agregar destino</button>
@@ -389,7 +438,8 @@
         -->
       </section>
 
-      <section class="box special-conditions preferences-stage is-stage-hidden" id="preferences-stage" aria-hidden="true">
+      <section class="box special-conditions preferences-stage is-stage-hidden planner-stage-card planner-stage-card--preferences" id="preferences-stage" aria-hidden="true">
+        <div class="planner-stage-card__index">03</div>
         <div class="preferences-stage-head">
           <span class="preferences-stage-eyebrow" id="preferences-stage-eyebrow">Personalización de tu viaje</span>
           <h3 id="preferences-stage-title">Personaliza tu viaje</h3>
@@ -402,7 +452,15 @@
           Preferencias / Restricciones / Condiciones especiales
         </div>
 
-        <textarea id="special-conditions" rows="3" placeholder="Escribe aquí tus preferencias, restricciones o condiciones especiales…"></textarea>
+        <div class="planner-preference-examples" id="planner-preference-examples">
+          <span>🏞 Naturaleza y paisajes</span>
+          <span>🏛 Museos / cultura</span>
+          <span>🍽 Gastronomía</span>
+          <span>🧭 Imperdibles</span>
+          <span>♿ Necesidades especiales</span>
+          <span>⏱ Ritmo del viaje</span>
+        </div>
+        <textarea id="special-conditions" rows="4" placeholder="Ej.: Prefiero naturaleza y barrios locales, evitar museos largos, quiero probar gastronomía típica y necesito un ritmo tranquilo…"></textarea>
 
         <div class="preferences-stage-actions">
           <button class="btn primary preferences-continue" id="continue-with-astra" type="button">
@@ -413,34 +471,42 @@
       </section>
 
       <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
-      <button class="btn primary w-100" id="save-destinations" disabled>Guardar destinos</button>
+      <div class="planner-stage-transition planner-stage-transition--save">
+        <div>
+          <span id="planner-save-eyebrow">CUANDO TU RUTA ESTÉ LISTA</span>
+          <strong id="planner-save-title">Confirma la ruta para personalizar el viaje.</strong>
+        </div>
+        <button class="btn primary w-100" id="save-destinations" disabled>Guardar destinos</button>
+      </div>
       <!-- 🆕 Botón de reinicio reubicado -->
       <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
         Reiniciar planificación
       </button>
 
       <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
-    </aside>
+    </section>
 
     <!-- MAIN -->
     <main class="main">
-      <div class="planner-canvas-intro" id="planner-canvas-intro">
-        <span class="planner-canvas-intro__eyebrow" id="planner-canvas-eyebrow">TU VIAJE EMPIEZA AQUÍ</span>
-        <h2 id="planner-canvas-title">Menos formularios.<br><span>Más ganas de viajar.</span></h2>
-        <p id="planner-canvas-copy">Agrega hasta 3 ciudades, define quién viaja y deja que ITBMO conecte las piezas.</p>
-        <div class="planner-canvas-orbit" aria-hidden="true">
-          <span class="planner-canvas-orbit__ring"></span>
-          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--1"></span>
-          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--2"></span>
-          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--3"></span>
-          <span class="planner-canvas-orbit__core">✦</span>
-        </div>
+      
       </div>
-      <section class="box itinerary-section">
+      <section class="box itinerary-section planner-stage-card planner-stage-card--create">
+        <div class="planner-stage-card__head planner-stage-card__head--create">
+          <div class="planner-stage-card__index">04</div>
+          <div>
+            <span class="planner-stage-card__eyebrow" id="planner-create-eyebrow">LISTO PARA CREAR</span>
+            <h3 id="planner-create-title">Tu viaje toma forma aquí.</h3>
+            <p id="planner-create-copy">Cuando completes la ruta y la personalización, ITBMO organizará el itinerario ciudad por ciudad y día por día.</p>
+          </div>
+        </div>
 
         <!-- ✅ Header: Título + botón Info Chat arriba (como el HTML donde sí se veía) -->
         <div class="itinerary-head">
           <h2>Itinerario</h2>
+          <div class="planner-create-status" id="planner-create-status">
+            <span class="planner-create-status__dot" aria-hidden="true"></span>
+            <span id="planner-create-status-copy">Completa los pasos anteriores para comenzar.</span>
+          </div>
 
           <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
           <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
@@ -1140,7 +1206,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=95"></script>
+<script src="./planner.js?v=96"></script>
  
 </body>
 </html>
