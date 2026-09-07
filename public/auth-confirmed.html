@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>I Travel By My Own — Confirmación de cuenta</title>
+  <style>
+    :root{--ink:#102c47;--muted:#6f8497;--brand:#0ea47a;--brand2:#0a9fbb;--surface:#f7fbfd;--line:#d9edf0}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:linear-gradient(145deg,#f7fbfd,#eef9fa);font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink)}
+    .card{width:min(620px,100%);background:#fff;border:1px solid var(--line);border-radius:24px;padding:34px;box-shadow:0 22px 55px rgba(16,44,71,.10)}
+    .brand{font-size:1.55rem;font-weight:900;line-height:1.05;margin-bottom:30px}.brand small{display:block;font-size:.72em;margin-top:3px}
+    .icon{width:58px;height:58px;border-radius:18px;display:grid;place-items:center;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;font-size:1.6rem;margin-bottom:20px}
+    h1{font-size:clamp(1.7rem,5vw,2.25rem);margin:0 0 12px}p{font-size:1rem;line-height:1.6;color:var(--muted);margin:0 0 22px}
+    .btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 20px;border:0;border-radius:14px;background:linear-gradient(135deg,#1477ed,#08a7b6);color:#fff;text-decoration:none;font-weight:800;cursor:pointer}
+    .status{font-size:.9rem;color:var(--muted);margin-top:14px}.error{color:#c83d4d}.success{color:#08785f}
+    @media(max-width:520px){.card{padding:26px 22px;border-radius:20px}}
+  </style>
+</head>
+<body>
+  <main class="card" aria-live="polite">
+    <div class="brand">I Travel<small>By My Own</small></div>
+    <div class="icon" id="status-icon">✓</div>
+    <h1 id="title">Confirmando tu cuenta…</h1>
+    <p id="copy">Estamos validando tu correo. Esto tomará solo unos segundos.</p>
+    <a class="btn" id="continue-btn" href="/planner.html?lang=es" style="display:none;">Continuar al Planner</a>
+    <div class="status" id="status"></div>
+  </main>
+
+  <script>
+    (async function(){
+      const params=new URLSearchParams(location.search);
+      const lang=(params.get('lang') || 'en').toLowerCase().startsWith('es') ? 'es' : 'en';
+      document.documentElement.lang=lang;
+      const copy={
+        es:{
+          confirming:'Confirmando tu cuenta…', confirmingCopy:'Estamos validando tu correo. Esto tomará solo unos segundos.',
+          success:'¡Cuenta verificada!', successCopy:'Tu cuenta de I Travel By My Own ya está activa. Si dejaste el Planner abierto en otro dispositivo, se desbloqueará automáticamente.',
+          button:'Continuar al Planner', error:'No pudimos confirmar tu cuenta', errorCopy:'El enlace puede haber expirado, ya haber sido utilizado o pertenecer a un correo anterior. Usa siempre el correo de confirmación más reciente. Si tu cuenta ya fue verificada, vuelve al Planner e inicia sesión.',
+          back:'Volver al Planner'
+        },
+        en:{
+          confirming:'Confirming your account…', confirmingCopy:'We are validating your email. This will only take a few seconds.',
+          success:'Account verified!', successCopy:'Your I Travel By My Own account is now active. If you left the Planner open on another device, it will unlock automatically.',
+          button:'Continue to Planner', error:'We could not confirm your account', errorCopy:'The link may have expired, already been used, or belong to an earlier email. Always use the most recent confirmation email. If your account is already verified, return to the Planner and sign in.',
+          back:'Back to Planner'
+        }
+      }[lang];
+      const title=document.getElementById('title'), body=document.getElementById('copy'), btn=document.getElementById('continue-btn'), status=document.getElementById('status'), icon=document.getElementById('status-icon');
+      title.textContent=copy.confirming; body.textContent=copy.confirmingCopy; btn.href=`/planner.html?lang=${lang}`;
+      const hash=new URLSearchParams(String(location.hash || '').replace(/^#/,''));
+      const accessToken=hash.get('access_token') || '';
+      const callbackError=hash.get('error_description') || hash.get('error') || '';
+      if(callbackError || !accessToken){
+        title.textContent=copy.error; body.textContent=copy.errorCopy; icon.textContent='!'; status.textContent=callbackError; status.className='status error'; btn.textContent=copy.back; btn.style.display='inline-flex'; return;
+      }
+      try{
+        const response=await fetch('/api/user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'complete_auth',access_token:accessToken,verification_only:true})});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok || !data?.ok) throw new Error(data?.error || 'Verification failed');
+        try{history.replaceState(null,'',location.pathname + location.search);}catch(_){ }
+        title.textContent=copy.success; body.textContent=copy.successCopy; icon.textContent='✓'; status.textContent=''; status.className='status success'; btn.textContent=copy.button; btn.style.display='inline-flex';
+      }catch(err){
+        title.textContent=copy.error; body.textContent=copy.errorCopy; icon.textContent='!'; status.textContent=err?.message || ''; status.className='status error'; btn.textContent=copy.back; btn.style.display='inline-flex';
+      }
+    })();
+  </script>
+</body>
+</html>

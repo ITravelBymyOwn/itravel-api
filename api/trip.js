@@ -5,6 +5,7 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
 const MAX_GENERATION_RUNS = 2;
+const MAX_DAYS_PER_DESTINATION = 10;
 
 const ITBMO_ADMIN_TEST_BYPASS =
   String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
@@ -81,10 +82,17 @@ async function getActiveSession(rawToken) {
 }
 
 function generationAdminBypass(userId) {
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+
+  // Vercel Preview is a test environment: any valid ITBMO session may
+  // exercise generation/recovery/Info Chat without a real payment.
+  // Production remains strictly payment-gated unless the explicit,
+  // admin-only production bypass is deliberately enabled.
+  if (!isProduction) return Boolean(userId);
+
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
-  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
-  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+  return ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
 }
 
 async function getOwnedTripForGeneration(tripId, userId) {
@@ -139,6 +147,19 @@ function validDateOrNull(value) {
   return value;
 }
 
+function hasDestinationOverDayLimit(destinations) {
+  if (!Array.isArray(destinations)) return false;
+
+  return destinations.some(destination => {
+    if (!destination || destination.days === undefined || destination.days === null || destination.days === "") {
+      return false;
+    }
+
+    const days = Number(destination.days);
+    return Number.isFinite(days) && days > MAX_DAYS_PER_DESTINATION;
+  });
+}
+
 function normalizeString(value, maxLength = 500) {
   if (value === null || value === undefined) {
     return null;
@@ -162,6 +183,13 @@ async function handleCreate(res, body, session) {
     return res.status(400).json({
       ok: false,
       error: "At least one destination is required"
+    });
+  }
+
+  if (hasDestinationOverDayLimit(destinations)) {
+    return res.status(400).json({
+      ok: false,
+      error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
     });
   }
 
@@ -424,6 +452,13 @@ async function handleUpdate(res, body, session) {
       });
     }
 
+    if (hasDestinationOverDayLimit(body.destinations)) {
+      return res.status(400).json({
+        ok: false,
+        error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+      });
+    }
+
     patch.destinations = body.destinations;
   }
 
@@ -545,11 +580,53 @@ async function handleGet(res, body, session) {
   });
 }
 
+async function disableAutoRecoveryForUser(userId) {
+  const rows = await supabaseFetch(
+    `/trips?select=id,status,planner_input&user_id=eq.${encodeURIComponent(userId)}&` +
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=100`,
+    { method:"GET" }
+  );
+
+  const candidates = Array.isArray(rows) ? rows : [];
+  const now = new Date().toISOString();
+
+  for (const candidate of candidates) {
+    const plannerInput = generationCheckpoint(candidate?.planner_input);
+    if (plannerInput.auto_recovery_disabled === true) continue;
+
+    await patchOwnedTrip(candidate.id, userId, {
+      planner_input:{
+        ...plannerInput,
+        auto_recovery_disabled:true,
+        auto_recovery_disabled_at:now
+      }
+    });
+  }
+
+  return candidates.length;
+}
+
 async function handleArchive(res, body, session) {
   const tripId = String(body.trip_id || "").trim();
+  const preventAutoRecovery = body.prevent_auto_recovery === true;
+
+  if (!tripId && !preventAutoRecovery) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  let disabledRecoveryCount = 0;
+  if (preventAutoRecovery) {
+    disabledRecoveryCount = await disableAutoRecoveryForUser(session.user_id);
+  }
 
   if (!tripId) {
-    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+    return res.status(200).json({
+      ok:true,
+      action:"archive",
+      trip:null,
+      auto_recovery_disabled:true,
+      disabled_recovery_count:disabledRecoveryCount
+    });
   }
 
   const trip = await getOwnedTripForGeneration(tripId, session.user_id);
@@ -558,7 +635,13 @@ async function handleArchive(res, body, session) {
   }
 
   if (trip.status === "archived") {
-    return res.status(200).json({ ok:true, action:"archive", trip });
+    return res.status(200).json({
+      ok:true,
+      action:"archive",
+      trip,
+      auto_recovery_disabled:preventAutoRecovery,
+      disabled_recovery_count:disabledRecoveryCount
+    });
   }
 
   const now = new Date().toISOString();
@@ -576,7 +659,9 @@ async function handleArchive(res, body, session) {
   return res.status(200).json({
     ok:true,
     action:"archive",
-    trip:updated
+    trip:updated,
+    auto_recovery_disabled:preventAutoRecovery,
+    disabled_recovery_count:disabledRecoveryCount
   });
 }
 
@@ -723,18 +808,119 @@ async function handleGenerationCheckpoint(res, body, session) {
   });
 }
 
+async function handlePostPaymentCheckpoint(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  const checkpoint = generationCheckpoint(body.checkpoint);
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"GENERATION_PAYMENT_REQUIRED", error:"Payment required" });
+  }
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+
+  const plannerInput = generationCheckpoint(trip.planner_input);
+  const persistedCheckpoint = {
+    ...checkpoint,
+    schema_version:1,
+    updated_at:new Date().toISOString()
+  };
+
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    planner_input:{
+      ...plannerInput,
+      post_payment_progress:persistedCheckpoint
+    }
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"post_payment_checkpoint",
+    trip:updated
+  });
+}
+
+
+async function handleInfoChatCheckpoint(res, body, session) {
+  const tripId = String(body.trip_id || "").trim();
+  const checkpoint = generationCheckpoint(body.checkpoint);
+
+  if (!tripId) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  const trip = await getOwnedTripForGeneration(tripId, session.user_id);
+  if (!trip) {
+    return res.status(404).json({ ok:false, error:"Trip not found" });
+  }
+  if (!(await hasGenerationEntitlement(tripId, session.user_id))) {
+    return res.status(402).json({ ok:false, code:"INFO_CHAT_NOT_AUTHORIZED", error:"Payment required" });
+  }
+  if (trip.status === "archived") {
+    return res.status(409).json({ ok:false, code:"GENERATION_ARCHIVED", error:"Trip archived" });
+  }
+
+  const plannerInput = generationCheckpoint(trip.planner_input);
+  const history = Array.isArray(checkpoint.history)
+    ? checkpoint.history
+        .filter(message => message && (message.role === "user" || message.role === "assistant"))
+        .slice(-40)
+        .map(message => ({
+          role: message.role,
+          content: String(message.content || "").slice(0, 12000)
+        }))
+    : [];
+
+  const persistedCheckpoint = {
+    trip_id: tripId,
+    authorized: true,
+    remaining: Math.max(0, Math.min(10, Number(checkpoint.remaining) || 0)),
+    used: Math.max(0, Math.min(10, Number(checkpoint.used) || 0)),
+    history,
+    updated_at: new Date().toISOString()
+  };
+
+  const updated = await patchOwnedTrip(tripId, session.user_id, {
+    planner_input:{
+      ...plannerInput,
+      info_chat_state:persistedCheckpoint
+    }
+  });
+
+  return res.status(200).json({
+    ok:true,
+    action:"info_chat_checkpoint",
+    trip:updated
+  });
+}
+
 async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
     `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
-    `status=in.(generating,failed)&order=updated_at.desc&limit=1`,
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=10`,
     { method:"GET" }
   );
-  const trip = Array.isArray(rows) ? rows[0] || null : null;
-  if (!trip || !(await hasGenerationEntitlement(trip.id, session.user_id))) {
-    return res.status(200).json({ ok:true, action:"recoverable", trip:null });
+
+  const candidates = Array.isArray(rows) ? rows : [];
+  for (const trip of candidates) {
+    const plannerInput = generationCheckpoint(trip?.planner_input);
+    if (plannerInput.auto_recovery_disabled === true) continue;
+
+    if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
+      return res.status(200).json({ ok:true, action:"recoverable", trip });
+    }
   }
-  return res.status(200).json({ ok:true, action:"recoverable", trip });
+
+  return res.status(200).json({ ok:true, action:"recoverable", trip:null });
 }
 
 export default async function handler(req, res) {
@@ -805,6 +991,14 @@ export default async function handler(req, res) {
 
     if (action === "generation_checkpoint") {
       return await handleGenerationCheckpoint(res, body, session);
+    }
+
+    if (action === "post_payment_checkpoint") {
+      return await handlePostPaymentCheckpoint(res, body, session);
+    }
+
+    if (action === "info_chat_checkpoint") {
+      return await handleInfoChatCheckpoint(res, body, session);
     }
 
     if (action === "recoverable") {

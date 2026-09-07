@@ -67,7 +67,7 @@
       <h2>Planificador</h2>
 
       <!-- =========================================================
-           ITBMO ACCOUNT — Registro / Login MVP
+           ITBMO ACCOUNT — Supabase Auth + Guest
            La autenticación visual vive en el Planner.
            La persistencia real se procesa en /api/user (Vercel → Supabase).
       ========================================================== -->
@@ -75,58 +75,41 @@
         <div class="account-head">
           <div>
             <h3 id="account-title">Your ITBMO account</h3>
-            <p id="account-subtitle" class="account-subtitle">Register once and keep planning without entering your details again.</p>
+            <p id="account-subtitle" class="account-subtitle">Create an account, sign in, or continue as a guest.</p>
           </div>
           <div id="account-user-badge" class="account-user-badge" style="display:none;"></div>
         </div>
 
         <div id="account-guest">
-          <div class="account-mode-actions">
-            <button class="btn primary account-mode-btn" id="account-register-toggle" type="button">Register</button>
+          <div class="account-mode-actions" id="account-mode-actions">
+            <button class="btn primary account-mode-btn" id="account-register-toggle" type="button">Create account</button>
             <button class="btn ghost account-mode-btn" id="account-login-toggle" type="button">Sign in</button>
           </div>
+
+          <button class="btn ghost w-100" id="account-guest-toggle" type="button" style="margin-top:.55rem;">Continue as guest</button>
 
           <div id="account-register-panel" class="account-panel" style="display:none;">
             <div class="account-form-grid">
               <label>
-                <span id="label-first-name">First name</span>
-                <input id="account-first-name" type="text" maxlength="100" autocomplete="given-name" />
-              </label>
-
-              <label>
-                <span id="label-last-name">Last name</span>
-                <input id="account-last-name" type="text" maxlength="150" autocomplete="family-name" />
-              </label>
-
-              <label>
-                <span id="label-username">Username</span>
-                <input id="account-username" type="text" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" />
-                <small id="username-hint">3–30 characters: letters, numbers, dot, hyphen or underscore.</small>
+                <span id="label-first-name">Name</span>
+                <input id="account-first-name" type="text" maxlength="100" autocomplete="name" />
               </label>
 
               <label>
                 <span id="label-email">Email</span>
                 <input id="account-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+                <small id="account-upgrade-email-hint" class="account-upgrade-email-hint" style="display:none;">You may keep your guest email or use a different email for your account.</small>
               </label>
 
               <label>
-                <span id="label-profile-age">Age range</span>
-                <select id="account-age-range">
-                  <option value="" selected disabled></option>
-                  <option value="18-24">18–24</option>
-                  <option value="25-34">25–34</option>
-                  <option value="35-44">35–44</option>
-                  <option value="45-54">45–54</option>
-                  <option value="55-64">55–64</option>
-                  <option value="65+">65+</option>
-                </select>
+                <span id="label-password">Password</span>
+                <input id="account-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+                <small id="password-hint">Minimum 8 characters, including uppercase, lowercase and a number.</small>
               </label>
 
               <label>
-                <span id="label-country-residence">Country of residence</span>
-                <select id="account-country">
-                  <option value="" selected disabled></option>
-                </select>
+                <span id="label-password-confirm">Confirm password</span>
+                <input id="account-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
               </label>
             </div>
 
@@ -145,32 +128,98 @@
               <span id="account-marketing-copy">Send me travel inspiration, recommendations and special offers from ITBMO.</span>
             </label>
 
-            <button class="btn primary w-100" id="account-register-submit" type="button">Create free account</button>
+            <button class="btn primary w-100" id="account-register-submit" type="button">Create account</button>
+            <button class="btn ghost w-100" id="account-upgrade-cancel" type="button" style="display:none; margin-top:.55rem;">Cancel</button>
           </div>
 
           <div id="account-login-panel" class="account-panel" style="display:none;">
             <div class="account-form-grid">
               <label>
-                <span id="label-login-username">Username</span>
-                <input id="account-login-username" type="text" maxlength="30" autocomplete="username" autocapitalize="none" spellcheck="false" />
+                <span id="label-login-email">Email</span>
+                <input id="account-login-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
               </label>
 
               <label>
-                <span id="label-login-email">Email</span>
-                <input id="account-login-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+                <span id="label-login-password">Password</span>
+                <input id="account-login-password" type="password" maxlength="128" autocomplete="current-password" />
               </label>
             </div>
 
             <button class="btn primary w-100" id="account-login-submit" type="button">Sign in</button>
+            <button class="btn ghost w-100" id="account-forgot-password" type="button" style="margin-top:.55rem;">Forgot your password?</button>
+          </div>
+
+          <div id="account-guest-panel" class="account-panel" style="display:none;">
+            <div class="account-form-grid">
+              <label>
+                <span id="label-guest-name">Name</span>
+                <input id="account-guest-name" type="text" maxlength="100" autocomplete="name" />
+              </label>
+
+              <label>
+                <span id="label-guest-email">Email</span>
+                <input id="account-guest-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+              </label>
+            </div>
+
+            <label class="account-check">
+              <input id="account-guest-legal-consent" type="checkbox" />
+              <span id="account-guest-legal-copy">
+                I agree to the
+                <a id="account-guest-terms-link" href="https://itravelbymyown.com/terminos" target="_blank" rel="noopener noreferrer">Terms of Use</a>
+                and acknowledge the
+                <a id="account-guest-privacy-link" href="https://itravelbymyown.com/privacidad-cookies" target="_blank" rel="noopener noreferrer">Privacy Policy</a>.
+              </span>
+            </label>
+
+            <button class="btn primary w-100" id="account-guest-submit" type="button">Continue as guest</button>
+          </div>
+
+          <div id="account-forgot-panel" class="account-panel" style="display:none;">
+            <div class="account-form-grid">
+              <label>
+                <span id="label-forgot-email">Email</span>
+                <input id="account-forgot-email" type="email" maxlength="320" autocomplete="email" autocapitalize="none" spellcheck="false" />
+              </label>
+            </div>
+
+            <button class="btn primary w-100" id="account-forgot-submit" type="button">Send reset link</button>
+            <button class="btn ghost w-100" id="account-forgot-back" type="button" style="margin-top:.55rem;">Back to sign in</button>
+          </div>
+
+          <div id="account-reset-panel" class="account-panel" style="display:none;">
+            <div class="account-form-grid">
+              <label>
+                <span id="label-reset-password">New password</span>
+                <input id="account-reset-password" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+              </label>
+
+              <label>
+                <span id="label-reset-password-confirm">Confirm new password</span>
+                <input id="account-reset-password-confirm" type="password" minlength="8" maxlength="128" autocomplete="new-password" />
+              </label>
+            </div>
+
+            <button class="btn primary w-100" id="account-reset-submit" type="button">Update password</button>
           </div>
 
           <div id="account-message" class="account-message" aria-live="polite"></div>
         </div>
 
         <div id="account-authenticated" class="account-authenticated" style="display:none;">
-          <div>
-            <strong id="account-welcome">Welcome back.</strong>
-            <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
+          <div class="account-authenticated-copy">
+            <div class="account-authenticated-text">
+              <strong id="account-welcome">Welcome back.</strong>
+              <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
+            </div>
+            <button id="account-logout" class="account-logout" type="button">Sign out</button>
+          </div>
+          <div id="account-guest-upgrade" class="account-guest-upgrade" style="display:none;">
+            <div class="account-guest-upgrade-text">
+              <strong id="account-guest-upgrade-title">Want access from another device?</strong>
+              <p id="account-guest-upgrade-copy">Create an account to access your planning from other devices during the available recovery period.</p>
+            </div>
+            <button class="btn primary" id="account-upgrade-toggle" type="button">Create account</button>
           </div>
         </div>
       </section>
@@ -264,7 +313,7 @@
         <h3>Destinos</h3>
         <div id="city-list"></div>
         <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar ciudad</button>
+          <button class="btn ghost" id="add-city-btn">+ Agregar destino</button>
         </div>
 
         <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
@@ -332,7 +381,7 @@
         <div id="chat-container" class="chat" style="display:none;">
           <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
           <div class="chat-input">
-            <input id="chat-input" type="text" placeholder="Escribe tu mensaje..." />
+            <textarea id="chat-input" rows="2" placeholder="Escribe tu mensaje..."></textarea>
             <button id="send-btn" class="btn primary">Enviar</button>
           </div>
         </div>
@@ -657,7 +706,7 @@
         en: {
           planner_title: "Planner",
           destinations: "Destinations",
-          add_city: "+ Add city",
+          add_city: "+ Add destination",
           save_destinations: "Save destinations",
           reset_planning: "Reset planning",
           special_title: "Preferences / Restrictions / Special conditions",
@@ -706,7 +755,7 @@
         es: {
           planner_title: "Planificador",
           destinations: "Destinos",
-          add_city: "+ Agregar ciudad",
+          add_city: "+ Agregar destino",
           save_destinations: "Guardar destinos",
           reset_planning: "Reiniciar planificación",
           special_title: "Preferencias / Restricciones / Condiciones especiales",

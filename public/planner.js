@@ -81,6 +81,7 @@ const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
+const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
@@ -89,6 +90,8 @@ const ITBMO_MARKETING_VERSION = '1.0';
 let currentUser = null;
 let currentTripId = null;
 let authReady = false;
+let guestUpgradeFormOpen = false;
+let pendingVerificationTimer = null;
 
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
@@ -100,6 +103,7 @@ let infoSession = [];            // historial separado para Info Chat
 let activeCity = null;
 
 const ITBMO_INFO_CHAT_STATE_KEY_PREFIX = 'itbmo_info_chat_state_v1_';
+const ITBMO_POST_PAYMENT_STATE_KEY_PREFIX = 'itbmo_post_payment_state_v1_';
 
 let planningStarted = false;
 let metaProgressIndex = 0;
@@ -133,6 +137,7 @@ let agentConversationLang = null;
 const DEFAULT_START = '';
 const DEFAULT_END   = '';
 const MAX_ITINERARY_CITIES = 3;
+const MAX_DAYS_PER_DESTINATION = 10;
 
 let plannerState = {
   destinations: [],
@@ -191,7 +196,7 @@ const I18N = {
     thinking: 'ITBMO está preparando la respuesta…',
 
     // UI / Sidebar cities
-    uiCity: 'Ciudad',
+    uiCity: 'Destino',
     uiCountry: 'País',
     uiDays: 'Días',
     uiStart: 'Primer día',
@@ -271,7 +276,7 @@ const I18N = {
     thinking: 'ITBMO is preparing the answer…',
 
     // UI / Sidebar cities
-    uiCity: 'City',
+    uiCity: 'Destination',
     uiCountry: 'Country',
     uiDays: 'Days',
     uiStart: 'First day',
@@ -697,25 +702,47 @@ const $accountGuest = qs('#account-guest');
 const $accountAuthenticated = qs('#account-authenticated');
 const $accountRegisterToggle = qs('#account-register-toggle');
 const $accountLoginToggle = qs('#account-login-toggle');
+const $accountGuestToggle = qs('#account-guest-toggle');
 const $accountRegisterPanel = qs('#account-register-panel');
 const $accountLoginPanel = qs('#account-login-panel');
+const $accountGuestPanel = qs('#account-guest-panel');
+const $accountForgotPanel = qs('#account-forgot-panel');
+const $accountResetPanel = qs('#account-reset-panel');
 const $accountRegisterSubmit = qs('#account-register-submit');
 const $accountLoginSubmit = qs('#account-login-submit');
+const $accountGuestSubmit = qs('#account-guest-submit');
+const $accountForgotPassword = qs('#account-forgot-password');
+const $accountForgotSubmit = qs('#account-forgot-submit');
+const $accountForgotBack = qs('#account-forgot-back');
+const $accountResetSubmit = qs('#account-reset-submit');
 const $accountMessage = qs('#account-message');
+const $accountSubtitle = qs('#account-subtitle');
 const $accountUserBadge = qs('#account-user-badge');
 const $accountWelcome = qs('#account-welcome');
 const $accountReadyCopy = qs('#account-ready-copy');
 
 const $accountFirstName = qs('#account-first-name');
-const $accountLastName = qs('#account-last-name');
-const $accountUsername = qs('#account-username');
 const $accountEmail = qs('#account-email');
-const $accountAgeRange = qs('#account-age-range');
-const $accountCountry = qs('#account-country');
+const $accountPassword = qs('#account-password');
+const $accountPasswordConfirm = qs('#account-password-confirm');
 const $accountLegalConsent = qs('#account-legal-consent');
 const $accountMarketingConsent = qs('#account-marketing-consent');
-const $accountLoginUsername = qs('#account-login-username');
 const $accountLoginEmail = qs('#account-login-email');
+const $accountLoginPassword = qs('#account-login-password');
+const $accountGuestName = qs('#account-guest-name');
+const $accountGuestEmail = qs('#account-guest-email');
+const $accountGuestLegalConsent = qs('#account-guest-legal-consent');
+const $accountModeActions = qs('#account-mode-actions');
+const $accountUpgradeToggle = qs('#account-upgrade-toggle');
+const $accountUpgradeCancel = qs('#account-upgrade-cancel');
+const $accountGuestUpgrade = qs('#account-guest-upgrade');
+const $accountGuestUpgradeCopy = qs('#account-guest-upgrade-copy');
+const $accountGuestUpgradeTitle = qs('#account-guest-upgrade-title');
+const $accountUpgradeEmailHint = qs('#account-upgrade-email-hint');
+const $accountLogout = qs('#account-logout');
+const $accountForgotEmail = qs('#account-forgot-email');
+const $accountResetPassword = qs('#account-reset-password');
+const $accountResetPasswordConfirm = qs('#account-reset-password-confirm');
 
 const $travelerMode      = qs('#traveler-mode');
 const $travelerSoloPanel = qs('#traveler-solo-panel');
@@ -729,89 +756,66 @@ const $travelerAdd      = qs('#traveler-add');
 const $travelerRemove   = qs('#traveler-remove');
 
 /* =========================================================
-   ITBMO ACCOUNT — Registro / Login + sesión persistente
-   - Frontend: solo UX + token local.
+   ITBMO ACCOUNT — Supabase Auth + invitado + sesión ITBMO
+   - Cuenta: nombre + email + contraseña.
+   - Invitado: nombre + email.
    - Backend real: /api/user.
-   - Nunca expone SUPABASE_SECRET_KEY.
+   - Trips/pagos siguen usando el session_token ITBMO existente.
 ========================================================= */
 const AUTH_COPY = {
   es: {
-    title:'Tu cuenta ITBMO',
-    subtitle:'Regístrate una sola vez y sigue planificando sin volver a ingresar tus datos.',
-    register:'Registrarse',
-    login:'Iniciar sesión',
-    firstName:'Nombre',
-    lastName:'Apellidos',
-    username:'Nombre de usuario',
-    usernameHint:'3–30 caracteres: letras, números, punto, guion o guion bajo.',
-    email:'Email',
-    profileAge:'Rango de edad',
-    country:'País de residencia',
-    create:'Crear cuenta gratis',
-    signIn:'Iniciar sesión',
-    legalPrefix:'Acepto los ',
-    terms:'Términos de Uso',
-    legalMiddle:' y reconozco la ',
-    privacy:'Política de Privacidad',
-    legalSuffix:'.',
+    title:'Tu cuenta ITBMO', subtitle:'Crea una cuenta, inicia sesión o continúa como invitado.',
+    subtitleGuest:'Estás usando ITBMO como invitado.', subtitlePending:'Confirma tu correo para activar tu cuenta.', subtitleRegistered:'Tu cuenta está activa.',
+    register:'Crear cuenta', login:'Iniciar sesión', guest:'Continuar como invitado',
+    name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña',
+    create:'Crear cuenta', signIn:'Iniciar sesión', forgot:'¿Olvidaste tu contraseña?',
+    guestContinue:'Continuar como invitado', forgotTitle:'Restablecer contraseña', sendReset:'Enviar enlace de recuperación',
+    backToLogin:'Volver a iniciar sesión', newPassword:'Nueva contraseña', newPasswordConfirm:'Confirmar nueva contraseña', updatePassword:'Actualizar contraseña',
+    legalPrefix:'Acepto los ', terms:'Términos de Uso', legalMiddle:' y reconozco la ', privacy:'Política de Privacidad', legalSuffix:'.',
     marketing:'Quiero recibir inspiración de viaje, recomendaciones y ofertas especiales de ITBMO.',
     welcome:(name)=>`Hola, ${name} 👋`,
-    ready:'Tu perfil está activo en este dispositivo. Continúa planificando normalmente.',
-    registering:'Creando tu cuenta…',
-    signingIn:'Iniciando sesión…',
-    required:'Completa todos los campos obligatorios.',
-    legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
-    usernameInvalid:'El nombre de usuario debe tener 3–30 caracteres y usar solo letras minúsculas, números, punto, guion o guion bajo.',
-    emailInvalid:'Ingresa un email válido.',
-    duplicateUser:'Ese nombre de usuario ya está en uso.',
-    duplicateEmail:'Ese email ya está registrado. Usa “Iniciar sesión”.',
-    registerFail:'No pudimos crear tu cuenta. Intenta nuevamente.',
-    loginFail:'El nombre de usuario y el email no coinciden.',
-    connectionFail:'No se pudo conectar con tu cuenta ITBMO. Intenta nuevamente.',
-    loginRequired:'Regístrate o inicia sesión antes de guardar destinos.',
-    travelerRequired:'Indica con quién viajas antes de guardar destinos.',
-    companionRequired:'Indica género y rango de edad de cada acompañante.',
-    tripSaving:'Guardando tu viaje…',
-    tripFail:'No pudimos guardar el viaje. Tus datos no se perdieron; intenta nuevamente.'
+    readyRegistered:'Tu cuenta está activa en este dispositivo. Continúa planificando normalmente.',
+    readyGuest:'Estás usando ITBMO como invitado en este dispositivo. Puedes continuar planificando normalmente.',
+    readyPending:'Tu cuenta está pendiente de confirmación. Revisa el correo que te enviamos. El Planner se desbloqueará automáticamente cuando confirmes tu correo.',
+    upgradeTitle:'¿Quieres acceder desde otro dispositivo?', upgradeCopy:'Crea una cuenta para acceder a tu planificación desde otros dispositivos durante el período disponible.',
+    upgradeAction:'Crear cuenta', upgradeCancel:'Cancelar', logout:'Cerrar sesión', upgradeEmailHint:'Puedes mantener el correo usado como invitado o usar otro correo para tu cuenta.', passwordHint:'Mínimo 8 caracteres, incluyendo mayúscula, minúscula y un número.',
+    registering:'Creando tu cuenta…', signingIn:'Iniciando sesión…', guestStarting:'Preparando tu sesión…', sendingReset:'Enviando enlace…', resetting:'Actualizando contraseña…', confirming:'Confirmando tu cuenta…',
+    required:'Completa todos los campos obligatorios.', legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
+    emailInvalid:'Ingresa un email válido.', passwordRule:'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número.', passwordMismatch:'Las contraseñas no coinciden.',
+    duplicateEmail:'Ese email ya está registrado. Usa “Iniciar sesión”.', registerFail:'No pudimos crear tu cuenta. Intenta nuevamente.',
+    confirmationSent:'Cuenta creada. Revisa tu email y confirma tu correo para iniciar sesión.', loginFail:'Email o contraseña incorrectos, o el correo aún no ha sido confirmado.',
+    guestFail:'No pudimos iniciar la sesión de invitado. Intenta nuevamente.', guestMismatch:'El nombre y el correo no coinciden con el invitado registrado anteriormente.', guestHasAccount:'Ese correo ya tiene una cuenta. Usa “Iniciar sesión”.', connectionFail:'No se pudo conectar con ITBMO. Intenta nuevamente.',
+    resetSent:'Si existe una cuenta con ese email, recibirás un enlace para restablecer tu contraseña.', resetFail:'No pudimos procesar la recuperación. Intenta nuevamente.',
+    passwordUpdated:'Contraseña actualizada. Ya puedes iniciar sesión.', confirmationComplete:'Correo confirmado. Tu cuenta ya está activa.', confirmationFail:'No pudimos completar la confirmación. Intenta iniciar sesión.',
+    loginRequired:'Crea una cuenta, inicia sesión o continúa como invitado antes de guardar destinos.', travelerRequired:'Indica con quién viajas antes de guardar destinos.', companionRequired:'Indica género y rango de edad de cada acompañante.',
+    tripSaving:'Guardando tu viaje…', tripFail:'No pudimos guardar el viaje. Tus datos no se perdieron; intenta nuevamente.'
   },
   en: {
-    title:'Your ITBMO account',
-    subtitle:'Register once and keep planning without entering your details again.',
-    register:'Register',
-    login:'Sign in',
-    firstName:'First name',
-    lastName:'Last name',
-    username:'Username',
-    usernameHint:'3–30 characters: letters, numbers, dot, hyphen or underscore.',
-    email:'Email',
-    profileAge:'Age range',
-    country:'Country of residence',
-    create:'Create free account',
-    signIn:'Sign in',
-    legalPrefix:'I agree to the ',
-    terms:'Terms of Use',
-    legalMiddle:' and acknowledge the ',
-    privacy:'Privacy Policy',
-    legalSuffix:'.',
+    title:'Your ITBMO account', subtitle:'Create an account, sign in, or continue as a guest.',
+    subtitleGuest:'You are using ITBMO as a guest.', subtitlePending:'Confirm your email to activate your account.', subtitleRegistered:'Your account is active.',
+    register:'Create account', login:'Sign in', guest:'Continue as guest',
+    name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password',
+    create:'Create account', signIn:'Sign in', forgot:'Forgot your password?',
+    guestContinue:'Continue as guest', forgotTitle:'Reset password', sendReset:'Send reset link',
+    backToLogin:'Back to sign in', newPassword:'New password', newPasswordConfirm:'Confirm new password', updatePassword:'Update password',
+    legalPrefix:'I agree to the ', terms:'Terms of Use', legalMiddle:' and acknowledge the ', privacy:'Privacy Policy', legalSuffix:'.',
     marketing:'Send me travel inspiration, recommendations and special offers from ITBMO.',
     welcome:(name)=>`Hi, ${name} 👋`,
-    ready:'Your profile is active on this device. Continue planning normally.',
-    registering:'Creating your account…',
-    signingIn:'Signing in…',
-    required:'Complete all required fields.',
-    legalRequired:'You must accept the Terms of Use and Privacy Policy.',
-    usernameInvalid:'Username must contain 3–30 lowercase letters, numbers, dots, hyphens or underscores.',
-    emailInvalid:'Enter a valid email.',
-    duplicateUser:'That username is already in use.',
-    duplicateEmail:'That email is already registered. Use “Sign in”.',
-    registerFail:'We could not create your account. Please try again.',
-    loginFail:'Username and email do not match.',
-    connectionFail:'Could not connect to your ITBMO account. Please try again.',
-    loginRequired:'Register or sign in before saving destinations.',
-    travelerRequired:'Tell us who you are traveling with before saving destinations.',
-    companionRequired:'Select gender and age range for every companion.',
-    tripSaving:'Saving your trip…',
-    tripFail:'We could not save the trip. Your entries are still here; please try again.'
+    readyRegistered:'Your account is active on this device. Continue planning normally.',
+    readyGuest:'You are using ITBMO as a guest on this device. You can continue planning normally.',
+    readyPending:'Your account is awaiting confirmation. Check the email we sent you. The Planner will unlock automatically once your email is confirmed.',
+    upgradeTitle:'Want access from another device?', upgradeCopy:'Create an account to access your planning from other devices during the available recovery period.',
+    upgradeAction:'Create account', upgradeCancel:'Cancel', logout:'Sign out', upgradeEmailHint:'You may keep the email used as a guest or use a different email for your account.', passwordHint:'Minimum 8 characters, including uppercase, lowercase and a number.',
+    registering:'Creating your account…', signingIn:'Signing in…', guestStarting:'Preparing your session…', sendingReset:'Sending reset link…', resetting:'Updating password…', confirming:'Confirming your account…',
+    required:'Complete all required fields.', legalRequired:'You must accept the Terms of Use and Privacy Policy.',
+    emailInvalid:'Enter a valid email.', passwordRule:'Password must be at least 8 characters and include an uppercase letter, lowercase letter and number.', passwordMismatch:'Passwords do not match.',
+    duplicateEmail:'That email is already registered. Use “Sign in”.', registerFail:'We could not create your account. Please try again.',
+    confirmationSent:'Account created. Check your email and confirm your address before signing in.', loginFail:'Incorrect email or password, or the email has not been confirmed yet.',
+    guestFail:'We could not start the guest session. Please try again.', guestMismatch:'The name and email do not match the guest previously registered.', guestHasAccount:'That email already has an account. Use “Sign in”.', connectionFail:'Could not connect to ITBMO. Please try again.',
+    resetSent:'If an account exists for that email, you will receive a password reset link.', resetFail:'We could not process password recovery. Please try again.',
+    passwordUpdated:'Password updated. You can now sign in.', confirmationComplete:'Email confirmed. Your account is now active.', confirmationFail:'We could not complete confirmation. Please try signing in.',
+    loginRequired:'Create an account, sign in, or continue as a guest before saving destinations.', travelerRequired:'Tell us who you are traveling with before saving destinations.', companionRequired:'Select gender and age range for every companion.',
+    tripSaving:'Saving your trip…', tripFail:'We could not save the trip. Your entries are still here; please try again.'
   }
 };
 
@@ -829,312 +833,540 @@ function setAccountMessage(message='', type=''){
 }
 
 function getStoredSessionToken(){
-  try{ return String(localStorage.getItem(ITBMO_SESSION_KEY) || '').trim(); }
-  catch(_){ return ''; }
-}
-
-function storeSessionToken(token){
   try{
-    if(token) localStorage.setItem(ITBMO_SESSION_KEY, token);
+    return String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || localStorage.getItem(ITBMO_SESSION_KEY) || '').trim();
+  }catch(_){ return ''; }
+}
+function storeSessionToken(token, persistent=true){
+  try{
+    if(!token) return;
+    if(persistent){
+      localStorage.setItem(ITBMO_SESSION_KEY, token);
+      sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY);
+    }else{
+      sessionStorage.setItem(ITBMO_GUEST_SESSION_KEY, token);
+      localStorage.removeItem(ITBMO_SESSION_KEY);
+    }
   }catch(_){}
 }
-
 function clearSessionToken(){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
+  try{ sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY); }catch(_){}
+}
+function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
+function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
+
+function validAccountEmail(email){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()); }
+function validAccountPassword(password){ return typeof password === 'string' && password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password); }
+
+function authTrackingPayload(){
+  const params = new URLSearchParams(window.location.search);
+  return {
+    preferred_language:getLang(), registration_source:'planner',
+    utm_source:params.get('utm_source') || null, utm_medium:params.get('utm_medium') || null,
+    utm_campaign:params.get('utm_campaign') || null, utm_content:params.get('utm_content') || null,
+    utm_term:params.get('utm_term') || null, referrer:document.referrer || null,
+    origin:window.location.origin
+  };
 }
 
-function getStoredActiveTripId(){
-  try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }
-  catch(_){ return ''; }
-}
-
-function storeActiveTripId(tripId){
-  try{
-    if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId));
-    else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY);
-  }catch(_){ }
+function legalPayload(prefix='account'){
+  const guest = prefix === 'guest';
+  return {
+    terms_accepted:true, privacy_accepted:true,
+    marketing_consent:guest ? false : !!$accountMarketingConsent?.checked,
+    terms_version:ITBMO_TERMS_VERSION, privacy_version:ITBMO_PRIVACY_VERSION, marketing_version:ITBMO_MARKETING_VERSION,
+    terms_url:qs(guest ? '#account-guest-terms-link' : '#account-terms-link')?.href || null,
+    privacy_url:qs(guest ? '#account-guest-privacy-link' : '#account-privacy-link')?.href || null
+  };
 }
 
 function setAuthBusy(on){
-  [$accountRegisterSubmit,$accountLoginSubmit,$accountRegisterToggle,$accountLoginToggle]
+  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack,$accountUpgradeToggle,$accountUpgradeCancel,$accountLogout]
     .forEach(el=>{ if(el) el.disabled = !!on; });
 }
 
 function updateSaveAvailability(){
   if(!$save) return;
   const lockedForCurrentTrip = Boolean(hasSavedOnce || planningStarted);
-  $save.disabled = !currentUser || lockedForCurrentTrip;
+  const authUsable = Boolean(currentUser && !currentUser.registration_pending);
+  $save.disabled = !authUsable || lockedForCurrentTrip;
   $save.setAttribute('aria-disabled', String($save.disabled));
 }
 
+/* =========================================================
+   AUTH GATE — additive safety layer only
+   ---------------------------------------------------------
+   The Planner must start locked until ITBMO has a valid user
+   (registered account or guest session). This gate does NOT
+   replace the Planner's existing saved-trip / generation locks.
+   When auth is released, any existing setup lock remains intact.
+   ========================================================= */
+function ensureAuthPlannerGateStyles(){
+  if(document.getElementById('itbmo-auth-gate-style')) return;
+  const style=document.createElement('style');
+  style.id='itbmo-auth-gate-style';
+  style.textContent=`
+    #travelers-box.itbmo-auth-locked,
+    #destinations-box.itbmo-auth-locked,
+    #preferences-stage.itbmo-auth-locked{
+      opacity:.52;
+      filter:saturate(.65);
+      pointer-events:none;
+      user-select:none;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function applyAuthPlannerGate(unlocked){
+  ensureAuthPlannerGateStyles();
+  const authLocked=!unlocked;
+
+  ['#travelers-box','#destinations-box','#preferences-stage'].forEach(sel=>{
+    const el=qs(sel);
+    if(!el) return;
+    el.classList.toggle('itbmo-auth-locked',authLocked);
+
+    if(authLocked){
+      try{ el.inert=true; }catch(_){}
+      el.setAttribute('aria-disabled','true');
+    }else{
+      // Never undo the existing post-Save Destinations setup lock.
+      const setupLocked=el.classList.contains('is-setup-locked');
+      try{ el.inert=setupLocked; }catch(_){}
+      el.setAttribute('aria-disabled',setupLocked?'true':'false');
+    }
+  });
+
+  // These controls already have their own Planner-state rules.
+  // Auth can force them OFF, but never force them ON.
+  if(authLocked){
+    if($save){ $save.disabled=true; $save.setAttribute('aria-disabled','true'); }
+    if($start){ $start.disabled=true; $start.setAttribute('aria-disabled','true'); }
+    if($resetBtn){ $resetBtn.disabled=true; $resetBtn.setAttribute('aria-disabled','true'); }
+  }else{
+    updateSaveAvailability();
+  }
+}
+
 function showAccountMode(mode){
-  if(currentUser) return;
-  if($accountRegisterPanel) $accountRegisterPanel.style.display = mode === 'register' ? 'block' : 'none';
-  if($accountLoginPanel) $accountLoginPanel.style.display = mode === 'login' ? 'block' : 'none';
+  const logged=Boolean(currentUser && getStoredSessionToken());
+  const guestCanUpgrade=logged && currentUser && !currentUser.is_registered;
+  if(logged && !guestCanUpgrade) return;
+  if(logged && guestCanUpgrade && mode !== 'register') return;
+
+  const panels = { register:$accountRegisterPanel, login:$accountLoginPanel, guest:$accountGuestPanel, forgot:$accountForgotPanel, reset:$accountResetPanel };
+  Object.entries(panels).forEach(([key,panel])=>{ if(panel) panel.style.display = key === mode ? 'block' : 'none'; });
+  if(mode !== 'reset') setAccountMessage('');
+}
+
+function openGuestAccountUpgrade(){
+  if(!currentUser || currentUser.is_registered) return;
+  guestUpgradeFormOpen=true;
+  if($accountFirstName) $accountFirstName.value=String(currentUser.first_name || '').trim();
+  if($accountEmail){
+    $accountEmail.value=String(currentUser.email || '').trim().toLowerCase();
+    $accountEmail.readOnly=false;
+  }
+  if($accountUpgradeEmailHint) $accountUpgradeEmailHint.style.display='block';
+  if($accountLegalConsent) $accountLegalConsent.checked=false;
+  if($accountMarketingConsent) $accountMarketingConsent.checked=false;
+  if($accountPassword) $accountPassword.value='';
+  if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+  showAccountMode('register');
+  renderAuthState();
+  setTimeout(()=>{ try{$accountPassword?.focus();}catch(_){} },40);
+}
+
+function closeGuestAccountUpgrade(){
+  guestUpgradeFormOpen=false;
+  if($accountEmail) $accountEmail.readOnly=false;
+  if($accountUpgradeEmailHint) $accountUpgradeEmailHint.style.display='none';
+  if($accountPassword) $accountPassword.value='';
+  if($accountPasswordConfirm) $accountPasswordConfirm.value='';
   setAccountMessage('');
-}
-
-function renderAuthState(){
-  const logged = !!currentUser;
-
-  if($accountGuest) $accountGuest.style.display = logged ? 'none' : 'block';
-  if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
-
-  if($accountUserBadge){
-    $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
-    $accountUserBadge.textContent = logged ? `@${currentUser.username || ''}` : '';
-  }
-
-  if(logged){
-    if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || currentUser.username || 'Traveler');
-    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy('ready');
-  }
-
-  updateSaveAvailability();
-  if(logged) scheduleAstraCoach('travelers','#travelers-box',520);
-}
-
-function applyAuthLanguage(){
-  const set = (sel, txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
-
-  set('#account-title', authCopy('title'));
-  set('#account-subtitle', authCopy('subtitle'));
-  set('#account-register-toggle', authCopy('register'));
-  set('#account-login-toggle', authCopy('login'));
-  set('#label-first-name', authCopy('firstName'));
-  set('#label-last-name', authCopy('lastName'));
-  set('#label-username', authCopy('username'));
-  set('#username-hint', authCopy('usernameHint'));
-  set('#label-email', authCopy('email'));
-  set('#label-profile-age', authCopy('profileAge'));
-  set('#label-country-residence', authCopy('country'));
-  set('#label-login-username', authCopy('username'));
-  set('#label-login-email', authCopy('email'));
-  set('#account-register-submit', authCopy('create'));
-  set('#account-login-submit', authCopy('signIn'));
-  set('#account-marketing-copy', authCopy('marketing'));
-
-  const legal = qs('#account-legal-copy');
-  const terms = qs('#account-terms-link');
-  const privacy = qs('#account-privacy-link');
-  if(legal && terms && privacy){
-    legal.innerHTML = '';
-    legal.appendChild(document.createTextNode(authCopy('legalPrefix')));
-    terms.textContent = authCopy('terms');
-    legal.appendChild(terms);
-    legal.appendChild(document.createTextNode(authCopy('legalMiddle')));
-    privacy.textContent = authCopy('privacy');
-    legal.appendChild(privacy);
-    legal.appendChild(document.createTextNode(authCopy('legalSuffix')));
-  }
-
   renderAuthState();
 }
 
-const ISO_COUNTRY_CODES = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW`.split(/\s+/);
+function stopPendingVerificationWatch(){
+  if(pendingVerificationTimer){
+    clearInterval(pendingVerificationTimer);
+    pendingVerificationTimer=null;
+  }
+}
 
-function populateAccountCountries(){
-  if(!$accountCountry || $accountCountry.options.length > 1) return;
-
-  let names = null;
+async function refreshPendingVerification(){
+  if(!currentUser?.registration_pending) return;
+  const token=getStoredSessionToken();
+  if(!token) return;
   try{
-    names = new Intl.DisplayNames([getLang()], { type:'region' });
-  }catch(_){}
+    const {response,data}=await postUserAction({action:'session',session_token:token});
+    if(response.ok && data?.ok && data?.user){
+      currentUser=data.user;
+      if(currentUser?.is_registered){
+        storeSessionToken(token,true);
+        stopPendingVerificationWatch();
+        setAccountMessage(authCopy('confirmationComplete'),'success');
+        renderAuthState();
+        setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+      }
+    }
+  }catch(err){ console.warn('ITBMO confirmation watch unavailable:',err); }
+}
 
-  const rows = ISO_COUNTRY_CODES.map(code=>({
-    code,
-    name: names ? (names.of(code) || code) : code
-  })).sort((a,b)=>String(a.name).localeCompare(String(b.name), getLang()));
+function syncPendingVerificationWatch(pending){
+  if(!pending){ stopPendingVerificationWatch(); return; }
+  if(pendingVerificationTimer) return;
+  pendingVerificationTimer=setInterval(refreshPendingVerification,6000);
+}
 
-  rows.forEach(({code,name})=>{
-    const opt = document.createElement('option');
-    opt.value = code;
-    opt.textContent = name;
-    $accountCountry.appendChild(opt);
-  });
+function renderAuthState(){
+  const logged = Boolean(currentUser && getStoredSessionToken());
+  const registered = Boolean(logged && currentUser?.is_registered);
+  const pending = Boolean(logged && currentUser?.registration_pending);
+  const guest = Boolean(logged && !registered && !pending);
+
+  if($accountGuest) $accountGuest.style.display = (!logged || (guest && guestUpgradeFormOpen)) ? 'block' : 'none';
+  if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
+  if($accountModeActions) $accountModeActions.style.display = (guest && guestUpgradeFormOpen) ? 'none' : '';
+  if($accountGuestToggle) $accountGuestToggle.style.display = (guest && guestUpgradeFormOpen) ? 'none' : '';
+  if($accountUpgradeCancel) $accountUpgradeCancel.style.display = (guest && guestUpgradeFormOpen) ? 'block' : 'none';
+  if($accountGuestUpgrade) $accountGuestUpgrade.style.display = (guest && !guestUpgradeFormOpen) ? 'flex' : 'none';
+  if($accountLogout) $accountLogout.style.display = logged ? 'inline-flex' : 'none';
+
+  if(!guestUpgradeFormOpen){
+    if($accountEmail) $accountEmail.readOnly=false;
+    if($accountUpgradeEmailHint) $accountUpgradeEmailHint.style.display='none';
+  }
+
+  if($accountUserBadge){
+    $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
+    let label='';
+    if(logged && currentUser){
+      label=currentUser.is_registered
+        ? (currentUser.email || currentUser.first_name || '')
+        : (currentUser.first_name || currentUser.email || '');
+    }
+    $accountUserBadge.textContent=label;
+  }
+
+  if($accountSubtitle){
+    $accountSubtitle.textContent = !logged
+      ? authCopy('subtitle')
+      : authCopy(registered ? 'subtitleRegistered' : (pending ? 'subtitlePending' : 'subtitleGuest'));
+  }
+
+  if(logged && currentUser){
+    if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || 'Traveler');
+    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(registered ? 'readyRegistered' : (pending ? 'readyPending' : 'readyGuest'));
+    if($accountGuestUpgradeTitle) $accountGuestUpgradeTitle.textContent = authCopy('upgradeTitle');
+    if($accountGuestUpgradeCopy) $accountGuestUpgradeCopy.textContent = authCopy('upgradeCopy');
+    if($accountUpgradeToggle) $accountUpgradeToggle.textContent = authCopy('upgradeAction');
+    if($accountLogout) $accountLogout.textContent = authCopy('logout');
+  }
+
+  // Guest can plan normally. While the guest is actively creating an account,
+  // or while email verification is pending, the Planner stays temporarily locked.
+  applyAuthPlannerGate(Boolean(logged && !pending && !guestUpgradeFormOpen));
+  syncPendingVerificationWatch(pending);
+  updateSaveAvailability();
+  if(logged && !pending) scheduleAstraCoach('travelers','#travelers-box',520);
+}
+
+function setLegalLanguage(containerSel, termsSel, privacySel){
+  const legal=qs(containerSel), terms=qs(termsSel), privacy=qs(privacySel);
+  if(!legal || !terms || !privacy) return;
+  legal.innerHTML='';
+  legal.appendChild(document.createTextNode(authCopy('legalPrefix'))); terms.textContent=authCopy('terms'); legal.appendChild(terms);
+  legal.appendChild(document.createTextNode(authCopy('legalMiddle'))); privacy.textContent=authCopy('privacy'); legal.appendChild(privacy);
+  legal.appendChild(document.createTextNode(authCopy('legalSuffix')));
+}
+
+function applyAuthLanguage(){
+  const set=(sel,txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
+  set('#account-title',authCopy('title')); set('#account-subtitle',authCopy('subtitle'));
+  set('#account-register-toggle',authCopy('register')); set('#account-login-toggle',authCopy('login')); set('#account-guest-toggle',authCopy('guest'));
+  set('#label-first-name',authCopy('name')); set('#label-email',authCopy('email')); set('#label-password',authCopy('password')); set('#label-password-confirm',authCopy('passwordConfirm')); set('#password-hint',authCopy('passwordHint'));
+  set('#label-login-email',authCopy('email')); set('#label-login-password',authCopy('password'));
+  set('#label-guest-name',authCopy('name')); set('#label-guest-email',authCopy('email'));
+  set('#label-forgot-email',authCopy('email')); set('#label-reset-password',authCopy('newPassword')); set('#label-reset-password-confirm',authCopy('newPasswordConfirm'));
+  set('#account-register-submit',authCopy('create')); set('#account-login-submit',authCopy('signIn')); set('#account-guest-submit',authCopy('guestContinue'));
+  set('#account-forgot-password',authCopy('forgot')); set('#account-forgot-submit',authCopy('sendReset')); set('#account-forgot-back',authCopy('backToLogin')); set('#account-reset-submit',authCopy('updatePassword'));
+  set('#account-marketing-copy',authCopy('marketing')); set('#account-guest-upgrade-title',authCopy('upgradeTitle')); set('#account-guest-upgrade-copy',authCopy('upgradeCopy')); set('#account-upgrade-toggle',authCopy('upgradeAction')); set('#account-upgrade-cancel',authCopy('upgradeCancel')); set('#account-upgrade-email-hint',authCopy('upgradeEmailHint')); set('#account-logout',authCopy('logout'));
+  setLegalLanguage('#account-legal-copy','#account-terms-link','#account-privacy-link');
+  setLegalLanguage('#account-guest-legal-copy','#account-guest-terms-link','#account-guest-privacy-link');
+  renderAuthState();
 }
 
 async function postUserAction(payload){
-  const response = await fetch(USER_API_URL, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(payload)
-  });
-
-  let data = {};
-  try{ data = await response.json(); }catch(_){}
-  return { response, data };
+  const response = await fetch(USER_API_URL,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  let data={}; try{ data=await response.json(); }catch(_){}
+  return {response,data};
 }
 
 async function registerITBMOUser(){
-  const first_name = String($accountFirstName?.value || '').trim();
-  const last_name = String($accountLastName?.value || '').trim();
-  const username = String($accountUsername?.value || '').trim().toLowerCase();
-  const email = String($accountEmail?.value || '').trim().toLowerCase();
-  const age_range = String($accountAgeRange?.value || '').trim();
-  const country_code = String($accountCountry?.value || '').trim().toUpperCase();
-
-  if(!first_name || !last_name || !username || !email || !age_range || !country_code){
-    setAccountMessage(authCopy('required'),'error');
-    return;
-  }
-
-  if(!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)){
-    setAccountMessage(authCopy('usernameInvalid'),'error');
-    return;
-  }
-
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
-    setAccountMessage(authCopy('emailInvalid'),'error');
-    return;
-  }
-
-  if(!$accountLegalConsent?.checked){
-    setAccountMessage(authCopy('legalRequired'),'error');
-    return;
-  }
-
-  setAuthBusy(true);
-  setAccountMessage(authCopy('registering'));
-
+  const name=String($accountFirstName?.value || '').trim();
+  const email=String($accountEmail?.value || '').trim().toLowerCase();
+  const password=String($accountPassword?.value || '');
+  const passwordConfirmation=String($accountPasswordConfirm?.value || '');
+  if(!name || !email || !password || !passwordConfirmation){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  if(!validAccountPassword(password)){ setAccountMessage(authCopy('passwordRule'),'error'); return; }
+  if(password !== passwordConfirmation){ setAccountMessage(authCopy('passwordMismatch'),'error'); return; }
+  if(!$accountLegalConsent?.checked){ setAccountMessage(authCopy('legalRequired'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('registering'));
   try{
-    const params = new URLSearchParams(window.location.search);
-    const { response, data } = await postUserAction({
-      action:'register',
-      first_name,
-      last_name,
-      username,
-      email,
-      age_range,
-      country_code,
-      preferred_language:getLang(),
-      terms_accepted:true,
-      privacy_accepted:true,
-      marketing_consent:!!$accountMarketingConsent?.checked,
-      terms_version:ITBMO_TERMS_VERSION,
-      privacy_version:ITBMO_PRIVACY_VERSION,
-      marketing_version:ITBMO_MARKETING_VERSION,
-      terms_url:qs('#account-terms-link')?.href || null,
-      privacy_url:qs('#account-privacy-link')?.href || null,
-      registration_source:'planner',
-      utm_source:params.get('utm_source') || null,
-      utm_medium:params.get('utm_medium') || null,
-      utm_campaign:params.get('utm_campaign') || null,
-      utm_content:params.get('utm_content') || null,
-      utm_term:params.get('utm_term') || null,
-      referrer:document.referrer || null
-    });
-
-    if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token);
-      currentUser = data.user || null;
-      authReady = true;
-      setAccountMessage('');
-      renderAuthState();
-      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+    const {response,data}=await postUserAction({ action:'sign_up', name,email,password,password_confirmation:passwordConfirmation, session_token:getStoredSessionToken() || null, ...authTrackingPayload(), ...legalPayload('account') });
+    if(response.ok && data?.ok){
+      if(currentUser && getStoredSessionToken()){
+        currentUser={...currentUser,...(data.user || {}),is_registered:false,registration_pending:true,email_verified:false};
+        guestUpgradeFormOpen=false;
+        if($accountEmail) $accountEmail.readOnly=false;
+        if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+        renderAuthState();
+      }else{
+        setAccountMessage(authCopy('confirmationSent'),'success');
+        if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
+      }
       return;
     }
-
-    if(response.status === 409){
-      if(data?.username_taken) setAccountMessage(authCopy('duplicateUser'),'error');
-      else if(data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
-      else setAccountMessage(authCopy('registerFail'),'error');
-      return;
-    }
-
-    setAccountMessage(authCopy('registerFail'),'error');
-  }catch(err){
-    console.error('ITBMO register error:', err);
-    setAccountMessage(authCopy('connectionFail'),'error');
-  }finally{
-    setAuthBusy(false);
-  }
+    if(response.status===409 || data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
+    else setAccountMessage(authCopy('registerFail'),'error');
+  }catch(err){ console.error('ITBMO signup error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
 }
 
 async function loginITBMOUser(){
-  const username = String($accountLoginUsername?.value || '').trim().toLowerCase();
-  const email = String($accountLoginEmail?.value || '').trim().toLowerCase();
-
-  if(!username || !email){
-    setAccountMessage(authCopy('required'),'error');
-    return;
-  }
-
-  setAuthBusy(true);
-  setAccountMessage(authCopy('signingIn'));
-
+  const email=String($accountLoginEmail?.value || '').trim().toLowerCase();
+  const password=String($accountLoginPassword?.value || '');
+  if(!email || !password){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('signingIn'));
   try{
-    const { response, data } = await postUserAction({
-      action:'login',
-      username,
-      email
-    });
-
+    const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token);
-      currentUser = data.user || null;
-      authReady = true;
-      setAccountMessage('');
-      renderAuthState();
-      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
-      return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
-
     setAccountMessage(authCopy('loginFail'),'error');
-  }catch(err){
-    console.error('ITBMO login error:', err);
-    setAccountMessage(authCopy('connectionFail'),'error');
-  }finally{
-    setAuthBusy(false);
-  }
+  }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+async function continueAsGuest(){
+  const name=String($accountGuestName?.value || '').trim();
+  const email=String($accountGuestEmail?.value || '').trim().toLowerCase();
+  if(!name || !email){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  if(!$accountGuestLegalConsent?.checked){ setAccountMessage(authCopy('legalRequired'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('guestStarting'));
+  try{
+    const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
+    if(response.ok && data?.ok && data?.session_token){
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+    }
+    if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
+    else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
+    else setAccountMessage(authCopy('guestFail'),'error');
+  }catch(err){ console.error('ITBMO guest error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+async function sendForgotPassword(){
+  const email=String($accountForgotEmail?.value || $accountLoginEmail?.value || '').trim().toLowerCase();
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('sendingReset'));
+  try{
+    const {response,data}=await postUserAction({action:'forgot_password',email,preferred_language:getLang(),origin:window.location.origin});
+    if(response.ok && data?.ok){ setAccountMessage(authCopy('resetSent'),'success'); return; }
+    setAccountMessage(authCopy('resetFail'),'error');
+  }catch(err){ console.error('ITBMO forgot password error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+function getSupabaseCallback(){
+  const hash=new URLSearchParams(String(window.location.hash || '').replace(/^#/,''));
+  return { accessToken:hash.get('access_token') || '', type:hash.get('type') || '', error:hash.get('error_description') || hash.get('error') || '' };
+}
+function clearAuthCallbackFromUrl(){
+  try{ history.replaceState(null,'',window.location.pathname + window.location.search); }catch(_){}
+}
+
+async function completeEmailConfirmation(accessToken){
+  if(!accessToken) return;
+  setAuthBusy(true); setAccountMessage(authCopy('confirming'));
+  try{
+    const {response,data}=await postUserAction({action:'complete_auth',access_token:accessToken});
+    if(response.ok && data?.ok && data?.session_token){
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+    }
+    setAccountMessage(authCopy('confirmationFail'),'error');
+  }catch(err){ console.error('ITBMO confirmation error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+async function resetITBMOPassword(){
+  const {accessToken}=getSupabaseCallback();
+  const password=String($accountResetPassword?.value || '');
+  const confirmation=String($accountResetPasswordConfirm?.value || '');
+  if(!accessToken || !password || !confirmation){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountPassword(password)){ setAccountMessage(authCopy('passwordRule'),'error'); return; }
+  if(password !== confirmation){ setAccountMessage(authCopy('passwordMismatch'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('resetting'));
+  try{
+    const {response,data}=await postUserAction({action:'reset_password',access_token:accessToken,password,password_confirmation:confirmation});
+    if(response.ok && data?.ok){
+      clearAuthCallbackFromUrl(); clearSessionToken(); currentUser=null; authReady=true; showAccountMode('login'); setAccountMessage(authCopy('passwordUpdated'),'success'); renderAuthState(); return;
+    }
+    setAccountMessage(authCopy('resetFail'),'error');
+  }catch(err){ console.error('ITBMO reset password error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
 }
 
 async function restoreITBMOSession(){
-  const token = getStoredSessionToken();
+  const callback=getSupabaseCallback();
+  if(callback.error){ authReady=true; currentUser=null; renderAuthState(); setAccountMessage(callback.error,'error'); clearAuthCallbackFromUrl(); return; }
+  if(callback.accessToken && callback.type === 'recovery'){
+    authReady=true; currentUser=null; renderAuthState(); showAccountMode('reset'); return;
+  }
+  if(callback.accessToken){ await completeEmailConfirmation(callback.accessToken); return; }
 
-  if(!token){
-    authReady = true;
-    currentUser = null;
-    renderAuthState();
-    return;
+  const token=getStoredSessionToken();
+  if(!token){ authReady=true; currentUser=null; renderAuthState(); return; }
+  try{
+    const {response,data}=await postUserAction({action:'session',session_token:token});
+    if(response.ok && data?.ok && data?.user){
+      currentUser=data.user;
+      storeSessionToken(token,Boolean(currentUser.is_registered));
+    }else{ clearSessionToken(); currentUser=null; }
+  }catch(err){ console.warn('ITBMO session restore unavailable:',err); currentUser=null; }
+  finally{ authReady=true; renderAuthState(); if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0); }
+}
+
+function clearPlannerUIForLogout(){
+  const tripIdToClear=currentTripId || getStoredActiveTripId();
+
+  // Logout is NOT a trip reset: do not archive or modify the trip in Supabase.
+  // We only remove private trip state from this browser so another person using
+  // the same device cannot see the previous user's itinerary while signed out.
+  clearInfoChatStateForTrip(tripIdToClear);
+  _clearPostPaymentProgressLocal_(tripIdToClear);
+  closeAstraCoach({remember:false});
+
+  savedDestinations=[];
+  itineraries={};
+  cityMeta={};
+  session=[];
+  hasSavedOnce=false;
+  pendingChange=null;
+  saveLockWarningAccepted=false;
+  paymentWarningAcceptedTripId=null;
+  paymentGateSatisfiedTripId=null;
+  generationRecoveryState=null;
+  paidGenerationRunning=false;
+  planningStarted=false;
+  metaProgressIndex=0;
+  collectingHotels=false;
+  isItineraryLocked=false;
+  activeCity=null;
+  agentConversationLang=null;
+  preferencesStageTripId=null;
+  preferencesConfirmedTripId=null;
+  currentTripId=null;
+  storeActiveTripId(null);
+
+  if($cityList){
+    $cityList.innerHTML='';
+    addCityRow();
+  }
+  if($tabs) $tabs.innerHTML='';
+  if($itWrap) $itWrap.innerHTML='';
+  closeImmersiveItinerary();
+  syncImmersiveItineraryLauncher();
+
+  if($chatBox) $chatBox.style.display='none';
+  if($chatM) $chatM.innerHTML='';
+  setPlanningChatLocked(true);
+
+  hidePreferencesStage({reset:true});
+  if($preferencesField){
+    $preferencesField.value='';
+    $preferencesField.style.height='';
+    $preferencesField.style.overflowY='hidden';
   }
 
-  try{
-    const { response, data } = await postUserAction({
-      action:'session',
-      session_token:token
-    });
+  resetTravelersUI();
+  if(typeof plannerState !== 'undefined' && plannerState){
+    plannerState.destinations=[];
+    plannerState.specialConditions='';
+    plannerState.travelers={adults:1,young:0,children:0,infants:0,seniors:0};
+    plannerState.travelerProfiles=null;
+    plannerState.budget='';
+    plannerState.currency='USD';
+    plannerState.collectingItineraryLang=false;
+    plannerState.itineraryLang='';
+    plannerState.forceReplan={};
+  }
 
-    if(response.ok && data?.ok && data?.user){
-      currentUser = data.user;
-    }else{
-      clearSessionToken();
-      currentUser = null;
-    }
-  }catch(err){
-    console.warn('ITBMO session restore unavailable:', err);
-    currentUser = null;
-  }finally{
-    authReady = true;
+  if($start){
+    delete $start.dataset.itbmoConsumed;
+    $start.disabled=true;
+    $start.setAttribute('aria-disabled','true');
+  }
+  setExportToolbarVisibility(false);
+  setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
+  if($affiliateAfter){
+    $affiliateAfter.innerHTML='';
+    $affiliateAfter.style.display='none';
+  }
+  try{ if($overlayWOW) $overlayWOW.style.display='none'; }catch(_){}
+  qsa('.date-tooltip').forEach(node=>node.remove());
+
+  if($sidebar) $sidebar.classList.remove('disabled');
+  setSavedSetupLocked(false);
+  updateAddCityButtonState();
+}
+
+async function logoutITBMOUser(){
+  const token=getStoredSessionToken();
+  setAuthBusy(true);
+  try{
+    if(token) await postUserAction({action:'logout',session_token:token});
+  }catch(err){ console.warn('ITBMO logout warning:',err); }
+  finally{
+    stopPendingVerificationWatch();
+    clearSessionToken();
+    clearPlannerUIForLogout();
+    currentUser=null;
+    authReady=true;
+    guestUpgradeFormOpen=false;
+    setAccountMessage('');
+
+    // Signed-out state starts neutral: show the three account choices, but do
+    // not leave Create account / Sign in / Guest fields expanded automatically.
+    showAccountMode(null);
     renderAuthState();
-    if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+    setAuthBusy(false);
   }
 }
 
 function bindAccountListeners(){
-  $accountRegisterToggle?.addEventListener('click', ()=>showAccountMode('register'));
-  $accountLoginToggle?.addEventListener('click', ()=>showAccountMode('login'));
-  $accountRegisterSubmit?.addEventListener('click', registerITBMOUser);
-  $accountLoginSubmit?.addEventListener('click', loginITBMOUser);
-
-  $accountUsername?.addEventListener('input', ()=>{
-    const normalized = String($accountUsername.value || '').toLowerCase().replace(/[^a-z0-9._-]/g,'');
-    if($accountUsername.value !== normalized) $accountUsername.value = normalized;
-  });
-
-  populateAccountCountries();
-  applyAuthLanguage();
-  updateSaveAvailability();
+  $accountRegisterToggle?.addEventListener('click',()=>showAccountMode('register'));
+  $accountLoginToggle?.addEventListener('click',()=>showAccountMode('login'));
+  $accountGuestToggle?.addEventListener('click',()=>showAccountMode('guest'));
+  $accountForgotPassword?.addEventListener('click',()=>{ if($accountForgotEmail && $accountLoginEmail) $accountForgotEmail.value=$accountLoginEmail.value || ''; showAccountMode('forgot'); });
+  $accountForgotBack?.addEventListener('click',()=>showAccountMode('login'));
+  $accountRegisterSubmit?.addEventListener('click',registerITBMOUser);
+  $accountLoginSubmit?.addEventListener('click',loginITBMOUser);
+  $accountGuestSubmit?.addEventListener('click',continueAsGuest);
+  $accountForgotSubmit?.addEventListener('click',sendForgotPassword);
+  $accountResetSubmit?.addEventListener('click',resetITBMOPassword);
+  $accountUpgradeToggle?.addEventListener('click',openGuestAccountUpgrade);
+  $accountUpgradeCancel?.addEventListener('click',closeGuestAccountUpgrade);
+  $accountLogout?.addEventListener('click',logoutITBMOUser);
+  applyAuthLanguage(); updateSaveAvailability();
+  document.addEventListener('visibilitychange',()=>{ if(!document.hidden && currentUser?.registration_pending) refreshPendingVerification(); });
+  window.addEventListener('focus',()=>{ if(currentUser?.registration_pending) refreshPendingVerification(); });
 }
 
 /* =========================================================
@@ -1305,6 +1537,157 @@ async function tripApi(payload){
   return data;
 }
 
+
+function _postPaymentStateKey_(tripId=currentTripId){
+  const safeTripId=String(tripId || '').trim();
+  return safeTripId ? `${ITBMO_POST_PAYMENT_STATE_KEY_PREFIX}${safeTripId}` : '';
+}
+
+function _planningChatHistorySnapshot_(){
+  if(!$chatM) return [];
+  return qsa('.chat-message',$chatM).slice(-80).map(node=>({
+    who:node.classList.contains('user') ? 'user' : 'ai',
+    html:String(node.innerHTML || '').slice(0,12000)
+  }));
+}
+
+function _postPaymentProgressSnapshot_(phase=''){
+  const resolvedPhase=String(phase || '').trim() || (
+    plannerState?.collectingItineraryLang ? 'collecting_language' :
+    collectingHotels ? 'collecting_hotels' :
+    (preferencesConfirmedTripId===currentTripId ? 'collecting_hotels' : 'preferences')
+  );
+  return {
+    schema_version:1,
+    phase:resolvedPhase,
+    preferences_confirmed:preferencesConfirmedTripId===currentTripId,
+    preferences_value:String($preferencesField?.value ?? plannerState?.specialConditions ?? '').trim(),
+    meta_progress_index:Math.max(0,Number(metaProgressIndex || 0)),
+    collecting_hotels:Boolean(collectingHotels),
+    collecting_itinerary_lang:Boolean(plannerState?.collectingItineraryLang),
+    itinerary_lang:String(plannerState?.itineraryLang || '').trim(),
+    agent_conversation_lang:agentConversationLang || null,
+    city_meta:cityMeta,
+    planning_chat_history:_planningChatHistorySnapshot_(),
+    updated_at:new Date().toISOString()
+  };
+}
+
+function _storePostPaymentProgressLocal_(checkpoint,tripId=currentTripId){
+  const key=_postPaymentStateKey_(tripId);
+  if(!key || !checkpoint) return;
+  try{ localStorage.setItem(key,JSON.stringify(checkpoint)); }catch(_){ }
+}
+
+function _readPostPaymentProgressLocal_(tripId=currentTripId){
+  const key=_postPaymentStateKey_(tripId);
+  if(!key) return null;
+  try{
+    const parsed=JSON.parse(localStorage.getItem(key) || 'null');
+    return parsed && typeof parsed==='object' && !Array.isArray(parsed) ? parsed : null;
+  }catch(_){ return null; }
+}
+
+function _clearPostPaymentProgressLocal_(tripId){
+  const key=_postPaymentStateKey_(tripId);
+  try{ if(key) localStorage.removeItem(key); }catch(_){ }
+}
+
+async function _persistPostPaymentProgress_(phase=''){
+  const token=getStoredSessionToken();
+  if(!token || !currentTripId) return null;
+  const checkpoint=_postPaymentProgressSnapshot_(phase);
+  _storePostPaymentProgressLocal_(checkpoint,currentTripId);
+  try{
+    return await tripApi({
+      action:'post_payment_checkpoint',
+      session_token:token,
+      trip_id:currentTripId,
+      checkpoint
+    });
+  }catch(err){
+    console.warn('[POST-PAYMENT CHECKPOINT]',err);
+    return null;
+  }
+}
+
+function _latestPostPaymentProgress_(trip){
+  const server=(trip?.planner_input?.post_payment_progress && typeof trip.planner_input.post_payment_progress==='object')
+    ? trip.planner_input.post_payment_progress
+    : null;
+  const local=_readPostPaymentProgressLocal_(trip?.id || currentTripId);
+  if(!server) return local;
+  if(!local) return server;
+  const serverTime=Date.parse(server.updated_at || '') || 0;
+  const localTime=Date.parse(local.updated_at || '') || 0;
+  return localTime>serverTime ? local : server;
+}
+
+function _restorePlanningChatHistory_(history){
+  if(!$chatM) return;
+  $chatM.innerHTML='';
+  (Array.isArray(history) ? history : []).forEach(message=>{
+    if(!message || !message.html) return;
+    chatMsg(message.html,message.who==='user'?'user':'ai');
+  });
+}
+
+function _restorePostPaymentProgress_(trip){
+  const checkpoint=_latestPostPaymentProgress_(trip);
+  if(!checkpoint) return false;
+
+  preferencesStageTripId=currentTripId;
+  if(checkpoint.preferences_confirmed) preferencesConfirmedTripId=currentTripId;
+
+  const special=String(checkpoint.preferences_value ?? plannerState?.specialConditions ?? '').trim();
+  plannerState.specialConditions=special;
+  if($preferencesField) $preferencesField.value=special;
+
+  if(checkpoint.city_meta && typeof checkpoint.city_meta==='object' && !Array.isArray(checkpoint.city_meta)){
+    cityMeta=checkpoint.city_meta;
+  }
+  metaProgressIndex=Math.max(0,Number(checkpoint.meta_progress_index || 0));
+  collectingHotels=Boolean(checkpoint.collecting_hotels);
+  plannerState.collectingItineraryLang=Boolean(checkpoint.collecting_itinerary_lang);
+  plannerState.itineraryLang=String(checkpoint.itinerary_lang || '').trim();
+  agentConversationLang=checkpoint.agent_conversation_lang || null;
+  planningStarted=true;
+
+  _restorePlanningChatHistory_(checkpoint.planning_chat_history);
+
+  const phase=String(checkpoint.phase || '').trim();
+  if(phase==='preferences' || !checkpoint.preferences_confirmed){
+    hidePreferencesStage({reset:true});
+    showPreferencesStage();
+    return true;
+  }
+
+  showPreferencesStage();
+  preferencesConfirmedTripId=currentTripId;
+  if($preferencesField){
+    $preferencesField.readOnly=true;
+    $preferencesField.setAttribute('aria-readonly','true');
+  }
+  $preferencesStage?.classList.add('is-confirmed');
+  if($preferencesContinue){
+    $preferencesContinue.disabled=true;
+    $preferencesContinue.setAttribute('aria-disabled','true');
+    $preferencesContinue.textContent=getLang()==='es' ? '✓ Preferencias confirmadas' : '✓ Preferences confirmed';
+  }
+
+  if($chatBox) $chatBox.style.display='flex';
+  setPlanningChatLocked(false);
+  if(collectingHotels) _setHotelTransportComposerTemplate_();
+
+  if(phase==='generation_requested'){
+    collectingHotels=false;
+    plannerState.collectingItineraryLang=false;
+    setPlanningChatLocked(true);
+    setTimeout(()=>runPaidGeneration(),180);
+  }
+  return true;
+}
+
 /* 🆕 Export buttons (PDF / CSV / Email) */
 const $btnPDF   = qs('#btn-pdf');
 const $btnCSV   = qs('#btn-csv');
@@ -1406,30 +1789,54 @@ function _infoChatStateKey_(tripId=currentTripId){
   return safeTripId ? `${ITBMO_INFO_CHAT_STATE_KEY_PREFIX}${safeTripId}` : '';
 }
 
-function persistInfoChatState(){
-  const key=_infoChatStateKey_();
-  if(!key || infoChatAuthorizedTripId!==currentTripId) return;
-  try{
-    const history=(Array.isArray(infoSession) ? infoSession : [])
+function _infoChatStateSnapshot_(){
+  return {
+    trip_id:currentTripId,
+    authorized:infoChatAuthorizedTripId===currentTripId,
+    remaining:infoChatQueriesRemaining,
+    used:infoChatQueriesUsed,
+    history:(Array.isArray(infoSession) ? infoSession : [])
       .filter(message=>message && (message.role==='user' || message.role==='assistant'))
       .slice(-40)
-      .map(message=>({role:message.role,content:String(message.content || '').slice(0,12000)}));
-    localStorage.setItem(key,JSON.stringify({
-      trip_id:currentTripId,
-      authorized:true,
-      remaining:infoChatQueriesRemaining,
-      used:infoChatQueriesUsed,
-      history,
-      updated_at:new Date().toISOString()
-    }));
-  }catch(_){ }
+      .map(message=>({role:message.role,content:String(message.content || '').slice(0,12000)})),
+    updated_at:new Date().toISOString()
+  };
 }
 
-function restoreInfoChatStateForTrip(tripId=currentTripId){
+function persistInfoChatState({server=true}={}){
+  const key=_infoChatStateKey_();
+  if(!key || infoChatAuthorizedTripId!==currentTripId) return;
+  const snapshot=_infoChatStateSnapshot_();
+  try{ localStorage.setItem(key,JSON.stringify(snapshot)); }catch(_){ }
+
+  /* Server copy protects the conversation if the page is refreshed after the
+     local state is lost/overwritten, and also keeps the history tied to the
+     paid trip instead of only to this browser. Fire-and-forget by design. */
+  if(server && getStoredSessionToken() && currentTripId){
+    tripApi({
+      action:'info_chat_checkpoint',
+      session_token:getStoredSessionToken(),
+      trip_id:currentTripId,
+      checkpoint:snapshot
+    }).catch(err=>console.warn('[INFO CHAT CHECKPOINT]',err));
+  }
+}
+
+function _latestInfoChatState_(tripId=currentTripId,serverState=null){
   const key=_infoChatStateKey_(tripId);
-  if(!key || String(tripId)!==String(currentTripId)) return false;
-  let cached=null;
-  try{ cached=JSON.parse(localStorage.getItem(key) || 'null'); }catch(_){ cached=null; }
+  let local=null;
+  try{ local=key ? JSON.parse(localStorage.getItem(key) || 'null') : null; }catch(_){ local=null; }
+  const server=(serverState && typeof serverState==='object' && !Array.isArray(serverState)) ? serverState : null;
+  if(!server) return local;
+  if(!local) return server;
+  const serverTime=Date.parse(server.updated_at || '') || 0;
+  const localTime=Date.parse(local.updated_at || '') || 0;
+  return localTime>serverTime ? local : server;
+}
+
+function restoreInfoChatStateForTrip(tripId=currentTripId,serverState=null){
+  if(!tripId || String(tripId)!==String(currentTripId)) return false;
+  const cached=_latestInfoChatState_(tripId,serverState);
   if(!cached || String(cached.trip_id)!==String(currentTripId) || !cached.authorized) return false;
 
   infoSession=Array.isArray(cached.history)
@@ -1462,20 +1869,24 @@ function clearInfoChatStateForTrip(tripId){
 }
 
 let infoTypingTimer = null;
+let infoChatRequestInFlight = false;
 const $infoTyping = document.createElement('div');
 $infoTyping.className = 'chat-message ai typing';
 // ✅ Puntos más grandes y llamativos
 $infoTyping.innerHTML = `<span class="dot">•</span><span class="dot">•</span><span class="dot">•</span>`;
 
 function setInfoChatBusy(on){
-  const input = $infoInput || qs('#info-chat-input');
-  const send  = $infoSend  || qs('#info-chat-send');
+  /* bindInfoChatListeners replaces the send button with a clone. Always
+     resolve the live nodes so mobile keeps the real composer in sync. */
+  const input = qs('#info-chat-input');
+  const send  = qs('#info-chat-send');
   if(input) input.disabled = on;
   if(send)  send.disabled  = on;
 
   const container = $infoMessages || qs('#info-chat-messages');
   if(container){
     if(on){
+      clearInterval(infoTypingTimer);
       if(!container.contains($infoTyping)){
         container.appendChild($infoTyping);
         container.scrollTop = container.scrollHeight;
@@ -1520,7 +1931,7 @@ if($infoInput){
   $infoInput.addEventListener('keydown', e=>{
     if(e.key === 'Enter' && !e.shiftKey){
       e.preventDefault();
-      const btn = $infoSend || qs('#info-chat-send');
+      const btn = qs('#info-chat-send');
       if(btn) btn.click();
     }
     // Shift+Enter deja pasar para crear nueva línea
@@ -1677,6 +2088,7 @@ function mirrorFirstDaySchedule(wrap){
 }
 
 function makeHoursBlock(days){
+  days=Math.min(MAX_DAYS_PER_DESTINATION, Math.max(1, Number(days) || 1));
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
 
@@ -1781,8 +2193,231 @@ function updateAddCityButtonState(){
   $addCity.disabled=atLimit;
   $addCity.setAttribute('aria-disabled',atLimit?'true':'false');
   $addCity.title=atLimit
-    ? (getLang()==='es' ? 'Máximo 3 ciudades por generación.' : 'Maximum 3 cities per generation.')
+    ? (getLang()==='es' ? 'Máximo 3 destinos por generación.' : 'Maximum 3 destinations per generation.')
     : '';
+}
+
+
+const ITBMO_COUNTRY_CODES = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS XK YE YT ZA ZM ZW`.split(/\s+/);
+const ITBMO_DESTINATION_SUGGESTIONS_URL='/api/destination-suggestions';
+const destinationSuggestionCache=new Map();
+
+function _countryDisplayNames_(locale=getLang()){
+  try{ return new Intl.DisplayNames([locale==='es'?'es':'en'],{type:'region'}); }
+  catch(_){ return new Intl.DisplayNames(['en'],{type:'region'}); }
+}
+function _countryEnglishNames_(){
+  try{ return new Intl.DisplayNames(['en'],{type:'region'}); }
+  catch(_){ return null; }
+}
+function _countryOptions_(){
+  const display=_countryDisplayNames_();
+  const english=_countryEnglishNames_();
+  return ITBMO_COUNTRY_CODES.map(code=>({
+    code,
+    label:String(display?.of(code) || code),
+    apiName:String(english?.of(code) || code)
+  })).sort((a,b)=>a.label.localeCompare(b.label,getLang(),{sensitivity:'base'}));
+}
+function _countryMatch_(value=''){
+  const needle=String(value||'').trim();
+  if(!needle) return null;
+  return _countryOptions_().find(item=>item.label.localeCompare(needle,getLang(),{sensitivity:'base'})===0 || item.apiName.localeCompare(needle,'en',{sensitivity:'base'})===0 || item.code===needle.toUpperCase()) || null;
+}
+function _escapeAttr_(value=''){
+  return String(value).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function _normalizeSearch_(value=''){
+  return String(value).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+}
+function _syncAutocompleteReserve_(menu){
+  const row=menu?.closest?.('.city-row');
+  if(!row) return;
+  requestAnimationFrame(()=>{
+    const openMenus=[...row.querySelectorAll('.itbmo-autocomplete-menu:not([hidden])')];
+    const reserve=openMenus.length ? Math.max(...openMenus.map(x=>Math.min(x.scrollHeight||0,260))) + 10 : 0;
+    row.style.setProperty('--itbmo-autocomplete-reserve',`${reserve}px`);
+  });
+}
+function _closeAutocompleteMenu_(menu){
+  if(!menu) return;
+  menu.innerHTML='';
+  menu.hidden=true;
+  _syncAutocompleteReserve_(menu);
+}
+function _renderAutocompleteMenu_(menu,items,{emptyText='',onSelect=null}={}){
+  if(!menu) return;
+  menu.innerHTML='';
+  if(!Array.isArray(items) || !items.length){
+    if(emptyText){
+      const empty=document.createElement('div');
+      empty.className='itbmo-autocomplete-empty';
+      empty.textContent=emptyText;
+      menu.appendChild(empty);
+      menu.hidden=false;
+    }else{
+      menu.hidden=true;
+    }
+    _syncAutocompleteReserve_(menu);
+    return;
+  }
+  const frag=document.createDocumentFragment();
+  items.forEach(item=>{
+    const button=document.createElement('button');
+    button.type='button';
+    button.className='itbmo-autocomplete-option';
+    button.setAttribute('role','option');
+    button.textContent=typeof item==='string' ? item : item.label;
+    button.addEventListener('pointerdown',event=>event.preventDefault());
+    button.addEventListener('click',()=>onSelect?.(item));
+    frag.appendChild(button);
+  });
+  menu.appendChild(frag);
+  menu.hidden=false;
+  _syncAutocompleteReserve_(menu);
+}
+function _countrySuggestions_(query=''){
+  const needle=_normalizeSearch_(query);
+  const options=_countryOptions_();
+  if(!needle) return options;
+  const starts=[];
+  const contains=[];
+  options.forEach(item=>{
+    const label=_normalizeSearch_(item.label);
+    const english=_normalizeSearch_(item.apiName);
+    const haystack=`${label} ${english} ${item.code.toLowerCase()}`;
+    if(!haystack.includes(needle)) return;
+    if(label.startsWith(needle) || english.startsWith(needle) || item.code.toLowerCase().startsWith(needle)) starts.push(item);
+    else contains.push(item);
+  });
+  return [...starts,...contains];
+}
+function _showCountrySuggestions_(row){
+  const input=qs('.country',row);
+  const menu=qs('.itbmo-country-menu',row);
+  if(!input || !menu) return;
+  const items=_countrySuggestions_(input.value).slice(0,40);
+  _renderAutocompleteMenu_(menu,items,{
+    emptyText:getLang()==='es'?'No encontramos ese país.':'We could not find that country.',
+    onSelect:item=>{
+      input.value=item.label;
+      input.dataset.countryCode=item.code;
+      input.dataset.countryApiName=item.apiName;
+      input.classList.add('is-valid-country');
+      _closeAutocompleteMenu_(menu);
+      const destination=qs('.city',row);
+      _syncCountrySelection_(row);
+      if(destination){ destination.value=''; destination.focus(); }
+    }
+  });
+}
+function _syncCountrySelection_(row){
+  const input=qs('.country',row);
+  const destination=qs('.city',row);
+  const match=_countryMatch_(input?.value || '');
+  if(input){
+    input.dataset.countryCode=match?.code || '';
+    input.dataset.countryApiName=match?.apiName || '';
+    input.classList.toggle('is-valid-country',Boolean(match));
+  }
+  if(destination){
+    destination.disabled=!match;
+    destination.setAttribute('aria-disabled',String(!match));
+    destination.placeholder=match
+      ? (getLang()==='es'?'Escribe un destino':'Type a destination')
+      : (getLang()==='es'?'Selecciona primero el país':'Select the country first');
+    if(!match){
+      destination.value='';
+      _closeAutocompleteMenu_(qs('.itbmo-destination-menu',row));
+    }
+  }
+  return match;
+}
+async function _loadDestinationSuggestions_(row){
+  const country=qs('.country',row);
+  const input=qs('.city',row);
+  const menu=qs('.itbmo-destination-menu',row);
+  const match=_countryMatch_(country?.value || '');
+  const query=String(input?.value || '').trim();
+  if(!match || !input || !menu || !query){ _closeAutocompleteMenu_(menu); return; }
+  if(query.length<3){
+    _renderAutocompleteMenu_(menu,[],{
+      emptyText:getLang()==='es'
+        ? 'Escribe al menos 3 letras para ver sugerencias. También puedes escribir el destino completo.'
+        : 'Type at least 3 letters to see suggestions. You can also type the full destination.'
+    });
+    return;
+  }
+
+  _renderAutocompleteMenu_(menu,[],{
+    emptyText:getLang()==='es'?'Buscando destinos…':'Searching destinations…'
+  });
+
+  const key=`${match.code}|${_normalizeSearch_(query)}`;
+  let suggestions=destinationSuggestionCache.get(key);
+  if(!suggestions){
+    try{
+      const url=`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&countryCode=${encodeURIComponent(match.code)}&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(query)}`;
+      const response=await fetch(url,{headers:{Accept:'application/json'}});
+      const data=await response.json().catch(()=>({}));
+      suggestions=response.ok && Array.isArray(data?.suggestions) ? data.suggestions : [];
+      destinationSuggestionCache.set(key,suggestions);
+    }catch(_){ suggestions=[]; }
+  }
+
+  /* Ignore a stale async response if the user kept typing or changed country. */
+  if(String(input.value||'').trim()!==query || _countryMatch_(country?.value||'')?.code!==match.code) return;
+
+  _renderAutocompleteMenu_(menu,suggestions.slice(0,12),{
+    emptyText:getLang()==='es'
+      ? 'No hay sugerencias para este texto. Puedes escribir el destino de todas formas.'
+      : 'No suggestions found for this text. You can type the destination anyway.',
+    onSelect:name=>{
+      input.value=name;
+      _closeAutocompleteMenu_(menu);
+      input.focus();
+    }
+  });
+}
+function _bindCountryDestinationAutocomplete_(row){
+  const country=qs('.country',row);
+  const destination=qs('.city',row);
+  const countryMenu=qs('.itbmo-country-menu',row);
+  const destinationMenu=qs('.itbmo-destination-menu',row);
+  let timer=null;
+
+  const sync=()=>{
+    _syncCountrySelection_(row);
+    _showCountrySuggestions_(row);
+  };
+
+  country?.addEventListener('focus',()=>_showCountrySuggestions_(row));
+  country?.addEventListener('input',sync);
+  country?.addEventListener('change',()=>_syncCountrySelection_(row));
+  country?.addEventListener('keydown',event=>{
+    if(event.key==='Escape') _closeAutocompleteMenu_(countryMenu);
+  });
+  country?.addEventListener('blur',()=>{
+    const match=_countryMatch_(country.value);
+    if(match) country.value=match.label;
+    _syncCountrySelection_(row);
+    setTimeout(()=>_closeAutocompleteMenu_(countryMenu),120);
+  });
+
+  destination?.addEventListener('input',()=>{
+    clearTimeout(timer);
+    if(!String(destination.value||'').trim()){ _closeAutocompleteMenu_(destinationMenu); return; }
+    timer=setTimeout(()=>_loadDestinationSuggestions_(row),220);
+  });
+  destination?.addEventListener('focus',()=>{
+    if(String(destination.value||'').trim()) _loadDestinationSuggestions_(row);
+  });
+  destination?.addEventListener('keydown',event=>{
+    if(event.key==='Escape') _closeAutocompleteMenu_(destinationMenu);
+  });
+  destination?.addEventListener('blur',()=>setTimeout(()=>_closeAutocompleteMenu_(destinationMenu),120));
+
+  _syncCountrySelection_(row);
 }
 
 function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
@@ -1796,8 +2431,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     updateAddCityButtonState();
     if(pref?.city){
       alert(getLang()==='es'
-        ? 'Puedes incluir un máximo de 3 ciudades por generación.'
-        : 'You can include a maximum of 3 cities per generation.');
+        ? 'Puedes incluir un máximo de 3 destinos por generación.'
+        : 'You can include a maximum of 3 destinations per generation.');
     }
     return;
   }
@@ -1805,10 +2440,13 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const initialDate=parsePlannerDate(pref.baseDate||'');
   const row = document.createElement('div');
   row.className = 'city-row';
+  const autocompleteId=`itbmo-destination-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+  const countryFieldName=`itbmo-country-${autocompleteId}`;
+  const destinationFieldName=`itbmo-destination-${autocompleteId}`;
   row.innerHTML = `
-    <label>${t('uiCity')}<input class="city" placeholder="${t('uiCity')}" value="${pref.city||''}"></label>
-    <label>${t('uiCountry')}<input class="country" placeholder="${t('uiCountry')}" value="${pref.country||''}"></label>
-    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:30},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+    <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
+    <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
+    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:MAX_DAYS_PER_DESTINATION},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
     <label class="date-label">
       ${t('uiStart')}
       <div class="date-wrapper${initialDate?' has-value':''}">
@@ -1823,6 +2461,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     </label>
     <button class="remove" type="button">✕</button>
   `;
+
+  _bindCountryDestinationAutocomplete_(row);
 
   const baseDateEl = qs('.baseDate', row);
   const baseDatePicker = qs('.baseDatePicker', row);
@@ -1840,7 +2480,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 
   const daysSelect = qs('.days', row);
   if(pref.days){
-    daysSelect.value = String(pref.days);
+    daysSelect.value = String(Math.min(MAX_DAYS_PER_DESTINATION, Math.max(1, Number(pref.days) || 1)));
   }
 
   daysSelect.addEventListener('change', ()=>{
@@ -1943,7 +2583,10 @@ function bindPlannerLanguageCapability(){
    - startPlanning() itself is intentionally left unchanged.
    ========================================================= */
 function setSavedSetupLocked(locked){
-  ['#account-box','#travelers-box','#destinations-box'].forEach(sel=>{
+  // Auth/account controls must remain usable after Save Destinations.
+  // In particular, Sign out must never become inert because trip setup is locked.
+  // Only trip-definition sections are frozen here; Auth has its own independent gate.
+  ['#travelers-box','#destinations-box'].forEach(sel=>{
     const el=qs(sel);
     if(!el) return;
     el.classList.toggle('is-setup-locked',!!locked);
@@ -2064,7 +2707,7 @@ function showPreferencesStage(){
   scheduleAstraCoach('preferences','#preferences-stage',520);
 }
 
-function confirmPreferencesAndContinue(){
+async function confirmPreferencesAndContinue(){
   if(!$preferencesStage || !$preferencesField || !currentTripId) return;
   if(preferencesStageTripId!==currentTripId) return;
 
@@ -2091,6 +2734,7 @@ function confirmPreferencesAndContinue(){
 
   /* Existing agent flow begins here, unchanged. */
   startPlanning();
+  await _persistPostPaymentProgress_('collecting_hotels');
 
   /* UX only: move the user directly to the agent input after confirmation. */
   setTimeout(()=>{
@@ -2128,8 +2772,8 @@ async function normalizeDestinationsBeforeSave(list, rows){
     if(status==='ambiguous'){
       const question=String(result.question || '').trim();
       const fallback=getLang()==='es'
-        ? `No pudimos confirmar con seguridad la ciudad “${item.city}”. Revísala e indica también el país.`
-        : `We could not safely confirm the city “${item.city}”. Please review it and include the country.`;
+        ? `No pudimos confirmar con seguridad el destino “${item.city}”. Revísalo e indica también el país.`
+        : `We could not safely confirm the destination “${item.city}”. Please review it and include the country.`;
       const error=new Error('DESTINATION_AMBIGUOUS');
       error.userMessage=question || fallback;
       error.rowIndex=index;
@@ -2150,6 +2794,51 @@ async function normalizeDestinationsBeforeSave(list, rows){
   });
 
   return normalized;
+}
+
+function ensureSaveTransitionOverlay(){
+  let overlay=qs('#itbmo-save-transition-overlay');
+  if(overlay) return overlay;
+
+  overlay=document.createElement('div');
+  overlay.id='itbmo-save-transition-overlay';
+  overlay.className='itbmo-save-transition-overlay';
+  overlay.setAttribute('aria-hidden','true');
+  overlay.innerHTML=`
+    <div class="itbmo-save-transition-card" role="status" aria-live="polite" aria-atomic="true">
+      <div class="itbmo-hourglass-loader" aria-hidden="true">
+        <svg class="itbmo-hourglass" viewBox="0 0 48 58" focusable="false" aria-hidden="true">
+          <path class="itbmo-hourglass-frame" d="M10 5h28M10 53h28M13 7c0 10 3 14 11 22-8 8-11 12-11 22M35 7c0 10-3 14-11 22 8 8 11 12 11 22"/>
+          <path class="itbmo-hourglass-glass" d="M15.5 8.5h17c-.7 7-3.1 11.3-8.5 17-5.4-5.7-7.8-10-8.5-17Zm0 41c.7-7 3.1-11.3 8.5-17 5.4 5.7 7.8 10 8.5 17h-17Z"/>
+          <path class="itbmo-hourglass-sand-top" d="M18 12h12c-.7 4.4-2.5 7.5-6 11-3.5-3.5-5.3-6.6-6-11Z"/>
+          <path class="itbmo-hourglass-sand-bottom" d="M18.5 46.5c.8-3.7 2.5-6.4 5.5-9.6 3 3.2 4.7 5.9 5.5 9.6h-11Z"/>
+          <rect class="itbmo-hourglass-stream" x="22.7" y="25.5" width="2.6" height="9.5" rx="1.3"/>
+        </svg>
+      </div>
+      <div class="itbmo-save-transition-title"></div>
+    </div>`;
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+function showSaveTransitionOverlay(){
+  const overlay=ensureSaveTransitionOverlay();
+  const es=getLang()==='es';
+  const title=qs('.itbmo-save-transition-title',overlay);
+  const subtitle=qs('.itbmo-save-transition-subtitle',overlay);
+  if(title) title.textContent=es?'Guardando destinos…':'Saving destinations…';
+  if(subtitle) subtitle.textContent=es?'Organizando tus destinos y preferencias.':'Organizing your destinations and preferences.';
+  overlay.classList.add('active');
+  overlay.setAttribute('aria-hidden','false');
+  document.documentElement.classList.add('itbmo-save-transition-open');
+}
+
+function hideSaveTransitionOverlay(){
+  const overlay=qs('#itbmo-save-transition-overlay');
+  if(!overlay) return;
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden','true');
+  document.documentElement.classList.remove('itbmo-save-transition-open');
 }
 
 async function saveDestinations(){
@@ -2173,21 +2862,36 @@ async function saveDestinations(){
   const rows = qsa('.city-row', $cityList);
   if(rows.length>MAX_ITINERARY_CITIES){
     alert(getLang()==='es'
-      ? 'Puedes incluir un máximo de 3 ciudades por generación.'
-      : 'You can include a maximum of 3 cities per generation.');
+      ? 'Puedes incluir un máximo de 3 destinos por generación.'
+      : 'You can include a maximum of 3 destinations per generation.');
     updateAddCityButtonState();
     return;
   }
   let list = [];
+  let invalidCountryRow=null;
+  let invalidDaysRow=null;
 
   rows.forEach(r=>{
     const city     = qs('.city',r).value.trim();
-    const country  = qs('.country',r).value.trim().replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñ\s]/g,'');
+    const countryInput=qs('.country',r);
+    const countryMatch=_countryMatch_(countryInput?.value || '');
+    const country  = countryMatch?.label || String(countryInput?.value || '').trim();
     const daysVal  = qs('.days',r).value;
     const days     = Math.max(1, parseInt(daysVal||'0',10)||1);
     const baseDate = qs('.baseDate',r).value.trim();
 
+    if(days > MAX_DAYS_PER_DESTINATION){
+      invalidDaysRow=invalidDaysRow || r;
+      return;
+    }
+
     if(!city) return;
+    if(!countryMatch){
+      invalidCountryRow=invalidCountryRow || r;
+      countryInput?.classList.add('itbmo-field-error');
+      return;
+    }
+    countryInput?.classList.remove('itbmo-field-error');
 
     const perDay = [];
     qsa('.hours-day', r).forEach((hd, idx)=>{
@@ -2201,6 +2905,22 @@ async function saveDestinations(){
 
     list.push({ city, country, days, baseDate, perDay });
   });
+
+  if(invalidCountryRow){
+    alert(getLang()==='es'
+      ? 'Selecciona un país válido de la lista antes de continuar.'
+      : 'Select a valid country from the list before continuing.');
+    try{ qs('.country',invalidCountryRow)?.focus(); }catch(_){ }
+    return;
+  }
+
+  if(invalidDaysRow){
+    alert(getLang()==='es'
+      ? `Puedes seleccionar un máximo de ${MAX_DAYS_PER_DESTINATION} días por destino.`
+      : `You can select a maximum of ${MAX_DAYS_PER_DESTINATION} days per destination.`);
+    try{ qs('.days',invalidDaysRow)?.focus(); }catch(_){ }
+    return;
+  }
 
   if(list.length === 0) return;
 
@@ -2224,10 +2944,14 @@ async function saveDestinations(){
     $save.textContent = authCopy('tripSaving');
   }
 
+  showSaveTransitionOverlay();
+
   try{
     list = await normalizeDestinationsBeforeSave(list, rows);
     await saveTripRecord(list, travelerState);
+    hideSaveTransitionOverlay();
   }catch(err){
+    hideSaveTransitionOverlay();
     console.error('ITBMO trip save error:', err);
     if(err?.userMessage){
       alert(err.userMessage);
@@ -3186,6 +3910,7 @@ ${buildIntake()}
   const controller = new AbortController();
   const timeoutMs = 45000; // 45s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  infoChatRequestInFlight = true;
 
   try{
     setInfoChatBusy(true);
@@ -3338,6 +4063,7 @@ ${buildIntake()}
     return {text:tone.fail,remaining:infoChatQueriesRemaining};
   }finally{
     clearTimeout(timer);
+    infoChatRequestInFlight = false;
     setInfoChatBusy(false);
   }
 }
@@ -4697,6 +5423,27 @@ function _globalDayTripPolicy_(){
   };
 }
 
+function _calendarDatesForStay_(baseDate='',totalDays=0){
+  const base=_parseBaseDate_(baseDate);
+  if(!base) return [];
+  return Array.from({length:Math.max(0,Number(totalDays||0))},(_,index)=>{
+    const date=addDays(base,index);
+    return {day:index+1,date:formatISODate(date)};
+  });
+}
+
+function _specialCalendarEventPolicy_(){
+  return {
+    rule:'Actively inspect the real calendar date of every itinerary day for destination-relevant special dates, major public celebrations, culturally important observances or exceptional events that can materially change the best plan for that day.',
+    anchor_behavior:'When such a date creates a genuinely destination-defining experience, treat the relevant celebration/event as a day anchor and organize earlier activities, routing, meals and arrival timing around it instead of allowing a generic sightseeing plan to crowd it out.',
+    midnight_behavior:'For events whose defining moment occurs at or after midnight, such as New Year celebrations, keep the itinerary active through the meaningful countdown/celebration window and a reasonable immediate post-event margin when compatible with the user hard boundaries. A normal default evening target must never cause the defining moment to be missed.',
+    user_precedence:'If the user specifies where or how to experience the celebration, that explicit preference is authoritative whenever safe and feasible.',
+    verification:'The planning model has no live web access. Never invent an annual program, exact fireworks location, temporary closure, ticket requirement or event timetable that has not been provided. Use stable calendar knowledge conservatively, clearly mark year-specific operational details for verification when needed, and still protect the special-date experience in the schedule.',
+    examples:['New Year’s Eve / New Year countdown','Christmas or major local holiday celebrations','major destination-defining festivals or public observances that coincide with the stay'],
+    prohibition:'Do not hardcode destination-specific event lists. Evaluate special dates from the supplied calendar dates and destination context.'
+  };
+}
+
 function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, transport){
   const lodging=_normalizeLodgingInput_(hotel);
   return {
@@ -4711,6 +5458,8 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     transport:transport||null,
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
+    calendar_dates:_calendarDatesForStay_(baseDate,totalDays),
+    special_calendar_event_policy:_specialCalendarEventPolicy_(),
     preference_constraint_policy:_preferenceConstraintPolicy_(),
     special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
     special_conditions_instruction:'Use special_conditions as authoritative user input throughout strategic distribution, activity selection, sequencing, logistics and validation. Never treat it as optional commentary.',
@@ -4755,6 +5504,7 @@ TRIP-WIDE RULES:
 - Use the normalized lodging base as the primary geographic anchor and reserve corridors that minimize unnecessary transfers.
 - Convert all preferences and restrictions into actual day identities, timing and routing decisions.
 - Apply the first/intermediate/final-day time policy contained in KNOWN USER FACTS.
+- Inspect calendar_dates and apply special_calendar_event_policy before finalizing each day identity. A meaningful special-date anchor must not be displaced by generic sightseeing.
 - If inventory is exhausted, make a deliberately light but distinct day; never recycle icons.
 - Respect the actual daily windows, season, useful daylight, travelers, base and transport.
 - Do not invent flight, airport, check-out, rental company or car-return logistics.
@@ -4812,6 +5562,7 @@ HARD RULES:
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
 - Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
+- Apply special_calendar_event_policy using the exact calendar_dates in KNOWN USER FACTS. When a meaningful celebration defines that date, protect it as an anchor, schedule sufficient arrival time, and continue through its defining moment (including after midnight when appropriate) unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - On Day 1, the supplied start time means the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent an airport, flight, station or inbound transfer.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
 - Do not borrow anchors from any other day.
@@ -5299,6 +6050,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
 - When an end time is blank, approximately 19:00 local is a MINIMUM planning target, not a ceiling. Do not finish a normal day before about 19:00 without a real constraint. Continue later when genuinely high-value evening content improves the itinerary. Respect any explicit user end time as a hard boundary.
+- Preserve every meaningful special-date anchor required by special_calendar_event_policy. A repair must not remove or shorten the defining celebration/countdown moment merely to simplify the day, and it must not invent year-specific event details.
 - The Day 1 start is when the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent arrival transport details.
 - A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
@@ -5484,6 +6236,7 @@ ${JSON.stringify(facts)}
 
 HARD RULES:
 - Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
+- Inspect calendar_dates and enforce special_calendar_event_policy. Protect a destination-defining special-date celebration as an anchor and continue through its defining moment, including after midnight when appropriate, unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - Day 1 starts AT the lodging at the user-provided time; complete check-in or luggage drop before sightseeing and do not invent airport/flight/arrival transport details.
 - Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
 - Enforce every preference and restriction through actual planning choices, not merely notes.
@@ -5713,11 +6466,11 @@ function agentConversationCopy(){
   const lang=agentConversationLang || (getLang()==='es' ? 'es' : 'en');
   const map={
     es:{
-      hotel:(city)=>`Para <strong>${city}</strong>, dime tu <strong>hotel/zona</strong> y tu <strong>transporte</strong> (vehículo alquilado, transporte público, taxi/Uber, mixto o “recomiéndame”).`,
+      hotel:(city)=>`Para <strong>${city}</strong>, completa estos dos datos. Si todavía no tienes alguno claro, escribe <strong>“recomiéndame”</strong>.`,
       itinerary:'Antes de generar: ¿en qué <strong>idioma</strong> quieres tu itinerario? (Ej: Español, English, Português, Français, Deutsch…)'
     },
     en:{
-      hotel:(city)=>`For <strong>${city}</strong>, tell me your <strong>hotel/area</strong> and your <strong>transport</strong> (rental car, public transit, taxi/Uber, mixed, or “recommend”).`,
+      hotel:(city)=>`For <strong>${city}</strong>, complete these two details. If you are not sure about either one yet, type <strong>“recommend”</strong>.`,
       itinerary:'Before I generate: what <strong>language</strong> do you want your itinerary in? (e.g., English, Español, Português, Français, Deutsch…)'
     },
     pt:{
@@ -5758,6 +6511,80 @@ function agentConversationCopy(){
     }
   };
   return map[lang] || map.en;
+}
+
+function _hotelTransportComposerLabels_(){
+  const lang=agentConversationLang || (getLang()==='es' ? 'es' : 'en');
+  const labels={
+    es:{lodging:'Hospedaje',transport:'Medio de transporte'},
+    en:{lodging:'Lodging',transport:'Transport'},
+    pt:{lodging:'Hospedagem',transport:'Meio de transporte'},
+    fr:{lodging:'Hébergement',transport:'Moyen de transport'},
+    de:{lodging:'Unterkunft',transport:'Verkehrsmittel'},
+    it:{lodging:'Alloggio',transport:'Mezzo di trasporto'},
+    ja:{lodging:'宿泊先',transport:'移動手段'},
+    ko:{lodging:'숙소',transport:'교통수단'},
+    zh:{lodging:'住宿',transport:'交通方式'},
+    ru:{lodging:'Проживание',transport:'Транспорт'},
+    ar:{lodging:'الإقامة',transport:'وسيلة النقل'}
+  };
+  return labels[lang] || labels.en;
+}
+
+function _autoGrowPlanningChatInput_(){
+  if(!$chatI || $chatI.tagName!=='TEXTAREA') return;
+  $chatI.style.height='auto';
+  const computed=getComputedStyle($chatI);
+  const maxHeight=parseFloat(computed.maxHeight) || 168;
+  const target=Math.min($chatI.scrollHeight,maxHeight);
+  $chatI.style.height=`${target}px`;
+  $chatI.classList.toggle('is-scrollable',$chatI.scrollHeight>maxHeight+1);
+}
+
+function _setHotelTransportComposerTemplate_(){
+  if(!$chatI || !collectingHotels || metaProgressIndex>=savedDestinations.length) return;
+  const labels=_hotelTransportComposerLabels_();
+  $chatI.value=`${labels.lodging}:\n\n${labels.transport}:`;
+  _autoGrowPlanningChatInput_();
+  const cursor=labels.lodging.length+1;
+  requestAnimationFrame(()=>{
+    try{
+      $chatI.focus({preventScroll:true});
+      $chatI.setSelectionRange(cursor,cursor);
+    }catch(_){
+      try{ $chatI.focus(); }catch(__){}
+    }
+  });
+}
+
+function _parseStructuredHotelTransport_(text){
+  const raw=String(text||'');
+  const labels=[
+    ['Hospedaje','Medio de transporte'],
+    ['Lodging','Transport'],
+    ['Hospedagem','Meio de transporte'],
+    ['Hébergement','Moyen de transport'],
+    ['Unterkunft','Verkehrsmittel'],
+    ['Alloggio','Mezzo di trasporto'],
+    ['宿泊先','移動手段'],
+    ['숙소','교통수단'],
+    ['住宿','交通方式'],
+    ['Проживание','Транспорт'],
+    ['الإقامة','وسيلة النقل']
+  ];
+  const escapeRegExp=value=>String(value).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+
+  for(const [lodgingLabel,transportLabel] of labels){
+    const re=new RegExp(`^\\s*${escapeRegExp(lodgingLabel)}\\s*:\\s*([\\s\\S]*?)\\s*${escapeRegExp(transportLabel)}\\s*:\\s*([\\s\\S]*)$`,'i');
+    const match=raw.match(re);
+    if(!match) continue;
+    return {
+      structured:true,
+      hotel:String(match[1]||'').trim(),
+      transport:String(match[2]||'').trim() || 'recomiéndame'
+    };
+  }
+  return {structured:false,hotel:'',transport:''};
 }
 
 function _generationISOToDMY_(value){
@@ -5893,8 +6720,8 @@ function _hydrateGenerationTrip_(trip){
       const windows=destination.perDay || [];
       qsa('.hours-day',row).forEach((dayRow,index)=>{
         const windowData=windows[index] || {};
-        setTimeSelectorValue(dayRow,'start',windowData.start || '');
-        setTimeSelectorValue(dayRow,'end',windowData.end || '');
+        setTimeSelectorValue(qs('[data-time-type="start"]',dayRow),windowData.start || '');
+        setTimeSelectorValue(qs('[data-time-type="end"]',dayRow),windowData.end || '');
       });
     });
     updateAddCityButtonState();
@@ -5919,7 +6746,7 @@ function _hydrateGenerationTrip_(trip){
   if($chatBox) $chatBox.style.display='flex';
   renderCityTabs();
   setExportToolbarVisibility(trip.status==='generated');
-  restoreInfoChatStateForTrip(currentTripId);
+  restoreInfoChatStateForTrip(currentTripId,persistedPlanner.info_chat_state);
   return true;
 }
 
@@ -6100,15 +6927,20 @@ async function restorePaidGenerationIfNeeded(){
       trip=data?.trip || null;
     }
     if(generationResetInProgress) return;
-    if(!trip || !['generating','failed','generated'].includes(trip.status)) return;
+    if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
     if(!_hydrateGenerationTrip_(trip)) return;
 
+    let paymentStatus=null;
     try{
-      const paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
       applyInfoChatStatus(paymentStatus);
     }catch(_){ }
 
-    if(trip.status==='generating'){
+    if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized) return;
+
+    if(trip.status==='saved'){
+      if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
+    }else if(trip.status==='generating'){
       chatMsg(getLang()==='es'
         ? 'ITBMO detectó una generación interrumpida y continuará desde la última ciudad guardada.'
         : 'ITBMO detected an interrupted generation and will continue from the last saved city.','ai');
@@ -6155,6 +6987,7 @@ function askNextHotelTransport(){
   const city = savedDestinations[metaProgressIndex].city;
   setActiveCity(city); renderCityItinerary(city);
   chatMsg(agentConversationCopy().hotel(city),'ai');
+  _setHotelTransportComposerTemplate_();
 }
 
 const WORD_NUM = {
@@ -6489,19 +7322,34 @@ async function onSend(){
   }
   chatMsg(text,'user');
   $chatI.value='';
+  _autoGrowPlanningChatInput_();
+
+  const structuredHotelTransport = collectingHotels
+    ? _parseStructuredHotelTransport_(text)
+    : null;
 
   if(!agentConversationLang){
-    agentConversationLang=detectAgentConversationLanguage(text);
+    const languageSource = structuredHotelTransport?.structured
+      ? `${structuredHotelTransport.hotel}
+${structuredHotelTransport.transport==='recomiéndame' ? '' : structuredHotelTransport.transport}`.trim()
+      : text;
+    agentConversationLang=detectAgentConversationLanguage(languageSource || text);
   }
 
   // Colecta hotel/transporte
   if(collectingHotels){
     const city = savedDestinations[metaProgressIndex].city;
-    const transport = detectTransportFromUserText(text);
-    const lodgingText = stripRecognizedTransportTail(text);
+    const structured = structuredHotelTransport || _parseStructuredHotelTransport_(text);
+    const transport = structured.structured
+      ? structured.transport
+      : detectTransportFromUserText(text);
+    const lodgingText = structured.structured
+      ? structured.hotel
+      : stripRecognizedTransportTail(text);
     upsertCityMeta({ city, hotel: lodgingText, transport });
     metaProgressIndex++;
     askNextHotelTransport();
+    await _persistPostPaymentProgress_(collectingHotels ? 'collecting_hotels' : 'collecting_language');
     return;
   }
 
@@ -6509,6 +7357,7 @@ async function onSend(){
     plannerState.collectingItineraryLang = false;
     plannerState.itineraryLang = String(text || '').trim();
 
+    await _persistPostPaymentProgress_('generation_requested');
     runPaidGeneration();
 
     return;
@@ -7980,12 +8829,13 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 
     const tripIdToArchive = currentTripId || getStoredActiveTripId();
     const sessionToken = getStoredSessionToken();
-    if(tripIdToArchive && sessionToken){
+    if(sessionToken){
       try{
         await tripApi({
           action:'archive',
           session_token:sessionToken,
-          trip_id:tripIdToArchive
+          trip_id:tripIdToArchive || null,
+          prevent_auto_recovery:true
         });
       }catch(err){
         console.warn('[RESET ARCHIVE]',err);
@@ -8005,6 +8855,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     }
 
     clearInfoChatStateForTrip(tripIdToArchive);
+    _clearPostPaymentProgressLocal_(tripIdToArchive);
     try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
     closeAstraCoach({remember:false});
 
@@ -8245,8 +9096,8 @@ function setInfoChatEntitlement({authorized=false, remaining=0, used=0, tripId=n
   if(entIcon) entIcon.textContent=!authorized ? '🔒' : (exhausted ? '✓' : '✓');
   if(usageLabel) usageLabel.textContent=!authorized ? copy.lockedUsage : (exhausted ? copy.exhausted : copy.remaining(safeRemaining));
   if(remainingEl) remainingEl.textContent=`${safeUsed} / ${INFO_CHAT_MAX_QUERIES}`;
-  if(authorized) persistInfoChatState();
 }
+
 
 function applyInfoChatStatus(data){
   const authorized=Boolean(data?.paid || data?.admin_bypass || data?.info_chat_authorized);
@@ -8411,7 +9262,7 @@ function closeSupportModal(){
 function _supportMailto_(){
   const es = getLang()==='es';
   const userEmail = String(currentUser?.email || '').trim();
-  const username = String(currentUser?.username || '').trim();
+  const username = String(currentUser?.username || currentUser?.first_name || '').trim();
   const cities = (savedDestinations || []).map(x=>x?.city).filter(Boolean).join(', ');
   const trip = currentTripId || 'Not available';
   const subject = es
@@ -8516,10 +9367,10 @@ async function hasValidPaymentForCurrentTrip(){
       session_token:token,
       trip_id:currentTripId
     });
-    const paid = Boolean(data?.paid);
-    if(paid) paymentGateSatisfiedTripId=currentTripId;
+    const authorized = Boolean(data?.paid || data?.admin_bypass);
+    if(authorized) paymentGateSatisfiedTripId=currentTripId;
     applyInfoChatStatus(data);
-    return paid;
+    return authorized;
   }catch(err){
     console.warn('[PAYMENT STATUS]',err);
     return false;
@@ -8544,6 +9395,8 @@ async function completePaymentGate(){
   }catch(err){
     console.warn('[INFO CHAT ENTITLEMENT AFTER PAYMENT]',err);
   }
+
+  await _persistPostPaymentProgress_('preferences');
 
   setTimeout(()=>{
     closeCheckoutModal();
@@ -8782,6 +9635,9 @@ $start?.addEventListener('click', requestPlanningStart);
 $preferencesContinue?.addEventListener('click', confirmPreferencesAndContinue);
 $send?.addEventListener('click', onSend);
 
+// Chat: textarea crece hasta su máximo; después usa scroll interno.
+$chatI?.addEventListener('input', _autoGrowPlanningChatInput_);
+
 // Chat: Enter envía (sin Shift)
 $chatI?.addEventListener('keydown', e=>{
   if(e.key==='Enter' && !e.shiftKey){
@@ -8819,6 +9675,91 @@ document.addEventListener('itbmo:addDays', e=>{
 let infoChatWelcomeTripId = null;
 let infoChatDragState = null;
 let infoChatSuppressRestoreClick = false;
+let infoChatViewportLayoutBound = false;
+
+function applyInfoChatViewportLayout(){
+  const modal=qs('#info-chat-modal');
+  const messages=qs('#info-chat-messages');
+  const input=qs('#info-chat-input');
+  const send=qs('#info-chat-send');
+  if(!modal || !messages || !input) return;
+
+  const mobile=window.matchMedia('(max-width: 760px)').matches;
+  const viewport=window.visualViewport;
+
+  modal.style.display=modal.classList.contains('active') ? 'flex' : modal.style.display;
+  modal.style.flexDirection='column';
+  modal.style.overflow='hidden';
+
+  messages.style.flex='1 1 auto';
+  messages.style.minHeight='0';
+  messages.style.overflowY='auto';
+  messages.style.overscrollBehavior='contain';
+  messages.style.webkitOverflowScrolling='touch';
+
+  input.style.maxHeight=mobile ? '132px' : '220px';
+  resizeInfoChatComposer(input);
+
+  /* Keep the input/send row outside the scrolling history. */
+  let composer=input.parentElement;
+  while(composer && composer!==modal && send && !composer.contains(send)) composer=composer.parentElement;
+  if(composer && composer!==modal){
+    composer.style.flex='0 0 auto';
+    composer.style.position='relative';
+    composer.style.zIndex='3';
+  }
+
+  if(!mobile){
+    if(modal.dataset.mobileViewportLayout==='1'){
+      ['left','top','right','bottom','width','height','maxWidth','maxHeight','transform'].forEach(prop=>{
+        modal.style[prop]='';
+      });
+      delete modal.dataset.mobileViewportLayout;
+    }
+    modal.style.maxHeight='';
+    return;
+  }
+
+  const width=Math.max(280,Math.floor(viewport?.width || window.innerWidth));
+  const height=Math.floor(viewport?.height || window.innerHeight);
+  const offsetLeft=Math.floor(viewport?.offsetLeft || 0);
+  const offsetTop=Math.floor(viewport?.offsetTop || 0);
+  const margin=8;
+
+  modal.dataset.mobileViewportLayout='1';
+  modal.style.position='fixed';
+  modal.style.left=`${offsetLeft+margin}px`;
+  modal.style.top=`${offsetTop+margin}px`;
+  modal.style.right='auto';
+  modal.style.bottom='auto';
+  modal.style.width=`${Math.max(264,width-(margin*2))}px`;
+  modal.style.height=`${Math.max(180,height-(margin*2))}px`;
+  modal.style.maxWidth=`${Math.max(264,width-(margin*2))}px`;
+  modal.style.maxHeight=`${Math.max(180,height-(margin*2))}px`;
+  modal.style.transform='none';
+}
+
+function bindInfoChatViewportLayout(){
+  if(infoChatViewportLayoutBound) return;
+  infoChatViewportLayoutBound=true;
+  const refresh=()=>{
+    const modal=qs('#info-chat-modal');
+    if(modal?.classList.contains('active') && !modal.classList.contains('is-minimized')){
+      applyInfoChatViewportLayout();
+    }
+  };
+  window.addEventListener('resize',refresh,{passive:true});
+  window.addEventListener('orientationchange',refresh,{passive:true});
+  window.visualViewport?.addEventListener('resize',refresh,{passive:true});
+  window.visualViewport?.addEventListener('scroll',refresh,{passive:true});
+  qs('#info-chat-input')?.addEventListener('focus',()=>{
+    requestAnimationFrame(()=>{
+      applyInfoChatViewportLayout();
+      const messages=qs('#info-chat-messages');
+      if(messages) messages.scrollTop=messages.scrollHeight;
+    });
+  },{passive:true});
+}
 
 function _infoAllowedCities_(){
   return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
@@ -8907,6 +9848,12 @@ function minimizeInfoModal(){
   const modal=qs('#info-chat-modal');
   if(!modal) return;
   hideInfoChatNotice();
+  if(modal.dataset.mobileViewportLayout==='1'){
+    ['left','top','right','bottom','width','height','maxWidth','maxHeight','transform'].forEach(prop=>{
+      modal.style[prop]='';
+    });
+    delete modal.dataset.mobileViewportLayout;
+  }
   modal.classList.add('is-minimized');
   modal.classList.add('active');
   modal.style.display='flex';
@@ -8918,6 +9865,7 @@ function restoreInfoModal(){
   modal.classList.remove('is-minimized');
   modal.classList.add('active');
   modal.style.display='flex';
+  applyInfoChatViewportLayout();
   ensureInfoChatWelcome();
 }
 
@@ -9000,6 +9948,8 @@ function openInfoModal(){
   modal.classList.remove('is-minimized');
   hideInfoChatNotice();
   initInfoChatDrag();
+  bindInfoChatViewportLayout();
+  applyInfoChatViewportLayout();
   ensureInfoChatWelcome();
 
   document.body.classList.add('itbmo-info-open');
@@ -9018,6 +9968,7 @@ async function sendInfoMessage(){
   const input = qs('#info-chat-input');
   const btn   = qs('#info-chat-send');
   if(!input || !btn) return;
+  if(infoChatRequestInFlight) return;
   if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
     setInfoChatEntitlement({
       authorized: infoChatAuthorizedTripId === currentTripId,
@@ -9067,6 +10018,7 @@ async function sendInfoMessage(){
       used:INFO_CHAT_MAX_QUERIES-remaining,
       tripId:currentTripId
     });
+    persistInfoChatState();
   }
 
   if(result?.quotaExceeded){
@@ -9076,6 +10028,7 @@ async function sendInfoMessage(){
       used:INFO_CHAT_MAX_QUERIES,
       tripId:currentTripId
     });
+    persistInfoChatState();
   }
 }
 function bindInfoChatListeners(){
@@ -9324,14 +10277,14 @@ function astraCoachCopy(key){
   const es=getLang()==='es';
   const copy={
     account:es
-      ? ['Tu punto de partida','Crea tu cuenta o inicia sesión. Así podremos guardar este viaje de forma segura antes de comenzar.']
-      : ['Your starting point','Create your account or sign in so we can save this trip safely before you begin.'],
+      ? ['Tu punto de partida','Elige cómo continuar: crea una cuenta, inicia sesión o usa ITBMO como invitado. Con cuenta podrás recuperar tu planificación desde otros dispositivos durante el período disponible; como invitado, la recuperación queda vinculada a este dispositivo.']
+      : ['Your starting point','Choose how to continue: create an account, sign in, or use ITBMO as a guest. With an account you can recover your planning from other devices during the available period; as a guest, recovery stays linked to this device.'],
     travelers:es
       ? ['¿Quiénes vivirán este viaje?','Indica si viajas solo o acompañado. Las edades y necesidades del grupo ayudan a ITBMO a ajustar ritmos, actividades y desplazamientos.']
       : ['Who will experience this trip?','Tell us whether you are traveling solo or with others. Ages and group needs help ITBMO adjust pacing, activities and transportation.'],
     destinations:es
-      ? ['Construye la ruta','Agrega hasta tres ciudades, su país y la cantidad de días. El orden en que las ingreses será el orden del viaje.']
-      : ['Build your route','Add up to three cities, their country and number of days. The order you enter them will be the trip order.'],
+      ? ['Construye la ruta','Selecciona primero el país y luego escribe tu destino. Puedes elegir una sugerencia de la lista o, si tu destino no aparece, escribirlo igualmente. Agrega hasta tres destinos; el orden en que los ingreses será el orden del viaje.']
+      : ['Build your route','Select the country first, then enter your destination. Choose a suggestion from the list or, if your destination does not appear, simply type it anyway. Add up to three destinations; the order you enter them will be the trip order.'],
     date:es
       ? ['Primer día en el destino','Selecciona la fecha en que llegarás al hotel o apartamento y tendrás tiempo disponible. Las siguientes ciudades se sugerirán automáticamente sin permitir fechas imposibles o superpuestas.']
       : ['First day at the destination','Choose the date when you will reach your hotel or apartment and have usable time. Following cities will be suggested automatically without impossible or overlapping dates.'],
@@ -9430,6 +10383,9 @@ function initAstraCoach(){
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
   if(!document.querySelector('#city-list .city-row')) addCityRow();
+
+  // Security/UX default: Planner is locked before any async session restore.
+  applyAuthPlannerGate(false);
 
   bindAccountListeners();
   restoreITBMOSession();

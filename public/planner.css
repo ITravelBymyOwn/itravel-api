@@ -512,6 +512,7 @@ input.end,
 #traveler-solo-panel select,
 #traveler-group-panel select,
 .chat-input input,
+.chat-input > textarea,
 .info-chat-modal .chat-input textarea,
 .account-form-grid input,
 .account-form-grid select{
@@ -548,6 +549,7 @@ input.end:hover,
 #traveler-solo-panel select:hover,
 #traveler-group-panel select:hover,
 .chat-input input:hover,
+.chat-input > textarea:hover,
 .info-chat-modal .chat-input textarea:hover,
 .account-form-grid input:hover,
 .account-form-grid select:hover{
@@ -564,6 +566,7 @@ input.end:focus,
 #traveler-solo-panel select:focus,
 #traveler-group-panel select:focus,
 .chat-input input:focus,
+.chat-input > textarea:focus,
 .info-chat-modal .chat-input textarea:focus,
 .account-form-grid input:focus,
 .account-form-grid select:focus{
@@ -1239,9 +1242,22 @@ input.end.invalid{
   border-top:1px solid var(--line);
 }
 
-.chat-input input{
+.chat-input input,
+.chat-input textarea{
   flex:1;
   padding:.65rem .75rem;
+}
+
+.chat-input textarea{
+  min-height:4.35rem;
+  max-height:10.5rem;
+  resize:none;
+  overflow-y:hidden;
+  line-height:1.45;
+}
+
+.chat-input textarea.is-scrollable{
+  overflow-y:auto;
 }
 
 .chat-message.ai.typing .dot{
@@ -2765,6 +2781,9 @@ table.itinerary td:nth-child(8){width:16%}
 /* ---------- 1. DESTINATIONS: FLUID BEFORE WRAPPING ---------- */
 .city-row{
   container-type:inline-size;
+  --itbmo-autocomplete-reserve:0px;
+  margin-bottom:calc(.8rem + var(--itbmo-autocomplete-reserve));
+  transition:margin-bottom .16s ease;
   grid-template-columns:
     minmax(82px,1.08fr)
     minmax(72px,.92fr)
@@ -6097,3 +6116,318 @@ body.itinerary-focus-open{
     max-width:236px;
   }
 }
+
+/* ITBMO · País → Destino autocomplete (surgical UX layer) */
+.city-row input.country.is-valid-country{
+  padding-right:2.2rem;
+}
+.city-row input.city:disabled{
+  opacity:.68;
+  cursor:not-allowed;
+}
+.city-row input.itbmo-field-error{
+  outline:2px solid rgba(220,38,38,.22);
+  border-color:#dc2626!important;
+}
+
+
+/* =========================================================
+   ITBMO · País → Destino · autocomplete multiplataforma
+   Sustituye el datalist nativo para una UX consistente en
+   desktop, tablet y móvil. No modifica la lógica del Planner.
+========================================================= */
+.city-row .itbmo-autocomplete-field{
+  position:relative;
+  z-index:2;
+}
+.city-row .itbmo-autocomplete-field:focus-within{
+  z-index:40;
+}
+.itbmo-autocomplete-menu{
+  position:absolute;
+  z-index:80;
+  top:calc(100% + .38rem);
+  left:0;
+  width:max(100%,220px);
+  max-width:min(340px,calc(100vw - 32px));
+  max-height:260px;
+  overflow-y:auto;
+  overscroll-behavior:contain;
+  padding:.34rem;
+  border:1px solid rgba(39,91,128,.16);
+  border-radius:14px;
+  background:#fff;
+  box-shadow:0 16px 38px rgba(17,51,83,.18),0 3px 10px rgba(17,51,83,.08);
+  -webkit-overflow-scrolling:touch;
+}
+.itbmo-autocomplete-menu[hidden]{display:none!important}
+.itbmo-autocomplete-option{
+  display:block;
+  width:100%;
+  min-height:42px;
+  padding:.62rem .72rem;
+  border:0;
+  border-radius:10px;
+  background:transparent;
+  color:#17324f;
+  font:inherit;
+  font-size:.86rem;
+  font-weight:720;
+  line-height:1.28;
+  text-align:left;
+  cursor:pointer;
+  touch-action:manipulation;
+}
+.itbmo-autocomplete-option:hover,
+.itbmo-autocomplete-option:focus-visible{
+  outline:none;
+  background:#edf8fb;
+  color:#075f79;
+}
+.itbmo-autocomplete-empty{
+  padding:.7rem .76rem;
+  color:#60798d;
+  font-size:.80rem;
+  font-weight:650;
+  line-height:1.4;
+}
+@media(max-width:760px){
+  .itbmo-autocomplete-menu{
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    max-height:min(240px,42vh);
+  }
+  .itbmo-autocomplete-option{
+    min-height:46px;
+    padding:.72rem .76rem;
+    font-size:.9rem;
+  }
+}
+
+
+/* =========================================================
+   ITBMO · SAVE DESTINATIONS MICRO-TRANSITION
+   Compact premium hourglass. No external assets.
+========================================================= */
+.itbmo-save-transition-overlay{
+  position:fixed;
+  inset:0;
+  z-index:47000;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:18px;
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+  background:rgba(244,249,251,.54);
+  backdrop-filter:blur(6px) saturate(110%);
+  -webkit-backdrop-filter:blur(6px) saturate(110%);
+  transition:opacity .18s ease,visibility .18s ease;
+}
+.itbmo-save-transition-overlay.active{
+  opacity:1;
+  visibility:visible;
+  pointer-events:all;
+}
+.itbmo-save-transition-card{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  width:min(72vw,184px);
+  min-height:116px;
+  padding:16px 18px 15px;
+  border:1px solid rgba(14,164,122,.14);
+  border-radius:18px;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 16px 42px rgba(16,24,40,.12),0 2px 8px rgba(16,24,40,.04);
+  text-align:center;
+}
+.itbmo-hourglass-loader{
+  display:grid;
+  place-items:center;
+  width:48px;
+  height:58px;
+  margin:0 auto 9px;
+  animation:itbmoHourglassFlip 2.2s cubic-bezier(.65,0,.35,1) infinite;
+  transform-origin:50% 50%;
+  filter:drop-shadow(0 5px 7px rgba(16,24,40,.10));
+}
+.itbmo-hourglass{display:block;width:42px;height:auto;overflow:visible}
+.itbmo-hourglass-frame{
+  fill:none;
+  stroke:#176d88;
+  stroke-width:2.6;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+.itbmo-hourglass-glass{
+  fill:rgba(225,247,249,.58);
+  stroke:rgba(23,109,136,.24);
+  stroke-width:1;
+}
+.itbmo-hourglass-sand-top,
+.itbmo-hourglass-sand-bottom,
+.itbmo-hourglass-stream{fill:#0EA47A}
+.itbmo-hourglass-sand-top{animation:itbmoSandTop 2.2s ease-in-out infinite;transform-origin:24px 17px}
+.itbmo-hourglass-sand-bottom{animation:itbmoSandBottom 2.2s ease-in-out infinite;transform-origin:24px 46px}
+.itbmo-hourglass-stream{animation:itbmoSandStream 2.2s ease-in-out infinite}
+.itbmo-save-transition-title{
+  color:#101828;
+  font-size:.89rem;
+  line-height:1.25;
+  font-weight:800;
+  letter-spacing:-.015em;
+}
+.itbmo-save-transition-subtitle{display:none!important}
+html.itbmo-save-transition-open,
+html.itbmo-save-transition-open body{overflow:hidden!important}
+@keyframes itbmoHourglassFlip{
+  0%,82%{transform:rotate(0deg)}
+  100%{transform:rotate(180deg)}
+}
+@keyframes itbmoSandTop{
+  0%,8%{transform:scaleY(1);opacity:1}
+  72%,100%{transform:scaleY(.12);opacity:.72}
+}
+@keyframes itbmoSandBottom{
+  0%,8%{transform:scaleY(.18);opacity:.66}
+  72%,100%{transform:scaleY(1);opacity:1}
+}
+@keyframes itbmoSandStream{
+  0%,8%,76%,100%{opacity:0}
+  14%,68%{opacity:1}
+}
+@media (max-width:760px){
+  .itbmo-save-transition-card{width:min(70vw,174px);min-height:110px;padding:15px 16px 14px}
+  .itbmo-hourglass-loader{width:45px;height:54px;margin-bottom:8px}
+  .itbmo-hourglass{width:39px}
+}
+@media (prefers-reduced-motion:reduce){
+  .itbmo-hourglass-loader,
+  .itbmo-hourglass-sand-top,
+  .itbmo-hourglass-sand-bottom,
+  .itbmo-hourglass-stream{animation:none}
+  .itbmo-save-transition-overlay{transition:none}
+}
+
+
+/* =========================================================
+   ITBMO AUTH — hierarchy + guest account upgrade
+   Surgical additions for Registered / Sign in / Guest flow.
+========================================================= */
+#account-login-toggle:not(:disabled){
+  color:#075d7a!important;
+  border:2px solid rgba(4,158,181,.40)!important;
+  background:linear-gradient(135deg,#f0fdff 0%,#e6f9fb 100%)!important;
+  box-shadow:0 9px 22px rgba(4,123,154,.12)!important;
+}
+#account-guest-toggle:not(:disabled){
+  color:#334b92!important;
+  border:2px solid rgba(83,101,206,.32)!important;
+  background:linear-gradient(135deg,#f7f9ff 0%,#eef2ff 100%)!important;
+  box-shadow:0 9px 22px rgba(62,77,160,.10)!important;
+}
+.account-authenticated{
+  display:flex;
+  flex-direction:column;
+  gap:.8rem;
+  align-items:stretch;
+}
+.account-authenticated-copy{
+  position:relative;
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:1rem;
+  width:100%;
+}
+.account-authenticated-text{
+  flex:1 1 auto;
+  min-width:0;
+}
+.account-authenticated-copy p{
+  margin:.35rem 0 0;
+}
+.account-logout{
+  flex:0 0 auto;
+  border:0;
+  background:transparent;
+  color:#6b7f90;
+  font:inherit;
+  font-size:.78rem;
+  font-weight:700;
+  line-height:1;
+  padding:.28rem .18rem;
+  cursor:pointer;
+  text-decoration:underline;
+  text-decoration-color:rgba(107,127,144,.35);
+  text-underline-offset:3px;
+}
+.account-logout:hover{
+  color:#36566b;
+  text-decoration-color:currentColor;
+}
+.account-guest-upgrade{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:1.25rem;
+  padding:.95rem 1rem;
+  border:1px solid rgba(22,150,143,.15);
+  border-radius:16px;
+  background:rgba(255,255,255,.48);
+}
+.account-guest-upgrade-text{
+  flex:1 1 auto;
+  min-width:0;
+}
+.account-guest-upgrade-text strong{
+  display:block;
+  margin:0 0 .25rem;
+  color:#102c47;
+  font-size:.92rem;
+}
+.account-guest-upgrade p{
+  margin:0;
+  max-width:680px;
+  font-size:.82rem;
+  line-height:1.45;
+}
+#account-upgrade-toggle{
+  flex:0 0 auto;
+  white-space:nowrap;
+  padding:.72rem 1.05rem;
+}
+.account-upgrade-email-hint{
+  display:block;
+  margin-top:.38rem;
+  color:#667f92;
+  font-size:.72rem;
+  font-weight:600;
+  line-height:1.35;
+}
+#account-email[readonly]{
+  background:#f3f7fa;
+  color:#4e6678;
+  cursor:not-allowed;
+}
+@media(max-width:720px){
+  .account-authenticated-copy{
+    gap:.65rem;
+  }
+  .account-logout{
+    font-size:.74rem;
+  }
+  .account-guest-upgrade{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:.7rem;
+    padding:.85rem;
+  }
+  #account-upgrade-toggle{width:100%;}
+}
+
