@@ -6312,3 +6312,66 @@ html.itbmo-save-transition-open body{overflow:hidden!important}
   .itbmo-hourglass-stream{animation:none}
   .itbmo-save-transition-overlay{transition:none}
 }
+
+
+/* =========================================================
+   ITBMO AUTH — hierarchy + guest account upgrade
+   Surgical additions for Registered / Sign in / Guest flow.
+========================================================= */
+#account-login-toggle:not(:disabled){
+  color:#075d7a!important;
+  border:2px solid rgba(4,158,181,.40)!important;
+  background:linear-gradient(135deg,#f0fdff 0%,#e6f9fb 100%)!important;
+  box-shadow:0 9px 22px rgba(4,123,154,.12)!important;
+}
+#account-guest-toggle:not(:disabled){
+  color:#334b92!important;
+  border:2px solid rgba(83,101,206,.32)!important;
+  background:linear-gradient(135deg,#f7f9ff 0%,#eef2ff 100%)!important;
+  box-shadow:0 9px 22px rgba(62,77,160,.10)!important;
+}
+.account-authenticated{
+  align-items:stretch;
+}
+.account-authenticated-copy{
+  flex:1 1 58%;
+  min-width:0;
+}
+.account-guest-upgrade{
+  flex:0 1 42%;
+  min-width:220px;
+  align-items:center;
+  justify-content:flex-end;
+  gap:.7rem;
+  padding-left:.8rem;
+  border-left:1px solid rgba(22,150,143,.16);
+}
+.account-guest-upgrade p{
+  margin:0;
+  max-width:330px;
+  font-size:.76rem;
+}
+#account-upgrade-toggle{
+  flex:0 0 auto;
+  white-space:nowrap;
+  padding:.72rem .95rem;
+}
+#account-email[readonly]{
+  background:#f3f7fa;
+  color:#4e6678;
+  cursor:not-allowed;
+}
+@media(max-width:720px){
+  .account-authenticated{flex-direction:column;}
+  .account-guest-upgrade{
+    width:100%;
+    min-width:0;
+    align-items:flex-start;
+    justify-content:flex-start;
+    flex-direction:column;
+    padding:.75rem 0 0;
+    border-left:0;
+    border-top:1px solid rgba(22,150,143,.16);
+  }
+  #account-upgrade-toggle{width:100%;}
+}
