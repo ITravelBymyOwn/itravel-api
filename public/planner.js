@@ -8531,12 +8531,13 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
 
     const tripIdToArchive = currentTripId || getStoredActiveTripId();
     const sessionToken = getStoredSessionToken();
-    if(tripIdToArchive && sessionToken){
+    if(sessionToken){
       try{
         await tripApi({
           action:'archive',
           session_token:sessionToken,
-          trip_id:tripIdToArchive
+          trip_id:tripIdToArchive || null,
+          prevent_auto_recovery:true
         });
       }catch(err){
         console.warn('[RESET ARCHIVE]',err);
