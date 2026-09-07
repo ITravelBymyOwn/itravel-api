@@ -6208,7 +6208,7 @@ body.itinerary-focus-open{
 
 /* =========================================================
    ITBMO · SAVE DESTINATIONS MICRO-TRANSITION
-   Small globe + orbiting plane. No external assets.
+   Compact premium hourglass. No external assets.
 ========================================================= */
 .itbmo-save-transition-overlay{
   position:fixed;
@@ -6221,9 +6221,9 @@ body.itinerary-focus-open{
   opacity:0;
   visibility:hidden;
   pointer-events:none;
-  background:rgba(244,249,251,.58);
-  backdrop-filter:blur(7px) saturate(112%);
-  -webkit-backdrop-filter:blur(7px) saturate(112%);
+  background:rgba(244,249,251,.54);
+  backdrop-filter:blur(6px) saturate(110%);
+  -webkit-backdrop-filter:blur(6px) saturate(110%);
   transition:opacity .18s ease,visibility .18s ease;
 }
 .itbmo-save-transition-overlay.active{
@@ -6236,85 +6236,79 @@ body.itinerary-focus-open{
   flex-direction:column;
   align-items:center;
   justify-content:center;
-  width:min(82vw,230px);
-  min-height:154px;
-  padding:18px 18px 16px;
-  border:1px solid rgba(14,164,122,.16);
-  border-radius:20px;
-  background:rgba(255,255,255,.96);
-  box-shadow:0 18px 50px rgba(16,24,40,.14),0 2px 10px rgba(16,24,40,.05);
+  width:min(72vw,184px);
+  min-height:116px;
+  padding:16px 18px 15px;
+  border:1px solid rgba(14,164,122,.14);
+  border-radius:18px;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 16px 42px rgba(16,24,40,.12),0 2px 8px rgba(16,24,40,.04);
   text-align:center;
 }
-.itbmo-orbit-loader{
-  position:relative;
-  width:78px;
-  height:78px;
-  margin:0 auto 8px;
-}
-.itbmo-mini-globe{
-  position:absolute;
-  left:50%;
-  top:50%;
+.itbmo-hourglass-loader{
+  display:grid;
+  place-items:center;
   width:48px;
-  height:48px;
-  transform:translate(-50%,-50%);
-  filter:drop-shadow(0 5px 8px rgba(16,24,40,.13));
+  height:58px;
+  margin:0 auto 9px;
+  animation:itbmoHourglassFlip 2.2s cubic-bezier(.65,0,.35,1) infinite;
+  transform-origin:50% 50%;
+  filter:drop-shadow(0 5px 7px rgba(16,24,40,.10));
 }
-.itbmo-mini-globe svg{display:block;width:100%;height:100%}
-.itbmo-globe-ocean{fill:#78cfe0;stroke:#267f9d;stroke-width:2}
-.itbmo-globe-land{fill:#42ad80;stroke:#23815f;stroke-width:1.1;stroke-linejoin:round}
-.itbmo-globe-shine{fill:none;stroke:rgba(255,255,255,.62);stroke-width:2.2;stroke-linecap:round}
-.itbmo-orbit-ring{
-  position:absolute;
-  inset:8px 1px;
-  border:1.5px solid rgba(14,164,122,.28);
-  border-radius:50%;
-  transform:rotate(-18deg);
+.itbmo-hourglass{display:block;width:42px;height:auto;overflow:visible}
+.itbmo-hourglass-frame{
+  fill:none;
+  stroke:#176d88;
+  stroke-width:2.6;
+  stroke-linecap:round;
+  stroke-linejoin:round;
 }
-.itbmo-plane-orbit{
-  position:absolute;
-  inset:0;
-  animation:itbmoPlaneOrbit 1.65s linear infinite;
+.itbmo-hourglass-glass{
+  fill:rgba(225,247,249,.58);
+  stroke:rgba(23,109,136,.24);
+  stroke-width:1;
 }
-.itbmo-mini-plane{
-  position:absolute;
-  top:3px;
-  left:50%;
-  width:21px;
-  height:21px;
-  transform:translateX(-50%) rotate(42deg);
-  overflow:visible;
-  filter:drop-shadow(0 2px 3px rgba(16,24,40,.18));
-}
-.itbmo-mini-plane path{fill:#ffffff;stroke:#176d88;stroke-width:1.25;stroke-linejoin:round}
+.itbmo-hourglass-sand-top,
+.itbmo-hourglass-sand-bottom,
+.itbmo-hourglass-stream{fill:#0EA47A}
+.itbmo-hourglass-sand-top{animation:itbmoSandTop 2.2s ease-in-out infinite;transform-origin:24px 17px}
+.itbmo-hourglass-sand-bottom{animation:itbmoSandBottom 2.2s ease-in-out infinite;transform-origin:24px 46px}
+.itbmo-hourglass-stream{animation:itbmoSandStream 2.2s ease-in-out infinite}
 .itbmo-save-transition-title{
   color:#101828;
-  font-size:.93rem;
+  font-size:.89rem;
   line-height:1.25;
   font-weight:800;
   letter-spacing:-.015em;
 }
-.itbmo-save-transition-subtitle{
-  margin-top:4px;
-  max-width:185px;
-  color:#667085;
-  font-size:.72rem;
-  line-height:1.35;
-  font-weight:600;
-}
+.itbmo-save-transition-subtitle{display:none!important}
 html.itbmo-save-transition-open,
 html.itbmo-save-transition-open body{overflow:hidden!important}
-@keyframes itbmoPlaneOrbit{
-  from{transform:rotate(0deg)}
-  to{transform:rotate(360deg)}
+@keyframes itbmoHourglassFlip{
+  0%,82%{transform:rotate(0deg)}
+  100%{transform:rotate(180deg)}
+}
+@keyframes itbmoSandTop{
+  0%,8%{transform:scaleY(1);opacity:1}
+  72%,100%{transform:scaleY(.12);opacity:.72}
+}
+@keyframes itbmoSandBottom{
+  0%,8%{transform:scaleY(.18);opacity:.66}
+  72%,100%{transform:scaleY(1);opacity:1}
+}
+@keyframes itbmoSandStream{
+  0%,8%,76%,100%{opacity:0}
+  14%,68%{opacity:1}
 }
 @media (max-width:760px){
-  .itbmo-save-transition-card{width:min(78vw,210px);min-height:148px;padding:16px}
-  .itbmo-orbit-loader{width:74px;height:74px}
-  .itbmo-mini-globe{width:46px;height:46px}
-  .itbmo-mini-plane{width:20px;height:20px}
+  .itbmo-save-transition-card{width:min(70vw,174px);min-height:110px;padding:15px 16px 14px}
+  .itbmo-hourglass-loader{width:45px;height:54px;margin-bottom:8px}
+  .itbmo-hourglass{width:39px}
 }
 @media (prefers-reduced-motion:reduce){
-  .itbmo-plane-orbit{animation:none;transform:rotate(35deg)}
+  .itbmo-hourglass-loader,
+  .itbmo-hourglass-sand-top,
+  .itbmo-hourglass-sand-bottom,
+  .itbmo-hourglass-stream{animation:none}
   .itbmo-save-transition-overlay{transition:none}
 }
