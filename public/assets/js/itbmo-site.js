@@ -485,7 +485,11 @@
     trigger.addEventListener('click', (event) => {
       event.preventDefault();
       if (typeof setMobileMenu === 'function') setMobileMenu(false);
-      enterPlannerFocus({ sourceRect:getLauncherRect(trigger) });
+
+      /* Phase 4: Planner is a standalone product surface.
+         Home no longer opens the embedded focus window. */
+      const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
+      window.location.href = `./planner.html?lang=${pageLang}`;
     });
   });
 
