@@ -699,25 +699,38 @@ const $accountGuest = qs('#account-guest');
 const $accountAuthenticated = qs('#account-authenticated');
 const $accountRegisterToggle = qs('#account-register-toggle');
 const $accountLoginToggle = qs('#account-login-toggle');
+const $accountGuestToggle = qs('#account-guest-toggle');
 const $accountRegisterPanel = qs('#account-register-panel');
 const $accountLoginPanel = qs('#account-login-panel');
+const $accountGuestPanel = qs('#account-guest-panel');
+const $accountForgotPanel = qs('#account-forgot-panel');
+const $accountResetPanel = qs('#account-reset-panel');
 const $accountRegisterSubmit = qs('#account-register-submit');
 const $accountLoginSubmit = qs('#account-login-submit');
+const $accountGuestSubmit = qs('#account-guest-submit');
+const $accountForgotPassword = qs('#account-forgot-password');
+const $accountForgotSubmit = qs('#account-forgot-submit');
+const $accountForgotBack = qs('#account-forgot-back');
+const $accountResetSubmit = qs('#account-reset-submit');
 const $accountMessage = qs('#account-message');
 const $accountUserBadge = qs('#account-user-badge');
 const $accountWelcome = qs('#account-welcome');
 const $accountReadyCopy = qs('#account-ready-copy');
 
 const $accountFirstName = qs('#account-first-name');
-const $accountLastName = qs('#account-last-name');
-const $accountUsername = qs('#account-username');
 const $accountEmail = qs('#account-email');
-const $accountAgeRange = qs('#account-age-range');
-const $accountCountry = qs('#account-country');
+const $accountPassword = qs('#account-password');
+const $accountPasswordConfirm = qs('#account-password-confirm');
 const $accountLegalConsent = qs('#account-legal-consent');
 const $accountMarketingConsent = qs('#account-marketing-consent');
-const $accountLoginUsername = qs('#account-login-username');
 const $accountLoginEmail = qs('#account-login-email');
+const $accountLoginPassword = qs('#account-login-password');
+const $accountGuestName = qs('#account-guest-name');
+const $accountGuestEmail = qs('#account-guest-email');
+const $accountGuestLegalConsent = qs('#account-guest-legal-consent');
+const $accountForgotEmail = qs('#account-forgot-email');
+const $accountResetPassword = qs('#account-reset-password');
+const $accountResetPasswordConfirm = qs('#account-reset-password-confirm');
 
 const $travelerMode      = qs('#traveler-mode');
 const $travelerSoloPanel = qs('#traveler-solo-panel');
@@ -731,89 +744,58 @@ const $travelerAdd      = qs('#traveler-add');
 const $travelerRemove   = qs('#traveler-remove');
 
 /* =========================================================
-   ITBMO ACCOUNT — Registro / Login + sesión persistente
-   - Frontend: solo UX + token local.
+   ITBMO ACCOUNT — Supabase Auth + invitado + sesión ITBMO
+   - Cuenta: nombre + email + contraseña.
+   - Invitado: nombre + email.
    - Backend real: /api/user.
-   - Nunca expone SUPABASE_SECRET_KEY.
+   - Trips/pagos siguen usando el session_token ITBMO existente.
 ========================================================= */
 const AUTH_COPY = {
   es: {
-    title:'Tu cuenta ITBMO',
-    subtitle:'Regístrate una sola vez y sigue planificando sin volver a ingresar tus datos.',
-    register:'Registrarse',
-    login:'Iniciar sesión',
-    firstName:'Nombre',
-    lastName:'Apellidos',
-    username:'Nombre de usuario',
-    usernameHint:'3–30 caracteres: letras, números, punto, guion o guion bajo.',
-    email:'Email',
-    profileAge:'Rango de edad',
-    country:'País de residencia',
-    create:'Crear cuenta gratis',
-    signIn:'Iniciar sesión',
-    legalPrefix:'Acepto los ',
-    terms:'Términos de Uso',
-    legalMiddle:' y reconozco la ',
-    privacy:'Política de Privacidad',
-    legalSuffix:'.',
+    title:'Tu cuenta ITBMO', subtitle:'Crea una cuenta, inicia sesión o continúa como invitado.',
+    register:'Crear cuenta', login:'Iniciar sesión', guest:'Continuar como invitado',
+    name:'Nombre', email:'Email', password:'Contraseña', passwordConfirm:'Confirmar contraseña',
+    create:'Crear cuenta', signIn:'Iniciar sesión', forgot:'¿Olvidaste tu contraseña?',
+    guestContinue:'Continuar como invitado', forgotTitle:'Restablecer contraseña', sendReset:'Enviar enlace de recuperación',
+    backToLogin:'Volver a iniciar sesión', newPassword:'Nueva contraseña', newPasswordConfirm:'Confirmar nueva contraseña', updatePassword:'Actualizar contraseña',
+    legalPrefix:'Acepto los ', terms:'Términos de Uso', legalMiddle:' y reconozco la ', privacy:'Política de Privacidad', legalSuffix:'.',
     marketing:'Quiero recibir inspiración de viaje, recomendaciones y ofertas especiales de ITBMO.',
     welcome:(name)=>`Hola, ${name} 👋`,
-    ready:'Tu perfil está activo en este dispositivo. Continúa planificando normalmente.',
-    registering:'Creando tu cuenta…',
-    signingIn:'Iniciando sesión…',
-    required:'Completa todos los campos obligatorios.',
-    legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
-    usernameInvalid:'El nombre de usuario debe tener 3–30 caracteres y usar solo letras minúsculas, números, punto, guion o guion bajo.',
-    emailInvalid:'Ingresa un email válido.',
-    duplicateUser:'Ese nombre de usuario ya está en uso.',
-    duplicateEmail:'Ese email ya está registrado. Usa “Iniciar sesión”.',
-    registerFail:'No pudimos crear tu cuenta. Intenta nuevamente.',
-    loginFail:'El nombre de usuario y el email no coinciden.',
-    connectionFail:'No se pudo conectar con tu cuenta ITBMO. Intenta nuevamente.',
-    loginRequired:'Regístrate o inicia sesión antes de guardar destinos.',
-    travelerRequired:'Indica con quién viajas antes de guardar destinos.',
-    companionRequired:'Indica género y rango de edad de cada acompañante.',
-    tripSaving:'Guardando tu viaje…',
-    tripFail:'No pudimos guardar el viaje. Tus datos no se perdieron; intenta nuevamente.'
+    readyRegistered:'Tu cuenta está activa en este dispositivo. Continúa planificando normalmente.',
+    readyGuest:'Estás usando ITBMO como invitado en este dispositivo. Continúa planificando normalmente.',
+    registering:'Creando tu cuenta…', signingIn:'Iniciando sesión…', guestStarting:'Preparando tu sesión…', sendingReset:'Enviando enlace…', resetting:'Actualizando contraseña…', confirming:'Confirmando tu cuenta…',
+    required:'Completa todos los campos obligatorios.', legalRequired:'Debes aceptar los Términos de Uso y la Política de Privacidad.',
+    emailInvalid:'Ingresa un email válido.', passwordRule:'La contraseña debe tener al menos 8 caracteres e incluir mayúscula, minúscula y número.', passwordMismatch:'Las contraseñas no coinciden.',
+    duplicateEmail:'Ese email ya está registrado. Usa “Iniciar sesión”.', registerFail:'No pudimos crear tu cuenta. Intenta nuevamente.',
+    confirmationSent:'Cuenta creada. Revisa tu email y confirma tu correo para iniciar sesión.', loginFail:'Email o contraseña incorrectos, o el correo aún no ha sido confirmado.',
+    guestFail:'No pudimos iniciar la sesión de invitado. Intenta nuevamente.', connectionFail:'No se pudo conectar con ITBMO. Intenta nuevamente.',
+    resetSent:'Si existe una cuenta con ese email, recibirás un enlace para restablecer tu contraseña.', resetFail:'No pudimos procesar la recuperación. Intenta nuevamente.',
+    passwordUpdated:'Contraseña actualizada. Ya puedes iniciar sesión.', confirmationComplete:'Correo confirmado. Tu cuenta ya está activa.', confirmationFail:'No pudimos completar la confirmación. Intenta iniciar sesión.',
+    loginRequired:'Crea una cuenta, inicia sesión o continúa como invitado antes de guardar destinos.', travelerRequired:'Indica con quién viajas antes de guardar destinos.', companionRequired:'Indica género y rango de edad de cada acompañante.',
+    tripSaving:'Guardando tu viaje…', tripFail:'No pudimos guardar el viaje. Tus datos no se perdieron; intenta nuevamente.'
   },
   en: {
-    title:'Your ITBMO account',
-    subtitle:'Register once and keep planning without entering your details again.',
-    register:'Register',
-    login:'Sign in',
-    firstName:'First name',
-    lastName:'Last name',
-    username:'Username',
-    usernameHint:'3–30 characters: letters, numbers, dot, hyphen or underscore.',
-    email:'Email',
-    profileAge:'Age range',
-    country:'Country of residence',
-    create:'Create free account',
-    signIn:'Sign in',
-    legalPrefix:'I agree to the ',
-    terms:'Terms of Use',
-    legalMiddle:' and acknowledge the ',
-    privacy:'Privacy Policy',
-    legalSuffix:'.',
+    title:'Your ITBMO account', subtitle:'Create an account, sign in, or continue as a guest.',
+    register:'Create account', login:'Sign in', guest:'Continue as guest',
+    name:'Name', email:'Email', password:'Password', passwordConfirm:'Confirm password',
+    create:'Create account', signIn:'Sign in', forgot:'Forgot your password?',
+    guestContinue:'Continue as guest', forgotTitle:'Reset password', sendReset:'Send reset link',
+    backToLogin:'Back to sign in', newPassword:'New password', newPasswordConfirm:'Confirm new password', updatePassword:'Update password',
+    legalPrefix:'I agree to the ', terms:'Terms of Use', legalMiddle:' and acknowledge the ', privacy:'Privacy Policy', legalSuffix:'.',
     marketing:'Send me travel inspiration, recommendations and special offers from ITBMO.',
     welcome:(name)=>`Hi, ${name} 👋`,
-    ready:'Your profile is active on this device. Continue planning normally.',
-    registering:'Creating your account…',
-    signingIn:'Signing in…',
-    required:'Complete all required fields.',
-    legalRequired:'You must accept the Terms of Use and Privacy Policy.',
-    usernameInvalid:'Username must contain 3–30 lowercase letters, numbers, dots, hyphens or underscores.',
-    emailInvalid:'Enter a valid email.',
-    duplicateUser:'That username is already in use.',
-    duplicateEmail:'That email is already registered. Use “Sign in”.',
-    registerFail:'We could not create your account. Please try again.',
-    loginFail:'Username and email do not match.',
-    connectionFail:'Could not connect to your ITBMO account. Please try again.',
-    loginRequired:'Register or sign in before saving destinations.',
-    travelerRequired:'Tell us who you are traveling with before saving destinations.',
-    companionRequired:'Select gender and age range for every companion.',
-    tripSaving:'Saving your trip…',
-    tripFail:'We could not save the trip. Your entries are still here; please try again.'
+    readyRegistered:'Your account is active on this device. Continue planning normally.',
+    readyGuest:'You are using ITBMO as a guest on this device. Continue planning normally.',
+    registering:'Creating your account…', signingIn:'Signing in…', guestStarting:'Preparing your session…', sendingReset:'Sending reset link…', resetting:'Updating password…', confirming:'Confirming your account…',
+    required:'Complete all required fields.', legalRequired:'You must accept the Terms of Use and Privacy Policy.',
+    emailInvalid:'Enter a valid email.', passwordRule:'Password must be at least 8 characters and include an uppercase letter, lowercase letter and number.', passwordMismatch:'Passwords do not match.',
+    duplicateEmail:'That email is already registered. Use “Sign in”.', registerFail:'We could not create your account. Please try again.',
+    confirmationSent:'Account created. Check your email and confirm your address before signing in.', loginFail:'Incorrect email or password, or the email has not been confirmed yet.',
+    guestFail:'We could not start the guest session. Please try again.', connectionFail:'Could not connect to ITBMO. Please try again.',
+    resetSent:'If an account exists for that email, you will receive a password reset link.', resetFail:'We could not process password recovery. Please try again.',
+    passwordUpdated:'Password updated. You can now sign in.', confirmationComplete:'Email confirmed. Your account is now active.', confirmationFail:'We could not complete confirmation. Please try signing in.',
+    loginRequired:'Create an account, sign in, or continue as a guest before saving destinations.', travelerRequired:'Tell us who you are traveling with before saving destinations.', companionRequired:'Select gender and age range for every companion.',
+    tripSaving:'Saving your trip…', tripFail:'We could not save the trip. Your entries are still here; please try again.'
   }
 };
 
@@ -830,35 +812,39 @@ function setAccountMessage(message='', type=''){
   if(type) $accountMessage.classList.add(type);
 }
 
-function getStoredSessionToken(){
-  try{ return String(localStorage.getItem(ITBMO_SESSION_KEY) || '').trim(); }
-  catch(_){ return ''; }
+function getStoredSessionToken(){ try{ return String(localStorage.getItem(ITBMO_SESSION_KEY) || '').trim(); }catch(_){ return ''; } }
+function storeSessionToken(token){ try{ if(token) localStorage.setItem(ITBMO_SESSION_KEY, token); }catch(_){} }
+function clearSessionToken(){ try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){} }
+function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
+function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
+
+function validAccountEmail(email){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim()); }
+function validAccountPassword(password){ return typeof password === 'string' && password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password); }
+
+function authTrackingPayload(){
+  const params = new URLSearchParams(window.location.search);
+  return {
+    preferred_language:getLang(), registration_source:'planner',
+    utm_source:params.get('utm_source') || null, utm_medium:params.get('utm_medium') || null,
+    utm_campaign:params.get('utm_campaign') || null, utm_content:params.get('utm_content') || null,
+    utm_term:params.get('utm_term') || null, referrer:document.referrer || null,
+    origin:window.location.origin
+  };
 }
 
-function storeSessionToken(token){
-  try{
-    if(token) localStorage.setItem(ITBMO_SESSION_KEY, token);
-  }catch(_){}
-}
-
-function clearSessionToken(){
-  try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
-}
-
-function getStoredActiveTripId(){
-  try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }
-  catch(_){ return ''; }
-}
-
-function storeActiveTripId(tripId){
-  try{
-    if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId));
-    else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY);
-  }catch(_){ }
+function legalPayload(prefix='account'){
+  const guest = prefix === 'guest';
+  return {
+    terms_accepted:true, privacy_accepted:true,
+    marketing_consent:guest ? false : !!$accountMarketingConsent?.checked,
+    terms_version:ITBMO_TERMS_VERSION, privacy_version:ITBMO_PRIVACY_VERSION, marketing_version:ITBMO_MARKETING_VERSION,
+    terms_url:qs(guest ? '#account-guest-terms-link' : '#account-terms-link')?.href || null,
+    privacy_url:qs(guest ? '#account-guest-privacy-link' : '#account-privacy-link')?.href || null
+  };
 }
 
 function setAuthBusy(on){
-  [$accountRegisterSubmit,$accountLoginSubmit,$accountRegisterToggle,$accountLoginToggle]
+  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack]
     .forEach(el=>{ if(el) el.disabled = !!on; });
 }
 
@@ -871,272 +857,197 @@ function updateSaveAvailability(){
 
 function showAccountMode(mode){
   if(currentUser) return;
-  if($accountRegisterPanel) $accountRegisterPanel.style.display = mode === 'register' ? 'block' : 'none';
-  if($accountLoginPanel) $accountLoginPanel.style.display = mode === 'login' ? 'block' : 'none';
-  setAccountMessage('');
+  const panels = { register:$accountRegisterPanel, login:$accountLoginPanel, guest:$accountGuestPanel, forgot:$accountForgotPanel, reset:$accountResetPanel };
+  Object.entries(panels).forEach(([key,panel])=>{ if(panel) panel.style.display = key === mode ? 'block' : 'none'; });
+  if(mode !== 'reset') setAccountMessage('');
 }
 
 function renderAuthState(){
   const logged = !!currentUser;
-
   if($accountGuest) $accountGuest.style.display = logged ? 'none' : 'block';
   if($accountAuthenticated) $accountAuthenticated.style.display = logged ? 'flex' : 'none';
-
   if($accountUserBadge){
     $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
-    $accountUserBadge.textContent = logged ? `@${currentUser.username || ''}` : '';
+    const label = currentUser?.is_registered ? (currentUser.email || currentUser.first_name || '') : (currentUser.first_name || currentUser.email || '');
+    $accountUserBadge.textContent = logged ? label : '';
   }
-
   if(logged){
-    if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || currentUser.username || 'Traveler');
-    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy('ready');
+    if($accountWelcome) $accountWelcome.textContent = authCopy('welcome', currentUser.first_name || 'Traveler');
+    if($accountReadyCopy) $accountReadyCopy.textContent = authCopy(currentUser?.is_registered ? 'readyRegistered' : 'readyGuest');
   }
-
   updateSaveAvailability();
   if(logged) scheduleAstraCoach('travelers','#travelers-box',520);
 }
 
+function setLegalLanguage(containerSel, termsSel, privacySel){
+  const legal=qs(containerSel), terms=qs(termsSel), privacy=qs(privacySel);
+  if(!legal || !terms || !privacy) return;
+  legal.innerHTML='';
+  legal.appendChild(document.createTextNode(authCopy('legalPrefix'))); terms.textContent=authCopy('terms'); legal.appendChild(terms);
+  legal.appendChild(document.createTextNode(authCopy('legalMiddle'))); privacy.textContent=authCopy('privacy'); legal.appendChild(privacy);
+  legal.appendChild(document.createTextNode(authCopy('legalSuffix')));
+}
+
 function applyAuthLanguage(){
-  const set = (sel, txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
-
-  set('#account-title', authCopy('title'));
-  set('#account-subtitle', authCopy('subtitle'));
-  set('#account-register-toggle', authCopy('register'));
-  set('#account-login-toggle', authCopy('login'));
-  set('#label-first-name', authCopy('firstName'));
-  set('#label-last-name', authCopy('lastName'));
-  set('#label-username', authCopy('username'));
-  set('#username-hint', authCopy('usernameHint'));
-  set('#label-email', authCopy('email'));
-  set('#label-profile-age', authCopy('profileAge'));
-  set('#label-country-residence', authCopy('country'));
-  set('#label-login-username', authCopy('username'));
-  set('#label-login-email', authCopy('email'));
-  set('#account-register-submit', authCopy('create'));
-  set('#account-login-submit', authCopy('signIn'));
-  set('#account-marketing-copy', authCopy('marketing'));
-
-  const legal = qs('#account-legal-copy');
-  const terms = qs('#account-terms-link');
-  const privacy = qs('#account-privacy-link');
-  if(legal && terms && privacy){
-    legal.innerHTML = '';
-    legal.appendChild(document.createTextNode(authCopy('legalPrefix')));
-    terms.textContent = authCopy('terms');
-    legal.appendChild(terms);
-    legal.appendChild(document.createTextNode(authCopy('legalMiddle')));
-    privacy.textContent = authCopy('privacy');
-    legal.appendChild(privacy);
-    legal.appendChild(document.createTextNode(authCopy('legalSuffix')));
-  }
-
+  const set=(sel,txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
+  set('#account-title',authCopy('title')); set('#account-subtitle',authCopy('subtitle'));
+  set('#account-register-toggle',authCopy('register')); set('#account-login-toggle',authCopy('login')); set('#account-guest-toggle',authCopy('guest'));
+  set('#label-first-name',authCopy('name')); set('#label-email',authCopy('email')); set('#label-account-password',authCopy('password')); set('#label-account-password-confirm',authCopy('passwordConfirm'));
+  set('#label-login-email',authCopy('email')); set('#label-login-password',authCopy('password'));
+  set('#label-guest-name',authCopy('name')); set('#label-guest-email',authCopy('email'));
+  set('#label-forgot-email',authCopy('email')); set('#label-reset-password',authCopy('newPassword')); set('#label-reset-password-confirm',authCopy('newPasswordConfirm'));
+  set('#account-register-submit',authCopy('create')); set('#account-login-submit',authCopy('signIn')); set('#account-guest-submit',authCopy('guestContinue'));
+  set('#account-forgot-password',authCopy('forgot')); set('#account-forgot-submit',authCopy('sendReset')); set('#account-forgot-back',authCopy('backToLogin')); set('#account-reset-submit',authCopy('updatePassword'));
+  set('#account-marketing-copy',authCopy('marketing'));
+  setLegalLanguage('#account-legal-copy','#account-terms-link','#account-privacy-link');
+  setLegalLanguage('#account-guest-legal-copy','#account-guest-terms-link','#account-guest-privacy-link');
   renderAuthState();
 }
 
-const ISO_COUNTRY_CODES = `AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI VN VU WF WS YE YT ZA ZM ZW`.split(/\s+/);
-
-function populateAccountCountries(){
-  if(!$accountCountry || $accountCountry.options.length > 1) return;
-
-  let names = null;
-  try{
-    names = new Intl.DisplayNames([getLang()], { type:'region' });
-  }catch(_){}
-
-  const rows = ISO_COUNTRY_CODES.map(code=>({
-    code,
-    name: names ? (names.of(code) || code) : code
-  })).sort((a,b)=>String(a.name).localeCompare(String(b.name), getLang()));
-
-  rows.forEach(({code,name})=>{
-    const opt = document.createElement('option');
-    opt.value = code;
-    opt.textContent = name;
-    $accountCountry.appendChild(opt);
-  });
-}
-
 async function postUserAction(payload){
-  const response = await fetch(USER_API_URL, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(payload)
-  });
-
-  let data = {};
-  try{ data = await response.json(); }catch(_){}
-  return { response, data };
+  const response = await fetch(USER_API_URL,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+  let data={}; try{ data=await response.json(); }catch(_){}
+  return {response,data};
 }
 
 async function registerITBMOUser(){
-  const first_name = String($accountFirstName?.value || '').trim();
-  const last_name = String($accountLastName?.value || '').trim();
-  const username = String($accountUsername?.value || '').trim().toLowerCase();
-  const email = String($accountEmail?.value || '').trim().toLowerCase();
-  const age_range = String($accountAgeRange?.value || '').trim();
-  const country_code = String($accountCountry?.value || '').trim().toUpperCase();
-
-  if(!first_name || !last_name || !username || !email || !age_range || !country_code){
-    setAccountMessage(authCopy('required'),'error');
-    return;
-  }
-
-  if(!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)){
-    setAccountMessage(authCopy('usernameInvalid'),'error');
-    return;
-  }
-
-  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
-    setAccountMessage(authCopy('emailInvalid'),'error');
-    return;
-  }
-
-  if(!$accountLegalConsent?.checked){
-    setAccountMessage(authCopy('legalRequired'),'error');
-    return;
-  }
-
-  setAuthBusy(true);
-  setAccountMessage(authCopy('registering'));
-
+  const name=String($accountFirstName?.value || '').trim();
+  const email=String($accountEmail?.value || '').trim().toLowerCase();
+  const password=String($accountPassword?.value || '');
+  const passwordConfirmation=String($accountPasswordConfirm?.value || '');
+  if(!name || !email || !password || !passwordConfirmation){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  if(!validAccountPassword(password)){ setAccountMessage(authCopy('passwordRule'),'error'); return; }
+  if(password !== passwordConfirmation){ setAccountMessage(authCopy('passwordMismatch'),'error'); return; }
+  if(!$accountLegalConsent?.checked){ setAccountMessage(authCopy('legalRequired'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('registering'));
   try{
-    const params = new URLSearchParams(window.location.search);
-    const { response, data } = await postUserAction({
-      action:'register',
-      first_name,
-      last_name,
-      username,
-      email,
-      age_range,
-      country_code,
-      preferred_language:getLang(),
-      terms_accepted:true,
-      privacy_accepted:true,
-      marketing_consent:!!$accountMarketingConsent?.checked,
-      terms_version:ITBMO_TERMS_VERSION,
-      privacy_version:ITBMO_PRIVACY_VERSION,
-      marketing_version:ITBMO_MARKETING_VERSION,
-      terms_url:qs('#account-terms-link')?.href || null,
-      privacy_url:qs('#account-privacy-link')?.href || null,
-      registration_source:'planner',
-      utm_source:params.get('utm_source') || null,
-      utm_medium:params.get('utm_medium') || null,
-      utm_campaign:params.get('utm_campaign') || null,
-      utm_content:params.get('utm_content') || null,
-      utm_term:params.get('utm_term') || null,
-      referrer:document.referrer || null
-    });
-
-    if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token);
-      currentUser = data.user || null;
-      authReady = true;
-      setAccountMessage('');
-      renderAuthState();
-      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+    const {response,data}=await postUserAction({ action:'sign_up', name,email,password,password_confirmation:passwordConfirmation, session_token:getStoredSessionToken() || null, ...authTrackingPayload(), ...legalPayload('account') });
+    if(response.ok && data?.ok){
+      setAccountMessage(authCopy('confirmationSent'),'success');
+      if($accountPassword) $accountPassword.value=''; if($accountPasswordConfirm) $accountPasswordConfirm.value='';
       return;
     }
-
-    if(response.status === 409){
-      if(data?.username_taken) setAccountMessage(authCopy('duplicateUser'),'error');
-      else if(data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
-      else setAccountMessage(authCopy('registerFail'),'error');
-      return;
-    }
-
-    setAccountMessage(authCopy('registerFail'),'error');
-  }catch(err){
-    console.error('ITBMO register error:', err);
-    setAccountMessage(authCopy('connectionFail'),'error');
-  }finally{
-    setAuthBusy(false);
-  }
+    if(response.status===409 || data?.email_taken) setAccountMessage(authCopy('duplicateEmail'),'error');
+    else setAccountMessage(authCopy('registerFail'),'error');
+  }catch(err){ console.error('ITBMO signup error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
 }
 
 async function loginITBMOUser(){
-  const username = String($accountLoginUsername?.value || '').trim().toLowerCase();
-  const email = String($accountLoginEmail?.value || '').trim().toLowerCase();
-
-  if(!username || !email){
-    setAccountMessage(authCopy('required'),'error');
-    return;
-  }
-
-  setAuthBusy(true);
-  setAccountMessage(authCopy('signingIn'));
-
+  const email=String($accountLoginEmail?.value || '').trim().toLowerCase();
+  const password=String($accountLoginPassword?.value || '');
+  if(!email || !password){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('signingIn'));
   try{
-    const { response, data } = await postUserAction({
-      action:'login',
-      username,
-      email
-    });
-
+    const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token);
-      currentUser = data.user || null;
-      authReady = true;
-      setAccountMessage('');
-      renderAuthState();
-      setTimeout(()=>restorePaidGenerationIfNeeded(),0);
-      return;
+      storeSessionToken(data.session_token); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
-
     setAccountMessage(authCopy('loginFail'),'error');
-  }catch(err){
-    console.error('ITBMO login error:', err);
-    setAccountMessage(authCopy('connectionFail'),'error');
-  }finally{
-    setAuthBusy(false);
-  }
+  }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+async function continueAsGuest(){
+  const name=String($accountGuestName?.value || '').trim();
+  const email=String($accountGuestEmail?.value || '').trim().toLowerCase();
+  if(!name || !email){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  if(!$accountGuestLegalConsent?.checked){ setAccountMessage(authCopy('legalRequired'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('guestStarting'));
+  try{
+    const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
+    if(response.ok && data?.ok && data?.session_token){
+      storeSessionToken(data.session_token); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+    }
+    setAccountMessage(authCopy('guestFail'),'error');
+  }catch(err){ console.error('ITBMO guest error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+async function sendForgotPassword(){
+  const email=String($accountForgotEmail?.value || $accountLoginEmail?.value || '').trim().toLowerCase();
+  if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('sendingReset'));
+  try{
+    const {response,data}=await postUserAction({action:'forgot_password',email,preferred_language:getLang(),origin:window.location.origin});
+    if(response.ok && data?.ok){ setAccountMessage(authCopy('resetSent'),'success'); return; }
+    setAccountMessage(authCopy('resetFail'),'error');
+  }catch(err){ console.error('ITBMO forgot password error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+function getSupabaseCallback(){
+  const hash=new URLSearchParams(String(window.location.hash || '').replace(/^#/,''));
+  return { accessToken:hash.get('access_token') || '', type:hash.get('type') || '', error:hash.get('error_description') || hash.get('error') || '' };
+}
+function clearAuthCallbackFromUrl(){
+  try{ history.replaceState(null,'',window.location.pathname + window.location.search); }catch(_){}
+}
+
+async function completeEmailConfirmation(accessToken){
+  if(!accessToken) return;
+  setAuthBusy(true); setAccountMessage(authCopy('confirming'));
+  try{
+    const {response,data}=await postUserAction({action:'complete_auth',access_token:accessToken});
+    if(response.ok && data?.ok && data?.session_token){
+      storeSessionToken(data.session_token); currentUser=data.user || null; authReady=true; clearAuthCallbackFromUrl(); renderAuthState(); setAccountMessage(authCopy('confirmationComplete'),'success'); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+    }
+    setAccountMessage(authCopy('confirmationFail'),'error');
+  }catch(err){ console.error('ITBMO confirmation error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
+}
+
+async function resetITBMOPassword(){
+  const {accessToken}=getSupabaseCallback();
+  const password=String($accountResetPassword?.value || '');
+  const confirmation=String($accountResetPasswordConfirm?.value || '');
+  if(!accessToken || !password || !confirmation){ setAccountMessage(authCopy('required'),'error'); return; }
+  if(!validAccountPassword(password)){ setAccountMessage(authCopy('passwordRule'),'error'); return; }
+  if(password !== confirmation){ setAccountMessage(authCopy('passwordMismatch'),'error'); return; }
+  setAuthBusy(true); setAccountMessage(authCopy('resetting'));
+  try{
+    const {response,data}=await postUserAction({action:'reset_password',access_token:accessToken,password,password_confirmation:confirmation});
+    if(response.ok && data?.ok){
+      clearAuthCallbackFromUrl(); clearSessionToken(); currentUser=null; authReady=true; showAccountMode('login'); setAccountMessage(authCopy('passwordUpdated'),'success'); renderAuthState(); return;
+    }
+    setAccountMessage(authCopy('resetFail'),'error');
+  }catch(err){ console.error('ITBMO reset password error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
+  finally{ setAuthBusy(false); }
 }
 
 async function restoreITBMOSession(){
-  const token = getStoredSessionToken();
-
-  if(!token){
-    authReady = true;
-    currentUser = null;
-    renderAuthState();
-    return;
+  const callback=getSupabaseCallback();
+  if(callback.error){ authReady=true; currentUser=null; renderAuthState(); setAccountMessage(callback.error,'error'); clearAuthCallbackFromUrl(); return; }
+  if(callback.accessToken && callback.type === 'recovery'){
+    authReady=true; currentUser=null; renderAuthState(); showAccountMode('reset'); return;
   }
+  if(callback.accessToken){ await completeEmailConfirmation(callback.accessToken); return; }
 
+  const token=getStoredSessionToken();
+  if(!token){ authReady=true; currentUser=null; renderAuthState(); return; }
   try{
-    const { response, data } = await postUserAction({
-      action:'session',
-      session_token:token
-    });
-
-    if(response.ok && data?.ok && data?.user){
-      currentUser = data.user;
-    }else{
-      clearSessionToken();
-      currentUser = null;
-    }
-  }catch(err){
-    console.warn('ITBMO session restore unavailable:', err);
-    currentUser = null;
-  }finally{
-    authReady = true;
-    renderAuthState();
-    if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
-  }
+    const {response,data}=await postUserAction({action:'session',session_token:token});
+    if(response.ok && data?.ok && data?.user) currentUser=data.user;
+    else{ clearSessionToken(); currentUser=null; }
+  }catch(err){ console.warn('ITBMO session restore unavailable:',err); currentUser=null; }
+  finally{ authReady=true; renderAuthState(); if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0); }
 }
 
 function bindAccountListeners(){
-  $accountRegisterToggle?.addEventListener('click', ()=>showAccountMode('register'));
-  $accountLoginToggle?.addEventListener('click', ()=>showAccountMode('login'));
-  $accountRegisterSubmit?.addEventListener('click', registerITBMOUser);
-  $accountLoginSubmit?.addEventListener('click', loginITBMOUser);
-
-  $accountUsername?.addEventListener('input', ()=>{
-    const normalized = String($accountUsername.value || '').toLowerCase().replace(/[^a-z0-9._-]/g,'');
-    if($accountUsername.value !== normalized) $accountUsername.value = normalized;
-  });
-
-  populateAccountCountries();
-  applyAuthLanguage();
-  updateSaveAvailability();
+  $accountRegisterToggle?.addEventListener('click',()=>showAccountMode('register'));
+  $accountLoginToggle?.addEventListener('click',()=>showAccountMode('login'));
+  $accountGuestToggle?.addEventListener('click',()=>showAccountMode('guest'));
+  $accountForgotPassword?.addEventListener('click',()=>{ if($accountForgotEmail && $accountLoginEmail) $accountForgotEmail.value=$accountLoginEmail.value || ''; showAccountMode('forgot'); });
+  $accountForgotBack?.addEventListener('click',()=>showAccountMode('login'));
+  $accountRegisterSubmit?.addEventListener('click',registerITBMOUser);
+  $accountLoginSubmit?.addEventListener('click',loginITBMOUser);
+  $accountGuestSubmit?.addEventListener('click',continueAsGuest);
+  $accountForgotSubmit?.addEventListener('click',sendForgotPassword);
+  $accountResetSubmit?.addEventListener('click',resetITBMOPassword);
+  applyAuthLanguage(); updateSaveAvailability();
 }
 
 /* =========================================================
@@ -9029,7 +8940,7 @@ function closeSupportModal(){
 function _supportMailto_(){
   const es = getLang()==='es';
   const userEmail = String(currentUser?.email || '').trim();
-  const username = String(currentUser?.username || '').trim();
+  const username = String(currentUser?.username || currentUser?.first_name || '').trim();
   const cities = (savedDestinations || []).map(x=>x?.city).filter(Boolean).join(', ');
   const trip = currentTripId || 'Not available';
   const subject = es
