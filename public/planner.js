@@ -2443,23 +2443,36 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const autocompleteId=`itbmo-destination-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const countryFieldName=`itbmo-country-${autocompleteId}`;
   const destinationFieldName=`itbmo-destination-${autocompleteId}`;
+  const destinationNumber=currentCount+1;
   row.innerHTML = `
-    <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
-    <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
-    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:MAX_DAYS_PER_DESTINATION},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-    <label class="date-label">
-      ${t('uiStart')}
-      <div class="date-wrapper${initialDate?' has-value':''}">
-        <span class="date-picker-shell">
-          <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
-          <span class="date-picker-placeholder" aria-hidden="true">📅 ${getLang()==='es'?'Seleccionar fecha':'Select date'}</span>
-        </span>
-        <input class="baseDate" type="hidden" value="${initialDate?formatDMY(initialDate):''}">
-        <small class="date-format">${t('uiDateFormatSmall')}</small>
-        <small class="date-summary" aria-live="polite"></small>
+    <div class="city-card-main">
+      <div class="city-card-kicker"><span>${String(destinationNumber).padStart(2,'0')}</span><b>${getLang()==='es'?'DESTINO':'DESTINATION'}</b></div>
+      <div class="city-card-fields">
+        <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
+        <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
+        <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:MAX_DAYS_PER_DESTINATION},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+        <label class="date-label">
+          ${t('uiStart')}
+          <div class="date-wrapper${initialDate?' has-value':''}">
+            <span class="date-picker-shell">
+              <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
+              <span class="date-picker-placeholder" aria-hidden="true">📅 ${getLang()==='es'?'Seleccionar fecha':'Select date'}</span>
+            </span>
+            <input class="baseDate" type="hidden" value="${initialDate?formatDMY(initialDate):''}">
+            <small class="date-format">${t('uiDateFormatSmall')}</small>
+            <small class="date-summary" aria-live="polite"></small>
+          </div>
+        </label>
       </div>
-    </label>
-    <button class="remove" type="button">✕</button>
+    </div>
+    <div class="city-card-schedule">
+      <div class="city-card-schedule__head">
+        <span>${getLang()==='es'?'TIEMPO EN DESTINO':'TIME IN DESTINATION'}</span>
+        <small>${getLang()==='es'?'Ajusta solo lo que ya tengas claro.':'Adjust only what you already know.'}</small>
+      </div>
+      <div class="city-card-schedule__body"></div>
+    </div>
+    <button class="remove" type="button" aria-label="${getLang()==='es'?'Eliminar destino':'Remove destination'}">✕</button>
   `;
 
   _bindCountryDestinationAutocomplete_(row);
@@ -2476,7 +2489,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 
   let hoursWrap = pref.days ? makeHoursBlock(pref.days) : document.createElement('div');
   if(!pref.days) hoursWrap.className = 'hours-block';
-  row.appendChild(hoursWrap);
+  qs('.city-card-schedule__body',row)?.appendChild(hoursWrap);
 
   const daysSelect = qs('.days', row);
   if(pref.days){
@@ -2700,9 +2713,7 @@ function showPreferencesStage(){
 
   requestAnimationFrame(()=>{
     autoGrowPreferencesField();
-    try{
-      $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
-    }catch(_){}
+    smoothAdvanceTo($preferencesStage,{gap:118,center:false});
   });
   scheduleAstraCoach('preferences','#preferences-stage',520);
 }
@@ -2732,19 +2743,12 @@ async function confirmPreferencesAndContinue(){
       : '✓ Preferences confirmed';
   }
 
-  /* Existing agent flow begins here, unchanged. */
+  /* Existing agent flow begins here, unchanged.
+     The chat now reveals directly below Personalize; the confirmed button stays
+     visible in its original location instead of the page jumping away from it. */
+  installPlannerAgentFlow();
   startPlanning();
   await _persistPostPaymentProgress_('collecting_hotels');
-
-  /* UX only: move the user directly to the agent input after confirmation. */
-  setTimeout(()=>{
-    try{
-      $chatBox?.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
-      setTimeout(()=>{
-        try{ $chatI?.focus({preventScroll:true}); }catch(_){ try{ $chatI?.focus(); }catch(__){} }
-      },340);
-    }catch(_){}
-  },80);
 }
 
 async function normalizeDestinationsBeforeSave(list, rows){
@@ -3075,16 +3079,9 @@ async function saveDestinations(){
     setTimeout(()=>{ loadPayPalSdk().catch(()=>{}); },0);
   }
 
-  /* QUIRÚRGICO v4: after saving, take the user directly to Start planning. */
+  /* Phase 4.3: advance only downward to the next CTA. */
   if($start && !$start.disabled){
-    requestAnimationFrame(()=>{
-      try{
-        $start.scrollIntoView({behavior:'smooth', block:'center', inline:'nearest'});
-        setTimeout(()=>{
-          try{ $start.focus({preventScroll:true}); }catch(_){ }
-        }, 420);
-      }catch(_){ }
-    });
+    requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
   }
 }
 
@@ -3266,6 +3263,7 @@ function syncImmersiveItineraryLauncher(){
   const wrap=qs('#itinerary-focus-launch'),btn=qs('#open-itinerary-focus'); if(!wrap||!btn)return;
   const cities=_immersiveAvailableCities_(),totalDays=cities.reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),hasRows=cities.length>0&&totalDays>0,copy=_immersiveViewerCopy_();
   wrap.classList.toggle('is-ready',hasRows);wrap.setAttribute('aria-hidden',hasRows?'false':'true');btn.disabled=!hasRows;btn.setAttribute('aria-disabled',hasRows?'false':'true');
+  qs('#planner-post-generation')?.classList.toggle('is-ready',hasRows);
   qs('#itinerary-focus-cta-title').textContent=copy.ctaTitle;qs('#itinerary-focus-cta-subtitle').textContent=copy.ctaSub;
   const meta=qs('#itinerary-focus-cta-meta'); if(meta)meta.textContent=hasRows?`${cities.length} ${cities.length===1?copy.citySingular:copy.cityPlural} · ${totalDays} ${totalDays===1?copy.daySingular:copy.dayPlural} · ${copy.ready}`:'';
 }
@@ -8565,7 +8563,7 @@ function showFinalDownloadModal(){
     <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
     <small>${es?'En móvil podrás abrir, compartir o guardar cada archivo mediante las opciones del dispositivo.':'On mobile, you can open, share or save each file using your device options.'}</small>
   </div>`;
-  document.body.appendChild(overlay); requestParentViewportFocus('download-ready',true); requestAnimationFrame(()=>overlay.classList.add('active'));
+  document.body.appendChild(overlay); requestAnimationFrame(()=>overlay.classList.add('active'));
   const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
   close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
@@ -8651,6 +8649,46 @@ function bindExportListeners(){
    Critical windows request that the parent page brings the top of the
    Planner into view. Standalone Vercel use falls back to window.scrollTo.
    ========================================================= */
+
+function smoothAdvanceTo(target,{gap=118,center=false}={}){
+  const el=typeof target==='string' ? qs(target) : target;
+  if(!el) return;
+  const rect=el.getBoundingClientRect();
+  const current=window.scrollY || document.documentElement.scrollTop || 0;
+  const viewportBottom=window.innerHeight || document.documentElement.clientHeight || 0;
+  const targetTop=current + rect.top - gap;
+
+  /* Never pull the traveler backward. Advance only when the next stage is below
+     the comfortable reading zone. */
+  const needsAdvance = center
+    ? rect.top > viewportBottom * .58
+    : rect.top > viewportBottom * .72;
+
+  if(needsAdvance && targetTop > current + 24){
+    window.scrollTo({top:targetTop,behavior:'smooth'});
+  }
+}
+
+function installPlannerInlineInfoChat(){
+  const slot=qs('#planner-inline-info-slot');
+  const modal=qs('#info-chat-modal');
+  if(!slot || !modal || modal.parentElement===slot) return;
+  slot.appendChild(modal);
+  modal.classList.add('is-inline-planner-chat');
+  modal.style.left='';
+  modal.style.right='';
+  modal.style.top='';
+  modal.style.bottom='';
+  modal.style.width='';
+  modal.style.height='';
+}
+
+function installPlannerAgentFlow(){
+  const host=qs('#planner-agent-flow');
+  const chat=qs('#chat-container');
+  if(host && chat && chat.parentElement!==host) host.appendChild(chat);
+}
+
 function requestParentViewportFocus(reason='modal', immediate=false){
   try{
     if(window.parent && window.parent !== window){
@@ -8744,8 +8782,7 @@ function showPlannerDecision({title,message,confirmLabel,cancelLabel,variant='pr
     card.querySelector('.itbmo-decision-confirm')?.addEventListener('click',()=>finish(true));
     overlay.addEventListener('click',(e)=>{if(e.target===overlay) finish(false);});
     document.addEventListener('keydown',onKey);
-    requestParentViewportFocus('planner-confirmation',true);
-    requestAnimationFrame(()=>overlay.classList.add('active'));
+      requestAnimationFrame(()=>overlay.classList.add('active'));
   });
 }
 
@@ -8766,7 +8803,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   `;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-  requestParentViewportFocus('reset-modal', true);
   setTimeout(()=>overlay.classList.add('active'), 10);
 
   const confirmReset = overlay.querySelector('#confirm-reset');
@@ -9196,7 +9232,6 @@ function applyCommerceI18n(){
 
 function openSupportModal(){
   if(!$supportModal || !ITBMO_COMMERCE_CONFIG.support.enabled) return;
-  requestParentViewportFocus('support-modal', true);
   $supportModal.scrollTop=0;
   const card=$supportModal.querySelector('.support-card');
   if(card) card.scrollTop=0;
@@ -9272,7 +9307,6 @@ function openCheckoutModal(){
   /* QUIRÚRGICO · Checkout visibility inside the auto-height Webflow iframe.
      The parent page is moved to the Planner top, while the modal itself always
      opens from its own top. This avoids hiding checkout in a tall iframe. */
-  requestParentViewportFocus('checkout-modal', true);
   $checkoutModal.scrollTop=0;
   const checkoutCard=$checkoutModal.querySelector('.checkout-card');
   if(checkoutCard) checkoutCard.scrollTop=0;
@@ -9281,7 +9315,6 @@ function openCheckoutModal(){
     if($checkoutStatus?.textContent===loadingMessage) setCheckoutStatus('');
     $checkoutModal.scrollTop=0;
     if(checkoutCard) checkoutCard.scrollTop=0;
-    requestParentViewportFocus('checkout-modal', true);
   });
 }
 
@@ -9821,6 +9854,7 @@ function restoreInfoModal(){
 }
 
 function initInfoChatDrag(){
+  if(qs('#info-chat-modal')?.classList.contains('is-inline-planner-chat')) return;
   const modal=qs('#info-chat-modal');
   const header=modal?.querySelector('.info-chat-header');
   if(!modal || !header || header.dataset.dragBound==='1') return;
@@ -9891,19 +9925,15 @@ function openInfoModal(){
   if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
     return;
   }
+  installPlannerInlineInfoChat();
   const modal = qs('#info-chat-modal');
   if(!modal) return;
-  requestParentViewportFocus('info-chat-modal', true);
   modal.style.display = 'flex';
   modal.classList.add('active');
   modal.classList.remove('is-minimized');
   hideInfoChatNotice();
-  initInfoChatDrag();
-  bindInfoChatViewportLayout();
-  applyInfoChatViewportLayout();
   ensureInfoChatWelcome();
-
-  document.body.classList.add('itbmo-info-open');
+  /* Inline on purpose: opening Info Chat must never yank the page upward. */
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
@@ -10324,8 +10354,8 @@ function initAstraCoach(){
 function applyTravelBuilderWorkspaceCopy(){
   const es=getLang()==='es';
   const values=es ? {
-    'planner-stage-route-label':'Ruta',
     'planner-stage-travelers-label':'Viajeros',
+    'planner-stage-route-label':'Ruta',
     'planner-stage-personalize-label':'Personaliza',
     'planner-stage-create-label':'Crear',
     'planner-account-guide-title':'Tu acceso a ITBMO',
@@ -10340,10 +10370,13 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-create-eyebrow':'LISTO PARA CREAR',
     'planner-create-title':'Tu viaje toma forma aquí.',
     'planner-create-copy':'Cuando completes la ruta y la personalización, ITBMO organizará el itinerario ciudad por ciudad y día por día.',
-    'planner-create-status-copy':'Completa los pasos anteriores para comenzar.'
+    'planner-create-status-copy':'Completa los pasos anteriores para comenzar.',
+    'planner-info-chat-kicker':'INVESTIGA ANTES DE DECIDIR',
+    'planner-info-chat-title':'¿Te falta contexto sobre tu destino?',
+    'planner-info-chat-copy':'Usa Info Chat para consultar zonas, transporte, barrios, gastronomía y otros datos útiles antes de definir tus preferencias.'
   } : {
-    'planner-stage-route-label':'Route',
     'planner-stage-travelers-label':'Travelers',
+    'planner-stage-route-label':'Route',
     'planner-stage-personalize-label':'Personalize',
     'planner-stage-create-label':'Create',
     'planner-account-guide-title':'Your ITBMO access',
@@ -10358,7 +10391,10 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-create-eyebrow':'READY TO CREATE',
     'planner-create-title':'Your trip takes shape here.',
     'planner-create-copy':'Once the route and personalization are complete, ITBMO will organize your itinerary city by city and day by day.',
-    'planner-create-status-copy':'Complete the previous steps to begin.'
+    'planner-create-status-copy':'Complete the previous steps to begin.',
+    'planner-info-chat-kicker':'RESEARCH BEFORE YOU DECIDE',
+    'planner-info-chat-title':'Need more context about your destination?',
+    'planner-info-chat-copy':'Use Info Chat to ask about areas, transportation, neighborhoods, food and other useful details before defining your preferences.'
   };
   Object.entries(values).forEach(([id,value])=>{
     const el=qs('#'+id);
@@ -10384,8 +10420,8 @@ function updateTravelBuilderProgress(){
   items.forEach((item,index)=>{
     const active =
       index===0 ? true :
-      index===1 ? hasRoute :
-      index===2 ? preferencesVisible || hasTravelers :
+      index===1 ? hasTravelers :
+      index===2 ? preferencesVisible :
       canCreate;
     item.classList.toggle('is-active',active);
   });
