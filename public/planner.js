@@ -2593,7 +2593,7 @@ function showSaveTransitionOverlay(){
   const es=getLang()==='es';
   const title=qs('.itbmo-save-transition-title',overlay);
   const subtitle=qs('.itbmo-save-transition-subtitle',overlay);
-  if(title) title.textContent=es?'Preparando tu viaje…':'Preparing your trip…';
+  if(title) title.textContent=es?'Guardando destinos…':'Saving destinations…';
   if(subtitle) subtitle.textContent=es?'Organizando tus destinos y preferencias.':'Organizing your destinations and preferences.';
   overlay.classList.add('active');
   overlay.setAttribute('aria-hidden','false');
