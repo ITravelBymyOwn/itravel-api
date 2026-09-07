@@ -82,10 +82,17 @@ async function getActiveSession(rawToken) {
 }
 
 function generationAdminBypass(userId) {
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+
+  // Vercel Preview is a test environment: any valid ITBMO session may
+  // exercise generation/recovery/Info Chat without a real payment.
+  // Production remains strictly payment-gated unless the explicit,
+  // admin-only production bypass is deliberately enabled.
+  if (!isProduction) return Boolean(userId);
+
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
-  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
-  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+  return ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
 }
 
 async function getOwnedTripForGeneration(tripId, userId) {
