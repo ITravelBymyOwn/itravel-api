@@ -545,11 +545,53 @@ async function handleGet(res, body, session) {
   });
 }
 
+async function disableAutoRecoveryForUser(userId) {
+  const rows = await supabaseFetch(
+    `/trips?select=id,status,planner_input&user_id=eq.${encodeURIComponent(userId)}&` +
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=100`,
+    { method:"GET" }
+  );
+
+  const candidates = Array.isArray(rows) ? rows : [];
+  const now = new Date().toISOString();
+
+  for (const candidate of candidates) {
+    const plannerInput = generationCheckpoint(candidate?.planner_input);
+    if (plannerInput.auto_recovery_disabled === true) continue;
+
+    await patchOwnedTrip(candidate.id, userId, {
+      planner_input:{
+        ...plannerInput,
+        auto_recovery_disabled:true,
+        auto_recovery_disabled_at:now
+      }
+    });
+  }
+
+  return candidates.length;
+}
+
 async function handleArchive(res, body, session) {
   const tripId = String(body.trip_id || "").trim();
+  const preventAutoRecovery = body.prevent_auto_recovery === true;
+
+  if (!tripId && !preventAutoRecovery) {
+    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+  }
+
+  let disabledRecoveryCount = 0;
+  if (preventAutoRecovery) {
+    disabledRecoveryCount = await disableAutoRecoveryForUser(session.user_id);
+  }
 
   if (!tripId) {
-    return res.status(400).json({ ok:false, error:"Trip ID is required" });
+    return res.status(200).json({
+      ok:true,
+      action:"archive",
+      trip:null,
+      auto_recovery_disabled:true,
+      disabled_recovery_count:disabledRecoveryCount
+    });
   }
 
   const trip = await getOwnedTripForGeneration(tripId, session.user_id);
@@ -558,7 +600,13 @@ async function handleArchive(res, body, session) {
   }
 
   if (trip.status === "archived") {
-    return res.status(200).json({ ok:true, action:"archive", trip });
+    return res.status(200).json({
+      ok:true,
+      action:"archive",
+      trip,
+      auto_recovery_disabled:preventAutoRecovery,
+      disabled_recovery_count:disabledRecoveryCount
+    });
   }
 
   const now = new Date().toISOString();
@@ -576,7 +624,9 @@ async function handleArchive(res, body, session) {
   return res.status(200).json({
     ok:true,
     action:"archive",
-    trip:updated
+    trip:updated,
+    auto_recovery_disabled:preventAutoRecovery,
+    disabled_recovery_count:disabledRecoveryCount
   });
 }
 
@@ -827,6 +877,9 @@ async function handleRecoverable(res, session) {
 
   const candidates = Array.isArray(rows) ? rows : [];
   for (const trip of candidates) {
+    const plannerInput = generationCheckpoint(trip?.planner_input);
+    if (plannerInput.auto_recovery_disabled === true) continue;
+
     if (trip?.id && await hasGenerationEntitlement(trip.id, session.user_id)) {
       return res.status(200).json({ ok:true, action:"recoverable", trip });
     }
