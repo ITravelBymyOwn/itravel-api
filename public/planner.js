@@ -2727,7 +2727,18 @@ function showPreferencesStage(){
 
   requestAnimationFrame(()=>{
     autoGrowPreferencesField();
-    smoothAdvanceTo($preferencesStage,{gap:118,center:false});
+
+    /* Put the actual writing area in the traveler's field of view. */
+    const target=$preferencesField || $preferencesStage;
+    if(target){
+      const rect=target.getBoundingClientRect();
+      const current=window.scrollY || document.documentElement.scrollTop || 0;
+      const offset=Math.min(300,Math.max(210,(window.innerHeight || 800)*0.32));
+      window.scrollTo({
+        top:Math.max(0,current + rect.top - offset),
+        behavior:'smooth'
+      });
+    }
   });
   scheduleAstraCoach('preferences','#preferences-stage',520);
 }
@@ -3840,7 +3851,8 @@ ${buildIntake()}
         text: getLang()==='es'
           ? 'Info Chat está disponible después de confirmar el pago de este itinerario.'
           : 'Info Chat is available after payment for this itinerary is confirmed.',
-        remaining:0
+        remaining:0,
+        notAuthorized:true
       };
     }
 
@@ -8650,27 +8662,14 @@ function showFinalDownloadModal(){
     if(!ack.checked) return;
     overlay.classList.remove('active');
 
-    setTimeout(()=>{
-      overlay.remove();
+    overlay.remove();
 
-      /* Phase 4.9 · Critical completion handoff.
-         The generated-trip controls live at the end of the Planner, so do not
-         calculate against a target that may still be reflowing. Stay at the
-         bottom and reinforce it once after layout settles. */
-      const scrollToPlannerEnd=(behavior='smooth')=>{
-        const doc=document.documentElement;
-        const bottom=Math.max(
-          document.body?.scrollHeight || 0,
-          doc?.scrollHeight || 0
-        );
-        window.scrollTo({top:bottom,behavior});
-      };
-
-      requestAnimationFrame(()=>{
-        scrollToPlannerEnd('smooth');
-        setTimeout(()=>scrollToPlannerEnd('auto'),420);
-      });
-    },220);
+    /* One deterministic jump to the real end of the Planner. */
+    requestAnimationFrame(()=>{
+      const doc=document.documentElement;
+      const bottom=Math.max(document.body?.scrollHeight || 0,doc?.scrollHeight || 0);
+      window.scrollTo({top:bottom,behavior:'auto'});
+    });
   });
   const pdfButton=overlay.querySelector('.itbmo-open-pdf');
   const csvButton=overlay.querySelector('.itbmo-open-csv');
@@ -10127,7 +10126,15 @@ async function sendInfoMessage(){
     infoChatMsg(result.text);
   }
 
-  if(Number.isFinite(Number(result?.remaining))){
+  if(result?.notAuthorized){
+    setInfoChatEntitlement({
+      authorized:false,
+      remaining:0,
+      used:0,
+      tripId:null
+    });
+    persistInfoChatState();
+  }else if(Number.isFinite(Number(result?.remaining))){
     const remaining=Math.max(0,Number(result.remaining));
     setInfoChatEntitlement({
       authorized:true,
@@ -10240,36 +10247,21 @@ function enhancePreferencesInfoChatCopy(){
   const lang=_plannerOutputLang_();
   const copy={
     en:{
-      label:'A few useful details make the itinerary much more personal.',
-      items:[
-        '<strong>Style:</strong> nature, culture, food, authentic experiences.',
-        '<strong>Pace:</strong> relaxed, balanced or intensive.',
-        '<strong>Must-dos:</strong> experiences you do not want to miss.',
-        '<strong>Needs:</strong> mobility, allergies, children or other constraints.'
-      ],
-      note:'Not sure yet? Use Info Chat above to research your destinations first.',
+      lead:'A little context makes your itinerary much more personal.',
+      summary:'You can mention <strong>style</strong>, <strong>pace</strong>, <strong>must-dos</strong> and any <strong>special needs or restrictions</strong>.',
+      note:'Need destination context first? Info Chat is right beside this field.',
       placeholder:'Write your preferences, restrictions or special conditions here…'
     },
     es:{
-      label:'Unos pocos detalles útiles hacen que el itinerario sea mucho más personal.',
-      items:[
-        '<strong>Estilo:</strong> naturaleza, cultura, gastronomía, experiencias auténticas.',
-        '<strong>Ritmo:</strong> relajado, balanceado o intenso.',
-        '<strong>Imperdibles:</strong> experiencias que no quieres dejar por fuera.',
-        '<strong>Necesidades:</strong> movilidad, alergias, niños u otras restricciones.'
-      ],
-      note:'¿Todavía no lo tienes claro? Usa Info Chat arriba para investigar primero.',
+      lead:'Un poco de contexto hace que tu itinerario sea mucho más personal.',
+      summary:'Puedes incluir <strong>estilo</strong>, <strong>ritmo</strong>, <strong>imperdibles</strong> y cualquier <strong>necesidad o restricción especial</strong>.',
+      note:'¿Necesitas investigar algo primero? Info Chat está justo al lado de este campo.',
       placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…'
     }
   }[lang] || {
-    label:'A few useful details make the itinerary much more personal.',
-    items:[
-      '<strong>Style:</strong> activities and experiences you prefer.',
-      '<strong>Pace:</strong> relaxed, balanced or intensive.',
-      '<strong>Must-dos:</strong> experiences you do not want to miss.',
-      '<strong>Needs:</strong> mobility, allergies or other constraints.'
-    ],
-    note:'Use Info Chat above first if you need more context.',
+    lead:'A little context makes your itinerary much more personal.',
+    summary:'Mention style, pace, must-dos and any special needs or restrictions.',
+    note:'Info Chat is beside this field if you need destination context first.',
     placeholder:'Write your preferences, restrictions or special conditions here…'
   };
 
@@ -10277,16 +10269,13 @@ function enhancePreferencesInfoChatCopy(){
   guide.id='itbmo-preferences-guidance';
   guide.className='preferences-guidance';
   guide.innerHTML=`
-    <div class="preferences-guidance__lead">${copy.label}</div>
-    <div class="preferences-guidance__items">
-      ${copy.items.map(item=>`<span>${item}</span>`).join('')}
-    </div>
-    <div class="preferences-guidance__note">${copy.note}</div>
+    <strong class="preferences-guidance__lead">${copy.lead}</strong>
+    <span class="preferences-guidance__summary">${copy.summary}</span>
+    <small class="preferences-guidance__note">${copy.note}</small>
   `;
 
   field.parentNode?.insertBefore(guide,field);
   field.placeholder=copy.placeholder;
-
   field.addEventListener('input',autoGrowPreferencesField);
   autoGrowPreferencesField();
 }
