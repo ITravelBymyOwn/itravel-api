@@ -4722,6 +4722,23 @@ function setOverlayMessage(msg=t('overlayDefault')){
 function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
+
+  const infoModal=qs('#info-chat-modal');
+
+  if(on){
+    /* Generation owns the viewport.
+       If Info Chat was open or minimized, preserve its exact state but remove
+       it completely from the generation layer until the overlay finishes. */
+    if(infoModal && infoModal.dataset.generationSuspended!=='1'){
+      infoModal.dataset.generationSuspended='1';
+      infoModal.dataset.generationWasActive=infoModal.classList.contains('active') ? '1' : '0';
+      infoModal.dataset.generationWasMinimized=infoModal.classList.contains('is-minimized') ? '1' : '0';
+      infoModal.style.display='none';
+      infoModal.style.pointerEvents='none';
+      document.body.classList.remove('itbmo-info-open');
+    }
+  }
+
   $overlayWOW.style.display = on ? 'flex' : 'none';
   if(on) requestParentViewportFocus('loading-overlay', true);
 
@@ -4734,7 +4751,7 @@ function showWOW(on, msg){
     // ✅ Keep only the reset button enabled
     if (el.id === 'reset-planner') return;
 
-    // 🆕 Also lock the floating Info Chat button
+    // Info Chat cannot be opened while generation owns the viewport.
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
       return;
@@ -4752,6 +4769,26 @@ function showWOW(on, msg){
       }
     }
   });
+
+  if(!on && infoModal?.dataset.generationSuspended==='1'){
+    const wasActive=infoModal.dataset.generationWasActive==='1';
+    const wasMinimized=infoModal.dataset.generationWasMinimized==='1';
+
+    delete infoModal.dataset.generationSuspended;
+    delete infoModal.dataset.generationWasActive;
+    delete infoModal.dataset.generationWasMinimized;
+    infoModal.style.pointerEvents='';
+
+    if(wasActive){
+      infoModal.style.display='flex';
+      infoModal.classList.add('active');
+      infoModal.classList.toggle('is-minimized',wasMinimized);
+      if(!wasMinimized) document.body.classList.add('itbmo-info-open');
+    }else{
+      infoModal.style.display='none';
+      infoModal.classList.remove('active','is-minimized');
+    }
+  }
 
   /* Permanent trip-state guardrails after any global UI unlock. */
   if(!on){
