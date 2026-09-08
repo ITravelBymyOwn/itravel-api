@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=95" />
+  <link rel="stylesheet" href="./planner.css?v=97" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -161,10 +161,11 @@
         <div class="planner-stage-card__number" aria-hidden="true">00</div>
         <div class="planner-inline-guide planner-inline-guide--account">
           <span class="planner-inline-guide__icon" aria-hidden="true">✓</span>
-          <div>
+          <div class="planner-account-guide__copy">
             <strong id="planner-account-guide-title">Tu acceso a ITBMO</strong>
             <p id="planner-account-guide-copy">Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.</p>
           </div>
+          <button id="account-logout" class="account-logout account-logout--top" type="button" style="display:none;">Sign out</button>
         </div>
         <div class="account-head">
           <div>
@@ -175,12 +176,11 @@
         </div>
 
         <div id="account-guest">
-          <div class="account-mode-actions" id="account-mode-actions">
-            <button class="btn primary account-mode-btn" id="account-register-toggle" type="button">Create account</button>
-            <button class="btn ghost account-mode-btn" id="account-login-toggle" type="button">Sign in</button>
+          <div class="account-mode-actions account-mode-actions--premium" id="account-mode-actions">
+            <button class="btn primary account-mode-btn account-mode-btn--register" id="account-register-toggle" type="button">Create account</button>
+            <button class="btn ghost account-mode-btn account-mode-btn--login" id="account-login-toggle" type="button">Sign in</button>
+            <button class="btn ghost account-mode-btn account-mode-btn--guest" id="account-guest-toggle" type="button">Continue as guest</button>
           </div>
-
-          <button class="btn ghost w-100" id="account-guest-toggle" type="button" style="margin-top:.55rem;">Continue as guest</button>
 
           <div id="account-register-panel" class="account-panel" style="display:none;">
             <div class="account-form-grid">
@@ -300,13 +300,13 @@
           <div id="account-message" class="account-message" aria-live="polite"></div>
         </div>
 
-        <div id="account-authenticated" class="account-authenticated" style="display:none;">
+        <div id="account-authenticated" class="account-authenticated account-authenticated--premium" style="display:none;">
           <div class="account-authenticated-copy">
+            <span class="account-authenticated-avatar" aria-hidden="true">✦</span>
             <div class="account-authenticated-text">
               <strong id="account-welcome">Welcome back.</strong>
               <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
             </div>
-            <button id="account-logout" class="account-logout" type="button">Sign out</button>
           </div>
           <div id="account-guest-upgrade" class="account-guest-upgrade" style="display:none;">
             <div class="account-guest-upgrade-text">
@@ -1198,7 +1198,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=97"></script>
+<script src="./planner.js?v=99"></script>
  
 </body>
 </html>
