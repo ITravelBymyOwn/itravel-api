@@ -8456,3 +8456,501 @@ body {
     grid-template-columns:1fr;
   }
 }
+
+
+/* =========================================================
+   ITBMO · PHASE 4.4 · FLOW FIX + PREMIUM MICRO-INTERACTIONS
+========================================================= */
+
+/* Travelers: the selector sits beside the explanation; companions then use the
+   full width below, preventing a tall narrow stack on the right. */
+#travelers-box{
+  grid-template-columns:minmax(300px,.72fr) minmax(360px,1.28fr) !important;
+  align-items:start !important;
+  row-gap:22px !important;
+}
+#travelers-box .planner-stage-card__head{grid-column:1 !important;grid-row:1 !important;}
+#travelers-box > label{grid-column:2 !important;grid-row:1 !important;align-self:center !important;}
+#traveler-group-panel,
+#traveler-grid{grid-column:1 / -1 !important;grid-row:auto !important;margin-top:0 !important;}
+#traveler-group-panel > .box{padding:20px !important;}
+#traveler-profiles{grid-template-columns:repeat(3,minmax(0,1fr)) !important;gap:14px !important;}
+.traveler-profile{min-width:0 !important;box-shadow:0 9px 24px rgba(16,24,40,.045) !important;}
+.traveler-profile-actions{
+  position:static !important;
+  grid-column:1 / -1;
+  display:flex !important;
+  justify-content:flex-end !important;
+  gap:10px !important;
+  margin-top:14px !important;
+  padding:12px !important;
+  border-radius:16px !important;
+  background:linear-gradient(135deg,#f7fcfa,#f1faf8) !important;
+}
+
+/* Saved destination data is frozen, but the route action rail stays fully alive. */
+#destinations-box.is-route-data-locked{
+  opacity:1 !important;
+  filter:none !important;
+}
+#destinations-box.is-route-data-locked::after{display:none !important;}
+#destinations-box.is-route-data-locked .city-row,
+#destinations-box.is-route-data-locked .row-actions{
+  opacity:.62;
+  filter:saturate(.85);
+}
+#destinations-box.is-route-data-locked .planner-route-actions{
+  opacity:1 !important;
+  filter:none !important;
+}
+
+/* Start CTA: deliberately quiet before Save, unmistakable after Save. */
+#start-planning{
+  position:relative;
+  overflow:hidden;
+  transition:transform .22s ease,box-shadow .22s ease,filter .22s ease,background .22s ease !important;
+}
+#start-planning:not(.is-ready){
+  background:#e7edf2 !important;
+  color:#98a2b3 !important;
+  box-shadow:none !important;
+}
+#start-planning.is-ready{
+  min-height:58px !important;
+  color:#fff !important;
+  background:linear-gradient(105deg,#08785c 0%,#0ea47a 52%,#17a7bb 100%) !important;
+  box-shadow:0 17px 38px rgba(14,164,122,.27),0 0 0 1px rgba(14,164,122,.12) !important;
+  transform:translateY(-1px);
+}
+#start-planning.is-ready::after{
+  content:"";
+  position:absolute;
+  inset:-40% auto -40% -30%;
+  width:24%;
+  transform:skewX(-20deg);
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.34),transparent);
+  animation:itbmoStartSheen 2.8s ease-in-out infinite;
+}
+#start-planning.is-ready:hover{transform:translateY(-3px);filter:saturate(1.05);}
+@keyframes itbmoStartSheen{0%,58%{left:-30%}85%,100%{left:125%}}
+
+/* Premium save overlay: route pulse instead of an hourglass. */
+.itbmo-save-transition-overlay{
+  background:rgba(241,248,247,.66) !important;
+  backdrop-filter:blur(12px) saturate(125%) !important;
+  -webkit-backdrop-filter:blur(12px) saturate(125%) !important;
+}
+.itbmo-save-transition-card{
+  width:min(90vw,430px) !important;
+  min-height:245px !important;
+  padding:30px 34px 28px !important;
+  border-radius:30px !important;
+  border:1px solid rgba(14,164,122,.16) !important;
+  background:
+    radial-gradient(circle at 85% 10%,rgba(25,174,195,.12),transparent 12rem),
+    radial-gradient(circle at 8% 100%,rgba(14,164,122,.10),transparent 13rem),
+    rgba(255,255,255,.97) !important;
+  box-shadow:0 32px 90px rgba(16,24,40,.16),0 3px 10px rgba(16,24,40,.05) !important;
+}
+.itbmo-hourglass-loader,.itbmo-hourglass{display:none !important;}
+.itbmo-route-loader{
+  position:relative;
+  width:146px;
+  height:76px;
+  margin:0 auto 22px;
+}
+.itbmo-route-loader__halo{
+  position:absolute;
+  left:50%;top:50%;
+  width:68px;height:68px;
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  background:radial-gradient(circle,rgba(14,164,122,.14) 0%,rgba(14,164,122,.05) 48%,transparent 72%);
+  animation:itbmoRouteHalo 1.8s ease-in-out infinite;
+}
+.itbmo-route-loader__line{
+  position:absolute;
+  left:22px;right:22px;top:37px;height:3px;
+  border-radius:999px;
+  background:linear-gradient(90deg,#8bd8c3,#0ea47a,#53bdd0);
+  box-shadow:0 0 18px rgba(14,164,122,.18);
+}
+.itbmo-route-loader__node{
+  position:absolute;top:31px;
+  width:15px;height:15px;
+  border:4px solid #fff;
+  border-radius:50%;
+  background:#0ea47a;
+  box-shadow:0 5px 14px rgba(14,164,122,.25);
+  animation:itbmoRouteNode 1.65s ease-in-out infinite;
+}
+.itbmo-route-loader__node--1{left:14px;animation-delay:0s}
+.itbmo-route-loader__node--2{left:66px;animation-delay:.22s}
+.itbmo-route-loader__node--3{right:14px;animation-delay:.44s}
+.itbmo-route-loader__star{
+  position:absolute;
+  left:50%;top:50%;
+  display:grid;place-items:center;
+  width:40px;height:40px;
+  transform:translate(-50%,-50%);
+  border-radius:14px;
+  color:#fff;
+  background:linear-gradient(145deg,#08785c,#0ea47a);
+  box-shadow:0 12px 24px rgba(14,164,122,.25);
+  font-size:18px;
+  animation:itbmoRouteStar 1.8s ease-in-out infinite;
+}
+.itbmo-save-transition-eyebrow{
+  margin-bottom:7px;
+  color:#0b8664;
+  font-size:.66rem;
+  font-weight:900;
+  letter-spacing:.16em;
+}
+.itbmo-save-transition-title{
+  color:#101828 !important;
+  font-size:1.32rem !important;
+  line-height:1.15 !important;
+  font-weight:900 !important;
+  letter-spacing:-.035em !important;
+}
+.itbmo-save-transition-subtitle{
+  display:block !important;
+  max-width:340px;
+  margin:9px auto 0;
+  color:#667085;
+  font-size:.82rem;
+  line-height:1.55;
+}
+@keyframes itbmoRouteHalo{0%,100%{transform:translate(-50%,-50%) scale(.9);opacity:.65}50%{transform:translate(-50%,-50%) scale(1.18);opacity:1}}
+@keyframes itbmoRouteNode{0%,100%{transform:scale(.78);opacity:.55}50%{transform:scale(1.08);opacity:1}}
+@keyframes itbmoRouteStar{0%,100%{transform:translate(-50%,-50%) rotate(0deg) scale(.96)}50%{transform:translate(-50%,-50%) rotate(6deg) scale(1.04)}}
+
+@media(max-width:1050px){
+  #traveler-profiles{grid-template-columns:repeat(2,minmax(0,1fr)) !important;}
+}
+@media(max-width:760px){
+  #travelers-box{display:block !important;}
+  #travelers-box > label{margin-top:18px !important;}
+  #traveler-group-panel{margin-top:16px !important;}
+  #traveler-profiles{grid-template-columns:1fr !important;}
+  .itbmo-save-transition-card{width:min(90vw,390px) !important;min-height:225px !important;padding:26px 24px !important;}
+}
+@media(prefers-reduced-motion:reduce){
+  #start-planning.is-ready::after,
+  .itbmo-route-loader__halo,
+  .itbmo-route-loader__node,
+  .itbmo-route-loader__star{animation:none !important;}
+}
+
+/* =========================================================
+   ITBMO · PHASE 4.5 · PREMIUM ACCOUNT ACCESS
+   Compact, proportional and integrated with the Planner flow.
+========================================================= */
+
+#account-box {
+  padding: 20px 24px 22px !important;
+  overflow: visible !important;
+}
+
+/* Access bar: this is the account-level utility surface.
+   Logout belongs here because it acts on the whole session. */
+#account-box .planner-inline-guide--account {
+  display: grid !important;
+  grid-template-columns: auto minmax(0,1fr) auto;
+  align-items: center !important;
+  gap: 14px !important;
+  min-height: 76px;
+  margin: 0 0 18px !important;
+  padding: 13px 16px !important;
+  border: 1px solid rgba(14,164,122,.16) !important;
+  border-radius: 20px !important;
+  background:
+    radial-gradient(circle at 92% 0%,rgba(14,164,122,.08),transparent 14rem),
+    linear-gradient(135deg,#f1fbf7 0%,#f8fcfb 100%) !important;
+}
+
+#account-box .planner-inline-guide__icon {
+  width: 42px !important;
+  height: 42px !important;
+  flex: 0 0 42px !important;
+  border-radius: 14px !important;
+  font-size: 1.05rem;
+  box-shadow: 0 9px 22px rgba(14,164,122,.16);
+}
+
+.planner-account-guide__copy {
+  min-width: 0;
+}
+
+.planner-account-guide__copy strong {
+  margin: 0 !important;
+  color: #101828;
+  font-size: 1rem !important;
+  line-height: 1.25;
+}
+
+.planner-account-guide__copy p {
+  max-width: 900px;
+  margin: 4px 0 0 !important;
+  color: #667085;
+  font-size: .84rem !important;
+  line-height: 1.45 !important;
+}
+
+/* Logout: visible, intentional and secondary.
+   It is not red because signing out is not a destructive operation. */
+.account-logout--top {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 132px;
+  min-height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(16,24,40,.11);
+  border-radius: 13px;
+  color: #344054;
+  background: rgba(255,255,255,.86);
+  box-shadow: 0 7px 18px rgba(16,24,40,.045);
+  font-size: .79rem;
+  font-weight: 850;
+  cursor: pointer;
+  transition:
+    transform .18s ease,
+    border-color .18s ease,
+    color .18s ease,
+    box-shadow .18s ease,
+    background .18s ease;
+}
+
+.account-logout--top::before {
+  content: "↪";
+  margin-right: 7px;
+  color: #0b8664;
+  font-size: .92rem;
+  transform: rotate(180deg);
+}
+
+.account-logout--top:hover {
+  color: #08785c;
+  border-color: rgba(14,164,122,.28);
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(14,164,122,.10);
+  transform: translateY(-1px);
+}
+
+/* Account title and status become one compact editorial row. */
+#account-box .account-head {
+  display: grid !important;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: center !important;
+  gap: 18px !important;
+  margin: 0 0 16px !important;
+  padding: 0 2px;
+}
+
+#account-box .account-head > div:first-child {
+  min-width: 0;
+}
+
+#account-box .account-head h3 {
+  margin: 0 !important;
+  color: #101828;
+  font-size: 1.1rem !important;
+  line-height: 1.2;
+  letter-spacing: -.025em;
+}
+
+#account-box .account-subtitle {
+  margin: 4px 0 0 !important;
+  max-width: 760px;
+  color: #667085 !important;
+  font-size: .84rem !important;
+}
+
+#account-box .account-user-badge {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 8px 13px !important;
+  border-radius: 999px !important;
+  background: linear-gradient(105deg,#08785c,#1194a2) !important;
+  box-shadow: 0 8px 20px rgba(14,164,122,.14) !important;
+  font-size: .75rem !important;
+}
+
+/* Logged-out state: three clear choices in one compact row.
+   No more two huge buttons + a full-width third button. */
+.account-mode-actions--premium {
+  display: grid !important;
+  grid-template-columns: repeat(3,minmax(0,1fr)) !important;
+  gap: 12px !important;
+  width: 100%;
+}
+
+.account-mode-actions--premium .account-mode-btn {
+  position: relative;
+  min-height: 58px !important;
+  margin: 0 !important;
+  border-radius: 16px !important;
+  font-size: .91rem !important;
+  font-weight: 850 !important;
+  letter-spacing: -.01em;
+  box-shadow: none;
+}
+
+.account-mode-btn--register {
+  background: linear-gradient(105deg,#08785c,#0ea47a 55%,#12a5ba) !important;
+  box-shadow: 0 11px 26px rgba(14,164,122,.16) !important;
+}
+
+.account-mode-btn--login {
+  border: 1.5px solid rgba(14,164,122,.24) !important;
+  color: #08785c !important;
+  background: #f7fcfa !important;
+}
+
+.account-mode-btn--guest {
+  border: 1px solid rgba(16,24,40,.09) !important;
+  color: #475467 !important;
+  background: #fafbfc !important;
+}
+
+.account-mode-actions--premium .account-mode-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 11px 24px rgba(16,24,40,.07);
+}
+
+/* Authenticated state: a compact identity strip rather than another large card. */
+.account-authenticated--premium {
+  display: block;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#account-authenticated .account-authenticated-copy {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  gap: 13px !important;
+  min-height: 66px !important;
+  padding: 14px 16px !important;
+  border: 1px solid rgba(14,164,122,.13);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 100% 0%,rgba(25,174,195,.06),transparent 12rem),
+    linear-gradient(135deg,#fbfefd,#f7fbfc);
+}
+
+.account-authenticated-avatar {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 14px;
+  color: #08785c;
+  background: #eaf8f3;
+  border: 1px solid rgba(14,164,122,.13);
+  font-size: 1rem;
+}
+
+#account-authenticated .account-authenticated-text {
+  max-width: none !important;
+  min-width: 0;
+}
+
+#account-authenticated .account-authenticated-text strong {
+  color: #101828;
+  font-size: .94rem !important;
+}
+
+#account-authenticated .account-authenticated-text p {
+  margin: 3px 0 0 !important;
+  color: #667085 !important;
+  font-size: .80rem !important;
+}
+
+/* Guest upgrade remains available, but visually subordinate. */
+#account-guest-upgrade {
+  margin-top: 12px !important;
+  padding: 14px 16px !important;
+  border-radius: 17px !important;
+  background: #fbfdfc !important;
+}
+
+/* Expanded forms should remain readable but not inflate the whole stage. */
+#account-box .account-panel {
+  margin-top: 14px !important;
+  padding: 18px !important;
+  border-radius: 18px !important;
+}
+
+#account-box .account-form-grid {
+  gap: 12px 14px !important;
+}
+
+@media (max-width: 900px) {
+  #account-box .planner-inline-guide--account {
+    grid-template-columns: auto minmax(0,1fr);
+  }
+
+  .account-logout--top {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+
+  .account-mode-actions--premium {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  .account-mode-btn--guest {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 620px) {
+  #account-box {
+    padding: 18px 16px 20px !important;
+  }
+
+  #account-box .planner-inline-guide--account {
+    grid-template-columns: auto minmax(0,1fr);
+    min-height: 0;
+    padding: 13px !important;
+  }
+
+  .planner-account-guide__copy p {
+    font-size: .78rem !important;
+  }
+
+  .account-logout--top {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  #account-box .account-head {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+
+  #account-box .account-user-badge {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .account-mode-actions--premium {
+    grid-template-columns: 1fr !important;
+  }
+
+  .account-mode-btn--guest {
+    grid-column: auto;
+  }
+
+  #account-box .account-form-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
