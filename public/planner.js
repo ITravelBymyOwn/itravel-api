@@ -932,10 +932,12 @@ function applyAuthPlannerGate(unlocked){
       try{ el.inert=true; }catch(_){}
       el.setAttribute('aria-disabled','true');
     }else{
-      // Never undo the existing post-Save Destinations setup lock.
+      // Never undo the existing post-Save lock, but Destinations must stay
+      // interactive because the Start CTA lives inside that section.
       const setupLocked=el.classList.contains('is-setup-locked');
-      try{ el.inert=setupLocked; }catch(_){}
-      el.setAttribute('aria-disabled',setupLocked?'true':'false');
+      const keepContainerInteractive=(sel==='#destinations-box');
+      try{ el.inert=keepContainerInteractive ? false : setupLocked; }catch(_){}
+      el.setAttribute('aria-disabled',(setupLocked && !keepContainerInteractive)?'true':'false');
     }
   });
 
@@ -2596,20 +2598,40 @@ function bindPlannerLanguageCapability(){
    - startPlanning() itself is intentionally left unchanged.
    ========================================================= */
 function setSavedSetupLocked(locked){
-  // Auth/account controls must remain usable after Save Destinations.
-  // In particular, Sign out must never become inert because trip setup is locked.
-  // Only trip-definition sections are frozen here; Auth has its own independent gate.
-  ['#travelers-box','#destinations-box'].forEach(sel=>{
-    const el=qs(sel);
-    if(!el) return;
-    el.classList.toggle('is-setup-locked',!!locked);
-    try{ el.inert=!!locked; }catch(_){}
-    el.setAttribute('aria-disabled',locked?'true':'false');
-  });
+  /* Phase 4.4
+     Travelers are fully frozen after Save. Destinations keep their container alive
+     because the primary Start CTA now lives inside that section. Only the route
+     editing controls are disabled; the CTA remains interactive. */
+  const travelers=qs('#travelers-box');
+  if(travelers){
+    travelers.classList.toggle('is-setup-locked',!!locked);
+    try{ travelers.inert=!!locked; }catch(_){}
+    travelers.setAttribute('aria-disabled',locked?'true':'false');
+  }
+
+  const destinations=qs('#destinations-box');
+  if(destinations){
+    destinations.classList.toggle('is-setup-locked',!!locked);
+    destinations.classList.toggle('is-route-data-locked',!!locked);
+    /* Never inert the whole section: #start-planning is intentionally inside it. */
+    try{ destinations.inert=false; }catch(_){}
+    destinations.setAttribute('aria-disabled','false');
+
+    qsa('input, select, textarea, button.remove, #add-city-btn',destinations).forEach(control=>{
+      /* The route confirmation CTA and Start CTA manage their own state below. */
+      if(control.id==='save-destinations' || control.id==='start-planning') return;
+      control.disabled=!!locked;
+      control.setAttribute('aria-disabled',locked?'true':'false');
+    });
+  }
 
   if($save){
     $save.disabled=!!locked || !currentUser;
     $save.setAttribute('aria-disabled',String(!!locked || !currentUser));
+  }
+
+  if(!locked){
+    updateAddCityButtonState();
   }
 }
 
@@ -2708,6 +2730,7 @@ function showPreferencesStage(){
   if($start){
     $start.disabled=true;
     $start.setAttribute('aria-disabled','true');
+    $start.classList.remove('is-ready');
     $start.dataset.itbmoConsumed='1';
   }
 
@@ -2810,16 +2833,17 @@ function ensureSaveTransitionOverlay(){
   overlay.setAttribute('aria-hidden','true');
   overlay.innerHTML=`
     <div class="itbmo-save-transition-card" role="status" aria-live="polite" aria-atomic="true">
-      <div class="itbmo-hourglass-loader" aria-hidden="true">
-        <svg class="itbmo-hourglass" viewBox="0 0 48 58" focusable="false" aria-hidden="true">
-          <path class="itbmo-hourglass-frame" d="M10 5h28M10 53h28M13 7c0 10 3 14 11 22-8 8-11 12-11 22M35 7c0 10-3 14-11 22 8 8 11 12 11 22"/>
-          <path class="itbmo-hourglass-glass" d="M15.5 8.5h17c-.7 7-3.1 11.3-8.5 17-5.4-5.7-7.8-10-8.5-17Zm0 41c.7-7 3.1-11.3 8.5-17 5.4 5.7 7.8 10 8.5 17h-17Z"/>
-          <path class="itbmo-hourglass-sand-top" d="M18 12h12c-.7 4.4-2.5 7.5-6 11-3.5-3.5-5.3-6.6-6-11Z"/>
-          <path class="itbmo-hourglass-sand-bottom" d="M18.5 46.5c.8-3.7 2.5-6.4 5.5-9.6 3 3.2 4.7 5.9 5.5 9.6h-11Z"/>
-          <rect class="itbmo-hourglass-stream" x="22.7" y="25.5" width="2.6" height="9.5" rx="1.3"/>
-        </svg>
+      <div class="itbmo-route-loader" aria-hidden="true">
+        <span class="itbmo-route-loader__halo"></span>
+        <span class="itbmo-route-loader__line"></span>
+        <span class="itbmo-route-loader__node itbmo-route-loader__node--1"></span>
+        <span class="itbmo-route-loader__node itbmo-route-loader__node--2"></span>
+        <span class="itbmo-route-loader__node itbmo-route-loader__node--3"></span>
+        <span class="itbmo-route-loader__star">✦</span>
       </div>
+      <div class="itbmo-save-transition-eyebrow"></div>
       <div class="itbmo-save-transition-title"></div>
+      <div class="itbmo-save-transition-subtitle"></div>
     </div>`;
   document.body.appendChild(overlay);
   return overlay;
@@ -2828,10 +2852,12 @@ function ensureSaveTransitionOverlay(){
 function showSaveTransitionOverlay(){
   const overlay=ensureSaveTransitionOverlay();
   const es=getLang()==='es';
+  const eyebrow=qs('.itbmo-save-transition-eyebrow',overlay);
   const title=qs('.itbmo-save-transition-title',overlay);
   const subtitle=qs('.itbmo-save-transition-subtitle',overlay);
-  if(title) title.textContent=es?'Guardando destinos…':'Saving destinations…';
-  if(subtitle) subtitle.textContent=es?'Organizando tus destinos y preferencias.':'Organizing your destinations and preferences.';
+  if(eyebrow) eyebrow.textContent=es?'TU RUTA ESTÁ TOMANDO FORMA':'YOUR ROUTE IS TAKING SHAPE';
+  if(title) title.textContent=es?'Organizando tus destinos':'Organizing your destinations';
+  if(subtitle) subtitle.textContent=es?'Validamos ciudades, fechas y tiempos para dejar todo listo para el siguiente paso.':'We are validating cities, dates and timing so everything is ready for the next step.';
   overlay.classList.add('active');
   overlay.setAttribute('aria-hidden','false');
   document.documentElement.classList.add('itbmo-save-transition-open');
@@ -3019,6 +3045,13 @@ async function saveDestinations(){
   renderCityTabs();
 
   $start.disabled = savedDestinations.length === 0;
+  $start.setAttribute('aria-disabled',String($start.disabled));
+  $start.classList.toggle('is-ready',!$start.disabled);
+  if(!$start.disabled){
+    $start.textContent=getLang()==='es'
+      ? '✦ Tu ruta está lista · Iniciar planificación →'
+      : '✦ Your route is ready · Start planning →';
+  }
   hasSavedOnce = true;
 
   if ($resetBtn) {
