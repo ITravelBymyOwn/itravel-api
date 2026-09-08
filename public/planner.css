@@ -9520,3 +9520,174 @@ body > #info-chat-modal.info-chat-modal.is-minimized{
     margin-top:4px !important;
   }
 }
+
+/* =========================================================
+   ITBMO · PHASE 4.9 · CRITICAL FLOW FIX
+   Floating Info Chat + deterministic generation-end handoff
+   + premium My Trips + richer post-generation actions.
+========================================================= */
+
+/* INFO CHAT
+   Explicit final-precedence rules. The window is independent of Planner flow. */
+body > #info-chat-modal.info-chat-modal{
+  display:flex;
+  position:fixed !important;
+  z-index:50000 !important;
+  visibility:hidden;
+  pointer-events:none;
+  opacity:0;
+  top:128px;
+  right:30px;
+  left:auto;
+  bottom:auto;
+  width:min(650px,calc(100vw - 60px));
+  height:min(610px,calc(100vh - 158px));
+  min-width:390px;
+  min-height:410px;
+  max-width:calc(100vw - 20px);
+  max-height:calc(100vh - 20px);
+  overflow:hidden !important;
+  resize:both !important;
+  transform:translateY(-8px) scale(.985);
+}
+body > #info-chat-modal.info-chat-modal.active{
+  visibility:visible !important;
+  pointer-events:auto !important;
+  opacity:1 !important;
+  transform:translateY(0) scale(1) !important;
+}
+body > #info-chat-modal.info-chat-modal.is-minimized{
+  width:min(360px,calc(100vw - 40px)) !important;
+  height:78px !important;
+  min-width:280px !important;
+  min-height:78px !important;
+  max-height:78px !important;
+  resize:none !important;
+}
+body > #info-chat-modal .info-chat-header{
+  cursor:grab !important;
+  user-select:none;
+}
+body > #info-chat-modal.is-dragging .info-chat-header{
+  cursor:grabbing !important;
+}
+
+/* Make the resize corner easier to discover without adding another control. */
+body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
+  content:"";
+  position:absolute;
+  right:6px;
+  bottom:6px;
+  width:15px;
+  height:15px;
+  pointer-events:none;
+  opacity:.48;
+  background:
+    linear-gradient(135deg,transparent 0 46%,rgba(8,120,92,.55) 47% 55%,transparent 56% 64%,rgba(8,120,92,.38) 65% 73%,transparent 74%);
+}
+
+/* MY TRIPS
+   This is a global navigation action, not a ghost utility. */
+.planner-my-trips:not([hidden]){
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:8px !important;
+  min-height:46px !important;
+  padding:0 18px !important;
+  color:#076f56 !important;
+  background:linear-gradient(135deg,#ffffff,#f1fbf7) !important;
+  border:1px solid rgba(14,164,122,.34) !important;
+  border-radius:999px !important;
+  box-shadow:
+    0 8px 22px rgba(7,94,72,.085),
+    inset 0 1px 0 rgba(255,255,255,.8) !important;
+  font-size:.88rem !important;
+  font-weight:850 !important;
+  cursor:pointer !important;
+  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,background .18s ease !important;
+}
+.planner-my-trips:not([hidden]):hover{
+  transform:translateY(-1px) !important;
+  color:#055c48 !important;
+  background:linear-gradient(135deg,#ffffff,#e9f9f3) !important;
+  border-color:rgba(14,164,122,.55) !important;
+  box-shadow:0 12px 28px rgba(7,94,72,.12) !important;
+}
+.planner-my-trips:not([hidden]):focus-visible{
+  outline:3px solid rgba(14,164,122,.16) !important;
+  outline-offset:3px !important;
+}
+
+/* POST-GENERATION ACTIONS
+   Keep them secondary to Trip Workspace, but add enough identity and energy. */
+#planner-post-generation .toolbar.itbmo-toolbar-ready{
+  gap:16px !important;
+}
+#planner-post-generation .toolbar #btn-pdf,
+#planner-post-generation .toolbar #btn-csv,
+#planner-post-generation .toolbar #btn-receipt{
+  min-height:58px !important;
+  border-radius:17px !important;
+  box-shadow:
+    0 8px 22px rgba(16,24,40,.05),
+    inset 0 1px 0 rgba(255,255,255,.8) !important;
+}
+
+#planner-post-generation .toolbar #btn-pdf{
+  color:#9f2147 !important;
+  background:linear-gradient(135deg,#fff,#fff6f8) !important;
+  border-color:rgba(214,51,101,.17) !important;
+}
+#planner-post-generation .toolbar #btn-csv{
+  color:#087659 !important;
+  background:linear-gradient(135deg,#fff,#f1fbf6) !important;
+  border-color:rgba(14,164,122,.18) !important;
+}
+#planner-post-generation .toolbar #btn-receipt{
+  color:#086e86 !important;
+  background:linear-gradient(135deg,#fff,#f1fafc) !important;
+  border-color:rgba(20,143,170,.18) !important;
+}
+
+#planner-post-generation .toolbar #btn-pdf:hover{
+  background:linear-gradient(135deg,#fff,#ffedf2) !important;
+  border-color:rgba(214,51,101,.30) !important;
+  box-shadow:0 13px 30px rgba(151,32,70,.09) !important;
+}
+#planner-post-generation .toolbar #btn-csv:hover{
+  background:linear-gradient(135deg,#fff,#e8f9f1) !important;
+  border-color:rgba(14,164,122,.34) !important;
+  box-shadow:0 13px 30px rgba(8,118,89,.09) !important;
+}
+#planner-post-generation .toolbar #btn-receipt:hover{
+  background:linear-gradient(135deg,#fff,#e9f8fb) !important;
+  border-color:rgba(20,143,170,.34) !important;
+  box-shadow:0 13px 30px rgba(8,110,134,.09) !important;
+}
+
+#planner-post-generation .new-planning-cta.is-ready{
+  margin-top:28px !important;
+  padding:20px 22px !important;
+}
+#planner-post-generation .new-planning-button{
+  min-height:48px !important;
+  padding:0 20px !important;
+}
+
+/* My Trips history feels like a destination when reached from the topbar. */
+#journey-history{
+  scroll-margin-top:112px !important;
+}
+
+@media(max-width:760px){
+  body > #info-chat-modal.info-chat-modal:not(.is-minimized){
+    resize:none !important;
+    min-width:0 !important;
+    min-height:0 !important;
+  }
+  .planner-my-trips:not([hidden]){
+    min-height:42px !important;
+    padding:0 14px !important;
+  }
+}
