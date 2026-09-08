@@ -2771,6 +2771,32 @@ async function confirmPreferencesAndContinue(){
      visible in its original location instead of the page jumping away from it. */
   installPlannerAgentFlow();
   startPlanning();
+
+  /* Guide the traveler forward: once the agent opens, glide gently to the
+     conversation and keep the cursor ready in the lodging field. */
+  requestAnimationFrame(()=>{
+    const agent=qs('#planner-agent-flow');
+    const composer=qs('#chat-input');
+
+    if(agent){
+      smoothAdvanceTo(agent,{gap:104,center:false});
+    }
+
+    if(composer){
+      try{ composer.focus({preventScroll:true}); }
+      catch(_){ try{ composer.focus(); }catch(__){} }
+    }
+
+    /* startPlanning() may reveal/paint the first prompt one frame later. */
+    setTimeout(()=>{
+      if(agent) smoothAdvanceTo(agent,{gap:104,center:false});
+      if(composer){
+        try{ composer.focus({preventScroll:true}); }
+        catch(_){ try{ composer.focus(); }catch(__){} }
+      }
+    },180);
+  });
+
   await _persistPostPaymentProgress_('collecting_hotels');
 }
 
@@ -6868,9 +6894,39 @@ function bindJourneyHome(){
   qs('#journey-home-resume')?.addEventListener('click',()=>_journeyOpenTrip_(journeyHomeLatestTrip?.id));
   qs('#journey-home-new')?.addEventListener('click',_journeyStartNew_);
   qs('#planner-my-trips')?.addEventListener('click',async()=>{
-    if(journeyHomeLatestTrip){await showJourneyReturnGate(journeyHomeLatestTrip);return;}
-    const trips=await _journeyLoadHistory_();
-    if(trips[0]){journeyHomeLatestTrip=trips[0];await showJourneyReturnGate(trips[0]);}
+    const button=qs('#planner-my-trips');
+    if(button?.dataset.busy==='1') return;
+    if(button) button.dataset.busy='1';
+
+    try{
+      let trip=journeyHomeLatestTrip;
+
+      if(!trip){
+        const trips=await _journeyLoadHistory_();
+        trip=trips[0] || null;
+        if(trip) journeyHomeLatestTrip=trip;
+      }
+
+      if(!trip) return;
+
+      await showJourneyReturnGate(trip);
+
+      /* The global topbar action is specifically "My trips", so take the
+         traveler to the history section instead of only revealing the gate. */
+      requestAnimationFrame(()=>{
+        const history=qs('#journey-history');
+        const gate=qs('#journey-home');
+        const target=(history && !history.hidden) ? history : gate;
+        if(!target) return;
+
+        const rect=target.getBoundingClientRect();
+        const current=window.scrollY || document.documentElement.scrollTop || 0;
+        const desired=Math.max(0,current + rect.top - 112);
+        window.scrollTo({top:desired,behavior:'smooth'});
+      });
+    }finally{
+      if(button) delete button.dataset.busy;
+    }
   });
 }
 
@@ -8599,7 +8655,32 @@ function showFinalDownloadModal(){
   document.body.appendChild(overlay); requestAnimationFrame(()=>overlay.classList.add('active'));
   const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
-  close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
+  close.addEventListener('click',()=>{
+    if(!ack.checked) return;
+    overlay.classList.remove('active');
+
+    setTimeout(()=>{
+      overlay.remove();
+
+      /* Phase 4.9 · Critical completion handoff.
+         The generated-trip controls live at the end of the Planner, so do not
+         calculate against a target that may still be reflowing. Stay at the
+         bottom and reinforce it once after layout settles. */
+      const scrollToPlannerEnd=(behavior='smooth')=>{
+        const doc=document.documentElement;
+        const bottom=Math.max(
+          document.body?.scrollHeight || 0,
+          doc?.scrollHeight || 0
+        );
+        window.scrollTo({top:bottom,behavior});
+      };
+
+      requestAnimationFrame(()=>{
+        scrollToPlannerEnd('smooth');
+        setTimeout(()=>scrollToPlannerEnd('auto'),420);
+      });
+    },220);
+  });
   const pdfButton=overlay.querySelector('.itbmo-open-pdf');
   const csvButton=overlay.querySelector('.itbmo-open-csv');
   const receiptButton=overlay.querySelector('.itbmo-open-receipt');
@@ -8703,17 +8784,18 @@ function smoothAdvanceTo(target,{gap=118,center=false}={}){
 }
 
 function installPlannerInlineInfoChat(){
-  const slot=qs('#planner-inline-info-slot');
+  /* Phase 4.9 · Restore the original floating Info Chat contract.
+     Keep the modal as a direct child of <body>. Do not reparent it into the
+     Planner flow and do not reset user-resized/user-moved geometry on reopen. */
   const modal=qs('#info-chat-modal');
-  if(!slot || !modal || modal.parentElement===slot) return;
-  slot.appendChild(modal);
-  modal.classList.add('is-inline-planner-chat');
-  modal.style.left='';
-  modal.style.right='';
-  modal.style.top='';
-  modal.style.bottom='';
-  modal.style.width='';
-  modal.style.height='';
+  if(!modal) return;
+
+  if(modal.parentElement !== document.body){
+    document.body.appendChild(modal);
+  }
+
+  modal.classList.remove('is-inline-planner-chat');
+  delete modal.dataset.mobileViewportLayout;
 }
 
 function installPlannerAgentFlow(){
@@ -9954,19 +10036,49 @@ function initInfoChatDrag(){
   header.addEventListener('pointercancel',end);
 }
 
-function openInfoModal(){
-  if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
-    return;
+async function openInfoModal(){
+  const modal=qs('#info-chat-modal');
+  const trigger=qs('#info-chat-floating');
+  if(!modal || !currentTripId) return;
+
+  /* Never bypass entitlement. If the visible control says Info Chat is
+     available but the in-memory trip binding became stale after restore,
+     revalidate against the existing payment/status API first. */
+  const triggerUsable=trigger && !trigger.disabled && trigger.getAttribute('aria-disabled')!=='true';
+  if(!triggerUsable || infoChatQueriesRemaining<=0) return;
+
+  if(infoChatAuthorizedTripId !== currentTripId){
+    try{
+      const token=getStoredSessionToken();
+      const status=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      applyInfoChatStatus(status);
+    }catch(err){
+      console.warn('[INFO CHAT OPEN STATUS]',err);
+    }
   }
+
+  if(infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining<=0) return;
+
   installPlannerInlineInfoChat();
-  const modal = qs('#info-chat-modal');
-  if(!modal) return;
-  modal.style.display = 'flex';
+
+  modal.style.display='flex';
   modal.classList.add('active');
   modal.classList.remove('is-minimized');
+  document.body.classList.add('itbmo-info-open');
+
   hideInfoChatNotice();
   ensureInfoChatWelcome();
-  /* Inline on purpose: opening Info Chat must never yank the page upward. */
+  bindInfoChatViewportLayout();
+  initInfoChatDrag();
+  applyInfoChatViewportLayout();
+
+  /* Keep the page where the traveler is; only the floating window opens. */
+  requestAnimationFrame(()=>{
+    const input=qs('#info-chat-input');
+    if(input && !window.matchMedia('(max-width:760px)').matches){
+      try{ input.focus({preventScroll:true}); }catch(_){}
+    }
+  });
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
@@ -10132,149 +10244,63 @@ function bindNewPlanningListener(){
 
 function enhancePreferencesInfoChatCopy(){
   const field=qs('#special-conditions');
-  if(!field || qs('#itbmo-preferences-help-row')) return;
+  if(!field || qs('#itbmo-preferences-guidance')) return;
 
-  const lang = _plannerOutputLang_();
-  const copy = {
+  const lang=_plannerOutputLang_();
+  const copy={
     en:{
-      guideTitle:'✨ Tell us exactly how you want to experience your trip',
-      guideSubtitle:'This will help create an itinerary that truly matches you.',
-      guideItems:[
-        '🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”',
-        '🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”',
-        '🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”',
-        '🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”',
-        '⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”',
-        '👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”'
+      label:'A few useful details make the itinerary much more personal.',
+      items:[
+        '<strong>Style:</strong> nature, culture, food, authentic experiences.',
+        '<strong>Pace:</strong> relaxed, balanced or intensive.',
+        '<strong>Must-dos:</strong> experiences you do not want to miss.',
+        '<strong>Needs:</strong> mobility, allergies, children or other constraints.'
       ],
-      guideFinal:'📝 The more details you share, the more precise, smooth and personalized your itinerary will be.',
-      unsureTitle:'💡 Not sure what to write?',
-      unsureIntro:'Info Chat 🌐 is now available with up to 10 trip-related queries for the cities in this itinerary. Use it before continuing if you want more context for your preferences.',
-      unsureExamples:'For example:',
-      unsureItems:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
-      placeholder:'Write your preferences, restrictions or special conditions here…',
-      close:'Close'
+      note:'Not sure yet? Use Info Chat above to research your destinations first.',
+      placeholder:'Write your preferences, restrictions or special conditions here…'
     },
     es:{
-      guideTitle:'✨ Cuéntanos exactamente cómo quieres vivir tu viaje',
-      guideSubtitle:'Esta información permitirá crear un itinerario realmente alineado contigo.',
-      guideItems:[
-        '🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”',
-        '🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”',
-        '🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”',
-        '🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”',
-        '⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”',
-        '👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”'
+      label:'Unos pocos detalles útiles hacen que el itinerario sea mucho más personal.',
+      items:[
+        '<strong>Estilo:</strong> naturaleza, cultura, gastronomía, experiencias auténticas.',
+        '<strong>Ritmo:</strong> relajado, balanceado o intenso.',
+        '<strong>Imperdibles:</strong> experiencias que no quieres dejar por fuera.',
+        '<strong>Necesidades:</strong> movilidad, alergias, niños u otras restricciones.'
       ],
-      guideFinal:'📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.',
-      unsureTitle:'💡 ¿No sabes qué escribir?',
-      unsureIntro:'Info Chat 🌐 ya está disponible con hasta 10 consultas relacionadas con las ciudades de este itinerario. Úsalo antes de continuar si necesitas más contexto para tus preferencias.',
-      unsureExamples:'Por ejemplo:',
-      unsureItems:['🏨 Mejor zona o barrio para hospedarte','🧳 Contexto estacional y qué llevar','🚇 Transporte y cómo desplazarte','🍽️ Gastronomía local y zonas para comer','📸 Lugares ocultos y puntos para fotografía','🧭 Barrios, costumbres y contexto práctico local','🧳 Qué llevar y costumbres locales','💰 Recomendaciones de presupuesto','❓ Cualquier otra consulta relacionada con tu viaje'],
-      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…',
-      close:'Cerrar'
+      note:'¿Todavía no lo tienes claro? Usa Info Chat arriba para investigar primero.',
+      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…'
     }
-  }[lang] || null;
-
-  const c=copy || {
-    guideTitle:'✨ Tell us exactly how you want to experience your trip',
-    guideSubtitle:'This will help create an itinerary that truly matches you.',
-    guideItems:[
-      '🏞️ Style & activities → nature, landscapes, museums, authentic tours.',
-      '🚗 Transportation → rental car, public transport, taxi/Uber.',
-      '🏃 Pace & adventure level → relaxed, balanced, adventurous.',
-      '🧭 Must-dos → activities or experiences you do not want to miss.',
-      '⚕️ Health & restrictions → mobility, allergies or other limitations.',
-      '👨‍👩‍👧‍👦 Other important details → children, flexible hours, long walks.'
+  }[lang] || {
+    label:'A few useful details make the itinerary much more personal.',
+    items:[
+      '<strong>Style:</strong> activities and experiences you prefer.',
+      '<strong>Pace:</strong> relaxed, balanced or intensive.',
+      '<strong>Must-dos:</strong> experiences you do not want to miss.',
+      '<strong>Needs:</strong> mobility, allergies or other constraints.'
     ],
-    guideFinal:'📝 The more details you share, the more personalized and optimized your itinerary becomes.',
-    unsureTitle:'💡 Not sure what to write?',
-    unsureIntro:'Use Info Chat 🌐 before continuing if you need more context about the cities in this itinerary.',
-    unsureExamples:'For example:',
-    unsureItems:['🏨 Best area to stay','🧳 Seasonal context and packing','🚇 Transportation','🍽️ Local cuisine','📸 Photography spots','🧭 Local context','💰 Budget recommendations'],
-    placeholder:'Write your preferences, restrictions or special conditions here…',
-    close:'Close'
+    note:'Use Info Chat above first if you need more context.',
+    placeholder:'Write your preferences, restrictions or special conditions here…'
   };
 
-  const row=document.createElement('div');
-  row.id='itbmo-preferences-help-row';
-  row.className='preferences-help-row';
+  /* Remove the previous button/popover treatment if this function is executed
+     after a hot reload or a recovered Planner state. */
+  qs('#itbmo-preferences-help-row')?.remove();
 
-  const buildHelp=(type,title,subtitle,bodyHtml)=>{
-    const item=document.createElement('div');
-    item.className='preferences-help-item';
-
-    const btn=document.createElement('button');
-    btn.type='button';
-    btn.className=`preferences-help-button preferences-help-button--${type}`;
-    btn.setAttribute('aria-expanded','false');
-    btn.innerHTML=subtitle
-      ? `<span class="preferences-help-button__title">${title}</span><span class="preferences-help-button__subtitle">${subtitle}</span>`
-      : `<span class="preferences-help-button__title">${title}</span>`;
-
-    const pop=document.createElement('div');
-    pop.className='preferences-help-popover';
-    pop.setAttribute('aria-hidden','true');
-    pop.innerHTML=`
-      <button type="button" class="preferences-help-popover__close" aria-label="${c.close}">×</button>
-      <div class="preferences-help-popover__body">${bodyHtml}</div>
-    `;
-
-    btn.addEventListener('click',(e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      const wasOpen=pop.classList.contains('is-open');
-      closePreferencesHelpPopovers();
-      if(!wasOpen){
-        pop.classList.add('is-open');
-        pop.setAttribute('aria-hidden','false');
-        btn.setAttribute('aria-expanded','true');
-      }
-    });
-
-    pop.querySelector('.preferences-help-popover__close')?.addEventListener('click',(e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      closePreferencesHelpPopovers();
-    });
-
-    pop.addEventListener('click',(e)=>e.stopPropagation());
-
-    item.append(btn,pop);
-    return item;
-  };
-
-  const guideBody=`
-    <div class="preferences-help-list">
-      ${c.guideItems.map(x=>`<p>${x}</p>`).join('')}
+  const guide=document.createElement('div');
+  guide.id='itbmo-preferences-guidance';
+  guide.className='preferences-guidance';
+  guide.innerHTML=`
+    <div class="preferences-guidance__lead">${copy.label}</div>
+    <div class="preferences-guidance__items">
+      ${copy.items.map(item=>`<span>${item}</span>`).join('')}
     </div>
-    <div class="preferences-help-final">${c.guideFinal}</div>
+    <div class="preferences-guidance__note">${copy.note}</div>
   `;
 
-  const unsureBody=`
-    <p class="preferences-help-intro">${c.unsureIntro}</p>
-    <strong class="preferences-help-examples">${c.unsureExamples}</strong>
-    <div class="preferences-help-list preferences-help-list--compact">
-      ${c.unsureItems.map(x=>`<p>${x}</p>`).join('')}
-    </div>
-  `;
-
-  row.append(
-    buildHelp('guide',c.guideTitle,c.guideSubtitle,guideBody),
-    buildHelp('unsure',c.unsureTitle,'',unsureBody)
-  );
-
-  field.parentNode?.insertBefore(row,field);
-  field.placeholder=c.placeholder;
+  field.parentNode?.insertBefore(guide,field);
+  field.placeholder=copy.placeholder;
 
   field.addEventListener('input',autoGrowPreferencesField);
-  field.addEventListener('click',closePreferencesHelpPopovers);
-  field.addEventListener('focus',closePreferencesHelpPopovers);
-
-  document.addEventListener('click',(e)=>{
-    if(!e.target.closest('#itbmo-preferences-help-row')) closePreferencesHelpPopovers();
-  });
-
   autoGrowPreferencesField();
 }
 
