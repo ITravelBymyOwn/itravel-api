@@ -2771,13 +2771,6 @@ async function confirmPreferencesAndContinue(){
      visible in its original location instead of the page jumping away from it. */
   installPlannerAgentFlow();
   startPlanning();
-  requestAnimationFrame(()=>{
-    const composer=qs('#chat-input');
-    if(composer){
-      try{ composer.focus({preventScroll:true}); }
-      catch(_){ try{ composer.focus(); }catch(__){} }
-    }
-  });
   await _persistPostPaymentProgress_('collecting_hotels');
 }
 
