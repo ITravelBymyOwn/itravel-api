@@ -4,10 +4,12 @@ const KEY='itbmo_trip_workspace_snapshot_v1';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
+const contextByCity=new Map();
+const contextRequests=new Map();
 const requestedLang=new URLSearchParams(location.search).get('lang');
 const copy={
- es:{back:'Volver al Planner',prepareBadge:'Explora',ready:'Tu viaje está listo',overviewK:'TU VIAJE ITBMO',overviewT:'¿Por dónde quieres empezar?',overviewC:'Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.',city:'ciudad',cities:'ciudades',d:'día',ds:'días',organized:'organizados',explore:'Explorar',all:'Todas las ciudades',cityK:'TU CIUDAD',it:'Itinerario',prep:'Para tu viaje',wholeK:'PARA TODO TU VIAJE',wholeT:'Lo esencial que viaja contigo.',wholeC:'Aquí aparecerán servicios de alcance general únicamente cuando aporten valor real a tu viaje.',coming:'Próximamente',details:'Ver detalles',hide:'Ocultar detalles',route:'Trayecto',transport:'Transporte',duration:'Duración',notes:'Detalles',prepareT:'Todo lo que necesitas para vivir',prepareC:'Tu itinerario ya está organizado. Aquí reuniremos únicamente lo que conviene resolver para hacerlo realidad.',tickets:'Entradas y reservas',ticketsC:'Accesos, horarios y reservas que realmente requiere tu itinerario.',tours:'Tours y experiencias',toursC:'Alternativas guiadas y experiencias que encajan con lo que ya planeaste.',move:'Cómo moverte',moveC:'Opciones útiles de movilidad relacionadas con esta ciudad.',more:'Más para tu viaje',moreC:'Otros servicios relevantes, solo cuando aporten valor.',next:'Próximamente',loading:'Recuperando tu viaje…',emptyT:'No pudimos cargar este viaje.',emptyC:'Vuelve al Planner para abrirlo nuevamente o inicia sesión si este viaje pertenece a tu cuenta.'},
- en:{back:'Back to Planner',prepareBadge:'Explore',ready:'Your trip is ready',overviewK:'YOUR ITBMO TRIP',overviewT:'Where do you want to start?',overviewC:'Choose a city to explore it day by day and prepare what you actually need.',city:'city',cities:'cities',d:'day',ds:'days',organized:'organized',explore:'Explore',all:'All cities',cityK:'YOUR CITY',it:'Itinerary',prep:'For your trip',wholeK:'FOR YOUR WHOLE TRIP',wholeT:'The essentials that travel with you.',wholeC:'Trip-wide services will appear here only when they add real value to your journey.',coming:'Coming next',details:'View details',hide:'Hide details',route:'Route',transport:'Transport',duration:'Duration',notes:'Details',prepareT:'Everything you need to experience',prepareC:'Your itinerary is already organized. Here we will bring together only what is worth arranging to make it happen.',tickets:'Tickets & reservations',ticketsC:'Access, schedules and reservations your itinerary actually requires.',tours:'Tours & experiences',toursC:'Guided alternatives and experiences that fit what you already planned.',move:'Getting around',moveC:'Useful mobility options related to this city.',more:'More for your trip',moreC:'Other relevant services, only when they add value.',next:'Coming next',loading:'Recovering your trip…',emptyT:'We could not load this trip.',emptyC:'Return to the Planner to open it again, or sign in if this trip belongs to your account.'}
+ es:{back:'Volver al Planner',prepareBadge:'Explora',ready:'Tu viaje está listo',overviewK:'TU VIAJE ITBMO',overviewT:'¿Por dónde quieres empezar?',overviewC:'Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.',city:'ciudad',cities:'ciudades',d:'día',ds:'días',organized:'organizados',explore:'Explorar',all:'Todas las ciudades',cityK:'TU CIUDAD',it:'Itinerario',prep:'Para tu viaje',wholeK:'PARA TODO TU VIAJE',wholeT:'Lo esencial que viaja contigo.',wholeC:'Aquí aparecerán servicios de alcance general únicamente cuando aporten valor real a tu viaje.',coming:'Próximamente',details:'Ver detalles',hide:'Ocultar detalles',route:'Trayecto',transport:'Transporte',duration:'Duración',notes:'Detalles',prepareT:'Todo lo que necesitas para vivir',prepareC:'Tu itinerario ya está organizado. Aquí reuniremos únicamente lo que conviene resolver para hacerlo realidad.',tickets:'Entradas y reservas',ticketsC:'Accesos, horarios y reservas que realmente requiere tu itinerario.',tours:'Tours y experiencias',toursC:'Alternativas guiadas y experiencias que encajan con lo que ya planeaste.',move:'Cómo moverte',moveC:'Opciones útiles de movilidad relacionadas con esta ciudad.',more:'Más para tu viaje',moreC:'Otros servicios relevantes, solo cuando aporten valor.',contextLoading:'Analizando lo que necesitas para este viaje…',contextError:'No pudimos analizar esta ciudad ahora. Puedes seguir usando tu itinerario normalmente.',contextEmpty:'No detectamos nada que necesites resolver aquí.',required:'Entrada necesaria',recommended:'Conviene reservar',optional:'Opcional',journey:'Trayecto',dayLabel:'Día',next:'Próximamente',loading:'Recuperando tu viaje…',emptyT:'No pudimos cargar este viaje.',emptyC:'Vuelve al Planner para abrirlo nuevamente o inicia sesión si este viaje pertenece a tu cuenta.'},
+ en:{back:'Back to Planner',prepareBadge:'Explore',ready:'Your trip is ready',overviewK:'YOUR ITBMO TRIP',overviewT:'Where do you want to start?',overviewC:'Choose a city to explore it day by day and prepare what you actually need.',city:'city',cities:'cities',d:'day',ds:'days',organized:'organized',explore:'Explore',all:'All cities',cityK:'YOUR CITY',it:'Itinerary',prep:'For your trip',wholeK:'FOR YOUR WHOLE TRIP',wholeT:'The essentials that travel with you.',wholeC:'Trip-wide services will appear here only when they add real value to your journey.',coming:'Coming next',details:'View details',hide:'Hide details',route:'Route',transport:'Transport',duration:'Duration',notes:'Details',prepareT:'Everything you need to experience',prepareC:'Your itinerary is already organized. Here we will bring together only what is worth arranging to make it happen.',tickets:'Tickets & reservations',ticketsC:'Access, schedules and reservations your itinerary actually requires.',tours:'Tours & experiences',toursC:'Guided alternatives and experiences that fit what you already planned.',move:'Getting around',moveC:'Useful mobility options related to this city.',more:'More for your trip',moreC:'Other relevant services, only when they add value.',contextLoading:'Analyzing what you need for this trip…',contextError:'We could not analyze this city right now. You can keep using your itinerary normally.',contextEmpty:'Nothing here appears to require action from you.',required:'Ticket needed',recommended:'Reservation recommended',optional:'Optional',journey:'Journey',dayLabel:'Day',next:'Coming next',loading:'Recovering your trip…',emptyT:'We could not load this trip.',emptyC:'Return to the Planner to open it again, or sign in if this trip belongs to your account.'}
 };
 let lang='es',t=copy.es;
 function parseDate(v){if(!v)return null;let m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]);m=String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return null}
@@ -31,7 +33,138 @@ function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw
 function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.innerHTML='';if(nav.hidden)return;days(city).forEach(d=>{const b=document.createElement('button');b.type='button';b.className='tw-day'+(d===day?' active':'');b.textContent=lang==='es'?`Día ${d}`:`Day ${d}`;b.onclick=()=>{day=d;renderCity();window.scrollTo({top:Math.max(0,$('#tw-content').offsetTop-160),behavior:'smooth'})};nav.appendChild(b)})}
 function cleanDuration(v){return String(v||'').replace(/\s*\|\s*/g,' · ').replace(/\n+/g,' · ').trim()}
 function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim(),route=[r.from,r.to].filter(Boolean).join(' → ');html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${r.transport?`<span class="tw-pill">${esc(r.transport)}</span>`:''}${r.duration?`<span class="tw-pill">${esc(cleanDuration(r.duration))}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${r.transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(r.transport)}</b></div>`:''}${r.duration?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(cleanDuration(r.duration))}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
-function renderPrepare(){const c=esc(city);$('#tw-content').innerHTML=`<section class="tw-prepare-hero"><span class="tw-prepare-mark">✦</span><span class="tw-kicker">${c}</span><h2>${esc(t.prepareT)} ${c}.</h2><p>${esc(t.prepareC)}</p></section><div class="tw-prepare-grid"><article class="tw-prepare-card"><span>🎟</span><h3>${esc(t.tickets)}</h3><p>${esc(t.ticketsC)}</p><small>${esc(t.next)}</small></article><article class="tw-prepare-card"><span>✦</span><h3>${esc(t.tours)}</h3><p>${esc(t.toursC)}</p><small>${esc(t.next)}</small></article><article class="tw-prepare-card"><span>↗</span><h3>${esc(t.move)}</h3><p>${esc(t.moveC)}</p><small>${esc(t.next)}</small></article><article class="tw-prepare-card"><span>＋</span><h3>${esc(t.more)}</h3><p>${esc(t.moreC)}</p><small>${esc(t.next)}</small></article></div>`}
+function contextLabel(item){
+  if(item?.need_type==='ticket_required') return t.required;
+  if(item?.need_type==='reservation_recommended') return t.recommended;
+  if(item?.need_type==='guided_tour_optional') return t.optional;
+  if(item?.need_type==='intercity_transport') return t.journey;
+  return '';
+}
+
+function renderNeedItems(items){
+  if(!items.length) return `<div class="tw-context-empty">${esc(t.contextEmpty)}</div>`;
+  return `<div class="tw-context-list">${items.map(item=>`
+    <article class="tw-context-item">
+      <div class="tw-context-item-head">
+        <div>
+          <span class="tw-context-day">${esc(t.dayLabel)} ${esc(item.day)}</span>
+          <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
+        </div>
+        <span class="tw-context-label">${esc(contextLabel(item))}</span>
+      </div>
+      ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
+      ${item.source_route?`<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`:''}
+    </article>`).join('')}</div>`;
+}
+
+function prepareCard(icon,title,description,items){
+  return `<article class="tw-prepare-card tw-prepare-card-live">
+    <span>${icon}</span>
+    <h3>${esc(title)}</h3>
+    <p>${esc(description)}</p>
+    ${renderNeedItems(items)}
+  </article>`;
+}
+
+async function fetchContext(cityName){
+  const token=getStoredSessionToken();
+  if(!token || !data?.trip_id) throw new Error('CONTEXT_SESSION_REQUIRED');
+
+  const response=await fetch('/api/context',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      session_token:token,
+      trip_id:data.trip_id,
+      city:cityName
+    })
+  });
+
+  let payload={};
+  try{ payload=await response.json(); }catch(_){}
+
+  if(!response.ok || !payload?.ok){
+    const error=new Error(payload?.code || 'CONTEXT_ERROR');
+    error.code=payload?.code || 'CONTEXT_ERROR';
+    throw error;
+  }
+
+  return Array.isArray(payload.needs) ? payload.needs : [];
+}
+
+function ensureContext(cityName){
+  if(contextByCity.has(cityName)) return Promise.resolve(contextByCity.get(cityName));
+  if(contextRequests.has(cityName)) return contextRequests.get(cityName);
+
+  const request=fetchContext(cityName)
+    .then(needs=>{
+      contextByCity.set(cityName,{status:'ready',needs});
+      contextRequests.delete(cityName);
+      if(city===cityName && mode==='prepare') renderPrepare();
+      return needs;
+    })
+    .catch(error=>{
+      console.warn('[CONTEXT INTELLIGENCE]',error);
+      contextByCity.set(cityName,{status:'error',needs:[]});
+      contextRequests.delete(cityName);
+      if(city===cityName && mode==='prepare') renderPrepare();
+      return [];
+    });
+
+  contextRequests.set(cityName,request);
+  return request;
+}
+
+function renderPrepare(){
+  const c=esc(city);
+  const state=contextByCity.get(city);
+
+  if(!state){
+    $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
+      <span class="tw-prepare-mark">✦</span>
+      <span class="tw-kicker">${c}</span>
+      <h2>${esc(t.prepareT)} ${c}.</h2>
+      <p>${esc(t.prepareC)}</p>
+    </section>
+    <div class="tw-context-loading"><span class="tw-context-spinner"></span><b>${esc(t.contextLoading)}</b></div>`;
+    ensureContext(city);
+    return;
+  }
+
+  if(state.status==='error'){
+    $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
+      <span class="tw-prepare-mark">✦</span>
+      <span class="tw-kicker">${c}</span>
+      <h2>${esc(t.prepareT)} ${c}.</h2>
+      <p>${esc(t.prepareC)}</p>
+    </section>
+    <div class="tw-context-error">${esc(t.contextError)}</div>`;
+    return;
+  }
+
+  const needs=Array.isArray(state.needs)?state.needs:[];
+  const tickets=needs.filter(item=>item.category==='tickets');
+  const tours=needs.filter(item=>item.category==='tours');
+  const transport=needs.filter(item=>item.category==='transport');
+
+  $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
+    <span class="tw-prepare-mark">✦</span>
+    <span class="tw-kicker">${c}</span>
+    <h2>${esc(t.prepareT)} ${c}.</h2>
+    <p>${esc(t.prepareC)}</p>
+  </section>
+  <div class="tw-prepare-grid">
+    ${prepareCard('🎟',t.tickets,t.ticketsC,tickets)}
+    ${prepareCard('✦',t.tours,t.toursC,tours)}
+    ${prepareCard('↗',t.move,t.moveC,transport)}
+    <article class="tw-prepare-card">
+      <span>＋</span>
+      <h3>${esc(t.more)}</h3>
+      <p>${esc(t.moreC)}</p>
+      <small>${esc(t.next)}</small>
+    </article>
+  </div>`;
+}
 function getStoredSessionToken(){
   try{
     return String(
