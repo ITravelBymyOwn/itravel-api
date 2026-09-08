@@ -2645,15 +2645,6 @@ function autoGrowPreferencesField(){
   $preferencesField.style.overflowY=($preferencesField.scrollHeight > maxHeight) ? 'auto' : 'hidden';
 }
 
-function closePreferencesHelpPopovers(){
-  qsa('.preferences-help-popover.is-open').forEach(pop=>{
-    pop.classList.remove('is-open');
-    pop.setAttribute('aria-hidden','true');
-  });
-  qsa('.preferences-help-button[aria-expanded="true"]').forEach(btn=>{
-    btn.setAttribute('aria-expanded','false');
-  });
-}
 
 function applyPreferencesStageLanguage(){
   if(!$preferencesStage) return;
@@ -10281,10 +10272,6 @@ function enhancePreferencesInfoChatCopy(){
     note:'Use Info Chat above first if you need more context.',
     placeholder:'Write your preferences, restrictions or special conditions here…'
   };
-
-  /* Remove the previous button/popover treatment if this function is executed
-     after a hot reload or a recovered Planner state. */
-  qs('#itbmo-preferences-help-row')?.remove();
 
   const guide=document.createElement('div');
   guide.id='itbmo-preferences-guidance';
