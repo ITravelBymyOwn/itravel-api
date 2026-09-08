@@ -3402,7 +3402,10 @@ function openImmersiveItinerary(){
   try{ localStorage.setItem('itbmo_trip_workspace_snapshot_v1',JSON.stringify(snapshot)); }
   catch(err){ console.warn('[ITBMO WORKSPACE SNAPSHOT]',err); }
 
-  const url='./trip-workspace.html'+(snapshot.lang==='es'?'?lang=es':'?lang=en');
+  const params=new URLSearchParams();
+  params.set('lang',snapshot.lang);
+  if(snapshot.trip_id) params.set('trip_id',snapshot.trip_id);
+  const url=`./trip-workspace.html?${params.toString()}`;
   const opened=window.open(url,'_blank','noopener,noreferrer');
   if(!opened) window.location.href=url;
 }
@@ -6925,7 +6928,7 @@ function _journeyStartNew_(){
   /* This is intentionally NOT Reset: no trip is archived or deleted.
      We only detach the old active-trip pointer and reload a clean Planner. */
   storeActiveTripId(null);
-  try{sessionStorage.removeItem('itbmo_trip_workspace_snapshot_v1');}catch(_){}
+  try{localStorage.removeItem('itbmo_trip_workspace_snapshot_v1');}catch(_){}
   const url=new URL(window.location.href);
   url.searchParams.set('mode','new');
   window.location.href=url.toString();
@@ -6974,8 +6977,11 @@ async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   try{
     const token=getStoredSessionToken();
-    let tripId=getStoredActiveTripId();
+    const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
+    let tripId=requestedTripId || getStoredActiveTripId();
     let trip=null;
+
+    if(requestedTripId) storeActiveTripId(requestedTripId);
 
     if(tripId){
       try{
