@@ -34,12 +34,10 @@ function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[
 function renderPrepare(){const c=esc(city);$('#tw-content').innerHTML=`<section class="tw-prepare-hero"><span class="tw-prepare-mark">✦</span><span class="tw-kicker">${c}</span><h2>${esc(t.prepareT)} ${c}.</h2><p>${esc(t.prepareC)}</p></section><div class="tw-prepare-grid"><article class="tw-prepare-card"><span>🎟</span><h3>${esc(t.tickets)}</h3><p>${esc(t.ticketsC)}</p><small>${esc(t.next)}</small></article><article class="tw-prepare-card"><span>✦</span><h3>${esc(t.tours)}</h3><p>${esc(t.toursC)}</p><small>${esc(t.next)}</small></article><article class="tw-prepare-card"><span>↗</span><h3>${esc(t.move)}</h3><p>${esc(t.moveC)}</p><small>${esc(t.next)}</small></article><article class="tw-prepare-card"><span>＋</span><h3>${esc(t.more)}</h3><p>${esc(t.moreC)}</p><small>${esc(t.next)}</small></article></div>`}
 function backPlanner(){
   const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
-  /* The workspace is normally opened in its own tab. Close it first.
-     If the browser does not allow window.close(), navigate explicitly
-     instead of history.back(), which could return to a Planner URL that
-     lost the active language. */
-  window.close();
-  setTimeout(()=>{if(!window.closed)location.href=plannerUrl},120);
+
+  /* Return inside this same tab. Never close the tab and never use browser
+     history, which could reveal an unrelated page opened before ITBMO. */
+  window.location.replace(plannerUrl);
 }
 try{data=JSON.parse(localStorage.getItem(KEY)||'null')}catch(_){data=null}lang=(requestedLang==='en'||requestedLang==='es')?requestedLang:(data?.lang==='en'?'en':'es');t=copy[lang];setText();$('#tw-back-planner').onclick=backPlanner;$('#tw-empty-back').onclick=backPlanner;$('#tw-all-cities').onclick=overview;$('#tw-mode-itinerary').onclick=()=>{mode='itinerary';renderCity()};$('#tw-mode-prepare').onclick=()=>{mode='prepare';renderCity()};if(!data||!data.itineraries||!cities().length){$('#tw-overview').hidden=true;$('#tw-city').hidden=true;$('#tw-empty').hidden=false}else overview();
 })();
