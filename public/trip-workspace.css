@@ -797,3 +797,111 @@ button,a {
   }
 }
 
+/* Context Intelligence V1 */
+.tw-prepare-card-live {
+  align-self:start
+}
+.tw-context-loading,.tw-context-error {
+  min-height:180px;
+  border:1px solid var(--line);
+  border-radius:26px;
+  background:rgba(255,255,255,.78);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:14px;
+  padding:30px;
+  color:#5f7889;
+  text-align:center
+}
+.tw-context-error {
+  color:#6b7785
+}
+.tw-context-spinner {
+  width:22px;
+  height:22px;
+  border:3px solid #d9e8ed;
+  border-top-color:var(--teal);
+  border-radius:50%;
+  animation:tw-context-spin .8s linear infinite
+}
+@keyframes tw-context-spin {
+  to{transform:rotate(360deg)}
+}
+.tw-context-list {
+  margin-top:18px;
+  display:grid;
+  gap:12px
+}
+.tw-context-item {
+  border:1px solid #dce9ed;
+  border-radius:18px;
+  background:#fbfefe;
+  padding:16px;
+  text-align:left
+}
+.tw-context-item-head {
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px
+}
+.tw-context-day {
+  display:block;
+  color:#17838c;
+  font-size:11px;
+  line-height:1;
+  font-weight:900;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  margin-bottom:7px
+}
+.tw-context-item h4 {
+  margin:0;
+  color:var(--ink);
+  font-size:15px;
+  line-height:1.3
+}
+.tw-context-label {
+  flex:0 0 auto;
+  border:1px solid #cce5e6;
+  border-radius:999px;
+  background:#eff9f8;
+  color:#137a78;
+  padding:6px 8px;
+  font-size:10px;
+  line-height:1;
+  font-weight:900
+}
+.tw-context-item p {
+  margin:10px 0 0;
+  color:#617a8a;
+  font-size:13px;
+  line-height:1.5
+}
+.tw-context-route {
+  display:block;
+  margin-top:10px;
+  color:#77909f;
+  font-size:11px;
+  line-height:1.4
+}
+.tw-context-empty {
+  margin-top:18px;
+  padding:14px;
+  border:1px dashed #d4e4e9;
+  border-radius:16px;
+  color:#78909d;
+  font-size:12px;
+  line-height:1.45;
+  background:#fbfdfd
+}
+@media(max-width:720px) {
+  .tw-context-item-head {
+    display:block
+  }
+  .tw-context-label {
+    display:inline-flex;
+    margin-top:10px
+  }
+}
