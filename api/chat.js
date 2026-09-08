@@ -35,10 +35,16 @@ function _infoHashToken_(token) {
 }
 
 function _infoAdminBypass_(userId) {
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+
+  // Match api/payment.js exactly in Vercel Preview:
+  // any valid ITBMO session may exercise the paid flow without a real payment.
+  // Production remains payment-gated unless the explicit admin bypass is enabled.
+  if (!isProduction) return Boolean(userId);
+
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
-  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
-  return !isProduction || ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+  return ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
 }
 
 async function _infoSupabaseFetch_(path, options = {}) {
