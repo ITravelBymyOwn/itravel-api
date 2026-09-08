@@ -1,7 +1,7 @@
 // /api/context.js
-// ITBMO Context Intelligence V1
-// Read-only contextual analysis for an already-generated trip.
-// No Supabase writes. No itinerary regeneration. No partner/affiliate ranking.
+// ITBMO Context Intelligence V1.1 + Persistence V1
+// Contextual analysis for an already-generated trip with additive persistence.
+// Never regenerates or modifies itinerary_data. No partner/affiliate ranking.
 
 import OpenAI from "openai";
 import crypto from "crypto";
@@ -19,6 +19,7 @@ const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim()
 const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
   String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
 
+const CONTEXT_VERSION = "1.1";
 const MAX_CANDIDATES = 120;
 const ALLOWED_NEEDS = new Set([
   "ticket_required",
@@ -111,6 +112,127 @@ async function getOwnedTrip(tripId, userId) {
     { method: "GET" }
   );
   return Array.isArray(rows) ? rows[0] || null : null;
+}
+
+function sameInstant(a, b) {
+  const x = new Date(a || 0).getTime();
+  const y = new Date(b || 0).getTime();
+  return Number.isFinite(x) && Number.isFinite(y) && x === y;
+}
+
+async function getPersistedContext(trip, city) {
+  const runs = await supabaseFetch(
+    `/trip_context_runs?select=id,context_version,source_trip_updated_at,candidate_count,visible_count,generated_at&` +
+    `trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}&limit=1`,
+    { method: "GET" }
+  );
+
+  const run = Array.isArray(runs) ? runs[0] || null : null;
+  if (!run) return null;
+  if (run.context_version !== CONTEXT_VERSION) return null;
+  if (!sameInstant(run.source_trip_updated_at, trip.updated_at)) return null;
+
+  const needs = await supabaseFetch(
+    `/trip_travel_needs?select=candidate_id,category,city,day,entity_name,entity_type,need_type,confidence,user_message,source_activity,source_route,transport&` +
+    `trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}&` +
+    `context_version=eq.${encodeURIComponent(CONTEXT_VERSION)}&order=day.asc,candidate_id.asc`,
+    { method: "GET" }
+  );
+
+  return {
+    run,
+    needs: Array.isArray(needs) ? needs.map(item => ({
+      ...item,
+      id: `${item.candidate_id}:${item.need_type}`
+    })) : []
+  };
+}
+
+async function persistContext(trip, userId, city, candidates, needs) {
+  const generatedAt = new Date().toISOString();
+
+  // Replace only this trip/city's derived context. Existing core trip data is untouched.
+  await supabaseFetch(
+    `/itinerary_context_entities?trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}`,
+    { method: "DELETE", headers: { Prefer: "return=minimal" } }
+  );
+
+  const entityRows = candidates.map(source => ({
+    trip_id: trip.id,
+    user_id: userId,
+    city,
+    candidate_id: source.candidate_id,
+    day: source.day,
+    entity_name: source.entity_hint || source.activity,
+    entity_type: "other",
+    source_activity: source.activity,
+    source_route: [source.from, source.to].filter(Boolean).join(" → "),
+    transport: source.transport || null,
+    source_notes: source.context_notes || source.notes || null,
+    context_version: CONTEXT_VERSION,
+    source_trip_updated_at: trip.updated_at
+  }));
+
+  let persistedEntities = [];
+  if (entityRows.length) {
+    persistedEntities = await supabaseFetch('/itinerary_context_entities', {
+      method: "POST",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(entityRows)
+    });
+  }
+
+  const entityIdByCandidate = new Map(
+    (Array.isArray(persistedEntities) ? persistedEntities : [])
+      .map(row => [row.candidate_id, row.id])
+  );
+
+  const needRows = needs.map(item => ({
+    trip_id: trip.id,
+    user_id: userId,
+    entity_id: entityIdByCandidate.get(String(item.id || '').split(':')[0]) || null,
+    city,
+    candidate_id: String(item.id || '').split(':')[0],
+    day: item.day,
+    category: item.category,
+    entity_name: item.entity_name,
+    entity_type: item.entity_type,
+    need_type: item.need_type,
+    confidence: item.confidence,
+    user_message: item.user_message || null,
+    source_activity: item.source_activity || null,
+    source_route: item.source_route || null,
+    transport: item.transport || null,
+    context_version: CONTEXT_VERSION,
+    source_trip_updated_at: trip.updated_at
+  }));
+
+  if (needRows.length) {
+    await supabaseFetch('/trip_travel_needs', {
+      method: "POST",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(needRows)
+    });
+  }
+
+  await supabaseFetch('/trip_context_runs?on_conflict=trip_id,city', {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=minimal"
+    },
+    body: JSON.stringify({
+      trip_id: trip.id,
+      user_id: userId,
+      city,
+      context_version: CONTEXT_VERSION,
+      source_trip_updated_at: trip.updated_at,
+      candidate_count: candidates.length,
+      visible_count: needs.length,
+      generated_at: generatedAt
+    })
+  });
+
+  return generatedAt;
 }
 
 function previewBypass(userId) {
@@ -576,37 +698,58 @@ export default async function handler(req, res) {
       });
     }
 
-    if (!candidates.length) {
-      return res.status(200).json({
-        ok: true,
-        context_version: "1.0",
-        trip_id: trip.id,
-        city,
-        generated_at: new Date().toISOString(),
-        needs: [],
-        meta: {
-          candidate_count: 0,
-          visible_count: 0,
-          persisted: false
-        }
-      });
+    // Persistence is a cache of derived context only. The generated itinerary remains the source of truth.
+    try {
+      const persisted = await getPersistedContext(trip, city);
+      if (persisted) {
+        return res.status(200).json({
+          ok: true,
+          context_version: CONTEXT_VERSION,
+          trip_id: trip.id,
+          city,
+          generated_at: persisted.run.generated_at,
+          needs: persisted.needs,
+          meta: {
+            candidate_count: persisted.run.candidate_count,
+            visible_count: persisted.run.visible_count,
+            persisted: true,
+            cache_hit: true
+          }
+        });
+      }
+    } catch (cacheError) {
+      console.warn("[CONTEXT PERSISTENCE READ]", cacheError);
     }
 
-    const language = trip.language === "en" ? "en" : "es";
-    const classifications = await classifyCandidates(city, candidates, language);
-    const needs = sanitizeClassifications(candidates, classifications, city);
+    let needs = [];
+    if (candidates.length) {
+      const language = trip.language === "en" ? "en" : "es";
+      const classifications = await classifyCandidates(city, candidates, language);
+      needs = sanitizeClassifications(candidates, classifications, city);
+    }
+
+    let persisted = false;
+    let generatedAt = new Date().toISOString();
+    try {
+      generatedAt = await persistContext(trip, session.user_id, city, candidates, needs);
+      persisted = true;
+    } catch (persistError) {
+      // Persistence must never block a traveler from using Context Intelligence.
+      console.error("[CONTEXT PERSISTENCE WRITE]", persistError);
+    }
 
     return res.status(200).json({
       ok: true,
-      context_version: "1.0",
+      context_version: CONTEXT_VERSION,
       trip_id: trip.id,
       city,
-      generated_at: new Date().toISOString(),
+      generated_at: generatedAt,
       needs,
       meta: {
         candidate_count: candidates.length,
         visible_count: needs.length,
-        persisted: false
+        persisted,
+        cache_hit: false
       }
     });
   } catch (error) {
