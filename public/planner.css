@@ -4538,7 +4538,6 @@ input.end,
 }
 
 
-
 /* =========================================================
    ITBMO · v76g · LANGUAGE CTA + MOBILE PREFERENCES
    ========================================================= */
@@ -6430,7 +6429,6 @@ html.itbmo-save-transition-open body{overflow:hidden!important}
   }
   #account-upgrade-toggle{width:100%;}
 }
-
 
 
 /* =========================================================
@@ -8953,4 +8951,157 @@ body {
   #account-box .account-form-grid {
     grid-template-columns: 1fr !important;
   }
+}
+
+
+/* =========================================================
+   ITBMO · PHASE 4.6 · PREMIUM POLISH
+   Preferences, inline Info Chat, auth forms and reset utility.
+========================================================= */
+
+/* Personalization header becomes a balanced two-column composition. */
+#preferences-stage .preferences-stage-head{
+  display:grid !important;
+  grid-template-columns:minmax(0,1.55fr) minmax(280px,.65fr) !important;
+  column-gap:34px !important;
+  align-items:center !important;
+}
+#preferences-stage .preferences-stage-eyebrow,
+#preferences-stage .preferences-stage-head>h3,
+#preferences-stage .preferences-stage-intro{grid-column:1 !important;}
+#preferences-stage .planner-info-chat-callout{
+  grid-column:2 !important;
+  grid-row:1 / span 3 !important;
+  display:flex !important;
+  flex-direction:column !important;
+  justify-content:center !important;
+  align-items:stretch !important;
+  gap:14px !important;
+  min-height:176px !important;
+  margin:0 !important;
+  padding:20px !important;
+  border-radius:22px !important;
+  background:linear-gradient(145deg,#f5fcf9,#edf9f8) !important;
+}
+#preferences-stage .planner-info-chat-callout__copy{display:block !important;}
+#preferences-stage #info-chat-floating{
+  align-self:center !important;
+  width:min(100%,280px) !important;
+  min-width:0 !important;
+  margin-top:5px !important;
+}
+
+/* Info Chat opens in the same Personalize surface, directly below its header. */
+#preferences-stage .planner-inline-info-slot{
+  grid-column:1 / -1 !important;
+  width:100% !important;
+  margin-top:20px !important;
+}
+#preferences-stage .planner-inline-info-slot .info-chat-modal{
+  border-radius:24px !important;
+  box-shadow:0 18px 50px rgba(16,24,40,.08) !important;
+}
+#preferences-stage .planner-inline-info-slot .info-chat-panel{min-height:360px !important;}
+#preferences-stage .planner-inline-info-slot .info-chat-modal .chat-messages{min-height:190px !important;max-height:360px !important;}
+
+/* Preference guidance: compact chips, not oversized competing buttons. */
+#planner-preference-examples{
+  display:flex !important;
+  flex-wrap:wrap !important;
+  gap:8px !important;
+  margin:10px 0 14px !important;
+}
+#planner-preference-examples span{
+  display:inline-flex !important;
+  align-items:center !important;
+  min-height:34px !important;
+  padding:6px 11px !important;
+  border-radius:999px !important;
+  border:1px solid rgba(14,164,122,.13) !important;
+  background:#f8fcfb !important;
+  color:#526175 !important;
+  font-size:.76rem !important;
+  font-weight:750 !important;
+  box-shadow:none !important;
+}
+#preferences-stage .preferences-help-row{
+  display:grid !important;
+  grid-template-columns:minmax(0,1.7fr) minmax(230px,.7fr) !important;
+  gap:10px !important;
+  margin:0 0 12px !important;
+}
+#preferences-stage .preferences-help-button{
+  min-height:48px !important;
+  padding:10px 16px !important;
+  border-radius:15px !important;
+  font-size:.82rem !important;
+  box-shadow:0 8px 22px rgba(16,24,40,.055) !important;
+}
+#preferences-stage #special-conditions{
+  min-height:150px !important;
+  padding:20px 22px !important;
+  border:2px solid rgba(14,164,122,.22) !important;
+  border-radius:22px !important;
+  background:linear-gradient(180deg,#fff,#fbfefd) !important;
+  box-shadow:0 14px 34px rgba(14,164,122,.07),inset 0 0 0 1px rgba(255,255,255,.8) !important;
+  font-size:1rem !important;
+  line-height:1.55 !important;
+}
+#preferences-stage #special-conditions:focus{
+  border-color:#0ea47a !important;
+  box-shadow:0 0 0 5px rgba(14,164,122,.10),0 18px 38px rgba(14,164,122,.09) !important;
+}
+
+/* Auth forms are compact centered workspaces rather than full-width slabs. */
+#account-box .account-panel{
+  width:min(100%,980px) !important;
+  margin:14px auto 0 !important;
+  padding:20px 22px !important;
+  border:1px solid rgba(16,24,40,.07) !important;
+  background:linear-gradient(180deg,#fff,#fbfdfc) !important;
+  box-shadow:0 14px 34px rgba(16,24,40,.045) !important;
+}
+#account-box .account-panel .account-form-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr)) !important;
+  gap:14px 18px !important;
+}
+#account-box .account-panel input{min-height:50px !important;}
+#account-box .account-panel .w-100{
+  min-height:50px !important;
+  border-radius:14px !important;
+  font-size:.9rem !important;
+}
+#account-login-panel,#account-guest-panel,#account-forgot-panel,#account-reset-panel{max-width:900px !important;}
+
+/* Reset is an unobtrusive utility attached to the end of the planning flow. */
+#reset-planner{
+  width:auto !important;
+  min-width:0 !important;
+  min-height:38px !important;
+  padding:0 14px !important;
+  margin:4px 0 0 auto !important;
+  border:0 !important;
+  background:transparent !important;
+  color:#667085 !important;
+  box-shadow:none !important;
+  font-size:.75rem !important;
+  text-decoration:underline;
+  text-underline-offset:3px;
+}
+#reset-planner:hover{color:#08785c !important;background:#f3faf7 !important;}
+
+@media(max-width:900px){
+  #preferences-stage .preferences-stage-head{grid-template-columns:1fr !important;}
+  #preferences-stage .preferences-stage-eyebrow,
+  #preferences-stage .preferences-stage-head>h3,
+  #preferences-stage .preferences-stage-intro,
+  #preferences-stage .planner-info-chat-callout{grid-column:1 !important;grid-row:auto !important;}
+  #preferences-stage .planner-info-chat-callout{margin-top:14px !important;min-height:0 !important;}
+  #preferences-stage .preferences-help-row{grid-template-columns:1fr !important;}
+}
+@media(max-width:680px){
+  #account-box .account-panel{padding:16px !important;}
+  #account-box .account-panel .account-form-grid{grid-template-columns:1fr !important;}
+  #preferences-stage #special-conditions{min-height:132px !important;padding:16px !important;}
+  #reset-planner{margin-left:auto !important;margin-right:auto !important;}
 }
