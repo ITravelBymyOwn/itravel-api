@@ -30,6 +30,10 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/context.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "public/**/*",
       "use": "@vercel/static"
     }
@@ -62,6 +66,10 @@
     {
       "src": "/api/destination-suggestions",
       "dest": "/api/destination-suggestions.js"
+    },
+    {
+      "src": "/api/context",
+      "dest": "/api/context.js"
     },
     {
       "src": "/(.*)",
