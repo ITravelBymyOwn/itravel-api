@@ -25,6 +25,7 @@ const ALLOWED_NEEDS = new Set([
   "reservation_recommended",
   "guided_tour_optional",
   "intercity_transport",
+  "transport_arrangement",
   "no_action"
 ]);
 const ALLOWED_CONFIDENCE = new Set(["high", "medium", "low"]);
@@ -164,24 +165,88 @@ function isLowValueRow(row) {
     "descanso", "rest"
   ];
 
-  return lowValue.some(term => activity === term || activity.includes(` – ${term}`) || activity.includes(` - ${term}`));
+  return lowValue.some(term =>
+    activity === term ||
+    activity.includes(` – ${term}`) ||
+    activity.includes(` - ${term}`)
+  );
 }
 
-function detectIntercity(row, destinationNames) {
-  const from = clean(row?.from, 160).toLowerCase();
-  const to = clean(row?.to, 160).toLowerCase();
-  const transport = clean(row?.transport, 120).toLowerCase();
-  const activity = clean(row?.activity, 240).toLowerCase();
+function isGenericTransferActivity(activity) {
+  return /(^|\s[-–—]\s)(traslado\s+(a|al|hacia)|regreso\s+(a|al|hacia)|transfer\s+to|return\s+to)\b/i
+    .test(clean(activity, 240));
+}
+
+function normalizeEntityKey(value) {
+  return clean(value, 180)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\b(galleria|gallery|museo|museum|catedral|cathedral|basilica|piazza|plaza|the|la|el|de|del|della|degli|di|of)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function entityMatch(a, b) {
+  const x = normalizeEntityKey(a);
+  const y = normalizeEntityKey(b);
+  if (!x || !y) return false;
+  return x === y || x.includes(y) || y.includes(x);
+}
+
+function transportMinutes(row) {
+  const source = `${clean(row?.duration, 160)} ${clean(row?.transport, 120)}`.toLowerCase();
+  let total = 0;
+
+  const hours = [...source.matchAll(/(\d+(?:[.,]\d+)?)\s*(?:h|hr|hrs|hora|horas)\b/g)];
+  for (const match of hours) total += Math.round(parseFloat(match[1].replace(",", ".")) * 60);
+
+  const minutes = [...source.matchAll(/(\d+)\s*(?:m|min|mins|minuto|minutos)\b/g)];
+  for (const match of minutes) total += Number(match[1]);
+
+  return total;
+}
+
+function detectTransportArrangement(row, destinationNames) {
+  const from = clean(row?.from, 160);
+  const to = clean(row?.to, 160);
+  const transport = clean(row?.transport, 120);
+  const activity = clean(row?.activity, 240);
+  const combined = `${activity} ${from} ${to} ${transport}`.toLowerCase();
 
   const cityHits = destinationNames.filter(name => {
     const n = name.toLowerCase();
-    return from.includes(n) || to.includes(n) || activity.includes(n);
+    return from.toLowerCase().includes(n) ||
+      to.toLowerCase().includes(n) ||
+      activity.toLowerCase().includes(n);
   });
 
-  const intercityMode = /\b(train|tren|flight|vuelo|bus|coach|ferry|ferri|rail|ferrocarril|avión|avion)\b/i
-    .test(`${transport} ${activity}`);
+  const longDistanceMode =
+    /\b(train|tren|flight|vuelo|bus|coach|ferry|ferri|rail|ferrocarril|avión|avion)\b/i.test(combined);
 
-  return cityHits.length >= 2 || (intercityMode && Boolean(from) && Boolean(to));
+  const plannedRoadTransport =
+    /\b(coche|car|driver|conductor|alquiler|rental|private transfer|traslado privado)\b/i.test(combined);
+
+  const minutes = transportMinutes(row);
+  const genericTransfer = isGenericTransferActivity(activity);
+  const intercity = cityHits.length >= 2 || (longDistanceMode && Boolean(from) && Boolean(to));
+
+  return {
+    intercity,
+    significant:
+      intercity ||
+      (genericTransfer && plannedRoadTransport) ||
+      (genericTransfer && longDistanceMode) ||
+      (genericTransfer && minutes >= 45),
+    minutes
+  };
+}
+
+function explicitTourHint(row) {
+  return /\b(tour|visita guiada|guided visit|guided tour|private tour|tour privado)\b/i
+    .test(`${clean(row?.activity, 240)} ${clean(row?.notes, 320)} ${clean(row?.transport, 120)}`);
 }
 
 function buildCandidates(trip, requestedCity) {
@@ -202,25 +267,63 @@ function buildCandidates(trip, requestedCity) {
     .sort((a, b) => a - b)
     .forEach(day => {
       const rows = Array.isArray(byDay[day]) ? byDay[day] : [];
+      const substantive = rows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) =>
+          row &&
+          typeof row === "object" &&
+          !isLowValueRow(row) &&
+          !isGenericTransferActivity(row?.activity)
+        );
 
       rows.forEach((row, index) => {
         if (!row || typeof row !== "object") return;
-
-        const intercity = detectIntercity(row, destinationNames);
-        if (!intercity && isLowValueRow(row)) return;
+        if (isLowValueRow(row)) return;
 
         const activity = normalizeActivity(row.activity, city);
-        if (!activity && !intercity) return;
+        if (!activity) return;
+
+        const transportInfo = detectTransportArrangement(row, destinationNames);
+        const genericTransfer = isGenericTransferActivity(row.activity);
+
+        if (genericTransfer && !transportInfo.significant) {
+          const destination = clean(row.to, 180);
+          const match = substantive.find(({ row: target }) =>
+            entityMatch(destination, target?.activity) ||
+            entityMatch(destination, target?.to) ||
+            entityMatch(activity, target?.activity)
+          );
+
+          if (match) {
+            const existingId = `${day}-${match.index + 1}`;
+            const existing = candidates.find(item => item.candidate_id === existingId);
+
+            if (existing) {
+              existing.context_notes = clean(
+                `${existing.context_notes || existing.notes || ""} ${clean(row.notes, 320)}`,
+                620
+              );
+            }
+            return;
+          }
+        }
+
+        const destination = clean(row.to, 180);
+        const entityHint = genericTransfer && destination ? destination : activity;
 
         candidates.push({
           candidate_id: `${day}-${index + 1}`,
           day,
           activity,
+          entity_hint: entityHint,
           notes: clean(row.notes, 320).replace(/^valid:\s*/i, ""),
+          context_notes: clean(row.notes, 320).replace(/^valid:\s*/i, ""),
           from: clean(row.from, 160),
-          to: clean(row.to, 160),
+          to: destination,
           transport: clean(row.transport, 120),
-          intercity_hint: intercity
+          intercity_hint: transportInfo.intercity,
+          transport_arrangement_hint: transportInfo.significant,
+          explicit_tour_hint: explicitTourHint(row)
         });
       });
     });
@@ -230,7 +333,6 @@ function buildCandidates(trip, requestedCity) {
     candidates: candidates.slice(0, MAX_CANDIDATES)
   };
 }
-
 function systemPrompt(language) {
   const outputLanguage = language === "en" ? "English" : "Spanish";
 
@@ -246,21 +348,24 @@ Allowed need_type values:
 - reservation_recommended
 - guided_tour_optional
 - intercity_transport
+- transport_arrangement
 - no_action
 
 Rules:
 1. Prefer no_action when there is no clear traveler action.
-2. ticket_required means an admission/ticket is intrinsic to doing the named visit. Do not use it merely because advance booking can be convenient.
-3. reservation_recommended means advance reservation is genuinely useful for the planned visit, but do not imply it is mandatory unless the source clearly supports that.
-4. guided_tour_optional is optional and must never replace the planned activity. Use it only when a guided experience is a sensible enhancement for the exact activity already in the itinerary.
-5. intercity_transport is only for actual city-to-city or equivalent long-distance movement already visible in the source.
-6. Do not classify ordinary meals, hotel time, free time, neighborhood walks, generic transfers, or simple local movement unless the source clearly creates one of the allowed needs.
-7. Never invent prices, availability, opening hours, rules, reservation deadlines, ticket types, providers, or affiliate products.
-8. confidence must be high, medium, or low.
-9. The user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
-10. Use cautious language when the need can vary. Do not present uncertain claims as facts.
-11. Return exactly one classification for every candidate_id.
-12. reason is internal explanatory text, concise and factual; do not expose chain-of-thought.
+2. ticket_required means admission is intrinsic to doing the named visit. Be strict. If only a specific component requires a ticket (for example a dome climb), state that condition in user_message instead of implying the whole site requires it.
+3. reservation_recommended means advance booking is genuinely useful for the exact planned visit, but do not imply it is mandatory.
+4. guided_tour_optional is optional and must never replace the planned activity. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact activity.
+5. intercity_transport is for actual movement between trip cities already visible in the source.
+6. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning (for example a rental car, driver, train, bus or other non-trivial arrangement). Never use it for ordinary local walking or short city movement.
+7. Generic transfer rows may contain useful logistics about the destination. Use entity_hint as the traveler-facing entity when appropriate; do not make the traveler act on a label such as "Transfer to..." if the real need is for the destination.
+8. Ordinary meals, hotel time, free time, neighborhood walks, return-to-hotel walks, and simple local movement should normally be no_action.
+9. Never invent prices, availability, opening hours, rules, reservation deadlines, ticket types, providers, or affiliate products.
+10. confidence must be high, medium, or low.
+11. The user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
+12. Use cautious language when the need can vary. Do not present uncertain claims as facts.
+13. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary logistical need.
+14. reason is internal explanatory text, concise and factual; do not expose chain-of-thought.
 
 Return valid JSON only:
 {
@@ -269,7 +374,7 @@ Return valid JSON only:
       "candidate_id": "1-1",
       "entity_name": "specific entity or route from the source",
       "entity_type": "attraction|museum|monument|site|experience|route|transport|other",
-      "need_type": "ticket_required|reservation_recommended|guided_tour_optional|intercity_transport|no_action",
+      "need_type": "ticket_required|reservation_recommended|guided_tour_optional|intercity_transport|transport_arrangement|no_action",
       "confidence": "high|medium|low",
       "user_message": "short traveler-facing message",
       "reason": "brief evidence-based rationale"
@@ -277,7 +382,6 @@ Return valid JSON only:
   ]
 }`;
 }
-
 function extractJson(text) {
   const raw = String(text || "").trim();
   if (!raw) return null;
@@ -334,7 +438,7 @@ async function classifyCandidates(city, candidates, language) {
 function categoryForNeed(needType) {
   if (needType === "ticket_required" || needType === "reservation_recommended") return "tickets";
   if (needType === "guided_tour_optional") return "tours";
-  if (needType === "intercity_transport") return "transport";
+  if (needType === "intercity_transport" || needType === "transport_arrangement") return "transport";
   return "none";
 }
 
@@ -352,10 +456,16 @@ function sanitizeClassifications(candidates, classifications, city) {
     const confidence = ALLOWED_CONFIDENCE.has(raw?.confidence) ? raw.confidence : "low";
     const entityType = ALLOWED_ENTITY_TYPES.has(raw?.entity_type) ? raw.entity_type : "other";
 
-    if (needType === "no_action") continue;
-    if (confidence === "low") continue;
+    if (needType === "no_action" || confidence === "low") continue;
 
-    if (needType === "intercity_transport" && !source.intercity_hint) {
+    if (needType === "intercity_transport" && !source.intercity_hint) continue;
+    if (needType === "transport_arrangement" && !source.transport_arrangement_hint) continue;
+
+    if (
+      needType === "guided_tour_optional" &&
+      confidence !== "high" &&
+      !source.explicit_tour_hint
+    ) {
       continue;
     }
 
@@ -368,7 +478,7 @@ function sanitizeClassifications(candidates, classifications, city) {
       category: categoryForNeed(needType),
       city,
       day: source.day,
-      entity_name: clean(raw?.entity_name, 180) || source.activity,
+      entity_name: clean(raw?.entity_name, 180) || source.entity_hint || source.activity,
       entity_type: entityType,
       need_type: needType,
       confidence,
@@ -379,7 +489,6 @@ function sanitizeClassifications(candidates, classifications, city) {
     });
   }
 
-  // Keep one primary actionable need per source activity, plus one optional tour enhancement.
   const byCandidate = new Map();
   for (const item of visible) {
     const candidateId = item.id.split(":")[0];
@@ -392,7 +501,8 @@ function sanitizeClassifications(candidates, classifications, city) {
     const primary = items.find(item =>
       item.need_type === "ticket_required" ||
       item.need_type === "reservation_recommended" ||
-      item.need_type === "intercity_transport"
+      item.need_type === "intercity_transport" ||
+      item.need_type === "transport_arrangement"
     );
     const optionalTour = items.find(item => item.need_type === "guided_tour_optional");
 
