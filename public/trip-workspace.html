@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
   <meta name="theme-color" content="#f7fbfc" />
   <title>ITBMO · Tu viaje</title>
-  <link rel="stylesheet" href="./trip-workspace.css?v=4" />
+  <link rel="stylesheet" href="./trip-workspace.css?v=5" />
 </head>
 <body>
   <div class="tw-shell">
@@ -27,9 +27,26 @@
         </div>
         <div id="tw-city-grid" class="tw-city-grid"></div>
         <section class="tw-trip-wide">
-          <span class="tw-trip-wide-icon">✦</span>
-          <div><span id="tw-trip-kicker" class="tw-kicker">PARA TODO TU VIAJE</span><h2 id="tw-trip-title">Lo esencial que viaja contigo.</h2><p id="tw-trip-copy">Servicios generales aparecerán aquí únicamente cuando aporten valor real.</p></div>
-          <span id="tw-coming" class="tw-coming">Próximamente</span>
+          <div class="tw-trip-wide__head">
+            <span class="tw-trip-wide-icon">✦</span>
+            <div>
+              <span id="tw-trip-kicker" class="tw-kicker">PARA TODO TU VIAJE</span>
+              <h2 id="tw-trip-title">Lo esencial que viaja contigo.</h2>
+              <p id="tw-trip-copy">Necesidades que acompañan el viaje completo, sin repetirlas ciudad por ciudad.</p>
+            </div>
+          </div>
+          <div class="tw-trip-wide__grid">
+            <article class="tw-trip-wide__item">
+              <span class="tw-trip-wide__item-icon" aria-hidden="true">◉</span>
+              <div><small id="tw-connectivity-kicker">VIAJE COMPLETO</small><h3 id="tw-connectivity-title">Conectividad</h3><p id="tw-connectivity-copy">Opciones de datos y eSIM para mantenerte conectado durante todo el viaje.</p></div>
+              <span id="tw-connectivity-status" class="tw-coming">Próximamente</span>
+            </article>
+            <article class="tw-trip-wide__item">
+              <span class="tw-trip-wide__item-icon" aria-hidden="true">◇</span>
+              <div><small id="tw-insurance-kicker">VIAJE COMPLETO</small><h3 id="tw-insurance-title">Seguro de viaje</h3><p id="tw-insurance-copy">Protección transversal para el viaje cuando exista una opción que aporte valor real.</p></div>
+              <span id="tw-insurance-status" class="tw-coming">Próximamente</span>
+            </article>
+          </div>
         </section>
       </section>
 
@@ -39,7 +56,11 @@
           <div class="tw-city-identity"><span id="tw-city-kicker" class="tw-kicker">TU CIUDAD</span><h1 id="tw-city-name">París</h1><p id="tw-city-dates"></p></div>
           <div class="tw-mode" role="tablist">
             <button id="tw-mode-itinerary" class="active" type="button" role="tab" aria-selected="true"><span>↝</span><b>Itinerario</b></button>
-            <button id="tw-mode-prepare" class="tw-mode-prepare" type="button" role="tab" aria-selected="false"><span>✦</span><b>Para tu viaje</b><em id="tw-prepare-badge">Explora</em></button>
+            <button id="tw-mode-prepare" class="tw-mode-prepare" type="button" role="tab" aria-selected="false">
+              <span class="tw-mode-prepare__icon">✦</span>
+              <span class="tw-mode-prepare__copy"><b>Para tu viaje</b><small id="tw-prepare-teaser">Tu itinerario es solo el comienzo. Prepárate para vivirlo.</small></span>
+              <em id="tw-prepare-badge">Explora</em>
+            </button>
           </div>
         </div>
         <nav id="tw-days" class="tw-days" aria-label="Días del itinerario"></nav>
@@ -51,6 +72,6 @@
       </section>
     </main>
   </div>
-  <script src="./trip-workspace.js?v=6"></script>
+  <script src="./trip-workspace.js?v=7"></script>
 </body>
 </html>
