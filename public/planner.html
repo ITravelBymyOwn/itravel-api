@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=102" />
+  <link rel="stylesheet" href="./planner.css?v=107" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -27,8 +27,13 @@
       <div class="brand-line-2">By My Own</div>
     </div>
 
-    <button id="planner-my-trips" class="planner-my-trips" type="button" hidden>
-      <span aria-hidden="true">✦</span><span id="planner-my-trips-label">Mis viajes</span>
+    <button id="planner-my-trips" class="planner-my-trips" type="button" hidden aria-label="Mis viajes">
+      <span class="planner-my-trips__icon" aria-hidden="true">✦</span>
+      <span class="planner-my-trips__copy">
+        <strong id="planner-my-trips-label">Mis viajes</strong>
+        <small id="planner-my-trips-hint">Tu espacio de viaje</small>
+      </span>
+      <span class="planner-my-trips__arrow" aria-hidden="true">→</span>
     </button>
 
     <div class="planner-language-capability">
@@ -555,17 +560,7 @@
           <span id="new-planning-copy">¿Listo para planificar otro viaje?</span>
           <button id="new-planning-button" class="new-planning-button" type="button">Planificar otro viaje →</button>
         </div>
-
-        <!-- =========================================================
-             ITBMO AFFILIATES — Post-itinerary surface
-             Rendered by planner.js. Hidden automatically when no partner
-             is enabled (or when previewMode=false and none are active).
-        ========================================================== -->
-        <div id="itbmo-affiliate-after" class="itbmo-affiliate-surface itbmo-affiliate-after" style="display:none;" aria-live="polite"></div>
-
-
-
-        <!-- ✅ QUIRÚRGICO: oculto/eliminado por ahora -->
+<!-- ✅ QUIRÚRGICO: oculto/eliminado por ahora -->
         <!-- <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button> -->
       </section>
     </main>
@@ -805,14 +800,7 @@
 
       <!-- ✅ Mensaje EXACTO solicitado -->
       <p>✨ ITBMO está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
-
-      <!-- =========================================================
-           ITBMO AFFILIATES — Generation surface
-           Links open in a new tab and DO NOT interrupt generation.
-           Rendered by planner.js from one central configuration block.
-      ========================================================== -->
-      <div id="itbmo-affiliate-loading" class="itbmo-affiliate-surface itbmo-affiliate-loading" style="display:none;" aria-live="polite"></div>
-    </div>
+</div>
   </div>
 
   <!-- 🧠 Indicador estilo ChatGPT (Planner) -->
@@ -1181,7 +1169,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=106"></script>
+<script src="./planner.js?v=107"></script>
  
 </body>
 </html>
