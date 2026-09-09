@@ -2,7 +2,6 @@
    ITBMO · HOME V4.5 JS
    - Stable planner auto-height (no feedback loop / no vibration)
    - FAQ
-   - Affiliate preview/config
    - AdSense preview/config
    - Gentle reveal motion
    ========================================================= */
@@ -11,32 +10,15 @@
   'use strict';
 
   /* =========================================================
-     CONFIG · HOME MONETIZATION
-     previewMode:true = show all planned partner surfaces while building.
-     For public launch before approvals:
-       previewMode:false
-       every partner enabled:false
-       ad slots enabled:false
+     CONFIG · HOME EXPERIENCE
+     Ad surfaces remain disabled by default to preserve the premium experience.
   ========================================================= */
   const ITBMO_HOME_CONFIG = {
     previewMode: false,
-
-    partners: {
-      kayak:        { enabled:false, url:'', previewUrl:'https://www.kayak.com/flights' },
-      skyscanner:   { enabled:false, url:'', previewUrl:'https://www.skyscanner.com/' },
-      booking:      { enabled:false, url:'', previewUrl:'https://www.booking.com/' },
-      getyourguide: { enabled:false, url:'', previewUrl:'https://www.getyourguide.com/' },
-      viator:       { enabled:false, url:'', previewUrl:'https://www.viator.com/' },
-      omio:         { enabled:false, url:'', previewUrl:'https://www.omio.com/' },
-      airalo:       { enabled:false, url:'', previewUrl:'https://www.airalo.com/' },
-      holafly:      { enabled:false, url:'', previewUrl:'https://esim.holafly.com/' }
-    },
-
     ads: {
       home01: { enabled:false },
       home02: { enabled:false }
     },
-
     infoChatPolicy: {
       enabledAfterPayment: true,
       maxUserMessages: 10,
@@ -261,42 +243,6 @@
   window.addEventListener('resize', () => {
     if (window.innerWidth > 1180 && mobileMenuOpen) setMobileMenu(false);
   }, { passive:true });
-
-  /* =========================================================
-     AFFILIATES
-  ========================================================= */
-  document.querySelectorAll('[data-partner]').forEach((card) => {
-    const key = card.getAttribute('data-partner');
-    const config = ITBMO_HOME_CONFIG.partners[key];
-    if (!config) {
-      card.hidden = true;
-      return;
-    }
-
-    const visible = ITBMO_HOME_CONFIG.previewMode || config.enabled;
-    card.hidden = !visible;
-    if (!visible) return;
-
-    const state = card.querySelector('.partner-card__state');
-    const link = card.querySelector(`[data-partner-link="${key}"]`);
-    const url = ITBMO_HOME_CONFIG.previewMode ? config.previewUrl : config.url;
-
-    if (state) {
-      state.textContent = ITBMO_HOME_CONFIG.previewMode ? 'Preview' : 'Partner';
-      state.hidden = !ITBMO_HOME_CONFIG.previewMode;
-    }
-
-    if (link) {
-      if (url) {
-        link.href = url;
-        link.target = '_blank';
-        link.rel = 'sponsored noopener noreferrer';
-      } else {
-        link.href = '#';
-        link.addEventListener('click', (event) => event.preventDefault());
-      }
-    }
-  });
 
   /* =========================================================
      ADSENSE SURFACES
@@ -815,7 +761,7 @@
   ========================================================= */
   const revealTargets = [
     ...document.querySelectorAll(
-      '.how-card,.info-instructions,.promise-hero,.example-entry,.partner-card,.utility-strip,.verify-panel,.faq-item'
+      '.how-card,.info-instructions,.promise-hero,.example-entry,.journey-continuum__card,.journey-continuum__whole,.verify-panel,.faq-item'
     )
   ];
 
