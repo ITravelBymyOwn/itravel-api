@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO PLANNER v64 · Final Download & Branded Affiliate Upgrade — Precision Route & Anchor Upgrade
+   ITBMO PLANNER · Premium Journey Experience — Clean Baseline
 
    Base: v63
    API contract: compatible with API v65
@@ -394,279 +394,6 @@ const $confirmCTA  = qs('#confirm-itinerary');
 
 const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
-
-const $affiliateLoading = qs('#itbmo-affiliate-loading');
-const $affiliateAfter   = qs('#itbmo-affiliate-after');
-
-/* =========================================================
-   ITBMO AFFILIATES — MVP monetization layer
-   ---------------------------------------------------------
-   PREVIEW WORKFLOW (before publishing):
-   - previewMode: true  -> shows every partner using previewUrl.
-   - This lets you evaluate the complete UX now.
-
-   PUBLIC LAUNCH (before affiliate approvals):
-   - Change ONLY previewMode to false.
-   - Because every partner starts enabled:false, the surfaces disappear.
-
-   AS EACH PARTNER APPROVES ITBMO:
-   - Keep previewMode:false.
-   - Set that partner enabled:true.
-   - Paste its real affiliate URL in url.
-   - Republish. Nothing else needs to change.
-
-   IMPORTANT:
-   - This layer never calls the itinerary API.
-   - Links use target="_blank", so generation continues in this tab.
-   - If GA4/gtag is available, clicks emit affiliate_click.
-========================================================= */
-const ITBMO_AFFILIATE_CONFIG = {
-  previewMode: false, // Public launch: show only approved and enabled partners.
-
-  partners: {
-    kayak: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.kayak.com/flights',
-      name: 'KAYAK',
-      category: 'flights'
-    },
-    skyscanner: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.skyscanner.com/',
-      name: 'Skyscanner',
-      category: 'flights'
-    },
-    booking: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.booking.com/',
-      name: 'Booking.com',
-      category: 'hotels'
-    },
-    getyourguide: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.getyourguide.com/',
-      name: 'GetYourGuide',
-      category: 'experiences'
-    },
-    viator: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.viator.com/',
-      name: 'Viator',
-      category: 'experiences'
-    },
-    omio: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.omio.com/',
-      name: 'Omio',
-      category: 'transport'
-    },
-    airalo: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.airalo.com/',
-      name: 'Airalo',
-      category: 'esim'
-    },
-    holafly: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://esim.holafly.com/',
-      name: 'Holafly',
-      category: 'esim'
-    }
-  }
-};
-
-if (typeof window !== 'undefined') {
-  window.ITBMO_AFFILIATE_CONFIG = ITBMO_AFFILIATE_CONFIG;
-}
-
-function _affiliateCopy_(){
-  const es = getLang()==='es';
-  return es ? {
-    loadingEyebrow: 'Mientras ITBMO crea tu viaje',
-    loadingTitle: 'Tu viaje empieza antes de que termine de generarse',
-    loadingSub: 'Explora vuelos, hospedaje y experiencias mientras ITBMO sigue trabajando en esta pestaña.',
-    afterEyebrow: 'Tu viaje ya tomó forma',
-    afterTitle: 'Ahora hazlo realidad',
-    afterSub: 'Da el siguiente paso. Compara, explora y reserva lo esencial para tu aventura.',
-    flightsTitle: 'Encuentra tu próximo vuelo',
-    flightsDesc: 'Compara opciones para llegar a tu destino.',
-    hotelsTitle: 'Elige dónde quedarte',
-    hotelsDesc: 'Encuentra el hospedaje ideal para tu viaje.',
-    experiencesTitle: 'Vive algo inolvidable',
-    experiencesDesc: 'Tours, entradas y experiencias para recordar.',
-    transportTitle: 'Muévete sin complicaciones',
-    transportDesc: 'Compara trenes, buses y conexiones.',
-    esimTitle: 'Llega conectado',
-    esimDesc: 'Activa datos para tu destino con una eSIM.',
-    explore: 'Explorar',
-    compare: 'Comparar',
-    preview: 'Vista previa',
-    trust: 'Se abre en una pestaña nueva · ITBMO continúa aquí'
-  } : {
-    loadingEyebrow: 'While ITBMO builds your trip',
-    loadingTitle: 'Your journey can start right now',
-    loadingSub: 'Explore flights, stays and experiences while ITBMO keeps working in this tab.',
-    afterEyebrow: 'Your trip has taken shape',
-    afterTitle: 'Now make it happen',
-    afterSub: 'Take the next step. Compare, explore and book the essentials for your adventure.',
-    flightsTitle: 'Find your next flight',
-    flightsDesc: 'Compare options to get to your destination.',
-    hotelsTitle: 'Choose where to stay',
-    hotelsDesc: 'Find the right stay for your trip.',
-    experiencesTitle: 'Make it unforgettable',
-    experiencesDesc: 'Tours, tickets and experiences worth remembering.',
-    transportTitle: 'Move with ease',
-    transportDesc: 'Compare trains, buses and connections.',
-    esimTitle: 'Land connected',
-    esimDesc: 'Get data for your destination with an eSIM.',
-    explore: 'Explore',
-    compare: 'Compare',
-    preview: 'Preview',
-    trust: 'Opens in a new tab · ITBMO keeps working here'
-  };
-}
-
-function _affiliateIcon_(key){
-  const common = 'viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"';
-  const icons = {
-    flights:`<svg ${common}><path d="M28 14.4 18.8 17l-6.2-10.1-2.7.8 3.4 10.8-6.2 1.8-3-3.2-2 .6 2.5 5.2 1.1 2.4 2-.6.8-4.2 6.2-1.8.2 11.3 2.7-.8 1.7-11.8 9.2-2.7c1.3-.4 2-1.7 1.6-3-.4-1.3-1.7-2-3-1.6Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-    hotels:`<svg ${common}><path d="M5 23V11.5A2.5 2.5 0 0 1 7.5 9H12a3 3 0 0 1 3 3v11M15 15h8.5A3.5 3.5 0 0 1 27 18.5V23M5 19h22M7 23v3M25 23v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 13h3.5a1.5 1.5 0 0 1 1.5 1.5V16H8v-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
-    experiences:`<svg ${common}><path d="M7 8.5h18a2 2 0 0 1 2 2v4.2a3.7 3.7 0 0 0 0 7.4v-.1a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v.1a3.7 3.7 0 0 0 0-7.4v-4.2a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 11.5v2M16 18.5v2M16 25.5v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
-    transport:`<svg ${common}><rect x="7" y="4.5" width="18" height="21" rx="5" stroke="currentColor" stroke-width="1.8"/><path d="M10 15h12M11.5 9h9M11 27.5l2-2M21 27.5l-2-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="11.5" cy="20.5" r="1.3" fill="currentColor"/><circle cx="20.5" cy="20.5" r="1.3" fill="currentColor"/></svg>`,
-    esim:`<svg ${common}><rect x="9" y="3.5" width="14" height="25" rx="4" stroke="currentColor" stroke-width="1.8"/><path d="M13.5 8h5M15 24.5h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13 17.5a4.2 4.2 0 0 1 6 0M14.8 19.4a1.7 1.7 0 0 1 2.4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`
-  };
-  return icons[key] || icons.flights;
-}
-
-function _affiliatePartnerVisible_(partner){
-  return !!(partner && (ITBMO_AFFILIATE_CONFIG.previewMode || (partner.enabled && partner.url)));
-}
-
-function _affiliatePartnerUrl_(partner){
-  if(!partner) return '';
-  if(partner.enabled && partner.url) return partner.url;
-  if(ITBMO_AFFILIATE_CONFIG.previewMode) return partner.previewUrl || '';
-  return '';
-}
-
-function _affiliateTrack_(partnerKey, placement){
-  try{
-    const partner = ITBMO_AFFILIATE_CONFIG.partners[partnerKey];
-    const destination = activeCity || savedDestinations?.[0]?.city || '';
-    trackITBMOEvent('affiliate_click',{
-      partner:partnerKey,
-      partner_name:partner?.name || partnerKey,
-      placement,
-      destination
-    });
-  }catch(_){}
-}
-
-function _affiliateCategoryModel_(){
-  const c = _affiliateCopy_();
-  return [
-    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak','skyscanner'] },
-    { key:'hotels', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
-    { key:'experiences', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
-    { key:'transport', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
-    { key:'esim', title:c.esimTitle, desc:c.esimDesc, partners:['airalo','holafly'] }
-  ];
-}
-
-function _affiliateBrandClass_(key){
-  const map={kayak:'kayak',skyscanner:'skyscanner',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
-  return map[key] || 'default';
-}
-
-function _affiliatePartnerCopy_(key){
-  const es=getLang()==='es';
-  const copy={
-    kayak: es ? ['Vuelos','Compara tus vuelos','Explora opciones para llegar a tus destinos.','Buscar vuelos'] : ['Flights','Compare flights','Explore options to reach your destinations.','Search flights'],
-    skyscanner: es ? ['Vuelos','Compara más opciones','Explora alternativas de vuelo para tus destinos.','Comparar vuelos'] : ['Flights','Compare more options','Explore additional flight options for your destinations.','Compare flights'],
-    booking: es ? ['Hospedaje','Encuentra tu alojamiento','Busca y compara alojamiento para tus destinos.','Buscar hoteles'] : ['Stays','Find your stay','Search and compare stays for your destinations.','Search hotels'],
-    getyourguide: es ? ['Experiencias','Reserva actividades','Tours, entradas y actividades en destino.','Explorar experiencias'] : ['Experiences','Book activities','Tours, tickets and activities at your destination.','Explore experiences'],
-    viator: es ? ['Experiencias','Explora tours','Compara excursiones y actividades disponibles.','Ver actividades'] : ['Experiences','Explore tours','Compare excursions and available activities.','View activities'],
-    omio: es ? ['Transporte','Conecta tus destinos','Trenes, autobuses y conexiones entre destinos.','Buscar transporte'] : ['Transport','Connect your destinations','Trains, buses and connections between destinations.','Search transport'],
-    airalo: es ? ['eSIM','Llega conectado','Opciones de datos móviles para tu destino.','Ver eSIM'] : ['eSIM','Land connected','Mobile data options for your destination.','View eSIM'],
-    holafly: es ? ['eSIM','Datos para tu viaje','Alternativas para mantenerte conectado al viajar.','Explorar conectividad'] : ['eSIM','Data for your trip','Alternatives to stay connected while traveling.','Explore connectivity']
-  };
-  return copy[key] || ['',key,'','Explorar'];
-}
-
-function renderAffiliateSurface(placement='loading'){
-  const root = placement==='loading' ? $affiliateLoading : $affiliateAfter;
-  if(!root) return false;
-
-  const c = _affiliateCopy_();
-  const order=['kayak','skyscanner','booking','omio','getyourguide','viator','airalo','holafly'];
-  const visible=order.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]));
-
-  if(!visible.length){
-    root.innerHTML='';
-    root.style.display='none';
-    return false;
-  }
-
-  const isLoading=placement==='loading';
-  const eyebrow=isLoading ? c.loadingEyebrow : c.afterEyebrow;
-  const title=isLoading ? c.loadingTitle : c.afterTitle;
-  const sub=isLoading ? c.loadingSub : c.afterSub;
-
-  root.innerHTML=`
-    <div class="itbmo-affiliate-shell itbmo-affiliate-shell--${placement}">
-      <div class="itbmo-affiliate-heading">
-        <div class="itbmo-affiliate-eyebrow"><span class="itbmo-affiliate-spark">✦</span><span>${eyebrow}</span>${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>`:''}</div>
-        <h3>${title}</h3><p>${sub}</p>
-      </div>
-      <div class="itbmo-affiliate-grid itbmo-affiliate-grid--brands" data-count="${visible.length}">
-        ${visible.map(key=>{
-          const p=ITBMO_AFFILIATE_CONFIG.partners[key];
-          const pc=_affiliatePartnerCopy_(key);
-          const url=_affiliatePartnerUrl_(p);
-          return `<article class="itbmo-affiliate-card itbmo-affiliate-brand-card itbmo-affiliate-brand-card--${_affiliateBrandClass_(key)}">
-            <div class="itbmo-affiliate-brand-head"><strong>${p.name}</strong>${ITBMO_AFFILIATE_CONFIG.previewMode?`<span>${c.preview}</span>`:''}</div>
-            <div class="itbmo-affiliate-brand-body"><small>${pc[0]}</small><h4>${pc[1]}</h4><p>${pc[2]}</p>
-              <a class="itbmo-affiliate-link" href="${url}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}"><span>${pc[3]}</span><span class="itbmo-affiliate-arrow">↗</span></a>
-            </div>
-          </article>`;
-        }).join('')}
-      </div>
-      <div class="itbmo-affiliate-trust"><span class="itbmo-affiliate-trust-dot"></span><span>${c.trust}</span></div>
-    </div>`;
-  root.style.display='block';
-  qsa('[data-affiliate-partner]',root).forEach(a=>a.addEventListener('click',()=>_affiliateTrack_(a.dataset.affiliatePartner,a.dataset.affiliatePlacement||placement)));
-  return true;
-}
-
-function setLoadingAffiliateVisibility(on){
-  if(!$affiliateLoading) return;
-  if(!on){
-    $affiliateLoading.style.display='none';
-    return;
-  }
-  renderAffiliateSurface('loading');
-}
-
-function refreshPostItineraryAffiliate(){
-  if(!$affiliateAfter) return;
-  const city = activeCity;
-  const hasRows = !!(city && itineraries?.[city] &&
-    Object.values(itineraries[city].byDay||{}).some(rows=>Array.isArray(rows) && rows.length));
-  if(!hasRows){
-    $affiliateAfter.innerHTML='';
-    $affiliateAfter.style.display='none';
-    return;
-  }
-  renderAffiliateSurface('after');
-}
 
 // 📌 Info Chat (IDs según tu HTML)
 const $infoToggle   = qs('#info-chat-toggle');
@@ -1317,10 +1044,6 @@ function clearPlannerUIForLogout(){
   }
   setExportToolbarVisibility(false);
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
-  if($affiliateAfter){
-    $affiliateAfter.innerHTML='';
-    $affiliateAfter.style.display='none';
-  }
   try{ if($overlayWOW) $overlayWOW.style.display='none'; }catch(_){}
   qsa('.date-tooltip').forEach(node=>node.remove());
 
@@ -3184,7 +2907,6 @@ function renderCityItinerary(city){
   $itWrap.innerHTML = '';
   if(!days.length){
     $itWrap.innerHTML = `<p>${t('uiNoActivities')}</p>`;
-    if($affiliateAfter) $affiliateAfter.style.display='none';
     syncImmersiveItineraryLauncher();
     return;
   }
@@ -3266,7 +2988,6 @@ function renderCityItinerary(city){
   show(itineraries[city].currentDay || days[0]);
 
   // Post-itinerary monetization surface: independent of itinerary rendering.
-  refreshPostItineraryAffiliate();
 
   // Immersive viewer launcher mirrors the already-generated state only.
   syncImmersiveItineraryLauncher();
@@ -4747,7 +4468,6 @@ function showWOW(on, msg){
 
   // Affiliate cards are anchors, not planner controls: they remain clickable
   // in a new tab while the generation request continues untouched.
-  setLoadingAffiliateVisibility(!!on);
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
@@ -6838,7 +6558,8 @@ function _journeyCopy_(){
     historyTitle:'Mis viajes',
     tripCount:n=>`${n} ${n===1?'viaje guardado':'viajes guardados'}`,
     open:'Abrir viaje',
-    myTrips:'Mis viajes'
+    myTrips:'Mis viajes',
+    myTripsHint:'Tu espacio de viaje'
   } : {
     eyebrow:'YOUR TRIP IS STILL HERE',
     title:'What would you like to do today?',
@@ -6854,7 +6575,8 @@ function _journeyCopy_(){
     historyTitle:'My trips',
     tripCount:n=>`${n} saved ${n===1?'trip':'trips'}`,
     open:'Open trip',
-    myTrips:'My trips'
+    myTrips:'My trips',
+    myTripsHint:'Your trip space'
   };
 }
 function _journeyApplyCopy_(){
@@ -6863,7 +6585,7 @@ function _journeyApplyCopy_(){
   set('journey-home-eyebrow',c.eyebrow);set('journey-home-title',c.title);set('journey-home-copy',c.copy);
   set('journey-home-resume-kicker',c.resumeKicker);set('journey-home-resume-title',c.resumeTitle);
   set('journey-home-new-kicker',c.newKicker);set('journey-home-new-title',c.newTitle);set('journey-home-new-copy',c.newCopy);
-  set('journey-history-eyebrow',c.historyEyebrow);set('journey-history-title',c.historyTitle);set('planner-my-trips-label',c.myTrips);
+  set('journey-history-eyebrow',c.historyEyebrow);set('journey-history-title',c.historyTitle);set('planner-my-trips-label',c.myTrips);set('planner-my-trips-hint',c.myTripsHint);
   const resumeAction=qs('#journey-home-resume-action');if(resumeAction)resumeAction.innerHTML=`${_journeyEsc_(c.resumeAction)} <i aria-hidden="true">→</i>`;
   const newAction=qs('#journey-home-new-action');if(newAction)newAction.innerHTML=`${_journeyEsc_(c.newAction)} <i aria-hidden="true">→</i>`;
 }
