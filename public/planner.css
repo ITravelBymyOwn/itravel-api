@@ -1506,381 +1506,6 @@ table.itinerary td:nth-child(8){width:16%}
 }
 
 /* =========================================================
-   AFFILIATE / MONETIZATION EXPERIENCE
-========================================================= */
-.itbmo-affiliate-surface{
-  position:relative;
-  width:100%;
-  min-width:0;
-  margin:1rem 0 0;
-  animation:affiliateIn .55s var(--ease) both;
-}
-
-@keyframes affiliateIn{
-  from{opacity:0;transform:translateY(10px) scale(.99)}
-  to{opacity:1;transform:translateY(0) scale(1)}
-}
-
-.itbmo-affiliate-shell{
-  --aff-ink:#102a45;
-  --aff-muted:#6e7f92;
-
-  position:relative;
-  width:100%;
-  min-width:0;
-  overflow:hidden;
-  isolation:isolate;
-  padding:1.08rem;
-  border:1px solid rgba(62,101,178,.19);
-  border-radius:1.45rem;
-  background:
-    radial-gradient(620px 280px at 0% 0%,rgba(42,141,245,.12),transparent 65%),
-    radial-gradient(620px 280px at 100% 100%,rgba(32,170,167,.10),transparent 65%),
-    linear-gradient(145deg,#fff,#f7faff);
-  box-shadow:0 3px 8px rgba(7,31,61,.025),0 20px 50px rgba(24,59,96,.075);
-}
-
-.itbmo-affiliate-orb{
-  position:absolute;
-  z-index:-2;
-  width:15rem;
-  height:15rem;
-  border-radius:999px;
-  filter:blur(28px);
-  opacity:.25;
-  pointer-events:none;
-}
-
-.itbmo-affiliate-orb--one{
-  right:-7rem;
-  bottom:-10rem;
-  background:radial-gradient(circle,rgba(109,120,238,.45),rgba(109,120,238,0) 70%);
-}
-
-.itbmo-affiliate-heading{
-  position:relative;
-  z-index:1;
-  padding:.05rem .12rem .9rem;
-}
-
-.itbmo-affiliate-eyebrow{
-  display:flex;
-  align-items:center;
-  flex-wrap:wrap;
-  gap:.42rem;
-  margin-bottom:.38rem;
-  color:#3b7894;
-  font-size:.67rem;
-  line-height:1.2;
-  font-weight:900;
-  letter-spacing:.07em;
-  text-transform:uppercase;
-}
-
-.itbmo-affiliate-spark{
-  display:inline-grid;
-  width:1.55rem;
-  height:1.55rem;
-  place-items:center;
-  color:#137c87;
-  background:#edfafa;
-  border:1px solid rgba(20,145,153,.17);
-  border-radius:999px;
-  box-shadow:0 5px 14px rgba(20,115,130,.08);
-  font-size:.75rem;
-}
-
-.itbmo-affiliate-preview{
-  padding:.22rem .5rem;
-  color:#6f5600;
-  background:#fff4c7;
-  border:1px solid rgba(154,121,0,.14);
-  border-radius:999px;
-  font-size:.58rem;
-  letter-spacing:.045em;
-}
-
-.itbmo-affiliate-heading h3{
-  margin:0;
-  color:var(--ink);
-  font-size:clamp(1.25rem,2vw,1.62rem);
-  line-height:1.08;
-  font-weight:920;
-  letter-spacing:-.045em;
-}
-
-.itbmo-affiliate-heading p{
-  max-width:780px;
-  margin:.45rem 0 0;
-  color:var(--aff-muted);
-  font-size:.82rem;
-  line-height:1.48;
-}
-
-.itbmo-affiliate-grid{
-  position:relative;
-  z-index:1;
-  display:grid;
-  width:100%;
-  min-width:0;
-  grid-template-columns:repeat(2,minmax(0,1fr));
-  gap:.7rem;
-}
-
-.itbmo-affiliate-card{
-  position:relative;
-  display:flex;
-  min-width:0;
-  flex-direction:column;
-  justify-content:space-between;
-  gap:.72rem;
-  padding:.86rem;
-  overflow:hidden;
-  background:#fff;
-  border:1px solid rgba(35,77,115,.12);
-  border-radius:1.1rem;
-  box-shadow:0 2px 6px rgba(6,31,60,.025),0 9px 24px rgba(18,55,90,.04);
-  transition:transform .28s var(--ease),box-shadow .28s ease,border-color .28s ease;
-}
-
-.itbmo-affiliate-card::after{
-  content:"";
-  position:absolute;
-  top:0;
-  left:0;
-  right:0;
-  height:3px;
-  pointer-events:none;
-}
-
-.itbmo-affiliate-card:hover{
-  transform:translateY(-3px);
-  border-color:rgba(8,119,249,.22);
-  box-shadow:0 4px 10px rgba(6,31,60,.035),0 15px 30px rgba(18,80,145,.08);
-}
-
-.itbmo-affiliate-card--featured{
-  grid-column:1 / -1;
-  background:
-    radial-gradient(520px 220px at 0% 0%,rgba(8,119,249,.14),transparent 68%),
-    linear-gradient(145deg,#fff,#eef5ff);
-  border-color:rgba(40,104,218,.22);
-}
-
-.itbmo-affiliate-card--featured::after{
-  background:linear-gradient(90deg,#0877f9,#557fe9);
-}
-
-.itbmo-affiliate-card--hotels{
-  background:linear-gradient(145deg,#fff,#eef8ff);
-}
-.itbmo-affiliate-card--hotels::after{
-  background:linear-gradient(90deg,#2a8df5,#35bfd1);
-}
-
-.itbmo-affiliate-card--experiences{
-  background:linear-gradient(145deg,#fff,#f8f1ff);
-}
-.itbmo-affiliate-card--experiences::after{
-  background:linear-gradient(90deg,#8a70e8,#d85891);
-}
-
-.itbmo-affiliate-card--transport{
-  background:linear-gradient(145deg,#fff,#edfaf6);
-}
-.itbmo-affiliate-card--transport::after{
-  background:linear-gradient(90deg,#17a783,#36bf8e);
-}
-
-.itbmo-affiliate-card--esim{
-  background:linear-gradient(145deg,#fff,#fff9eb);
-}
-.itbmo-affiliate-card--esim::after{
-  background:linear-gradient(90deg,#d79a16,#e9bd42);
-}
-
-.itbmo-affiliate-card-top{
-  display:flex;
-  align-items:center;
-  gap:.72rem;
-  min-width:0;
-}
-
-.itbmo-affiliate-icon{
-  display:grid;
-  width:3rem;
-  height:3rem;
-  flex:0 0 3rem;
-  place-items:center;
-  color:#4c58c4;
-  background:#fff;
-  border:1px solid rgba(54,88,139,.13);
-  border-radius:.95rem;
-  box-shadow:0 7px 19px rgba(31,63,101,.08),inset 0 1px 0 #fff;
-  transition:transform .28s var(--ease);
-}
-
-.itbmo-affiliate-card:hover .itbmo-affiliate-icon{
-  transform:translateY(-2px) scale(1.05);
-}
-
-.itbmo-affiliate-icon svg{
-  display:block;
-  width:1.68rem;
-  height:1.68rem;
-}
-
-.itbmo-affiliate-card--hotels .itbmo-affiliate-icon{
-  color:#2176d7;
-  background:#f4f9ff;
-}
-
-.itbmo-affiliate-card--experiences .itbmo-affiliate-icon{
-  color:#cf3d7b;
-  background:#fff4f9;
-}
-
-.itbmo-affiliate-card--transport .itbmo-affiliate-icon{
-  color:#168768;
-  background:#f0fbf7;
-}
-
-.itbmo-affiliate-card--esim .itbmo-affiliate-icon{
-  color:#ae7409;
-  background:#fffaf0;
-}
-
-.itbmo-affiliate-card-copy{min-width:0}
-
-.itbmo-affiliate-card h4{
-  margin:0;
-  color:#18324d;
-  font-size:.9rem;
-  line-height:1.18;
-  font-weight:880;
-  letter-spacing:-.02em;
-}
-
-.itbmo-affiliate-card p{
-  margin:.25rem 0 0;
-  color:#748397;
-  font-size:.7rem;
-  line-height:1.4;
-}
-
-.itbmo-affiliate-card--featured h4{font-size:1rem}
-
-.itbmo-affiliate-links{
-  display:flex;
-  min-width:0;
-  flex-wrap:wrap;
-  gap:.42rem;
-  margin-top:auto;
-}
-
-.itbmo-affiliate-link{
-  position:relative;
-  display:flex;
-  min-width:0;
-  min-height:46px;
-  flex:1 1 125px;
-  align-items:center;
-  justify-content:space-between;
-  gap:.55rem;
-  padding:.58rem .62rem .58rem .74rem;
-  color:#213d5c;
-  background:rgba(255,255,255,.96);
-  border:1px solid rgba(35,76,114,.15);
-  border-radius:.82rem;
-  box-shadow:0 2px 6px rgba(6,31,60,.025),0 6px 15px rgba(18,55,90,.045);
-  text-decoration:none;
-  font-size:.72rem;
-  line-height:1.15;
-  font-weight:850;
-  transition:transform .22s var(--ease),box-shadow .22s ease,border-color .22s ease;
-}
-
-.itbmo-affiliate-link:hover,
-.itbmo-affiliate-link:focus-visible{
-  transform:translateY(-3px) scale(1.006);
-  border-color:rgba(8,119,249,.30);
-  box-shadow:0 4px 10px rgba(6,31,60,.035),0 13px 25px rgba(18,80,145,.095);
-  outline:none;
-}
-
-.itbmo-affiliate-brand{
-  overflow:hidden;
-  text-overflow:ellipsis;
-  white-space:nowrap;
-}
-
-.itbmo-affiliate-arrow{
-  display:grid;
-  width:1.8rem;
-  height:1.8rem;
-  flex:0 0 1.8rem;
-  place-items:center;
-  color:#fff;
-  border-radius:999px;
-  box-shadow:0 5px 12px rgba(20,77,100,.16);
-  transition:transform .22s var(--ease);
-}
-
-.itbmo-affiliate-card--featured .itbmo-affiliate-arrow{
-  background:linear-gradient(180deg,#1787ff,#086ce4);
-}
-.itbmo-affiliate-card--hotels .itbmo-affiliate-arrow{
-  background:linear-gradient(180deg,#2d9ee8,#177fc8);
-}
-.itbmo-affiliate-card--experiences .itbmo-affiliate-arrow{
-  background:linear-gradient(180deg,#9a73e9,#7958cf);
-}
-.itbmo-affiliate-card--transport .itbmo-affiliate-arrow{
-  background:linear-gradient(180deg,#2db88f,#168869);
-}
-.itbmo-affiliate-card--esim .itbmo-affiliate-arrow{
-  background:linear-gradient(180deg,#e1aa2b,#bc8010);
-}
-
-.itbmo-affiliate-link:hover .itbmo-affiliate-arrow{
-  transform:translate(2px,-2px) scale(1.07);
-}
-
-.itbmo-affiliate-arrow svg{
-  display:block;
-  width:.92rem;
-  height:.92rem;
-}
-
-.itbmo-affiliate-trust{
-  position:relative;
-  z-index:1;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-  gap:.42rem;
-  margin:.75rem .1rem 0;
-  color:#7c8b9c;
-  text-align:center;
-  font-size:.63rem;
-  line-height:1.35;
-  font-weight:650;
-}
-
-.itbmo-affiliate-trust-dot{
-  width:.42rem;
-  height:.42rem;
-  flex:0 0 .42rem;
-  background:#5ebca3;
-  border-radius:999px;
-  box-shadow:0 0 0 4px rgba(94,188,163,.11);
-}
-
-.itbmo-affiliate-after{
-  margin:1.1rem 0 .35rem;
-}
-
-/* =========================================================
    LOADING OVERLAY
 ========================================================= */
 #loading-overlay{
@@ -2019,95 +1644,6 @@ table.itinerary td:nth-child(8){width:16%}
 
 @keyframes progressFlow{
   to{background-position:220% 0}
-}
-
-#loading-overlay .itbmo-affiliate-surface p::after,
-#loading-overlay .itbmo-affiliate-heading p::after,
-#loading-overlay .itbmo-affiliate-card p::after,
-#loading-overlay .itbmo-affiliate-trust::after{
-  content:none!important;
-  display:none!important;
-}
-
-#loading-overlay .itbmo-affiliate-loading{
-  display:flex;
-  width:100%;
-  height:100%;
-  min-height:0;
-  max-width:1160px;
-  flex-direction:column;
-  margin:.72rem auto 0;
-  text-align:left;
-}
-
-#loading-overlay .itbmo-affiliate-shell{
-  display:flex;
-  min-height:0;
-  flex:1 1 auto;
-  flex-direction:column;
-  padding:.92rem;
-  border-radius:1.45rem;
-}
-
-#loading-overlay .itbmo-affiliate-heading{
-  padding:.02rem .12rem .62rem;
-}
-
-#loading-overlay .itbmo-affiliate-heading h3{
-  font-size:1.34rem;
-}
-
-#loading-overlay .itbmo-affiliate-heading p{
-  margin-top:.28rem;
-  font-size:.73rem;
-}
-
-#loading-overlay .itbmo-affiliate-grid{
-  display:grid;
-  min-height:0;
-  flex:1 1 auto;
-  grid-template-columns:repeat(4,minmax(0,1fr));
-  grid-template-rows:minmax(0,.9fr) minmax(0,1.1fr);
-  gap:.62rem;
-}
-
-#loading-overlay .itbmo-affiliate-card{
-  height:100%;
-  min-height:0;
-  padding:.72rem;
-  opacity:0;
-  animation:affiliateCardRise .55s var(--ease) forwards;
-}
-
-#loading-overlay .itbmo-affiliate-card:nth-child(1){animation-delay:.08s}
-#loading-overlay .itbmo-affiliate-card:nth-child(2){animation-delay:.16s}
-#loading-overlay .itbmo-affiliate-card:nth-child(3){animation-delay:.24s}
-#loading-overlay .itbmo-affiliate-card:nth-child(4){animation-delay:.32s}
-#loading-overlay .itbmo-affiliate-card:nth-child(5){animation-delay:.40s}
-
-@keyframes affiliateCardRise{
-  from{opacity:0;transform:translateY(14px) scale(.985)}
-  to{opacity:1;transform:translateY(0) scale(1)}
-}
-
-#loading-overlay .itbmo-affiliate-card--featured{
-  grid-column:1 / -1;
-  height:100%;
-  min-height:0;
-}
-
-#loading-overlay .itbmo-affiliate-card p{
-  font-size:.65rem;
-}
-
-#loading-overlay .itbmo-affiliate-link{
-  min-height:44px;
-  font-size:.74rem;
-}
-
-#loading-overlay .itbmo-affiliate-trust{
-  margin-top:.55rem;
-  font-size:.6rem;
 }
 
 /* =========================================================
@@ -2622,15 +2158,6 @@ table.itinerary td:nth-child(8){width:16%}
     overflow:visible;
     border-radius:1.35rem;
   }
-
-  #loading-overlay .itbmo-affiliate-grid{
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    grid-template-rows:auto;
-  }
-
-  #loading-overlay .itbmo-affiliate-card--featured{
-    grid-column:1 / -1;
-  }
 }
 
 @media(max-width:768px){
@@ -2708,25 +2235,6 @@ table.itinerary td:nth-child(8){width:16%}
     min-width:unset!important;
   }
 
-  .itbmo-affiliate-grid,
-  #loading-overlay .itbmo-affiliate-grid{
-    grid-template-columns:1fr;
-  }
-
-  .itbmo-affiliate-card--featured,
-  #loading-overlay .itbmo-affiliate-card--featured{
-    grid-column:auto;
-  }
-
-  .itbmo-affiliate-links{
-    display:grid;
-    grid-template-columns:1fr;
-  }
-
-  .itbmo-affiliate-link{
-    width:100%;
-  }
-
   table.itinerary{
     font-size:.74rem;
   }
@@ -2752,12 +2260,6 @@ table.itinerary td:nth-child(8){width:16%}
   .hourglass,
   .hourglass::before,
   .hourglass::after,
-  #loading-overlay .itbmo-affiliate-card,
-  .itbmo-affiliate-surface,
-  .itbmo-affiliate-card,
-  .itbmo-affiliate-link,
-  .itbmo-affiliate-icon,
-  .itbmo-affiliate-arrow,
   .toolbar.itbmo-toolbar-ready{
     animation:none!important;
     transition:none!important;
@@ -2966,88 +2468,11 @@ input.end,
   padding:.62rem;
 }
 
-/* ---------- 5. OVERLAY: OPTIMIZE FEATURED FLIGHT VERTICAL SPACE ---------- */
-#loading-overlay .itbmo-affiliate-grid{
-  grid-template-rows:minmax(0,.72fr) minmax(0,1.28fr);
-}
-
-#loading-overlay .itbmo-affiliate-card--featured{
-  padding:.64rem .72rem;
-}
-
-#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-card-top{
-  gap:.62rem;
-}
-
-#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-icon{
-  width:2.75rem;
-  height:2.75rem;
-  flex-basis:2.75rem;
-}
-
-#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-links{
-  margin-top:.12rem;
-}
-
-/* Slightly stronger card hierarchy, not more saturation. */
-#loading-overlay .itbmo-affiliate-card{
+/* Slightly stronger card hierarchy{
   border-color:rgba(38,87,135,.15);
   box-shadow:
     0 2px 6px rgba(6,31,60,.025),
     0 11px 27px rgba(18,65,102,.055);
-}
-
-#loading-overlay .itbmo-affiliate-card:hover{
-  border-color:rgba(8,119,249,.26);
-  box-shadow:
-    0 4px 10px rgba(6,31,60,.03),
-    0 16px 34px rgba(18,80,145,.085);
-}
-
-#loading-overlay .itbmo-affiliate-card h4{
-  color:#102f4e;
-  font-weight:900;
-}
-
-#loading-overlay .itbmo-affiliate-link{
-  background:
-    linear-gradient(180deg,rgba(255,255,255,1),rgba(248,251,253,.98));
-  font-weight:880;
-}
-
-#loading-overlay .itbmo-affiliate-link:hover{
-  background:#fff;
-}
-
-/* Slightly stronger category accents. */
-#loading-overlay .itbmo-affiliate-card--featured{
-  background:
-    radial-gradient(560px 210px at 0% 0%,rgba(8,119,249,.16),transparent 68%),
-    linear-gradient(145deg,#fff,#edf5ff);
-}
-
-#loading-overlay .itbmo-affiliate-card--hotels{
-  background:
-    radial-gradient(360px 190px at 100% 100%,rgba(53,191,209,.10),transparent 72%),
-    linear-gradient(145deg,#fff,#eef8ff);
-}
-
-#loading-overlay .itbmo-affiliate-card--experiences{
-  background:
-    radial-gradient(360px 190px at 100% 100%,rgba(216,88,145,.09),transparent 72%),
-    linear-gradient(145deg,#fff,#f8f1ff);
-}
-
-#loading-overlay .itbmo-affiliate-card--transport{
-  background:
-    radial-gradient(360px 190px at 100% 100%,rgba(55,185,142,.10),transparent 72%),
-    linear-gradient(145deg,#fff,#edfaf6);
-}
-
-#loading-overlay .itbmo-affiliate-card--esim{
-  background:
-    radial-gradient(360px 190px at 100% 100%,rgba(215,154,22,.09),transparent 72%),
-    linear-gradient(145deg,#fff,#fff9eb);
 }
 
 /* ---------- 6. DESKTOP FLUIDITY ---------- */
@@ -3105,56 +2530,6 @@ input.end,
   .info-chat-floating::before,
   .info-chat-floating::after{
     animation:none!important;
-  }
-}
-/* =========================================================
-   v69.1 · SURGICAL OVERLAY FLIGHT CARD FIX
-   Restores safe vertical geometry after v69 compaction.
-   No HTML / JS / palette changes.
-========================================================= */
-#loading-overlay .itbmo-affiliate-grid{
-  grid-template-rows:minmax(138px,.92fr) minmax(0,1.08fr);
-}
-
-#loading-overlay .itbmo-affiliate-card--featured{
-  min-height:138px;
-  padding:.72rem .78rem;
-  justify-content:flex-start;
-  gap:.52rem;
-}
-
-#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-card-top{
-  flex:0 0 auto;
-  min-height:46px;
-}
-
-#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-links{
-  flex:0 0 auto;
-  width:100%;
-  min-height:44px;
-  margin-top:auto;
-  gap:.5rem;
-}
-
-#loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-link{
-  min-height:44px;
-  height:44px;
-  flex:1 1 0;
-}
-
-@media(max-height:760px) and (min-width:769px){
-  #loading-overlay .itbmo-affiliate-grid{
-    grid-template-rows:minmax(126px,.9fr) minmax(0,1.1fr);
-  }
-
-  #loading-overlay .itbmo-affiliate-card--featured{
-    min-height:126px;
-    padding:.62rem .72rem;
-  }
-
-  #loading-overlay .itbmo-affiliate-card--featured .itbmo-affiliate-link{
-    min-height:40px;
-    height:40px;
   }
 }
 
@@ -3687,33 +3062,6 @@ input.end,
   background:#f5f8fa;
 }
 
-/* =========================================================
-   v73 · BRANDED AFFILIATES + FINAL DOWNLOAD MODAL
-========================================================= */
-.itbmo-affiliate-grid--brands{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.72rem}
-.itbmo-affiliate-brand-card{padding:0!important;overflow:hidden;border-radius:20px;background:#fff;border:1px solid rgba(25,70,105,.10);box-shadow:0 12px 30px rgba(16,55,86,.08)}
-.itbmo-affiliate-brand-head{min-height:52px;display:flex;align-items:center;justify-content:space-between;padding:.7rem .82rem;color:#fff;font-size:1rem;font-weight:950;letter-spacing:-.035em}
-.itbmo-affiliate-brand-head>span{padding:.18rem .34rem;border-radius:999px;background:#fff4cf;color:#795b0a;font-size:.52rem;font-weight:900;letter-spacing:0}
-.itbmo-affiliate-brand-body{display:flex;min-height:145px;flex-direction:column;padding:.72rem .8rem .8rem}
-.itbmo-affiliate-brand-body small{color:#748a9b;font-size:.56rem;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
-.itbmo-affiliate-brand-body h4{margin:.16rem 0 .3rem;font-size:.9rem;color:var(--ink)}
-.itbmo-affiliate-brand-body p{margin:0;color:var(--text);font-size:.66rem;line-height:1.38}
-.itbmo-affiliate-brand-body .itbmo-affiliate-link{margin-top:auto;min-height:38px;padding:.58rem .65rem;border-radius:11px;background:#f3f8fb;color:#245f7b}
-.itbmo-affiliate-brand-card--kayak .itbmo-affiliate-brand-head{background:#ff690f}
-.itbmo-affiliate-brand-card--skyscanner .itbmo-affiliate-brand-head{background:linear-gradient(135deg,#0770e3,#00a8e8)}
-.itbmo-affiliate-brand-card--booking .itbmo-affiliate-brand-head{background:#003b95}
-.itbmo-affiliate-brand-card--gyg .itbmo-affiliate-brand-head{background:#ff5533}
-.itbmo-affiliate-brand-card--viator .itbmo-affiliate-brand-head{background:#008768}
-.itbmo-affiliate-brand-card--omio .itbmo-affiliate-brand-head{background:linear-gradient(135deg,#14265f,#4c5bdc)}
-.itbmo-affiliate-brand-card--airalo .itbmo-affiliate-brand-head{background:linear-gradient(135deg,#5b2bd7,#8b46ef)}
-.itbmo-affiliate-brand-card--holafly .itbmo-affiliate-brand-head{background:#ff3b67}
-#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:repeat(4,minmax(0,1fr));grid-template-rows:auto!important}
-#loading-overlay .itbmo-affiliate-brand-card{height:auto;min-height:0}
-#loading-overlay .itbmo-affiliate-brand-body{min-height:118px;padding:.58rem .66rem .65rem}
-#loading-overlay .itbmo-affiliate-brand-head{min-height:43px;padding:.52rem .66rem;font-size:.88rem}
-#loading-overlay .itbmo-affiliate-brand-body p{font-size:.59rem}
-#loading-overlay .itbmo-affiliate-brand-body h4{font-size:.78rem}
-
 .itbmo-download-overlay{position:fixed;inset:0;z-index:70000;display:grid;place-items:start center;padding:clamp(18px,5vh,54px) 18px;background:rgba(5,25,45,.56);backdrop-filter:blur(18px);opacity:0;transition:opacity .22s ease;overflow:auto}
 .itbmo-download-overlay.active{opacity:1}
 .itbmo-download-card{width:min(94vw,620px);padding:1.35rem;border:1px solid rgba(255,255,255,.7);border-radius:26px;background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(244,251,252,.97));box-shadow:0 30px 90px rgba(4,27,49,.26);text-align:center;transform:translateY(12px) scale(.985);transition:transform .22s ease}
@@ -3731,8 +3079,7 @@ input.end,
 .itbmo-download-close{width:100%}
 .itbmo-download-close:disabled{opacity:.42;cursor:not-allowed}
 .itbmo-download-card>small{display:block;margin-top:.62rem;color:#718697;font-size:.6rem;line-height:1.4}
-@media(max-width:900px){.itbmo-affiliate-grid--brands,#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:560px){.itbmo-affiliate-grid--brands,#loading-overlay .itbmo-affiliate-grid--brands{grid-template-columns:1fr}.itbmo-download-card{padding:1rem;border-radius:22px}}
+@media(max-width:560px){.itbmo-download-card{padding:1rem;border-radius:22px}}
 
 
 /* ITBMO · Info Chat mobile safety */
@@ -3762,36 +3109,6 @@ input.end,
   overflow:visible;
 }
 
-#loading-overlay .itbmo-affiliate-loading{
-  height:auto;
-  min-height:0;
-  flex:0 0 auto;
-}
-
-#loading-overlay .itbmo-affiliate-shell{
-  min-height:auto;
-  flex:0 0 auto;
-}
-
-#loading-overlay .itbmo-affiliate-grid{
-  min-height:auto;
-  flex:0 0 auto;
-  grid-template-rows:none;
-  grid-auto-rows:minmax(250px,auto);
-}
-
-#loading-overlay .itbmo-affiliate-card{
-  height:auto;
-  min-height:250px;
-}
-
-@media (max-width:900px){
-  #loading-overlay .itbmo-affiliate-grid{
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    grid-auto-rows:minmax(230px,auto);
-  }
-}
-
 @media (max-width:560px){
   #loading-overlay{
     padding:8px 6px;
@@ -3800,15 +3117,6 @@ input.end,
   #loading-overlay .loader{
     min-height:calc(100dvh - 16px);
     padding:.8rem .7rem .9rem;
-  }
-
-  #loading-overlay .itbmo-affiliate-grid{
-    grid-template-columns:1fr;
-    grid-auto-rows:auto;
-  }
-
-  #loading-overlay .itbmo-affiliate-card{
-    min-height:220px;
   }
 }
 
@@ -4710,11 +4018,6 @@ input.end,
   box-shadow:0 0 18px rgba(35,165,173,.17);
 }
 
-/* The affiliate area stays secondary to the generation status. */
-#loading-overlay .itbmo-affiliate-loading{
-  margin-top:.35rem;
-}
-
 @media(max-width:760px){
   #loading-overlay .loader > p{
     width:calc(100% - 8px);
@@ -5525,26 +4828,6 @@ body.itinerary-focus-open{
   box-shadow:0 0 17px rgba(10,151,153,.18);
 }
 
-/* =========================================================
-   ITBMO · v78 · FINAL IMMERSIVE UX POLISH
-   Surgical presentation/performance companion layer only.
-   ========================================================= */
-
-/* More breathing room between itinerary actions and monetization. */
-.itbmo-affiliate-after{
-  margin:2.6rem 0 .35rem;
-}
-
-.itbmo-affiliate-after::before{
-  content:"";
-  display:block;
-  width:min(180px,32%);
-  height:3px;
-  margin:0 auto 1.35rem;
-  border-radius:999px;
-  background:linear-gradient(90deg,rgba(8,119,249,0),rgba(53,191,209,.55),rgba(10,151,153,.55),rgba(109,120,238,0));
-}
-
 /* Focus header: stronger travel-reward moment while preserving readability. */
 .itinerary-focus-header{
   background:
@@ -5643,13 +4926,6 @@ body.itinerary-focus-open{
 }
 
 @media(max-width:760px){
-  .itbmo-affiliate-after{
-    margin-top:2rem;
-  }
-
-  .itbmo-affiliate-after::before{
-    margin-bottom:1rem;
-  }
 
   .itinerary-focus-back{
     background:linear-gradient(135deg,#0877f9,#0aa7a5);
@@ -6829,22 +6105,22 @@ html.itbmo-save-transition-open body{overflow:hidden!important}
 :root{
   --itbmo-ink:#101828;
   --itbmo-muted:#667085;
-  --itbmo-brand:#0EA47A;
-  --itbmo-brand-deep:#08785c;
-  --itbmo-mint:#dff7ef;
-  --itbmo-surface:#f7faf9;
+  --itbmo-brand:#0B8FB9;
+  --itbmo-brand-deep:#086987;
+  --itbmo-mint:#e3f5f9;
+  --itbmo-surface:#f5fafc;
   --itbmo-line:rgba(16,24,40,.09);
   --itbmo-shadow:0 24px 80px rgba(16,24,40,.10);
 }
 
-html,body{min-height:100%;background:#f7faf9;}
+html,body{min-height:100%;background:#f5fafc;}
 body{
   margin:0;
   color:var(--itbmo-ink);
   background:
-    radial-gradient(circle at 8% 5%,rgba(14,164,122,.13),transparent 27rem),
-    radial-gradient(circle at 94% 20%,rgba(73,197,162,.12),transparent 31rem),
-    linear-gradient(180deg,#fbfdfc 0%,#f5f9f7 48%,#f8fafc 100%);
+    radial-gradient(circle at 8% 5%,rgba(10,146,223,.12),transparent 27rem),
+    radial-gradient(circle at 94% 20%,rgba(10,166,181,.11),transparent 31rem),
+    linear-gradient(180deg,#fbfdff 0%,#f4f9fc 48%,#f8fbfd 100%);
 }
 
 .topbar{
@@ -7102,17 +6378,17 @@ body{
 }
 .journey-home__aurora--one{
   width:620px;height:620px;left:-250px;top:-220px;
-  background:radial-gradient(circle,rgba(14,164,122,.16),rgba(14,164,122,0) 68%);
+  background:radial-gradient(circle,rgba(10,146,223,.17),rgba(10,146,223,0) 68%);
 }
 .journey-home__aurora--two{
   width:720px;height:720px;right:-280px;top:80px;
-  background:radial-gradient(circle,rgba(92,215,179,.14),rgba(92,215,179,0) 68%);
+  background:radial-gradient(circle,rgba(10,166,181,.14),rgba(10,166,181,0) 68%);
 }
 .journey-home__shell{position:relative;z-index:2;width:min(1280px,92vw);margin:0 auto;}
 .journey-home__intro{max-width:830px;margin-bottom:42px;}
 .journey-home__eyebrow,
 .journey-history__eyebrow{
-  display:block;margin-bottom:14px;color:#0b8664;font-size:.72rem;font-weight:900;letter-spacing:.18em;
+  display:block;margin-bottom:14px;color:#087e9d;font-size:.72rem;font-weight:900;letter-spacing:.18em;
 }
 .journey-home__intro h1{
   margin:0;
@@ -7145,8 +6421,8 @@ body{
   border:1px solid rgba(255,255,255,.10);
   background:
     radial-gradient(circle at 88% 8%,rgba(255,255,255,.17),transparent 13rem),
-    linear-gradient(145deg,#075e49 0%,#0b8664 48%,#11a97e 100%);
-  box-shadow:0 28px 75px rgba(8,120,92,.24);
+    linear-gradient(145deg,#075b86 0%,#087da5 50%,#0ba3b5 100%);
+  box-shadow:0 28px 75px rgba(7,100,142,.24);
 }
 .journey-home-card--new{
   color:#101828;
@@ -7164,7 +6440,7 @@ body{
   font-size:1.15rem;font-weight:900;
 }
 .journey-home-card--resume .journey-home-card__icon{background:rgba(255,255,255,.14);}
-.journey-home-card--new .journey-home-card__icon{background:#e8f8f2;color:#08785c;}
+.journey-home-card--new .journey-home-card__icon{background:#e6f6fb;color:#08718f;}
 .journey-home-card__kicker{margin-top:30px;font-size:.67rem;font-weight:900;letter-spacing:.16em;opacity:.72;}
 .journey-home-card strong{
   display:block;margin-top:9px;max-width:520px;font-size:clamp(1.65rem,3vw,2.75rem);line-height:1.02;letter-spacing:-.045em;
@@ -7196,13 +6472,13 @@ body{
 }
 .journey-trip-card:hover{
   transform:translateY(-3px);
-  border-color:rgba(14,164,122,.24);
+  border-color:rgba(10,146,223,.24);
   box-shadow:0 18px 45px rgba(16,24,40,.085);
 }
 .journey-trip-card__number{display:block;color:#98a2b3;font-size:.68rem;font-weight:900;letter-spacing:.12em;}
 .journey-trip-card strong{display:block;margin-top:22px;font-size:1.3rem;line-height:1.08;letter-spacing:-.035em;}
 .journey-trip-card small{display:block;margin-top:8px;color:#667085;line-height:1.45;}
-.journey-trip-card__open{display:block;margin-top:24px;color:#08785c;font-size:.78rem;font-weight:900;}
+.journey-trip-card__open{display:block;margin-top:24px;color:#087b9a;font-size:.78rem;font-weight:900;}
 
 body.journey-home-open #planner-grid{display:none!important;}
 body.journey-home-open .astra-guide-replay{display:none!important;}
@@ -9168,28 +8444,35 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
   display:inline-flex !important;
   align-items:center !important;
   justify-content:center !important;
-  gap:8px !important;
-  min-height:46px !important;
-  padding:0 18px !important;
-  color:#076f56 !important;
-  background:linear-gradient(135deg,#ffffff,#f1fbf7) !important;
-  border:1px solid rgba(14,164,122,.34) !important;
-  border-radius:999px !important;
-  box-shadow:0 8px 22px rgba(7,94,72,.085),inset 0 1px 0 rgba(255,255,255,.8) !important;
+  gap:10px !important;
+  min-height:54px !important;
+  padding:7px 14px 7px 9px !important;
+  color:#fff !important;
+  background:linear-gradient(135deg,#0877c9 0%,#0a94bc 52%,#0aa8b1 100%) !important;
+  border:1px solid rgba(255,255,255,.45) !important;
+  border-radius:18px !important;
+  box-shadow:0 14px 34px rgba(5,104,151,.23),inset 0 1px 0 rgba(255,255,255,.25) !important;
   font-size:.88rem !important;
-  font-weight:850 !important;
   cursor:pointer !important;
-  transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease,background .18s ease !important;
+  transition:transform .2s ease,box-shadow .2s ease,filter .2s ease !important;
 }
+.planner-my-trips__icon{
+  width:38px;height:38px;display:grid;place-items:center;flex:0 0 auto;
+  border-radius:12px;background:rgba(255,255,255,.16);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.12);font-size:1rem;font-weight:900;
+}
+.planner-my-trips__copy{display:flex;flex-direction:column;align-items:flex-start;line-height:1.05;}
+.planner-my-trips__copy strong{font-size:.9rem;font-weight:900;letter-spacing:-.015em;color:#fff;}
+.planner-my-trips__copy small{margin-top:4px;color:rgba(255,255,255,.74);font-size:.58rem;font-weight:750;white-space:nowrap;}
+.planner-my-trips__arrow{font-size:1rem;font-weight:900;opacity:.78;transition:transform .2s ease;}
 .planner-my-trips:not([hidden]):hover{
-  transform:translateY(-1px) !important;
-  color:#055c48 !important;
-  background:linear-gradient(135deg,#ffffff,#e9f9f3) !important;
-  border-color:rgba(14,164,122,.55) !important;
-  box-shadow:0 12px 28px rgba(7,94,72,.12) !important;
+  transform:translateY(-2px) !important;
+  filter:saturate(1.06) brightness(1.02) !important;
+  box-shadow:0 18px 42px rgba(5,104,151,.29),inset 0 1px 0 rgba(255,255,255,.28) !important;
 }
+.planner-my-trips:not([hidden]):hover .planner-my-trips__arrow{transform:translateX(3px);}
 .planner-my-trips:not([hidden]):focus-visible{
-  outline:3px solid rgba(14,164,122,.16) !important;
+  outline:3px solid rgba(10,146,223,.19) !important;
   outline-offset:3px !important;
 }
 #journey-history{scroll-margin-top:112px !important;}
@@ -9399,9 +8682,11 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
     min-height:0 !important;
   }
   .planner-my-trips:not([hidden]){
-    min-height:42px !important;
-    padding:0 14px !important;
+    min-height:48px !important;
+    padding:6px 10px 6px 7px !important;
   }
+  .planner-my-trips__icon{width:34px;height:34px;}
+  .planner-my-trips__copy small{display:none;}
   #reset-planner{
     margin-left:0 !important;
     margin-right:auto !important;
