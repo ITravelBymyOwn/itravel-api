@@ -1,0 +1,66 @@
+ITBMO · MASTER PROGRESS / RECOVERY CONTEXT
+Fecha de corte: 2026-09-10
+Confidencial: estrategia, arquitectura, código, monetización, afiliados y datos del proyecto.
+
+REGLAS DE TRABAJO
+- Partir siempre de la última baseline aprobada.
+- Cambios quirúrgicos; no parches sobre parches.
+- Entregar al usuario únicamente archivos nuevos o modificados, nunca archivos sin cambios.
+- Probar en rama/Vercel Preview antes de main.
+- No inventar handles sociales, URLs de afiliados, disponibilidad, precios ni conversiones.
+
+VISIÓN
+ITBMO es un planner propio powered by AI, no una IA-personaje. Ecosistema: adquisición -> Planner -> identidad -> trip -> Travel Intelligence -> Workspace -> Needs -> Partner/Offer Engine -> conversión -> lifecycle -> sharing/referral -> crecimiento. Supabase es la fuente de verdad operacional. Plataformas externas entran mediante adapters.
+
+COMPLETADO · GROWTH FOUNDATION V1
+- Event Gateway: /api/events.
+- Attribution: anonymous_id + attribution_id + first touch + last meaningful touch.
+- Tablas: marketing_channels, campaigns, campaign_links, attributions, marketing_touchpoints, social_accounts, feature_flags.
+- Foundation frontend: public/assets/js/itbmo-foundation.js.
+- Backend común: api/_lib/itbmo-foundation.js.
+- Supabase migration: 20260909_growth_foundation_v1.sql.
+- Webflow attribution bridge preparado, todavía se activa solo cuando se valide en producción.
+- user_events sigue siendo operacional/autoritativo; marketing_touchpoints no debe duplicar eventos server-side.
+
+TANDA 2026-09-10 · CAMBIOS VISUALES / UX
+- Footer: un único link Soporte & Contacto / Support & Contact, sin anchors, abre el inicio de la página.
+- Planner navbar: contraste de marca I Travel / By My Own corregido sobre topbar clara.
+- Mis viajes: microanimación premium de brillo + ícono, con prefers-reduced-motion.
+- Para tu viaje: CTA reforzado con sheen premium, microanimación y hover; sin rebotes/parpadeos.
+- Social metadata Vercel preview actualizado sin ASTRA.
+- El Home público de Webflow requiere actualizar SEO/Open Graph según docs/WEBFLOW_SOCIAL_METADATA_UPDATE.txt para eliminar ASTRA al compartir www.itravelbymyown.com.
+
+FASE FUNCIONAL ACTUAL · PARTNER / COMMERCE ENGINE V1
+Nuevas tablas: travel_partners, partner_capabilities, partner_rules, partner_offers, partner_clicks, partner_conversions.
+Nuevo backend: api/_lib/partner-engine.js + /api/partners.
+Feature flag partner_engine_enabled pasa a true al aplicar la migración.
+Partners aprobados registrados: Viator, GetYourGuide, Omio, Holafly.
+Activación controlada inicial:
+- Holafly: oferta transversal de conectividad en Workspace general. Link de tracking validado. No se afirma descuento si no se valida dinámicamente.
+- Omio: oferta de transporte solo cuando Context Intelligence detecta intercity_transport/transport_arrangement. Link general validado; deeplinks quedan para fase posterior.
+- Viator/GetYourGuide: registrados y habilitados a nivel partner, pero NO se muestran genéricamente; se activarán al existir mapping exacto destino/entidad.
+- Cada CTA pasa por /api/partners action=click y genera click_id propio en partner_clicks antes de abrir el partner.
+- partner_offer_view/click se envían a la Foundation de eventos.
+
+AFILIADOS · CORTE 2026-09-09
+Aprobados: Viator (P00318254), GetYourGuide (3FZWELC), Omio (Impact 7727455 / advertiser 465493 / program 7385), Holafly (Impact 7727455).
+En revisión: Airalo, KAYAK.
+Pausa/pospuestos: Booking.com, Skyscanner, AdSense.
+No activar partners no aprobados.
+
+PENDIENTES PRÓXIMOS
+1. Aplicar 20260910_partner_engine_v1.sql en Supabase.
+2. Crear/subir solo los archivos nuevos/modificados de esta tanda.
+3. Vercel Preview: validar Planner, login/guest, Mis viajes, Workspace, Context Intelligence.
+4. Validar Holafly en Para todo tu viaje: abre nueva pestaña y crea partner_click.
+5. Validar Omio solo en una ciudad con necesidad real de transporte detectada.
+6. Confirmar que itinerario_data no cambia.
+7. Actualizar Webflow SEO/Open Graph para eliminar ASTRA del share preview.
+8. No pasar a main hasta aprobación visual/funcional.
+
+SIGUIENTES FASES PLANEADAS
+- Partner Engine V1.1: canonical travel entities + provider mappings + Viator/GYG exact matching + Holafly coverage resolver regional/país + Omio deeplinks origen/destino.
+- Lifecycle/Brevo V1: reglas event-driven y consentidas.
+- Sharing/Referral V1.
+- Campaign landing/content engine.
+- Social publishing adapters y Growth Center posteriormente.
