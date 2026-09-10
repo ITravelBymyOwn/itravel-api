@@ -6,10 +6,13 @@ const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>
 let data=null,city=null,day=null,mode='itinerary';
 const contextByCity=new Map();
 const contextRequests=new Map();
+const partnerOffersByCity=new Map();
+let tripPartnerOffers=[];
+const viewedOfferIds=new Set();
 const requestedLang=new URLSearchParams(location.search).get('lang');
 const copy={
- es:{back:'Volver al Planner',prepareBadge:'Explora',prepareTeaser:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',ready:'Tu viaje está listo',overviewK:'TU VIAJE ITBMO',overviewT:'¿Por dónde quieres empezar?',overviewC:'Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.',city:'ciudad',cities:'ciudades',d:'día',ds:'días',organized:'organizados',explore:'Explorar',all:'Todas las ciudades',cityK:'TU CIUDAD',it:'Itinerario',prep:'Para tu viaje',wholeK:'PARA TODO TU VIAJE',wholeT:'Lo esencial que viaja contigo.',wholeC:'Necesidades que acompañan el viaje completo, sin repetirlas ciudad por ciudad.',connectivityK:'VIAJE COMPLETO',connectivityT:'Conectividad',connectivityC:'Opciones de datos y eSIM para mantenerte conectado durante todo el viaje.',insuranceK:'VIAJE COMPLETO',insuranceT:'Seguro de viaje',insuranceC:'Protección transversal para el viaje cuando exista una opción que aporte valor real.',coming:'Próximamente',details:'Ver detalles',hide:'Ocultar detalles',route:'Trayecto',transport:'Transporte',duration:'Duración',notes:'Detalles',prepareT:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',prepareC:'Entradas, reservas, experiencias y movilidad, seleccionadas según tu viaje.',tickets:'Entradas y reservas',ticketsC:'Accesos, horarios y reservas que realmente requiere tu itinerario.',tours:'Tours y experiencias',toursC:'Alternativas guiadas y experiencias que encajan con lo que ya planeaste.',move:'Cómo moverte',moveC:'Opciones útiles de movilidad relacionadas con esta ciudad.',more:'Más para tu viaje',moreC:'Otros servicios relevantes, solo cuando aporten valor.',contextLoading:'Analizando lo que necesitas para este viaje…',contextError:'No pudimos analizar esta ciudad ahora. Puedes seguir usando tu itinerario normalmente.',contextEmpty:'No detectamos nada que necesites resolver aquí.',required:'Entrada necesaria',recommended:'Conviene reservar',optional:'Opcional',journey:'Trayecto a resolver',dayLabel:'Día',basedOn:'Basado en tu itinerario',items:'pendientes',next:'Próximamente',loading:'Recuperando tu viaje…',emptyT:'No pudimos cargar este viaje.',emptyC:'Vuelve al Planner para abrirlo nuevamente o inicia sesión si este viaje pertenece a tu cuenta.'},
- en:{back:'Back to Planner',prepareBadge:'Explore',prepareTeaser:'Your itinerary is only the beginning. Get ready to live it.',ready:'Your trip is ready',overviewK:'YOUR ITBMO TRIP',overviewT:'Where do you want to start?',overviewC:'Choose a city to explore it day by day and prepare what you actually need.',city:'city',cities:'cities',d:'day',ds:'days',organized:'organized',explore:'Explore',all:'All cities',cityK:'YOUR CITY',it:'Itinerary',prep:'For your trip',wholeK:'FOR YOUR WHOLE TRIP',wholeT:'The essentials that travel with you.',wholeC:'Needs that travel with the whole trip, without repeating them city by city.',connectivityK:'WHOLE TRIP',connectivityT:'Connectivity',connectivityC:'Data and eSIM options to keep you connected throughout the trip.',insuranceK:'WHOLE TRIP',insuranceT:'Travel insurance',insuranceC:'Trip-wide protection when there is an option that genuinely adds value.',coming:'Coming next',details:'View details',hide:'Hide details',route:'Route',transport:'Transport',duration:'Duration',notes:'Details',prepareT:'Your itinerary is only the beginning. Get ready to live it.',prepareC:'Tickets, reservations, experiences and mobility, selected around your trip.',tickets:'Tickets & reservations',ticketsC:'Access, schedules and reservations your itinerary actually requires.',tours:'Tours & experiences',toursC:'Guided alternatives and experiences that fit what you already planned.',move:'Getting around',moveC:'Useful mobility options related to this city.',more:'More for your trip',moreC:'Other relevant services, only when they add value.',contextLoading:'Analyzing what you need for this trip…',contextError:'We could not analyze this city right now. You can keep using your itinerary normally.',contextEmpty:'Nothing here appears to require action from you.',required:'Ticket needed',recommended:'Reservation recommended',optional:'Optional',journey:'Transport to arrange',dayLabel:'Day',basedOn:'Based on your itinerary',items:'items',next:'Coming next',loading:'Recovering your trip…',emptyT:'We could not load this trip.',emptyC:'Return to the Planner to open it again, or sign in if this trip belongs to your account.'}
+ es:{back:'Volver al Planner',prepareBadge:'Explora',prepareTeaser:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',ready:'Tu viaje está listo',overviewK:'TU VIAJE ITBMO',overviewT:'¿Por dónde quieres empezar?',overviewC:'Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.',city:'ciudad',cities:'ciudades',d:'día',ds:'días',organized:'organizados',explore:'Explorar',all:'Todas las ciudades',cityK:'TU CIUDAD',it:'Itinerario',prep:'Para tu viaje',wholeK:'PARA TODO TU VIAJE',wholeT:'Lo esencial que viaja contigo.',wholeC:'Necesidades que acompañan el viaje completo, sin repetirlas ciudad por ciudad.',connectivityK:'VIAJE COMPLETO',connectivityT:'Conectividad',connectivityC:'Opciones de datos y eSIM para mantenerte conectado durante todo el viaje.',insuranceK:'VIAJE COMPLETO',insuranceT:'Seguro de viaje',insuranceC:'Protección transversal para el viaje cuando exista una opción que aporte valor real.',coming:'Próximamente',details:'Ver detalles',hide:'Ocultar detalles',route:'Trayecto',transport:'Transporte',duration:'Duración',notes:'Detalles',prepareT:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',prepareC:'Entradas, reservas, experiencias y movilidad, seleccionadas según tu viaje.',tickets:'Entradas y reservas',ticketsC:'Accesos, horarios y reservas que realmente requiere tu itinerario.',tours:'Tours y experiencias',toursC:'Alternativas guiadas y experiencias que encajan con lo que ya planeaste.',move:'Cómo moverte',moveC:'Opciones útiles de movilidad relacionadas con esta ciudad.',more:'Más para tu viaje',moreC:'Otros servicios relevantes, solo cuando aporten valor.',contextLoading:'Analizando lo que necesitas para este viaje…',contextError:'No pudimos analizar esta ciudad ahora. Puedes seguir usando tu itinerario normalmente.',contextEmpty:'No detectamos nada que necesites resolver aquí.',required:'Entrada necesaria',recommended:'Conviene reservar',optional:'Opcional',journey:'Trayecto a resolver',dayLabel:'Día',basedOn:'Basado en tu itinerario',items:'pendientes',next:'Próximamente',loading:'Recuperando tu viaje…',emptyT:'No pudimos cargar este viaje.',emptyC:'Vuelve al Planner para abrirlo nuevamente o inicia sesión si este viaje pertenece a tu cuenta.',partnerCta:'Ver opción',affiliateNote:'Enlace de afiliado. ITBMO puede recibir una comisión sin costo adicional para ti.',available:'Disponible'},
+ en:{back:'Back to Planner',prepareBadge:'Explore',prepareTeaser:'Your itinerary is only the beginning. Get ready to live it.',ready:'Your trip is ready',overviewK:'YOUR ITBMO TRIP',overviewT:'Where do you want to start?',overviewC:'Choose a city to explore it day by day and prepare what you actually need.',city:'city',cities:'cities',d:'day',ds:'days',organized:'organized',explore:'Explore',all:'All cities',cityK:'YOUR CITY',it:'Itinerary',prep:'For your trip',wholeK:'FOR YOUR WHOLE TRIP',wholeT:'The essentials that travel with you.',wholeC:'Needs that travel with the whole trip, without repeating them city by city.',connectivityK:'WHOLE TRIP',connectivityT:'Connectivity',connectivityC:'Data and eSIM options to keep you connected throughout the trip.',insuranceK:'WHOLE TRIP',insuranceT:'Travel insurance',insuranceC:'Trip-wide protection when there is an option that genuinely adds value.',coming:'Coming next',details:'View details',hide:'Hide details',route:'Route',transport:'Transport',duration:'Duration',notes:'Details',prepareT:'Your itinerary is only the beginning. Get ready to live it.',prepareC:'Tickets, reservations, experiences and mobility, selected around your trip.',tickets:'Tickets & reservations',ticketsC:'Access, schedules and reservations your itinerary actually requires.',tours:'Tours & experiences',toursC:'Guided alternatives and experiences that fit what you already planned.',move:'Getting around',moveC:'Useful mobility options related to this city.',more:'More for your trip',moreC:'Other relevant services, only when they add value.',contextLoading:'Analyzing what you need for this trip…',contextError:'We could not analyze this city right now. You can keep using your itinerary normally.',contextEmpty:'Nothing here appears to require action from you.',required:'Ticket needed',recommended:'Reservation recommended',optional:'Optional',journey:'Transport to arrange',dayLabel:'Day',basedOn:'Based on your itinerary',items:'items',next:'Coming next',loading:'Recovering your trip…',emptyT:'We could not load this trip.',emptyC:'Return to the Planner to open it again, or sign in if this trip belongs to your account.',partnerCta:'View option',affiliateNote:'Affiliate link. ITBMO may earn a commission at no additional cost to you.',available:'Available'}
 };
 let lang='es',t=copy.es;
 function parseDate(v){if(!v)return null;let m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]);m=String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return null}
@@ -123,6 +126,40 @@ function ensureContext(cityName){
   return request;
 }
 
+function localizedOffer(offer){
+  return {title:lang==='es'?offer.title_es:offer.title_en,description:lang==='es'?offer.description_es:offer.description_en};
+}
+function offerCard(offer,placement){
+  if(!offer?.id)return'';const c=localizedOffer(offer);
+  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p><button type="button" data-partner-open="${esc(offer.id)}">${esc(t.partnerCta)} →</button><small class="tw-affiliate-note">${esc(t.affiliateNote)}</small></div>`;
+}
+async function fetchPartnerOffers(action,needs=[]){
+  const token=getStoredSessionToken();if(!token||!data?.trip_id)return[];
+  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,needs})});
+  const payload=await response.json().catch(()=>({}));return response.ok&&payload?.ok&&Array.isArray(payload.offers)?payload.offers:[];
+}
+async function openPartnerOffer(offerId,placement){
+  const token=getStoredSessionToken();if(!token)return;
+  const target=window.open('about:blank','_blank');if(target)target.opener=null;
+  try{
+    const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'click',session_token:token,trip_id:data?.trip_id,offer_id:offerId,placement})});
+    const payload=await response.json().catch(()=>({}));
+    if(response.ok&&payload?.ok&&/^https:\/\//i.test(payload.url||'')){
+      window.ITBMOFoundation?.track('partner_offer_click',{partner_name:placement==='trip_connectivity'?'Holafly':'Omio',placement,destination:city||''});
+      if(target)target.location.replace(payload.url);else window.location.assign(payload.url);
+      return;
+    }
+  }catch(_){}
+  if(target)target.close();
+}
+function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>btn.onclick=()=>openPartnerOffer(btn.dataset.partnerOpen,btn.closest('[data-placement]')?.dataset.placement||''));}
+async function loadTripPartnerOffers(){tripPartnerOffers=await fetchPartnerOffers('resolve_trip');renderTripPartnerOffers();}
+function renderTripPartnerOffers(){
+  const offer=tripPartnerOffers.find(x=>x.placement==='trip_connectivity');if(!offer)return;
+  const item=$('#tw-connectivity-status')?.closest('.tw-trip-wide__item');if(!item)return;item.classList.add('is-live');$('#tw-connectivity-status').textContent=t.available;
+  item.querySelector('.tw-partner-offer')?.remove();item.insertAdjacentHTML('beforeend',offerCard(offer,'trip_connectivity'));bindPartnerOffers();
+  if(!viewedOfferIds.has(offer.id)){viewedOfferIds.add(offer.id);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',placement:'trip_connectivity'});}
+}
 function renderPrepare(){
   const c=esc(city);
   const state=contextByCity.get(city);
@@ -151,15 +188,16 @@ function renderPrepare(){
   }
 
   const needs=Array.isArray(state.needs)?state.needs:[];
+  if(!partnerOffersByCity.has(city)){partnerOffersByCity.set(city,[]);fetchPartnerOffers('resolve_city',needs).then(offers=>{partnerOffersByCity.set(city,offers);if(mode==='prepare')renderPrepare()}).catch(()=>{});}
   const tickets=needs.filter(item=>item.category==='tickets');
   const tours=needs.filter(item=>item.category==='tours');
   const transport=needs.filter(item=>item.category==='transport');
 
-  const activeSections=[
-    contextSection('🎟',t.tickets,t.ticketsC,tickets),
-    contextSection('✦',t.tours,t.toursC,tours),
-    contextSection('↗',t.move,t.moveC,transport)
-  ].filter(Boolean).join('');
+  const cityOffers=partnerOffersByCity.get(city)||[];
+  let transportSection=contextSection('↗',t.move,t.moveC,transport);
+  const transportOffer=cityOffers.find(x=>x.placement==='city_transport');
+  if(transportOffer&&transportSection) transportSection=transportSection.replace('</section>',offerCard(transportOffer,'city_transport')+'</section>');
+  const activeSections=[contextSection('🎟',t.tickets,t.ticketsC,tickets),contextSection('✦',t.tours,t.toursC,tours),transportSection].filter(Boolean).join('');
 
   $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
     <span class="tw-prepare-mark">✦</span>
@@ -180,6 +218,8 @@ function renderPrepare(){
       <small>${esc(t.next)}</small>
     </section>
   </div>`;
+  bindPartnerOffers();
+  if(transportOffer&&!viewedOfferIds.has(transportOffer.id)){viewedOfferIds.add(transportOffer.id);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:transportOffer.partner?.name||'',placement:'city_transport',destination:city});}
 }
 function getStoredSessionToken(){
   try{
@@ -312,6 +352,7 @@ async function boot(){
   if(status) status.textContent=t.ready;
   window.ITBMOFoundation?.track('workspace_opened',{city_count:cities().length,language:lang});
   overview();
+  loadTripPartnerOffers().catch(()=>{});
 }
 
 boot();
