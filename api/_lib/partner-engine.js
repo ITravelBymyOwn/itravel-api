@@ -19,8 +19,9 @@ export async function getOffer(slug, placement=''){
 }
 
 export async function resolveTripOffers({session_token,trip_id}){
-  const session=await resolveSession(session_token);
-  if(!session) return {session:null,offers:[]};
+  // Trip-wide offers are safe to resolve even if the workspace was reopened
+  // without a persisted session token. Session context is attached when available.
+  const session=await resolveSession(session_token).catch(()=>null);
   const offers=[];
   const holafly=await getOffer('holafly','trip_connectivity').catch(()=>null);
   if(holafly) offers.push(holafly);
@@ -40,12 +41,13 @@ export async function resolveCityOffers({session_token,trip_id,needs=[]}){
 }
 
 export async function registerPartnerClick({session_token,trip_id,offer_id,placement}){
-  const session=await resolveSession(session_token);
-  if(!session) return {ok:false,code:'SESSION_REQUIRED'};
+  // Affiliate destinations are public. Preserve session attribution when available,
+  // but never make a useful trip-wide offer disappear because a token is unavailable.
+  const session=await resolveSession(session_token).catch(()=>null);
   const rows=await supabaseFetch(`/partner_offers?select=id,partner_id,target_url,enabled& id=eq.${encodeURIComponent(offer_id)}`.replace('& ', '&'));
   const offer=Array.isArray(rows)?rows[0]:null;
   if(!offer?.enabled || !/^https:\/\//i.test(String(offer.target_url||''))) return {ok:false,code:'OFFER_NOT_AVAILABLE'};
   const clickId=crypto.randomUUID();
-  await supabaseFetch('/partner_clicks',{method:'POST',body:JSON.stringify({click_id:clickId,partner_id:offer.partner_id,offer_id:offer.id,user_id:session.user_id||null,session_id:session.id,trip_id:trip_id||null,placement:String(placement||'').slice(0,80)})});
+  await supabaseFetch('/partner_clicks',{method:'POST',body:JSON.stringify({click_id:clickId,partner_id:offer.partner_id,offer_id:offer.id,user_id:session?.user_id||null,session_id:session?.id||null,trip_id:trip_id||null,placement:String(placement||'').slice(0,80)})});
   return {ok:true,click_id:clickId,url:offer.target_url};
 }
