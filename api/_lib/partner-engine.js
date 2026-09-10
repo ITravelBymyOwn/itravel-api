@@ -23,7 +23,7 @@ export async function resolveTripOffers({session_token,trip_id}){
   // without a persisted session token. Session context is attached when available.
   const session=await resolveSession(session_token).catch(()=>null);
   const offers=[];
-  const holafly=await getOffer('holafly','trip_connectivity').catch(()=>null);
+  const holafly = await getOffer('holafly', 'trip_connectivity');
   if(holafly) offers.push(holafly);
   return {session,offers};
 }
