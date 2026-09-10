@@ -161,3 +161,9 @@
 
   .support-steps{grid-template-columns:1fr}
 }
+
+/* ITBMO Foundation V1 · direct footer navigation targets */
+#support,
+#contact {
+  scroll-margin-top: 110px;
+}
