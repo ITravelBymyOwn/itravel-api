@@ -8700,3 +8700,27 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
     padding:16px !important;
   }
 }
+
+
+/* =========================================================
+   ITBMO · GROWTH V1.1 · PREMIUM NAV ATTENTION
+   Brand contrast + deliberate My Trips micro-interaction.
+========================================================= */
+.topbar .brand.brand-logo .brand-line-1{
+  color:#0a6687 !important;
+  text-shadow:0 1px 0 rgba(255,255,255,.72),0 8px 22px rgba(8,111,151,.08);
+}
+.topbar .brand.brand-logo .brand-line-2{
+  color:#1685a2 !important;
+  text-shadow:0 1px 0 rgba(255,255,255,.68);
+}
+.planner-my-trips:not([hidden]){position:relative;overflow:hidden;isolation:isolate;}
+.planner-my-trips:not([hidden])::before{
+  content:"";position:absolute;z-index:-1;inset:-35% auto -35% -42%;width:34%;
+  transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.38),transparent);
+  animation:itbmoMyTripsSheen 6.4s cubic-bezier(.22,.61,.36,1) infinite;
+}
+.planner-my-trips__icon{animation:itbmoMyTripsSpark 4.8s ease-in-out infinite;}
+@keyframes itbmoMyTripsSheen{0%,66%{left:-42%;opacity:0}70%{opacity:1}84%{left:120%;opacity:0}100%{left:120%;opacity:0}}
+@keyframes itbmoMyTripsSpark{0%,70%,100%{transform:scale(1) rotate(0)}76%{transform:scale(1.08) rotate(5deg)}82%{transform:scale(1) rotate(0)}}
+@media (prefers-reduced-motion:reduce){.planner-my-trips:not([hidden])::before,.planner-my-trips__icon{animation:none!important}}
