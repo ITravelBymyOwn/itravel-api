@@ -34,6 +34,14 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/events.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/attribution.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "public/**/*",
       "use": "@vercel/static"
     }
@@ -70,6 +78,14 @@
     {
       "src": "/api/context",
       "dest": "/api/context.js"
+    },
+    {
+      "src": "/api/events",
+      "dest": "/api/events.js"
+    },
+    {
+      "src": "/api/attribution",
+      "dest": "/api/attribution.js"
     },
     {
       "src": "/(.*)",
