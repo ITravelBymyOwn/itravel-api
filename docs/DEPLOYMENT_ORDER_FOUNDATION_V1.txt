@@ -1,0 +1,17 @@
+ITBMO · Growth Foundation V1 · Deployment order
+
+1) Create/test a feature branch. Do not merge directly to main.
+2) Review supabase/migrations/20260909_growth_foundation_v1.sql in Supabase SQL Editor.
+3) Apply the additive migration in the test/target Supabase project.
+4) Deploy this code branch to a Vercel preview.
+5) Validate Home -> Planner -> Login/Guest -> Save Destinations -> Payment sandbox -> Workspace.
+6) Confirm existing user_events remain unchanged/server-authoritative.
+7) Confirm new marketing_touchpoints receives browser telemetry.
+8) Confirm attributions stores first_touch + last_meaningful_touch after authentication.
+9) Validate footer links: Soporte -> #support, Contacto -> #contact, including EN equivalents.
+10) Add WEBFLOW_ATTRIBUTION_BRIDGE_PRODUCTION.txt to Webflow custom code only after Vercel preview validation; for preview testing, use the preview Vercel origin in a temporary copy of the bridge.
+11) Verify GTM/GA4 continues receiving ITBMO_ANALYTICS_EVENT messages.
+12) Merge to main only after the complete regression test passes.
+
+No social account URLs are hardcoded in this release because no official handles/URLs were supplied in the baseline.
+Social publishing remains feature-flagged off.
