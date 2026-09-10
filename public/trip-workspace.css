@@ -1016,3 +1016,29 @@ button,a {
     margin-top:4px
   }
 }
+
+
+/* =========================================================
+   ITBMO · PARTNER ENGINE V1 · PREMIUM COMMERCE EXPERIENCE
+========================================================= */
+.tw-mode #tw-mode-prepare{isolation:isolate;box-shadow:0 14px 34px rgba(8,105,151,.13),inset 0 1px 0 rgba(255,255,255,.86);}
+.tw-mode #tw-mode-prepare::before{
+  content:"";position:absolute;z-index:-1;top:-45%;bottom:-45%;left:-34%;width:25%;
+  transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.72),transparent);
+  animation:twPrepareSheen 5.8s cubic-bezier(.22,.61,.36,1) infinite;pointer-events:none;
+}
+.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:twPrepareSpark 4.2s ease-in-out infinite;}
+.tw-mode #tw-mode-prepare em{box-shadow:0 6px 18px rgba(7,117,144,.09);transition:transform .2s ease,box-shadow .2s ease;}
+.tw-mode #tw-mode-prepare:hover em{transform:translateX(2px);box-shadow:0 8px 22px rgba(7,117,144,.14)}
+@keyframes twPrepareSheen{0%,64%{left:-34%;opacity:0}69%{opacity:1}84%{left:118%;opacity:0}100%{left:118%;opacity:0}}
+@keyframes twPrepareSpark{0%,68%,100%{transform:scale(1) rotate(0)}74%{transform:scale(1.10) rotate(7deg)}80%{transform:scale(1) rotate(0)}}
+.tw-partner-offer{grid-column:1/-1;margin-top:14px;padding:15px 16px;border:1px solid rgba(8,126,209,.14);border-radius:18px;background:linear-gradient(135deg,#f7fcff,#f2fbfb);box-shadow:0 10px 26px rgba(22,66,93,.05)}
+.tw-partner-offer__top{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.tw-partner-offer__top strong{font-size:13px;color:#0a6784}.tw-partner-offer__top small{font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#63808f}
+.tw-partner-offer p{margin:6px 0 10px;font-size:11px;line-height:1.45;color:#637f90}
+.tw-partner-offer button{border:0;border-radius:999px;padding:9px 13px;color:#fff;background:linear-gradient(135deg,#087ed1,#0a9db5);font-weight:900;font-size:11px;cursor:pointer;box-shadow:0 9px 20px rgba(8,126,177,.16);transition:transform .2s ease,box-shadow .2s ease}
+.tw-partner-offer button:hover{transform:translateY(-1px);box-shadow:0 12px 26px rgba(8,126,177,.23)}
+.tw-affiliate-note{display:block;margin-top:8px;color:#8297a3;font-size:9px;line-height:1.35}
+.tw-trip-wide__item.is-live{border-color:rgba(8,126,209,.18);background:rgba(255,255,255,.92)}
+.tw-trip-wide__item.is-live .tw-coming{color:#087590;background:#e7f8fa}
+@media(prefers-reduced-motion:reduce){.tw-mode #tw-mode-prepare::before,.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:none!important}}
