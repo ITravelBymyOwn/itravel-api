@@ -5,7 +5,7 @@ export default async function handler(req,res){
   try{
     const b=req.body||{},action=String(b.action||'');
     if(action==='resolve_trip'){
-      const result=await resolveTripOffers(b);if(!result.session)return send(res,401,{ok:false,code:'SESSION_REQUIRED'});
+      const result=await resolveTripOffers(b);
       return send(res,200,{ok:true,offers:result.offers});
     }
     if(action==='resolve_city'){
