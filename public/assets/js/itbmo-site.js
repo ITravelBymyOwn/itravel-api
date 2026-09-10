@@ -13,6 +13,8 @@
      CONFIG · HOME EXPERIENCE
      Ad surfaces remain disabled by default to preserve the premium experience.
   ========================================================= */
+  window.ITBMOFoundation?.track('view_home');
+
   const ITBMO_HOME_CONFIG = {
     previewMode: false,
     ads: {
@@ -435,6 +437,7 @@
       /* Phase 4: Planner is a standalone product surface.
          Home no longer opens the embedded focus window. */
       const pageLang = document.documentElement.lang?.toLowerCase().startsWith('es') ? 'es' : 'en';
+      window.ITBMOFoundation?.track('planner_open',{placement:'home_cta',language:pageLang});
       window.location.href = `./planner.html?lang=${pageLang}`;
     });
   });
