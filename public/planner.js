@@ -39,6 +39,10 @@ function trackITBMOEvent(eventName, parameters={}){
   try{
     const name=String(eventName || '').trim();
     if(!ITBMO_ANALYTICS_EVENT_NAMES.has(name)) return;
+    if(window.ITBMOFoundation?.track){
+      window.ITBMOFoundation.track(name,parameters);
+      return;
+    }
     const allowedKeys=new Set([
       'language','city_count','days_total','payment_provider','currency',
       'generation_mode','partner','partner_name','placement','destination',
@@ -53,12 +57,8 @@ function trackITBMOEvent(eventName, parameters={}){
     });
     if(!clean.language) clean.language=getLang?.() || document.documentElement.lang || 'en';
     const payload={type:'ITBMO_ANALYTICS_EVENT',event_name:name,parameters:clean};
-    /* The Planner is nested inside preview-home, which is itself embedded in
-       Webflow. Send analytics to the top Webflow window, not only to the
-       immediate preview-home parent. */
-    if(window.top && window.top!==window){
-      window.top.postMessage(payload,'*');
-    }else{
+    if(window.top && window.top!==window) window.top.postMessage(payload,'*');
+    else{
       window.dataLayer=window.dataLayer || [];
       window.dataLayer.push({event:'itbmo_event',itbmo_event_name:name,...clean});
     }
@@ -79,6 +79,8 @@ const USER_API_URL = '/api/user';
 const TRIP_API_URL = '/api/trip';
 const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
+
+trackITBMOEvent('planner_open');
 
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
@@ -574,6 +576,7 @@ function storeSessionToken(token, persistent=true){
       sessionStorage.setItem(ITBMO_GUEST_SESSION_KEY, token);
       localStorage.removeItem(ITBMO_SESSION_KEY);
     }
+    setTimeout(()=>window.ITBMOFoundation?.syncAttribution?.(),0);
   }catch(_){}
 }
 function clearSessionToken(){
@@ -588,11 +591,20 @@ function validAccountPassword(password){ return typeof password === 'string' && 
 
 function authTrackingPayload(){
   const params = new URLSearchParams(window.location.search);
+  const attribution = window.ITBMOFoundation?.getAttribution?.() || {};
+  const firstTouch = attribution.first_touch || {};
+  const lastTouch = attribution.last_touch || firstTouch || {};
   return {
     preferred_language:getLang(), registration_source:'planner',
-    utm_source:params.get('utm_source') || null, utm_medium:params.get('utm_medium') || null,
-    utm_campaign:params.get('utm_campaign') || null, utm_content:params.get('utm_content') || null,
-    utm_term:params.get('utm_term') || null, referrer:document.referrer || null,
+    utm_source:firstTouch.source || params.get('utm_source') || null,
+    utm_medium:firstTouch.medium || params.get('utm_medium') || null,
+    utm_campaign:firstTouch.campaign || params.get('utm_campaign') || null,
+    utm_content:firstTouch.content || params.get('utm_content') || null,
+    utm_term:firstTouch.term || params.get('utm_term') || null,
+    referrer:firstTouch.referrer || document.referrer || null,
+    attribution_id:attribution.attribution_id || null,
+    first_touch:firstTouch,
+    last_meaningful_touch:lastTouch,
     origin:window.location.origin
   };
 }
