@@ -42,6 +42,10 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/partners.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "public/**/*",
       "use": "@vercel/static"
     }
@@ -86,6 +90,10 @@
     {
       "src": "/api/attribution",
       "dest": "/api/attribution.js"
+    },
+    {
+      "src": "/api/partners",
+      "dest": "/api/partners.js"
     },
     {
       "src": "/(.*)",
