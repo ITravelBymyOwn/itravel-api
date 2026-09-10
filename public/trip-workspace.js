@@ -134,12 +134,12 @@ function offerCard(offer,placement){
   return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p><button type="button" data-partner-open="${esc(offer.id)}">${esc(t.partnerCta)} →</button><small class="tw-affiliate-note">${esc(t.affiliateNote)}</small></div>`;
 }
 async function fetchPartnerOffers(action,needs=[]){
-  const token=getStoredSessionToken();if(!token||!data?.trip_id)return[];
+  const token=getStoredSessionToken();if(!data?.trip_id)return[];
   const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,needs})});
   const payload=await response.json().catch(()=>({}));return response.ok&&payload?.ok&&Array.isArray(payload.offers)?payload.offers:[];
 }
 async function openPartnerOffer(offerId,placement){
-  const token=getStoredSessionToken();if(!token)return;
+  const token=getStoredSessionToken();
   const target=window.open('about:blank','_blank');if(target)target.opener=null;
   try{
     const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'click',session_token:token,trip_id:data?.trip_id,offer_id:offerId,placement})});
@@ -155,8 +155,10 @@ async function openPartnerOffer(offerId,placement){
 function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>btn.onclick=()=>openPartnerOffer(btn.dataset.partnerOpen,btn.closest('[data-placement]')?.dataset.placement||''));}
 async function loadTripPartnerOffers(){tripPartnerOffers=await fetchPartnerOffers('resolve_trip');renderTripPartnerOffers();}
 function renderTripPartnerOffers(){
-  const offer=tripPartnerOffers.find(x=>x.placement==='trip_connectivity');if(!offer)return;
-  const item=$('#tw-connectivity-status')?.closest('.tw-trip-wide__item');if(!item)return;item.classList.add('is-live');$('#tw-connectivity-status').textContent=t.available;
+  const offer=tripPartnerOffers.find(x=>x.placement==='trip_connectivity');
+  const item=$('#tw-connectivity-status')?.closest('.tw-trip-wide__item');
+  if(!offer){ if(item) item.classList.remove('is-live'); return; }
+  if(!item)return;item.classList.add('is-live');$('#tw-connectivity-status').textContent=t.available;
   item.querySelector('.tw-partner-offer')?.remove();item.insertAdjacentHTML('beforeend',offerCard(offer,'trip_connectivity'));bindPartnerOffers();
   if(!viewedOfferIds.has(offer.id)){viewedOfferIds.add(offer.id);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',placement:'trip_connectivity'});}
 }
