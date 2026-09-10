@@ -1021,17 +1021,40 @@ button,a {
 /* =========================================================
    ITBMO · PARTNER ENGINE V1 · PREMIUM COMMERCE EXPERIENCE
 ========================================================= */
-.tw-mode #tw-mode-prepare{isolation:isolate;box-shadow:0 14px 34px rgba(8,105,151,.13),inset 0 1px 0 rgba(255,255,255,.86);}
-.tw-mode #tw-mode-prepare::before{
-  content:"";position:absolute;z-index:-1;top:-45%;bottom:-45%;left:-34%;width:25%;
-  transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.72),transparent);
-  animation:twPrepareSheen 5.8s cubic-bezier(.22,.61,.36,1) infinite;pointer-events:none;
+.tw-mode #tw-mode-prepare{
+  isolation:isolate;overflow:hidden;position:relative;
+  border-color:rgba(8,126,209,.22);
+  background:linear-gradient(120deg,rgba(240,250,255,.98),rgba(230,248,252,.98));
+  box-shadow:0 18px 42px rgba(8,105,151,.16),0 0 0 1px rgba(255,255,255,.72) inset;
+  transition:transform .24s ease,box-shadow .24s ease,border-color .24s ease,filter .24s ease;
 }
-.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:twPrepareSpark 4.2s ease-in-out infinite;}
-.tw-mode #tw-mode-prepare em{box-shadow:0 6px 18px rgba(7,117,144,.09);transition:transform .2s ease,box-shadow .2s ease;}
-.tw-mode #tw-mode-prepare:hover em{transform:translateX(2px);box-shadow:0 8px 22px rgba(7,117,144,.14)}
-@keyframes twPrepareSheen{0%,64%{left:-34%;opacity:0}69%{opacity:1}84%{left:118%;opacity:0}100%{left:118%;opacity:0}}
-@keyframes twPrepareSpark{0%,68%,100%{transform:scale(1) rotate(0)}74%{transform:scale(1.10) rotate(7deg)}80%{transform:scale(1) rotate(0)}}
+.tw-mode #tw-mode-prepare::after{
+  content:"";position:absolute;z-index:-2;inset:-1px;border-radius:inherit;pointer-events:none;
+  background:linear-gradient(110deg,rgba(8,126,209,.12),rgba(10,168,177,.24),rgba(8,126,209,.10));
+  opacity:.72;animation:twPrepareAura 4.8s ease-in-out infinite;
+}
+.tw-mode #tw-mode-prepare::before{
+  content:"";position:absolute;z-index:-1;top:-45%;bottom:-45%;left:-36%;width:28%;
+  transform:skewX(-18deg);background:linear-gradient(90deg,transparent,rgba(255,255,255,.88),transparent);
+  animation:twPrepareSheen 4.7s cubic-bezier(.22,.61,.36,1) infinite;pointer-events:none;
+}
+.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{
+  box-shadow:0 10px 24px rgba(8,126,177,.22);
+  animation:twPrepareSpark 3.9s cubic-bezier(.22,.61,.36,1) infinite;
+}
+.tw-mode #tw-mode-prepare em{
+  background:#fff;color:#08738f;border:1px solid rgba(8,126,209,.16);
+  box-shadow:0 8px 20px rgba(7,117,144,.11);
+  transition:transform .2s ease,box-shadow .2s ease,background .2s ease;
+}
+.tw-mode #tw-mode-prepare:hover{
+  transform:translateY(-2px);filter:saturate(1.04);border-color:rgba(8,126,209,.34);
+  box-shadow:0 24px 52px rgba(8,105,151,.22),0 0 0 1px rgba(255,255,255,.8) inset;
+}
+.tw-mode #tw-mode-prepare:hover em{transform:translateX(3px);background:#fafdff;box-shadow:0 10px 26px rgba(7,117,144,.17)}
+@keyframes twPrepareAura{0%,100%{opacity:.48;filter:saturate(.96)}50%{opacity:.92;filter:saturate(1.12)}}
+@keyframes twPrepareSheen{0%,58%{left:-36%;opacity:0}64%{opacity:1}82%{left:118%;opacity:0}100%{left:118%;opacity:0}}
+@keyframes twPrepareSpark{0%,65%,100%{transform:scale(1) rotate(0)}72%{transform:scale(1.16) rotate(8deg)}79%{transform:scale(1.03) rotate(-2deg)}85%{transform:scale(1) rotate(0)}}
 .tw-partner-offer{grid-column:1/-1;margin-top:14px;padding:15px 16px;border:1px solid rgba(8,126,209,.14);border-radius:18px;background:linear-gradient(135deg,#f7fcff,#f2fbfb);box-shadow:0 10px 26px rgba(22,66,93,.05)}
 .tw-partner-offer__top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .tw-partner-offer__top strong{font-size:13px;color:#0a6784}.tw-partner-offer__top small{font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#63808f}
@@ -1039,6 +1062,6 @@ button,a {
 .tw-partner-offer button{border:0;border-radius:999px;padding:9px 13px;color:#fff;background:linear-gradient(135deg,#087ed1,#0a9db5);font-weight:900;font-size:11px;cursor:pointer;box-shadow:0 9px 20px rgba(8,126,177,.16);transition:transform .2s ease,box-shadow .2s ease}
 .tw-partner-offer button:hover{transform:translateY(-1px);box-shadow:0 12px 26px rgba(8,126,177,.23)}
 .tw-affiliate-note{display:block;margin-top:8px;color:#8297a3;font-size:9px;line-height:1.35}
-.tw-trip-wide__item.is-live{border-color:rgba(8,126,209,.18);background:rgba(255,255,255,.92)}
+.tw-trip-wide__item.is-live{border-color:rgba(8,126,209,.22);background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(242,251,253,.96));box-shadow:0 14px 34px rgba(8,105,151,.08)}
 .tw-trip-wide__item.is-live .tw-coming{color:#087590;background:#e7f8fa}
-@media(prefers-reduced-motion:reduce){.tw-mode #tw-mode-prepare::before,.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:none!important}}
+@media(prefers-reduced-motion:reduce){.tw-mode #tw-mode-prepare::before,.tw-mode #tw-mode-prepare::after,.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:none!important}}
