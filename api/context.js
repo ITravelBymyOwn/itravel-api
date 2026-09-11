@@ -18,6 +18,8 @@ const ITBMO_ADMIN_TEST_BYPASS =
 const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
 const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
   String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+const ITBMO_PREVIEW_PAYMENT_BYPASS =
+  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
 const CONTEXT_VERSION = "1.1";
 const MAX_CANDIDATES = 120;
@@ -237,7 +239,7 @@ async function persistContext(trip, userId, city, candidates, needs) {
 
 function previewBypass(userId) {
   const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
-  if (!isProduction) return Boolean(userId);
+  if (!isProduction) return ITBMO_PREVIEW_PAYMENT_BYPASS && Boolean(userId);
 
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
@@ -252,8 +254,14 @@ async function hasEntitlement(tripId, userId) {
     `user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
     { method: "GET" }
   );
+  if (Array.isArray(rows) && rows.length > 0) return true;
 
-  return Array.isArray(rows) && rows.length > 0;
+  const promoRows = await supabaseFetch(
+    `/promo_redemptions?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&status=eq.consumed&final_amount=eq.0&limit=1`,
+    { method: "GET" }
+  );
+  return Array.isArray(promoRows) && promoRows.length > 0;
 }
 
 function cityNames(trip) {
