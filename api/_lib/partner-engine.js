@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
-const SAFE_SLUGS = new Set(['holafly', 'omio', 'viator', 'getyourguide']);
+const SAFE_SLUGS = new Set(['holafly', 'airalo', 'omio', 'viator', 'getyourguide']);
 const SIGNING_SECRET = String(
   process.env.PARTNER_CLICK_SIGNING_SECRET || process.env.SUPABASE_SECRET_KEY || ''
 ).trim();
@@ -50,6 +50,7 @@ function allowedPartnerUrl(slug, rawUrl) {
     if (slug === 'getyourguide') return host === 'www.getyourguide.com' || host.endsWith('.getyourguide.com') || host === 'gyg.me';
     if (slug === 'omio') return host === 'omio.sjv.io' || host === 'www.omio.com' || host === 'www.omio.es';
     if (slug === 'holafly') return host === 'holafly.sjv.io' || host.endsWith('.holafly.com') || host === 'holafly.com';
+    if (slug === 'airalo') return host === 'airalo.pxf.io' || host.endsWith('.airalo.com') || host === 'airalo.com';
     return false;
   } catch (_) {
     return false;
@@ -390,9 +391,13 @@ function rankOffers(offers) {
 export async function resolveTripOffers({ session_token, trip_id }) {
   const session = await resolveSession(session_token).catch(() => null);
   const offers = [];
-  const holafly = await getOffer('holafly', 'trip_connectivity');
+  const [holafly, airalo] = await Promise.all([
+    getOffer('holafly', 'trip_connectivity'),
+    getOffer('airalo', 'trip_connectivity')
+  ]);
   if (holafly) offers.push(holafly);
-  return { session, offers };
+  if (airalo) offers.push(airalo);
+  return { session, offers: rankOffers(offers) };
 }
 
 export async function resolveCityOffers({ session_token, trip_id, city = '', language = 'es', needs = [] }) {
