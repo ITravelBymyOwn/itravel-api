@@ -1,0 +1,373 @@
+ITBMO · ARCHITECTURE BLUEPRINT · CURRENT
+Versión: 2026-09-11
+Propósito: fuente de verdad arquitectónica de largo plazo. No implica que cada módulo esté habilitado o implementado.
+CONFIDENCIAL.
+
+======================================================================
+1. PRINCIPIO DE PRODUCTO
+======================================================================
+ITBMO es una plataforma propia de planificación y acompañamiento de viaje, powered by AI.
+No debe presentarse como una IA-personaje.
+
+Macro journey:
+Acquisition/Growth
+  -> Planner / Planning Intelligence
+  -> Identity + Trip
+  -> Workspace
+  -> Context / Needs Intelligence
+  -> Partner / Offer Engine
+  -> Commerce / Promotions
+  -> viaje ejecutado
+  -> Travel Companion / Mobility
+  -> Lifecycle
+  -> Sharing / Referral / Creator
+  -> Growth Intelligence
+
+======================================================================
+2. CAPAS COMUNES · NO DUPLICAR
+======================================================================
+- Identity / Session
+- Trip Context
+- Canonical Travel Entities / Travel Graph
+- Context Intelligence / Needs Engine
+- Partner Registry / Capability Registry
+- Offer Resolver / Ranking
+- Event Gateway
+- Attribution
+- Consent & Privacy
+- Feature Flags
+- External Adapters
+- Observability / QA
+
+El Planner nunca debe conectarse directamente a cada proveedor/canal.
+Las integraciones externas entran mediante adapters y resolvers.
+
+======================================================================
+3. IDENTITY + ATTRIBUTION
+======================================================================
+Cadena conceptual:
+anonymous_id -> session_id -> attribution_id -> user_id(optional) -> trip_id
+
+Preservar:
+- first touch
+- last meaningful touch
+- campaign
+- creator
+- promo code
+- tracking code/link
+- snapshot por trip cuando sea necesario para impedir cambios retrospectivos.
+
+Supabase es source of truth de adquisición/comercio.
+GA4/Brevo/plataformas externas reciben eventos, no sustituyen la verdad del negocio.
+
+======================================================================
+4. CONTEXT / NEEDS ENGINE
+======================================================================
+Context Intelligence interpreta itinerary_data sin mutilarla ni modificarla silenciosamente.
+Necesidades iniciales/actuales:
+- ticket_required
+- reservation_recommended
+- guided_tour_optional
+- intercity_transport
+- transport_arrangement
+- no_action
+
+Futuras canonical needs:
+- connectivity
+- travel_insurance
+- attraction_ticket
+- guided_experience
+- intercity_transport
+- airport_transfer
+- car_rental
+- luggage_storage
+- city_pass
+- accommodation
+- flight
+- restaurant_reservation
+- local_transport
+- currency
+- visa_info
+
+Regla: need existe por necesidad del viajero, no porque exista un afiliado.
+
+======================================================================
+5. PARTNER / OFFER ENGINE
+======================================================================
+Cadena:
+Traveler -> Trip -> Context -> Need -> Solution -> Offer -> Partner -> Action -> Conversion
+
+Partner != Offer.
+Partner Registry define estado/capabilities.
+Offer Engine resuelve una solución opcional al need.
+
+Capabilities posibles:
+- destination_link
+- attraction_link
+- product_link
+- regional_product
+- date_prefill
+- origin_destination
+- discount
+- api_search
+- real_time_availability
+
+Regla permanente de contextualidad:
+- cualquier atracción/actividad elegible puede intentar resolverse dinámicamente;
+- mappings no pueden convertirse en una whitelist cerrada;
+- fallbacks progresivos entity/activity -> category/destination cuando sean seguros;
+- nunca inventar disponibilidad/producto/precio/coverage.
+
+Ranking futuro:
+1) relevancia exacta
+2) cobertura/disponibilidad conocida
+3) beneficio al viajero
+4) UX/deep-link quality
+5) fiabilidad
+6) performance observada
+7) comisión/economics como criterio secundario.
+
+======================================================================
+6. TRANSPORT RESOLVER
+======================================================================
+Intercity commerce debe originarse en la secuencia real de destinos principales del trip.
+Nunca convertir arbitrariamente source_route local en una ruta comercial intercity.
+
+Ahora:
+- Omio adapter/resolver.
+
+Prioridad de expansión:
+- Trainline
+- FlixBus
+- Busbud
+- Rail Europe
+- car-rental partner para contextos donde transporte público/intercity no es la solución.
+
+Operadores B2B/directos (p.ej. Renfe/Trenitalia) se evalúan según escala/capacidad.
+
+======================================================================
+7. PROMOTIONS ENGINE
+======================================================================
+Configuración data-driven desde Supabase, no hardcoding.
+
+promo_codes:
+- code
+- campaign_id
+- creator_id
+- promo_type: percentage | fixed | free_trip
+- discount_value
+- currency
+- max_redemptions
+- max_redemptions_per_profile
+- reservation_minutes
+- starts_at / expires_at
+- registered_only / verified_only
+- active
+- metadata
+
+promo_redemptions = ledger operacional/inmutable de uso:
+- reserved
+- consumed
+- canceled
+- reversed
+
+Requisitos:
+- atomic reservation
+- concurrency-safe quota
+- idempotencia
+- un perfil no excede su límite
+- browser nunca decide final_amount
+- free_trip crea entitlement, nunca fake payment=0.
+
+ITBMO100 es una instancia configurable del motor, no lógica especial hardcodeada.
+
+======================================================================
+8. CREATOR / INFLUENCER PROGRAM
+======================================================================
+Creator channels:
+- YouTube
+- TikTok
+- Instagram
+- Blog
+- Newsletter
+- Other
+
+Objetos:
+- creator_partners
+- creator_tracking_links
+- campaigns
+- promo_codes
+- attributions
+- futuras creator_commissions / creator_payouts.
+
+Journey:
+creator/campaign -> landing/tracking -> registration/session -> trip -> promo -> Planner conversion -> partner commerce -> revenue.
+
+Promo code de creator puede funcionar como fuerte fallback de attribution.
+Payout no debe quedar payable antes de resolver refund/chargeback/partner confirmation según basis.
+
+======================================================================
+9. PAYMENT / ENTITLEMENTS
+======================================================================
+Entitlement de generación puede originarse en:
+- pago confirmado
+- free_trip promo consumida
+- admin/test bypass controlado.
+
+Payment provider nunca confía en un monto enviado libremente por el browser.
+Servidor resuelve pricing/promotion y crea la orden con amount autorizado.
+
+======================================================================
+10. COMMUNICATION & SUPPORT HUB
+======================================================================
+Arquitectura objetivo:
+Channel Adapter
+  -> Communication Gateway
+  -> Identity / Trip Context
+  -> Intent / Routing
+  -> Human Support | Automation | Future Companion
+
+Canales contemplados:
+- WhatsApp Business ITBMO
+- Web Chat
+- Email
+- Instagram Direct
+- Messenger
+- futuros channels.
+
+Consentimientos separados:
+- customer support
+- product support
+- transactional
+- Travel Companion
+- lifecycle
+- marketing_email
+- marketing_whatsapp
+
+Human handoff obligatorio para pagos, reclamaciones, cuenta y casos sensibles.
+No acoplar el chatbot a un proveedor único.
+
+ESTADO ACTUAL: foundation/config registry preparado; canales públicos DESHABILITADOS.
+
+======================================================================
+11. DYNAMIC ITINERARY ENGINE · FUTURO
+======================================================================
+El itinerario generado evoluciona a objeto editable/reoptimizável.
+
+Flow:
+user change/live event
+  -> constraint validation
+  -> re-optimization
+  -> proposed update
+  -> user approval
+  -> new version
+
+Recalcular:
+- traslados
+- ventanas de apertura/reserva
+- duración
+- comidas/descansos
+- restricciones
+- eficiencia del resto del día/viaje.
+
+Nunca sobrescribir silenciosamente. Mantener versionado/rollback.
+
+======================================================================
+12. MOBILITY INTELLIGENCE · FUTURO
+======================================================================
+Derivar A->B de cada actividad/día.
+Opciones:
+- caminar
+- transporte público
+- metro/tram/bus/train/ferry
+- taxi/rideshare
+- rental car.
+
+ITBMO recomienda/orquesta; Google Maps/Waze/proveedores especializados ejecutan turn-by-turn vía adapters/deeplinks cuando corresponda.
+
+Workspace futuro:
+- Mi día
+- Ir a…
+- Desde: ubicación con permiso / hotel / itinerary point / typed/map
+- Hacia: next activity / itinerary point / typed/map
+- considerar hora de reserva y margen de llegada, no solo ETA.
+
+======================================================================
+13. TRAVEL COMPANION / LIVE INTELLIGENCE · FUTURO
+======================================================================
+Módulos:
+- Weather Intelligence con impacto sobre itinerary
+- Nearby: restaurantes, supermercados, toilets, farmacias, clínicas/hospitales, combustible
+- Local Travel Services Registry
+- Safety/Emergency oficial/objetivo
+- Search Intelligence por contexto
+- Accessibility
+- Money / Local Payments
+- Language Companion
+- Disruption Intelligence
+- Document/Entry Companion con privacidad estricta
+
+Concepto superior:
+"¿Qué necesito ahora?" = ubicación autorizada + hora + siguiente actividad + movilidad + clima + contexto.
+
+======================================================================
+14. LIFECYCLE / SHARING / REFERRAL / GROWTH · FUTURO
+======================================================================
+Lifecycle CRM:
+- transaccional
+- viaje upcoming
+- post-trip
+- reactivation
+- marketing solo con consentimiento.
+
+Sharing:
+- WhatsApp
+- enlace
+- email
+- social.
+
+Referral/Creator:
+- attributed link/code
+- registration
+- trip
+- purchase
+- partner revenue
+- referral/creator economics.
+
+Growth Platform:
+- Campaign
+- Content
+- Social
+- Attribution
+- Lifecycle
+- Referral
+- Growth Intelligence
+- private Growth Control Center.
+
+======================================================================
+15. FEATURE FLAGS
+======================================================================
+Toda nueva capacidad externa o incompleta debe poder deshabilitarse sin romper core.
+Ejemplos:
+- growth_engine
+- partner_engine_enabled
+- promotions_engine_enabled
+- creator_program_enabled
+- communication_hub_enabled
+- whatsapp_support_enabled
+- web_chat_enabled
+- partner-specific flags cuando sean necesarios.
+
+======================================================================
+16. RELEASE PRINCIPLE
+======================================================================
+Diseñar para el ecosistema futuro, pero publicar solo lo validado.
+Cada macrofase debe:
+1) preservar baseline,
+2) ser aditiva cuando sea posible,
+3) tener feature flags,
+4) probar Preview,
+5) registrar estado en Master Progress,
+6) llegar a main únicamente después de regresión integral.
+
+FIN BLUEPRINT
