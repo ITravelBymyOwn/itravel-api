@@ -1,3 +1,4 @@
+import { getPromotionReservation, consumePromotion, findConsumedPromoEntitlement, promoCodeForRedemption, commercePricing } from './_lib/promo-engine.js';
 import crypto from "crypto";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -27,14 +28,7 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
 const COMMERCE = {
   currency: "USD",
   regularPrice: 5.99,
-  promotions: {
-    launch_offer: {
-      code: "launch_offer",
-      amount: 2.99,
-      regularAmount: 5.99,
-      active: true
-    }
-  }
+  launchPrice: 2.99
 };
 
 const PAYPAL_ENV = String(process.env.PAYPAL_ENV || "sandbox").trim().toLowerCase();
@@ -52,6 +46,8 @@ const ITBMO_ADMIN_TEST_BYPASS =
 const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
 const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
   String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+const ITBMO_PREVIEW_PAYMENT_BYPASS =
+  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 const INFO_CHAT_MAX_QUERIES = 10;
 
 function isAdminTestBypass(userId) {
@@ -60,7 +56,7 @@ function isAdminTestBypass(userId) {
   // Every Vercel Preview deployment is a test environment. A valid ITBMO
   // session may exercise the complete Planner flow there without opening
   // PayPal or creating a real payment. Production remains payment-gated.
-  if (!isProduction) return Boolean(userId);
+  if (!isProduction) return ITBMO_PREVIEW_PAYMENT_BYPASS && Boolean(userId);
 
   // Optional explicit production bypass remains restricted to the configured
   // admin UUID and requires the separate allow-production switch.
@@ -168,26 +164,63 @@ async function getOwnedTrip(tripId, userId) {
   return Array.isArray(trips) ? trips[0] || null : null;
 }
 
-function resolveOffer(promotionCode) {
-  const requested = String(promotionCode || "").trim();
+function defaultOffer() {
+  return {
+    promotionCode: "launch_offer",
+    promoRedemptionId: null,
+    amount: COMMERCE.launchPrice,
+    regularAmount: COMMERCE.regularPrice,
+    baseAmount: COMMERCE.launchPrice,
+    discountAmount: 0
+  };
+}
 
+async function resolveCheckoutOffer(body, session, trip) {
+  const redemptionId = normalizeString(body?.promo_redemption_id, 100);
+  if (!redemptionId) return defaultOffer();
+
+  const redemption = await getPromotionReservation({
+    redemption_id: redemptionId,
+    session,
+    trip_id: trip.id
+  });
+
+  if (!redemption || redemption.status !== "reserved") {
+    const error = new Error("PROMO_REDEMPTION_INVALID");
+    error.status = 409;
+    throw error;
+  }
   if (
-    requested &&
-    COMMERCE.promotions[requested] &&
-    COMMERCE.promotions[requested].active
+    redemption.reservation_expires_at &&
+    new Date(redemption.reservation_expires_at).getTime() <= Date.now()
   ) {
-    const promo = COMMERCE.promotions[requested];
-    return {
-      promotionCode: promo.code,
-      amount: promo.amount,
-      regularAmount: promo.regularAmount
-    };
+    const error = new Error("PROMO_RESERVATION_EXPIRED");
+    error.status = 409;
+    throw error;
+  }
+
+  const promo = await promoCodeForRedemption(redemption);
+  if (!promo?.code) {
+    const error = new Error("PROMO_CODE_NOT_FOUND");
+    error.status = 409;
+    throw error;
+  }
+
+  const amount = Number(redemption.final_amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    const error = new Error("FREE_PROMO_REQUIRES_ENTITLEMENT_FLOW");
+    error.status = 409;
+    throw error;
   }
 
   return {
-    promotionCode: null,
-    amount: COMMERCE.regularPrice,
-    regularAmount: COMMERCE.regularPrice
+    promotionCode: String(promo.code).toUpperCase(),
+    promoRedemptionId: redemption.id,
+    promoCodeId: redemption.promo_code_id,
+    amount,
+    regularAmount: COMMERCE.regularPrice,
+    baseAmount: Number(redemption.base_amount),
+    discountAmount: Number(redemption.discount_amount)
   };
 }
 
@@ -274,7 +307,11 @@ async function createPaymentRow({
       metadata: {
         source: "planner",
         product: "itbmo_premium_journey",
-        paypal_env: provider === "paypal" ? PAYPAL_ENV : null
+        paypal_env: provider === "paypal" ? PAYPAL_ENV : null,
+        promo_redemption_id: offer.promoRedemptionId || null,
+        promo_code_id: offer.promoCodeId || null,
+        base_amount: offer.baseAmount ?? offer.amount,
+        discount_amount: offer.discountAmount || 0
       }
     })
   });
@@ -389,15 +426,18 @@ async function paypalRequest(path, options = {}) {
 }
 
 async function handleConfig(res) {
+  const pricing = commercePricing();
   return res.status(200).json({
     ok: true,
-    currency: COMMERCE.currency,
-    regular_price: money(COMMERCE.regularPrice),
+    currency: pricing.currency,
+    regular_price: pricing.regular_price,
+    base_price: pricing.base_price,
     promotion: {
       code: "launch_offer",
-      active: COMMERCE.promotions.launch_offer.active,
-      price: money(COMMERCE.promotions.launch_offer.amount)
+      active: true,
+      price: pricing.base_price
     },
+    configurable_promotions: true,
     paypal_enabled: Boolean(PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET),
     paypal_client_id: PAYPAL_CLIENT_ID || null,
     paypal_environment: PAYPAL_ENV,
@@ -424,9 +464,12 @@ async function handleStatus(res, body, session) {
     });
   }
 
-  const payment = await findPaidPayment(trip.id, session.user_id);
+  const [payment, promoEntitlement] = await Promise.all([
+    findPaidPayment(trip.id, session.user_id),
+    findConsumedPromoEntitlement(trip.id, session.user_id)
+  ]);
   const adminBypass = isAdminTestBypass(session.user_id);
-  const authorized = Boolean(payment) || adminBypass;
+  const authorized = Boolean(payment) || Boolean(promoEntitlement) || adminBypass;
   const infoUsed = authorized
     ? Math.min(INFO_CHAT_MAX_QUERIES, await countInfoChatQueries(trip.id, session.user_id))
     : 0;
@@ -435,7 +478,13 @@ async function handleStatus(res, body, session) {
     ok: true,
     paid: authorized,
     admin_bypass: adminBypass,
-    entitlement_source: payment ? "payment" : (adminBypass ? "admin_test_bypass" : null),
+    entitlement_source: payment ? "payment" : (promoEntitlement ? "promotion" : (adminBypass ? "admin_test_bypass" : null)),
+    promotion_entitlement: promoEntitlement ? {
+      id: promoEntitlement.id,
+      promo_code_id: promoEntitlement.promo_code_id,
+      discount_amount: promoEntitlement.discount_amount,
+      consumed_at: promoEntitlement.consumed_at
+    } : null,
     info_chat_authorized: authorized,
     info_chat_limit: INFO_CHAT_MAX_QUERIES,
     info_chat_used: infoUsed,
@@ -474,18 +523,22 @@ async function handlePayPalCreateOrder(res, body, session) {
     });
   }
 
-  const existingPaid = await findPaidPayment(trip.id, session.user_id);
+  const [existingPaid, existingPromoEntitlement] = await Promise.all([
+    findPaidPayment(trip.id, session.user_id),
+    findConsumedPromoEntitlement(trip.id, session.user_id)
+  ]);
 
-  if (existingPaid) {
+  if (existingPaid || existingPromoEntitlement) {
     return res.status(200).json({
       ok: true,
       already_paid: true,
       paid: true,
-      payment_id: existingPaid.id
+      payment_id: existingPaid?.id || null,
+      entitlement_source: existingPaid ? "payment" : "promotion"
     });
   }
 
-  const offer = resolveOffer(body.promotion);
+  const offer = await resolveCheckoutOffer(body, session, trip);
   const payment = await createPaymentRow({
     session,
     trip,
@@ -543,14 +596,20 @@ async function handlePayPalCreateOrder(res, body, session) {
         payment_id: payment.id,
         amount: offer.amount,
         currency: COMMERCE.currency,
-        promotion_code: offer.promotionCode
+        promotion_code: offer.promotionCode,
+        promo_redemption_id: offer.promoRedemptionId || null,
+        discount_amount: offer.discountAmount || 0
       }
     });
 
     return res.status(201).json({
       ok: true,
       order_id: paypalOrder.id,
-      payment_id: payment.id
+      payment_id: payment.id,
+      amount: money(offer.amount),
+      currency: COMMERCE.currency,
+      promotion_code: offer.promotionCode,
+      promo_redemption_id: offer.promoRedemptionId || null
     });
   } catch (error) {
     await patchPayment(payment.id, {
@@ -678,6 +737,21 @@ async function handlePayPalCaptureOrder(res, body, session) {
       failed_at: null,
       failure_code: null
     });
+
+    const promoRedemptionId = payment?.metadata?.promo_redemption_id || null;
+    if (promoRedemptionId) {
+      const promoResult = await consumePromotion({
+        redemption_id: promoRedemptionId,
+        session,
+        trip_id: trip.id
+      });
+      if (!promoResult?.ok) {
+        console.error("ITBMO promo consumption after paid PayPal capture failed", {
+          promo_redemption_id: promoRedemptionId,
+          code: promoResult?.code || null
+        });
+      }
+    }
 
     await markBillingActive(session.user_id, "paypal");
 
