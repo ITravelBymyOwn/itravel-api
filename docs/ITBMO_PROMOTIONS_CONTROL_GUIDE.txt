@@ -1,0 +1,192 @@
+ITBMO · PROMOTIONS CONTROL GUIDE
+Versión: 2026-09-11
+Objetivo: crear/activar/desactivar descuentos desde Supabase SIN cambiar código ni hacer deploy.
+
+======================================================================
+1. IDEA CENTRAL
+======================================================================
+El código NO contiene porcentajes comerciales fijos.
+Cada promoción es una fila en public.promo_codes.
+
+Puedes decidir después:
+- qué código usar;
+- qué porcentaje/monto/free trip aplicar;
+- cuántos usos permitir;
+- cuántos usos por perfil;
+- cuándo inicia/termina;
+- si está activa;
+- si pertenece a creator/campaign.
+
+======================================================================
+2. CAMPOS PRINCIPALES
+======================================================================
+code                         Texto que escribe el usuario. Es case-insensitive.
+name                         Nombre interno/descriptivo.
+promo_type                   percentage | fixed | free_trip
+discount_value               percentage: 0..100; fixed: monto; free_trip: puede quedar 100.
+currency                     USD actualmente.
+max_redemptions              Cupo global. NULL = sin cupo global.
+max_redemptions_per_profile  Máximo por usuario/perfil. Recomendado 1 para campañas públicas.
+reservation_minutes          Tiempo que un checkout reservado mantiene un cupo (default 60).
+starts_at                    Inicio opcional.
+expires_at                   Fin opcional.
+registered_only              true si debe exigir cuenta registrada (no guest).
+verified_only                true si debe exigir email verificado.
+active                       Interruptor comercial ON/OFF.
+creator_id                   Opcional: attribution a influencer/creator.
+campaign_id                  Opcional: attribution a campaña.
+metadata                     Notas/config extra.
+
+======================================================================
+3. ITBMO100
+======================================================================
+La migración crea ITBMO100 de forma INACTIVA:
+- free_trip
+- max 100 redenciones
+- max 1 por perfil
+- 60 min de reserva
+
+Para revisar:
+select * from public.promo_code_control where code='ITBMO100';
+
+Para ACTIVAR después del QA:
+update public.promo_codes
+set active=true, updated_at=now()
+where upper(code)='ITBMO100';
+
+Para PAUSAR inmediatamente:
+update public.promo_codes
+set active=false, updated_at=now()
+where upper(code)='ITBMO100';
+
+No requiere cambio de GitHub/Vercel.
+
+======================================================================
+4. CREAR CUALQUIER DESCUENTO PORCENTUAL
+======================================================================
+Ejemplo de PLANTILLA (los valores son ejemplos, no una política fija):
+
+insert into public.promo_codes(
+  code,name,promo_type,discount_value,currency,
+  max_redemptions,max_redemptions_per_profile,
+  reservation_minutes,starts_at,expires_at,
+  registered_only,verified_only,active,metadata
+)
+values (
+  'CAMPAIGN_X','Campaign X','percentage',30,'USD',
+  100,1,
+  60,null,null,
+  false,false,true,'{"created_for":"campaign"}'::jsonb
+);
+
+Para cambiar de 30% a otro porcentaje, cambia discount_value en Supabase.
+El código de aplicación NO cambia.
+
+======================================================================
+5. CREAR DESCUENTO FIJO
+======================================================================
+Ejemplo de plantilla:
+
+insert into public.promo_codes(
+  code,name,promo_type,discount_value,currency,
+  max_redemptions,max_redemptions_per_profile,
+  active,metadata
+)
+values (
+  'FIXED_X','Fixed discount test','fixed',1.00,'USD',
+  25,1,
+  true,'{"created_for":"campaign"}'::jsonb
+);
+
+El descuento nunca baja el total por debajo de cero.
+
+======================================================================
+6. CREAR OTRO FREE TRIP
+======================================================================
+insert into public.promo_codes(
+  code,name,promo_type,discount_value,currency,
+  max_redemptions,max_redemptions_per_profile,
+  active,metadata
+)
+values (
+  'FREE_X','Free trip campaign','free_trip',100,'USD',
+  25,1,
+  true,'{"created_for":"campaign"}'::jsonb
+);
+
+free_trip crea entitlement de generación. NO crea un payment de US$0.
+
+======================================================================
+7. CÓDIGO PARA CREATOR / INFLUENCER
+======================================================================
+Primero crear creator:
+
+insert into public.creator_partners(
+  creator_code,display_name,platform,status,attribution_window_days,hold_days,metadata
+)
+values (
+  'CREATOR_X','Creator X','tiktok','active',30,30,'{}'::jsonb
+)
+returning id;
+
+Luego crear promo usando ese creator_id:
+
+insert into public.promo_codes(
+  code,name,creator_id,promo_type,discount_value,currency,
+  max_redemptions,max_redemptions_per_profile,active,metadata
+)
+values (
+  'CREATOR_X_CODE','Creator X campaign','<PEGAR_CREATOR_UUID>','percentage',25,'USD',
+  100,1,true,'{"channel":"creator"}'::jsonb
+);
+
+El porcentaje 25 es solo un ejemplo. Puede ser cualquier valor válido que decida ITBMO.
+
+======================================================================
+8. CONTROL DE USOS
+======================================================================
+Vista de control:
+select * from public.promo_code_control order by updated_at desc;
+
+Campos útiles:
+- reserved_count
+- consumed_count
+- remaining_redemptions
+
+Detalle de redenciones:
+select
+  r.id,
+  p.code,
+  r.user_id,
+  r.trip_id,
+  r.status,
+  r.base_amount,
+  r.discount_amount,
+  r.final_amount,
+  r.reserved_at,
+  r.reservation_expires_at,
+  r.consumed_at
+from public.promo_redemptions r
+join public.promo_codes p on p.id=r.promo_code_id
+order by r.created_at desc;
+
+======================================================================
+9. REGLAS DE OPERACIÓN
+======================================================================
+- No editar manualmente promo_redemptions para "dar cupos" durante operación normal.
+- Para detener una campaña: active=false.
+- Para extender cupo: aumentar max_redemptions.
+- Para cambiar descuento de una campaña ya usada, es preferible crear un nuevo código/campaña
+  para preservar interpretación histórica; no reescribir arbitrariamente una promoción consumida.
+- Para QA usar códigos TEST separados y cupos pequeños; luego desactivarlos.
+- No activar ITBMO100 en producción hasta terminar QA completo.
+
+======================================================================
+10. SEGURIDAD
+======================================================================
+- El browser no tiene acceso directo a promo_codes/promo_redemptions.
+- Vercel API valida sesión, trip y ownership.
+- Supabase RPC reserva el cupo bajo lock y evita exceder quota por concurrencia.
+- El importe final de PayPal proviene del servidor.
+
+FIN GUÍA
