@@ -35,7 +35,9 @@ export const FOUNDATION_EVENT_NAMES = new Set([
   'export_csv',
   'export_receipt',
   'info_chat_question',
-  'start_chat'
+  'start_chat',
+  'promo_code_applied',
+  'promo_code_consumed'
 ]);
 
 const ALLOWED_EVENT_PROPERTIES = new Set([
@@ -63,7 +65,15 @@ const ALLOWED_EVENT_PROPERTIES = new Set([
   'referral',
   'landing_page',
   'first_touch_source',
-  'last_touch_source'
+  'last_touch_source',
+  'promotion_code',
+  'promo_type',
+  'discount_amount',
+  'partner_slug',
+  'need_type',
+  'entity_name',
+  'resolution_type',
+  'travel_date'
 ]);
 
 export function sanitizeEventName(value = '') {
