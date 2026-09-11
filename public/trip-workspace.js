@@ -178,7 +178,8 @@ function offerCard(offer,placement){
   if(!offer?.id)return'';
   const c=localizedOffer(offer);
   const partnerSlug=offer.partner?.slug||'';
-  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}" data-partner-slug="${esc(partnerSlug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(t.partnerCta)} →</button></div>`;
+  const benefit=lang==='en'?(offer.metadata?.benefit_text_en||''):(offer.metadata?.benefit_text_es||'');
+  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}" data-partner-slug="${esc(partnerSlug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p>${benefit?`<div class="tw-partner-benefit">${esc(benefit)}</div>`:''}<button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(t.partnerCta)} →</button></div>`;
 }
 function partnerOptions(offers=[]){
   const list=Array.isArray(offers)?offers:[];
@@ -218,12 +219,18 @@ function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').fo
 });}
 async function loadTripPartnerOffers(){tripPartnerOffers=await fetchPartnerOffers('resolve_trip');renderTripPartnerOffers();}
 function renderTripPartnerOffers(){
-  const offer=tripPartnerOffers.find(x=>x.placement==='trip_connectivity');
+  const offers=tripPartnerOffers.filter(x=>x.placement==='trip_connectivity');
   const item=$('#tw-connectivity-status')?.closest('.tw-trip-wide__item');
-  if(!offer){ if(item) item.classList.remove('is-live'); return; }
+  if(!offers.length){ if(item) item.classList.remove('is-live'); return; }
   if(!item)return;item.classList.add('is-live');$('#tw-connectivity-status').textContent=t.available;
-  item.querySelector('.tw-partner-offer')?.remove();item.insertAdjacentHTML('beforeend',offerCard(offer,'trip_connectivity'));bindPartnerOffers();
-  if(!viewedOfferIds.has(offer.id)){viewedOfferIds.add(offer.id);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',placement:'trip_connectivity'});}
+  item.querySelectorAll('.tw-partner-offer').forEach(el=>el.remove());
+  item.insertAdjacentHTML('beforeend',offers.map(offer=>offerCard(offer,'trip_connectivity')).join(''));bindPartnerOffers();
+  offers.forEach(offer=>{
+    if(!viewedOfferIds.has(offer.id)){
+      viewedOfferIds.add(offer.id);
+      window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',partner_slug:offer.partner?.slug||'',placement:'trip_connectivity'});
+    }
+  });
 }
 function renderPrepare(){
   const c=esc(city);
