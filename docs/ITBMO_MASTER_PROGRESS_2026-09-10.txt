@@ -389,3 +389,28 @@ Este Master Progress es la fuente de verdad OPERATIVA: qué existe, qué se camb
 qué está pendiente de validar y qué se puede/no se puede publicar.
 
 FIN DEL CHECKPOINT
+
+ACTUALIZACIÓN · 2026-09-11 · QA PARTNERS + AIRALO
+- QA Preview: Account/UI PASS; Workspace PASS; GetYourGuide URL conserva partner_id=3FZWELC + utm_medium + cmp; Omio no aparece en viaje de una sola ciudad; Holafly PASS; regresión total pendiente.
+- Viator: el backend V1.3 construye y valida antes de navegación pid=P00318254, mcid=42383, medium=link y campaign. El URL visible dentro de Viator puede dejar de mostrar parámetros después del redirect porque Viator indica que los parámetros solo se requieren en la redirección inicial y la atribución continúa por cookie. Validar con enlace directo controlado y posteriormente con reporting/integration data antes de declarar revenue attribution cerrada.
+- Airalo aprobado. Red Impact, account 7727455. Affiliate URL recibido: https://airalo.pxf.io/c/7727455/2071037/15608. Beneficio vigente informado: 15% en primera eSIM con NEWTOAIRALO15, expiración informada 2026-12-31. Integración: trip-level Connectivity, junto a Holafly; no repetir por ciudad.
+- Holafly: beneficio confirmado funcional por ITBMO: 5% al acceder mediante el link de ITBMO. Mostrar beneficio desde metadata de partner_offers, no hardcodear en UI.
+- Promotions QA: crear ITBMOQAFREE2 (free_trip, 2 usos, 1 por perfil) e ITBMOQA50 (50%, 2 usos, 1 por perfil), ambos únicamente para Preview. ITBMO100 permanece INACTIVO hasta cerrar QA.
+- Communication Foundation permanece configurada pero deshabilitada para lanzamiento.
+
+------------------------------------------------------------
+2026-09-11 · VIATOR OUTBOUND PROOF + AIRALO QA FINAL
+------------------------------------------------------------
+- Prueba manual controlada confirmó que Viator recibe correctamente una búsqueda contextual y luego puede dejar una URL visible limpia.
+- El primer link manual de QA estuvo mal construido porque los separadores quedaron codificados dentro de text; ese error NO está presente en el constructor real de ITBMO.
+- partner-engine.js construye Viator con URL.searchParams separados: text, pid=P00318254, mcid=42383, medium=link, campaign=itbmo-...
+- El backend valida atribución antes de firmar y antes de navegar el clic.
+- La prueba definitiva en Preview se hará contra public.partner_clicks.target_url usando supabase/qa/20260911_viator_click_proof.sql.txt. PASS = pid/mcid/medium/campaign presentes en la URL de salida de ITBMO.
+- Airalo aprobado queda incorporado como opción global de connectivity con Impact link oficial, NEWTOAIRALO15 y expiración 2026-12-31 almacenados como datos.
+- Holafly muestra beneficio confirmado de 5% desde metadata de partner_offers.
+- QA promo codes: ITBMOQAFREE2 e ITBMOQA50. ITBMO100 sigue inactive.
+
+2026-09-11 — Ajuste visual partners en Workspace
+- Se conserva intacta la estructura de "Opciones para reservar".
+- Los nombres de partners se reducen visualmente (tipografia menor y color secundario) para que la experiencia priorice la necesidad/accion del viajero y no la marca afiliada.
+- Se mantiene transparencia/disclosure y CTA sin cambios.
