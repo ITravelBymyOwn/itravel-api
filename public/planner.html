@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=107" />
+  <link rel="stylesheet" href="./planner.css?v=108" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -697,6 +697,16 @@
           <span class="checkout-price-new" id="checkout-price-new">US$2.99</span>
         </div>
         <div class="checkout-price-note" id="checkout-price-note">One-time payment · Complete trip · All configured cities</div>
+
+        <div class="checkout-promo" id="checkout-promo">
+          <label id="checkout-promo-label" for="checkout-promo-input">¿Tienes un código?</label>
+          <div class="checkout-promo-row">
+            <input id="checkout-promo-input" type="text" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Código promocional" />
+            <button id="checkout-promo-apply" type="button">Aplicar</button>
+          </div>
+          <div id="checkout-promo-message" class="checkout-promo-message" aria-live="polite"></div>
+          <div id="checkout-promo-summary" class="checkout-promo-summary" hidden></div>
+        </div>
       </div>
 
       <div class="checkout-includes">
@@ -1170,7 +1180,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=107"></script>
+<script src="./planner.js?v=108"></script>
  
 </body>
 </html>
