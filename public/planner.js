@@ -776,6 +776,8 @@ function renderAuthState(){
   if($accountUpgradeCancel) $accountUpgradeCancel.style.display = (guest && guestUpgradeFormOpen) ? 'block' : 'none';
   if($accountGuestUpgrade) $accountGuestUpgrade.style.display = (guest && !guestUpgradeFormOpen) ? 'flex' : 'none';
   if($accountLogout) $accountLogout.style.display = logged ? 'inline-flex' : 'none';
+  const plannerMyTrips=qs('#planner-my-trips');
+  if(plannerMyTrips) plannerMyTrips.hidden=!logged;
 
   if(!guestUpgradeFormOpen){
     if($accountEmail) $accountEmail.readOnly=false;
@@ -6379,6 +6381,43 @@ function _showGenerationRetry_(reason=''){
   if(reason) console.warn('[GENERATION RECOVERY]',reason);
 }
 
+async function _prewarmGeneratedTripContext_(){
+  const token=getStoredSessionToken();
+  const tripId=String(currentTripId||'').trim();
+  const cityList=(savedDestinations||[]).map(item=>String(item?.city||'').trim()).filter(Boolean);
+  if(!token || !tripId || !cityList.length) return;
+
+  const markerKey=`itbmo_context_prewarm_${tripId}`;
+  try{
+    localStorage.setItem(markerKey,JSON.stringify({status:'running',started_at:new Date().toISOString(),cities:cityList}));
+  }catch(_){}
+
+  for(const cityName of cityList){
+    try{
+      const response=await fetch('/api/context',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          session_token:token,
+          trip_id:tripId,
+          city:cityName
+        })
+      });
+      let payload={};
+      try{payload=await response.json();}catch(_){}
+      if(!response.ok || !payload?.ok){
+        console.warn('[CONTEXT PREWARM]',cityName,payload?.code||response.status);
+      }
+    }catch(error){
+      console.warn('[CONTEXT PREWARM]',cityName,error);
+    }
+  }
+
+  try{
+    localStorage.setItem(markerKey,JSON.stringify({status:'done',finished_at:new Date().toISOString(),cities:cityList}));
+  }catch(_){}
+}
+
 async function runPaidGeneration({manualRetry=false}={}){
   if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
   paidGenerationRunning=true;
@@ -6472,6 +6511,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     }
 
     await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    _prewarmGeneratedTripContext_().catch(error=>console.warn('[CONTEXT PREWARM]',error));
     trackITBMOEvent('itinerary_generated',{
       city_count:savedDestinations.length,
       days_total:savedDestinations.reduce((sum,item)=>sum+(Number(item?.days)||0),0),
