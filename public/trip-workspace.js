@@ -32,8 +32,8 @@ $('#tw-back-planner').setAttribute('data-planner-url',plannerUrl);
 $('#tw-empty-back').setAttribute('data-planner-url',plannerUrl);
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
 $('#tw-back-label').textContent=t.back;$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge}
-function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
-function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='itinerary';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();scrollTo({top:0,behavior:'smooth'})}
+function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
+function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='itinerary';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
 function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare()}
 function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.innerHTML='';if(nav.hidden)return;days(city).forEach(d=>{const b=document.createElement('button');b.type='button';b.className='tw-day'+(d===day?' active':'');const date=dayDate(city,d);b.textContent=(lang==='es'?`Día ${d}`:`Day ${d}`)+(date?` · ${date}`:'');b.onclick=()=>{day=d;renderCity();window.scrollTo({top:Math.max(0,$('#tw-content').offsetTop-160),behavior:'smooth'})};nav.appendChild(b)})}
 function cleanDuration(v){return String(v||'').replace(/\s*\|\s*/g,' · ').replace(/\n+/g,' · ').trim()}
@@ -409,6 +409,36 @@ function backPlanner(){
   window.location.replace(`./planner.html?${params.toString()}`);
 }
 
+function setupAllCitiesFloating(){
+  const btn=$('#tw-all-cities');
+  const head=document.querySelector('.tw-city-head');
+  if(!btn||!head)return;
+  let anchorTop=0;
+  const recalc=()=>{
+    btn.classList.remove('is-floating');
+    head.classList.remove('has-floating-all-cities');
+    anchorTop=btn.getBoundingClientRect().top+window.scrollY;
+    update();
+  };
+  const update=()=>{
+    if($('#tw-city')?.hidden){
+      btn.classList.remove('is-floating');
+      head.classList.remove('has-floating-all-cities');
+      return;
+    }
+    const topbar=document.querySelector('.tw-topbar');
+    const top=(topbar?.offsetHeight||82)+16;
+    const shouldFloat=window.scrollY+top>=anchorTop;
+    btn.classList.toggle('is-floating',shouldFloat);
+    head.classList.toggle('has-floating-all-cities',shouldFloat);
+  };
+  window.addEventListener('scroll',update,{passive:true});
+  window.addEventListener('resize',recalc);
+  window.addEventListener('tw:city-entered',()=>requestAnimationFrame(recalc));
+  window.addEventListener('tw:overview-opened',update);
+  requestAnimationFrame(recalc);
+}
+
 async function boot(){
   const params=new URLSearchParams(location.search);
   const requestedTripId=String(params.get('trip_id') || '').trim();
@@ -453,6 +483,7 @@ async function boot(){
 
   if(status) status.textContent=t.ready;
   window.ITBMOFoundation?.track('workspace_opened',{city_count:cities().length,language:lang});
+  setupAllCitiesFloating();
   overview();
   loadTripPartnerOffers().catch(()=>{});
   scheduleWorkspaceContextPrewarm();
