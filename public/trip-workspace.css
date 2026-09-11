@@ -280,9 +280,7 @@ button,a {
   margin-bottom:26px
 }
 .tw-all-cities {
-  position:fixed;
-  top:108px;
-  left:clamp(18px,4vw,70px);
+  position:relative;
   z-index:45;
   justify-self:start;
   align-self:center;
@@ -295,6 +293,16 @@ button,a {
   cursor:pointer;
   box-shadow:0 10px 26px rgba(38,83,108,.08);
   backdrop-filter:blur(10px)
+}
+.tw-all-cities.is-floating {
+  position:fixed;
+  top:98px;
+  left:clamp(18px,4vw,70px)
+}
+.tw-city-head.has-floating-all-cities::before {
+  content:"";
+  display:block;
+  min-width:190px
 }
 .tw-city-identity {
   text-align:center
@@ -617,10 +625,15 @@ button,a {
     align-items:center
   }
   .tw-all-cities {
-    top:82px;
-    left:14px;
     padding:10px 14px;
     font-size:13px
+  }
+  .tw-all-cities.is-floating {
+    top:82px;
+    left:14px
+  }
+  .tw-city-head.has-floating-all-cities::before {
+    min-width:0
   }
   .tw-city-identity {
     text-align:left
