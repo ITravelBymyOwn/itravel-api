@@ -280,15 +280,21 @@ button,a {
   margin-bottom:26px
 }
 .tw-all-cities {
+  position:fixed;
+  top:108px;
+  left:clamp(18px,4vw,70px);
+  z-index:45;
   justify-self:start;
   align-self:center;
   border:1px solid var(--line);
   border-radius:999px;
-  background:white;
+  background:rgba(255,255,255,.96);
   padding:12px 17px;
   color:#31566c;
   font-weight:850;
-  cursor:pointer
+  cursor:pointer;
+  box-shadow:0 10px 26px rgba(38,83,108,.08);
+  backdrop-filter:blur(10px)
 }
 .tw-city-identity {
   text-align:center
@@ -609,6 +615,12 @@ button,a {
   .tw-city-head {
     grid-template-columns:auto 1fr;
     align-items:center
+  }
+  .tw-all-cities {
+    top:82px;
+    left:14px;
+    padding:10px 14px;
+    font-size:13px
   }
   .tw-city-identity {
     text-align:left
@@ -1058,7 +1070,7 @@ button,a {
 .tw-link-disclosure{margin-top:16px;padding:12px 14px;border:1px solid rgba(8,126,209,.10);border-radius:14px;background:rgba(247,252,255,.72);color:#66808f;font-size:10px;line-height:1.55}
 .tw-partner-offer{grid-column:1/-1;margin-top:14px;padding:15px 16px;border:1px solid rgba(8,126,209,.14);border-radius:18px;background:linear-gradient(135deg,#f7fcff,#f2fbfb);box-shadow:0 10px 26px rgba(22,66,93,.05)}
 .tw-partner-offer__top{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.tw-partner-offer__top strong{font-size:13px;color:#0a6784}.tw-partner-offer__top small{font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#63808f}
+.tw-partner-offer__top strong{font-size:13px;color:#0a6784}.tw-partner-offer__top small{font-size:8px;font-weight:700;letter-spacing:.06em;text-transform:none;color:#8aa0ac}
 .tw-partner-offer p{margin:6px 0 10px;font-size:11px;line-height:1.45;color:#637f90}
 .tw-partner-benefit{display:inline-flex;align-items:center;margin:0 0 10px;padding:6px 9px;border:1px solid rgba(7,141,145,.16);border-radius:999px;background:#eefafb;color:#087b86;font-size:10px;font-weight:900;line-height:1.25}
 .tw-partner-offer button,.tw-partner-option button{border:0;border-radius:999px;padding:9px 13px;color:#fff;background:linear-gradient(135deg,#087ed1,#0a9db5);font-weight:900;font-size:11px;cursor:pointer;box-shadow:0 9px 20px rgba(8,126,177,.16);transition:transform .2s ease,box-shadow .2s ease}
