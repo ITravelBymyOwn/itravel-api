@@ -21,8 +21,12 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.1";
+const CONTEXT_VERSION = "1.2";
 const MAX_CANDIDATES = 120;
+const CONTEXT_BATCH_SIZE = 24;
+const CONTEXT_BATCH_CONCURRENCY = 3;
+const CONTEXT_BATCH_TIMEOUT_MS = 45000;
+const CONTEXT_BATCH_RETRIES = 1;
 const ALLOWED_NEEDS = new Set([
   "ticket_required",
   "reservation_recommended",
@@ -526,43 +530,132 @@ function extractJson(text) {
   return null;
 }
 
+function isContextAbort(error) {
+  const name = String(error?.name || "");
+  const message = String(error?.message || "");
+  return /abort/i.test(name) || /request was aborted/i.test(message);
+}
+
+function isRetryableContextError(error) {
+  const status = Number(error?.status || 0);
+  return isContextAbort(error) || status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function classifyCandidateBatch(city, candidates, language, batchIndex) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= CONTEXT_BATCH_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONTEXT_BATCH_TIMEOUT_MS);
+
+    try {
+      const response = await client.responses.create(
+        {
+          model: MODEL,
+          reasoning: { effort: "low" },
+          input: [
+            {
+              role: "system",
+              content: [{ type: "input_text", text: systemPrompt(language) }]
+            },
+            {
+              role: "user",
+              content: [{
+                type: "input_text",
+                text: JSON.stringify({
+                  city,
+                  candidates
+                })
+              }]
+            }
+          ],
+          max_output_tokens: 3200
+        },
+        { signal: controller.signal }
+      );
+
+      const parsed = extractJson(response?.output_text || "");
+      if (!Array.isArray(parsed?.classifications)) {
+        throw new Error("CONTEXT_INVALID_MODEL_OUTPUT");
+      }
+
+      return parsed.classifications;
+    } catch (error) {
+      lastError = error;
+      const retryable = isRetryableContextError(error);
+      console.warn("[CONTEXT BATCH]", {
+        city,
+        batch: batchIndex + 1,
+        attempt: attempt + 1,
+        retryable,
+        name: error?.name,
+        status: error?.status,
+        message: error?.message
+      });
+
+      if (!retryable || attempt >= CONTEXT_BATCH_RETRIES) break;
+      await wait(700 * (attempt + 1));
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError || new Error("CONTEXT_BATCH_FAILED");
+}
+
 async function classifyCandidates(city, candidates, language) {
   if (!candidates.length) return [];
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 60000);
-
-  try {
-    const response = await client.responses.create(
-      {
-        model: MODEL,
-        reasoning: { effort: "low" },
-        input: [
-          {
-            role: "system",
-            content: [{ type: "input_text", text: systemPrompt(language) }]
-          },
-          {
-            role: "user",
-            content: [{
-              type: "input_text",
-              text: JSON.stringify({
-                city,
-                candidates
-              })
-            }]
-          }
-        ],
-        max_output_tokens: 5000
-      },
-      { signal: controller.signal }
-    );
-
-    const parsed = extractJson(response?.output_text || "");
-    return Array.isArray(parsed?.classifications) ? parsed.classifications : [];
-  } finally {
-    clearTimeout(timeout);
+  const batches = [];
+  for (let index = 0; index < candidates.length; index += CONTEXT_BATCH_SIZE) {
+    batches.push(candidates.slice(index, index + CONTEXT_BATCH_SIZE));
   }
+
+  const results = new Array(batches.length);
+  const errors = [];
+  let nextBatch = 0;
+
+  async function worker() {
+    while (true) {
+      const batchIndex = nextBatch;
+      nextBatch += 1;
+      if (batchIndex >= batches.length) return;
+
+      try {
+        results[batchIndex] = await classifyCandidateBatch(
+          city,
+          batches[batchIndex],
+          language,
+          batchIndex
+        );
+      } catch (error) {
+        errors.push({ batchIndex, error });
+        results[batchIndex] = [];
+      }
+    }
+  }
+
+  const workerCount = Math.min(CONTEXT_BATCH_CONCURRENCY, batches.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+
+  const classifications = results.flat();
+  if (!classifications.length && errors.length) {
+    throw errors[0].error;
+  }
+
+  if (errors.length) {
+    console.warn("[CONTEXT PARTIAL RESULT]", {
+      city,
+      failed_batches: errors.map(item => item.batchIndex + 1),
+      total_batches: batches.length
+    });
+  }
+
+  return classifications;
 }
 
 function categoryForNeed(needType) {
@@ -765,7 +858,7 @@ export default async function handler(req, res) {
 
     return res.status(500).json({
       ok: false,
-      code: error?.name === "AbortError" ? "CONTEXT_TIMEOUT" : "CONTEXT_ERROR",
+      code: isContextAbort(error) ? "CONTEXT_TIMEOUT" : "CONTEXT_ERROR",
       error: "Unable to analyze this trip right now"
     });
   }
