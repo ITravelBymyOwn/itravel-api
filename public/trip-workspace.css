@@ -1060,13 +1060,14 @@ button,a {
 .tw-partner-offer__top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .tw-partner-offer__top strong{font-size:13px;color:#0a6784}.tw-partner-offer__top small{font-size:9px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#63808f}
 .tw-partner-offer p{margin:6px 0 10px;font-size:11px;line-height:1.45;color:#637f90}
+.tw-partner-benefit{display:inline-flex;align-items:center;margin:0 0 10px;padding:6px 9px;border:1px solid rgba(7,141,145,.16);border-radius:999px;background:#eefafb;color:#087b86;font-size:10px;font-weight:900;line-height:1.25}
 .tw-partner-offer button,.tw-partner-option button{border:0;border-radius:999px;padding:9px 13px;color:#fff;background:linear-gradient(135deg,#087ed1,#0a9db5);font-weight:900;font-size:11px;cursor:pointer;box-shadow:0 9px 20px rgba(8,126,177,.16);transition:transform .2s ease,box-shadow .2s ease}
 .tw-partner-offer button:hover,.tw-partner-option button:hover{transform:translateY(-1px);box-shadow:0 12px 26px rgba(8,126,177,.23)}
 .tw-partner-options{margin-top:13px;padding-top:11px;border-top:1px solid rgba(24,93,125,.08)}
 .tw-partner-options__label{display:block;margin-bottom:7px;color:#718995;font-size:9px;font-weight:900;letter-spacing:.06em;text-transform:uppercase}
 .tw-partner-option{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0}
 .tw-partner-option+.tw-partner-option{border-top:1px solid rgba(24,93,125,.06)}
-.tw-partner-option strong{color:#174c65;font-size:12px}
+.tw-partner-option strong{color:#718995;font-size:10px;font-weight:700;letter-spacing:.01em}
 .tw-trip-wide__item.is-live{border-color:rgba(8,126,209,.22);background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(242,251,253,.96));box-shadow:0 14px 34px rgba(8,105,151,.08)}
 .tw-trip-wide__item.is-live .tw-coming{color:#087590;background:#e7f8fa}
 @media(prefers-reduced-motion:reduce){.tw-mode #tw-mode-prepare::before,.tw-mode #tw-mode-prepare::after,.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:none!important}}
