@@ -12,6 +12,8 @@ const ITBMO_ADMIN_TEST_BYPASS =
 const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
 const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
   String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+const ITBMO_PREVIEW_PAYMENT_BYPASS =
+  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
 function jsonHeaders(extra = {}) {
   return {
@@ -88,7 +90,7 @@ function generationAdminBypass(userId) {
   // exercise generation/recovery/Info Chat without a real payment.
   // Production remains strictly payment-gated unless the explicit,
   // admin-only production bypass is deliberately enabled.
-  if (!isProduction) return Boolean(userId);
+  if (!isProduction) return ITBMO_PREVIEW_PAYMENT_BYPASS && Boolean(userId);
 
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
@@ -113,7 +115,14 @@ async function hasGenerationEntitlement(tripId, userId) {
     `user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
     { method: "GET" }
   );
-  return Array.isArray(rows) && rows.length > 0;
+  if (Array.isArray(rows) && rows.length > 0) return true;
+
+  const promoRows = await supabaseFetch(
+    `/promo_redemptions?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&status=eq.consumed&final_amount=eq.0&limit=1`,
+    { method: "GET" }
+  );
+  return Array.isArray(promoRows) && promoRows.length > 0;
 }
 
 function generationCheckpoint(value) {
