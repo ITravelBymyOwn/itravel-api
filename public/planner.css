@@ -2768,6 +2768,17 @@ input.end,
   letter-spacing:-.055em;
 }
 .checkout-price-note{color:#5f7588;font-size:.75rem;font-weight:680}
+.checkout-promo{margin-top:.85rem;padding-top:.8rem;border-top:1px solid rgba(24,141,174,.12)}
+.checkout-promo label{display:block;margin-bottom:.4rem;color:#31566f;font-size:.72rem;font-weight:850}
+.checkout-promo-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:.5rem}
+.checkout-promo-row input{min-width:0;height:42px;padding:0 .75rem;border:1px solid rgba(32,85,116,.18);border-radius:.75rem;background:rgba(255,255,255,.92);color:#173f57;font-size:.78rem;font-weight:800;letter-spacing:.02em;text-transform:uppercase;outline:none}
+.checkout-promo-row input:focus{border-color:rgba(8,126,209,.48);box-shadow:0 0 0 3px rgba(8,126,209,.08)}
+.checkout-promo-row button{height:42px;padding:0 .9rem;border:0;border-radius:.75rem;background:linear-gradient(135deg,#087ed1,#0a9db5);color:#fff;font-size:.74rem;font-weight:900;cursor:pointer;box-shadow:0 8px 18px rgba(8,126,177,.14)}
+.checkout-promo-row button:disabled{opacity:.55;cursor:wait;box-shadow:none}
+.checkout-promo-message{min-height:1rem;margin-top:.38rem;color:#617a8b;font-size:.68rem;font-weight:700}
+.checkout-promo-message.error{color:#b54242}
+.checkout-promo-message.success{color:#087f69}
+.checkout-promo-summary{margin-top:.45rem;padding:.5rem .6rem;border:1px solid rgba(10,161,125,.15);border-radius:.7rem;background:rgba(238,252,247,.82);color:#226b5d;font-size:.7rem;font-weight:800}
 .checkout-includes{
   display:grid;
   grid-template-columns:repeat(3,minmax(0,1fr));
