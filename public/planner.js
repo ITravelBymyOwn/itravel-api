@@ -32,7 +32,7 @@ const ITBMO_ANALYTICS_EVENT_NAMES = new Set([
   'planner_started','destinations_saved','checkout_opened','payment_approved',
   'payment_cancelled','payment_failed','itinerary_generated','export_pdf',
   'export_csv','export_receipt','info_chat_question','affiliate_click',
-  'new_planning_started','start_chat'
+  'new_planning_started','start_chat','promo_code_applied','promo_code_consumed'
 ]);
 
 function trackITBMOEvent(eventName, parameters={}){
@@ -46,7 +46,8 @@ function trackITBMOEvent(eventName, parameters={}){
     const allowedKeys=new Set([
       'language','city_count','days_total','payment_provider','currency',
       'generation_mode','partner','partner_name','placement','destination',
-      'queries_used','queries_remaining','file_type','error_stage'
+      'queries_used','queries_remaining','file_type','error_stage',
+      'promotion_code','promo_type','discount_amount'
     ]);
     const clean={};
     Object.entries(parameters || {}).forEach(([key,value])=>{
@@ -785,9 +786,7 @@ function renderAuthState(){
     $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
     let label='';
     if(logged && currentUser){
-      label=currentUser.is_registered
-        ? (currentUser.email || currentUser.first_name || '')
-        : (currentUser.first_name || currentUser.email || '');
+      label=currentUser.first_name || currentUser.username || (getLang()==='es'?'Cuenta activa':'Active account');
     }
     $accountUserBadge.textContent=label;
   }
@@ -8852,9 +8851,7 @@ const ITBMO_COMMERCE_CONFIG = {
 
   currency: 'USD',
   regularPrice: 5.99,
-  promoPrice: 2.99,
-  promotionCode: 'launch_offer',
-  promotionLabel: 'Limited-time launch offer',
+  basePrice: 2.99,
 
   support: {
     enabled: true,
@@ -8882,6 +8879,11 @@ const $checkoutPayPalFallback = qs('#checkout-paypal-fallback');
 const $checkoutPreviewContinue = qs('#checkout-preview-continue');
 const $paypalButtonContainer = qs('#paypal-button-container');
 const $checkoutSupportLink = qs('#checkout-support-link');
+const $checkoutPromoInput = qs('#checkout-promo-input');
+const $checkoutPromoApply = qs('#checkout-promo-apply');
+const $checkoutPromoMessage = qs('#checkout-promo-message');
+const $checkoutPromoSummary = qs('#checkout-promo-summary');
+const $checkoutPromoLabel = qs('#checkout-promo-label');
 
 const $needHelp = qs('#need-help-floating');
 const $supportModal = qs('#support-modal');
@@ -8890,6 +8892,8 @@ const $supportEmailButton = qs('#support-email-button');
 
 let paymentGateSatisfiedTripId = null;
 let paypalSdkLoadingPromise = null;
+let activePromoReservation = null;
+let commerceServerConfig = null;
 
 /* ---------- Info Chat entitlement ---------- */
 const INFO_CHAT_MAX_QUERIES = 10;
@@ -9015,6 +9019,13 @@ function _commerceCopy_(){
     supportLink:'¿Necesitas ayuda? Contacta Atención al Cliente',
     preview:'Modo de prueba · Continuar con ITBMO',
     providerSoon:'Este método todavía no está activado.',
+    promoLabel:'¿Tienes un código promocional?',
+    promoPlaceholder:'Ingresa tu código',
+    promoApply:'Aplicar',
+    promoApplied:(code)=>`✓ Código ${code} aplicado`,
+    promoFree:'Tu itinerario queda cubierto al 100% con este código.',
+    promoDiscount:(amount,final)=>`Descuento US$${amount} · Total US$${final}`,
+    promoErrors:{PROMO_CODE_REQUIRED:'Ingresa un código.',PROMO_NOT_FOUND:'Ese código no existe.',PROMO_INACTIVE:'Ese código no está activo.',PROMO_NOT_STARTED:'Este código todavía no está vigente.',PROMO_EXPIRED:'Este código ya venció.',PROMO_EXHAUSTED:'Este código alcanzó su límite de usos.',PROMO_USER_LIMIT:'Ya utilizaste el máximo permitido para este código.',PROMO_REGISTERED_REQUIRED:'Este código requiere una cuenta registrada.',PROMO_VERIFIED_REQUIRED:'Este código requiere una cuenta verificada.',PROMO_RESERVATION_EXPIRED:'La reserva del código venció. Aplícalo nuevamente.',PROMO_UNAVAILABLE:'No pudimos aplicar este código.'},
     processing:'Procesando pago…',
     paid:'✓ Pago confirmado. Todo está listo.',
     error:'No pudimos confirmar el pago. Inténtalo nuevamente o contacta soporte.'
@@ -9046,6 +9057,13 @@ function _commerceCopy_(){
     supportLink:'Need help? Contact Customer Support',
     preview:'Preview mode · Continue to ITBMO',
     providerSoon:'This payment method is not active yet.',
+    promoLabel:'Have a promo code?',
+    promoPlaceholder:'Enter your code',
+    promoApply:'Apply',
+    promoApplied:(code)=>`✓ Code ${code} applied`,
+    promoFree:'This code covers 100% of your itinerary.',
+    promoDiscount:(amount,final)=>`Discount US$${amount} · Total US$${final}`,
+    promoErrors:{PROMO_CODE_REQUIRED:'Enter a code.',PROMO_NOT_FOUND:'That code does not exist.',PROMO_INACTIVE:'That code is not active.',PROMO_NOT_STARTED:'This code is not active yet.',PROMO_EXPIRED:'This code has expired.',PROMO_EXHAUSTED:'This code has reached its usage limit.',PROMO_USER_LIMIT:'You already used the maximum allowed for this code.',PROMO_REGISTERED_REQUIRED:'This code requires a registered account.',PROMO_VERIFIED_REQUIRED:'This code requires a verified account.',PROMO_RESERVATION_EXPIRED:'The code reservation expired. Apply it again.',PROMO_UNAVAILABLE:'We could not apply this code.'},
     processing:'Processing payment…',
     paid:'✓ Payment confirmed. Everything is ready.',
     error:'We could not confirm the payment. Please try again or contact support.'
@@ -9088,8 +9106,25 @@ function applyCommerceI18n(){
 
   const oldP = qs('#checkout-price-old');
   const newP = qs('#checkout-price-new');
-  if(oldP) oldP.textContent = `US$${Number(ITBMO_COMMERCE_CONFIG.regularPrice).toFixed(2)}`;
-  if(newP) newP.textContent = `US$${Number(ITBMO_COMMERCE_CONFIG.promoPrice).toFixed(2)}`;
+  const regularPrice=Number(commerceServerConfig?.regular_price || ITBMO_COMMERCE_CONFIG.regularPrice);
+  const basePrice=Number(commerceServerConfig?.base_price || ITBMO_COMMERCE_CONFIG.basePrice);
+  const finalPrice=Number(activePromoReservation?.final_amount ?? basePrice);
+  if(oldP) oldP.textContent = `US$${regularPrice.toFixed(2)}`;
+  if(newP) newP.textContent = `US$${finalPrice.toFixed(2)}`;
+  if($checkoutPromoLabel) $checkoutPromoLabel.textContent=c.promoLabel;
+  if($checkoutPromoInput) $checkoutPromoInput.placeholder=c.promoPlaceholder;
+  if($checkoutPromoApply) $checkoutPromoApply.textContent=c.promoApply;
+  if($checkoutPromoSummary){
+    if(activePromoReservation){
+      $checkoutPromoSummary.hidden=false;
+      $checkoutPromoSummary.textContent=activePromoReservation.is_free
+        ? c.promoFree
+        : c.promoDiscount(Number(activePromoReservation.discount_amount||0).toFixed(2),Number(activePromoReservation.final_amount||0).toFixed(2));
+    }else{
+      $checkoutPromoSummary.hidden=true;
+      $checkoutPromoSummary.textContent='';
+    }
+  }
 
   if($needHelp) $needHelp.style.display = ITBMO_COMMERCE_CONFIG.support.enabled ? 'flex' : 'none';
 
@@ -9178,6 +9213,68 @@ function setCheckoutStatus(message='', type=''){
   $checkoutStatus.className = 'checkout-status' + (type ? ` ${type}` : '');
 }
 
+async function loadCommerceServerConfig(){
+  try{
+    const token=getStoredSessionToken();
+    if(!token) return null;
+    commerceServerConfig=await paymentApi({action:'config',session_token:token});
+    if(commerceServerConfig?.currency) ITBMO_COMMERCE_CONFIG.currency=commerceServerConfig.currency;
+    return commerceServerConfig;
+  }catch(err){
+    console.warn('[COMMERCE CONFIG]',err);
+    return null;
+  }
+}
+
+function setPromoMessage(message='',type=''){
+  if(!$checkoutPromoMessage) return;
+  $checkoutPromoMessage.textContent=message||'';
+  $checkoutPromoMessage.className='checkout-promo-message'+(type?` ${type}`:'');
+}
+
+async function promotionApi(payload){
+  const response=await fetch('/api/promotions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok || body?.ok===false){
+    const err=new Error(body?.code||`PROMO_HTTP_${response.status}`);
+    err.code=body?.code||'PROMO_UNAVAILABLE';
+    throw err;
+  }
+  return body;
+}
+
+async function applyPromotionCode(){
+  const c=_commerceCopy_();
+  const code=String($checkoutPromoInput?.value||'').trim().toUpperCase();
+  if(!code){ setPromoMessage(c.promoErrors.PROMO_CODE_REQUIRED,'error'); return; }
+  if(!$checkoutPromoApply || !currentTripId) return;
+  $checkoutPromoApply.disabled=true;
+  setPromoMessage('');
+  try{
+    const token=getStoredSessionToken();
+    const result=await promotionApi({action:'reserve',session_token:token,trip_id:currentTripId,code});
+    activePromoReservation=result?.reservation||null;
+    if(!activePromoReservation) throw Object.assign(new Error('PROMO_UNAVAILABLE'),{code:'PROMO_UNAVAILABLE'});
+    setPromoMessage(c.promoApplied(activePromoReservation.code||code),'success');
+    applyCommerceI18n();
+    trackITBMOEvent('promo_code_applied',{promotion_code:activePromoReservation.code||code,promo_type:activePromoReservation.promo_type||'',discount_amount:Number(activePromoReservation.discount_amount||0)});
+
+    if(activePromoReservation.is_free){
+      const consumed=await promotionApi({action:'consume_free',session_token:token,trip_id:currentTripId,redemption_id:activePromoReservation.redemption_id});
+      if(!consumed?.ok) throw Object.assign(new Error('PROMO_UNAVAILABLE'),{code:'PROMO_UNAVAILABLE'});
+      trackITBMOEvent('promo_code_consumed',{promotion_code:activePromoReservation.code||code,promo_type:activePromoReservation.promo_type||'',discount_amount:Number(activePromoReservation.discount_amount||0)});
+      await completePaymentGate(c.promoFree);
+    }
+  }catch(err){
+    const key=err?.code||'PROMO_UNAVAILABLE';
+    activePromoReservation=null;
+    applyCommerceI18n();
+    setPromoMessage(c.promoErrors[key]||c.promoErrors.PROMO_UNAVAILABLE,'error');
+  }finally{
+    if($checkoutPromoApply) $checkoutPromoApply.disabled=false;
+  }
+}
+
 function openCheckoutModal(){
   if(!$checkoutModal) return;
   applyCommerceI18n();
@@ -9193,11 +9290,13 @@ function openCheckoutModal(){
   const checkoutCard=$checkoutModal.querySelector('.checkout-card');
   if(checkoutCard) checkoutCard.scrollTop=0;
 
-  Promise.resolve(renderPayPalButtonsIfAvailable()).finally(()=>{
-    if($checkoutStatus?.textContent===loadingMessage) setCheckoutStatus('');
-    $checkoutModal.scrollTop=0;
-    if(checkoutCard) checkoutCard.scrollTop=0;
-  });
+  Promise.resolve(loadCommerceServerConfig())
+    .then(()=>{ applyCommerceI18n(); return renderPayPalButtonsIfAvailable(); })
+    .finally(()=>{
+      if($checkoutStatus?.textContent===loadingMessage) setCheckoutStatus('');
+      $checkoutModal.scrollTop=0;
+      if(checkoutCard) checkoutCard.scrollTop=0;
+    });
 }
 
 function closeCheckoutModal(){
@@ -9243,9 +9342,9 @@ async function hasValidPaymentForCurrentTrip(){
   }
 }
 
-async function completePaymentGate(){
+async function completePaymentGate(successMessage=''){
   paymentGateSatisfiedTripId = currentTripId || paymentGateSatisfiedTripId;
-  setCheckoutStatus(_commerceCopy_().paid,'success');
+  setCheckoutStatus(successMessage || _commerceCopy_().paid,'success');
 
   /* Refresh authoritative entitlement + remaining Info Chat queries. */
   try{
@@ -9329,7 +9428,8 @@ async function loadPayPalSdk(){
 
   paypalSdkLoadingPromise = (async()=>{
     const token=getStoredSessionToken();
-    const cfg=await paymentApi({action:'config',session_token:token});
+    const cfg=commerceServerConfig || await paymentApi({action:'config',session_token:token});
+    commerceServerConfig=cfg||commerceServerConfig;
     const clientId=String(cfg?.paypal_client_id || '').trim();
     if(!clientId) throw new Error('PAYPAL_CLIENT_ID_NOT_AVAILABLE');
 
@@ -9370,7 +9470,7 @@ async function renderPayPalButtonsIfAvailable(){
           action:'paypal_create_order',
           session_token:token,
           trip_id:currentTripId,
-          promotion:ITBMO_COMMERCE_CONFIG.promotionCode
+          promo_redemption_id:activePromoReservation?.redemption_id || null
         });
         if(!data?.order_id) throw new Error('PAYPAL_ORDER_ID_MISSING');
         return data.order_id;
@@ -9426,7 +9526,7 @@ async function beginTilopayCheckout(){
       action:'tilopay_create_checkout',
       session_token:token,
       trip_id:currentTripId,
-      promotion:ITBMO_COMMERCE_CONFIG.promotionCode,
+      promo_redemption_id:activePromoReservation?.redemption_id || null,
       return_url:window.location.href
     });
 
@@ -9462,6 +9562,8 @@ function initCommerceAndSupport(){
   });
 
   $checkoutClose?.addEventListener('click',closeCheckoutModal);
+  $checkoutPromoApply?.addEventListener('click',applyPromotionCode);
+  $checkoutPromoInput?.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();applyPromotionCode();}});
   $checkoutTilopay?.addEventListener('click',beginTilopayCheckout);
   $checkoutPayPalFallback?.addEventListener('click',()=>{
     if(ITBMO_COMMERCE_CONFIG.previewMode && !ITBMO_COMMERCE_CONFIG.paypal.enabled){
