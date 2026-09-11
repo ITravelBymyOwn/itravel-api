@@ -171,6 +171,24 @@ function ensureContext(cityName){
   return request;
 }
 
+function scheduleWorkspaceContextPrewarm(){
+  const list=cities();
+  if(!list.length || !data?.trip_id || !getStoredSessionToken()) return;
+
+  let index=0;
+  const runNext=()=>{
+    if(index>=list.length) return;
+    const cityName=list[index++];
+    ensureContext(cityName).finally(()=>{
+      window.setTimeout(runNext,180);
+    });
+  };
+
+  // The Planner already starts prewarming as soon as generation completes.
+  // This is a delayed safety net for direct/recovered Workspace entry.
+  window.setTimeout(runNext,12000);
+}
+
 function localizedOffer(offer){
   return {title:lang==='es'?offer.title_es:offer.title_en,description:lang==='es'?offer.description_es:offer.description_en};
 }
@@ -179,7 +197,10 @@ function offerCard(offer,placement){
   const c=localizedOffer(offer);
   const partnerSlug=offer.partner?.slug||'';
   const benefit=lang==='en'?(offer.metadata?.benefit_text_en||''):(offer.metadata?.benefit_text_es||'');
-  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}" data-partner-slug="${esc(partnerSlug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p>${benefit?`<div class="tw-partner-benefit">${esc(benefit)}</div>`:''}<button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(t.partnerCta)} →</button></div>`;
+  const displayTitle=placement==='trip_connectivity'
+    ? (lang==='es'?'Conectividad para tu viaje':'Connectivity for your trip')
+    : (c.title||offer.partner?.name||'');
+  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}" data-partner-slug="${esc(partnerSlug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><div class="tw-partner-offer__top"><strong>${esc(displayTitle)}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p>${benefit?`<div class="tw-partner-benefit">${esc(benefit)}</div>`:''}<button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(t.partnerCta)} →</button></div>`;
 }
 function partnerOptions(offers=[]){
   const list=Array.isArray(offers)?offers:[];
@@ -434,6 +455,7 @@ async function boot(){
   window.ITBMOFoundation?.track('workspace_opened',{city_count:cities().length,language:lang});
   overview();
   loadTripPartnerOffers().catch(()=>{});
+  scheduleWorkspaceContextPrewarm();
 }
 
 boot();
