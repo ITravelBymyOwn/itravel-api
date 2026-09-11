@@ -93,6 +93,26 @@ function appendParams(url, params) {
   return parsed.toString();
 }
 
+function hasRequiredAttribution(slug, rawUrl) {
+  try {
+    const url = new URL(String(rawUrl || ''));
+    if (slug === 'viator') {
+      return url.searchParams.get('pid') === VIATOR_PID &&
+        url.searchParams.get('mcid') === VIATOR_MCID &&
+        url.searchParams.get('medium') === 'link' &&
+        Boolean(url.searchParams.get('campaign'));
+    }
+    if (slug === 'getyourguide') {
+      return url.searchParams.get('partner_id') === GYG_PARTNER_ID &&
+        url.searchParams.get('utm_medium') === 'online_publisher' &&
+        Boolean(url.searchParams.get('cmp'));
+    }
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
 export async function getPartner(slug) {
   if (!SAFE_SLUGS.has(slug)) return null;
   const rows = await supabaseFetch(
@@ -180,6 +200,9 @@ function contextualDescription(slug, language) {
 }
 
 function signResolvedOffer({ template, partner, targetUrl, placement, need, city, resolutionType, travelDate = '' }) {
+  if (!hasRequiredAttribution(partner?.slug, targetUrl)) {
+    throw new Error('PARTNER_ATTRIBUTION_PARAMS_MISSING');
+  }
   const payload = {
     iat: Date.now(),
     offer_id: template.id,
@@ -250,19 +273,31 @@ async function resolveExperiencePartner(slug, needs, city, language) {
   return offers;
 }
 
-function routeFromNeed(need) {
-  const directOrigin = clean(need?.origin, 160);
-  const directDestination = clean(need?.destination, 160);
-  if (directOrigin && directDestination) {
-    return { origin: directOrigin, destination: directDestination, date: clean(need?.travel_date || need?.date, 40) };
-  }
-  const raw = clean(need?.source_route, 300);
-  const parts = raw.split(/\s*[→>]\s*/).map(x => clean(x, 160)).filter(Boolean);
-  return {
-    origin: parts.length >= 2 ? parts[0] : '',
-    destination: parts.length >= 2 ? parts[parts.length - 1] : '',
-    date: clean(need?.travel_date || need?.date, 40)
-  };
+async function getOwnedTripRoutes(tripId, userId) {
+  if (!tripId || !userId) return [];
+  const rows = await supabaseFetch(
+    `/trips?select=id,user_id,destinations&` +
+    `id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  const trip = Array.isArray(rows) ? rows[0] || null : null;
+  const destinations = (Array.isArray(trip?.destinations) ? trip.destinations : [])
+    .map((item, index) => ({
+      index,
+      city: clean(item?.city, 160),
+      baseDate: clean(item?.base_date || item?.baseDate, 40)
+    }))
+    .filter(item => item.city);
+
+  return destinations.slice(0, -1).map((from, index) => {
+    const to = destinations[index + 1];
+    return {
+      id: `route:${index}:${from.city}:${to.city}`,
+      origin: from.city,
+      destination: to.city,
+      travel_date: to.baseDate || ''
+    };
+  });
 }
 
 function omioLanding(origin, destination, language) {
@@ -282,38 +317,45 @@ function omioTrackedUrl(trackingBase, origin, destination, language) {
   return url.toString();
 }
 
-async function resolveOmio(needs, city, language) {
+async function resolveOmioTripRoutes(tripId, userId, city, language) {
   const partner = await getPartner('omio');
   const template = await getOffer('omio', 'city_transport_contextual');
   if (!partner || !template) return [];
+
+  const routes = await getOwnedTripRoutes(tripId, userId);
+  const eligible = routes.filter(route => route.origin === clean(city, 160));
   const result = [];
 
-  for (const need of needs) {
-    if (!['intercity_transport', 'transport_arrangement'].includes(need?.need_type)) continue;
-    const route = routeFromNeed(need);
-    if (!route.origin || !route.destination) continue;
-
+  for (const route of eligible) {
     const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, language);
     if (!targetUrl) continue;
+
     const routeLabel = `${route.origin} → ${route.destination}`;
-    const dateEs = route.date ? ` · ${route.date}` : '';
-    const dateEn = route.date ? ` · ${route.date}` : '';
+    const need = {
+      id: route.id,
+      need_type: 'intercity_transport',
+      entity_name: routeLabel,
+      source_activity: routeLabel,
+      city: route.origin,
+      travel_date: route.travel_date,
+      derived_by: 'trip_sequence'
+    };
 
     result.push({
       ...template,
       placement: 'city_transport',
       title_es: routeLabel,
       title_en: routeLabel,
-      description_es: `Compara trenes, buses y otras opciones para este trayecto${dateEs}.`,
-      description_en: `Compare trains, buses and other options for this exact leg${dateEn}.`,
+      description_es: 'Compara opciones de tren, bus y otras conexiones entre tus destinos principales.',
+      description_en: 'Compare train, bus and other connections between your main trip destinations.',
       target_url: undefined,
       confidence: 'high',
-      need_id: clean(need?.id, 120),
+      need_id: route.id,
       need_type: 'intercity_transport',
       entity_name: routeLabel,
-      city: clean(city || route.origin, 160),
-      travel_date: route.date || null,
-      resolution_type: 'route_deeplink',
+      city: route.origin,
+      travel_date: route.travel_date || null,
+      resolution_type: 'trip_sequence_route',
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({
         template,
@@ -321,9 +363,9 @@ async function resolveOmio(needs, city, language) {
         targetUrl,
         placement: 'city_transport',
         need,
-        city: city || route.origin,
-        resolutionType: 'route_deeplink',
-        travelDate: route.date
+        city: route.origin,
+        resolutionType: 'trip_sequence_route',
+        travelDate: route.travel_date
       })
     });
   }
@@ -332,7 +374,7 @@ async function resolveOmio(needs, city, language) {
 }
 
 function rankOffers(offers) {
-  const resolution = { route_deeplink: 40, context_search: 35, static: 10 };
+  const resolution = { trip_sequence_route: 40, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
@@ -364,7 +406,7 @@ export async function resolveCityOffers({ session_token, trip_id, city = '', lan
   const [viator, getyourguide, omio] = await Promise.all([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeLanguage),
-    resolveOmio(safeNeeds, safeCity, safeLanguage)
+    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeLanguage)
   ]);
 
   return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
@@ -398,6 +440,10 @@ export async function registerPartnerClick({ session_token, trip_id, offer_id, o
   }
 
   if (!resolved) return { ok: false, code: 'OFFER_NOT_AVAILABLE' };
+  if (resolved.partner_slug && !hasRequiredAttribution(resolved.partner_slug, resolved.url)) {
+    console.error('ITBMO partner attribution blocked before navigation', { partner: resolved.partner_slug });
+    return { ok: false, code: 'PARTNER_ATTRIBUTION_INVALID' };
+  }
 
   const clickId = crypto.randomUUID();
   await supabaseFetch('/partner_clicks', {
@@ -413,6 +459,7 @@ export async function registerPartnerClick({ session_token, trip_id, offer_id, o
       city: clean(resolved.city, 160) || null,
       need_type: clean(resolved.need_type, 80) || null,
       entity_name: clean(resolved.entity_name, 180) || null,
+      travel_date: clean(resolved.travel_date, 40) || null,
       target_url: clean(resolved.url, 1500),
       resolution_type: clean(resolved.resolution_type, 40) || null
     })
