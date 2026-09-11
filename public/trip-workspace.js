@@ -36,6 +36,43 @@ function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw
 function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.innerHTML='';if(nav.hidden)return;days(city).forEach(d=>{const b=document.createElement('button');b.type='button';b.className='tw-day'+(d===day?' active':'');b.textContent=lang==='es'?`Día ${d}`:`Day ${d}`;b.onclick=()=>{day=d;renderCity();window.scrollTo({top:Math.max(0,$('#tw-content').offsetTop-160),behavior:'smooth'})};nav.appendChild(b)})}
 function cleanDuration(v){return String(v||'').replace(/\s*\|\s*/g,' · ').replace(/\n+/g,' · ').trim()}
 function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim(),route=[r.from,r.to].filter(Boolean).join(' → ');html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${r.transport?`<span class="tw-pill">${esc(r.transport)}</span>`:''}${r.duration?`<span class="tw-pill">${esc(cleanDuration(r.duration))}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${r.transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(r.transport)}</b></div>`:''}${r.duration?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(cleanDuration(r.duration))}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
+function tripRoutes(){
+  const destinations=(Array.isArray(data?.destinations)?data.destinations:[])
+    .map((item,index)=>({
+      index,
+      city:String(item?.city||'').trim(),
+      baseDate:String(item?.baseDate||item?.base_date||'').trim()
+    }))
+    .filter(item=>item.city);
+  return destinations.slice(0,-1).map((from,index)=>({
+    id:`route:${index}:${from.city}:${destinations[index+1].city}`,
+    category:'transport',
+    need_type:'intercity_transport',
+    day:'',
+    city:from.city,
+    entity_name:`${from.city} → ${destinations[index+1].city}`,
+    source_activity:`${from.city} → ${destinations[index+1].city}`,
+    source_route:`${from.city} → ${destinations[index+1].city}`,
+    origin:from.city,
+    destination:destinations[index+1].city,
+    travel_date:destinations[index+1].baseDate||'',
+    user_message:lang==='es'
+      ? 'Compara opciones para conectar tus destinos.'
+      : 'Compare options to connect your destinations.',
+    derived_by:'trip_sequence'
+  }));
+}
+function contextualNeedsForCity(cityName,needs){
+  const source=Array.isArray(needs)?needs:[];
+  const derived=tripRoutes().filter(route=>route.origin===cityName);
+  if(!derived.length)return source;
+  const existingRoutes=new Set(source
+    .filter(item=>item?.need_type==='intercity_transport'||item?.need_type==='transport_arrangement')
+    .map(item=>String(item?.source_route||item?.entity_name||'').toLowerCase().replace(/\s+/g,' ').trim()));
+  const extra=derived.filter(route=>!existingRoutes.has(String(route.source_route).toLowerCase().replace(/\s+/g,' ').trim()));
+  return [...source,...extra];
+}
+
 function contextLabel(item){
   if(item?.need_type==='ticket_required') return t.required;
   if(item?.need_type==='reservation_recommended') return t.recommended;
@@ -44,24 +81,28 @@ function contextLabel(item){
   return '';
 }
 
-function renderNeedItems(items){
+function renderNeedItems(items,offers=[]){
   if(!items.length) return '';
-  return `<div class="tw-context-list">${items.map(item=>`
+  return `<div class="tw-context-list">${items.map(item=>{
+    const matched=(Array.isArray(offers)?offers:[]).filter(offer=>offer?.need_id===item?.id);
+    return `
     <article class="tw-context-item">
       <div class="tw-context-item-top">
-        <span class="tw-context-day">${esc(t.dayLabel)} ${esc(item.day)}</span>
+        ${item.day?`<span class="tw-context-day">${esc(t.dayLabel)} ${esc(item.day)}</span>`:'<span class="tw-context-day">↗</span>'}
         <span class="tw-context-label">${esc(contextLabel(item))}</span>
       </div>
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
-      <small class="tw-context-source">${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}</small>
+      <small class="tw-context-source">${item.derived_by==='trip_sequence'?(lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order'):`${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}`}</small>
       ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement')
         ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
         : ''}
-    </article>`).join('')}</div>`;
+      ${matched.length?`<div class="tw-partner-options">${matched.map(offer=>offerCard(offer,offer.placement||'city_contextual')).join('')}</div>`:''}
+    </article>`;
+  }).join('')}</div>`;
 }
 
-function contextSection(icon,title,description,items){
+function contextSection(icon,title,description,items,offers=[]){
   if(!items.length) return '';
   return `<section class="tw-context-section">
     <div class="tw-context-section-head">
@@ -74,7 +115,7 @@ function contextSection(icon,title,description,items){
         <p>${esc(description)}</p>
       </div>
     </div>
-    ${renderNeedItems(items)}
+    ${renderNeedItems(items,offers)}
   </section>`;
 }
 async function fetchContext(cityName){
@@ -130,29 +171,38 @@ function localizedOffer(offer){
   return {title:lang==='es'?offer.title_es:offer.title_en,description:lang==='es'?offer.description_es:offer.description_en};
 }
 function offerCard(offer,placement){
-  if(!offer?.id)return'';const c=localizedOffer(offer);
-  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p><button type="button" data-partner-open="${esc(offer.id)}">${esc(t.partnerCta)} →</button><small class="tw-affiliate-note">${esc(t.affiliateNote)}</small></div>`;
+  if(!offer?.id)return'';
+  const c=localizedOffer(offer);
+  const partnerSlug=offer.partner?.slug||'';
+  return `<div class="tw-partner-offer" data-offer-id="${esc(offer.id)}" data-placement="${esc(placement)}" data-partner-slug="${esc(partnerSlug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}"><div class="tw-partner-offer__top"><strong>${esc(c.title||offer.partner?.name||'')}</strong><small>${esc(offer.partner?.name||'')}</small></div><p>${esc(c.description||'')}</p><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(t.partnerCta)} →</button><small class="tw-affiliate-note">${esc(t.affiliateNote)}</small></div>`;
 }
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
-  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,needs})});
-  const payload=await response.json().catch(()=>({}));return response.ok&&payload?.ok&&Array.isArray(payload.offers)?payload.offers:[];
+  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,needs})});
+  const payload=await response.json().catch(()=>({}));
+  if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
+  return Array.isArray(payload.offers)?payload.offers:[];
 }
-async function openPartnerOffer(offerId,placement){
+async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   const token=getStoredSessionToken();
   const target=window.open('about:blank','_blank');if(target)target.opener=null;
   try{
-    const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'click',session_token:token,trip_id:data?.trip_id,offer_id:offerId,placement})});
+    const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'click',session_token:token,trip_id:data?.trip_id,offer_id:offerId,offer_token:offerToken||'',placement})});
     const payload=await response.json().catch(()=>({}));
     if(response.ok&&payload?.ok&&/^https:\/\//i.test(payload.url||'')){
-      window.ITBMOFoundation?.track('partner_offer_click',{partner_name:placement==='trip_connectivity'?'Holafly':'Omio',placement,destination:city||''});
+      window.ITBMOFoundation?.track('partner_offer_click',{partner_name:payload.partner_name||meta.partnerSlug||'',partner_slug:payload.partner_slug||meta.partnerSlug||'',placement,destination:city||'',need_type:payload.need_type||meta.needType||'',entity_name:payload.entity_name||meta.entityName||''});
       if(target)target.location.replace(payload.url);else window.location.assign(payload.url);
       return;
     }
-  }catch(_){}
+  }catch(error){console.warn('[PARTNER CLICK]',error)}
   if(target)target.close();
 }
-function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>btn.onclick=()=>openPartnerOffer(btn.dataset.partnerOpen,btn.closest('[data-placement]')?.dataset.placement||''));}
+function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>{
+  btn.onclick=()=>{
+    const card=btn.closest('[data-placement]');
+    openPartnerOffer(btn.dataset.partnerOpen,card?.dataset.placement||'',btn.dataset.partnerToken||'',{partnerSlug:card?.dataset.partnerSlug||'',needType:card?.dataset.needType||'',entityName:card?.dataset.entityName||''});
+  };
+});}
 async function loadTripPartnerOffers(){tripPartnerOffers=await fetchPartnerOffers('resolve_trip');renderTripPartnerOffers();}
 function renderTripPartnerOffers(){
   const offer=tripPartnerOffers.find(x=>x.placement==='trip_connectivity');
@@ -189,17 +239,21 @@ function renderPrepare(){
     return;
   }
 
-  const needs=Array.isArray(state.needs)?state.needs:[];
+  const needs=contextualNeedsForCity(city,Array.isArray(state.needs)?state.needs:[]);
   if(!partnerOffersByCity.has(city)){partnerOffersByCity.set(city,[]);fetchPartnerOffers('resolve_city',needs).then(offers=>{partnerOffersByCity.set(city,offers);if(mode==='prepare')renderPrepare()}).catch(()=>{});}
   const tickets=needs.filter(item=>item.category==='tickets');
   const tours=needs.filter(item=>item.category==='tours');
   const transport=needs.filter(item=>item.category==='transport');
 
   const cityOffers=partnerOffersByCity.get(city)||[];
-  let transportSection=contextSection('↗',t.move,t.moveC,transport);
-  const transportOffer=cityOffers.find(x=>x.placement==='city_transport');
-  if(transportOffer&&transportSection) transportSection=transportSection.replace('</section>',offerCard(transportOffer,'city_transport')+'</section>');
-  const activeSections=[contextSection('🎟',t.tickets,t.ticketsC,tickets),contextSection('✦',t.tours,t.toursC,tours),transportSection].filter(Boolean).join('');
+  const ticketOffers=cityOffers.filter(x=>x.placement==='city_tickets');
+  const tourOffers=cityOffers.filter(x=>x.placement==='city_experiences');
+  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport');
+  const activeSections=[
+    contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers),
+    contextSection('✦',t.tours,t.toursC,tours,tourOffers),
+    contextSection('↗',t.move,t.moveC,transport,transportOffers)
+  ].filter(Boolean).join('');
 
   $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
     <span class="tw-prepare-mark">✦</span>
@@ -221,7 +275,12 @@ function renderPrepare(){
     </section>
   </div>`;
   bindPartnerOffers();
-  if(transportOffer&&!viewedOfferIds.has(transportOffer.id)){viewedOfferIds.add(transportOffer.id);window.ITBMOFoundation?.track('partner_offer_view',{partner_name:transportOffer.partner?.name||'',placement:'city_transport',destination:city});}
+  cityOffers.forEach(offer=>{
+    const viewKey=`${offer.id}:${offer.need_id||offer.placement}:${offer.partner?.slug||''}`;
+    if(viewedOfferIds.has(viewKey))return;
+    viewedOfferIds.add(viewKey);
+    window.ITBMOFoundation?.track('partner_offer_view',{partner_name:offer.partner?.name||'',partner_slug:offer.partner?.slug||'',placement:offer.placement||'',destination:city,need_type:offer.need_type||'',entity_name:offer.entity_name||'',resolution_type:offer.resolution_type||''});
+  });
 }
 function getStoredSessionToken(){
   try{
