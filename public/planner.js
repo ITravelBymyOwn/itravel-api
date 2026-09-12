@@ -1206,6 +1206,7 @@ async function saveTripRecord(list, travelerState){
   const destinations = list.map(d=>({
     city:d.city,
     country:d.country,
+    country_code:d.countryCode || _countryMatch_(d.country)?.code || null,
     days:d.days,
     base_date:dmyToISO(d.baseDate),
     per_day:Array.isArray(d.perDay) ? d.perDay : []
@@ -2697,7 +2698,7 @@ async function saveDestinations(){
       for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
     }
 
-    list.push({ city, country, days, baseDate, perDay });
+    list.push({ city, country, countryCode:countryMatch?.code || '', days, baseDate, perDay });
   });
 
   if(invalidCountryRow){
@@ -3121,7 +3122,7 @@ function openImmersiveItinerary(){
     lang:getLang()==='es'?'es':'en',
     trip_id:currentTripId || null,
     destinations:(savedDestinations||[]).map(d=>({
-      city:d?.city||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
+      city:d?.city||'',country:d?.country||'',countryCode:d?.countryCode||_countryMatch_(d?.country||'')?.code||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
     })).filter(d=>d.city),
     city_meta:cityMeta||{},
     itineraries:Object.fromEntries(cities.map(city=>[
