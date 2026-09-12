@@ -561,3 +561,15 @@ UPDATE 2026-09-11 · PRE-MAIN FINAL QA PATCH
 - Workspace visual hierarchy strengthened: the 'Entradas, reservas, experiencias y movilidad…' subheadline is larger/darker/bolder; the overview essentials copy is now 'Conectividad, movilidad y servicios útiles, organizados según tu viaje.' and is visually stronger. English equivalent updated.
 - Preview payment bypass now defaults to OFF server-side in payment/trip/chat/context for real checkout and promotion QA. ITBMO50 must follow the actual promotional checkout path unless ITBMO_PREVIEW_PAYMENT_BYPASS is deliberately set to true.
 - No SQL changes in this patch. Existing Context, partner cards, recovery, generation and affiliate behavior otherwise preserved.
+
+
+======================================================================
+UPDATE 2026-09-11 · CONTEXT AUTHORIZATION FIX AFTER REAL-CHECKOUT QA
+======================================================================
+- Real checkout/promotion QA exposed a redundant authorization gate inside /api/context.
+- /api/context no longer re-checks payments or promo_redemptions after a trip is already generated.
+- Context authorization is now based on: valid ITBMO session + owned trip + trip.status=generated.
+- Payment/promotion authorization remains enforced before generation by the commerce/generation flow; the Preview payment bypass remains OFF.
+- This prevents legitimate paid/free-promo generated trips from returning 402 CONTEXT_NOT_AUTHORIZED during Workspace Context Intelligence.
+- Context analysis, batching, persistence, candidate limits and partner logic are otherwise unchanged.
+- Context version: 1.2.1.
