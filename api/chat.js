@@ -29,8 +29,10 @@ const ITBMO_ADMIN_TEST_BYPASS =
 const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
 const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
   String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+// Safe default: Preview must exercise the real checkout/promotion path.
+// Enable explicitly only when a deliberate admin test bypass is needed.
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
-  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
+  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "false").toLowerCase() === "true";
 
 function _infoHashToken_(token) {
   return crypto.createHash("sha256").update(String(token || "")).digest("hex");
