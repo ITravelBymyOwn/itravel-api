@@ -10,6 +10,7 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
+const OMIO_GENERIC_TRACKING_URL = 'https://omio.sjv.io/PzvDjY';
 
 function clean(value, max = 240) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
@@ -107,6 +108,13 @@ function hasRequiredAttribution(slug, rawUrl) {
       return url.searchParams.get('partner_id') === GYG_PARTNER_ID &&
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
+    }
+    if (slug === 'omio') {
+      const host = url.hostname.toLowerCase();
+      const path = url.pathname.replace(/\/$/, '');
+      const isApprovedShortLink = host === 'omio.sjv.io' && path === '/PzvDjY';
+      const isImpactAccountLink = host === 'omio.sjv.io' && /^\/c\/7727455\/\d+\/7385$/.test(path);
+      return isApprovedShortLink || isImpactAccountLink;
     }
     return true;
   } catch (_) {
@@ -277,20 +285,21 @@ async function resolveExperiencePartner(slug, needs, city, language) {
 // Omio launch state: keep the official API-ready infrastructure, but expose a
 // conservative generic Omio search entry for launch while API access is pending.
 // IMPORTANT: this temporary gate is NOT provider coverage truth. It only limits
-// exposure to Europe-to-Europe main-destination legs, where Omio has its strongest
-// verified consumer footprint. Once the official Search API is enabled, remove this
-// geographic launch gate and let the authorized coverage response decide eligibility.
+// exposure to Europe-to-Europe main-destination legs only. This is a continent-level
+// launch guard, NOT a claim that Omio serves every European city pair. Once the official
+// Search API is enabled, remove this geographic gate and let live provider coverage/results
+// decide eligibility route by route.
 const OMIO_INTEGRATION = Object.freeze({
   status: 'limited_launch',
   impact_partner_id: '7727455',
-  generic_tracking_url: 'https://omio.sjv.io/c/7727455/861892/7385',
+  generic_tracking_url: OMIO_GENERIC_TRACKING_URL,
   widget_partner_id: 'omio-affiliates',
   widget_redirect: 'https://omio.sjv.io/c/7727455/3963000/7385?u='
 });
 
 const OMIO_LAUNCH_EUROPE_CODES = new Set([
   'AL','AD','AT','BE','BA','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IS',
-  'IE','IT','LV','LI','LT','LU','MT','MD','MC','ME','NL','MK','NO','PL','PT','RO','SM',
+  'IE','IT','XK','LV','LI','LT','LU','MT','MD','MC','ME','NL','MK','NO','PL','PT','RO','SM',
   'RS','SK','SI','ES','SE','CH','TR','UA','GB','VA'
 ]);
 
@@ -300,7 +309,7 @@ const OMIO_LAUNCH_COUNTRY_ALIASES = new Map([
   ['cyprus','CY'],['chipre','CY'],['czech republic','CZ'],['czechia','CZ'],['republica checa','CZ'],['república checa','CZ'],
   ['denmark','DK'],['dinamarca','DK'],['estonia','EE'],['finland','FI'],['finlandia','FI'],['france','FR'],['francia','FR'],
   ['germany','DE'],['alemania','DE'],['greece','GR'],['grecia','GR'],['hungary','HU'],['hungria','HU'],['hungría','HU'],
-  ['iceland','IS'],['islandia','IS'],['ireland','IE'],['irlanda','IE'],['italy','IT'],['italia','IT'],['latvia','LV'],['letonia','LV'],
+  ['iceland','IS'],['islandia','IS'],['ireland','IE'],['irlanda','IE'],['italy','IT'],['italia','IT'],['kosovo','XK'],['latvia','LV'],['letonia','LV'],
   ['liechtenstein','LI'],['lithuania','LT'],['lituania','LT'],['luxembourg','LU'],['luxemburgo','LU'],['malta','MT'],
   ['moldova','MD'],['moldavia','MD'],['monaco','MC'],['mónaco','MC'],['montenegro','ME'],['netherlands','NL'],['paises bajos','NL'],['países bajos','NL'],
   ['north macedonia','MK'],['macedonia del norte','MK'],['norway','NO'],['noruega','NO'],['poland','PL'],['polonia','PL'],
@@ -406,8 +415,8 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
       placement: 'city_transport',
       title_es: routeLabel,
       title_en: routeLabel,
-      description_es: 'Consulta en Omio las opciones disponibles para este trayecto. Por ahora, origen y destino se confirman directamente en Omio.',
-      description_en: 'Check the options available for this route on Omio. For now, origin and destination are confirmed directly on Omio.',
+      description_es: 'Abre Omio para buscar este trayecto. Mientras activamos la integración API, ingresa origen, destino y fechas directamente en Omio.',
+      description_en: 'Open Omio to search this route. Until the API integration is enabled, enter origin, destination and dates directly on Omio.',
       target_url: undefined,
       confidence: 'medium',
       need_id: route.id,
