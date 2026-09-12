@@ -87,6 +87,8 @@ const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
 const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
+const ITBMO_AUTH_SYNC_KEY = 'itbmo_auth_sync_v1';
+const ITBMO_WORKSPACE_GUEST_HANDOFF_KEY = 'itbmo_workspace_guest_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -167,9 +169,15 @@ let plannerState = {
     return (base === 'es' || base === 'en') ? base : '';
   };
 
-  // 1) <html lang="">
-  let lang = normalize(document?.documentElement?.getAttribute('lang'));
+  // 1) Explicit URL language is authoritative. This is especially important
+  // after account recovery, where Supabase returns to planner.html?lang=es|en.
+  let lang = '';
+  try{ lang = normalize(new URLSearchParams(window.location.search).get('lang')); }catch(_){}
 
+  // 2) Fall back to the document language when no explicit URL language exists.
+  if(!lang) lang = normalize(document?.documentElement?.getAttribute('lang'));
+
+  // 3) Localized route fallback.
   if(!lang){
     try{
       const p = String(window?.location?.pathname || '').toLowerCase();
@@ -178,7 +186,7 @@ let plannerState = {
     }catch(_){}
   }
 
-  // 3) Default MVP
+  // 4) Default MVP
   if(!lang) lang = 'en';
 
   plannerState.lang = lang;
@@ -598,6 +606,9 @@ function clearCachedUser(){
   try{ localStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
   try{ sessionStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
 }
+function broadcastAuthState(state){
+  try{ localStorage.setItem(ITBMO_AUTH_SYNC_KEY,JSON.stringify({state:String(state||''),ts:Date.now()})); }catch(_){}
+}
 function storeSessionToken(token, persistent=true){
   try{
     if(!token) return;
@@ -608,13 +619,15 @@ function storeSessionToken(token, persistent=true){
       sessionStorage.setItem(ITBMO_GUEST_SESSION_KEY, token);
       localStorage.removeItem(ITBMO_SESSION_KEY);
     }
+    broadcastAuthState('signed_in');
     setTimeout(()=>window.ITBMOFoundation?.syncAttribution?.(),0);
   }catch(_){}
 }
-function clearSessionToken(){
+function clearSessionToken({broadcast=true}={}){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
   try{ sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY); }catch(_){}
   clearCachedUser();
+  if(broadcast) broadcastAuthState('signed_out');
 }
 function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
 function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
@@ -1182,6 +1195,17 @@ function clearPlannerUIForLogout(){
 
   if($sidebar) $sidebar.classList.remove('disabled');
   setSavedSetupLocked(false);
+
+  // Logout must return the Planner to its neutral signed-out view.
+  // My Trips remains hidden until the user signs in again and explicitly opens it.
+  hideJourneyReturnGate();
+  journeyHomeLatestTrip=null;
+  journeyHistoryTrips=[];
+  const journeyHistory=qs('#journey-history');
+  const journeyHistoryGrid=qs('#journey-history-grid');
+  if(journeyHistory) journeyHistory.hidden=true;
+  if(journeyHistoryGrid) journeyHistoryGrid.innerHTML='';
+
   updateAddCityButtonState();
 }
 
@@ -1206,6 +1230,36 @@ async function logoutITBMOUser(){
     closeAccountDialog();
     renderAuthState();
     setAuthBusy(false);
+  }
+}
+
+async function syncPlannerAuthFromAnotherTab(event){
+  if(!event) return;
+  const relevant=event.key===ITBMO_SESSION_KEY || event.key===ITBMO_AUTH_SYNC_KEY;
+  if(!relevant) return;
+
+  let announcedState='';
+  if(event.key===ITBMO_AUTH_SYNC_KEY && event.newValue){
+    try{ announcedState=String(JSON.parse(event.newValue)?.state||''); }catch(_){}
+  }
+
+  const token=getStoredSessionToken();
+  if(announcedState==='signed_out' || (event.key===ITBMO_SESSION_KEY && !event.newValue && !token)){
+    stopPendingVerificationWatch();
+    clearSessionToken({broadcast:false});
+    clearPlannerUIForLogout();
+    currentUser=null;
+    authReady=true;
+    guestUpgradeFormOpen=false;
+    setAccountMessage('');
+    showAccountMode(null);
+    closeAccountDialog();
+    renderAuthState();
+    return;
+  }
+
+  if(token && (!currentUser || announcedState==='signed_in')){
+    await restoreITBMOSession();
   }
 }
 
@@ -1236,6 +1290,7 @@ function bindAccountListeners(){
   applyAuthLanguage(); updateSaveAvailability();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden && currentUser?.registration_pending) refreshPendingVerification(); });
   window.addEventListener('focus',()=>{ if(currentUser?.registration_pending) refreshPendingVerification(); });
+  window.addEventListener('storage',syncPlannerAuthFromAnotherTab);
 }
 
 /* =========================================================
@@ -3267,6 +3322,16 @@ function openImmersiveItinerary(){
   };
   try{ localStorage.setItem('itbmo_trip_workspace_snapshot_v1',JSON.stringify(snapshot)); }
   catch(err){ console.warn('[ITBMO WORKSPACE SNAPSHOT]',err); }
+
+  // Guest sessions intentionally live in sessionStorage so they do not persist
+  // after the browsing session. A short-lived same-origin handoff lets a newly
+  // opened Workspace receive that guest session without making it persistent.
+  try{
+    const guestToken=String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY)||'').trim();
+    if(guestToken){
+      localStorage.setItem(ITBMO_WORKSPACE_GUEST_HANDOFF_KEY,JSON.stringify({token:guestToken,expires_at:Date.now()+60000}));
+    }
+  }catch(_){}
 
   const params=new URLSearchParams();
   params.set('lang',snapshot.lang);
