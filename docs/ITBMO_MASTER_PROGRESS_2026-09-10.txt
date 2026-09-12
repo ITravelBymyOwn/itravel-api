@@ -1,240 +1,541 @@
 ITBMO · MASTER PROGRESS / RECOVERY CONTEXT
-Fecha de actualización: 2026-09-11
-Estado: MACROTANDA COMMERCE/GROWTH V1 IMPLEMENTADA EN CÓDIGO · PENDIENTE DE MIGRACIÓN + DEPLOY PREVIEW + QA · NO APROBADA AÚN PARA MAIN
+Fecha de actualización: 2026-09-12
+Estado: RELEASE CANDIDATE PRE-MAIN · MACROTANDA 1 IMPLEMENTADA Y MAYORMENTE VALIDADA · PENDIENTE ÚLTIMO QA DE IDIOMA EN PASSWORD RECOVERY + REGRESIÓN CORTA + BACKUP DE MAIN
 
 CONFIDENCIAL
 Toda la estrategia, arquitectura, código, monetización, afiliados, datos, lógica, marketing, resultados e ideas de ITBMO deben manejarse con máxima discreción.
 
+IMPORTANTE SOBRE ESTE DOCUMENTO
+Este archivo reemplaza el historial acumulado/contradictorio de etapas intermedias. Es la fuente de verdad OPERATIVA vigente.
+No debe usarse una nota histórica previa para reemplazar código que hoy funciona. La baseline actual validada por el usuario prevalece sobre checkpoints antiguos.
+La fuente de verdad de arquitectura permanece separada en:
+docs/ITBMO_ARCHITECTURE_BLUEPRINT_CURRENT.txt
+
 ======================================================================
-1. REGLAS PERMANENTES DE TRABAJO
+1. BASELINE ACTUAL Y REGLAS PERMANENTES
 ======================================================================
+Baseline de trabajo actual:
+- ZIP base vigente aportado por el usuario: itravel-api-feature-promo-feedback (4).zip
+- Rama activa de QA: feature/promo-feedback
+- Preview actual de referencia:
+  https://itravelbymyown-d19jciqun-itravelbymyowns-projects.vercel.app
+- Home Preview:
+  https://itravelbymyown-d19jciqun-itravelbymyowns-projects.vercel.app/preview-home.html
+
+Reglas permanentes:
 - Partir siempre de la última baseline aprobada.
 - Cambios quirúrgicos; no parches sobre parches ni acumulación de código obsoleto.
 - Entregar únicamente archivos nuevos o modificados; nunca archivos sin cambios.
-- Para entregas de código al usuario: archivos completos .txt listos para copiar/pegar.
+- Para entregas de código: archivos completos .txt listos para copiar/pegar.
 - Probar siempre en rama/Vercel Preview antes de main.
 - Nada se considera corregido/validado hasta comprobarlo en Preview.
 - Todo ITBMO (páginas, código y metadatos) se sirve desde Vercel. No pedir cambios en Webflow.
 - No inventar afiliados, descuentos, disponibilidad, precios, productos, conversiones o cobertura.
 - Supabase/ITBMO conserva la verdad operacional; integraciones externas entran por adapters.
-- Preservar el fix del helper de Supabase para claves sb_secret_* y el logging explícito de errores.
-- Planner/Auth/Payment/Persistence/Workspace/Info Chat/PDF/CSV deben conservarse sin regresiones.
+- Preservar el helper correcto de Supabase para claves sb_secret_* usando apikey y el logging explícito de errores.
+- Preservar Planner/Auth/Payment/Persistence/Workspace/Info Chat/PDF/CSV sin regresiones.
+- No modificar código funcional para hacerlo coincidir con documentación histórica obsoleta.
 
 ======================================================================
-2. OBJETIVO COMERCIAL INMEDIATO
+2. OBJETIVO INMEDIATO DE RELEASE
 ======================================================================
-Publicar una versión Premium monetizable y preparada para adquisición real:
+Publicar ITBMO Premium monetizable con:
 - Planner estable y pago por itinerario.
-- promociones configurables sin tocar código ni hacer deploy;
-- campaña inicial posible ITBMO100 para atraer early travelers;
-- Workspace con monetización contextual mediante partners aprobados;
-- medición de adquisición, promociones y clics;
-- base de creators/influencers lista;
-- Communication Foundation preparada, PERO DESHABILITADA para el lanzamiento público actual.
+- Registro/login/invitado y recuperación de contraseña.
+- Persistencia de sesión y recuperación del viaje.
+- Promociones configurables desde Supabase sin redeploy.
+- ITBMO100 listo como campaña inicial de adquisición.
+- Workspace contextual con monetización mediante partners aprobados.
+- Context Intelligence estable.
+- Medición de adquisición, promociones y clics.
+- Creator/Influencer foundation lista pero no pública.
+- Communication Foundation preparada pero DESHABILITADA para este lanzamiento.
 
-El resto de la visión (Dynamic Itinerary, Travel Companion, Mobility avanzada, Growth Control Center, etc.) queda contemplado en arquitectura pero NO forma parte del release inmediato.
-
-======================================================================
-3. GROWTH FOUNDATION V1 · YA EXISTENTE
-======================================================================
-- Event Gateway: /api/events
-- Attribution: anonymous_id + attribution_id + first touch + last meaningful touch.
-- Tablas existentes: marketing_channels, campaigns, campaign_links, attributions,
-  marketing_touchpoints, social_accounts, feature_flags.
-- Frontend foundation: public/assets/js/itbmo-foundation.js
-- Backend común: api/_lib/itbmo-foundation.js
-- Migración base: 20260909_growth_foundation_v1.sql
-- user_events sigue siendo operacional/server-authoritative.
-- marketing_touchpoints se usa para telemetría browser/marketing evitando duplicar eventos server-side.
+Fuera del release actual:
+- Mobility Intelligence avanzada.
+- Dynamic Itinerary / reoptimización.
+- Travel Companion completo.
+- Lifecycle CRM completo.
+- Social Publishing.
+- Growth Intelligence / Growth Control Center.
 
 ======================================================================
-4. PARTNER / COMMERCE ENGINE · REGLAS PERMANENTES
+3. MACROTANDA 1 · ESTADO REAL
 ======================================================================
-Partners aprobados/configurados de referencia:
-- Viator
-- GetYourGuide
-- Omio
-- Holafly
+Macrotanda 1 = Launch / Monetization candidate.
+Componentes:
+A. Partner / Workspace V1.3
+B. Promotions + Checkout + ITBMO100
+C. Creator / Influencer + Attribution foundation
+D. Communication Foundation configurada pero OFF para lanzamiento
+
+Estado actual:
+- Implementación principal completada.
+- Migración/DB funcional en el entorno actual.
+- QA de promociones principales completado.
+- QA de Workspace/partners/contexto realizado en Preview.
+- Password recovery funcional de punta a punta.
+- Pendiente únicamente validar la corrección de preservación de idioma del recovery y hacer regresión corta final antes de main.
+
+======================================================================
+4. GROWTH FOUNDATION V1
+======================================================================
+Existe y debe preservarse:
+- /api/events
+- /api/attribution
+- api/_lib/itbmo-foundation.js
+- public/assets/js/itbmo-foundation.js
+- marketing_channels
+- campaigns
+- campaign_links
+- attributions
+- marketing_touchpoints
+- social_accounts
+- feature_flags
+
+Modelo de identidad/atribución:
+anonymous_id -> session_id -> attribution_id -> user_id(optional) -> trip_id
+
+Regla:
+- user_events = operacional / server-authoritative.
+- marketing_touchpoints = telemetría browser/marketing.
+
+Consentimiento separado por finalidad:
+- analytics
+- advertising
+- marketing_email
+- marketing_whatsapp
+- personalization
+- ugc_reuse
+
+Compra/cuenta NO implica consentimiento de marketing.
+
+======================================================================
+5. PARTNER / COMMERCE ENGINE · REGLAS PERMANENTES
+======================================================================
+Cadena conceptual:
+Traveler -> Trip -> Context -> Need -> Solution -> Offer -> Partner -> Action -> Conversion
+
+Partner != Offer.
 
 Regla permanente de monetización contextual:
-- Toda oferta comercial debe originarse en contexto real del viaje, destino, tramo,
-  atracción, actividad o necesidad detectada.
-- NO depender de listas cerradas de atracciones/ciudades.
-- Los mappings conocidos solo pueden ser cache/optimización/validación técnica.
-- Si no puede resolverse una entidad exacta, usar fallbacks contextuales seguros sin
-  inventar producto, precio, disponibilidad o cobertura.
+- Toda oferta debe originarse en contexto real del viaje, destino, tramo, atracción, actividad o necesidad detectada.
+- El sistema debe intentar monetizar dinámicamente cualquier atracción/actividad elegible.
+- No depender de listas cerradas de ciudades o atracciones.
+- Mappings conocidos solo pueden ser cache/optimización/validación técnica.
+- Si no puede resolverse una entidad exacta, usar fallback contextual seguro sin inventar producto, precio, disponibilidad o cobertura.
 - need -> optional commercial solution; nunca affiliate -> necesidad inventada.
-- ranking: relevancia/contexto/cobertura/fiabilidad/beneficio/UX/performance;
-  comisión como criterio secundario.
+- Ranking prioriza relevancia/contexto/cobertura/fiabilidad/beneficio/UX; comisión es secundaria.
+
+Tablas base del Partner Engine:
+- travel_partners
+- partner_capabilities
+- partner_rules
+- partner_offers
+- partner_clicks
+- partner_conversions
+
+Feature flag:
+- partner_engine_enabled=true
 
 ======================================================================
-5. MACROTANDA · PARTNER / WORKSPACE V1.3
+6. PARTNERS ACTUALES Y COMPORTAMIENTO APROBADO
 ======================================================================
-IMPLEMENTADO EN CÓDIGO; PENDIENTE QA PREVIEW.
+VIATOR
+- Aprobado.
+- PID: P00318254
+- mcid=42383
+- medium=link
+- campaign contextual itbmo-...
+- Comisión: 8% sobre booking completado.
+- Cookie: 30 días.
+- PayPal semanal sin mínimo.
+- W-8BEN enviado.
+- Constructor contextual aprobado.
+- CTA: “Ver opción →”.
+- No inventar date/party-size params.
+- QA estructural del outbound disponible en supabase/qa/20260911_viator_click_proof.sql.txt.
 
-A) Privacidad de cuenta
-- El badge/cabecera de cuenta ya no debe mostrar el email completo de forma prominente.
-- Mantener nombre/saludo/estado de cuenta.
+GETYOURGUIDE
+- Aprobado.
+- partner_id=3FZWELC
+- utm_medium=online_publisher
+- cmp contextual.
+- Comisión: 8%.
+- Cookie: 31 días.
+- Constructor contextual aprobado.
+- No hardcodear listas cerradas de atracciones.
 
-B) Transparencia de afiliados
-- Eliminar disclosure repetitivo debajo de cada tarjeta.
-- Mostrar un único disclosure claro y Premium en el área comercial del Workspace.
-- Copy ES/EN explica que ITBMO puede recibir comisión, no añade recargo y que
-  precio/fecha/disponibilidad/condiciones finales se confirman con el proveedor.
-- CTAs dinámicos de partners se abren por JS después de registrar el click; no son anchors.
-  Mantener aislamiento de opener. Si en el futuro se usan anchors, usar
-  rel="sponsored noopener noreferrer".
+HOLAFly
+- Aprobado.
+- Conectividad trip-wide; no repetir por ciudad.
+- Impact account 7727455.
+- Beneficio ITBMO confirmado: 5% visible en landing.
+- Beneficio se muestra desde metadata; no hardcodear UI.
 
-C) CTA
-- Mantener "Ver opción →" / "View option →".
+AIRALO
+- Aprobado 2026-09-11.
+- Impact: https://airalo.pxf.io/c/7727455/2071037/15608
+- Beneficio: 15% primera eSIM.
+- Código: NEWTOAIRALO15
+- Expira: 2026-12-31.
+- Integración global/trip-wide junto a Holafly.
 
-D) Día + fecha
-- Las necesidades/ofertas deben mostrar Día X + fecha real del itinerario.
-- La fecha debe derivarse de las fechas guardadas del viaje, no inferirse del texto.
+OMIO
+- Aprobado por Impact.
+- Impact account: 7727455
+- Advertiser: 465493
+- Program: 7385
+- Fallback original: https://omio.sjv.io/PzvDjY
+- Asset Widget_link 861892: https://omio.sjv.io/c/7727455/861892/7385
+- Widget redirect oficial: https://omio.sjv.io/c/7727455/3963000/7385?u=
+- Widget partner id: omio-affiliates
+- Solicitud de API enviada; pendiente.
 
-E) Viator
-- Antes de firmar/abrir una URL, validar que el outbound real incluya:
-  pid=P00318254
-  mcid=42383
-  medium=link
-  campaign=...
-- No inventar query params de fechas o viajeros.
-- La URL final del navegador puede ser reescrita por Viator; la validación importante es
-  el outbound generado por ITBMO y posteriormente los reportes del partner.
+REGLA OMIO PERMANENTE:
+- SOLO secuencia de destinos principales guardados destination[n] -> destination[n+1].
+- Single-city = cero Omio.
+- N destinos = N-1 necesidades principales como máximo.
+- Nunca POI/hotel/aeropuerto-hotel/tramo local/day-trip como Omio.
+- No fabricar slugs SEO ni URLs de ruta no verificadas.
+- La cobertura real futura debe venir del proveedor/API autorizada.
 
-F) GetYourGuide
-- Preservar partner_id=3FZWELC + utm_medium=online_publisher + cmp contextual.
-- No hardcodear una lista cerrada de atracciones.
-
-G) Agrupación de ofertas
-- Una misma necesidad/entidad debe mostrarse una sola vez.
-- Viator/GYG aparecen como opciones compactas dentro de esa necesidad, evitando tarjetas duplicadas.
-- No privilegiar un partner solo por comisión hasta contar con evidencia de performance.
-
-H) Holafly
-- Oferta global de conectividad: solo en "Para todo tu viaje".
-- No repetir por ciudad.
-
-I) Omio · CORRECCIÓN ESTRUCTURAL
-- Omio SOLO puede derivarse de la secuencia de destinos principales guardados del trip:
-  destino[n] -> destino[n+1].
-- Un viaje de una sola ciudad = cero ofertas Omio.
-- Prohibido derivar Omio desde source_route local, hotel, POI, barrio, museo,
-  aeropuerto->hotel u otro transporte intra-ciudad.
-- Day trips/local excursions no se fuerzan a Omio.
-- La existencia de una ruta real en Omio debe validarse en QA; si un deeplink de ruta
-  no es soportado, preferir fallback tracked seguro antes que enviar a una página inexistente.
-
-J) Telemetría
-- partner_clicks incluye contexto adicional como city, need_type, entity_name,
-  resolution_type y travel_date.
-- Eventos browser permiten partner_slug/need/entity/resolution/date para futura optimización.
+NOTA DE BASELINE:
+El ZIP actual fue confirmado por el usuario como funcionando sin problemas. No reemplazar partner-engine/context por versiones históricas basándose en notas antiguas sin evidencia de regresión en Preview.
 
 ======================================================================
-6. PROMOTIONS ENGINE · MACROTANDA
+7. CONTEXT INTELLIGENCE · ESTADO APROBADO
 ======================================================================
-IMPLEMENTADO EN CÓDIGO; PENDIENTE MIGRACIÓN + QA.
+Need types principales:
+- ticket_required
+- reservation_recommended
+- guided_tour_optional
+- intercity_transport
+- transport_arrangement
+- no_action
 
-Objetivo permanente:
-El usuario/administrador debe poder crear, activar, pausar o modificar campañas de descuento
-DESDE SUPABASE, sin cambiar código y sin hacer un deploy.
+Reglas:
+- Context nunca modifica itinerary_data.
+- source_route puede ser local; no mapear automáticamente a Omio.
 
-Tipos configurables:
-- percentage: cualquier porcentaje válido 0..100 decidido por ITBMO.
-- fixed: monto fijo en la moneda configurada.
-- free_trip: itinerario sin pago del Planner.
+Estabilización V1.2 aprobada:
+- max candidates: 120
+- batch size: 24
+- concurrency: 3
+- timeout por lote: 45s
+- retry: 1 solo para abort/408/409/429/5xx
+- resultados parciales preservados
+- Planner prewarm ciudad por ciudad después de generated
+- Workspace safety-net prewarm diferido
 
-Controles configurables por promo:
-- code
-- name
-- campaign_id opcional
-- creator_id opcional
-- promo_type
-- discount_value
-- currency
-- max_redemptions (cupo global)
-- max_redemptions_per_profile
-- reservation_minutes
-- starts_at / expires_at
-- registered_only / verified_only
-- active
-- metadata
+Autorización conceptual aprobada:
+- Context es capacidad post-generation.
+- Autorizar por sesión ITBMO válida + ownership del trip + trip.status=generated.
+- Payment/promo gating pertenece antes de generación, no debe re-evaluarse redundantemente en Context.
 
-Tablas nuevas:
-- creator_partners
-- creator_tracking_links
+IMPORTANTE:
+La baseline actual funciona y prevalece. No hacer rollback de context.js solo porque un checkpoint histórico describa una etapa intermedia.
+
+======================================================================
+8. WORKSPACE · UX ACTUAL APROBADA
+======================================================================
+CTA educativo general:
+ES:
+- kicker: “ANTES DE SEGUIR”
+- título: “Prepara lo esencial de tu viaje”
+- copy: “Conectividad, movilidad y servicios útiles, organizados según tu viaje.”
+- botón: “Ver lo que puedo necesitar ↓”
+
+EN equivalente.
+- smooth scroll a #tw-trip-wide.
+- no mover trip-wide cards encima de ciudades.
+
+Hero Prepare:
+“Entradas, reservas, experiencias y movilidad, seleccionadas según tu viaje.”
+Debe conservar jerarquía visual fuerte.
+
+Floating “Para tu viaje”:
+- control fijo separado.
+- aparece solo cuando el control original sale del viewport.
+- no reflow del header/layout.
+
+“Todas las ciudades”:
+- flujo normal y luego .is-floating con placeholder.
+
+Mis Viajes:
+- visible autenticado.
+- Workspace topbar ES “Mis Viajes”, EN “My Trips”.
+- navega planner.html?lang=...&view=my-trips.
+- Planner abre UI existente y limpia query param.
+- Back to Planner permanece separado.
+
+======================================================================
+9. SESSION PERSISTENCE · QA PASS
+======================================================================
+Problema previo:
+restoreITBMOSession() podía borrar token ante cualquier error no-OK y tratar un fallo transitorio como logout.
+
+Fix aprobado 2026-09-12:
+- cache de usuario registrado/invitado.
+- localStorage para registered, sessionStorage para guest.
+- validación de sesión con hasta 3 intentos.
+- solo 401/403 explícito borra token/cache.
+- errores transitorios preservan token/identidad cacheada.
+- logout explícito limpia token/cache/estado privado del trip.
+- sin cambio backend auth.
+
+Estado: QA PASS confirmado por usuario.
+Preservar.
+
+======================================================================
+10. AUTH / TOPBAR / MODAL · ESTADO ACTUAL
+======================================================================
+Planner topbar aprobado:
+- Crear cuenta / Create account
+- Iniciar sesión / Sign in
+- Continuar como invitado / Continue as guest
+- Salir / Sign out
+- Guest puede pasar a cuenta.
+- Account box convertido a modal/dialog on-demand.
+- Forms/handlers existentes reutilizados.
+- Logout existente preservado.
+- Ajustes de tamaño/modal/legal checkbox aplicados.
+
+Mensaje de login incorrecto existente:
+ES: “Email o contraseña incorrectos, o el correo aún no ha sido confirmado.”
+EN equivalente.
+
+======================================================================
+11. PASSWORD RECOVERY · QA FUNCIONAL PASS / IDIOMA PENDIENTE
+======================================================================
+Flujo existente y validado:
+1. Usuario solicita “Olvidé mi contraseña”.
+2. /api/user action=forgot_password.
+3. Supabase /recover.
+4. Brevo SMTP envía email de recuperación.
+5. Link abre Planner.
+6. type=recovery es detectado.
+7. Se abre modal para nueva contraseña.
+8. /api/user action=reset_password actualiza contraseña.
+9. Usuario puede iniciar sesión con la nueva contraseña.
+
+QA 2026-09-12:
+- Primeros intentos recibieron 429 de Supabase por mínimo de reenvío; configuración actual 60 s.
+- Supabase Auth confirmó /recover.
+- Brevo confirmó “Enviado”; Gmail tuvo retraso, pero ambos mensajes finalmente llegaron.
+- El botón de recovery contiene enlace funcional mediante tracking r.send.itravelbymyown.com.
+- Usuario logró restablecer contraseña correctamente y volver al Planner.
+
+Estado:
+- PASSWORD RECOVERY END-TO-END = QA PASS FUNCIONAL.
+
+Hallazgo pendiente:
+- El retorno del recovery puede perder ?lang=es/?lang=en y abrir planner.html sin idioma explícito.
+- planner.html tiene fallback EN, provocando mezcla ES/EN después del recovery aunque Home siga en español.
+
+Corrección quirúrgica entregada:
+- SOLO public/planner.js.
+- sendForgotPassword debe enviar redirect/origin conservando idioma actual:
+  planner.html?lang=es o planner.html?lang=en.
+- No tocar api/user.js, Supabase ni backend auth para este ajuste.
+
+Estado de este micro-fix:
+- IMPLEMENTADO/ENTREGADO PARA DEPLOY.
+- PENDIENTE VALIDAR EN PREVIEW ES y EN antes de main.
+
+Requisito de UX recomendado:
+- Recovery inválido/expirado debe mostrar mensaje claro y no caer silenciosamente al Planner.
+- No es bloqueo funcional si el flujo nuevo y válido pasa QA.
+
+======================================================================
+12. SMTP / BREVO · ESTADO REAL
+======================================================================
+Supabase Custom SMTP:
+- Enabled = ON.
+- Sender: support@itravelbymyown.com
+- Sender name: I Travel By My Own
+- Host: smtp-relay.brevo.com
+- Port: 587
+- Minimum interval per user: 60 s
+
+Comprobado:
+- Supabase entrega solicitud a Brevo.
+- Brevo genera y envía recovery email.
+- Gmail presentó retraso de entrega, pero los mensajes terminaron llegando.
+- No modificar SMTP por este hallazgo.
+
+Pendiente recomendado antes o inmediatamente después de main:
+- Revisar autenticación del dominio itravelbymyown.com en Brevo (DKIM/DMARC/SPF) porque la pantalla de Brevo mostró advertencias en el remitente gratuito registrado.
+- Esto es importante para entregabilidad sostenida de confirmación/recovery/transactional email.
+- No hacer cambios DNS sin revisar exactamente los registros requeridos para no afectar el dominio/correo.
+
+======================================================================
+13. PROMOTIONS ENGINE · QA PASS PRINCIPAL
+======================================================================
+Tablas:
 - promo_codes
 - promo_redemptions
-- view promo_code_control
 
-Seguridad:
-- Las tablas nuevas quedan con RLS habilitado y sin acceso directo anon/authenticated.
-- Las operaciones de redención se realizan server-side mediante Vercel/service role.
-- RPC de reserva/consumo revocados para browser roles.
+Principios:
+- Configuración desde Supabase sin redeploy.
+- percentage / fixed / free_trip.
+- reserve -> attach trip -> entitlement/payment -> consume.
+- reserva atómica para evitar over-redemption.
+- retry/refresco no debe duplicar cupo.
+- free_trip crea entitlement, NO payment amount=0.
+- descuento parcial modifica server-side el monto enviado a PayPal.
+- browser nunca decide final_amount.
 
-Flujo de promoción:
-validate/reserve atomically -> attach to trip/checkout -> entitlement or payment -> consume.
+Bug SQL corregido:
+- RPC itbmo_reserve_promo tenía ambigüedad reservation_expires_at.
+- Corregido calificando aliases.
+- SQL de QA/fix: ITBMO_QA_PROMOS_FIX_2026-09-11.sql.txt
 
-Reglas críticas:
-- Reserva atómica para evitar sobrepasar cupos bajo concurrencia.
-- Retry/refresco no debe consumir dos cupos.
-- Un solo código activo por usuario+trip durante checkout.
-- free_trip NO crea payment.amount=0; crea un entitlement vía promo_redemptions.
-- Un descuento parcial modifica únicamente el importe que el servidor envía a PayPal.
-- El navegador nunca decide el monto final.
+QA codes:
+- ITBMOQA50 = 50%
+- ITBMOQAFREE2 = free_trip
+
+Estado:
+- AMBOS PROBADOS Y CONFIRMADOS POR EL USUARIO COMO FUNCIONALES.
+- ITBMOQA50: launch US$2.99 -> descuento US$1.50 -> total US$1.49 observado en QA.
+
+Antes de main:
+- Desactivar QA codes.
 
 ======================================================================
-7. ITBMO100 · EARLY TRAVELERS
+14. ITBMO100 · ESTADO PARA LANZAMIENTO
 ======================================================================
-La migración siembra ITBMO100 con:
+Configuración:
+- code: ITBMO100
 - promo_type=free_trip
 - max_redemptions=100
 - max_redemptions_per_profile=1
 - reservation_minutes=60
-- active=false por seguridad.
 
-IMPORTANTE:
-"100 códigos ITBMO100" significa una campaña/código ITBMO100 con 100 redenciones máximas,
-no 100 strings distintas. Si en el futuro se desean códigos únicos individuales, se puede añadir
-sin romper este modelo.
+Regla:
+- Es UN código/campaña con máximo 100 redenciones, no 100 códigos distintos.
+- Debe permanecer en el estado intencional acordado hasta verificar producción.
+- Recomendación operativa: mantener active=false durante merge/deploy y activar solo después de validar producción.
 
 Activación:
-- Solo activar cuando Preview haya aprobado QA y se decida lanzar la campaña.
-- Puede hacerse en Supabase cambiando active=true; no requiere cambio de código/deploy.
+update public.promo_codes
+set active=true, updated_at=now()
+where upper(code)='ITBMO100';
 
-Objetivo comercial:
-ITBMO100 -> registro/usuario -> itinerario gratis -> Workspace contextual -> partner click ->
-posible reserva/comisión -> medición de comportamiento y conversión.
+No requiere GitHub/Vercel redeploy.
 
-======================================================================
-8. CHECKOUT / PAYMENT + PROMOS
-======================================================================
-IMPLEMENTADO EN CÓDIGO; PENDIENTE QA.
-
-- Precio regular de referencia: US$5.99.
-- Precio launch/base vigente del Planner: US$2.99.
-- Sin código: checkout conserva launch/base actual.
-- Código válido: servidor calcula base, descuento y final.
-- Código parcial: PayPal recibe únicamente final_amount calculado server-side.
-- free_trip: /api/promotions consume entitlement; no abre PayPal.
-- Estado de pago/autorización considera:
-  1) payment paid,
-  2) free promo consumed,
-  3) admin/preview bypass cuando corresponde.
-- Trip generation, Context Intelligence e Info Chat reconocen free promo como entitlement.
-
-Preview payment bypass:
-- Nueva env ITBMO_PREVIEW_PAYMENT_BYPASS.
-- Default true para no romper flujo histórico de Preview.
-- Para QA real del checkout/promos en esta rama: configurar Preview = false y redeploy.
-- Producción permanece payment-gated salvo bypass admin explícito ya existente.
+Después de activar:
+- validar primera redención real.
+- comprobar contador/cupo.
 
 ======================================================================
-9. CREATOR / INFLUENCER FOUNDATION
+15. PREVIEW PAYMENT BYPASS · REGLA ACTUAL
 ======================================================================
-FOUNDATION IMPLEMENTADA; PROGRAMA PÚBLICO DESHABILITADO POR FEATURE FLAG.
+Durante QA puede usarse:
+ITBMO_PREVIEW_PAYMENT_BYPASS=true
 
-Preparado para:
+a través de variables de entorno de Vercel.
+
+Regla:
+- NO modificar chat/payment/trip/context solo para cambiar el default del bypass.
+- Controlarlo desde Vercel env.
+- Producción debe permanecer payment-gated.
+- Bypass de producción solo por mecanismo admin explícito ya existente y NO debe quedar habilitado accidentalmente.
+
+======================================================================
+16. TOURS ALTERNATIVOS · QA APROBADO
+======================================================================
+Requisito:
+Aunque el usuario indique rental car, Workspace debe seguir mostrando Tours alternativos para actividades sustantivas cuando corresponda.
+
+Implementación aprobada:
+- Workspace-only derivation.
+- preserva Context Intelligence original.
+- deriva guided_tour_optional de itinerary rows sustantivas.
+- excluye logística, comidas, hotel/check-in/out, free time/rest.
+- rental car no suprime tours.
+- pasa necesidades derivadas por /api/partners resolve_city.
+- no inventa productos, precios ni disponibilidad.
+
+Estado:
+- Usuario confirmó que la lógica contextual quedó muy bien.
+- Preservar.
+
+======================================================================
+17. RENTAL MOBILITY UX · ESTADO APROBADO
+======================================================================
+Diseño:
+1. Revisar data.city_meta[city].transport primero.
+2. Si rental car explícito, mostrar una tarjeta general para la estadía en esa ciudad.
+3. Si no, detectar días exactos desde itinerary rows.
+4. Colapsar tarjetas individuales de transport_arrangement por tramo.
+5. Mostrar alcance/días en una tarjeta general clara.
+6. Copy aclara que un tour puede incluir transporte y que se revise antes de mantener rental car.
+7. Sin cambios en Omio/Context backend/Partner Engine.
+8. Ordenar por día.
+
+Último paquete validado:
+ITBMO_UX_RENTAL_ORDER_FIX_2026-09-12.zip
+SHA256:
+19a431978c53fe86bea1b16ebe909464e87255d4d0bb7b066d773b8e6b2795cc
+
+Archivos afectados en esa tanda:
+- public/planner.css
+- public/trip-workspace.js
+
+Caveat conocido:
+- Si QA futuro falla con la palabra independiente “alquiler”, revisar regex real contra city_meta antes de ampliar quirúrgicamente.
+
+======================================================================
+18. FOOTER / SUPPORT
+======================================================================
+Un solo link de soporte:
+- ES: “Soporte & Contacto”
+- EN: “Support & Contact”
+
+Debe abrir:
+- support-contact.html
+- support-contact-en.html
+
+a top de página, sin anchors.
+
+======================================================================
+19. COMMUNICATION & SUPPORT FOUNDATION · OFF PARA LANZAMIENTO
+======================================================================
+Arquitectura futura:
+Channel Adapter -> Communication Gateway -> Identity/Trip Context -> intent/routing -> humano/automatización/futuro Travel Companion.
+
+Canales base previstos:
+- WhatsApp Business
+- Web Chat
+- Email Support
+- Instagram Direct
+- Messenger
+
+Para este release:
+- communication_hub_enabled=false
+- whatsapp_support_enabled=false
+- web_chat_enabled=false
+- communication_channels.enabled=false
+
+Reglas futuras:
+- WhatsApp Business exclusivo ITBMO; nunca personal.
+- soporte/transaccional != marketing consent.
+- human handoff para pagos, reclamaciones, cuenta y sensible.
+- adapters; no acoplar a proveedor único.
+
+======================================================================
+20. CREATOR / INFLUENCER FOUNDATION · OFF PÚBLICO
+======================================================================
+Foundation preparada para:
+- creator_code
+- tracking links
+- campaign
+- promo code
+- discount benefit
+- futura comisión/hold/payout
+
+Canales previstos:
 - YouTube
 - TikTok
 - Instagram
@@ -242,352 +543,203 @@ Preparado para:
 - Newsletter
 - Other
 
-Cada creator puede relacionarse con:
-- creator_code
-- uno o más tracking links
-- campaign
-- promo code configurable
-- discount benefit
-- futura regla de comisión/hold/payout.
-
-La promoción puede tener creator_id. Al aplicarse, se vincula attribution con creator/campaign/promo.
-No se automatizan pagos a creators en este release.
-Feature flag: creator_program_enabled=false hasta decisión posterior.
+No automatizar payouts en este release.
+Feature flag:
+- creator_program_enabled=false
 
 ======================================================================
-10. COMMUNICATION & SUPPORT FOUNDATION
+21. AFILIACIONES · PRIORIDAD ACTUAL
 ======================================================================
-FOUNDATION CONFIGURADA, PERO DELIBERADAMENTE DESHABILITADA PARA PUBLICACIÓN ACTUAL.
+1. Trainline — Partnerize; rail/coach; verificar payout CR.
+2. DiscoverCars — directo; PayPal/wire; deeplinks/widget/XML API.
+3. FlixBus — AWIN; verificar payout CR.
+4. Rail Europe — Rakuten Program ID 42638; aprobación manual.
+5. Rise & Shield — seguro; Tapfiliate; inicia 10%; 60-day cookie; PayPal/bank.
+6. Heymondo — directo; 50% revenue share mostrado ES; 30-day cookie; confirmar payout CR.
+7. KAYAK — solicitud YA enviada; NO reaplicar.
+8. Skyscanner — esperar >5,000 unique visitors/month.
+9. SafetyWing — ambassador ~10%; confirmar payout.
+10. Busbud — CJ; defer.
+11. Booking.com — pausado por economía CJ/Payoneer.
+12. Renfe / Trenitalia B2B — futuro API/distribution.
 
-Objetivo futuro:
-Channel Adapter -> Communication Gateway -> Identity/Trip Context -> intent/routing ->
-humano / automatización / futuro Travel Companion.
-
-Canales registrados como base:
-- WhatsApp Business
-- Web Chat
-- Email Support
-- Instagram Direct
-- Messenger
-
-Todos quedan enabled=false.
-Feature flags:
-- communication_hub_enabled=false
-- whatsapp_support_enabled=false
-- web_chat_enabled=false
-
-Reglas futuras:
-- número WhatsApp Business exclusivo ITBMO; nunca número personal.
-- Brevo puede servir como Conversations/CRM inicialmente.
-- soporte/transaccional != consentimiento de marketing.
-- human handoff obligatorio para pagos, reclamaciones, cuenta y casos sensibles.
-- no acoplar chatbot a un proveedor único; usar adapters.
-
-NO habilitar esta capa en el release comercial inmediato. Continuar en rama futura.
+No bloquear launch esperando estos partners.
 
 ======================================================================
-11. NUEVAS AFILIACIONES · PARALELO AL CRECIMIENTO
+22. MACROTANDA 2 · POST-LAUNCH
 ======================================================================
-Estrategia:
-- No esperar a tener todos los partners para lanzar.
-- Explotar correctamente los aprobados/configurados actuales.
-- Solicitar nuevas afiliaciones en paralelo y activar cada una solo después de aprobación + QA.
+Roadmap acordado:
+1. Mobility Intelligence
+2. Dynamic Itinerary
+3. Travel Companion
+4. Growth Platform
 
-Prioridad recomendada de solicitudes (verificar condiciones vigentes al momento de aplicar):
-1. Trainline — fuerte cobertura rail/coach y complemento directo de Omio.
-2. FlixBus — bus intercity, gran cobertura europea/internacional.
-3. Busbud — bus + rail, cobertura internacional adicional.
-4. Rail Europe — rail europeo y múltiples operadores.
-5. Airalo — complementar eSIM/conectividad si aprobación/programa conviene.
-6. Proveedor global de alquiler de autos — especialmente útil para day trips/rutas donde Omio no aplica.
-7. Seguro de viaje — nueva necesidad trip-wide contextual.
-8. KAYAK / otros metasearch aprobables según estado de solicitud y condiciones.
-9. Relaciones B2B/direct distribution con Renfe/Trenitalia cuando volumen/capacidad lo justifique.
-
-No modelar "Intercity" como partner universal: es un concepto/servicio que depende del operador real.
+Incluye a futuro:
+- A->B mobility avanzada.
+- Trainline/FlixBus/Rail Europe/Busbud/rental adapters.
+- reoptimización dinámica.
+- clima/contexto durante viaje.
+- Nearby.
+- restaurantes/servicios.
+- Safety.
+- currency/language/disruptions.
+- “¿Qué necesito ahora?”.
+- sharing/referral avanzado.
+- lifecycle/CRM.
+- Social Publishing.
+- Growth Intelligence.
+- Growth Control Center.
 
 ======================================================================
-12. ARCHIVOS PRINCIPALES DE ESTA MACROTANDA
+23. ARQUITECTURA DE GROWTH · PRINCIPIOS VIGENTES
 ======================================================================
-Nuevos:
-- api/_lib/promo-engine.js
-- api/promotions.js
-- supabase/migrations/20260911_commerce_growth_macro_v1.sql
+ITBMO debe ser cerebro/orquestador, no recrear Meta Business Suite, Hootsuite, Brevo o GA4.
+
+Loop:
+demand -> distribute -> visitor -> Planner -> purchase/promo entitlement -> Workspace -> partner revenue -> relationship -> sharing/referral -> new visitor
+
+Nombre conceptual:
+ITBMO Travel Intelligence & Growth Platform
+
+Módulos futuros/actuales de Growth Engine:
+- Campaign
+- Content
+- Social
+- Attribution
+- Lifecycle
+- Referral
+- Growth Intelligence
+
+Reglas:
+1. Integraciones comerciales por needs/offers, no directas al Planner.
+2. Canales marketing por Campaign + Attribution + Event Gateway.
+3. Plataformas externas por adapters.
+4. ITBMO/Supabase mantiene business truth.
+
+======================================================================
+24. DOCUMENTACIÓN / MIGRACIONES · HOUSEKEEPING
+======================================================================
+Situación detectada:
+- El ZIP actual muestra físicamente supabase/migrations/20260909_growth_foundation_v1.sql.
+- La documentación histórica también hace referencia a 20260911_commerce_growth_macro_v1.sql.
+
+Regla:
+- No reconstruir ni inventar una migración faltante desde memoria.
+- No modificar una base funcionando solo por discrepancia documental.
+- Si se recupera el SQL exacto realmente ejecutado para Macrotanda 1, conviene conservarlo en repo para reproducibilidad.
+- Esta discrepancia es housekeeping/reproducibilidad; no debe usarse para revertir funcionalidad ya validada.
+
+======================================================================
+25. QA REAL YA COMPLETADO / CONFIRMADO
+======================================================================
+Confirmado por usuario o evidencia directa en Preview:
+- Session persistence fix: PASS.
+- Login/logout básico: PASS.
+- Guest/account topbar/modal: funcional.
+- Password recovery end-to-end: PASS funcional.
+- Recovery email vía Supabase -> Brevo -> Gmail: llega, aunque se observó retraso.
+- ITBMOQA50: PASS.
+- ITBMOQAFREE2: PASS.
+- ITBMO100: funcionó en pruebas previas; para lanzamiento usar estado controlado.
+- Context Intelligence stabilization: funcional en baseline actual.
+- Workspace contextual: funcional.
+- GetYourGuide: QA estructural PASS.
+- Viator: constructor/outbound de atribución implementado y validable por partner_clicks.
+- Holafly connectivity: PASS.
+- Airalo connectivity: visible/funcional en QA.
+- Single-city: regla cero Omio aprobada.
+- Omio: mantener solo top-level N-1 según baseline actual aprobada; no introducir rutas locales.
+- Tours alternativos: PASS conceptual/UX confirmado.
+- Rental mobility UX/order: aprobado.
+- Mis Viajes/session restoration: PASS.
+
+======================================================================
+26. ÚLTIMOS PENDIENTES ANTES DE MAIN
+======================================================================
+PENDIENTE 1 — Password recovery language preservation
+- Deploy del public/planner.js corregido.
+- Probar recovery iniciado en ES -> reset -> login -> Planner completo ES.
+- Probar recovery iniciado en EN -> reset -> login -> Planner completo EN.
+- No debe existir mezcla de idiomas.
+
+PENDIENTE 2 — Regression corta final en Preview
+Validar sin reabrir áreas ya aprobadas salvo evidencia real de regresión:
+- login/logout/session persistence.
+- password recovery ES/EN.
+- generación de trip.
+- Context funciona en flujo live actual sin 402/500.
+- Workspace abre y muestra necesidades/partners.
+- Viator/GYG/Holafly/Airalo según baseline.
+- Omio solo en top-level main destination sequence.
+- tours/rental UX.
+- PDF/CSV/persistencia/reset/Info Chat.
+- promo QA codes inactivos para release.
+- communication flags OFF.
+
+PENDIENTE 3 — Revisar variables Production Vercel
+- PAYPAL_ENV=live y credenciales live correctas.
+- Supabase production correcto.
+- no admin production bypass habilitado accidentalmente.
+- ITBMO_PREVIEW_PAYMENT_BYPASS no debe abrir producción.
+
+PENDIENTE 4 — Estado de ITBMO100
+- Mantener inactive durante merge/deploy recomendado.
+- Activar solo después de validar producción.
+
+PENDIENTE 5 — Backup de main antes del merge
+Crear desde main actual:
+- Branch: backup/main-pre-premium-launch-2026-09-12
+- Tag: pre-premium-launch-2026-09-12
+No modificar ese backup después.
+
+======================================================================
+27. SECUENCIA EXACTA RECOMENDADA PARA PASAR A MAIN
+======================================================================
+1. Subir/commit del micro-fix de idioma de recovery en public/planner.js.
+2. Esperar nuevo Vercel Preview.
+3. QA recovery ES.
+4. QA recovery EN.
+5. Regresión corta final de los puntos del apartado 26.
+6. Desactivar códigos QA promocionales.
+7. Verificar communication/WhatsApp/web chat OFF.
+8. Verificar variables Production y PayPal live.
+9. Crear branch backup/main-pre-premium-launch-2026-09-12 desde main actual.
+10. Crear tag pre-premium-launch-2026-09-12 en el mismo commit.
+11. Merge feature/promo-feedback -> main.
+12. Esperar deployment Production.
+13. Smoke test producción: Home / Planner / Auth / payment gate / Workspace.
+14. Verificar que ITBMO100 continúa en estado intencional.
+15. Activar ITBMO100 en Supabase cuando producción esté confirmada.
+16. Ejecutar primera redención real controlada y revisar contador/eventos.
+17. Monitorear Vercel logs, Supabase Auth logs, partner clicks y Brevo durante primeras horas.
+
+======================================================================
+28. NO HACER ANTES DE MAIN
+======================================================================
+- No rehacer Partner Engine desde una versión histórica.
+- No cambiar Context por contradicciones documentales antiguas.
+- No reabrir arquitectura de Omio si el comportamiento live actual pasa QA.
+- No habilitar Communication Hub.
+- No habilitar creator payouts/program público.
+- No agregar Mobility/Dynamic Itinerary/Travel Companion.
+- No hacer refactors amplios.
+- No cambiar SMTP mientras recovery funcione.
+- No tocar DNS de Brevo sin revisar exactamente qué registros pide.
+
+======================================================================
+29. FUENTE DE VERDAD
+======================================================================
+OPERATIVA:
+- Este archivo: docs/ITBMO_MASTER_PROGRESS_2026-09-10.txt
+
+ARQUITECTURA:
 - docs/ITBMO_ARCHITECTURE_BLUEPRINT_CURRENT.txt
-- docs/ITBMO_PROMOTIONS_CONTROL_GUIDE.txt
-- docs/ITBMO_MACRO_V1_DEPLOY_QA.txt
 
-Modificados:
-- api/_lib/itbmo-foundation.js
-- api/_lib/partner-engine.js
-- api/chat.js
-- api/context.js
-- api/payment.js
-- api/trip.js
-- public/assets/js/itbmo-foundation.js
-- public/planner.css
-- public/planner.html
-- public/planner.js
-- public/trip-workspace.css
-- public/trip-workspace.html
-- public/trip-workspace.js
-- vercel.json
-- docs/ITBMO_MASTER_PROGRESS_2026-09-10.txt (este archivo, reemplazado en lugar de crear un checkpoint paralelo)
+BASELINE DE CÓDIGO:
+- última versión real de la rama feature/promo-feedback validada en Vercel Preview.
+- El código live/Preview validado prevalece sobre notas históricas.
 
-======================================================================
-13. QA OBLIGATORIO ANTES DE MAIN
-======================================================================
-1. Ejecutar migración Macro V1 en Supabase.
-2. Deploy de los archivos nuevos/modificados únicamente.
-3. Preview con ITBMO_PREVIEW_PAYMENT_BYPASS=false para probar checkout real.
-4. Verificar Auth/login/guest/logout/recovery sin regresiones.
-5. Confirmar email no visible en badge de cuenta.
-6. Confirmar checkout sin código mantiene launch US$2.99.
-7. Probar promo percentage dinámica con código temporal y cupo pequeño.
-8. Probar fixed dinámica.
-9. Probar free_trip temporal con cupo 2 para validar agotamiento sin gastar 100 redenciones.
-10. Probar invalid/inactive/not-started/expired/exhausted/user-limit.
-11. Confirmar free trip genera itinerario, Context e Info Chat sin payment falso.
-12. Confirmar ITBMO100 permanece INACTIVO hasta lanzamiento.
-13. Confirmar Viator outbound tiene PID/MCID/medium/campaign.
-14. Confirmar GYG partner_id/utm_medium/cmp.
-15. Confirmar Holafly global sin duplicación ciudad.
-16. Confirmar single-city = cero Omio.
-17. Confirmar multi-city genera Omio solo para destinos principales consecutivos.
-18. Confirmar hotel/POI/day-trip local nunca genera Omio.
-19. Confirmar Día X + fecha real.
-20. Confirmar Viator/GYG agrupados por necesidad/entidad.
-21. Confirmar disclosure único.
-22. Confirmar partner_clicks/telemetría.
-23. Confirmar PDF/CSV/persistencia/reset/recovery/Info Chat sin regresiones.
-24. Confirmar communication/WhatsApp/web chat permanecen OFF.
-25. Corregir hallazgos y repetir regresión completa.
-26. SOLO después decidir main/publicación.
+PRINCIPIO FINAL:
+“Partir de la última baseline aprobada; cambios quirúrgicos; no parches sobre parches.”
 
-======================================================================
-14. ROADMAP POST-LANZAMIENTO · NO IMPLEMENTAR AHORA
-======================================================================
-- Nuevos partner adapters conforme lleguen aprobaciones.
-- Ranking Engine basado en impresiones/clics/conversiones reales.
-- Creator program público + comisiones/payouts.
-- Communication & Support Hub + WhatsApp Business/Brevo/Web Chat.
-- Lifecycle CRM.
-- Sharing / Referral / Creator acquisition avanzado.
-- Mobility Intelligence (A->B, transporte local, navigation adapters).
-- Dynamic Itinerary Engine con propuesta/aprobación/versionado.
-- Travel Companion: clima contextual, nearby/local services, safety/emergency,
-  money/language/accessibility/disruption y "¿Qué necesito ahora?".
-- Content/Campaign/Social Publishing/Growth Intelligence/Growth Control Center.
-
-======================================================================
-15. FUENTE DE VERDAD DE ARQUITECTURA
-======================================================================
-El detalle arquitectónico vigente se mantiene separado en:
-docs/ITBMO_ARCHITECTURE_BLUEPRINT_CURRENT.txt
-
-Este Master Progress es la fuente de verdad OPERATIVA: qué existe, qué se cambió,
-qué está pendiente de validar y qué se puede/no se puede publicar.
-
-FIN DEL CHECKPOINT
-
-ACTUALIZACIÓN · 2026-09-11 · QA PARTNERS + AIRALO
-- QA Preview: Account/UI PASS; Workspace PASS; GetYourGuide URL conserva partner_id=3FZWELC + utm_medium + cmp; Omio no aparece en viaje de una sola ciudad; Holafly PASS; regresión total pendiente.
-- Viator: el backend V1.3 construye y valida antes de navegación pid=P00318254, mcid=42383, medium=link y campaign. El URL visible dentro de Viator puede dejar de mostrar parámetros después del redirect porque Viator indica que los parámetros solo se requieren en la redirección inicial y la atribución continúa por cookie. Validar con enlace directo controlado y posteriormente con reporting/integration data antes de declarar revenue attribution cerrada.
-- Airalo aprobado. Red Impact, account 7727455. Affiliate URL recibido: https://airalo.pxf.io/c/7727455/2071037/15608. Beneficio vigente informado: 15% en primera eSIM con NEWTOAIRALO15, expiración informada 2026-12-31. Integración: trip-level Connectivity, junto a Holafly; no repetir por ciudad.
-- Holafly: beneficio confirmado funcional por ITBMO: 5% al acceder mediante el link de ITBMO. Mostrar beneficio desde metadata de partner_offers, no hardcodear en UI.
-- Promotions QA: crear ITBMOQAFREE2 (free_trip, 2 usos, 1 por perfil) e ITBMOQA50 (50%, 2 usos, 1 por perfil), ambos únicamente para Preview. ITBMO100 permanece INACTIVO hasta cerrar QA.
-- Communication Foundation permanece configurada pero deshabilitada para lanzamiento.
-
-------------------------------------------------------------
-2026-09-11 · VIATOR OUTBOUND PROOF + AIRALO QA FINAL
-------------------------------------------------------------
-- Prueba manual controlada confirmó que Viator recibe correctamente una búsqueda contextual y luego puede dejar una URL visible limpia.
-- El primer link manual de QA estuvo mal construido porque los separadores quedaron codificados dentro de text; ese error NO está presente en el constructor real de ITBMO.
-- partner-engine.js construye Viator con URL.searchParams separados: text, pid=P00318254, mcid=42383, medium=link, campaign=itbmo-...
-- El backend valida atribución antes de firmar y antes de navegar el clic.
-- La prueba definitiva en Preview se hará contra public.partner_clicks.target_url usando supabase/qa/20260911_viator_click_proof.sql.txt. PASS = pid/mcid/medium/campaign presentes en la URL de salida de ITBMO.
-- Airalo aprobado queda incorporado como opción global de connectivity con Impact link oficial, NEWTOAIRALO15 y expiración 2026-12-31 almacenados como datos.
-- Holafly muestra beneficio confirmado de 5% desde metadata de partner_offers.
-- QA promo codes: ITBMOQAFREE2 e ITBMOQA50. ITBMO100 sigue inactive.
-
-2026-09-11 — Ajuste visual partners en Workspace
-- Se conserva intacta la estructura de "Opciones para reservar".
-- Los nombres de partners se reducen visualmente (tipografia menor y color secundario) para que la experiencia priorice la necesidad/accion del viajero y no la marca afiliada.
-- Se mantiene transparencia/disclosure y CTA sin cambios.
-
-2026-09-11 — ESTABILIZACIÓN CONTEXT INTELLIGENCE + UX WORKSPACE
-- QA generación 3 ciudades: generación principal PASS; recuperación de avance PASS; ITBMO100 funcionó en la prueba; Airalo/Holafly visibles en Connectivity.
-- Hallazgo crítico: /api/context devolvió 500 en Rovaniemi y París. Log confirmado: OpenAI APIUserAbortError dentro de classifyCandidates(); el diseño previo enviaba hasta 120 candidatos en una sola llamada con aborto a 60 s.
-- Corrección Context v1.2: candidatos clasificados por lotes de 24, hasta 3 lotes concurrentes, timeout 45 s por lote, 1 reintento solo para abort/408/409/429/5xx y tolerancia a resultado parcial. Un lote fallido ya no invalida automáticamente toda la ciudad si otros lotes sí responden.
-- Context prewarm: al terminar una generación pagada/gratuita y persistir status=generated, Planner inicia Context Intelligence en background ciudad por ciudad. Workspace añade un prewarm diferido de seguridad para entradas directas/recuperadas. La pestaña "Para tu viaje" deja de ser el disparador primario.
-- Cache/versionado: CONTEXT_VERSION sube a 1.2 para no reutilizar resultados derivados con la implementación anterior.
-- Planner: "Mis viajes" queda visible para cualquier sesión autenticada, sin borrar ni desacoplar el active trip; volver al Planner conserva la recuperación existente.
-- Workspace: "Todas las ciudades" pasa a control flotante/fijo mientras se hace scroll; se mantiene semánticamente separado de "Volver al Planner".
-- Connectivity: Airalo/Holafly conservan transparencia pero bajan jerarquía de marca. El título visible de cada oferta trip-wide es genérico "Conectividad para tu viaje" y el proveedor queda como etiqueta secundaria pequeña. Beneficios sí permanecen visibles.
-- Holafly QA visual confirmado: el enlace ITBMO abre popup de Holafly indicando código ITBMO y 5% de descuento; el URL observado incluye irclickid y discount=ITBMO.
-- No se modifican: payment/promo engine, Viator/GYG/Omio resolvers, recuperación de generación, Info Chat, Partner Engine ni tablas Supabase.
-- QA requerido antes de main: repetir Rovaniemi + París + Florencia; confirmar /api/context 200 en las tres, cache_hit en reapertura, Para tu viaje listo o en proceso previo, botón Todas las ciudades flotante desktop/móvil, Mis viajes visible y recuperación intacta.
-
-2026-09-11 — SEGURO DE VIAJE / PAYOUT RESEARCH
-- World Nomads: programa actual opera mediante CJ; documentación actual orienta payout por depósito/Payoneer. No priorizar para ITBMO mientras la restricción/costo de Payoneer en Costa Rica no sea conveniente.
-- Rise & Shield: documentación pública de afiliados confirma payout mensual vía banco o PayPal mediante Tapfiliate, cookie 60 días y 10% inicial. Candidato directo para aplicación si elegibilidad territorial/comercial se valida al alta.
-- Heymondo: programa directo atractivo, cookie 30 días y dashboard; método de pago del afiliado no aparece públicamente confirmado. Preguntar explícitamente por PayPal antes de activar.
-- SafetyWing y VisitorsCoverage: programas atractivos, pero el método PayPal para payout no quedó confirmado en documentación pública consultada; validar antes de integración.
-
-
-2026-09-11 — Ajuste navegación Workspace (post-QA)
-- Corregido el desorden visual introducido al convertir “Todas las ciudades” en botón fijo permanente.
-- El botón vuelve a ocupar su posición natural dentro del encabezado de ciudad al cargar la vista, preservando la alineación original: navegación izquierda / ciudad centrada / selector Itinerario–Para tu viaje derecha.
-- Solo pasa a estado flotante cuando el scroll alcanza su posición; se agrega un placeholder visual para evitar que el resto del encabezado se desplace al fijarse.
-- Al volver a la vista de todas las ciudades se retira automáticamente el estado flotante.
-- Sin cambios en Context Intelligence, pagos, promociones, recuperación, Partner Engine ni generación de itinerarios.
-
-============================================================
-RELEASE CANDIDATE FINAL · CTA EDUCATIVO + COBERTURA OMIO
-2026-09-11
-============================================================
-
-1) WORKSPACE GENERAL / EDUCACION DEL USUARIO
-- Se incorpora un CTA educativo visible debajo del resumen del viaje y antes de las tarjetas de ciudades.
-- Copy ES: "Prepara lo esencial de tu viaje" / "Ver lo que puedo necesitar ↓".
-- Copy EN equivalente.
-- El CTA hace smooth scroll al bloque "Para todo tu viaje".
-- No se mueve ni reestructura el bloque de ciudades ni el bloque de servicios.
-- Se registra evento trip_essentials_cta_clicked.
-
-2) OMIO / MOVILIDAD ENTRE DESTINOS
-- La necesidad intercity sigue derivándose exclusivamente de la secuencia guardada destination[n] → destination[n+1].
-- Se preserva la regla: no usar Omio para POI, hoteles, barrios, day trips ni movilidad local.
-- Se añade gate conservador de cobertura para Release Candidate: Omio solo se ofrece cuando origen y destino guardados pertenecen a Europa.
-- Esta es una medida temporal de seguridad comercial, no el diseño final del Coverage Engine. Omio puede cubrir rutas adicionales; estas se habilitarán posteriormente mediante una capa de cobertura/API validada, no por suposición.
-- Los viajes nuevos guardan country_code junto con country. Viajes existentes conservan compatibilidad mediante normalización ES/EN de países europeos.
-- Para Roma → París → Rovaniemi deben existir dos necesidades N-1. En Roma se muestra Roma → París; en París se muestra París → Rovaniemi. Ambos son elegibles para Omio por cobertura europea.
-- Para un tramo fuera de la cobertura conservadora, ITBMO conserva la necesidad de movilidad pero no muestra CTA de Omio; futuros proveedores globales (KAYAK/Skyscanner) podrán resolverla.
-- Label visible actualizado de "Trayecto a resolver" a "Comparar opciones".
-
-3) ARCHIVOS MODIFICADOS EN ESTA TANDA
-- public/planner.js
-- public/trip-workspace.js
-- public/trip-workspace.html
-- public/trip-workspace.css
-- api/_lib/partner-engine.js
-- docs/ITBMO_MASTER_PROGRESS_2026-09-10.txt
-
-4) QA ANTES DE MAIN
-- Overview: CTA visible, claro y smooth scroll correcto hacia "Para todo tu viaje".
-- Roma > Para tu viaje: Roma → París con Omio.
-- París > Para tu viaje: París → Rovaniemi con Omio.
-- Rovaniemi: no se genera un tercer tramo porque es el último destino.
-- Single-city: cero Omio.
-- Ruta no Europa↔Europa: no mostrar Omio.
-- Confirmar que Context Intelligence, Airalo, Holafly, Viator, GYG, promociones, recuperación y navegación sticky permanecen sin regresiones.
-
-
-============================================================
-2026-09-11 · RELEASE CANDIDATE V2 · OMIO + DISCOVERY UX
-============================================================
-- Omio QA found that /viajes/<origin>/<destination> is not a universal canonical pattern. Roma→París works, while París→Rovaniemi returns Omio 404 despite Omio publicly supporting the route.
-- Added validated technical landing override for París→Rovaniemi using Omio's live canonical route page. This is an optimization/cache, not a business eligibility requirement.
-- Preserved affiliate tracking wrapper (Impact u= destination).
-- Strengthened overview CTA contrast/weight so users clearly discover trip-wide essentials.
-- Added separate floating "Para tu viaje" CTA that appears only after the original control scrolls out of view while itinerary mode is active. It is a separate fixed control, so the city header grid never reflows or becomes disordered.
-- No changes to payments, promo engine, Context Intelligence, recovery, Viator/GYG, Airalo/Holafly logic, or Omio Europe→Europe eligibility in this patch.
-
-=== 2026-09-11 — PRE-MAIN V3 OMIO CONTEXTUAL SAFE ===
-- Se eliminó el hardcode París→Rovaniemi y cualquier tabla de landings Omio por ruta.
-- Se eliminó la fabricación de slugs SEO /viajes/{from}/{to} y /travel/{from}/{to}.
-- Se eliminó la regla artificial Europe→Europe.
-- Los route needs siguen siendo determinísticos N−1 desde trips.destinations.
-- Para lanzamiento seguro, Omio usa el asset oficial Impact Widget_link 861892 / Partner 7727455 / Campaign 7385 como entrada de búsqueda rastreada.
-- ITBMO no declara disponibilidad antes de que Omio la compruebe.
-- Pendiente para deep contextual prefill perfecto: obtener del configurador oficial Omio el snippet generado con filtros (origin/destination/date/IR partner ID) o acceso Search API. No adivinar data-attributes ni usar endpoints no autorizados.
-- UX V2 preservada: CTA overview reforzado + “Para tu viaje” flotante sin alterar layout + “Todas las ciudades” estable.
-
-
-============================================================
-PRE-MAIN V4 — OMIO PENDIENTE DE API + UX FINAL
-============================================================
-Fecha: 2026-09-11
-
-Decisión de lanzamiento:
-- Omio NO genera enlaces ni ofertas hasta recibir acceso/documentación oficial de Affiliate Search API.
-- Se eliminan hardcodes, slugs fabricados y links genéricos que obliguen al usuario a repetir origen/destino.
-- La infraestructura del adapter Omio queda preparada con metadata oficial del widget/Impact, pero status=pending_api.
-- Los trayectos principales se siguen generando de forma determinística N-1 desde destinations guardados.
-- Cada trayecto aparece en Workspace como "Pendiente de resolver" / "Pending resolution".
-- Cuando llegue la API, el punto de activación será resolver location IDs + validar cobertura + emitir oferta contextual, sin rediseñar Workspace.
-
-Metadata Omio confirmada y reservada para futura activación:
-- Impact Partner ID: 7727455
-- Widget partner id: omio-affiliates
-- Widget redirect: https://omio.sjv.io/c/7727455/3963000/7385?u=
-
-UX incluida en esta tanda:
-- CTA general "Prepara lo esencial de tu viaje" con mayor contraste.
-- CTA "Para tu viaje" flotante durante scroll, sin mover el layout original.
-- Botón "Todas las ciudades" conserva comportamiento flotante estable.
-- Airalo/Holafly, Viator/GYG y Context Intelligence no se modifican funcionalmente.
-
-Criterio para main:
-- Confirmar que Roma→París y París→Rovaniemi aparecen como necesidades N-1 pendientes, sin enlace Omio.
-- Confirmar que no se generan trayectos locales/day-trip como Omio.
-- Confirmar CTA general + flotante "Para tu viaje" sin desorden visual.
-
-
-=== 2026-09-11 · PRE-MAIN V5 · OMIO LIMITED LAUNCH ===
-- Decision: keep Omio visible for launch while official Affiliate Search API access is pending.
-- No route-specific URLs, city IDs, Omio slugs or Paris/Rovaniemi hardcodes are used.
-- N-1 intercity needs remain deterministic from the saved destination sequence.
-- Temporary conservative eligibility gate: Omio generic search entry is shown only when both main destinations resolve to European country codes. This is a launch guard, NOT provider coverage truth.
-- Unsupported/non-eligible routes remain visible as "Pendiente de resolver" / "Pending resolution" with no Omio button.
-- Eligible routes show "Comparar opciones" / "Compare options" and use the approved Impact Widget_link tracking asset 861892. Origin/destination are not claimed to be preloaded.
-- Official widget metadata and redirect 3963000 remain preserved for future API activation.
-- Once Omio grants Search API/location resolution access, remove the temporary geographic gate and let authorized provider coverage/results determine eligibility.
-- UX changes from V4 remain untouched: prominent overview essentials CTA; floating "Para tu viaje" CTA with layout-safe behavior; stable "Todas las ciudades" behavior.
-
-=== 2026-09-11 · OMIO LIMITED LAUNCH — GENERIC ATTRIBUTED FALLBACK ===
-- During limited launch, every eligible Omio intercity CTA opens the approved generic Omio affiliate tracking link instead of attempting to preload a route.
-- Generic attributed entry: https://omio.sjv.io/PzvDjY
-- The traveler enters origin, destination and dates directly on Omio until Search API access is granted.
-- Attribution validation now rejects non-tracking Omio URLs; accepted launch links must use the approved short tracking link or the ITBMO Impact account path (7727455 / 7385).
-- Top-level N-1 route detection and the temporary Europe-to-Europe exposure guard remain unchanged.
-- No city IDs, route slugs or destination-specific exceptions are hardcoded.
-
-======================================================================
-UPDATE 2026-09-11 · PRE-MAIN FINAL QA PATCH
-======================================================================
-- Omio launch guard: only deterministic top-level destination[n] → destination[n+1] legs where BOTH endpoints are in the Europe allowlist. This is a temporary geographic guard, not provider coverage truth.
-- Omio click behavior while API is pending: always open the generic attributed affiliate entry https://omio.sjv.io/PzvDjY; do not prefill origin, destination, date, route slug or provider city IDs. User completes the search on Omio.
-- Workspace visual hierarchy strengthened: the 'Entradas, reservas, experiencias y movilidad…' subheadline is larger/darker/bolder; the overview essentials copy is now 'Conectividad, movilidad y servicios útiles, organizados según tu viaje.' and is visually stronger. English equivalent updated.
-- Preview payment bypass now defaults to OFF server-side in payment/trip/chat/context for real checkout and promotion QA. ITBMO50 must follow the actual promotional checkout path unless ITBMO_PREVIEW_PAYMENT_BYPASS is deliberately set to true.
-- No SQL changes in this patch. Existing Context, partner cards, recovery, generation and affiliate behavior otherwise preserved.
-
-
-======================================================================
-UPDATE 2026-09-11 · CONTEXT AUTHORIZATION FIX AFTER REAL-CHECKOUT QA
-======================================================================
-- Real checkout/promotion QA exposed a redundant authorization gate inside /api/context.
-- /api/context no longer re-checks payments or promo_redemptions after a trip is already generated.
-- Context authorization is now based on: valid ITBMO session + owned trip + trip.status=generated.
-- Payment/promotion authorization remains enforced before generation by the commerce/generation flow; the Preview payment bypass remains OFF.
-- This prevents legitimate paid/free-promo generated trips from returning 402 CONTEXT_NOT_AUTHORIZED during Workspace Context Intelligence.
-- Context analysis, batching, persistence, candidate limits and partner logic are otherwise unchanged.
-- Context version: 1.2.1.
-
-======================================================================
-2026-09-12 · RESTORE LAST-GOOD PARTNER BASELINE
-======================================================================
-- Diagnostic comparison confirmed that the later FINAL_QA package changed api/chat.js,
-  api/payment.js and api/trip.js only to alter the Preview payment-bypass default.
-- Those three files are restored exactly to the last known-good Commerce/Growth baseline.
-- Preview bypass must remain disabled through Vercel environment variable:
-  ITBMO_PREVIEW_PAYMENT_BYPASS=false.
-- api/_lib/partner-engine.js is restored exactly from the user-confirmed V5 working ZIP.
-  This preserves contextual Viator/GYG resolution and Omio Europe-to-Europe limited launch
-  with attributed generic Impact entry (asset 861892).
-- api/context.js returns to the stabilized Context V1.2 implementation (batching,
-  concurrency, persistence, prewarm compatibility) with one surgical change only:
-  generated trips are authorized by valid session + ownership + generated status and do
-  not re-check payment/promo entitlement post-generation.
-- Workspace HTML/CSS/JS are NOT rolled back; current approved UX/copy remains untouched.
-- No SQL changes in this restore package.
+FIN DEL CHECKPOINT · 2026-09-12
