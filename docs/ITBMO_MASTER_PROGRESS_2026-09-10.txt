@@ -573,3 +573,21 @@ UPDATE 2026-09-11 · CONTEXT AUTHORIZATION FIX AFTER REAL-CHECKOUT QA
 - This prevents legitimate paid/free-promo generated trips from returning 402 CONTEXT_NOT_AUTHORIZED during Workspace Context Intelligence.
 - Context analysis, batching, persistence, candidate limits and partner logic are otherwise unchanged.
 - Context version: 1.2.1.
+
+======================================================================
+2026-09-12 · RESTORE LAST-GOOD PARTNER BASELINE
+======================================================================
+- Diagnostic comparison confirmed that the later FINAL_QA package changed api/chat.js,
+  api/payment.js and api/trip.js only to alter the Preview payment-bypass default.
+- Those three files are restored exactly to the last known-good Commerce/Growth baseline.
+- Preview bypass must remain disabled through Vercel environment variable:
+  ITBMO_PREVIEW_PAYMENT_BYPASS=false.
+- api/_lib/partner-engine.js is restored exactly from the user-confirmed V5 working ZIP.
+  This preserves contextual Viator/GYG resolution and Omio Europe-to-Europe limited launch
+  with attributed generic Impact entry (asset 861892).
+- api/context.js returns to the stabilized Context V1.2 implementation (batching,
+  concurrency, persistence, prewarm compatibility) with one surgical change only:
+  generated trips are authorized by valid session + ownership + generated status and do
+  not re-check payment/promo entitlement post-generation.
+- Workspace HTML/CSS/JS are NOT rolled back; current approved UX/copy remains untouched.
+- No SQL changes in this restore package.
