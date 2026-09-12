@@ -1215,3 +1215,109 @@ button,a {
   .tw-floating-prepare em{display:none}
 }
 @media(prefers-reduced-motion:reduce){.tw-floating-prepare{transition:none!important}}
+
+
+/* =========================================================
+   Workspace auth gate — shared ITBMO session
+   ========================================================= */
+.tw-auth-gate {
+  position:fixed;
+  inset:0;
+  z-index:10000;
+  display:grid;
+  place-items:center;
+  padding:24px;
+  background:rgba(243,249,251,.88);
+  backdrop-filter:blur(18px);
+  -webkit-backdrop-filter:blur(18px)
+}
+.tw-auth-gate[hidden] { display:none }
+.tw-auth-gate__card {
+  width:min(520px,100%);
+  padding:clamp(28px,5vw,46px);
+  border:1px solid rgba(190,220,229,.92);
+  border-radius:32px;
+  background:rgba(255,255,255,.97);
+  box-shadow:0 34px 90px rgba(16,42,67,.16);
+  text-align:center
+}
+.tw-auth-gate__mark {
+  width:58px;
+  height:58px;
+  margin:0 auto 18px;
+  display:grid;
+  place-items:center;
+  border-radius:18px;
+  color:#fff;
+  font-size:26px;
+  background:linear-gradient(145deg,var(--cyan),var(--teal));
+  box-shadow:0 14px 34px rgba(9,151,179,.22)
+}
+.tw-auth-gate__card>small {
+  display:block;
+  color:#078d91;
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.13em
+}
+.tw-auth-gate__card h1 {
+  margin:8px 0 10px;
+  font-size:clamp(30px,6vw,44px);
+  line-height:1;
+  letter-spacing:-.04em
+}
+.tw-auth-gate__card>p {
+  margin:0 auto 24px;
+  max-width:390px;
+  color:var(--muted);
+  line-height:1.55
+}
+.tw-auth-gate__actions,.tw-auth-login__buttons {
+  display:flex;
+  justify-content:center;
+  gap:10px;
+  flex-wrap:wrap
+}
+.tw-auth-primary,.tw-auth-secondary {
+  min-height:46px;
+  border-radius:999px;
+  padding:0 20px;
+  cursor:pointer;
+  font-weight:900
+}
+.tw-auth-primary {
+  border:0;
+  color:#fff;
+  background:linear-gradient(135deg,var(--cyan),var(--teal));
+  box-shadow:0 10px 28px rgba(8,126,209,.18)
+}
+.tw-auth-secondary {
+  border:1px solid var(--line);
+  color:var(--ink);
+  background:#fff
+}
+.tw-auth-primary:disabled,.tw-auth-secondary:disabled { opacity:.58;cursor:wait }
+.tw-auth-login { margin-top:22px;text-align:left }
+.tw-auth-login label { display:block;margin:0 0 14px }
+.tw-auth-login label span { display:block;margin:0 0 7px;font-size:13px;font-weight:850;color:#34566a }
+.tw-auth-login input {
+  width:100%;
+  min-height:48px;
+  border:1px solid #cbdfe7;
+  border-radius:14px;
+  padding:0 14px;
+  background:#fff;
+  color:var(--ink);
+  outline:none
+}
+.tw-auth-login input:focus { border-color:#0a94b2;box-shadow:0 0 0 4px rgba(10,157,181,.10) }
+.tw-auth-message { min-height:22px;margin:2px 0 14px;color:#b33a3a;font-size:13px;text-align:center }
+.tw-auth-message.is-success { color:#13845e }
+body.tw-auth-locked { overflow:hidden }
+body.tw-auth-locked .tw-shell { pointer-events:none;user-select:none;filter:blur(2px) saturate(.75) }
+@media(max-width:620px){
+  .tw-auth-gate { padding:16px }
+  .tw-auth-gate__card { border-radius:24px;padding:28px 20px }
+  .tw-auth-gate__actions,.tw-auth-login__buttons { flex-direction:column }
+  .tw-auth-primary,.tw-auth-secondary { width:100% }
+}
