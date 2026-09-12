@@ -1096,3 +1096,41 @@ button,a {
 .tw-trip-wide__item.is-live{border-color:rgba(8,126,209,.22);background:linear-gradient(135deg,rgba(255,255,255,.98),rgba(242,251,253,.96));box-shadow:0 14px 34px rgba(8,105,151,.08)}
 .tw-trip-wide__item.is-live .tw-coming{color:#087590;background:#e7f8fa}
 @media(prefers-reduced-motion:reduce){.tw-mode #tw-mode-prepare::before,.tw-mode #tw-mode-prepare::after,.tw-mode #tw-mode-prepare .tw-mode-prepare__icon{animation:none!important}}
+
+/* =========================================================
+   RELEASE CANDIDATE · EDUCATIONAL TRIP ESSENTIALS CTA
+   Keeps the city-first hierarchy while making trip-wide value discoverable.
+   ========================================================= */
+.tw-overview-essentials{
+  width:min(980px,100%);
+  margin:24px auto 0;
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:16px;
+  padding:16px 18px;
+  border:1px solid rgba(8,126,209,.18);
+  border-radius:22px;
+  background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(233,249,250,.96));
+  box-shadow:0 16px 36px rgba(11,91,128,.09);
+}
+.tw-overview-essentials__mark{
+  width:46px;height:46px;display:grid;place-items:center;border-radius:15px;
+  color:#fff;background:linear-gradient(135deg,#087ed1,#0a9db5);
+  box-shadow:0 10px 24px rgba(8,126,177,.18);font-size:18px
+}
+.tw-overview-essentials__copy small{display:block;color:#087b92;font-size:9px;font-weight:950;letter-spacing:.13em}
+.tw-overview-essentials__copy h2{margin:3px 0 3px;color:var(--ink);font-size:18px;letter-spacing:-.025em}
+.tw-overview-essentials__copy p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}
+#tw-overview-essentials-cta{
+  border:0;border-radius:999px;padding:12px 16px;white-space:nowrap;cursor:pointer;
+  color:#fff;background:linear-gradient(135deg,#087ed1,#0aa7a6);font-size:12px;font-weight:950;
+  box-shadow:0 11px 24px rgba(8,126,177,.19);transition:transform .2s ease,box-shadow .2s ease
+}
+#tw-overview-essentials-cta:hover{transform:translateY(-1px);box-shadow:0 14px 30px rgba(8,126,177,.25)}
+#tw-trip-wide{scroll-margin-top:104px}
+@media(max-width:760px){
+  .tw-overview-essentials{grid-template-columns:auto minmax(0,1fr);padding:14px;gap:12px;text-align:left}
+  #tw-overview-essentials-cta{grid-column:1/-1;width:100%}
+}
+
