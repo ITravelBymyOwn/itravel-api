@@ -983,7 +983,9 @@ async function sendForgotPassword(){
   if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
   setAuthBusy(true); setAccountMessage(authCopy('sendingReset'));
   try{
-    const {response,data}=await postUserAction({action:'forgot_password',email,preferred_language:getLang(),origin:window.location.origin});
+    const recoveryLang=getLang();
+    const recoveryRedirect=`${window.location.origin}/planner.html?lang=${encodeURIComponent(recoveryLang)}`;
+    const {response,data}=await postUserAction({action:'forgot_password',email,preferred_language:recoveryLang,origin:window.location.origin,redirect_to:recoveryRedirect});
     if(response.ok && data?.ok){ setAccountMessage(authCopy('resetSent'),'success'); return; }
     setAccountMessage(authCopy('resetFail'),'error');
   }catch(err){ console.error('ITBMO forgot password error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
