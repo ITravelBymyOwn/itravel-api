@@ -72,17 +72,82 @@ function tripRoutes(){
     derived_by:'trip_sequence'
   }));
 }
+function normalizeWorkspaceEntity(value){
+  return String(value||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/^rev:\s*/i,'')
+    .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+}
+function isTourAlternativeEligible(row){
+  const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
+  if(!activity) return false;
+  const key=normalizeWorkspaceEntity(activity);
+  if(!key) return false;
+
+  // Exclude rows whose purpose is only logistics, meals, hotel time or free time.
+  // The transport mode itself (including a rental car) never suppresses a tour
+  // alternative for a real attraction/activity such as Blue Lagoon or auroras.
+  const lowValue=/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|hotel|alojamiento|accommodation|check in|check out|tiempo libre|free time|descanso|rest)\b/i;
+  const logisticsOnly=/^(traslado|transfer|salida hacia|llegada a|llegada|departure|arrival|conduccion|drive|recoger|devolver|pickup|drop off|dropoff|check in|check out)\b/i;
+  if(lowValue.test(key) || logisticsOnly.test(key)) return false;
+  return true;
+}
+function tourAlternativesForCity(cityName,existingNeeds=[]){
+  const byDay=data?.itineraries?.[cityName]?.byDay||{};
+  const existing=(Array.isArray(existingNeeds)?existingNeeds:[])
+    .filter(item=>item?.need_type==='guided_tour_optional');
+  const existingKeys=new Set(existing.map(item=>`${Number(item?.day)||0}|${normalizeWorkspaceEntity(item?.entity_name||item?.source_activity)}`));
+  const derived=[];
+
+  Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
+    const rows=Array.isArray(byDay[dayNumber])?byDay[dayNumber]:[];
+    rows.forEach((row,index)=>{
+      if(!isTourAlternativeEligible(row)) return;
+      const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
+      const activityKey=normalizeWorkspaceEntity(activity);
+      if(!activityKey) return;
+
+      const duplicate=[...existingKeys].some(key=>{
+        const [existingDay,...rest]=key.split('|');
+        const entityKey=rest.join('|');
+        return Number(existingDay)===dayNumber && (entityKey===activityKey || entityKey.includes(activityKey) || activityKey.includes(entityKey));
+      });
+      if(duplicate) return;
+
+      const route=[row?.from,row?.to].filter(Boolean).join(' → ');
+      derived.push({
+        id:`workspace-tour:${dayNumber}:${index+1}`,
+        category:'tours',
+        city:cityName,
+        day:dayNumber,
+        entity_name:activity,
+        entity_type:'experience',
+        need_type:'guided_tour_optional',
+        confidence:'medium',
+        user_message:lang==='es'
+          ? 'Si prefieres no hacer esta actividad por tu cuenta, compara una alternativa guiada para el mismo plan.'
+          : 'If you would rather not do this activity on your own, compare a guided alternative for the same plan.',
+        source_activity:activity,
+        source_route:route,
+        transport:String(row?.transport||'').trim(),
+        derived_by:'itinerary_tour_alternative'
+      });
+      existingKeys.add(`${dayNumber}|${activityKey}`);
+    });
+  });
+  return derived;
+}
 function contextualNeedsForCity(cityName,needs){
   const source=Array.isArray(needs)?needs:[];
-  const derived=tripRoutes().filter(route=>route.origin===cityName);
-  if(!derived.length)return source;
+  const derivedRoutes=tripRoutes().filter(route=>route.origin===cityName);
   const normalizeRoute=value=>String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
-  const derivedRoutes=new Set(derived.map(route=>normalizeRoute(route.source_route)));
+  const routeKeys=new Set(derivedRoutes.map(route=>normalizeRoute(route.source_route)));
   const withoutDuplicateTopLevelRoutes=source.filter(item=>{
     if(item?.need_type!=='intercity_transport' && item?.need_type!=='transport_arrangement') return true;
-    return !derivedRoutes.has(normalizeRoute(item?.source_route||item?.entity_name));
+    return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
-  return [...withoutDuplicateTopLevelRoutes,...derived];
+  const tourAlternatives=tourAlternativesForCity(cityName,withoutDuplicateTopLevelRoutes);
+  return [...withoutDuplicateTopLevelRoutes,...derivedRoutes,...tourAlternatives];
 }
 
 function contextLabel(item){
@@ -297,7 +362,10 @@ function renderPrepare(){
   const cityOffers=partnerOffersByCity.get(city)||[];
   const ticketOffers=cityOffers.filter(x=>x.placement==='city_tickets');
   const tourOffers=cityOffers.filter(x=>x.placement==='city_experiences');
-  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport');
+  // Mobility stays informational / pending while the Omio API is not available.
+  // We deliberately do not expose transport partner links here; no Partner Engine
+  // or Omio resolver logic is changed by this UI decision.
+  const transportOffers=[];
   const activeSections=[
     contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers),
     contextSection('✦',t.tours,t.toursC,tours,tourOffers),
