@@ -544,3 +544,20 @@ Criterio para main:
 - Official widget metadata and redirect 3963000 remain preserved for future API activation.
 - Once Omio grants Search API/location resolution access, remove the temporary geographic gate and let authorized provider coverage/results determine eligibility.
 - UX changes from V4 remain untouched: prominent overview essentials CTA; floating "Para tu viaje" CTA with layout-safe behavior; stable "Todas las ciudades" behavior.
+
+=== 2026-09-11 · OMIO LIMITED LAUNCH — GENERIC ATTRIBUTED FALLBACK ===
+- During limited launch, every eligible Omio intercity CTA opens the approved generic Omio affiliate tracking link instead of attempting to preload a route.
+- Generic attributed entry: https://omio.sjv.io/PzvDjY
+- The traveler enters origin, destination and dates directly on Omio until Search API access is granted.
+- Attribution validation now rejects non-tracking Omio URLs; accepted launch links must use the approved short tracking link or the ITBMO Impact account path (7727455 / 7385).
+- Top-level N-1 route detection and the temporary Europe-to-Europe exposure guard remain unchanged.
+- No city IDs, route slugs or destination-specific exceptions are hardcoded.
+
+======================================================================
+UPDATE 2026-09-11 · PRE-MAIN FINAL QA PATCH
+======================================================================
+- Omio launch guard: only deterministic top-level destination[n] → destination[n+1] legs where BOTH endpoints are in the Europe allowlist. This is a temporary geographic guard, not provider coverage truth.
+- Omio click behavior while API is pending: always open the generic attributed affiliate entry https://omio.sjv.io/PzvDjY; do not prefill origin, destination, date, route slug or provider city IDs. User completes the search on Omio.
+- Workspace visual hierarchy strengthened: the 'Entradas, reservas, experiencias y movilidad…' subheadline is larger/darker/bolder; the overview essentials copy is now 'Conectividad, movilidad y servicios útiles, organizados según tu viaje.' and is visually stronger. English equivalent updated.
+- Preview payment bypass now defaults to OFF server-side in payment/trip/chat/context for real checkout and promotion QA. ITBMO50 must follow the actual promotional checkout path unless ITBMO_PREVIEW_PAYMENT_BYPASS is deliberately set to true.
+- No SQL changes in this patch. Existing Context, partner cards, recovery, generation and affiliate behavior otherwise preserved.
