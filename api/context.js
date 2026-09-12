@@ -13,6 +13,14 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 const REST_URL = SUPABASE_URL ? `${SUPABASE_URL}/rest/v1` : "";
 
+const ITBMO_ADMIN_TEST_BYPASS =
+  String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
+const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
+const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
+  String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+const ITBMO_PREVIEW_PAYMENT_BYPASS =
+  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
+
 const CONTEXT_VERSION = "1.2.1";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
@@ -231,6 +239,33 @@ async function persistContext(trip, userId, city, candidates, needs) {
   });
 
   return generatedAt;
+}
+
+function previewBypass(userId) {
+  const isProduction = String(process.env.VERCEL_ENV || "").toLowerCase() === "production";
+  if (!isProduction) return ITBMO_PREVIEW_PAYMENT_BYPASS && Boolean(userId);
+
+  if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
+  if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
+  return ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION;
+}
+
+async function hasEntitlement(tripId, userId) {
+  if (previewBypass(userId)) return true;
+
+  const rows = await supabaseFetch(
+    `/payments?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
+    { method: "GET" }
+  );
+  if (Array.isArray(rows) && rows.length > 0) return true;
+
+  const promoRows = await supabaseFetch(
+    `/promo_redemptions?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&status=eq.consumed&final_amount=eq.0&limit=1`,
+    { method: "GET" }
+  );
+  return Array.isArray(promoRows) && promoRows.length > 0;
 }
 
 function cityNames(trip) {
@@ -746,11 +781,8 @@ export default async function handler(req, res) {
       });
     }
 
-    // Context Intelligence is a post-generation capability.
-    // Authorization is therefore anchored to a valid ITBMO session + trip ownership
-    // + generated trip status. Payment/promotion gating happens before generation and
-    // must not be re-evaluated here, otherwise legitimate generated trips can lose
-    // Context access after checkout state transitions or recovery.
+    // Post-generation authorization: valid session + trip ownership + generated status.
+    // Payment/promotion gating already happened before generation and is not re-evaluated here.
 
     const { city, candidates } = buildCandidates(trip, requestedCity);
     if (!city) {
