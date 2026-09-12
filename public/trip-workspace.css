@@ -1123,14 +1123,45 @@ button,a {
 .tw-overview-essentials__copy h2{margin:3px 0 3px;color:var(--ink);font-size:18px;letter-spacing:-.025em}
 .tw-overview-essentials__copy p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}
 #tw-overview-essentials-cta{
-  border:0;border-radius:999px;padding:12px 16px;white-space:nowrap;cursor:pointer;
-  color:#fff;background:linear-gradient(135deg,#087ed1,#0aa7a6);font-size:12px;font-weight:950;
-  box-shadow:0 11px 24px rgba(8,126,177,.19);transition:transform .2s ease,box-shadow .2s ease
+  border:1px solid rgba(255,255,255,.42);border-radius:999px;padding:13px 19px;white-space:nowrap;cursor:pointer;
+  color:#fff;background:linear-gradient(135deg,#056fc1 0%,#0798b5 52%,#078f8d 100%);font-size:13px;font-weight:950;
+  letter-spacing:.01em;text-shadow:0 1px 0 rgba(0,0,0,.08);
+  box-shadow:0 13px 28px rgba(6,111,160,.28),0 0 0 4px rgba(8,151,177,.07);
+  transition:transform .2s ease,box-shadow .2s ease,filter .2s ease
 }
-#tw-overview-essentials-cta:hover{transform:translateY(-1px);box-shadow:0 14px 30px rgba(8,126,177,.25)}
+#tw-overview-essentials-cta:hover{transform:translateY(-2px);filter:saturate(1.08);box-shadow:0 18px 36px rgba(6,111,160,.34),0 0 0 5px rgba(8,151,177,.09)}
 #tw-trip-wide{scroll-margin-top:104px}
 @media(max-width:760px){
   .tw-overview-essentials{grid-template-columns:auto minmax(0,1fr);padding:14px;gap:12px;text-align:left}
   #tw-overview-essentials-cta{grid-column:1/-1;width:100%}
 }
 
+
+
+/* =========================================================
+   RELEASE CANDIDATE V2 · FLOATING "PARA TU VIAJE" DISCOVERY CTA
+   Uses a separate fixed control so the original city header never leaves the grid
+   and therefore cannot disturb city identity / itinerary tabs while scrolling.
+   ========================================================= */
+.tw-floating-prepare{
+  position:fixed;z-index:58;top:98px;right:clamp(18px,4vw,70px);
+  display:flex;align-items:center;gap:9px;
+  border:1px solid rgba(255,255,255,.58);border-radius:999px;padding:10px 12px;
+  color:#fff;background:linear-gradient(135deg,#087ed1 0%,#079bb6 54%,#07988d 100%);
+  box-shadow:0 16px 38px rgba(7,98,145,.28),0 0 0 4px rgba(8,151,177,.08);
+  cursor:pointer;opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none;
+  transition:opacity .2s ease,transform .2s ease,box-shadow .2s ease,filter .2s ease;
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)
+}
+.tw-floating-prepare[hidden]{display:none!important}
+.tw-floating-prepare.is-visible{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.tw-floating-prepare:hover{transform:translateY(-2px) scale(1.01);filter:saturate(1.08);box-shadow:0 20px 44px rgba(7,98,145,.34),0 0 0 5px rgba(8,151,177,.10)}
+.tw-floating-prepare>span{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:rgba(255,255,255,.96);color:#087a9d;font-size:13px;font-weight:950}
+.tw-floating-prepare b{font-size:12px;font-weight:950;white-space:nowrap}
+.tw-floating-prepare em{font-style:normal;padding:5px 8px;border-radius:999px;background:rgba(255,255,255,.94);color:#076d89;font-size:8px;font-weight:950;letter-spacing:.06em;text-transform:uppercase}
+@media(max-width:760px){
+  .tw-floating-prepare{top:86px;right:12px;padding:9px 10px;gap:7px}
+  .tw-floating-prepare b{font-size:11px}
+  .tw-floating-prepare em{display:none}
+}
+@media(prefers-reduced-motion:reduce){.tw-floating-prepare{transition:none!important}}
