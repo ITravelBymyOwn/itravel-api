@@ -471,6 +471,12 @@ const $accountGuestUpgradeCopy = qs('#account-guest-upgrade-copy');
 const $accountGuestUpgradeTitle = qs('#account-guest-upgrade-title');
 const $accountUpgradeEmailHint = qs('#account-upgrade-email-hint');
 const $accountLogout = qs('#account-logout');
+const $accountDialogClose = qs('#account-dialog-close');
+const $accountModalBackdrop = qs('#account-modal-backdrop');
+const $topbarAccountRegister = qs('#topbar-account-register');
+const $topbarAccountLogin = qs('#topbar-account-login');
+const $topbarAccountGuest = qs('#topbar-account-guest');
+const $topbarAccountLogout = qs('#topbar-account-logout');
 const $accountForgotEmail = qs('#account-forgot-email');
 const $accountResetPassword = qs('#account-reset-password');
 const $accountResetPasswordConfirm = qs('#account-reset-password-confirm');
@@ -648,7 +654,7 @@ function legalPayload(prefix='account'){
 }
 
 function setAuthBusy(on){
-  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack,$accountUpgradeToggle,$accountUpgradeCancel,$accountLogout]
+  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack,$accountUpgradeToggle,$accountUpgradeCancel,$accountLogout,$topbarAccountRegister,$topbarAccountLogin,$topbarAccountGuest,$topbarAccountLogout]
     .forEach(el=>{ if(el) el.disabled = !!on; });
 }
 
@@ -716,6 +722,24 @@ function applyAuthPlannerGate(unlocked){
   }else{
     updateSaveAvailability();
   }
+}
+
+function closeAccountDialog(){
+  const box=qs('#account-box');
+  if(box){ box.classList.remove('is-auth-dialog-open'); box.setAttribute('aria-hidden','true'); }
+  if($accountModalBackdrop){ $accountModalBackdrop.hidden=true; $accountModalBackdrop.classList.remove('is-open'); }
+  document.body.classList.remove('itbmo-auth-dialog-open');
+}
+function openAccountDialog(mode){
+  const box=qs('#account-box');
+  if(!box) return;
+  if(mode) showAccountMode(mode);
+  box.classList.add('is-auth-dialog-open');
+  box.setAttribute('aria-hidden','false');
+  if($accountModalBackdrop){ $accountModalBackdrop.hidden=false; requestAnimationFrame(()=>$accountModalBackdrop.classList.add('is-open')); }
+  document.body.classList.add('itbmo-auth-dialog-open');
+  const focusTarget=mode==='register'?$accountFirstName:mode==='login'?$accountLoginEmail:mode==='guest'?$accountGuestName:mode==='reset'?$accountResetPassword:null;
+  setTimeout(()=>{ try{ focusTarget?.focus(); }catch(_){} },60);
 }
 
 function showAccountMode(mode){
@@ -810,6 +834,13 @@ function renderAuthState(){
   if($accountLogout) $accountLogout.style.display = logged ? 'inline-flex' : 'none';
   const plannerMyTrips=qs('#planner-my-trips');
   if(plannerMyTrips) plannerMyTrips.hidden=!logged;
+  if($topbarAccountRegister){
+    $topbarAccountRegister.hidden=Boolean(logged && !guest);
+    $topbarAccountRegister.textContent=authCopy('register');
+  }
+  if($topbarAccountLogin){ $topbarAccountLogin.hidden=logged; $topbarAccountLogin.textContent=authCopy('login'); }
+  if($topbarAccountGuest){ $topbarAccountGuest.hidden=logged; $topbarAccountGuest.textContent=authCopy('guest'); }
+  if($topbarAccountLogout){ $topbarAccountLogout.hidden=!logged; $topbarAccountLogout.textContent=getLang()==='es'?'Salir':'Sign out'; }
 
   if(!guestUpgradeFormOpen){
     if($accountEmail) $accountEmail.readOnly=false;
@@ -861,6 +892,7 @@ function applyAuthLanguage(){
   const set=(sel,txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
   set('#account-title',authCopy('title')); set('#account-subtitle',authCopy('subtitle'));
   set('#account-register-toggle',authCopy('register')); set('#account-login-toggle',authCopy('login')); set('#account-guest-toggle',authCopy('guest'));
+  set('#topbar-account-register',authCopy('register')); set('#topbar-account-login',authCopy('login')); set('#topbar-account-guest',authCopy('guest')); set('#topbar-account-logout',getLang()==='es'?'Salir':'Sign out');
   set('#label-first-name',authCopy('name')); set('#label-email',authCopy('email')); set('#label-password',authCopy('password')); set('#label-password-confirm',authCopy('passwordConfirm')); set('#password-hint',authCopy('passwordHint'));
   set('#label-login-email',authCopy('email')); set('#label-login-password',authCopy('password'));
   set('#label-guest-name',authCopy('name')); set('#label-guest-email',authCopy('email'));
@@ -920,7 +952,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -937,7 +969,7 @@ async function continueAsGuest(){
   try{
     const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
     else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
@@ -1016,7 +1048,7 @@ async function restoreITBMOSession(){
   const callback=getSupabaseCallback();
   if(callback.error){ authReady=true; currentUser=null; renderAuthState(); setAccountMessage(callback.error,'error'); clearAuthCallbackFromUrl(); return; }
   if(callback.accessToken && callback.type === 'recovery'){
-    authReady=true; currentUser=null; renderAuthState(); showAccountMode('reset'); return;
+    authReady=true; currentUser=null; renderAuthState(); openAccountDialog('reset'); return;
   }
   if(callback.accessToken){ await completeEmailConfirmation(callback.accessToken); return; }
 
@@ -1169,6 +1201,7 @@ async function logoutITBMOUser(){
     // Signed-out state starts neutral: show the three account choices, but do
     // not leave Create account / Sign in / Guest fields expanded automatically.
     showAccountMode(null);
+    closeAccountDialog();
     renderAuthState();
     setAuthBusy(false);
   }
@@ -1188,6 +1221,16 @@ function bindAccountListeners(){
   $accountUpgradeToggle?.addEventListener('click',openGuestAccountUpgrade);
   $accountUpgradeCancel?.addEventListener('click',closeGuestAccountUpgrade);
   $accountLogout?.addEventListener('click',logoutITBMOUser);
+  $topbarAccountRegister?.addEventListener('click',()=>{
+    if(currentUser && !currentUser.is_registered){ openGuestAccountUpgrade(); openAccountDialog('register'); return; }
+    openAccountDialog('register');
+  });
+  $topbarAccountLogin?.addEventListener('click',()=>openAccountDialog('login'));
+  $topbarAccountGuest?.addEventListener('click',()=>openAccountDialog('guest'));
+  $topbarAccountLogout?.addEventListener('click',logoutITBMOUser);
+  $accountDialogClose?.addEventListener('click',closeAccountDialog);
+  $accountModalBackdrop?.addEventListener('click',closeAccountDialog);
+  document.addEventListener('keydown',event=>{ if(event.key==='Escape' && qs('#account-box')?.classList.contains('is-auth-dialog-open')) closeAccountDialog(); });
   applyAuthLanguage(); updateSaveAvailability();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden && currentUser?.registration_pending) refreshPendingVerification(); });
   window.addEventListener('focus',()=>{ if(currentUser?.registration_pending) refreshPendingVerification(); });
