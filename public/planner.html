@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=108" />
+  <link rel="stylesheet" href="./planner.css?v=109" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -28,16 +28,24 @@
       <div class="brand-line-2">By My Own</div>
     </div>
 
-    <button id="planner-my-trips" class="planner-my-trips" type="button" hidden aria-label="Mis viajes">
-      <span class="planner-my-trips__icon" aria-hidden="true">✦</span>
-      <span class="planner-my-trips__copy">
-        <strong id="planner-my-trips-label">Mis viajes</strong>
-        <small id="planner-my-trips-hint">Tu espacio de viaje</small>
-      </span>
-      <span class="planner-my-trips__arrow" aria-hidden="true">→</span>
-    </button>
+    <div class="planner-topbar-actions">
+      <button id="planner-my-trips" class="planner-my-trips" type="button" hidden aria-label="Mis viajes">
+        <span class="planner-my-trips__icon" aria-hidden="true">✦</span>
+        <span class="planner-my-trips__copy">
+          <strong id="planner-my-trips-label">Mis viajes</strong>
+          <small id="planner-my-trips-hint">Tu espacio de viaje</small>
+        </span>
+        <span class="planner-my-trips__arrow" aria-hidden="true">→</span>
+      </button>
 
-    <div class="planner-language-capability">
+      <div id="planner-auth-nav" class="planner-auth-nav" aria-label="Acceso a ITBMO">
+        <button id="topbar-account-register" class="planner-auth-nav__btn planner-auth-nav__btn--primary" type="button">Crear cuenta</button>
+        <button id="topbar-account-login" class="planner-auth-nav__btn" type="button">Iniciar sesión</button>
+        <button id="topbar-account-guest" class="planner-auth-nav__btn" type="button">Continuar como invitado</button>
+        <button id="topbar-account-logout" class="planner-auth-nav__btn planner-auth-nav__btn--logout" type="button" hidden>Salir</button>
+      </div>
+
+      <div class="planner-language-capability">
       <button
         id="planner-language-help"
         class="planner-language-help"
@@ -68,11 +76,14 @@
           If a language is not supported, ITBMO will let you know in the chat. The final itinerary language is selected later in the planning flow.
         </small>
       </div>
+      </div>
     </div>
 
     <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
     <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
+
+  <div id="account-modal-backdrop" class="account-modal-backdrop" hidden></div>
 
 
   <!-- =========================================================
@@ -163,7 +174,8 @@
            La autenticación visual vive en el Planner.
            La persistencia real se procesa en /api/user (Vercel → Supabase).
       ========================================================== -->
-      <section class="box account-box planner-stage-card planner-stage-card--account" id="account-box">
+      <section class="box account-box planner-stage-card planner-stage-card--account" id="account-box" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="account-title">
+        <button id="account-dialog-close" class="account-dialog-close" type="button" aria-label="Cerrar">×</button>
         <div class="planner-stage-card__number" aria-hidden="true">00</div>
         <div class="planner-inline-guide planner-inline-guide--account">
           <span class="planner-inline-guide__icon" aria-hidden="true">✓</span>
@@ -1180,7 +1192,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=109"></script>
+<script src="./planner.js?v=110"></script>
  
 </body>
 </html>
