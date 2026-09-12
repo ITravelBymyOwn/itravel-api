@@ -274,6 +274,39 @@ async function resolveExperiencePartner(slug, needs, city, language) {
   return offers;
 }
 
+const OMIO_EUROPE_COUNTRY_CODES = new Set(`AD AL AT AX BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GR HR HU IE IS IT LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS SE SI SK SM TR UA VA XK`.split(/\s+/));
+const OMIO_EUROPE_COUNTRY_ALIASES = new Map(Object.entries({
+  andorra:'AD', albania:'AL', austria:'AT', 'aland islands':'AX', 'islas aland':'AX',
+  'bosnia and herzegovina':'BA', 'bosnia y herzegovina':'BA', belarus:'BY', bielorrusia:'BY',
+  belgium:'BE', belgica:'BE', bulgaria:'BG', switzerland:'CH', suiza:'CH', cyprus:'CY', chipre:'CY',
+  czechia:'CZ', 'czech republic':'CZ', chequia:'CZ', 'republica checa':'CZ', germany:'DE', alemania:'DE',
+  denmark:'DK', dinamarca:'DK', estonia:'EE', spain:'ES', espana:'ES', finland:'FI', finlandia:'FI',
+  'faroe islands':'FO', 'islas feroe':'FO', france:'FR', francia:'FR', 'united kingdom':'GB',
+  'reino unido':'GB', uk:'GB', 'great britain':'GB', greece:'GR', grecia:'GR', croatia:'HR', croacia:'HR',
+  hungary:'HU', hungria:'HU', ireland:'IE', irlanda:'IE', iceland:'IS', islandia:'IS', italy:'IT', italia:'IT',
+  liechtenstein:'LI', lithuania:'LT', lituania:'LT', luxembourg:'LU', luxemburgo:'LU', latvia:'LV', letonia:'LV',
+  monaco:'MC', moldova:'MD', moldavia:'MD', montenegro:'ME', 'north macedonia':'MK', 'macedonia del norte':'MK',
+  malta:'MT', netherlands:'NL', 'paises bajos':'NL', norway:'NO', noruega:'NO', poland:'PL', polonia:'PL',
+  portugal:'PT', romania:'RO', rumania:'RO', serbia:'RS', sweden:'SE', suecia:'SE', slovenia:'SI', eslovenia:'SI',
+  slovakia:'SK', eslovaquia:'SK', 'san marino':'SM', turkey:'TR', turquia:'TR', ukraine:'UA', ucrania:'UA',
+  'vatican city':'VA', 'ciudad del vaticano':'VA', kosovo:'XK'
+}));
+
+function normalizeCountryKey(value) {
+  return clean(value, 120).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function destinationCountryCode(item) {
+  const explicit = clean(item?.country_code || item?.countryCode, 8).toUpperCase();
+  if (explicit) return explicit;
+  return OMIO_EUROPE_COUNTRY_ALIASES.get(normalizeCountryKey(item?.country)) || '';
+}
+
+function omioRouteEligible(route) {
+  return OMIO_EUROPE_COUNTRY_CODES.has(route?.origin_country_code) &&
+    OMIO_EUROPE_COUNTRY_CODES.has(route?.destination_country_code);
+}
+
 async function getOwnedTripRoutes(tripId, userId) {
   if (!tripId || !userId) return [];
   const rows = await supabaseFetch(
@@ -286,6 +319,8 @@ async function getOwnedTripRoutes(tripId, userId) {
     .map((item, index) => ({
       index,
       city: clean(item?.city, 160),
+      country: clean(item?.country, 120),
+      country_code: destinationCountryCode(item),
       baseDate: clean(item?.base_date || item?.baseDate, 40)
     }))
     .filter(item => item.city);
@@ -296,6 +331,8 @@ async function getOwnedTripRoutes(tripId, userId) {
       id: `route:${index}:${from.city}:${to.city}`,
       origin: from.city,
       destination: to.city,
+      origin_country_code: from.country_code,
+      destination_country_code: to.country_code,
       travel_date: to.baseDate || ''
     };
   });
@@ -324,7 +361,7 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
   if (!partner || !template) return [];
 
   const routes = await getOwnedTripRoutes(tripId, userId);
-  const eligible = routes.filter(route => route.origin === clean(city, 160));
+  const eligible = routes.filter(route => route.origin === clean(city, 160) && omioRouteEligible(route));
   const result = [];
 
   for (const route of eligible) {
