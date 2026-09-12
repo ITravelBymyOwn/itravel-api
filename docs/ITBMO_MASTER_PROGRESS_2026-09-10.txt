@@ -414,3 +414,70 @@ ACTUALIZACIÓN · 2026-09-11 · QA PARTNERS + AIRALO
 - Se conserva intacta la estructura de "Opciones para reservar".
 - Los nombres de partners se reducen visualmente (tipografia menor y color secundario) para que la experiencia priorice la necesidad/accion del viajero y no la marca afiliada.
 - Se mantiene transparencia/disclosure y CTA sin cambios.
+
+2026-09-11 — ESTABILIZACIÓN CONTEXT INTELLIGENCE + UX WORKSPACE
+- QA generación 3 ciudades: generación principal PASS; recuperación de avance PASS; ITBMO100 funcionó en la prueba; Airalo/Holafly visibles en Connectivity.
+- Hallazgo crítico: /api/context devolvió 500 en Rovaniemi y París. Log confirmado: OpenAI APIUserAbortError dentro de classifyCandidates(); el diseño previo enviaba hasta 120 candidatos en una sola llamada con aborto a 60 s.
+- Corrección Context v1.2: candidatos clasificados por lotes de 24, hasta 3 lotes concurrentes, timeout 45 s por lote, 1 reintento solo para abort/408/409/429/5xx y tolerancia a resultado parcial. Un lote fallido ya no invalida automáticamente toda la ciudad si otros lotes sí responden.
+- Context prewarm: al terminar una generación pagada/gratuita y persistir status=generated, Planner inicia Context Intelligence en background ciudad por ciudad. Workspace añade un prewarm diferido de seguridad para entradas directas/recuperadas. La pestaña "Para tu viaje" deja de ser el disparador primario.
+- Cache/versionado: CONTEXT_VERSION sube a 1.2 para no reutilizar resultados derivados con la implementación anterior.
+- Planner: "Mis viajes" queda visible para cualquier sesión autenticada, sin borrar ni desacoplar el active trip; volver al Planner conserva la recuperación existente.
+- Workspace: "Todas las ciudades" pasa a control flotante/fijo mientras se hace scroll; se mantiene semánticamente separado de "Volver al Planner".
+- Connectivity: Airalo/Holafly conservan transparencia pero bajan jerarquía de marca. El título visible de cada oferta trip-wide es genérico "Conectividad para tu viaje" y el proveedor queda como etiqueta secundaria pequeña. Beneficios sí permanecen visibles.
+- Holafly QA visual confirmado: el enlace ITBMO abre popup de Holafly indicando código ITBMO y 5% de descuento; el URL observado incluye irclickid y discount=ITBMO.
+- No se modifican: payment/promo engine, Viator/GYG/Omio resolvers, recuperación de generación, Info Chat, Partner Engine ni tablas Supabase.
+- QA requerido antes de main: repetir Rovaniemi + París + Florencia; confirmar /api/context 200 en las tres, cache_hit en reapertura, Para tu viaje listo o en proceso previo, botón Todas las ciudades flotante desktop/móvil, Mis viajes visible y recuperación intacta.
+
+2026-09-11 — SEGURO DE VIAJE / PAYOUT RESEARCH
+- World Nomads: programa actual opera mediante CJ; documentación actual orienta payout por depósito/Payoneer. No priorizar para ITBMO mientras la restricción/costo de Payoneer en Costa Rica no sea conveniente.
+- Rise & Shield: documentación pública de afiliados confirma payout mensual vía banco o PayPal mediante Tapfiliate, cookie 60 días y 10% inicial. Candidato directo para aplicación si elegibilidad territorial/comercial se valida al alta.
+- Heymondo: programa directo atractivo, cookie 30 días y dashboard; método de pago del afiliado no aparece públicamente confirmado. Preguntar explícitamente por PayPal antes de activar.
+- SafetyWing y VisitorsCoverage: programas atractivos, pero el método PayPal para payout no quedó confirmado en documentación pública consultada; validar antes de integración.
+
+
+2026-09-11 — Ajuste navegación Workspace (post-QA)
+- Corregido el desorden visual introducido al convertir “Todas las ciudades” en botón fijo permanente.
+- El botón vuelve a ocupar su posición natural dentro del encabezado de ciudad al cargar la vista, preservando la alineación original: navegación izquierda / ciudad centrada / selector Itinerario–Para tu viaje derecha.
+- Solo pasa a estado flotante cuando el scroll alcanza su posición; se agrega un placeholder visual para evitar que el resto del encabezado se desplace al fijarse.
+- Al volver a la vista de todas las ciudades se retira automáticamente el estado flotante.
+- Sin cambios en Context Intelligence, pagos, promociones, recuperación, Partner Engine ni generación de itinerarios.
+
+============================================================
+RELEASE CANDIDATE FINAL · CTA EDUCATIVO + COBERTURA OMIO
+2026-09-11
+============================================================
+
+1) WORKSPACE GENERAL / EDUCACION DEL USUARIO
+- Se incorpora un CTA educativo visible debajo del resumen del viaje y antes de las tarjetas de ciudades.
+- Copy ES: "Prepara lo esencial de tu viaje" / "Ver lo que puedo necesitar ↓".
+- Copy EN equivalente.
+- El CTA hace smooth scroll al bloque "Para todo tu viaje".
+- No se mueve ni reestructura el bloque de ciudades ni el bloque de servicios.
+- Se registra evento trip_essentials_cta_clicked.
+
+2) OMIO / MOVILIDAD ENTRE DESTINOS
+- La necesidad intercity sigue derivándose exclusivamente de la secuencia guardada destination[n] → destination[n+1].
+- Se preserva la regla: no usar Omio para POI, hoteles, barrios, day trips ni movilidad local.
+- Se añade gate conservador de cobertura para Release Candidate: Omio solo se ofrece cuando origen y destino guardados pertenecen a Europa.
+- Esta es una medida temporal de seguridad comercial, no el diseño final del Coverage Engine. Omio puede cubrir rutas adicionales; estas se habilitarán posteriormente mediante una capa de cobertura/API validada, no por suposición.
+- Los viajes nuevos guardan country_code junto con country. Viajes existentes conservan compatibilidad mediante normalización ES/EN de países europeos.
+- Para Roma → París → Rovaniemi deben existir dos necesidades N-1. En Roma se muestra Roma → París; en París se muestra París → Rovaniemi. Ambos son elegibles para Omio por cobertura europea.
+- Para un tramo fuera de la cobertura conservadora, ITBMO conserva la necesidad de movilidad pero no muestra CTA de Omio; futuros proveedores globales (KAYAK/Skyscanner) podrán resolverla.
+- Label visible actualizado de "Trayecto a resolver" a "Comparar opciones".
+
+3) ARCHIVOS MODIFICADOS EN ESTA TANDA
+- public/planner.js
+- public/trip-workspace.js
+- public/trip-workspace.html
+- public/trip-workspace.css
+- api/_lib/partner-engine.js
+- docs/ITBMO_MASTER_PROGRESS_2026-09-10.txt
+
+4) QA ANTES DE MAIN
+- Overview: CTA visible, claro y smooth scroll correcto hacia "Para todo tu viaje".
+- Roma > Para tu viaje: Roma → París con Omio.
+- París > Para tu viaje: París → Rovaniemi con Omio.
+- Rovaniemi: no se genera un tercer tramo porque es el último destino.
+- Single-city: cero Omio.
+- Ruta no Europa↔Europa: no mostrar Omio.
+- Confirmar que Context Intelligence, Airalo, Holafly, Viator, GYG, promociones, recuperación y navegación sticky permanecen sin regresiones.
