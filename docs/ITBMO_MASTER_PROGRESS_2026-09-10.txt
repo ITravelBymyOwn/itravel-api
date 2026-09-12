@@ -481,3 +481,66 @@ RELEASE CANDIDATE FINAL · CTA EDUCATIVO + COBERTURA OMIO
 - Single-city: cero Omio.
 - Ruta no Europa↔Europa: no mostrar Omio.
 - Confirmar que Context Intelligence, Airalo, Holafly, Viator, GYG, promociones, recuperación y navegación sticky permanecen sin regresiones.
+
+
+============================================================
+2026-09-11 · RELEASE CANDIDATE V2 · OMIO + DISCOVERY UX
+============================================================
+- Omio QA found that /viajes/<origin>/<destination> is not a universal canonical pattern. Roma→París works, while París→Rovaniemi returns Omio 404 despite Omio publicly supporting the route.
+- Added validated technical landing override for París→Rovaniemi using Omio's live canonical route page. This is an optimization/cache, not a business eligibility requirement.
+- Preserved affiliate tracking wrapper (Impact u= destination).
+- Strengthened overview CTA contrast/weight so users clearly discover trip-wide essentials.
+- Added separate floating "Para tu viaje" CTA that appears only after the original control scrolls out of view while itinerary mode is active. It is a separate fixed control, so the city header grid never reflows or becomes disordered.
+- No changes to payments, promo engine, Context Intelligence, recovery, Viator/GYG, Airalo/Holafly logic, or Omio Europe→Europe eligibility in this patch.
+
+=== 2026-09-11 — PRE-MAIN V3 OMIO CONTEXTUAL SAFE ===
+- Se eliminó el hardcode París→Rovaniemi y cualquier tabla de landings Omio por ruta.
+- Se eliminó la fabricación de slugs SEO /viajes/{from}/{to} y /travel/{from}/{to}.
+- Se eliminó la regla artificial Europe→Europe.
+- Los route needs siguen siendo determinísticos N−1 desde trips.destinations.
+- Para lanzamiento seguro, Omio usa el asset oficial Impact Widget_link 861892 / Partner 7727455 / Campaign 7385 como entrada de búsqueda rastreada.
+- ITBMO no declara disponibilidad antes de que Omio la compruebe.
+- Pendiente para deep contextual prefill perfecto: obtener del configurador oficial Omio el snippet generado con filtros (origin/destination/date/IR partner ID) o acceso Search API. No adivinar data-attributes ni usar endpoints no autorizados.
+- UX V2 preservada: CTA overview reforzado + “Para tu viaje” flotante sin alterar layout + “Todas las ciudades” estable.
+
+
+============================================================
+PRE-MAIN V4 — OMIO PENDIENTE DE API + UX FINAL
+============================================================
+Fecha: 2026-09-11
+
+Decisión de lanzamiento:
+- Omio NO genera enlaces ni ofertas hasta recibir acceso/documentación oficial de Affiliate Search API.
+- Se eliminan hardcodes, slugs fabricados y links genéricos que obliguen al usuario a repetir origen/destino.
+- La infraestructura del adapter Omio queda preparada con metadata oficial del widget/Impact, pero status=pending_api.
+- Los trayectos principales se siguen generando de forma determinística N-1 desde destinations guardados.
+- Cada trayecto aparece en Workspace como "Pendiente de resolver" / "Pending resolution".
+- Cuando llegue la API, el punto de activación será resolver location IDs + validar cobertura + emitir oferta contextual, sin rediseñar Workspace.
+
+Metadata Omio confirmada y reservada para futura activación:
+- Impact Partner ID: 7727455
+- Widget partner id: omio-affiliates
+- Widget redirect: https://omio.sjv.io/c/7727455/3963000/7385?u=
+
+UX incluida en esta tanda:
+- CTA general "Prepara lo esencial de tu viaje" con mayor contraste.
+- CTA "Para tu viaje" flotante durante scroll, sin mover el layout original.
+- Botón "Todas las ciudades" conserva comportamiento flotante estable.
+- Airalo/Holafly, Viator/GYG y Context Intelligence no se modifican funcionalmente.
+
+Criterio para main:
+- Confirmar que Roma→París y París→Rovaniemi aparecen como necesidades N-1 pendientes, sin enlace Omio.
+- Confirmar que no se generan trayectos locales/day-trip como Omio.
+- Confirmar CTA general + flotante "Para tu viaje" sin desorden visual.
+
+
+=== 2026-09-11 · PRE-MAIN V5 · OMIO LIMITED LAUNCH ===
+- Decision: keep Omio visible for launch while official Affiliate Search API access is pending.
+- No route-specific URLs, city IDs, Omio slugs or Paris/Rovaniemi hardcodes are used.
+- N-1 intercity needs remain deterministic from the saved destination sequence.
+- Temporary conservative eligibility gate: Omio generic search entry is shown only when both main destinations resolve to European country codes. This is a launch guard, NOT provider coverage truth.
+- Unsupported/non-eligible routes remain visible as "Pendiente de resolver" / "Pending resolution" with no Omio button.
+- Eligible routes show "Comparar opciones" / "Compare options" and use the approved Impact Widget_link tracking asset 861892. Origin/destination are not claimed to be preloaded.
+- Official widget metadata and redirect 3963000 remain preserved for future API activation.
+- Once Omio grants Search API/location resolution access, remove the temporary geographic gate and let authorized provider coverage/results determine eligibility.
+- UX changes from V4 remain untouched: prominent overview essentials CTA; floating "Para tu viaje" CTA with layout-safe behavior; stable "Todas las ciudades" behavior.
