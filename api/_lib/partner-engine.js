@@ -274,37 +274,57 @@ async function resolveExperiencePartner(slug, needs, city, language) {
   return offers;
 }
 
-const OMIO_EUROPE_COUNTRY_CODES = new Set(`AD AL AT AX BA BE BG BY CH CY CZ DE DK EE ES FI FO FR GB GR HR HU IE IS IT LI LT LU LV MC MD ME MK MT NL NO PL PT RO RS SE SI SK SM TR UA VA XK`.split(/\s+/));
-const OMIO_EUROPE_COUNTRY_ALIASES = new Map(Object.entries({
-  andorra:'AD', albania:'AL', austria:'AT', 'aland islands':'AX', 'islas aland':'AX',
-  'bosnia and herzegovina':'BA', 'bosnia y herzegovina':'BA', belarus:'BY', bielorrusia:'BY',
-  belgium:'BE', belgica:'BE', bulgaria:'BG', switzerland:'CH', suiza:'CH', cyprus:'CY', chipre:'CY',
-  czechia:'CZ', 'czech republic':'CZ', chequia:'CZ', 'republica checa':'CZ', germany:'DE', alemania:'DE',
-  denmark:'DK', dinamarca:'DK', estonia:'EE', spain:'ES', espana:'ES', finland:'FI', finlandia:'FI',
-  'faroe islands':'FO', 'islas feroe':'FO', france:'FR', francia:'FR', 'united kingdom':'GB',
-  'reino unido':'GB', uk:'GB', 'great britain':'GB', greece:'GR', grecia:'GR', croatia:'HR', croacia:'HR',
-  hungary:'HU', hungria:'HU', ireland:'IE', irlanda:'IE', iceland:'IS', islandia:'IS', italy:'IT', italia:'IT',
-  liechtenstein:'LI', lithuania:'LT', lituania:'LT', luxembourg:'LU', luxemburgo:'LU', latvia:'LV', letonia:'LV',
-  monaco:'MC', moldova:'MD', moldavia:'MD', montenegro:'ME', 'north macedonia':'MK', 'macedonia del norte':'MK',
-  malta:'MT', netherlands:'NL', 'paises bajos':'NL', norway:'NO', noruega:'NO', poland:'PL', polonia:'PL',
-  portugal:'PT', romania:'RO', rumania:'RO', serbia:'RS', sweden:'SE', suecia:'SE', slovenia:'SI', eslovenia:'SI',
-  slovakia:'SK', eslovaquia:'SK', 'san marino':'SM', turkey:'TR', turquia:'TR', ukraine:'UA', ucrania:'UA',
-  'vatican city':'VA', 'ciudad del vaticano':'VA', kosovo:'XK'
-}));
+// Omio launch state: keep the official API-ready infrastructure, but expose a
+// conservative generic Omio search entry for launch while API access is pending.
+// IMPORTANT: this temporary gate is NOT provider coverage truth. It only limits
+// exposure to Europe-to-Europe main-destination legs, where Omio has its strongest
+// verified consumer footprint. Once the official Search API is enabled, remove this
+// geographic launch gate and let the authorized coverage response decide eligibility.
+const OMIO_INTEGRATION = Object.freeze({
+  status: 'limited_launch',
+  impact_partner_id: '7727455',
+  generic_tracking_url: 'https://omio.sjv.io/c/7727455/861892/7385',
+  widget_partner_id: 'omio-affiliates',
+  widget_redirect: 'https://omio.sjv.io/c/7727455/3963000/7385?u='
+});
 
-function normalizeCountryKey(value) {
-  return clean(value, 120).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+const OMIO_LAUNCH_EUROPE_CODES = new Set([
+  'AL','AD','AT','BE','BA','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IS',
+  'IE','IT','LV','LI','LT','LU','MT','MD','MC','ME','NL','MK','NO','PL','PT','RO','SM',
+  'RS','SK','SI','ES','SE','CH','TR','UA','GB','VA'
+]);
+
+const OMIO_LAUNCH_COUNTRY_ALIASES = new Map([
+  ['albania','AL'],['andorra','AD'],['austria','AT'],['belgium','BE'],['belgica','BE'],['bélgica','BE'],
+  ['bosnia and herzegovina','BA'],['bosnia y herzegovina','BA'],['bulgaria','BG'],['croatia','HR'],['croacia','HR'],
+  ['cyprus','CY'],['chipre','CY'],['czech republic','CZ'],['czechia','CZ'],['republica checa','CZ'],['república checa','CZ'],
+  ['denmark','DK'],['dinamarca','DK'],['estonia','EE'],['finland','FI'],['finlandia','FI'],['france','FR'],['francia','FR'],
+  ['germany','DE'],['alemania','DE'],['greece','GR'],['grecia','GR'],['hungary','HU'],['hungria','HU'],['hungría','HU'],
+  ['iceland','IS'],['islandia','IS'],['ireland','IE'],['irlanda','IE'],['italy','IT'],['italia','IT'],['latvia','LV'],['letonia','LV'],
+  ['liechtenstein','LI'],['lithuania','LT'],['lituania','LT'],['luxembourg','LU'],['luxemburgo','LU'],['malta','MT'],
+  ['moldova','MD'],['moldavia','MD'],['monaco','MC'],['mónaco','MC'],['montenegro','ME'],['netherlands','NL'],['paises bajos','NL'],['países bajos','NL'],
+  ['north macedonia','MK'],['macedonia del norte','MK'],['norway','NO'],['noruega','NO'],['poland','PL'],['polonia','PL'],
+  ['portugal','PT'],['romania','RO'],['rumania','RO'],['san marino','SM'],['serbia','RS'],['slovakia','SK'],['eslovaquia','SK'],
+  ['slovenia','SI'],['eslovenia','SI'],['spain','ES'],['espana','ES'],['españa','ES'],['sweden','SE'],['suecia','SE'],
+  ['switzerland','CH'],['suiza','CH'],['turkey','TR'],['turkiye','TR'],['türkiye','TR'],['turquia','TR'],['turquía','TR'],
+  ['ukraine','UA'],['ucrania','UA'],['united kingdom','GB'],['reino unido','GB'],['vatican city','VA'],['vaticano','VA']
+]);
+
+function normalizeCountryName(value) {
+  return clean(value, 120).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
 
-function destinationCountryCode(item) {
-  const explicit = clean(item?.country_code || item?.countryCode, 8).toUpperCase();
+function launchCountryCode(code, country) {
+  const explicit = clean(code, 8).toUpperCase();
   if (explicit) return explicit;
-  return OMIO_EUROPE_COUNTRY_ALIASES.get(normalizeCountryKey(item?.country)) || '';
+  return OMIO_LAUNCH_COUNTRY_ALIASES.get(normalizeCountryName(country)) || '';
 }
 
-function omioRouteEligible(route) {
-  return OMIO_EUROPE_COUNTRY_CODES.has(route?.origin_country_code) &&
-    OMIO_EUROPE_COUNTRY_CODES.has(route?.destination_country_code);
+function omioLimitedLaunchEligible(route) {
+  if (!route?.origin || !route?.destination) return false;
+  const originCode = launchCountryCode(route.origin_country_code, route.origin_country);
+  const destinationCode = launchCountryCode(route.destination_country_code, route.destination_country);
+  return OMIO_LAUNCH_EUROPE_CODES.has(originCode) && OMIO_LAUNCH_EUROPE_CODES.has(destinationCode);
 }
 
 async function getOwnedTripRoutes(tripId, userId) {
@@ -320,7 +340,7 @@ async function getOwnedTripRoutes(tripId, userId) {
       index,
       city: clean(item?.city, 160),
       country: clean(item?.country, 120),
-      country_code: destinationCountryCode(item),
+      country_code: clean(item?.country_code || item?.countryCode, 8).toUpperCase(),
       baseDate: clean(item?.base_date || item?.baseDate, 40)
     }))
     .filter(item => item.city);
@@ -331,6 +351,8 @@ async function getOwnedTripRoutes(tripId, userId) {
       id: `route:${index}:${from.city}:${to.city}`,
       origin: from.city,
       destination: to.city,
+      origin_country: from.country,
+      destination_country: to.country,
       origin_country_code: from.country_code,
       destination_country_code: to.country_code,
       travel_date: to.baseDate || ''
@@ -338,21 +360,13 @@ async function getOwnedTripRoutes(tripId, userId) {
   });
 }
 
-function omioLanding(origin, destination, language) {
-  const from = slugify(origin);
-  const to = slugify(destination);
-  if (!from || !to) return '';
-  return language === 'en'
-    ? `https://www.omio.com/travel/${from}/${to}`
-    : `https://www.omio.es/viajes/${from}/${to}`;
+function omioApiReady() {
+  return OMIO_INTEGRATION.status === 'active_api';
 }
 
-function omioTrackedUrl(trackingBase, origin, destination, language) {
-  const landing = omioLanding(origin, destination, language);
-  if (!landing || !allowedPartnerUrl('omio', trackingBase)) return '';
-  const url = new URL(trackingBase);
-  url.searchParams.set('u', landing);
-  return url.toString();
+function omioGenericSearchEntryUrl() {
+  const url = OMIO_INTEGRATION.generic_tracking_url;
+  return allowedPartnerUrl('omio', url) ? url : '';
 }
 
 async function resolveOmioTripRoutes(tripId, userId, city, language) {
@@ -361,13 +375,21 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
   if (!partner || !template) return [];
 
   const routes = await getOwnedTripRoutes(tripId, userId);
-  const eligible = routes.filter(route => route.origin === clean(city, 160) && omioRouteEligible(route));
-  const result = [];
+  const relevant = routes.filter(route =>
+    route.origin === clean(city, 160) && omioLimitedLaunchEligible(route)
+  );
+  if (!relevant.length) return [];
 
-  for (const route of eligible) {
-    const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, language);
-    if (!targetUrl) continue;
+  // Future API activation point. The Workspace contract remains unchanged: the API
+  // resolver will replace this temporary eligibility gate and generic search entry.
+  if (omioApiReady()) {
+    return [];
+  }
 
+  const targetUrl = omioGenericSearchEntryUrl();
+  if (!targetUrl) return [];
+
+  return relevant.map(route => {
     const routeLabel = `${route.origin} → ${route.destination}`;
     const need = {
       id: route.id,
@@ -379,21 +401,30 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
       derived_by: 'trip_sequence'
     };
 
-    result.push({
+    return {
       ...template,
       placement: 'city_transport',
       title_es: routeLabel,
       title_en: routeLabel,
-      description_es: 'Compara opciones de tren, bus y otras conexiones entre tus destinos principales.',
-      description_en: 'Compare train, bus and other connections between your main trip destinations.',
+      description_es: 'Consulta en Omio las opciones disponibles para este trayecto. Por ahora, origen y destino se confirman directamente en Omio.',
+      description_en: 'Check the options available for this route on Omio. For now, origin and destination are confirmed directly on Omio.',
       target_url: undefined,
-      confidence: 'high',
+      confidence: 'medium',
       need_id: route.id,
       need_type: 'intercity_transport',
       entity_name: routeLabel,
       city: route.origin,
       travel_date: route.travel_date || null,
-      resolution_type: 'trip_sequence_route',
+      resolution_type: 'provider_search_entry',
+      provider_entity_type: 'search_entry',
+      provider_entity_id: null,
+      route_context: {
+        origin: route.origin,
+        destination: route.destination,
+        origin_country: route.origin_country || '',
+        destination_country: route.destination_country || '',
+        travel_date: route.travel_date || ''
+      },
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({
         template,
@@ -402,17 +433,15 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
         placement: 'city_transport',
         need,
         city: route.origin,
-        resolutionType: 'trip_sequence_route',
+        resolutionType: 'provider_search_entry',
         travelDate: route.travel_date
       })
-    });
-  }
-
-  return result;
+    };
+  });
 }
 
 function rankOffers(offers) {
-  const resolution = { trip_sequence_route: 40, context_search: 35, static: 10 };
+  const resolution = { provider_search_entry: 40, trip_sequence_route: 40, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
