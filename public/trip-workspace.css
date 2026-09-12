@@ -521,11 +521,12 @@ button,a {
   letter-spacing:-.04em
 }
 .tw-prepare-hero p {
-  max-width:700px;
+  max-width:760px;
   margin:auto;
-  color:var(--muted);
-  font-size:17px;
-  line-height:1.55
+  color:#365f74;
+  font-size:clamp(19px,1.7vw,23px);
+  font-weight:700;
+  line-height:1.48
 }
 .tw-prepare-grid {
   display:grid;
@@ -1121,7 +1122,7 @@ button,a {
 }
 .tw-overview-essentials__copy small{display:block;color:#087b92;font-size:9px;font-weight:950;letter-spacing:.13em}
 .tw-overview-essentials__copy h2{margin:3px 0 3px;color:var(--ink);font-size:18px;letter-spacing:-.025em}
-.tw-overview-essentials__copy p{margin:0;color:var(--muted);font-size:12px;line-height:1.45}
+.tw-overview-essentials__copy p{margin:0;color:#3d6477;font-size:14px;font-weight:700;line-height:1.45}
 #tw-overview-essentials-cta{
   border:1px solid rgba(255,255,255,.42);border-radius:999px;padding:13px 19px;white-space:nowrap;cursor:pointer;
   color:#fff;background:linear-gradient(135deg,#056fc1 0%,#0798b5 52%,#078f8d 100%);font-size:13px;font-weight:950;
