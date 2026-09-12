@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.2.1";
+const CONTEXT_VERSION = "1.2";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -781,8 +781,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // Post-generation authorization: valid session + trip ownership + generated status.
-    // Payment/promotion gating already happened before generation and is not re-evaluated here.
+    const entitled = await hasEntitlement(tripId, session.user_id);
+    if (!entitled) {
+      return res.status(402).json({
+        ok: false,
+        code: "CONTEXT_NOT_AUTHORIZED",
+        error: "Trip entitlement required"
+      });
+    }
 
     const { city, candidates } = buildCandidates(trip, requestedCity);
     if (!city) {
