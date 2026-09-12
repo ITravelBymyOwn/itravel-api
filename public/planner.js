@@ -86,6 +86,7 @@ trackITBMOEvent('planner_open');
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
+const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -567,6 +568,30 @@ function getStoredSessionToken(){
     return String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || localStorage.getItem(ITBMO_SESSION_KEY) || '').trim();
   }catch(_){ return ''; }
 }
+function getCachedUser(){
+  try{
+    const raw=sessionStorage.getItem(ITBMO_USER_CACHE_KEY) || localStorage.getItem(ITBMO_USER_CACHE_KEY) || '';
+    const parsed=raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed==='object' && !Array.isArray(parsed) ? parsed : null;
+  }catch(_){ return null; }
+}
+function storeCachedUser(user,persistent=true){
+  if(!user || typeof user!=='object') return;
+  try{
+    const serialized=JSON.stringify(user);
+    if(persistent){
+      localStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+      sessionStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    }else{
+      sessionStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+      localStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    }
+  }catch(_){ }
+}
+function clearCachedUser(){
+  try{ localStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
+  try{ sessionStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
+}
 function storeSessionToken(token, persistent=true){
   try{
     if(!token) return;
@@ -583,6 +608,7 @@ function storeSessionToken(token, persistent=true){
 function clearSessionToken(){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
   try{ sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY); }catch(_){}
+  clearCachedUser();
 }
 function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
 function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
@@ -764,7 +790,13 @@ function syncPendingVerificationWatch(pending){
 }
 
 function renderAuthState(){
-  const logged = Boolean(currentUser && getStoredSessionToken());
+  const sessionToken=getStoredSessionToken();
+  const logged = Boolean(currentUser && sessionToken);
+  if(logged){
+    let persistent=false;
+    try{ persistent=Boolean(localStorage.getItem(ITBMO_SESSION_KEY)); }catch(_){ }
+    storeCachedUser(currentUser,persistent);
+  }
   const registered = Boolean(logged && currentUser?.is_registered);
   const pending = Boolean(logged && currentUser?.registration_pending);
   const guest = Boolean(logged && !registered && !pending);
@@ -965,6 +997,21 @@ async function resetITBMOPassword(){
   finally{ setAuthBusy(false); }
 }
 
+function wantsMyTripsView(){
+  return String(new URLSearchParams(window.location.search).get('view') || '').trim().toLowerCase()==='my-trips';
+}
+function openRequestedMyTripsView(){
+  if(!wantsMyTripsView() || !currentUser || !getStoredSessionToken()) return false;
+  try{
+    const url=new URL(window.location.href);
+    url.searchParams.delete('view');
+    history.replaceState(null,'',url.pathname + (url.searchParams.toString()?`?${url.searchParams.toString()}`:'') + url.hash);
+  }catch(_){ }
+  setTimeout(()=>qs('#planner-my-trips')?.click(),80);
+  return true;
+}
+function waitITBMO(ms){ return new Promise(resolve=>setTimeout(resolve,ms)); }
+
 async function restoreITBMOSession(){
   const callback=getSupabaseCallback();
   if(callback.error){ authReady=true; currentUser=null; renderAuthState(); setAccountMessage(callback.error,'error'); clearAuthCallbackFromUrl(); return; }
@@ -975,14 +1022,53 @@ async function restoreITBMOSession(){
 
   const token=getStoredSessionToken();
   if(!token){ authReady=true; currentUser=null; renderAuthState(); return; }
-  try{
-    const {response,data}=await postUserAction({action:'session',session_token:token});
-    if(response.ok && data?.ok && data?.user){
-      currentUser=data.user;
-      storeSessionToken(token,Boolean(currentUser.is_registered));
-    }else{ clearSessionToken(); currentUser=null; }
-  }catch(err){ console.warn('ITBMO session restore unavailable:',err); currentUser=null; }
-  finally{ authReady=true; renderAuthState(); if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0); }
+
+  // Keep authenticated UI stable while the server validates the token.
+  // Transient API/Supabase failures must never behave like an explicit logout.
+  const cachedUser=getCachedUser();
+  if(cachedUser){
+    currentUser=cachedUser;
+    renderAuthState();
+  }
+
+  let lastError=null;
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      const {response,data}=await postUserAction({action:'session',session_token:token});
+      if(response.ok && data?.ok && data?.user){
+        currentUser=data.user;
+        storeSessionToken(token,Boolean(currentUser.is_registered));
+        authReady=true;
+        renderAuthState();
+        if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+        return;
+      }
+
+      if(response.status===401 || response.status===403){
+        clearSessionToken();
+        currentUser=null;
+        authReady=true;
+        renderAuthState();
+        return;
+      }
+
+      lastError=new Error(data?.error || `SESSION_HTTP_${response.status}`);
+      lastError.status=response.status;
+    }catch(err){
+      lastError=err;
+    }
+
+    if(attempt<2) await waitITBMO(attempt===0 ? 350 : 900);
+  }
+
+  // Preserve token and cached identity after transient infrastructure failures.
+  console.warn('ITBMO session validation temporarily unavailable:',lastError);
+  currentUser=cachedUser || currentUser || null;
+  authReady=true;
+  renderAuthState();
+  if(currentUser){
+    if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+  }
 }
 
 function clearPlannerUIForLogout(){
