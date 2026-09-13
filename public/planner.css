@@ -8667,52 +8667,141 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
 }
 
 /* =========================================================
-   ITBMO · PREMIUM PALETTE & CARD DEFINITION · 2026-09-12
-   Visual-only. Keeps every Planner and Workspace contract intact.
+   ITBMO · PREMIUM HIERARCHY V2 · 2026-09-12
+   Consolidated visual theme for Planner + embedded workspaces.
+   Visual-only: no planner/session/payment/partner logic changes.
 ========================================================= */
 :root{
+  --itbmo-blue:#087bfa;
+  --itbmo-teal:#0aa0a5;
   --itbmo-coral:#ff6b5e;
   --itbmo-gold:#f4b740;
   --itbmo-terracotta:#d96c4c;
   --itbmo-champagne:#fff4e8;
   --itbmo-slate:#52677d;
   --itbmo-navy:#0b2341;
-  --itbmo-premium-line:rgba(45,92,125,.18);
+  --itbmo-premium-line:rgba(45,92,125,.19);
+  --itbmo-premium-line-strong:rgba(45,92,125,.27);
+  --itbmo-blue-soft:#5d88b3;
+  --itbmo-teal-soft:#6b9fa2;
+  --itbmo-coral-soft:#e99084;
+  --itbmo-gold-soft:#d8b66f;
 }
 
-/* Planner stage hierarchy: remove the old strong-green accent and return to the ITBMO family. */
+/* Global Planner surface: calm, luminous and less saturated. */
+body{
+  background:
+    radial-gradient(circle at 7% 4%,rgba(8,123,250,.075),transparent 30rem),
+    radial-gradient(circle at 94% 18%,rgba(10,160,165,.055),transparent 34rem),
+    radial-gradient(circle at 78% 78%,rgba(255,107,94,.035),transparent 28rem),
+    linear-gradient(180deg,#fbfdff 0%,#f4f8fb 52%,#f9fbfc 100%)!important;
+}
+
+/* Planner hero / unauthenticated and authenticated entry state. */
+.planner-canvas-intro,
+.planner-builder-intro--compact{
+  border-color:var(--itbmo-premium-line)!important;
+  background:
+    radial-gradient(circle at 92% 8%,rgba(8,123,250,.08),transparent 17rem),
+    radial-gradient(circle at 8% 100%,rgba(255,244,232,.70),transparent 22rem),
+    linear-gradient(145deg,rgba(255,255,255,.94),rgba(242,249,252,.91) 68%,rgba(255,248,241,.72))!important;
+  box-shadow:0 24px 68px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.94)!important;
+}
+.planner-builder-intro--compact h1,
+.planner-builder-intro--compact p{color:var(--itbmo-navy)!important;text-shadow:none!important;}
+.planner-builder-intro--compact p{color:#587087!important;}
+.planner-canvas-intro__eyebrow{color:#497a9b!important;}
+.planner-canvas-intro h2 span{color:#4f809e!important;}
+
+/* Stage navigator: no green state; use attenuated blue/teal. */
+.planner-stage-nav{
+  border-color:rgba(45,92,125,.16)!important;
+  background:rgba(255,255,255,.80)!important;
+  box-shadow:0 14px 40px rgba(16,42,67,.065),inset 0 1px 0 rgba(255,255,255,.92)!important;
+}
+.planner-stage-nav__item b{
+  color:#477793!important;
+  background:linear-gradient(145deg,rgba(8,123,250,.075),rgba(10,160,165,.075))!important;
+  border:1px solid rgba(45,92,125,.09);
+}
+.planner-stage-nav__item.is-active b{
+  color:#fff!important;
+  background:linear-gradient(145deg,#537fa8,#679b9e)!important;
+  box-shadow:0 8px 20px rgba(52,96,126,.17)!important;
+}
+.planner-stage-nav__line{background:linear-gradient(90deg,rgba(8,123,250,.20),rgba(10,160,165,.14),rgba(16,24,40,.06))!important;}
+
+/* Planner cards: stronger boundaries, more air, subtle color hierarchy. */
 .planner-stage-card,
 .sidebar > .box{
   border-color:var(--itbmo-premium-line)!important;
   background:
-    radial-gradient(circle at 96% 3%,rgba(8,123,250,.035),transparent 20rem),
-    linear-gradient(145deg,rgba(255,255,255,.92),rgba(249,252,253,.88))!important;
-  box-shadow:0 22px 62px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.92)!important;
+    radial-gradient(circle at 96% 3%,rgba(8,123,250,.028),transparent 20rem),
+    linear-gradient(145deg,rgba(255,255,255,.94),rgba(249,252,253,.91))!important;
+  box-shadow:0 22px 62px rgba(16,42,67,.072),inset 0 1px 0 rgba(255,255,255,.95)!important;
 }
-.planner-stage-card::before{
-  background:linear-gradient(180deg,#087bfa 0%,#0aa0a5 58%,rgba(10,160,165,.04) 100%);
-}
-.planner-stage-card__number{
-  color:rgba(8,123,250,.11);
-}
+.planner-stage-card::before{background:linear-gradient(180deg,#678db0 0%,#74a3a6 58%,rgba(116,163,166,.05) 100%)!important;}
+.planner-stage-card__number{color:rgba(77,121,155,.10)!important;}
 .planner-stage-card__index{
-  background:linear-gradient(145deg,#087bfa 0%,#0aa0a5 100%);
-  box-shadow:0 10px 24px rgba(8,126,177,.18);
+  background:linear-gradient(145deg,#5d86ac 0%,#6e9c9f 100%)!important;
+  box-shadow:0 10px 24px rgba(62,100,128,.15)!important;
 }
-.planner-stage-card__eyebrow{
-  color:#087a9a;
-}
-
-/* A restrained warm accent differentiates preferences without turning the UI multicolor. */
-.planner-stage-card--preferences::before{
-  background:linear-gradient(180deg,#ff6b5e 0%,#f4b740 62%,rgba(244,183,64,.04) 100%);
-}
+.planner-stage-card__eyebrow{color:#4f7791!important;}
+.planner-stage-card--preferences::before{background:linear-gradient(180deg,#dd8b80 0%,#d7b46f 62%,rgba(216,182,111,.05) 100%)!important;}
 .planner-stage-card--preferences>.planner-stage-card__index{
-  background:linear-gradient(145deg,#e76555 0%,#efaa42 100%);
-  box-shadow:0 10px 24px rgba(217,108,76,.16);
+  background:linear-gradient(145deg,#d9867d 0%,#d5af6a 100%)!important;
+  box-shadow:0 10px 24px rgba(166,112,86,.14)!important;
 }
 
-/* Existing embedded Trip Workspace: stronger glass edges and softer differentiated gradients. */
+.planner-inline-guide,
+#account-box .planner-inline-guide--account{
+  border-color:rgba(66,105,135,.15)!important;
+  background:linear-gradient(135deg,rgba(239,247,252,.86),rgba(250,252,253,.94))!important;
+}
+.planner-inline-guide__icon,
+#account-box .planner-inline-guide__icon{
+  background:linear-gradient(145deg,#5d86ac,#6e9c9f)!important;
+  box-shadow:0 9px 22px rgba(62,100,128,.13)!important;
+}
+.planner-route-tip{background:linear-gradient(135deg,#f8fbfd,#fbfcfd)!important;border-color:rgba(45,92,125,.12)!important;}
+.planner-route-tip>span{color:#5f879f!important;}
+
+/* Core Planner CTAs: visible without shouting. */
+#start-planning.is-ready,
+.planner-auth-nav__btn--primary{
+  background:linear-gradient(108deg,#527fac 0%,#5f91a8 54%,#6d9fa0 100%)!important;
+  box-shadow:0 15px 34px rgba(48,92,123,.20),inset 0 1px 0 rgba(255,255,255,.22)!important;
+}
+#start-planning.is-ready{min-height:58px!important;}
+.planner-auth-nav__btn:hover:not(:disabled){border-color:rgba(76,119,151,.28)!important;box-shadow:0 9px 22px rgba(48,92,123,.08)!important;}
+.planner-auth-nav__btn--logout{color:#4b748f!important;border-color:rgba(76,119,151,.20)!important;background:#f5f9fc!important;}
+
+/* Post-generation Planner workspace. */
+#planner-post-generation.planner-post-generation.is-ready{
+  border-color:var(--itbmo-premium-line)!important;
+  background:
+    radial-gradient(circle at 96% 0%,rgba(8,123,250,.045),transparent 25rem),
+    linear-gradient(180deg,rgba(255,255,255,.96),rgba(249,252,253,.94))!important;
+}
+#planner-post-generation .new-planning-cta.is-ready{
+  border-color:rgba(82,103,125,.15)!important;
+  background:linear-gradient(135deg,#fafcfd,#f5f8fa)!important;
+}
+#planner-post-generation .new-planning-icon{color:#52758d!important;background:linear-gradient(145deg,#edf5fa,#eef7f6)!important;}
+#planner-post-generation .new-planning-button{color:#4d7188!important;border-color:rgba(82,103,125,.24)!important;background:rgba(255,255,255,.92)!important;}
+#planner-post-generation .new-planning-button:hover{color:#365b74!important;background:#f9fbfc!important;border-color:rgba(82,103,125,.36)!important;}
+#planner-post-generation .toolbar #btn-csv{color:#4d7188!important;background:linear-gradient(135deg,#fff,#f3f8fa)!important;border-color:rgba(82,103,125,.17)!important;}
+#planner-post-generation .toolbar #btn-csv::before{color:#52758d!important;background:#edf5fa!important;}
+
+/* Embedded “Todas las ciudades” workspace. */
+.itinerary-workspace-overview{
+  background:
+    radial-gradient(circle at 8% 0%,rgba(8,123,250,.045),transparent 26rem),
+    radial-gradient(circle at 92% 15%,rgba(255,107,94,.028),transparent 22rem),
+    linear-gradient(180deg,rgba(250,253,255,.95),rgba(245,249,251,.93));
+}
+.itinerary-workspace-kicker{color:#4c7894!important;border-color:rgba(76,120,148,.15)!important;background:rgba(255,255,255,.76)!important;}
+.itinerary-workspace-summary{background:linear-gradient(135deg,rgba(8,123,250,.07),rgba(10,160,165,.065))!important;color:#52758d!important;}
 .itinerary-workspace-city-card,
 .itinerary-workspace-trip-tools,
 .itinerary-focus-day-card,
@@ -8723,38 +8812,41 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
 }
 .itinerary-workspace-city-card{
   background:
-    radial-gradient(circle at 92% 6%,rgba(10,160,165,.08),transparent 34%),
-    linear-gradient(145deg,rgba(255,255,255,.96),rgba(245,251,253,.92));
-  box-shadow:0 18px 52px rgba(22,61,88,.095),inset 0 1px 0 rgba(255,255,255,.94);
+    radial-gradient(circle at 94% 4%,rgba(8,123,250,.05),transparent 32%),
+    linear-gradient(145deg,rgba(255,255,255,.96),rgba(247,251,253,.93))!important;
+  box-shadow:0 18px 52px rgba(22,61,88,.085),inset 0 1px 0 rgba(255,255,255,.95)!important;
 }
-.itinerary-workspace-city-card__number{
-  background:linear-gradient(135deg,#087bfa 0%,#0aa0a5 100%);
-}
+.itinerary-workspace-city-card:hover{border-color:var(--itbmo-premium-line-strong)!important;box-shadow:0 24px 58px rgba(22,61,88,.115)!important;}
+.itinerary-workspace-city-card::before{background:radial-gradient(circle,rgba(10,160,165,.07),transparent 68%)!important;}
+.itinerary-workspace-city-card__number{background:linear-gradient(135deg,#5d86ac 0%,#6e9c9f 100%)!important;box-shadow:0 10px 24px rgba(62,100,128,.15)!important;}
+.itinerary-workspace-city-card__cta{color:#4f7891!important;border-top-color:rgba(45,92,125,.11)!important;}
+.itinerary-workspace-city-card__cta i{background:linear-gradient(145deg,#eef5fa,#eef7f6)!important;color:#52758d;}
 .itinerary-workspace-trip-tools{
-  background:
-    radial-gradient(circle at 96% 10%,rgba(255,107,94,.055),transparent 28%),
-    linear-gradient(135deg,rgba(255,255,255,.80),rgba(247,252,253,.76));
-  box-shadow:0 14px 36px rgba(20,62,91,.06),inset 0 1px 0 rgba(255,255,255,.92);
+  background:linear-gradient(135deg,rgba(255,255,255,.84),rgba(247,250,252,.80))!important;
+  box-shadow:0 14px 36px rgba(20,62,91,.055),inset 0 1px 0 rgba(255,255,255,.93)!important;
 }
-.itinerary-focus-day-card{
-  box-shadow:0 18px 54px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.92)!important;
-}
-.itinerary-focus-activity-card,
-.itinerary-focus-activity__card{
-  background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(249,252,253,.90))!important;
-}
+.itinerary-workspace-trip-tools__icon{background:linear-gradient(145deg,#edf5fa,#f5f2ed)!important;color:#587d95!important;}
 
-/* Home / trip cards: clearer boundaries while preserving the Apple-like glass language. */
+/* Embedded Itinerary workspace. */
+.itinerary-city-focus-topbar,
+.itinerary-city-focus-controls{border-color:rgba(45,92,125,.11)!important;background:rgba(248,251,253,.88)!important;backdrop-filter:blur(16px);}
+.itinerary-city-focus-identity span{color:#527c94!important;}
+.itinerary-focus-day-card{background:linear-gradient(145deg,rgba(255,255,255,.97),rgba(249,252,253,.94))!important;box-shadow:0 18px 54px rgba(16,42,67,.072),inset 0 1px 0 rgba(255,255,255,.94)!important;}
+.itinerary-focus-activity-card,
+.itinerary-focus-activity__card{background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(249,252,253,.92))!important;box-shadow:0 10px 28px rgba(16,42,67,.045)!important;}
+.itinerary-focus-prepare-categories span{background:linear-gradient(145deg,#fbfdfe,#f4f8fa)!important;color:#52677d!important;}
+
+/* Home / My Trips cards: clear but understated. */
 .journey-home-card--new,
 .journey-trip-card{
-  border-color:var(--itbmo-premium-line);
-  background:linear-gradient(145deg,rgba(255,255,255,.88),rgba(248,252,253,.84));
-  box-shadow:0 18px 50px rgba(16,42,67,.07),inset 0 1px 0 rgba(255,255,255,.92);
+  border-color:var(--itbmo-premium-line)!important;
+  background:linear-gradient(145deg,rgba(255,255,255,.90),rgba(248,251,253,.87))!important;
+  box-shadow:0 18px 50px rgba(16,42,67,.065),inset 0 1px 0 rgba(255,255,255,.93)!important;
 }
 .journey-home-card--resume{
   background:
-    radial-gradient(circle at 88% 8%,rgba(255,255,255,.16),transparent 13rem),
-    linear-gradient(145deg,#0867a8 0%,#087fba 46%,#0a9da6 100%);
+    radial-gradient(circle at 88% 8%,rgba(255,255,255,.17),transparent 13rem),
+    linear-gradient(145deg,#567fa6 0%,#648fa5 48%,#709da0 100%)!important;
 }
 
 @media(prefers-reduced-motion:reduce){
