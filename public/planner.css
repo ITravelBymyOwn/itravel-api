@@ -8667,188 +8667,196 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
 }
 
 /* =========================================================
-   ITBMO · PREMIUM HIERARCHY V2 · 2026-09-12
-   Consolidated visual theme for Planner + embedded workspaces.
+   ITBMO · PREMIUM FLOW V3 · 2026-09-12
+   Color rhythm inspired by Home: blue / cyan / teal / indigo /
+   warm orange / amber. Glass-first, never flat or neon.
    Visual-only: no planner/session/payment/partner logic changes.
 ========================================================= */
 :root{
-  --itbmo-blue:#087bfa;
-  --itbmo-teal:#0aa0a5;
-  --itbmo-coral:#ff6b5e;
-  --itbmo-gold:#f4b740;
-  --itbmo-terracotta:#d96c4c;
-  --itbmo-champagne:#fff4e8;
-  --itbmo-slate:#52677d;
-  --itbmo-navy:#0b2341;
-  --itbmo-premium-line:rgba(45,92,125,.19);
-  --itbmo-premium-line-strong:rgba(45,92,125,.27);
-  --itbmo-blue-soft:#5d88b3;
-  --itbmo-teal-soft:#6b9fa2;
-  --itbmo-coral-soft:#e99084;
-  --itbmo-gold-soft:#d8b66f;
+  --itbmo-blue:#087BFA;
+  --itbmo-cyan:#35BFD1;
+  --itbmo-teal:#0AA0A5;
+  --itbmo-indigo:#6D78EE;
+  --itbmo-orange:#F17C4A;
+  --itbmo-gold:#F4B740;
+  --itbmo-terracotta:#D96C4C;
+  --itbmo-champagne:#FFF4E8;
+  --itbmo-slate:#52677D;
+  --itbmo-navy:#0B2341;
+  --itbmo-line:rgba(32,76,108,.18);
+  --itbmo-line-strong:rgba(32,76,108,.29);
+  --itbmo-glass:rgba(255,255,255,.82);
+  --itbmo-shadow:0 20px 58px rgba(16,56,88,.08);
+  --itbmo-shadow-up:0 28px 74px rgba(16,56,88,.12);
 }
 
-/* Global Planner surface: calm, luminous and less saturated. */
+/* Canvas: luminous, calm, with several quiet color zones instead of one green wash. */
 body{
   background:
-    radial-gradient(circle at 7% 4%,rgba(8,123,250,.075),transparent 30rem),
-    radial-gradient(circle at 94% 18%,rgba(10,160,165,.055),transparent 34rem),
-    radial-gradient(circle at 78% 78%,rgba(255,107,94,.035),transparent 28rem),
-    linear-gradient(180deg,#fbfdff 0%,#f4f8fb 52%,#f9fbfc 100%)!important;
+    radial-gradient(circle at 8% 2%,rgba(8,123,250,.085),transparent 30rem),
+    radial-gradient(circle at 88% 10%,rgba(109,120,238,.052),transparent 31rem),
+    radial-gradient(circle at 92% 60%,rgba(241,124,74,.040),transparent 30rem),
+    radial-gradient(circle at 18% 86%,rgba(53,191,209,.045),transparent 31rem),
+    linear-gradient(180deg,#fbfdff 0%,#f4f9fc 48%,#fafbfd 100%)!important;
 }
 
-/* Planner hero / unauthenticated and authenticated entry state. */
+/* Entry / authentication surfaces. */
 .planner-canvas-intro,
 .planner-builder-intro--compact{
-  border-color:var(--itbmo-premium-line)!important;
+  border-color:var(--itbmo-line)!important;
   background:
-    radial-gradient(circle at 92% 8%,rgba(8,123,250,.08),transparent 17rem),
-    radial-gradient(circle at 8% 100%,rgba(255,244,232,.70),transparent 22rem),
-    linear-gradient(145deg,rgba(255,255,255,.94),rgba(242,249,252,.91) 68%,rgba(255,248,241,.72))!important;
-  box-shadow:0 24px 68px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.94)!important;
+    radial-gradient(circle at 94% 0%,rgba(109,120,238,.075),transparent 17rem),
+    radial-gradient(circle at 5% 100%,rgba(53,191,209,.065),transparent 20rem),
+    linear-gradient(145deg,rgba(255,255,255,.95),rgba(246,251,254,.90) 60%,rgba(255,248,240,.66))!important;
+  box-shadow:0 26px 74px rgba(16,56,88,.075),inset 0 1px 0 rgba(255,255,255,.98)!important;
 }
-.planner-builder-intro--compact h1,
-.planner-builder-intro--compact p{color:var(--itbmo-navy)!important;text-shadow:none!important;}
+.planner-builder-intro--compact h1,.planner-builder-intro--compact p{color:var(--itbmo-navy)!important;text-shadow:none!important;}
 .planner-builder-intro--compact p{color:#587087!important;}
-.planner-canvas-intro__eyebrow{color:#497a9b!important;}
-.planner-canvas-intro h2 span{color:#4f809e!important;}
+.planner-canvas-intro__eyebrow{color:#47799b!important;}
+.planner-canvas-intro h2 span{color:#536fd2!important;}
 
-/* Stage navigator: no green state; use attenuated blue/teal. */
+/* Progress navigator: each stage gets a subtle identity; no saturated green. */
 .planner-stage-nav{
-  border-color:rgba(45,92,125,.16)!important;
-  background:rgba(255,255,255,.80)!important;
-  box-shadow:0 14px 40px rgba(16,42,67,.065),inset 0 1px 0 rgba(255,255,255,.92)!important;
+  border-color:rgba(32,76,108,.15)!important;
+  background:rgba(255,255,255,.82)!important;
+  box-shadow:0 15px 44px rgba(16,56,88,.06),inset 0 1px 0 rgba(255,255,255,.96)!important;
+  backdrop-filter:blur(18px) saturate(120%);
 }
-.planner-stage-nav__item b{
-  color:#477793!important;
-  background:linear-gradient(145deg,rgba(8,123,250,.075),rgba(10,160,165,.075))!important;
-  border:1px solid rgba(45,92,125,.09);
-}
-.planner-stage-nav__item.is-active b{
-  color:#fff!important;
-  background:linear-gradient(145deg,#537fa8,#679b9e)!important;
-  box-shadow:0 8px 20px rgba(52,96,126,.17)!important;
-}
-.planner-stage-nav__line{background:linear-gradient(90deg,rgba(8,123,250,.20),rgba(10,160,165,.14),rgba(16,24,40,.06))!important;}
+.planner-stage-nav__item b{color:#4e7189!important;border:1px solid rgba(32,76,108,.08);background:linear-gradient(145deg,rgba(255,255,255,.92),rgba(239,247,252,.86))!important;}
+.planner-stage-nav__item:nth-child(1) b{background:linear-gradient(145deg,rgba(8,123,250,.10),rgba(109,120,238,.075))!important;color:#4b66a8!important;}
+.planner-stage-nav__item:nth-child(2) b{background:linear-gradient(145deg,rgba(53,191,209,.11),rgba(8,123,250,.07))!important;color:#32758a!important;}
+.planner-stage-nav__item:nth-child(3) b{background:linear-gradient(145deg,rgba(241,124,74,.10),rgba(244,183,64,.12))!important;color:#9d684e!important;}
+.planner-stage-nav__item.is-active b{color:#fff!important;background:linear-gradient(135deg,#087BFA 0%,#258FD9 47%,#0AA0A5 100%)!important;box-shadow:0 9px 24px rgba(8,115,184,.19)!important;}
+.planner-stage-nav__line{background:linear-gradient(90deg,rgba(8,123,250,.28),rgba(109,120,238,.20),rgba(241,124,74,.16),rgba(244,183,64,.10))!important;}
 
-/* Planner cards: stronger boundaries, more air, subtle color hierarchy. */
-.planner-stage-card,
-.sidebar > .box{
-  border-color:var(--itbmo-premium-line)!important;
-  background:
-    radial-gradient(circle at 96% 3%,rgba(8,123,250,.028),transparent 20rem),
-    linear-gradient(145deg,rgba(255,255,255,.94),rgba(249,252,253,.91))!important;
-  box-shadow:0 22px 62px rgba(16,42,67,.072),inset 0 1px 0 rgba(255,255,255,.95)!important;
+/* Planner cards: same family, different accents. */
+.planner-stage-card,.sidebar > .box{
+  border-color:var(--itbmo-line)!important;
+  background:linear-gradient(145deg,rgba(255,255,255,.95),rgba(248,252,254,.91))!important;
+  box-shadow:var(--itbmo-shadow),inset 0 1px 0 rgba(255,255,255,.97)!important;
 }
-.planner-stage-card::before{background:linear-gradient(180deg,#678db0 0%,#74a3a6 58%,rgba(116,163,166,.05) 100%)!important;}
-.planner-stage-card__number{color:rgba(77,121,155,.10)!important;}
-.planner-stage-card__index{
-  background:linear-gradient(145deg,#5d86ac 0%,#6e9c9f 100%)!important;
-  box-shadow:0 10px 24px rgba(62,100,128,.15)!important;
-}
-.planner-stage-card__eyebrow{color:#4f7791!important;}
-.planner-stage-card--preferences::before{background:linear-gradient(180deg,#dd8b80 0%,#d7b46f 62%,rgba(216,182,111,.05) 100%)!important;}
-.planner-stage-card--preferences>.planner-stage-card__index{
-  background:linear-gradient(145deg,#d9867d 0%,#d5af6a 100%)!important;
-  box-shadow:0 10px 24px rgba(166,112,86,.14)!important;
-}
+.planner-stage-card::before{width:3px!important;opacity:.92;}
+.planner-stage-card__number{color:rgba(33,78,110,.085)!important;}
+.planner-stage-card__eyebrow{color:#53748d!important;}
 
-.planner-inline-guide,
-#account-box .planner-inline-guide--account{
-  border-color:rgba(66,105,135,.15)!important;
-  background:linear-gradient(135deg,rgba(239,247,252,.86),rgba(250,252,253,.94))!important;
-}
-.planner-inline-guide__icon,
-#account-box .planner-inline-guide__icon{
-  background:linear-gradient(145deg,#5d86ac,#6e9c9f)!important;
-  box-shadow:0 9px 22px rgba(62,100,128,.13)!important;
-}
-.planner-route-tip{background:linear-gradient(135deg,#f8fbfd,#fbfcfd)!important;border-color:rgba(45,92,125,.12)!important;}
-.planner-route-tip>span{color:#5f879f!important;}
+/* 01 · Viajeros — blue → indigo. */
+.planner-stage-card--travelers::before{background:linear-gradient(180deg,#087BFA,#6D78EE 72%,rgba(109,120,238,.06))!important;}
+.planner-stage-card--travelers>.planner-stage-card__head .planner-stage-card__index,
+.planner-stage-card--travelers>.planner-stage-card__index{background:linear-gradient(135deg,#1A7FDF,#6D78EE)!important;box-shadow:0 10px 25px rgba(74,100,195,.18)!important;}
 
-/* Core Planner CTAs: visible without shouting. */
-#start-planning.is-ready,
-.planner-auth-nav__btn--primary{
-  background:linear-gradient(108deg,#527fac 0%,#5f91a8 54%,#6d9fa0 100%)!important;
-  box-shadow:0 15px 34px rgba(48,92,123,.20),inset 0 1px 0 rgba(255,255,255,.22)!important;
-}
-#start-planning.is-ready{min-height:58px!important;}
-.planner-auth-nav__btn:hover:not(:disabled){border-color:rgba(76,119,151,.28)!important;box-shadow:0 9px 22px rgba(48,92,123,.08)!important;}
-.planner-auth-nav__btn--logout{color:#4b748f!important;border-color:rgba(76,119,151,.20)!important;background:#f5f9fc!important;}
+/* 02 · Destinos — cyan → blue. */
+.planner-stage-card--destinations::before{background:linear-gradient(180deg,#35BFD1,#087BFA 72%,rgba(8,123,250,.05))!important;}
+.planner-stage-card--destinations>.planner-stage-card__head .planner-stage-card__index,
+.planner-stage-card--destinations>.planner-stage-card__index{background:linear-gradient(135deg,#2EB4C7,#258FD9)!important;box-shadow:0 10px 25px rgba(27,133,175,.17)!important;}
 
-/* Post-generation Planner workspace. */
+/* 03 · Preferencias — warm orange → amber, intentionally restrained. */
+.planner-stage-card--preferences::before{background:linear-gradient(180deg,#F17C4A,#F4B740 72%,rgba(244,183,64,.06))!important;}
+.planner-stage-card--preferences>.planner-stage-card__index{background:linear-gradient(135deg,#E9855E,#E5B468)!important;box-shadow:0 10px 25px rgba(179,123,70,.15)!important;}
+
+/* 04 · Crear — brand conversion gradient. */
+.planner-stage-card--create::before{background:linear-gradient(180deg,#6D78EE,#087BFA 48%,#35BFD1 100%)!important;}
+.planner-stage-card--create>.planner-stage-card__head .planner-stage-card__index{background:linear-gradient(135deg,#6575DF,#087BFA 54%,#23AFC3)!important;box-shadow:0 10px 25px rgba(50,100,183,.19)!important;}
+
+/* Account / guide elements. */
+.planner-inline-guide,#account-box .planner-inline-guide--account{border-color:rgba(52,91,122,.14)!important;background:linear-gradient(135deg,rgba(239,247,255,.86),rgba(244,242,255,.74) 54%,rgba(255,249,241,.72))!important;}
+.planner-inline-guide__icon,#account-box .planner-inline-guide__icon{background:linear-gradient(145deg,#087BFA,#6D78EE)!important;box-shadow:0 9px 22px rgba(67,97,185,.15)!important;}
+.planner-route-tip{background:linear-gradient(135deg,#f8fbfe,#f4f7ff)!important;border-color:rgba(65,88,145,.12)!important;}
+.planner-route-tip>span{color:#6478b2!important;}
+
+/* Primary product CTA: blue/cyan. Warm CTAs are reserved for preparation/commercial actions. */
+#start-planning.is-ready,.planner-auth-nav__btn--primary{
+  background:linear-gradient(112deg,#087BFA 0%,#258FD9 46%,#13A9B5 100%)!important;
+  box-shadow:0 16px 38px rgba(8,105,178,.22),inset 0 1px 0 rgba(255,255,255,.24)!important;
+}
+#start-planning.is-ready{min-height:59px!important;}
+.planner-auth-nav__btn:hover:not(:disabled){border-color:rgba(65,96,132,.26)!important;box-shadow:0 9px 22px rgba(35,77,110,.08)!important;}
+.planner-auth-nav__btn--logout{color:#52677D!important;border-color:rgba(82,103,125,.18)!important;background:linear-gradient(145deg,#fbfdfe,#f2f6f9)!important;}
+
+/* Post-generation frame. */
 #planner-post-generation.planner-post-generation.is-ready{
-  border-color:var(--itbmo-premium-line)!important;
+  border-color:var(--itbmo-line)!important;
   background:
-    radial-gradient(circle at 96% 0%,rgba(8,123,250,.045),transparent 25rem),
-    linear-gradient(180deg,rgba(255,255,255,.96),rgba(249,252,253,.94))!important;
+    radial-gradient(circle at 95% 3%,rgba(109,120,238,.055),transparent 24rem),
+    radial-gradient(circle at 8% 98%,rgba(53,191,209,.05),transparent 25rem),
+    linear-gradient(180deg,rgba(255,255,255,.96),rgba(248,251,254,.93))!important;
 }
-#planner-post-generation .new-planning-cta.is-ready{
-  border-color:rgba(82,103,125,.15)!important;
-  background:linear-gradient(135deg,#fafcfd,#f5f8fa)!important;
-}
-#planner-post-generation .new-planning-icon{color:#52758d!important;background:linear-gradient(145deg,#edf5fa,#eef7f6)!important;}
-#planner-post-generation .new-planning-button{color:#4d7188!important;border-color:rgba(82,103,125,.24)!important;background:rgba(255,255,255,.92)!important;}
-#planner-post-generation .new-planning-button:hover{color:#365b74!important;background:#f9fbfc!important;border-color:rgba(82,103,125,.36)!important;}
-#planner-post-generation .toolbar #btn-csv{color:#4d7188!important;background:linear-gradient(135deg,#fff,#f3f8fa)!important;border-color:rgba(82,103,125,.17)!important;}
-#planner-post-generation .toolbar #btn-csv::before{color:#52758d!important;background:#edf5fa!important;}
+#planner-post-generation .new-planning-cta.is-ready{border-color:rgba(82,103,125,.15)!important;background:linear-gradient(135deg,#fbfdfe,#f4f7fb)!important;}
+#planner-post-generation .new-planning-icon{color:#536fd2!important;background:linear-gradient(145deg,#edf5ff,#f0efff)!important;}
+#planner-post-generation .new-planning-button{color:#4e6480!important;border-color:rgba(82,103,125,.22)!important;background:rgba(255,255,255,.94)!important;}
+#planner-post-generation .new-planning-button:hover{color:#354f70!important;background:#f8fbfd!important;border-color:rgba(82,103,125,.34)!important;}
+#planner-post-generation .toolbar #btn-csv{color:#4d7188!important;background:linear-gradient(135deg,#fff,#f1f7fb)!important;border-color:rgba(82,103,125,.17)!important;}
+#planner-post-generation .toolbar #btn-csv::before{color:#087BFA!important;background:#edf6ff!important;}
 
-/* Embedded “Todas las ciudades” workspace. */
+/* =========================================================
+   Workspace 1 · TODAS LAS CIUDADES
+   City cards intentionally rotate through three color families.
+========================================================= */
 .itinerary-workspace-overview{
   background:
-    radial-gradient(circle at 8% 0%,rgba(8,123,250,.045),transparent 26rem),
-    radial-gradient(circle at 92% 15%,rgba(255,107,94,.028),transparent 22rem),
-    linear-gradient(180deg,rgba(250,253,255,.95),rgba(245,249,251,.93));
+    radial-gradient(circle at 4% 0%,rgba(8,123,250,.065),transparent 25rem),
+    radial-gradient(circle at 95% 18%,rgba(109,120,238,.045),transparent 23rem),
+    radial-gradient(circle at 68% 100%,rgba(241,124,74,.035),transparent 22rem),
+    linear-gradient(180deg,rgba(250,253,255,.96),rgba(245,249,252,.94));
 }
-.itinerary-workspace-kicker{color:#4c7894!important;border-color:rgba(76,120,148,.15)!important;background:rgba(255,255,255,.76)!important;}
-.itinerary-workspace-summary{background:linear-gradient(135deg,rgba(8,123,250,.07),rgba(10,160,165,.065))!important;color:#52758d!important;}
-.itinerary-workspace-city-card,
-.itinerary-workspace-trip-tools,
-.itinerary-focus-day-card,
-.itinerary-focus-activity-card,
-.itinerary-focus-activity__card,
-.itinerary-focus-prepare-categories span{
-  border-color:var(--itbmo-premium-line)!important;
-}
-.itinerary-workspace-city-card{
-  background:
-    radial-gradient(circle at 94% 4%,rgba(8,123,250,.05),transparent 32%),
-    linear-gradient(145deg,rgba(255,255,255,.96),rgba(247,251,253,.93))!important;
-  box-shadow:0 18px 52px rgba(22,61,88,.085),inset 0 1px 0 rgba(255,255,255,.95)!important;
-}
-.itinerary-workspace-city-card:hover{border-color:var(--itbmo-premium-line-strong)!important;box-shadow:0 24px 58px rgba(22,61,88,.115)!important;}
-.itinerary-workspace-city-card::before{background:radial-gradient(circle,rgba(10,160,165,.07),transparent 68%)!important;}
-.itinerary-workspace-city-card__number{background:linear-gradient(135deg,#5d86ac 0%,#6e9c9f 100%)!important;box-shadow:0 10px 24px rgba(62,100,128,.15)!important;}
-.itinerary-workspace-city-card__cta{color:#4f7891!important;border-top-color:rgba(45,92,125,.11)!important;}
-.itinerary-workspace-city-card__cta i{background:linear-gradient(145deg,#eef5fa,#eef7f6)!important;color:#52758d;}
-.itinerary-workspace-trip-tools{
-  background:linear-gradient(135deg,rgba(255,255,255,.84),rgba(247,250,252,.80))!important;
-  box-shadow:0 14px 36px rgba(20,62,91,.055),inset 0 1px 0 rgba(255,255,255,.93)!important;
-}
-.itinerary-workspace-trip-tools__icon{background:linear-gradient(145deg,#edf5fa,#f5f2ed)!important;color:#587d95!important;}
+.itinerary-workspace-kicker{color:#4d6fb0!important;border-color:rgba(109,120,238,.15)!important;background:linear-gradient(145deg,rgba(255,255,255,.83),rgba(241,242,255,.70))!important;}
+.itinerary-workspace-summary{background:linear-gradient(135deg,rgba(8,123,250,.075),rgba(109,120,238,.055),rgba(53,191,209,.055))!important;color:#536d86!important;}
+.itinerary-workspace-city-card,.itinerary-workspace-trip-tools,.itinerary-focus-day-card,.itinerary-focus-activity-card,.itinerary-focus-activity__card,.itinerary-focus-prepare-categories span{border-color:var(--itbmo-line)!important;}
+.itinerary-workspace-city-card{box-shadow:0 19px 54px rgba(20,59,90,.085),inset 0 1px 0 rgba(255,255,255,.96)!important;}
+.itinerary-workspace-city-card:hover{border-color:var(--itbmo-line-strong)!important;box-shadow:var(--itbmo-shadow-up),inset 0 1px 0 rgba(255,255,255,.98)!important;}
 
-/* Embedded Itinerary workspace. */
-.itinerary-city-focus-topbar,
-.itinerary-city-focus-controls{border-color:rgba(45,92,125,.11)!important;background:rgba(248,251,253,.88)!important;backdrop-filter:blur(16px);}
-.itinerary-city-focus-identity span{color:#527c94!important;}
-.itinerary-focus-day-card{background:linear-gradient(145deg,rgba(255,255,255,.97),rgba(249,252,253,.94))!important;box-shadow:0 18px 54px rgba(16,42,67,.072),inset 0 1px 0 rgba(255,255,255,.94)!important;}
-.itinerary-focus-activity-card,
-.itinerary-focus-activity__card{background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(249,252,253,.92))!important;box-shadow:0 10px 28px rgba(16,42,67,.045)!important;}
-.itinerary-focus-prepare-categories span{background:linear-gradient(145deg,#fbfdfe,#f4f8fa)!important;color:#52677d!important;}
+/* City 1 · blue/cyan */
+.itinerary-workspace-city-card:nth-child(3n+1){background:radial-gradient(circle at 94% 5%,rgba(53,191,209,.105),transparent 34%),linear-gradient(145deg,rgba(255,255,255,.97),rgba(239,248,255,.91))!important;}
+.itinerary-workspace-city-card:nth-child(3n+1)::before{background:radial-gradient(circle,rgba(8,123,250,.10),transparent 68%)!important;}
+.itinerary-workspace-city-card:nth-child(3n+1) .itinerary-workspace-city-card__number{background:linear-gradient(135deg,#087BFA,#35BFD1)!important;box-shadow:0 10px 24px rgba(8,123,200,.18)!important;}
+.itinerary-workspace-city-card:nth-child(3n+1) .itinerary-workspace-city-card__cta{color:#197C9D!important;}
+.itinerary-workspace-city-card:nth-child(3n+1) .itinerary-workspace-city-card__cta i{background:linear-gradient(145deg,#eaf7ff,#e8fbfb)!important;color:#187f9f!important;}
 
-/* Home / My Trips cards: clear but understated. */
-.journey-home-card--new,
-.journey-trip-card{
-  border-color:var(--itbmo-premium-line)!important;
-  background:linear-gradient(145deg,rgba(255,255,255,.90),rgba(248,251,253,.87))!important;
-  box-shadow:0 18px 50px rgba(16,42,67,.065),inset 0 1px 0 rgba(255,255,255,.93)!important;
-}
-.journey-home-card--resume{
-  background:
-    radial-gradient(circle at 88% 8%,rgba(255,255,255,.17),transparent 13rem),
-    linear-gradient(145deg,#567fa6 0%,#648fa5 48%,#709da0 100%)!important;
-}
+/* City 2 · indigo/blue */
+.itinerary-workspace-city-card:nth-child(3n+2){background:radial-gradient(circle at 94% 5%,rgba(109,120,238,.10),transparent 34%),linear-gradient(145deg,rgba(255,255,255,.97),rgba(244,244,255,.91))!important;}
+.itinerary-workspace-city-card:nth-child(3n+2)::before{background:radial-gradient(circle,rgba(109,120,238,.10),transparent 68%)!important;}
+.itinerary-workspace-city-card:nth-child(3n+2) .itinerary-workspace-city-card__number{background:linear-gradient(135deg,#6D78EE,#3F83E6)!important;box-shadow:0 10px 24px rgba(83,104,213,.18)!important;}
+.itinerary-workspace-city-card:nth-child(3n+2) .itinerary-workspace-city-card__cta{color:#5969BC!important;}
+.itinerary-workspace-city-card:nth-child(3n+2) .itinerary-workspace-city-card__cta i{background:linear-gradient(145deg,#f0f0ff,#edf4ff)!important;color:#5C6EC4!important;}
+
+/* City 3 · orange/amber */
+.itinerary-workspace-city-card:nth-child(3n){background:radial-gradient(circle at 94% 5%,rgba(241,124,74,.10),transparent 34%),linear-gradient(145deg,rgba(255,255,255,.97),rgba(255,248,239,.91))!important;}
+.itinerary-workspace-city-card:nth-child(3n)::before{background:radial-gradient(circle,rgba(244,183,64,.10),transparent 68%)!important;}
+.itinerary-workspace-city-card:nth-child(3n) .itinerary-workspace-city-card__number{background:linear-gradient(135deg,#F17C4A,#E3AE61)!important;box-shadow:0 10px 24px rgba(190,123,68,.16)!important;}
+.itinerary-workspace-city-card:nth-child(3n) .itinerary-workspace-city-card__cta{color:#9B664E!important;}
+.itinerary-workspace-city-card:nth-child(3n) .itinerary-workspace-city-card__cta i{background:linear-gradient(145deg,#fff4ec,#fff7de)!important;color:#A5694D!important;}
+.itinerary-workspace-city-card__cta{border-top-color:rgba(32,76,108,.10)!important;}
+
+.itinerary-workspace-trip-tools{background:linear-gradient(135deg,rgba(255,255,255,.86),rgba(244,248,255,.82) 54%,rgba(255,248,239,.70))!important;box-shadow:0 14px 38px rgba(20,62,91,.055),inset 0 1px 0 rgba(255,255,255,.94)!important;}
+.itinerary-workspace-trip-tools__icon{background:linear-gradient(145deg,#eef5ff,#f1efff)!important;color:#5d6fc4!important;}
+
+/* =========================================================
+   Workspace 2 · ITINERARIO
+   Calm content canvas; color is concentrated in navigation and day identity.
+========================================================= */
+.itinerary-city-focus-topbar,.itinerary-city-focus-controls{border-color:rgba(32,76,108,.12)!important;background:rgba(249,252,254,.86)!important;backdrop-filter:blur(18px) saturate(120%);box-shadow:0 10px 32px rgba(16,56,88,.035);}
+.itinerary-city-focus-identity span{color:#5870b5!important;}
+.itinerary-focus-day-card{background:linear-gradient(145deg,rgba(255,255,255,.98),rgba(248,251,254,.94))!important;box-shadow:0 20px 58px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.96)!important;}
+.itinerary-focus-day-head{background:linear-gradient(90deg,rgba(8,123,250,.055),rgba(109,120,238,.035),rgba(241,124,74,.025))!important;border-bottom-color:rgba(32,76,108,.10)!important;}
+.itinerary-focus-day-btn{border-color:rgba(32,76,108,.11)!important;background:rgba(255,255,255,.78)!important;color:#5d7184!important;}
+.itinerary-focus-day-btn:nth-child(4n+1).active{background:linear-gradient(135deg,#087BFA,#35BFD1)!important;box-shadow:0 8px 20px rgba(8,123,200,.17)!important;}
+.itinerary-focus-day-btn:nth-child(4n+2).active{background:linear-gradient(135deg,#6D78EE,#3F83E6)!important;box-shadow:0 8px 20px rgba(83,104,213,.17)!important;}
+.itinerary-focus-day-btn:nth-child(4n+3).active{background:linear-gradient(135deg,#2BAFC1,#4C8FD5)!important;box-shadow:0 8px 20px rgba(39,136,178,.16)!important;}
+.itinerary-focus-day-btn:nth-child(4n).active{background:linear-gradient(135deg,#E9855E,#E2B061)!important;box-shadow:0 8px 20px rgba(181,124,73,.15)!important;}
+.itinerary-focus-day-btn.active{color:#fff!important;border-color:transparent!important;}
+.itinerary-focus-activity-card,.itinerary-focus-activity__card{background:linear-gradient(145deg,rgba(255,255,255,.97),rgba(248,251,253,.93))!important;box-shadow:0 11px 30px rgba(16,42,67,.047)!important;}
+.itinerary-focus-prepare-categories{gap:.65rem!important;}
+.itinerary-focus-prepare-categories span{background:linear-gradient(145deg,#fbfdff,#f2f6fb)!important;color:#52677D!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.95);}
+.itinerary-focus-prepare-categories span:nth-child(3n+1){background:linear-gradient(145deg,#eef8ff,#eff3ff)!important;color:#4f69a9!important;}
+.itinerary-focus-prepare-categories span:nth-child(3n+2){background:linear-gradient(145deg,#edfafa,#f0f7ff)!important;color:#39788e!important;}
+.itinerary-focus-prepare-categories span:nth-child(3n){background:linear-gradient(145deg,#fff4ec,#fff7e8)!important;color:#9b684f!important;}
+
+/* Home / My Trips within Planner. */
+.journey-home-card--new,.journey-trip-card{border-color:var(--itbmo-line)!important;background:linear-gradient(145deg,rgba(255,255,255,.91),rgba(246,250,254,.87))!important;box-shadow:0 18px 52px rgba(16,42,67,.065),inset 0 1px 0 rgba(255,255,255,.95)!important;}
+.journey-trip-card:nth-child(3n+1){background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(239,248,255,.84))!important;}
+.journey-trip-card:nth-child(3n+2){background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(244,243,255,.84))!important;}
+.journey-trip-card:nth-child(3n){background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(255,248,239,.84))!important;}
+.journey-home-card--resume{background:radial-gradient(circle at 90% 8%,rgba(255,255,255,.16),transparent 13rem),linear-gradient(135deg,#225F9B 0%,#4D69BC 50%,#4A8FA1 100%)!important;}
 
 @media(prefers-reduced-motion:reduce){
-  .planner-stage-card,.itinerary-workspace-city-card,.itinerary-focus-day-card,.journey-home-card,.journey-trip-card{transition:none!important}
+  .planner-stage-card,.itinerary-workspace-city-card,.itinerary-focus-day-card,.journey-home-card,.journey-trip-card{transition:none!important;}
 }
