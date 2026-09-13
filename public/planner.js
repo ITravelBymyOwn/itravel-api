@@ -1,5 +1,5 @@
 /* =========================================================
-   ITBMO PLANNER v64 · Final Download & Branded Affiliate Upgrade — Precision Route & Anchor Upgrade
+   ITBMO PLANNER · Premium Journey Experience — Clean Baseline
 
    Base: v63
    API contract: compatible with API v65
@@ -32,17 +32,22 @@ const ITBMO_ANALYTICS_EVENT_NAMES = new Set([
   'planner_started','destinations_saved','checkout_opened','payment_approved',
   'payment_cancelled','payment_failed','itinerary_generated','export_pdf',
   'export_csv','export_receipt','info_chat_question','affiliate_click',
-  'new_planning_started','start_chat'
+  'new_planning_started','start_chat','promo_code_applied','promo_code_consumed'
 ]);
 
 function trackITBMOEvent(eventName, parameters={}){
   try{
     const name=String(eventName || '').trim();
     if(!ITBMO_ANALYTICS_EVENT_NAMES.has(name)) return;
+    if(window.ITBMOFoundation?.track){
+      window.ITBMOFoundation.track(name,parameters);
+      return;
+    }
     const allowedKeys=new Set([
       'language','city_count','days_total','payment_provider','currency',
       'generation_mode','partner','partner_name','placement','destination',
-      'queries_used','queries_remaining','file_type','error_stage'
+      'queries_used','queries_remaining','file_type','error_stage',
+      'promotion_code','promo_type','discount_amount'
     ]);
     const clean={};
     Object.entries(parameters || {}).forEach(([key,value])=>{
@@ -53,12 +58,8 @@ function trackITBMOEvent(eventName, parameters={}){
     });
     if(!clean.language) clean.language=getLang?.() || document.documentElement.lang || 'en';
     const payload={type:'ITBMO_ANALYTICS_EVENT',event_name:name,parameters:clean};
-    /* The Planner is nested inside preview-home, which is itself embedded in
-       Webflow. Send analytics to the top Webflow window, not only to the
-       immediate preview-home parent. */
-    if(window.top && window.top!==window){
-      window.top.postMessage(payload,'*');
-    }else{
+    if(window.top && window.top!==window) window.top.postMessage(payload,'*');
+    else{
       window.dataLayer=window.dataLayer || [];
       window.dataLayer.push({event:'itbmo_event',itbmo_event_name:name,...clean});
     }
@@ -80,9 +81,20 @@ const TRIP_API_URL = '/api/trip';
 const PAYMENT_API_URL = '/api/payment';
 const MODEL   = 'gpt-4o-mini';
 
+trackITBMOEvent('planner_open');
+
 const ITBMO_SESSION_KEY = 'itbmo_session_token';
 const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
+const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
+const ITBMO_AUTH_SYNC_KEY = 'itbmo_auth_sync_v1';
+const ITBMO_AUTH_OWNER_KEY = 'itbmo_auth_owner_v1';
+const ITBMO_PLANNER_PRESENCE_KEY = 'itbmo_planner_presence_v1';
+const ITBMO_PLANNER_TAB_ID_KEY = 'itbmo_planner_tab_id_v1';
+const ITBMO_PLANNER_TAB_ESTABLISHED_KEY = 'itbmo_planner_tab_established_v1';
+const ITBMO_PLANNER_PRESENCE_TTL_MS = 8000;
+const ITBMO_PLANNER_HEARTBEAT_MS = 2000;
+const ITBMO_WORKSPACE_GUEST_HANDOFF_KEY = 'itbmo_workspace_guest_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -92,6 +104,8 @@ let currentTripId = null;
 let authReady = false;
 let guestUpgradeFormOpen = false;
 let pendingVerificationTimer = null;
+let plannerPresenceTimer = null;
+let plannerPresenceId = '';
 
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
@@ -163,9 +177,15 @@ let plannerState = {
     return (base === 'es' || base === 'en') ? base : '';
   };
 
-  // 1) <html lang="">
-  let lang = normalize(document?.documentElement?.getAttribute('lang'));
+  // 1) Explicit URL language is authoritative. This is especially important
+  // after account recovery, where Supabase returns to planner.html?lang=es|en.
+  let lang = '';
+  try{ lang = normalize(new URLSearchParams(window.location.search).get('lang')); }catch(_){}
 
+  // 2) Fall back to the document language when no explicit URL language exists.
+  if(!lang) lang = normalize(document?.documentElement?.getAttribute('lang'));
+
+  // 3) Localized route fallback.
   if(!lang){
     try{
       const p = String(window?.location?.pathname || '').toLowerCase();
@@ -174,7 +194,7 @@ let plannerState = {
     }catch(_){}
   }
 
-  // 3) Default MVP
+  // 4) Default MVP
   if(!lang) lang = 'en';
 
   plannerState.lang = lang;
@@ -345,6 +365,21 @@ const I18N = {
 function getLang(){
   return (plannerState && (plannerState.lang === 'es' || plannerState.lang === 'en')) ? plannerState.lang : 'en';
 }
+function plannerHomeUrl(lang=getLang()){
+  return lang === 'en' ? './preview-home-en.html' : './preview-home.html';
+}
+function syncPlannerLanguageShell(){
+  const lang=getLang();
+  document.documentElement.lang=lang;
+  try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
+  const homeLink=qs('.planner-home-link');
+  if(homeLink){
+    homeLink.href=plannerHomeUrl(lang);
+    homeLink.setAttribute('aria-label',lang==='es'?'Volver a I Travel By My Own':'Back to I Travel By My Own');
+    const label=homeLink.querySelector('.planner-home-link__label');
+    if(label) label.textContent=lang==='es'?'Inicio':'Home';
+  }
+}
 function t(key, ...args){
   const lang = getLang();
   const pack = I18N[lang] || I18N.en;
@@ -394,279 +429,6 @@ const $confirmCTA  = qs('#confirm-itinerary');
 
 const $overlayWOW  = qs('#loading-overlay');
 const $thinkingIndicator = qs('#thinking-indicator');
-
-const $affiliateLoading = qs('#itbmo-affiliate-loading');
-const $affiliateAfter   = qs('#itbmo-affiliate-after');
-
-/* =========================================================
-   ITBMO AFFILIATES — MVP monetization layer
-   ---------------------------------------------------------
-   PREVIEW WORKFLOW (before publishing):
-   - previewMode: true  -> shows every partner using previewUrl.
-   - This lets you evaluate the complete UX now.
-
-   PUBLIC LAUNCH (before affiliate approvals):
-   - Change ONLY previewMode to false.
-   - Because every partner starts enabled:false, the surfaces disappear.
-
-   AS EACH PARTNER APPROVES ITBMO:
-   - Keep previewMode:false.
-   - Set that partner enabled:true.
-   - Paste its real affiliate URL in url.
-   - Republish. Nothing else needs to change.
-
-   IMPORTANT:
-   - This layer never calls the itinerary API.
-   - Links use target="_blank", so generation continues in this tab.
-   - If GA4/gtag is available, clicks emit affiliate_click.
-========================================================= */
-const ITBMO_AFFILIATE_CONFIG = {
-  previewMode: false, // Public launch: show only approved and enabled partners.
-
-  partners: {
-    kayak: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.kayak.com/flights',
-      name: 'KAYAK',
-      category: 'flights'
-    },
-    skyscanner: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.skyscanner.com/',
-      name: 'Skyscanner',
-      category: 'flights'
-    },
-    booking: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.booking.com/',
-      name: 'Booking.com',
-      category: 'hotels'
-    },
-    getyourguide: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.getyourguide.com/',
-      name: 'GetYourGuide',
-      category: 'experiences'
-    },
-    viator: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.viator.com/',
-      name: 'Viator',
-      category: 'experiences'
-    },
-    omio: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.omio.com/',
-      name: 'Omio',
-      category: 'transport'
-    },
-    airalo: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://www.airalo.com/',
-      name: 'Airalo',
-      category: 'esim'
-    },
-    holafly: {
-      enabled: false,
-      url: '',
-      previewUrl: 'https://esim.holafly.com/',
-      name: 'Holafly',
-      category: 'esim'
-    }
-  }
-};
-
-if (typeof window !== 'undefined') {
-  window.ITBMO_AFFILIATE_CONFIG = ITBMO_AFFILIATE_CONFIG;
-}
-
-function _affiliateCopy_(){
-  const es = getLang()==='es';
-  return es ? {
-    loadingEyebrow: 'Mientras ITBMO crea tu viaje',
-    loadingTitle: 'Tu viaje empieza antes de que termine de generarse',
-    loadingSub: 'Explora vuelos, hospedaje y experiencias mientras ITBMO sigue trabajando en esta pestaña.',
-    afterEyebrow: 'Tu viaje ya tomó forma',
-    afterTitle: 'Ahora hazlo realidad',
-    afterSub: 'Da el siguiente paso. Compara, explora y reserva lo esencial para tu aventura.',
-    flightsTitle: 'Encuentra tu próximo vuelo',
-    flightsDesc: 'Compara opciones para llegar a tu destino.',
-    hotelsTitle: 'Elige dónde quedarte',
-    hotelsDesc: 'Encuentra el hospedaje ideal para tu viaje.',
-    experiencesTitle: 'Vive algo inolvidable',
-    experiencesDesc: 'Tours, entradas y experiencias para recordar.',
-    transportTitle: 'Muévete sin complicaciones',
-    transportDesc: 'Compara trenes, buses y conexiones.',
-    esimTitle: 'Llega conectado',
-    esimDesc: 'Activa datos para tu destino con una eSIM.',
-    explore: 'Explorar',
-    compare: 'Comparar',
-    preview: 'Vista previa',
-    trust: 'Se abre en una pestaña nueva · ITBMO continúa aquí'
-  } : {
-    loadingEyebrow: 'While ITBMO builds your trip',
-    loadingTitle: 'Your journey can start right now',
-    loadingSub: 'Explore flights, stays and experiences while ITBMO keeps working in this tab.',
-    afterEyebrow: 'Your trip has taken shape',
-    afterTitle: 'Now make it happen',
-    afterSub: 'Take the next step. Compare, explore and book the essentials for your adventure.',
-    flightsTitle: 'Find your next flight',
-    flightsDesc: 'Compare options to get to your destination.',
-    hotelsTitle: 'Choose where to stay',
-    hotelsDesc: 'Find the right stay for your trip.',
-    experiencesTitle: 'Make it unforgettable',
-    experiencesDesc: 'Tours, tickets and experiences worth remembering.',
-    transportTitle: 'Move with ease',
-    transportDesc: 'Compare trains, buses and connections.',
-    esimTitle: 'Land connected',
-    esimDesc: 'Get data for your destination with an eSIM.',
-    explore: 'Explore',
-    compare: 'Compare',
-    preview: 'Preview',
-    trust: 'Opens in a new tab · ITBMO keeps working here'
-  };
-}
-
-function _affiliateIcon_(key){
-  const common = 'viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"';
-  const icons = {
-    flights:`<svg ${common}><path d="M28 14.4 18.8 17l-6.2-10.1-2.7.8 3.4 10.8-6.2 1.8-3-3.2-2 .6 2.5 5.2 1.1 2.4 2-.6.8-4.2 6.2-1.8.2 11.3 2.7-.8 1.7-11.8 9.2-2.7c1.3-.4 2-1.7 1.6-3-.4-1.3-1.7-2-3-1.6Z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
-    hotels:`<svg ${common}><path d="M5 23V11.5A2.5 2.5 0 0 1 7.5 9H12a3 3 0 0 1 3 3v11M15 15h8.5A3.5 3.5 0 0 1 27 18.5V23M5 19h22M7 23v3M25 23v3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 13h3.5a1.5 1.5 0 0 1 1.5 1.5V16H8v-3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
-    experiences:`<svg ${common}><path d="M7 8.5h18a2 2 0 0 1 2 2v4.2a3.7 3.7 0 0 0 0 7.4v-.1a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v.1a3.7 3.7 0 0 0 0-7.4v-4.2a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16 11.5v2M16 18.5v2M16 25.5v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`,
-    transport:`<svg ${common}><rect x="7" y="4.5" width="18" height="21" rx="5" stroke="currentColor" stroke-width="1.8"/><path d="M10 15h12M11.5 9h9M11 27.5l2-2M21 27.5l-2-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="11.5" cy="20.5" r="1.3" fill="currentColor"/><circle cx="20.5" cy="20.5" r="1.3" fill="currentColor"/></svg>`,
-    esim:`<svg ${common}><rect x="9" y="3.5" width="14" height="25" rx="4" stroke="currentColor" stroke-width="1.8"/><path d="M13.5 8h5M15 24.5h2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13 17.5a4.2 4.2 0 0 1 6 0M14.8 19.4a1.7 1.7 0 0 1 2.4 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>`
-  };
-  return icons[key] || icons.flights;
-}
-
-function _affiliatePartnerVisible_(partner){
-  return !!(partner && (ITBMO_AFFILIATE_CONFIG.previewMode || (partner.enabled && partner.url)));
-}
-
-function _affiliatePartnerUrl_(partner){
-  if(!partner) return '';
-  if(partner.enabled && partner.url) return partner.url;
-  if(ITBMO_AFFILIATE_CONFIG.previewMode) return partner.previewUrl || '';
-  return '';
-}
-
-function _affiliateTrack_(partnerKey, placement){
-  try{
-    const partner = ITBMO_AFFILIATE_CONFIG.partners[partnerKey];
-    const destination = activeCity || savedDestinations?.[0]?.city || '';
-    trackITBMOEvent('affiliate_click',{
-      partner:partnerKey,
-      partner_name:partner?.name || partnerKey,
-      placement,
-      destination
-    });
-  }catch(_){}
-}
-
-function _affiliateCategoryModel_(){
-  const c = _affiliateCopy_();
-  return [
-    { key:'flights', featured:true, title:c.flightsTitle, desc:c.flightsDesc, partners:['kayak','skyscanner'] },
-    { key:'hotels', title:c.hotelsTitle, desc:c.hotelsDesc, partners:['booking'] },
-    { key:'experiences', title:c.experiencesTitle, desc:c.experiencesDesc, partners:['getyourguide','viator'] },
-    { key:'transport', title:c.transportTitle, desc:c.transportDesc, partners:['omio'] },
-    { key:'esim', title:c.esimTitle, desc:c.esimDesc, partners:['airalo','holafly'] }
-  ];
-}
-
-function _affiliateBrandClass_(key){
-  const map={kayak:'kayak',skyscanner:'skyscanner',booking:'booking',getyourguide:'gyg',viator:'viator',omio:'omio',airalo:'airalo',holafly:'holafly'};
-  return map[key] || 'default';
-}
-
-function _affiliatePartnerCopy_(key){
-  const es=getLang()==='es';
-  const copy={
-    kayak: es ? ['Vuelos','Compara tus vuelos','Explora opciones para llegar a tus destinos.','Buscar vuelos'] : ['Flights','Compare flights','Explore options to reach your destinations.','Search flights'],
-    skyscanner: es ? ['Vuelos','Compara más opciones','Explora alternativas de vuelo para tus destinos.','Comparar vuelos'] : ['Flights','Compare more options','Explore additional flight options for your destinations.','Compare flights'],
-    booking: es ? ['Hospedaje','Encuentra tu alojamiento','Busca y compara alojamiento para tus destinos.','Buscar hoteles'] : ['Stays','Find your stay','Search and compare stays for your destinations.','Search hotels'],
-    getyourguide: es ? ['Experiencias','Reserva actividades','Tours, entradas y actividades en destino.','Explorar experiencias'] : ['Experiences','Book activities','Tours, tickets and activities at your destination.','Explore experiences'],
-    viator: es ? ['Experiencias','Explora tours','Compara excursiones y actividades disponibles.','Ver actividades'] : ['Experiences','Explore tours','Compare excursions and available activities.','View activities'],
-    omio: es ? ['Transporte','Conecta tus destinos','Trenes, autobuses y conexiones entre destinos.','Buscar transporte'] : ['Transport','Connect your destinations','Trains, buses and connections between destinations.','Search transport'],
-    airalo: es ? ['eSIM','Llega conectado','Opciones de datos móviles para tu destino.','Ver eSIM'] : ['eSIM','Land connected','Mobile data options for your destination.','View eSIM'],
-    holafly: es ? ['eSIM','Datos para tu viaje','Alternativas para mantenerte conectado al viajar.','Explorar conectividad'] : ['eSIM','Data for your trip','Alternatives to stay connected while traveling.','Explore connectivity']
-  };
-  return copy[key] || ['',key,'','Explorar'];
-}
-
-function renderAffiliateSurface(placement='loading'){
-  const root = placement==='loading' ? $affiliateLoading : $affiliateAfter;
-  if(!root) return false;
-
-  const c = _affiliateCopy_();
-  const order=['kayak','skyscanner','booking','omio','getyourguide','viator','airalo','holafly'];
-  const visible=order.filter(key=>_affiliatePartnerVisible_(ITBMO_AFFILIATE_CONFIG.partners[key]));
-
-  if(!visible.length){
-    root.innerHTML='';
-    root.style.display='none';
-    return false;
-  }
-
-  const isLoading=placement==='loading';
-  const eyebrow=isLoading ? c.loadingEyebrow : c.afterEyebrow;
-  const title=isLoading ? c.loadingTitle : c.afterTitle;
-  const sub=isLoading ? c.loadingSub : c.afterSub;
-
-  root.innerHTML=`
-    <div class="itbmo-affiliate-shell itbmo-affiliate-shell--${placement}">
-      <div class="itbmo-affiliate-heading">
-        <div class="itbmo-affiliate-eyebrow"><span class="itbmo-affiliate-spark">✦</span><span>${eyebrow}</span>${ITBMO_AFFILIATE_CONFIG.previewMode ? `<span class="itbmo-affiliate-preview">${c.preview}</span>`:''}</div>
-        <h3>${title}</h3><p>${sub}</p>
-      </div>
-      <div class="itbmo-affiliate-grid itbmo-affiliate-grid--brands" data-count="${visible.length}">
-        ${visible.map(key=>{
-          const p=ITBMO_AFFILIATE_CONFIG.partners[key];
-          const pc=_affiliatePartnerCopy_(key);
-          const url=_affiliatePartnerUrl_(p);
-          return `<article class="itbmo-affiliate-card itbmo-affiliate-brand-card itbmo-affiliate-brand-card--${_affiliateBrandClass_(key)}">
-            <div class="itbmo-affiliate-brand-head"><strong>${p.name}</strong>${ITBMO_AFFILIATE_CONFIG.previewMode?`<span>${c.preview}</span>`:''}</div>
-            <div class="itbmo-affiliate-brand-body"><small>${pc[0]}</small><h4>${pc[1]}</h4><p>${pc[2]}</p>
-              <a class="itbmo-affiliate-link" href="${url}" target="_blank" rel="sponsored noopener noreferrer" data-affiliate-partner="${key}" data-affiliate-placement="${placement}"><span>${pc[3]}</span><span class="itbmo-affiliate-arrow">↗</span></a>
-            </div>
-          </article>`;
-        }).join('')}
-      </div>
-      <div class="itbmo-affiliate-trust"><span class="itbmo-affiliate-trust-dot"></span><span>${c.trust}</span></div>
-    </div>`;
-  root.style.display='block';
-  qsa('[data-affiliate-partner]',root).forEach(a=>a.addEventListener('click',()=>_affiliateTrack_(a.dataset.affiliatePartner,a.dataset.affiliatePlacement||placement)));
-  return true;
-}
-
-function setLoadingAffiliateVisibility(on){
-  if(!$affiliateLoading) return;
-  if(!on){
-    $affiliateLoading.style.display='none';
-    return;
-  }
-  renderAffiliateSurface('loading');
-}
-
-function refreshPostItineraryAffiliate(){
-  if(!$affiliateAfter) return;
-  const city = activeCity;
-  const hasRows = !!(city && itineraries?.[city] &&
-    Object.values(itineraries[city].byDay||{}).some(rows=>Array.isArray(rows) && rows.length));
-  if(!hasRows){
-    $affiliateAfter.innerHTML='';
-    $affiliateAfter.style.display='none';
-    return;
-  }
-  renderAffiliateSurface('after');
-}
 
 // 📌 Info Chat (IDs según tu HTML)
 const $infoToggle   = qs('#info-chat-toggle');
@@ -740,6 +502,12 @@ const $accountGuestUpgradeCopy = qs('#account-guest-upgrade-copy');
 const $accountGuestUpgradeTitle = qs('#account-guest-upgrade-title');
 const $accountUpgradeEmailHint = qs('#account-upgrade-email-hint');
 const $accountLogout = qs('#account-logout');
+const $accountDialogClose = qs('#account-dialog-close');
+const $accountModalBackdrop = qs('#account-modal-backdrop');
+const $topbarAccountRegister = qs('#topbar-account-register');
+const $topbarAccountLogin = qs('#topbar-account-login');
+const $topbarAccountGuest = qs('#topbar-account-guest');
+const $topbarAccountLogout = qs('#topbar-account-logout');
 const $accountForgotEmail = qs('#account-forgot-email');
 const $accountResetPassword = qs('#account-reset-password');
 const $accountResetPasswordConfirm = qs('#account-reset-password-confirm');
@@ -832,10 +600,122 @@ function setAccountMessage(message='', type=''){
   if(type) $accountMessage.classList.add(type);
 }
 
+/* Planner-owned session lifecycle.
+   Authentication remains shared through localStorage so every ITBMO workspace
+   sees the same registered-account session. A separate Planner heartbeat tells
+   workspaces whether at least one Planner tab is still alive. Closing a
+   workspace never affects authentication. Refreshing the Planner keeps the
+   same tab marker and therefore does not sign the traveler out. */
+function readPlannerPresence(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(ITBMO_PLANNER_PRESENCE_KEY) || '{}');
+    return raw && typeof raw==='object' && !Array.isArray(raw) ? raw : {};
+  }catch(_){ return {}; }
+}
+function writePlannerPresence(presence){
+  try{ localStorage.setItem(ITBMO_PLANNER_PRESENCE_KEY,JSON.stringify(presence || {})); }catch(_){ }
+}
+function prunePlannerPresence(presence=readPlannerPresence(), now=Date.now()){
+  const next={};
+  Object.entries(presence || {}).forEach(([id,ts])=>{
+    const n=Number(ts||0);
+    if(id && n>0 && now-n<=ITBMO_PLANNER_PRESENCE_TTL_MS) next[id]=n;
+  });
+  return next;
+}
+function hasLivePlannerPresence(){
+  return Object.keys(prunePlannerPresence()).length>0;
+}
+function plannerTabId(){
+  if(plannerPresenceId) return plannerPresenceId;
+  try{ plannerPresenceId=String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim(); }catch(_){ }
+  if(!plannerPresenceId){
+    plannerPresenceId=(globalThis.crypto?.randomUUID?.() || `planner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try{ sessionStorage.setItem(ITBMO_PLANNER_TAB_ID_KEY,plannerPresenceId); }catch(_){ }
+  }
+  return plannerPresenceId;
+}
+function markPlannerPresence(){
+  const id=plannerTabId();
+  const now=Date.now();
+  const presence=prunePlannerPresence(readPlannerPresence(),now);
+  presence[id]=now;
+  writePlannerPresence(presence);
+}
+function removePlannerPresence(){
+  const id=plannerPresenceId || (()=>{ try{return String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim();}catch(_){return '';} })();
+  if(!id) return;
+  const presence=prunePlannerPresence();
+  delete presence[id];
+  writePlannerPresence(presence);
+}
+function startPlannerPresenceHeartbeat(){
+  markPlannerPresence();
+  if(plannerPresenceTimer) clearInterval(plannerPresenceTimer);
+  plannerPresenceTimer=setInterval(markPlannerPresence,ITBMO_PLANNER_HEARTBEAT_MS);
+}
+function initializePlannerSessionLifecycle(){
+  let established=false;
+  try{ established=sessionStorage.getItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY)==='1'; }catch(_){ }
+
+  // A registered-account token left behind by a Planner tab that is no longer
+  // alive must not silently authenticate a newly opened Planner. A real reload
+  // keeps the sessionStorage marker, while a new/reopened tab does not.
+  let persistentToken='';
+  let owner='';
+  try{
+    persistentToken=String(localStorage.getItem(ITBMO_SESSION_KEY)||'').trim();
+    owner=String(localStorage.getItem(ITBMO_AUTH_OWNER_KEY)||'').trim();
+  }catch(_){ }
+  const liveBefore=hasLivePlannerPresence();
+  if(persistentToken && (owner==='planner' || !owner) && !established && !liveBefore){
+    try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){ }
+    try{ localStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
+    try{ localStorage.removeItem(ITBMO_AUTH_OWNER_KEY); }catch(_){ }
+    broadcastAuthState('signed_out');
+  }
+
+  try{ sessionStorage.setItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY,'1'); }catch(_){ }
+  startPlannerPresenceHeartbeat();
+
+  window.addEventListener('pagehide',()=>{
+    if(plannerPresenceTimer){ clearInterval(plannerPresenceTimer); plannerPresenceTimer=null; }
+    removePlannerPresence();
+  });
+  window.addEventListener('pageshow',()=>startPlannerPresenceHeartbeat());
+}
+
 function getStoredSessionToken(){
   try{
     return String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || localStorage.getItem(ITBMO_SESSION_KEY) || '').trim();
   }catch(_){ return ''; }
+}
+function getCachedUser(){
+  try{
+    const raw=sessionStorage.getItem(ITBMO_USER_CACHE_KEY) || localStorage.getItem(ITBMO_USER_CACHE_KEY) || '';
+    const parsed=raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed==='object' && !Array.isArray(parsed) ? parsed : null;
+  }catch(_){ return null; }
+}
+function storeCachedUser(user,persistent=true){
+  if(!user || typeof user!=='object') return;
+  try{
+    const serialized=JSON.stringify(user);
+    if(persistent){
+      localStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+      sessionStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    }else{
+      sessionStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+      localStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    }
+  }catch(_){ }
+}
+function clearCachedUser(){
+  try{ localStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
+  try{ sessionStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
+}
+function broadcastAuthState(state){
+  try{ localStorage.setItem(ITBMO_AUTH_SYNC_KEY,JSON.stringify({state:String(state||''),ts:Date.now()})); }catch(_){}
 }
 function storeSessionToken(token, persistent=true){
   try{
@@ -847,11 +727,17 @@ function storeSessionToken(token, persistent=true){
       sessionStorage.setItem(ITBMO_GUEST_SESSION_KEY, token);
       localStorage.removeItem(ITBMO_SESSION_KEY);
     }
+    localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'planner');
+    broadcastAuthState('signed_in');
+    setTimeout(()=>window.ITBMOFoundation?.syncAttribution?.(),0);
   }catch(_){}
 }
-function clearSessionToken(){
+function clearSessionToken({broadcast=true}={}){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
   try{ sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY); }catch(_){}
+  try{ localStorage.removeItem(ITBMO_AUTH_OWNER_KEY); }catch(_){}
+  clearCachedUser();
+  if(broadcast) broadcastAuthState('signed_out');
 }
 function getStoredActiveTripId(){ try{ return String(localStorage.getItem(ITBMO_ACTIVE_TRIP_KEY) || '').trim(); }catch(_){ return ''; } }
 function storeActiveTripId(tripId){ try{ if(tripId) localStorage.setItem(ITBMO_ACTIVE_TRIP_KEY,String(tripId)); else localStorage.removeItem(ITBMO_ACTIVE_TRIP_KEY); }catch(_){ } }
@@ -861,11 +747,20 @@ function validAccountPassword(password){ return typeof password === 'string' && 
 
 function authTrackingPayload(){
   const params = new URLSearchParams(window.location.search);
+  const attribution = window.ITBMOFoundation?.getAttribution?.() || {};
+  const firstTouch = attribution.first_touch || {};
+  const lastTouch = attribution.last_touch || firstTouch || {};
   return {
     preferred_language:getLang(), registration_source:'planner',
-    utm_source:params.get('utm_source') || null, utm_medium:params.get('utm_medium') || null,
-    utm_campaign:params.get('utm_campaign') || null, utm_content:params.get('utm_content') || null,
-    utm_term:params.get('utm_term') || null, referrer:document.referrer || null,
+    utm_source:firstTouch.source || params.get('utm_source') || null,
+    utm_medium:firstTouch.medium || params.get('utm_medium') || null,
+    utm_campaign:firstTouch.campaign || params.get('utm_campaign') || null,
+    utm_content:firstTouch.content || params.get('utm_content') || null,
+    utm_term:firstTouch.term || params.get('utm_term') || null,
+    referrer:firstTouch.referrer || document.referrer || null,
+    attribution_id:attribution.attribution_id || null,
+    first_touch:firstTouch,
+    last_meaningful_touch:lastTouch,
     origin:window.location.origin
   };
 }
@@ -882,7 +777,7 @@ function legalPayload(prefix='account'){
 }
 
 function setAuthBusy(on){
-  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack,$accountUpgradeToggle,$accountUpgradeCancel,$accountLogout]
+  [$accountRegisterSubmit,$accountLoginSubmit,$accountGuestSubmit,$accountForgotSubmit,$accountResetSubmit,$accountRegisterToggle,$accountLoginToggle,$accountGuestToggle,$accountForgotPassword,$accountForgotBack,$accountUpgradeToggle,$accountUpgradeCancel,$accountLogout,$topbarAccountRegister,$topbarAccountLogin,$topbarAccountGuest,$topbarAccountLogout]
     .forEach(el=>{ if(el) el.disabled = !!on; });
 }
 
@@ -932,10 +827,12 @@ function applyAuthPlannerGate(unlocked){
       try{ el.inert=true; }catch(_){}
       el.setAttribute('aria-disabled','true');
     }else{
-      // Never undo the existing post-Save Destinations setup lock.
+      // Never undo the existing post-Save lock, but Destinations must stay
+      // interactive because the Start CTA lives inside that section.
       const setupLocked=el.classList.contains('is-setup-locked');
-      try{ el.inert=setupLocked; }catch(_){}
-      el.setAttribute('aria-disabled',setupLocked?'true':'false');
+      const keepContainerInteractive=(sel==='#destinations-box');
+      try{ el.inert=keepContainerInteractive ? false : setupLocked; }catch(_){}
+      el.setAttribute('aria-disabled',(setupLocked && !keepContainerInteractive)?'true':'false');
     }
   });
 
@@ -948,6 +845,24 @@ function applyAuthPlannerGate(unlocked){
   }else{
     updateSaveAvailability();
   }
+}
+
+function closeAccountDialog(){
+  const box=qs('#account-box');
+  if(box){ box.classList.remove('is-auth-dialog-open'); box.setAttribute('aria-hidden','true'); }
+  if($accountModalBackdrop){ $accountModalBackdrop.hidden=true; $accountModalBackdrop.classList.remove('is-open'); }
+  document.body.classList.remove('itbmo-auth-dialog-open');
+}
+function openAccountDialog(mode){
+  const box=qs('#account-box');
+  if(!box) return;
+  if(mode) showAccountMode(mode);
+  box.classList.add('is-auth-dialog-open');
+  box.setAttribute('aria-hidden','false');
+  if($accountModalBackdrop){ $accountModalBackdrop.hidden=false; requestAnimationFrame(()=>$accountModalBackdrop.classList.add('is-open')); }
+  document.body.classList.add('itbmo-auth-dialog-open');
+  const focusTarget=mode==='register'?$accountFirstName:mode==='login'?$accountLoginEmail:mode==='guest'?$accountGuestName:mode==='reset'?$accountResetPassword:null;
+  setTimeout(()=>{ try{ focusTarget?.focus(); }catch(_){} },60);
 }
 
 function showAccountMode(mode){
@@ -1022,7 +937,13 @@ function syncPendingVerificationWatch(pending){
 }
 
 function renderAuthState(){
-  const logged = Boolean(currentUser && getStoredSessionToken());
+  const sessionToken=getStoredSessionToken();
+  const logged = Boolean(currentUser && sessionToken);
+  if(logged){
+    let persistent=false;
+    try{ persistent=Boolean(localStorage.getItem(ITBMO_SESSION_KEY)); }catch(_){ }
+    storeCachedUser(currentUser,persistent);
+  }
   const registered = Boolean(logged && currentUser?.is_registered);
   const pending = Boolean(logged && currentUser?.registration_pending);
   const guest = Boolean(logged && !registered && !pending);
@@ -1034,6 +955,15 @@ function renderAuthState(){
   if($accountUpgradeCancel) $accountUpgradeCancel.style.display = (guest && guestUpgradeFormOpen) ? 'block' : 'none';
   if($accountGuestUpgrade) $accountGuestUpgrade.style.display = (guest && !guestUpgradeFormOpen) ? 'flex' : 'none';
   if($accountLogout) $accountLogout.style.display = logged ? 'inline-flex' : 'none';
+  const plannerMyTrips=qs('#planner-my-trips');
+  if(plannerMyTrips) plannerMyTrips.hidden=!logged;
+  if($topbarAccountRegister){
+    $topbarAccountRegister.hidden=Boolean(logged && !guest);
+    $topbarAccountRegister.textContent=authCopy('register');
+  }
+  if($topbarAccountLogin){ $topbarAccountLogin.hidden=logged; $topbarAccountLogin.textContent=authCopy('login'); }
+  if($topbarAccountGuest){ $topbarAccountGuest.hidden=logged; $topbarAccountGuest.textContent=authCopy('guest'); }
+  if($topbarAccountLogout){ $topbarAccountLogout.hidden=!logged; $topbarAccountLogout.textContent=getLang()==='es'?'Salir':'Sign out'; }
 
   if(!guestUpgradeFormOpen){
     if($accountEmail) $accountEmail.readOnly=false;
@@ -1044,9 +974,7 @@ function renderAuthState(){
     $accountUserBadge.style.display = logged ? 'inline-flex' : 'none';
     let label='';
     if(logged && currentUser){
-      label=currentUser.is_registered
-        ? (currentUser.email || currentUser.first_name || '')
-        : (currentUser.first_name || currentUser.email || '');
+      label=currentUser.first_name || currentUser.username || (getLang()==='es'?'Cuenta activa':'Active account');
     }
     $accountUserBadge.textContent=label;
   }
@@ -1087,6 +1015,7 @@ function applyAuthLanguage(){
   const set=(sel,txt)=>{ const el=qs(sel); if(el) el.textContent=txt; };
   set('#account-title',authCopy('title')); set('#account-subtitle',authCopy('subtitle'));
   set('#account-register-toggle',authCopy('register')); set('#account-login-toggle',authCopy('login')); set('#account-guest-toggle',authCopy('guest'));
+  set('#topbar-account-register',authCopy('register')); set('#topbar-account-login',authCopy('login')); set('#topbar-account-guest',authCopy('guest')); set('#topbar-account-logout',getLang()==='es'?'Salir':'Sign out');
   set('#label-first-name',authCopy('name')); set('#label-email',authCopy('email')); set('#label-password',authCopy('password')); set('#label-password-confirm',authCopy('passwordConfirm')); set('#password-hint',authCopy('passwordHint'));
   set('#label-login-email',authCopy('email')); set('#label-login-password',authCopy('password'));
   set('#label-guest-name',authCopy('name')); set('#label-guest-email',authCopy('email'));
@@ -1146,7 +1075,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1163,7 +1092,7 @@ async function continueAsGuest(){
   try{
     const {response,data}=await postUserAction({action:'guest',name,email,...authTrackingPayload(),...legalPayload('guest')});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,false); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     if(response.status===409 && data?.account_exists) setAccountMessage(authCopy('guestHasAccount'),'error');
     else if(response.status===403 && data?.guest_mismatch) setAccountMessage(authCopy('guestMismatch'),'error');
@@ -1177,7 +1106,9 @@ async function sendForgotPassword(){
   if(!validAccountEmail(email)){ setAccountMessage(authCopy('emailInvalid'),'error'); return; }
   setAuthBusy(true); setAccountMessage(authCopy('sendingReset'));
   try{
-    const {response,data}=await postUserAction({action:'forgot_password',email,preferred_language:getLang(),origin:window.location.origin});
+    const recoveryLang=getLang();
+    const recoveryRedirect=`${window.location.origin}/planner.html?lang=${encodeURIComponent(recoveryLang)}`;
+    const {response,data}=await postUserAction({action:'forgot_password',email,preferred_language:recoveryLang,origin:window.location.origin,redirect_to:recoveryRedirect});
     if(response.ok && data?.ok){ setAccountMessage(authCopy('resetSent'),'success'); return; }
     setAccountMessage(authCopy('resetFail'),'error');
   }catch(err){ console.error('ITBMO forgot password error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -1223,24 +1154,78 @@ async function resetITBMOPassword(){
   finally{ setAuthBusy(false); }
 }
 
+function wantsMyTripsView(){
+  return String(new URLSearchParams(window.location.search).get('view') || '').trim().toLowerCase()==='my-trips';
+}
+function openRequestedMyTripsView(){
+  if(!wantsMyTripsView() || !currentUser || !getStoredSessionToken()) return false;
+  try{
+    const url=new URL(window.location.href);
+    url.searchParams.delete('view');
+    history.replaceState(null,'',url.pathname + (url.searchParams.toString()?`?${url.searchParams.toString()}`:'') + url.hash);
+  }catch(_){ }
+  setTimeout(()=>qs('#planner-my-trips')?.click(),80);
+  return true;
+}
+function waitITBMO(ms){ return new Promise(resolve=>setTimeout(resolve,ms)); }
+
 async function restoreITBMOSession(){
   const callback=getSupabaseCallback();
   if(callback.error){ authReady=true; currentUser=null; renderAuthState(); setAccountMessage(callback.error,'error'); clearAuthCallbackFromUrl(); return; }
   if(callback.accessToken && callback.type === 'recovery'){
-    authReady=true; currentUser=null; renderAuthState(); showAccountMode('reset'); return;
+    authReady=true; currentUser=null; renderAuthState(); openAccountDialog('reset'); return;
   }
   if(callback.accessToken){ await completeEmailConfirmation(callback.accessToken); return; }
 
   const token=getStoredSessionToken();
   if(!token){ authReady=true; currentUser=null; renderAuthState(); return; }
-  try{
-    const {response,data}=await postUserAction({action:'session',session_token:token});
-    if(response.ok && data?.ok && data?.user){
-      currentUser=data.user;
-      storeSessionToken(token,Boolean(currentUser.is_registered));
-    }else{ clearSessionToken(); currentUser=null; }
-  }catch(err){ console.warn('ITBMO session restore unavailable:',err); currentUser=null; }
-  finally{ authReady=true; renderAuthState(); if(currentUser) setTimeout(()=>restorePaidGenerationIfNeeded(),0); }
+
+  // Keep authenticated UI stable while the server validates the token.
+  // Transient API/Supabase failures must never behave like an explicit logout.
+  const cachedUser=getCachedUser();
+  if(cachedUser){
+    currentUser=cachedUser;
+    renderAuthState();
+  }
+
+  let lastError=null;
+  for(let attempt=0; attempt<3; attempt++){
+    try{
+      const {response,data}=await postUserAction({action:'session',session_token:token});
+      if(response.ok && data?.ok && data?.user){
+        currentUser=data.user;
+        storeSessionToken(token,Boolean(currentUser.is_registered));
+        authReady=true;
+        renderAuthState();
+        if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+        return;
+      }
+
+      if(response.status===401 || response.status===403){
+        clearSessionToken();
+        currentUser=null;
+        authReady=true;
+        renderAuthState();
+        return;
+      }
+
+      lastError=new Error(data?.error || `SESSION_HTTP_${response.status}`);
+      lastError.status=response.status;
+    }catch(err){
+      lastError=err;
+    }
+
+    if(attempt<2) await waitITBMO(attempt===0 ? 350 : 900);
+  }
+
+  // Preserve token and cached identity after transient infrastructure failures.
+  console.warn('ITBMO session validation temporarily unavailable:',lastError);
+  currentUser=cachedUser || currentUser || null;
+  authReady=true;
+  renderAuthState();
+  if(currentUser){
+    if(!openRequestedMyTripsView()) setTimeout(()=>restorePaidGenerationIfNeeded(),0);
+  }
 }
 
 function clearPlannerUIForLogout(){
@@ -1315,15 +1300,22 @@ function clearPlannerUIForLogout(){
   }
   setExportToolbarVisibility(false);
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
-  if($affiliateAfter){
-    $affiliateAfter.innerHTML='';
-    $affiliateAfter.style.display='none';
-  }
   try{ if($overlayWOW) $overlayWOW.style.display='none'; }catch(_){}
   qsa('.date-tooltip').forEach(node=>node.remove());
 
   if($sidebar) $sidebar.classList.remove('disabled');
   setSavedSetupLocked(false);
+
+  // Logout must return the Planner to its neutral signed-out view.
+  // My Trips remains hidden until the user signs in again and explicitly opens it.
+  hideJourneyReturnGate();
+  journeyHomeLatestTrip=null;
+  journeyHistoryTrips=[];
+  const journeyHistory=qs('#journey-history');
+  const journeyHistoryGrid=qs('#journey-history-grid');
+  if(journeyHistory) journeyHistory.hidden=true;
+  if(journeyHistoryGrid) journeyHistoryGrid.innerHTML='';
+
   updateAddCityButtonState();
 }
 
@@ -1345,8 +1337,39 @@ async function logoutITBMOUser(){
     // Signed-out state starts neutral: show the three account choices, but do
     // not leave Create account / Sign in / Guest fields expanded automatically.
     showAccountMode(null);
+    closeAccountDialog();
     renderAuthState();
     setAuthBusy(false);
+  }
+}
+
+async function syncPlannerAuthFromAnotherTab(event){
+  if(!event) return;
+  const relevant=event.key===ITBMO_SESSION_KEY || event.key===ITBMO_AUTH_SYNC_KEY;
+  if(!relevant) return;
+
+  let announcedState='';
+  if(event.key===ITBMO_AUTH_SYNC_KEY && event.newValue){
+    try{ announcedState=String(JSON.parse(event.newValue)?.state||''); }catch(_){}
+  }
+
+  const token=getStoredSessionToken();
+  if(announcedState==='signed_out' || (event.key===ITBMO_SESSION_KEY && !event.newValue && !token)){
+    stopPendingVerificationWatch();
+    clearSessionToken({broadcast:false});
+    clearPlannerUIForLogout();
+    currentUser=null;
+    authReady=true;
+    guestUpgradeFormOpen=false;
+    setAccountMessage('');
+    showAccountMode(null);
+    closeAccountDialog();
+    renderAuthState();
+    return;
+  }
+
+  if(token && (!currentUser || announcedState==='signed_in')){
+    await restoreITBMOSession();
   }
 }
 
@@ -1364,9 +1387,20 @@ function bindAccountListeners(){
   $accountUpgradeToggle?.addEventListener('click',openGuestAccountUpgrade);
   $accountUpgradeCancel?.addEventListener('click',closeGuestAccountUpgrade);
   $accountLogout?.addEventListener('click',logoutITBMOUser);
+  $topbarAccountRegister?.addEventListener('click',()=>{
+    if(currentUser && !currentUser.is_registered){ openGuestAccountUpgrade(); openAccountDialog('register'); return; }
+    openAccountDialog('register');
+  });
+  $topbarAccountLogin?.addEventListener('click',()=>openAccountDialog('login'));
+  $topbarAccountGuest?.addEventListener('click',()=>openAccountDialog('guest'));
+  $topbarAccountLogout?.addEventListener('click',logoutITBMOUser);
+  $accountDialogClose?.addEventListener('click',closeAccountDialog);
+  $accountModalBackdrop?.addEventListener('click',closeAccountDialog);
+  document.addEventListener('keydown',event=>{ if(event.key==='Escape' && qs('#account-box')?.classList.contains('is-auth-dialog-open')) closeAccountDialog(); });
   applyAuthLanguage(); updateSaveAvailability();
   document.addEventListener('visibilitychange',()=>{ if(!document.hidden && currentUser?.registration_pending) refreshPendingVerification(); });
   window.addEventListener('focus',()=>{ if(currentUser?.registration_pending) refreshPendingVerification(); });
+  window.addEventListener('storage',syncPlannerAuthFromAnotherTab);
 }
 
 /* =========================================================
@@ -1468,6 +1502,7 @@ async function saveTripRecord(list, travelerState){
   const destinations = list.map(d=>({
     city:d.city,
     country:d.country,
+    country_code:d.countryCode || _countryMatch_(d.country)?.code || null,
     days:d.days,
     base_date:dmyToISO(d.baseDate),
     per_day:Array.isArray(d.perDay) ? d.perDay : []
@@ -2443,23 +2478,36 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   const autocompleteId=`itbmo-destination-${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
   const countryFieldName=`itbmo-country-${autocompleteId}`;
   const destinationFieldName=`itbmo-destination-${autocompleteId}`;
+  const destinationNumber=currentCount+1;
   row.innerHTML = `
-    <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
-    <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
-    <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:MAX_DAYS_PER_DESTINATION},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
-    <label class="date-label">
-      ${t('uiStart')}
-      <div class="date-wrapper${initialDate?' has-value':''}">
-        <span class="date-picker-shell">
-          <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
-          <span class="date-picker-placeholder" aria-hidden="true">📅 ${getLang()==='es'?'Seleccionar fecha':'Select date'}</span>
-        </span>
-        <input class="baseDate" type="hidden" value="${initialDate?formatDMY(initialDate):''}">
-        <small class="date-format">${t('uiDateFormatSmall')}</small>
-        <small class="date-summary" aria-live="polite"></small>
+    <div class="city-card-main">
+      <div class="city-card-kicker"><span>${String(destinationNumber).padStart(2,'0')}</span><b>${getLang()==='es'?'DESTINO':'DESTINATION'}</b></div>
+      <div class="city-card-fields">
+        <label class="itbmo-autocomplete-field">${t('uiCountry')}<input class="country" name="${countryFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Escribe o selecciona un país':'Type or select a country'}" value="${_escapeAttr_(pref.country||'')}"><div class="itbmo-autocomplete-menu itbmo-country-menu" role="listbox" hidden></div></label>
+        <label class="itbmo-autocomplete-field">${t('uiCity')}<input class="city" name="${destinationFieldName}" autocomplete="new-password" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" placeholder="${getLang()==='es'?'Selecciona primero el país':'Select the country first'}" value="${_escapeAttr_(pref.city||'')}"><div class="itbmo-autocomplete-menu itbmo-destination-menu" role="listbox" hidden></div></label>
+        <label>${t('uiDays')}<select class="days"><option value="" selected disabled></option>${Array.from({length:MAX_DAYS_PER_DESTINATION},(_,i)=>`<option value="${i+1}">${i+1}</option>`).join('')}</select></label>
+        <label class="date-label">
+          ${t('uiStart')}
+          <div class="date-wrapper${initialDate?' has-value':''}">
+            <span class="date-picker-shell">
+              <input class="baseDatePicker" type="date" min="${plannerDateMin()}" max="${plannerDateMax()}" value="${initialDate?formatISODate(initialDate):''}">
+              <span class="date-picker-placeholder" aria-hidden="true">📅 ${getLang()==='es'?'Seleccionar fecha':'Select date'}</span>
+            </span>
+            <input class="baseDate" type="hidden" value="${initialDate?formatDMY(initialDate):''}">
+            <small class="date-format">${t('uiDateFormatSmall')}</small>
+            <small class="date-summary" aria-live="polite"></small>
+          </div>
+        </label>
       </div>
-    </label>
-    <button class="remove" type="button">✕</button>
+    </div>
+    <div class="city-card-schedule">
+      <div class="city-card-schedule__head">
+        <span>${getLang()==='es'?'TIEMPO EN DESTINO':'TIME IN DESTINATION'}</span>
+        <small>${getLang()==='es'?'Ajusta solo lo que ya tengas claro.':'Adjust only what you already know.'}</small>
+      </div>
+      <div class="city-card-schedule__body"></div>
+    </div>
+    <button class="remove" type="button" aria-label="${getLang()==='es'?'Eliminar destino':'Remove destination'}">✕</button>
   `;
 
   _bindCountryDestinationAutocomplete_(row);
@@ -2476,7 +2524,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 
   let hoursWrap = pref.days ? makeHoursBlock(pref.days) : document.createElement('div');
   if(!pref.days) hoursWrap.className = 'hours-block';
-  row.appendChild(hoursWrap);
+  qs('.city-card-schedule__body',row)?.appendChild(hoursWrap);
 
   const daysSelect = qs('.days', row);
   if(pref.days){
@@ -2583,20 +2631,40 @@ function bindPlannerLanguageCapability(){
    - startPlanning() itself is intentionally left unchanged.
    ========================================================= */
 function setSavedSetupLocked(locked){
-  // Auth/account controls must remain usable after Save Destinations.
-  // In particular, Sign out must never become inert because trip setup is locked.
-  // Only trip-definition sections are frozen here; Auth has its own independent gate.
-  ['#travelers-box','#destinations-box'].forEach(sel=>{
-    const el=qs(sel);
-    if(!el) return;
-    el.classList.toggle('is-setup-locked',!!locked);
-    try{ el.inert=!!locked; }catch(_){}
-    el.setAttribute('aria-disabled',locked?'true':'false');
-  });
+  /* Phase 4.4
+     Travelers are fully frozen after Save. Destinations keep their container alive
+     because the primary Start CTA now lives inside that section. Only the route
+     editing controls are disabled; the CTA remains interactive. */
+  const travelers=qs('#travelers-box');
+  if(travelers){
+    travelers.classList.toggle('is-setup-locked',!!locked);
+    try{ travelers.inert=!!locked; }catch(_){}
+    travelers.setAttribute('aria-disabled',locked?'true':'false');
+  }
+
+  const destinations=qs('#destinations-box');
+  if(destinations){
+    destinations.classList.toggle('is-setup-locked',!!locked);
+    destinations.classList.toggle('is-route-data-locked',!!locked);
+    /* Never inert the whole section: #start-planning is intentionally inside it. */
+    try{ destinations.inert=false; }catch(_){}
+    destinations.setAttribute('aria-disabled','false');
+
+    qsa('input, select, textarea, button.remove, #add-city-btn',destinations).forEach(control=>{
+      /* The route confirmation CTA and Start CTA manage their own state below. */
+      if(control.id==='save-destinations' || control.id==='start-planning') return;
+      control.disabled=!!locked;
+      control.setAttribute('aria-disabled',locked?'true':'false');
+    });
+  }
 
   if($save){
     $save.disabled=!!locked || !currentUser;
     $save.setAttribute('aria-disabled',String(!!locked || !currentUser));
+  }
+
+  if(!locked){
+    updateAddCityButtonState();
   }
 }
 
@@ -2610,15 +2678,6 @@ function autoGrowPreferencesField(){
   $preferencesField.style.overflowY=($preferencesField.scrollHeight > maxHeight) ? 'auto' : 'hidden';
 }
 
-function closePreferencesHelpPopovers(){
-  qsa('.preferences-help-popover.is-open').forEach(pop=>{
-    pop.classList.remove('is-open');
-    pop.setAttribute('aria-hidden','true');
-  });
-  qsa('.preferences-help-button[aria-expanded="true"]').forEach(btn=>{
-    btn.setAttribute('aria-expanded','false');
-  });
-}
 
 function applyPreferencesStageLanguage(){
   if(!$preferencesStage) return;
@@ -2695,14 +2754,24 @@ function showPreferencesStage(){
   if($start){
     $start.disabled=true;
     $start.setAttribute('aria-disabled','true');
+    $start.classList.remove('is-ready');
     $start.dataset.itbmoConsumed='1';
   }
 
   requestAnimationFrame(()=>{
     autoGrowPreferencesField();
-    try{
-      $preferencesStage.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
-    }catch(_){}
+
+    /* Put the actual writing area in the traveler's field of view. */
+    const target=$preferencesField || $preferencesStage;
+    if(target){
+      const rect=target.getBoundingClientRect();
+      const current=window.scrollY || document.documentElement.scrollTop || 0;
+      const offset=Math.min(300,Math.max(210,(window.innerHeight || 800)*0.32));
+      window.scrollTo({
+        top:Math.max(0,current + rect.top - offset),
+        behavior:'smooth'
+      });
+    }
   });
   scheduleAstraCoach('preferences','#preferences-stage',520);
 }
@@ -2732,19 +2801,38 @@ async function confirmPreferencesAndContinue(){
       : '✓ Preferences confirmed';
   }
 
-  /* Existing agent flow begins here, unchanged. */
+  /* Existing agent flow begins here, unchanged.
+     The chat now reveals directly below Personalize; the confirmed button stays
+     visible in its original location instead of the page jumping away from it. */
+  installPlannerAgentFlow();
   startPlanning();
-  await _persistPostPaymentProgress_('collecting_hotels');
 
-  /* UX only: move the user directly to the agent input after confirmation. */
-  setTimeout(()=>{
-    try{
-      $chatBox?.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
-      setTimeout(()=>{
-        try{ $chatI?.focus({preventScroll:true}); }catch(_){ try{ $chatI?.focus(); }catch(__){} }
-      },340);
-    }catch(_){}
-  },80);
+  /* Guide the traveler forward: once the agent opens, glide gently to the
+     conversation and keep the cursor ready in the lodging field. */
+  requestAnimationFrame(()=>{
+    const agent=qs('#planner-agent-flow');
+    const composer=qs('#chat-input');
+
+    if(agent){
+      smoothAdvanceTo(agent,{gap:104,center:false});
+    }
+
+    if(composer){
+      try{ composer.focus({preventScroll:true}); }
+      catch(_){ try{ composer.focus(); }catch(__){} }
+    }
+
+    /* startPlanning() may reveal/paint the first prompt one frame later. */
+    setTimeout(()=>{
+      if(agent) smoothAdvanceTo(agent,{gap:104,center:false});
+      if(composer){
+        try{ composer.focus({preventScroll:true}); }
+        catch(_){ try{ composer.focus(); }catch(__){} }
+      }
+    },180);
+  });
+
+  await _persistPostPaymentProgress_('collecting_hotels');
 }
 
 async function normalizeDestinationsBeforeSave(list, rows){
@@ -2806,16 +2894,17 @@ function ensureSaveTransitionOverlay(){
   overlay.setAttribute('aria-hidden','true');
   overlay.innerHTML=`
     <div class="itbmo-save-transition-card" role="status" aria-live="polite" aria-atomic="true">
-      <div class="itbmo-hourglass-loader" aria-hidden="true">
-        <svg class="itbmo-hourglass" viewBox="0 0 48 58" focusable="false" aria-hidden="true">
-          <path class="itbmo-hourglass-frame" d="M10 5h28M10 53h28M13 7c0 10 3 14 11 22-8 8-11 12-11 22M35 7c0 10-3 14-11 22 8 8 11 12 11 22"/>
-          <path class="itbmo-hourglass-glass" d="M15.5 8.5h17c-.7 7-3.1 11.3-8.5 17-5.4-5.7-7.8-10-8.5-17Zm0 41c.7-7 3.1-11.3 8.5-17 5.4 5.7 7.8 10 8.5 17h-17Z"/>
-          <path class="itbmo-hourglass-sand-top" d="M18 12h12c-.7 4.4-2.5 7.5-6 11-3.5-3.5-5.3-6.6-6-11Z"/>
-          <path class="itbmo-hourglass-sand-bottom" d="M18.5 46.5c.8-3.7 2.5-6.4 5.5-9.6 3 3.2 4.7 5.9 5.5 9.6h-11Z"/>
-          <rect class="itbmo-hourglass-stream" x="22.7" y="25.5" width="2.6" height="9.5" rx="1.3"/>
-        </svg>
+      <div class="itbmo-route-loader" aria-hidden="true">
+        <span class="itbmo-route-loader__halo"></span>
+        <span class="itbmo-route-loader__line"></span>
+        <span class="itbmo-route-loader__node itbmo-route-loader__node--1"></span>
+        <span class="itbmo-route-loader__node itbmo-route-loader__node--2"></span>
+        <span class="itbmo-route-loader__node itbmo-route-loader__node--3"></span>
+        <span class="itbmo-route-loader__star">✦</span>
       </div>
+      <div class="itbmo-save-transition-eyebrow"></div>
       <div class="itbmo-save-transition-title"></div>
+      <div class="itbmo-save-transition-subtitle"></div>
     </div>`;
   document.body.appendChild(overlay);
   return overlay;
@@ -2824,10 +2913,12 @@ function ensureSaveTransitionOverlay(){
 function showSaveTransitionOverlay(){
   const overlay=ensureSaveTransitionOverlay();
   const es=getLang()==='es';
+  const eyebrow=qs('.itbmo-save-transition-eyebrow',overlay);
   const title=qs('.itbmo-save-transition-title',overlay);
   const subtitle=qs('.itbmo-save-transition-subtitle',overlay);
-  if(title) title.textContent=es?'Guardando destinos…':'Saving destinations…';
-  if(subtitle) subtitle.textContent=es?'Organizando tus destinos y preferencias.':'Organizing your destinations and preferences.';
+  if(eyebrow) eyebrow.textContent=es?'TU RUTA ESTÁ TOMANDO FORMA':'YOUR ROUTE IS TAKING SHAPE';
+  if(title) title.textContent=es?'Organizando tus destinos':'Organizing your destinations';
+  if(subtitle) subtitle.textContent=es?'Validamos ciudades, fechas y tiempos para dejar todo listo para el siguiente paso.':'We are validating cities, dates and timing so everything is ready for the next step.';
   overlay.classList.add('active');
   overlay.setAttribute('aria-hidden','false');
   document.documentElement.classList.add('itbmo-save-transition-open');
@@ -2903,7 +2994,7 @@ async function saveDestinations(){
       for(let d=1; d<=days; d++) perDay.push({day:d,start:DEFAULT_START,end:DEFAULT_END});
     }
 
-    list.push({ city, country, days, baseDate, perDay });
+    list.push({ city, country, countryCode:countryMatch?.code || '', days, baseDate, perDay });
   });
 
   if(invalidCountryRow){
@@ -3015,6 +3106,13 @@ async function saveDestinations(){
   renderCityTabs();
 
   $start.disabled = savedDestinations.length === 0;
+  $start.setAttribute('aria-disabled',String($start.disabled));
+  $start.classList.toggle('is-ready',!$start.disabled);
+  if(!$start.disabled){
+    $start.textContent=getLang()==='es'
+      ? '✦ Tu ruta está lista · Iniciar planificación →'
+      : '✦ Your route is ready · Start planning →';
+  }
   hasSavedOnce = true;
 
   if ($resetBtn) {
@@ -3075,16 +3173,9 @@ async function saveDestinations(){
     setTimeout(()=>{ loadPayPalSdk().catch(()=>{}); },0);
   }
 
-  /* QUIRÚRGICO v4: after saving, take the user directly to Start planning. */
+  /* Phase 4.3: advance only downward to the next CTA. */
   if($start && !$start.disabled){
-    requestAnimationFrame(()=>{
-      try{
-        $start.scrollIntoView({behavior:'smooth', block:'center', inline:'nearest'});
-        setTimeout(()=>{
-          try{ $start.focus({preventScroll:true}); }catch(_){ }
-        }, 420);
-      }catch(_){ }
-    });
+    requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
   }
 }
 
@@ -3126,7 +3217,6 @@ function renderCityItinerary(city){
   $itWrap.innerHTML = '';
   if(!days.length){
     $itWrap.innerHTML = `<p>${t('uiNoActivities')}</p>`;
-    if($affiliateAfter) $affiliateAfter.style.display='none';
     syncImmersiveItineraryLauncher();
     return;
   }
@@ -3208,382 +3298,169 @@ function renderCityItinerary(city){
   show(itineraries[city].currentDay || days[0]);
 
   // Post-itinerary monetization surface: independent of itinerary rendering.
-  refreshPostItineraryAffiliate();
 
   // Immersive viewer launcher mirrors the already-generated state only.
   syncImmersiveItineraryLauncher();
 }
 
 /* =========================================================
-   ITBMO · IMMERSIVE ITINERARY VIEWER · v77
-   ---------------------------------------------------------
-   Presentation-only layer:
-   - Reads from the existing itineraries / cityMeta objects.
-   - Does NOT call the itinerary API.
-   - Does NOT mutate generated rows.
-   - Does NOT change PDF / CSV / receipt logic.
-   - The legacy flat renderer remains mounted but hidden by CSS.
+   ITBMO · TRIP WORKSPACE · PHASE 2
+   Presentation-only layer. Two levels:
+   1) Trip overview / city gateway
+   2) City Focus Mode: Itinerary | For your trip
+   No API calls, no generated-row mutation, no export changes.
 ========================================================= */
-let immersiveItineraryCity = null;
-let immersiveItineraryDay = null;
-let immersiveTouchStartX = null;
-let immersiveTouchStartY = null;
-let immersiveRenderFrame = null;
+let immersiveItineraryCity=null;
+let immersiveItineraryDay=null;
+let immersiveItineraryMode='itinerary';
+let immersiveWorkspaceLevel='overview';
+let immersiveTouchStartX=null;
+let immersiveTouchStartY=null;
+let immersiveRenderFrame=null;
 
 function scheduleImmersiveItineraryRender(){
-  if(immersiveRenderFrame!=null){
-    cancelAnimationFrame(immersiveRenderFrame);
-  }
-  immersiveRenderFrame=requestAnimationFrame(()=>{
-    immersiveRenderFrame=requestAnimationFrame(()=>{
-      immersiveRenderFrame=null;
-      renderImmersiveItinerary();
-    });
-  });
+  if(immersiveRenderFrame!=null) cancelAnimationFrame(immersiveRenderFrame);
+  immersiveRenderFrame=requestAnimationFrame(()=>{ immersiveRenderFrame=requestAnimationFrame(()=>{ immersiveRenderFrame=null; renderImmersiveItinerary(); }); });
 }
-
 function _immersiveViewerCopy_(){
-  const es = getLang()==='es';
-  return es ? {
-    ctaTitle:'Explora tu itinerario día a día',
-    ctaSub:'Abre cada ciudad y recorre cada día en una vista inmersiva.',
-    citySingular:'ciudad',
-    cityPlural:'ciudades',
-    daySingular:'día',
-    dayPlural:'días',
-    ready:'listos para explorar',
-    eyebrow:'TU ITINERARIO ITBMO',
-    title:'Tu viaje, día a día.',
-    subtitle:'Elige una ciudad y recorre cada día a tu propio ritmo.',
-    back:'Volver al Planner',
-    close:'Cerrar itinerario',
-    prev:'Día anterior',
-    next:'Día siguiente',
-    of:'de'
-  } : {
-    ctaTitle:'Explore your day-by-day itinerary',
-    ctaSub:'Open every city and move through each day in an immersive view.',
-    citySingular:'city',
-    cityPlural:'cities',
-    daySingular:'day',
-    dayPlural:'days',
-    ready:'ready to explore',
-    eyebrow:'YOUR ITBMO ITINERARY',
-    title:'Your trip, day by day.',
-    subtitle:'Choose a city, then move through each day at your own pace.',
-    back:'Back to Planner',
-    close:'Close itinerary',
-    prev:'Previous day',
-    next:'Next day',
-    of:'of'
+  const es=getLang()==='es';
+  return es?{
+    ctaTitle:'Explora y prepara tu viaje', ctaSub:'Entra a tu viaje, elige una ciudad y descubre cada día con todo lo que necesitas para vivirlo.',
+    citySingular:'ciudad',cityPlural:'ciudades',daySingular:'día',dayPlural:'días',ready:'listos para explorar',
+    eyebrow:'TU VIAJE ITBMO',title:'Explora y prepara tu viaje.',subtitle:'Todo organizado por ciudad, sin perder de vista el viaje completo.',
+    back:'Volver al Planner',close:'Cerrar viaje',overviewKicker:'TU RECORRIDO',overviewTitle:'¿Por dónde quieres empezar?',overviewIntro:'Abre una ciudad para recorrer su itinerario día a día y ver todo lo que conviene preparar.',
+    exploreCity:'Explorar',allCities:'Todas las ciudades',cityFocus:'MODO FOCUS',itinerary:'Itinerario',prepare:'Para tu viaje',prev:'Día anterior',next:'Día siguiente',of:'de',
+    details:'Ver detalles',hideDetails:'Ocultar detalles',route:'Trayecto',duration:'Duración',transport:'Transporte',notes:'Detalles',
+    wholeTrip:'PARA TODO TU VIAJE',wholeTripTitle:'Lo esencial que viaja contigo.',wholeTripCopy:'Aquí aparecerán servicios de alcance general, únicamente cuando aporten valor real a tu viaje.',coming:'Próximamente',
+    prepareTitle:'Para tu viaje',prepareIntro:'Este espacio convertirá tu itinerario en una guía práctica de lo que conviene resolver en esta ciudad.',prepareSafe:'Entradas y reservas · Tours y experiencias · Cómo moverte · Otros servicios relevantes',
+    daysOrganized:'días organizados'
+  }:{
+    ctaTitle:'Explore and prepare your trip',ctaSub:'Enter your journey, choose a city and discover every day with what you need to make it happen.',
+    citySingular:'city',cityPlural:'cities',daySingular:'day',dayPlural:'days',ready:'ready to explore',
+    eyebrow:'YOUR ITBMO TRIP',title:'Explore and prepare your trip.',subtitle:'Everything organized by city, without losing sight of the whole journey.',
+    back:'Back to Planner',close:'Close trip',overviewKicker:'YOUR JOURNEY',overviewTitle:'Where do you want to start?',overviewIntro:'Open a city to move through its itinerary day by day and see what is worth preparing.',
+    exploreCity:'Explore',allCities:'All cities',cityFocus:'FOCUS MODE',itinerary:'Itinerary',prepare:'For your trip',prev:'Previous day',next:'Next day',of:'of',
+    details:'View details',hideDetails:'Hide details',route:'Route',duration:'Duration',transport:'Transport',notes:'Details',
+    wholeTrip:'FOR YOUR WHOLE TRIP',wholeTripTitle:'The essentials that travel with you.',wholeTripCopy:'Trip-level services will appear here only when they add real value to your journey.',coming:'Coming next',
+    prepareTitle:'For your trip',prepareIntro:'This space will turn your itinerary into a practical guide to what is worth arranging in this city.',prepareSafe:'Tickets & reservations · Tours & experiences · Getting around · Other relevant services',
+    daysOrganized:'days organized'
   };
 }
-
 function _immersiveAvailableCities_(){
-  const ordered = (savedDestinations||[]).map(x=>x.city).filter(Boolean);
-  const extras = Object.keys(itineraries||{}).filter(city=>!ordered.includes(city));
-  return [...ordered,...extras].filter(city=>{
-    const byDay = itineraries?.[city]?.byDay || {};
-    return Object.values(byDay).some(rows=>Array.isArray(rows) && rows.length);
-  });
+  const ordered=(savedDestinations||[]).map(x=>x.city).filter(Boolean); const extras=Object.keys(itineraries||{}).filter(c=>!ordered.includes(c));
+  return [...ordered,...extras].filter(city=>Object.values(itineraries?.[city]?.byDay||{}).some(rows=>Array.isArray(rows)&&rows.length));
 }
-
-function _immersiveDaysForCity_(city){
-  return Object.keys(itineraries?.[city]?.byDay || {})
-    .map(Number)
-    .filter(Number.isFinite)
-    .sort((a,b)=>a-b);
-}
-
+function _immersiveDaysForCity_(city){ return Object.keys(itineraries?.[city]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b); }
 function syncImmersiveItineraryLauncher(){
-  const wrap = qs('#itinerary-focus-launch');
-  const btn = qs('#open-itinerary-focus');
-  if(!wrap || !btn) return;
-
-  const cities = _immersiveAvailableCities_();
-  const totalDays = cities.reduce((sum,city)=>sum + _immersiveDaysForCity_(city).length,0);
-  const hasRows = cities.length>0 && totalDays>0;
-  const copy = _immersiveViewerCopy_();
-
-  wrap.classList.toggle('is-ready',hasRows);
-  wrap.setAttribute('aria-hidden',hasRows?'false':'true');
-  btn.disabled = !hasRows;
-  btn.setAttribute('aria-disabled',hasRows?'false':'true');
-
-  const title = qs('#itinerary-focus-cta-title');
-  const sub = qs('#itinerary-focus-cta-subtitle');
-  const meta = qs('#itinerary-focus-cta-meta');
-  if(title) title.textContent = copy.ctaTitle;
-  if(sub) sub.textContent = copy.ctaSub;
-  if(meta){
-    const cityLabel = cities.length===1 ? copy.citySingular : copy.cityPlural;
-    const dayLabel = totalDays===1 ? copy.daySingular : copy.dayPlural;
-    meta.textContent = hasRows ? `${cities.length} ${cityLabel} · ${totalDays} ${dayLabel} · ${copy.ready}` : '';
-  }
+  const wrap=qs('#itinerary-focus-launch'),btn=qs('#open-itinerary-focus'); if(!wrap||!btn)return;
+  const cities=_immersiveAvailableCities_(),totalDays=cities.reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),hasRows=cities.length>0&&totalDays>0,copy=_immersiveViewerCopy_();
+  wrap.classList.toggle('is-ready',hasRows);wrap.setAttribute('aria-hidden',hasRows?'false':'true');btn.disabled=!hasRows;btn.setAttribute('aria-disabled',hasRows?'false':'true');
+  qs('#planner-post-generation')?.classList.toggle('is-ready',hasRows);
+  qs('#itinerary-focus-cta-title').textContent=copy.ctaTitle;qs('#itinerary-focus-cta-subtitle').textContent=copy.ctaSub;
+  const meta=qs('#itinerary-focus-cta-meta'); if(meta)meta.textContent=hasRows?`${cities.length} ${cities.length===1?copy.citySingular:copy.cityPlural} · ${totalDays} ${totalDays===1?copy.daySingular:copy.dayPlural} · ${copy.ready}`:'';
 }
-
-function _immersiveFormatDuration_(val,transport=''){
-  if(!val) return '';
-  return _sanitizeDurationLines_(val,transport);
+function _immersiveEscapeHtml_(v){return String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');}
+function _immersiveFormatDuration_(v,t=''){return v?_sanitizeDurationLines_(v,t):'';}
+function _immersiveCityDateRange_(city){
+  const data=itineraries?.[city],days=_immersiveDaysForCity_(city),base=parseDMY(data?.baseDate||cityMeta?.[city]?.baseDate||''); if(!base||!days.length)return '';
+  const a=formatDMY(addDays(base,days[0]-1)),b=formatDMY(addDays(base,days[days.length-1]-1)); return a===b?a:`${a} – ${b}`;
 }
-
-function _immersiveRenderDayTable_(city,dayNum){
-  const target = qs('#itinerary-focus-day-content');
-  if(!target) return;
-
-  const rows = itineraries?.[city]?.byDay?.[dayNum] || [];
-  if(!rows.length){
-    target.innerHTML = `<p class="itinerary-focus-empty">${t('uiNoActivities')}</p>`;
-    return;
-  }
-
-  const headers = [
-    t('thStart'),t('thEnd'),t('thActivity'),t('thFrom'),
-    t('thTo'),t('thTransport'),t('thDuration'),t('thNotes')
-  ];
-
-  const table = document.createElement('table');
-  table.className='itinerary itinerary-focus-table';
-  table.innerHTML=`
-    <thead>
-      <tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr>
-    </thead>
-    <tbody></tbody>
-  `;
-
-  const tbody = qs('tbody',table);
-  rows.forEach(r=>{
-    const cleanActivity = String(r.activity||'').replace(/^rev:\s*/i,'');
-    const cleanNotes = String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim();
-    const values = [
-      r.start||'',
-      r.end||'',
-      cleanActivity,
-      r.from||'',
-      r.to||'',
-      r.transport||'',
-      _immersiveFormatDuration_(r.duration||'',r.transport||''),
-      cleanNotes
-    ];
-
-    const tr=document.createElement('tr');
-    tr.innerHTML=values.map((value,i)=>`<td data-label="${headers[i]}">${value}</td>`).join('');
-    tbody.appendChild(tr);
-  });
-
-  target.replaceChildren(table);
-}
-
-function _immersiveRenderCities_(){
-  const nav = qs('#itinerary-focus-cities');
-  if(!nav) return;
-  const cities = _immersiveAvailableCities_();
-  nav.innerHTML='';
-
+function _immersiveRenderOverview_(){
+  const copy=_immersiveViewerCopy_(),grid=qs('#itinerary-workspace-cities'),cities=_immersiveAvailableCities_(); if(!grid)return;
+  qs('#itinerary-workspace-kicker').textContent=copy.overviewKicker;qs('#itinerary-workspace-title').textContent=copy.overviewTitle;qs('#itinerary-workspace-intro').textContent=copy.overviewIntro;
+  qs('#itinerary-workspace-trip-tools-kicker').textContent=copy.wholeTrip;qs('#itinerary-workspace-trip-tools-title').textContent=copy.wholeTripTitle;qs('#itinerary-workspace-trip-tools-copy').textContent=copy.wholeTripCopy;qs('#itinerary-workspace-coming').textContent=copy.coming;
+  const totalDays=cities.reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),summary=qs('#itinerary-workspace-summary'); if(summary)summary.textContent=`${cities.length} ${cities.length===1?copy.citySingular:copy.cityPlural} · ${totalDays} ${totalDays===1?copy.daySingular:copy.dayPlural}`;
+  grid.innerHTML='';
   cities.forEach((city,index)=>{
-    const b=document.createElement('button');
-    b.type='button';
-    b.className='itinerary-focus-city-btn' + (city===immersiveItineraryCity?' active':'');
-    b.dataset.city=city;
-    b.innerHTML=`<span>${index+1}</span><strong>${city}</strong>`;
-    b.addEventListener('click',()=>{
-      immersiveItineraryCity=city;
-      setActiveCity(city);
-      const days=_immersiveDaysForCity_(city);
-      const preferred=Number(itineraries?.[city]?.currentDay);
-      immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
-      scheduleImmersiveItineraryRender();
-    });
-    nav.appendChild(b);
+    const days=_immersiveDaysForCity_(city),card=document.createElement('button');card.type='button';card.className='itinerary-workspace-city-card';
+    card.innerHTML=`<span class="itinerary-workspace-city-card__number">${String(index+1).padStart(2,'0')}</span><span class="itinerary-workspace-city-card__body"><small>${_immersiveEscapeHtml_(_immersiveCityDateRange_(city))}</small><strong>${_immersiveEscapeHtml_(city)}</strong><span>${days.length} ${_immersiveEscapeHtml_(copy.daysOrganized)}</span></span><span class="itinerary-workspace-city-card__cta">${_immersiveEscapeHtml_(copy.exploreCity)} <i aria-hidden="true">→</i></span>`;
+    card.addEventListener('click',()=>_immersiveEnterCity_(city));grid.appendChild(card);
   });
 }
-
+function _immersiveEnterCity_(city){
+  const cities=_immersiveAvailableCities_();if(!cities.includes(city))return;immersiveItineraryCity=city;immersiveItineraryMode='itinerary';immersiveWorkspaceLevel='city';setActiveCity(city);
+  const days=_immersiveDaysForCity_(city),preferred=Number(itineraries?.[city]?.currentDay);immersiveItineraryDay=days.includes(preferred)?preferred:days[0];scheduleImmersiveItineraryRender();
+}
+function _immersiveBackToOverview_(){immersiveWorkspaceLevel='overview';immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();}
+function _immersiveRenderDayTimeline_(city,dayNum){
+  const target=qs('#itinerary-focus-day-content');if(!target)return;const rows=itineraries?.[city]?.byDay?.[dayNum]||[],copy=_immersiveViewerCopy_();target.innerHTML='';
+  if(!rows.length){target.innerHTML='<p class="itinerary-focus-empty">—</p>';return;} const timeline=document.createElement('div');timeline.className='itinerary-focus-timeline';
+  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_immersiveFormatDuration_(r.duration,r.transport);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(r.start||'')}</strong><span>${_immersiveEscapeHtml_(r.end||'')}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(r.transport)}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
+    const toggle=qs('.itinerary-focus-detail-toggle',item),details=qs('.itinerary-focus-activity__details',item);toggle?.addEventListener('click',()=>{const expanded=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',expanded?'false':'true');details.hidden=expanded;toggle.firstChild.textContent=(expanded?copy.details:copy.hideDetails)+' ';const icon=qs('i',toggle);if(icon)icon.textContent=expanded?'＋':'−';});timeline.appendChild(item);});target.appendChild(timeline);
+}
+function _immersiveRenderPrepareShell_(city){const target=qs('#itinerary-focus-day-content'),copy=_immersiveViewerCopy_();if(!target)return;target.innerHTML=`<section class="itinerary-focus-prepare-shell"><div class="itinerary-focus-prepare-mark" aria-hidden="true">✦</div><span class="itinerary-focus-prepare-city">${_immersiveEscapeHtml_(city)}</span><h4>${_immersiveEscapeHtml_(copy.prepareTitle)}</h4><p>${_immersiveEscapeHtml_(copy.prepareIntro)}</p><div class="itinerary-focus-prepare-categories"><span>🎟 <b>${getLang()==='es'?'Entradas':'Tickets'}</b></span><span>✦ <b>${getLang()==='es'?'Tours':'Tours'}</b></span><span>↗ <b>${getLang()==='es'?'Moverte':'Getting around'}</b></span><span>＋ <b>${getLang()==='es'?'Más':'More'}</b></span></div><small>${_immersiveEscapeHtml_(copy.prepareSafe)}</small></section>`;}
+function _immersiveRenderDays_(){const nav=qs('#itinerary-focus-days');if(!nav)return;const days=_immersiveDaysForCity_(immersiveItineraryCity);nav.innerHTML='';nav.hidden=immersiveItineraryMode!=='itinerary';if(nav.hidden)return;days.forEach(day=>{const b=document.createElement('button');b.type='button';b.className='itinerary-focus-day-btn'+(day===immersiveItineraryDay?' active':'');b.textContent=t('uiDayTitle',day);b.addEventListener('click',()=>{immersiveItineraryDay=day;scheduleImmersiveItineraryRender();});nav.appendChild(b);});requestAnimationFrame(()=>nav.querySelector('.active')?.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}));}
 function renderImmersiveItinerary(){
-  const modal=qs('#itinerary-focus-modal');
-  if(!modal) return;
-
+  const modal=qs('#itinerary-focus-modal');if(!modal)return;const cities=_immersiveAvailableCities_();if(!cities.length){closeImmersiveItinerary();syncImmersiveItineraryLauncher();return;}const copy=_immersiveViewerCopy_();
+  qs('#itinerary-focus-eyebrow').textContent=copy.eyebrow;qs('#itinerary-focus-title').textContent=copy.title;qs('#itinerary-focus-subtitle').textContent=copy.subtitle;qs('#itinerary-focus-back-label').textContent=copy.back;qs('#itinerary-focus-close').setAttribute('aria-label',copy.close);
+  const overview=qs('#itinerary-workspace-overview'),cityFocus=qs('#itinerary-city-focus');overview.hidden=immersiveWorkspaceLevel!=='overview';cityFocus.hidden=immersiveWorkspaceLevel!=='city';
+  if(immersiveWorkspaceLevel==='overview'){_immersiveRenderOverview_();return;}
+  if(!immersiveItineraryCity||!cities.includes(immersiveItineraryCity))immersiveItineraryCity=cities[0];const days=_immersiveDaysForCity_(immersiveItineraryCity);if(!days.includes(Number(immersiveItineraryDay)))immersiveItineraryDay=days[0];
+  itineraries[immersiveItineraryCity].currentDay=immersiveItineraryDay;setActiveCity(immersiveItineraryCity);const data=itineraries[immersiveItineraryCity],base=parseDMY(data?.baseDate||cityMeta?.[immersiveItineraryCity]?.baseDate||''),dateLabel=base?formatDMY(addDays(base,immersiveItineraryDay-1)):'',dayIndex=days.indexOf(immersiveItineraryDay),itineraryMode=immersiveItineraryMode==='itinerary';
+  qs('#itinerary-city-focus-back-label').textContent=copy.allCities;qs('#itinerary-city-focus-kicker').textContent=copy.cityFocus;qs('#itinerary-city-focus-name').textContent=immersiveItineraryCity;qs('#itinerary-focus-mode-itinerary-label').textContent=copy.itinerary;qs('#itinerary-focus-mode-prepare-label').textContent=copy.prepare;
+  const ib=qs('#itinerary-focus-mode-itinerary'),pb=qs('#itinerary-focus-mode-prepare');ib.classList.toggle('active',itineraryMode);ib.setAttribute('aria-selected',itineraryMode?'true':'false');pb.classList.toggle('active',!itineraryMode);pb.setAttribute('aria-selected',itineraryMode?'false':'true');
+  qs('#itinerary-focus-city-label').textContent=immersiveItineraryCity;qs('#itinerary-focus-day-title').textContent=itineraryMode?`${t('uiDayTitle',immersiveItineraryDay)}${dateLabel?` · ${dateLabel}`:''}`:copy.prepareTitle;const count=qs('#itinerary-focus-day-count');count.hidden=!itineraryMode;count.textContent=`${dayIndex+1} ${copy.of} ${days.length}`;
+  _immersiveRenderDays_();if(itineraryMode)_immersiveRenderDayTimeline_(immersiveItineraryCity,immersiveItineraryDay);else _immersiveRenderPrepareShell_(immersiveItineraryCity);
+  const prev=qs('#itinerary-focus-prev'),next=qs('#itinerary-focus-next');prev.hidden=!itineraryMode;next.hidden=!itineraryMode;prev.disabled=dayIndex<=0;next.disabled=dayIndex>=days.length-1;prev.setAttribute('aria-label',copy.prev);next.setAttribute('aria-label',copy.next);
+}
+function _immersiveMoveDay_(delta){if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const days=_immersiveDaysForCity_(immersiveItineraryCity),i=days.indexOf(Number(immersiveItineraryDay)),n=Math.max(0,Math.min(days.length-1,i+delta));if(n!==i){immersiveItineraryDay=days[n];scheduleImmersiveItineraryRender();}}
+function openImmersiveItinerary(){
   const cities=_immersiveAvailableCities_();
-  if(!cities.length){
-    closeImmersiveItinerary();
-    syncImmersiveItineraryLauncher();
-    return;
-  }
+  if(!cities.length)return;
 
-  if(!immersiveItineraryCity || !cities.includes(immersiveItineraryCity)){
-    immersiveItineraryCity=activeCity && cities.includes(activeCity) ? activeCity : cities[0];
-  }
+  /* Phase 3: the Trip Workspace is a true standalone Vercel page.
+     We only hand off an immutable presentation snapshot through same-origin
+     localStorage. No API call, payment state, generation state or itinerary
+     row is changed here. */
+  const snapshot={
+    schema_version:2,
+    created_at:new Date().toISOString(),
+    lang:getLang()==='es'?'es':'en',
+    trip_language:_plannerTripLanguage_(),
+    trip_id:currentTripId || null,
+    destinations:(savedDestinations||[]).map(d=>({
+      city:d?.city||'',country:d?.country||'',countryCode:d?.countryCode||_countryMatch_(d?.country||'')?.code||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
+    })).filter(d=>d.city),
+    city_meta:cityMeta||{},
+    itineraries:Object.fromEntries(cities.map(city=>[
+      city,
+      {
+        baseDate:itineraries?.[city]?.baseDate || cityMeta?.[city]?.baseDate || null,
+        currentDay:itineraries?.[city]?.currentDay || 1,
+        byDay:itineraries?.[city]?.byDay || {}
+      }
+    ]))
+  };
+  try{ localStorage.setItem('itbmo_trip_workspace_snapshot_v1',JSON.stringify(snapshot)); }
+  catch(err){ console.warn('[ITBMO WORKSPACE SNAPSHOT]',err); }
 
-  const days=_immersiveDaysForCity_(immersiveItineraryCity);
-  if(!days.length) return;
-
-  if(!days.includes(Number(immersiveItineraryDay))){
-    const preferred=Number(itineraries?.[immersiveItineraryCity]?.currentDay);
-    immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
-  }
-
-  itineraries[immersiveItineraryCity].currentDay=immersiveItineraryDay;
-  setActiveCity(immersiveItineraryCity);
-
-  const copy=_immersiveViewerCopy_();
-  const data=itineraries[immersiveItineraryCity];
-  const base=parseDMY(data?.baseDate || cityMeta?.[immersiveItineraryCity]?.baseDate || '');
-  const dateLabel=base ? formatDMY(addDays(base,immersiveItineraryDay-1)) : '';
-  const dayIndex=days.indexOf(immersiveItineraryDay);
-
-  const eyebrow=qs('#itinerary-focus-eyebrow');
-  const title=qs('#itinerary-focus-title');
-  const subtitle=qs('#itinerary-focus-subtitle');
-  const backLabel=qs('#itinerary-focus-back-label');
-  const close=qs('#itinerary-focus-close');
-  const prev=qs('#itinerary-focus-prev');
-  const next=qs('#itinerary-focus-next');
-  const cityLabel=qs('#itinerary-focus-city-label');
-  const dayTitle=qs('#itinerary-focus-day-title');
-  const dayCount=qs('#itinerary-focus-day-count');
-
-  if(eyebrow) eyebrow.textContent=copy.eyebrow;
-  if(title) title.textContent=copy.title;
-  if(subtitle) subtitle.textContent=copy.subtitle;
-  if(backLabel) backLabel.textContent=copy.back;
-  if(close) close.setAttribute('aria-label',copy.close);
-  if(prev) prev.setAttribute('aria-label',copy.prev);
-  if(next) next.setAttribute('aria-label',copy.next);
-  if(cityLabel) cityLabel.textContent=immersiveItineraryCity;
-  if(dayTitle) dayTitle.textContent=`${t('uiDayTitle',immersiveItineraryDay)}${dateLabel ? ` · ${dateLabel}` : ''}`;
-  if(dayCount) dayCount.textContent=`${dayIndex+1} ${copy.of} ${days.length}`;
-
-  _immersiveRenderCities_();
-  _immersiveRenderDayTable_(immersiveItineraryCity,immersiveItineraryDay);
-
-  const dots=qs('#itinerary-focus-dots');
-  if(dots){
-    dots.innerHTML='';
-    days.forEach((day,i)=>{
-      const b=document.createElement('button');
-      b.type='button';
-      b.className='itinerary-focus-dot' + (day===immersiveItineraryDay?' active':'');
-      b.setAttribute('aria-label',t('uiDayTitle',day));
-      b.title=t('uiDayTitle',day);
-      b.innerHTML=`<span>${i+1}</span>`;
-      b.addEventListener('click',()=>{
-        immersiveItineraryDay=day;
-        scheduleImmersiveItineraryRender();
-      });
-      dots.appendChild(b);
-    });
-  }
-
-  if(prev){
-    prev.disabled=dayIndex<=0;
-    prev.setAttribute('aria-disabled',dayIndex<=0?'true':'false');
-  }
-  if(next){
-    next.disabled=dayIndex>=days.length-1;
-    next.setAttribute('aria-disabled',dayIndex>=days.length-1?'true':'false');
-  }
-}
-
-function _immersiveMoveDay_(delta){
-  const days=_immersiveDaysForCity_(immersiveItineraryCity);
-  if(!days.length) return;
-  const currentIndex=Math.max(0,days.indexOf(Number(immersiveItineraryDay)));
-  const nextIndex=Math.max(0,Math.min(days.length-1,currentIndex+delta));
-  if(nextIndex===currentIndex) return;
-  immersiveItineraryDay=days[nextIndex];
-  scheduleImmersiveItineraryRender();
-}
-
-function openImmersiveItinerary(city){
-  const modal=qs('#itinerary-focus-modal');
-  if(!modal || !_immersiveAvailableCities_().length) return;
-
-  immersiveItineraryCity=city && _immersiveAvailableCities_().includes(city)
-    ? city
-    : (activeCity && _immersiveAvailableCities_().includes(activeCity) ? activeCity : _immersiveAvailableCities_()[0]);
-
-  const days=_immersiveDaysForCity_(immersiveItineraryCity);
-  const preferred=Number(itineraries?.[immersiveItineraryCity]?.currentDay);
-  immersiveItineraryDay=days.includes(preferred)?preferred:days[0];
-
+  // Guest sessions intentionally live in sessionStorage so they do not persist
+  // after the browsing session. A short-lived same-origin handoff lets a newly
+  // opened Workspace receive that guest session without making it persistent.
   try{
-    if(window.parent && window.parent!==window){
-      window.parent.postMessage({type:'ITBMO_REQUEST_PLANNER_FOCUS',reason:'itinerary-viewer'},'*');
+    const guestToken=String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY)||'').trim();
+    if(guestToken){
+      localStorage.setItem(ITBMO_WORKSPACE_GUEST_HANDOFF_KEY,JSON.stringify({token:guestToken,expires_at:Date.now()+60000}));
     }
   }catch(_){}
 
-  modal.classList.add('is-open');
-  modal.setAttribute('aria-hidden','false');
-  document.body.classList.add('itinerary-focus-open');
-
-  // Let the focus surface paint first, then build the day table.
-  // This prevents the CTA click from carrying the full table-render cost.
-  scheduleImmersiveItineraryRender();
-
-  setTimeout(()=>qs('#itinerary-focus-close')?.focus(),80);
-}
-
-function closeImmersiveItinerary(){
-  const modal=qs('#itinerary-focus-modal');
-  if(!modal) return;
-  if(immersiveRenderFrame!=null){
-    cancelAnimationFrame(immersiveRenderFrame);
-    immersiveRenderFrame=null;
+  const params=new URLSearchParams();
+  params.set('lang',snapshot.lang);
+  if(snapshot.trip_id) params.set('trip_id',snapshot.trip_id);
+  const url=`./trip-workspace.html?${params.toString()}`;
+  const opened=window.open(url,'_blank','noopener,noreferrer');
+  if(!opened){
+    // If the browser blocks the new tab, ownership follows the intentional
+    // same-tab navigation so the Workspace is not mistaken for an abandoned
+    // Planner session. Returning to the Planner restores Planner ownership.
+    try{ localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'workspace'); }catch(_){ }
+    window.location.href=url;
   }
-  modal.classList.remove('is-open');
-  modal.setAttribute('aria-hidden','true');
-  document.body.classList.remove('itinerary-focus-open');
-  setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);
 }
-
-function bindImmersiveItineraryViewer(){
-  const launch=qs('#open-itinerary-focus');
-  const modal=qs('#itinerary-focus-modal');
-  if(!launch || !modal) return;
-
-  launch.addEventListener('click',()=>openImmersiveItinerary());
-  qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);
-  qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);
-  qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);
-  qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));
-  qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));
-
-  modal.addEventListener('touchstart',(e)=>{
-    const p=e.touches?.[0];
-    if(!p) return;
-    immersiveTouchStartX=p.clientX;
-    immersiveTouchStartY=p.clientY;
-  },{passive:true});
-
-  modal.addEventListener('touchend',(e)=>{
-    if(immersiveTouchStartX==null || immersiveTouchStartY==null) return;
-    const p=e.changedTouches?.[0];
-    if(!p) return;
-    const dx=p.clientX-immersiveTouchStartX;
-    const dy=p.clientY-immersiveTouchStartY;
-    immersiveTouchStartX=null;
-    immersiveTouchStartY=null;
-    if(Math.abs(dx)>58 && Math.abs(dx)>Math.abs(dy)*1.25){
-      _immersiveMoveDay_(dx<0?1:-1);
-    }
-  },{passive:true});
-
-  document.addEventListener('keydown',(e)=>{
-    if(!modal.classList.contains('is-open')) return;
-    if(e.key==='Escape'){
-      e.preventDefault();
-      closeImmersiveItinerary();
-    }else if(e.key==='ArrowLeft'){
-      e.preventDefault();
-      _immersiveMoveDay_(-1);
-    }else if(e.key==='ArrowRight'){
-      e.preventDefault();
-      _immersiveMoveDay_(1);
-    }
-  });
-
-  syncImmersiveItineraryLauncher();
-}
-
+function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
+function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch||!modal)return;launch.addEventListener('click',openImmersiveItinerary);qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
+  modal.addEventListener('touchstart',e=>{if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const p=e.touches?.[0];if(p){immersiveTouchStartX=p.clientX;immersiveTouchStartY=p.clientY;}},{passive:true});modal.addEventListener('touchend',e=>{if(immersiveTouchStartX==null)return;const p=e.changedTouches?.[0];if(!p)return;const dx=p.clientX-immersiveTouchStartX,dy=p.clientY-immersiveTouchStartY;immersiveTouchStartX=immersiveTouchStartY=null;if(Math.abs(dx)>58&&Math.abs(dx)>Math.abs(dy)*1.25)_immersiveMoveDay_(dx<0?1:-1);},{passive:true});
+  document.addEventListener('keydown',e=>{if(!modal.classList.contains('is-open'))return;if(e.key==='Escape'){e.preventDefault();if(immersiveWorkspaceLevel==='city')_immersiveBackToOverview_();else closeImmersiveItinerary();}else if(e.key==='ArrowLeft')_immersiveMoveDay_(-1);else if(e.key==='ArrowRight')_immersiveMoveDay_(1);});syncImmersiveItineraryLauncher();}
 bindImmersiveItineraryViewer();
 
 function getFrontendSnapshot(){
@@ -4025,7 +3902,8 @@ ${buildIntake()}
         text: getLang()==='es'
           ? 'Info Chat está disponible después de confirmar el pago de este itinerario.'
           : 'Info Chat is available after payment for this itinerary is confirmed.',
-        remaining:0
+        remaining:0,
+        notAuthorized:true
       };
     }
 
@@ -4102,17 +3980,37 @@ function _minutesToHHMM_(mins){
   const mm = String(Math.floor(n%60)).padStart(2,'0');
   return `${hh}:${mm}`;
 }
+function _plannerTripLanguage_(){
+  const original = String(plannerState?.itineraryLang || '').trim().slice(0,80);
+  if(!original) return String(plannerState?.lang || getLang() || 'en').trim().slice(0,80) || 'en';
+
+  const raw = original.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return 'es';
+  if(/\b(en|eng|english|ingles)\b/.test(raw)) return 'en';
+  if(/\b(pt|por|portuguese|portugues)\b/.test(raw)) return 'pt';
+  if(/\b(fr|fre|french|francais)\b/.test(raw)) return 'fr';
+  if(/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return 'de';
+  if(/\b(it|ita|italian|italiano)\b/.test(raw)) return 'it';
+
+  // Preserve any other language exactly as selected by the traveler. This
+  // metadata is for generation/context understanding, not for ITBMO UI locale.
+  return original;
+}
+
 function _plannerOutputLang_(){
-  const raw = String(plannerState?.itineraryLang || plannerState?.lang || getLang() || 'en')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'');
+  const selected = _plannerTripLanguage_();
+  const raw = String(selected||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   if(/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return 'es';
   if(/\b(pt|por|portuguese|portugues)\b/.test(raw)) return 'pt';
   if(/\b(fr|fre|french|francais)\b/.test(raw)) return 'fr';
   if(/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return 'de';
   if(/\b(it|ita|italian|italiano)\b/.test(raw)) return 'it';
-  return 'en';
+  if(/\b(en|eng|english|ingles)\b/.test(raw)) return 'en';
+
+  // Static helper/export labels are currently localized for the six validated
+  // output packs. For any other itinerary language, keep ITBMO's own labels in
+  // the selected site UI language instead of falsely classifying the trip as EN.
+  return getLang()==='es' ? 'es' : 'en';
 }
 
 function _durationLabels_(){
@@ -4895,19 +4793,35 @@ function setOverlayMessage(msg=t('overlayDefault')){
 function showWOW(on, msg){
   if(!$overlayWOW) return;
   if(msg) setOverlayMessage(msg);
+
+  const infoModal=qs('#info-chat-modal');
+
+  if(on){
+    /* Generation owns the viewport.
+       If Info Chat was open or minimized, preserve its exact state but remove
+       it completely from the generation layer until the overlay finishes. */
+    if(infoModal && infoModal.dataset.generationSuspended!=='1'){
+      infoModal.dataset.generationSuspended='1';
+      infoModal.dataset.generationWasActive=infoModal.classList.contains('active') ? '1' : '0';
+      infoModal.dataset.generationWasMinimized=infoModal.classList.contains('is-minimized') ? '1' : '0';
+      infoModal.style.display='none';
+      infoModal.style.pointerEvents='none';
+      document.body.classList.remove('itbmo-info-open');
+    }
+  }
+
   $overlayWOW.style.display = on ? 'flex' : 'none';
   if(on) requestParentViewportFocus('loading-overlay', true);
 
   // Affiliate cards are anchors, not planner controls: they remain clickable
   // in a new tab while the generation request continues untouched.
-  setLoadingAffiliateVisibility(!!on);
 
   const all = qsa('button, input, select, textarea');
   all.forEach(el=>{
     // ✅ Keep only the reset button enabled
     if (el.id === 'reset-planner') return;
 
-    // 🆕 Also lock the floating Info Chat button
+    // Info Chat cannot be opened while generation owns the viewport.
     if (el.id === 'info-chat-floating') {
       el.disabled = on;
       return;
@@ -4925,6 +4839,26 @@ function showWOW(on, msg){
       }
     }
   });
+
+  if(!on && infoModal?.dataset.generationSuspended==='1'){
+    const wasActive=infoModal.dataset.generationWasActive==='1';
+    const wasMinimized=infoModal.dataset.generationWasMinimized==='1';
+
+    delete infoModal.dataset.generationSuspended;
+    delete infoModal.dataset.generationWasActive;
+    delete infoModal.dataset.generationWasMinimized;
+    infoModal.style.pointerEvents='';
+
+    if(wasActive){
+      infoModal.style.display='flex';
+      infoModal.classList.add('active');
+      infoModal.classList.toggle('is-minimized',wasMinimized);
+      if(!wasMinimized) document.body.classList.add('itbmo-info-open');
+    }else{
+      infoModal.style.display='none';
+      infoModal.classList.remove('active','is-minimized');
+    }
+  }
 
   /* Permanent trip-state guardrails after any global UI unlock. */
   if(!on){
@@ -6781,6 +6715,43 @@ function _showGenerationRetry_(reason=''){
   if(reason) console.warn('[GENERATION RECOVERY]',reason);
 }
 
+async function _prewarmGeneratedTripContext_(){
+  const token=getStoredSessionToken();
+  const tripId=String(currentTripId||'').trim();
+  const cityList=(savedDestinations||[]).map(item=>String(item?.city||'').trim()).filter(Boolean);
+  if(!token || !tripId || !cityList.length) return;
+
+  const markerKey=`itbmo_context_prewarm_${tripId}`;
+  try{
+    localStorage.setItem(markerKey,JSON.stringify({status:'running',started_at:new Date().toISOString(),cities:cityList}));
+  }catch(_){}
+
+  for(const cityName of cityList){
+    try{
+      const response=await fetch('/api/context',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          session_token:token,
+          trip_id:tripId,
+          city:cityName
+        })
+      });
+      let payload={};
+      try{payload=await response.json();}catch(_){}
+      if(!response.ok || !payload?.ok){
+        console.warn('[CONTEXT PREWARM]',cityName,payload?.code||response.status);
+      }
+    }catch(error){
+      console.warn('[CONTEXT PREWARM]',cityName,error);
+    }
+  }
+
+  try{
+    localStorage.setItem(markerKey,JSON.stringify({status:'done',finished_at:new Date().toISOString(),cities:cityList}));
+  }catch(_){}
+}
+
 async function runPaidGeneration({manualRetry=false}={}){
   if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
   paidGenerationRunning=true;
@@ -6874,6 +6845,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     }
 
     await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    _prewarmGeneratedTripContext_().catch(error=>console.warn('[CONTEXT PREWARM]',error));
     trackITBMOEvent('itinerary_generated',{
       city_count:savedDestinations.length,
       days_total:savedDestinations.reduce((sum,item)=>sum+(Number(item?.days)||0),0),
@@ -6905,12 +6877,218 @@ async function runPaidGeneration({manualRetry=false}={}){
   }
 }
 
+
+/* =========================================================
+   ITBMO · JOURNEY HOME · PHASE 4
+   Returning generated trips are presented as choices instead of being
+   silently restored. Interrupted paid generations retain legacy recovery.
+========================================================= */
+let journeyHomeLatestTrip = null;
+let journeyHistoryTrips = [];
+let journeyHomeBusy = false;
+
+function _journeyEsc_(value){
+  return String(value ?? '').replace(/[&<>"']/g,ch=>({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'
+  }[ch]));
+}
+function _journeyDestinations_(trip){
+  return (Array.isArray(trip?.destinations)?trip.destinations:[])
+    .map(d=>String(d?.city||'').trim()).filter(Boolean);
+}
+function _journeyDateLabel_(trip){
+  const ds=Array.isArray(trip?.destinations)?trip.destinations:[];
+  const dates=ds.map(d=>d?.base_date||d?.baseDate||'').filter(Boolean);
+  const fmt=(raw)=>{
+    const value=String(raw||'').trim();
+    let date=null;
+    if(/^\d{4}-\d{2}-\d{2}$/.test(value)) date=new Date(value+'T12:00:00');
+    else if(/^\d{2}\/\d{2}\/\d{4}$/.test(value)){
+      const [dd,mm,yyyy]=value.split('/'); date=new Date(`${yyyy}-${mm}-${dd}T12:00:00`);
+    }
+    if(!date || Number.isNaN(date.getTime())) return '';
+    return new Intl.DateTimeFormat(getLang()==='es'?'es-CR':'en-US',{day:'numeric',month:'short',year:'numeric'}).format(date);
+  };
+  return dates.length ? fmt(dates[0]) : '';
+}
+function _journeyTripLabel_(trip){
+  const cities=_journeyDestinations_(trip);
+  return cities.join(' · ') || (getLang()==='es'?'Viaje ITBMO':'ITBMO trip');
+}
+function _journeyTripMeta_(trip){
+  const cities=_journeyDestinations_(trip);
+  const days=(Array.isArray(trip?.destinations)?trip.destinations:[])
+    .reduce((sum,d)=>sum+(Number(d?.days)||0),0);
+  const date=_journeyDateLabel_(trip);
+  const parts=[];
+  if(date) parts.push(date);
+  if(cities.length) parts.push(`${cities.length} ${getLang()==='es'?(cities.length===1?'ciudad':'ciudades'):(cities.length===1?'city':'cities')}`);
+  if(days) parts.push(`${days} ${getLang()==='es'?(days===1?'día':'días'):(days===1?'day':'days')}`);
+  return parts.join(' · ');
+}
+function _journeyCopy_(){
+  const es=getLang()==='es';
+  return es ? {
+    eyebrow:'TU VIAJE SIGUE AQUÍ',
+    title:'¿Qué quieres hacer hoy?',
+    copy:'Continúa donde lo dejaste o empieza una nueva aventura. Tus viajes anteriores permanecen disponibles para que vuelvas a ellos cuando los necesites.',
+    resumeKicker:'ÚLTIMO VIAJE',
+    resumeTitle:'Continuar con mi último viaje',
+    resumeAction:'Abrir Trip Workspace',
+    newKicker:'NUEVA AVENTURA',
+    newTitle:'Planificar un nuevo viaje',
+    newCopy:'Empieza desde cero sin borrar los viajes que ya creaste.',
+    newAction:'Crear nuevo itinerario',
+    historyEyebrow:'TU HISTORIAL',
+    historyTitle:'Mis viajes',
+    tripCount:n=>`${n} ${n===1?'viaje guardado':'viajes guardados'}`,
+    open:'Abrir viaje',
+    myTrips:'Mis viajes',
+    myTripsHint:'Tu espacio de viaje'
+  } : {
+    eyebrow:'YOUR TRIP IS STILL HERE',
+    title:'What would you like to do today?',
+    copy:'Continue where you left off or start a new adventure. Your previous trips stay available whenever you need them.',
+    resumeKicker:'LATEST TRIP',
+    resumeTitle:'Continue my latest trip',
+    resumeAction:'Open Trip Workspace',
+    newKicker:'NEW ADVENTURE',
+    newTitle:'Plan a new trip',
+    newCopy:'Start from scratch without deleting the trips you already created.',
+    newAction:'Create new itinerary',
+    historyEyebrow:'YOUR HISTORY',
+    historyTitle:'My trips',
+    tripCount:n=>`${n} saved ${n===1?'trip':'trips'}`,
+    open:'Open trip',
+    myTrips:'My trips',
+    myTripsHint:'Your trip space'
+  };
+}
+function _journeyApplyCopy_(){
+  const c=_journeyCopy_();
+  const set=(id,value)=>{const el=qs('#'+id);if(el)el.textContent=value;};
+  set('journey-home-eyebrow',c.eyebrow);set('journey-home-title',c.title);set('journey-home-copy',c.copy);
+  set('journey-home-resume-kicker',c.resumeKicker);set('journey-home-resume-title',c.resumeTitle);
+  set('journey-home-new-kicker',c.newKicker);set('journey-home-new-title',c.newTitle);set('journey-home-new-copy',c.newCopy);
+  set('journey-history-eyebrow',c.historyEyebrow);set('journey-history-title',c.historyTitle);set('planner-my-trips-label',c.myTrips);set('planner-my-trips-hint',c.myTripsHint);
+  const resumeAction=qs('#journey-home-resume-action');if(resumeAction)resumeAction.innerHTML=`${_journeyEsc_(c.resumeAction)} <i aria-hidden="true">→</i>`;
+  const newAction=qs('#journey-home-new-action');if(newAction)newAction.innerHTML=`${_journeyEsc_(c.newAction)} <i aria-hidden="true">→</i>`;
+}
+async function _journeyLoadHistory_(){
+  const token=getStoredSessionToken();
+  if(!token) return [];
+  try{
+    const data=await tripApi({action:'list',session_token:token,limit:12});
+    journeyHistoryTrips=Array.isArray(data?.trips)?data.trips.filter(t=>t?.status==='generated'):[];
+  }catch(err){
+    console.warn('[JOURNEY HISTORY]',err);
+    journeyHistoryTrips=journeyHomeLatestTrip?[journeyHomeLatestTrip]:[];
+  }
+  return journeyHistoryTrips;
+}
+function _journeyRenderHistory_(){
+  const c=_journeyCopy_(),section=qs('#journey-history'),grid=qs('#journey-history-grid'),count=qs('#journey-history-count');
+  if(!section||!grid)return;
+  const trips=journeyHistoryTrips.filter(t=>t?.id);
+  section.hidden=trips.length===0;
+  if(count)count.textContent=c.tripCount(trips.length);
+  grid.innerHTML='';
+  trips.slice(0,9).forEach((trip,index)=>{
+    const card=document.createElement('button');
+    card.type='button';card.className='journey-trip-card';card.dataset.tripId=trip.id;
+    card.innerHTML=`<span class="journey-trip-card__number">${String(index+1).padStart(2,'0')}</span><strong>${_journeyEsc_(_journeyTripLabel_(trip))}</strong><small>${_journeyEsc_(_journeyTripMeta_(trip))}</small><span class="journey-trip-card__open">${_journeyEsc_(c.open)} →</span>`;
+    card.addEventListener('click',()=>_journeyOpenTrip_(trip.id));
+    grid.appendChild(card);
+  });
+}
+async function showJourneyReturnGate(trip){
+  if(!trip?.id)return;
+  journeyHomeLatestTrip=trip;
+  _journeyApplyCopy_();
+  const gate=qs('#journey-home');
+  if(!gate)return;
+  const meta=qs('#journey-home-resume-meta');if(meta)meta.textContent=`${_journeyTripLabel_(trip)}${_journeyTripMeta_(trip)?' · '+_journeyTripMeta_(trip):''}`;
+  gate.hidden=false;gate.setAttribute('aria-hidden','false');document.body.classList.add('journey-home-open');
+  const myTrips=qs('#planner-my-trips');if(myTrips)myTrips.hidden=false;
+  await _journeyLoadHistory_();_journeyRenderHistory_();
+}
+function hideJourneyReturnGate(){
+  const gate=qs('#journey-home');if(gate){gate.hidden=true;gate.setAttribute('aria-hidden','true');}
+  document.body.classList.remove('journey-home-open');
+}
+async function _journeyOpenTrip_(tripId){
+  if(journeyHomeBusy||!tripId)return;
+  journeyHomeBusy=true;
+  try{
+    const token=getStoredSessionToken();
+    const data=await tripApi({action:'get',session_token:token,trip_id:tripId});
+    const trip=data?.trip;
+    if(!trip||!_hydrateGenerationTrip_(trip))throw new Error('TRIP_NOT_AVAILABLE');
+    let paymentStatus=null;
+    try{paymentStatus=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});applyInfoChatStatus(paymentStatus);}catch(_){}
+    setExportToolbarVisibility(true);setPlanningChatLocked(true);hideJourneyReturnGate();
+    openImmersiveItinerary();
+  }catch(err){console.warn('[JOURNEY OPEN]',err);}
+  finally{journeyHomeBusy=false;}
+}
+function _journeyStartNew_(){
+  /* This is intentionally NOT Reset: no trip is archived or deleted.
+     We only detach the old active-trip pointer and reload a clean Planner. */
+  storeActiveTripId(null);
+  try{localStorage.removeItem('itbmo_trip_workspace_snapshot_v1');}catch(_){}
+  const url=new URL(window.location.href);
+  url.searchParams.set('mode','new');
+  window.location.href=url.toString();
+}
+function bindJourneyHome(){
+  qs('#journey-home-resume')?.addEventListener('click',()=>_journeyOpenTrip_(journeyHomeLatestTrip?.id));
+  qs('#journey-home-new')?.addEventListener('click',_journeyStartNew_);
+  qs('#planner-my-trips')?.addEventListener('click',async()=>{
+    const button=qs('#planner-my-trips');
+    if(button?.dataset.busy==='1') return;
+    if(button) button.dataset.busy='1';
+
+    try{
+      let trip=journeyHomeLatestTrip;
+
+      if(!trip){
+        const trips=await _journeyLoadHistory_();
+        trip=trips[0] || null;
+        if(trip) journeyHomeLatestTrip=trip;
+      }
+
+      if(!trip) return;
+
+      await showJourneyReturnGate(trip);
+
+      /* The global topbar action is specifically "My trips", so take the
+         traveler to the history section instead of only revealing the gate. */
+      requestAnimationFrame(()=>{
+        const history=qs('#journey-history');
+        const gate=qs('#journey-home');
+        const target=(history && !history.hidden) ? history : gate;
+        if(!target) return;
+
+        const rect=target.getBoundingClientRect();
+        const current=window.scrollY || document.documentElement.scrollTop || 0;
+        const desired=Math.max(0,current + rect.top - 112);
+        window.scrollTo({top:desired,behavior:'smooth'});
+      });
+    }finally{
+      if(button) delete button.dataset.busy;
+    }
+  });
+}
+
 async function restorePaidGenerationIfNeeded(){
   if(generationResetInProgress || paidGenerationRunning || !currentUser || !getStoredSessionToken()) return;
   try{
     const token=getStoredSessionToken();
-    let tripId=getStoredActiveTripId();
+    const requestedTripId=String(new URLSearchParams(window.location.search).get('trip_id') || '').trim();
+    let tripId=requestedTripId || getStoredActiveTripId();
     let trip=null;
+
+    if(requestedTripId) storeActiveTripId(requestedTripId);
 
     if(tripId){
       try{
@@ -6928,6 +7106,19 @@ async function restorePaidGenerationIfNeeded(){
     }
     if(generationResetInProgress) return;
     if(!trip || !['saved','generating','failed','generated'].includes(trip.status)) return;
+
+    const plannerMode=new URLSearchParams(window.location.search).get('mode');
+    if(trip.status==='generated'){
+      if(plannerMode==='new'){
+        storeActiveTripId(null);
+        const myTrips=qs('#planner-my-trips'); if(myTrips) myTrips.hidden=false;
+        _journeyLoadHistory_().then(()=>_journeyRenderHistory_()).catch(()=>{});
+        return;
+      }
+      await showJourneyReturnGate(trip);
+      return;
+    }
+
     if(!_hydrateGenerationTrip_(trip)) return;
 
     let paymentStatus=null;
@@ -8614,10 +8805,22 @@ function showFinalDownloadModal(){
     <button class="btn itbmo-download-close" type="button" disabled>${es?'Continuar':'Continue'}</button>
     <small>${es?'En móvil podrás abrir, compartir o guardar cada archivo mediante las opciones del dispositivo.':'On mobile, you can open, share or save each file using your device options.'}</small>
   </div>`;
-  document.body.appendChild(overlay); requestParentViewportFocus('download-ready',true); requestAnimationFrame(()=>overlay.classList.add('active'));
+  document.body.appendChild(overlay); requestAnimationFrame(()=>overlay.classList.add('active'));
   const ack=overlay.querySelector('input'); const close=overlay.querySelector('.itbmo-download-close'); const status=overlay.querySelector('.itbmo-download-status');
   ack.addEventListener('change',()=>{close.disabled=!ack.checked;});
-  close.addEventListener('click',()=>{if(!ack.checked)return;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);});
+  close.addEventListener('click',()=>{
+    if(!ack.checked) return;
+    overlay.classList.remove('active');
+
+    overlay.remove();
+
+    /* One deterministic jump to the real end of the Planner. */
+    requestAnimationFrame(()=>{
+      const doc=document.documentElement;
+      const bottom=Math.max(document.body?.scrollHeight || 0,doc?.scrollHeight || 0);
+      window.scrollTo({top:bottom,behavior:'auto'});
+    });
+  });
   const pdfButton=overlay.querySelector('.itbmo-open-pdf');
   const csvButton=overlay.querySelector('.itbmo-open-csv');
   const receiptButton=overlay.querySelector('.itbmo-open-receipt');
@@ -8700,6 +8903,47 @@ function bindExportListeners(){
    Critical windows request that the parent page brings the top of the
    Planner into view. Standalone Vercel use falls back to window.scrollTo.
    ========================================================= */
+
+function smoothAdvanceTo(target,{gap=118,center=false}={}){
+  const el=typeof target==='string' ? qs(target) : target;
+  if(!el) return;
+  const rect=el.getBoundingClientRect();
+  const current=window.scrollY || document.documentElement.scrollTop || 0;
+  const viewportBottom=window.innerHeight || document.documentElement.clientHeight || 0;
+  const targetTop=current + rect.top - gap;
+
+  /* Never pull the traveler backward. Advance only when the next stage is below
+     the comfortable reading zone. */
+  const needsAdvance = center
+    ? rect.top > viewportBottom * .58
+    : rect.top > viewportBottom * .72;
+
+  if(needsAdvance && targetTop > current + 24){
+    window.scrollTo({top:targetTop,behavior:'smooth'});
+  }
+}
+
+function installPlannerInlineInfoChat(){
+  /* Phase 4.9 · Restore the original floating Info Chat contract.
+     Keep the modal as a direct child of <body>. Do not reparent it into the
+     Planner flow and do not reset user-resized/user-moved geometry on reopen. */
+  const modal=qs('#info-chat-modal');
+  if(!modal) return;
+
+  if(modal.parentElement !== document.body){
+    document.body.appendChild(modal);
+  }
+
+  modal.classList.remove('is-inline-planner-chat');
+  delete modal.dataset.mobileViewportLayout;
+}
+
+function installPlannerAgentFlow(){
+  const host=qs('#planner-agent-flow');
+  const chat=qs('#chat-container');
+  if(host && chat && chat.parentElement!==host) host.appendChild(chat);
+}
+
 function requestParentViewportFocus(reason='modal', immediate=false){
   try{
     if(window.parent && window.parent !== window){
@@ -8793,8 +9037,7 @@ function showPlannerDecision({title,message,confirmLabel,cancelLabel,variant='pr
     card.querySelector('.itbmo-decision-confirm')?.addEventListener('click',()=>finish(true));
     overlay.addEventListener('click',(e)=>{if(e.target===overlay) finish(false);});
     document.addEventListener('keydown',onKey);
-    requestParentViewportFocus('planner-confirmation',true);
-    requestAnimationFrame(()=>overlay.classList.add('active'));
+      requestAnimationFrame(()=>overlay.classList.add('active'));
   });
 }
 
@@ -8815,7 +9058,6 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   `;
   overlay.appendChild(modal);
   document.body.appendChild(overlay);
-  requestParentViewportFocus('reset-modal', true);
   setTimeout(()=>overlay.classList.add('active'), 10);
 
   const confirmReset = overlay.querySelector('#confirm-reset');
@@ -8983,9 +9225,7 @@ const ITBMO_COMMERCE_CONFIG = {
 
   currency: 'USD',
   regularPrice: 5.99,
-  promoPrice: 2.99,
-  promotionCode: 'launch_offer',
-  promotionLabel: 'Limited-time launch offer',
+  basePrice: 2.99,
 
   support: {
     enabled: true,
@@ -9013,6 +9253,11 @@ const $checkoutPayPalFallback = qs('#checkout-paypal-fallback');
 const $checkoutPreviewContinue = qs('#checkout-preview-continue');
 const $paypalButtonContainer = qs('#paypal-button-container');
 const $checkoutSupportLink = qs('#checkout-support-link');
+const $checkoutPromoInput = qs('#checkout-promo-input');
+const $checkoutPromoApply = qs('#checkout-promo-apply');
+const $checkoutPromoMessage = qs('#checkout-promo-message');
+const $checkoutPromoSummary = qs('#checkout-promo-summary');
+const $checkoutPromoLabel = qs('#checkout-promo-label');
 
 const $needHelp = qs('#need-help-floating');
 const $supportModal = qs('#support-modal');
@@ -9021,6 +9266,8 @@ const $supportEmailButton = qs('#support-email-button');
 
 let paymentGateSatisfiedTripId = null;
 let paypalSdkLoadingPromise = null;
+let activePromoReservation = null;
+let commerceServerConfig = null;
 
 /* ---------- Info Chat entitlement ---------- */
 const INFO_CHAT_MAX_QUERIES = 10;
@@ -9146,6 +9393,13 @@ function _commerceCopy_(){
     supportLink:'¿Necesitas ayuda? Contacta Atención al Cliente',
     preview:'Modo de prueba · Continuar con ITBMO',
     providerSoon:'Este método todavía no está activado.',
+    promoLabel:'¿Tienes un código promocional?',
+    promoPlaceholder:'Ingresa tu código',
+    promoApply:'Aplicar',
+    promoApplied:(code)=>`✓ Código ${code} aplicado`,
+    promoFree:'Tu itinerario queda cubierto al 100% con este código.',
+    promoDiscount:(amount,final)=>`Descuento US$${amount} · Total US$${final}`,
+    promoErrors:{PROMO_CODE_REQUIRED:'Ingresa un código.',PROMO_NOT_FOUND:'Ese código no existe.',PROMO_INACTIVE:'Ese código no está activo.',PROMO_NOT_STARTED:'Este código todavía no está vigente.',PROMO_EXPIRED:'Este código ya venció.',PROMO_EXHAUSTED:'Este código alcanzó su límite de usos.',PROMO_USER_LIMIT:'Ya utilizaste el máximo permitido para este código.',PROMO_REGISTERED_REQUIRED:'Este código requiere una cuenta registrada.',PROMO_VERIFIED_REQUIRED:'Este código requiere una cuenta verificada.',PROMO_RESERVATION_EXPIRED:'La reserva del código venció. Aplícalo nuevamente.',PROMO_UNAVAILABLE:'No pudimos aplicar este código.'},
     processing:'Procesando pago…',
     paid:'✓ Pago confirmado. Todo está listo.',
     error:'No pudimos confirmar el pago. Inténtalo nuevamente o contacta soporte.'
@@ -9177,6 +9431,13 @@ function _commerceCopy_(){
     supportLink:'Need help? Contact Customer Support',
     preview:'Preview mode · Continue to ITBMO',
     providerSoon:'This payment method is not active yet.',
+    promoLabel:'Have a promo code?',
+    promoPlaceholder:'Enter your code',
+    promoApply:'Apply',
+    promoApplied:(code)=>`✓ Code ${code} applied`,
+    promoFree:'This code covers 100% of your itinerary.',
+    promoDiscount:(amount,final)=>`Discount US$${amount} · Total US$${final}`,
+    promoErrors:{PROMO_CODE_REQUIRED:'Enter a code.',PROMO_NOT_FOUND:'That code does not exist.',PROMO_INACTIVE:'That code is not active.',PROMO_NOT_STARTED:'This code is not active yet.',PROMO_EXPIRED:'This code has expired.',PROMO_EXHAUSTED:'This code has reached its usage limit.',PROMO_USER_LIMIT:'You already used the maximum allowed for this code.',PROMO_REGISTERED_REQUIRED:'This code requires a registered account.',PROMO_VERIFIED_REQUIRED:'This code requires a verified account.',PROMO_RESERVATION_EXPIRED:'The code reservation expired. Apply it again.',PROMO_UNAVAILABLE:'We could not apply this code.'},
     processing:'Processing payment…',
     paid:'✓ Payment confirmed. Everything is ready.',
     error:'We could not confirm the payment. Please try again or contact support.'
@@ -9219,8 +9480,25 @@ function applyCommerceI18n(){
 
   const oldP = qs('#checkout-price-old');
   const newP = qs('#checkout-price-new');
-  if(oldP) oldP.textContent = `US$${Number(ITBMO_COMMERCE_CONFIG.regularPrice).toFixed(2)}`;
-  if(newP) newP.textContent = `US$${Number(ITBMO_COMMERCE_CONFIG.promoPrice).toFixed(2)}`;
+  const regularPrice=Number(commerceServerConfig?.regular_price || ITBMO_COMMERCE_CONFIG.regularPrice);
+  const basePrice=Number(commerceServerConfig?.base_price || ITBMO_COMMERCE_CONFIG.basePrice);
+  const finalPrice=Number(activePromoReservation?.final_amount ?? basePrice);
+  if(oldP) oldP.textContent = `US$${regularPrice.toFixed(2)}`;
+  if(newP) newP.textContent = `US$${finalPrice.toFixed(2)}`;
+  if($checkoutPromoLabel) $checkoutPromoLabel.textContent=c.promoLabel;
+  if($checkoutPromoInput) $checkoutPromoInput.placeholder=c.promoPlaceholder;
+  if($checkoutPromoApply) $checkoutPromoApply.textContent=c.promoApply;
+  if($checkoutPromoSummary){
+    if(activePromoReservation){
+      $checkoutPromoSummary.hidden=false;
+      $checkoutPromoSummary.textContent=activePromoReservation.is_free
+        ? c.promoFree
+        : c.promoDiscount(Number(activePromoReservation.discount_amount||0).toFixed(2),Number(activePromoReservation.final_amount||0).toFixed(2));
+    }else{
+      $checkoutPromoSummary.hidden=true;
+      $checkoutPromoSummary.textContent='';
+    }
+  }
 
   if($needHelp) $needHelp.style.display = ITBMO_COMMERCE_CONFIG.support.enabled ? 'flex' : 'none';
 
@@ -9245,7 +9523,6 @@ function applyCommerceI18n(){
 
 function openSupportModal(){
   if(!$supportModal || !ITBMO_COMMERCE_CONFIG.support.enabled) return;
-  requestParentViewportFocus('support-modal', true);
   $supportModal.scrollTop=0;
   const card=$supportModal.querySelector('.support-card');
   if(card) card.scrollTop=0;
@@ -9310,6 +9587,68 @@ function setCheckoutStatus(message='', type=''){
   $checkoutStatus.className = 'checkout-status' + (type ? ` ${type}` : '');
 }
 
+async function loadCommerceServerConfig(){
+  try{
+    const token=getStoredSessionToken();
+    if(!token) return null;
+    commerceServerConfig=await paymentApi({action:'config',session_token:token});
+    if(commerceServerConfig?.currency) ITBMO_COMMERCE_CONFIG.currency=commerceServerConfig.currency;
+    return commerceServerConfig;
+  }catch(err){
+    console.warn('[COMMERCE CONFIG]',err);
+    return null;
+  }
+}
+
+function setPromoMessage(message='',type=''){
+  if(!$checkoutPromoMessage) return;
+  $checkoutPromoMessage.textContent=message||'';
+  $checkoutPromoMessage.className='checkout-promo-message'+(type?` ${type}`:'');
+}
+
+async function promotionApi(payload){
+  const response=await fetch('/api/promotions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload||{})});
+  const body=await response.json().catch(()=>({}));
+  if(!response.ok || body?.ok===false){
+    const err=new Error(body?.code||`PROMO_HTTP_${response.status}`);
+    err.code=body?.code||'PROMO_UNAVAILABLE';
+    throw err;
+  }
+  return body;
+}
+
+async function applyPromotionCode(){
+  const c=_commerceCopy_();
+  const code=String($checkoutPromoInput?.value||'').trim().toUpperCase();
+  if(!code){ setPromoMessage(c.promoErrors.PROMO_CODE_REQUIRED,'error'); return; }
+  if(!$checkoutPromoApply || !currentTripId) return;
+  $checkoutPromoApply.disabled=true;
+  setPromoMessage('');
+  try{
+    const token=getStoredSessionToken();
+    const result=await promotionApi({action:'reserve',session_token:token,trip_id:currentTripId,code});
+    activePromoReservation=result?.reservation||null;
+    if(!activePromoReservation) throw Object.assign(new Error('PROMO_UNAVAILABLE'),{code:'PROMO_UNAVAILABLE'});
+    setPromoMessage(c.promoApplied(activePromoReservation.code||code),'success');
+    applyCommerceI18n();
+    trackITBMOEvent('promo_code_applied',{promotion_code:activePromoReservation.code||code,promo_type:activePromoReservation.promo_type||'',discount_amount:Number(activePromoReservation.discount_amount||0)});
+
+    if(activePromoReservation.is_free){
+      const consumed=await promotionApi({action:'consume_free',session_token:token,trip_id:currentTripId,redemption_id:activePromoReservation.redemption_id});
+      if(!consumed?.ok) throw Object.assign(new Error('PROMO_UNAVAILABLE'),{code:'PROMO_UNAVAILABLE'});
+      trackITBMOEvent('promo_code_consumed',{promotion_code:activePromoReservation.code||code,promo_type:activePromoReservation.promo_type||'',discount_amount:Number(activePromoReservation.discount_amount||0)});
+      await completePaymentGate(c.promoFree);
+    }
+  }catch(err){
+    const key=err?.code||'PROMO_UNAVAILABLE';
+    activePromoReservation=null;
+    applyCommerceI18n();
+    setPromoMessage(c.promoErrors[key]||c.promoErrors.PROMO_UNAVAILABLE,'error');
+  }finally{
+    if($checkoutPromoApply) $checkoutPromoApply.disabled=false;
+  }
+}
+
 function openCheckoutModal(){
   if(!$checkoutModal) return;
   applyCommerceI18n();
@@ -9321,17 +9660,17 @@ function openCheckoutModal(){
   /* QUIRÚRGICO · Checkout visibility inside the auto-height Webflow iframe.
      The parent page is moved to the Planner top, while the modal itself always
      opens from its own top. This avoids hiding checkout in a tall iframe. */
-  requestParentViewportFocus('checkout-modal', true);
   $checkoutModal.scrollTop=0;
   const checkoutCard=$checkoutModal.querySelector('.checkout-card');
   if(checkoutCard) checkoutCard.scrollTop=0;
 
-  Promise.resolve(renderPayPalButtonsIfAvailable()).finally(()=>{
-    if($checkoutStatus?.textContent===loadingMessage) setCheckoutStatus('');
-    $checkoutModal.scrollTop=0;
-    if(checkoutCard) checkoutCard.scrollTop=0;
-    requestParentViewportFocus('checkout-modal', true);
-  });
+  Promise.resolve(loadCommerceServerConfig())
+    .then(()=>{ applyCommerceI18n(); return renderPayPalButtonsIfAvailable(); })
+    .finally(()=>{
+      if($checkoutStatus?.textContent===loadingMessage) setCheckoutStatus('');
+      $checkoutModal.scrollTop=0;
+      if(checkoutCard) checkoutCard.scrollTop=0;
+    });
 }
 
 function closeCheckoutModal(){
@@ -9377,9 +9716,9 @@ async function hasValidPaymentForCurrentTrip(){
   }
 }
 
-async function completePaymentGate(){
+async function completePaymentGate(successMessage=''){
   paymentGateSatisfiedTripId = currentTripId || paymentGateSatisfiedTripId;
-  setCheckoutStatus(_commerceCopy_().paid,'success');
+  setCheckoutStatus(successMessage || _commerceCopy_().paid,'success');
 
   /* Refresh authoritative entitlement + remaining Info Chat queries. */
   try{
@@ -9463,7 +9802,8 @@ async function loadPayPalSdk(){
 
   paypalSdkLoadingPromise = (async()=>{
     const token=getStoredSessionToken();
-    const cfg=await paymentApi({action:'config',session_token:token});
+    const cfg=commerceServerConfig || await paymentApi({action:'config',session_token:token});
+    commerceServerConfig=cfg||commerceServerConfig;
     const clientId=String(cfg?.paypal_client_id || '').trim();
     if(!clientId) throw new Error('PAYPAL_CLIENT_ID_NOT_AVAILABLE');
 
@@ -9504,7 +9844,7 @@ async function renderPayPalButtonsIfAvailable(){
           action:'paypal_create_order',
           session_token:token,
           trip_id:currentTripId,
-          promotion:ITBMO_COMMERCE_CONFIG.promotionCode
+          promo_redemption_id:activePromoReservation?.redemption_id || null
         });
         if(!data?.order_id) throw new Error('PAYPAL_ORDER_ID_MISSING');
         return data.order_id;
@@ -9560,7 +9900,7 @@ async function beginTilopayCheckout(){
       action:'tilopay_create_checkout',
       session_token:token,
       trip_id:currentTripId,
-      promotion:ITBMO_COMMERCE_CONFIG.promotionCode,
+      promo_redemption_id:activePromoReservation?.redemption_id || null,
       return_url:window.location.href
     });
 
@@ -9596,6 +9936,8 @@ function initCommerceAndSupport(){
   });
 
   $checkoutClose?.addEventListener('click',closeCheckoutModal);
+  $checkoutPromoApply?.addEventListener('click',applyPromotionCode);
+  $checkoutPromoInput?.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();applyPromotionCode();}});
   $checkoutTilopay?.addEventListener('click',beginTilopayCheckout);
   $checkoutPayPalFallback?.addEventListener('click',()=>{
     if(ITBMO_COMMERCE_CONFIG.previewMode && !ITBMO_COMMERCE_CONFIG.paypal.enabled){
@@ -9870,6 +10212,7 @@ function restoreInfoModal(){
 }
 
 function initInfoChatDrag(){
+  if(qs('#info-chat-modal')?.classList.contains('is-inline-planner-chat')) return;
   const modal=qs('#info-chat-modal');
   const header=modal?.querySelector('.info-chat-header');
   if(!modal || !header || header.dataset.dragBound==='1') return;
@@ -9936,23 +10279,49 @@ function initInfoChatDrag(){
   header.addEventListener('pointercancel',end);
 }
 
-function openInfoModal(){
-  if(!currentTripId || infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining <= 0){
-    return;
+async function openInfoModal(){
+  const modal=qs('#info-chat-modal');
+  const trigger=qs('#info-chat-floating');
+  if(!modal || !currentTripId) return;
+
+  /* Never bypass entitlement. If the visible control says Info Chat is
+     available but the in-memory trip binding became stale after restore,
+     revalidate against the existing payment/status API first. */
+  const triggerUsable=trigger && !trigger.disabled && trigger.getAttribute('aria-disabled')!=='true';
+  if(!triggerUsable || infoChatQueriesRemaining<=0) return;
+
+  if(infoChatAuthorizedTripId !== currentTripId){
+    try{
+      const token=getStoredSessionToken();
+      const status=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
+      applyInfoChatStatus(status);
+    }catch(err){
+      console.warn('[INFO CHAT OPEN STATUS]',err);
+    }
   }
-  const modal = qs('#info-chat-modal');
-  if(!modal) return;
-  requestParentViewportFocus('info-chat-modal', true);
-  modal.style.display = 'flex';
+
+  if(infoChatAuthorizedTripId !== currentTripId || infoChatQueriesRemaining<=0) return;
+
+  installPlannerInlineInfoChat();
+
+  modal.style.display='flex';
   modal.classList.add('active');
   modal.classList.remove('is-minimized');
-  hideInfoChatNotice();
-  initInfoChatDrag();
-  bindInfoChatViewportLayout();
-  applyInfoChatViewportLayout();
-  ensureInfoChatWelcome();
-
   document.body.classList.add('itbmo-info-open');
+
+  hideInfoChatNotice();
+  ensureInfoChatWelcome();
+  bindInfoChatViewportLayout();
+  initInfoChatDrag();
+  applyInfoChatViewportLayout();
+
+  /* Keep the page where the traveler is; only the floating window opens. */
+  requestAnimationFrame(()=>{
+    const input=qs('#info-chat-input');
+    if(input && !window.matchMedia('(max-width:760px)').matches){
+      try{ input.focus({preventScroll:true}); }catch(_){}
+    }
+  });
 }
 function closeInfoModal(){
   const modal = qs('#info-chat-modal');
@@ -10010,7 +10379,15 @@ async function sendInfoMessage(){
     infoChatMsg(result.text);
   }
 
-  if(Number.isFinite(Number(result?.remaining))){
+  if(result?.notAuthorized){
+    setInfoChatEntitlement({
+      authorized:false,
+      remaining:0,
+      used:0,
+      tripId:null
+    });
+    persistInfoChatState();
+  }else if(Number.isFinite(Number(result?.remaining))){
     const remaining=Math.max(0,Number(result.remaining));
     setInfoChatEntitlement({
       authorized:true,
@@ -10118,149 +10495,41 @@ function bindNewPlanningListener(){
 
 function enhancePreferencesInfoChatCopy(){
   const field=qs('#special-conditions');
-  if(!field || qs('#itbmo-preferences-help-row')) return;
+  if(!field || qs('#itbmo-preferences-guidance')) return;
 
-  const lang = _plannerOutputLang_();
-  const copy = {
+  const lang=_plannerOutputLang_();
+  const copy={
     en:{
-      guideTitle:'✨ Tell us exactly how you want to experience your trip',
-      guideSubtitle:'This will help create an itinerary that truly matches you.',
-      guideItems:[
-        '🏞️ Style & activities → “I prefer nature and landscapes. Avoid museums.” / “I want authentic tours, not massive ones.”',
-        '🚗 Transportation → “I’ll rent a 4x4.” / “I’ll use public transport.” / “Uber or taxi when needed.”',
-        '🏃 Pace & adventure level → “Relaxed trip.” / “Balanced.” / “Extreme adventure.”',
-        '🧭 Must-dos → “Northern lights hunt.” / “Whale watching.” / “Golden Circle tour.”',
-        '⚕️ Health & restrictions → “Asthma, reduced mobility, knee issues, food allergies.”',
-        '👨‍👩‍👧‍👦 Other important details → “Traveling with small kids.” / “Need flexible hours.” / “Avoid long walks.”'
-      ],
-      guideFinal:'📝 The more details you share, the more precise, smooth and personalized your itinerary will be.',
-      unsureTitle:'💡 Not sure what to write?',
-      unsureIntro:'Info Chat 🌐 is now available with up to 10 trip-related queries for the cities in this itinerary. Use it before continuing if you want more context for your preferences.',
-      unsureExamples:'For example:',
-      unsureItems:['🏨 Best area or neighborhood to stay','🧳 Seasonal context and what to pack','🚇 Transportation and how to get around','🍽️ Local cuisine and dining areas','📸 Hidden gems and photography spots','🧭 Neighborhoods, customs and practical local context','🧳 What to pack and local customs','💰 Budget recommendations','❓ Anything else related to your trip'],
-      placeholder:'Write your preferences, restrictions or special conditions here…',
-      close:'Close'
+      lead:'A little context makes your itinerary much more personal.',
+      summary:'You can mention <strong>style</strong>, <strong>pace</strong>, <strong>must-dos</strong> and any <strong>special needs or restrictions</strong>.',
+      note:'Need destination context first? Info Chat is right beside this field.',
+      placeholder:'Write your preferences, restrictions or special conditions here…'
     },
     es:{
-      guideTitle:'✨ Cuéntanos exactamente cómo quieres vivir tu viaje',
-      guideSubtitle:'Esta información permitirá crear un itinerario realmente alineado contigo.',
-      guideItems:[
-        '🏞️ Estilo y actividades → “Prefiero naturaleza y paisajes. Evitar museos.” / “Quiero tours auténticos, no masivos.”',
-        '🚗 Transporte → “Voy a rentar un 4x4.” / “Usaré transporte público.” / “Uber o taxi cuando sea necesario.”',
-        '🏃 Ritmo y nivel de aventura → “Viaje relax.” / “Balanceado.” / “Aventura extrema.”',
-        '🧭 Actividades imperdibles → “Caza de auroras.” / “Avistamiento de ballenas.” / “Tour al Círculo Dorado.”',
-        '⚕️ Salud y restricciones → “Asma, movilidad reducida, problemas de rodillas, alergias alimentarias.”',
-        '👨‍👩‍👧‍👦 Otros detalles importantes → “Viajo con niños pequeños.” / “Necesito horarios flexibles.” / “Evitar caminatas largas.”'
-      ],
-      guideFinal:'📝 Entre más detalles indiques, más preciso, fluido y personalizado será tu itinerario.',
-      unsureTitle:'💡 ¿No sabes qué escribir?',
-      unsureIntro:'Info Chat 🌐 ya está disponible con hasta 10 consultas relacionadas con las ciudades de este itinerario. Úsalo antes de continuar si necesitas más contexto para tus preferencias.',
-      unsureExamples:'Por ejemplo:',
-      unsureItems:['🏨 Mejor zona o barrio para hospedarte','🧳 Contexto estacional y qué llevar','🚇 Transporte y cómo desplazarte','🍽️ Gastronomía local y zonas para comer','📸 Lugares ocultos y puntos para fotografía','🧭 Barrios, costumbres y contexto práctico local','🧳 Qué llevar y costumbres locales','💰 Recomendaciones de presupuesto','❓ Cualquier otra consulta relacionada con tu viaje'],
-      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…',
-      close:'Cerrar'
+      lead:'Un poco de contexto hace que tu itinerario sea mucho más personal.',
+      summary:'Puedes incluir <strong>estilo</strong>, <strong>ritmo</strong>, <strong>imperdibles</strong> y cualquier <strong>necesidad o restricción especial</strong>.',
+      note:'¿Necesitas investigar algo primero? Info Chat está justo al lado de este campo.',
+      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…'
     }
-  }[lang] || null;
-
-  const c=copy || {
-    guideTitle:'✨ Tell us exactly how you want to experience your trip',
-    guideSubtitle:'This will help create an itinerary that truly matches you.',
-    guideItems:[
-      '🏞️ Style & activities → nature, landscapes, museums, authentic tours.',
-      '🚗 Transportation → rental car, public transport, taxi/Uber.',
-      '🏃 Pace & adventure level → relaxed, balanced, adventurous.',
-      '🧭 Must-dos → activities or experiences you do not want to miss.',
-      '⚕️ Health & restrictions → mobility, allergies or other limitations.',
-      '👨‍👩‍👧‍👦 Other important details → children, flexible hours, long walks.'
-    ],
-    guideFinal:'📝 The more details you share, the more personalized and optimized your itinerary becomes.',
-    unsureTitle:'💡 Not sure what to write?',
-    unsureIntro:'Use Info Chat 🌐 before continuing if you need more context about the cities in this itinerary.',
-    unsureExamples:'For example:',
-    unsureItems:['🏨 Best area to stay','🧳 Seasonal context and packing','🚇 Transportation','🍽️ Local cuisine','📸 Photography spots','🧭 Local context','💰 Budget recommendations'],
-    placeholder:'Write your preferences, restrictions or special conditions here…',
-    close:'Close'
+  }[lang] || {
+    lead:'A little context makes your itinerary much more personal.',
+    summary:'Mention style, pace, must-dos and any special needs or restrictions.',
+    note:'Info Chat is beside this field if you need destination context first.',
+    placeholder:'Write your preferences, restrictions or special conditions here…'
   };
 
-  const row=document.createElement('div');
-  row.id='itbmo-preferences-help-row';
-  row.className='preferences-help-row';
-
-  const buildHelp=(type,title,subtitle,bodyHtml)=>{
-    const item=document.createElement('div');
-    item.className='preferences-help-item';
-
-    const btn=document.createElement('button');
-    btn.type='button';
-    btn.className=`preferences-help-button preferences-help-button--${type}`;
-    btn.setAttribute('aria-expanded','false');
-    btn.innerHTML=subtitle
-      ? `<span class="preferences-help-button__title">${title}</span><span class="preferences-help-button__subtitle">${subtitle}</span>`
-      : `<span class="preferences-help-button__title">${title}</span>`;
-
-    const pop=document.createElement('div');
-    pop.className='preferences-help-popover';
-    pop.setAttribute('aria-hidden','true');
-    pop.innerHTML=`
-      <button type="button" class="preferences-help-popover__close" aria-label="${c.close}">×</button>
-      <div class="preferences-help-popover__body">${bodyHtml}</div>
-    `;
-
-    btn.addEventListener('click',(e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      const wasOpen=pop.classList.contains('is-open');
-      closePreferencesHelpPopovers();
-      if(!wasOpen){
-        pop.classList.add('is-open');
-        pop.setAttribute('aria-hidden','false');
-        btn.setAttribute('aria-expanded','true');
-      }
-    });
-
-    pop.querySelector('.preferences-help-popover__close')?.addEventListener('click',(e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      closePreferencesHelpPopovers();
-    });
-
-    pop.addEventListener('click',(e)=>e.stopPropagation());
-
-    item.append(btn,pop);
-    return item;
-  };
-
-  const guideBody=`
-    <div class="preferences-help-list">
-      ${c.guideItems.map(x=>`<p>${x}</p>`).join('')}
-    </div>
-    <div class="preferences-help-final">${c.guideFinal}</div>
+  const guide=document.createElement('div');
+  guide.id='itbmo-preferences-guidance';
+  guide.className='preferences-guidance';
+  guide.innerHTML=`
+    <strong class="preferences-guidance__lead">${copy.lead}</strong>
+    <span class="preferences-guidance__summary">${copy.summary}</span>
+    <small class="preferences-guidance__note">${copy.note}</small>
   `;
 
-  const unsureBody=`
-    <p class="preferences-help-intro">${c.unsureIntro}</p>
-    <strong class="preferences-help-examples">${c.unsureExamples}</strong>
-    <div class="preferences-help-list preferences-help-list--compact">
-      ${c.unsureItems.map(x=>`<p>${x}</p>`).join('')}
-    </div>
-  `;
-
-  row.append(
-    buildHelp('guide',c.guideTitle,c.guideSubtitle,guideBody),
-    buildHelp('unsure',c.unsureTitle,'',unsureBody)
-  );
-
-  field.parentNode?.insertBefore(row,field);
-  field.placeholder=c.placeholder;
-
+  field.parentNode?.insertBefore(guide,field);
+  field.placeholder=copy.placeholder;
   field.addEventListener('input',autoGrowPreferencesField);
-  field.addEventListener('click',closePreferencesHelpPopovers);
-  field.addEventListener('focus',closePreferencesHelpPopovers);
-
-  document.addEventListener('click',(e)=>{
-    if(!e.target.closest('#itbmo-preferences-help-row')) closePreferencesHelpPopovers();
-  });
-
   autoGrowPreferencesField();
 }
 
@@ -10360,34 +10629,129 @@ function showAstraCoach(key,targetRef,{force=false}={}){
   requestAnimationFrame(()=>bubble.classList.add('is-visible'));
 }
 function scheduleAstraCoach(key,target,delay=260,options={}){
-  if(!options.force && astraCoachSeen()[key]) return;
-  clearTimeout(astraCoachTimer);
-  astraCoachTimer=setTimeout(()=>showAstraCoach(key,target,options),delay);
+  /* Phase 4.2: contextual guidance is permanently embedded in the workspace.
+     Bubble coaching is intentionally disabled to reduce interruption and visual noise. */
+  return;
 }
 function initAstraCoach(){
-  if(!document.querySelector('.astra-guide-replay')){
-    const replay=document.createElement('button');
-    replay.type='button';
-    replay.className='astra-guide-replay';
-    replay.innerHTML=`<span>✦</span>${getLang()==='es'?'Ver guía':'View guide'}`;
-    replay.addEventListener('click',()=>{
-      try{localStorage.removeItem(ASTRA_COACH_STORAGE_KEY);}catch(_){}
-      closeAstraCoach({remember:false});
-      scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',80,{force:true});
-    });
-    document.body.appendChild(replay);
-  }
-  scheduleAstraCoach(currentUser?'travelers':'account',currentUser?'#travelers-box':'#account-box',900);
+  /* Phase 4.2: inline guidance replaces floating coach bubbles. */
+  closeAstraCoach({remember:false});
 }
+
+
+function applyTravelBuilderWorkspaceCopy(){
+  const es=getLang()==='es';
+  const values=es ? {
+    'planner-stage-travelers-label':'Viajeros',
+    'planner-stage-route-label':'Ruta',
+    'planner-stage-personalize-label':'Personaliza',
+    'planner-stage-create-label':'Crear',
+    'planner-account-guide-title':'Tu acceso a ITBMO',
+    'planner-account-guide-copy':'Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.',
+    'planner-route-eyebrow':'CONSTRUYE TU RUTA',
+    'planner-route-guide':'Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.',
+    'planner-route-tip-copy':'Usa tu tiempo útil, no la hora del vuelo. En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.',
+    'planner-travelers-eyebrow':'QUIÉN VIAJA',
+    'planner-travelers-guide':'Indica si viajas solo o acompañado. Las edades del grupo ayudan a ajustar ritmos, actividades y desplazamientos.',
+    'planner-save-eyebrow':'CUANDO TU RUTA ESTÉ LISTA',
+    'planner-save-title':'Confirma la ruta para personalizar el viaje.',
+    'planner-create-eyebrow':'LISTO PARA CREAR',
+    'planner-create-title':'Tu viaje toma forma aquí.',
+    'planner-create-copy':'Cuando completes la ruta y la personalización, ITBMO organizará el itinerario ciudad por ciudad y día por día.',
+    'planner-create-status-copy':'Completa los pasos anteriores para comenzar.',
+    'planner-info-chat-kicker':'INVESTIGA ANTES DE DECIDIR',
+    'planner-info-chat-title':'¿Te falta contexto sobre tu destino?',
+    'planner-info-chat-copy':'Usa Info Chat para consultar zonas, transporte, barrios, gastronomía y otros datos útiles antes de definir tus preferencias.'
+  } : {
+    'planner-stage-travelers-label':'Travelers',
+    'planner-stage-route-label':'Route',
+    'planner-stage-personalize-label':'Personalize',
+    'planner-stage-create-label':'Create',
+    'planner-account-guide-title':'Your ITBMO access',
+    'planner-account-guide-copy':'Sign in, create an account, or continue as a guest. With an account you can return to your trips from other devices.',
+    'planner-route-eyebrow':'BUILD YOUR ROUTE',
+    'planner-route-guide':'Add up to 3 cities in the actual order of your trip. For each city, enter the number of days, start date, and the useful time you will have to explore.',
+    'planner-route-tip-copy':'Use your useful travel time, not your flight time. On day one, enter when you expect to be ready after reaching your lodging; on the last day, enter how late you can explore before leaving.',
+    'planner-travelers-eyebrow':'WHO IS TRAVELING',
+    'planner-travelers-guide':'Tell us whether you are traveling solo or with others. Group ages help adjust pace, activities, and transportation.',
+    'planner-save-eyebrow':'WHEN YOUR ROUTE IS READY',
+    'planner-save-title':'Confirm the route to personalize your trip.',
+    'planner-create-eyebrow':'READY TO CREATE',
+    'planner-create-title':'Your trip takes shape here.',
+    'planner-create-copy':'Once the route and personalization are complete, ITBMO will organize your itinerary city by city and day by day.',
+    'planner-create-status-copy':'Complete the previous steps to begin.',
+    'planner-info-chat-kicker':'RESEARCH BEFORE YOU DECIDE',
+    'planner-info-chat-title':'Need more context about your destination?',
+    'planner-info-chat-copy':'Use Info Chat to ask about areas, transportation, neighborhoods, food and other useful details before defining your preferences.'
+  };
+  Object.entries(values).forEach(([id,value])=>{
+    const el=qs('#'+id);
+    if(!el) return;
+    if(id==='planner-route-tip-copy'){
+      el.innerHTML=es
+        ? '<strong>Usa tu tiempo útil, no la hora del vuelo.</strong> En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.'
+        : '<strong>Use your useful travel time, not your flight time.</strong> On day one, enter when you expect to be ready after reaching your lodging; on the last day, enter how late you can explore before leaving.';
+    }else el.textContent=value;
+  });
+}
+
+function updateTravelBuilderProgress(){
+  const items=qsa('.planner-stage-nav__item');
+  if(!items.length) return;
+  const hasRoute=qsa('.city-row','#city-list').some(row=>{
+    return Boolean(qs('.country',row)?.value?.trim() && qs('.city',row)?.value?.trim() && qs('.days',row)?.value && qs('.baseDate',row)?.value);
+  });
+  const hasTravelers=Boolean(qs('#traveler-mode')?.value);
+  const preferencesVisible=qs('#preferences-stage')?.getAttribute('aria-hidden')==='false' || !qs('#preferences-stage')?.classList.contains('is-stage-hidden');
+  const canCreate=!qs('#start-planning')?.disabled;
+
+  items.forEach((item,index)=>{
+    const active =
+      index===0 ? true :
+      index===1 ? hasTravelers :
+      index===2 ? preferencesVisible :
+      canCreate;
+    item.classList.toggle('is-active',active);
+  });
+
+  const status=qs('#planner-create-status-copy');
+  const dot=qs('.planner-create-status__dot');
+  if(status){
+    if(canCreate) status.textContent=getLang()==='es'?'Todo listo. Puedes iniciar la planificación.':'Everything is ready. You can start planning.';
+    else if(preferencesVisible) status.textContent=getLang()==='es'?'Personaliza tu viaje o continúa sin agregar información.':'Personalize your trip or continue without adding information.';
+    else if(hasRoute && hasTravelers) status.textContent=getLang()==='es'?'Guarda tu ruta para continuar.':'Save your route to continue.';
+    else status.textContent=getLang()==='es'?'Completa ruta y viajeros para continuar.':'Complete route and travelers to continue.';
+  }
+  if(dot){
+    dot.style.background=canCreate?'#0ea47a':'#d0d5dd';
+    dot.style.boxShadow=canCreate?'0 0 0 5px rgba(14,164,122,.16)':'0 0 0 5px rgba(208,213,221,.22)';
+  }
+}
+
+function bindTravelBuilderProgress(){
+  const root=qs('#planner-grid');
+  if(!root) return;
+  root.addEventListener('input',()=>requestAnimationFrame(updateTravelBuilderProgress),true);
+  root.addEventListener('change',()=>requestAnimationFrame(updateTravelBuilderProgress),true);
+  root.addEventListener('click',()=>setTimeout(updateTravelBuilderProgress,0),true);
+  const observer=new MutationObserver(()=>requestAnimationFrame(updateTravelBuilderProgress));
+  observer.observe(root,{subtree:true,childList:true,attributes:true,attributeFilter:['disabled','class','aria-hidden']});
+  applyTravelBuilderWorkspaceCopy();
+  updateTravelBuilderProgress();
+}
+
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
+  syncPlannerLanguageShell();
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
   // Security/UX default: Planner is locked before any async session restore.
   applyAuthPlannerGate(false);
 
+  initializePlannerSessionLifecycle();
   bindAccountListeners();
+  bindJourneyHome();
   restoreITBMOSession();
 
   setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});

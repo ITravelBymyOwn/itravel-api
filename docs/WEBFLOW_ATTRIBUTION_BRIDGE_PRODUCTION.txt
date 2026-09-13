@@ -1,0 +1,35 @@
+<!-- ITBMO · Webflow -> Vercel attribution bridge · Production -->
+<script>
+(() => {
+  const ITBMO_VERCEL_ORIGIN = 'https://itravelbymyown-api.vercel.app';
+  const params = new URLSearchParams(location.search);
+  const attribution = {
+    utm_source: params.get('utm_source'),
+    utm_medium: params.get('utm_medium'),
+    utm_campaign: params.get('utm_campaign'),
+    utm_content: params.get('utm_content'),
+    utm_term: params.get('utm_term'),
+    creator: params.get('creator'),
+    referral: params.get('referral'),
+    landing_page: location.pathname,
+    referrer: document.referrer || null
+  };
+
+  const sendAttribution = () => {
+    document.querySelectorAll('iframe').forEach((frame) => {
+      try {
+        const frameOrigin = new URL(frame.src, location.href).origin;
+        if (frameOrigin !== ITBMO_VERCEL_ORIGIN) return;
+        frame.contentWindow.postMessage(
+          { type:'ITBMO_ATTRIBUTION_CONTEXT', attribution },
+          ITBMO_VERCEL_ORIGIN
+        );
+      } catch (_) {}
+    });
+  };
+
+  window.addEventListener('load', sendAttribution, { once:true });
+  setTimeout(sendAttribution, 800);
+  setTimeout(sendAttribution, 1800);
+})();
+</script>

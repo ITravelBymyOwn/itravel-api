@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#f7fbfc" />
+  <title>ITBMO · Tu viaje</title>
+  <link rel="stylesheet" href="./trip-workspace.css?v=23" />
+  <script src="./assets/js/itbmo-foundation.js?v=1.0"></script>
+</head>
+<body>
+  <section id="tw-auth-gate" class="tw-auth-gate" hidden aria-live="polite" aria-modal="true" role="dialog">
+    <div class="tw-auth-gate__card">
+      <span class="tw-auth-gate__mark" aria-hidden="true">✦</span>
+      <small id="tw-auth-gate-kicker">TU VIAJE ESTÁ PROTEGIDO</small>
+      <h1 id="tw-auth-gate-title">Sesión cerrada</h1>
+      <p id="tw-auth-gate-copy">Inicia sesión para volver a acceder a este viaje.</p>
+      <div id="tw-auth-gate-actions" class="tw-auth-gate__actions">
+        <button id="tw-auth-login-open" class="tw-auth-primary" type="button">Iniciar sesión</button>
+        <button id="tw-auth-planner" class="tw-auth-secondary" type="button">Ir al Planner</button>
+      </div>
+      <form id="tw-auth-login-form" class="tw-auth-login" hidden novalidate>
+        <label><span id="tw-auth-email-label">Email</span><input id="tw-auth-email" type="email" autocomplete="email" required /></label>
+        <label><span id="tw-auth-password-label">Contraseña</span><input id="tw-auth-password" type="password" autocomplete="current-password" required /></label>
+        <p id="tw-auth-message" class="tw-auth-message" aria-live="polite"></p>
+        <div class="tw-auth-login__buttons">
+          <button id="tw-auth-login-submit" class="tw-auth-primary" type="submit">Iniciar sesión</button>
+          <button id="tw-auth-login-cancel" class="tw-auth-secondary" type="button">Cancelar</button>
+        </div>
+      </form>
+    </div>
+  </section>
+  <div class="tw-shell">
+    <header class="tw-topbar">
+      <div class="tw-top-actions">
+        <button id="tw-back-planner" class="tw-back" type="button" aria-label="Volver al Planner"><span>←</span><b id="tw-back-label">Volver al Planner</b></button>
+        <button id="tw-my-trips" class="tw-my-trips" type="button" aria-label="Mis Viajes"><span>✦</span><b id="tw-my-trips-label">Mis Viajes</b></button>
+      </div>
+      <a class="tw-brand" href="./preview-home.html?lang=es" aria-label="I Travel By My Own">
+        <span class="tw-brand-mark">✦</span><span><b>I Travel</b><small>By My Own</small></span>
+      </a>
+      <div class="tw-top-status"><span class="tw-status-dot"></span><span id="tw-status-label">Tu viaje está listo</span></div>
+    </header>
+
+    <main id="tw-app" class="tw-app" aria-live="polite">
+      <section id="tw-overview" class="tw-view">
+        <div class="tw-overview-hero">
+          <span id="tw-overview-kicker" class="tw-kicker">TU VIAJE ITBMO</span>
+          <h1 id="tw-overview-title">¿Por dónde quieres empezar?</h1>
+          <p id="tw-overview-copy">Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.</p>
+          <div id="tw-overview-summary" class="tw-summary"></div>
+          <aside class="tw-overview-essentials" aria-labelledby="tw-overview-essentials-title">
+            <span class="tw-overview-essentials__mark">✦</span>
+            <div class="tw-overview-essentials__copy">
+              <small id="tw-overview-essentials-kicker">ANTES DE SEGUIR</small>
+              <h2 id="tw-overview-essentials-title">Prepara lo esencial de tu viaje</h2>
+              <p id="tw-overview-essentials-copy">Conectividad, movilidad y servicios útiles, organizados según tu viaje.</p>
+            </div>
+            <button id="tw-overview-essentials-cta" type="button">Ver lo que puedo necesitar ↓</button>
+          </aside>
+        </div>
+        <div id="tw-city-grid" class="tw-city-grid"></div>
+        <section id="tw-trip-wide" class="tw-trip-wide">
+          <div class="tw-trip-wide__head">
+            <span class="tw-trip-wide-icon">✦</span>
+            <div>
+              <span id="tw-trip-kicker" class="tw-kicker">PARA TODO TU VIAJE</span>
+              <h2 id="tw-trip-title">Lo esencial que viaja contigo.</h2>
+              <p id="tw-trip-copy">Necesidades que acompañan el viaje completo, sin repetirlas ciudad por ciudad.</p>
+            </div>
+          </div>
+          <div id="tw-link-disclosure" class="tw-link-disclosure"></div>
+          <div class="tw-trip-wide__grid">
+            <article class="tw-trip-wide__item">
+              <span class="tw-trip-wide__item-icon" aria-hidden="true">◉</span>
+              <div><small id="tw-connectivity-kicker">VIAJE COMPLETO</small><h3 id="tw-connectivity-title">Conectividad</h3><p id="tw-connectivity-copy">Opciones de datos y eSIM para mantenerte conectado durante todo el viaje.</p></div>
+              <span id="tw-connectivity-status" class="tw-coming">Próximamente</span>
+            </article>
+            <article class="tw-trip-wide__item">
+              <span class="tw-trip-wide__item-icon" aria-hidden="true">◇</span>
+              <div><small id="tw-insurance-kicker">VIAJE COMPLETO</small><h3 id="tw-insurance-title">Seguro de viaje</h3><p id="tw-insurance-copy">Protección transversal para el viaje cuando exista una opción que aporte valor real.</p></div>
+              <span id="tw-insurance-status" class="tw-coming">Próximamente</span>
+            </article>
+          </div>
+        </section>
+      </section>
+
+      <section id="tw-city" class="tw-view" hidden>
+        <div class="tw-city-head">
+          <button id="tw-all-cities" class="tw-all-cities" type="button">← <span>Todas las ciudades</span></button>
+          <div class="tw-city-identity"><span id="tw-city-kicker" class="tw-kicker">TU CIUDAD</span><h1 id="tw-city-name">París</h1><p id="tw-city-dates"></p></div>
+          <div class="tw-mode" role="tablist">
+            <button id="tw-mode-itinerary" class="active" type="button" role="tab" aria-selected="true"><span>↝</span><b>Itinerario</b></button>
+            <button id="tw-mode-prepare" class="tw-mode-prepare" type="button" role="tab" aria-selected="false">
+              <span class="tw-mode-prepare__icon">✦</span>
+              <span class="tw-mode-prepare__copy"><b>Para tu viaje</b><small id="tw-prepare-teaser">Tu itinerario es solo el comienzo. Prepárate para vivirlo.</small></span>
+              <em id="tw-prepare-badge">Explora</em>
+            </button>
+          </div>
+        </div>
+        <nav id="tw-days" class="tw-days" aria-label="Días del itinerario"></nav>
+        <div id="tw-content" class="tw-content"></div>
+      </section>
+
+
+      <button id="tw-floating-all-cities" class="tw-floating-all-cities" type="button" aria-label="Todas las ciudades" hidden>
+        <span aria-hidden="true">←</span><b>Todas las ciudades</b>
+      </button>
+
+      <button id="tw-floating-prepare" class="tw-floating-prepare" type="button" aria-label="Abrir Para tu viaje" hidden>
+        <span aria-hidden="true">✦</span><b>Para tu viaje</b><em>Explora</em>
+      </button>
+
+      <section id="tw-empty" class="tw-empty" hidden>
+        <span class="tw-empty-mark">✦</span><h1>No pudimos cargar este viaje.</h1><p>Vuelve al Planner para abrirlo nuevamente.</p><button id="tw-empty-back" type="button">Volver al Planner</button>
+      </section>
+    </main>
+  </div>
+  <script src="./trip-workspace.js?v=24"></script>
+</body>
+</html>

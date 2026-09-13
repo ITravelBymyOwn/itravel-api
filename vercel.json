@@ -26,7 +26,27 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/promotions.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "api/destination-suggestions.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/context.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/events.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/attribution.js",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "api/partners.js",
       "use": "@vercel/node"
     },
     {
@@ -60,8 +80,28 @@
       "dest": "/api/payment.js"
     },
     {
+      "src": "/api/promotions",
+      "dest": "/api/promotions.js"
+    },
+    {
       "src": "/api/destination-suggestions",
       "dest": "/api/destination-suggestions.js"
+    },
+    {
+      "src": "/api/context",
+      "dest": "/api/context.js"
+    },
+    {
+      "src": "/api/events",
+      "dest": "/api/events.js"
+    },
+    {
+      "src": "/api/attribution",
+      "dest": "/api/attribution.js"
+    },
+    {
+      "src": "/api/partners",
+      "dest": "/api/partners.js"
     },
     {
       "src": "/(.*)",

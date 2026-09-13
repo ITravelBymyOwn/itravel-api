@@ -5,7 +5,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=93" />
+  <link rel="stylesheet" href="./planner.css?v=113" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -14,17 +14,38 @@
   <script>
     WebFont.load({ google: { families: ["Inter:400,500,600,700,800,900"] } });
   </script>
+  <script src="./assets/js/itbmo-foundation.js?v=1.0"></script>
 </head>
 <body>
   <!-- TOPBAR -->
   <div class="topbar">
+    <a class="planner-home-link" href="./preview-home.html" aria-label="Volver a I Travel By My Own">
+      <span aria-hidden="true">←</span><span class="planner-home-link__label">Inicio</span>
+    </a>
     <!-- ✅ Brand estilo logo (2 líneas) -->
     <div class="brand brand-logo" aria-label="I Travel By My Own">
       <div class="brand-line-1">I Travel</div>
       <div class="brand-line-2">By My Own</div>
     </div>
 
-    <div class="planner-language-capability">
+    <div class="planner-topbar-actions">
+      <button id="planner-my-trips" class="planner-my-trips" type="button" hidden aria-label="Mis viajes">
+        <span class="planner-my-trips__icon" aria-hidden="true">✦</span>
+        <span class="planner-my-trips__copy">
+          <strong id="planner-my-trips-label">Mis viajes</strong>
+          <small id="planner-my-trips-hint">Tu espacio de viaje</small>
+        </span>
+        <span class="planner-my-trips__arrow" aria-hidden="true">→</span>
+      </button>
+
+      <div id="planner-auth-nav" class="planner-auth-nav" aria-label="Acceso a ITBMO">
+        <button id="topbar-account-register" class="planner-auth-nav__btn planner-auth-nav__btn--primary" type="button">Crear cuenta</button>
+        <button id="topbar-account-login" class="planner-auth-nav__btn" type="button">Iniciar sesión</button>
+        <button id="topbar-account-guest" class="planner-auth-nav__btn" type="button">Continuar como invitado</button>
+        <button id="topbar-account-logout" class="planner-auth-nav__btn planner-auth-nav__btn--logout" type="button" hidden>Salir</button>
+      </div>
+
+      <div class="planner-language-capability">
       <button
         id="planner-language-help"
         class="planner-language-help"
@@ -55,23 +76,115 @@
           If a language is not supported, ITBMO will let you know in the chat. The final itinerary language is selected later in the planning flow.
         </small>
       </div>
+      </div>
     </div>
 
     <!-- ✅ MVP: Se elimina botón de topbar para dejar SOLO el flotante -->
     <!-- <button id="info-chat-toggle" class="btn info-chat-btn pulse" title="Open Info Chat">💬 Info Chat</button> -->
   </div>
 
+  <div id="account-modal-backdrop" class="account-modal-backdrop" hidden></div>
+
+
+  <!-- =========================================================
+       ITBMO · JOURNEY HOME
+       Presentation layer for returning travelers.
+       Existing Planner DOM remains mounted and untouched below.
+  ========================================================== -->
+  <section id="journey-home" class="journey-home" hidden aria-hidden="true">
+    <div class="journey-home__aurora journey-home__aurora--one" aria-hidden="true"></div>
+    <div class="journey-home__aurora journey-home__aurora--two" aria-hidden="true"></div>
+
+    <div class="journey-home__shell">
+      <div class="journey-home__intro">
+        <span class="journey-home__eyebrow" id="journey-home-eyebrow">TU VIAJE SIGUE AQUÍ</span>
+        <h1 id="journey-home-title">¿Qué quieres hacer hoy?</h1>
+        <p id="journey-home-copy">Continúa donde lo dejaste o empieza una nueva aventura. Tus viajes anteriores permanecen disponibles para que vuelvas a ellos cuando los necesites.</p>
+      </div>
+
+      <div class="journey-home__primary-grid">
+        <button id="journey-home-resume" class="journey-home-card journey-home-card--resume" type="button">
+          <span class="journey-home-card__glow" aria-hidden="true"></span>
+          <span class="journey-home-card__icon" aria-hidden="true">↗</span>
+          <span class="journey-home-card__kicker" id="journey-home-resume-kicker">ÚLTIMO VIAJE</span>
+          <strong id="journey-home-resume-title">Continuar con mi último viaje</strong>
+          <span id="journey-home-resume-meta" class="journey-home-card__meta"></span>
+          <span class="journey-home-card__action" id="journey-home-resume-action">Abrir Trip Workspace <i aria-hidden="true">→</i></span>
+        </button>
+
+        <button id="journey-home-new" class="journey-home-card journey-home-card--new" type="button">
+          <span class="journey-home-card__icon" aria-hidden="true">＋</span>
+          <span class="journey-home-card__kicker" id="journey-home-new-kicker">NUEVA AVENTURA</span>
+          <strong id="journey-home-new-title">Planificar un nuevo viaje</strong>
+          <span class="journey-home-card__meta" id="journey-home-new-copy">Empieza desde cero sin borrar los viajes que ya creaste.</span>
+          <span class="journey-home-card__action" id="journey-home-new-action">Crear nuevo itinerario <i aria-hidden="true">→</i></span>
+        </button>
+      </div>
+
+      <section id="journey-history" class="journey-history" hidden>
+        <div class="journey-history__head">
+          <div>
+            <span class="journey-history__eyebrow" id="journey-history-eyebrow">TU HISTORIAL</span>
+            <h2 id="journey-history-title">Mis viajes</h2>
+          </div>
+          <span id="journey-history-count" class="journey-history__count"></span>
+        </div>
+        <div id="journey-history-grid" class="journey-history__grid"></div>
+      </section>
+    </div>
+  </section>
+
+  <section class="planner-experience-hero">
+    <div class="planner-canvas-intro" id="planner-canvas-intro">
+        <span class="planner-canvas-intro__eyebrow" id="planner-canvas-eyebrow">TU VIAJE EMPIEZA AQUÍ</span>
+        <h2 id="planner-canvas-title">Menos formularios.<br><span>Más ganas de viajar.</span></h2>
+        <p id="planner-canvas-copy">Agrega hasta 3 ciudades, define quién viaja y deja que ITBMO conecte las piezas.</p>
+        <div class="planner-canvas-orbit" aria-hidden="true">
+          <span class="planner-canvas-orbit__ring"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--1"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--2"></span>
+          <span class="planner-canvas-orbit__dot planner-canvas-orbit__dot--3"></span>
+          <span class="planner-canvas-orbit__core">✦</span>
+        </div>
+  </section>
+
   <div id="planner-grid">
     <!-- SIDEBAR -->
-    <aside class="sidebar">
-      <h2>Planificador</h2>
+    <section class="sidebar planner-builder-workspace">
+      <nav class="planner-stage-nav" aria-label="Flujo de planificación">
+        <span class="planner-stage-nav__item is-active"><b>01</b><span id="planner-stage-travelers-label">Viajeros</span></span>
+        <span class="planner-stage-nav__line" aria-hidden="true"></span>
+        <span class="planner-stage-nav__item"><b>02</b><span id="planner-stage-route-label">Ruta</span></span>
+        <span class="planner-stage-nav__line" aria-hidden="true"></span>
+        <span class="planner-stage-nav__item"><b>03</b><span id="planner-stage-personalize-label">Personaliza</span></span>
+        <span class="planner-stage-nav__line" aria-hidden="true"></span>
+        <span class="planner-stage-nav__item"><b>04</b><span id="planner-stage-create-label">Crear</span></span>
+      </nav>
+      <div class="planner-builder-intro planner-builder-intro--compact">
+        <div>
+          <span class="planner-builder-intro__eyebrow" id="planner-builder-eyebrow">DISEÑA TU VIAJE</span>
+          <h1 id="planner-builder-title">Construye la ruta a tu manera.</h1>
+        </div>
+        <p id="planner-builder-copy">Avanza paso a paso. Nada técnico: solo lo que realmente necesitamos para organizar bien tu viaje.</p>
+      </div>
+      </div>
 
       <!-- =========================================================
            ITBMO ACCOUNT — Supabase Auth + Guest
            La autenticación visual vive en el Planner.
            La persistencia real se procesa en /api/user (Vercel → Supabase).
       ========================================================== -->
-      <section class="box account-box" id="account-box">
+      <section class="box account-box planner-stage-card planner-stage-card--account" id="account-box" role="dialog" aria-modal="true" aria-hidden="true" aria-labelledby="account-title">
+        <button id="account-dialog-close" class="account-dialog-close" type="button" aria-label="Cerrar">×</button>
+        <div class="planner-stage-card__number" aria-hidden="true">00</div>
+        <div class="planner-inline-guide planner-inline-guide--account">
+          <span class="planner-inline-guide__icon" aria-hidden="true">✓</span>
+          <div class="planner-account-guide__copy">
+            <strong id="planner-account-guide-title">Tu acceso a ITBMO</strong>
+            <p id="planner-account-guide-copy">Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.</p>
+          </div>
+          <button id="account-logout" class="account-logout account-logout--top" type="button" style="display:none;">Sign out</button>
+        </div>
         <div class="account-head">
           <div>
             <h3 id="account-title">Your ITBMO account</h3>
@@ -81,12 +194,11 @@
         </div>
 
         <div id="account-guest">
-          <div class="account-mode-actions" id="account-mode-actions">
-            <button class="btn primary account-mode-btn" id="account-register-toggle" type="button">Create account</button>
-            <button class="btn ghost account-mode-btn" id="account-login-toggle" type="button">Sign in</button>
+          <div class="account-mode-actions account-mode-actions--premium" id="account-mode-actions">
+            <button class="btn primary account-mode-btn account-mode-btn--register" id="account-register-toggle" type="button">Create account</button>
+            <button class="btn ghost account-mode-btn account-mode-btn--login" id="account-login-toggle" type="button">Sign in</button>
+            <button class="btn ghost account-mode-btn account-mode-btn--guest" id="account-guest-toggle" type="button">Continue as guest</button>
           </div>
-
-          <button class="btn ghost w-100" id="account-guest-toggle" type="button" style="margin-top:.55rem;">Continue as guest</button>
 
           <div id="account-register-panel" class="account-panel" style="display:none;">
             <div class="account-form-grid">
@@ -206,13 +318,13 @@
           <div id="account-message" class="account-message" aria-live="polite"></div>
         </div>
 
-        <div id="account-authenticated" class="account-authenticated" style="display:none;">
+        <div id="account-authenticated" class="account-authenticated account-authenticated--premium" style="display:none;">
           <div class="account-authenticated-copy">
+            <span class="account-authenticated-avatar" aria-hidden="true">✦</span>
             <div class="account-authenticated-text">
               <strong id="account-welcome">Welcome back.</strong>
               <p id="account-ready-copy">Your profile is active on this device. Continue planning normally.</p>
             </div>
-            <button id="account-logout" class="account-logout" type="button">Sign out</button>
           </div>
           <div id="account-guest-upgrade" class="account-guest-upgrade" style="display:none;">
             <div class="account-guest-upgrade-text">
@@ -225,8 +337,15 @@
       </section>
 
       <!-- ✅ Viajeros — titular desde cuenta + acompañantes -->
-      <section class="box" id="travelers-box">
-        <h3>Viajeros</h3>
+      <section class="box planner-stage-card planner-stage-card--travelers" id="travelers-box">
+        <div class="planner-stage-card__head">
+          <div class="planner-stage-card__index">01</div>
+          <div>
+            <span class="planner-stage-card__eyebrow" id="planner-travelers-eyebrow">QUIÉN VIAJA</span>
+            <h3>Viajeros</h3>
+            <p id="planner-travelers-guide">Indica si viajas solo o acompañado. Las edades del grupo ayudan a ajustar ritmos, actividades y desplazamientos.</p>
+          </div>
+        </div>
 
         <label style="display:flex; flex-direction:column; gap:.25rem; font-size:.9rem; font-weight:600;">
           ¿Con quién viajas?
@@ -309,37 +428,57 @@
         </div>
       </section>
 
-      <section class="box" id="destinations-box">
-        <h3>Destinos</h3>
+      <section class="box planner-stage-card planner-stage-card--destinations" id="destinations-box">
+        <div class="planner-stage-card__head">
+          <div class="planner-stage-card__index">02</div>
+          <div>
+            <span class="planner-stage-card__eyebrow" id="planner-route-eyebrow">CONSTRUYE TU RUTA</span>
+            <h3>Destinos</h3>
+            <p id="planner-route-guide">Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.</p>
+          </div>
+        </div>
+        <div class="planner-route-tip">
+          <span aria-hidden="true">✦</span>
+          <p id="planner-route-tip-copy"><strong>Usa tu tiempo útil, no la hora del vuelo.</strong> En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.</p>
+        </div>
         <div id="city-list"></div>
         <div class="row-actions">
           <button class="btn ghost" id="add-city-btn">+ Agregar destino</button>
         </div>
 
-        <!-- ✅ QUIRÚRGICO: botones movidos al final del sidebar (después de Viajeros) -->
-        <!-- <button class="btn primary w-100" id="save-destinations">Guardar destinos</button> -->
-        <!-- 🆕 Botón de reinicio reubicado -->
-        <!--
-        <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
-          Reiniciar planificación
-        </button>
-        -->
+        <div class="planner-route-actions" id="planner-route-actions">
+          <div class="planner-route-actions__copy">
+            <span id="planner-save-eyebrow">CUANDO TU RUTA ESTÉ LISTA</span>
+            <strong id="planner-save-title">Confirma la ruta para continuar.</strong>
+            <small id="planner-save-subtitle">Después podrás iniciar la planificación sin perder de vista esta sección.</small>
+          </div>
+          <div class="planner-route-actions__buttons">
+            <button class="btn primary" id="save-destinations" disabled>Guardar destinos</button>
+            <button id="start-planning" class="btn primary planner-start-cta" disabled>Continuar: iniciar planificación →</button>
+          </div>
+        </div>
       </section>
 
-      <section class="box special-conditions preferences-stage is-stage-hidden" id="preferences-stage" aria-hidden="true">
+      <section class="box special-conditions preferences-stage is-stage-hidden planner-stage-card planner-stage-card--preferences" id="preferences-stage" aria-hidden="true">
+        <div class="planner-stage-card__index">03</div>
         <div class="preferences-stage-head">
           <span class="preferences-stage-eyebrow" id="preferences-stage-eyebrow">Personalización de tu viaje</span>
           <h3 id="preferences-stage-title">Personaliza tu viaje</h3>
           <p class="preferences-stage-intro" id="preferences-stage-intro">
-            Usa Info Chat si necesitas investigar algo sobre tus destinos y, cuando estés listo, cuéntanos cómo quieres vivir el viaje.
+            Cuéntanos lo que realmente importa para adaptar el viaje a tu estilo, ritmo y necesidades.
           </p>
         </div>
 
-        <div class="preferences-stage-field-title" id="preferences-stage-field-title">
-          Preferencias / Restricciones / Condiciones especiales
+        <div class="preferences-stage-field-row">
+          <div class="preferences-stage-field-title" id="preferences-stage-field-title">
+            Preferencias / Restricciones / Condiciones especiales
+          </div>
+          <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
+                title="Info Chat unlocks after payment" aria-disabled="true" disabled>
+            🔒 Info Chat
+          </button>
         </div>
-
-        <textarea id="special-conditions" rows="3" placeholder="Escribe aquí tus preferencias, restricciones o condiciones especiales…"></textarea>
+        <textarea id="special-conditions" rows="4" placeholder="Ej.: Prefiero naturaleza y barrios locales, evitar museos largos, quiero probar gastronomía típica y necesito un ritmo tranquilo…"></textarea>
 
         <div class="preferences-stage-actions">
           <button class="btn primary preferences-continue" id="continue-with-astra" type="button">
@@ -349,40 +488,35 @@
         </div>
       </section>
 
+      <div class="planner-agent-flow" id="planner-agent-flow">
+<div id="chat-container" class="chat" style="display:none;">
+          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
+          <div class="chat-input">
+            <textarea id="chat-input" rows="2" placeholder="Escribe tu mensaje..."></textarea>
+            <button id="send-btn" class="btn primary">Enviar</button>
+          </div>
+        </div>
+      </div>
+
       <!-- ✅ QUIRÚRGICO: botones al final del tab Planner -->
-      <button class="btn primary w-100" id="save-destinations" disabled>Guardar destinos</button>
+      
       <!-- 🆕 Botón de reinicio reubicado -->
       <button id="reset-planner" class="btn warn w-100" style="margin-top:0.5rem;" disabled>
         Reiniciar planificación
       </button>
 
       <!-- ✅ Se eliminó la sección de Presupuesto del sidebar -->
-    </aside>
+    </section>
 
     <!-- MAIN -->
     <main class="main">
-      <section class="box itinerary-section">
-
-        <!-- ✅ Header: Título + botón Info Chat arriba (como el HTML donde sí se veía) -->
-        <div class="itinerary-head">
-          <h2>Itinerario</h2>
-
-          <!-- ✅ Botón Info Chat (WOW) en la posición solicitada -->
-          <button id="info-chat-floating" class="info-chat-floating is-locked" type="button"
-                  title="Info Chat unlocks after payment" aria-disabled="true" disabled>
-            🔒 Info Chat
-          </button>
-        </div>
-
-        <div class="itinerary-actions">
-          <button id="start-planning" class="btn primary" disabled>Continuar: iniciar planificación →</button>
-        </div>
-
-        <div id="chat-container" class="chat" style="display:none;">
-          <div id="chat-messages" class="chat-messages" aria-live="polite"></div>
-          <div class="chat-input">
-            <textarea id="chat-input" rows="2" placeholder="Escribe tu mensaje..."></textarea>
-            <button id="send-btn" class="btn primary">Enviar</button>
+      <section class="box itinerary-section planner-stage-card planner-stage-card--create planner-post-generation" id="planner-post-generation">
+        <div class="planner-stage-card__head planner-stage-card__head--create planner-post-generation__intro">
+          <div class="planner-stage-card__index">04</div>
+          <div>
+            <span class="planner-stage-card__eyebrow" id="planner-create-eyebrow">LISTO PARA CREAR</span>
+            <h3 id="planner-create-title">Tu viaje toma forma aquí.</h3>
+            <p id="planner-create-copy">Cuando completes la ruta y la personalización, ITBMO organizará el itinerario ciudad por ciudad y día por día.</p>
           </div>
         </div>
 
@@ -439,71 +573,77 @@
           <span id="new-planning-copy">¿Listo para planificar otro viaje?</span>
           <button id="new-planning-button" class="new-planning-button" type="button">Planificar otro viaje →</button>
         </div>
-
-        <!-- =========================================================
-             ITBMO AFFILIATES — Post-itinerary surface
-             Rendered by planner.js. Hidden automatically when no partner
-             is enabled (or when previewMode=false and none are active).
-        ========================================================== -->
-        <div id="itbmo-affiliate-after" class="itbmo-affiliate-surface itbmo-affiliate-after" style="display:none;" aria-live="polite"></div>
-
-
-
-        <!-- ✅ QUIRÚRGICO: oculto/eliminado por ahora -->
+<!-- ✅ QUIRÚRGICO: oculto/eliminado por ahora -->
         <!-- <button id="confirm-itinerary" class="btn primary w-100" style="margin-top:1rem;">Elijo este itinerario</button> -->
       </section>
     </main>
   </div>
 
   <!-- =========================================================
-       ITBMO · DAY-BY-DAY ITINERARY FOCUS MODE
-       Full-screen viewer only. Does not duplicate or mutate itinerary data.
+       ITBMO · TRIP WORKSPACE · PHASE 2
+       Level 1: trip overview / city gateway.
+       Level 2: true city Focus Mode with Itinerary | For your trip.
+       Presentation only: existing generated itinerary remains untouched.
   ========================================================== -->
   <div id="itinerary-focus-modal" class="itinerary-focus-modal" aria-hidden="true">
     <div class="itinerary-focus-backdrop" data-itinerary-focus-close></div>
-
     <section class="itinerary-focus-shell" role="dialog" aria-modal="true" aria-labelledby="itinerary-focus-title">
       <header class="itinerary-focus-header">
         <button id="itinerary-focus-back" class="itinerary-focus-back" type="button">
-          <span aria-hidden="true">←</span>
-          <span id="itinerary-focus-back-label">Back to Planner</span>
+          <span aria-hidden="true">←</span><span id="itinerary-focus-back-label">Back to Planner</span>
         </button>
-
         <div class="itinerary-focus-heading">
-          <span id="itinerary-focus-eyebrow" class="itinerary-focus-eyebrow">YOUR ITBMO ITINERARY</span>
-          <h2 id="itinerary-focus-title">Your trip, day by day.</h2>
-          <p id="itinerary-focus-subtitle">Choose a city, then move through each day at your own pace.</p>
+          <span id="itinerary-focus-eyebrow" class="itinerary-focus-eyebrow">YOUR ITBMO TRIP</span>
+          <h2 id="itinerary-focus-title">Explore and prepare your trip.</h2>
+          <p id="itinerary-focus-subtitle">Everything organized by city, without losing sight of the whole journey.</p>
         </div>
-
-        <button id="itinerary-focus-close" class="itinerary-focus-close" type="button" aria-label="Close itinerary">
-          ×
-        </button>
+        <button id="itinerary-focus-close" class="itinerary-focus-close" type="button" aria-label="Close trip">×</button>
       </header>
 
-      <nav id="itinerary-focus-cities" class="itinerary-focus-cities" aria-label="Itinerary cities"></nav>
-
-      <div class="itinerary-focus-stage">
-        <button id="itinerary-focus-prev" class="itinerary-focus-nav itinerary-focus-nav--prev" type="button" aria-label="Previous day">
-          <span aria-hidden="true">‹</span>
-        </button>
-
-        <article class="itinerary-focus-day-card">
-          <div class="itinerary-focus-day-head">
-            <div>
-              <span id="itinerary-focus-city-label" class="itinerary-focus-city-label"></span>
-              <h3 id="itinerary-focus-day-title"></h3>
-            </div>
-            <span id="itinerary-focus-day-count" class="itinerary-focus-day-count"></span>
+      <main id="itinerary-workspace-overview" class="itinerary-workspace-overview">
+        <section class="itinerary-workspace-hero">
+          <span id="itinerary-workspace-kicker" class="itinerary-workspace-kicker">YOUR JOURNEY</span>
+          <h3 id="itinerary-workspace-title">Where do you want to start?</h3>
+          <p id="itinerary-workspace-intro">Open a city to see its itinerary day by day and everything worth preparing for it.</p>
+          <div id="itinerary-workspace-summary" class="itinerary-workspace-summary"></div>
+        </section>
+        <section id="itinerary-workspace-cities" class="itinerary-workspace-city-grid" aria-label="Trip cities"></section>
+        <section class="itinerary-workspace-trip-tools" aria-labelledby="itinerary-workspace-trip-tools-title">
+          <div class="itinerary-workspace-trip-tools__icon" aria-hidden="true">✦</div>
+          <div>
+            <span id="itinerary-workspace-trip-tools-kicker">FOR YOUR WHOLE TRIP</span>
+            <h4 id="itinerary-workspace-trip-tools-title">The essentials that travel with you.</h4>
+            <p id="itinerary-workspace-trip-tools-copy">Trip-level services will live here, only when they are useful to your journey.</p>
           </div>
+          <span class="itinerary-workspace-coming" id="itinerary-workspace-coming">Coming next</span>
+        </section>
+      </main>
 
-          <div id="itinerary-focus-day-content" class="itinerary-focus-day-content"></div>
-          <div id="itinerary-focus-dots" class="itinerary-focus-dots" aria-label="Itinerary days"></div>
-        </article>
-
-        <button id="itinerary-focus-next" class="itinerary-focus-nav itinerary-focus-nav--next" type="button" aria-label="Next day">
-          <span aria-hidden="true">›</span>
-        </button>
-      </div>
+      <main id="itinerary-city-focus" class="itinerary-city-focus" hidden>
+        <div class="itinerary-city-focus-topbar">
+          <button id="itinerary-city-focus-back" class="itinerary-city-focus-back" type="button"><span aria-hidden="true">←</span><span id="itinerary-city-focus-back-label">All cities</span></button>
+          <div class="itinerary-city-focus-identity"><span id="itinerary-city-focus-kicker">CITY FOCUS</span><strong id="itinerary-city-focus-name"></strong></div>
+          <div class="itinerary-city-focus-spacer" aria-hidden="true"></div>
+        </div>
+        <div class="itinerary-city-focus-controls">
+          <div class="itinerary-focus-workspace-nav" role="tablist" aria-label="City workspace">
+            <button id="itinerary-focus-mode-itinerary" class="itinerary-focus-mode-btn active" type="button" role="tab" aria-selected="true"><span class="itinerary-focus-mode-icon" aria-hidden="true">⌁</span><span id="itinerary-focus-mode-itinerary-label">Itinerary</span></button>
+            <button id="itinerary-focus-mode-prepare" class="itinerary-focus-mode-btn" type="button" role="tab" aria-selected="false"><span class="itinerary-focus-mode-icon" aria-hidden="true">✦</span><span id="itinerary-focus-mode-prepare-label">For your trip</span></button>
+          </div>
+          <nav id="itinerary-focus-days" class="itinerary-focus-days" aria-label="Itinerary days"></nav>
+        </div>
+        <section class="itinerary-city-focus-canvas">
+          <button id="itinerary-focus-prev" class="itinerary-focus-nav itinerary-focus-nav--prev" type="button" aria-label="Previous day"><span aria-hidden="true">‹</span></button>
+          <article class="itinerary-focus-day-card">
+            <div class="itinerary-focus-day-head">
+              <div><span id="itinerary-focus-city-label" class="itinerary-focus-city-label"></span><h3 id="itinerary-focus-day-title"></h3></div>
+              <span id="itinerary-focus-day-count" class="itinerary-focus-day-count"></span>
+            </div>
+            <div id="itinerary-focus-day-content" class="itinerary-focus-day-content"></div>
+          </article>
+          <button id="itinerary-focus-next" class="itinerary-focus-nav itinerary-focus-nav--next" type="button" aria-label="Next day"><span aria-hidden="true">›</span></button>
+        </section>
+      </main>
     </section>
   </div>
 
@@ -569,6 +709,16 @@
           <span class="checkout-price-new" id="checkout-price-new">US$2.99</span>
         </div>
         <div class="checkout-price-note" id="checkout-price-note">One-time payment · Complete trip · All configured cities</div>
+
+        <div class="checkout-promo" id="checkout-promo">
+          <label id="checkout-promo-label" for="checkout-promo-input">¿Tienes un código?</label>
+          <div class="checkout-promo-row">
+            <input id="checkout-promo-input" type="text" maxlength="80" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Código promocional" />
+            <button id="checkout-promo-apply" type="button">Aplicar</button>
+          </div>
+          <div id="checkout-promo-message" class="checkout-promo-message" aria-live="polite"></div>
+          <div id="checkout-promo-summary" class="checkout-promo-summary" hidden></div>
+        </div>
       </div>
 
       <div class="checkout-includes">
@@ -673,14 +823,7 @@
 
       <!-- ✅ Mensaje EXACTO solicitado -->
       <p>✨ ITBMO está creando tu itinerario completo… Esto puede tardar varios minutos. No cierres esta pestaña: estás ahorrando horas de planificación.</p>
-
-      <!-- =========================================================
-           ITBMO AFFILIATES — Generation surface
-           Links open in a new tab and DO NOT interrupt generation.
-           Rendered by planner.js from one central configuration block.
-      ========================================================== -->
-      <div id="itbmo-affiliate-loading" class="itbmo-affiliate-surface itbmo-affiliate-loading" style="display:none;" aria-live="polite"></div>
-    </div>
+</div>
   </div>
 
   <!-- 🧠 Indicador estilo ChatGPT (Planner) -->
@@ -1049,7 +1192,7 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=94"></script>
+<script src="./planner.js?v=115"></script>
  
 </body>
 </html>

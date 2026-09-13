@@ -12,6 +12,8 @@ const ITBMO_ADMIN_TEST_BYPASS =
 const ITBMO_ADMIN_USER_ID = String(process.env.ITBMO_ADMIN_USER_ID || "").trim();
 const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
   String(process.env.ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION || "false").toLowerCase() === "true";
+const ITBMO_PREVIEW_PAYMENT_BYPASS =
+  String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
 function jsonHeaders(extra = {}) {
   return {
@@ -88,7 +90,7 @@ function generationAdminBypass(userId) {
   // exercise generation/recovery/Info Chat without a real payment.
   // Production remains strictly payment-gated unless the explicit,
   // admin-only production bypass is deliberately enabled.
-  if (!isProduction) return Boolean(userId);
+  if (!isProduction) return ITBMO_PREVIEW_PAYMENT_BYPASS && Boolean(userId);
 
   if (!ITBMO_ADMIN_TEST_BYPASS || !ITBMO_ADMIN_USER_ID) return false;
   if (String(userId || "") !== ITBMO_ADMIN_USER_ID) return false;
@@ -113,7 +115,14 @@ async function hasGenerationEntitlement(tripId, userId) {
     `user_id=eq.${encodeURIComponent(userId)}&status=eq.paid&limit=1`,
     { method: "GET" }
   );
-  return Array.isArray(rows) && rows.length > 0;
+  if (Array.isArray(rows) && rows.length > 0) return true;
+
+  const promoRows = await supabaseFetch(
+    `/promo_redemptions?select=id&trip_id=eq.${encodeURIComponent(tripId)}&` +
+    `user_id=eq.${encodeURIComponent(userId)}&status=eq.consumed&final_amount=eq.0&limit=1`,
+    { method: "GET" }
+  );
+  return Array.isArray(promoRows) && promoRows.length > 0;
 }
 
 function generationCheckpoint(value) {
@@ -902,6 +911,25 @@ async function handleInfoChatCheckpoint(res, body, session) {
   });
 }
 
+
+async function handleList(res, body, session) {
+  const requestedLimit = Number(body.limit || 12);
+  const limit = Math.max(1, Math.min(30, Number.isFinite(requestedLimit) ? Math.floor(requestedLimit) : 12));
+
+  const rows = await supabaseFetch(
+    `/trips?select=id,trip_name,status,destinations,planner_input,itinerary_data,generation_count,` +
+    `generated_at,created_at,updated_at&user_id=eq.${encodeURIComponent(session.user_id)}&` +
+    `status=in.(saved,generating,failed,generated)&order=updated_at.desc&limit=${limit}`,
+    { method:"GET" }
+  );
+
+  return res.status(200).json({
+    ok:true,
+    action:"list",
+    trips:Array.isArray(rows) ? rows : []
+  });
+}
+
 async function handleRecoverable(res, session) {
   const rows = await supabaseFetch(
     `/trips?select=id,status,destinations,planner_input,itinerary_data,generation_count,` +
@@ -1003,6 +1031,10 @@ export default async function handler(req, res) {
 
     if (action === "recoverable") {
       return await handleRecoverable(res, session);
+    }
+
+    if (action === "list") {
+      return await handleList(res, body, session);
     }
 
     return res.status(400).json({

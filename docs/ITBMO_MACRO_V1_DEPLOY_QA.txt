@@ -1,0 +1,174 @@
+ITBMO · MACRO COMMERCE/GROWTH V1 · DEPLOY + QA
+Versión: 2026-09-11
+NO ES APROBACIÓN PARA MAIN. Ejecutar y validar en Preview.
+
+======================================================================
+A. ORDEN DE IMPLEMENTACIÓN
+======================================================================
+1. Crear/usar una rama de prueba basada en la baseline suministrada.
+2. Reemplazar/crear ÚNICAMENTE los archivos entregados en esta macrotanda.
+3. En Supabase SQL Editor, usar/crear una query claramente nombrada, por ejemplo:
+   ITBMO - Commerce Growth Macro V1 - 2026-09-11
+4. Pegar supabase/migrations/20260911_commerce_growth_macro_v1.sql.
+5. Presionar RUN. Guardar la query no aplica cambios por sí solo.
+6. Confirmar éxito completo antes de deploy.
+7. Para probar checkout/promociones en Vercel Preview, configurar env de Preview:
+   ITBMO_PREVIEW_PAYMENT_BYPASS=false
+8. Redeploy Preview.
+9. Ejecutar QA por bloques en el orden siguiente.
+
+======================================================================
+B. QA 1 · REGRESIÓN CORE
+======================================================================
+- Home -> Planner.
+- Cuenta registrada: login/logout/reingreso.
+- Invitado si sigue habilitado en baseline.
+- Guardar destinos.
+- Máximo ciudades/reglas actuales.
+- Generación normal.
+- Refresh/recovery.
+- Reset / Planificar otro viaje.
+- PDF.
+- CSV.
+- Info Chat.
+- Idioma ES/EN y output según reglas existentes.
+
+FAIL = no seguir a publicación.
+
+======================================================================
+C. QA 2 · CUENTA / WORKSPACE VISUAL
+======================================================================
+- El badge de cuenta no muestra email completo.
+- Workspace conserva viaje/ciudades/días.
+- Día debe mostrar también fecha real.
+- Una necesidad con GYG+Viator aparece UNA vez con ambas opciones compactas.
+- CTA conserva "Ver opción →".
+- Existe un solo disclosure central de afiliados.
+- No aparece el texto de comisión repetido debajo de cada opción.
+- Holafly aparece una sola vez a nivel viaje.
+
+======================================================================
+D. QA 3 · PARTNERS
+======================================================================
+VIATOR
+- Abrir una opción contextual.
+- Antes de navigation, target generado debe contener:
+  pid=P00318254
+  mcid=42383
+  medium=link
+  campaign=<no vacío>
+- Confirmar click en partner_clicks.
+- No interpretar URL limpia posterior de Viator como prueba de pérdida de attribution sin revisar outbound/reporting.
+
+GETYOURGUIDE
+- partner_id=3FZWELC
+- utm_medium=online_publisher
+- cmp=<no vacío>
+- click registrado.
+
+HOLAFLY
+- solo global/trip connectivity.
+- click registrado.
+
+OMIO
+TEST 1: viaje de una sola ciudad -> cero Omio.
+TEST 2: viaje Ciudad A -> Ciudad B -> una opción para ese tramo principal.
+TEST 3: Ciudad A -> B -> C -> máximo rutas A->B y B->C según contexto/surface.
+TEST 4: hotel -> POI / museo -> estación / day trip local -> NUNCA Omio.
+TEST 5: abrir route deeplink real; si proveedor devuelve 404, NO publicar ese resolver sin corregir fallback/API validation.
+
+======================================================================
+E. QA 4 · PROMOTIONS ENGINE
+======================================================================
+Mantener ITBMO100 inactive durante pruebas iniciales.
+
+Crear PROMO DE TEST temporal con máximo 2 redenciones:
+- percentage (valor cualquiera de QA)
+- max_redemptions=2
+- active=true
+
+Validar:
+- mayúsculas/minúsculas del código.
+- descuento visible correcto.
+- servidor calcula final amount.
+- PayPal recibe final amount correcto.
+- promo_redemptions pasa reserved -> consumed al pagar.
+- tercer usuario/perfil recibe exhausted.
+- mismo perfil no consume más de max_redemptions_per_profile.
+- retry/refresco no duplica cupo.
+- aplicar otro código libera reservation anterior del mismo checkout.
+
+Crear TEST FREE con máximo 2:
+- al aplicar, NO abrir PayPal.
+- promo queda consumed.
+- trip se genera.
+- payment table NO recibe falso amount=0 por esta promoción.
+- payment status devuelve entitlement_source=promotion.
+- Context e Info Chat quedan autorizados.
+- tercer uso recibe exhausted.
+
+Probar también:
+- código inexistente
+- active=false
+- starts_at futuro
+- expires_at pasado
+- verified_only si se decide utilizar
+- registered_only si se decide utilizar
+
+Al terminar QA: desactivar todos los TEST codes.
+
+======================================================================
+F. QA 5 · ITBMO100
+======================================================================
+Antes de producción, NO es necesario consumir realmente 100 cupos.
+La concurrencia/quota se valida con un código de test de max=2.
+
+Después de aprobar todo:
+- revisar public.promo_code_control where code='ITBMO100'.
+- confirmar active=false antes del momento de lanzamiento.
+- cuando se decida liberar campaña, poner active=true.
+- verificar primera redención real.
+- revisar contador frequently al inicio del lanzamiento.
+
+======================================================================
+G. QA 6 · COMMUNICATION FOUNDATION
+======================================================================
+Confirmar:
+- communication_hub_enabled=false
+- whatsapp_support_enabled=false
+- web_chat_enabled=false
+- communication_channels.enabled=false para todos.
+- ningún WhatsApp/chat nuevo debe aparecer en UI pública en este release.
+
+======================================================================
+H. QA 7 · DATA / TELEMETRY
+======================================================================
+Verificar:
+- marketing_touchpoints/user_events siguen recibiendo eventos permitidos.
+- promo_code_applied / promo_code_consumed cuando corresponda.
+- partner click registra city/need/entity/resolution/travel_date donde exista.
+- no PII innecesaria en event properties.
+
+======================================================================
+I. CHECK DE SEGURIDAD
+======================================================================
+- Browser no puede leer/escribir directamente promo tables con anon/authenticated.
+- /api/promotions exige sesión válida y ownership del trip.
+- promo free no puede consumir una redemption de otro user/trip.
+- monto de PayPal no se toma del browser.
+- URL partner arbitraria no puede inyectarse en click endpoint; conservar signed resolved offer.
+
+======================================================================
+J. CRITERIO PARA MAIN
+======================================================================
+Solo considerar main cuando:
+- todos los QA anteriores pasen;
+- no haya regresiones core;
+- se hayan corregido hallazgos de Preview;
+- segunda regresión completa pase;
+- comunicación siga deshabilitada;
+- códigos TEST estén desactivados;
+- ITBMO100 esté en el estado intencional para el momento del release;
+- PayPal/partner tracking estén confirmados.
+
+FIN QA
