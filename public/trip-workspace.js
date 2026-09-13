@@ -5,10 +5,16 @@ const SESSION_KEY='itbmo_session_token';
 const GUEST_SESSION_KEY='itbmo_guest_session_token';
 const USER_CACHE_KEY='itbmo_user_cache_v1';
 const AUTH_SYNC_KEY='itbmo_auth_sync_v1';
+const AUTH_OWNER_KEY='itbmo_auth_owner_v1';
+const PLANNER_PRESENCE_KEY='itbmo_planner_presence_v1';
+const PLANNER_PRESENCE_TTL_MS=8000;
+const PLANNER_ABSENCE_GRACE_MS=5000;
 const GUEST_HANDOFF_KEY='itbmo_workspace_guest_handoff_v1';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
+let plannerPresenceWatchTimer=null;
+let plannerMissingSince=0;
 const contextByCity=new Map();
 const contextRequests=new Map();
 const partnerOffersByCity=new Map();
@@ -506,6 +512,22 @@ function consumeGuestWorkspaceHandoff(){
     return token;
   }catch(_){return ''}
 }
+function readPlannerPresence(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(PLANNER_PRESENCE_KEY)||'{}');
+    return raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
+  }catch(_){return{}}
+}
+function hasLivePlannerPresence(){
+  const now=Date.now();
+  return Object.values(readPlannerPresence()).some(ts=>{
+    const n=Number(ts||0);
+    return n>0 && now-n<=PLANNER_PRESENCE_TTL_MS;
+  });
+}
+function workspaceAuthOwnedByPlanner(){
+  try{return String(localStorage.getItem(AUTH_OWNER_KEY)||'')==='planner'}catch(_){return false}
+}
 function getStoredSessionToken(){
   try{
     return String(
@@ -552,6 +574,7 @@ function storeWorkspaceSession(token,user){
   try{
     localStorage.setItem(SESSION_KEY,String(token||''));
     sessionStorage.removeItem(GUEST_SESSION_KEY);
+    localStorage.setItem(AUTH_OWNER_KEY,'workspace');
     if(user&&typeof user==='object')localStorage.setItem(USER_CACHE_KEY,JSON.stringify(user));
     broadcastWorkspaceAuth('signed_in');
   }catch(_){}
@@ -561,7 +584,29 @@ function clearWorkspaceSessionLocal({broadcast=false}={}){
   try{sessionStorage.removeItem(GUEST_SESSION_KEY)}catch(_){}
   try{localStorage.removeItem(USER_CACHE_KEY)}catch(_){}
   try{sessionStorage.removeItem(USER_CACHE_KEY)}catch(_){}
+  try{localStorage.removeItem(AUTH_OWNER_KEY)}catch(_){}
+  plannerMissingSince=0;
   if(broadcast)broadcastWorkspaceAuth('signed_out');
+}
+function enforcePlannerPresence({immediate=false}={}){
+  if(!workspaceAuthOwnedByPlanner()){
+    plannerMissingSince=0;
+    return true;
+  }
+  if(hasLivePlannerPresence()){
+    plannerMissingSince=0;
+    return true;
+  }
+  const now=Date.now();
+  if(!plannerMissingSince) plannerMissingSince=now;
+  if(!immediate && now-plannerMissingSince<PLANNER_ABSENCE_GRACE_MS) return true;
+  clearWorkspaceSessionLocal({broadcast:true});
+  showWorkspaceAuthGate();
+  return false;
+}
+function startPlannerPresenceWatch(){
+  if(plannerPresenceWatchTimer) clearInterval(plannerPresenceWatchTimer);
+  plannerPresenceWatchTimer=setInterval(()=>enforcePlannerPresence(),2000);
 }
 async function fetchTripWorkspaceResult(tripId){
   const token=getStoredSessionToken();
@@ -634,25 +679,30 @@ function setupWorkspaceAuthGate(){
   form?.addEventListener('submit',signInFromWorkspace);
 
   window.addEventListener('storage',async event=>{
-    if(event.key!==SESSION_KEY&&event.key!==AUTH_SYNC_KEY)return;
+    if(event.key!==SESSION_KEY&&event.key!==AUTH_SYNC_KEY&&event.key!==AUTH_OWNER_KEY&&event.key!==PLANNER_PRESENCE_KEY)return;
     let state='';
     if(event.key===AUTH_SYNC_KEY&&event.newValue){try{state=String(JSON.parse(event.newValue)?.state||'')}catch(_){}}
     const token=getStoredSessionToken();
     if(state==='signed_out'||(event.key===SESSION_KEY&&!event.newValue&&!token)){
       clearWorkspaceSessionLocal();showWorkspaceAuthGate();return;
     }
-    if(token&&(event.key===SESSION_KEY||state==='signed_in'))await revalidateWorkspaceAccess();
+    if(event.key===PLANNER_PRESENCE_KEY||event.key===AUTH_OWNER_KEY){
+      if(!enforcePlannerPresence())return;
+    }
+    if(token&&(event.key===SESSION_KEY||state==='signed_in'||event.key===AUTH_OWNER_KEY))await revalidateWorkspaceAccess();
   });
 
   let lastValidation=0;
   const validateOnReturn=()=>{
     if(document.hidden)return;
     const now=Date.now();if(now-lastValidation<1500)return;lastValidation=now;
+    if(!enforcePlannerPresence())return;
     if(!getStoredSessionToken()){showWorkspaceAuthGate();return}
     revalidateWorkspaceAccess().catch(()=>{});
   };
   window.addEventListener('focus',validateOnReturn);
   document.addEventListener('visibilitychange',validateOnReturn);
+  startPlannerPresenceWatch();
 }
 
 function readSnapshot(){
@@ -806,6 +856,7 @@ async function boot(){
   if(status) status.textContent=t.loading;
 
   if(!getStoredSessionToken()) consumeGuestWorkspaceHandoff();
+  if(workspaceAuthOwnedByPlanner() && !hasLivePlannerPresence()) enforcePlannerPresence();
   const token=getStoredSessionToken();
   if(!token){
     data=(requestedTripId && cached?.trip_id===requestedTripId) ? cached : (!requestedTripId?cached:null);
