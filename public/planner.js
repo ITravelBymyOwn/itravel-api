@@ -3413,9 +3413,10 @@ function openImmersiveItinerary(){
      localStorage. No API call, payment state, generation state or itinerary
      row is changed here. */
   const snapshot={
-    schema_version:1,
+    schema_version:2,
     created_at:new Date().toISOString(),
     lang:getLang()==='es'?'es':'en',
+    trip_language:_plannerTripLanguage_(),
     trip_id:currentTripId || null,
     destinations:(savedDestinations||[]).map(d=>({
       city:d?.city||'',country:d?.country||'',countryCode:d?.countryCode||_countryMatch_(d?.country||'')?.code||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
@@ -3979,17 +3980,37 @@ function _minutesToHHMM_(mins){
   const mm = String(Math.floor(n%60)).padStart(2,'0');
   return `${hh}:${mm}`;
 }
+function _plannerTripLanguage_(){
+  const original = String(plannerState?.itineraryLang || '').trim().slice(0,80);
+  if(!original) return String(plannerState?.lang || getLang() || 'en').trim().slice(0,80) || 'en';
+
+  const raw = original.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return 'es';
+  if(/\b(en|eng|english|ingles)\b/.test(raw)) return 'en';
+  if(/\b(pt|por|portuguese|portugues)\b/.test(raw)) return 'pt';
+  if(/\b(fr|fre|french|francais)\b/.test(raw)) return 'fr';
+  if(/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return 'de';
+  if(/\b(it|ita|italian|italiano)\b/.test(raw)) return 'it';
+
+  // Preserve any other language exactly as selected by the traveler. This
+  // metadata is for generation/context understanding, not for ITBMO UI locale.
+  return original;
+}
+
 function _plannerOutputLang_(){
-  const raw = String(plannerState?.itineraryLang || plannerState?.lang || getLang() || 'en')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'');
+  const selected = _plannerTripLanguage_();
+  const raw = String(selected||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
   if(/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return 'es';
   if(/\b(pt|por|portuguese|portugues)\b/.test(raw)) return 'pt';
   if(/\b(fr|fre|french|francais)\b/.test(raw)) return 'fr';
   if(/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return 'de';
   if(/\b(it|ita|italian|italiano)\b/.test(raw)) return 'it';
-  return 'en';
+  if(/\b(en|eng|english|ingles)\b/.test(raw)) return 'en';
+
+  // Static helper/export labels are currently localized for the six validated
+  // output packs. For any other itinerary language, keep ITBMO's own labels in
+  // the selected site UI language instead of falsely classifying the trip as EN.
+  return getLang()==='es' ? 'es' : 'en';
 }
 
 function _durationLabels_(){
