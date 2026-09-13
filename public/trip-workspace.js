@@ -777,30 +777,27 @@ function setupAllCitiesFloating(){
   const btn=$('#tw-all-cities');
   const head=document.querySelector('.tw-city-head');
   if(!btn||!head)return;
-  let anchorTop=0;
-  const recalc=()=>{
-    btn.classList.remove('is-floating');
-    head.classList.remove('has-floating-all-cities');
-    anchorTop=btn.getBoundingClientRect().top+window.scrollY;
-    update();
-  };
+
   const update=()=>{
     if($('#tw-city')?.hidden){
       btn.classList.remove('is-floating');
       head.classList.remove('has-floating-all-cities');
       return;
     }
+
     const topbar=document.querySelector('.tw-topbar');
     const top=(topbar?.offsetHeight||82)+16;
-    const shouldFloat=window.scrollY+top>=anchorTop;
+    const shouldFloat=head.getBoundingClientRect().top<=top;
+
     btn.classList.toggle('is-floating',shouldFloat);
     head.classList.toggle('has-floating-all-cities',shouldFloat);
   };
+
   window.addEventListener('scroll',update,{passive:true});
-  window.addEventListener('resize',recalc);
-  window.addEventListener('tw:city-entered',()=>requestAnimationFrame(recalc));
+  window.addEventListener('resize',update);
+  window.addEventListener('tw:city-entered',()=>requestAnimationFrame(update));
   window.addEventListener('tw:overview-opened',update);
-  requestAnimationFrame(recalc);
+  requestAnimationFrame(update);
 }
 
 
