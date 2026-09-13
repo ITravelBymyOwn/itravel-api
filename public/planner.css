@@ -8715,6 +8715,20 @@ body{
 .planner-canvas-intro__eyebrow{color:#47799b!important;}
 .planner-canvas-intro h2 span{color:#536fd2!important;}
 
+/* Hero orbit is decorative only. Keep it inside the same premium palette. */
+.planner-canvas-orbit__ring{
+  border-color:rgba(109,120,238,.17)!important;
+  box-shadow:0 0 0 35px rgba(8,123,250,.032),0 0 0 70px rgba(53,191,209,.022)!important;
+}
+.planner-canvas-orbit__core{
+  background:linear-gradient(145deg,#5F6FD8 0%,#258FD9 48%,#35BFD1 100%)!important;
+  box-shadow:0 18px 45px rgba(65,92,181,.18)!important;
+}
+.planner-canvas-orbit__dot{
+  background:linear-gradient(145deg,#6D78EE,#35BFD1)!important;
+  box-shadow:0 0 0 7px rgba(109,120,238,.075)!important;
+}
+
 /* Progress navigator: each stage gets a subtle identity; no saturated green. */
 .planner-stage-nav{
   border-color:rgba(32,76,108,.15)!important;
