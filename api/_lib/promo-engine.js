@@ -2,7 +2,7 @@ import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
 const CURRENCY = 'USD';
 const LAUNCH_PRICE = 2.99;
-const REGULAR_PRICE = 5.99;
+const REGULAR_PRICE = 7.99;
 
 function clean(value, max = 160) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
