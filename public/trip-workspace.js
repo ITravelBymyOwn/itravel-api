@@ -260,9 +260,10 @@ function renderNeedItems(items,offers=[]){
   }).join('')}</div>`;
 }
 
-function contextSection(icon,title,description,items,offers=[]){
+function contextSection(icon,title,description,items,offers=[],sectionId=''){
   if(!items.length) return '';
-  return `<section class="tw-context-section">
+  const id=sectionId?` id="${esc(sectionId)}"`:'';
+  return `<section class="tw-context-section"${id}>
     <div class="tw-context-section-head">
       <div class="tw-context-section-icon">${icon}</div>
       <div class="tw-context-section-copy">
@@ -448,10 +449,15 @@ function renderPrepare(){
   // or Omio resolver logic is changed by this UI decision.
   const transportOffers=[];
   const activeSections=[
-    contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers),
-    contextSection('✦',t.tours,t.toursC,tours,tourOffers),
-    contextSection('↗',t.move,t.moveC,transport,transportOffers)
+    contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets'),
+    contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours'),
+    contextSection('↗',t.move,t.moveC,transport,transportOffers,'tw-context-move')
   ].filter(Boolean).join('');
+  const jumpNav=`<nav class="tw-prepare-jump-nav" aria-label="${esc(lang==='es'?'Secciones de Para tu viaje':'For your trip sections')}">
+    <button type="button" data-tw-jump="tw-context-tickets" ${tickets.length?'':'disabled'}>${esc(t.tickets)}</button>
+    <button type="button" data-tw-jump="tw-context-tours" ${tours.length?'':'disabled'}>${esc(t.tours)}</button>
+    <button type="button" data-tw-jump="tw-context-move" ${transport.length?'':'disabled'}>${esc(t.move)}</button>
+  </nav>`;
 
   $('#tw-content').innerHTML=`<section class="tw-prepare-hero">
     <span class="tw-prepare-mark">✦</span>
@@ -459,6 +465,7 @@ function renderPrepare(){
     <h2>${esc(t.prepareT)}</h2>
     <p>${esc(t.prepareC)}</p>
   </section>
+  ${jumpNav}
   <div class="tw-context-sections">
     ${activeSections || `<div class="tw-context-empty tw-context-empty-page">${esc(t.contextEmpty)}</div>`}
     <section class="tw-context-more">
@@ -472,6 +479,12 @@ function renderPrepare(){
       <small>${esc(t.next)}</small>
     </section>
   </div>`;
+  document.querySelectorAll('[data-tw-jump]').forEach(button=>{
+    button.onclick=()=>{
+      const target=document.getElementById(button.dataset.twJump||'');
+      if(target)target.scrollIntoView({behavior:'smooth',block:'start'});
+    };
+  });
   bindPartnerOffers();
   cityOffers.forEach(offer=>{
     const viewKey=`${offer.id}:${offer.need_id||offer.placement}:${offer.partner?.slug||''}`;
