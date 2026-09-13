@@ -81,47 +81,6 @@ function normalizeKey(value) {
     .trim();
 }
 
-
-function experienceNeedBlocked(need) {
-  const entityType = clean(need?.entity_type, 80).toLowerCase();
-  const needType = clean(need?.need_type, 80);
-  const text = [
-    need?.entity_name,
-    need?.source_activity,
-    need?.source_route,
-    need?.transport
-  ]
-    .map(value => clean(value, 320))
-    .filter(Boolean)
-    .join(' ')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  // Defense in depth: contextual classification must never turn mobility
-  // infrastructure or a transport fare into a Viator/GYG attraction search.
-  if (entityType === 'transport' || entityType === 'route') return true;
-
-  const transportHub = /\b(?:train|rail(?:way)?|bus|coach|metro|subway|underground|tram|ferry)\s+(?:station|terminal|stop)|(?:station|terminal)\s+(?:de\s+)?(?:train|rail|bus|coach|metro|ferry)|estacion(?:\s+de)?(?:\s+tren|\s+ferrocarril|\s+autobus|\s+bus|\s+metro)?|terminal(?:\s+de)?(?:\s+autobus|\s+bus|\s+ferry|\s+ferri)?|aeropuerto|airport|flughafen|aeroport|aeroporto|gare|bahnhof|hauptbahnhof|stazione|estacao|port\s+terminal|ferry\s+terminal|roma\s+termini)\b/i;
-  if (transportHub.test(text)) return true;
-
-  const lodgingOrFood = /\b(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|ristorante|trattoria|osteria|pizzeria|caf[eé]|coffee\s+shop|bar|pub|gelateria|bakery|panaderia|panader[ií]a)\b/i;
-  if (lodgingOrFood.test(text)) return true;
-
-  const mobilityIntent = /\b(?:traslado|transfer|regreso|retorno|salida|llegada|conexion|conexi[oó]n|embarque|and[eé]n|plataforma|train\s+(?:to|from|ride|journey)|anreise|abreise|ruckfahrt|rueckfahrt|zugfahrt|ankunft|abfahrt|transfert|retour|trajet\s+en\s+train|arrivee|depart|trasferimento|ritorno|viaggio\s+in\s+treno|arrivo|partenza|deslocamento|viagem\s+de\s+trem)\b/i;
-  const mobilityMode = /\b(?:train|tren|zug|treno|trem|rail|ferrocarril|bus|coach|autobus|autob[uú]s|metro|subway|tram|tranvia|flight|vuelo|flug|volo|ferry|ferri|funicular|cremallera|rack\s+railway|cable\s+car|aeri|gondola|shuttle)\b/i;
-  if (mobilityIntent.test(text) && mobilityMode.test(text)) return true;
-
-  if (needType === 'ticket_required' || needType === 'reservation_recommended') {
-    const clearlyNonAdmission = /\b(?:photo\s+stop|foto|exterior|outside|fachada|facade|shopping|compras|free\s+time|tiempo\s+libre)\b/i;
-    if (clearlyNonAdmission.test(text)) return true;
-  }
-
-  return false;
-}
-
 function slugify(value) {
   return normalizeKey(value).replace(/\s+/g, '-').replace(/^-+|-+$/g, '');
 }
@@ -349,7 +308,6 @@ async function resolveExperiencePartner(slug, needs, city, uiLanguage, tripLangu
 
   for (const need of needs) {
     if (!['ticket_required', 'reservation_recommended', 'guided_tour_optional'].includes(need?.need_type)) continue;
-    if (experienceNeedBlocked(need)) continue;
 
     const targetUrl = contextualSearchUrl(slug, uiLanguage, localeResolution.locale, need, city);
     if (!targetUrl || !allowedPartnerUrl(slug, targetUrl)) continue;
