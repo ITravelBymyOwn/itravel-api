@@ -8665,3 +8665,98 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
     max-height:calc(100vh - 32px) !important;
   }
 }
+
+/* =========================================================
+   ITBMO · PREMIUM PALETTE & CARD DEFINITION · 2026-09-12
+   Visual-only. Keeps every Planner and Workspace contract intact.
+========================================================= */
+:root{
+  --itbmo-coral:#ff6b5e;
+  --itbmo-gold:#f4b740;
+  --itbmo-terracotta:#d96c4c;
+  --itbmo-champagne:#fff4e8;
+  --itbmo-slate:#52677d;
+  --itbmo-navy:#0b2341;
+  --itbmo-premium-line:rgba(45,92,125,.18);
+}
+
+/* Planner stage hierarchy: remove the old strong-green accent and return to the ITBMO family. */
+.planner-stage-card,
+.sidebar > .box{
+  border-color:var(--itbmo-premium-line)!important;
+  background:
+    radial-gradient(circle at 96% 3%,rgba(8,123,250,.035),transparent 20rem),
+    linear-gradient(145deg,rgba(255,255,255,.92),rgba(249,252,253,.88))!important;
+  box-shadow:0 22px 62px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.92)!important;
+}
+.planner-stage-card::before{
+  background:linear-gradient(180deg,#087bfa 0%,#0aa0a5 58%,rgba(10,160,165,.04) 100%);
+}
+.planner-stage-card__number{
+  color:rgba(8,123,250,.11);
+}
+.planner-stage-card__index{
+  background:linear-gradient(145deg,#087bfa 0%,#0aa0a5 100%);
+  box-shadow:0 10px 24px rgba(8,126,177,.18);
+}
+.planner-stage-card__eyebrow{
+  color:#087a9a;
+}
+
+/* A restrained warm accent differentiates preferences without turning the UI multicolor. */
+.planner-stage-card--preferences::before{
+  background:linear-gradient(180deg,#ff6b5e 0%,#f4b740 62%,rgba(244,183,64,.04) 100%);
+}
+.planner-stage-card--preferences>.planner-stage-card__index{
+  background:linear-gradient(145deg,#e76555 0%,#efaa42 100%);
+  box-shadow:0 10px 24px rgba(217,108,76,.16);
+}
+
+/* Existing embedded Trip Workspace: stronger glass edges and softer differentiated gradients. */
+.itinerary-workspace-city-card,
+.itinerary-workspace-trip-tools,
+.itinerary-focus-day-card,
+.itinerary-focus-activity-card,
+.itinerary-focus-activity__card,
+.itinerary-focus-prepare-categories span{
+  border-color:var(--itbmo-premium-line)!important;
+}
+.itinerary-workspace-city-card{
+  background:
+    radial-gradient(circle at 92% 6%,rgba(10,160,165,.08),transparent 34%),
+    linear-gradient(145deg,rgba(255,255,255,.96),rgba(245,251,253,.92));
+  box-shadow:0 18px 52px rgba(22,61,88,.095),inset 0 1px 0 rgba(255,255,255,.94);
+}
+.itinerary-workspace-city-card__number{
+  background:linear-gradient(135deg,#087bfa 0%,#0aa0a5 100%);
+}
+.itinerary-workspace-trip-tools{
+  background:
+    radial-gradient(circle at 96% 10%,rgba(255,107,94,.055),transparent 28%),
+    linear-gradient(135deg,rgba(255,255,255,.80),rgba(247,252,253,.76));
+  box-shadow:0 14px 36px rgba(20,62,91,.06),inset 0 1px 0 rgba(255,255,255,.92);
+}
+.itinerary-focus-day-card{
+  box-shadow:0 18px 54px rgba(16,42,67,.075),inset 0 1px 0 rgba(255,255,255,.92)!important;
+}
+.itinerary-focus-activity-card,
+.itinerary-focus-activity__card{
+  background:linear-gradient(145deg,rgba(255,255,255,.94),rgba(249,252,253,.90))!important;
+}
+
+/* Home / trip cards: clearer boundaries while preserving the Apple-like glass language. */
+.journey-home-card--new,
+.journey-trip-card{
+  border-color:var(--itbmo-premium-line);
+  background:linear-gradient(145deg,rgba(255,255,255,.88),rgba(248,252,253,.84));
+  box-shadow:0 18px 50px rgba(16,42,67,.07),inset 0 1px 0 rgba(255,255,255,.92);
+}
+.journey-home-card--resume{
+  background:
+    radial-gradient(circle at 88% 8%,rgba(255,255,255,.16),transparent 13rem),
+    linear-gradient(145deg,#0867a8 0%,#087fba 46%,#0a9da6 100%);
+}
+
+@media(prefers-reduced-motion:reduce){
+  .planner-stage-card,.itinerary-workspace-city-card,.itinerary-focus-day-card,.journey-home-card,.journey-trip-card{transition:none!important}
+}
