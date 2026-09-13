@@ -1539,6 +1539,30 @@ body{
 .tw-context-item{border-color:rgba(32,76,108,.18)!important;background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(248,251,254,.92))!important;box-shadow:0 13px 34px rgba(22,66,93,.052),inset 0 1px 0 rgba(255,255,255,.96)!important;}
 .tw-context-item:hover{transform:translateY(-3px)!important;border-color:rgba(32,76,108,.29)!important;box-shadow:0 19px 43px rgba(22,66,93,.08),inset 0 1px 0 rgba(255,255,255,.98)!important;}
 
+.tw-context-toggle{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  width:max-content;
+  min-width:138px;
+  min-height:44px;
+  margin:18px auto 0;
+  padding:10px 18px;
+  border:1px solid rgba(39,87,121,.16);
+  border-radius:999px;
+  background:rgba(255,255,255,.84);
+  color:#315b78;
+  font:850 13px/1.1 inherit;
+  cursor:pointer;
+  box-shadow:0 8px 22px rgba(22,66,93,.05),inset 0 1px 0 rgba(255,255,255,.94);
+  transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease,background .2s ease;
+}
+.tw-context-toggle:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(22,66,93,.075),inset 0 1px 0 rgba(255,255,255,.98);}
+.tw-context-toggle:focus-visible{outline:3px solid rgba(8,123,250,.18);outline-offset:3px;}
+#tw-context-tickets .tw-context-toggle{background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(255,244,232,.88));border-color:rgba(198,125,87,.18);color:#895c48;}
+#tw-context-tours .tw-context-toggle{background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(242,242,255,.90));border-color:rgba(101,112,211,.18);color:#5868b5;}
+#tw-context-move .tw-context-toggle{background:linear-gradient(135deg,rgba(255,255,255,.95),rgba(235,249,250,.90));border-color:rgba(50,145,171,.18);color:#327489;}
+
 /* Entradas y reservas · warm orange / amber. */
 #tw-context-tickets .tw-context-section-head::after{background:linear-gradient(90deg,#F17C4A,#F4B740);}
 #tw-context-tickets .tw-context-section-icon{background:linear-gradient(145deg,rgba(241,124,74,.14),rgba(244,183,64,.14))!important;border-color:rgba(198,125,87,.15)!important;color:#A46448!important;}
@@ -1578,7 +1602,8 @@ body{
   .tw-context-section-icon{width:49px!important;height:49px!important;border-radius:16px!important;}
   .tw-context-section-title h3{font-size:27px!important;}
   .tw-context-section-copy p{font-size:13.5px!important;}
+  .tw-context-toggle{width:100%;max-width:320px;min-height:46px;margin-top:16px;}
 }
 @media(prefers-reduced-motion:reduce){
-  .tw-city-card,.tw-trip-wide__item,.tw-stop-card,.tw-prepare-card,.tw-context-item,.tw-partner-offer,#tw-overview-essentials-cta,.tw-prepare-jump-nav button{transition:none!important;}
+  .tw-city-card,.tw-trip-wide__item,.tw-stop-card,.tw-prepare-card,.tw-context-item,.tw-context-toggle,.tw-partner-offer,#tw-overview-essentials-cta,.tw-prepare-jump-nav button{transition:none!important;}
 }
