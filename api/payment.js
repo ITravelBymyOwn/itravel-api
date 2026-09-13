@@ -27,7 +27,7 @@ const REST_URL = `${SUPABASE_URL}/rest/v1`;
 
 const COMMERCE = {
   currency: "USD",
-  regularPrice: 5.99,
+  regularPrice: 7.99,
   launchPrice: 2.99
 };
 
