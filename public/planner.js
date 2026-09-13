@@ -88,6 +88,12 @@ const ITBMO_GUEST_SESSION_KEY = 'itbmo_guest_session_token';
 const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
 const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
 const ITBMO_AUTH_SYNC_KEY = 'itbmo_auth_sync_v1';
+const ITBMO_AUTH_OWNER_KEY = 'itbmo_auth_owner_v1';
+const ITBMO_PLANNER_PRESENCE_KEY = 'itbmo_planner_presence_v1';
+const ITBMO_PLANNER_TAB_ID_KEY = 'itbmo_planner_tab_id_v1';
+const ITBMO_PLANNER_TAB_ESTABLISHED_KEY = 'itbmo_planner_tab_established_v1';
+const ITBMO_PLANNER_PRESENCE_TTL_MS = 8000;
+const ITBMO_PLANNER_HEARTBEAT_MS = 2000;
 const ITBMO_WORKSPACE_GUEST_HANDOFF_KEY = 'itbmo_workspace_guest_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
@@ -98,6 +104,8 @@ let currentTripId = null;
 let authReady = false;
 let guestUpgradeFormOpen = false;
 let pendingVerificationTimer = null;
+let plannerPresenceTimer = null;
+let plannerPresenceId = '';
 
 let savedDestinations = [];      // [{ city, country, days, baseDate, perDay:[{day,start,end}] }]
 
@@ -577,19 +585,99 @@ function setAccountMessage(message='', type=''){
   if(type) $accountMessage.classList.add(type);
 }
 
+/* Planner-owned session lifecycle.
+   Authentication remains shared through localStorage so every ITBMO workspace
+   sees the same registered-account session. A separate Planner heartbeat tells
+   workspaces whether at least one Planner tab is still alive. Closing a
+   workspace never affects authentication. Refreshing the Planner keeps the
+   same tab marker and therefore does not sign the traveler out. */
+function readPlannerPresence(){
+  try{
+    const raw=JSON.parse(localStorage.getItem(ITBMO_PLANNER_PRESENCE_KEY) || '{}');
+    return raw && typeof raw==='object' && !Array.isArray(raw) ? raw : {};
+  }catch(_){ return {}; }
+}
+function writePlannerPresence(presence){
+  try{ localStorage.setItem(ITBMO_PLANNER_PRESENCE_KEY,JSON.stringify(presence || {})); }catch(_){ }
+}
+function prunePlannerPresence(presence=readPlannerPresence(), now=Date.now()){
+  const next={};
+  Object.entries(presence || {}).forEach(([id,ts])=>{
+    const n=Number(ts||0);
+    if(id && n>0 && now-n<=ITBMO_PLANNER_PRESENCE_TTL_MS) next[id]=n;
+  });
+  return next;
+}
+function hasLivePlannerPresence(){
+  return Object.keys(prunePlannerPresence()).length>0;
+}
+function plannerTabId(){
+  if(plannerPresenceId) return plannerPresenceId;
+  try{ plannerPresenceId=String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim(); }catch(_){ }
+  if(!plannerPresenceId){
+    plannerPresenceId=(globalThis.crypto?.randomUUID?.() || `planner-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try{ sessionStorage.setItem(ITBMO_PLANNER_TAB_ID_KEY,plannerPresenceId); }catch(_){ }
+  }
+  return plannerPresenceId;
+}
+function markPlannerPresence(){
+  const id=plannerTabId();
+  const now=Date.now();
+  const presence=prunePlannerPresence(readPlannerPresence(),now);
+  presence[id]=now;
+  writePlannerPresence(presence);
+}
+function removePlannerPresence(){
+  const id=plannerPresenceId || (()=>{ try{return String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim();}catch(_){return '';} })();
+  if(!id) return;
+  const presence=prunePlannerPresence();
+  delete presence[id];
+  writePlannerPresence(presence);
+}
+function startPlannerPresenceHeartbeat(){
+  markPlannerPresence();
+  if(plannerPresenceTimer) clearInterval(plannerPresenceTimer);
+  plannerPresenceTimer=setInterval(markPlannerPresence,ITBMO_PLANNER_HEARTBEAT_MS);
+}
+function initializePlannerSessionLifecycle(){
+  let established=false;
+  try{ established=sessionStorage.getItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY)==='1'; }catch(_){ }
+
+  // A registered-account token left behind by a Planner tab that is no longer
+  // alive must not silently authenticate a newly opened Planner. A real reload
+  // keeps the sessionStorage marker, while a new/reopened tab does not.
+  let persistentToken='';
+  let owner='';
+  try{
+    persistentToken=String(localStorage.getItem(ITBMO_SESSION_KEY)||'').trim();
+    owner=String(localStorage.getItem(ITBMO_AUTH_OWNER_KEY)||'').trim();
+  }catch(_){ }
+  const liveBefore=hasLivePlannerPresence();
+  if(persistentToken && (owner==='planner' || !owner) && !established && !liveBefore){
+    try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){ }
+    try{ localStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
+    try{ localStorage.removeItem(ITBMO_AUTH_OWNER_KEY); }catch(_){ }
+    broadcastAuthState('signed_out');
+  }
+
+  try{ sessionStorage.setItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY,'1'); }catch(_){ }
+  startPlannerPresenceHeartbeat();
+
+  window.addEventListener('pagehide',()=>{
+    if(plannerPresenceTimer){ clearInterval(plannerPresenceTimer); plannerPresenceTimer=null; }
+    removePlannerPresence();
+  });
+  window.addEventListener('pageshow',()=>startPlannerPresenceHeartbeat());
+}
+
 function getStoredSessionToken(){
   try{
-    // Security rule: authentication lasts only for the current browser session.
-    // Legacy persistent tokens are deliberately ignored and removed.
-    localStorage.removeItem(ITBMO_SESSION_KEY);
-    return String(sessionStorage.getItem(ITBMO_SESSION_KEY) || sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || '').trim();
+    return String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || localStorage.getItem(ITBMO_SESSION_KEY) || '').trim();
   }catch(_){ return ''; }
 }
 function getCachedUser(){
   try{
-    // User identity follows the same browser-session lifecycle as the auth token.
-    localStorage.removeItem(ITBMO_USER_CACHE_KEY);
-    const raw=sessionStorage.getItem(ITBMO_USER_CACHE_KEY) || '';
+    const raw=sessionStorage.getItem(ITBMO_USER_CACHE_KEY) || localStorage.getItem(ITBMO_USER_CACHE_KEY) || '';
     const parsed=raw ? JSON.parse(raw) : null;
     return parsed && typeof parsed==='object' && !Array.isArray(parsed) ? parsed : null;
   }catch(_){ return null; }
@@ -598,8 +686,13 @@ function storeCachedUser(user,persistent=true){
   if(!user || typeof user!=='object') return;
   try{
     const serialized=JSON.stringify(user);
-    sessionStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
-    localStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    if(persistent){
+      localStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+      sessionStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    }else{
+      sessionStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+      localStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    }
   }catch(_){ }
 }
 function clearCachedUser(){
@@ -612,16 +705,14 @@ function broadcastAuthState(state){
 function storeSessionToken(token, persistent=true){
   try{
     if(!token) return;
-    // Registered and guest sessions are session-scoped: closing the browser
-    // removes authentication, while reloads in the same tab/session still work.
     if(persistent){
-      sessionStorage.setItem(ITBMO_SESSION_KEY, token);
+      localStorage.setItem(ITBMO_SESSION_KEY, token);
       sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY);
     }else{
       sessionStorage.setItem(ITBMO_GUEST_SESSION_KEY, token);
-      sessionStorage.removeItem(ITBMO_SESSION_KEY);
+      localStorage.removeItem(ITBMO_SESSION_KEY);
     }
-    localStorage.removeItem(ITBMO_SESSION_KEY);
+    localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'planner');
     broadcastAuthState('signed_in');
     setTimeout(()=>window.ITBMOFoundation?.syncAttribution?.(),0);
   }catch(_){}
@@ -629,6 +720,7 @@ function storeSessionToken(token, persistent=true){
 function clearSessionToken({broadcast=true}={}){
   try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){}
   try{ sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY); }catch(_){}
+  try{ localStorage.removeItem(ITBMO_AUTH_OWNER_KEY); }catch(_){}
   clearCachedUser();
   if(broadcast) broadcastAuthState('signed_out');
 }
@@ -833,7 +925,9 @@ function renderAuthState(){
   const sessionToken=getStoredSessionToken();
   const logged = Boolean(currentUser && sessionToken);
   if(logged){
-    storeCachedUser(currentUser,false);
+    let persistent=false;
+    try{ persistent=Boolean(localStorage.getItem(ITBMO_SESSION_KEY)); }catch(_){ }
+    storeCachedUser(currentUser,persistent);
   }
   const registered = Boolean(logged && currentUser?.is_registered);
   const pending = Boolean(logged && currentUser?.registration_pending);
@@ -3339,7 +3433,13 @@ function openImmersiveItinerary(){
   if(snapshot.trip_id) params.set('trip_id',snapshot.trip_id);
   const url=`./trip-workspace.html?${params.toString()}`;
   const opened=window.open(url,'_blank','noopener,noreferrer');
-  if(!opened) window.location.href=url;
+  if(!opened){
+    // If the browser blocks the new tab, ownership follows the intentional
+    // same-tab navigation so the Workspace is not mistaken for an abandoned
+    // Planner session. Returning to the Planner restores Planner ownership.
+    try{ localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'workspace'); }catch(_){ }
+    window.location.href=url;
+  }
 }
 function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
 function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch||!modal)return;launch.addEventListener('click',openImmersiveItinerary);qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
@@ -10612,6 +10712,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   // Security/UX default: Planner is locked before any async session restore.
   applyAuthPlannerGate(false);
 
+  initializePlannerSessionLifecycle();
   bindAccountListeners();
   bindJourneyHome();
   restoreITBMOSession();
