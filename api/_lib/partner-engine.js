@@ -11,8 +11,64 @@ const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
 
+
+// Only language capabilities verified for ITBMO's current affiliate integration
+// are declared here. They are deliberately separated from URL mutation: if the
+// partner does not document a safe locale mechanism for the exact link format
+// ITBMO uses, the adapter leaves the provider URL untouched.
+const PARTNER_LANGUAGE_CAPABILITIES = Object.freeze({
+  viator: {
+    supported: new Set(['en','es','de','fr','it','pt','ja','ko','zh-cn','zh-tw']),
+    applicable: new Set([]),
+    strategy: 'provider_managed'
+  },
+  omio: {
+    supported: new Set(['en','es','de']),
+    applicable: new Set(['en','es']),
+    strategy: 'explicit_route'
+  }
+});
+
 function clean(value, max = 240) {
   return String(value ?? '').trim().replace(/\s+/g, ' ').slice(0, max);
+}
+
+function normalizeLanguage(value) {
+  const raw = clean(value, 80)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return 'es';
+  if (/\b(pt|por|portuguese|portugues)\b/.test(raw)) return 'pt';
+  if (/\b(fr|fre|french|francais)\b/.test(raw)) return 'fr';
+  if (/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return 'de';
+  if (/\b(it|ita|italian|italiano)\b/.test(raw)) return 'it';
+  if (/\b(ja|japanese|japones)\b/.test(raw)) return 'ja';
+  if (/\b(ko|korean|coreano)\b/.test(raw)) return 'ko';
+  if (/\b(zh-cn|chinese simplified|chino simplificado)\b/.test(raw)) return 'zh-cn';
+  if (/\b(zh-tw|chinese traditional|chino tradicional)\b/.test(raw)) return 'zh-tw';
+  if (/\b(en|eng|english|ingles)\b/.test(raw)) return 'en';
+  return raw || '';
+}
+
+function resolvePartnerLocale(slug, uiLanguage) {
+  const capability = PARTNER_LANGUAGE_CAPABILITIES[slug];
+  // Commercial/affiliate language follows ITBMO UI only (ES/EN). The itinerary
+  // language is intentionally excluded so a DE/FR/JA/etc. itinerary can never
+  // mutate an affiliate link into an unverified locale.
+  const ui = normalizeLanguage(uiLanguage) === 'es' ? 'es' : 'en';
+
+  if (!capability) {
+    return { locale: ui, applied: false, strategy: 'provider_default' };
+  }
+
+  const locale = capability.supported.has(ui) ? ui : 'en';
+  return {
+    locale,
+    applied: capability.applicable.has(locale),
+    strategy: capability.strategy
+  };
 }
 
 function normalizeKey(value) {
@@ -135,29 +191,46 @@ async function getContextTemplate(slug) {
   return getOffer(slug, 'city_contextual');
 }
 
-function searchQueryForNeed(need, city) {
+function searchQueryForNeed(need, city, language = 'en') {
   const entity = clean(need?.entity_name || need?.source_activity, 180);
   const safeCity = clean(city || need?.city, 120);
-  if (entity) return [entity, safeCity].filter(Boolean).join(' ');
-
   const type = clean(need?.need_type, 80);
+  const isSpanish = normalizeLanguage(language) === 'es';
+
+  if (entity) {
+    if (type === 'ticket_required' || type === 'reservation_recommended') {
+      const intent = isSpanish ? 'entrada acceso sin tour' : 'entry ticket admission self guided';
+      return [entity, safeCity, intent].filter(Boolean).join(' ');
+    }
+    if (type === 'guided_tour_optional') {
+      const intent = isSpanish ? 'tour guiado experiencia' : 'guided tour experience';
+      return [entity, safeCity, intent].filter(Boolean).join(' ');
+    }
+    return [entity, safeCity].filter(Boolean).join(' ');
+  }
+
   if (!safeCity) return '';
-  if (type === 'guided_tour_optional') return `${safeCity} tours experiences`;
-  if (type === 'ticket_required' || type === 'reservation_recommended') return `${safeCity} tickets attractions`;
+  if (type === 'guided_tour_optional') {
+    return isSpanish ? `${safeCity} tours experiencias guiadas` : `${safeCity} guided tours experiences`;
+  }
+  if (type === 'ticket_required' || type === 'reservation_recommended') {
+    return isSpanish ? `${safeCity} entradas atracciones acceso` : `${safeCity} entry tickets attractions admission`;
+  }
   return safeCity;
 }
 
-function trackingCampaign(need, city, language) {
+function trackingCampaign(need, city, uiLanguage, partnerLocale = '') {
   const entityPart = campaignPart(need?.entity_name || need?.source_activity || city);
   const typePart = campaignPart(need?.need_type || 'context');
-  const langPart = language === 'en' ? 'en' : 'es';
-  return `itbmo-${entityPart}-${typePart}-${langPart}`.slice(0, 120);
+  const uiPart = campaignPart(normalizeLanguage(uiLanguage) || 'en');
+  const localePart = campaignPart(partnerLocale || uiPart);
+  return `itbmo-${entityPart}-${typePart}-${uiPart}-${localePart}`.slice(0, 120);
 }
 
-function contextualSearchUrl(slug, language, need, city) {
-  const query = searchQueryForNeed(need, city);
+function contextualSearchUrl(slug, uiLanguage, partnerLocale, need, city) {
+  const query = searchQueryForNeed(need, city, uiLanguage);
   if (!query) return '';
-  const campaign = trackingCampaign(need, city, language);
+  const campaign = trackingCampaign(need, city, uiLanguage, partnerLocale);
 
   if (slug === 'viator') {
     return appendParams('https://www.viator.com/searchResults/all', {
@@ -200,7 +273,7 @@ function contextualDescription(slug, language) {
   return `Explora ${provider} usando exactamente el lugar y destino detectados en tu itinerario.`;
 }
 
-function signResolvedOffer({ template, partner, targetUrl, placement, need, city, resolutionType, travelDate = '' }) {
+function signResolvedOffer({ template, partner, targetUrl, placement, need, city, resolutionType, travelDate = '', partnerLocale = '' }) {
   if (!hasRequiredAttribution(partner?.slug, targetUrl)) {
     throw new Error('PARTNER_ATTRIBUTION_PARAMS_MISSING');
   }
@@ -217,12 +290,13 @@ function signResolvedOffer({ template, partner, targetUrl, placement, need, city
     entity_name: clean(need?.entity_name || need?.source_activity, 180),
     city: clean(city || need?.city, 160),
     travel_date: clean(travelDate || need?.travel_date || need?.date, 40),
-    resolution_type: clean(resolutionType, 40)
+    resolution_type: clean(resolutionType, 40),
+    partner_locale: clean(partnerLocale, 20)
   };
   return signPayload(payload);
 }
 
-async function resolveExperiencePartner(slug, needs, city, language) {
+async function resolveExperiencePartner(slug, needs, city, uiLanguage, tripLanguage) {
   const partner = await getPartner(slug);
   if (!partner || !partner.enabled || partner.status !== 'approved') return [];
   const template = await getContextTemplate(slug);
@@ -230,14 +304,17 @@ async function resolveExperiencePartner(slug, needs, city, language) {
 
   const offers = [];
   const seen = new Set();
+  const localeResolution = resolvePartnerLocale(slug, uiLanguage);
 
   for (const need of needs) {
     if (!['ticket_required', 'reservation_recommended', 'guided_tour_optional'].includes(need?.need_type)) continue;
 
-    const targetUrl = contextualSearchUrl(slug, language, need, city);
+    const targetUrl = contextualSearchUrl(slug, uiLanguage, localeResolution.locale, need, city);
     if (!targetUrl || !allowedPartnerUrl(slug, targetUrl)) continue;
 
-    const placement = need?.need_type === 'guided_tour_optional' ? 'city_experiences' : 'city_tickets';
+    const isTour = need?.need_type === 'guided_tour_optional';
+    const placement = isTour ? 'city_experiences' : 'city_tickets';
+    const resolutionType = isTour ? 'context_search_experience' : 'context_search_admission';
     const dedupeKey = `${slug}|${clean(need?.id,120)}|${targetUrl}`;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
@@ -255,8 +332,10 @@ async function resolveExperiencePartner(slug, needs, city, language) {
       need_type: clean(need?.need_type, 80),
       entity_name: clean(need?.entity_name || need?.source_activity, 180),
       city: clean(city || need?.city, 160),
-      resolution_type: 'context_search',
-      provider_entity_type: 'search',
+      resolution_type: resolutionType,
+      provider_entity_type: isTour ? 'search_experience' : 'search_admission',
+      partner_locale: localeResolution.locale,
+      locale_applied: localeResolution.applied,
       provider_entity_id: null,
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({
@@ -266,7 +345,8 @@ async function resolveExperiencePartner(slug, needs, city, language) {
         placement,
         need,
         city,
-        resolutionType: 'context_search'
+        resolutionType,
+        partnerLocale: localeResolution.locale
       })
     });
   }
@@ -338,34 +418,35 @@ async function getOwnedTripRoutes(tripId, userId) {
   });
 }
 
-function omioLanding(origin, destination, language) {
+function omioLanding(origin, destination, locale) {
   const from = slugify(origin);
   const to = slugify(destination);
   if (!from || !to) return '';
-  return language === 'en'
-    ? `https://www.omio.com/travel/${from}/${to}`
-    : `https://www.omio.es/viajes/${from}/${to}`;
+  return locale === 'es'
+    ? `https://www.omio.es/viajes/${from}/${to}`
+    : `https://www.omio.com/travel/${from}/${to}`;
 }
 
-function omioTrackedUrl(trackingBase, origin, destination, language) {
-  const landing = omioLanding(origin, destination, language);
+function omioTrackedUrl(trackingBase, origin, destination, locale) {
+  const landing = omioLanding(origin, destination, locale);
   if (!landing || !allowedPartnerUrl('omio', trackingBase)) return '';
   const url = new URL(trackingBase);
   url.searchParams.set('u', landing);
   return url.toString();
 }
 
-async function resolveOmioTripRoutes(tripId, userId, city, language) {
+async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, tripLanguage) {
   const partner = await getPartner('omio');
   const template = await getOffer('omio', 'city_transport_contextual');
   if (!partner || !template) return [];
 
+  const localeResolution = resolvePartnerLocale('omio', uiLanguage);
   const routes = await getOwnedTripRoutes(tripId, userId);
   const eligible = routes.filter(route => route.origin === clean(city, 160) && omioRouteEligible(route));
   const result = [];
 
   for (const route of eligible) {
-    const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, language);
+    const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, localeResolution.applied ? localeResolution.locale : 'en');
     if (!targetUrl) continue;
 
     const routeLabel = `${route.origin} → ${route.destination}`;
@@ -394,6 +475,8 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
       city: route.origin,
       travel_date: route.travel_date || null,
       resolution_type: 'trip_sequence_route',
+      partner_locale: localeResolution.locale,
+      locale_applied: localeResolution.applied,
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({
         template,
@@ -403,7 +486,8 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
         need,
         city: route.origin,
         resolutionType: 'trip_sequence_route',
-        travelDate: route.travel_date
+        travelDate: route.travel_date,
+        partnerLocale: localeResolution.locale
       })
     });
   }
@@ -412,7 +496,7 @@ async function resolveOmioTripRoutes(tripId, userId, city, language) {
 }
 
 function rankOffers(offers) {
-  const resolution = { trip_sequence_route: 40, context_search: 35, static: 10 };
+  const resolution = { trip_sequence_route: 40, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
@@ -437,18 +521,27 @@ export async function resolveTripOffers({ session_token, trip_id }) {
   return { session, offers: rankOffers(offers) };
 }
 
-export async function resolveCityOffers({ session_token, trip_id, city = '', language = 'es', needs = [] }) {
+export async function resolveCityOffers({
+  session_token,
+  trip_id,
+  city = '',
+  language = 'es',
+  ui_language = '',
+  trip_language = '',
+  needs = []
+}) {
   const session = await resolveSession(session_token);
   if (!session) return { session: null, offers: [] };
 
   const safeNeeds = Array.isArray(needs) ? needs : [];
   const safeCity = clean(city || safeNeeds.find(Boolean)?.city, 160);
-  const safeLanguage = language === 'en' ? 'en' : 'es';
+  const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
+  const safeTripLanguage = normalizeLanguage(trip_language);
 
   const [viator, getyourguide, omio] = await Promise.all([
-    resolveExperiencePartner('viator', safeNeeds, safeCity, safeLanguage),
-    resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeLanguage),
-    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeLanguage)
+    resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
+    resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
+    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage)
   ]);
 
   return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
@@ -477,7 +570,8 @@ export async function registerPartnerClick({ session_token, trip_id, offer_id, o
       need_type: '',
       entity_name: '',
       travel_date: '',
-      resolution_type: 'static'
+      resolution_type: 'static',
+      partner_locale: ''
     };
   }
 
@@ -515,6 +609,7 @@ export async function registerPartnerClick({ session_token, trip_id, offer_id, o
     partner_name: resolved.partner_name || null,
     need_type: resolved.need_type || null,
     entity_name: resolved.entity_name || null,
-    travel_date: resolved.travel_date || null
+    travel_date: resolved.travel_date || null,
+    partner_locale: resolved.partner_locale || null
   };
 }
