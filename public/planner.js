@@ -365,6 +365,21 @@ const I18N = {
 function getLang(){
   return (plannerState && (plannerState.lang === 'es' || plannerState.lang === 'en')) ? plannerState.lang : 'en';
 }
+function plannerHomeUrl(lang=getLang()){
+  return lang === 'en' ? './preview-home-en.html' : './preview-home.html';
+}
+function syncPlannerLanguageShell(){
+  const lang=getLang();
+  document.documentElement.lang=lang;
+  try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
+  const homeLink=qs('.planner-home-link');
+  if(homeLink){
+    homeLink.href=plannerHomeUrl(lang);
+    homeLink.setAttribute('aria-label',lang==='es'?'Volver a I Travel By My Own':'Back to I Travel By My Own');
+    const label=homeLink.querySelector('.planner-home-link__label');
+    if(label) label.textContent=lang==='es'?'Inicio':'Home';
+  }
+}
 function t(key, ...args){
   const lang = getLang();
   const pack = I18N[lang] || I18N.en;
@@ -10707,6 +10722,7 @@ function bindTravelBuilderProgress(){
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', ()=>{
+  syncPlannerLanguageShell();
   if(!document.querySelector('#city-list .city-row')) addCityRow();
 
   // Security/UX default: Planner is locked before any async session restore.
