@@ -9224,7 +9224,7 @@ const ITBMO_COMMERCE_CONFIG = {
   requirePayment: true,
 
   currency: 'USD',
-  regularPrice: 5.99,
+  regularPrice: 7.99,
   basePrice: 2.99,
 
   support: {
