@@ -36,15 +36,19 @@ function range(c){const ds=days(c),b=base(c);if(!b||!ds.length)return'';const a=
 function dayDate(c,d){const b=base(c),n=Number(d);return b&&Number.isFinite(n)&&n>0?fmt(addDays(b,n-1)):''}
 function travelDateLabel(raw){const parsed=parseDate(raw);return parsed?fmt(parsed):String(raw||'').trim()}
 function setText(){document.documentElement.lang=lang;
+document.title=lang==='es'?'ITBMO · Tu viaje':'ITBMO · Your trip';
 const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
-const homeUrl=`./preview-home.html?lang=${encodeURIComponent(lang)}`;
+const homeUrl=lang==='en'?'./preview-home-en.html':'./preview-home.html';
+try{ localStorage.setItem('itbmo_site_language',lang); }catch(_){ }
 const brand=$('.tw-brand');if(brand)brand.setAttribute('href',homeUrl);
 $('#tw-back-planner').setAttribute('data-planner-url',plannerUrl);
+$('#tw-back-planner').setAttribute('aria-label',t.back);
 $('#tw-empty-back').setAttribute('data-planner-url',plannerUrl);
+$('#tw-empty-back').textContent=t.back;
 const badge=$('#tw-prepare-badge');if(badge)badge.textContent=t.prepareBadge;
 $('#tw-back-label').textContent=t.back;
 $('#tw-my-trips-label').textContent=t.myTrips;
-$('#tw-my-trips').setAttribute('aria-label',t.myTrips);$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
+$('#tw-my-trips').setAttribute('aria-label',t.myTrips);$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
 function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
 function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='itinerary';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
 function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
@@ -774,23 +778,28 @@ function openMyTrips(){
 }
 
 function setupAllCitiesFloating(){
-  const btn=$('#tw-all-cities');
-  const head=document.querySelector('.tw-city-head');
-  if(!btn||!head)return;
+  const source=$('#tw-all-cities');
+  const floating=$('#tw-floating-all-cities');
+  if(!source||!floating)return;
 
   const update=()=>{
     if($('#tw-city')?.hidden){
-      btn.classList.remove('is-floating');
-      head.classList.remove('has-floating-all-cities');
+      floating.hidden=true;
+      floating.classList.remove('is-visible');
       return;
     }
-
     const topbar=document.querySelector('.tw-topbar');
-    const top=(topbar?.offsetHeight||82)+16;
-    const shouldFloat=head.getBoundingClientRect().top<=top;
+    const threshold=(topbar?.offsetHeight||82)+14;
+    const rect=source.getBoundingClientRect();
+    const shouldShow=rect.bottom < threshold;
+    floating.hidden=!shouldShow;
+    floating.classList.toggle('is-visible',shouldShow);
+  };
 
-    btn.classList.toggle('is-floating',shouldFloat);
-    head.classList.toggle('has-floating-all-cities',shouldFloat);
+  floating.onclick=()=>{
+    floating.hidden=true;
+    floating.classList.remove('is-visible');
+    overview();
   };
 
   window.addEventListener('scroll',update,{passive:true});
@@ -799,7 +808,6 @@ function setupAllCitiesFloating(){
   window.addEventListener('tw:overview-opened',update);
   requestAnimationFrame(update);
 }
-
 
 function setupPrepareFloating(){
   const source=$('#tw-mode-prepare');
