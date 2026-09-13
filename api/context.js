@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.3";
+const CONTEXT_VERSION = "1.4";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -357,6 +357,79 @@ function isGenericTransferActivity(activity) {
     .test(clean(activity, 240));
 }
 
+
+function normalizedContextText(...values) {
+  return values
+    .map(value => clean(value, 320))
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function admissionBlockInfo({ activity = "", entityHint = "", from = "", to = "", transport = "", notes = "" } = {}) {
+  const entity = normalizedContextText(entityHint || activity);
+  const activityText = normalizedContextText(activity);
+  const transportText = normalizedContextText(transport);
+  const notesText = normalizedContextText(notes);
+  const combined = normalizedContextText(activity, entityHint, from, to, transport, notes);
+
+  const transportHub = /\b(?:train|rail(?:way)?|bus|coach|metro|subway|underground|tram|ferry)\s+(?:station|terminal|stop)|(?:station|terminal)\s+(?:de\s+)?(?:train|rail|bus|coach|metro|ferry)|estacion(?:\s+de)?(?:\s+tren|\s+ferrocarril|\s+autobus|\s+bus|\s+metro)?|terminal(?:\s+de)?(?:\s+autobus|\s+bus|\s+ferry|\s+ferri)?|aeropuerto|airport|flughafen|aeroport|aeroporto|gare|bahnhof|hauptbahnhof|stazione|estacao|port\s+terminal|ferry\s+terminal\b/i;
+  if (transportHub.test(entity)) {
+    return { blocked: true, reason: "transport_hub" };
+  }
+
+  const namedTransitHub = /\b(?:roma\s+termini|firenze\s+santa\s+maria\s+novella|milano\s+centrale|venezia\s+santa\s+lucia|napoli\s+centrale|barcelona\s+sants|madrid\s+atocha|paris\s+gare\s+du\s+nord|london\s+st\.?\s*pancras)\b/i;
+  if (namedTransitHub.test(entity)) {
+    return { blocked: true, reason: "transport_hub" };
+  }
+
+  const mobilityIntent = /\b(?:traslado|transfer|regreso|retorno|salida|llegada|conexion|conexi[oó]n|embarque|and[eé]n|plataforma|viaje\s+en\s+tren|tren\s+(?:rapido|rápido|regional)|train\s+(?:to|from|ride|journey)|rail\s+journey|anreise|abreise|ruckfahrt|rueckfahrt|fahrt\s+mit|zugfahrt|ankunft|abfahrt|transfert|retour|trajet\s+en\s+train|arrivee|depart|trasferimento|ritorno|viaggio\s+in\s+treno|arrivo|partenza|deslocamento|retorno|viagem\s+de\s+trem)\b/i;
+  const mobilityMode = /\b(?:train|tren|zug|treno|trem|rail|ferrocarril|bus|coach|autobus|autob[uú]s|metro|subway|tram|tranvia|tranv[ií]a|flight|vuelo|flug|volo|ferry|ferri|funicular|cremallera|rack\s+railway|cable\s+car|aeri|gondola|shuttle)\b/i;
+  if (mobilityIntent.test(activityText) && (mobilityMode.test(combined) || transportText)) {
+    return { blocked: true, reason: "transport_activity" };
+  }
+
+  const lodgingOrFood = /\b(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|ristorante|trattoria|osteria|pizzeria|caf[eé]|coffee\s+shop|bar|pub|gelateria|bakery|panaderia|panader[ií]a)\b/i;
+  if (lodgingOrFood.test(entity)) {
+    return { blocked: true, reason: "lodging_or_food" };
+  }
+
+  const nonVisitIntent = /\b(?:foto|photo\s+stop|photograph|exterior|outside|fachada|facade|shopping|compras|tiempo\s+libre|free\s+time|descanso|rest)\b/i;
+  const explicitAdmission = /\b(?:entrada(?:s)?|entry\s+ticket(?:s)?|admission|ticket(?:s)?|eintritt|billet(?:s)?|bigliett(?:o|i)|ingress(?:o|i))\b/i;
+  if (nonVisitIntent.test(activityText) && !explicitAdmission.test(notesText)) {
+    return { blocked: true, reason: "non_admission_visit" };
+  }
+
+  return { blocked: false, reason: "" };
+}
+
+function transportTicketContext(row) {
+  const activity = normalizedContextText(row?.activity);
+  const notes = normalizedContextText(row?.notes);
+  const transport = normalizedContextText(row?.transport);
+  const combined = `${activity} ${notes} ${transport}`;
+  const mobilityWord = /\b(?:train|tren|zug|treno|trem|rail|bus|coach|autobus|autobus|metro|subway|tram|flight|vuelo|flug|volo|ferry|ferri|funicular|cremallera|rack\s+railway|cable\s+car|aeri|gondola|station|estacion|bahnhof|gare|stazione|airport|aeropuerto|terminal|anden|platform)\b/i;
+  if (!mobilityWord.test(combined)) return false;
+
+  // Strong attraction-admission vocabulary overrides an otherwise transport-heavy row.
+  if (/\b(?:entrada(?:s)?|admission|entry\s+ticket(?:s)?|eintritt|ingress(?:o|i))\b/i.test(notes)) {
+    return false;
+  }
+
+  const explicitTransportFare = /\b(?:billete(?:s)?(?:\s+de)?\s+(?:tren|bus|autobus|metro|ferry|vuelo)|(?:train|bus|coach|metro|ferry|flight)\s+ticket(?:s)?|fahrkarte(?:n)?|bigliett(?:o|i)\s+(?:del|di)\s+(?:treno|autobus)|billet(?:s)?\s+(?:de|du)\s+(?:train|bus|metro)|transport(?:ation)?\s+pass(?:es)?|rail\s+pass(?:es)?)\b/i;
+  if (explicitTransportFare.test(combined)) return true;
+
+  // Generic "bring/buy your tickets" on a row whose activity itself is clearly a transfer
+  // is treated as transport fare, not attraction admission.
+  const transferIntent = /\b(?:traslado|transfer|regreso|retorno|salida|llegada|train\s+to|anreise|abreise|ruckfahrt|rueckfahrt|zugfahrt|transfert|retour|trasferimento|ritorno|deslocamento)\b/i;
+  const genericTicket = /\b(?:billete(?:s)?|ticket(?:s)?|fahrkarte(?:n)?|billet(?:s)?|bigliett(?:o|i))\b/i;
+  return transferIntent.test(activity) && genericTicket.test(notes);
+}
+
 function normalizeEntityKey(value) {
   return clean(value, 180)
     .toLowerCase()
@@ -435,7 +508,12 @@ function accessEvidence(row) {
   const source = `${activity} ${notes}`
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, " ");
+    .replace(/[\u0300-\u036f]/g, "");
+
+  // "ticket/billet" in a transport instruction is a fare, not attraction admission.
+  if (transportTicketContext(row)) {
+    return { hint: "", evidence: "" };
+  }
 
   const conditional =
     /\b(considera|si quieres|si deseas|si es posible|segun entradas|segun ticket(?:s)?|opcional|optional|if you want|if desired|if possible|depending on (?:the )?ticket(?:s)?|where possible|consider|wenn du|falls du|wenn moglich|je nach ticket|si vous|si possible|selon (?:les )?billets|facultatif|se vuoi|se desideri|se possibile|in base (?:al|ai) bigliett(?:o|i)|opzionale|se quiser|se possivel)\b/i
@@ -533,7 +611,8 @@ function buildCandidates(trip, requestedCity) {
               );
               const evidence = accessEvidence({
                 activity: existing.activity,
-                notes: existing.context_notes
+                notes: existing.context_notes,
+                transport: existing.transport
               });
               existing.access_hint = evidence.hint;
               existing.access_evidence = evidence.evidence;
@@ -558,7 +637,15 @@ function buildCandidates(trip, requestedCity) {
           620
         );
         pendingContextNotes.delete(candidateId);
-        const evidence = accessEvidence({ activity, notes: contextNotes });
+        const evidence = accessEvidence({ activity, notes: contextNotes, transport: row.transport });
+        const admissionBlock = admissionBlockInfo({
+          activity,
+          entityHint,
+          from: row.from,
+          to: destination,
+          transport: row.transport,
+          notes: contextNotes
+        });
 
         candidates.push({
           candidate_id: candidateId,
@@ -570,6 +657,8 @@ function buildCandidates(trip, requestedCity) {
           from: clean(row.from, 160),
           to: destination,
           transport: clean(row.transport, 120),
+          admission_block_hint: admissionBlock.blocked,
+          admission_block_reason: admissionBlock.reason,
           intercity_hint: transportInfo.intercity,
           transport_arrangement_hint: transportInfo.significant,
           explicit_tour_hint: explicitTourHint(row),
@@ -611,19 +700,23 @@ ACCESS-FIRST RULES (CRITICAL):
 3. If advance booking is strongly useful but not mandatory, use reservation_recommended.
 4. If only one component requires payment/reservation (for example a dome climb or special interior), state that condition in user_message and do not imply the whole site requires it.
 5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
-6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
-7. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
-8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
-9. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
-10. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
-11. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
-12. Generic transfer rows can contain evidence about the destination. Use entity_hint and context_notes so a ticket clue from a preceding transfer is not lost.
-13. Never invent products, providers, prices, availability, ticket inventory, or commercial claims.
-14. confidence must be high, medium, or low.
-15. user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
-16. Use cautious language when a requirement can vary. Do not present uncertain claims as facts.
-17. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary access/logistics need.
-18. reason is concise evidence, not hidden chain-of-thought.
+6. HARD EXCLUSION: if candidate.admission_block_hint is true, NEVER classify that candidate as ticket_required or reservation_recommended. The reason may indicate a transport hub, a transport activity, lodging/food, or a non-admission visit. Use transport_arrangement/intercity_transport only if the supplied hints justify it; otherwise use no_action.
+7. Stations, airports, ports, ferry terminals, metro/bus terminals, platforms, hotels, restaurants, cafes, ordinary streets/plazas/neighborhoods, simple exterior/photo stops, shopping, walks, and transit instructions do not become attraction admission needs merely because the text contains words such as ticket, access, reservation, platform, entrance, or entry.
+8. Distinguish a TRANSPORT FARE from an ATTRACTION ADMISSION. A train/bus/ferry/funicular/cable-car ticket belongs to mobility/transport, never to ticket_required for an attraction.
+9. Split compound activity meaning before classifying. Example: "Montserrat – arrival by R5 + rack railway/cable car" is primarily transport to Montserrat; do not turn the whole phrase into an attraction ticket. Only a separately identified visit inside Montserrat may create an admission need if the source actually supports it.
+10. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
+11. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
+12. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
+13. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
+14. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
+15. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
+16. Generic transfer rows can contain evidence about the destination. Use entity_hint and context_notes so a ticket clue from a preceding transfer is not lost.
+17. Never invent products, providers, prices, availability, ticket inventory, or commercial claims.
+18. confidence must be high, medium, or low.
+19. user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
+20. Use cautious language when a requirement can vary. Do not present uncertain claims as facts.
+21. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary access/logistics need.
+22. reason is concise evidence, not hidden chain-of-thought.
 
 Return valid JSON only:
 {
@@ -790,6 +883,22 @@ function categoryForNeed(needType) {
   return "none";
 }
 
+function admissionNeedBlocked(source, entityName, entityType) {
+  if (!source) return true;
+  if (source.admission_block_hint) return true;
+  if (entityType === "transport" || entityType === "route") return true;
+
+  const check = admissionBlockInfo({
+    activity: source.activity,
+    entityHint: entityName || source.entity_hint,
+    from: source.from,
+    to: source.to,
+    transport: source.transport,
+    notes: source.context_notes || source.notes
+  });
+  return check.blocked;
+}
+
 function sanitizeClassifications(candidates, classifications, city) {
   const sourceById = new Map(candidates.map(item => [item.candidate_id, item]));
   const usedCandidateNeed = new Set();
@@ -803,8 +912,23 @@ function sanitizeClassifications(candidates, classifications, city) {
     const needType = ALLOWED_NEEDS.has(raw?.need_type) ? raw.need_type : "no_action";
     const confidence = ALLOWED_CONFIDENCE.has(raw?.confidence) ? raw.confidence : "low";
     const entityType = ALLOWED_ENTITY_TYPES.has(raw?.entity_type) ? raw.entity_type : "other";
+    const entityName = clean(raw?.entity_name, 180) || source.entity_hint || source.activity;
 
     if (needType === "no_action" || confidence === "low") continue;
+
+    if (
+      (needType === "ticket_required" || needType === "reservation_recommended") &&
+      admissionNeedBlocked(source, entityName, entityType)
+    ) {
+      continue;
+    }
+
+    if (
+      needType === "guided_tour_optional" &&
+      (source.admission_block_hint || entityType === "transport" || entityType === "route")
+    ) {
+      continue;
+    }
 
     if (needType === "intercity_transport" && !source.intercity_hint) continue;
     if (needType === "transport_arrangement" && !source.transport_arrangement_hint) continue;
@@ -826,7 +950,7 @@ function sanitizeClassifications(candidates, classifications, city) {
       category: categoryForNeed(needType),
       city,
       day: source.day,
-      entity_name: clean(raw?.entity_name, 180) || source.entity_hint || source.activity,
+      entity_name: entityName,
       entity_type: entityType,
       need_type: needType,
       confidence,
@@ -888,6 +1012,7 @@ function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
   for (const source of candidates) {
     if (!source?.access_hint || accessByCandidate.has(source.candidate_id)) continue;
     if (source.intercity_hint || source.transport_arrangement_hint) continue;
+    if (admissionNeedBlocked(source, source.entity_hint || source.activity, "other")) continue;
 
     const needType = source.access_hint === "ticket_required"
       ? "ticket_required"
