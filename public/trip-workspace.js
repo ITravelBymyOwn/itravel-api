@@ -20,12 +20,24 @@ const contextRequests=new Map();
 const partnerOffersByCity=new Map();
 let tripPartnerOffers=[];
 const viewedOfferIds=new Set();
+const expandedContextSections=new Set();
 const requestedLang=new URLSearchParams(location.search).get('lang');
 const copy={
- es:{back:'Volver al Planner',myTrips:'Mis Viajes',prepareBadge:'Explora',prepareTeaser:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',ready:'Tu viaje está listo',overviewK:'TU VIAJE ITBMO',overviewT:'¿Por dónde quieres empezar?',overviewC:'Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.',city:'ciudad',cities:'ciudades',d:'día',ds:'días',organized:'organizados',explore:'Explorar',all:'Todas las ciudades',cityK:'TU CIUDAD',it:'Itinerario',prep:'Para tu viaje',wholeK:'PARA TODO TU VIAJE',wholeT:'Lo esencial que viaja contigo.',wholeC:'Necesidades que acompañan el viaje completo, sin repetirlas ciudad por ciudad.',connectivityK:'VIAJE COMPLETO',connectivityT:'Conectividad',connectivityC:'Opciones de datos y eSIM para mantenerte conectado durante todo el viaje.',insuranceK:'VIAJE COMPLETO',insuranceT:'Seguro de viaje',insuranceC:'Protección transversal para el viaje cuando exista una opción que aporte valor real.',coming:'Próximamente',details:'Ver detalles',hide:'Ocultar detalles',route:'Trayecto',transport:'Transporte',duration:'Duración',notes:'Detalles',prepareT:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',prepareC:'Entradas, reservas, experiencias y movilidad, seleccionadas según tu viaje.',tickets:'Entradas y reservas',ticketsC:'Accesos, horarios y reservas que realmente requiere tu itinerario.',tours:'Tours y experiencias',toursC:'Alternativas guiadas y experiencias que encajan con lo que ya planeaste.',move:'Cómo moverte',moveC:'Opciones útiles de movilidad relacionadas con esta ciudad.',rentalTitle:'Vehículo rentado',rentalAll:'TODO EL VIAJE',rentalDays:'DÍAS',rentalMessageAll:'Tienes previsto moverte en vehículo rentado durante tu estancia en esta ciudad. Esta opción queda pendiente de resolver. Si eliges alguno de los tours de arriba, revisa si incluye transporte antes de mantener el vehículo para esa actividad.',rentalMessageDays:'El itinerario contempla vehículo rentado en estos días. Esta opción queda pendiente de resolver. Si eliges alguno de los tours de arriba, revisa si incluye transporte antes de mantener el vehículo para esa actividad.',rentalSource:'Basado en el medio de transporte indicado para esta ciudad',more:'Más para tu viaje',moreC:'Otros servicios relevantes, solo cuando aporten valor.',contextLoading:'Analizando lo que necesitas para este viaje…',contextError:'No pudimos analizar esta ciudad ahora. Puedes seguir usando tu itinerario normalmente.',contextEmpty:'No detectamos nada que necesites resolver aquí.',required:'Entrada necesaria',recommended:'Conviene reservar',optional:'Opcional',journey:'Pendiente de resolver',compareJourney:'Comparar opciones',dayLabel:'Día',basedOn:'Basado en tu itinerario',items:'pendientes',next:'Próximamente',loading:'Recuperando tu viaje…',emptyT:'No pudimos cargar este viaje.',emptyC:'Vuelve al Planner para abrirlo nuevamente o inicia sesión si este viaje pertenece a tu cuenta.',partnerCta:'Ver opción',optionsForBooking:'Opciones para reservar',linkDisclosure:'Transparencia de enlaces: Algunas opciones de reserva utilizan enlaces de afiliados. Si reservas a través de ellos, ITBMO puede recibir una comisión del proveedor. ITBMO no añade ningún recargo al precio mostrado por el proveedor y, en algunos casos, acceder desde ITBMO puede darte un beneficio o descuento adicional. Fechas, disponibilidad, condiciones y precio final se confirman directamente con el proveedor.',available:'Disponible',overviewEssentialsK:'ANTES DE SEGUIR',overviewEssentialsT:'Prepara lo esencial de tu viaje',overviewEssentialsC:'Conectividad, movilidad y servicios útiles, organizados según tu viaje.',overviewEssentialsCta:'Ver lo que puedo necesitar ↓',authKicker:'TU VIAJE ESTÁ PROTEGIDO',authTitle:'Sesión cerrada',authCopy:'Inicia sesión para volver a acceder a este viaje.',authLogin:'Iniciar sesión',authPlanner:'Ir al Planner',authEmail:'Email',authPassword:'Contraseña',authCancel:'Cancelar',authRequired:'Ingresa tu email y contraseña.',authInvalid:'Email o contraseña incorrectos, o el correo aún no ha sido confirmado.',authConnecting:'Iniciando sesión…',authConnection:'No pudimos conectar con ITBMO. Intenta nuevamente.',authAccessDenied:'Este viaje no está disponible para la cuenta con la que acabas de iniciar sesión.'},
- en:{back:'Back to Planner',myTrips:'My Trips',prepareBadge:'Explore',prepareTeaser:'Your itinerary is only the beginning. Get ready to live it.',ready:'Your trip is ready',overviewK:'YOUR ITBMO TRIP',overviewT:'Where do you want to start?',overviewC:'Choose a city to explore it day by day and prepare what you actually need.',city:'city',cities:'cities',d:'day',ds:'days',organized:'organized',explore:'Explore',all:'All cities',cityK:'YOUR CITY',it:'Itinerary',prep:'For your trip',wholeK:'FOR YOUR WHOLE TRIP',wholeT:'The essentials that travel with you.',wholeC:'Needs that travel with the whole trip, without repeating them city by city.',connectivityK:'WHOLE TRIP',connectivityT:'Connectivity',connectivityC:'Data and eSIM options to keep you connected throughout the trip.',insuranceK:'WHOLE TRIP',insuranceT:'Travel insurance',insuranceC:'Trip-wide protection when there is an option that genuinely adds value.',coming:'Coming next',details:'View details',hide:'Hide details',route:'Route',transport:'Transport',duration:'Duration',notes:'Details',prepareT:'Your itinerary is only the beginning. Get ready to live it.',prepareC:'Tickets, reservations, experiences and mobility, selected around your trip.',tickets:'Tickets & reservations',ticketsC:'Access, schedules and reservations your itinerary actually requires.',tours:'Tours & experiences',toursC:'Guided alternatives and experiences that fit what you already planned.',move:'Getting around',moveC:'Useful mobility options related to this city.',rentalTitle:'Rental car',rentalAll:'WHOLE STAY',rentalDays:'DAYS',rentalMessageAll:'You plan to use a rental car during your stay in this city. This option remains pending resolution. If you choose one of the tours above, check whether transportation is included before keeping the car for that activity.',rentalMessageDays:'The itinerary uses a rental car on these days. This option remains pending resolution. If you choose one of the tours above, check whether transportation is included before keeping the car for that activity.',rentalSource:'Based on the transportation selected for this city',more:'More for your trip',moreC:'Other relevant services, only when they add value.',contextLoading:'Analyzing what you need for this trip…',contextError:'We could not analyze this city right now. You can keep using your itinerary normally.',contextEmpty:'Nothing here appears to require action from you.',required:'Ticket needed',recommended:'Reservation recommended',optional:'Optional',journey:'Pending resolution',compareJourney:'Compare options',dayLabel:'Day',basedOn:'Based on your itinerary',items:'items',next:'Coming next',loading:'Recovering your trip…',emptyT:'We could not load this trip.',emptyC:'Return to the Planner to open it again, or sign in if this trip belongs to your account.',partnerCta:'View option',optionsForBooking:'Booking options',linkDisclosure:'Link transparency: Some booking options use affiliate links. If you book through them, ITBMO may receive a commission from the provider. ITBMO does not add any surcharge to the price shown by the provider and, in some cases, accessing through ITBMO may include an additional benefit or discount. Dates, availability, conditions and final price are confirmed directly with the provider.',available:'Available',overviewEssentialsK:'BEFORE YOU CONTINUE',overviewEssentialsT:'Prepare the essentials for your trip',overviewEssentialsC:'Connectivity, mobility and useful services, organized around your trip.',overviewEssentialsCta:'See what I may need ↓',authKicker:'YOUR TRIP IS PROTECTED',authTitle:'Session ended',authCopy:'Sign in again to access this trip.',authLogin:'Sign in',authPlanner:'Go to Planner',authEmail:'Email',authPassword:'Password',authCancel:'Cancel',authRequired:'Enter your email and password.',authInvalid:'Incorrect email or password, or the email has not been confirmed yet.',authConnecting:'Signing in…',authConnection:'We could not connect to ITBMO. Please try again.',authAccessDenied:'This trip is not available to the account you just signed in with.'}
+ es:{back:'Volver al Planner',myTrips:'Mis Viajes',prepareBadge:'Explora',prepareTeaser:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',ready:'Tu viaje está listo',overviewK:'TU VIAJE ITBMO',overviewT:'¿Por dónde quieres empezar?',overviewC:'Elige una ciudad para explorarla día a día y preparar lo que realmente necesitas.',city:'ciudad',cities:'ciudades',d:'día',ds:'días',organized:'organizados',explore:'Explorar',all:'Todas las ciudades',cityK:'TU CIUDAD',it:'Itinerario',prep:'Para tu viaje',wholeK:'PARA TODO TU VIAJE',wholeT:'Lo esencial que viaja contigo.',wholeC:'Necesidades que acompañan el viaje completo, sin repetirlas ciudad por ciudad.',connectivityK:'VIAJE COMPLETO',connectivityT:'Conectividad',connectivityC:'Opciones de datos y eSIM para mantenerte conectado durante todo el viaje.',insuranceK:'VIAJE COMPLETO',insuranceT:'Seguro de viaje',insuranceC:'Protección transversal para el viaje cuando exista una opción que aporte valor real.',coming:'Próximamente',details:'Ver detalles',hide:'Ocultar detalles',route:'Trayecto',transport:'Transporte',duration:'Duración',notes:'Detalles',prepareT:'Tu itinerario es solo el comienzo. Prepárate para vivirlo.',prepareC:'Entradas, reservas, experiencias y movilidad, seleccionadas según tu viaje.',tickets:'Entradas y reservas',ticketsC:'Accesos, horarios y reservas que realmente requiere tu itinerario.',tours:'Tours y experiencias',toursC:'Alternativas guiadas y experiencias que encajan con lo que ya planeaste.',move:'Cómo moverte',moveC:'Opciones útiles de movilidad relacionadas con esta ciudad.',rentalTitle:'Vehículo rentado',rentalAll:'TODO EL VIAJE',rentalDays:'DÍAS',rentalMessageAll:'Tienes previsto moverte en vehículo rentado durante tu estancia en esta ciudad. Esta opción queda pendiente de resolver. Si eliges alguno de los tours de arriba, revisa si incluye transporte antes de mantener el vehículo para esa actividad.',rentalMessageDays:'El itinerario contempla vehículo rentado en estos días. Esta opción queda pendiente de resolver. Si eliges alguno de los tours de arriba, revisa si incluye transporte antes de mantener el vehículo para esa actividad.',rentalSource:'Basado en el medio de transporte indicado para esta ciudad',more:'Más para tu viaje',moreC:'Otros servicios relevantes, solo cuando aporten valor.',contextLoading:'Analizando lo que necesitas para este viaje…',contextError:'No pudimos analizar esta ciudad ahora. Puedes seguir usando tu itinerario normalmente.',contextEmpty:'No detectamos nada que necesites resolver aquí.',required:'Entrada necesaria',recommended:'Conviene reservar',optional:'Opcional',journey:'Pendiente de resolver',compareJourney:'Comparar opciones',dayLabel:'Día',basedOn:'Basado en tu itinerario',items:'pendientes',next:'Próximamente',loading:'Recuperando tu viaje…',emptyT:'No pudimos cargar este viaje.',emptyC:'Vuelve al Planner para abrirlo nuevamente o inicia sesión si este viaje pertenece a tu cuenta.',partnerCta:'Ver opción',optionsForBooking:'Opciones para reservar',linkDisclosure:'Transparencia de enlaces: Algunas opciones de reserva utilizan enlaces de afiliados. Si reservas a través de ellos, ITBMO puede recibir una comisión del proveedor. ITBMO no añade ningún recargo al precio mostrado por el proveedor y, en algunos casos, acceder desde ITBMO puede darte un beneficio o descuento adicional. Fechas, disponibilidad, condiciones y precio final se confirman directamente con el proveedor.',available:'Disponible',overviewEssentialsK:'ANTES DE SEGUIR',overviewEssentialsT:'Prepara lo esencial de tu viaje',overviewEssentialsC:'Conectividad, movilidad y servicios útiles, organizados según tu viaje.',overviewEssentialsCta:'Ver lo que puedo necesitar ↓',authKicker:'TU VIAJE ESTÁ PROTEGIDO',authTitle:'Sesión cerrada',authCopy:'Inicia sesión para volver a acceder a este viaje.',authLogin:'Iniciar sesión',authPlanner:'Ir al Planner',authEmail:'Email',authPassword:'Contraseña',authCancel:'Cancelar',authRequired:'Ingresa tu email y contraseña.',authInvalid:'Email o contraseña incorrectos, o el correo aún no ha sido confirmado.',authConnecting:'Iniciando sesión…',authConnection:'No pudimos conectar con ITBMO. Intenta nuevamente.',authAccessDenied:'Este viaje no está disponible para la cuenta con la que acabas de iniciar sesión.',showMore:'Ver más',showLess:'Ver menos',findTickets:'Buscar entradas',viewOptions:'Ver opciones'},
+ en:{back:'Back to Planner',myTrips:'My Trips',prepareBadge:'Explore',prepareTeaser:'Your itinerary is only the beginning. Get ready to live it.',ready:'Your trip is ready',overviewK:'YOUR ITBMO TRIP',overviewT:'Where do you want to start?',overviewC:'Choose a city to explore it day by day and prepare what you actually need.',city:'city',cities:'cities',d:'day',ds:'days',organized:'organized',explore:'Explore',all:'All cities',cityK:'YOUR CITY',it:'Itinerary',prep:'For your trip',wholeK:'FOR YOUR WHOLE TRIP',wholeT:'The essentials that travel with you.',wholeC:'Needs that travel with the whole trip, without repeating them city by city.',connectivityK:'WHOLE TRIP',connectivityT:'Connectivity',connectivityC:'Data and eSIM options to keep you connected throughout the trip.',insuranceK:'WHOLE TRIP',insuranceT:'Travel insurance',insuranceC:'Trip-wide protection when there is an option that genuinely adds value.',coming:'Coming next',details:'View details',hide:'Hide details',route:'Route',transport:'Transport',duration:'Duration',notes:'Details',prepareT:'Your itinerary is only the beginning. Get ready to live it.',prepareC:'Tickets, reservations, experiences and mobility, selected around your trip.',tickets:'Tickets & reservations',ticketsC:'Access, schedules and reservations your itinerary actually requires.',tours:'Tours & experiences',toursC:'Guided alternatives and experiences that fit what you already planned.',move:'Getting around',moveC:'Useful mobility options related to this city.',rentalTitle:'Rental car',rentalAll:'WHOLE STAY',rentalDays:'DAYS',rentalMessageAll:'You plan to use a rental car during your stay in this city. This option remains pending resolution. If you choose one of the tours above, check whether transportation is included before keeping the car for that activity.',rentalMessageDays:'The itinerary uses a rental car on these days. This option remains pending resolution. If you choose one of the tours above, check whether transportation is included before keeping the car for that activity.',rentalSource:'Based on the transportation selected for this city',more:'More for your trip',moreC:'Other relevant services, only when they add value.',contextLoading:'Analyzing what you need for this trip…',contextError:'We could not analyze this city right now. You can keep using your itinerary normally.',contextEmpty:'Nothing here appears to require action from you.',required:'Ticket needed',recommended:'Reservation recommended',optional:'Optional',journey:'Pending resolution',compareJourney:'Compare options',dayLabel:'Day',basedOn:'Based on your itinerary',items:'items',next:'Coming next',loading:'Recovering your trip…',emptyT:'We could not load this trip.',emptyC:'Return to the Planner to open it again, or sign in if this trip belongs to your account.',partnerCta:'View option',optionsForBooking:'Booking options',linkDisclosure:'Link transparency: Some booking options use affiliate links. If you book through them, ITBMO may receive a commission from the provider. ITBMO does not add any surcharge to the price shown by the provider and, in some cases, accessing through ITBMO may include an additional benefit or discount. Dates, availability, conditions and final price are confirmed directly with the provider.',available:'Available',overviewEssentialsK:'BEFORE YOU CONTINUE',overviewEssentialsT:'Prepare the essentials for your trip',overviewEssentialsC:'Connectivity, mobility and useful services, organized around your trip.',overviewEssentialsCta:'See what I may need ↓',authKicker:'YOUR TRIP IS PROTECTED',authTitle:'Session ended',authCopy:'Sign in again to access this trip.',authLogin:'Sign in',authPlanner:'Go to Planner',authEmail:'Email',authPassword:'Password',authCancel:'Cancel',authRequired:'Enter your email and password.',authInvalid:'Incorrect email or password, or the email has not been confirmed yet.',authConnecting:'Signing in…',authConnection:'We could not connect to ITBMO. Please try again.',authAccessDenied:'This trip is not available to the account you just signed in with.',showMore:'Show more',showLess:'Show less',findTickets:'Find tickets',viewOptions:'View options'}
 };
 let lang='es',t=copy.es;
+function normalizeTripLanguage(value){
+  const original=String(value||'').trim().slice(0,80);
+  const raw=original.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(/\b(es|spa|spanish|espanol|castellano)\b/.test(raw))return'es';
+  if(/\b(en|eng|english|ingles)\b/.test(raw))return'en';
+  if(/\b(pt|por|portuguese|portugues)\b/.test(raw))return'pt';
+  if(/\b(fr|fre|french|francais)\b/.test(raw))return'fr';
+  if(/\b(de|ger|german|deutsch|aleman)\b/.test(raw))return'de';
+  if(/\b(it|ita|italian|italiano)\b/.test(raw))return'it';
+  return original;
+}
 function parseDate(v){if(!v)return null;let m=String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return new Date(+m[3],+m[2]-1,+m[1]);m=String(v).match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);if(m)return new Date(+m[1],+m[2]-1,+m[3]);return null}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x}
 function fmt(d){if(!d)return'';return new Intl.DateTimeFormat(lang==='es'?'es-ES':'en-US',{day:'numeric',month:'short',year:'numeric'}).format(d)}
@@ -238,10 +250,34 @@ function contextLabel(item){
   return '';
 }
 
-function renderNeedItems(items,offers=[]){
-  if(!items.length) return '';
-  const ordered=sortContextItems(items);
-  return `<div class="tw-context-list">${ordered.map(item=>{
+function sectionSort(items=[],sectionType=''){
+  const ordered=[...items];
+  const priority=item=>{
+    if(sectionType==='tickets') return item?.need_type==='ticket_required'?0:1;
+    if(sectionType==='tours') return item?.derived_by==='itinerary_tour_alternative'?1:0;
+    return 0;
+  };
+  return ordered.sort((a,b)=>{
+    const p=priority(a)-priority(b);
+    if(p)return p;
+    const dayDiff=contextDayOrder(a)-contextDayOrder(b);
+    if(dayDiff)return dayDiff;
+    return String(a?.entity_name||a?.source_activity||'').localeCompare(String(b?.entity_name||b?.source_activity||''),lang==='es'?'es':'en',{sensitivity:'base'});
+  });
+}
+function initialSectionLimit(items=[],sectionType=''){
+  if(sectionType==='tickets'){
+    const required=items.filter(item=>item?.need_type==='ticket_required').length;
+    return Math.max(required,Math.min(items.length,required+2));
+  }
+  if(sectionType==='tours') return Math.min(items.length,4);
+  if(sectionType==='transport') return Math.min(items.length,3);
+  return items.length;
+}
+function renderNeedItems(items,offers=[],visibleCount=Infinity){
+  if(!items.length)return'';
+  const ordered=items;
+  return `<div class="tw-context-list">${ordered.map((item,index)=>{
     const matched=(Array.isArray(offers)?offers:[]).filter(offer=>offer?.need_id===item?.id);
     const scopeOrDay=item?.scope_label
       ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
@@ -254,7 +290,7 @@ function renderNeedItems(items,offers=[]){
         ? (lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order')
         : `${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}`;
     return `
-    <article class="tw-context-item">
+    <article class="tw-context-item"${index>=visibleCount?' hidden data-context-extra="1"':''}>
       <div class="tw-context-item-top">
         ${scopeOrDay}
         <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : contextLabel(item))}</span>
@@ -270,9 +306,18 @@ function renderNeedItems(items,offers=[]){
   }).join('')}</div>`;
 }
 
-function contextSection(icon,title,description,items,offers=[],sectionId=''){
-  if(!items.length) return '';
+function contextSection(icon,title,description,items,offers=[],sectionId='',sectionType=''){
+  if(!items.length)return'';
   const id=sectionId?` id="${esc(sectionId)}"`:'';
+  const ordered=sectionSort(items,sectionType);
+  const sectionKey=`${city||''}:${sectionId||sectionType}`;
+  const expanded=expandedContextSections.has(sectionKey);
+  const initialLimit=initialSectionLimit(ordered,sectionType);
+  const visibleCount=expanded?ordered.length:initialLimit;
+  const hiddenCount=Math.max(0,ordered.length-visibleCount);
+  const toggle=ordered.length>initialLimit
+    ? `<button class="tw-context-toggle" type="button" data-context-toggle="${esc(sectionKey)}" aria-expanded="${expanded?'true':'false'}">${esc(expanded?t.showLess:`${t.showMore} (${hiddenCount})`)}</button>`
+    : '';
   return `<section class="tw-context-section"${id}>
     <div class="tw-context-section-head">
       <div class="tw-context-section-icon">${icon}</div>
@@ -284,7 +329,8 @@ function contextSection(icon,title,description,items,offers=[],sectionId=''){
         <p>${esc(description)}</p>
       </div>
     </div>
-    ${renderNeedItems(items,offers)}
+    ${renderNeedItems(ordered,offers,visibleCount)}
+    ${toggle}
   </section>`;
 }
 async function fetchContext(cityName){
@@ -297,7 +343,9 @@ async function fetchContext(cityName){
     body:JSON.stringify({
       session_token:token,
       trip_id:data.trip_id,
-      city:cityName
+      city:cityName,
+      ui_language:lang,
+      trip_language:data?.trip_language||''
     })
   });
 
@@ -372,13 +420,14 @@ function partnerOptions(offers=[]){
   if(!list.length)return'';
   return `<div class="tw-partner-options"><small class="tw-partner-options__label">${esc(t.optionsForBooking)}</small>${list.map(offer=>{
     const slug=offer.partner?.slug||'';
-    return `<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_contextual')}" data-partner-slug="${esc(slug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>${esc(offer.partner?.name||'')}</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(t.partnerCta)} →</button></div>`;
+    const cta=['ticket_required','reservation_recommended'].includes(offer?.need_type)?t.findTickets:t.viewOptions;
+    return `<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_contextual')}" data-partner-slug="${esc(slug)}" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>${esc(offer.partner?.name||'')}</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(cta)} →</button></div>`;
   }).join('')}</div>`;
 }
 
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
-  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,needs})});
+  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs})});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
   return Array.isArray(payload.offers)?payload.offers:[];
@@ -459,9 +508,9 @@ function renderPrepare(){
   // or Omio resolver logic is changed by this UI decision.
   const transportOffers=[];
   const activeSections=[
-    contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets'),
-    contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours'),
-    contextSection('↗',t.move,t.moveC,transport,transportOffers,'tw-context-move')
+    contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
+    contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
+    contextSection('↗',t.move,t.moveC,transport,transportOffers,'tw-context-move','transport')
   ].filter(Boolean).join('');
   const jumpNav=`<nav class="tw-prepare-jump-nav" aria-label="${esc(lang==='es'?'Secciones de Para tu viaje':'For your trip sections')}">
     <button type="button" data-tw-jump="tw-context-tickets" ${tickets.length?'':'disabled'}>${esc(t.tickets)}</button>
@@ -493,6 +542,16 @@ function renderPrepare(){
     button.onclick=()=>{
       const target=document.getElementById(button.dataset.twJump||'');
       if(target)target.scrollIntoView({behavior:'smooth',block:'start'});
+    };
+  });
+  document.querySelectorAll('[data-context-toggle]').forEach(button=>{
+    button.onclick=()=>{
+      const key=button.dataset.contextToggle||'';
+      if(!key)return;
+      if(expandedContextSections.has(key)) expandedContextSections.delete(key);
+      else expandedContextSections.add(key);
+      renderPrepare();
+      requestAnimationFrame(()=>[...document.querySelectorAll('[data-context-toggle]')].find(el=>el.dataset.contextToggle===key)?.focus());
     };
   });
   bindPartnerOffers();
@@ -737,11 +796,17 @@ function tripToWorkspace(trip){
 
   if(!destinations.length || !Object.keys(itineraries).length) return null;
 
+  const plannerState=(checkpoint.planner_state && typeof checkpoint.planner_state==='object')
+    ? checkpoint.planner_state
+    : {};
+  const tripLanguage=normalizeTripLanguage(plannerState.itineraryLang||plannerState.itinerary_lang||'');
+
   return {
-    schema_version:2,
+    schema_version:3,
     source:'trip_api',
     created_at:trip.generated_at || trip.updated_at || null,
     lang:trip.language==='en'?'en':'es',
+    trip_language:tripLanguage,
     trip_id:trip.id,
     destinations,
     city_meta:cityMeta,
