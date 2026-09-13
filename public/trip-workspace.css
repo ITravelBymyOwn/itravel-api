@@ -1321,3 +1321,228 @@ body.tw-auth-locked .tw-shell { pointer-events:none;user-select:none;filter:blur
   .tw-auth-gate__actions,.tw-auth-login__buttons { flex-direction:column }
   .tw-auth-primary,.tw-auth-secondary { width:100% }
 }
+
+/* =========================================================
+   ITBMO · PREMIUM VISUAL HIERARCHY · 2026-09-12
+   Visual-only refinement. Preserves current HTML/JS contracts.
+   Palette: ITBMO blue/cyan + soft coral/gold/champagne accents.
+========================================================= */
+:root{
+  --itbmo-coral:#ff6b5e;
+  --itbmo-gold:#f4b740;
+  --itbmo-terracotta:#d96c4c;
+  --itbmo-champagne:#fff4e8;
+  --itbmo-slate:#52677d;
+  --itbmo-navy:#0b2341;
+  --itbmo-card-line:rgba(45,92,125,.18);
+  --itbmo-card-line-hover:rgba(8,126,209,.30);
+  --itbmo-glass:rgba(255,255,255,.78);
+}
+
+/* Glass surfaces: slightly clearer edges without losing transparency. */
+.tw-city-card,
+.tw-trip-wide,
+.tw-trip-wide__item,
+.tw-stop-card,
+.tw-prepare-card,
+.tw-context-item,
+.tw-context-more,
+.tw-partner-offer,
+.tw-auth-gate__card{
+  border-color:var(--itbmo-card-line);
+}
+
+.tw-city-card,
+.tw-trip-wide__item,
+.tw-stop-card,
+.tw-prepare-card,
+.tw-context-item,
+.tw-partner-offer{
+  transition:transform .28s cubic-bezier(.22,1,.36,1),box-shadow .28s cubic-bezier(.22,1,.36,1),border-color .28s ease,background .28s ease;
+}
+
+.tw-city-card:hover,
+.tw-context-item:hover,
+.tw-stop-card:hover{
+  border-color:var(--itbmo-card-line-hover);
+}
+
+/* Overview essentials: warmer conversion cue, still unmistakably ITBMO. */
+.tw-overview-essentials{
+  border-color:rgba(8,126,209,.22);
+  background:
+    radial-gradient(circle at 8% 18%,rgba(8,126,209,.08),transparent 26%),
+    radial-gradient(circle at 92% 20%,rgba(255,107,94,.08),transparent 24%),
+    linear-gradient(135deg,rgba(255,255,255,.96),rgba(244,250,252,.95) 58%,rgba(255,244,232,.58));
+  box-shadow:0 18px 48px rgba(11,91,128,.10),inset 0 1px 0 rgba(255,255,255,.90);
+}
+.tw-overview-essentials__mark{
+  background:linear-gradient(145deg,#087bfa 0%,#0aa0a5 100%);
+  box-shadow:0 12px 28px rgba(8,126,177,.20),inset 0 1px 0 rgba(255,255,255,.28);
+}
+#tw-overview-essentials-cta{
+  padding:14px 22px;
+  font-size:14.5px;
+  background:linear-gradient(115deg,#f45f58 0%,#ff7b61 52%,#f3a447 100%);
+  border:1px solid rgba(255,255,255,.58);
+  box-shadow:0 14px 30px rgba(217,108,76,.22),0 0 0 5px rgba(255,107,94,.07),inset 0 1px 0 rgba(255,255,255,.30);
+}
+#tw-overview-essentials-cta:hover{
+  transform:translateY(-3px) scale(1.015);
+  filter:saturate(1.03) brightness(1.015);
+  box-shadow:0 20px 40px rgba(217,108,76,.28),0 0 0 6px rgba(255,107,94,.09),inset 0 1px 0 rgba(255,255,255,.34);
+}
+
+/* Trip-wide essentials: visual differentiation for scanability. */
+.tw-trip-wide{
+  border-color:rgba(35,91,124,.16);
+  background:
+    radial-gradient(circle at 2% 10%,rgba(8,126,209,.065),transparent 24%),
+    linear-gradient(145deg,rgba(247,252,255,.94),rgba(242,250,252,.88));
+}
+.tw-trip-wide__item{
+  min-height:128px;
+  border-color:rgba(42,94,128,.18);
+  box-shadow:0 12px 30px rgba(22,66,93,.055),inset 0 1px 0 rgba(255,255,255,.92);
+}
+.tw-trip-wide__item:first-child{
+  background:linear-gradient(135deg,rgba(255,255,255,.90),rgba(235,248,255,.90) 58%,rgba(231,250,251,.82));
+}
+.tw-trip-wide__item:first-child .tw-trip-wide__item-icon{
+  background:linear-gradient(145deg,rgba(8,123,250,.16),rgba(10,160,165,.16));
+  color:#08749b;
+}
+.tw-trip-wide__item:first-child h3{
+  color:#0b4168;
+  font-size:18px;
+}
+.tw-trip-wide__item:first-child p{
+  color:#486d82;
+  font-size:12.5px;
+  font-weight:650;
+}
+.tw-trip-wide__item:nth-child(2){
+  background:linear-gradient(135deg,rgba(255,255,255,.92),rgba(255,247,239,.92) 62%,rgba(255,241,229,.78));
+  border-color:rgba(217,108,76,.20);
+}
+.tw-trip-wide__item:nth-child(2) .tw-trip-wide__item-icon{
+  background:linear-gradient(145deg,rgba(255,107,94,.14),rgba(244,183,64,.16));
+  color:#c55f44;
+}
+.tw-trip-wide__item:nth-child(2) h3{
+  color:#61372d;
+  font-size:18px;
+}
+.tw-trip-wide__item:nth-child(2) p{
+  color:#76594f;
+  font-size:12.5px;
+  font-weight:650;
+}
+
+/* Para tu viaje: section titles become true hierarchy anchors above the cards. */
+.tw-context-sections{
+  gap:34px;
+}
+.tw-context-section{
+  border:0;
+  border-radius:0;
+  background:transparent;
+  padding:0;
+  box-shadow:none;
+}
+.tw-context-section-head{
+  position:relative;
+  align-items:center;
+  gap:16px;
+  margin:0 0 16px;
+  padding:0 2px 14px;
+  border-bottom:1px solid rgba(35,91,124,.14);
+}
+.tw-context-section-head::after{
+  content:"";
+  position:absolute;
+  left:0;
+  bottom:-1px;
+  width:86px;
+  height:2px;
+  border-radius:999px;
+  background:linear-gradient(90deg,#087bfa,#0aa0a5);
+}
+.tw-context-section-icon{
+  width:52px;
+  height:52px;
+  border-radius:17px;
+  background:linear-gradient(145deg,rgba(8,123,250,.13),rgba(10,160,165,.14));
+  border:1px solid rgba(8,126,209,.14);
+  box-shadow:0 10px 24px rgba(25,83,117,.07),inset 0 1px 0 rgba(255,255,255,.86);
+}
+.tw-context-section-title h3{
+  font-size:clamp(24px,3vw,34px);
+  letter-spacing:-.04em;
+  color:var(--itbmo-navy);
+}
+.tw-context-section-title span{
+  background:linear-gradient(135deg,rgba(8,123,250,.09),rgba(10,160,165,.10));
+  border-color:rgba(8,126,209,.16);
+}
+.tw-context-section-copy p{
+  max-width:780px;
+  margin-top:7px;
+  color:#526f82;
+  font-size:14px;
+  font-weight:650;
+  line-height:1.55;
+}
+.tw-context-list{
+  margin-top:0;
+  gap:16px;
+}
+.tw-context-item{
+  border-color:rgba(42,94,128,.18);
+  background:linear-gradient(145deg,rgba(255,255,255,.90),rgba(248,252,253,.86));
+  box-shadow:0 12px 32px rgba(22,66,93,.055),inset 0 1px 0 rgba(255,255,255,.94);
+}
+.tw-context-item:hover{
+  transform:translateY(-3px);
+  box-shadow:0 18px 40px rgba(22,66,93,.085),inset 0 1px 0 rgba(255,255,255,.96);
+}
+.tw-context-section:nth-of-type(2) .tw-context-section-head::after{
+  background:linear-gradient(90deg,#52677d,#087bfa);
+}
+.tw-context-section:nth-of-type(2) .tw-context-section-icon{
+  background:linear-gradient(145deg,rgba(82,103,125,.11),rgba(8,123,250,.10));
+  color:#3e617a;
+}
+.tw-context-section:nth-of-type(3) .tw-context-section-head::after{
+  background:linear-gradient(90deg,#ff6b5e,#f4b740);
+}
+.tw-context-section:nth-of-type(3) .tw-context-section-icon{
+  background:linear-gradient(145deg,rgba(255,107,94,.12),rgba(244,183,64,.14));
+  border-color:rgba(217,108,76,.15);
+  color:#c55f44;
+}
+
+/* Partner offers inherit the premium glass hierarchy instead of reading like ads. */
+.tw-partner-offer{
+  background:
+    radial-gradient(circle at 92% 8%,rgba(244,183,64,.06),transparent 30%),
+    linear-gradient(135deg,rgba(249,253,255,.94),rgba(246,251,252,.90));
+  border-color:rgba(42,94,128,.17);
+}
+.tw-partner-offer button,.tw-partner-option button{
+  background:linear-gradient(135deg,#087bfa 0%,#0aa0a5 100%);
+}
+
+@media(max-width:760px){
+  #tw-overview-essentials-cta{font-size:14px;padding:14px 18px}
+  .tw-trip-wide__item:first-child h3,.tw-trip-wide__item:nth-child(2) h3{font-size:17px}
+  .tw-context-sections{gap:28px}
+  .tw-context-section-head{align-items:flex-start;gap:12px;padding-bottom:12px}
+  .tw-context-section-icon{width:46px;height:46px;border-radius:15px}
+  .tw-context-section-title h3{font-size:24px}
+  .tw-context-section-copy p{font-size:13px}
+}
+
+@media(prefers-reduced-motion:reduce){
+  .tw-city-card,.tw-trip-wide__item,.tw-stop-card,.tw-prepare-card,.tw-context-item,.tw-partner-offer,#tw-overview-essentials-cta{transition:none!important}
+}
