@@ -579,12 +579,17 @@ function setAccountMessage(message='', type=''){
 
 function getStoredSessionToken(){
   try{
-    return String(sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || localStorage.getItem(ITBMO_SESSION_KEY) || '').trim();
+    // Security rule: authentication lasts only for the current browser session.
+    // Legacy persistent tokens are deliberately ignored and removed.
+    localStorage.removeItem(ITBMO_SESSION_KEY);
+    return String(sessionStorage.getItem(ITBMO_SESSION_KEY) || sessionStorage.getItem(ITBMO_GUEST_SESSION_KEY) || '').trim();
   }catch(_){ return ''; }
 }
 function getCachedUser(){
   try{
-    const raw=sessionStorage.getItem(ITBMO_USER_CACHE_KEY) || localStorage.getItem(ITBMO_USER_CACHE_KEY) || '';
+    // User identity follows the same browser-session lifecycle as the auth token.
+    localStorage.removeItem(ITBMO_USER_CACHE_KEY);
+    const raw=sessionStorage.getItem(ITBMO_USER_CACHE_KEY) || '';
     const parsed=raw ? JSON.parse(raw) : null;
     return parsed && typeof parsed==='object' && !Array.isArray(parsed) ? parsed : null;
   }catch(_){ return null; }
@@ -593,13 +598,8 @@ function storeCachedUser(user,persistent=true){
   if(!user || typeof user!=='object') return;
   try{
     const serialized=JSON.stringify(user);
-    if(persistent){
-      localStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
-      sessionStorage.removeItem(ITBMO_USER_CACHE_KEY);
-    }else{
-      sessionStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
-      localStorage.removeItem(ITBMO_USER_CACHE_KEY);
-    }
+    sessionStorage.setItem(ITBMO_USER_CACHE_KEY,serialized);
+    localStorage.removeItem(ITBMO_USER_CACHE_KEY);
   }catch(_){ }
 }
 function clearCachedUser(){
@@ -612,13 +612,16 @@ function broadcastAuthState(state){
 function storeSessionToken(token, persistent=true){
   try{
     if(!token) return;
+    // Registered and guest sessions are session-scoped: closing the browser
+    // removes authentication, while reloads in the same tab/session still work.
     if(persistent){
-      localStorage.setItem(ITBMO_SESSION_KEY, token);
+      sessionStorage.setItem(ITBMO_SESSION_KEY, token);
       sessionStorage.removeItem(ITBMO_GUEST_SESSION_KEY);
     }else{
       sessionStorage.setItem(ITBMO_GUEST_SESSION_KEY, token);
-      localStorage.removeItem(ITBMO_SESSION_KEY);
+      sessionStorage.removeItem(ITBMO_SESSION_KEY);
     }
+    localStorage.removeItem(ITBMO_SESSION_KEY);
     broadcastAuthState('signed_in');
     setTimeout(()=>window.ITBMOFoundation?.syncAttribution?.(),0);
   }catch(_){}
@@ -830,9 +833,7 @@ function renderAuthState(){
   const sessionToken=getStoredSessionToken();
   const logged = Boolean(currentUser && sessionToken);
   if(logged){
-    let persistent=false;
-    try{ persistent=Boolean(localStorage.getItem(ITBMO_SESSION_KEY)); }catch(_){ }
-    storeCachedUser(currentUser,persistent);
+    storeCachedUser(currentUser,false);
   }
   const registered = Boolean(logged && currentUser?.is_registered);
   const pending = Boolean(logged && currentUser?.registration_pending);
