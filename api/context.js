@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.2";
+const CONTEXT_VERSION = "1.3";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -67,6 +67,45 @@ function clean(value, max = 500) {
 
 function plain(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function normalizeUiLanguage(value) {
+  return String(value || "").toLowerCase() === "en" ? "en" : "es";
+}
+
+function normalizeTripLanguage(value) {
+  const original = clean(value, 80);
+  const raw = original
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  if (/\b(es|spa|spanish|espanol|castellano)\b/.test(raw)) return "es";
+  if (/\b(en|eng|english|ingles)\b/.test(raw)) return "en";
+  if (/\b(pt|por|portuguese|portugues)\b/.test(raw)) return "pt";
+  if (/\b(fr|fre|french|francais)\b/.test(raw)) return "fr";
+  if (/\b(de|ger|german|deutsch|aleman)\b/.test(raw)) return "de";
+  if (/\b(it|ita|italian|italiano)\b/.test(raw)) return "it";
+
+  // Do not constrain Context Intelligence to a fixed language allow-list.
+  // Preserve any other traveler-selected language as metadata; the model must
+  // still infer and understand the actual language directly from the source.
+  return original || "";
+}
+
+function tripContentLanguage(trip) {
+  const checkpoint = plain(trip?.itinerary_data);
+  const plannerState = plain(checkpoint?.planner_state);
+  return normalizeTripLanguage(
+    plannerState?.itineraryLang ||
+    plannerState?.itinerary_lang ||
+    plain(trip?.planner_input)?.post_payment_progress?.itinerary_lang ||
+    ""
+  );
+}
+
+function contextVersionFor(uiLanguage) {
+  return `${CONTEXT_VERSION}-${normalizeUiLanguage(uiLanguage)}`;
 }
 
 async function supabaseFetch(path, options = {}) {
@@ -126,7 +165,7 @@ function sameInstant(a, b) {
   return Number.isFinite(x) && Number.isFinite(y) && x === y;
 }
 
-async function getPersistedContext(trip, city) {
+async function getPersistedContext(trip, city, contextVersion) {
   const runs = await supabaseFetch(
     `/trip_context_runs?select=id,context_version,source_trip_updated_at,candidate_count,visible_count,generated_at&` +
     `trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}&limit=1`,
@@ -135,13 +174,13 @@ async function getPersistedContext(trip, city) {
 
   const run = Array.isArray(runs) ? runs[0] || null : null;
   if (!run) return null;
-  if (run.context_version !== CONTEXT_VERSION) return null;
+  if (run.context_version !== contextVersion) return null;
   if (!sameInstant(run.source_trip_updated_at, trip.updated_at)) return null;
 
   const needs = await supabaseFetch(
     `/trip_travel_needs?select=candidate_id,category,city,day,entity_name,entity_type,need_type,confidence,user_message,source_activity,source_route,transport&` +
     `trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}&` +
-    `context_version=eq.${encodeURIComponent(CONTEXT_VERSION)}&order=day.asc,candidate_id.asc`,
+    `context_version=eq.${encodeURIComponent(contextVersion)}&order=day.asc,candidate_id.asc`,
     { method: "GET" }
   );
 
@@ -154,7 +193,7 @@ async function getPersistedContext(trip, city) {
   };
 }
 
-async function persistContext(trip, userId, city, candidates, needs) {
+async function persistContext(trip, userId, city, candidates, needs, contextVersion) {
   const generatedAt = new Date().toISOString();
 
   // Replace only this trip/city's derived context. Existing core trip data is untouched.
@@ -175,7 +214,7 @@ async function persistContext(trip, userId, city, candidates, needs) {
     source_route: [source.from, source.to].filter(Boolean).join(" → "),
     transport: source.transport || null,
     source_notes: source.context_notes || source.notes || null,
-    context_version: CONTEXT_VERSION,
+    context_version: contextVersion,
     source_trip_updated_at: trip.updated_at
   }));
 
@@ -191,6 +230,13 @@ async function persistContext(trip, userId, city, candidates, needs) {
   const entityIdByCandidate = new Map(
     (Array.isArray(persistedEntities) ? persistedEntities : [])
       .map(row => [row.candidate_id, row.id])
+  );
+
+  // Derived needs are replaceable cache data. Remove the prior city set so
+  // switching the Workspace UI language never leaves stale localized messages.
+  await supabaseFetch(
+    `/trip_travel_needs?trip_id=eq.${encodeURIComponent(trip.id)}&city=eq.${encodeURIComponent(city)}`,
+    { method: "DELETE", headers: { Prefer: "return=minimal" } }
   );
 
   const needRows = needs.map(item => ({
@@ -209,7 +255,7 @@ async function persistContext(trip, userId, city, candidates, needs) {
     source_activity: item.source_activity || null,
     source_route: item.source_route || null,
     transport: item.transport || null,
-    context_version: CONTEXT_VERSION,
+    context_version: contextVersion,
     source_trip_updated_at: trip.updated_at
   }));
 
@@ -230,7 +276,7 @@ async function persistContext(trip, userId, city, candidates, needs) {
       trip_id: trip.id,
       user_id: userId,
       city,
-      context_version: CONTEXT_VERSION,
+      context_version: contextVersion,
       source_trip_updated_at: trip.updated_at,
       candidate_count: candidates.length,
       visible_count: needs.length,
@@ -383,6 +429,53 @@ function explicitTourHint(row) {
     .test(`${clean(row?.activity, 240)} ${clean(row?.notes, 320)} ${clean(row?.transport, 120)}`);
 }
 
+function accessEvidence(row) {
+  const activity = clean(row?.activity, 240);
+  const notes = clean(row?.notes, 520);
+  const source = `${activity} ${notes}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, " ");
+
+  const conditional =
+    /\b(considera|si quieres|si deseas|si es posible|segun entradas|segun ticket(?:s)?|opcional|optional|if you want|if desired|if possible|depending on (?:the )?ticket(?:s)?|where possible|consider|wenn du|falls du|wenn moglich|je nach ticket|si vous|si possible|selon (?:les )?billets|facultatif|se vuoi|se desideri|se possibile|in base (?:al|ai) bigliett(?:o|i)|opzionale|se quiser|se possivel)\b/i
+      .test(source);
+
+  const directAdmission =
+    /\b(entrada(?:s)?(?:\s+(?:anticipada|anticipadas|con hora))?|billete(?:s)?|boleto(?:s)?|ticket(?:s)?|admission|entry ticket(?:s)?|timed entry|advance ticket(?:s)?|eintritt(?:skarte|skarten)?|billet(?:s)?|bigliett(?:o|i)|ingress(?:o|i))\b/i
+      .test(source);
+
+  const alreadyIncluded =
+    /\b(incluye(?:n)?\s+(?:la\s+)?entrada|entrada\s+incluida|ticket(?:s)?\s+included|includes?\s+(?:the\s+)?(?:entry|admission|ticket)|eintritt\s+inklusive|billet(?:s)?\s+inclus|ingresso\s+incluso|ingressi\s+inclusi)\b/i
+      .test(source);
+
+  const bookingSignal =
+    /\b(reserva(?:r|\s+anticipada|\s+con antelacion)?|reservacion|reservation|book(?:ing)?\s+(?:ahead|in advance)|advance booking|reservierung|im voraus buchen|reservation a l avance|reserver a l avance|prenotazione|prenota(?:re)?\s+in anticipo|reserva antecipada|reserve com antecedencia)\b/i
+      .test(source);
+
+  const accessRequired =
+    /\b(requiere(?:\s+reserva|\s+entrada)?|obligatori[oa]|required|must book|reservation required|ticket required|requires?\s+(?:a\s+)?ticket|reservierung erforderlich|erfordert|obligatoire|necessite|obbligatori[oa]|richiede|obrigatori[oa]|requer)\b/i
+      .test(source);
+
+  if (alreadyIncluded) {
+    return { hint: "", evidence: "" };
+  }
+
+  if (directAdmission && !conditional) {
+    return { hint: "ticket_required", evidence: clean(notes || activity, 260) };
+  }
+
+  if (accessRequired && (directAdmission || bookingSignal)) {
+    return { hint: "ticket_required", evidence: clean(notes || activity, 260) };
+  }
+
+  if (directAdmission || bookingSignal) {
+    return { hint: "reservation_recommended", evidence: clean(notes || activity, 260) };
+  }
+
+  return { hint: "", evidence: "" };
+}
+
 function buildCandidates(trip, requestedCity) {
   const checkpoint = plain(trip?.itinerary_data);
   const itineraries = plain(checkpoint.itineraries);
@@ -394,6 +487,7 @@ function buildCandidates(trip, requestedCity) {
   const cityData = plain(itineraries[city]);
   const byDay = plain(cityData.byDay);
   const candidates = [];
+  const pendingContextNotes = new Map();
 
   Object.keys(byDay)
     .map(Number)
@@ -437,6 +531,18 @@ function buildCandidates(trip, requestedCity) {
                 `${existing.context_notes || existing.notes || ""} ${clean(row.notes, 320)}`,
                 620
               );
+              const evidence = accessEvidence({
+                activity: existing.activity,
+                notes: existing.context_notes
+              });
+              existing.access_hint = evidence.hint;
+              existing.access_evidence = evidence.evidence;
+            } else {
+              const pending = clean(
+                `${pendingContextNotes.get(existingId) || ""} ${clean(row.notes, 320)}`,
+                620
+              );
+              pendingContextNotes.set(existingId, pending);
             }
             return;
           }
@@ -445,19 +551,30 @@ function buildCandidates(trip, requestedCity) {
         const destination = clean(row.to, 180);
         const entityHint = genericTransfer && destination ? destination : activity;
 
+        const candidateId = `${day}-${index + 1}`;
+        const ownNotes = clean(row.notes, 320).replace(/^valid:\s*/i, "");
+        const contextNotes = clean(
+          `${pendingContextNotes.get(candidateId) || ""} ${ownNotes}`,
+          620
+        );
+        pendingContextNotes.delete(candidateId);
+        const evidence = accessEvidence({ activity, notes: contextNotes });
+
         candidates.push({
-          candidate_id: `${day}-${index + 1}`,
+          candidate_id: candidateId,
           day,
           activity,
           entity_hint: entityHint,
-          notes: clean(row.notes, 320).replace(/^valid:\s*/i, ""),
-          context_notes: clean(row.notes, 320).replace(/^valid:\s*/i, ""),
+          notes: ownNotes,
+          context_notes: contextNotes,
           from: clean(row.from, 160),
           to: destination,
           transport: clean(row.transport, 120),
           intercity_hint: transportInfo.intercity,
           transport_arrangement_hint: transportInfo.significant,
-          explicit_tour_hint: explicitTourHint(row)
+          explicit_tour_hint: explicitTourHint(row),
+          access_hint: evidence.hint,
+          access_evidence: evidence.evidence
         });
       });
     });
@@ -467,13 +584,16 @@ function buildCandidates(trip, requestedCity) {
     candidates: candidates.slice(0, MAX_CANDIDATES)
   };
 }
-function systemPrompt(language) {
-  const outputLanguage = language === "en" ? "English" : "Spanish";
+function systemPrompt(language, itineraryLanguage = "") {
+  const outputLanguage = normalizeUiLanguage(language) === "en" ? "English" : "Spanish";
+  const sourceLanguage = itineraryLanguage || "unknown / mixed";
 
   return `You are the Context Intelligence engine for ITBMO, a travel-planning product.
 
 Your job is NOT to redesign the itinerary and NOT to sell products.
-Your only job is to identify what the traveler may genuinely need to arrange in order to execute the itinerary.
+Your job is to identify what the traveler genuinely needs to arrange to execute the itinerary as written, while clearly separating self-guided access from optional guided experiences.
+
+The itinerary source language metadata may be ${sourceLanguage}. It is a hint only, never an allow-list or a reason to reject content. Detect and understand the actual language directly from the supplied itinerary text, including languages not explicitly named by ITBMO, and write user_message only in ${outputLanguage}.
 
 Analyze only the supplied itinerary candidates. Never add attractions, routes, dates, times, or activities that are not present in the source.
 
@@ -485,28 +605,32 @@ Allowed need_type values:
 - transport_arrangement
 - no_action
 
-Rules:
-1. Prefer no_action when there is no clear traveler action.
-2. ticket_required means admission is intrinsic to doing the named visit. Be strict. If only a specific component requires a ticket (for example a dome climb), state that condition in user_message instead of implying the whole site requires it.
-3. reservation_recommended means advance booking is genuinely useful for the exact planned visit, but do not imply it is mandatory.
-4. guided_tour_optional is optional and must never replace the planned activity. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact activity.
-5. intercity_transport is for actual movement between trip cities already visible in the source.
-6. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning (for example a rental car, driver, train, bus or other non-trivial arrangement). Never use it for ordinary local walking or short city movement.
-7. Generic transfer rows may contain useful logistics about the destination. Use entity_hint as the traveler-facing entity when appropriate; do not make the traveler act on a label such as "Transfer to..." if the real need is for the destination.
-8. Ordinary meals, hotel time, free time, neighborhood walks, return-to-hotel walks, and simple local movement should normally be no_action.
-9. Never invent prices, availability, opening hours, rules, reservation deadlines, ticket types, providers, or affiliate products.
-10. confidence must be high, medium, or low.
-11. The user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
-12. Use cautious language when the need can vary. Do not present uncertain claims as facts.
-13. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary logistical need.
-14. reason is internal explanatory text, concise and factual; do not expose chain-of-thought.
+ACCESS-FIRST RULES (CRITICAL):
+1. For every named attraction, museum, gallery, archaeological site, monument interior, palace, tower/dome, paid garden/site, or similar visit, first ask: "Can the traveler execute this exact planned visit independently, and does doing so intrinsically require or strongly benefit from admission/reservation?"
+2. If admission is intrinsic to doing the planned visit, use ticket_required. This is the self-guided access need. Do NOT substitute a guided tour for it.
+3. If advance booking is strongly useful but not mandatory, use reservation_recommended.
+4. If only one component requires payment/reservation (for example a dome climb or special interior), state that condition in user_message and do not imply the whole site requires it.
+5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
+6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
+7. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
+8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
+9. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
+10. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
+11. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
+12. Generic transfer rows can contain evidence about the destination. Use entity_hint and context_notes so a ticket clue from a preceding transfer is not lost.
+13. Never invent products, providers, prices, availability, ticket inventory, or commercial claims.
+14. confidence must be high, medium, or low.
+15. user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
+16. Use cautious language when a requirement can vary. Do not present uncertain claims as facts.
+17. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary access/logistics need.
+18. reason is concise evidence, not hidden chain-of-thought.
 
 Return valid JSON only:
 {
   "classifications": [
     {
       "candidate_id": "1-1",
-      "entity_name": "specific entity or route from the source",
+      "entity_name": "specific entity or combined access complex from the source",
       "entity_type": "attraction|museum|monument|site|experience|route|transport|other",
       "need_type": "ticket_required|reservation_recommended|guided_tour_optional|intercity_transport|transport_arrangement|no_action",
       "confidence": "high|medium|low",
@@ -545,7 +669,7 @@ function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-async function classifyCandidateBatch(city, candidates, language, batchIndex) {
+async function classifyCandidateBatch(city, candidates, language, itineraryLanguage, batchIndex) {
   let lastError = null;
 
   for (let attempt = 0; attempt <= CONTEXT_BATCH_RETRIES; attempt += 1) {
@@ -560,7 +684,7 @@ async function classifyCandidateBatch(city, candidates, language, batchIndex) {
           input: [
             {
               role: "system",
-              content: [{ type: "input_text", text: systemPrompt(language) }]
+              content: [{ type: "input_text", text: systemPrompt(language, itineraryLanguage) }]
             },
             {
               role: "user",
@@ -607,7 +731,7 @@ async function classifyCandidateBatch(city, candidates, language, batchIndex) {
   throw lastError || new Error("CONTEXT_BATCH_FAILED");
 }
 
-async function classifyCandidates(city, candidates, language) {
+async function classifyCandidates(city, candidates, language, itineraryLanguage) {
   if (!candidates.length) return [];
 
   const batches = [];
@@ -630,6 +754,7 @@ async function classifyCandidates(city, candidates, language) {
           city,
           batches[batchIndex],
           language,
+          itineraryLanguage,
           batchIndex
         );
       } catch (error) {
@@ -736,6 +861,58 @@ function sanitizeClassifications(candidates, classifications, city) {
   return finalNeeds;
 }
 
+
+function accessMessage(needType, entityName, language) {
+  const entity = clean(entityName, 180);
+  if (normalizeUiLanguage(language) === "en") {
+    if (needType === "ticket_required") {
+      return entity ? `Plan the admission needed to visit ${entity} as scheduled.` : "Plan the admission needed for this visit.";
+    }
+    return entity ? `Booking ${entity} in advance may make this planned visit easier.` : "Advance booking may be useful for this visit.";
+  }
+
+  if (needType === "ticket_required") {
+    return entity ? `Prepara la entrada necesaria para visitar ${entity} según tu itinerario.` : "Prepara la entrada necesaria para esta visita.";
+  }
+  return entity ? `Reservar ${entity} con antelación puede facilitar esta visita planificada.` : "Reservar con antelación puede ser útil para esta visita.";
+}
+
+function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
+  const result = Array.isArray(needs) ? [...needs] : [];
+  const accessByCandidate = new Set(
+    result
+      .filter(item => item?.need_type === "ticket_required" || item?.need_type === "reservation_recommended")
+      .map(item => String(item?.id || "").split(":")[0])
+  );
+
+  for (const source of candidates) {
+    if (!source?.access_hint || accessByCandidate.has(source.candidate_id)) continue;
+    if (source.intercity_hint || source.transport_arrangement_hint) continue;
+
+    const needType = source.access_hint === "ticket_required"
+      ? "ticket_required"
+      : "reservation_recommended";
+
+    result.push({
+      id: `${source.candidate_id}:${needType}`,
+      category: "tickets",
+      city,
+      day: source.day,
+      entity_name: source.entity_hint || source.activity,
+      entity_type: "attraction",
+      need_type: needType,
+      confidence: needType === "ticket_required" ? "high" : "medium",
+      user_message: accessMessage(needType, source.entity_hint || source.activity, language),
+      source_activity: source.activity,
+      source_route: [source.from, source.to].filter(Boolean).join(" → "),
+      transport: source.transport
+    });
+    accessByCandidate.add(source.candidate_id);
+  }
+
+  return result;
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -746,6 +923,8 @@ export default async function handler(req, res) {
     const sessionToken = clean(body.session_token, 500);
     const tripId = clean(body.trip_id, 120);
     const requestedCity = clean(body.city, 160);
+    const uiLanguage = normalizeUiLanguage(body.ui_language || body.language || "es");
+    const contextVersion = contextVersionFor(uiLanguage);
 
     if (!sessionToken || !tripId || !requestedCity) {
       return res.status(400).json({
@@ -801,11 +980,11 @@ export default async function handler(req, res) {
 
     // Persistence is a cache of derived context only. The generated itinerary remains the source of truth.
     try {
-      const persisted = await getPersistedContext(trip, city);
+      const persisted = await getPersistedContext(trip, city, contextVersion);
       if (persisted) {
         return res.status(200).json({
           ok: true,
-          context_version: CONTEXT_VERSION,
+          context_version: contextVersion,
           trip_id: trip.id,
           city,
           generated_at: persisted.run.generated_at,
@@ -824,15 +1003,21 @@ export default async function handler(req, res) {
 
     let needs = [];
     if (candidates.length) {
-      const language = trip.language === "en" ? "en" : "es";
-      const classifications = await classifyCandidates(city, candidates, language);
+      const itineraryLanguage = normalizeTripLanguage(body.trip_language) || tripContentLanguage(trip);
+      const classifications = await classifyCandidates(
+        city,
+        candidates,
+        uiLanguage,
+        itineraryLanguage
+      );
       needs = sanitizeClassifications(candidates, classifications, city);
+      needs = ensureEvidenceBackedAccessNeeds(candidates, needs, city, uiLanguage);
     }
 
     let persisted = false;
     let generatedAt = new Date().toISOString();
     try {
-      generatedAt = await persistContext(trip, session.user_id, city, candidates, needs);
+      generatedAt = await persistContext(trip, session.user_id, city, candidates, needs, contextVersion);
       persisted = true;
     } catch (persistError) {
       // Persistence must never block a traveler from using Context Intelligence.
@@ -841,7 +1026,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       ok: true,
-      context_version: CONTEXT_VERSION,
+      context_version: contextVersion,
       trip_id: trip.id,
       city,
       generated_at: generatedAt,
