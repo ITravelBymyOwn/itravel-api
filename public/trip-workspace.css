@@ -344,16 +344,6 @@ button,a {
   backdrop-filter:blur(10px)
 }
 .tw-all-cities span{display:inline!important;white-space:nowrap!important;word-break:keep-all!important;}
-.tw-all-cities.is-floating {
-  position:fixed;
-  top:98px;
-  left:clamp(18px,4vw,70px)
-}
-.tw-city-head.has-floating-all-cities::before {
-  content:"";
-  display:block;
-  min-width:190px
-}
 .tw-city-identity {
   text-align:center
 }
@@ -690,13 +680,6 @@ button,a {
     min-height:42px;
     padding:10px 14px;
     font-size:13px
-  }
-  .tw-all-cities.is-floating {
-    top:82px;
-    left:14px
-  }
-  .tw-city-head.has-floating-all-cities::before {
-    min-width:0
   }
   .tw-city-identity {
     text-align:left
@@ -1200,6 +1183,40 @@ button,a {
 }
 
 
+
+/* =========================================================
+   FLOATING "ALL CITIES" NAVIGATION
+   Independent control: the source button never leaves .tw-city-head, so the
+   city title / mode selector grid remains structurally identical at all sizes.
+   ========================================================= */
+.tw-floating-all-cities{
+  position:fixed;z-index:58;top:98px;left:clamp(18px,4vw,70px);
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  width:max-content;min-width:190px;min-height:46px;max-width:calc(100vw - 36px);aspect-ratio:auto;white-space:nowrap;
+  border:1px solid rgba(64,101,147,.16);border-radius:999px;padding:10px 17px;
+  color:#244b68;background:linear-gradient(135deg,rgba(255,255,255,.96),rgba(244,248,255,.94));
+  box-shadow:0 16px 38px rgba(32,69,110,.15),0 0 0 4px rgba(87,112,224,.045),inset 0 1px 0 rgba(255,255,255,.96);
+  cursor:pointer;opacity:0;transform:translateY(-8px) scale(.98);pointer-events:none;
+  transition:opacity .2s ease,transform .2s ease,box-shadow .2s ease,border-color .2s ease;
+  backdrop-filter:blur(16px) saturate(125%);-webkit-backdrop-filter:blur(16px) saturate(125%)
+}
+.tw-floating-all-cities[hidden]{display:none!important}
+.tw-floating-all-cities.is-visible{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}
+.tw-floating-all-cities:hover{transform:translateY(-2px) scale(1.01);border-color:rgba(75,105,205,.24);box-shadow:0 20px 44px rgba(32,69,110,.19),0 0 0 5px rgba(87,112,224,.055),inset 0 1px 0 rgba(255,255,255,.98)}
+.tw-floating-all-cities>span{width:30px;height:30px;display:grid;place-items:center;border-radius:10px;background:linear-gradient(135deg,#6680eb,#3f9bd7);color:#fff;font-size:15px;font-weight:950;box-shadow:0 7px 18px rgba(70,105,210,.18)}
+.tw-floating-all-cities b{font-size:12px;font-weight:950;white-space:nowrap}
+@media(max-width:900px){
+  .tw-floating-all-cities{top:82px;left:12px;min-width:160px;min-height:42px;padding:9px 13px;gap:7px}
+  .tw-floating-all-cities b{font-size:11px}
+  .tw-floating-all-cities>span{width:28px;height:28px}
+}
+@media(max-width:420px){
+  .tw-floating-all-cities{max-width:calc(100vw - 24px);min-width:0;padding-inline:11px}
+}
+@media(max-width:360px){
+  .tw-floating-prepare{top:136px}
+}
+@media(prefers-reduced-motion:reduce){.tw-floating-all-cities{transition:none!important}}
 
 /* =========================================================
    RELEASE CANDIDATE V2 · FLOATING "PARA TU VIAJE" DISCOVERY CTA
