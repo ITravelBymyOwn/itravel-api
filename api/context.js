@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.4";
+const CONTEXT_VERSION = "1.3";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -165,6 +165,87 @@ function sameInstant(a, b) {
   return Number.isFinite(x) && Number.isFinite(y) && x === y;
 }
 
+function normalizedAdmissionText(...values) {
+  return values
+    .map(value => clean(value, 320))
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function compactAdmissionText(value) {
+  return normalizedAdmissionText(value)
+    .replace(/[^a-z0-9\u00c0-\u024f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function blocksAttractionAdmission(source, entityName = "", entityType = "other") {
+  if (!source) return true;
+  if (entityType === "transport" || entityType === "route") return true;
+
+  const entity = normalizedAdmissionText(entityName || source.entity_hint || source.activity);
+  const activity = normalizedAdmissionText(source.activity || source.source_activity);
+  const transport = normalizedAdmissionText(source.transport);
+  const route = normalizedAdmissionText(
+    source.from,
+    source.to,
+    source.source_route
+  );
+
+  // Transport infrastructure is never an attraction-admission need.
+  const transportHub = /(?:^|\b)(?:airport|aeropuerto|aeroport|aeroporto|flughafen|bahnhof|hauptbahnhof|stazione|estacao|gare|train station|railway station|rail station|bus station|coach station|metro station|subway station|ferry terminal|bus terminal|rail terminal|airport terminal|estacion de tren|estacion ferroviaria|estacion de autobuses|estacion de bus|estacion de metro|terminal de autobuses|terminal de bus|terminal de ferry|terminal ferroviaria)(?:\b|$)/i;
+  const knownHub = /(?:^|\b)(?:roma termini|milano centrale|napoli centrale|venezia santa lucia|firenze santa maria novella|barcelona sants|madrid atocha|paris gare du nord|london st pancras)(?:\b|$)/i;
+  if (transportHub.test(entity) || knownHub.test(entity)) return true;
+
+  // Lodging and food venues are not admission products.
+  const lodgingOrFood = /(?:^|\b)(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|ristorante|trattoria|osteria|pizzeria|cafe|coffee shop|bar|pub|gelateria|bakery|panaderia)(?:\b|$)/i;
+  if (lodgingOrFood.test(entity)) return true;
+
+  // Explicit non-admission intent.
+  const nonAdmissionVisit = /(?:^|\b)(?:photo stop|parada fotografica|exterior|outside|fachada|shopping|compras|free time|tiempo libre)(?:\b|$)/i;
+  if (nonAdmissionVisit.test(activity)) return true;
+
+  // Distinguish an attraction from the transport used to reach it. Only block a
+  // movement row when the entity itself still represents that movement/compound
+  // label. If the model extracted a clean attraction entity, preserve it.
+  const movementIntent = /(?:^|\b)(?:traslado|transfer|regreso|retorno|salida|llegada|conexion|embarque|anreise|abreise|ruckfahrt|rueckfahrt|zugfahrt|ankunft|abfahrt|transfert|retour|arrivee|depart|trasferimento|ritorno|arrivo|partenza|deslocamento)(?:\b|$)/i;
+  const movementMode = /(?:^|\b)(?:train|tren|zug|treno|trem|rail|bus|coach|autobus|metro|subway|tram|flight|vuelo|flug|volo|ferry|ferri|funicular|cremallera|rack railway|cable car|aeri|gondola|shuttle|r5)(?:\b|$)/i;
+  const entityHasMovement = movementMode.test(entity) || movementIntent.test(entity);
+  const activityIsMovement = movementIntent.test(activity) && (
+    movementMode.test(activity) || movementMode.test(transport) || movementMode.test(route)
+  );
+  const entityMatchesActivity = compactAdmissionText(entity) === compactAdmissionText(activity);
+
+  if (activityIsMovement && (entityHasMovement || entityMatchesActivity)) return true;
+
+  return false;
+}
+
+function filterUnsafeAdmissionNeeds(needs) {
+  return (Array.isArray(needs) ? needs : []).filter(item => {
+    if (!item || (item.need_type !== "ticket_required" && item.need_type !== "reservation_recommended")) {
+      return true;
+    }
+
+    return !blocksAttractionAdmission(
+      {
+        activity: item.source_activity,
+        source_activity: item.source_activity,
+        source_route: item.source_route,
+        transport: item.transport,
+        entity_hint: item.entity_name
+      },
+      item.entity_name,
+      item.entity_type
+    );
+  });
+}
+
 async function getPersistedContext(trip, city, contextVersion) {
   const runs = await supabaseFetch(
     `/trip_context_runs?select=id,context_version,source_trip_updated_at,candidate_count,visible_count,generated_at&` +
@@ -184,12 +265,16 @@ async function getPersistedContext(trip, city, contextVersion) {
     { method: "GET" }
   );
 
-  return {
-    run,
-    needs: Array.isArray(needs) ? needs.map(item => ({
+  const safeNeeds = filterUnsafeAdmissionNeeds(
+    Array.isArray(needs) ? needs.map(item => ({
       ...item,
       id: `${item.candidate_id}:${item.need_type}`
     })) : []
+  );
+
+  return {
+    run,
+    needs: safeNeeds
   };
 }
 
@@ -611,23 +696,19 @@ ACCESS-FIRST RULES (CRITICAL):
 3. If advance booking is strongly useful but not mandatory, use reservation_recommended.
 4. If only one component requires payment/reservation (for example a dome climb or special interior), state that condition in user_message and do not imply the whole site requires it.
 5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
-6. Before assigning ticket_required or reservation_recommended, distinguish the PLACE BEING VISITED from the WAY OF GETTING THERE. Train/bus/metro stations, airports, ports/ferry terminals, platforms, transport connections, transfers, arrivals/departures, and transport fares are mobility context, not attraction admission.
-7. Compound activity labels must be interpreted semantically. For example, a label equivalent to “Montserrat – arrival by R5 + rack railway/cable car” describes transport to Montserrat and must not become an attraction-entry need as a whole. Only a separately identified visit whose access genuinely requires admission may create an admission need.
-8. Hotels/accommodation, restaurants/cafes/bars, ordinary streets, public squares, neighborhoods, exterior/photo stops, shopping, free time and simple walks must not become attraction admission needs merely because nearby text contains words such as ticket, access, entrance, entry or reservation.
-9. A transport ticket/fare (train, bus, ferry, funicular, rack railway, cable car, flight, metro, etc.) belongs to mobility/transport, never to ticket_required for an attraction.
-10. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
-11. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
-12. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
-13. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
-14. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
-15. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
-16. Generic transfer rows can contain evidence about the destination. Use entity_hint and context_notes so a genuine attraction-admission clue from a preceding transfer is not lost.
-17. Never invent products, providers, prices, availability, ticket inventory, or commercial claims.
-18. confidence must be high, medium, or low.
-19. user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
-20. Use cautious language when a requirement can vary. Do not present uncertain claims as facts.
-21. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary access/logistics need.
-22. reason is concise evidence, not hidden chain-of-thought.
+6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
+7. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
+8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
+9. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
+10. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
+11. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
+12. Generic transfer rows can contain evidence about the destination. Use entity_hint and context_notes so a ticket clue from a preceding transfer is not lost.
+13. Never invent products, providers, prices, availability, ticket inventory, or commercial claims.
+14. confidence must be high, medium, or low.
+15. user_message must be short, helpful, non-commercial, and written in ${outputLanguage}.
+16. Use cautious language when a requirement can vary. Do not present uncertain claims as facts.
+17. A candidate may produce zero, one, or at most two visible needs. If there are two, one must be guided_tour_optional and the other must be a primary access/logistics need.
+18. reason is concise evidence, not hidden chain-of-thought.
 
 Return valid JSON only:
 {
@@ -792,48 +873,6 @@ function categoryForNeed(needType) {
   if (needType === "guided_tour_optional") return "tours";
   if (needType === "intercity_transport" || needType === "transport_arrangement") return "transport";
   return "none";
-}
-
-function normalizedAdmissionText(...values) {
-  return values
-    .map(value => clean(value, 320))
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function blocksAttractionAdmission(source, entityName = "", entityType = "other") {
-  if (!source) return true;
-  if (entityType === "transport" || entityType === "route") return true;
-
-  const entity = normalizedAdmissionText(entityName || source.entity_hint || source.activity);
-  const activity = normalizedAdmissionText(source.activity);
-  const transport = normalizedAdmissionText(source.transport);
-  const route = normalizedAdmissionText(source.from, source.to);
-
-  // Conservative hard exclusions: infrastructure whose purpose is transportation.
-  const transportHub = /(?:^|\b)(?:airport|aeropuerto|aeroport|aeroporto|flughafen|bahnhof|hauptbahnhof|stazione|estacao|gare|train station|railway station|rail station|bus station|coach station|metro station|subway station|ferry terminal|bus terminal|rail terminal|airport terminal|estacion de tren|estacion ferroviaria|estacion de autobuses|estacion de bus|estacion de metro|terminal de autobuses|terminal de bus|terminal de ferry|terminal ferroviaria)(?:\b|$)/i;
-  const knownHub = /(?:^|\b)(?:roma termini|milano centrale|napoli centrale|venezia santa lucia|firenze santa maria novella|barcelona sants|madrid atocha|paris gare du nord|london st pancras)(?:\b|$)/i;
-  if (transportHub.test(entity) || knownHub.test(entity)) return true;
-
-  // A row whose semantic purpose is movement must not be converted into an attraction ticket.
-  const movementIntent = /(?:^|\b)(?:traslado|transfer|regreso|retorno|salida|llegada|conexion|embarque|anreise|abreise|ruckfahrt|rueckfahrt|zugfahrt|ankunft|abfahrt|transfert|retour|arrivee|depart|trasferimento|ritorno|arrivo|partenza|deslocamento)(?:\b|$)/i;
-  const movementMode = /(?:^|\b)(?:train|tren|zug|treno|trem|rail|bus|coach|autobus|metro|subway|tram|flight|vuelo|flug|volo|ferry|ferri|funicular|cremallera|rack railway|cable car|aeri|gondola|shuttle|r5)(?:\b|$)/i;
-  if (movementIntent.test(activity) && (movementMode.test(activity) || movementMode.test(transport) || movementMode.test(route))) return true;
-
-  // Clear non-attraction commercial contexts. Kept entity-focused to avoid suppressing
-  // a real attraction merely because a nearby note mentions lunch or a hotel.
-  const lodgingOrFood = /(?:^|\b)(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|ristorante|trattoria|osteria|pizzeria|cafe|coffee shop|bar|pub|gelateria|bakery|panaderia)(?:\b|$)/i;
-  if (lodgingOrFood.test(entity)) return true;
-
-  const nonAdmissionVisit = /(?:^|\b)(?:photo stop|parada fotografica|exterior|outside|fachada|shopping|compras|free time|tiempo libre)(?:\b|$)/i;
-  if (nonAdmissionVisit.test(activity)) return true;
-
-  return false;
 }
 
 function sanitizeClassifications(candidates, classifications, city) {
