@@ -166,8 +166,55 @@ let plannerState = {
   travelerProfiles: null,
   budget: '',
   currency: 'USD',
+  travelModelV2: null,
+  preferencesV2: null,
   lang: 'en' // se setea abajo
 };
+
+
+function _travelV2(){ return window.ITBMOTravelV2 || null; }
+function _currentTravelModelV2_(){
+  const engine=_travelV2();
+  if(!engine || !$cityList) return plannerState?.travelModelV2 || null;
+  const rows=qsa('.city-row',$cityList);
+  const model=engine.collect(rows);
+  if(plannerState) plannerState.travelModelV2=model;
+  return model;
+}
+function _renumberDestinationCards_(){
+  if(!$cityList) return;
+  qsa('.city-row',$cityList).forEach((row,index)=>{
+    const n=qs('.city-card-kicker span',row); if(n) n.textContent=String(index+1).padStart(2,'0');
+  });
+}
+function reorderDestinationRowsByDate({animate=true}={}){
+  if(!$cityList) return;
+  const rows=qsa('.city-row',$cityList);
+  const ordered=[...rows].sort((a,b)=>{
+    const da=parsePlannerDate(qs('.baseDate',a)?.value||'');
+    const db=parsePlannerDate(qs('.baseDate',b)?.value||'');
+    if(!da&&!db) return rows.indexOf(a)-rows.indexOf(b);
+    if(!da) return 1; if(!db) return -1;
+    return da-db || rows.indexOf(a)-rows.indexOf(b);
+  });
+  const changed=ordered.some((row,i)=>row!==rows[i]);
+  if(!changed) return false;
+  ordered.forEach(row=>$cityList.appendChild(row));
+  _renumberDestinationCards_();
+  if(animate){ ordered.forEach(row=>{row.classList.remove('route-v2-reordered');requestAnimationFrame(()=>row.classList.add('route-v2-reordered'));setTimeout(()=>row.classList.remove('route-v2-reordered'),650);}); }
+  return true;
+}
+function _routeV2ContextForCity_(city){
+  const engine=_travelV2();
+  const dest=savedDestinations.find(x=>x.city===city);
+  if(!engine||!dest) return null;
+  const model=plannerState?.travelModelV2 || _currentTravelModelV2_();
+  try{return engine.compileForDestination(dest,model);}catch(err){console.warn('[TRAVEL MODEL V2 COMPILE]',err);return null;}
+}
+function _routeV2PlacePreference_(place){
+  const prefs=plannerState?.preferencesV2?.places || _travelV2()?.state?.preferences?.places || {};
+  return prefs[String(place||'').trim().toLowerCase()] || null;
+}
 
 (function initPlannerLang(){
   const normalize = (v)=>{
@@ -458,6 +505,7 @@ const $plannerLanguagePopoverNote = qs('#planner-language-popover-note');
 const $preferencesStage = qs('#preferences-stage');
 const $preferencesField = qs('#special-conditions');
 const $preferencesContinue = qs('#continue-with-astra');
+const $preferencesGenerateV2 = qs('#generate-itineraries-v2');
 
 /* ---------- ITBMO Account / Supabase ---------- */
 const $accountGuest = qs('#account-guest');
@@ -1288,6 +1336,9 @@ function clearPlannerUIForLogout(){
     plannerState.travelerProfiles=null;
     plannerState.budget='';
     plannerState.currency='USD';
+    plannerState.travelModelV2=null;
+    plannerState.preferencesV2=null;
+    if(_travelV2()?.state){_travelV2().state.routes={};_travelV2().state.preferences={global:{},places:{}};_travelV2().state.itineraryLanguage='';}
     plannerState.collectingItineraryLang=false;
     plannerState.itineraryLang='';
     plannerState.forceReplan={};
@@ -1508,6 +1559,7 @@ async function saveTripRecord(list, travelerState){
     per_day:Array.isArray(d.perDay) ? d.perDay : []
   }));
 
+  const travelModelV2=_currentTravelModelV2_();
   const body = {
     action:'create',
     session_token:token,
@@ -1526,9 +1578,10 @@ async function saveTripRecord(list, travelerState){
       traveler_counts:travelerState.counts,
       primary_traveler:travelerState.primary,
       companion_profiles:travelerState.companions,
-      special_conditions:String(qs('#special-conditions')?.value || '').trim() || null
+      special_conditions:String(qs('#special-conditions')?.value || '').trim() || null,
+      travel_model_v2:travelModelV2
     },
-    planner_version:'v64',
+    planner_version:'v117-route-v2',
     api_version:'v65'
   };
 
@@ -1603,6 +1656,8 @@ function _postPaymentProgressSnapshot_(phase=''){
     itinerary_lang:String(plannerState?.itineraryLang || '').trim(),
     agent_conversation_lang:agentConversationLang || null,
     city_meta:cityMeta,
+    travel_model_v2:plannerState?.travelModelV2 || _currentTravelModelV2_(),
+    preferences_v2:plannerState?.preferencesV2 || _travelV2()?.preferencesPayload?.() || null,
     planning_chat_history:_planningChatHistorySnapshot_(),
     updated_at:new Date().toISOString()
   };
@@ -1681,6 +1736,18 @@ function _restorePostPaymentProgress_(trip){
   if(checkpoint.city_meta && typeof checkpoint.city_meta==='object' && !Array.isArray(checkpoint.city_meta)){
     cityMeta=checkpoint.city_meta;
   }
+  if(checkpoint.travel_model_v2 && typeof checkpoint.travel_model_v2==='object'){
+    plannerState.travelModelV2=checkpoint.travel_model_v2;
+    _travelV2()?.restore?.(checkpoint.travel_model_v2,qsa('.city-row',$cityList));
+  }
+  if(checkpoint.preferences_v2 && typeof checkpoint.preferences_v2==='object'){
+    plannerState.preferencesV2=checkpoint.preferences_v2;
+    const engine=_travelV2();
+    if(engine?.state){
+      engine.state.preferences={global:{...(checkpoint.preferences_v2.global||{})},places:{...(checkpoint.preferences_v2.places||{})}};
+      engine.state.itineraryLanguage=checkpoint.preferences_v2.itinerary_language||plannerState.itineraryLang||'';
+    }
+  }
   metaProgressIndex=Math.max(0,Number(checkpoint.meta_progress_index || 0));
   collectingHotels=Boolean(checkpoint.collecting_hotels);
   plannerState.collectingItineraryLang=Boolean(checkpoint.collecting_itinerary_lang);
@@ -1707,17 +1774,27 @@ function _restorePostPaymentProgress_(trip){
   if($preferencesContinue){
     $preferencesContinue.disabled=true;
     $preferencesContinue.setAttribute('aria-disabled','true');
-    $preferencesContinue.textContent=getLang()==='es' ? '✓ Preferencias confirmadas' : '✓ Preferences confirmed';
+    $preferencesContinue.textContent=getLang()==='es' ? '✓ Preferencias guardadas' : '✓ Preferences saved';
+  }
+  if(phase==='preferences_confirmed' && $preferencesGenerateV2){
+    $preferencesGenerateV2.hidden=false;$preferencesGenerateV2.disabled=false;$preferencesGenerateV2.removeAttribute('aria-disabled');
+    $preferencesGenerateV2.textContent=getLang()==='es'?'Generar mi itinerario ✨':'Generate my itinerary ✨';
   }
 
-  if($chatBox) $chatBox.style.display='flex';
-  setPlanningChatLocked(false);
-  if(collectingHotels) _setHotelTransportComposerTemplate_();
+  if(phase==='collecting_hotels' || phase==='collecting_language'){
+    // Legacy checkpoint compatibility only. New V2 trips no longer use Planner Chat for structure.
+    if($chatBox) $chatBox.style.display='flex';
+    setPlanningChatLocked(false);
+    if(collectingHotels) _setHotelTransportComposerTemplate_();
+  }else{
+    if($chatBox) $chatBox.style.display='none';
+    setPlanningChatLocked(true);
+  }
 
   if(phase==='generation_requested'){
+    _travelV2()?.setLocked?.(true);
     collectingHotels=false;
     plannerState.collectingItineraryLang=false;
-    setPlanningChatLocked(true);
     setTimeout(()=>runPaidGeneration(),180);
   }
   return true;
@@ -2518,7 +2595,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     if(baseDateEl) baseDateEl.value=dateToPlannerStorage(baseDatePicker.value);
     baseDatePicker.dataset.autoSuggested='0';
     updateCityDateSummary(row);
-    suggestFollowingCityDates(row);
+    reorderDestinationRowsByDate();
+    _travelV2()?.renderRowSummary?.(row);
     scheduleAstraCoach('schedule',()=>qs('.hours-block',row),360);
   });
 
@@ -2538,7 +2616,8 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     hoursWrap.replaceWith(nextHoursWrap);
     hoursWrap=nextHoursWrap;
     updateCityDateSummary(row);
-    suggestFollowingCityDates(row);
+    reorderDestinationRowsByDate();
+    _travelV2()?.renderRowSummary?.(row);
     scheduleAstraCoach('date',()=>qs('.baseDatePicker',row),320);
   });
 
@@ -2548,6 +2627,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
   });
   $cityList.appendChild(row);
   updateCityDateSummary(row);
+  _travelV2()?.attachCityRow?.(row,pref);
 
   const allRows=qsa('.city-row',$cityList);
   const previous=allRows[allRows.length-2];
@@ -2650,7 +2730,7 @@ function setSavedSetupLocked(locked){
     try{ destinations.inert=false; }catch(_){}
     destinations.setAttribute('aria-disabled','false');
 
-    qsa('input, select, textarea, button.remove, #add-city-btn',destinations).forEach(control=>{
+    qsa('input, select, textarea, button',destinations).forEach(control=>{
       /* The route confirmation CTA and Start CTA manage their own state below. */
       if(control.id==='save-destinations' || control.id==='start-planning') return;
       control.disabled=!!locked;
@@ -2701,12 +2781,12 @@ function applyPreferencesStageLanguage(){
   set(
     '#preferences-stage-optional',
     es
-      ? 'Opcional · puedes continuar aunque no agregues información.'
-      : 'Optional · you can continue without adding any information.'
+      ? 'Completa la información obligatoria de cada destino o estancia para continuar.'
+      : 'Complete the required information for each destination or stay to continue.'
   );
 
   if($preferencesContinue && !preferencesConfirmedTripId){
-    $preferencesContinue.textContent=es ? 'Continuar con ITBMO →' : 'Continue with ITBMO →';
+    $preferencesContinue.textContent=es ? 'Guardar preferencias' : 'Save preferences';
   }
 }
 
@@ -2727,6 +2807,7 @@ function hidePreferencesStage({reset=false}={}){
       $preferencesContinue.disabled=false;
       $preferencesContinue.removeAttribute('aria-disabled');
     }
+    if($preferencesGenerateV2){$preferencesGenerateV2.disabled=true;$preferencesGenerateV2.hidden=true;$preferencesGenerateV2.setAttribute('aria-disabled','true');}
   }
 }
 
@@ -2758,6 +2839,25 @@ function showPreferencesStage(){
     $start.dataset.itbmoConsumed='1';
   }
 
+  const engine=_travelV2();
+  const prefHost=qs('#preferences-v2-host');
+  if(engine && prefHost){
+    if(plannerState?.travelModelV2) engine.restore?.(plannerState.travelModelV2,qsa('.city-row',$cityList));
+    engine.renderPreferences(prefHost,savedDestinations,plannerState?.travelModelV2 || _currentTravelModelV2_(),()=>{
+      plannerState.preferencesV2=engine.preferencesPayload();
+      plannerState.itineraryLang=engine.state?.itineraryLanguage || plannerState.itineraryLang || '';
+      if($preferencesField) $preferencesField.value=engine.specialConditionsText();
+      const ready=engine.allRequiredPreferencesComplete(savedDestinations,plannerState?.travelModelV2 || _currentTravelModelV2_());
+      if($preferencesContinue){
+        $preferencesContinue.disabled=!ready;
+        $preferencesContinue.setAttribute('aria-disabled',String(!ready));
+      }
+    });
+    plannerState.preferencesV2=engine.preferencesPayload();
+    const ready=engine.allRequiredPreferencesComplete(savedDestinations,plannerState?.travelModelV2 || _currentTravelModelV2_());
+    if($preferencesContinue){$preferencesContinue.disabled=!ready;$preferencesContinue.setAttribute('aria-disabled',String(!ready));}
+  }
+
   requestAnimationFrame(()=>{
     autoGrowPreferencesField();
 
@@ -2777,62 +2877,77 @@ function showPreferencesStage(){
 }
 
 async function confirmPreferencesAndContinue(){
-  if(!$preferencesStage || !$preferencesField || !currentTripId) return;
+  if(!$preferencesStage || !currentTripId) return;
   if(preferencesStageTripId!==currentTripId) return;
 
-  const confirmedValue=String($preferencesField.value || '').trim();
+  const engine=_travelV2();
+  const model=plannerState?.travelModelV2 || _currentTravelModelV2_();
+  if(engine && !engine.allRequiredPreferencesComplete(savedDestinations,model)){
+    alert(getLang()==='es'
+      ? 'Completa hospedaje y transporte para cada destino o estancia antes de generar.'
+      : 'Complete lodging and transport for every destination or stay before generating.');
+    return;
+  }
 
-  /* CRITICAL: preserve the existing generation contract exactly. */
-  if(typeof plannerState!=='undefined' && plannerState){
-    plannerState.specialConditions=confirmedValue;
+  if(engine){
+    plannerState.preferencesV2=engine.preferencesPayload();
+    plannerState.itineraryLang=engine.state?.itineraryLanguage || (getLang()==='es'?'Español':'English');
+    plannerState.specialConditions=engine.specialConditionsText();
+    if($preferencesField) $preferencesField.value=plannerState.specialConditions;
+
+    // Preserve the existing cityMeta contract for main destinations while the
+    // richer V2 preferences remain available to route-aware generation.
+    savedDestinations.forEach(dest=>{
+      const pref=plannerState.preferencesV2?.places?.[String(dest.city||'').trim().toLowerCase()] || {};
+      if(!cityMeta[dest.city]) cityMeta[dest.city]={baseDate:dest.baseDate||null,start:null,end:null,hotel:'',transport:'',perDay:dest.perDay||[]};
+      cityMeta[dest.city].hotel=pref.lodgingChoice==='recommend' ? 'recommend me' : (pref.lodgingText || pref.lodgingChoice || 'recommend me');
+      cityMeta[dest.city].transport=pref.localTransport || pref.arrivalTransport || 'recommend me';
+    });
+  }else{
+    plannerState.specialConditions=String($preferencesField?.value || '').trim();
   }
 
   preferencesConfirmedTripId=currentTripId;
-
-  $preferencesField.readOnly=true;
-  $preferencesField.setAttribute('aria-readonly','true');
+  if($preferencesField){$preferencesField.readOnly=true;$preferencesField.setAttribute('aria-readonly','true');}
   $preferencesStage.classList.add('is-confirmed');
-
   if($preferencesContinue){
     $preferencesContinue.disabled=true;
     $preferencesContinue.setAttribute('aria-disabled','true');
-    $preferencesContinue.textContent=getLang()==='es'
-      ? '✓ Preferencias confirmadas'
-      : '✓ Preferences confirmed';
+    $preferencesContinue.textContent=getLang()==='es' ? '✓ Preferencias guardadas' : '✓ Preferences saved';
   }
 
-  /* Existing agent flow begins here, unchanged.
-     The chat now reveals directly below Personalize; the confirmed button stays
-     visible in its original location instead of the page jumping away from it. */
-  installPlannerAgentFlow();
-  startPlanning();
+  // Planner Chat is no longer used as a structural data-entry step in V2.
+  collectingHotels=false;
+  plannerState.collectingItineraryLang=false;
+  if($chatBox) $chatBox.style.display='none';
+  setPlanningChatLocked(true);
 
-  /* Guide the traveler forward: once the agent opens, glide gently to the
-     conversation and keep the cursor ready in the lodging field. */
-  requestAnimationFrame(()=>{
-    const agent=qs('#planner-agent-flow');
-    const composer=qs('#chat-input');
+  await _persistPostPaymentProgress_('preferences_confirmed');
+  if($preferencesGenerateV2){
+    $preferencesGenerateV2.hidden=false;
+    $preferencesGenerateV2.disabled=false;
+    $preferencesGenerateV2.removeAttribute('aria-disabled');
+    $preferencesGenerateV2.textContent=getLang()==='es'?'Generar mi itinerario ✨':'Generate my itinerary ✨';
+    requestAnimationFrame(()=>smoothAdvanceTo($preferencesGenerateV2,{gap:110,center:true}));
+  }
+}
 
-    if(agent){
-      smoothAdvanceTo(agent,{gap:104,center:false});
-    }
-
-    if(composer){
-      try{ composer.focus({preventScroll:true}); }
-      catch(_){ try{ composer.focus(); }catch(__){} }
-    }
-
-    /* startPlanning() may reveal/paint the first prompt one frame later. */
-    setTimeout(()=>{
-      if(agent) smoothAdvanceTo(agent,{gap:104,center:false});
-      if(composer){
-        try{ composer.focus({preventScroll:true}); }
-        catch(_){ try{ composer.focus(); }catch(__){} }
-      }
-    },180);
-  });
-
-  await _persistPostPaymentProgress_('collecting_hotels');
+async function startV2PaidGeneration(){
+  if(!currentTripId || preferencesConfirmedTripId!==currentTripId) return;
+  _travelV2()?.setLocked?.(true);
+  const prefHost=qs('#preferences-v2-host');
+  if(prefHost){
+    prefHost.classList.add('is-readonly');
+    _travelV2()?.renderPreferences?.(prefHost,savedDestinations,plannerState?.travelModelV2 || _currentTravelModelV2_(),()=>{});
+  }
+  if($preferencesGenerateV2){
+    $preferencesGenerateV2.disabled=true;
+    $preferencesGenerateV2.setAttribute('aria-disabled','true');
+    $preferencesGenerateV2.textContent=getLang()==='es'?'Generando…':'Generating…';
+  }
+  await _persistPostPaymentProgress_('generation_requested');
+  requestAnimationFrame(()=>smoothAdvanceTo('#planner-post-generation',{gap:104,center:false}));
+  setTimeout(()=>runPaidGeneration(),120);
 }
 
 async function normalizeDestinationsBeforeSave(list, rows){
@@ -3015,6 +3130,17 @@ async function saveDestinations(){
 
   if(list.length === 0) return;
 
+  const routeValidation=_travelV2()?.validateAll?.(rows) || {ok:true,errors:[]};
+  if(!routeValidation.ok){
+    const first=routeValidation.errors[0];
+    const targetRow=rows[Number(first?.rowIndex)||0];
+    targetRow?.classList.add('shake-highlight');
+    setTimeout(()=>targetRow?.classList.remove('shake-highlight'),850);
+    alert((getLang()==='es'?'Revisa tu recorrido: ':'Review your route: ') + String(first?.message||''));
+    try{targetRow?.scrollIntoView({behavior:'smooth',block:'center'});}catch(_){ }
+    return;
+  }
+
   if(!saveLockWarningAccepted){
     const es=getLang()==='es';
     const confirmed=await showPlannerDecision({
@@ -3080,6 +3206,10 @@ async function saveDestinations(){
   });
 
   savedDestinations = list;
+  if(plannerState){
+    plannerState.travelModelV2=_currentTravelModelV2_();
+    plannerState.destinations=[...savedDestinations];
+  }
   trackITBMOEvent('destinations_saved',{
     city_count:list.length,
     days_total:list.reduce((sum,item)=>sum+(Number(item?.days)||0),0)
@@ -3517,11 +3647,17 @@ function buildIntake(){
     const dates = x.baseDate ? `, start=${x.baseDate}` : '';
     return `${x.city} (${x.country||'—'} · ${x.days} días${dates})`;
   }).join(' | ');
+  const routeModel=plannerState?.travelModelV2 || _currentTravelModelV2_();
+  const routeSummary=(routeModel?.destinations||[]).flatMap(d=>(d?.route?.segments||[]).map(seg=>({
+    parent:d.city,origin:seg.origin,destination:seg.destination,departure_date:seg.departureDate,departure_time:seg.departureTime||null,arrival_date:seg.arrivalDate,arrival_time:seg.arrivalTime||null,disposition:seg.disposition,nights:Number(seg.nights||0),return_date:seg.returnDepartureDate||null,return_departure:seg.returnDepartureTime||null,return_arrival:seg.returnArrivalTime||null
+  })));
 
   return [
     `Destinations: ${list}`,
+    `Route movements: ${routeSummary.length?JSON.stringify(routeSummary):'N/A'}`,
     `Travelers: ${pax}`,
     `Budget: ${budget}`,
+    `Itinerary language: ${plannerState?.itineraryLang || 'N/A'}`,
     `Special conditions: ${specialConditions}`,
     `Existing: ${getFrontendSnapshot()}`
   ].join('\n');
@@ -3553,6 +3689,11 @@ Mandatory rules:
 - Major destination spas and thermal complexes normally require at least 3 hours of activity time, excluding the incoming road transfer. Small local baths may be shorter only when clearly identified as such. Large museums normally require at least 90 minutes unless the row explicitly states a selective highlights-only visit.
 - Detect semantic duplicate experiences, not only matching names. Merge or remove aliases, sub-area labels and repeated experiences that deliver essentially the same visit.
 - Apply the global time-window policy: day 1 must respect any provided start time; the final day must respect any provided end time; intermediate-day times are preferences that may be optimized when this materially improves the itinerary, while remaining realistic and coherent.
+- TRAVEL MODEL V2: when KNOWN USER FACTS include travel_model_v2, every USER_FIXED transfer, location window and overnight base is a hard constraint. Never schedule an activity during a fixed transfer. A day may start in one place and continue in another on the same calendar date.
+- A subdestination where the traveler stays one or more nights receives the SAME complete planning quality rules as a main destination: core highlights, geographic optimization, realistic meals, evening value, preferences, restrictions, day-trip reasoning, validation and repair.
+- User-declared subdestinations do NOT disable the existing intelligent day-trip policy on unconstrained days. Continue recommending valuable round-trip day excursions when appropriate and when they do not conflict with the user's fixed route.
+- If travel_model_v2 says the traveler sleeps in a different place, the next day starts from that real overnight base. Never teleport the traveler back to the parent city.
+- place_preferences are authoritative for the named location and override generic parent-city lodging/transport assumptions for time spent there.
 - If an end time is blank, plan the day to reach at least approximately 19:00 local time when worthwhile content remains. Treat 19:00 as a minimum planning target, not a ceiling. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.
 - The Day 1 start is the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing; never invent an airport, flight or inbound transfer.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
@@ -5380,6 +5521,16 @@ function _specialCalendarEventPolicy_(){
 
 function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, transport){
   const lodging=_normalizeLodgingInput_(hotel);
+  const routeContext=_routeV2ContextForCity_(city);
+  const routePlaces={};
+  (routeContext?.day_contexts||[]).forEach(day=>{
+    const places=[day.start_location,day.end_location,day.overnight_base];
+    (day.fixed_transfers||[]).forEach(t=>places.push(t.origin,t.destination));
+    places.filter(Boolean).forEach(place=>{
+      const pref=_routeV2PlacePreference_(place);
+      if(pref) routePlaces[place]=pref;
+    });
+  });
   return {
     city,
     total_days:totalDays,
@@ -5390,13 +5541,25 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
     lodging_normalization_applied:!!(lodging.original && lodging.normalized!==lodging.original),
     lodging_policy:'Use lodging_base as the principal geographic anchor. On Day 1, the supplied start time is when the traveler is ready at that lodging; complete check-in or luggage drop before sightseeing. Minimize unnecessary transfers and start/end there whenever sensible. Never invent airport/flight arrival details when they were not provided.',
     transport:transport||null,
+    travel_model_v2:routeContext,
+    place_preferences:routePlaces,
+    route_policy:{
+      declared_movements_are_hard_constraints:true,
+      apply_full_itinerary_quality_rules_to_every_overnight_subdestination:true,
+      preserve_automatic_day_trip_recommendations_when_no_user_fixed_movement_conflicts:true,
+      same_day_location_changes_are_allowed:true,
+      fixed_transfer_intervals_must_remain_activity_free:true,
+      each_day_must_start_from_the_real_previous_overnight_base:true
+    },
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
     calendar_dates:_calendarDatesForStay_(baseDate,totalDays),
     special_calendar_event_policy:_specialCalendarEventPolicy_(),
     preference_constraint_policy:_preferenceConstraintPolicy_(),
-    special_conditions:String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null,
-    special_conditions_instruction:'Use special_conditions as authoritative user input throughout strategic distribution, activity selection, sequencing, logistics and validation. Never treat it as optional commentary.',
+    special_conditions:(plannerState?.preferencesV2
+      ? String(plannerState.preferencesV2?.global?.notes || '').trim() || null
+      : String(plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim() || null),
+    special_conditions_instruction:'Use global special_conditions plus the structured place_preferences as authoritative user input throughout strategic distribution, activity selection, sequencing, logistics and validation. Do not duplicate them as decorative notes.',
     travelers:plannerState?.travelers || null,
     traveler_profiles:plannerState?.travelerProfiles || null,
     budget:plannerState?.budget || null,
@@ -5910,6 +6073,63 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
       }
     }
   }
+
+  // Travel Model V2 deterministic route audit. The LLM is not trusted to infer
+  // fixed movements: exact user transfers must be represented and remain activity-free.
+  const routeContext=_routeV2ContextForCity_(city);
+  (routeContext?.day_contexts||[]).forEach(ctx=>{
+    const dayRows=byDay[Number(ctx.day)]||[];
+    (ctx.fixed_transfers||[]).forEach(transfer=>{
+      if(!transfer.departure || !transfer.arrival) return; // unknown times stay soft until resolved
+      const fixedStart=_hhmmToMinutes_(transfer.departure);
+      const fixedEnd=_hhmmToMinutes_(transfer.arrival);
+      if(fixedStart==null || fixedEnd==null) return;
+      const exactTransfer=dayRows.find(r=>{
+        const rs=_hhmmToMinutes_(r.start), re=_hhmmToMinutes_(r.end);
+        return rs===fixedStart && re===fixedEnd &&
+          _arePoiAliases_(r.from,transfer.origin) && _arePoiAliases_(r.to,transfer.destination);
+      });
+      if(!exactTransfer){
+        errors.push({
+          code:'MISSING_USER_FIXED_TRANSFER',day:ctx.day,
+          origin:transfer.origin,destination:transfer.destination,
+          required_window:`${transfer.departure}-${transfer.arrival}`,
+          instruction:'Insert one pure transport row for this exact user-fixed movement. Do not merge sightseeing or an activity into this interval.'
+        });
+      }
+      dayRows.forEach((r,index)=>{
+        const rs=_hhmmToMinutes_(r.start), re=_hhmmToMinutes_(r.end);
+        if(rs==null||re==null) return;
+        const overlap=Math.max(rs,fixedStart)<Math.min(re,fixedEnd);
+        const isExact=rs===fixedStart&&re===fixedEnd&&_arePoiAliases_(r.from,transfer.origin)&&_arePoiAliases_(r.to,transfer.destination);
+        if(overlap&&!isExact){
+          errors.push({
+            code:'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER',day:ctx.day,row:index+1,
+            required_window:`${transfer.departure}-${transfer.arrival}`,
+            instruction:'Move or remove this row. No activity may overlap a user-fixed transfer.'
+          });
+        }
+      });
+    });
+    if(ctx.overnight_base && dayRows.length && ((ctx.fixed_transfers||[]).length || String(ctx.overnight_base||'').toLowerCase()!==String(city||'').toLowerCase())){
+      const last=dayRows[dayRows.length-1];
+      // Only flag a wrong overnight base when the final To clearly resolves to a
+      // *different known route place*. A hotel name may not contain the city name,
+      // so treating every non-alias as an error would create false repair loops.
+      const knownRoutePlaces=[city,ctx.start_location,ctx.end_location,
+        ...(ctx.fixed_transfers||[]).flatMap(t=>[t.origin,t.destination])
+      ].filter(Boolean);
+      const resolvesToDifferentKnownPlace=last?.to && knownRoutePlaces.some(place=>
+        !_arePoiAliases_(place,ctx.overnight_base) && _arePoiAliases_(last.to,place)
+      );
+      if(resolvesToDifferentKnownPlace){
+        errors.push({
+          code:'WRONG_OVERNIGHT_BASE',day:ctx.day,expected:ctx.overnight_base,actual:last.to,
+          instruction:'End this day at the real overnight base or include an explicit final movement to it.'
+        });
+      }
+    }
+  });
 
   const known=String(plannerState?.specialConditions||'');
   const inventedDeparture=
@@ -6553,7 +6773,9 @@ function _generationCheckpointSnapshot_(extra={}){
       specialConditions:plannerState?.specialConditions || '',
       travelers:plannerState?.travelers || {},
       travelerProfiles:plannerState?.travelerProfiles || null,
-      itineraryLang:plannerState?.itineraryLang || ''
+      itineraryLang:plannerState?.itineraryLang || '',
+      travelModelV2:plannerState?.travelModelV2 || null,
+      preferencesV2:plannerState?.preferencesV2 || null
     },
     last_error:generationRecoveryState?.last_error || null,
     ...extra
@@ -6636,6 +6858,12 @@ function _hydrateGenerationTrip_(trip){
     ? checkpoint.planner_state
     : {};
   plannerState={...plannerState,...persistedPlanner,...checkpointPlanner,destinations:[...savedDestinations]};
+  plannerState.travelModelV2=checkpointPlanner.travelModelV2 || persistedPlanner.travel_model_v2 || persistedPlanner.travelModelV2 || plannerState.travelModelV2 || null;
+  plannerState.preferencesV2=checkpointPlanner.preferencesV2 || persistedPlanner.preferences_v2 || persistedPlanner.preferencesV2 || plannerState.preferencesV2 || null;
+  if(_travelV2()?.state && plannerState.preferencesV2){
+    _travelV2().state.preferences={global:{...(plannerState.preferencesV2.global||{})},places:{...(plannerState.preferencesV2.places||{})}};
+    _travelV2().state.itineraryLanguage=plannerState.preferencesV2.itinerary_language || plannerState.itineraryLang || '';
+  }
 
   savedDestinations.forEach(destination=>{
     if(!itineraries[destination.city]){
@@ -6659,6 +6887,7 @@ function _hydrateGenerationTrip_(trip){
       });
     });
     updateAddCityButtonState();
+    if(plannerState.travelModelV2) _travelV2()?.restore?.(plannerState.travelModelV2,qsa('.city-row',$cityList));
   }
 
   hasSavedOnce=true;
@@ -7865,6 +8094,8 @@ $addCity?.addEventListener('click', ()=>{
 });
 
 function validateBaseDatesDMY(){
+  // Travel Model V2: order is derived from dates, never from entry order.
+  reorderDestinationRowsByDate({animate:false});
   // Valida el calendario visual sin alterar el DD/MM/AAAA que consume el contrato existente.
   const rows = qsa('.city-row', $cityList);
   let firstInvalid = null;
@@ -7884,11 +8115,11 @@ function validateBaseDatesDMY(){
       setTimeout(()=>firstInvalid?.classList.remove('shake-highlight'), 800);
       break;
     }
-    if(previousEnd && date<=previousEnd){
+    if(previousEnd && date<previousEnd){
       firstInvalid=picker || hidden;
       message=getLang()==='es'
-        ? 'Esta ciudad se superpone con la anterior. Elige una fecha posterior al último día del destino previo.'
-        : 'This city overlaps the previous one. Choose a date after the prior destination ends.';
+        ? 'Esta ciudad se superpone realmente con la anterior. El mismo día sí está permitido cuando el traslado ocurre durante esa fecha; revisa las fechas o agrega el traslado correspondiente.'
+        : 'This city truly overlaps the previous one. Sharing the same day is allowed when the transfer happens during that date; review the dates or add the corresponding transfer.';
       firstInvalid?.classList.add('shake-highlight');
       setTimeout(()=>firstInvalid?.classList.remove('shake-highlight'),800);
       break;
@@ -8786,6 +9017,27 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null){
   return true;
 }
 
+function showPostDownloadWorkspaceGuide(){
+  document.querySelector('.itbmo-next-overlay')?.remove();
+  const es=getLang()==='es';
+  const overlay=document.createElement('div');overlay.className='itbmo-next-overlay';
+  overlay.innerHTML=`<div class="itbmo-next-card" role="dialog" aria-modal="true">
+    <div class="itbmo-next-icon">✦</div>
+    <h3>${es?'Tu viaje ya está listo para explorarlo.':'Your trip is ready to explore.'}</h3>
+    <p>${es?'Ahora puedes pasar de planificar a vivir tu viaje desde antes de salir. Estos dos espacios organizan lo que sigue.':'Now you can move from planning to experiencing your trip before departure. These two spaces organize what comes next.'}</p>
+    <div class="itbmo-next-grid">
+      <div><strong>${es?'Trip Workspace':'Trip Workspace'}</strong><span>${es?'Visión completa de tu viaje, herramientas y necesidades que aplican a toda la ruta.':'Your full-trip view, tools and needs across the entire route.'}</span></div>
+      <div><strong>${es?'City Workspace':'City Workspace'}</strong><span>${es?'Entra a cada destino para revisar el itinerario día por día y acceder a herramientas contextualizadas.':'Open each destination to review the day-by-day itinerary and contextual tools.'}</span></div>
+    </div>
+    <button type="button">${es?'Explorar mi viaje →':'Explore my trip →'}</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('button')?.addEventListener('click',()=>{
+    overlay.remove();
+    requestAnimationFrame(()=>{const doc=document.documentElement;const bottom=Math.max(document.body?.scrollHeight||0,doc?.scrollHeight||0);window.scrollTo({top:bottom,behavior:'smooth'});});
+  });
+}
+
 function showFinalDownloadModal(){
   if(document.querySelector('.itbmo-download-overlay')) return;
   const es=getLang()==='es';
@@ -8813,13 +9065,7 @@ function showFinalDownloadModal(){
     overlay.classList.remove('active');
 
     overlay.remove();
-
-    /* One deterministic jump to the real end of the Planner. */
-    requestAnimationFrame(()=>{
-      const doc=document.documentElement;
-      const bottom=Math.max(document.body?.scrollHeight || 0,doc?.scrollHeight || 0);
-      window.scrollTo({top:bottom,behavior:'auto'});
-    });
+    showPostDownloadWorkspaceGuide();
   });
   const pdfButton=overlay.querySelector('.itbmo-open-pdf');
   const csvButton=overlay.querySelector('.itbmo-open-csv');
@@ -9153,6 +9399,9 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       plannerState.travelerProfiles = null;
       plannerState.budget = '';
       plannerState.currency = 'USD';
+      plannerState.travelModelV2 = null;
+      plannerState.preferencesV2 = null;
+      if(_travelV2()?.state){_travelV2().state.routes={};_travelV2().state.preferences={global:{},places:{}};_travelV2().state.itineraryLanguage='';}
       plannerState.forceReplan = {}; // 🧼 limpiar banderas de replanificación
     }
 
@@ -9716,31 +9965,37 @@ async function hasValidPaymentForCurrentTrip(){
   }
 }
 
+function showPostPaymentWelcome(){
+  document.querySelector('.itbmo-postpay-overlay')?.remove();
+  const es=getLang()==='es';
+  const overlay=document.createElement('div');overlay.className='itbmo-postpay-overlay';
+  overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true">
+    <div class="itbmo-postpay-icon">✓</div>
+    <h3>${es?'¡Gracias por tu pago!':'Thank you for your payment!'}</h3>
+    <p>${es
+      ? 'Info Chat ya está habilitado para ayudarte a investigar y resolver dudas sobre tu viaje. Antes de generar el itinerario, te pediremos algunos datos de hospedaje, transporte, preferencias y restricciones para personalizar cada destino y estancia.'
+      : 'Info Chat is now enabled to help you research and answer questions about your trip. Before generating the itinerary, we will ask for a few lodging, transport, preference and restriction details to personalize each destination and stay.'}</p>
+    <button type="button">${es?'Personalizar mi viaje →':'Personalize my trip →'}</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('button')?.addEventListener('click',()=>{
+    overlay.remove();showPreferencesStage();
+    requestAnimationFrame(()=>smoothAdvanceTo('#preferences-stage',{gap:92,center:false}));
+  });
+}
+
 async function completePaymentGate(successMessage=''){
   paymentGateSatisfiedTripId = currentTripId || paymentGateSatisfiedTripId;
   setCheckoutStatus(successMessage || _commerceCopy_().paid,'success');
-
-  /* Refresh authoritative entitlement + remaining Info Chat queries. */
   try{
     const token=getStoredSessionToken();
     if(token && currentTripId){
-      const status=await paymentApi({
-        action:'status',
-        session_token:token,
-        trip_id:currentTripId
-      });
+      const status=await paymentApi({action:'status',session_token:token,trip_id:currentTripId});
       applyInfoChatStatus(status);
     }
-  }catch(err){
-    console.warn('[INFO CHAT ENTITLEMENT AFTER PAYMENT]',err);
-  }
-
+  }catch(err){console.warn('[INFO CHAT ENTITLEMENT AFTER PAYMENT]',err);}
   await _persistPostPaymentProgress_('preferences');
-
-  setTimeout(()=>{
-    closeCheckoutModal();
-    showPreferencesStage();
-  },500);
+  setTimeout(()=>{closeCheckoutModal();showPostPaymentWelcome();},420);
 }
 
 async function requestPlanningStart(){
@@ -9975,6 +10230,7 @@ if(document.readyState==='loading'){
 
 $start?.addEventListener('click', requestPlanningStart);
 $preferencesContinue?.addEventListener('click', confirmPreferencesAndContinue);
+$preferencesGenerateV2?.addEventListener('click', startV2PaidGeneration);
 $send?.addEventListener('click', onSend);
 
 // Chat: textarea crece hasta su máximo; después usa scroll interno.
@@ -10104,7 +10360,14 @@ function bindInfoChatViewportLayout(){
 }
 
 function _infoAllowedCities_(){
-  return (savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
+  const main=(savedDestinations || []).map(d=>String(d?.city || '').trim()).filter(Boolean);
+  const model=plannerState?.travelModelV2 || _currentTravelModelV2_();
+  const route=(model?.destinations||[]).flatMap(d=>{
+    const out=[String(d?.city||'').trim()];
+    (d?.route?.segments||[]).forEach(seg=>{out.push(String(seg?.origin||'').trim(),String(seg?.destination||'').trim());});
+    return out;
+  }).filter(Boolean);
+  return [...new Set([...main,...route])];
 }
 
 function _infoCityListText_(){
@@ -10649,8 +10912,8 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-account-guide-title':'Tu acceso a ITBMO',
     'planner-account-guide-copy':'Inicia sesión, crea una cuenta o continúa como invitado. Con una cuenta podrás volver a tus viajes desde otros dispositivos.',
     'planner-route-eyebrow':'CONSTRUYE TU RUTA',
-    'planner-route-guide':'Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.',
-    'planner-route-tip-copy':'Usa tu tiempo útil, no la hora del vuelo. En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.',
+    'planner-route-guide':'Agrega hasta 3 destinos principales. No importa el orden en que los ingreses: ITBMO organizará la ruta según las fechas. Dentro de cada destino puedes añadir traslados, paradas o estancias si ya los tienes definidos.',
+    'planner-route-tip-copy':'Empieza simple y añade detalle solo cuando lo necesites. Si no agregas traslados o paradas, ITBMO seguirá recomendando excursiones de un día como lo hace hoy. Si ya tienes movimientos definidos, agrégalos para que respetemos esas horas y lugares.',
     'planner-travelers-eyebrow':'QUIÉN VIAJA',
     'planner-travelers-guide':'Indica si viajas solo o acompañado. Las edades del grupo ayudan a ajustar ritmos, actividades y desplazamientos.',
     'planner-save-eyebrow':'CUANDO TU RUTA ESTÉ LISTA',
@@ -10670,8 +10933,8 @@ function applyTravelBuilderWorkspaceCopy(){
     'planner-account-guide-title':'Your ITBMO access',
     'planner-account-guide-copy':'Sign in, create an account, or continue as a guest. With an account you can return to your trips from other devices.',
     'planner-route-eyebrow':'BUILD YOUR ROUTE',
-    'planner-route-guide':'Add up to 3 cities in the actual order of your trip. For each city, enter the number of days, start date, and the useful time you will have to explore.',
-    'planner-route-tip-copy':'Use your useful travel time, not your flight time. On day one, enter when you expect to be ready after reaching your lodging; on the last day, enter how late you can explore before leaving.',
+    'planner-route-guide':'Add up to 3 main destinations. The entry order does not matter: ITBMO will organize the route by date. Within each destination you can add transfers, stops or overnight stays when you already know them.',
+    'planner-route-tip-copy':'Start simple and add detail only when you need it. If you add no transfers or stops, ITBMO will keep recommending round-trip day excursions as it does today. If you already have fixed movements, add them so we can respect those times and places.',
     'planner-travelers-eyebrow':'WHO IS TRAVELING',
     'planner-travelers-guide':'Tell us whether you are traveling solo or with others. Group ages help adjust pace, activities, and transportation.',
     'planner-save-eyebrow':'WHEN YOUR ROUTE IS READY',
