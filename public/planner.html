@@ -435,12 +435,12 @@
           <div>
             <span class="planner-stage-card__eyebrow" id="planner-route-eyebrow">CONSTRUYE TU RUTA</span>
             <h3>Destinos</h3>
-            <p id="planner-route-guide">Agrega hasta 3 ciudades en el orden real del viaje. Para cada ciudad indica días, fecha de inicio y el tiempo útil que tendrás para explorar.</p>
+            <p id="planner-route-guide">Agrega hasta 3 destinos principales. No importa el orden en que los ingreses: ITBMO organizará la ruta según las fechas. Dentro de cada destino puedes añadir traslados, paradas o estancias si ya los tienes definidos.</p>
           </div>
         </div>
         <div class="planner-route-tip">
           <span aria-hidden="true">✦</span>
-          <p id="planner-route-tip-copy"><strong>Usa tu tiempo útil, no la hora del vuelo.</strong> En el primer día indica cuándo estarás listo después de llegar al alojamiento; en el último, hasta qué hora puedes hacer actividades antes de salir.</p>
+          <p id="planner-route-tip-copy"><strong>Empieza simple y añade detalle solo cuando lo necesites.</strong> Si no agregas traslados o paradas, ITBMO seguirá recomendando excursiones de un día como lo hace hoy. Si ya tienes movimientos definidos, agrégalos para que respetemos esas horas y lugares.</p>
         </div>
         <div id="city-list"></div>
         <div class="row-actions">
@@ -470,7 +470,7 @@
           </p>
         </div>
 
-        <div class="preferences-stage-field-row">
+        <div class="preferences-stage-field-row preferences-stage-field-row--v2">
           <div class="preferences-stage-field-title" id="preferences-stage-field-title">
             Preferencias / Restricciones / Condiciones especiales
           </div>
@@ -479,13 +479,21 @@
             🔒 Info Chat
           </button>
         </div>
-        <textarea id="special-conditions" rows="4" placeholder="Ej.: Prefiero naturaleza y barrios locales, evitar museos largos, quiero probar gastronomía típica y necesito un ritmo tranquilo…"></textarea>
 
-        <div class="preferences-stage-actions">
+        <div id="preferences-v2-host" class="preferences-v2-host" aria-live="polite"></div>
+
+        <!-- Compatibility field: the V2 form compiles its structured data into this
+             existing contract so generation, persistence and recovery remain backward compatible. -->
+        <textarea id="special-conditions" class="itbmo-compatibility-field" rows="4" aria-hidden="true" tabindex="-1"></textarea>
+
+        <div class="preferences-stage-actions preferences-stage-actions--v2">
           <button class="btn primary preferences-continue" id="continue-with-astra" type="button">
-            Continuar con ITBMO →
+            Guardar preferencias
           </button>
-          <small id="preferences-stage-optional">Opcional · puedes continuar aunque no agregues información.</small>
+          <button class="btn primary preferences-generate-v2" id="generate-itineraries-v2" type="button" disabled hidden>
+            Generar mi itinerario ✨
+          </button>
+          <small id="preferences-stage-optional">Completa la información obligatoria de cada destino o estancia para continuar.</small>
         </div>
       </section>
 
@@ -1193,7 +1201,8 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./planner.js?v=116"></script>
+<script src="./travel-model-v2.js?v=1"></script>
+<script src="./planner.js?v=117"></script>
  
 </body>
 </html>
