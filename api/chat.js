@@ -370,7 +370,27 @@ function _infoTripCities_(trip) {
     .map(d=>String(d?.city || d?.name || "").trim())
     .filter(Boolean);
 
-  if (cities.length) return [...new Set(cities)];
+  // Travel Model V2 keeps main destinations backward-compatible while route
+  // stops/subdestinations live in structured JSON. Include those places in
+  // Info Chat scope so an overnight stay or user-fixed stop is never treated
+  // as an unrelated destination.
+  const travelModel = plannerInput?.post_payment_progress?.travel_model_v2
+    || plannerInput?.travel_model_v2
+    || null;
+  const routePlaces = Array.isArray(travelModel?.destinations)
+    ? travelModel.destinations.flatMap(d=>{
+        const out=[String(d?.city || "").trim()];
+        const segments=Array.isArray(d?.route?.segments) ? d.route.segments : [];
+        for(const seg of segments){
+          out.push(String(seg?.origin || "").trim());
+          out.push(String(seg?.destination || "").trim());
+        }
+        return out;
+      }).filter(Boolean)
+    : [];
+
+  const scoped=[...new Set([...cities,...routePlaces])];
+  if (scoped.length) return scoped;
 
   return String(trip?.trip_name || "")
     .split("·")
