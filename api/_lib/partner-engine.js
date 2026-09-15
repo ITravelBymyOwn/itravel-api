@@ -198,6 +198,10 @@ function searchQueryForNeed(need, city, language = 'en') {
   const isSpanish = normalizeLanguage(language) === 'es';
 
   if (entity) {
+    if (type === 'guided_tour_optional' && /^(?:city tour en |.+ city tour$)/i.test(entity)) {
+      const tourCity = entity.replace(/^city tour en /i, '').replace(/ city tour$/i, '').trim() || safeCity;
+      return `${tourCity} city tour`;
+    }
     if (type === 'ticket_required' || type === 'reservation_recommended') {
       const intent = isSpanish ? 'entrada acceso sin tour' : 'entry ticket admission self guided';
       return [entity, safeCity, intent].filter(Boolean).join(' ');
