@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.3";
+const CONTEXT_VERSION = "1.4";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -205,6 +205,10 @@ function blocksAttractionAdmission(source, entityName = "", entityType = "other"
   // Lodging and food venues are not admission products.
   const lodgingOrFood = /(?:^|\b)(?:hotel|hostel|alojamiento|accommodation|airbnb|resort|restaurant|ristorante|trattoria|osteria|pizzeria|cafe|coffee shop|bar|pub|gelateria|bakery|panaderia)(?:\b|$)/i;
   if (lodgingOrFood.test(entity)) return true;
+
+  // Ordinary public-space experiences should never become admission products.
+  const publicSpace = /(?:^|\b)(?:mercado|market|barrio|neighborhood|district|plaza|square|calle|street|paseo|walk|walking|recorrido a pie|mirador del valle|viewpoint|gran via|puerta del sol)(?:\b|$)/i;
+  if (publicSpace.test(entity) && !/(?:museum|museo|palace|palacio|alcazar|catedral|cathedral|tower|torre|interior)/i.test(entity)) return true;
 
   // Explicit non-admission intent.
   const nonAdmissionVisit = /(?:^|\b)(?:photo stop|parada fotografica|exterior|outside|fachada|shopping|compras|free time|tiempo libre)(?:\b|$)/i;
@@ -698,7 +702,7 @@ ACCESS-FIRST RULES (CRITICAL):
 5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
 6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
 7. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
-8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Use it only when a guided option is explicitly supported by the source or is a high-confidence enhancement for that exact visit.
+8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Do NOT create one guided-tour need for every ordinary plaza, street, neighborhood, market, viewpoint or short stop. When several same-locality sightseeing rows naturally belong to one overview experience, prefer ONE consolidated locality/city tour opportunity instead of fragmented tours for each row. Use attraction-specific guided tours only when the exact attraction genuinely benefits from one.
 9. Prefer no_action for plazas, streets, exterior photo stops, ordinary neighborhood walks, free public spaces, meals, hotel time, free time, and simple local movement unless the source itself clearly indicates an arrangement is needed.
 10. intercity_transport is only for actual movement between the trip's main destinations already visible in the source.
 11. transport_arrangement is for a meaningful regional/day-trip transfer already in the itinerary that clearly requires planning. Never use it for ordinary walking or short local movement.
@@ -968,6 +972,52 @@ function accessMessage(needType, entityName, language) {
   return entity ? `Reservar ${entity} con antelación puede facilitar esta visita planificada.` : "Reservar con antelación puede ser útil para esta visita.";
 }
 
+function localityFromCandidate(source, fallbackCity) {
+  const activity = clean(source?.activity, 240);
+  const match = activity.match(/^([^–—-]{2,80})\s*[–—-]\s*/);
+  return clean(match?.[1] || fallbackCity, 100) || fallbackCity;
+}
+
+function consolidateOptionalTours(candidates, needs, city, language) {
+  const sourceById = new Map(candidates.map(item => [item.candidate_id, item]));
+  const nonTours = (needs || []).filter(item => item.need_type !== "guided_tour_optional");
+  const tourNeeds = (needs || []).filter(item => item.need_type === "guided_tour_optional");
+  const groups = new Map();
+
+  for (const need of tourNeeds) {
+    const source = sourceById.get(String(need.id || "").split(":")[0]);
+    if (!source) continue;
+    const locality = localityFromCandidate(source, city);
+    const key = locality.toLowerCase();
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ need, source, locality });
+  }
+
+  const consolidated = [];
+  for (const group of groups.values()) {
+    if (group.length === 1) {
+      const { need, source } = group[0];
+      const generic = /(?:barrio|neighborhood|district|plaza|square|market|mercado|paseo|walk|mirador|viewpoint|traslado|transfer)/i.test(`${source.activity} ${need.entity_name}`);
+      if (!generic && (source.explicit_tour_hint || need.confidence === "high")) consolidated.push(need);
+      continue;
+    }
+    const first = group[0];
+    const locality = first.locality;
+    consolidated.push({
+      ...first.need,
+      id: `${first.source.candidate_id}:guided_tour_optional`,
+      entity_name: normalizeUiLanguage(language) === "en" ? `${locality} city tour` : `City tour en ${locality}`,
+      entity_type: "experience",
+      confidence: "high",
+      user_message: normalizeUiLanguage(language) === "en"
+        ? `A city tour can combine several of the ${locality} sights already included in your itinerary.`
+        : `Un city tour puede reunir varios de los lugares de ${locality} que ya están incluidos en tu itinerario.`,
+      source_activity: group.map(x => x.source.activity).slice(0, 4).join(" · ")
+    });
+  }
+  return [...nonTours, ...consolidated];
+}
+
 function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
   const result = Array.isArray(needs) ? [...needs] : [];
   const accessByCandidate = new Set(
@@ -1103,6 +1153,7 @@ export default async function handler(req, res) {
         itineraryLanguage
       );
       needs = sanitizeClassifications(candidates, classifications, city);
+      needs = consolidateOptionalTours(candidates, needs, city, uiLanguage);
       needs = ensureEvidenceBackedAccessNeeds(candidates, needs, city, uiLanguage);
     }
 
