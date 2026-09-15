@@ -55,151 +55,86 @@
     return host;
   }
 
+  function _dayOptions(meta,fromISO=''){
+    const out=[];
+    for(let i=0;i<Math.max(1,meta.days||1);i++){
+      const iso=addDays(meta.baseISO,i); if(fromISO && iso<fromISO) continue;
+      out.push({day:i+1,iso,label:copy(`Día ${i+1}`,`Day ${i+1}`),date:new Intl.DateTimeFormat(lang()==='es'?'es-ES':'en-US',{day:'2-digit',month:'short'}).format(new Date(`${iso}T12:00:00`)).replace('.','')});
+    }
+    return out;
+  }
+  function _timeSelect(field,value='',label=''){
+    const [hh='',mm='00']=String(value||'').split(':');
+    const hours=['',...Array.from({length:24},(_,i)=>String(i).padStart(2,'0'))];
+    const mins=['00','15','30','45'];
+    return `<div class="route-v2-time" data-time-field="${field}"><span>${esc(label)}</span><div><select data-time-hour="${field}">${hours.map(h=>`<option value="${h}" ${h===hh?'selected':''}>${h||'--'}</option>`).join('')}</select><b>:</b><select data-time-minute="${field}">${mins.map(m=>`<option value="${m}" ${m===mm?'selected':''}>${m}</option>`).join('')}</select></div></div>`;
+  }
+  function _dayChips(meta,field,value,fromISO=''){
+    return `<div class="route-v2-daychips" data-day-field="${field}">${_dayOptions(meta,fromISO).map(d=>`<button type="button" data-day-value="${d.iso}" class="${value===d.iso?'is-selected':''}"><strong>${d.label}</strong><small>${d.date}</small></button>`).join('')}</div>`;
+  }
+  function _deriveNights(arrivalISO,departureISO){
+    if(!arrivalISO||!departureISO) return 0;
+    return Math.max(0,Math.round((dateKey(departureISO)-dateKey(arrivalISO))/86400000));
+  }
   function renderRowSummary(row){
     const host=ensureRouteHost(row), meta=rowMeta(row), route=rowRoute(row);
     const segments=(route.segments||[]).slice().sort((a,b)=>dateKey(a.departureDate,a.departureTime)-dateKey(b.departureDate,b.departureTime));
-    host.innerHTML=`
-      <div class="route-v2-head">
-        <div>
-          <strong>${copy('Traslados y paradas','Transfers & stops')}</strong>
-          <small>${copy('Opcional · agrega solo los movimientos que ya quieras fijar. ITBMO seguirá pudiendo recomendar excursiones por su cuenta.','Optional · add only movements you already want to fix. ITBMO can still recommend day trips on its own.')}</small>
-        </div>
-        <button type="button" class="route-v2-add">＋ ${copy('Añadir traslado o parada','Add transfer or stop')}</button>
-      </div>
-      <div class="route-v2-segments">
-        ${segments.length?segments.map(seg=>segmentCard(seg)).join(''):`<div class="route-v2-empty">${copy('Si no agregas nada, este destino se planificará como hoy.','If you add nothing, this destination will be planned exactly as today.')}</div>`}
-      </div>`;
+    host.innerHTML=`<div class="route-v2-head"><div><strong>${copy('Tu recorrido dentro de este destino','Your route within this destination')}</strong><small>${copy('Opcional. Si ya sabes que visitarás, dormirás o te moverás a otro lugar, añádelo. ITBMO conectará cada parada con los días y horarios de tu Planner.','Optional. If you already know you will visit, stay overnight or move elsewhere, add it. ITBMO will connect each stop to your Planner days and times.')}</small></div><button type="button" class="route-v2-add">＋ ${segments.length?copy('Continuar ruta','Continue route'):copy('Añadir traslado o parada','Add transfer or stop')}</button></div>
+      <div class="route-v2-segments">${segments.length?segments.map(seg=>segmentCard(seg)).join(''):''}</div>`;
     host.querySelector('.route-v2-add')?.addEventListener('click',()=>openSegmentWizard(row));
-    host.querySelectorAll('[data-route-edit]').forEach(btn=>btn.addEventListener('click',()=>{
-      const seg=route.segments.find(x=>x.id===btn.dataset.routeEdit); if(seg) openSegmentWizard(row,seg);
-    }));
-    host.querySelectorAll('[data-route-remove]').forEach(btn=>btn.addEventListener('click',()=>{
-      route.segments=route.segments.filter(x=>x.id!==btn.dataset.routeRemove); renderRowSummary(row);
-    }));
+    const quickStop=row.querySelector('.hours-quick-add-stop'); if(quickStop&&!quickStop.dataset.routeBound){quickStop.dataset.routeBound='1';quickStop.addEventListener('click',()=>openSegmentWizard(row));}
+    host.querySelectorAll('[data-route-edit]').forEach(btn=>btn.addEventListener('click',()=>{const seg=route.segments.find(x=>x.id===btn.dataset.routeEdit);if(seg)openSegmentWizard(row,seg);}));
+    host.querySelectorAll('[data-route-remove]').forEach(btn=>btn.addEventListener('click',()=>{route.segments=route.segments.filter(x=>x.id!==btn.dataset.routeRemove);renderRowSummary(row);}));
   }
-
   function segmentCard(seg){
-    const nights=Number(seg.nights||0);
-    const disposition=seg.disposition==='roundtrip'
-      ? copy('Regresa al origen','Returns to origin')
-      : seg.disposition==='stay_return'
-        ? copy(`${nights} noche${nights===1?'':'s'} y regresa`,`${nights} night${nights===1?'':'s'} and returns`)
-        : copy(`${nights} noche${nights===1?'':'s'} y continúa`,`${nights} night${nights===1?'':'s'} and continues`);
-    return `<article class="route-v2-segment-card">
-      <div class="route-v2-segment-icon">↗</div>
-      <div class="route-v2-segment-main">
-        <strong>${esc(seg.origin)} → ${esc(seg.destination)}</strong>
-        <span>${esc(seg.departureDate)} · ${esc(seg.departureTime||copy('hora por definir','time TBD'))} → ${esc(seg.arrivalDate)} · ${esc(seg.arrivalTime||copy('hora por definir','time TBD'))}</span>
-        <small>${esc(disposition)}</small>
-      </div>
-      <div class="route-v2-segment-actions">
-        <button type="button" data-route-edit="${esc(seg.id)}">${copy('Editar','Edit')}</button>
-        <button type="button" data-route-remove="${esc(seg.id)}" aria-label="${copy('Eliminar','Remove')}">✕</button>
-      </div>
-    </article>`;
+    const end=seg.disposition==='roundtrip'||seg.disposition==='stay_return'?` → ${seg.origin}`:'';
+    const overnight=seg.disposition==='open'||seg.disposition==='continue'||seg.disposition==='stay_return';
+    return `<article class="route-v2-segment-card"><div class="route-v2-segment-icon">↗</div><div class="route-v2-segment-main"><strong>${esc(seg.origin)} → ${esc(seg.destination)}${esc(end)}</strong><span>${esc(dmy(seg.departureDate)||seg.departureDate)} · ${esc(seg.departureTime||copy('hora por definir','time TBD'))} → ${esc(dmy(seg.arrivalDate)||seg.arrivalDate)} · ${esc(seg.arrivalTime||copy('hora por definir','time TBD'))}</span><small>${overnight?copy('La ubicación nocturna se integra automáticamente al Planner.','Overnight location is automatically integrated into the Planner.'):copy('Visita dentro del mismo día.','Same-day visit.')}</small></div><div class="route-v2-segment-actions"><button type="button" data-route-edit="${esc(seg.id)}">${copy('Editar','Edit')}</button><button type="button" data-route-remove="${esc(seg.id)}">✕</button></div></article>`;
   }
-
   function wizardShell(title,subtitle){
-    document.querySelector('.route-v2-overlay')?.remove();
-    const overlay=document.createElement('div'); overlay.className='route-v2-overlay';
-    overlay.innerHTML=`<div class="route-v2-modal" role="dialog" aria-modal="true">
-      <button class="route-v2-close" type="button" aria-label="${copy('Cerrar','Close')}">✕</button>
-      <div class="route-v2-modal-kicker">${copy('RUTA DEL VIAJE','TRIP ROUTE')}</div>
-      <h3>${esc(title)}</h3><p class="route-v2-modal-intro">${esc(subtitle)}</p>
-      <div class="route-v2-wizard-body"></div>
-    </div>`;
-    document.body.appendChild(overlay);
-    const close=()=>{overlay.classList.remove('active');setTimeout(()=>overlay.remove(),180);};
-    overlay.querySelector('.route-v2-close')?.addEventListener('click',close);
-    overlay.addEventListener('click',e=>{if(e.target===overlay) close();});
-    requestAnimationFrame(()=>overlay.classList.add('active'));
-    return {overlay,body:overlay.querySelector('.route-v2-wizard-body'),close};
+    document.querySelector('.route-v2-overlay')?.remove(); const overlay=document.createElement('div');overlay.className='route-v2-overlay';
+    overlay.innerHTML=`<div class="route-v2-modal" role="dialog" aria-modal="true"><button class="route-v2-close" type="button">✕</button><div class="route-v2-modal-kicker">${copy('CONSTRUYE TU RECORRIDO','BUILD YOUR ROUTE')}</div><h3>${esc(title)}</h3><p class="route-v2-modal-intro">${esc(subtitle)}</p><div class="route-v2-wizard-body"></div></div>`;
+    document.body.appendChild(overlay);const close=()=>{overlay.classList.remove('active');setTimeout(()=>overlay.remove(),180)};overlay.querySelector('.route-v2-close').onclick=close;requestAnimationFrame(()=>overlay.classList.add('active'));return{overlay,body:overlay.querySelector('.route-v2-wizard-body'),close};
   }
-
   function openSegmentWizard(row,existing=null){
-    const meta=rowMeta(row), route=rowRoute(row);
-    const prior=(route.segments||[]).slice().sort((a,b)=>dateKey(a.arrivalDate,a.arrivalTime)-dateKey(b.arrivalDate,b.arrivalTime)).at(-1);
-    const seg=existing?{...existing}:{
-      id:uid(), origin:prior?.disposition==='continue'?prior.destination:(meta.city||''), destination:'',
-      departureDate:prior?.disposition==='continue'?prior.arrivalDate:(meta.baseISO||''), departureTime:'',
-      arrivalDate:prior?.disposition==='continue'?prior.arrivalDate:(meta.baseISO||''), arrivalTime:'',
-      disposition:'roundtrip', nights:0, returnDepartureDate:'', returnDepartureTime:'', returnArrivalDate:'', returnArrivalTime:'',
-      timePrecision:'exact'
-    };
-    const ui=wizardShell(copy('Añadir traslado o parada','Add transfer or stop'),copy('Cuéntanos solo lo que ya sabes. Iremos mostrando el siguiente dato necesario sin llenar la pantalla de campos.','Tell us only what you already know. We will reveal the next detail as you go, without filling the screen with fields.'));
-
+    const meta=rowMeta(row),route=rowRoute(row); if(!meta.baseISO||!meta.days){alert(copy('Primero indica el primer día y la cantidad de días del destino.','First enter the start date and number of days.'));return;}
+    const sorted=(route.segments||[]).slice().sort((a,b)=>dateKey(a.arrivalDate,a.arrivalTime)-dateKey(b.arrivalDate,b.arrivalTime));
+    const prior=existing?null:sorted.at(-1);
+    let drafts=[];
+    let seg=existing?{...existing}:{id:uid(),origin:(prior?.disposition==='continue'||prior?.disposition==='open')?prior.destination:(meta.city||''),destination:'',departureDate:prior?.arrivalDate||'',departureTime:'',arrivalDate:'',arrivalTime:'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',timePrecision:'exact'};
+    const ui=wizardShell(copy('Añadir traslado o parada','Add transfer or stop'),copy('Selecciona, no escribas de más. Cada decisión abre solo el siguiente paso y queda conectada con los días reales de tu Planner.','Select instead of typing whenever possible. Each decision reveals only the next step and stays connected to your real Planner days.'));
     const render=()=>{
-      ui.body.innerHTML=`
-        <section class="route-v2-step is-open">
-          <div class="route-v2-step-index">1</div><div class="route-v2-step-content">
-            <h4>${copy('¿A dónde vas?','Where are you going?')}</h4>
-            <p>${copy(`Sales desde ${seg.origin||meta.city||'este destino'}. Escribe la ciudad, pueblo o lugar al que te moverás.`,`You are leaving from ${seg.origin||meta.city||'this destination'}. Enter the city, town or place you are moving to.`)}</p>
-            <label>${copy('Destino o lugar','Destination or place')}<input data-f="destination" value="${esc(seg.destination)}" placeholder="${copy('Ej.: Segovia, Toledo, Versalles…','E.g. Segovia, Toledo, Versailles…')}"></label>
-          </div>
-        </section>
-        ${seg.destination?`<section class="route-v2-step is-open">
-          <div class="route-v2-step-index">2</div><div class="route-v2-step-content">
-            <h4>${copy('¿Cuándo haces este traslado?','When do you make this transfer?')}</h4>
-            <p>${copy('Indica salida y llegada. Esto nos permite saber exactamente qué parte del día sigue disponible para actividades.','Enter departure and arrival. This tells us exactly which parts of the day remain available for activities.')}</p>
-            <div class="route-v2-grid4">
-              <label>${copy('Fecha de salida','Departure date')}<input type="date" data-f="departureDate" value="${esc(seg.departureDate)}"></label>
-              <label>${copy('Hora de salida','Departure time')}<input type="time" data-f="departureTime" value="${esc(seg.departureTime)}"></label>
-              <label>${copy('Fecha de llegada','Arrival date')}<input type="date" data-f="arrivalDate" value="${esc(seg.arrivalDate)}"></label>
-              <label>${copy('Hora de llegada','Arrival time')}<input type="time" data-f="arrivalTime" value="${esc(seg.arrivalTime)}"></label>
-            </div>
-            <label class="route-v2-check"><input type="checkbox" data-f="timeUnknown" ${seg.timePrecision==='unknown'?'checked':''}><span>${copy('Todavía no conozco las horas exactas','I do not know the exact times yet')}</span></label>
-          </div>
-        </section>`:''}
-        ${seg.destination&&seg.departureDate&&seg.arrivalDate?`<section class="route-v2-step is-open">
-          <div class="route-v2-step-index">3</div><div class="route-v2-step-content">
-            <h4>${copy(`¿Qué harás después de ${seg.destination}?`,`What will you do after ${seg.destination}?`)}</h4>
-            <p>${copy('Elige la opción que describe tu recorrido. Solo mostraremos los datos adicionales que realmente necesitemos.','Choose the option that matches your route. We will only show the additional details we truly need.')}</p>
-            <div class="route-v2-choice-grid">
-              <label class="route-v2-choice ${seg.disposition==='roundtrip'?'selected':''}"><input type="radio" name="route-disposition" value="roundtrip" ${seg.disposition==='roundtrip'?'checked':''}><strong>${copy('Regreso el mismo día','Return the same day')}</strong><span>${copy('Excursión ida y vuelta.','Round-trip day visit.')}</span></label>
-              <label class="route-v2-choice ${seg.disposition==='stay_return'?'selected':''}"><input type="radio" name="route-disposition" value="stay_return" ${seg.disposition==='stay_return'?'checked':''}><strong>${copy('Me quedaré a dormir','I will stay overnight')}</strong><span>${copy('Una o más noches y luego regreso.','One or more nights, then return.')}</span></label>
-              <label class="route-v2-choice ${seg.disposition==='continue'?'selected':''}"><input type="radio" name="route-disposition" value="continue" ${seg.disposition==='continue'?'checked':''}><strong>${copy('Continuaré desde allí','Continue from there')}</strong><span>${copy('Dormiré allí y seguiré a otro lugar.','Stay there and continue elsewhere.')}</span></label>
-            </div>
-          </div>
-        </section>`:''}
-        ${(seg.disposition==='stay_return'||seg.disposition==='continue')&&seg.destination?`<section class="route-v2-step is-open">
-          <div class="route-v2-step-index">4</div><div class="route-v2-step-content">
-            <h4>${copy(`¿Cuántas noches pasarás en ${seg.destination}?`,`How many nights will you spend in ${seg.destination}?`)}</h4>
-            <p>${copy('Cada día completo aquí recibirá la misma lógica de calidad y optimización que un destino principal.','Every full day here will receive the same quality and optimization logic as a main destination.')}</p>
-            <label>${copy('Noches','Nights')}<select data-f="nights">${Array.from({length:10},(_,i)=>`<option value="${i+1}" ${Number(seg.nights||1)===i+1?'selected':''}>${i+1}</option>`).join('')}</select></label>
-          </div>
-        </section>`:''}
-        ${(seg.disposition==='roundtrip'||seg.disposition==='stay_return')&&seg.destination?`<section class="route-v2-step is-open">
-          <div class="route-v2-step-index">${seg.disposition==='roundtrip'?4:5}</div><div class="route-v2-step-content">
-            <h4>${copy(`Regreso a ${seg.origin}`,`Return to ${seg.origin}`)}</h4>
-            <p>${copy('Indica cuándo sales y cuándo vuelves. Si aún no sabes la hora, puedes dejarla pendiente.','Enter when you leave and return. If you do not know the exact time yet, you can leave it pending.')}</p>
-            <div class="route-v2-grid3">
-              <label>${copy('Fecha de regreso','Return date')}<input type="date" data-f="returnDepartureDate" value="${esc(seg.returnDepartureDate)}"></label>
-              <label>${copy('Hora de salida','Departure time')}<input type="time" data-f="returnDepartureTime" value="${esc(seg.returnDepartureTime)}"></label>
-              <label>${copy(`Llegada a ${seg.origin}`,`Arrival in ${seg.origin}`)}<input type="time" data-f="returnArrivalTime" value="${esc(seg.returnArrivalTime)}"></label>
-            </div>
-          </div>
-        </section>`:''}
-        <div class="route-v2-modal-actions"><button type="button" class="route-v2-cancel">${copy('Cancelar','Cancel')}</button><button type="button" class="route-v2-save">${copy('Guardar traslado o parada','Save transfer or stop')}</button></div>`;
-
-      ui.body.querySelectorAll('[data-f]').forEach(el=>{
-        const event=(el.type==='radio'||el.type==='checkbox'||el.tagName==='SELECT')?'change':'input';
-        el.addEventListener(event,()=>{
-          if(el.dataset.f==='timeUnknown') seg.timePrecision=el.checked?'unknown':'exact';
-          else if(el.type==='radio'){ if(el.checked){seg.disposition=el.value;if(seg.disposition==='roundtrip')seg.nights=0;else if(!seg.nights)seg.nights=1;} }
-          else seg[el.dataset.f]=el.value;
-          if(el.dataset.f==='departureDate'&&!seg.arrivalDate) seg.arrivalDate=el.value;
-          if(el.dataset.f==='returnDepartureDate') seg.returnArrivalDate=el.value;
-          if(['destination','departureDate','arrivalDate'].includes(el.dataset.f)||el.type==='radio') setTimeout(render,0);
-        });
-      });
+      const hasDay=!!seg.departureDate,hasDest=!!norm(seg.destination),hasTimes=seg.timePrecision==='unknown'||(seg.departureTime&&seg.arrivalTime);
+      if(hasDay&&!seg.arrivalDate)seg.arrivalDate=seg.departureDate;
+      if(seg.disposition==='roundtrip'&&seg.arrivalDate)seg.returnDepartureDate=seg.arrivalDate;
+      const draftSummary=drafts.length?`<div class="route-v2-built">${drafts.map((d,i)=>`<div><span>✓</span><strong>${esc(d.origin)} → ${esc(d.destination)}</strong><small>${esc(dmy(d.departureDate))} · ${esc(d.departureTime||'--:--')}–${esc(d.arrivalTime||'--:--')}</small></div>`).join('')}</div>`:'';
+      ui.body.innerHTML=`${draftSummary}
+      <section class="route-v2-step is-open"><div class="route-v2-step-index">1</div><div class="route-v2-step-content"><h4>${copy(`¿Qué día sales de ${seg.origin||meta.city}?`,`What day do you leave ${seg.origin||meta.city}?`)}</h4><p>${copy('Estos son los días que ya creaste en el Planner. Selecciona uno y ocultaremos los demás para continuar.','These are the days already created in your Planner. Select one and we will collapse the rest to continue.')}</p>${_dayChips(meta,'departureDate',seg.departureDate,prior?.arrivalDate||'')}</div></section>
+      ${hasDay?`<section class="route-v2-step is-open"><div class="route-v2-step-index">2</div><div class="route-v2-step-content"><h4>${copy('¿A dónde vas?','Where are you going?')}</h4><p>${copy(`Sales desde ${seg.origin||meta.city}. Solo necesitamos el nombre del siguiente lugar.`,`You are leaving from ${seg.origin||meta.city}. We only need the name of the next place.`)}</p><label>${copy('Destino o lugar','Destination or place')}<input data-route-destination value="${esc(seg.destination)}" placeholder="${copy('Ej.: Segovia','E.g. Segovia')}"></label></div></section>`:''}
+      ${hasDay&&hasDest?`<section class="route-v2-step is-open"><div class="route-v2-step-index">3</div><div class="route-v2-step-content"><h4>${copy(`¿A qué hora te mueves a ${seg.destination}?`,`What time do you move to ${seg.destination}?`)}</h4><p>${copy('Usamos el mismo selector del Planner. Si el traslado cruza de día, selecciona también el día de llegada.','We use the same selector as the Planner. If the transfer crosses into another day, select the arrival day too.')}</p><div class="route-v2-timegrid">${_timeSelect('departureTime',seg.departureTime,copy('Hora de salida','Departure time'))}${_timeSelect('arrivalTime',seg.arrivalTime,copy('Hora de llegada','Arrival time'))}</div><details class="route-v2-arrival-day"><summary>${copy('¿Llegas otro día?','Arriving another day?')}</summary>${_dayChips(meta,'arrivalDate',seg.arrivalDate,seg.departureDate)}</details><label class="route-v2-check"><input type="checkbox" data-route-unknown ${seg.timePrecision==='unknown'?'checked':''}><span>${copy('Todavía no conozco las horas exactas','I do not know the exact times yet')}</span></label></div></section>`:''}
+      ${hasDay&&hasDest&&hasTimes?`<section class="route-v2-step is-open"><div class="route-v2-step-index">4</div><div class="route-v2-step-content"><h4>${copy(`¿Qué harás después de ${seg.destination}?`,`What will you do after ${seg.destination}?`)}</h4><p>${copy('Elige lo que mejor describe tu viaje. Puede ser unas horas, una o varias noches, o continuar a otra ciudad.','Choose what best matches your trip. It can be a few hours, one or several nights, or continuing to another city.')}</p><div class="route-v2-choice-grid route-v2-choice-grid--four">
+      ${[['roundtrip',copy('Regreso el mismo día','Return same day'),copy('Visita ida y vuelta.','Round trip visit.')],['stay_return',copy('Me quedaré y regresaré','Stay, then return'),copy('Una o varias noches.','One or several nights.')],['continue',copy('Continuaré a otro lugar','Continue elsewhere'),copy('La ruta sigue desde aquí.','Route continues from here.')],['open',copy('Termino aquí por ahora','Finish here for now'),copy('Podrás continuar después.','Continue later.')]].map(([v,a,b])=>`<label class="route-v2-choice ${seg.disposition===v?'selected':''}"><input type="radio" name="route-disposition" value="${v}" ${seg.disposition===v?'checked':''}><strong>${a}</strong><span>${b}</span></label>`).join('')}</div></div></section>`:''}
+      ${(seg.disposition==='roundtrip'||seg.disposition==='stay_return')?`<section class="route-v2-step is-open"><div class="route-v2-step-index">5</div><div class="route-v2-step-content"><h4>${copy(`¿Cuándo sales de ${seg.destination} para volver a ${seg.origin}?`,`When do you leave ${seg.destination} to return to ${seg.origin}?`)}</h4><p>${copy(seg.disposition==='roundtrip'?'La fecha ya está fijada al mismo día. Solo selecciona las horas.':'Selecciona el día de salida. ITBMO calculará automáticamente los días y noches de estancia.','Select the departure day. ITBMO will automatically calculate the stay.')}</p>${seg.disposition==='stay_return'?_dayChips(meta,'returnDepartureDate',seg.returnDepartureDate,seg.arrivalDate):`<div class="route-v2-fixed-day"><strong>${copy('Mismo día','Same day')}</strong><span>${esc(dmy(seg.arrivalDate))}</span></div>`}<div class="route-v2-timegrid">${_timeSelect('returnDepartureTime',seg.returnDepartureTime,copy(`Salida de ${seg.destination}`,`Leave ${seg.destination}`))}${_timeSelect('returnArrivalTime',seg.returnArrivalTime,copy(`Llegada a ${seg.origin}`,`Arrive ${seg.origin}`))}</div></div></section>`:''}
+      ${seg.disposition==='continue'?`<section class="route-v2-step is-open"><div class="route-v2-step-index">5</div><div class="route-v2-step-content"><h4>${copy(`¿Cuándo continúas desde ${seg.destination}?`,`When do you continue from ${seg.destination}?`)}</h4><p>${copy('Selecciona el día. No importa si pasas una, dos o más noches: la duración se deriva automáticamente.','Select the day. One, two or more nights are all supported; duration is derived automatically.')}</p>${_dayChips(meta,'nextDepartureDate',seg.nextDepartureDate||'',seg.arrivalDate)}${seg.nextDepartureDate?`<label>${copy('Siguiente ciudad o lugar','Next city or place')}<input data-route-next-destination value="${esc(seg.nextDestination||'')}" placeholder="${copy('Ej.: Toledo','E.g. Toledo')}"></label><div class="route-v2-timegrid">${_timeSelect('nextDepartureTime',seg.nextDepartureTime||'',copy(`Salida de ${seg.destination}`,`Leave ${seg.destination}`))}${_timeSelect('nextArrivalTime',seg.nextArrivalTime||'',copy('Hora de llegada','Arrival time'))}</div>`:''}</div></section>`:''}
+      <div class="route-v2-modal-actions"><button type="button" class="route-v2-cancel">${copy('Cancelar','Cancel')}</button>${seg.disposition==='continue'?`<button type="button" class="route-v2-continue">${copy('Guardar tramo y seguir →','Save leg and continue →')}</button>`:`<button type="button" class="route-v2-save">${drafts.length?copy('Guardar recorrido','Save route'):copy('Guardar traslado o parada','Save transfer or stop')}</button>`}</div>`;
+      bind();
+    };
+    const bind=()=>{
+      ui.body.querySelectorAll('[data-day-value]').forEach(btn=>btn.onclick=()=>{const field=btn.closest('[data-day-field]').dataset.dayField;seg[field]=btn.dataset.dayValue;if(field==='departureDate'&&!seg.arrivalDate)seg.arrivalDate=seg[field];if(field==='returnDepartureDate')seg.nights=_deriveNights(seg.arrivalDate,seg.returnDepartureDate);render();});
+      const dest=ui.body.querySelector('[data-route-destination]');if(dest){dest.oninput=e=>seg.destination=e.target.value;dest.onblur=()=>{if(norm(seg.destination))render();};dest.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();dest.blur();}};}
+      const nd=ui.body.querySelector('[data-route-next-destination]');if(nd)nd.oninput=e=>seg.nextDestination=e.target.value;
+      ui.body.querySelectorAll('[data-time-field]').forEach(group=>{const field=group.dataset.timeField;const sync=()=>{const h=group.querySelector(`[data-time-hour="${field}"]`).value,m=group.querySelector(`[data-time-minute="${field}"]`).value;seg[field]=h?`${h}:${m}`:'';};group.querySelectorAll('select').forEach(x=>x.onchange=()=>{sync();render();});});
+      const unk=ui.body.querySelector('[data-route-unknown]');if(unk)unk.onchange=()=>{seg.timePrecision=unk.checked?'unknown':'exact';render();};
+      ui.body.querySelectorAll('input[name="route-disposition"]').forEach(r=>r.onchange=()=>{if(!r.checked)return;seg.disposition=r.value;if(r.value==='roundtrip'){seg.returnDepartureDate=seg.arrivalDate;seg.nights=0;}render();});
       ui.body.querySelector('.route-v2-cancel')?.addEventListener('click',ui.close);
-      ui.body.querySelector('.route-v2-save')?.addEventListener('click',()=>{
-        const errors=validateSegment(seg);
-        if(errors.length){ showInlineError(ui.body,errors[0]); return; }
-        const idx=route.segments.findIndex(x=>x.id===seg.id);
-        if(idx>=0) route.segments[idx]={...seg}; else route.segments.push({...seg});
-        renderRowSummary(row); ui.close();
+      ui.body.querySelector('.route-v2-continue')?.addEventListener('click',()=>{
+        if(!norm(seg.nextDestination)||!seg.nextDepartureDate||(seg.timePrecision!=='unknown'&&(!seg.nextDepartureTime||!seg.nextArrivalTime))){showInlineError(ui.body,copy('Completa el siguiente destino, el día y las horas para continuar la ruta.','Complete the next destination, day and times to continue.'));return;}
+        const nextDestination=norm(seg.nextDestination),nextDepartureDate=seg.nextDepartureDate,nextDepartureTime=seg.nextDepartureTime||'',nextArrivalTime=seg.nextArrivalTime||'';
+        seg.nights=_deriveNights(seg.arrivalDate,nextDepartureDate);const current={...seg};delete current.nextDestination;delete current.nextDepartureDate;delete current.nextDepartureTime;delete current.nextArrivalTime;drafts.push(current);
+        seg={id:uid(),origin:current.destination,destination:nextDestination,departureDate:nextDepartureDate,departureTime:nextDepartureTime,arrivalDate:nextDepartureDate,arrivalTime:nextArrivalTime,disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',timePrecision:current.timePrecision||'exact'};
+        render();
       });
+      ui.body.querySelector('.route-v2-save')?.addEventListener('click',()=>{const errors=validateSegment(seg);if(errors.length){showInlineError(ui.body,errors[0]);return;}const all=[...drafts,{...seg}];if(existing)route.segments=route.segments.filter(x=>x.id!==existing.id);all.forEach(x=>{const i=route.segments.findIndex(y=>y.id===x.id);if(i>=0)route.segments[i]=x;else route.segments.push(x);});renderRowSummary(row);ui.close();});
     };
     render();
   }
@@ -212,6 +147,7 @@
   function validateSegment(seg){
     const errors=[];
     if(!norm(seg.destination)) errors.push(copy('Indica el destino o lugar.','Enter the destination or place.'));
+    if(!norm(seg.disposition)) errors.push(copy('Indica qué harás después de llegar.','Tell us what you will do after arriving.'));
     if(!seg.departureDate||!seg.arrivalDate) errors.push(copy('Indica las fechas de salida y llegada.','Enter departure and arrival dates.'));
     if(seg.timePrecision!=='unknown'&&(!seg.departureTime||!seg.arrivalTime)) errors.push(copy('Indica las horas o marca que todavía no las conoces.','Enter the times or mark that you do not know them yet.'));
     if(seg.disposition==='roundtrip'||seg.disposition==='stay_return'){
@@ -316,7 +252,7 @@
           dayContexts[retIndex].overnight_base=seg.origin; dayContexts[retIndex].end_location=seg.origin;
         }
       }else{
-        const nights=Math.max(1,Number(seg.nights||1));
+        const nights=seg.disposition==='open'?Math.max(1,dayContexts.length-(arrIndex>=0?arrIndex:depIndex)):Math.max(1,Number(seg.nights||1));
         const firstStay=arrIndex>=0?arrIndex:depIndex;
         for(let i=firstStay;i>=0&&i<dayContexts.length&&i<firstStay+nights;i++){
           dayContexts[i].end_location=seg.destination;dayContexts[i].overnight_base=seg.destination;
