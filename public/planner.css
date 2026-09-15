@@ -9022,3 +9022,18 @@ body{
 .hours-day.route-v2-day-partial .time-selector{
   border-color:rgba(78,70,229,.20)!important;
 }
+
+
+/* ITBMO V2.2.3 · CTA hierarchy + preference completion */
+.hours-quick-add-stop{background:linear-gradient(135deg,#087BFA 0%,#08AFC2 100%)!important;color:#fff!important;border-color:transparent!important;box-shadow:0 12px 28px rgba(8,126,190,.24)!important;}
+.hours-quick-add-stop:hover{transform:translateY(-2px)!important;box-shadow:0 16px 34px rgba(8,126,190,.32)!important;}
+.pref-v2-place-card.is-complete{border-color:rgba(12,158,116,.42)!important;background:linear-gradient(135deg,#f7fffc,#f5fbff)!important;box-shadow:0 8px 24px rgba(12,128,103,.07)}
+.pref-v2-place-card.is-complete .pref-v2-number{background:#0c9e74!important;color:#fff!important;}
+.pref-v2-place-card.is-complete .pref-v2-place-title strong::after{content:' · Listo';color:#0c8d69;font-size:.7rem;font-weight:900;}
+.pref-v2-assist{padding:12px 15px!important;background:linear-gradient(135deg,#f7fbff,#f5fffb)!important;}
+#planner-post-generation .toolbar #btn-pdf,#planner-post-generation .toolbar #btn-csv,#planner-post-generation .toolbar #btn-receipt{color:#fff!important;border-color:transparent!important;box-shadow:0 12px 26px rgba(30,86,160,.16)!important;}
+#planner-post-generation .toolbar #btn-pdf{background:linear-gradient(135deg,#d52b61,#b51f53)!important;}
+#planner-post-generation .toolbar #btn-csv{background:linear-gradient(135deg,#087BFA,#4E74D8)!important;}
+#planner-post-generation .toolbar #btn-receipt{background:linear-gradient(135deg,#078b83,#11a9a0)!important;}
+#planner-post-generation .toolbar #btn-pdf::before,#planner-post-generation .toolbar #btn-csv::before,#planner-post-generation .toolbar #btn-receipt::before{background:rgba(255,255,255,.16)!important;color:#fff!important;}
+#preferences-generate-v2.is-generated{background:#eef3f6!important;color:#728091!important;box-shadow:none!important;cursor:default!important;}
