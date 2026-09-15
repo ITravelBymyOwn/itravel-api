@@ -8912,3 +8912,85 @@ body{
 @media(max-width:720px){.route-v2-modal{padding:25px 17px!important;border-radius:24px!important}.route-v2-timegrid,.route-v2-choice-grid--four{grid-template-columns:1fr!important}.route-v2-head{align-items:stretch!important}.route-v2-daychips button{min-width:94px}.route-v2-built>div{grid-template-columns:22px 1fr}.route-v2-built small{grid-column:2}.hours-day-label{min-width:64px}}
 .hours-quick-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.hours-quick-actions .same-schedule-toggle{margin:0!important}.hours-quick-add-stop,.hours-quick-add-destination{border:1px solid rgba(20,128,170,.18);background:#fff;border-radius:999px;padding:10px 14px;font-weight:800;font-size:.78rem;color:#126b8a;cursor:pointer;box-shadow:0 5px 18px rgba(25,70,95,.05);transition:.18s ease}.hours-quick-add-stop:hover,.hours-quick-add-destination:hover{transform:translateY(-1px);box-shadow:0 8px 22px rgba(25,70,95,.08)}.hours-route-guide{margin:7px 0 12px!important;font-size:.75rem!important;line-height:1.5!important;color:#7a849c!important;max-width:760px}.city-row:not(:last-child) .hours-quick-add-destination{display:none}.row-actions{display:none!important}
 @media(max-width:720px){.hours-quick-actions{align-items:stretch;flex-direction:column}.hours-quick-add-stop,.hours-quick-add-destination{width:100%}}
+
+
+/* =========================================================
+   ITBMO Travel Model V2.2 · premium route UX
+   ========================================================= */
+#destinations-box .row-actions{
+  display:flex!important;
+  justify-content:center!important;
+  margin:30px 0 8px!important;
+}
+#add-city-btn:not(:disabled){
+  min-width:min(360px,100%)!important;
+  min-height:58px!important;
+  padding:14px 28px!important;
+  border:0!important;
+  border-radius:18px!important;
+  background:linear-gradient(135deg,#4f46e5 0%,#635bff 52%,#7557e8 100%)!important;
+  color:#fff!important;
+  font-weight:900!important;
+  font-size:.92rem!important;
+  letter-spacing:-.01em;
+  box-shadow:0 16px 38px rgba(79,70,229,.24),inset 0 1px 0 rgba(255,255,255,.28)!important;
+  transition:transform .18s ease,box-shadow .18s ease!important;
+}
+#add-city-btn:hover:not(:disabled){transform:translateY(-2px)!important;box-shadow:0 20px 44px rgba(79,70,229,.3),inset 0 1px 0 rgba(255,255,255,.3)!important}
+.hours-route-guide{
+  margin:12px 0 12px!important;
+  padding:0!important;
+  display:flex!important;
+  flex-direction:column;
+  gap:4px;
+  max-width:780px!important;
+  color:#17204b!important;
+}
+.hours-route-guide strong{font-size:.84rem;font-weight:850;letter-spacing:-.01em}
+.hours-route-guide span{font-size:.75rem;line-height:1.55;color:#78829a}
+.hours-quick-actions{margin:0 0 18px!important;gap:10px!important}
+.hours-quick-add-stop{
+  border:1px solid rgba(41,118,151,.18)!important;
+  background:rgba(255,255,255,.92)!important;
+  color:#126b8a!important;
+  padding:11px 17px!important;
+  border-radius:999px!important;
+  box-shadow:0 8px 24px rgba(25,70,95,.06)!important;
+}
+.route-v2-host{margin-top:12px!important;padding-top:0!important}
+.route-v2-segments{display:grid;gap:9px}
+.route-v2-search-wrap{position:relative}
+.route-v2-destination-field>small{font-weight:600!important;color:#7b849b;font-size:.69rem!important}
+.route-v2-search-menu{
+  position:absolute;z-index:8;left:0;right:0;top:calc(100% + 7px);
+  max-height:280px;overflow:auto;padding:7px;
+  border:1px solid rgba(35,50,96,.1);border-radius:16px;background:rgba(255,255,255,.98);
+  box-shadow:0 20px 55px rgba(22,32,67,.16);backdrop-filter:blur(18px);
+}
+.route-v2-search-menu button{
+  width:100%;border:0;background:transparent;border-radius:11px;padding:10px 11px;
+  display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;cursor:pointer;color:#182247
+}
+.route-v2-search-menu button:hover{background:#f5f6fb}
+.route-v2-search-menu button strong{font-size:.8rem}
+.route-v2-search-menu button span{font-size:.7rem;color:#78829b;white-space:nowrap}
+.route-v2-search-status{padding:12px;font-size:.74rem;color:#7a849c}
+.route-v2-resume{
+  margin-top:14px;padding:14px;border-radius:16px;background:linear-gradient(135deg,#f4f8ff,#f8f7ff);
+  display:grid;grid-template-columns:1fr minmax(180px,230px);gap:14px;align-items:center
+}
+.route-v2-resume>div:first-child{display:flex;flex-direction:column;gap:3px}
+.route-v2-resume strong{font-size:.79rem;color:#1d2852}
+.route-v2-resume small{font-size:.69rem;line-height:1.45;color:#75809b}
+.route-v2-choice-grid{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.route-v2-modal{scrollbar-width:thin}
+.route-v2-modal h3{font-size:1.55rem!important;letter-spacing:-.025em}
+.route-v2-step{padding:20px!important}
+.route-v2-segment-card{padding:13px 14px!important;border-radius:17px!important;background:rgba(255,255,255,.94)!important;box-shadow:0 8px 25px rgba(25,40,80,.04)}
+@media(max-width:720px){
+  #destinations-box .row-actions{margin-top:24px!important}
+  #add-city-btn:not(:disabled){width:100%!important;min-width:0!important}
+  .route-v2-resume{grid-template-columns:1fr}
+  .route-v2-choice-grid{grid-template-columns:1fr!important}
+  .hours-route-guide{margin-top:8px!important}
+}
