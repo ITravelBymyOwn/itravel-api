@@ -497,7 +497,10 @@
         if(owner?.resumeTime && cursor && owner.resumeTime>cursor) cursor=owner.resumeTime;
       });
       const dayEnd=destination.perDay?.[ctx.day-1]?.end||null;
-      if(transfers.length && cursor && dayEnd && cursor<dayEnd) ctx.location_windows.push({location,start:cursor,end:dayEnd});
+      if(transfers.length && cursor){
+        if(dayEnd && cursor<dayEnd) ctx.location_windows.push({location,start:cursor,end:dayEnd});
+        else if(!dayEnd) ctx.location_windows.push({location,start:cursor,end:null,open_end:true,minimum_useful_target:'19:00'});
+      }
       ctx.end_location=ctx.overnight_base||location;
     });
     const transitions=(model?.transitions||[]).filter(t=>norm(t.origin).toLowerCase()===norm(destination.city).toLowerCase()||norm(t.destination).toLowerCase()===norm(destination.city).toLowerCase());
@@ -526,18 +529,16 @@
     if(!state.itineraryLanguage) state.itineraryLanguage=lang()==='es'?'Español':'English';
     places.forEach(p=>{if(!state.preferences.places[p.key]) state.preferences.places[p.key]=preferenceDefaults(p);});
     host.innerHTML=`
-      <div class="pref-v2-assist">
-        <div><span>✦</span><div><strong>${copy('Info Chat ya está disponible','Info Chat is now available')}</strong><p>${copy('Úsalo mientras personalizas tu viaje para investigar zonas, hospedaje, transporte, actividades o cualquier duda. La ventana es flotante: puedes moverla y seguir completando esta sección.','Use it while personalizing your trip to research areas, lodging, transport, activities or any question. The window floats, so you can move it and keep completing this section.')}</p></div></div>
-        <button type="button" data-pref-info-chat>💬 ${copy('Abrir Info Chat','Open Info Chat')}</button>
-      </div>
-      <div class="pref-v2-language"><div><strong>${copy('Idioma del itinerario','Itinerary language')}</strong><small>${copy('Hemos seleccionado el idioma de la página. Puedes cambiarlo si prefieres recibir el itinerario en otro idioma.','We selected the page language. You can change it if you prefer the itinerary in another language.')}</small></div><select data-pref-language>${['Español','English','Français','Italiano','Deutsch','Português','Nederlands','Català','日本語','한국어','中文','Русский','العربية'].map(x=>`<option ${state.itineraryLanguage===x?'selected':''}>${x}</option>`).join('')}</select></div>
       <div class="pref-v2-global">
-        <div class="pref-v2-section-head"><div><strong>${copy('Para todo mi viaje','For my whole trip')}</strong><small>${copy('Añade aquí lo que debe aplicarse a todos los lugares. Es opcional.','Add anything that should apply everywhere. This is optional.')}</small></div></div>
+        <div class="pref-v2-section-head"><div><strong>${copy('1. Para todo mi viaje','1. For my whole trip')}</strong><small>${copy('Estas son generalidades que aplicaremos a todo el viaje. Más abajo podrás completar información específica, lugar por lugar, para cada destino y estancia. Todo este bloque es opcional.','These are general preferences that apply to the whole trip. Below, you can add specific information place by place for every destination and stay. This whole block is optional.')}</small></div></div>
         <textarea data-pref-global placeholder="${copy('Ej.: ritmo tranquilo, viajamos con niños, priorizar experiencias locales, evitar restaurantes demasiado formales…','E.g. relaxed pace, traveling with children, prioritize local experiences, avoid overly formal restaurants…')}">${esc(state.preferences.global.notes||'')}</textarea>
       </div>
-      <div class="pref-v2-list-head"><strong>${copy('Información por destino y estancia','Information by destination and stay')}</strong><p>${copy('Completa un lugar a la vez. Al guardar, se cerrará y quedará un resumen limpio para que la pantalla respire.','Complete one place at a time. After saving, it collapses into a clean summary so the screen stays light.')}</p></div>
-      <div class="pref-v2-place-list">${places.map((p,i)=>placeCard(p,i)).join('')}</div>`;
-    host.querySelector('[data-pref-info-chat]')?.addEventListener('click',()=>document.querySelector('#info-chat-floating')?.click());
+      <div class="pref-v2-list-head"><strong>${copy('2. Información por destino y estancia','2. Information by destination and stay')}</strong><p>${copy('Completa cada lugar por separado. Cuando guardes la información obligatoria, la tarjeta quedará marcada como lista, pero podrás volver a entrar y ajustarla cuando quieras antes de generar.','Complete each place separately. Once the required information is saved, its card will be marked ready, but you can reopen and adjust it any time before generation.')}</p></div>
+      <div class="pref-v2-place-list">${places.map((p,i)=>placeCard(p,i)).join('')}</div>
+      <div class="pref-v2-language"><div><strong>${copy('3. Idioma del itinerario','3. Itinerary language')}</strong><small>${copy('Hemos seleccionado el idioma de la página. Cámbialo aquí si prefieres recibir el itinerario en otro idioma.','We selected the page language. Change it here if you prefer the itinerary in another language.')}</small></div><select data-pref-language>${['Español','English','Français','Italiano','Deutsch','Português','Nederlands','Català','日本語','한국어','中文','Русский','العربية'].map(x=>`<option ${state.itineraryLanguage===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      <div class="pref-v2-assist">
+        <div><span>✦</span><div><strong>${copy('Info Chat está disponible durante la personalización','Info Chat is available while you personalize')}</strong><p>${copy('Si necesitas investigar una zona, hospedaje, transporte o actividad, usa el botón flotante de Info Chat que permanece disponible en pantalla.','If you need to research an area, lodging, transport or activity, use the floating Info Chat button that remains available on screen.')}</p></div></div>
+      </div>`;
     if(state.locked){
       host.querySelectorAll('[data-pref-language],[data-pref-global]').forEach(el=>{el.disabled=true;el.setAttribute('aria-disabled','true');});
     }else{
@@ -548,10 +549,10 @@
   }
   function placeCard(p,index){
     const pref=state.preferences.places[p.key]||preferenceDefaults(p);
-    const complete=Boolean(pref.lodgingChoice&&pref.arrivalTransport&&pref.localTransport);
+    const complete=Boolean((p.type==='daytrip'||pref.lodgingChoice)&&pref.arrivalTransport&&pref.localTransport);
     return `<article class="pref-v2-place-card ${complete?'is-complete':''}">
-      <span class="pref-v2-number">${index+1}</span><div class="pref-v2-place-title"><strong>${esc(p.name)}</strong><small>${p.type==='stay'?copy(`${p.nights||1} noche(s) dentro de la ruta`,'Overnight stay within route'):(p.type==='daytrip'?copy('Parada / excursión de un día','Stop / day trip'):copy(`${p.days||''} día(s) · destino principal`,'Main destination'))}</small></div>
-      <div class="pref-v2-place-summary">${p.type==='daytrip'?'':`<span>🛏 ${esc(pref.lodgingChoice==='recommend'?copy('Recomiéndame','Recommend'):pref.lodgingText||copy('Definido','Set'))}</span>`}<span>🚆 ${esc(pref.arrivalTransport||'')}</span><span>♡ ${pref.interests?.length?esc(pref.interests.slice(0,2).join(', ')):copy('Opcional','Optional')}</span></div>
+      <span class="pref-v2-number">${complete?'✓':index+1}</span><div class="pref-v2-place-title"><strong>${esc(p.name)}</strong><small>${p.type==='stay'?copy(`${p.nights||1} noche(s) dentro de la ruta`,'Overnight stay within route'):(p.type==='daytrip'?copy('Parada / excursión de un día','Stop / day trip'):copy(`${p.days||''} día(s) · destino principal`,'Main destination'))}</small></div>
+      <div class="pref-v2-place-summary">${p.type==='daytrip'?'':`<span>🛏 ${esc(pref.lodgingChoice==='recommend'?copy('ITBMO elegirá una zona base conveniente','ITBMO will choose a convenient base area'):pref.lodgingText||copy('Definido','Set'))}</span>`}<span>🚆 ${esc(pref.arrivalTransport||'')}</span><span>♡ ${pref.interests?.length?esc(pref.interests.slice(0,2).join(', ')):copy('Opcional','Optional')}</span></div>
       <button type="button" data-pref-open="${esc(p.key)}">${state.locked?copy('Ver','View'):(complete?copy('Revisar','Review'):copy('Completar','Complete'))}</button>
     </article>`;
   }
@@ -560,8 +561,8 @@
     const pref=state.preferences.places[place.key]||preferenceDefaults(place);
     const ui=wizardShell(copy(`Personaliza ${place.name}`,`Personalize ${place.name}`),copy('Primero pedimos lo imprescindible. Después puedes añadir detalles opcionales para afinar todavía más la planificación.','We ask for the essentials first. Then you can add optional details to fine-tune the plan.'));
     ui.body.innerHTML=`
-      ${place.type==='daytrip'?'':`<section class="route-v2-step is-open"><div class="route-v2-step-index">1</div><div class="route-v2-step-content"><h4>${copy('Hospedaje','Lodging')} <em>${copy('Obligatorio','Required')}</em></h4><p>${copy(`Indica dónde te hospedarás en ${place.name}. Puede ser el nombre, una dirección, una zona, un punto de referencia o simplemente pedirnos una recomendación.`,`Tell us where you will stay in ${place.name}. It can be a name, address, area, landmark, or simply ask us to recommend one.`)}</p>
-      <select data-p="lodgingChoice"><option value="recommend">${copy('Recomiéndame un alojamiento','Recommend lodging')}</option><option value="hotel">${copy('Tengo hotel/alojamiento','I have lodging')}</option><option value="area">${copy('Solo sé la zona aproximada','I only know the approximate area')}</option><option value="address">${copy('Tengo una dirección / ubicación','I have an address / location')}</option><option value="reference">${copy('Tengo un punto de referencia','I have a landmark')}</option></select>
+      ${place.type==='daytrip'?'':`<section class="route-v2-step is-open"><div class="route-v2-step-index">1</div><div class="route-v2-step-content"><h4>${copy('Hospedaje','Lodging')} <em>${copy('Obligatorio','Required')}</em></h4><p>${copy(`Indica dónde te hospedarás en ${place.name}. Si aún no tienes alojamiento, ITBMO usará una zona base conveniente solo para optimizar rutas y tiempos; no reservará ni seleccionará un hotel por ti.`,`Tell us where you will stay in ${place.name}. It can be a name, address, area, landmark, or simply ask us to recommend one.`)}</p>
+      <select data-p="lodgingChoice"><option value="recommend">${copy('Aún no tengo alojamiento · usa una zona base conveniente','I do not have lodging yet · use a convenient base area')}</option><option value="hotel">${copy('Tengo hotel/alojamiento','I have lodging')}</option><option value="area">${copy('Solo sé la zona aproximada','I only know the approximate area')}</option><option value="address">${copy('Tengo una dirección / ubicación','I have an address / location')}</option><option value="reference">${copy('Tengo un punto de referencia','I have a landmark')}</option></select>
       <input data-p="lodgingText" value="${esc(pref.lodgingText)}" placeholder="${copy('Nombre, dirección, zona, coordenadas o referencia…','Name, address, area, coordinates or landmark…')}"></div></section>`}
       <section class="route-v2-step is-open"><div class="route-v2-step-index">${place.type==='daytrip'?1:2}</div><div class="route-v2-step-content"><h4>${copy('Transporte','Transport')} <em>${copy('Obligatorio','Required')}</em></h4><p>${copy('Dinos cómo llegarás y cómo prefieres moverte. Si aún no lo sabes, selecciona “Recomiéndame”.','Tell us how you will arrive and how you prefer to get around. If you do not know yet, choose “Recommend”.')}</p>
       <div class="route-v2-grid2"><label>${copy('Cómo llegarás','How you will arrive')}<select data-p="arrivalTransport">${transportOptions(pref.arrivalTransport)}</select></label><label>${copy(`Cómo te moverás en ${place.name}`,`How you will get around ${place.name}`)}<select data-p="localTransport">${localTransportOptions(pref.localTransport)}</select></label></div></div></section>
