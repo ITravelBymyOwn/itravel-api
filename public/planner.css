@@ -8994,3 +8994,31 @@ body{
   .route-v2-choice-grid{grid-template-columns:1fr!important}
   .hours-route-guide{margin-top:8px!important}
 }
+
+/* ITBMO Travel Model V2.2.2 · deterministic availability feedback */
+.hours-day.route-v2-day-away{
+  position:relative;
+  opacity:.72;
+  background:linear-gradient(90deg,rgba(91,78,232,.045),rgba(16,132,123,.045));
+  border-radius:18px;
+}
+.hours-day.route-v2-day-away::after{
+  content:attr(data-route-v2-note);
+  grid-column:2 / -1;
+  display:block;
+  margin-top:-.2rem;
+  color:#66758f;
+  font-size:.72rem;
+  font-weight:800;
+}
+.hours-day.route-v2-day-away .time-selector{
+  background:#f3f5f8!important;
+  box-shadow:none!important;
+}
+.hours-day.route-v2-day-away .time-selector select{
+  cursor:not-allowed!important;
+  opacity:.55;
+}
+.hours-day.route-v2-day-partial .time-selector{
+  border-color:rgba(78,70,229,.20)!important;
+}
