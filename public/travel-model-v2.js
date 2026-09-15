@@ -102,10 +102,95 @@
     if(!arrivalISO||!departureISO) return 0;
     return Math.max(0,Math.round((dateKey(departureISO)-dateKey(arrivalISO))/86400000));
   }
+  function _setPlannerTimeGroup(group,value='',disabled=false){
+    if(!group) return;
+    const match=/^(\d{2}):(\d{2})$/.exec(String(value||''));
+    const hour=group.querySelector('.time-hour'), minute=group.querySelector('.time-minute'), hidden=group.querySelector('input[type="hidden"]');
+    if(hour){ hour.value=match?.[1]||''; hour.disabled=Boolean(disabled); }
+    if(minute){ minute.value=['15','30','45'].includes(match?.[2])?match[2]:''; minute.disabled=Boolean(disabled); }
+    if(hidden) hidden.value=match?`${match[1]}:${match[2]}`:'';
+    group.classList.toggle('route-v2-time-locked',Boolean(disabled));
+  }
+  function syncPlannerAvailability(row){
+    const meta=rowMeta(row), route=rowRoute(row), base=norm(meta.city).toLowerCase();
+    const dayRows=[...row.querySelectorAll('.hours-day')];
+    // Restore the user's pre-route schedule before re-applying deterministic route limits.
+    dayRows.forEach(day=>{
+      const startGroup=day.querySelector('[data-time-type="start"]'), endGroup=day.querySelector('[data-time-type="end"]');
+      if(day.dataset.routeV2OriginalStart===undefined) day.dataset.routeV2OriginalStart=norm(day.querySelector('.start')?.value);
+      if(day.dataset.routeV2OriginalEnd===undefined) day.dataset.routeV2OriginalEnd=norm(day.querySelector('.end')?.value);
+      _setPlannerTimeGroup(startGroup,day.dataset.routeV2OriginalStart||'',false);
+      _setPlannerTimeGroup(endGroup,day.dataset.routeV2OriginalEnd||'',false);
+      day.classList.remove('route-v2-day-away','route-v2-day-partial');
+      day.removeAttribute('data-route-v2-note');
+    });
+    const segments=(route.segments||[]).slice().sort((a,b)=>dateKey(a.departureDate,a.departureTime)-dateKey(b.departureDate,b.departureTime));
+    if(!segments.length){
+      dayRows.forEach(day=>{
+        day.dataset.routeV2OriginalStart=norm(day.querySelector('.start')?.value);
+        day.dataset.routeV2OriginalEnd=norm(day.querySelector('.end')?.value);
+        day.dataset.routeV2HasConstraints='0';
+      });
+      return;
+    }
+    dayRows.forEach(day=>{
+      if(day.dataset.routeV2HasConstraints!=='1'){
+        day.dataset.routeV2OriginalStart=norm(day.querySelector('.start')?.value);
+        day.dataset.routeV2OriginalEnd=norm(day.querySelector('.end')?.value);
+      }
+      day.dataset.routeV2HasConstraints='1';
+    });
+    const cycles=[]; let active=null;
+    for(const seg of segments){
+      if(!active && norm(seg.origin).toLowerCase()===base){
+        active={departureDate:seg.departureDate,departureTime:seg.departureTime||'',returnDate:'',returnTime:'',resumeTime:'',open:false};
+      }
+      if(active && (seg.disposition==='roundtrip'||seg.disposition==='stay_return')){
+        active.returnDate=seg.returnDepartureDate||seg.arrivalDate;
+        active.returnTime=seg.returnArrivalTime||'';
+        active.resumeTime=seg.resumeTime||active.returnTime;
+        cycles.push(active); active=null;
+      }else if(active && seg.disposition==='end_block'){
+        active.open=true; cycles.push(active); active=null;
+      }
+    }
+    if(active){ active.open=true; cycles.push(active); }
+    const minTime=(a,b)=>!a?b:(!b?a:(a<b?a:b));
+    const maxTime=(a,b)=>!a?b:(!b?a:(a>b?a:b));
+    dayRows.forEach((day,index)=>{
+      const iso=addDays(meta.baseISO,index); let startMin='',endMax='',away=false,partial=false;
+      for(const c of cycles){
+        if(!c.departureDate) continue;
+        if(iso===c.departureDate){ endMax=minTime(endMax,c.departureTime); partial=true; }
+        if(c.returnDate && iso===c.returnDate){ startMin=maxTime(startMin,c.resumeTime||c.returnTime); partial=true; }
+        const afterDeparture=iso>c.departureDate;
+        const beforeReturn=c.returnDate?iso<c.returnDate:true;
+        if(afterDeparture&&beforeReturn) away=true;
+      }
+      const startGroup=day.querySelector('[data-time-type="start"]'), endGroup=day.querySelector('[data-time-type="end"]');
+      if(away){
+        _setPlannerTimeGroup(startGroup,'',true); _setPlannerTimeGroup(endGroup,'',true);
+        day.classList.add('route-v2-day-away'); day.dataset.routeV2Note=copy('Día ocupado fuera del destino base','Day occupied away from base destination');
+        return;
+      }
+      if(partial){
+        day.classList.add('route-v2-day-partial');
+        if(startMin){
+          const original=day.dataset.routeV2OriginalStart||'';
+          _setPlannerTimeGroup(startGroup,original&&original>startMin?original:startMin,false);
+        }
+        if(endMax){
+          const original=day.dataset.routeV2OriginalEnd||'';
+          _setPlannerTimeGroup(endGroup,original&&original<endMax?original:endMax,false);
+        }
+      }
+    });
+  }
   function renderRowSummary(row){
     const host=ensureRouteHost(row), meta=rowMeta(row), route=rowRoute(row);
     const segments=(route.segments||[]).slice().sort((a,b)=>dateKey(a.departureDate,a.departureTime)-dateKey(b.departureDate,b.departureTime));
-    host.innerHTML=`<div class="route-v2-segments">${segments.length?segments.map(seg=>segmentCard(seg)).join(''):''}</div>`;
+    host.innerHTML=`<div class="route-v2-segments">${segments.length?segments.map(seg=>segmentCard(seg,meta.city)).join(''):''}</div>`;
+    syncPlannerAvailability(row);
     const quickStop=row.querySelector('.hours-quick-add-stop');
     if(quickStop&&!quickStop.dataset.routeBound){
       quickStop.dataset.routeBound='1';
@@ -117,13 +202,14 @@
       renderRowSummary(row);
     }));
   }
-  function segmentCard(seg){
+  function segmentCard(seg,baseCity=''){
     const returns=seg.disposition==='roundtrip'||seg.disposition==='stay_return';
-    const end=returns?` → ${seg.origin}`:'';
-    const endPlace=returns?seg.origin:seg.destination;
+    const returnBase=norm(seg.returnDestination||seg.baseDestination||baseCity||seg.origin);
+    const end=returns?` → ${returnBase}`:'';
+    const endPlace=returns?returnBase:seg.destination;
     const endDate=returns?seg.returnDepartureDate:seg.arrivalDate;
     const endTime=returns?seg.returnArrivalTime:seg.arrivalTime;
-    return `<article class="route-v2-segment-card"><div class="route-v2-segment-icon">↗</div><div class="route-v2-segment-main"><strong>${esc(seg.origin)} → ${esc(seg.destination)}${esc(end)}</strong><span>${esc(dmy(seg.departureDate)||seg.departureDate)} · ${esc(seg.departureTime||copy('hora por definir','time TBD'))} · ${copy('finaliza en','ends in')} ${esc(endPlace)} ${esc(dmy(endDate)||endDate)} ${esc(endTime||'')}</span><small>${returns?copy(`El Planner retoma ${seg.origin} desde ${seg.resumeTime||seg.returnArrivalTime||'--:--'}.`,`Planner resumes ${seg.origin} from ${seg.resumeTime||seg.returnArrivalTime||'--:--'}.`):copy('El recorrido continúa desde esta ubicación.','The route continues from this location.')}</small></div><div class="route-v2-segment-actions"><button type="button" data-route-edit="${esc(seg.id)}">${copy('Editar','Edit')}</button><button type="button" data-route-remove="${esc(seg.id)}">✕</button></div></article>`;
+    return `<article class="route-v2-segment-card"><div class="route-v2-segment-icon">↗</div><div class="route-v2-segment-main"><strong>${esc(seg.origin)} → ${esc(seg.destination)}${esc(end)}</strong><span>${esc(dmy(seg.departureDate)||seg.departureDate)} · ${esc(seg.departureTime||copy('hora por definir','time TBD'))} · ${copy('finaliza en','ends in')} ${esc(endPlace)} ${esc(dmy(endDate)||endDate)} ${esc(endTime||'')}</span><small>${returns?copy(`El Planner retoma ${returnBase} desde ${seg.resumeTime||seg.returnArrivalTime||'--:--'}.`,`Planner resumes ${returnBase} from ${seg.resumeTime||seg.returnArrivalTime||'--:--'}.`):copy('El recorrido continúa desde esta ubicación.','The route continues from this location.')}</small></div><div class="route-v2-segment-actions"><button type="button" data-route-edit="${esc(seg.id)}">${copy('Editar','Edit')}</button><button type="button" data-route-remove="${esc(seg.id)}">✕</button></div></article>`;
   }
   function wizardShell(title,subtitle){
     document.querySelector('.route-v2-overlay')?.remove(); const overlay=document.createElement('div');overlay.className='route-v2-overlay';
@@ -145,7 +231,7 @@
     const meta=rowMeta(row),route=rowRoute(row);
     if(!meta.baseISO||!meta.days){alert(copy('Primero indica el primer día y la cantidad de días del destino.','First enter the start date and number of days.'));return;}
     let drafts=[];
-    let seg=existing?{...existing}:{id:uid(),origin:meta.city||'',destination:'',destinationCountry:'',departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',resumeTime:'',timePrecision:'exact'};
+    let seg=existing?{...existing}:{id:uid(),baseDestination:meta.city||'',origin:meta.city||'',destination:'',destinationCountry:'',departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',resumeTime:'',timePrecision:'exact'};
     const ui=wizardShell(copy('Agregar lugar a mi recorrido','Add a place to my route'),copy(`Construye el recorrido dentro de ${meta.city}. El ciclo debe regresar a ${meta.city} o terminar en otra ubicación al consumir el último día disponible.`,`Build the route within ${meta.city}. The cycle must return to ${meta.city} or end elsewhere when the last available day is consumed.`));
 
     const allDrafts=()=>[...drafts,{...seg}];
@@ -209,7 +295,7 @@
         if(dateKey(seg.nextDepartureDate,seg.nextDepartureTime)<dateKey(seg.arrivalDate,seg.arrivalTime)){showInlineError(ui.body,copy('No puedes salir del lugar antes de haber llegado.','You cannot leave before arriving.'));return;}
         seg.nights=_deriveNights(seg.arrivalDate,seg.nextDepartureDate);
         const current={...seg,disposition:'continue'};
-        const next={id:uid(),origin:current.destination,destination:norm(current.nextDestination),destinationCountry:current.nextDestinationCountry||'',destinationCountryCode:current.nextDestinationCountryCode||'',departureDate:current.nextDepartureDate,departureTime:current.nextDepartureTime,arrivalDate:current.nextDepartureDate,arrivalTime:current.nextArrivalTime,disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',resumeTime:'',timePrecision:'exact'};
+        const next={id:uid(),baseDestination:meta.city||'',origin:current.destination,destination:norm(current.nextDestination),destinationCountry:current.nextDestinationCountry||'',destinationCountryCode:current.nextDestinationCountryCode||'',departureDate:current.nextDepartureDate,departureTime:current.nextDepartureTime,arrivalDate:current.nextDepartureDate,arrivalTime:current.nextArrivalTime,disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',resumeTime:'',timePrecision:'exact'};
         delete current.nextDestination;delete current.nextDestinationCountry;delete current.nextDestinationCountryCode;delete current.nextDepartureDate;delete current.nextDepartureTime;delete current.nextArrivalTime;
         drafts.push(current);seg=next;render();
       });
@@ -241,7 +327,9 @@
     if(blockEnd&&(seg.departureDate>blockEnd||seg.arrivalDate>blockEnd||seg.returnDepartureDate>blockEnd)) errors.push(copy('Este recorrido supera los días disponibles del destino principal.','This route exceeds the main destination’s available days.'));
     if(seg.disposition==='end_block' && blockEnd && seg.arrivalDate!==blockEnd) errors.push(copy('Solo puedes finalizar fuera del destino base cuando hayas llegado al último día disponible.','You can only finish away from the base destination on the last available day.'));
     if(seg.disposition==='roundtrip'||seg.disposition==='stay_return'){
-      if(!seg.returnDepartureDate||!seg.returnDepartureTime||!seg.returnArrivalTime) errors.push(copy('Completa el regreso al destino base.','Complete the return to the base destination.'));
+      if(!seg.returnDepartureDate) errors.push(copy(`Indica el día en que regresarás a ${meta?.city||'destino base'}.`,`Enter the day you will return to ${meta?.city||'the base destination'}.`));
+      else if(!seg.returnDepartureTime) errors.push(copy(`Indica la hora de salida de ${seg.destination} para regresar a ${meta?.city||'el destino base'}.`,`Enter the departure time from ${seg.destination} to return to ${meta?.city||'the base destination'}.`));
+      else if(!seg.returnArrivalTime) errors.push(copy(`Indica la hora de llegada a ${meta?.city||'el destino base'}.`,`Enter the arrival time at ${meta?.city||'the base destination'}.`));
       if(seg.resumeTime&&seg.returnArrivalTime&&seg.resumeTime<seg.returnArrivalTime) errors.push(copy('La hora para retomar el Planner debe ser igual o posterior a tu llegada.','Planner resume time must be at or after your arrival.'));
     }
     const out=dateKey(seg.departureDate,seg.departureTime||'00:00'),arr=dateKey(seg.arrivalDate,seg.arrivalTime||'23:59');
@@ -262,6 +350,18 @@
     row.querySelector('.city')?.addEventListener('change',rerender);
     row.querySelector('.baseDatePicker')?.addEventListener('change',rerender);
     row.querySelector('.days')?.addEventListener('change',rerender);
+    row.querySelectorAll('.hours-day .time-selector select').forEach(select=>select.addEventListener('change',()=>{
+      const day=select.closest('.hours-day');
+      if(!day || !(rowRoute(row).segments||[]).length) return;
+      const group=select.closest('.time-selector');
+      const field=group?.dataset.timeType;
+      const h=group?.querySelector('.time-hour')?.value||'', m=group?.querySelector('.time-minute')?.value||'00';
+      const value=h?`${h}:${m}`:'';
+      if(field==='start') day.dataset.routeV2OriginalStart=value;
+      if(field==='end') day.dataset.routeV2OriginalEnd=value;
+      setTimeout(()=>syncPlannerAvailability(row),0);
+    }));
+    row.querySelector('.same-schedule')?.addEventListener('change',()=>setTimeout(()=>syncPlannerAvailability(row),0));
     renderRowSummary(row);
   }
 
@@ -352,9 +452,9 @@
       if(seg.disposition==='roundtrip'){
         const retIndex=dayContexts.findIndex(x=>x.date===seg.returnDepartureDate);
         if(retIndex>=0){
-          dayContexts[retIndex].fixed_transfers.push({origin:seg.destination,destination:seg.origin,departure:seg.returnDepartureTime||null,arrival:seg.returnArrivalTime||null,date:seg.returnDepartureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED'});
-          dayContexts[retIndex].hard_route_constraints.push(`${seg.destination} → ${seg.origin}${seg.returnDepartureTime?` ${seg.returnDepartureTime}`:''}${seg.returnArrivalTime?`–${seg.returnArrivalTime}`:''}`);
-          dayContexts[retIndex].overnight_base=seg.origin; dayContexts[retIndex].end_location=seg.origin;
+          dayContexts[retIndex].fixed_transfers.push({origin:seg.destination,destination:destination.city,departure:seg.returnDepartureTime||null,arrival:seg.returnArrivalTime||null,date:seg.returnDepartureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED'});
+          dayContexts[retIndex].hard_route_constraints.push(`${seg.destination} → ${destination.city}${seg.returnDepartureTime?` ${seg.returnDepartureTime}`:''}${seg.returnArrivalTime?`–${seg.returnArrivalTime}`:''}`);
+          dayContexts[retIndex].overnight_base=destination.city; dayContexts[retIndex].end_location=destination.city;
         }
       }else{
         const nights=seg.disposition==='end_block'?Math.max(1,dayContexts.length-(arrIndex>=0?arrIndex:depIndex)):Math.max(1,Number(seg.nights||1));
@@ -368,14 +468,22 @@
           const retIndex=dayContexts.findIndex(x=>x.date===seg.returnDepartureDate);
           if(retIndex>=0){
             dayContexts[retIndex].start_location=seg.destination;
-            dayContexts[retIndex].fixed_transfers.push({origin:seg.destination,destination:seg.origin,departure:seg.returnDepartureTime||null,arrival:seg.returnArrivalTime||null,date:seg.returnDepartureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED'});
-            dayContexts[retIndex].hard_route_constraints.push(`${seg.destination} → ${seg.origin}${seg.returnDepartureTime?` ${seg.returnDepartureTime}`:''}${seg.returnArrivalTime?`–${seg.returnArrivalTime}`:''}`);
-            dayContexts[retIndex].end_location=seg.origin; dayContexts[retIndex].overnight_base=seg.origin;
-            if(retIndex+1<dayContexts.length) dayContexts[retIndex+1].start_location=seg.origin;
+            dayContexts[retIndex].fixed_transfers.push({origin:seg.destination,destination:destination.city,departure:seg.returnDepartureTime||null,arrival:seg.returnArrivalTime||null,date:seg.returnDepartureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED'});
+            dayContexts[retIndex].hard_route_constraints.push(`${seg.destination} → ${destination.city}${seg.returnDepartureTime?` ${seg.returnDepartureTime}`:''}${seg.returnArrivalTime?`–${seg.returnArrivalTime}`:''}`);
+            dayContexts[retIndex].end_location=destination.city; dayContexts[retIndex].overnight_base=destination.city;
+            if(retIndex+1<dayContexts.length) dayContexts[retIndex+1].start_location=destination.city;
           }
         }
       }
     });
+    // Propagate the real overnight location into the following morning.
+    // This is essential for chained routes such as Madrid → Segovia → Toledo → Madrid.
+    for(let i=1;i<dayContexts.length;i++){
+      const previousBase=dayContexts[i-1].overnight_base||dayContexts[i-1].end_location;
+      if(previousBase && norm(previousBase).toLowerCase()!==norm(destination.city).toLowerCase() && norm(dayContexts[i].start_location).toLowerCase()===norm(destination.city).toLowerCase()){
+        dayContexts[i].start_location=previousBase;
+      }
+    }
     // Build deterministic windows for exact same-day transfers.
     dayContexts.forEach(ctx=>{
       const transfers=ctx.fixed_transfers.slice().sort((a,b)=>(a.departure||'99:99').localeCompare(b.departure||'99:99'));
@@ -385,7 +493,7 @@
         if(t.departure && availableStart && availableStart!==t.departure) ctx.location_windows.push({location,start:availableStart,end:t.departure});
         ctx.location_windows.push({location:`${t.origin} → ${t.destination}`,start:t.departure,end:t.arrival,type:'fixed_transfer'});
         cursor=t.arrival||cursor;location=t.destination;
-        const owner=segments.find(seg=>seg.returnDepartureDate===ctx.date&&seg.returnArrivalTime===t.arrival&&norm(seg.origin).toLowerCase()===norm(t.destination).toLowerCase());
+        const owner=segments.find(seg=>seg.returnDepartureDate===ctx.date&&seg.returnArrivalTime===t.arrival&&norm(destination.city).toLowerCase()===norm(t.destination).toLowerCase());
         if(owner?.resumeTime && cursor && owner.resumeTime>cursor) cursor=owner.resumeTime;
       });
       const dayEnd=destination.perDay?.[ctx.day-1]?.end||null;
