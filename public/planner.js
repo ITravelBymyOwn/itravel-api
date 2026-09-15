@@ -2235,13 +2235,18 @@ function makeHoursBlock(days,baseDMY=''){
   const quickActions=document.createElement('div');
   quickActions.className='hours-quick-actions';
   quickActions.appendChild(same);
-  const quickStop=document.createElement('button'); quickStop.type='button'; quickStop.className='hours-quick-add-stop'; quickStop.innerHTML=`＋ ${getLang()==='es'?'Añadir traslado o parada':'Add transfer or stop'}`;
+  const quickStop=document.createElement('button');
+  quickStop.type='button';
+  quickStop.className='hours-quick-add-stop';
+  quickStop.innerHTML=`＋ ${getLang()==='es'?'Agregar lugar a mi recorrido':'Add a place to my route'}`;
   quickActions.appendChild(quickStop);
-  const quickDestination=document.createElement('button'); quickDestination.type='button'; quickDestination.className='hours-quick-add-destination'; quickDestination.innerHTML=`＋ ${getLang()==='es'?'Agregar destino':'Add destination'}`;
-  quickDestination.addEventListener('click',()=>document.querySelector('#add-city-btn')?.click());
-  quickActions.appendChild(quickDestination);
   wrap.appendChild(quickActions);
-  const routeGuide=document.createElement('p');routeGuide.className='hours-route-guide';routeGuide.textContent=getLang()==='es'?'¿Visitarás otro lugar o dormirás en otra ciudad? Añádelo aquí. Si no, ITBMO seguirá recomendando excursiones por ti.':'Visiting another place or sleeping in another city? Add it here. Otherwise, ITBMO can still recommend excursions for you.';wrap.appendChild(routeGuide);
+  const routeGuide=document.createElement('div');
+  routeGuide.className='hours-route-guide';
+  routeGuide.innerHTML=getLang()==='es'
+    ? `<strong>¿Visitarás otros lugares durante tu estancia?</strong><span>Agrégalos a tu recorrido y dinos cuándo irás. Puedes regresar al destino base, quedarte varias noches o continuar hacia otro lugar. Si no agregas ninguno, ITBMO seguirá planificando este destino y podrá recomendar excursiones por ti.</span>`
+    : `<strong>Will you visit other places during this stay?</strong><span>Add them to your route and tell us when. You can return to the base destination, stay several nights or continue elsewhere. If you add none, ITBMO will keep planning this destination and may recommend day trips.</span>`;
+  quickActions.insertAdjacentElement('beforebegin',routeGuide);
 
   const header = document.createElement('div');
   header.className = 'hours-header';
