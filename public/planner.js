@@ -2199,7 +2199,26 @@ function mirrorFirstDaySchedule(wrap){
   });
 }
 
-function makeHoursBlock(days){
+function _plannerDayDateLabel_(baseDMY,dayNumber){
+  const start=parsePlannerDate(baseDMY||'');
+  if(!start) return '';
+  const date=addDays(start,Math.max(0,Number(dayNumber||1)-1));
+  try{
+    return new Intl.DateTimeFormat(getLang()==='es'?'es-ES':'en-US',{day:'2-digit',month:'short'}).format(date).replace('.','');
+  }catch(_){ return formatDMY(date); }
+}
+function updateHoursDayDates(wrap,baseDMY=''){
+  if(!wrap) return;
+  qsa('.hours-day',wrap).forEach((dayRow,index)=>{
+    const label=qs('.hours-day-label',dayRow);
+    if(!label) return;
+    const date=_plannerDayDateLabel_(baseDMY,index+1);
+    label.innerHTML=`<strong>${t('uiDay',index+1)}</strong>${date?`<small>${date}</small>`:''}`;
+    dayRow.dataset.date=baseDMY?dateToPlannerStorage(formatISODate(addDays(parsePlannerDate(baseDMY),index))):'';
+  });
+}
+
+function makeHoursBlock(days,baseDMY=''){
   days=Math.min(MAX_DAYS_PER_DESTINATION, Math.max(1, Number(days) || 1));
   const wrap = document.createElement('div');
   wrap.className = 'hours-block';
@@ -2213,7 +2232,16 @@ function makeHoursBlock(days){
   const same=document.createElement('label');
   same.className='same-schedule-toggle';
   same.innerHTML=`<input class="same-schedule" type="checkbox"><span class="same-schedule-ui" aria-hidden="true"></span><span>${t('uiSameSchedule')}</span>`;
-  wrap.appendChild(same);
+  const quickActions=document.createElement('div');
+  quickActions.className='hours-quick-actions';
+  quickActions.appendChild(same);
+  const quickStop=document.createElement('button'); quickStop.type='button'; quickStop.className='hours-quick-add-stop'; quickStop.innerHTML=`＋ ${getLang()==='es'?'Añadir traslado o parada':'Add transfer or stop'}`;
+  quickActions.appendChild(quickStop);
+  const quickDestination=document.createElement('button'); quickDestination.type='button'; quickDestination.className='hours-quick-add-destination'; quickDestination.innerHTML=`＋ ${getLang()==='es'?'Agregar destino':'Add destination'}`;
+  quickDestination.addEventListener('click',()=>document.querySelector('#add-city-btn')?.click());
+  quickActions.appendChild(quickDestination);
+  wrap.appendChild(quickActions);
+  const routeGuide=document.createElement('p');routeGuide.className='hours-route-guide';routeGuide.textContent=getLang()==='es'?'¿Visitarás otro lugar o dormirás en otra ciudad? Añádelo aquí. Si no, ITBMO seguirá recomendando excursiones por ti.':'Visiting another place or sleeping in another city? Add it here. Otherwise, ITBMO can still recommend excursions for you.';wrap.appendChild(routeGuide);
 
   const header = document.createElement('div');
   header.className = 'hours-header';
@@ -2228,7 +2256,7 @@ function makeHoursBlock(days){
     const row = document.createElement('div');
     row.className = 'hours-day';
     row.innerHTML = `
-      <span>${t('uiDay', d)}</span>
+      <span class="hours-day-label"><strong>${t('uiDay', d)}</strong>${_plannerDayDateLabel_(baseDMY,d)?`<small>${_plannerDayDateLabel_(baseDMY,d)}</small>`:''}</span>
       ${timeSelectorMarkup('start',t('uiAriaStart'))}
       ${timeSelectorMarkup('end',t('uiAriaEnd'))}
     `;
@@ -2261,6 +2289,7 @@ function makeHoursBlock(days){
   });
   toggle?.addEventListener('change',refreshMirrorState);
   refreshMirrorState();
+  updateHoursDayDates(wrap,baseDMY);
   return wrap;
 }
 
@@ -2579,7 +2608,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     </div>
     <div class="city-card-schedule">
       <div class="city-card-schedule__head">
-        <span>${getLang()==='es'?'TIEMPO EN DESTINO':'TIME IN DESTINATION'}</span>
+        <span>${getLang()==='es'?'HORARIO DEL DÍA':'DAILY SCHEDULE'}</span>
         <small>${getLang()==='es'?'Ajusta solo lo que ya tengas claro.':'Adjust only what you already know.'}</small>
       </div>
       <div class="city-card-schedule__body"></div>
@@ -2595,12 +2624,13 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
     if(baseDateEl) baseDateEl.value=dateToPlannerStorage(baseDatePicker.value);
     baseDatePicker.dataset.autoSuggested='0';
     updateCityDateSummary(row);
+    updateHoursDayDates(qs('.hours-block',row),baseDateEl?.value||'');
     reorderDestinationRowsByDate();
     _travelV2()?.renderRowSummary?.(row);
     scheduleAstraCoach('schedule',()=>qs('.hours-block',row),360);
   });
 
-  let hoursWrap = pref.days ? makeHoursBlock(pref.days) : document.createElement('div');
+  let hoursWrap = pref.days ? makeHoursBlock(pref.days,pref.baseDate||'') : document.createElement('div');
   if(!pref.days) hoursWrap.className = 'hours-block';
   qs('.city-card-schedule__body',row)?.appendChild(hoursWrap);
 
@@ -2611,7 +2641,7 @@ function addCityRow(pref={city:'',country:'',days:'',baseDate:''}){
 
   daysSelect.addEventListener('change', ()=>{
     const n = Math.max(0, parseInt(daysSelect.value||0,10));
-    const nextHoursWrap=n>0 ? makeHoursBlock(n) : document.createElement('div');
+    const nextHoursWrap=n>0 ? makeHoursBlock(n,qs('.baseDate',row)?.value||'') : document.createElement('div');
     if(n<=0) nextHoursWrap.className='hours-block';
     hoursWrap.replaceWith(nextHoursWrap);
     hoursWrap=nextHoursWrap;
