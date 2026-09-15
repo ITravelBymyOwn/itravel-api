@@ -2896,16 +2896,12 @@ function showPreferencesStage(){
   requestAnimationFrame(()=>{
     autoGrowPreferencesField();
 
-    /* Put the actual writing area in the traveler's field of view. */
-    const target=$preferencesField || $preferencesStage;
+    /* Preferences must always open at the beginning of the stage. */
+    const target=$preferencesStage;
     if(target){
       const rect=target.getBoundingClientRect();
       const current=window.scrollY || document.documentElement.scrollTop || 0;
-      const offset=Math.min(300,Math.max(210,(window.innerHeight || 800)*0.32));
-      window.scrollTo({
-        top:Math.max(0,current + rect.top - offset),
-        behavior:'smooth'
-      });
+      window.scrollTo({top:Math.max(0,current + rect.top - 18),behavior:'smooth'});
     }
   });
   scheduleAstraCoach('preferences','#preferences-stage',520);
@@ -4962,8 +4958,8 @@ function setOverlayMessage(msg=t('overlayDefault')){
   const isEs = getLang() === 'es';
   p.classList.add('astra-overlay-copy');
   p.innerHTML = isEs
-    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong> Mientras ITBMO trabaja, explora los enlaces de abajo para vuelos, hospedaje, transporte y experiencias.</span>`
-    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong> While ITBMO works, explore the links below for flights, stays, transport and experiences.</span>`;
+    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
 }
 
 function showWOW(on, msg){
@@ -5584,7 +5580,11 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
       preserve_automatic_day_trip_recommendations_when_no_user_fixed_movement_conflicts:true,
       same_day_location_changes_are_allowed:true,
       fixed_transfer_intervals_must_remain_activity_free:true,
-      each_day_must_start_from_the_real_previous_overnight_base:true
+      each_day_must_start_from_the_real_previous_overnight_base:true,
+      location_windows_are_hard_physical_availability:true,
+      after_arrival_use_remaining_time_productively:true,
+      open_end_window_policy:'When a route arrival has no user end time, continue useful planning in that actual location to at least about 19:00 and later when worthwhile; never stop merely because the parent city changed.',
+      transfer_buffer_policy:'Before rail/bus/ferry departures, include realistic station/terminal access plus a prudent boarding buffer. Airports require materially larger buffers. Never treat the user fixed departure interval as if station access starts at that same minute.'
     },
     global_day_trip_policy:_globalDayTripPolicy_(),
     time_window_policy:_globalTimeWindowPolicy_(totalDays,perDay),
@@ -5694,6 +5694,8 @@ HARD RULES:
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
 - Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
+- TRAVEL MODEL V2 LOCATION WINDOWS ARE HARD PHYSICAL AVAILABILITY. Generate activities in EVERY available location window, including the remaining hours after arrival in a subdestination. A parent-city change must never cause the post-arrival window to be discarded.
+- For a fixed transfer, finish sightseeing early enough to reach the real station/terminal/airport with a prudent operational buffer BEFORE the declared departure. For rail/bus/ferry, normally protect at least 20–30 minutes at the departure point plus realistic access time; airports require substantially more. Do not double-count the fixed transfer itself.
 - Apply special_calendar_event_policy using the exact calendar_dates in KNOWN USER FACTS. When a meaningful celebration defines that date, protect it as an anchor, schedule sufficient arrival time, and continue through its defining moment (including after midnight when appropriate) unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - On Day 1, the supplied start time means the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent an airport, flight, station or inbound transfer.
 - Infer reasonable missing details and conservatively complete partial input, while prioritizing detailed instructions.
@@ -5914,7 +5916,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE'
+    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -6146,6 +6148,35 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         }
       });
     });
+    // Every deterministic location window must be used in the correct physical place.
+    (ctx.location_windows||[]).forEach(window=>{
+      if(window.type==='fixed_transfer' || !window.start) return;
+      const ws=_hhmmToMinutes_(window.start), we=window.end?_hhmmToMinutes_(window.end):null;
+      if(ws==null) return;
+      const rowsInWindow=dayRows.filter(r=>{
+        const rs=_hhmmToMinutes_(r.start), re=_hhmmToMinutes_(r.end);
+        if(rs==null||re==null) return false;
+        const insideStart=rs>=ws;
+        const insideEnd=we==null ? true : re<=we;
+        return insideStart&&insideEnd;
+      });
+      const useful=rowsInWindow.filter(r=>String(r.kind||'activity').toLowerCase()!=='transport');
+      if((window.open_end||we==null) && useful.length===0){
+        errors.push({
+          code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,available_from:window.start,
+          instruction:`After arriving in ${window.location} at ${window.start}, continue useful itinerary planning there. The missing end time is not a reason to stop; use the remaining day productively to at least about 19:00 and later when high-value evening content warrants it.`
+        });
+      }
+      rowsInWindow.forEach((r,index)=>{
+        const text=`${r.activity||''} ${r.from||''} ${r.to||''}`;
+        const knownPlaces=[city,ctx.start_location,ctx.end_location,ctx.overnight_base,...(ctx.fixed_transfers||[]).flatMap(t=>[t.origin,t.destination])].filter(Boolean);
+        const clearlyOther=knownPlaces.some(place=>!_arePoiAliases_(place,window.location)&&_arePoiAliases_(text,place));
+        if(clearlyOther){
+          errors.push({code:'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',day:ctx.day,row:index+1,expected_location:window.location,window_start:window.start,window_end:window.end||null,instruction:'Move this activity into the correct physical location window or replace it with a valid activity there.'});
+        }
+      });
+    });
+
     if(ctx.overnight_base && dayRows.length && ((ctx.fixed_transfers||[]).length || String(ctx.overnight_base||'').toLowerCase()!==String(city||'').toLowerCase())){
       const last=dayRows[dayRows.length-1];
       // Only flag a wrong overnight base when the final To clearly resolves to a
@@ -6390,6 +6421,10 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
 
     const finalRows=_dedupeRows_(finalResult.rows);
     itineraries[city].audit=finalResult.report;
+    const blockingCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','END_BEFORE_MINIMUM_TARGET']);
+    if((finalResult.report?.errors||[]).some(error=>blockingCodes.has(error?.code))){
+      throw new Error(`ROUTE_QUALITY_BLOCK:${city}`);
+    }
 
     // Replace every generated day atomically; do not merge stale rows.
     pushRows(city,finalRows,true);
@@ -6425,6 +6460,8 @@ ${JSON.stringify(facts)}
 
 HARD RULES:
 - Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
+- TRAVEL MODEL V2 LOCATION WINDOWS ARE HARD. Use every meaningful pre-departure and post-arrival window in the actual physical location. After arriving in a subdestination, continue useful planning there rather than ending the day because the parent destination changed.
+- Before fixed rail/bus/ferry departures, reserve realistic access to the departure point and normally at least 20–30 minutes of boarding margin; airports need materially more.
 - Inspect calendar_dates and enforce special_calendar_event_policy. Protect a destination-defining special-date celebration as an anchor and continue through its defining moment, including after midnight when appropriate, unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - Day 1 starts AT the lodging at the user-provided time; complete check-in or luggage drop before sightseeing and do not invent airport/flight/arrival transport details.
 - Use the lodging/address/coordinates/area as the primary geographic base, minimizing unnecessary transfers and returning there when sensible.
@@ -6456,6 +6493,8 @@ HARD RULES:
       city,rows,dest.days,syntheticMaster,perDay,baseDate,hotel,transport,true
     );
     rows=_dedupeRows_(finalResult.rows);
+    const blockingCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','END_BEFORE_MINIMUM_TARGET']);
+    if((finalResult.report?.errors||[]).some(error=>blockingCodes.has(error?.code))) throw new Error(`ROUTE_QUALITY_BLOCK:${city}`);
     pushRows(city,rows,true);
     itineraries[city].audit=finalResult.report;
 
@@ -7118,6 +7157,12 @@ async function runPaidGeneration({manualRetry=false}={}){
     _finishAstraGenerationMetrics_();
     showWOW(false);
     setExportToolbarVisibility();
+    if($preferencesGenerateV2){
+      $preferencesGenerateV2.disabled=true;
+      $preferencesGenerateV2.setAttribute('aria-disabled','true');
+      $preferencesGenerateV2.textContent=getLang()==='es'?'✓ Itinerario generado':'✓ Itinerary generated';
+      $preferencesGenerateV2.classList.add('is-generated');
+    }
     chatMsg(getPlannerCompletionMessage(),'ai');
     setPlanningChatLocked(true);
     setTimeout(()=>showFinalDownloadModal(),260);
