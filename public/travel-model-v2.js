@@ -177,11 +177,11 @@
         day.classList.add('route-v2-day-partial');
         if(startMin){
           const original=day.dataset.routeV2OriginalStart||'';
-          _setPlannerTimeGroup(startGroup,original&&original>startMin?original:startMin,false);
+          _setPlannerTimeGroup(startGroup,original&&original>startMin?original:startMin,true);
         }
         if(endMax){
           const original=day.dataset.routeV2OriginalEnd||'';
-          _setPlannerTimeGroup(endGroup,original&&original<endMax?original:endMax,false);
+          _setPlannerTimeGroup(endGroup,original&&original<endMax?original:endMax,true);
         }
       }
     });
@@ -247,8 +247,8 @@
         ${hasDay?`<section class="route-v2-step is-open"><div class="route-v2-step-index">2</div><div class="route-v2-step-content"><h4>${copy('¿A dónde vas?','Where are you going?')}</h4><p>${copy(`Sales desde ${seg.origin}. No hay lugares predefinidos: busca el destino que tú decidiste.`,`You leave from ${seg.origin}. There are no predefined places: search for the destination you chose.`)}</p>${_destinationField('destination',seg.destination)}</div></section>`:''}
         ${hasDay&&hasDest?`<section class="route-v2-step is-open"><div class="route-v2-step-index">3</div><div class="route-v2-step-content"><h4>${copy(`¿Cuándo sales de ${seg.origin} y llegas a ${seg.destination}?`,`When do you leave ${seg.origin} and arrive in ${seg.destination}?`)}</h4><p>${copy(`La hora de salida cerrará la ventana disponible del Planner en ${seg.origin}; al llegar, comenzará la ventana disponible en ${seg.destination}.`,`Departure closes the Planner window in ${seg.origin}; arrival opens the available window in ${seg.destination}.`)}</p><div class="route-v2-timegrid">${_timeSelect('departureTime',seg.departureTime,copy('Hora de salida','Departure time'))}${_timeSelect('arrivalTime',seg.arrivalTime,copy('Hora de llegada','Arrival time'))}</div><details class="route-v2-arrival-day"><summary>${copy('¿Llegas otro día?','Arriving another day?')}</summary>${_dayChips(meta,'arrivalDate',seg.arrivalDate,seg.departureDate)}</details></div></section>`:''}
         ${hasDay&&hasDest&&hasTimes?`<section class="route-v2-step is-open"><div class="route-v2-step-index">4</div><div class="route-v2-step-content"><h4>${copy(`¿Qué harás después de ${seg.destination}?`,`What will you do after ${seg.destination}?`)}</h4><p>${atLastDay?copy(`Estás en el último día de ${meta.city}. Puedes regresar a ${meta.city} o finalizar este bloque en ${seg.destination}.`,`This is the last day of ${meta.city}. You can return to ${meta.city} or finish this block in ${seg.destination}.`):copy(`Para cerrar este recorrido debes regresar a ${meta.city} o continuar hacia otro lugar. No dejamos rutas abiertas a mitad del ciclo.`,`To close this route you must return to ${meta.city} or continue to another place. Routes cannot be left open mid-cycle.`)}</p><div class="route-v2-choice-grid">
-          ${[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')],['stay_return',copy(`Me quedaré y regresaré a ${meta.city}`,`Stay, then return to ${meta.city}`),copy('Una o varias noches.','One or several nights.')],['continue',copy('Continuaré hacia otro lugar','Continue to another place'),copy('El recorrido sigue desde aquí.','The route continues from here.')]].map(([v,a,b])=>`<label class="route-v2-choice ${seg.disposition===v?'selected':''}"><input type="radio" name="route-disposition" value="${v}" ${seg.disposition===v?'checked':''}><strong>${a}</strong><span>${b}</span></label>`).join('')}
-          ${atLastDay?`<label class="route-v2-choice ${seg.disposition==='end_block'?'selected':''}"><input type="radio" name="route-disposition" value="end_block" ${seg.disposition==='end_block'?'checked':''}><strong>${copy(`Finalizo aquí los días de ${meta.city}`,`Finish ${meta.city} days here`)}</strong><span>${copy(`Tu ubicación final será ${seg.destination}.`,`Your final location will be ${seg.destination}.`)}</span></label>`:''}
+          ${(atLastDay?[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')]]:[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')],['stay_return',copy(`Me quedaré y regresaré a ${meta.city}`,`Stay, then return to ${meta.city}`),copy('Una o varias noches.','One or several nights.')],['continue',copy('Continuaré hacia otro lugar','Continue to another place'),copy('El recorrido sigue desde aquí.','The route continues from here.')]]).map(([v,a,b])=>`<label class="route-v2-choice ${seg.disposition===v?'selected':''}"><input type="radio" name="route-disposition" value="${v}" ${seg.disposition===v?'checked':''}><strong>${a}</strong><span>${b}</span></label>`).join('')}
+          <label class="route-v2-choice ${seg.disposition==='end_block'?'selected':''}"><input type="radio" name="route-disposition" value="end_block" ${seg.disposition==='end_block'?'checked':''}><strong>${copy(atLastDay?'Finalizo este destino aquí':'Me quedaré aquí hasta finalizar este destino',atLastDay?'Finish this destination here':'Stay here until this destination ends')}</strong><span>${copy(atLastDay?`Tu ubicación al finalizar será ${seg.destination}.`:`Los días restantes se planificarán desde ${seg.destination}.`,`Your final location will be ${seg.destination}.`)}</span></label>
         </div></div></section>`:''}
         ${(seg.disposition==='roundtrip'||seg.disposition==='stay_return')?`<section class="route-v2-step is-open"><div class="route-v2-step-index">5</div><div class="route-v2-step-content"><h4>${copy(`Regreso a ${meta.city}`,`Return to ${meta.city}`)}</h4><p>${copy(seg.disposition==='roundtrip'?'El regreso ocurre el mismo día.':'Selecciona el día real en que regresarás. La estancia se deriva de estas fechas.','Select the actual day you return. The stay is derived from these dates.')}</p>${seg.disposition==='stay_return'?_dayChips(meta,'returnDepartureDate',seg.returnDepartureDate,seg.arrivalDate):`<div class="route-v2-fixed-day"><strong>${copy('Mismo día','Same day')}</strong><span>${esc(dmy(seg.arrivalDate))}</span></div>`}<div class="route-v2-timegrid">${_timeSelect('returnDepartureTime',seg.returnDepartureTime,copy(`Salida de ${seg.destination}`,`Leave ${seg.destination}`))}${_timeSelect('returnArrivalTime',seg.returnArrivalTime,copy(`Llegada a ${meta.city}`,`Arrive ${meta.city}`))}</div>${seg.returnArrivalTime?`<div class="route-v2-resume"><div><strong>${copy(`¿Desde qué hora retomamos ${meta.city}?`,`When should we resume ${meta.city}?`)}</strong><small>${copy(`Precargamos ${seg.returnArrivalTime}. Puedes moverla hacia adelante, nunca antes de tu llegada.`,`We preloaded ${seg.returnArrivalTime}. You can move it later, never before arrival.`)}</small></div>${_timeSelect('resumeTime',seg.resumeTime||seg.returnArrivalTime,copy('Retomar Planner','Resume Planner'))}</div>`:''}</div></section>`:''}
         ${seg.disposition==='continue'?`<section class="route-v2-step is-open"><div class="route-v2-step-index">5</div><div class="route-v2-step-content"><h4>${copy(`Continúa desde ${seg.destination}`,`Continue from ${seg.destination}`)}</h4><p>${copy('Elige el día en que sales. Si llegas al último día, el recorrido podrá finalizar en el último lugar alcanzado.','Choose the day you leave. If you reach the last day, the route may finish at the last place reached.')}</p>${_dayChips(meta,'nextDepartureDate',seg.nextDepartureDate||'',seg.arrivalDate)}${seg.nextDepartureDate?`${_destinationField('nextDestination',seg.nextDestination||'')}<div class="route-v2-timegrid">${_timeSelect('nextDepartureTime',seg.nextDepartureTime||'',copy(`Salida de ${seg.destination}`,`Leave ${seg.destination}`))}${_timeSelect('nextArrivalTime',seg.nextArrivalTime||'',copy('Hora de llegada','Arrival time'))}</div>`:''}</div></section>`:''}
@@ -325,7 +325,6 @@
     if(!seg.departureTime||!seg.arrivalTime) errors.push(copy('Completa las horas de salida y llegada.','Complete departure and arrival times.'));
     const blockEnd=meta?.baseISO?addDays(meta.baseISO,Math.max(0,meta.days-1)):'';
     if(blockEnd&&(seg.departureDate>blockEnd||seg.arrivalDate>blockEnd||seg.returnDepartureDate>blockEnd)) errors.push(copy('Este recorrido supera los días disponibles del destino principal.','This route exceeds the main destination’s available days.'));
-    if(seg.disposition==='end_block' && blockEnd && seg.arrivalDate!==blockEnd) errors.push(copy('Solo puedes finalizar fuera del destino base cuando hayas llegado al último día disponible.','You can only finish away from the base destination on the last available day.'));
     if(seg.disposition==='roundtrip'||seg.disposition==='stay_return'){
       if(!seg.returnDepartureDate) errors.push(copy(`Indica el día en que regresarás a ${meta?.city||'destino base'}.`,`Enter the day you will return to ${meta?.city||'the base destination'}.`));
       else if(!seg.returnDepartureTime) errors.push(copy(`Indica la hora de salida de ${seg.destination} para regresar a ${meta?.city||'el destino base'}.`,`Enter the departure time from ${seg.destination} to return to ${meta?.city||'the base destination'}.`));
@@ -514,6 +513,10 @@
       add(dest.city,{type:'main',country:dest.country,dates:dest.baseDate,days:dest.days});
       const source=(model?.destinations||[]).find(x=>norm(x.city).toLowerCase()===norm(dest.city).toLowerCase());
       (source?.route?.segments||[]).forEach(seg=>{
+        // A pure terminal arrival closes the current main-destination block but
+        // is not itself a stay to personalize. It will appear later if the user
+        // declares it as a main destination.
+        if(seg.disposition==='end_block' && _isLastPlannerDay({baseISO:source.base_date||dest.baseDate,days:Number(dest.days||0)},seg.arrivalDate)) return;
         add(seg.destination,{type:seg.disposition==='roundtrip'?'daytrip':'stay',country:dest.country,nights:seg.disposition==='roundtrip'?0:Number(seg.nights||1)});
       });
     });
@@ -521,7 +524,7 @@
   }
 
   function preferenceDefaults(place){
-    return {lodgingChoice:'recommend',lodgingText:'',arrivalTransport:'recommend',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''};
+    return {saved:false,lodgingChoice:'recommend',lodgingText:'',arrivalTransport:'recommend',localTransport:'recommend',pace:'balanced',interests:[],mustDo:'',avoid:'',reservations:'',notes:''};
   }
   function renderPreferences(host,savedDestinations=[],model,onChange){
     if(!host) return;
@@ -529,16 +532,15 @@
     if(!state.itineraryLanguage) state.itineraryLanguage=lang()==='es'?'Español':'English';
     places.forEach(p=>{if(!state.preferences.places[p.key]) state.preferences.places[p.key]=preferenceDefaults(p);});
     host.innerHTML=`
+      <div class="pref-v2-assist pref-v2-assist--intro"><div><span>✦</span><div><strong>${copy('Haz que tu itinerario se adapte realmente a ti','Make your itinerary truly fit you')}</strong><p>${copy('Cuéntanos tu estilo de viaje, ritmo, imprescindibles y cualquier necesidad o restricción especial. Primero puedes indicar generalidades para todo el viaje y después personalizar cada destino o estancia. Info Chat permanece disponible si necesitas investigar algo antes de decidir.','Tell us your travel style, pace, must-dos and any special need or restriction. Start with trip-wide preferences, then personalize each destination or stay. Info Chat remains available if you want to research something before deciding.')}</p></div></div></div>
       <div class="pref-v2-global">
-        <div class="pref-v2-section-head"><div><strong>${copy('1. Para todo mi viaje','1. For my whole trip')}</strong><small>${copy('Estas son generalidades que aplicaremos a todo el viaje. Más abajo podrás completar información específica, lugar por lugar, para cada destino y estancia. Todo este bloque es opcional.','These are general preferences that apply to the whole trip. Below, you can add specific information place by place for every destination and stay. This whole block is optional.')}</small></div></div>
+        <div class="pref-v2-section-head"><div><strong>${copy('1. Para todo mi viaje','1. For my whole trip')}</strong><small>${copy('Generalidades opcionales que aplicaremos a todo el viaje. En el punto 2 podrás completar información específica, lugar por lugar, para cada destino y estancia.','Optional general preferences that apply to your whole trip. In section 2 you can add specific information, place by place, for every destination and stay.')}</small></div></div>
         <textarea data-pref-global placeholder="${copy('Ej.: ritmo tranquilo, viajamos con niños, priorizar experiencias locales, evitar restaurantes demasiado formales…','E.g. relaxed pace, traveling with children, prioritize local experiences, avoid overly formal restaurants…')}">${esc(state.preferences.global.notes||'')}</textarea>
       </div>
       <div class="pref-v2-list-head"><strong>${copy('2. Información por destino y estancia','2. Information by destination and stay')}</strong><p>${copy('Completa cada lugar por separado. Cuando guardes la información obligatoria, la tarjeta quedará marcada como lista, pero podrás volver a entrar y ajustarla cuando quieras antes de generar.','Complete each place separately. Once the required information is saved, its card will be marked ready, but you can reopen and adjust it any time before generation.')}</p></div>
       <div class="pref-v2-place-list">${places.map((p,i)=>placeCard(p,i)).join('')}</div>
       <div class="pref-v2-language"><div><strong>${copy('3. Idioma del itinerario','3. Itinerary language')}</strong><small>${copy('Hemos seleccionado el idioma de la página. Cámbialo aquí si prefieres recibir el itinerario en otro idioma.','We selected the page language. Change it here if you prefer the itinerary in another language.')}</small></div><select data-pref-language>${['Español','English','Français','Italiano','Deutsch','Português','Nederlands','Català','日本語','한국어','中文','Русский','العربية'].map(x=>`<option ${state.itineraryLanguage===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      <div class="pref-v2-assist">
-        <div><span>✦</span><div><strong>${copy('Info Chat está disponible durante la personalización','Info Chat is available while you personalize')}</strong><p>${copy('Si necesitas investigar una zona, hospedaje, transporte o actividad, usa el botón flotante de Info Chat que permanece disponible en pantalla.','If you need to research an area, lodging, transport or activity, use the floating Info Chat button that remains available on screen.')}</p></div></div>
-      </div>`;
+`;
     if(state.locked){
       host.querySelectorAll('[data-pref-language],[data-pref-global]').forEach(el=>{el.disabled=true;el.setAttribute('aria-disabled','true');});
     }else{
@@ -549,7 +551,7 @@
   }
   function placeCard(p,index){
     const pref=state.preferences.places[p.key]||preferenceDefaults(p);
-    const complete=Boolean((p.type==='daytrip'||pref.lodgingChoice)&&pref.arrivalTransport&&pref.localTransport);
+    const complete=Boolean(pref.saved && (p.type==='daytrip'||pref.lodgingChoice)&&pref.arrivalTransport&&pref.localTransport);
     return `<article class="pref-v2-place-card ${complete?'is-complete':''}">
       <span class="pref-v2-number">${complete?'✓':index+1}</span><div class="pref-v2-place-title"><strong>${esc(p.name)}</strong><small>${p.type==='stay'?copy(`${p.nights||1} noche(s) dentro de la ruta`,'Overnight stay within route'):(p.type==='daytrip'?copy('Parada / excursión de un día','Stop / day trip'):copy(`${p.days||''} día(s) · destino principal`,'Main destination'))}</small></div>
       <div class="pref-v2-place-summary">${p.type==='daytrip'?'':`<span>🛏 ${esc(pref.lodgingChoice==='recommend'?copy('ITBMO elegirá una zona base conveniente','ITBMO will choose a convenient base area'):pref.lodgingText||copy('Definido','Set'))}</span>`}<span>🚆 ${esc(pref.arrivalTransport||'')}</span><span>♡ ${pref.interests?.length?esc(pref.interests.slice(0,2).join(', ')):copy('Opcional','Optional')}</span></div>
@@ -588,7 +590,7 @@
       ui.body.querySelector('.route-v2-save')?.addEventListener('click',()=>{
         ui.body.querySelectorAll('[data-p]').forEach(el=>pref[el.dataset.p]=el.value);
         pref.interests=[...ui.body.querySelectorAll('[data-interest]:checked')].map(x=>x.value);
-        state.preferences.places[place.key]=pref; onChange?.(); ui.close(); renderPreferences(host,savedDestinations,model,onChange);
+        pref.saved=true; state.preferences.places[place.key]=pref; onChange?.(); ui.close(); renderPreferences(host,savedDestinations,model,onChange);
       });
     }
   }
@@ -601,7 +603,7 @@
 
   function preferencesPayload(){return {schema_version:VERSION,itinerary_language:state.itineraryLanguage,global:JSON.parse(JSON.stringify(state.preferences.global)),places:JSON.parse(JSON.stringify(state.preferences.places))};}
   function allRequiredPreferencesComplete(savedDestinations=[],model){
-    return placesForPreferences(savedDestinations,model).every(p=>{const v=state.preferences.places[p.key];return p.type==='daytrip'?Boolean(v?.arrivalTransport&&v?.localTransport):Boolean(v?.lodgingChoice&&v?.arrivalTransport&&v?.localTransport);});
+    return placesForPreferences(savedDestinations,model).every(p=>{const v=state.preferences.places[p.key];return Boolean(v?.saved) && (p.type==='daytrip'?Boolean(v?.arrivalTransport&&v?.localTransport):Boolean(v?.lodgingChoice&&v?.arrivalTransport&&v?.localTransport));});
   }
   function specialConditionsText(){
     const blocks=[];
