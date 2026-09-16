@@ -6421,7 +6421,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
 
     const finalRows=_dedupeRows_(finalResult.rows);
     itineraries[city].audit=finalResult.report;
-    const blockingCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','END_BEFORE_MINIMUM_TARGET']);
+    const blockingCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW']);
     if((finalResult.report?.errors||[]).some(error=>blockingCodes.has(error?.code))){
       throw new Error(`ROUTE_QUALITY_BLOCK:${city}`);
     }
@@ -6493,7 +6493,7 @@ HARD RULES:
       city,rows,dest.days,syntheticMaster,perDay,baseDate,hotel,transport,true
     );
     rows=_dedupeRows_(finalResult.rows);
-    const blockingCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','END_BEFORE_MINIMUM_TARGET']);
+    const blockingCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW']);
     if((finalResult.report?.errors||[]).some(error=>blockingCodes.has(error?.code))) throw new Error(`ROUTE_QUALITY_BLOCK:${city}`);
     pushRows(city,rows,true);
     itineraries[city].audit=finalResult.report;
@@ -7055,6 +7055,19 @@ async function _prewarmGeneratedTripContext_(){
   }catch(_){}
 }
 
+function _applyGeneratedUIState({showModal=false}={}){
+  showWOW(false);
+  setExportToolbarVisibility(true);
+  setPlanningChatLocked(true);
+  if($preferencesGenerateV2){
+    $preferencesGenerateV2.disabled=true;
+    $preferencesGenerateV2.setAttribute('aria-disabled','true');
+    $preferencesGenerateV2.textContent=getLang()==='es'?'✓ Itinerario generado':'✓ Itinerary generated';
+    $preferencesGenerateV2.classList.add('is-generated');
+  }
+  if(showModal) setTimeout(()=>showFinalDownloadModal(),260);
+}
+
 async function runPaidGeneration({manualRetry=false}={}){
   if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
   paidGenerationRunning=true;
@@ -7072,9 +7085,7 @@ async function runPaidGeneration({manualRetry=false}={}){
 
     if(begin?.already_completed){
       _hydrateGenerationTrip_(begin.trip);
-      showWOW(false);
-      setExportToolbarVisibility(true);
-      setPlanningChatLocked(true);
+      _applyGeneratedUIState({showModal:true});
       return;
     }
 
@@ -7143,6 +7154,13 @@ async function runPaidGeneration({manualRetry=false}={}){
     const allComplete=savedDestinations.every(({city})=>_generationCityComplete_(city));
     if(!allComplete){
       await _persistGenerationCheckpoint_('failed',{active_city:null});
+      showWOW(false);
+      if($preferencesGenerateV2){
+        $preferencesGenerateV2.disabled=false;
+        $preferencesGenerateV2.removeAttribute('aria-disabled');
+        $preferencesGenerateV2.textContent=getLang()==='es'?'Reintentar generación':'Retry generation';
+        $preferencesGenerateV2.classList.remove('is-generated');
+      }
       _showGenerationRetry_('One or more cities remained incomplete.');
       return;
     }
@@ -7155,17 +7173,8 @@ async function runPaidGeneration({manualRetry=false}={}){
       generation_mode:manualRetry?'recovery':'standard'
     });
     _finishAstraGenerationMetrics_();
-    showWOW(false);
-    setExportToolbarVisibility();
-    if($preferencesGenerateV2){
-      $preferencesGenerateV2.disabled=true;
-      $preferencesGenerateV2.setAttribute('aria-disabled','true');
-      $preferencesGenerateV2.textContent=getLang()==='es'?'✓ Itinerario generado':'✓ Itinerary generated';
-      $preferencesGenerateV2.classList.add('is-generated');
-    }
+    _applyGeneratedUIState({showModal:true});
     chatMsg(getPlannerCompletionMessage(),'ai');
-    setPlanningChatLocked(true);
-    setTimeout(()=>showFinalDownloadModal(),260);
   }catch(err){
     console.error('[PAID GENERATION ORCHESTRATOR]',err);
     if(err?.code==='GENERATION_RECOVERY_EXHAUSTED'){
@@ -7179,6 +7188,12 @@ async function runPaidGeneration({manualRetry=false}={}){
         });
       }
     }catch(_){ }
+    if($preferencesGenerateV2){
+      $preferencesGenerateV2.disabled=false;
+      $preferencesGenerateV2.removeAttribute('aria-disabled');
+      $preferencesGenerateV2.textContent=getLang()==='es'?'Reintentar generación':'Retry generation';
+      $preferencesGenerateV2.classList.remove('is-generated');
+    }
     _showGenerationRetry_(err?.code || err?.message || 'Generation failed');
   }finally{
     paidGenerationRunning=false;
@@ -7448,8 +7463,7 @@ async function restorePaidGenerationIfNeeded(){
     }else if(trip.status==='failed'){
       _showGenerationRetry_();
     }else{
-      setExportToolbarVisibility(true);
-      setPlanningChatLocked(true);
+      _applyGeneratedUIState({showModal:false});
     }
   }catch(err){
     console.warn('[GENERATION RESTORE]',err);
@@ -10111,7 +10125,8 @@ async function requestPlanningStart(){
   try{
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
     if(alreadyPaid){
-      showPreferencesStage();
+      await _persistPostPaymentProgress_('preferences');
+      showPostPaymentWelcome();
       return;
     }
     trackITBMOEvent('checkout_opened',{
