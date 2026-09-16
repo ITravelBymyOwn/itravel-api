@@ -651,21 +651,13 @@ function clearWorkspaceSessionLocal({broadcast=false}={}){
   plannerMissingSince=0;
   if(broadcast)broadcastWorkspaceAuth('signed_out');
 }
-function enforcePlannerPresence({immediate=false}={}){
-  if(!workspaceAuthOwnedByPlanner()){
-    plannerMissingSince=0;
-    return true;
-  }
-  if(hasLivePlannerPresence()){
-    plannerMissingSince=0;
-    return true;
-  }
-  const now=Date.now();
-  if(!plannerMissingSince) plannerMissingSince=now;
-  if(!immediate && now-plannerMissingSince<PLANNER_ABSENCE_GRACE_MS) return true;
-  clearWorkspaceSessionLocal({broadcast:true});
-  showWorkspaceAuthGate();
-  return false;
+function enforcePlannerPresence(){
+  // Presence is advisory only. Browsers can throttle background tabs well beyond
+  // the heartbeat TTL; that must never be interpreted as an explicit sign-out.
+  // Guest lifetime is already scoped by sessionStorage and registered sessions
+  // are validated by /api/trip.
+  plannerMissingSince=0;
+  return true;
 }
 function startPlannerPresenceWatch(){
   if(plannerPresenceWatchTimer) clearInterval(plannerPresenceWatchTimer);
