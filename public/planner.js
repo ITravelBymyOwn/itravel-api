@@ -89,10 +89,11 @@ const ITBMO_ACTIVE_TRIP_KEY = 'itbmo_active_trip_id';
 const ITBMO_USER_CACHE_KEY = 'itbmo_user_cache_v1';
 const ITBMO_AUTH_SYNC_KEY = 'itbmo_auth_sync_v1';
 const ITBMO_AUTH_OWNER_KEY = 'itbmo_auth_owner_v1';
-const ITBMO_PLANNER_PRESENCE_KEY = 'itbmo_planner_presence_v1';
-const ITBMO_PLANNER_TAB_ID_KEY = 'itbmo_planner_tab_id_v1';
-const ITBMO_PLANNER_TAB_ESTABLISHED_KEY = 'itbmo_planner_tab_established_v1';
-const ITBMO_PLANNER_PRESENCE_TTL_MS = 8000;
+const ITBMO_PLANNER_PRESENCE_KEY = 'itbmo_planner_presence_v1'; // legacy telemetry; retained for backward compatibility
+const ITBMO_SURFACE_PRESENCE_KEY = 'itbmo_surface_presence_v2';
+const ITBMO_PLANNER_TAB_ID_KEY = 'itbmo_planner_tab_id_v2';
+const ITBMO_PLANNER_TAB_ESTABLISHED_KEY = 'itbmo_planner_tab_established_v2';
+const ITBMO_SURFACE_PRESENCE_TTL_MS = 10000;
 const ITBMO_PLANNER_HEARTBEAT_MS = 2000;
 const ITBMO_WORKSPACE_GUEST_HANDOFF_KEY = 'itbmo_workspace_guest_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
@@ -131,8 +132,8 @@ let paymentWarningAcceptedTripId = null;
 
 /* Paid-generation recovery. Normal successful generations add only small
    checkpoint writes; retries run only after a real technical failure. */
-const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
-const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,15000];
+const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 2;
+const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000];
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
 let generationResetInProgress = false;
@@ -648,32 +649,30 @@ function setAccountMessage(message='', type=''){
   if(type) $accountMessage.classList.add(type);
 }
 
-/* Planner-owned session lifecycle.
-   Authentication remains shared through localStorage so every ITBMO workspace
-   sees the same registered-account session. A separate Planner heartbeat tells
-   workspaces whether at least one Planner tab is still alive. Closing a
-   workspace never affects authentication. Refreshing the Planner keeps the
-   same tab marker and therefore does not sign the traveler out. */
-function readPlannerPresence(){
+/* ITBMO shared surface session lifecycle.
+   A registered session remains valid while at least one Planner/Workspace surface
+   from the same browser session is alive. Closing every ITBMO surface ends the
+   browser session; refresh does not. Trip/checkpoint persistence is independent. */
+function readSurfacePresence(){
   try{
-    const raw=JSON.parse(localStorage.getItem(ITBMO_PLANNER_PRESENCE_KEY) || '{}');
+    const raw=JSON.parse(localStorage.getItem(ITBMO_SURFACE_PRESENCE_KEY) || '{}');
     return raw && typeof raw==='object' && !Array.isArray(raw) ? raw : {};
   }catch(_){ return {}; }
 }
-function writePlannerPresence(presence){
-  try{ localStorage.setItem(ITBMO_PLANNER_PRESENCE_KEY,JSON.stringify(presence || {})); }catch(_){ }
+function writeSurfacePresence(presence){
+  try{ localStorage.setItem(ITBMO_SURFACE_PRESENCE_KEY,JSON.stringify(presence || {})); }catch(_){ }
 }
-function prunePlannerPresence(presence=readPlannerPresence(), now=Date.now()){
+function pruneSurfacePresence(presence=readSurfacePresence(),now=Date.now()){
   const next={};
-  Object.entries(presence || {}).forEach(([id,ts])=>{
-    const n=Number(ts||0);
-    if(id && n>0 && now-n<=ITBMO_PLANNER_PRESENCE_TTL_MS) next[id]=n;
+  Object.entries(presence||{}).forEach(([id,entry])=>{
+    const ts=Number(entry?.ts||entry||0);
+    if(id && ts>0 && now-ts<=ITBMO_SURFACE_PRESENCE_TTL_MS){
+      next[id]=typeof entry==='object' ? {...entry,ts} : {type:'unknown',ts};
+    }
   });
   return next;
 }
-function hasLivePlannerPresence(){
-  return Object.keys(prunePlannerPresence()).length>0;
-}
+function hasLiveITBMOSurface(){ return Object.keys(pruneSurfacePresence()).length>0; }
 function plannerTabId(){
   if(plannerPresenceId) return plannerPresenceId;
   try{ plannerPresenceId=String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim(); }catch(_){ }
@@ -684,18 +683,14 @@ function plannerTabId(){
   return plannerPresenceId;
 }
 function markPlannerPresence(){
-  const id=plannerTabId();
-  const now=Date.now();
-  const presence=prunePlannerPresence(readPlannerPresence(),now);
-  presence[id]=now;
-  writePlannerPresence(presence);
+  const presence=pruneSurfacePresence();
+  presence[plannerTabId()]={type:'planner',ts:Date.now()};
+  writeSurfacePresence(presence);
 }
 function removePlannerPresence(){
-  const id=plannerPresenceId || (()=>{ try{return String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim();}catch(_){return '';} })();
+  const id=plannerPresenceId || (()=>{try{return String(sessionStorage.getItem(ITBMO_PLANNER_TAB_ID_KEY)||'').trim();}catch(_){return '';}})();
   if(!id) return;
-  const presence=prunePlannerPresence();
-  delete presence[id];
-  writePlannerPresence(presence);
+  const presence=pruneSurfacePresence(); delete presence[id]; writeSurfacePresence(presence);
 }
 function startPlannerPresenceHeartbeat(){
   markPlannerPresence();
@@ -706,11 +701,13 @@ function initializePlannerSessionLifecycle(){
   let established=false;
   try{ established=sessionStorage.getItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY)==='1'; }catch(_){ }
 
-  // Registered-account authentication is persistent by product design and must
-  // never be inferred as signed out from tab/heartbeat state. Browsers throttle
-  // background tabs during long generations, which made a valid session look
-  // abandoned and broke Workspace handoff. Presence is telemetry only; explicit
-  // logout or backend rejection is the only authority that clears the account.
+  /* A new surface with no other live ITBMO surface means the previous browser
+     session ended when its last window closed. A reload keeps sessionStorage,
+     so it never trips this rule. */
+  if(!established && !hasLiveITBMOSurface()){
+    const hadRegisteredSession=(()=>{try{return Boolean(localStorage.getItem(ITBMO_SESSION_KEY));}catch(_){return false;}})();
+    if(hadRegisteredSession) clearSessionToken({broadcast:true});
+  }
   try{ sessionStorage.setItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY,'1'); }catch(_){ }
   startPlannerPresenceHeartbeat();
 
@@ -1569,7 +1566,7 @@ async function saveTripRecord(list, travelerState){
       special_conditions:String(qs('#special-conditions')?.value || '').trim() || null,
       travel_model_v2:travelModelV2
     },
-    planner_version:'v117-route-v2',
+    planner_version:'v119-generation-v3',
     api_version:'v65'
   };
 
@@ -6743,19 +6740,13 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     return true;
   }catch(error){
     console.error(`[ITBMO V3] ${city} failed`,error);
-    /* One bounded compatibility fallback. It is deliberately city-scoped and
-       only used after V3 fails, preserving recovery without making legacy work
-       part of the normal token/time path. */
-    try{
-      const ok=await _generateCityItineraryLegacy_(city,{silentFailure:true});
-      record();
-      return Boolean(ok);
-    }catch(fallbackError){
-      console.error(`[ITBMO V3] ${city} legacy fallback failed`,fallbackError);
-      record();
-      if(!silentFailure) chatMsg(getLang()==='es'?'No pude completar el itinerario. Intenta nuevamente.':'I could not complete the itinerary. Please retry.','ai');
-      return false;
-    }
+    /* V3 is authoritative. Never fall back automatically to the historical
+       Master Plan/Block pipeline: that path can multiply latency and tokens and
+       makes a V3 benchmark impossible to interpret. The orchestrator may retry
+       V3 once after a real failure. */
+    record();
+    if(!silentFailure) chatMsg(getLang()==='es'?'No pude completar el itinerario. Intenta nuevamente.':'I could not complete the itinerary. Please retry.','ai');
+    return false;
   }finally{
     showWOW(false);
   }
@@ -7232,30 +7223,27 @@ function _showGenerationRetry_(reason=''){
   showWOW(false);
   setPlanningChatLocked(true);
   qs('#itbmo-generation-retry')?.remove();
+  document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
 
   const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
-  const message=exhausted
-    ? (getLang()==='es'
-      ? 'ITBMO no pudo completar el itinerario después de los intentos de recuperación. Tu pago permanece registrado; contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.'
-      : 'ITBMO could not complete the itinerary after the recovery attempts. Your payment remains recorded; contact Support for assistance, replacement or refund as applicable.')
-    : (getLang()==='es'
-      ? 'ITBMO no pudo completar todas las ciudades por un fallo técnico. Tu pago continúa activo y puedes reintentar sin volver a pagar.'
-      : 'ITBMO could not complete every city because of a technical failure. Your payment remains active and you can retry without paying again.');
-  const row=chatMsg(message,'ai');
-  if(!row || exhausted) return;
-
-  const button=document.createElement('button');
-  button.id='itbmo-generation-retry';
-  button.type='button';
-  button.className='btn primary';
-  button.textContent=getLang()==='es' ? 'Reintentar generación' : 'Retry generation';
-  button.addEventListener('click',()=>{
+  const es=getLang()==='es';
+  const overlay=document.createElement('div');
+  overlay.className='itbmo-postpay-overlay itbmo-generation-recovery-overlay';
+  overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-recovery-title">
+    <div class="itbmo-postpay-icon">↻</div>
+    <h3 id="itbmo-recovery-title">${exhausted ? (es?'Necesitamos ayudarte a recuperar tu viaje':'We need to help recover your trip') : (es?'Tu generación quedó pendiente':'Your generation was interrupted')}</h3>
+    <p>${exhausted
+      ? (es?'Tu pago permanece registrado. Contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.':'Your payment remains recorded. Contact Support for assistance, replacement or refund as applicable.')
+      : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.')}</p>
+    ${exhausted?'':`<button id="itbmo-generation-retry" type="button">${es?'Reintentar generación':'Retry generation'}</button>`}
+  </div>`;
+  document.body.appendChild(overlay);
+  const button=overlay.querySelector('#itbmo-generation-retry');
+  button?.addEventListener('click',()=>{
     button.disabled=true;
-    button.remove();
+    overlay.remove();
     runPaidGeneration({manualRetry:true});
   });
-  row.appendChild(document.createElement('br'));
-  row.appendChild(button);
   if(reason) console.warn('[GENERATION RECOVERY]',reason);
 }
 
