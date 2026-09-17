@@ -2398,7 +2398,7 @@ export default async function handler(req, res) {
     const mode = body.mode || "planner";
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
-    const plannerUsage = mode === "planner" ? _newUsageCollector_() : null;
+    const plannerUsage = (mode === "planner" || mode === "planner_v3") ? _newUsageCollector_() : null;
 
     /* CITY NORMALIZATION · isolated pre-save validation.
        It never changes the planner or Info Chat contracts. */
@@ -2581,6 +2581,84 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
           info_chat_limit:INFO_CHAT_MAX_QUERIES
         });
       }
+    }
+
+    /* =========================================================
+       ITBMO GENERATION ENGINE V3 · COMPACT CONTRACT MODE
+       One planning-unit call, no legacy master-plan/block prompt stack and
+       no automatic model repair. The browser owns deterministic validation
+       and requests a small scoped repair only when materially necessary.
+       ========================================================= */
+    if (mode === "planner_v3") {
+      const override = detectLanguageOverride(clientMessages);
+      const languageLine = override
+        ? `Output language: ${override.toUpperCase()}. Keep JSON keys unchanged.`
+        : "Use the itinerary language explicitly requested in the generation contract.";
+
+      const V3_SYSTEM_PROMPT = `
+You are ITBMO Travel Intelligence V3.
+${languageLine}
+
+The client supplies a deterministic GENERATION CONTRACT. Treat dates, location windows, fixed movements, overnight bases, user-fixed times, preferences and restrictions in that contract as hard facts. Do not reinterpret them and never invent transport bookings, airports, flight/train details, reservation status or live conditions.
+
+Your job is tourism intelligence only: select excellent experiences, sequence them geographically, use available time well, respect realistic dwell/meal/rest needs, and create a distinctive, practical itinerary.
+
+QUALITY POLICY:
+- Use every substantial PLANNABLE location window productively; a long window normally needs multiple meaningful activities, not one token stop.
+- Aim for rich but realistic days, typically 5–8 meaningful sub-stops on a full unconstrained day when destination inventory and timing support it; never add filler merely to hit a quota.
+- Preserve all USER_FIXED movement intervals exactly and keep them activity-free.
+- Before fixed rail/bus/ferry departures allow realistic access plus prudent boarding margin; airports require materially more when an airport movement is explicitly supplied.
+- After arrival, continue planning in the actual arrival location when the contract says the window remains plannable.
+- If a large terminal transfer ends the destination block, end at arrival; do not create tourism, dinner or lodging suggestions in that arrival city unless the contract explicitly makes it a planning location.
+- Optimize geographic flow; avoid backtracking, duplicates and repeated major anchors across days.
+- Respect season, plausible daylight and actual calendar dates. Protect destination-defining special-date moments without inventing year-specific event details.
+- Use the lodging/overnight base as the geographic anchor where applicable.
+- Incorporate traveler profiles, pace, interests, must-sees and restrictions through actual choices.
+- Include realistic meal breaks when a long day spans meals.
+- The activity occurs at To. The next row starts from the prior row's To unless a fixed movement changes location.
+- One concrete To and one primary transport choice per row. Put uncertainty/alternatives in Notes.
+- Never use generic destinations such as “nearby restaurant”, “local services” or “similar option”.
+- Keep transport and activity duration mathematically consistent with start/end times.
+- Preserve official proper names and write concise, useful concierge notes.
+
+OUTPUT CONTRACT:
+Return JSON only:
+{"destination":"...","city_day":[{"city":"...","day":1,"rows":[...]}]}
+Every row must contain: day, start, end, from, to, transport, duration, activity, notes.
+Use HH:MM local time. duration must contain two lines: "Transport: ...\nActivity: ...".
+Include every requested day, even if a day contains only a fixed terminal movement.
+Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
+`.trim();
+
+      let raw = await callStructured(
+        [{ role:"system", content:V3_SYSTEM_PROMPT }, ...clientMessages],
+        0.22,
+        8200,
+        110000,
+        plannerUsage
+      );
+      let parsed = cleanToJSON(raw);
+      if (!_hasRenderableItinerary_(parsed)) {
+        raw = await callStructured(
+          [{ role:"system", content:V3_SYSTEM_PROMPT + "\nRECOVERY: Return complete valid JSON only. Preserve every contract day and hard movement exactly." }, ...clientMessages],
+          0.12,
+          8600,
+          110000,
+          plannerUsage
+        );
+        parsed = cleanToJSON(raw);
+      }
+      if (!_hasRenderableItinerary_(parsed)) {
+        return res.status(200).json({
+          text:JSON.stringify({ok:false,error:{code:"V3_GENERATION_FAILED",retryable:true}}),
+          usage:_usagePayload_(plannerUsage)
+        });
+      }
+      parsed = _v65NormalizeEverySchema_(parsed);
+      return res.status(200).json({
+        text:JSON.stringify(parsed),
+        usage:_usagePayload_(plannerUsage)
+      });
     }
 
     const stage = detectPlannerStage(clientMessages);
