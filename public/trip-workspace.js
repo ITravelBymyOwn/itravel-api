@@ -924,11 +924,17 @@ async function boot(){
     showWorkspaceAuthGate();
   }else if(requestedTripId){
     try{ data=await fetchTripWorkspace(requestedTripId); }
-    catch(err){ console.warn('[TRIP WORKSPACE FETCH]',err); }
+    catch(err){
+      console.warn('[TRIP WORKSPACE FETCH]',err);
+      // A transient API/network failure is not an authentication event. The
+      // Planner already handed off a complete same-origin snapshot, so keep the
+      // traveler inside the Workspace while the backend recovers.
+      if(cached?.trip_id===requestedTripId) data=cached;
+    }
     if(!data) showWorkspaceAuthGate();
   }else if(cached?.trip_id){
     try{ data=await fetchTripWorkspace(cached.trip_id); }
-    catch(err){ console.warn('[TRIP WORKSPACE FETCH]',err); }
+    catch(err){ console.warn('[TRIP WORKSPACE FETCH]',err); data=cached; }
     if(!data){data=cached;showWorkspaceAuthGate()}
   }else{
     data=null;
