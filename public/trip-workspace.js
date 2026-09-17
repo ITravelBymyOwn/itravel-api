@@ -6,15 +6,18 @@ const GUEST_SESSION_KEY='itbmo_guest_session_token';
 const USER_CACHE_KEY='itbmo_user_cache_v1';
 const AUTH_SYNC_KEY='itbmo_auth_sync_v1';
 const AUTH_OWNER_KEY='itbmo_auth_owner_v1';
-const PLANNER_PRESENCE_KEY='itbmo_planner_presence_v1';
-const PLANNER_PRESENCE_TTL_MS=8000;
-const PLANNER_ABSENCE_GRACE_MS=5000;
+const PLANNER_PRESENCE_KEY='itbmo_planner_presence_v1'; // legacy telemetry
+const SURFACE_PRESENCE_KEY='itbmo_surface_presence_v2';
+const WORKSPACE_TAB_ID_KEY='itbmo_workspace_tab_id_v2';
+const WORKSPACE_TAB_ESTABLISHED_KEY='itbmo_workspace_tab_established_v2';
+const SURFACE_PRESENCE_TTL_MS=10000;
+const SURFACE_HEARTBEAT_MS=2000;
 const GUEST_HANDOFF_KEY='itbmo_workspace_guest_handoff_v1';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
 let plannerPresenceWatchTimer=null;
-let plannerMissingSince=0;
+let workspacePresenceId='';
 const contextByCity=new Map();
 const contextRequests=new Map();
 const partnerOffersByCity=new Map();
@@ -574,22 +577,36 @@ function consumeGuestWorkspaceHandoff(){
     return token;
   }catch(_){return ''}
 }
-function readPlannerPresence(){
-  try{
-    const raw=JSON.parse(localStorage.getItem(PLANNER_PRESENCE_KEY)||'{}');
-    return raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{};
-  }catch(_){return{}}
+function readSurfacePresence(){
+  try{const raw=JSON.parse(localStorage.getItem(SURFACE_PRESENCE_KEY)||'{}');return raw&&typeof raw==='object'&&!Array.isArray(raw)?raw:{}}catch(_){return{}}
 }
-function hasLivePlannerPresence(){
-  const now=Date.now();
-  return Object.values(readPlannerPresence()).some(ts=>{
-    const n=Number(ts||0);
-    return n>0 && now-n<=PLANNER_PRESENCE_TTL_MS;
-  });
+function pruneSurfacePresence(presence=readSurfacePresence(),now=Date.now()){
+  const next={};Object.entries(presence||{}).forEach(([id,entry])=>{const ts=Number(entry?.ts||entry||0);if(id&&ts>0&&now-ts<=SURFACE_PRESENCE_TTL_MS)next[id]=typeof entry==='object'?{...entry,ts}:{type:'unknown',ts}});return next;
 }
-function workspaceAuthOwnedByPlanner(){
-  try{return String(localStorage.getItem(AUTH_OWNER_KEY)||'')==='planner'}catch(_){return false}
+function writeSurfacePresence(presence){try{localStorage.setItem(SURFACE_PRESENCE_KEY,JSON.stringify(presence||{}))}catch(_){}}
+function hasLiveITBMOSurface(){return Object.keys(pruneSurfacePresence()).length>0}
+function workspaceTabId(){
+  if(workspacePresenceId)return workspacePresenceId;
+  try{workspacePresenceId=String(sessionStorage.getItem(WORKSPACE_TAB_ID_KEY)||'').trim()}catch(_){}
+  if(!workspacePresenceId){workspacePresenceId=(globalThis.crypto?.randomUUID?.()||`workspace-${Date.now()}-${Math.random().toString(36).slice(2)}`);try{sessionStorage.setItem(WORKSPACE_TAB_ID_KEY,workspacePresenceId)}catch(_){}}
+  return workspacePresenceId;
 }
+function markWorkspacePresence(){const p=pruneSurfacePresence();p[workspaceTabId()]={type:'workspace',ts:Date.now()};writeSurfacePresence(p)}
+function removeWorkspacePresence(){const id=workspacePresenceId||(()=>{try{return String(sessionStorage.getItem(WORKSPACE_TAB_ID_KEY)||'').trim()}catch(_){return''}})();if(!id)return;const p=pruneSurfacePresence();delete p[id];writeSurfacePresence(p)}
+function initializeWorkspaceSessionLifecycle(){
+  let established=false;try{established=sessionStorage.getItem(WORKSPACE_TAB_ESTABLISHED_KEY)==='1'}catch(_){}
+  if(!established&&!hasLiveITBMOSurface()){
+    const hadRegistered=(()=>{try{return Boolean(localStorage.getItem(SESSION_KEY))}catch(_){return false}})();
+    if(hadRegistered)clearWorkspaceSessionLocal({broadcast:true});
+  }
+  try{sessionStorage.setItem(WORKSPACE_TAB_ESTABLISHED_KEY,'1')}catch(_){}
+  markWorkspacePresence();
+  if(plannerPresenceWatchTimer)clearInterval(plannerPresenceWatchTimer);
+  plannerPresenceWatchTimer=setInterval(markWorkspacePresence,SURFACE_HEARTBEAT_MS);
+  window.addEventListener('pagehide',()=>{if(plannerPresenceWatchTimer){clearInterval(plannerPresenceWatchTimer);plannerPresenceWatchTimer=null}removeWorkspacePresence()});
+  window.addEventListener('pageshow',()=>{markWorkspacePresence();if(!plannerPresenceWatchTimer)plannerPresenceWatchTimer=setInterval(markWorkspacePresence,SURFACE_HEARTBEAT_MS)});
+}
+
 function getStoredSessionToken(){
   try{
     return String(
@@ -647,21 +664,11 @@ function clearWorkspaceSessionLocal({broadcast=false}={}){
   try{localStorage.removeItem(USER_CACHE_KEY)}catch(_){}
   try{sessionStorage.removeItem(USER_CACHE_KEY)}catch(_){}
   try{localStorage.removeItem(AUTH_OWNER_KEY)}catch(_){}
-  plannerMissingSince=0;
   if(broadcast)broadcastWorkspaceAuth('signed_out');
 }
-function enforcePlannerPresence(){
-  // Presence is advisory only. Browsers can throttle background tabs well beyond
-  // the heartbeat TTL; that must never be interpreted as an explicit sign-out.
-  // Guest lifetime is already scoped by sessionStorage and registered sessions
-  // are validated by /api/trip.
-  plannerMissingSince=0;
-  return true;
-}
-function startPlannerPresenceWatch(){
-  if(plannerPresenceWatchTimer) clearInterval(plannerPresenceWatchTimer);
-  plannerPresenceWatchTimer=setInterval(()=>enforcePlannerPresence(),2000);
-}
+function enforcePlannerPresence(){ return true; }
+function startPlannerPresenceWatch(){ initializeWorkspaceSessionLifecycle(); }
+
 async function fetchTripWorkspaceResult(tripId){
   const token=getStoredSessionToken();
   if(!tripId||!token)return {ok:false,status:401,workspace:null};
@@ -733,16 +740,14 @@ function setupWorkspaceAuthGate(){
   form?.addEventListener('submit',signInFromWorkspace);
 
   window.addEventListener('storage',async event=>{
-    if(event.key!==SESSION_KEY&&event.key!==AUTH_SYNC_KEY&&event.key!==AUTH_OWNER_KEY&&event.key!==PLANNER_PRESENCE_KEY)return;
+    if(event.key!==SESSION_KEY&&event.key!==AUTH_SYNC_KEY&&event.key!==AUTH_OWNER_KEY&&event.key!==SURFACE_PRESENCE_KEY)return;
     let state='';
     if(event.key===AUTH_SYNC_KEY&&event.newValue){try{state=String(JSON.parse(event.newValue)?.state||'')}catch(_){}}
     const token=getStoredSessionToken();
     if(state==='signed_out'||(event.key===SESSION_KEY&&!event.newValue&&!token)){
       clearWorkspaceSessionLocal();showWorkspaceAuthGate();return;
     }
-    if(event.key===PLANNER_PRESENCE_KEY||event.key===AUTH_OWNER_KEY){
-      if(!enforcePlannerPresence())return;
-    }
+    if(event.key===SURFACE_PRESENCE_KEY||event.key===AUTH_OWNER_KEY){ if(!enforcePlannerPresence())return; }
     if(token&&(event.key===SESSION_KEY||state==='signed_in'||event.key===AUTH_OWNER_KEY))await revalidateWorkspaceAccess();
   });
 
@@ -917,7 +922,6 @@ async function boot(){
   if(status) status.textContent=t.loading;
 
   if(!getStoredSessionToken()) consumeGuestWorkspaceHandoff();
-  if(workspaceAuthOwnedByPlanner() && !hasLivePlannerPresence()) enforcePlannerPresence();
   const token=getStoredSessionToken();
   if(!token){
     data=(requestedTripId && cached?.trip_id===requestedTripId) ? cached : (!requestedTripId?cached:null);
