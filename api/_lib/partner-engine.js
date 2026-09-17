@@ -499,8 +499,72 @@ async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, tripLangu
   return result;
 }
 
+
+function parseIntercityRouteLabel(value) {
+  const text = clean(value, 320);
+  const match = text.match(/^\s*([^→]{2,120})\s*→\s*([^→]{2,120})\s*$/);
+  if (!match) return null;
+  const origin = clean(match[1], 120);
+  const destination = clean(match[2], 120);
+  const bad = /\b(hotel|alojamiento|restaurant|restaurante|airport|aeropuerto|station|estacion|gare|terminal|point|punto|muelle|andén|anden)\b/i;
+  if (!origin || !destination || bad.test(origin) || bad.test(destination)) return null;
+  return { origin, destination };
+}
+
+async function getOwnedTripDestination(tripId, userId, city) {
+  if (!tripId || !userId || !city) return null;
+  const rows = await supabaseFetch(
+    `/trips?select=destinations&id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  const trip = Array.isArray(rows) ? rows[0] || null : null;
+  return (Array.isArray(trip?.destinations) ? trip.destinations : []).find(item =>
+    clean(item?.city,160).toLowerCase() === clean(city,160).toLowerCase()
+  ) || null;
+}
+
+async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=[]) {
+  const transportNeeds=(Array.isArray(needs)?needs:[]).filter(item=>
+    item && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement')
+  );
+  if(!transportNeeds.length) return [];
+
+  const [partner,template,mainDestination]=await Promise.all([
+    getPartner('omio'),
+    getOffer('omio','city_transport_contextual'),
+    getOwnedTripDestination(tripId,userId,city)
+  ]);
+  if(!partner || !template || !mainDestination) return [];
+  const countryCode=destinationCountryCode(mainDestination);
+  if(!OMIO_EUROPE_COUNTRY_CODES.has(countryCode)) return [];
+
+  const localeResolution=resolvePartnerLocale('omio',uiLanguage);
+  const out=[]; const seen=new Set();
+  for(const need of transportNeeds){
+    const route=parseIntercityRouteLabel(need.entity_name) || parseIntercityRouteLabel(need.source_activity) || parseIntercityRouteLabel(need.source_route);
+    if(!route) continue;
+    // Until Omio's API is approved, only expose contextual internal routes inside
+    // a known European main-destination block. This is deliberately conservative:
+    // it avoids pretending that arbitrary worldwide inventory has been verified.
+    const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
+    if(seen.has(key)) continue; seen.add(key);
+    const targetUrl=omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
+    if(!targetUrl) continue;
+    const routeLabel=`${route.origin} → ${route.destination}`;
+    out.push({
+      ...template, placement:'city_transport', title_es:routeLabel,title_en:routeLabel,
+      description_es:'Compara opciones disponibles para este traslado entre ciudades.',
+      description_en:'Compare available options for this intercity journey.',
+      target_url:undefined,confidence:'medium',need_id:need.id,need_type:need.need_type,entity_name:routeLabel,city,
+      travel_date:need.travel_date||null,resolution_type:'context_intercity_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
+      partner:{id:partner.id,slug:partner.slug,name:partner.name},
+      offer_token:signResolvedOffer({template,partner,targetUrl,placement:'city_transport',need:{...need,entity_name:routeLabel},city,resolutionType:'context_intercity_route',travelDate:need.travel_date||'',partnerLocale:localeResolution.locale})
+    });
+  }
+  return out;
+}
+
 function rankOffers(offers) {
-  const resolution = { trip_sequence_route: 40, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
+  const resolution = { trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
@@ -542,13 +606,14 @@ export async function resolveCityOffers({
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
 
-  const [viator, getyourguide, omio] = await Promise.all([
+  const [viator, getyourguide, omio, omioContext] = await Promise.all([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage)
+    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage),
+    resolveOmioContextRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
   ]);
 
-  return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
+  return { session, offers: rankOffers([...viator, ...getyourguide, ...omio, ...omioContext]) };
 }
 
 export async function registerPartnerClick({ session_token, trip_id, offer_id, offer_token, placement }) {
