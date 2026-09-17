@@ -1123,7 +1123,7 @@ async function loginITBMOUser(){
   try{
     const {response,data}=await postUserAction({action:'sign_in',email,password});
     if(response.ok && data?.ok && data?.session_token){
-      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
+      storeSessionToken(data.session_token,true); currentUser=data.user || null; authReady=true; if($accountLoginPassword) $accountLoginPassword.value=''; setAccountMessage(''); renderAuthState(); closeAccountDialog(); setTimeout(()=>restorePaidGenerationIfNeeded(),0); return;
     }
     setAccountMessage(authCopy('loginFail'),'error');
   }catch(err){ console.error('ITBMO sign in error:',err); setAccountMessage(authCopy('connectionFail'),'error'); }
@@ -3731,7 +3731,8 @@ Mandatory rules:
 - Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
 - Treat preferences and restrictions as binding planning constraints, not merely note content. Translate them into concrete scheduling, routing, meal and activity decisions.
 - Validate geography, season, useful daylight, route continuity, operational logistics and traveler fit.
-- Never invent flights, airports, check-out, rental companies or vehicle-return logistics.
+- Never invent flights, airports, stations, transport modes, reservations, check-out, rental companies or vehicle-return logistics. A user-fixed movement supplies only the facts explicitly present in KNOWN USER FACTS; unknown mode/terminal/provider details must remain unknown.
+- Respect every deterministic location window in KNOWN USER FACTS. A substantial 3.5+ hour window before departure or after a non-terminal arrival must contain a coherent useful sequence, not a single token activity. A terminal_arrival ends this destination at arrival and must never be expanded into tourism in the next city.
 - Never claim live weather, live road conditions, live openings or guaranteed wildlife/aurora sightings.
 
 Required non-empty row fields:
@@ -5694,7 +5695,8 @@ HARD RULES:
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
 - Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
-- TRAVEL MODEL V2 LOCATION WINDOWS ARE HARD PHYSICAL AVAILABILITY. Generate activities in EVERY available location window, including the remaining hours after arrival in a subdestination. A parent-city change must never cause the post-arrival window to be discarded.
+- TRAVEL MODEL V2 LOCATION WINDOWS ARE HARD PHYSICAL AVAILABILITY. Generate activities in EVERY planable location window. On transfer days, treat a substantial pre-departure or post-arrival window as a real sightseeing block: do not satisfy a 3.5+ hour window with one token stop. Preserve the same destination quality and density whenever time realistically allows.
+- Exception: a fixed transfer marked terminal_arrival closes the current main-destination block. Plan the origin before departure when viable, preserve access/buffer, include the fixed movement, and STOP at arrival. Do not invent sightseeing, dinner, lodging or local transport in the terminal city; the traveler must add that city as a new main destination to continue planning there.
 - For a fixed transfer, finish sightseeing early enough to reach the real station/terminal/airport with a prudent operational buffer BEFORE the declared departure. For rail/bus/ferry, normally protect at least 20–30 minutes at the departure point plus realistic access time; airports require substantially more. Do not double-count the fixed transfer itself.
 - Apply special_calendar_event_policy using the exact calendar_dates in KNOWN USER FACTS. When a meaningful celebration defines that date, protect it as an anchor, schedule sufficient arrival time, and continue through its defining moment (including after midnight when appropriate) unless a user hard boundary prevents it. Never fabricate year-specific event details.
 - On Day 1, the supplied start time means the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent an airport, flight, station or inbound transfer.
@@ -5916,7 +5918,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED'
+    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
@@ -6165,6 +6167,21 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         errors.push({
           code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,available_from:window.start,
           instruction:`After arriving in ${window.location} at ${window.start}, continue useful itinerary planning there. The missing end time is not a reason to stop; use the remaining day productively to at least about 19:00 and later when high-value evening content warrants it.`
+        });
+      }
+      // A transfer day can technically contain one post-arrival row and still be
+      // badly under-planned. For any long deterministic location window, require
+      // meaningful tourism coverage rather than accepting a token orientation stop.
+      const effectiveEnd=we==null?19*60:we;
+      const availableMinutes=Math.max(0,effectiveEnd-ws);
+      const usefulMinutes=useful.reduce((sum,r)=>{
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
+        return sum+(rs!=null&&re!=null?Math.max(0,re-rs):0);
+      },0);
+      if(availableMinutes>=210 && (useful.length<2 || usefulMinutes<Math.min(150,Math.round(availableMinutes*0.45)))){
+        errors.push({
+          code:'ROUTE_WINDOW_TOO_THIN',day:ctx.day,location:window.location,window_start:window.start,window_end:window.end||'open',available_minutes:availableMinutes,useful_rows:useful.length,useful_minutes:usefulMinutes,
+          instruction:`This is a substantial usable window in ${window.location}. Rebuild this part of the day with a coherent, high-value sequence of multiple activities (plus meal/rest only when appropriate), without touching the fixed transfer or adding filler.`
         });
       }
       rowsInWindow.forEach((r,index)=>{
@@ -9118,10 +9135,10 @@ function showPostDownloadWorkspaceGuide(){
   overlay.innerHTML=`<div class="itbmo-next-card" role="dialog" aria-modal="true">
     <div class="itbmo-next-icon">✦</div>
     <h3>${es?'Tu viaje ya está listo para explorarlo.':'Your trip is ready to explore.'}</h3>
-    <p>${es?'Ahora puedes pasar de planificar a vivir tu viaje desde antes de salir. Estos dos espacios organizan lo que sigue.':'Now you can move from planning to experiencing your trip before departure. These two spaces organize what comes next.'}</p>
+    <p>${es?'Tu itinerario es solo el comienzo. Ahora tienes un espacio para preparar todo el viaje y otro para explorar cada destino día por día.':'Your itinerary is only the beginning. You now have one space to prepare the whole trip and another to explore each destination day by day.'}</p>
     <div class="itbmo-next-grid">
-      <div><strong>${es?'Trip Workspace':'Trip Workspace'}</strong><span>${es?'Visión completa de tu viaje, herramientas y necesidades que aplican a toda la ruta.':'Your full-trip view, tools and needs across the entire route.'}</span></div>
-      <div><strong>${es?'City Workspace':'City Workspace'}</strong><span>${es?'Entra a cada destino para revisar el itinerario día por día y acceder a herramientas contextualizadas.':'Open each destination to review the day-by-day itinerary and contextual tools.'}</span></div>
+      <div><strong>${es?'Prepara todo tu viaje':'Prepare your whole trip'}</strong><span>${es?'Usa el botón “Explora y prepara tu viaje” para entrar a las ciudades y abrir “Para todo tu viaje”: conectividad, seguros y servicios útiles para toda la ruta.':'Use “Explore and prepare your trip” to enter your cities and open “For your whole trip”: connectivity, insurance and useful services for the full route.'}</span><em>${es?'Explora y prepara tu viaje →  ·  Para todo tu viaje':'Explore and prepare your trip →  ·  For your whole trip'}</em></div>
+      <div><strong>${es?'Explora cada destino':'Explore each destination'}</strong><span>${es?'Al entrar a una ciudad verás el itinerario detallado día por día. En “Para tu viaje” encontrarás entradas, tours, experiencias y transporte seleccionados según ese itinerario.':'Inside each city you will see the detailed day-by-day itinerary. “For your trip” brings together tickets, tours, experiences and transport selected from that itinerary.'}</span><em>${es?'Itinerario  |  ✦ Para tu viaje · EXPLORA':'Itinerary  |  ✦ For your trip · EXPLORE'}</em></div>
     </div>
     <button type="button">${es?'Explorar mi viaje →':'Explore my trip →'}</button>
   </div>`;
