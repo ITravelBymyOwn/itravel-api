@@ -445,7 +445,7 @@
       const inboundToMain=norm(seg.destination).toLowerCase()===norm(destination.city).toLowerCase() && norm(seg.origin).toLowerCase()!==norm(destination.city).toLowerCase();
       if(depIndex>=0){
         if(inboundToMain) dayContexts[depIndex].start_location=seg.origin;
-        dayContexts[depIndex].fixed_transfers.push({origin:seg.origin,destination:seg.destination,departure:seg.departureTime||null,arrival:seg.arrivalTime||null,date:seg.departureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED'});
+        dayContexts[depIndex].fixed_transfers.push({origin:seg.origin,destination:seg.destination,departure:seg.departureTime||null,arrival:seg.arrivalTime||null,date:seg.departureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED',terminal_arrival:seg.disposition==='end_block'&&_isLastPlannerDay({baseISO:source?.base_date||destination.baseDate,days:totalDays},seg.arrivalDate)});
         dayContexts[depIndex].hard_route_constraints.push(`${seg.origin} → ${seg.destination}${seg.departureTime?` ${seg.departureTime}`:''}${seg.arrivalTime?`–${seg.arrivalTime}`:''}`);
       }
       if(seg.disposition==='roundtrip'){
@@ -486,17 +486,18 @@
     // Build deterministic windows for exact same-day transfers.
     dayContexts.forEach(ctx=>{
       const transfers=ctx.fixed_transfers.slice().sort((a,b)=>(a.departure||'99:99').localeCompare(b.departure||'99:99'));
-      let cursor=null, location=ctx.start_location;
+      let cursor=null, location=ctx.start_location, terminalReached=false;
       transfers.forEach(t=>{
         const availableStart=cursor||destination.perDay?.[ctx.day-1]?.start||null;
         if(t.departure && availableStart && availableStart!==t.departure) ctx.location_windows.push({location,start:availableStart,end:t.departure});
-        ctx.location_windows.push({location:`${t.origin} → ${t.destination}`,start:t.departure,end:t.arrival,type:'fixed_transfer'});
+        ctx.location_windows.push({location:`${t.origin} → ${t.destination}`,start:t.departure,end:t.arrival,type:'fixed_transfer',terminal_arrival:!!t.terminal_arrival});
         cursor=t.arrival||cursor;location=t.destination;
+        if(t.terminal_arrival) terminalReached=true;
         const owner=segments.find(seg=>seg.returnDepartureDate===ctx.date&&seg.returnArrivalTime===t.arrival&&norm(destination.city).toLowerCase()===norm(t.destination).toLowerCase());
         if(owner?.resumeTime && cursor && owner.resumeTime>cursor) cursor=owner.resumeTime;
       });
       const dayEnd=destination.perDay?.[ctx.day-1]?.end||null;
-      if(transfers.length && cursor){
+      if(transfers.length && cursor && !terminalReached){
         if(dayEnd && cursor<dayEnd) ctx.location_windows.push({location,start:cursor,end:dayEnd});
         else if(!dayEnd) ctx.location_windows.push({location,start:cursor,end:null,open_end:true,minimum_useful_target:'19:00'});
       }
