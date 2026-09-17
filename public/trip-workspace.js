@@ -238,8 +238,10 @@ function contextualNeedsForCity(cityName,needs){
     if(item?.need_type!=='intercity_transport' && item?.need_type!=='transport_arrangement') return true;
     return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
-  const tourAlternatives=tourAlternativesForCity(cityName,withoutDuplicateTopLevelRoutes);
-  return [...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[]),...tourAlternatives];
+  // Context Intelligence is the single source of truth for tour opportunities.
+  // Do not synthesize one tour card per itinerary row here: that recreates the
+  // fragmentation that the server-side clustering intentionally removes.
+  return [...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
 }
 
 function contextLabel(item){
@@ -266,10 +268,7 @@ function sectionSort(items=[],sectionType=''){
   });
 }
 function initialSectionLimit(items=[],sectionType=''){
-  if(sectionType==='tickets'){
-    const required=items.filter(item=>item?.need_type==='ticket_required').length;
-    return Math.max(required,Math.min(items.length,required+2));
-  }
+  if(sectionType==='tickets') return items.length; // access needs are execution-critical: never hide them behind 'Ver más'
   if(sectionType==='tours') return Math.min(items.length,4);
   if(sectionType==='transport') return Math.min(items.length,3);
   return items.length;
