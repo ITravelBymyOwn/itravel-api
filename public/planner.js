@@ -706,23 +706,11 @@ function initializePlannerSessionLifecycle(){
   let established=false;
   try{ established=sessionStorage.getItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY)==='1'; }catch(_){ }
 
-  // A registered-account token left behind by a Planner tab that is no longer
-  // alive must not silently authenticate a newly opened Planner. A real reload
-  // keeps the sessionStorage marker, while a new/reopened tab does not.
-  let persistentToken='';
-  let owner='';
-  try{
-    persistentToken=String(localStorage.getItem(ITBMO_SESSION_KEY)||'').trim();
-    owner=String(localStorage.getItem(ITBMO_AUTH_OWNER_KEY)||'').trim();
-  }catch(_){ }
-  const liveBefore=hasLivePlannerPresence();
-  if(persistentToken && (owner==='planner' || !owner) && !established && !liveBefore){
-    try{ localStorage.removeItem(ITBMO_SESSION_KEY); }catch(_){ }
-    try{ localStorage.removeItem(ITBMO_USER_CACHE_KEY); }catch(_){ }
-    try{ localStorage.removeItem(ITBMO_AUTH_OWNER_KEY); }catch(_){ }
-    broadcastAuthState('signed_out');
-  }
-
+  // Registered-account authentication is persistent by product design and must
+  // never be inferred as signed out from tab/heartbeat state. Browsers throttle
+  // background tabs during long generations, which made a valid session look
+  // abandoned and broke Workspace handoff. Presence is telemetry only; explicit
+  // logout or backend rejection is the only authority that clears the account.
   try{ sessionStorage.setItem(ITBMO_PLANNER_TAB_ESTABLISHED_KEY,'1'); }catch(_){ }
   startPlannerPresenceHeartbeat();
 
@@ -3885,7 +3873,7 @@ Edits:
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
+      body: JSON.stringify({ model: MODEL, messages, mode })
     });
 
     if(!res.ok){
@@ -4959,8 +4947,8 @@ function setOverlayMessage(msg=t('overlayDefault')){
   const isEs = getLang() === 'es';
   p.classList.add('astra-overlay-copy');
   p.innerHTML = isEs
-    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">1 ciudad 4–5 min <i>·</i> 2 ciudades 8–10 min <i>·</i> 3 ciudades 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
-    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">1 city 4–5 min <i>·</i> 2 cities 8–10 min <i>·</i> 3 cities 12–15 min</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
+    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">Nuevo motor V3 · generación concurrente y optimizada</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">New V3 engine · concurrent, optimized generation</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
 }
 
 function showWOW(on, msg){
@@ -5156,17 +5144,20 @@ function _extractExactUsage_(data){
     (input+output)
   ) || (input+output);
 
+  const modelCalls=Number(usage.model_calls ?? usage.modelCalls ?? 1) || 1;
   if(input<=0 && output<=0 && total<=0) return null;
-  return {input,output,total};
+  return {input,output,total,modelCalls};
 }
 
 function _captureExactUsage_(data){
   if(!_astraGenerationMetrics_.active) return;
-  _astraGenerationMetrics_.calls++;
-
   const usage=_extractExactUsage_(data);
-  if(!usage) return;
+  if(!usage){
+    _astraGenerationMetrics_.calls++;
+    return;
+  }
 
+  _astraGenerationMetrics_.calls+=usage.modelCalls;
   _astraGenerationMetrics_.inputTokens+=usage.input;
   _astraGenerationMetrics_.outputTokens+=usage.output;
   _astraGenerationMetrics_.totalTokens+=usage.total;
@@ -5214,7 +5205,7 @@ function _finishAstraGenerationMetrics_(){
   return snapshot;
 }
 
-async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true){
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='planner'){
   const history = useHistory ? session : [];
 
   // timeout to avoid hangs (same pattern as SECTION 12)
@@ -6337,17 +6328,30 @@ async function _finalTripWideRepair_(
     city,currentRows,totalDays,masterDays,perDay,baseDate
   );
 
-  const firstRepair=await _runTripWideRepairCall_(
-    city,currentRows,totalDays,masterDays,facts,currentReport,forceReplan,false
-  );
+  // V3 latency rule: a clean deterministic audit must never trigger a model repair.
+  // The previous flow always made at least one full-city repair call, even when the
+  // generated city was already valid. That added a large token/latency tax with no
+  // quality benefit. Repair only material findings; minor advisory warnings remain
+  // visible to diagnostics but do not cause another large generation call.
+  const initialScore=_auditScore_(currentReport);
+  if(initialScore===0){
+    return {rows:currentRows,report:currentReport,repaired:false};
+  }
 
-  if(firstRepair){
-    const firstReport=_localGlobalAudit_(
-      city,firstRepair,totalDays,masterDays,perDay,baseDate
+  const hasMaterialIssue=(currentReport?.errors||[]).some(error=>_auditSeverity_(error)>=4);
+  if(hasMaterialIssue){
+    const firstRepair=await _runTripWideRepairCall_(
+      city,currentRows,totalDays,masterDays,facts,currentReport,forceReplan,false
     );
-    if(_auditScore_(firstReport)<_auditScore_(currentReport)){
-      currentRows=firstRepair;
-      currentReport=firstReport;
+
+    if(firstRepair){
+      const firstReport=_localGlobalAudit_(
+        city,firstRepair,totalDays,masterDays,perDay,baseDate
+      );
+      if(_auditScore_(firstReport)<_auditScore_(currentReport)){
+        currentRows=firstRepair;
+        currentReport=firstReport;
+      }
     }
   }
 
@@ -6377,7 +6381,7 @@ async function _finalTripWideRepair_(
     )
   };
 }
-async function generateCityItinerary(city,{silentFailure=false}={}){
+async function _generateCityItineraryLegacy_(city,{silentFailure=false}={}){
   const _cityGenerationStartedAt_=performance.now();
   const _recordCityGenerationTime_=()=>{
     if(!_astraGenerationMetrics_.active) return;
@@ -6536,6 +6540,225 @@ HARD RULES:
     : 'I could not complete a coherent itinerary. Please retry or temporarily reduce the number of days.';
   if(!silentFailure) chatMsg(msg,'ai');
   return false;
+}
+
+/* =========================================================
+   ITBMO · GENERATION ENGINE V3
+   Deterministic contract -> one planning-unit model call -> deterministic
+   audit -> at most one scoped repair. Legacy V2 remains above as a fallback.
+========================================================= */
+const ITBMO_GENERATION_ENGINE='v3';
+
+function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
+  const route=_routeV2ContextForCity_(city) || {};
+  const placePreferences={};
+  (route.day_contexts||[]).forEach(day=>{
+    [day.start_location,day.end_location,day.overnight_base,
+      ...(day.fixed_transfers||[]).flatMap(t=>[t.origin,t.destination])]
+      .filter(Boolean).forEach(place=>{
+        const pref=_routeV2PlacePreference_(place);
+        if(pref) placePreferences[place]=pref;
+      });
+  });
+  const lodging=_normalizeLodgingInput_(hotel);
+  return {
+    version:'ITBMO_GENERATION_CONTRACT_V3',
+    planning_unit:city,
+    total_days:Number(dest?.days||0),
+    base_date:baseDate||null,
+    itinerary_language:String(plannerState?.itineraryLang||getLang()||'es'),
+    daily_user_windows:perDay,
+    lodging_base:lodging.normalized||null,
+    transport_preference:transport||null,
+    route_days:(route.day_contexts||[]).map(day=>({
+      day:Number(day.day),
+      date:day.date||null,
+      start_location:day.start_location||city,
+      end_location:day.end_location||day.start_location||city,
+      overnight_base:day.overnight_base||day.end_location||city,
+      terminal_arrival_only:Boolean(day.terminal_arrival_only||day.end_destination_block||day.terminal_transfer),
+      location_windows:(day.location_windows||[]).map(w=>({
+        location:w.location||null,
+        start:w.start||null,
+        end:w.end||null,
+        type:w.type||'plannable',
+        open_end:Boolean(w.open_end)
+      })),
+      fixed_transfers:(day.fixed_transfers||[]).map(t=>({
+        origin:t.origin||null,
+        destination:t.destination||null,
+        departure:t.departure||null,
+        arrival:t.arrival||null,
+        source:t.source||'USER_FIXED',
+        mode:t.mode||null
+      }))
+    })),
+    place_preferences:placePreferences,
+    global_preferences:plannerState?.preferencesV2?.global||null,
+    special_conditions:String(plannerState?.preferencesV2?.global?.notes || plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim()||null,
+    travelers:plannerState?.travelers||null,
+    traveler_profiles:plannerState?.travelerProfiles||null,
+    calendar_dates:_calendarDatesForStay_(baseDate,Number(dest?.days||0)),
+    hard_policies:{
+      fixed_movements_are_immutable:true,
+      location_windows_are_physical_bounds:true,
+      use_substantial_windows_productively:true,
+      preserve_real_overnight_base:true,
+      terminal_large_transfer_ends_block:true,
+      never_invent_transport_booking_details:true,
+      no_activity_during_fixed_transfer:true,
+      full_itbmo_quality_applies_to_subdestinations:true
+    }
+  };
+}
+
+function _v3SyntheticMaster_(totalDays){
+  return Array.from({length:Number(totalDays)||0},(_,i)=>({
+    day:i+1,
+    theme:`Unique high-value day ${i+1} | Anchors: distinct geographically coherent experiences`
+  }));
+}
+
+function _v3MaterialAuditErrors_(report){
+  const material=new Set([
+    'MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER',
+    'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','WRONG_OVERNIGHT_BASE',
+    'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','GLOBAL_DUPLICATE_POI',
+    'OVERLAP','CONTINUITY','GENERIC_TO','AMBIGUOUS_TO','AMBIGUOUS_TRANSPORT',
+    'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','REGIONAL_DAY_TOO_THIN',
+    'END_BEFORE_MINIMUM_TARGET','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
+    'MISSING_AURORA_FINAL_NOTE','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE'
+  ]);
+  return (report?.errors||[]).filter(e=>material.has(String(e?.code||'')));
+}
+
+async function _v3Call_(prompt){
+  return _callPlannerSystemPrompt_(prompt,false,'planner_v3');
+}
+
+async function _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport){
+  const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
+  const prompt=`
+GENERATION CONTRACT — authoritative JSON:
+${JSON.stringify(contract)}
+
+Generate the complete planning unit in one pass. Internally choose distinct day identities and anchors before writing rows, but output only the final itinerary JSON. Use every physically available window correctly. Do not ask questions.
+`.trim();
+  const raw=await _v3Call_(prompt);
+  const parsed=parseJSON(raw);
+  const rows=_dedupeRows_(_extractPlannerRows_(parsed,city));
+  return {rows,contract};
+}
+
+async function _v3RepairAffectedDays_(city,rows,contract,report,totalDays,perDay,baseDate){
+  const errors=_v3MaterialAuditErrors_(report);
+  const affected=[...new Set(errors.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(d=>d>=1&&d<=totalDays))].sort((a,b)=>a-b);
+  if(!affected.length) return {rows,report,repaired:false};
+
+  const current=rows.filter(r=>affected.includes(Number(r?.day)));
+  const scopedContract={
+    ...contract,
+    repair_scope_days:affected,
+    route_days:(contract.route_days||[]).filter(d=>affected.includes(Number(d.day)))
+  };
+  const prompt=`
+SURGICAL REPAIR CONTRACT — authoritative JSON:
+${JSON.stringify(scopedContract)}
+
+CURRENT ROWS FOR THE AFFECTED DAYS:
+${JSON.stringify(current)}
+
+DETERMINISTIC VALIDATOR ERRORS:
+${JSON.stringify(errors)}
+
+Rebuild ONLY days ${affected.join(', ')}. Correct every validator error while preserving all hard route windows, fixed movements, preferences and strong valid tourism choices. Return city_day JSON containing ONLY those repaired days. Do not regenerate unaffected days.
+`.trim();
+
+  const raw=await _v3Call_(prompt);
+  const parsed=parseJSON(raw);
+  const repaired=_dedupeRows_(_extractPlannerRows_(parsed,city)).filter(r=>affected.includes(Number(r?.day)));
+  if(!repaired.length || !affected.every(day=>repaired.some(r=>Number(r?.day)===day))){
+    return {rows,report,repaired:false};
+  }
+  const merged=_dedupeRows_([
+    ...rows.filter(r=>!affected.includes(Number(r?.day))),
+    ...repaired
+  ]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  const nextReport=_localGlobalAudit_(city,merged,totalDays,_v3SyntheticMaster_(totalDays),perDay,baseDate);
+  return _auditScore_(nextReport)<_auditScore_(report)
+    ? {rows:merged,report:nextReport,repaired:true}
+    : {rows,report,repaired:false};
+}
+
+async function generateCityItinerary(city,{silentFailure=false}={}){
+  if(ITBMO_GENERATION_ENGINE!=='v3') return _generateCityItineraryLegacy_(city,{silentFailure});
+  const started=performance.now();
+  const record=()=>{
+    if(!_astraGenerationMetrics_.active) return;
+    const elapsed=performance.now()-started;
+    const existing=_astraGenerationMetrics_.cities.find(x=>x.city===city);
+    const value={city,ms:Math.round(elapsed),duration:_formatGenerationDuration_(elapsed),engine:'v3'};
+    if(existing) Object.assign(existing,value); else _astraGenerationMetrics_.cities.push(value);
+    console.log(`[ITBMO V3 TIMER] ${city}: ${value.duration}`);
+  };
+  const dest=savedDestinations.find(x=>x.city===city);
+  if(!dest) return false;
+  const perDay=_normalizePerDayForPrompt_(city,dest.days,dest.perDay||[]);
+  const baseDate=cityMeta[city]?.baseDate||dest.baseDate||'';
+  const hotel=cityMeta[city]?.hotel||'';
+  const transport=cityMeta[city]?.transport||'recommend me';
+  showWOW(true,t('overlayGenerating'));
+
+  try{
+    console.log(`[ITBMO V3] Planning unit ${city}: one-pass generation`);
+    const generated=await _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport);
+    let rows=generated.rows;
+    if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error(`V3_INCOMPLETE:${city}`);
+
+    const master=_v3SyntheticMaster_(dest.days);
+    let report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+    const materialBefore=_v3MaterialAuditErrors_(report);
+    if(materialBefore.length){
+      console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} material issue(s); scoped repair only`,materialBefore);
+      const repaired=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
+      rows=repaired.rows;
+      report=repaired.report;
+    }
+
+    const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW']);
+    if((report?.errors||[]).some(e=>blocking.has(String(e?.code||'')))){
+      throw new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
+    }
+
+    if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null,masterPlan:[],audit:null};
+    itineraries[city].masterPlan=master;
+    itineraries[city].audit=report;
+    pushRows(city,_dedupeRows_(rows),true);
+    renderCityTabs();
+    if(!activeCity) setActiveCity(city);
+    if(activeCity===city) renderCityItinerary(city);
+    $resetBtn?.removeAttribute('disabled');
+    if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
+    record();
+    return true;
+  }catch(error){
+    console.error(`[ITBMO V3] ${city} failed`,error);
+    /* One bounded compatibility fallback. It is deliberately city-scoped and
+       only used after V3 fails, preserving recovery without making legacy work
+       part of the normal token/time path. */
+    try{
+      const ok=await _generateCityItineraryLegacy_(city,{silentFailure:true});
+      record();
+      return Boolean(ok);
+    }catch(fallbackError){
+      console.error(`[ITBMO V3] ${city} legacy fallback failed`,fallbackError);
+      record();
+      if(!silentFailure) chatMsg(getLang()==='es'?'No pude completar el itinerario. Intenta nuevamente.':'I could not complete the itinerary. Please retry.','ai');
+      return false;
+    }
+  }finally{
+    showWOW(false);
+  }
 }
 
 /* =========================================================
@@ -6854,7 +7077,8 @@ function _generationCheckpointSnapshot_(extra={}){
       .filter(city=>_generationCityComplete_(city))
   )];
   return {
-    schema_version:1,
+    schema_version:2,
+    generation_engine:'v3',
     completed_cities:completed,
     pending_cities:savedDestinations.map(x=>x.city).filter(city=>!completed.includes(city)),
     city_attempts:{...(generationRecoveryState?.city_attempts || {})},
@@ -7082,7 +7306,30 @@ function _applyGeneratedUIState({showModal=false}={}){
     $preferencesGenerateV2.textContent=getLang()==='es'?'✓ Itinerario generado':'✓ Itinerary generated';
     $preferencesGenerateV2.classList.add('is-generated');
   }
-  if(showModal) setTimeout(()=>showFinalDownloadModal(),260);
+  if(showModal) showFinalDownloadModal();
+}
+
+// V3 generation orchestrator: main destinations are independent only AFTER
+// Travel Model V2 has compiled their physical route windows. We therefore keep
+// each city's internal master-plan/block sequence intact, but run independent
+// main-destination chains concurrently. This reduces wall-clock time without
+// parallelizing dependent blocks inside Madrid→Segovia→Toledo, etc.
+const ITBMO_GENERATION_CONCURRENCY=2;
+let _generationCheckpointQueue_=Promise.resolve();
+function _queueGenerationCheckpoint_(status='generating',extra={}){
+  const task=()=>_persistGenerationCheckpoint_(status,extra);
+  _generationCheckpointQueue_=_generationCheckpointQueue_.then(task,task);
+  return _generationCheckpointQueue_;
+}
+async function _runGenerationPool_(items,worker,limit=ITBMO_GENERATION_CONCURRENCY){
+  const queue=[...(items||[])];
+  const workers=Array.from({length:Math.max(1,Math.min(Number(limit)||1,queue.length||1))},async()=>{
+    while(queue.length){
+      const item=queue.shift();
+      if(item) await worker(item);
+    }
+  });
+  await Promise.all(workers);
 }
 
 async function runPaidGeneration({manualRetry=false}={}){
@@ -7124,15 +7371,17 @@ async function runPaidGeneration({manualRetry=false}={}){
 
     await _persistGenerationCheckpoint_('generating');
 
+    const pendingDestinations=savedDestinations.filter(({city})=>!_generationCityComplete_(city));
     for(const {city} of savedDestinations){
-      if(_generationCityComplete_(city)){
-        if(!generationRecoveryState.completed_cities.includes(city)){
-          generationRecoveryState.completed_cities.push(city);
-          await _persistGenerationCheckpoint_('generating');
-        }
-        continue;
+      if(_generationCityComplete_(city) && !generationRecoveryState.completed_cities.includes(city)){
+        generationRecoveryState.completed_cities.push(city);
       }
+    }
+    if(pendingDestinations.length!==savedDestinations.length){
+      await _queueGenerationCheckpoint_('generating');
+    }
 
+    await _runGenerationPool_(pendingDestinations,async({city})=>{
       let attempts=Math.max(0,Number(generationRecoveryState.city_attempts[city] || 0));
       let completed=false;
 
@@ -7144,7 +7393,7 @@ async function runPaidGeneration({manualRetry=false}={}){
         attempts+=1;
         generationRecoveryState.city_attempts[city]=attempts;
         generationRecoveryState.last_error=null;
-        await _persistGenerationCheckpoint_('generating',{active_city:city});
+        await _queueGenerationCheckpoint_('generating',{active_city:city});
 
         showWOW(true,t('overlayGenerating'));
         const success=await generateCityItinerary(city,{silentFailure:true});
@@ -7155,7 +7404,7 @@ async function runPaidGeneration({manualRetry=false}={}){
             generationRecoveryState.completed_cities.push(city);
           }
           generationRecoveryState.last_error=null;
-          await _persistGenerationCheckpoint_('generating',{active_city:null});
+          await _queueGenerationCheckpoint_('generating',{active_city:null});
         }else{
           generationRecoveryState.last_error={
             city,
@@ -7163,10 +7412,10 @@ async function runPaidGeneration({manualRetry=false}={}){
             code:'CITY_GENERATION_FAILED',
             at:new Date().toISOString()
           };
-          await _persistGenerationCheckpoint_('generating',{active_city:city});
+          await _queueGenerationCheckpoint_('generating',{active_city:city});
         }
       }
-    }
+    },ITBMO_GENERATION_CONCURRENCY);
 
     const allComplete=savedDestinations.every(({city})=>_generationCityComplete_(city));
     if(!allComplete){
@@ -7182,7 +7431,10 @@ async function runPaidGeneration({manualRetry=false}={}){
       return;
     }
 
-    await _persistGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    await _queueGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    // Publication is the critical transaction boundary. Show downloads first;
+    // analytics/context warming must never be able to suppress the completion UI.
+    _applyGeneratedUIState({showModal:true});
     _prewarmGeneratedTripContext_().catch(error=>console.warn('[CONTEXT PREWARM]',error));
     trackITBMOEvent('itinerary_generated',{
       city_count:savedDestinations.length,
@@ -7190,7 +7442,6 @@ async function runPaidGeneration({manualRetry=false}={}){
       generation_mode:manualRetry?'recovery':'standard'
     });
     _finishAstraGenerationMetrics_();
-    _applyGeneratedUIState({showModal:true});
     chatMsg(getPlannerCompletionMessage(),'ai');
   }catch(err){
     console.error('[PAID GENERATION ORCHESTRATOR]',err);
@@ -10877,13 +11128,13 @@ function enhancePreferencesInfoChatCopy(){
     en:{
       lead:'A little context makes your itinerary much more personal.',
       summary:'You can mention <strong>style</strong>, <strong>pace</strong>, <strong>must-dos</strong> and any <strong>special needs or restrictions</strong>.',
-      note:'Need destination context first? Info Chat is right beside this field.',
+      note:'',
       placeholder:'Write your preferences, restrictions or special conditions here…'
     },
     es:{
       lead:'Un poco de contexto hace que tu itinerario sea mucho más personal.',
       summary:'Puedes incluir <strong>estilo</strong>, <strong>ritmo</strong>, <strong>imperdibles</strong> y cualquier <strong>necesidad o restricción especial</strong>.',
-      note:'¿Necesitas investigar algo primero? Info Chat está justo al lado de este campo.',
+      note:'',
       placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…'
     }
   }[lang] || {
