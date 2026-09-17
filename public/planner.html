@@ -194,7 +194,7 @@
           <div id="account-user-badge" class="account-user-badge" style="display:none;"></div>
         </div>
 
-        <div id="account-guest">
+        <form id="account-guest" autocomplete="on" onsubmit="return false;">
           <div class="account-mode-actions account-mode-actions--premium" id="account-mode-actions">
             <button class="btn primary account-mode-btn account-mode-btn--register" id="account-register-toggle" type="button">Create account</button>
             <button class="btn ghost account-mode-btn account-mode-btn--login" id="account-login-toggle" type="button">Sign in</button>
@@ -317,7 +317,7 @@
           </div>
 
           <div id="account-message" class="account-message" aria-live="polite"></div>
-        </div>
+        </form>
 
         <div id="account-authenticated" class="account-authenticated account-authenticated--premium" style="display:none;">
           <div class="account-authenticated-copy">
