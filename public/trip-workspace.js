@@ -13,6 +13,7 @@ const WORKSPACE_TAB_ESTABLISHED_KEY='itbmo_workspace_tab_established_v2';
 const SURFACE_PRESENCE_TTL_MS=10000;
 const SURFACE_HEARTBEAT_MS=2000;
 const GUEST_HANDOFF_KEY='itbmo_workspace_guest_handoff_v1';
+const WORKSPACE_OPEN_HANDOFF_KEY='itbmo_workspace_open_handoff_v1';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
@@ -595,7 +596,18 @@ function markWorkspacePresence(){const p=pruneSurfacePresence();p[workspaceTabId
 function removeWorkspacePresence(){const id=workspacePresenceId||(()=>{try{return String(sessionStorage.getItem(WORKSPACE_TAB_ID_KEY)||'').trim()}catch(_){return''}})();if(!id)return;const p=pruneSurfacePresence();delete p[id];writeSurfacePresence(p)}
 function initializeWorkspaceSessionLifecycle(){
   let established=false;try{established=sessionStorage.getItem(WORKSPACE_TAB_ESTABLISHED_KEY)==='1'}catch(_){}
-  if(!established&&!hasLiveITBMOSurface()){
+  let openedFromLivePlanner=false;
+  try{
+    const handoffId=new URLSearchParams(location.search).get('handoff')||'';
+    const keyed=handoffId?`${WORKSPACE_OPEN_HANDOFF_KEY}:${handoffId}`:WORKSPACE_OPEN_HANDOFF_KEY;
+    const raw=localStorage.getItem(keyed);
+    if(raw){
+      localStorage.removeItem(keyed);
+      const handoff=JSON.parse(raw);
+      openedFromLivePlanner=Number(handoff?.expires_at||0)>Date.now();
+    }
+  }catch(_){}
+  if(!established&&!openedFromLivePlanner&&!hasLiveITBMOSurface()){
     const hadRegistered=(()=>{try{return Boolean(localStorage.getItem(SESSION_KEY))}catch(_){return false}})();
     if(hadRegistered)clearWorkspaceSessionLocal({broadcast:true});
   }
