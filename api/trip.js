@@ -4,7 +4,7 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
-const MAX_GENERATION_RUNS = 2;
+const MAX_GENERATION_RUNS = 4; // V3: allow paid recovery without exhausting after two technical failures
 const MAX_DAYS_PER_DESTINATION = 10;
 
 const ITBMO_ADMIN_TEST_BYPASS =
