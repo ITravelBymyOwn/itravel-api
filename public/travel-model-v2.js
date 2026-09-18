@@ -209,7 +209,10 @@
       quickStop.dataset.routeBound='1';
       quickStop.addEventListener('click',()=>openSegmentWizard(row));
     }
-    host.querySelectorAll('[data-route-edit]').forEach(btn=>btn.addEventListener('click',()=>{const seg=route.segments.find(x=>x.id===btn.dataset.routeEdit);if(seg)openSegmentWizard(row,seg);}));
+    host.querySelectorAll('[data-route-edit]').forEach(btn=>btn.addEventListener('click',()=>{
+      const ordered=(route.segments||[]).slice().sort((a,b)=>dateKey(a.departureDate,a.departureTime)-dateKey(b.departureDate,b.departureTime));
+      if(ordered.length) openSegmentWizard(row,ordered[0],{editWholeRoute:true});
+    }));
     host.querySelectorAll('[data-route-remove]').forEach(btn=>btn.addEventListener('click',()=>{
       route.segments=route.segments.filter(x=>x.id!==btn.dataset.routeRemove);
       renderRowSummary(row);
@@ -240,26 +243,46 @@
   function _destinationField(field,value=''){
     return `<label class="route-v2-destination-field">${copy('Destino o lugar','Destination or place')}<div class="route-v2-search-wrap"><input data-route-search="${field}" value="${esc(value)}" autocomplete="off" placeholder="${copy('Escribe al menos 3 letras','Type at least 3 letters')}"><div class="route-v2-search-menu" data-route-search-menu="${field}" hidden></div></div><small>${copy('Escribe 3 letras y selecciona el lugar correcto. Verás ciudad y país.','Type 3 letters and select the correct place. You will see city and country.')}</small></label>`;
   }
-  function openSegmentWizard(row,existing=null){
+  function openSegmentWizard(row,existing=null,options={}){
     const meta=rowMeta(row),route=rowRoute(row);
     if(!meta.baseISO||!meta.days){alert(copy('Primero indica el primer día y la cantidad de días del destino.','First enter the start date and number of days.'));return;}
     let drafts=[];
-    let seg=existing?{...existing}:{id:uid(),baseDestination:meta.city||'',origin:meta.city||'',destination:'',destinationCountry:'',departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',transportMode:'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',returnTransportMode:'',resumeTime:'',timePrecision:'exact'};
-    const ui=wizardShell(copy('Agregar lugar a mi recorrido','Add a place to my route'),copy(`Construye el recorrido dentro de ${meta.city}. El ciclo debe regresar a ${meta.city} o terminar en otra ubicación al consumir el último día disponible.`,`Build the route within ${meta.city}. The cycle must return to ${meta.city} or end elsewhere when the last available day is consumed.`));
+    const editWholeRoute=Boolean(existing&&options?.editWholeRoute);
+    let originalEditSegments=editWholeRoute?(route.segments||[]).slice().sort((a,b)=>dateKey(a.departureDate,a.departureTime)-dateKey(b.departureDate,b.departureTime)):[];
+    const originalEditIds=new Set(originalEditSegments.map(x=>x.id));
+    let editCursor=0;
+    const hydrateContinuation=(target,index)=>{
+      if(!editWholeRoute) return target;
+      const next=originalEditSegments[index+1];
+      if(next && norm(next.origin).toLowerCase()===norm(target.destination).toLowerCase()){
+        target.disposition='continue';
+        target.nextDepartureDate=next.departureDate||'';
+        target.nextDestination=next.destination||'';
+        target.nextDestinationCountry=next.destinationCountry||'';
+        target.nextDestinationCountryCode=next.destinationCountryCode||'';
+        target.nextDepartureTime=next.departureTime||'';
+        target.nextArrivalTime=next.arrivalTime||'';
+        target.nextTransportMode=next.transportMode||'';
+      }
+      return target;
+    };
+    let seg=existing?hydrateContinuation({...existing},0):{id:uid(),baseDestination:meta.city||'',origin:meta.city||'',destination:'',destinationCountry:'',departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',transportMode:'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',returnTransportMode:'',resumeTime:'',timePrecision:'exact'};
+    const ui=wizardShell(editWholeRoute?copy('Editar mi recorrido','Edit my route'):copy('Agregar lugar a mi recorrido','Add a place to my route'),copy(`Construye el recorrido dentro de ${meta.city}. El ciclo debe regresar a ${meta.city} o terminar en otra ubicación al consumir el último día disponible.`,`Build the route within ${meta.city}. The cycle must return to ${meta.city} or end elsewhere when the last available day is consumed.`));
 
     const allDrafts=()=>[...drafts,{...seg}];
     const render=()=>{
-      const hasDay=!!seg.departureDate,hasDest=!!norm(seg.destination),hasTimes=seg.timePrecision==='unknown'||(seg.departureTime&&seg.arrivalTime);
+      const hasDay=!!seg.departureDate,hasDest=!!norm(seg.destination),hasTimes=seg.timePrecision==='unknown'||(seg.departureTime&&seg.arrivalTime),hasTransport=!!seg.transportMode,hasMovement=hasTimes&&hasTransport;
       if(hasDay&&!seg.arrivalDate)seg.arrivalDate=seg.departureDate;
       if(seg.disposition==='roundtrip'&&seg.arrivalDate)seg.returnDepartureDate=seg.arrivalDate;
       if((seg.disposition==='roundtrip'||seg.disposition==='stay_return')&&seg.returnArrivalTime&&!seg.resumeTime)seg.resumeTime=seg.returnArrivalTime;
       const atLastDay=_isLastPlannerDay(meta,seg.arrivalDate);
+      const editOverview=editWholeRoute?`<div class="route-v2-edit-overview"><div class="route-v2-edit-overview-head"><strong>${copy('Recorrido completo','Full route')}</strong><small>${copy('Puedes ajustar cada tramo o eliminarlo. Al guardar, este recorrido reemplazará al anterior.','You can adjust or remove each segment. Saving replaces the previous route.')}</small></div>${originalEditSegments.length?originalEditSegments.map((d,i)=>`<div class="route-v2-edit-segment ${i===editCursor?'is-current':''}"><div><strong>${esc(d.origin)} → ${esc(d.destination)}</strong><small>${esc(dmy(d.departureDate))} · ${esc(d.departureTime||'--:--')}–${esc(d.arrivalTime||'--:--')}</small></div><button type="button" data-edit-route-remove="${esc(d.id)}" aria-label="${copy('Eliminar tramo','Remove segment')}">${copy('Eliminar','Remove')}</button></div>`).join(''):`<div class="route-v2-edit-empty">${copy('No quedan tramos en este recorrido.','No segments remain in this route.')}</div>`}</div>`:'';
       const built=drafts.length?`<div class="route-v2-built">${drafts.map(d=>`<div><span>✓</span><strong>${esc(d.origin)} → ${esc(d.destination)}</strong><small>${esc(dmy(d.departureDate))} · ${esc(d.departureTime||'--:--')}–${esc(d.arrivalTime||'--:--')}</small></div>`).join('')}</div>`:'';
-      ui.body.innerHTML=`${built}
+      ui.body.innerHTML=`${editOverview}${built}
         <section class="route-v2-step is-open"><div class="route-v2-step-index">1</div><div class="route-v2-step-content"><h4>${copy(`¿Qué día sales de ${seg.origin}?`,`What day do you leave ${seg.origin}?`)}</h4><p>${copy('Selecciona uno de los días reales de este destino. El recorrido nunca podrá extenderse fuera de este bloque.','Select one of this destination’s actual days. The route can never extend beyond this block.')}</p>${_dayChips(meta,'departureDate',seg.departureDate,drafts.at(-1)?._routeEndDate||'')}</div></section>
         ${hasDay?`<section class="route-v2-step is-open"><div class="route-v2-step-index">2</div><div class="route-v2-step-content"><h4>${copy('¿A dónde vas?','Where are you going?')}</h4><p>${copy(`Sales desde ${seg.origin}. No hay lugares predefinidos: busca el destino que tú decidiste.`,`You leave from ${seg.origin}. There are no predefined places: search for the destination you chose.`)}</p>${_destinationField('destination',seg.destination)}</div></section>`:''}
         ${hasDay&&hasDest?`<section class="route-v2-step is-open"><div class="route-v2-step-index">3</div><div class="route-v2-step-content"><h4>${copy(`¿Cuándo sales de ${seg.origin} y llegas a ${seg.destination}?`,`When do you leave ${seg.origin} and arrive in ${seg.destination}?`)}</h4><p>${copy(`La hora de salida cerrará la ventana disponible del Planner en ${seg.origin}; al llegar, comenzará la ventana disponible en ${seg.destination}.`,`Departure closes the Planner window in ${seg.origin}; arrival opens the available window in ${seg.destination}.`)}</p><div class="route-v2-timegrid">${_timeSelect('departureTime',seg.departureTime,copy('Hora de salida','Departure time'))}${_timeSelect('arrivalTime',seg.arrivalTime,copy('Hora de llegada','Arrival time'))}</div><label>${copy('Medio de transporte para este traslado','Transport for this transfer')}<select data-field="transportMode">${_routeTransportOptions(seg.transportMode)}</select></label><details class="route-v2-arrival-day"><summary>${copy('¿Llegas otro día?','Arriving another day?')}</summary>${_dayChips(meta,'arrivalDate',seg.arrivalDate,seg.departureDate)}</details></div></section>`:''}
-        ${hasDay&&hasDest&&hasTimes?`<section class="route-v2-step is-open"><div class="route-v2-step-index">4</div><div class="route-v2-step-content"><h4>${copy(`¿Qué harás después de ${seg.destination}?`,`What will you do after ${seg.destination}?`)}</h4><p>${atLastDay?copy(`Estás en el último día de ${meta.city}. Puedes regresar a ${meta.city} o finalizar este bloque en ${seg.destination}.`,`This is the last day of ${meta.city}. You can return to ${meta.city} or finish this block in ${seg.destination}.`):copy(`Para cerrar este recorrido debes regresar a ${meta.city} o continuar hacia otro lugar. No dejamos rutas abiertas a mitad del ciclo.`,`To close this route you must return to ${meta.city} or continue to another place. Routes cannot be left open mid-cycle.`)}</p><div class="route-v2-choice-grid">
+        ${hasDay&&hasDest&&hasMovement?`<section class="route-v2-step is-open"><div class="route-v2-step-index">4</div><div class="route-v2-step-content"><h4>${copy(`¿Qué harás después de ${seg.destination}?`,`What will you do after ${seg.destination}?`)}</h4><p>${atLastDay?copy(`Estás en el último día de ${meta.city}. Puedes regresar a ${meta.city} o finalizar este bloque en ${seg.destination}.`,`This is the last day of ${meta.city}. You can return to ${meta.city} or finish this block in ${seg.destination}.`):copy(`Para cerrar este recorrido debes regresar a ${meta.city} o continuar hacia otro lugar. No dejamos rutas abiertas a mitad del ciclo.`,`To close this route you must return to ${meta.city} or continue to another place. Routes cannot be left open mid-cycle.`)}</p><div class="route-v2-choice-grid">
           ${(atLastDay?[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')]]:[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')],['stay_return',copy(`Me quedaré y regresaré a ${meta.city}`,`Stay, then return to ${meta.city}`),copy('Una o varias noches.','One or several nights.')],['continue',copy('Continuaré hacia otro lugar','Continue to another place'),copy('El recorrido sigue desde aquí.','The route continues from here.')]]).map(([v,a,b])=>`<label class="route-v2-choice ${seg.disposition===v?'selected':''}"><input type="radio" name="route-disposition" value="${v}" ${seg.disposition===v?'checked':''}><strong>${a}</strong><span>${b}</span></label>`).join('')}
           <label class="route-v2-choice ${seg.disposition==='end_block'?'selected':''}"><input type="radio" name="route-disposition" value="end_block" ${seg.disposition==='end_block'?'checked':''}><strong>${copy(atLastDay?'Finalizo este destino aquí':'Me quedaré aquí hasta finalizar este destino',atLastDay?'Finish this destination here':'Stay here until this destination ends')}</strong><span>${copy(atLastDay?`Tu ubicación al finalizar será ${seg.destination}.`:`Los días restantes se planificarán desde ${seg.destination}.`,`Your final location will be ${seg.destination}.`)}</span></label>
         </div></div></section>`:''}
@@ -298,9 +321,33 @@
       });
     };
     const bind=()=>{
+      ui.body.querySelectorAll('[data-edit-route-remove]').forEach(btn=>btn.addEventListener('click',()=>{
+        if(!editWholeRoute) return;
+        const id=btn.dataset.editRouteRemove;
+        const idx=originalEditSegments.findIndex(x=>x.id===id);
+        if(idx<0) return;
+        originalEditSegments.splice(idx,1);
+        // A route is a physical chain. When a middle segment is removed, reconnect the
+        // following segment to the physical endpoint immediately before it instead of
+        // leaving a stale origin that would later create continuity/overlap errors.
+        if(idx<originalEditSegments.length){
+          const prev=idx>0?originalEditSegments[idx-1]:null;
+          originalEditSegments[idx].origin=prev?_routeEnd(prev).place:(meta.city||'');
+        }
+        if(idx>0 && idx>=originalEditSegments.length){
+          originalEditSegments[idx-1].disposition='';
+        }
+        drafts=[]; editCursor=0;
+        if(originalEditSegments.length){
+          seg=hydrateContinuation({...originalEditSegments[0]},0);
+        }else{
+          seg={id:uid(),baseDestination:meta.city||'',origin:meta.city||'',destination:'',destinationCountry:'',departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',transportMode:'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnArrivalTime:'',returnTransportMode:'',resumeTime:'',timePrecision:'exact'};
+        }
+        render();
+      }));
       ui.body.querySelectorAll('[data-day-value]').forEach(btn=>btn.onclick=()=>{const field=btn.closest('[data-day-field]').dataset.dayField;seg[field]=btn.dataset.dayValue;if(field==='departureDate')seg.arrivalDate=seg[field];if(field==='returnDepartureDate')seg.nights=_deriveNights(seg.arrivalDate,seg.returnDepartureDate);render();});
       bindSearch('destination');bindSearch('nextDestination');
-      ui.body.querySelector('[data-field="transportMode"]')?.addEventListener('change',e=>{seg.transportMode=e.target.value||'';});
+      ui.body.querySelector('[data-field="transportMode"]')?.addEventListener('change',e=>{seg.transportMode=e.target.value||'';render();});
       ui.body.querySelector('[data-field="nextTransportMode"]')?.addEventListener('change',e=>{seg.nextTransportMode=e.target.value||'';});
       ui.body.querySelector('[data-field="returnTransportMode"]')?.addEventListener('change',e=>{seg.returnTransportMode=e.target.value||'';});
       ui.body.querySelectorAll('[data-time-field]').forEach(group=>{const field=group.dataset.timeField;const sync=()=>{const h=group.querySelector(`[data-time-hour="${field}"]`)?.value||'',m=group.querySelector(`[data-time-minute="${field}"]`)?.value||'00';seg[field]=h?`${h}:${m}`:'';};group.querySelectorAll('select').forEach(x=>x.onchange=()=>{sync();if(field==='returnArrivalTime')seg.resumeTime=seg.returnArrivalTime;render();});});
@@ -311,16 +358,18 @@
         if(dateKey(seg.nextDepartureDate,seg.nextDepartureTime)<dateKey(seg.arrivalDate,seg.arrivalTime)){showInlineError(ui.body,copy('No puedes salir del lugar antes de haber llegado.','You cannot leave before arriving.'));return;}
         seg.nights=_deriveNights(seg.arrivalDate,seg.nextDepartureDate);
         const current={...seg,disposition:'continue'};
-        const next={id:uid(),baseDestination:meta.city||'',origin:current.destination,destination:norm(current.nextDestination),destinationCountry:current.nextDestinationCountry||'',destinationCountryCode:current.nextDestinationCountryCode||'',departureDate:current.nextDepartureDate,departureTime:current.nextDepartureTime,arrivalDate:current.nextDepartureDate,arrivalTime:current.nextArrivalTime,transportMode:current.nextTransportMode||'',disposition:'',returnDepartureDate:'',returnDepartureTime:'',returnArrivalDate:'',returnTransportMode:'',resumeTime:'',timePrecision:'exact'};
+        const originalNext=editWholeRoute?originalEditSegments[editCursor+1]:null;
+        const next=hydrateContinuation({id:originalNext?.id||uid(),baseDestination:meta.city||'',origin:current.destination,destination:norm(current.nextDestination),destinationCountry:current.nextDestinationCountry||'',destinationCountryCode:current.nextDestinationCountryCode||'',departureDate:current.nextDepartureDate,departureTime:current.nextDepartureTime,arrivalDate:originalNext?.arrivalDate||current.nextDepartureDate,arrivalTime:current.nextArrivalTime,transportMode:current.nextTransportMode||'',disposition:originalNext?.disposition||'',returnDepartureDate:originalNext?.returnDepartureDate||'',returnDepartureTime:originalNext?.returnDepartureTime||'',returnArrivalDate:originalNext?.returnArrivalDate||'',returnTransportMode:originalNext?.returnTransportMode||'',resumeTime:originalNext?.resumeTime||'',timePrecision:'exact'},editCursor+1);
         delete current.nextDestination;delete current.nextDestinationCountry;delete current.nextDestinationCountryCode;delete current.nextDepartureDate;delete current.nextDepartureTime;delete current.nextArrivalTime;delete current.nextTransportMode;
-        drafts.push(current);seg=next;render();
+        drafts.push(current);editCursor+=1;seg=next;render();
       });
       ui.body.querySelector('.route-v2-save')?.addEventListener('click',()=>{
         const errors=validateSegment(seg,meta);
         if(errors.length){showInlineError(ui.body,errors[0]);return;}
         if(!_validResumeTime(seg)){showInlineError(ui.body,copy('La hora para retomar el Planner no puede ser anterior a la llegada.','Planner resume time cannot be before arrival.'));return;}
         const all=[...drafts,{...seg}];
-        if(existing)route.segments=route.segments.filter(x=>x.id!==existing.id);
+        if(editWholeRoute) route.segments=route.segments.filter(x=>!originalEditIds.has(x.id));
+        else if(existing) route.segments=route.segments.filter(x=>x.id!==existing.id);
         all.forEach(x=>{const i=route.segments.findIndex(y=>y.id===x.id);if(i>=0)route.segments[i]=x;else route.segments.push(x);});
         renderRowSummary(row);ui.close();
       });
