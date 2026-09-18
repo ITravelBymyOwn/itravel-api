@@ -385,10 +385,13 @@
   function validateSegment(seg,meta=null){
     const errors=[];
     if(!norm(seg.destination)) errors.push(copy('Selecciona un destino de la lista después de escribir al menos 3 letras.','Select a destination from the list after typing at least 3 letters.'));
-    if(!norm(seg.disposition)) errors.push(copy('Indica qué harás después de llegar.','Tell us what you will do after arriving.'));
     if(!seg.departureDate||!seg.arrivalDate) errors.push(copy('Indica las fechas de salida y llegada.','Enter departure and arrival dates.'));
     if(!seg.departureTime||!seg.arrivalTime) errors.push(copy('Completa las horas de salida y llegada.','Complete departure and arrival times.'));
-    if(!seg.transportMode) errors.push(copy('Selecciona el medio de transporte de este traslado.','Select the transport mode for this transfer.'));
+    // Transport belongs to the movement itself and is a prerequisite for every
+    // downstream route decision. Validate it before disposition so the user is
+    // never shown a later-step error while the transfer is still incomplete.
+    if(!seg.transportMode) errors.push(copy('Selecciona el medio de transporte para este traslado antes de continuar.','Select the transport mode for this transfer before continuing.'));
+    if(!norm(seg.disposition)) errors.push(copy('Indica qué harás después de llegar.','Tell us what you will do after arriving.'));
     const blockEnd=meta?.baseISO?addDays(meta.baseISO,Math.max(0,meta.days-1)):'';
     if(blockEnd&&(seg.departureDate>blockEnd||seg.arrivalDate>blockEnd||seg.returnDepartureDate>blockEnd)) errors.push(copy('Este recorrido supera los días disponibles del destino principal.','This route exceeds the main destination’s available days.'));
     if(seg.disposition==='roundtrip'||seg.disposition==='stay_return'){
