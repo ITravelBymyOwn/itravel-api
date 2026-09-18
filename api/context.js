@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.5";
+const CONTEXT_VERSION = "1.6";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -665,8 +665,12 @@ function buildCandidates(trip, requestedCity) {
           intercity_hint: transportInfo.intercity,
           transport_arrangement_hint: transportInfo.significant,
           explicit_tour_hint: explicitTourHint(row),
-          access_hint: evidence.hint,
-          access_evidence: evidence.evidence
+          commerce_semantic_type: clean(row?.commerce_context?.semantic_type, 80).toUpperCase(),
+          commerce_ticket_need: clean(row?.commerce_context?.ticket_need, 40).toLowerCase(),
+          commerce_guided_tour_value: clean(row?.commerce_context?.guided_tour_value, 40).toLowerCase(),
+          commerce_canonical_place: clean(row?.commerce_context?.canonical_place, 180),
+          access_hint: evidence.hint || (String(row?.commerce_context?.semantic_type||'').toUpperCase()==='ATTRACTION_TICKET' ? (String(row?.commerce_context?.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended') : ''),
+          access_evidence: evidence.evidence || clean(row?.commerce_context?.canonical_place||row?.activity,260)
         });
       });
     });
@@ -703,6 +707,7 @@ ACCESS-FIRST RULES (CRITICAL):
 3. If advance booking is strongly useful but not mandatory, use reservation_recommended.
 4. If only one component requires payment/reservation (for example a dome climb or special interior), state that condition in user_message and do not imply the whole site requires it.
 5. candidate.access_hint and candidate.access_evidence are source-derived clues. Respect them unless the clue clearly refers to transport rather than attraction admission.
+5A. candidate.commerce_semantic_type, commerce_ticket_need, commerce_guided_tour_value and commerce_canonical_place are structured signals emitted by the itinerary engine. Treat them as stronger evidence than generic prose: ATTRACTION_TICKET with ticket_need=required must produce ticket_required; recommended/optional/unknown normally produces reservation_recommended when access is genuinely controlled. guided_tour_value=high may additionally produce guided_tour_optional, but never instead of the access need. FREE_SIGHT, RESTAURANT and LOGISTICS must not become ticket needs without contradictory explicit evidence.
 6. You may use stable, high-confidence general tourism knowledge only to recognize whether admission is intrinsic to a famous named attraction. Never invent operational details, current prices, availability, opening hours, reservation deadlines, ticket variants, or provider rules.
 7. When multiple itinerary rows on the same day are clearly parts of one commonly shared admission complex, avoid duplicate purchase needs. Anchor one need to the earliest relevant candidate, use a combined entity_name, and classify the duplicate access rows no_action. Do this only with high confidence.
 8. guided_tour_optional is a separate enhancement. It must never replace ticket_required/reservation_recommended. Think in EXPERIENCE CLUSTERS, never itinerary rows. Ordinary plazas, streets, neighborhoods, markets, viewpoints, exteriors and short walking stops are ingredients of an overview experience, not separate tour products. When two or more sightseeing rows in the same locality can naturally be covered by one walking/city/overview tour, return ONE guided_tour_optional anchored to the earliest candidate and classify the other tour alternatives no_action. Use attraction-specific guided tours only when that exact attraction is a genuinely distinct experience that materially benefits from guidance.
