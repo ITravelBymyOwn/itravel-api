@@ -3644,10 +3644,17 @@ function _immersiveMoveDay_(delta){if(immersiveWorkspaceLevel!=='city'||immersiv
 function _workspaceSnapshotViews_(){
   const views=new Map();
   const ensure=(name,country='')=>{
-    const key=String(name||'').trim();
-    if(!key)return null;
-    if(!views.has(key))views.set(key,{city:key,country,dates:new Map(),source_units:new Set()});
-    return views.get(key);
+    const display=String(name||'').trim();
+    if(!display)return null;
+    // Workspace identity is accent/case insensitive. The route may contain
+    // "Paris" and "París" in different generated rows; those are one
+    // physical destination and must never become duplicate cards.
+    const key=_normalizePoiKey_(display)||display.toLowerCase();
+    if(!views.has(key))views.set(key,{city:display,country,dates:new Map(),source_units:new Set(),aliases:new Set([display])});
+    const view=views.get(key);
+    view.aliases?.add(display);
+    if(!view.country&&country)view.country=country;
+    return view;
   };
   const placeCountry=(place,sourceUnit)=>{
     const model=plannerState?.travelModelV2||_currentTravelModelV2_();
