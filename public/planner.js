@@ -2939,7 +2939,24 @@ async function confirmPreferencesAndContinue(){
   if($chatBox) $chatBox.style.display='none';
   setPlanningChatLocked(true);
 
-  await _persistPostPaymentProgress_('preferences_confirmed');
+  showPreferencesSaveOverlay();
+  try{
+    await _persistPostPaymentProgress_('preferences_confirmed');
+  }catch(err){
+    console.error('[ITBMO] preferences save failed',err);
+    preferencesConfirmedTripId=null;
+    $preferencesStage.classList.remove('is-confirmed');
+    if($preferencesField){$preferencesField.readOnly=false;$preferencesField.removeAttribute('aria-readonly');}
+    if($preferencesContinue){
+      $preferencesContinue.disabled=false;
+      $preferencesContinue.removeAttribute('aria-disabled');
+      $preferencesContinue.textContent=getLang()==='es'?'Guardar preferencias':'Save preferences';
+    }
+    alert(getLang()==='es'?'No pudimos guardar tus preferencias. Inténtalo nuevamente.':'We could not save your preferences. Please try again.');
+    return;
+  }finally{
+    hideSaveTransitionOverlay();
+  }
   if($preferencesGenerateV2){
     $preferencesGenerateV2.hidden=false;
     $preferencesGenerateV2.disabled=false;
@@ -3064,7 +3081,33 @@ function hideSaveTransitionOverlay(){
   document.documentElement.classList.remove('itbmo-save-transition-open');
 }
 
-async function saveDestinations(){
+function showPreferencesSaveOverlay(){
+  const overlay=ensureSaveTransitionOverlay();
+  const es=getLang()==='es';
+  const eyebrow=qs('.itbmo-save-transition-eyebrow',overlay);
+  const title=qs('.itbmo-save-transition-title',overlay);
+  const subtitle=qs('.itbmo-save-transition-subtitle',overlay);
+  if(eyebrow) eyebrow.textContent=es?'PERSONALIZANDO TU VIAJE':'PERSONALIZING YOUR TRIP';
+  if(title) title.textContent=es?'Guardando tus preferencias…':'Saving your preferences…';
+  if(subtitle) subtitle.textContent=es?'Estamos preparando todo para personalizar tu itinerario.':'We are preparing everything to personalize your itinerary.';
+  overlay.classList.add('active');
+  overlay.setAttribute('aria-hidden','false');
+  document.documentElement.classList.add('itbmo-save-transition-open');
+}
+
+async function showRouteReadyModal(){
+  const es=getLang()==='es';
+  return showPlannerDecision({
+    title:es?'Tu recorrido está listo':'Your route is ready',
+    message:es
+      ? 'Guardamos tus destinos y movimientos. Ahora puedes continuar con los detalles que harán tu itinerario más personal.'
+      : 'We saved your destinations and movements. You can now continue with the details that will make your itinerary more personal.',
+    cancelLabel:es?'Seguir editando':'Keep editing',
+    confirmLabel:es?'Continuar con mi itinerario →':'Continue with my itinerary →'
+  });
+}
+
+async function saveDestinations({showReadyModal=true}={}){
   if(!currentUser || !getStoredSessionToken()){
     setAccountMessage(authCopy('loginRequired'),'error');
     try{ qs('#account-box')?.scrollIntoView({behavior:'smooth',block:'start'}); }catch(_){}
@@ -3320,9 +3363,19 @@ async function saveDestinations(){
     setTimeout(()=>{ loadPayPalSdk().catch(()=>{}); },0);
   }
 
-  /* Phase 4.3: advance only downward to the next CTA. */
+  /* Premium handoff: confirm that the route was saved and offer the next step.
+     The normal Continue CTA remains available if the user chooses to keep editing. */
   if($start && !$start.disabled){
-    requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
+    if(showReadyModal){
+      const continueNow=await showRouteReadyModal();
+      if(continueNow){
+        requestAnimationFrame(()=>{ try{$start.click();}catch(_){ smoothAdvanceTo($start,{gap:132,center:true}); } });
+      }else{
+        requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
+      }
+    }else{
+      requestAnimationFrame(()=>smoothAdvanceTo($start,{gap:132,center:true}));
+    }
   }
 }
 
@@ -7040,10 +7093,14 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const repairBudget=_v3AdaptiveRepairBudget_(generated.contract,dest.days);
     let repairAttempt=0;
     let previousFingerprint='';
+    let stagnantPasses=0;
     while(material.length && repairAttempt<repairBudget){
       const fingerprint=_v3IssueFingerprint_(report);
-      if(fingerprint===previousFingerprint){
-        console.warn(`[ITBMO V3 REPAIR] ${city}: no convergence; stopping model repairs`,_v3AuditSummary_(report));
+      // A complex route can legitimately need more than one surgical attempt on the
+      // same issue family. Do not abort after the first unchanged fingerprint; allow
+      // one additional scoped attempt, while still preventing unbounded token burn.
+      if(fingerprint===previousFingerprint && stagnantPasses>=2){
+        console.warn(`[ITBMO V3 REPAIR] ${city}: no convergence after ${stagnantPasses} scoped passes; stopping model repairs`,_v3AuditSummary_(report));
         break;
       }
       previousFingerprint=fingerprint;
@@ -7060,7 +7117,17 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       // If the model could not improve the scoped fragment, do not burn more tokens
       // repeating the same request. Deterministic cleanup and final classification
       // decide whether the remaining items are hard blockers or quality warnings.
-      if(!repaired.repaired || afterScore>=beforeScore) break;
+      if(!repaired.repaired){
+        stagnantPasses+=1;
+      }else if(afterScore<beforeScore){
+        stagnantPasses=0;
+      }else{
+        stagnantPasses+=1;
+      }
+      if(stagnantPasses>=2 && material.length){
+        console.warn(`[ITBMO V3 REPAIR] ${city}: scoped repair is not converging; preserving Quality Gate`,_v3AuditSummary_(report));
+        break;
+      }
     }
 
     console.info(`[ITBMO V3 AUDIT FINAL] ${city}`,_v3AuditSummary_(report),report?.errors||[]);
@@ -8679,7 +8746,7 @@ ${structuredHotelTransport.transport==='recomiéndame' ? '' : structuredHotelTra
     const lastRow = $cityList.lastElementChild;
     const sel = lastRow?.querySelector('.days');
     if(sel){ sel.value = String(days); sel.dispatchEvent(new Event('change')); }
-    saveDestinations();
+    saveDestinations({showReadyModal:false});
     chatMsg(
       (getLang()==='es')
         ? `✅ Añadí <strong>${name}</strong>. Dime tu hotel/zona y transporte para generar el plan.`
