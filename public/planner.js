@@ -7231,15 +7231,29 @@ function _showGenerationRetry_(reason=''){
   const es=getLang()==='es';
   const overlay=document.createElement('div');
   overlay.className='itbmo-postpay-overlay itbmo-generation-recovery-overlay';
-  overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-recovery-title">
+  overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-recovery-title" style="position:relative">
+    <button id="itbmo-generation-recovery-close" type="button" aria-label="${es?'Cerrar':'Close'}" title="${es?'Cerrar':'Close'}" style="position:absolute;right:18px;top:14px;border:0;background:transparent;font-size:30px;line-height:1;color:#667085;cursor:pointer;padding:6px 10px">×</button>
     <div class="itbmo-postpay-icon">↻</div>
     <h3 id="itbmo-recovery-title">${exhausted ? (es?'Necesitamos ayudarte a recuperar tu viaje':'We need to help recover your trip') : (es?'Tu generación quedó pendiente':'Your generation was interrupted')}</h3>
     <p>${exhausted
-      ? (es?'Tu pago permanece registrado. Contacta a Soporte para recibir asistencia, reemplazo o reembolso según corresponda.':'Your payment remains recorded. Contact Support for assistance, replacement or refund as applicable.')
+      ? (es?'La generación no pudo completarse, pero tu pago permanece registrado. Puedes volver a intentarlo o contactar a Soporte si necesitas ayuda.':'Generation could not be completed, but your payment remains recorded. You can try again or contact Support if you need help.')
       : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.')}</p>
-    ${exhausted?'':`<button id="itbmo-generation-retry" type="button">${es?'Reintentar generación':'Retry generation'}</button>`}
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:22px">
+      <button id="itbmo-generation-retry" type="button">${es?'Reintentar generación':'Retry generation'}</button>
+      ${exhausted?`<button id="itbmo-generation-support" type="button" style="background:#fff;color:#24345f;border:1px solid #d6dbea">${es?'Contactar Soporte':'Contact Support'}</button>`:''}
+    </div>
   </div>`;
   document.body.appendChild(overlay);
+  const closeRecovery=()=>{
+    overlay.remove();
+    setPlanningChatLocked(false);
+    $resetBtn?.removeAttribute('disabled');
+  };
+  overlay.querySelector('#itbmo-generation-recovery-close')?.addEventListener('click',closeRecovery);
+  overlay.addEventListener('click',(event)=>{ if(event.target===overlay) closeRecovery(); });
+  overlay.querySelector('#itbmo-generation-support')?.addEventListener('click',()=>{
+    window.location.href='mailto:support@itravelbymyown.com';
+  });
   const button=overlay.querySelector('#itbmo-generation-retry');
   button?.addEventListener('click',()=>{
     button.disabled=true;
