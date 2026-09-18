@@ -9078,3 +9078,8 @@ body{
 @media(max-width:720px){
   .hours-quick-add-stop{bottom:12px !important;max-width:calc(100vw - 34px);}
 }
+
+/* V2.5.0 — keep the route-building CTA reachable without changing the Planner layout. */
+.route-v2-head{position:sticky;bottom:12px;z-index:24;box-shadow:0 12px 34px rgba(26,45,88,.10)}
+.route-v2-head:has(.route-v2-add){backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+@media(max-width:720px){.route-v2-head{bottom:8px}.route-v2-add{position:relative;z-index:2}}
