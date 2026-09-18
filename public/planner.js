@@ -6224,9 +6224,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
     }
   });
 
-  const known=String(plannerState?.specialConditions||'');
+  // Departure logistics are only invented when neither the user's free-text
+  // conditions nor Travel Model V2 supports them. Fixed route modes are hard facts.
+  const routeFacts=JSON.stringify((routeContext?.day_contexts||[]).flatMap(ctx=>ctx.fixed_transfers||[]));
+  const known=`${String(plannerState?.specialConditions||'')} ${routeFacts}`;
   const inventedDeparture=
-    !/\b(flight|vuelo|airport|aeropuerto|departure|salida|check[- ]?out|devolver|return car|rental company|europcar|hertz|avis)\b/i.test(known) &&
+    !/\b(flight|vuelo|plane|avion|avión|airport|aeropuerto|departure|salida|check[- ]?out|devolver|return car|rental company|europcar|hertz|avis)\b/i.test(known) &&
     (rows||[]).some(r=>
       /\b(airport|aeropuerto|check[- ]?out|europcar|hertz|avis|return.*car|devoluci[oó]n.*veh[ií]culo)\b/i.test(
         `${r.activity} ${r.to} ${r.notes}`
@@ -6715,6 +6718,83 @@ function _v3MaterialAuditErrors_(report){
   return (report?.errors||[]).filter(e=>material.has(String(e?.code||'')));
 }
 
+function _v3ConcretePlace_(row={}){
+  const activity=String(row?.activity||'').trim();
+  const activityTail=activity.split(/\s+[–—-]\s+/).slice(1).join(' - ').trim();
+  const ambiguous=/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif full\b|\bsi est[aá] lleno\b/i;
+  if(activityTail && !ambiguous.test(activityTail)) return activityTail;
+  const raw=String(row?.to||'').trim();
+  return raw.split(/\s+\/\s+|\s+or\s+|\s+o\s+|\s+alternative\s+|\s+alternativa\s+/i)[0].trim() || raw;
+}
+
+function _v3FitDurationToInterval_(row={}){
+  const start=_hhmmToMinutes_(row.start), end=_hhmmToMinutes_(row.end);
+  if(start==null||end==null) return row;
+  let span=end-start; if(span<=0) span+=1440;
+  if(span<=0) return row;
+  const [transportLabel,activityLabel]=_durationLabels_();
+  if(_isPureTransportRow_(row)){
+    return {...row,duration:`${transportLabel}: ${_minutesToHuman_(span)}`};
+  }
+  const transport=_durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
+  const transportMinutes=Math.max(0,Math.min(span-1,Number(transport?.max||0)));
+  const activityMinutes=Math.max(1,span-transportMinutes);
+  return {...row,duration:transportMinutes>0
+    ? `${transportLabel}: ${_minutesToHuman_(transportMinutes)}\n${activityLabel}: ${_minutesToHuman_(activityMinutes)}`
+    : `${activityLabel}: ${_minutesToHuman_(span)}`};
+}
+
+function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate){
+  let out=_v3EnforceHardRouteFacts_(rows,contract);
+  const master=_v3SyntheticMaster_(totalDays);
+  const removed=[];
+  for(let pass=0;pass<5;pass++){
+    const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate);
+    const errors=report?.errors||[];
+    let changed=false;
+    const byDay=_rowsByDayObject_(out);
+
+    // Timeline/duration defects are arithmetic, not creative-writing problems.
+    for(const error of errors){
+      const day=Number(error?.day||0), rowNum=Number(error?.row||0);
+      const row=day&&rowNum ? (byDay[day]||[])[rowNum-1] : null;
+      if(!row) continue;
+      if(['ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE'].includes(error.code)){
+        Object.assign(row,_v3FitDurationToInterval_(row)); changed=true;
+      }else if(error.code==='CONTINUITY'){
+        const arr=byDay[day]||[], prev=arr[rowNum-2];
+        if(prev && !_isPureTransportRow_(prev) && !_isPureTransportRow_(row) && prev.to){
+          row.from=prev.to; changed=true;
+        }
+      }else if(error.code==='AMBIGUOUS_TO'){
+        const concrete=_v3ConcretePlace_(row);
+        if(concrete && concrete!==row.to){ row.to=concrete; changed=true; }
+      }
+    }
+
+    // Duplicate POIs are deterministic trip-wide conflicts. Remove only the later
+    // row identified by the auditor; a subsequent scoped repair may fill the gap.
+    for(const error of errors.filter(e=>e.code==='GLOBAL_DUPLICATE_POI')){
+      const laterDay=Math.max(...(error.days||[]).map(Number).filter(Boolean));
+      const arr=byDay[laterDay]||[];
+      const victim=arr.find(r=>!_isUtilityRow_(r) && _arePoiAliases_(r.to||r.activity,error.second||''));
+      if(victim && !_isPureTransportRow_(victim)){
+        const idx=out.indexOf(victim);
+        if(idx>=0){ removed.push({day:laterDay,poi:victim.to||victim.activity}); out.splice(idx,1); changed=true; }
+      }
+    }
+
+    out=_v3EnforceHardRouteFacts_(out,contract);
+    if(!changed) break;
+  }
+  const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate);
+  if(removed.length) console.info(`[ITBMO V3 NORMALIZE] ${city}: deterministic duplicate cleanup`,removed);
+  console.info(`[ITBMO V3 NORMALIZE] ${city}`,_v3AuditSummary_(report));
+  return {rows:out,report};
+}
+
+const _v3LastFailureByCity_={};
+
 async function _v3Call_(prompt){
   return _callPlannerSystemPrompt_(prompt,false,'planner_v3');
 }
@@ -6847,6 +6927,7 @@ Rebuild ONLY days ${affected.join(', ')}. Correct every validator error while pr
 
 async function generateCityItinerary(city,{silentFailure=false}={}){
   if(ITBMO_GENERATION_ENGINE!=='v3') return _generateCityItineraryLegacy_(city,{silentFailure});
+  delete _v3LastFailureByCity_[city];
   const started=performance.now();
   const record=()=>{
     if(!_astraGenerationMetrics_.active) return;
@@ -6885,29 +6966,33 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     }
 
     const master=_v3SyntheticMaster_(dest.days);
-    let report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+    // First resolve arithmetic/identity defects deterministically. GPT is reserved
+    // for genuinely semantic gaps that remain after the compiler-enforced cleanup.
+    let normalized=_v3DeterministicQualityCleanup_(city,rows,generated.contract,dest.days,perDay,baseDate);
+    rows=normalized.rows;
+    let report=normalized.report;
     const materialBefore=_v3MaterialAuditErrors_(report);
     if(materialBefore.length){
-      console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} material issue(s); scoped repair only`,_v3AuditSummary_(report),materialBefore);
+      console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} semantic/material issue(s) after deterministic cleanup; scoped repair`,_v3AuditSummary_(report),materialBefore);
       const repaired=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
-      rows=_v3EnforceHardRouteFacts_(repaired.rows,generated.contract);
-      report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+      normalized=_v3DeterministicQualityCleanup_(city,repaired.rows,generated.contract,dest.days,perDay,baseDate);
+      rows=normalized.rows;
+      report=normalized.report;
 
-      // One bounded precision pass is allowed only when material issues remain.
-      // It is still scoped to affected days and keeps V3 far below the legacy
-      // full-trip repair loop while giving the model one chance to satisfy the
-      // deterministic validator after seeing the reduced error set.
+      // One precision pass only if material defects genuinely survive deterministic
+      // normalization. Never restart the whole planning unit inside this function.
       const materialAfterFirst=_v3MaterialAuditErrors_(report);
       if(materialAfterFirst.length){
-        console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialAfterFirst.length} issue(s) remain after repair; precision scoped repair`,_v3AuditSummary_(report),materialAfterFirst);
+        console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialAfterFirst.length} issue(s) remain; final scoped precision repair`,_v3AuditSummary_(report),materialAfterFirst);
         const precision=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
-        rows=_v3EnforceHardRouteFacts_(precision.rows,generated.contract);
-        report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+        normalized=_v3DeterministicQualityCleanup_(city,precision.rows,generated.contract,dest.days,perDay,baseDate);
+        rows=normalized.rows;
+        report=normalized.report;
       }
     }
 
     console.info(`[ITBMO V3 AUDIT FINAL] ${city}`,_v3AuditSummary_(report),report?.errors||[]);
-    const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','OVERLAP','CONTINUITY','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE']);
+    const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','OVERLAP','CONTINUITY','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','GLOBAL_DUPLICATE_POI','AMBIGUOUS_TO','GENERIC_TO','INVENTED_DEPARTURE_LOGISTICS']);
     if((report?.errors||[]).some(e=>blocking.has(String(e?.code||'')))){
       throw new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
     }
@@ -6924,6 +7009,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     record();
     return true;
   }catch(error){
+    _v3LastFailureByCity_[city]=String(error?.message||error?.code||'V3_FAILED');
     console.error(`[ITBMO V3] ${city} failed`,error);
     /* V3 is authoritative. Never fall back automatically to the historical
        Master Plan/Block pipeline: that path can multiply latency and tokens and
@@ -6933,7 +7019,9 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     if(!silentFailure) chatMsg(getLang()==='es'?'No pude completar el itinerario. Intenta nuevamente.':'I could not complete the itinerary. Please retry.','ai');
     return false;
   }finally{
-    showWOW(false);
+    // V3 generation is orchestrated as one atomic visible transaction.
+    // runPaidGeneration owns the overlay so internal city retries/repairs never
+    // expose an idle Planner state between attempts.
   }
 }
 
@@ -7599,6 +7687,12 @@ async function runPaidGeneration({manualRetry=false}={}){
         showWOW(true,t('overlayGenerating'));
         const success=await generateCityItinerary(city,{silentFailure:true});
         completed=Boolean(success && _generationCityComplete_(city));
+        // A route-quality block already went through deterministic cleanup and
+        // bounded scoped repairs. Do not regenerate the whole planning unit again.
+        // Genuine transient/network failures keep the normal retry policy.
+        if(!completed && ITBMO_GENERATION_ENGINE==='v3' && /V3_ROUTE_QUALITY_BLOCK/.test(_v3LastFailureByCity_[city]||'')){
+          attempts=ITBMO_CITY_GENERATION_MAX_ATTEMPTS;
+        }
 
         if(completed){
           if(!generationRecoveryState.completed_cities.includes(city)){
