@@ -130,49 +130,40 @@ function isTourAlternativeEligible(row){
   return true;
 }
 function tourAlternativesForCity(cityName,existingNeeds=[]){
-  const byDay=data?.itineraries?.[cityName]?.byDay||{};
-  const existing=(Array.isArray(existingNeeds)?existingNeeds:[])
-    .filter(item=>item?.need_type==='guided_tour_optional');
-  const existingKeys=new Set(existing.map(item=>`${Number(item?.day)||0}|${normalizeWorkspaceEntity(item?.entity_name||item?.source_activity)}`));
+  const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(item=>item?.need_type==='guided_tour_optional');
+  const existingKeys=new Set(existing.map(item=>normalizeWorkspaceEntity(item?.entity_name||item?.source_activity||'')));
   const derived=[];
-
-  Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
-    const rows=Array.isArray(byDay[dayNumber])?byDay[dayNumber]:[];
-    rows.forEach((row,index)=>{
-      if(!isTourAlternativeEligible(row)) return;
-      const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
-      const activityKey=normalizeWorkspaceEntity(activity);
-      if(!activityKey) return;
-
-      const duplicate=[...existingKeys].some(key=>{
-        const [existingDay,...rest]=key.split('|');
-        const entityKey=rest.join('|');
-        return Number(existingDay)===dayNumber && (entityKey===activityKey || entityKey.includes(activityKey) || activityKey.includes(entityKey));
-      });
-      if(duplicate) return;
-
-      const route=[row?.from,row?.to].filter(Boolean).join(' → ');
-      derived.push({
-        id:`workspace-tour:${dayNumber}:${index+1}`,
-        category:'tours',
-        city:cityName,
-        day:dayNumber,
-        entity_name:activity,
-        entity_type:'experience',
-        need_type:'guided_tour_optional',
-        confidence:'medium',
-        user_message:lang==='es'
-          ? 'Si prefieres no hacer esta actividad por tu cuenta, compara una alternativa guiada para el mismo plan.'
-          : 'If you would rather not do this activity on your own, compare a guided alternative for the same plan.',
-        source_activity:activity,
-        source_route:route,
-        transport:String(row?.transport||'').trim(),
-        derived_by:'itinerary_tour_alternative'
-      });
-      existingKeys.add(`${dayNumber}|${activityKey}`);
-    });
+  const byDay=new Map();
+  workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
+    if(!isTourAlternativeEligible(row))return;
+    const cc=row?.commerce_context||{};
+    const semantic=String(cc?.semantic_type||'').toUpperCase();
+    const guided=String(cc?.guided_tour_value||'').toLowerCase();
+    const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
+    const canonical=String(cc?.canonical_place||row?.to||activity).trim();
+    const item={day,index,row,activity,canonical,guided,semantic};
+    if(!byDay.has(day))byDay.set(day,[]);byDay.get(day).push(item);
+    // Standalone guided value is reserved for genuinely complex/high-value anchors.
+    if(guided==='high'||semantic==='TOUR_EXPERIENCE'){
+      const key=normalizeWorkspaceEntity(canonical);
+      if(key&&!existingKeys.has(key)){
+        derived.push({id:`workspace-tour-anchor:${day}:${index+1}`,category:'tours',city:cityName,day,entity_name:canonical,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Una visita guiada puede aportar contexto y ayudarte a aprovechar mejor ${canonical}; compárala con la visita por tu cuenta.`:`A guided visit can add context and help you get more from ${canonical}; compare it with visiting independently.`,source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context_guided'});
+        existingKeys.add(key);
+      }
+    }
   });
-  return derived;
+  // Build at most one coherent overview experience per sightseeing day instead
+  // of turning every itinerary row into a separate tour product.
+  for(const [day,items] of byDay.entries()){
+    const cluster=items.filter(x=>!['RESTAURANT','LOGISTICS','NONE'].includes(x.semantic));
+    if(cluster.length<2)continue;
+    const label=lang==='es'?`Tour panorámico de ${cityName}`:`${cityName} highlights tour`;
+    const key=normalizeWorkspaceEntity(label);
+    if(existingKeys.has(key))continue;
+    derived.push({id:`workspace-tour-cluster:${normalizeWorkspaceEntity(cityName)}:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',user_message:lang==='es'?`Puede reunir en una experiencia guiada varios de los lugares que ya tienes previstos este día, manteniendo el foco en tu ruta.`:`A guided experience can combine several places already planned for this day while staying aligned with your route.`,source_activity:cluster.slice(0,4).map(x=>x.canonical||x.activity).join(' · '),source_route:'',derived_by:'itinerary_experience_cluster'});
+    existingKeys.add(key);
+  }
+  return derived.slice(0,4);
 }
 function rentalTransportTextMatches(value){
   const text=normalizeWorkspaceEntity(value);
@@ -237,9 +228,57 @@ function sortContextItems(items=[]){
     return String(a?.entity_name||a?.source_activity||'').localeCompare(String(b?.entity_name||b?.source_activity||''),lang==='es'?'es':'en',{sensitivity:'base'});
   });
 }
+function workspaceRowsForCity(cityName){
+  const rows=[];
+  const byDay=data?.itineraries?.[cityName]?.byDay||{};
+  Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
+    (Array.isArray(byDay[dayNumber])?byDay[dayNumber]:[]).forEach((row,index)=>rows.push({day:dayNumber,index,row}));
+  });
+  return rows;
+}
+function contextualNeedBelongsToCitySlice(item,cityName){
+  if(item?.need_type==='intercity_transport'||item?.need_type==='transport_arrangement') return true;
+  const facts=workspaceRowsForCity(cityName);
+  if(!facts.length)return false;
+  const target=normalizeWorkspaceEntity(`${item?.entity_name||''} ${item?.source_activity||''}`);
+  if(!target)return false;
+  return facts.some(({row})=>{
+    const rowText=normalizeWorkspaceEntity(`${row?.activity||''} ${row?.to||''} ${row?.commerce_context?.canonical_place||''}`);
+    if(!rowText)return false;
+    const entity=normalizeWorkspaceEntity(item?.entity_name||'');
+    const source=normalizeWorkspaceEntity(item?.source_activity||'');
+    return (entity&&rowText.includes(entity))||(source&&rowText.includes(source))||(target.length>8&&rowText.includes(target));
+  });
+}
+function localTicketNeedsForCity(cityName,existing=[]){
+  const existingKeys=new Set((existing||[]).filter(x=>x?.need_type==='ticket_required'||x?.need_type==='reservation_recommended').map(x=>normalizeWorkspaceEntity(x?.entity_name||x?.source_activity||'')));
+  const out=[];
+  workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
+    const cc=row?.commerce_context||{};
+    const semantic=String(cc?.semantic_type||'').toUpperCase();
+    const ticket=String(cc?.ticket_need||'').toLowerCase();
+    const notes=String(row?.notes||'');
+    const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
+    const canonical=String(cc?.canonical_place||row?.to||activity).trim();
+    const key=normalizeWorkspaceEntity(canonical);
+    if(!key||existingKeys.has(key))return;
+    const explicitRequired=semantic==='ATTRACTION_TICKET'&&ticket==='required';
+    const explicitRecommended=semantic==='ATTRACTION_TICKET'&&['recommended','optional','unknown'].includes(ticket);
+    const noteRequired=/\b(entrada|ticket|billete|boleto).{0,45}\b(necesari|required|obligatori|imprescindible)\b|\b(requiere|requires?).{0,35}\b(entrada|ticket|admission)\b/i.test(notes);
+    const noteRecommended=/\b(reserva|reservar|booking|book|timed entry|entrada con hora|anticipad)\b/i.test(notes);
+    if(!explicitRequired&&!explicitRecommended&&!noteRequired&&!noteRecommended)return;
+    const needType=(explicitRequired||noteRequired)?'ticket_required':'reservation_recommended';
+    out.push({id:`workspace-ticket:${day}:${index+1}`,category:'tickets',city:cityName,day,entity_name:canonical,entity_type:'attraction',need_type:needType,confidence:(explicitRequired||noteRequired)?'high':'medium',user_message:lang==='es'?(needType==='ticket_required'?`Necesitas resolver la entrada para ${canonical} antes de esta visita.`:`Conviene revisar y reservar con antelación el acceso a ${canonical}.`):(needType==='ticket_required'?`Plan the admission for ${canonical} before this visit.`:`It is worth checking and booking ${canonical} in advance.`),source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context'});
+    existingKeys.add(key);
+  });
+  return out;
+}
 function contextualNeedsForCity(cityName,needs){
-  const source=Array.isArray(needs)?needs:[];
-  const derivedRoutes=tripRoutes().filter(route=>route.origin===cityName);
+  // Server context for a main planning unit can contain rows that physically
+  // belong to a subdestination. Keep only needs that belong to this physical
+  // workspace slice; transport is re-derived from the authoritative route.
+  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName));
+  const derivedRoutes=tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName));
   const normalizeRoute=value=>String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
   const routeKeys=new Set(derivedRoutes.map(route=>normalizeRoute(route.source_route)));
   const rentalPlan=rentalPlanForCity(cityName);
@@ -249,6 +288,10 @@ function contextualNeedsForCity(cityName,needs){
     return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
+  // Ticket/access needs are first-class deterministic data. V3 emits
+  // commerce_context on each row; use it directly so subdestination cards do
+  // not depend on the parent planning-unit classifier.
+  merged.push(...localTicketNeedsForCity(cityName,merged));
   // Tours/experiences are a first-class contextual layer. Server intelligence
   // can enrich them, but the section must never depend on a server classifier
   // returning a tour category: derive defensible alternatives from the actual
