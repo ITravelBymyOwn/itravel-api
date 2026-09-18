@@ -3098,12 +3098,12 @@ function showPreferencesSaveOverlay(){
 async function showRouteReadyModal(){
   const es=getLang()==='es';
   return showPlannerDecision({
-    title:es?'Tu recorrido está listo':'Your route is ready',
+    title:es?'Tu ruta está lista para continuar':'Your route is ready to continue',
     message:es
-      ? 'Guardamos tus destinos y movimientos. Ahora puedes continuar con los detalles que harán tu itinerario más personal.'
-      : 'We saved your destinations and movements. You can now continue with the details that will make your itinerary more personal.',
-    cancelLabel:es?'Seguir editando':'Keep editing',
-    confirmLabel:es?'Continuar con mi itinerario →':'Continue with my itinerary →'
+      ? 'Tus destinos, fechas y movimientos quedaron guardados. El siguiente paso es completar la información que personalizará tu itinerario.'
+      : 'Your destinations, dates and movements are saved. The next step is to complete the information that will personalize your itinerary.',
+    cancelLabel:es?'Revisar mi ruta':'Review my route',
+    confirmLabel:es?'Iniciar itinerario →':'Start itinerary →'
   });
 }
 
@@ -5052,7 +5052,11 @@ function showWOW(on, msg){
     }
 
     if(on){
-      el._prevDisabled = el.disabled;
+      // Generation may refresh/reassert its overlay more than once. Preserve the
+      // ORIGINAL interactive state only once; otherwise a second showWOW(true)
+      // would overwrite false with true and leave the whole Planner disabled
+      // after generation completes.
+      if(typeof el._prevDisabled === 'undefined') el._prevDisabled = el.disabled;
       el.disabled = true;
     }else{
       if(typeof el._prevDisabled !== 'undefined'){
@@ -5783,8 +5787,10 @@ HARD RULES:
   selected itinerary language.
 - Never use generic destinations such as "nearby village", "local restaurant", "services",
   "recommended place" or "similar option".
-- Notes must sound natural and expert. Do not repeat fixed labels such as "Emotion:" and "Tip:" on
-  every row. Include one specific operational or experiential insight instead.
+- Notes are a traveler-facing intelligence layer, not filler. For every meaningful activity include concise, specific execution guidance when relevant: advance booking/timed-entry need, what to prioritize inside a large attraction, realistic seasonal/daylight or opening-hours caveats, access/logistics, practical timing, and a useful fallback or alternative only when it adds real value. Never expose engine language, internal labels, contract/window terminology or fake certainty.
+- Notes must sound natural and expert. Do not repeat fixed labels such as "Emotion:" and "Tip:" on every row. Avoid generic filler such as "great for photos" unless paired with a concrete reason or operational recommendation.
+- commerce_context is operational data for the contextual recommendation engine and must be precise. For every non-transport row classify semantic_type as exactly one of ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE; set ticket_need to required/recommended/optional/none/unknown; set guided_tour_value to high/medium/low/none; and set canonical_place to the single concrete attraction/experience represented by the row. Paid interior attractions, museums, monuments, towers and access-controlled sites must not be mislabeled as FREE_SIGHT. Streets, plazas, exterior walks, viewpoints without controlled access and logistics must not be mislabeled as ticket needs.
+- For transport rows, commerce_context must identify origin, destination, known mode, departure and arrival. If the user asks ITBMO to recommend transport, choose one primary practical mode when the route facts support it; if confidence is insufficient, keep the visible transport neutral and set transport_recommendation_needed=true so the contextual mobility layer can resolve it. Never invent an operator, terminal, reservation, schedule or availability.
 - Target 4–8 useful rows on a normal full day, fewer on genuinely short/light days.
 - No text outside JSON.
 
@@ -6731,9 +6737,11 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         from:t.origin,to:t.destination,
         transport:_v3TransportLabel_(t.mode),
         duration:`${_durationLabels_()[0]}: ${_minutesToHuman_(duration)}`,
-        notes:es?`Llegada prevista a ${t.destination} a las ${t.arrival}. El itinerario continúa desde allí cuando exista tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. The itinerary continues from there when time remains available.`,
+        notes:t.terminal_arrival
+          ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
+          : (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. La planificación continúa desde ${t.destination} según el tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. Planning continues from ${t.destination} according to the available time.`),
         kind:'transport',
-        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,source:t.source||'USER_FIXED'}
+        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,source:t.source||'USER_FIXED',booking_need:'compare_options'}
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
@@ -6834,8 +6842,8 @@ function _v3NormalizeTransportRecommendation_(row={}){
   if(!raw || !ambiguous.test(raw)) return row;
   const es=getLang()==='es';
   return {...row,
-    transport:es?'Recomiéndame':'Recommend',
-    commerce_context:{...(row.commerce_context||{}),transport_recommendation_needed:true}
+    transport:es?'Por definir':'To be defined',
+    commerce_context:{...(row.commerce_context||{}),semantic_type:'TRANSPORT',transport_recommendation_needed:true,booking_need:'recommend'}
   };
 }
 
