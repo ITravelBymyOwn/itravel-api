@@ -515,7 +515,7 @@
       const inboundToMain=norm(seg.destination).toLowerCase()===norm(destination.city).toLowerCase() && norm(seg.origin).toLowerCase()!==norm(destination.city).toLowerCase();
       if(depIndex>=0){
         if(inboundToMain) dayContexts[depIndex].start_location=seg.origin;
-        const terminalArrival=seg.disposition==='end_block'&&_isLastPlannerDay({baseISO:source?.base_date||destination.baseDate,days:totalDays},seg.arrivalDate);
+        const terminalArrival=_isLastPlannerDay({baseISO:source?.base_date||destination.baseDate,days:totalDays},seg.arrivalDate) && !['roundtrip','stay_return'].includes(String(seg.disposition||''));
         dayContexts[depIndex].fixed_transfers.push({origin:seg.origin,destination:seg.destination,departure:seg.departureTime||null,arrival:seg.arrivalTime||null,date:seg.departureDate,time_precision:seg.timePrecision||'exact',source:'USER_FIXED',mode:seg.transportMode||null,terminal_arrival:terminalArrival});
         if(terminalArrival){
           dayContexts[depIndex].terminal_arrival_only=true;
