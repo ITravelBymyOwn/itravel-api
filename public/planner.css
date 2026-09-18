@@ -9084,50 +9084,42 @@ body{
 .route-v2-head:has(.route-v2-add){backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 @media(max-width:720px){.route-v2-head{bottom:8px}.route-v2-add{position:relative;z-index:2}}
 
+
 /* =========================================================
-   ITBMO V2.5.3 · Premium post-generation actions
-   High-contrast hover states; no disappearing text.
+   ITBMO V2.5.4 · Premium export palette
+   Uses the established ITBMO navy / electric blue / cyan / warm accent family.
 ========================================================= */
-#planner-post-generation .toolbar{
-  gap:14px !important;
-}
+#planner-post-generation .toolbar{gap:16px!important;}
 #planner-post-generation .toolbar #btn-pdf,
 #planner-post-generation .toolbar #btn-csv,
 #planner-post-generation .toolbar #btn-receipt{
-  min-height:66px !important;
-  border-radius:19px !important;
-  font-weight:900 !important;
-  letter-spacing:-.01em !important;
-  transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease,background .2s ease,color .2s ease !important;
-  opacity:1 !important;
+  min-height:68px!important;border-radius:20px!important;font-weight:900!important;
+  letter-spacing:-.015em!important;opacity:1!important;border:1px solid transparent!important;
+  transition:transform .2s ease,box-shadow .2s ease,filter .2s ease!important;
 }
 #planner-post-generation .toolbar #btn-pdf{
-  color:#fff !important;
-  background:linear-gradient(135deg,#123c73 0%,#126aa3 58%,#118da7 100%) !important;
-  border-color:rgba(20,101,151,.34) !important;
-  box-shadow:0 14px 34px rgba(17,72,120,.16) !important;
+  color:#fff!important;background:linear-gradient(135deg,#102b55 0%,#0b67c8 62%,#0d91b4 100%)!important;
+  box-shadow:0 15px 34px rgba(16,43,85,.18)!important;
 }
-#planner-post-generation .toolbar #btn-pdf::before{color:#0d567a !important;background:rgba(255,255,255,.92) !important;}
 #planner-post-generation .toolbar #btn-csv{
-  color:#fff !important;
-  background:linear-gradient(135deg,#087d8d 0%,#0b9b9b 52%,#20aaa4 100%) !important;
-  border-color:rgba(8,125,141,.30) !important;
-  box-shadow:0 14px 34px rgba(8,125,141,.15) !important;
+  color:#fff!important;background:linear-gradient(135deg,#087b8f 0%,#0c9aa2 55%,#19aaa4 100%)!important;
+  box-shadow:0 15px 34px rgba(8,123,143,.17)!important;
 }
-#planner-post-generation .toolbar #btn-csv::before{color:#087b7e !important;background:rgba(255,255,255,.92) !important;}
 #planner-post-generation .toolbar #btn-receipt{
-  color:#173c61 !important;
-  background:linear-gradient(135deg,#fff 0%,#f5fbfc 55%,#e9f7f6 100%) !important;
-  border-color:rgba(18,126,142,.20) !important;
-  box-shadow:0 14px 34px rgba(25,80,108,.09) !important;
+  color:#173455!important;background:linear-gradient(135deg,#fffaf7 0%,#fff3e9 54%,#fbe2c9 100%)!important;
+  border-color:rgba(241,124,74,.26)!important;box-shadow:0 15px 34px rgba(112,75,50,.10)!important;
 }
+#planner-post-generation .toolbar #btn-pdf::before,
+#planner-post-generation .toolbar #btn-csv::before{background:rgba(255,255,255,.94)!important;}
+#planner-post-generation .toolbar #btn-pdf::before{color:#0b67c8!important;}
+#planner-post-generation .toolbar #btn-csv::before{color:#087b8f!important;}
+#planner-post-generation .toolbar #btn-receipt::before{color:#b6532f!important;background:#fff7f0!important;}
 #planner-post-generation .toolbar #btn-pdf:hover,
 #planner-post-generation .toolbar #btn-csv:hover,
 #planner-post-generation .toolbar #btn-receipt:hover{
-  transform:translateY(-3px) !important;
-  opacity:1 !important;
-  filter:saturate(1.04) brightness(1.02) !important;
+  transform:translateY(-2px)!important;opacity:1!important;filter:brightness(1.035) saturate(1.02)!important;
 }
-#planner-post-generation .toolbar #btn-pdf:hover{color:#fff !important;background:linear-gradient(135deg,#123c73 0%,#0f70ad 58%,#0b9aad 100%) !important;box-shadow:0 20px 42px rgba(17,72,120,.22) !important;}
-#planner-post-generation .toolbar #btn-csv:hover{color:#fff !important;background:linear-gradient(135deg,#087786 0%,#079b98 52%,#18b1a8 100%) !important;box-shadow:0 20px 42px rgba(8,125,141,.22) !important;}
-#planner-post-generation .toolbar #btn-receipt:hover{color:#123b60 !important;background:linear-gradient(135deg,#fff 0%,#f1fafb 52%,#dff4f2 100%) !important;box-shadow:0 20px 42px rgba(25,80,108,.14) !important;}
+#planner-post-generation .toolbar #btn-pdf:hover{box-shadow:0 20px 42px rgba(16,43,85,.24)!important;}
+#planner-post-generation .toolbar #btn-csv:hover{box-shadow:0 20px 42px rgba(8,123,143,.23)!important;}
+#planner-post-generation .toolbar #btn-receipt:hover{color:#173455!important;box-shadow:0 20px 42px rgba(112,75,50,.15)!important;}
+#planner-post-generation .toolbar button:disabled{opacity:.52!important;filter:saturate(.55)!important;cursor:not-allowed!important;}
