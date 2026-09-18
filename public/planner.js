@@ -6635,17 +6635,54 @@ async function _v3Call_(prompt){
   return _callPlannerSystemPrompt_(prompt,false,'planner_v3');
 }
 
+function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays){
+  if(!parsed) return [];
+  const maxDay=Math.max(1,Number(totalDays)||1);
+  let rows=[];
+
+  // V3 identity rule: city_day.city is the PHYSICAL location for that day/block.
+  // Membership in the response is established by planning_unit + day index, never
+  // by comparing the physical city with the MAIN destination name.
+  if(Array.isArray(parsed.city_day)){
+    rows=parsed.city_day.flatMap((block,index)=>{
+      const dayNum=Number(block?.day)||index+1;
+      if(dayNum<1||dayNum>maxDay) return [];
+      return (Array.isArray(block?.rows)?block.rows:[]).map(r=>normalizeRow({...r,day:r?.day??dayNum},dayNum));
+    });
+  }else if(Array.isArray(parsed.rows)){
+    rows=parsed.rows.map(r=>normalizeRow(r));
+  }else if(Array.isArray(parsed.destinations)){
+    // Compatibility only: a V3 planning unit may contain multiple physical places.
+    // Flatten all day blocks instead of selecting only the MAIN destination.
+    rows=parsed.destinations.flatMap(item=>
+      Array.isArray(item?.city_day)
+        ? item.city_day.flatMap((block,index)=>{
+            const dayNum=Number(block?.day)||index+1;
+            return dayNum>=1&&dayNum<=maxDay
+              ? (Array.isArray(block?.rows)?block.rows:[]).map(r=>normalizeRow({...r,day:r?.day??dayNum},dayNum))
+              : [];
+          })
+        : (Array.isArray(item?.rows)?item.rows.map(r=>normalizeRow(r)):[])
+    );
+  }
+
+  const valid=rows.filter(r=>Number(r?.day)>=1&&Number(r?.day)<=maxDay);
+  console.info(`[ITBMO V3 IDENTITY] ${planningUnit}: accepted rows by planning-unit day; physical city labels are not used as membership filters`,_v3Coverage_(valid,maxDay));
+  return valid;
+}
+
 async function _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport){
   const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
   const prompt=`
 GENERATION CONTRACT — authoritative JSON:
 ${JSON.stringify(contract)}
 
-Generate the complete planning unit in one pass. Internally choose distinct day identities and anchors before writing rows, but output only the final itinerary JSON. Use every physically available window correctly. Do not ask questions.
+Generate the complete planning unit in one pass.
+IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the physical city for every day. A day remains part of this planning unit even when its physical location is another city/place from route_days. Use route_days[].day as the authoritative day identity. city_day[].city may name that day's actual physical location; it does NOT need to equal planning_unit. Include every planning-unit day 1..total_days exactly once or in multiple blocks sharing that same day when the day has multiple physical windows. Internally choose distinct day identities and anchors before writing rows, but output only the final itinerary JSON. Use every physically available window correctly. Do not ask questions.
 `.trim();
   const raw=await _v3Call_(prompt);
   const parsed=parseJSON(raw);
-  const rows=_dedupeRows_(_extractPlannerRows_(parsed,city));
+  const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,dest.days));
   return {rows,contract};
 }
 
@@ -6677,7 +6714,7 @@ The previous response omitted day(s) ${coverage.missing.join(', ')}. Generate ON
 `.trim();
   const raw=await _v3Call_(prompt);
   const parsed=parseJSON(raw);
-  const repaired=_dedupeRows_(_extractPlannerRows_(parsed,city)).filter(r=>coverage.missing.includes(Number(r?.day)));
+  const repaired=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,totalDays)).filter(r=>coverage.missing.includes(Number(r?.day)));
   const merged=_dedupeRows_([...rows,...repaired]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
   const next=_v3Coverage_(merged,totalDays);
   console.info(`[ITBMO V3 COVERAGE] ${city}: after scoped missing-day repair`,next);
@@ -6710,7 +6747,7 @@ Rebuild ONLY days ${affected.join(', ')}. Correct every validator error while pr
 
   const raw=await _v3Call_(prompt);
   const parsed=parseJSON(raw);
-  const repaired=_dedupeRows_(_extractPlannerRows_(parsed,city)).filter(r=>affected.includes(Number(r?.day)));
+  const repaired=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,totalDays)).filter(r=>affected.includes(Number(r?.day)));
   if(!repaired.length || !affected.every(day=>repaired.some(r=>Number(r?.day)===day))){
     return {rows,report,repaired:false};
   }
