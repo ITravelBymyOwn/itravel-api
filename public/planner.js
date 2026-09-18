@@ -6784,6 +6784,25 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       }
     }
 
+    // Global, city-agnostic duplicate sweep. The auditor can report aliases with
+    // different surface text; compare every concrete POI against all earlier rows
+    // and deterministically keep the first chronological occurrence.
+    const chronological=[...out].sort((a,b)=>Number(a?.day||0)-Number(b?.day||0)||String(a?.start||'').localeCompare(String(b?.start||'')));
+    const kept=[];
+    for(const candidate of chronological){
+      if(_isUtilityRow_(candidate)||_isPureTransportRow_(candidate)){ kept.push(candidate); continue; }
+      const candidatePoi=_poiKeyFromRow_(candidate);
+      const duplicate=kept.find(previous=>{
+        if(_isUtilityRow_(previous)||_isPureTransportRow_(previous)) return false;
+        const previousPoi=_poiKeyFromRow_(previous);
+        return candidatePoi&&previousPoi&&_arePoiAliases_(candidatePoi,previousPoi);
+      });
+      if(duplicate){
+        const idx=out.indexOf(candidate);
+        if(idx>=0){ removed.push({day:Number(candidate.day||0),poi:candidate.to||candidate.activity,reason:'global_alias'}); out.splice(idx,1); changed=true; }
+      }else kept.push(candidate);
+    }
+
     out=_v3EnforceHardRouteFacts_(out,contract);
     if(!changed) break;
   }
@@ -11440,41 +11459,14 @@ function bindNewPlanningListener(){
 }
 
 function enhancePreferencesInfoChatCopy(){
+  // V2.4.13: the contextual guidance already lives in the upper Preferences flow.
+  // Keep only the useful placeholder here; never render a duplicate footer banner.
   const field=qs('#special-conditions');
-  if(!field || qs('#itbmo-preferences-guidance')) return;
-
+  if(!field) return;
   const lang=_plannerOutputLang_();
-  const copy={
-    en:{
-      lead:'A little context makes your itinerary much more personal.',
-      summary:'You can mention <strong>style</strong>, <strong>pace</strong>, <strong>must-dos</strong> and any <strong>special needs or restrictions</strong>.',
-      note:'',
-      placeholder:'Write your preferences, restrictions or special conditions here…'
-    },
-    es:{
-      lead:'Un poco de contexto hace que tu itinerario sea mucho más personal.',
-      summary:'Puedes incluir <strong>estilo</strong>, <strong>ritmo</strong>, <strong>imperdibles</strong> y cualquier <strong>necesidad o restricción especial</strong>.',
-      note:'',
-      placeholder:'Escribe aquí tus preferencias, restricciones o condiciones especiales…'
-    }
-  }[lang] || {
-    lead:'A little context makes your itinerary much more personal.',
-    summary:'Mention style, pace, must-dos and any special needs or restrictions.',
-    note:'Info Chat is beside this field if you need destination context first.',
-    placeholder:'Write your preferences, restrictions or special conditions here…'
-  };
-
-  const guide=document.createElement('div');
-  guide.id='itbmo-preferences-guidance';
-  guide.className='preferences-guidance';
-  guide.innerHTML=`
-    <strong class="preferences-guidance__lead">${copy.lead}</strong>
-    <span class="preferences-guidance__summary">${copy.summary}</span>
-    <small class="preferences-guidance__note">${copy.note}</small>
-  `;
-
-  field.parentNode?.insertBefore(guide,field);
-  field.placeholder=copy.placeholder;
+  field.placeholder=lang==='es'
+    ? 'Escribe aquí tus preferencias, restricciones o condiciones especiales…'
+    : 'Write your preferences, restrictions or special conditions here…';
   field.addEventListener('input',autoGrowPreferencesField);
   autoGrowPreferencesField();
 }
