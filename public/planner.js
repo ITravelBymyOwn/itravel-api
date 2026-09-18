@@ -5287,7 +5287,7 @@ function _extractPlannerRows_(parsed, city){
     return parsed.city_day
       .filter(block => {
         const blockCity = block?.city || parsed.destination || city;
-        return blockCity === city;
+        return _canonicalText_(blockCity) === _canonicalText_(city);
       })
       .flatMap(block => {
         const dayNum = parseInt(block?.day, 10) || 1;
@@ -6649,6 +6649,41 @@ Generate the complete planning unit in one pass. Internally choose distinct day 
   return {rows,contract};
 }
 
+function _v3Coverage_(rows=[],totalDays=1){
+  const expected=Array.from({length:Number(totalDays)||0},(_,i)=>i+1);
+  const received=[...new Set((rows||[]).map(r=>Number(r?.day)).filter(d=>Number.isInteger(d)&&d>=1&&d<=Number(totalDays)))].sort((a,b)=>a-b);
+  const missing=expected.filter(d=>!received.includes(d));
+  const counts=Object.fromEntries(expected.map(d=>[d,(rows||[]).filter(r=>Number(r?.day)===d).length]));
+  return {expected,received,missing,counts,rowCount:(rows||[]).length};
+}
+
+async function _v3RepairMissingDays_(city,rows,contract,totalDays){
+  const coverage=_v3Coverage_(rows,totalDays);
+  if(!coverage.missing.length) return {rows,coverage,repaired:false};
+  console.warn(`[ITBMO V3 COVERAGE] ${city}: repairing missing day(s) ${coverage.missing.join(', ')}`,coverage);
+  const scopedContract={
+    ...contract,
+    repair_scope_days:coverage.missing,
+    route_days:(contract.route_days||[]).filter(d=>coverage.missing.includes(Number(d.day)))
+  };
+  const prompt=`
+MISSING-DAY REPAIR CONTRACT — authoritative JSON:
+${JSON.stringify(scopedContract)}
+
+ALREADY VALID DAYS — DO NOT REGENERATE THEM:
+${JSON.stringify(_rowsByDayObject_(rows))}
+
+The previous response omitted day(s) ${coverage.missing.join(', ')}. Generate ONLY those missing days. Preserve every hard physical window and USER_FIXED movement exactly. Return city_day JSON containing every requested missing day and no other days.
+`.trim();
+  const raw=await _v3Call_(prompt);
+  const parsed=parseJSON(raw);
+  const repaired=_dedupeRows_(_extractPlannerRows_(parsed,city)).filter(r=>coverage.missing.includes(Number(r?.day)));
+  const merged=_dedupeRows_([...rows,...repaired]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  const next=_v3Coverage_(merged,totalDays);
+  console.info(`[ITBMO V3 COVERAGE] ${city}: after scoped missing-day repair`,next);
+  return {rows:merged,coverage:next,repaired:next.missing.length<coverage.missing.length};
+}
+
 async function _v3RepairAffectedDays_(city,rows,contract,report,totalDays,perDay,baseDate){
   const errors=_v3MaterialAuditErrors_(report);
   const affected=[...new Set(errors.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(d=>d>=1&&d<=totalDays))].sort((a,b)=>a-b);
@@ -6712,7 +6747,21 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     console.log(`[ITBMO V3] Planning unit ${city}: one-pass generation`);
     const generated=await _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport);
     let rows=generated.rows;
-    if(!rows.length || !_rowsCoverAllDays_(rows,dest.days)) throw new Error(`V3_INCOMPLETE:${city}`);
+    let coverage=_v3Coverage_(rows,dest.days);
+    console.info(`[ITBMO V3 COVERAGE] ${city}: initial response`,coverage);
+    if(!rows.length){
+      throw new Error(`V3_EMPTY:${city}`);
+    }
+    if(coverage.missing.length){
+      const missingRepair=await _v3RepairMissingDays_(city,rows,generated.contract,dest.days);
+      rows=missingRepair.rows;
+      coverage=missingRepair.coverage;
+    }
+    if(coverage.missing.length){
+      const error=new Error(`V3_INCOMPLETE:${city}:missing_days=${coverage.missing.join(',')}:rows=${coverage.rowCount}`);
+      error.v3Coverage=coverage;
+      throw error;
+    }
 
     const master=_v3SyntheticMaster_(dest.days);
     let report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
