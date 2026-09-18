@@ -96,6 +96,7 @@ const ITBMO_PLANNER_TAB_ESTABLISHED_KEY = 'itbmo_planner_tab_established_v2';
 const ITBMO_SURFACE_PRESENCE_TTL_MS = 10000;
 const ITBMO_PLANNER_HEARTBEAT_MS = 2000;
 const ITBMO_WORKSPACE_GUEST_HANDOFF_KEY = 'itbmo_workspace_guest_handoff_v1';
+const ITBMO_WORKSPACE_OPEN_HANDOFF_KEY = 'itbmo_workspace_open_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -3590,8 +3591,18 @@ function openImmersiveItinerary(){
     }
   }catch(_){}
 
+  // Explicit short-lived handoff proves that this Workspace was opened from a
+  // currently authenticated Planner. It prevents a new Workspace tab from
+  // mistaking its own startup for "last ITBMO surface closed".
+  let workspaceHandoffId='';
+  try{
+    workspaceHandoffId=(globalThis.crypto?.randomUUID?.()||`handoff-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    localStorage.setItem(`${ITBMO_WORKSPACE_OPEN_HANDOFF_KEY}:${workspaceHandoffId}`,JSON.stringify({trip_id:snapshot.trip_id||null,expires_at:Date.now()+120000}));
+  }catch(_){}
+
   const params=new URLSearchParams();
   params.set('lang',snapshot.lang);
+  if(workspaceHandoffId) params.set('handoff',workspaceHandoffId);
   if(snapshot.trip_id) params.set('trip_id',snapshot.trip_id);
   const url=`./trip-workspace.html?${params.toString()}`;
   const opened=window.open(url,'_blank','noopener,noreferrer');
@@ -4541,6 +4552,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const durRaw   = r.duration ?? r.durationMinutes ?? r.duracion ?? '';
   const notes    = r.notes ?? r.nota ?? r.comentarios ?? '';
   const kindRaw  = r.kind ?? r.type ?? r.tipo ?? '';
+  const commerceContext = (r.commerce_context && typeof r.commerce_context==='object') ? r.commerce_context : null;
   const d = Math.max(1, parseInt(r.day ?? r.dia ?? fallbackDay, 10) || 1);
 
   let start = String(startRaw||'').trim();
@@ -4582,7 +4594,8 @@ function normalizeRow(r = {}, fallbackDay = 1){
     transport:safeTransport,
     duration,
     notes:safeNotes,
-    kind
+    kind,
+    commerce_context:commerceContext
   }));
 }
 
@@ -6576,12 +6589,14 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
       end_location:day.end_location||day.start_location||city,
       overnight_base:day.overnight_base||day.end_location||city,
       terminal_arrival_only:Boolean(day.terminal_arrival_only||day.end_destination_block||day.terminal_transfer),
+      terminal_destination:day.terminal_destination||null,
       location_windows:(day.location_windows||[]).map(w=>({
         location:w.location||null,
         start:w.start||null,
         end:w.end||null,
         type:w.type||'plannable',
-        open_end:Boolean(w.open_end)
+        open_end:Boolean(w.open_end),
+        terminal_arrival:Boolean(w.terminal_arrival)
       })),
       fixed_transfers:(day.fixed_transfers||[]).map(t=>({
         origin:t.origin||null,
@@ -6589,7 +6604,8 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
         departure:t.departure||null,
         arrival:t.arrival||null,
         source:t.source||'USER_FIXED',
-        mode:t.mode||null
+        mode:t.mode||null,
+        terminal_arrival:Boolean(t.terminal_arrival)
       }))
     })),
     place_preferences:placePreferences,
@@ -6609,6 +6625,49 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
       full_itbmo_quality_applies_to_subdestinations:true
     }
   };
+}
+
+function _minutesToHuman_(minutes){
+  const m=Math.max(0,Number(minutes)||0),h=Math.floor(m/60),r=m%60;
+  if(h&&r) return `${h} h ${r} min`;
+  if(h) return `${h} h`;
+  return `${r} min`;
+}
+
+function _v3TransportLabel_(mode){
+  const es=getLang()==='es';
+  const labels={train:es?'Tren':'Train',plane:es?'Avión':'Plane',bus:'Bus',car:es?'Automóvil':'Car',ferry:'Ferry',transfer:'Transfer',other:es?'Otro':'Other'};
+  return labels[String(mode||'').toLowerCase()] || (es?'Por definir':'To be defined');
+}
+
+function _v3EnforceHardRouteFacts_(rows=[],contract={}){
+  const es=getLang()==='es';
+  let out=[...(rows||[])];
+  (contract.route_days||[]).forEach(day=>{
+    const dayNum=Number(day.day);
+    const transfers=(day.fixed_transfers||[]).filter(t=>t.departure&&t.arrival);
+    transfers.forEach(t=>{
+      const dep=_hhmmToMinutes_(t.departure),arr=_hhmmToMinutes_(t.arrival);
+      if(dep==null||arr==null)return;
+      const duration=Math.max(0,arr-dep);
+      const idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
+      if(idx>=0){
+        out[idx]={...out[idx],
+          activity:es?`Traslado fijo ${t.origin} → ${t.destination}`:`Fixed transfer ${t.origin} → ${t.destination}`,
+          from:t.origin,to:t.destination,
+          transport:_v3TransportLabel_(t.mode),
+          duration:_minutesToHuman_(duration),
+          notes:es?`Llegada prevista a ${t.destination} a las ${t.arrival}. El itinerario continúa desde allí cuando exista tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. The itinerary continues from there when time remains available.`,
+          kind:'transport',
+          commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival}
+        };
+      }
+      if(t.terminal_arrival||day.terminal_arrival_only){
+        out=out.filter(r=>Number(r.day)!==dayNum || _hhmmToMinutes_(r.start)==null || _hhmmToMinutes_(r.start)<arr || (_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr));
+      }
+    });
+  });
+  return _dedupeRows_(out).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
 }
 
 function _v3SyntheticMaster_(totalDays){
@@ -6783,7 +6842,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
   try{
     console.log(`[ITBMO V3] Planning unit ${city}: one-pass generation`);
     const generated=await _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport);
-    let rows=generated.rows;
+    let rows=_v3EnforceHardRouteFacts_(generated.rows,generated.contract);
     let coverage=_v3Coverage_(rows,dest.days);
     console.info(`[ITBMO V3 COVERAGE] ${city}: initial response`,coverage);
     if(!rows.length){
@@ -6791,8 +6850,8 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     }
     if(coverage.missing.length){
       const missingRepair=await _v3RepairMissingDays_(city,rows,generated.contract,dest.days);
-      rows=missingRepair.rows;
-      coverage=missingRepair.coverage;
+      rows=_v3EnforceHardRouteFacts_(missingRepair.rows,generated.contract);
+      coverage=_v3Coverage_(rows,dest.days);
     }
     if(coverage.missing.length){
       const error=new Error(`V3_INCOMPLETE:${city}:missing_days=${coverage.missing.join(',')}:rows=${coverage.rowCount}`);
@@ -6806,11 +6865,11 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     if(materialBefore.length){
       console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} material issue(s); scoped repair only`,materialBefore);
       const repaired=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
-      rows=repaired.rows;
-      report=repaired.report;
+      rows=_v3EnforceHardRouteFacts_(repaired.rows,generated.contract);
+      report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
     }
 
-    const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW']);
+    const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','OVERLAP','CONTINUITY','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE']);
     if((report?.errors||[]).some(e=>blocking.has(String(e?.code||'')))){
       throw new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
     }
@@ -7394,7 +7453,7 @@ async function _prewarmGeneratedTripContext_(){
 }
 
 function _applyGeneratedUIState({showModal=false}={}){
-  showWOW(false);
+  if(!showModal) showWOW(false);
   setExportToolbarVisibility(true);
   setPlanningChatLocked(true);
   if($preferencesGenerateV2){
@@ -7403,7 +7462,12 @@ function _applyGeneratedUIState({showModal=false}={}){
     $preferencesGenerateV2.textContent=getLang()==='es'?'✓ Itinerario generado':'✓ Itinerary generated';
     $preferencesGenerateV2.classList.add('is-generated');
   }
-  if(showModal) showFinalDownloadModal();
+  if(showModal){
+    showFinalDownloadModal();
+    // Keep the generation overlay in place until the completion modal exists;
+    // then reveal the modal atomically with no intermediate Planner state.
+    requestAnimationFrame(()=>showWOW(false));
+  }
 }
 
 // V3 generation orchestrator: main destinations are independent only AFTER
@@ -7432,6 +7496,7 @@ async function _runGenerationPool_(items,worker,limit=ITBMO_GENERATION_CONCURREN
 async function runPaidGeneration({manualRetry=false}={}){
   if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
   paidGenerationRunning=true;
+  let completionPublished=false;
   setPlanningChatLocked(true);
   qs('#itbmo-generation-retry')?.remove();
   _resetAstraGenerationMetrics_();
@@ -7447,6 +7512,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     if(begin?.already_completed){
       _hydrateGenerationTrip_(begin.trip);
       _applyGeneratedUIState({showModal:true});
+      completionPublished=true;
       return;
     }
 
@@ -7532,6 +7598,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     // Publication is the critical transaction boundary. Show downloads first;
     // analytics/context warming must never be able to suppress the completion UI.
     _applyGeneratedUIState({showModal:true});
+    completionPublished=true;
     _prewarmGeneratedTripContext_().catch(error=>console.warn('[CONTEXT PREWARM]',error));
     trackITBMOEvent('itinerary_generated',{
       city_count:savedDestinations.length,
@@ -7562,7 +7629,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     _showGenerationRetry_(err?.code || err?.message || 'Generation failed');
   }finally{
     paidGenerationRunning=false;
-    showWOW(false);
+    if(!completionPublished) showWOW(false);
   }
 }
 
@@ -9048,17 +9115,28 @@ async function exportItineraryToPDF(){
   // helper: encabezado por página
   function pageHeader(city, dayNum){
     const left = 40;
+    const routeCtx=_routeV2ContextForCity_(city);
+    const dayCtx=(routeCtx?.day_contexts||[]).find(d=>Number(d.day)===Number(dayNum));
+    const transfers=(dayCtx?.fixed_transfers||[]);
+    let physicalLabel='';
+    if(transfers.length){
+      const chain=[dayCtx?.start_location||transfers[0]?.origin,...transfers.map(x=>x.destination)].filter(Boolean);
+      physicalLabel=[...new Set(chain)].join(' → ');
+    }else{
+      physicalLabel=dayCtx?.overnight_base||dayCtx?.start_location||'';
+    }
 
     doc.setFontSize(14);
-    doc.text(String(normalizeCellText(city || 'Itinerary')), left, 46);
+    const startPlace=dayCtx?.start_location||city;
+    doc.text(String(normalizeCellText(startPlace || city || 'Itinerary')), left, 42);
 
     const dateLabel = getDayDateLabel(city, dayNum);
     doc.setFontSize(11);
     const dayLine = dateLabel ? `${t('uiDayTitle', dayNum)} (${normalizeCellText(dateLabel)})` : `${t('uiDayTitle', dayNum)}`;
-    doc.text(normalizeCellText(dayLine), left, 66);
+    doc.text(normalizeCellText(dayLine), left, 61);
 
-    doc.setFontSize(9);
-    doc.text(`${yyyy}-${mm}-${dd}`, left, 84);
+    doc.setFontSize(8.5);
+    doc.text(`${yyyy}-${mm}-${dd}`, left, 80);
   }
 
   // Encabezados de la tabla (usa i18n del UI si existe)
@@ -9088,16 +9166,29 @@ async function exportItineraryToPDF(){
       pageHeader(city, dayNum);
 
       // body
-      const body = rows.map(r => ([
-        normalizeCellText(r.start),
-        normalizeCellText(r.end),
-        normalizeCellText(r.activity),
-        normalizeCellText(r.from),
-        normalizeCellText(r.to),
-        normalizeCellText(r.transport),
-        normalizeCellText(r.duration),
-        normalizeCellText(r.notes)
-      ]));
+      const routeCtx=_routeV2ContextForCity_(city);
+      const dayCtx=(routeCtx?.day_contexts||[]).find(d=>Number(d.day)===Number(dayNum));
+      const fixedTransfers=(dayCtx?.fixed_transfers||[]);
+      const body=[];
+      rows.forEach((r,rowIndex)=>{
+        body.push([
+          normalizeCellText(r.start), normalizeCellText(r.end), normalizeCellText(r.activity),
+          normalizeCellText(r.from), normalizeCellText(r.to), normalizeCellText(r.transport),
+          normalizeCellText(r.duration), normalizeCellText(r.notes)
+        ]);
+        const transfer=fixedTransfers.find(t=>
+          String(t.departure||'')===String(r.start||'') && String(t.arrival||'')===String(r.end||'') &&
+          _arePoiAliases_(r.from,t.origin) && _arePoiAliases_(r.to,t.destination)
+        );
+        const hasRowsAfter=rowIndex<rows.length-1;
+        if(transfer && hasRowsAfter && !transfer.terminal_arrival){
+          body.push([{
+            content:normalizeCellText(`${String(transfer.destination||'').toUpperCase()} · ${getLang()==='es'?'Desde':'From'} ${transfer.arrival}`),
+            colSpan:8,
+            styles:{fontStyle:'bold',fontSize:10,cellPadding:{top:7,right:4,bottom:7,left:4},halign:'left'}
+          }]);
+        }
+      });
 
       // Si no hay filas, ponemos nota (honesto) y seguimos
       if(!body.length){
@@ -9110,7 +9201,7 @@ async function exportItineraryToPDF(){
         doc.autoTable({
           head,
           body,
-          startY: 98,
+          startY: 108,
           margin: { left: 40, right: 40 },
           styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
           headStyles: { fontSize: 8 },
