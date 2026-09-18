@@ -2962,6 +2962,13 @@ async function confirmPreferencesAndContinue(){
     $preferencesGenerateV2.disabled=false;
     $preferencesGenerateV2.removeAttribute('aria-disabled');
     $preferencesGenerateV2.textContent=getLang()==='es'?'Generar mi itinerario ✨':'Generate my itinerary ✨';
+  }
+  const generateNow=await showPreferencesReadyModal();
+  if(generateNow){
+    requestAnimationFrame(()=>{
+      if($preferencesGenerateV2 && !$preferencesGenerateV2.disabled) $preferencesGenerateV2.click();
+    });
+  }else if($preferencesGenerateV2){
     requestAnimationFrame(()=>smoothAdvanceTo($preferencesGenerateV2,{gap:110,center:true}));
   }
 }
@@ -3093,6 +3100,18 @@ function showPreferencesSaveOverlay(){
   overlay.classList.add('active');
   overlay.setAttribute('aria-hidden','false');
   document.documentElement.classList.add('itbmo-save-transition-open');
+}
+
+async function showPreferencesReadyModal(){
+  const es=getLang()==='es';
+  return showPlannerDecision({
+    title:es?'Tus preferencias están listas':'Your preferences are ready',
+    message:es
+      ? 'Guardamos cómo quieres vivir este viaje. ITBMO ya puede organizar la ruta completa con tus tiempos, movimientos y preferencias.'
+      : 'We saved how you want to experience this trip. ITBMO can now organize the complete route around your timing, movements and preferences.',
+    cancelLabel:es?'Revisar preferencias':'Review preferences',
+    confirmLabel:es?'Generar mi itinerario ✨':'Generate my itinerary ✨'
+  });
 }
 
 async function showRouteReadyModal(){
@@ -3553,7 +3572,11 @@ function _immersiveAvailableCities_(){
 function _immersiveDaysForCity_(city){ return Object.keys(itineraries?.[city]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b); }
 function syncImmersiveItineraryLauncher(){
   const wrap=qs('#itinerary-focus-launch'),btn=qs('#open-itinerary-focus'); if(!wrap||!btn)return;
-  const cities=_immersiveAvailableCities_(),totalDays=cities.reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),hasRows=cities.length>0&&totalDays>0,copy=_immersiveViewerCopy_();
+  const workspace=_workspaceSnapshotViews_();
+  const cities=(workspace?.destinations||[]).map(d=>d.city).filter(Boolean);
+  const uniqueDates=new Set();
+  (workspace?.destinations||[]).forEach(d=>{const base=parseDMY(String(d?.baseDate||''));for(let i=0;i<Number(d?.days||0);i++){if(base)uniqueDates.add(formatDMY(addDays(base,i)));}});
+  const totalDays=uniqueDates.size||_immersiveAvailableCities_().reduce((s,c)=>s+_immersiveDaysForCity_(c).length,0),hasRows=cities.length>0&&totalDays>0,copy=_immersiveViewerCopy_();
   wrap.classList.toggle('is-ready',hasRows);wrap.setAttribute('aria-hidden',hasRows?'false':'true');btn.disabled=!hasRows;btn.setAttribute('aria-disabled',hasRows?'false':'true');
   qs('#planner-post-generation')?.classList.toggle('is-ready',hasRows);
   qs('#itinerary-focus-cta-title').textContent=copy.ctaTitle;qs('#itinerary-focus-cta-subtitle').textContent=copy.ctaSub;
@@ -3604,6 +3627,76 @@ function renderImmersiveItinerary(){
   const prev=qs('#itinerary-focus-prev'),next=qs('#itinerary-focus-next');prev.hidden=!itineraryMode;next.hidden=!itineraryMode;prev.disabled=dayIndex<=0;next.disabled=dayIndex>=days.length-1;prev.setAttribute('aria-label',copy.prev);next.setAttribute('aria-label',copy.next);
 }
 function _immersiveMoveDay_(delta){if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const days=_immersiveDaysForCity_(immersiveItineraryCity),i=days.indexOf(Number(immersiveItineraryDay)),n=Math.max(0,Math.min(days.length-1,i+delta));if(n!==i){immersiveItineraryDay=days[n];scheduleImmersiveItineraryRender();}}
+function _workspaceSnapshotViews_(){
+  const views=new Map();
+  const ensure=(name,country='')=>{
+    const key=String(name||'').trim();
+    if(!key)return null;
+    if(!views.has(key))views.set(key,{city:key,country,dates:new Map(),source_units:new Set()});
+    return views.get(key);
+  };
+  const placeCountry=(place,sourceUnit)=>{
+    const model=plannerState?.travelModelV2||_currentTravelModelV2_();
+    const main=(savedDestinations||[]).find(d=>_arePoiAliases_(d?.city,place));
+    if(main?.country)return main.country;
+    for(const d of (model?.destinations||[])){
+      for(const seg of (d?.route?.segments||[])){
+        if(_arePoiAliases_(seg?.destination,place)&&seg?.destinationCountry)return seg.destinationCountry;
+      }
+    }
+    return (savedDestinations||[]).find(d=>_arePoiAliases_(d?.city,sourceUnit))?.country||'';
+  };
+  const addRow=(place,date,row,sourceUnit)=>{
+    const view=ensure(place,placeCountry(place,sourceUnit));
+    if(!view||!date)return;
+    if(!view.dates.has(date))view.dates.set(date,[]);
+    view.dates.get(date).push({...row,workspace_source_unit:sourceUnit});
+    view.source_units.add(sourceUnit);
+  };
+  (savedDestinations||[]).forEach(dest=>{
+    const sourceUnit=dest?.city||'';
+    const route=_routeV2ContextForCity_(sourceUnit)||{};
+    const contexts=new Map((route.day_contexts||[]).map(ctx=>[Number(ctx.day),ctx]));
+    const byDay=itineraries?.[sourceUnit]?.byDay||{};
+    Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNum=>{
+      const date=getDayDateLabel(sourceUnit,dayNum);
+      const ctx=contexts.get(dayNum)||{};
+      const transfers=(ctx.fixed_transfers||[]).filter(t=>t?.origin&&t?.destination).slice().sort((a,b)=>String(a.departure||'99:99').localeCompare(String(b.departure||'99:99')));
+      const finalDay=dayNum===Number(dest?.days||0);
+      const terminal=transfers.find(t=>Boolean(t.terminal_arrival) || (finalDay && !_arePoiAliases_(t.destination,sourceUnit) && !transfers.some(later=>later!==t&&_arePoiAliases_(later.origin,t.destination)&&_arePoiAliases_(later.destination,sourceUnit))));
+      const terminalArrival=_hhmmToMinutes_(terminal?.arrival);
+      (Array.isArray(byDay[dayNum])?byDay[dayNum]:[]).forEach(row=>{
+        const rs=_hhmmToMinutes_(row?.start),re=_hhmmToMinutes_(row?.end);
+        const exactTransfer=transfers.find(t=>String(t.departure||'')===String(row?.start||'')&&String(t.arrival||'')===String(row?.end||'')&&_arePoiAliases_(row?.from,t.origin)&&_arePoiAliases_(row?.to,t.destination));
+        if(exactTransfer){ addRow(exactTransfer.origin,date,row,sourceUnit); return; }
+        if(terminalArrival!=null && rs!=null && rs>=terminalArrival) return;
+        let place=ctx.start_location||sourceUnit;
+        const window=(ctx.location_windows||[]).find(w=>w?.type!=='fixed_transfer'&&w?.location&&rs!=null&&_hhmmToMinutes_(w.start)!=null&&rs>=_hhmmToMinutes_(w.start)&&(w.end==null||re==null||re<=_hhmmToMinutes_(w.end)));
+        if(window) place=window.location;
+        else if(rs!=null){
+          transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=t.destination;});
+        }
+        addRow(place,date,row,sourceUnit);
+      });
+    });
+  });
+  const destinations=[];
+  const workspaceItineraries={};
+  const sourceMap={};
+  [...views.values()].forEach(view=>{
+    const dates=[...view.dates.keys()].sort((a,b)=>{
+      const da=parseDMY(a),db=parseDMY(b);return (da?.getTime?.()||0)-(db?.getTime?.()||0);
+    });
+    if(!dates.length)return;
+    const byDay={};
+    dates.forEach((date,index)=>{byDay[index+1]=view.dates.get(date)||[];});
+    destinations.push({city:view.city,country:view.country||'',days:dates.length,baseDate:dates[0]});
+    workspaceItineraries[view.city]={baseDate:dates[0],currentDay:1,byDay};
+    sourceMap[view.city]=[...view.source_units][0]||view.city;
+  });
+  return {destinations,itineraries:workspaceItineraries,source_map:sourceMap};
+}
+
 function openImmersiveItinerary(){
   const cities=_immersiveAvailableCities_();
   if(!cities.length)return;
@@ -3612,24 +3705,20 @@ function openImmersiveItinerary(){
      We only hand off an immutable presentation snapshot through same-origin
      localStorage. No API call, payment state, generation state or itinerary
      row is changed here. */
+  const workspaceViews=_workspaceSnapshotViews_();
   const snapshot={
-    schema_version:2,
+    schema_version:3,
     created_at:new Date().toISOString(),
     lang:getLang()==='es'?'es':'en',
     trip_language:_plannerTripLanguage_(),
     trip_id:currentTripId || null,
-    destinations:(savedDestinations||[]).map(d=>({
+    destinations:(workspaceViews.destinations||[]).map(d=>({
       city:d?.city||'',country:d?.country||'',countryCode:d?.countryCode||_countryMatch_(d?.country||'')?.code||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
     })).filter(d=>d.city),
+    source_destinations:(savedDestinations||[]).map(d=>({city:d?.city||'',country:d?.country||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null})).filter(d=>d.city),
+    workspace_source_map:workspaceViews.source_map||{},
     city_meta:cityMeta||{},
-    itineraries:Object.fromEntries(cities.map(city=>[
-      city,
-      {
-        baseDate:itineraries?.[city]?.baseDate || cityMeta?.[city]?.baseDate || null,
-        currentDay:itineraries?.[city]?.currentDay || 1,
-        byDay:itineraries?.[city]?.byDay || {}
-      }
-    ]))
+    itineraries:workspaceViews.itineraries||{}
   };
   try{ localStorage.setItem('itbmo_trip_workspace_snapshot_v1',JSON.stringify(snapshot)); }
   catch(err){ console.warn('[ITBMO WORKSPACE SNAPSHOT]',err); }
@@ -3658,7 +3747,8 @@ function openImmersiveItinerary(){
   if(workspaceHandoffId) params.set('handoff',workspaceHandoffId);
   if(snapshot.trip_id) params.set('trip_id',snapshot.trip_id);
   const url=`./trip-workspace.html?${params.toString()}`;
-  const opened=window.open(url,'_blank','noopener,noreferrer');
+  const opened=window.open(url,'_blank');
+  if(opened){ try{ opened.opener=null; }catch(_){} }
   if(!opened){
     // If the browser blocks the new tab, ownership follows the intentional
     // same-tab navigation so the Workspace is not mistaken for an abandoned
@@ -3668,7 +3758,7 @@ function openImmersiveItinerary(){
   }
 }
 function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
-function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch||!modal)return;launch.addEventListener('click',openImmersiveItinerary);qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
+function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch)return;launch.addEventListener('click',openImmersiveItinerary);if(!modal){syncImmersiveItineraryLauncher();return;}qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
   modal.addEventListener('touchstart',e=>{if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const p=e.touches?.[0];if(p){immersiveTouchStartX=p.clientX;immersiveTouchStartY=p.clientY;}},{passive:true});modal.addEventListener('touchend',e=>{if(immersiveTouchStartX==null)return;const p=e.changedTouches?.[0];if(!p)return;const dx=p.clientX-immersiveTouchStartX,dy=p.clientY-immersiveTouchStartY;immersiveTouchStartX=immersiveTouchStartY=null;if(Math.abs(dx)>58&&Math.abs(dx)>Math.abs(dy)*1.25)_immersiveMoveDay_(dx<0?1:-1);},{passive:true});
   document.addEventListener('keydown',e=>{if(!modal.classList.contains('is-open'))return;if(e.key==='Escape'){e.preventDefault();if(immersiveWorkspaceLevel==='city')_immersiveBackToOverview_();else closeImmersiveItinerary();}else if(e.key==='ArrowLeft')_immersiveMoveDay_(-1);else if(e.key==='ArrowRight')_immersiveMoveDay_(1);});syncImmersiveItineraryLauncher();}
 bindImmersiveItineraryViewer();
@@ -6247,6 +6337,25 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
         return sum+(rs!=null&&re!=null?Math.max(0,re-rs):0);
       },0);
+      const chronological=useful.slice().sort((a,b)=>(_hhmmToMinutes_(a.start)??9999)-(_hhmmToMinutes_(b.start)??9999));
+      if(availableMinutes>=240 && chronological.length){
+        const firstStart=_hhmmToMinutes_(chronological[0]?.start);
+        const lastEnd=_hhmmToMinutes_(chronological[chronological.length-1]?.end);
+        const leadingGap=firstStart==null?0:Math.max(0,firstStart-ws);
+        const trailingGap=(we==null||lastEnd==null)?0:Math.max(0,we-lastEnd);
+        let largestInternalGap=0;
+        for(let i=1;i<chronological.length;i++){
+          const prevEnd=_hhmmToMinutes_(chronological[i-1]?.end),nextStart=_hhmmToMinutes_(chronological[i]?.start);
+          if(prevEnd!=null&&nextStart!=null)largestInternalGap=Math.max(largestInternalGap,Math.max(0,nextStart-prevEnd));
+        }
+        if(leadingGap>=150 || trailingGap>=150 || largestInternalGap>=120){
+          errors.push({
+            code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
+            leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,
+            instruction:`Use the substantial available time in ${window.location} coherently. Do not leave multi-hour unexplained gaps; include meals/rest only where they naturally belong and preserve a realistic, non-overloaded pace.`
+          });
+        }
+      }
       if(availableMinutes>=210 && (useful.length<2 || usefulMinutes<Math.min(150,Math.round(availableMinutes*0.45)))){
         errors.push({
           code:'ROUTE_WINDOW_TOO_THIN',day:ctx.day,location:window.location,window_start:window.start,window_end:window.end||'open',available_minutes:availableMinutes,useful_rows:useful.length,useful_minutes:usefulMinutes,
@@ -6651,32 +6760,42 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
     daily_user_windows:perDay,
     lodging_base:lodging.normalized||null,
     transport_preference:transport||null,
-    route_days:(route.day_contexts||[]).map(day=>({
-      day:Number(day.day),
-      date:day.date||null,
-      start_location:day.start_location||city,
-      end_location:day.end_location||day.start_location||city,
-      overnight_base:day.overnight_base||day.end_location||city,
-      terminal_arrival_only:Boolean(day.terminal_arrival_only||day.end_destination_block||day.terminal_transfer),
-      terminal_destination:day.terminal_destination||null,
-      location_windows:(day.location_windows||[]).map(w=>({
-        location:w.location||null,
-        start:w.start||null,
-        end:w.end||null,
-        type:w.type||'plannable',
-        open_end:Boolean(w.open_end),
-        terminal_arrival:Boolean(w.terminal_arrival)
-      })),
-      fixed_transfers:(day.fixed_transfers||[]).map(t=>({
-        origin:t.origin||null,
-        destination:t.destination||null,
-        departure:t.departure||null,
-        arrival:t.arrival||null,
-        source:t.source||'USER_FIXED',
-        mode:t.mode||null,
-        terminal_arrival:Boolean(t.terminal_arrival)
-      }))
-    })),
+    route_days:(route.day_contexts||[]).map(day=>{
+      const dayNum=Number(day.day);
+      const isFinalDay=dayNum===Number(dest?.days||0);
+      const fixedTransfers=(day.fixed_transfers||[]);
+      const inferredTerminalTransfer=isFinalDay
+        ? fixedTransfers.find(t=>t?.destination && !_arePoiAliases_(t.destination,city) && !fixedTransfers.some(later=>later!==t && later?.origin && later?.destination && _arePoiAliases_(later.origin,t.destination) && _arePoiAliases_(later.destination,city)))
+        : null;
+      const terminalDestination=day.terminal_destination||inferredTerminalTransfer?.destination||null;
+      const terminalOnly=Boolean(day.terminal_arrival_only||day.end_destination_block||day.terminal_transfer||inferredTerminalTransfer);
+      return {
+        day:dayNum,
+        date:day.date||null,
+        start_location:day.start_location||city,
+        end_location:terminalOnly?(terminalDestination||day.end_location||day.start_location||city):(day.end_location||day.start_location||city),
+        overnight_base:terminalOnly?city:(day.overnight_base||day.end_location||city),
+        terminal_arrival_only:terminalOnly,
+        terminal_destination:terminalDestination,
+        location_windows:(day.location_windows||[]).map(w=>({
+          location:w.location||null,
+          start:w.start||null,
+          end:w.end||null,
+          type:w.type||'plannable',
+          open_end:Boolean(w.open_end),
+          terminal_arrival:Boolean(w.terminal_arrival||Boolean(inferredTerminalTransfer && w.type==='fixed_transfer' && _arePoiAliases_(w.location,`${inferredTerminalTransfer.origin} → ${inferredTerminalTransfer.destination}`)))
+        })),
+        fixed_transfers:fixedTransfers.map(t=>({
+          origin:t.origin||null,
+          destination:t.destination||null,
+          departure:t.departure||null,
+          arrival:t.arrival||null,
+          source:t.source||'USER_FIXED',
+          mode:t.mode||null,
+          terminal_arrival:Boolean(t.terminal_arrival||t===inferredTerminalTransfer)
+        }))
+      };
+    }),
     place_preferences:placePreferences,
     global_preferences:plannerState?.preferencesV2?.global||null,
     special_conditions:String(plannerState?.preferencesV2?.global?.notes || plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim()||null,
@@ -6771,7 +6890,8 @@ function _v3HardBlockingCodes_(){
     'MISSING_DAY','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE','ROUTE_WINDOW_UNDERUSED',
-    'ROUTE_WINDOW_TOO_THIN','INVENTED_DEPARTURE_LOGISTICS'
+    'ROUTE_WINDOW_TOO_THIN','CATEGORY_DWELL_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
+    'INVENTED_DEPARTURE_LOGISTICS'
   ]);
 }
 
@@ -9273,75 +9393,58 @@ function normalizeCellText(v){
   return s;
 }
 
+function _v3VisibleTransportLabel_(value){
+  const raw=String(value||'').trim();
+  if(!raw)return '';
+  if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
+  return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
+}
+
 function exportItineraryToCSV(){
-  const cities = getOrderedCitiesForExport();
-  if(!cities.length){
-    alert('No hay ciudades guardadas todavía para exportar.');
-    return;
-  }
+  const workspace=_workspaceSnapshotViews_();
+  const exportCities=(workspace?.destinations||[]).map(d=>d.city).filter(Boolean);
+  const exportItineraries=workspace?.itineraries||{};
+  if(!exportCities.length){alert(getLang()==='es'?'No hay itinerarios generados todavía para exportar.':'There are no generated itineraries to export yet.');return;}
 
-  // Validación: al menos una ciudad con byDay
-  const hasAny = cities.some(city=>{
-    const byDay = itineraries?.[city]?.byDay;
-    return byDay && Object.keys(byDay).length;
-  });
-  if(!hasAny){
-    alert('No hay itinerarios generados todavía para exportar.');
-    return;
-  }
-
-  const delim = detectCsvDelimiter();
-  const lines = [];
-
-  // Header localizado según el idioma elegido por el usuario para el itinerario.
-  const csvHeadersByLang = {
-    es:['Ciudad','Día','Fecha','Hora inicio','Hora final','Actividad','Desde','Hacia','Transporte','Duración','Notas'],
-    en:['City','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes'],
-    pt:['Cidade','Dia','Data','Hora início','Hora final','Atividade','De','Para','Transporte','Duração','Notas'],
-    fr:['Ville','Jour','Date','Heure début','Heure fin','Activité','Depuis','Vers','Transport','Durée','Notes'],
-    de:['Stadt','Tag','Datum','Startzeit','Endzeit','Aktivität','Von','Nach','Transport','Dauer','Hinweise'],
-    it:['Città','Giorno','Data','Ora inizio','Ora fine','Attività','Da','A','Trasporto','Durata','Note']
+  const delim=detectCsvDelimiter(),lines=[],outLang=_plannerOutputLang_();
+  const labels={
+    es:{title:'ITBMO · TU ITINERARIO',generated:'Generado',summary:'Resumen del viaje',destination:'DESTINO',day:'DÍA',date:'FECHA',destinations:'destinos',days:'días',headers:['Hora inicio','Hora final','Actividad','Desde','Hacia','Transporte','Duración','Notas']},
+    en:{title:'ITBMO · YOUR ITINERARY',generated:'Generated',summary:'Trip summary',destination:'DESTINATION',day:'DAY',date:'DATE',destinations:'destinations',days:'days',headers:['Start time','End time','Activity','From','To','Transport','Duration','Notes']}
   };
-  const csvHeaders = csvHeadersByLang[_plannerOutputLang_()] || csvHeadersByLang.en;
-  lines.push(csvHeaders.map(x=>csvEscape(x, delim)).join(delim));
+  const l=labels[outLang]||labels.en;
+  const push=row=>lines.push(row.map(x=>csvEscape(normalizeCellText(x),delim)).join(delim));
+  const blank=()=>lines.push('');
+  const totalDates=new Set();
+  (workspace?.destinations||[]).forEach(d=>{
+    const base=parseDMY(String(d?.baseDate||''));
+    for(let i=0;i<Number(d?.days||0);i++){if(base)totalDates.add(formatDMY(addDays(base,i)));}
+  });
+  push([l.title]);
+  push([l.generated,new Intl.DateTimeFormat(outLang==='es'?'es-CR':'en-US',{dateStyle:'long'}).format(new Date())]);
+  push([l.summary,`${exportCities.length} ${l.destinations} · ${totalDates.size} ${l.days}`]);
+  blank();
 
-  cities.forEach(city=>{
-    const days = getOrderedDaysForCity(city);
+  exportCities.forEach((city,cityIndex)=>{
+    const cityData=exportItineraries?.[city]||{},base=parseDMY(String(cityData?.baseDate||''));
+    const days=Object.keys(cityData?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b);
+    push([l.destination,city]);
     days.forEach(dayNum=>{
-      const rows = itineraries?.[city]?.byDay?.[dayNum] || [];
-      const dateLabel = getDayDateLabel(city, dayNum);
-
-      rows.forEach(r=>{
-        const row = [
-          city,
-          dayNum,
-          dateLabel,
-          normalizeCellText(r.start),
-          normalizeCellText(r.end),
-          normalizeCellText(r.activity),
-          normalizeCellText(r.from),
-          normalizeCellText(r.to),
-          normalizeCellText(r.transport),
-          normalizeCellText(r.duration),
-          normalizeCellText(r.notes)
-        ];
-        lines.push(row.map(x=>csvEscape(x, delim)).join(delim));
-      });
-
-      // Si un día no tiene filas, igual lo dejamos sin filas (honesto)
+      const rows=cityData?.byDay?.[dayNum]||[];
+      const dateLabel=base?formatDMY(addDays(base,dayNum-1)):'';
+      push([`${l.day} ${dayNum}`,`${l.date}: ${dateLabel}`]);
+      push(l.headers);
+      rows.forEach(r=>push([r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport),r.duration,r.notes]));
+      blank();
     });
+    if(cityIndex<exportCities.length-1)blank();
   });
 
-  const csv = '\uFEFF' + lines.join('\r\n');
-  const blob = new Blob([csv], { type:'text/csv;charset=utf-8' });
-
-  const d = new Date();
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
-  const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`;
-  trackITBMOEvent('export_csv',{file_type:'csv'});
-  return deliverGeneratedFile(blob, filename);
+  const csv='\uFEFF'+lines.join('\r\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+  const filename=`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`;
+  trackITBMOEvent('export_csv',{file_type:'csv',layout:'premium_sections_v3',physical_destinations:exportCities.length});
+  return deliverGeneratedFile(blob,filename);
 }
 
 async function exportItineraryToPDF(){
