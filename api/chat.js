@@ -2617,7 +2617,7 @@ QUALITY POLICY:
 - Preserve all USER_FIXED movement intervals exactly and keep them activity-free.
 - Before fixed rail/bus/ferry departures allow realistic access plus prudent boarding margin; airports require materially more when an airport movement is explicitly supplied.
 - After arrival, continue planning in the actual arrival location when the contract says the window remains plannable.
-- If a large terminal transfer ends the destination block, end at arrival; do not create tourism, dinner or lodging suggestions in that arrival city unless the contract explicitly makes it a planning location.
+- If route_days[].terminal_arrival_only=true OR fixed_transfers[].terminal_arrival=true, the planning unit ends exactly at that transfer arrival. Output the fixed movement and STOP. Do not create tourism, dinner, lodging, check-in, local transport, airport/station assumptions, or any other row after arrival. The terminal destination becomes plan-worthy only if the user later adds it as a MAIN destination.
 - Optimize geographic flow; avoid backtracking, duplicates and repeated major anchors across days.
 - Respect season, plausible daylight and actual calendar dates. Protect destination-defining special-date moments without inventing year-specific event details.
 - Use the lodging/overnight base as the geographic anchor where applicable.
@@ -2633,6 +2633,8 @@ OUTPUT CONTRACT:
 Return JSON only:
 {"destination":"...","city_day":[{"city":"...","day":1,"rows":[...]}]}
 Every row must contain: day, start, end, from, to, transport, duration, activity, notes.
+For non-transport rows also include commerce_context with: semantic_type (ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE), ticket_need (required, recommended, optional, none, unknown), guided_tour_value (high, medium, low, none), canonical_place.
+For fixed intercity transport rows include commerce_context with semantic_type=TRANSPORT, origin, destination, mode, departure and arrival. Never invent operator, station, airport, availability or booking status.
 Use HH:MM local time. duration must contain two lines: "Transport: ...\nActivity: ...".
 Include every requested planning-unit day from 1 through total_days, even when its physical location differs from planning_unit or when a day contains only a fixed terminal movement. Never omit a day merely because the traveler is in an internal route place.
 Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
