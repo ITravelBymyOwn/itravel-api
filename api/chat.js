@@ -2627,7 +2627,8 @@ QUALITY POLICY:
 - One concrete To and one primary transport choice per row. Put uncertainty/alternatives in Notes.
 - Never use generic destinations such as “nearby restaurant”, “local services” or “similar option”.
 - Keep transport and activity duration mathematically consistent with start/end times.
-- Preserve official proper names and write concise, useful concierge notes.
+- Preserve official proper names and write concise, useful concierge notes. Notes are the traveler-facing intelligence layer: when relevant, state booking/timed-entry needs, what to prioritize, seasonal/daylight or opening-hours caveats, practical access/logistics, and a useful fallback. Avoid generic filler, internal engine terminology, contract/window language and invented certainty.
+- Commerce metadata must be explicit enough for the contextual engine to act without re-interpreting prose. Classify paid/access-controlled attractions separately from free sights and logistics. A TOUR_EXPERIENCE is a genuinely guided/experiential product, not every sightseeing row. For transport, preserve known user mode; when transport is to be recommended, choose a primary practical mode only when supported by route facts, otherwise mark the recommendation need without inventing operator, terminal, schedule, reservation or availability.
 
 OUTPUT CONTRACT:
 Return JSON only:
