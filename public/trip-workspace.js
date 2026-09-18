@@ -72,37 +72,42 @@ function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.
 function cleanDuration(v){return String(v||'').replace(/\s*\|\s*/g,' · ').replace(/\n+/g,' · ').trim()}
 function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim(),route=[r.from,r.to].filter(Boolean).join(' → ');html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${r.transport?`<span class="tw-pill">${esc(r.transport)}</span>`:''}${r.duration?`<span class="tw-pill">${esc(cleanDuration(r.duration))}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${r.transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(r.transport)}</b></div>`:''}${r.duration?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(cleanDuration(r.duration))}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
 function tripRoutes(){
-  const destinations=(Array.isArray(data?.destinations)?data.destinations:[])
-    .map((item,index)=>({
-      index,
-      city:String(item?.city||'').trim(),
-      country:String(item?.country||'').trim(),
-      country_code:String(item?.countryCode||item?.country_code||'').trim().toUpperCase(),
-      baseDate:String(item?.baseDate||item?.base_date||'').trim()
-    }))
-    .filter(item=>item.city);
-  return destinations.slice(0,-1).map((from,index)=>({
-    id:`route:${index}:${from.city}:${destinations[index+1].city}`,
-    category:'transport',
-    need_type:'intercity_transport',
-    day:'',
-    city:from.city,
-    entity_name:`${from.city} → ${destinations[index+1].city}`,
-    source_activity:`${from.city} → ${destinations[index+1].city}`,
-    source_route:`${from.city} → ${destinations[index+1].city}`,
-    origin:from.city,
-    destination:destinations[index+1].city,
-    origin_country:from.country,
-    destination_country:destinations[index+1].country,
-    origin_country_code:from.country_code,
-    destination_country_code:destinations[index+1].country_code,
-    travel_date:destinations[index+1].baseDate||'',
-    user_message:lang==='es'
-      ? 'Este trayecto está identificado y queda pendiente de resolver.'
-      : 'This route is identified and remains pending resolution.',
-    derived_by:'trip_sequence'
-  }));
+  const routes=[];
+  const seen=new Set();
+  const add=route=>{
+    const origin=String(route?.origin||'').trim(),destination=String(route?.destination||'').trim();
+    if(!origin||!destination||normalizeWorkspaceEntity(origin)===normalizeWorkspaceEntity(destination))return;
+    const key=`${normalizeWorkspaceEntity(origin)}>${normalizeWorkspaceEntity(destination)}|${route.travel_date||''}`;
+    if(seen.has(key))return;seen.add(key);
+    routes.push({
+      id:route.id||`route:${routes.length+1}:${origin}:${destination}`,
+      category:'transport',need_type:'intercity_transport',day:route.day||'',city:origin,
+      entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,source_route:`${origin} → ${destination}`,
+      origin,destination,travel_date:route.travel_date||'',transport:String(route.transport||'').trim(),
+      user_message:lang==='es'?'Este trayecto forma parte de tu recorrido. Compara la opción que mejor encaje con tus horarios y preferencias.':'This journey is part of your route. Compare the option that best fits your timing and preferences.',
+      derived_by:route.derived_by||'generated_route'
+    });
+  };
+  Object.entries(data?.itineraries||{}).forEach(([viewCity,cityData])=>{
+    const baseDate=parseDate(cityData?.baseDate||'');
+    Object.keys(cityData?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
+      const date=baseDate?fmt(addDays(baseDate,dayNumber-1)):'';
+      (Array.isArray(cityData?.byDay?.[dayNumber])?cityData.byDay[dayNumber]:[]).forEach((row,index)=>{
+        const activity=String(row?.activity||'');
+        const semantic=String(row?.commerce_context?.semantic_type||'').toUpperCase();
+        const looksTransfer=semantic==='TRANSPORT'||/^(traslado|transfer)\b/i.test(activity);
+        if(!looksTransfer)return;
+        add({id:`route:${viewCity}:${dayNumber}:${index+1}`,origin:row?.from,destination:row?.to,day:dayNumber,travel_date:date,transport:row?.transport,derived_by:'generated_itinerary'});
+      });
+    });
+  });
+  // Preserve main-destination transitions that may not have an explicit row
+  // because they occur between planning units.
+  const sourceDestinations=Array.isArray(data?.source_destinations)?data.source_destinations:[];
+  sourceDestinations.slice(0,-1).forEach((from,index)=>add({origin:from?.city,destination:sourceDestinations[index+1]?.city,travel_date:sourceDestinations[index+1]?.baseDate||'',derived_by:'trip_sequence'}));
+  return routes;
 }
+
 function normalizeWorkspaceEntity(value){
   return String(value||'')
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
@@ -242,10 +247,26 @@ function contextualNeedsForCity(cityName,needs){
     if(item?.need_type!=='intercity_transport' && item?.need_type!=='transport_arrangement') return true;
     return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
-  // Context Intelligence is the single source of truth for tour opportunities.
-  // Do not synthesize one tour card per itinerary row here: that recreates the
-  // fragmentation that the server-side clustering intentionally removes.
-  return [...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
+  const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
+  if(!merged.some(item=>item?.need_type==='guided_tour_optional')){
+    const eligible=[];
+    const byDay=data?.itineraries?.[cityName]?.byDay||{};
+    Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
+      (Array.isArray(byDay[dayNumber])?byDay[dayNumber]:[]).forEach(row=>{
+        if(isTourAlternativeEligible(row)) eligible.push({day:dayNumber,row});
+      });
+    });
+    if(eligible.length>=2){
+      const sample=eligible.slice(0,4);
+      merged.push({
+        id:`workspace-tour-cluster:${normalizeWorkspaceEntity(cityName)}`,
+        category:'tours',city:cityName,day:sample[0]?.day||'',entity_name:lang==='es'?`Tour de ${cityName}`:`${cityName} tour`,entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',
+        user_message:lang==='es'?`Una experiencia guiada puede reunir varios de los lugares que ya tienes previstos en ${cityName}, sin fragmentar tu itinerario.`:`A guided experience can combine several places already planned in ${cityName} without fragmenting your itinerary.`,
+        source_activity:sample.map(x=>String(x.row?.activity||'').trim()).filter(Boolean).join(' · '),source_route:'',derived_by:'workspace_experience_cluster'
+      });
+    }
+  }
+  return merged;
 }
 
 function contextLabel(item){
@@ -339,6 +360,12 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
 async function fetchContext(cityName){
   const token=getStoredSessionToken();
   if(!token || !data?.trip_id) throw new Error('CONTEXT_SESSION_REQUIRED');
+  const sourceCity=String(data?.workspace_source_map?.[cityName]||cityName).trim();
+  // Subdestination views are derived from the authoritative generated route.
+  // Until the server Context Intelligence accepts physical-stay slices directly,
+  // keep the view functional with deterministic local route/experience context
+  // rather than asking the server to classify the wrong parent-city itinerary.
+  if(sourceCity && normalizeWorkspaceEntity(sourceCity)!==normalizeWorkspaceEntity(cityName)) return [];
 
   const response=await fetch('/api/context',{
     method:'POST',
