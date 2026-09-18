@@ -3875,7 +3875,7 @@ Edits:
 
     if(!res.ok){
       const raw = await res.text().catch(()=> '');
-      console.error('API error (planner):', res.status, res.statusText, raw);
+      console.error(`API error (${mode}):`, res.status, res.statusText, raw);
       return `{"followup":"${tone.fail}"}`;
     }
 
@@ -4944,8 +4944,8 @@ function setOverlayMessage(msg=t('overlayDefault')){
   const isEs = getLang() === 'es';
   p.classList.add('astra-overlay-copy');
   p.innerHTML = isEs
-    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">Nuevo motor V3 · generación concurrente y optimizada</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
-    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">New V3 engine · concurrent, optimized generation</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
+    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">Normalmente toma unos minutos · puede variar según la duración y complejidad del viaje</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">Usually takes a few minutes · timing may vary with trip length and complexity</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
 }
 
 function showWOW(on, msg){
@@ -5223,11 +5223,13 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='pl
       { role:'user', content: String(anchor || '') }
     ];
 
+    if(mode === 'planner_v3') console.log('[ITBMO V3] API mode: planner_v3');
+
     const res = await fetch(API_URL,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      body: JSON.stringify({ model: MODEL, messages, mode: 'planner' })
+      body: JSON.stringify({ model: MODEL, messages, mode })
     });
 
     if(!res.ok){
@@ -7242,7 +7244,14 @@ function _showGenerationRetry_(reason=''){
   button?.addEventListener('click',()=>{
     button.disabled=true;
     overlay.remove();
-    runPaidGeneration({manualRetry:true});
+    // Immediate UX acknowledgement: generation_begin/checkpoint recovery can take
+    // several seconds, so never leave the user looking at an apparently idle UI.
+    showWOW(true,es
+      ? 'Preparando tu itinerario… Estamos recuperando tu viaje y preparando la generación.'
+      : 'Preparing your itinerary… We are recovering your trip and preparing generation.');
+    requestAnimationFrame(()=>{
+      runPaidGeneration({manualRetry:true});
+    });
   });
   if(reason) console.warn('[GENERATION RECOVERY]',reason);
 }
