@@ -9054,3 +9054,27 @@ body{
 /* V2.4.12 route editor: full-route overview + in-modal segment deletion */
 .route-v2-edit-overview{display:grid;gap:8px;padding:12px;border:1px solid rgba(34,53,99,.10);border-radius:16px;background:#f8f9fd;margin:0 0 12px}.route-v2-edit-overview-head{display:grid;gap:3px;padding:1px 2px 5px}.route-v2-edit-overview-head strong{font-size:.82rem;color:#233052}.route-v2-edit-overview-head small{font-size:.71rem;color:#6d7893;line-height:1.4}.route-v2-edit-segment{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 11px;border-radius:13px;background:#fff;border:1px solid rgba(34,53,99,.09)}.route-v2-edit-segment.is-current{box-shadow:0 0 0 2px rgba(81,71,232,.10);border-color:rgba(81,71,232,.24)}.route-v2-edit-segment>div{display:grid;gap:3px}.route-v2-edit-segment strong{font-size:.77rem;color:#233052}.route-v2-edit-segment small{font-size:.69rem;color:#73809a}.route-v2-edit-segment button{border:0;background:#fff1f1;color:#a33b3b;border-radius:9px;padding:7px 9px;font-size:.69rem;font-weight:800;cursor:pointer}.route-v2-edit-empty{font-size:.74rem;color:#73809a;padding:8px 3px}
 @media(max-width:720px){.route-v2-edit-segment{align-items:flex-start}.route-v2-edit-segment button{flex:0 0 auto}}
+
+
+/* ITBMO V2.4.13 · Global route controls */
+.hours-quick-add-stop{
+  position:sticky !important;
+  bottom:18px !important;
+  z-index:42 !important;
+  margin-left:auto !important;
+  box-shadow:0 12px 32px rgba(25,70,95,.16) !important;
+  backdrop-filter:blur(12px);
+  -webkit-backdrop-filter:blur(12px);
+}
+.route-v2-edit-segment button[data-edit-route-remove]{
+  border:1px solid rgba(180,55,70,.16);
+  background:#fff;
+  color:#a63d4d;
+  border-radius:10px;
+  padding:7px 10px;
+  font-weight:800;
+  cursor:pointer;
+}
+@media(max-width:720px){
+  .hours-quick-add-stop{bottom:12px !important;max-width:calc(100vw - 34px);}
+}
