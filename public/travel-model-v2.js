@@ -572,10 +572,17 @@
         const owner=segments.find(seg=>seg.returnDepartureDate===ctx.date&&seg.returnArrivalTime===t.arrival&&norm(destination.city).toLowerCase()===norm(t.destination).toLowerCase());
         if(owner?.resumeTime && cursor && owner.resumeTime>cursor) cursor=owner.resumeTime;
       });
+      const dayStart=destination.perDay?.[ctx.day-1]?.start||null;
       const dayEnd=destination.perDay?.[ctx.day-1]?.end||null;
       if(transfers.length && cursor && !terminalReached){
         if(dayEnd && cursor<dayEnd) ctx.location_windows.push({location,start:cursor,end:dayEnd});
         else if(!dayEnd) ctx.location_windows.push({location,start:cursor,end:null,open_end:true,minimum_useful_target:'19:00'});
+      }else if(!transfers.length && dayStart){
+        // Every ordinary day also receives an explicit physical planning window.
+        // V3 Quality Gate can therefore detect half-empty days and large unexplained
+        // gaps instead of auditing route-transfer days only.
+        if(dayEnd && dayStart<dayEnd) ctx.location_windows.push({location:ctx.start_location||destination.city,start:dayStart,end:dayEnd,type:'plannable'});
+        else if(!dayEnd) ctx.location_windows.push({location:ctx.start_location||destination.city,start:dayStart,end:null,open_end:true,minimum_useful_target:'19:00',type:'plannable'});
       }
       ctx.end_location=ctx.overnight_base||location;
     });
