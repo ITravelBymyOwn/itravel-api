@@ -6000,12 +6000,19 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
       }
 
       if(i>0 && priorTo && r.from && !_arePoiAliases_(priorTo,r.from)){
-        errors.push({
-          code:'CONTINUITY',
-          day,row,
-          previous_to:priorTo,
-          current_from:r.from
-        });
+        const previousRow=dayRows[i-1]||{};
+        // A pure intercity transfer is a boundary between POI-level continuity
+        // and city-level route identity. Requiring the previous landmark to equal
+        // the city name (or the next city name to equal the next landmark) creates
+        // false CONTINUITY failures even when the physical route is valid.
+        if(!_isPureTransportRow_(previousRow) && !_isPureTransportRow_(r)){
+          errors.push({
+            code:'CONTINUITY',
+            day,row,
+            previous_to:priorTo,
+            current_from:r.from
+          });
+        }
       }
       priorTo=r.to;
 
@@ -6636,7 +6643,7 @@ function _minutesToHuman_(minutes){
 
 function _v3TransportLabel_(mode){
   const es=getLang()==='es';
-  const labels={train:es?'Tren':'Train',plane:es?'Avión':'Plane',bus:'Bus',car:es?'Automóvil':'Car',ferry:'Ferry',transfer:'Transfer',other:es?'Otro':'Other'};
+  const labels={recommend:es?'Recomiéndame':'Recommend',train:es?'Tren':'Train',plane:es?'Avión':'Plane',bus:'Bus',car:es?'Automóvil':'Car',ferry:'Ferry',transfer:'Transfer',other:es?'Otro':'Other'};
   return labels[String(mode||'').toLowerCase()] || (es?'Por definir':'To be defined');
 }
 
@@ -6650,18 +6657,30 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       const dep=_hhmmToMinutes_(t.departure),arr=_hhmmToMinutes_(t.arrival);
       if(dep==null||arr==null)return;
       const duration=Math.max(0,arr-dep);
-      const idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
-      if(idx>=0){
-        out[idx]={...out[idx],
-          activity:es?`Traslado fijo ${t.origin} → ${t.destination}`:`Fixed transfer ${t.origin} → ${t.destination}`,
-          from:t.origin,to:t.destination,
-          transport:_v3TransportLabel_(t.mode),
-          duration:_minutesToHuman_(duration),
-          notes:es?`Llegada prevista a ${t.destination} a las ${t.arrival}. El itinerario continúa desde allí cuando exista tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. The itinerary continues from there when time remains available.`,
-          kind:'transport',
-          commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival}
-        };
-      }
+      // USER_FIXED movements are deterministic facts. Never spend a model repair
+      // call trying to recreate them, and never allow generated sightseeing to
+      // occupy their interval.
+      out=out.filter(r=>{
+        if(Number(r.day)!==dayNum) return true;
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
+        if(rs==null||re==null) return true;
+        const exact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
+        const overlaps=Math.max(rs,dep)<Math.min(re,arr);
+        return exact || !overlaps;
+      });
+      let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
+      const fixedRow={
+        day:dayNum,start:t.departure,end:t.arrival,
+        activity:es?`Traslado de ${t.origin} a ${t.destination}`:`Transfer from ${t.origin} to ${t.destination}`,
+        from:t.origin,to:t.destination,
+        transport:_v3TransportLabel_(t.mode),
+        duration:`${_durationLabels_()[0]}: ${_minutesToHuman_(duration)}`,
+        notes:es?`Llegada prevista a ${t.destination} a las ${t.arrival}. El itinerario continúa desde allí cuando exista tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. The itinerary continues from there when time remains available.`,
+        kind:'transport',
+        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,source:t.source||'USER_FIXED'}
+      };
+      if(idx>=0) out[idx]={...out[idx],...fixedRow};
+      else out.push(fixedRow);
       if(t.terminal_arrival||day.terminal_arrival_only){
         out=out.filter(r=>Number(r.day)!==dayNum || _hhmmToMinutes_(r.start)==null || _hhmmToMinutes_(r.start)<arr || (_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr));
       }
@@ -6675,6 +6694,12 @@ function _v3SyntheticMaster_(totalDays){
     day:i+1,
     theme:`Unique high-value day ${i+1} | Anchors: distinct geographically coherent experiences`
   }));
+}
+
+function _v3AuditSummary_(report={}){
+  const counts={};
+  (report?.errors||[]).forEach(e=>{ const code=String(e?.code||'UNKNOWN'); counts[code]=(counts[code]||0)+1; });
+  return Object.fromEntries(Object.entries(counts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])));
 }
 
 function _v3MaterialAuditErrors_(report){
@@ -6863,12 +6888,25 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     let report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
     const materialBefore=_v3MaterialAuditErrors_(report);
     if(materialBefore.length){
-      console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} material issue(s); scoped repair only`,materialBefore);
+      console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} material issue(s); scoped repair only`,_v3AuditSummary_(report),materialBefore);
       const repaired=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
       rows=_v3EnforceHardRouteFacts_(repaired.rows,generated.contract);
       report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+
+      // One bounded precision pass is allowed only when material issues remain.
+      // It is still scoped to affected days and keeps V3 far below the legacy
+      // full-trip repair loop while giving the model one chance to satisfy the
+      // deterministic validator after seeing the reduced error set.
+      const materialAfterFirst=_v3MaterialAuditErrors_(report);
+      if(materialAfterFirst.length){
+        console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialAfterFirst.length} issue(s) remain after repair; precision scoped repair`,_v3AuditSummary_(report),materialAfterFirst);
+        const precision=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
+        rows=_v3EnforceHardRouteFacts_(precision.rows,generated.contract);
+        report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+      }
     }
 
+    console.info(`[ITBMO V3 AUDIT FINAL] ${city}`,_v3AuditSummary_(report),report?.errors||[]);
     const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','OVERLAP','CONTINUITY','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE']);
     if((report?.errors||[]).some(e=>blocking.has(String(e?.code||'')))){
       throw new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
