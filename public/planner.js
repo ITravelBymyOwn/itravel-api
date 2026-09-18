@@ -97,6 +97,7 @@ const ITBMO_SURFACE_PRESENCE_TTL_MS = 10000;
 const ITBMO_PLANNER_HEARTBEAT_MS = 2000;
 const ITBMO_WORKSPACE_GUEST_HANDOFF_KEY = 'itbmo_workspace_guest_handoff_v1';
 const ITBMO_WORKSPACE_OPEN_HANDOFF_KEY = 'itbmo_workspace_open_handoff_v1';
+const ITBMO_PLANNER_OPEN_HANDOFF_KEY = 'itbmo_planner_open_handoff_v1';
 const ITBMO_TERMS_VERSION = '1.0';
 const ITBMO_PRIVACY_VERSION = '1.0';
 const ITBMO_MARKETING_VERSION = '1.0';
@@ -705,7 +706,16 @@ function initializePlannerSessionLifecycle(){
   /* A new surface with no other live ITBMO surface means the previous browser
      session ended when its last window closed. A reload keeps sessionStorage,
      so it never trips this rule. */
-  if(!established && !hasLiveITBMOSurface()){
+  let openedFromLiveWorkspace=false;
+  try{
+    const raw=localStorage.getItem(ITBMO_PLANNER_OPEN_HANDOFF_KEY);
+    if(raw){
+      localStorage.removeItem(ITBMO_PLANNER_OPEN_HANDOFF_KEY);
+      const handoff=JSON.parse(raw);
+      openedFromLiveWorkspace=Number(handoff?.expires_at||0)>Date.now();
+    }
+  }catch(_){}
+  if(!established && !openedFromLiveWorkspace && !hasLiveITBMOSurface()){
     const hadRegisteredSession=(()=>{try{return Boolean(localStorage.getItem(ITBMO_SESSION_KEY));}catch(_){return false;}})();
     if(hadRegisteredSession) clearSessionToken({broadcast:true});
   }
@@ -3566,7 +3576,11 @@ function _immersiveViewerCopy_(){
   };
 }
 function _immersiveAvailableCities_(){
-  const ordered=(savedDestinations||[]).map(x=>x.city).filter(Boolean); const extras=Object.keys(itineraries||{}).filter(c=>!ordered.includes(c));
+  const workspace=_workspaceSnapshotViews_();
+  const physical=(workspace?.destinations||[]).map(x=>x?.city).filter(Boolean);
+  if(physical.length) return physical;
+  const ordered=(savedDestinations||[]).map(x=>x.city).filter(Boolean);
+  const extras=Object.keys(itineraries||{}).filter(c=>!ordered.includes(c));
   return [...ordered,...extras].filter(city=>Object.values(itineraries?.[city]?.byDay||{}).some(rows=>Array.isArray(rows)&&rows.length));
 }
 function _immersiveDaysForCity_(city){ return Object.keys(itineraries?.[city]?.byDay||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b); }
@@ -3698,14 +3712,14 @@ function _workspaceSnapshotViews_(){
 }
 
 function openImmersiveItinerary(){
-  const cities=_immersiveAvailableCities_();
+  const workspaceViews=_workspaceSnapshotViews_();
+  const cities=(workspaceViews?.destinations||[]).map(d=>d?.city).filter(Boolean);
   if(!cities.length)return;
 
   /* Phase 3: the Trip Workspace is a true standalone Vercel page.
      We only hand off an immutable presentation snapshot through same-origin
      localStorage. No API call, payment state, generation state or itinerary
      row is changed here. */
-  const workspaceViews=_workspaceSnapshotViews_();
   const snapshot={
     schema_version:3,
     created_at:new Date().toISOString(),
@@ -3758,7 +3772,7 @@ function openImmersiveItinerary(){
   }
 }
 function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
-function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch)return;launch.addEventListener('click',openImmersiveItinerary);if(!modal){syncImmersiveItineraryLauncher();return;}qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
+function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch)return;launch.disabled=false;launch.removeAttribute('aria-disabled');launch.onclick=(event)=>{event.preventDefault();openImmersiveItinerary();};if(!modal){syncImmersiveItineraryLauncher();return;}qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
   modal.addEventListener('touchstart',e=>{if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const p=e.touches?.[0];if(p){immersiveTouchStartX=p.clientX;immersiveTouchStartY=p.clientY;}},{passive:true});modal.addEventListener('touchend',e=>{if(immersiveTouchStartX==null)return;const p=e.changedTouches?.[0];if(!p)return;const dx=p.clientX-immersiveTouchStartX,dy=p.clientY-immersiveTouchStartY;immersiveTouchStartX=immersiveTouchStartY=null;if(Math.abs(dx)>58&&Math.abs(dx)>Math.abs(dy)*1.25)_immersiveMoveDay_(dx<0?1:-1);},{passive:true});
   document.addEventListener('keydown',e=>{if(!modal.classList.contains('is-open'))return;if(e.key==='Escape'){e.preventDefault();if(immersiveWorkspaceLevel==='city')_immersiveBackToOverview_();else closeImmersiveItinerary();}else if(e.key==='ArrowLeft')_immersiveMoveDay_(-1);else if(e.key==='ArrowRight')_immersiveMoveDay_(1);});syncImmersiveItineraryLauncher();}
 bindImmersiveItineraryViewer();
@@ -8052,8 +8066,17 @@ function _journeyEsc_(value){
   }[ch]));
 }
 function _journeyDestinations_(trip){
-  return (Array.isArray(trip?.destinations)?trip.destinations:[])
+  const mains=(Array.isArray(trip?.destinations)?trip.destinations:[])
     .map(d=>String(d?.city||'').trim()).filter(Boolean);
+  const checkpoint=(trip?.itinerary_data&&typeof trip.itinerary_data==='object')?trip.itinerary_data:{};
+  const model=checkpoint?.planner_state?.travelModelV2 || trip?.planner_input?.travel_model_v2 || trip?.planner_input?.travelModelV2 || null;
+  const ordered=[]; const add=value=>{const city=String(value||'').trim();if(city&&!ordered.some(x=>_arePoiAliases_(x,city)))ordered.push(city);};
+  (Array.isArray(model?.destinations)?model.destinations:[]).forEach((dest,index)=>{
+    add(dest?.city||mains[index]);
+    (Array.isArray(dest?.route?.segments)?dest.route.segments:[]).forEach(seg=>add(seg?.destination));
+  });
+  mains.forEach(add);
+  return ordered.length?ordered:mains;
 }
 function _journeyDateLabel_(trip){
   const ds=Array.isArray(trip?.destinations)?trip.destinations:[];
