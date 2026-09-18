@@ -2601,6 +2601,14 @@ ${languageLine}
 
 The client supplies a deterministic GENERATION CONTRACT. Treat dates, location windows, fixed movements, overnight bases, user-fixed times, preferences and restrictions in that contract as hard facts. Do not reinterpret them and never invent transport bookings, airports, flight/train details, reservation status or live conditions.
 
+IDENTITY MODEL (GLOBAL, DATA-DRIVEN):
+- planning_unit is the MAIN destination block selected by the user; it is NOT a requirement that every day physically occurs in that city.
+- route_days[].day is the authoritative day identity within the planning unit.
+- route_days[].location_windows, start_location, end_location and overnight_base define where the traveler physically is.
+- Internal route places are discovered from the contract; never rely on predefined city lists or special cases.
+- A Madrid planning unit can therefore contain a day physically in Segovia or Toledo; a Paris planning unit can contain a day physically in Bruges. Those days still belong to their original planning unit and MUST be returned with their original day number.
+- city_day[].city may represent the actual physical location for that block/day and does not need to equal planning_unit.
+
 Your job is tourism intelligence only: select excellent experiences, sequence them geographically, use available time well, respect realistic dwell/meal/rest needs, and create a distinctive, practical itinerary.
 
 QUALITY POLICY:
@@ -2626,7 +2634,7 @@ Return JSON only:
 {"destination":"...","city_day":[{"city":"...","day":1,"rows":[...]}]}
 Every row must contain: day, start, end, from, to, transport, duration, activity, notes.
 Use HH:MM local time. duration must contain two lines: "Transport: ...\nActivity: ...".
-Include every requested day, even if a day contains only a fixed terminal movement.
+Include every requested planning-unit day from 1 through total_days, even when its physical location differs from planning_unit or when a day contains only a fixed terminal movement. Never omit a day merely because the traveler is in an internal route place.
 Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
 `.trim();
 
