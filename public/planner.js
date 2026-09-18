@@ -6705,17 +6705,47 @@ function _v3AuditSummary_(report={}){
   return Object.fromEntries(Object.entries(counts).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0])));
 }
 
-function _v3MaterialAuditErrors_(report){
-  const material=new Set([
-    'MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER',
-    'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','WRONG_OVERNIGHT_BASE',
-    'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','GLOBAL_DUPLICATE_POI',
-    'OVERLAP','CONTINUITY','GENERIC_TO','AMBIGUOUS_TO','AMBIGUOUS_TRANSPORT',
+function _v3HardBlockingCodes_(){
+  return new Set([
+    'MISSING_DAY','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
+    'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
+    'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE','ROUTE_WINDOW_UNDERUSED',
+    'ROUTE_WINDOW_TOO_THIN','INVENTED_DEPARTURE_LOGISTICS'
+  ]);
+}
+
+function _v3RepairableCodes_(){
+  return new Set([
+    ..._v3HardBlockingCodes_(),
+    'GLOBAL_DUPLICATE_POI','GENERIC_TO','AMBIGUOUS_TO','AMBIGUOUS_TRANSPORT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','REGIONAL_DAY_TOO_THIN',
     'END_BEFORE_MINIMUM_TARGET','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
-    'MISSING_AURORA_FINAL_NOTE','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE'
+    'MISSING_AURORA_FINAL_NOTE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
+    'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE'
   ]);
-  return (report?.errors||[]).filter(e=>material.has(String(e?.code||'')));
+}
+
+function _v3MaterialAuditErrors_(report){
+  const repairable=_v3RepairableCodes_();
+  return (report?.errors||[]).filter(e=>repairable.has(String(e?.code||'')));
+}
+
+function _v3BlockingAuditErrors_(report){
+  const blocking=_v3HardBlockingCodes_();
+  return (report?.errors||[]).filter(e=>blocking.has(String(e?.code||'')));
+}
+
+function _v3IssueFingerprint_(report={}){
+  return JSON.stringify((report?.errors||[]).map(e=>({code:e?.code,day:e?.day,row:e?.row,days:e?.days,to:e?.to,transport:e?.transport})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
+}
+
+function _v3AdaptiveRepairBudget_(contract={},totalDays=1){
+  const transfers=(contract?.route_days||[]).reduce((n,d)=>n+(d?.fixed_transfers||[]).length,0);
+  const windows=(contract?.route_days||[]).reduce((n,d)=>n+(d?.location_windows||[]).length,0);
+  const complexity=Math.max(1,Number(totalDays)||1)+transfers+Math.max(0,windows-(Number(totalDays)||1));
+  // Repairs remain surgical. Complex trips get more opportunities to converge,
+  // but never an unbounded loop or whole-trip regeneration.
+  return Math.max(2,Math.min(5,2+Math.floor(complexity/8)));
 }
 
 function _v3ConcretePlace_(row={}){
@@ -6744,6 +6774,18 @@ function _v3FitDurationToInterval_(row={}){
     : `${activityLabel}: ${_minutesToHuman_(span)}`};
 }
 
+function _v3NormalizeTransportRecommendation_(row={}){
+  if(_isPureTransportRow_(row)) return row;
+  const raw=String(row?.transport||'').trim();
+  const ambiguous=/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif preferred\b|\bsi prefieres\b/i;
+  if(!raw || !ambiguous.test(raw)) return row;
+  const es=getLang()==='es';
+  return {...row,
+    transport:es?'Recomiéndame':'Recommend',
+    commerce_context:{...(row.commerce_context||{}),transport_recommendation_needed:true}
+  };
+}
+
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate){
   let out=_v3EnforceHardRouteFacts_(rows,contract);
   const master=_v3SyntheticMaster_(totalDays);
@@ -6769,6 +6811,9 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       }else if(error.code==='AMBIGUOUS_TO'){
         const concrete=_v3ConcretePlace_(row);
         if(concrete && concrete!==row.to){ row.to=concrete; changed=true; }
+      }else if(error.code==='AMBIGUOUS_TRANSPORT'){
+        const normalizedTransport=_v3NormalizeTransportRecommendation_(row);
+        if(normalizedTransport.transport!==row.transport){ Object.assign(row,normalizedTransport); changed=true; }
       }
     }
 
@@ -6861,6 +6906,7 @@ GENERATION CONTRACT — authoritative JSON:
 ${JSON.stringify(contract)}
 
 Generate the complete planning unit in one pass.
+TRANSPORT DECISION RULE: A transport mode explicitly selected by the user is authoritative for the fixed movement and must be preserved in the itinerary. If it appears impractical for the route, do not silently replace it or invent booking details: preserve the user choice and add a concise traveler-facing note recommending the most plausible alternatives and why they may be more practical. When transport is RECOMMEND/recommend or a local movement is genuinely undecided, choose one concrete practical recommendation when the available facts support it; otherwise use a clean recommendation-needed state, never a slash-separated list such as “train/bus”.
 IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the physical city for every day. A day remains part of this planning unit even when its physical location is another city/place from route_days. Use route_days[].day as the authoritative day identity. city_day[].city may name that day's actual physical location; it does NOT need to equal planning_unit. Include every planning-unit day 1..total_days exactly once or in multiple blocks sharing that same day when the day has multiple physical windows. Internally choose distinct day identities and anchors before writing rows, but output only the final itinerary JSON. Use every physically available window correctly. Do not ask questions.
 `.trim();
   const raw=await _v3Call_(prompt);
@@ -6990,30 +7036,41 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     let normalized=_v3DeterministicQualityCleanup_(city,rows,generated.contract,dest.days,perDay,baseDate);
     rows=normalized.rows;
     let report=normalized.report;
-    const materialBefore=_v3MaterialAuditErrors_(report);
-    if(materialBefore.length){
-      console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialBefore.length} semantic/material issue(s) after deterministic cleanup; scoped repair`,_v3AuditSummary_(report),materialBefore);
+    let material=_v3MaterialAuditErrors_(report);
+    const repairBudget=_v3AdaptiveRepairBudget_(generated.contract,dest.days);
+    let repairAttempt=0;
+    let previousFingerprint='';
+    while(material.length && repairAttempt<repairBudget){
+      const fingerprint=_v3IssueFingerprint_(report);
+      if(fingerprint===previousFingerprint){
+        console.warn(`[ITBMO V3 REPAIR] ${city}: no convergence; stopping model repairs`,_v3AuditSummary_(report));
+        break;
+      }
+      previousFingerprint=fingerprint;
+      repairAttempt+=1;
+      console.warn(`[ITBMO V3 AUDIT] ${city}: ${material.length} repairable issue(s); adaptive surgical repair ${repairAttempt}/${repairBudget}`,_v3AuditSummary_(report),material);
       const repaired=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
       normalized=_v3DeterministicQualityCleanup_(city,repaired.rows,generated.contract,dest.days,perDay,baseDate);
-      rows=normalized.rows;
-      report=normalized.report;
-
-      // One precision pass only if material defects genuinely survive deterministic
-      // normalization. Never restart the whole planning unit inside this function.
-      const materialAfterFirst=_v3MaterialAuditErrors_(report);
-      if(materialAfterFirst.length){
-        console.warn(`[ITBMO V3 AUDIT] ${city}: ${materialAfterFirst.length} issue(s) remain; final scoped precision repair`,_v3AuditSummary_(report),materialAfterFirst);
-        const precision=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
-        normalized=_v3DeterministicQualityCleanup_(city,precision.rows,generated.contract,dest.days,perDay,baseDate);
-        rows=normalized.rows;
-        report=normalized.report;
-      }
+      const nextRows=normalized.rows;
+      const nextReport=normalized.report;
+      const nextMaterial=_v3MaterialAuditErrors_(nextReport);
+      const beforeScore=_auditScore_(report), afterScore=_auditScore_(nextReport);
+      rows=nextRows; report=nextReport; material=nextMaterial;
+      console.info(`[ITBMO V3 REPAIR] ${city}: pass ${repairAttempt}/${repairBudget}`,{beforeScore,afterScore,remaining:_v3AuditSummary_(report)});
+      // If the model could not improve the scoped fragment, do not burn more tokens
+      // repeating the same request. Deterministic cleanup and final classification
+      // decide whether the remaining items are hard blockers or quality warnings.
+      if(!repaired.repaired || afterScore>=beforeScore) break;
     }
 
     console.info(`[ITBMO V3 AUDIT FINAL] ${city}`,_v3AuditSummary_(report),report?.errors||[]);
-    const blocking=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','OVERLAP','CONTINUITY','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','GLOBAL_DUPLICATE_POI','AMBIGUOUS_TO','GENERIC_TO','INVENTED_DEPARTURE_LOGISTICS']);
-    if((report?.errors||[]).some(e=>blocking.has(String(e?.code||'')))){
-      throw new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
+    const blockingErrors=_v3BlockingAuditErrors_(report);
+    const qualityWarnings=(report?.errors||[]).filter(e=>!_v3HardBlockingCodes_().has(String(e?.code||'')));
+    if(qualityWarnings.length) console.warn(`[ITBMO V3 QUALITY WARNINGS] ${city}: publishing physically valid itinerary with non-blocking quality warnings`,_v3AuditSummary_({errors:qualityWarnings}),qualityWarnings);
+    if(blockingErrors.length){
+      const error=new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
+      error.v3BlockingErrors=blockingErrors;
+      throw error;
     }
 
     if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null,masterPlan:[],audit:null};
