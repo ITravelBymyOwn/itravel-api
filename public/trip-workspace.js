@@ -14,6 +14,7 @@ const SURFACE_PRESENCE_TTL_MS=10000;
 const SURFACE_HEARTBEAT_MS=2000;
 const GUEST_HANDOFF_KEY='itbmo_workspace_guest_handoff_v1';
 const WORKSPACE_OPEN_HANDOFF_KEY='itbmo_workspace_open_handoff_v1';
+const PLANNER_OPEN_HANDOFF_KEY='itbmo_planner_open_handoff_v1';
 const $=(s,r=document)=>r.querySelector(s);
 const esc=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;');
 let data=null,city=null,day=null,mode='itinerary';
@@ -248,6 +249,12 @@ function contextualNeedsForCity(cityName,needs){
     return !routeKeys.has(normalizeRoute(item?.source_route||item?.entity_name));
   });
   const merged=[...withoutDuplicateTopLevelRoutes,...derivedRoutes,...(rentalPlan?[rentalPlan]:[])];
+  // Tours/experiences are a first-class contextual layer. Server intelligence
+  // can enrich them, but the section must never depend on a server classifier
+  // returning a tour category: derive defensible alternatives from the actual
+  // itinerary and deduplicate against server needs.
+  const derivedTours=tourAlternativesForCity(cityName,merged);
+  if(derivedTours.length) merged.push(...derivedTours);
   if(!merged.some(item=>item?.need_type==='guided_tour_optional')){
     const eligible=[];
     const byDay=data?.itineraries?.[cityName]?.byDay||{};
@@ -730,7 +737,10 @@ async function revalidateWorkspaceAccess({showErrors=false}={}){
   if(!tripId){showWorkspaceAuthGate();return false}
   const result=await fetchTripWorkspaceResult(tripId);
   if(result.ok&&result.workspace){
-    data=result.workspace;
+    const snapshot=readSnapshot();
+    data=(snapshot?.trip_id===tripId && snapshot?.itineraries && Object.keys(snapshot.itineraries).length)
+      ? snapshot
+      : result.workspace;
     hideWorkspaceAuthGate();
     return true;
   }
@@ -864,17 +874,25 @@ function showEmpty(){
   if(body) body.textContent=t.emptyC;
 }
 
+function handoffToPlanner(){
+  try{localStorage.setItem(PLANNER_OPEN_HANDOFF_KEY,JSON.stringify({trip_id:data?.trip_id||null,expires_at:Date.now()+120000}))}catch(_){}
+}
 function backPlanner(){
   const params=new URLSearchParams();
   params.set('lang',lang);
   if(data?.trip_id) params.set('trip_id',data.trip_id);
+  handoffToPlanner();
   window.location.replace(`./planner.html?${params.toString()}`);
 }
 function openMyTrips(){
   const params=new URLSearchParams();
   params.set('lang',lang);
   params.set('view','my-trips');
-  window.location.href=`./planner.html?${params.toString()}`;
+  if(data?.trip_id) params.set('trip_id',data.trip_id);
+  // Navigation is not logout. Keep the shared session untouched and let the
+  // Planner render the history gate from the same authenticated trip.
+  handoffToPlanner();
+  window.location.assign(`./planner.html?${params.toString()}`);
 }
 
 function setupAllCitiesFloating(){
@@ -966,19 +984,21 @@ async function boot(){
     data=(requestedTripId && cached?.trip_id===requestedTripId) ? cached : (!requestedTripId?cached:null);
     showWorkspaceAuthGate();
   }else if(requestedTripId){
-    try{ data=await fetchTripWorkspace(requestedTripId); }
-    catch(err){
-      console.warn('[TRIP WORKSPACE FETCH]',err);
-      // A transient API/network failure is not an authentication event. The
-      // Planner already handed off a complete same-origin snapshot, so keep the
-      // traveler inside the Workspace while the backend recovers.
-      if(cached?.trip_id===requestedTripId) data=cached;
+    // The Planner handoff is the authoritative presentation model because it
+    // is already split by the travel compiler into every physical stay
+    // (main city + route destinations). The API checkpoint keeps generation
+    // units by main destination and must not collapse this richer view.
+    if(cached?.trip_id===requestedTripId && cached?.itineraries && Object.keys(cached.itineraries).length){
+      data=cached;
+      fetchTripWorkspace(requestedTripId).catch(err=>console.warn('[TRIP WORKSPACE REVALIDATE]',err));
+    }else{
+      try{ data=await fetchTripWorkspace(requestedTripId); }
+      catch(err){ console.warn('[TRIP WORKSPACE FETCH]',err); }
     }
     if(!data) showWorkspaceAuthGate();
   }else if(cached?.trip_id){
-    try{ data=await fetchTripWorkspace(cached.trip_id); }
-    catch(err){ console.warn('[TRIP WORKSPACE FETCH]',err); data=cached; }
-    if(!data){data=cached;showWorkspaceAuthGate()}
+    data=cached;
+    fetchTripWorkspace(cached.trip_id).catch(err=>console.warn('[TRIP WORKSPACE REVALIDATE]',err));
   }else{
     data=null;
   }
