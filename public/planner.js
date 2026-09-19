@@ -6150,7 +6150,7 @@ function _hasCriticalAuditErrors_(report={}){
   return (report?.errors||[]).some(error=>_auditSeverity_(error)>=10);
 }
 
-function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
+function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',routeContextOverride=undefined){
   const errors=[];
   const byDay=_rowsByDayObject_(rows);
   const seenPois=[];
@@ -6335,7 +6335,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate=''){
 
   // Travel Model V2 deterministic route audit. The LLM is not trusted to infer
   // fixed movements: exact user transfers must be represented and remain activity-free.
-  const routeContext=_routeV2ContextForCity_(city);
+  const routeContext=routeContextOverride===false ? null : (routeContextOverride || _routeV2ContextForCity_(city));
   (routeContext?.day_contexts||[]).forEach(ctx=>{
     const dayRows=byDay[Number(ctx.day)]||[];
     (ctx.fixed_transfers||[]).forEach(transfer=>{
@@ -7041,12 +7041,12 @@ function _v3NormalizeTransportRecommendation_(row={}){
   };
 }
 
-function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate){
+function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract);
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
   for(let pass=0;pass<5;pass++){
-    const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate);
+    const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride);
     const errors=report?.errors||[];
     let changed=false;
     const byDay=_rowsByDayObject_(out);
@@ -7106,7 +7106,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     out=_v3EnforceHardRouteFacts_(out,contract);
     if(!changed) break;
   }
-  const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate);
+  const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride);
   if(removed.length) console.info(`[ITBMO V3 NORMALIZE] ${city}: deterministic duplicate cleanup`,removed);
   console.info(`[ITBMO V3 NORMALIZE] ${city}`,_v3AuditSummary_(report));
   return {rows:out,report};
@@ -7312,11 +7312,115 @@ Return valid city_day JSON only. Do not ask questions.
   return _v3StampStayRows_(rows,unit);
 }
 
+async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDays,perDay,baseDate){
+  const unitDays=[...new Set((unit.days||[]).map(Number).filter(Boolean))].sort((a,b)=>a-b);
+  const unitDaySet=new Set(unitDays);
+  const unitCity=unit.base_destination||unit.physical_destination||contract.planning_unit;
+  const unitStartDate=unit.windows?.find(w=>w?.date)?.date||baseDate||'';
+  const scopedRouteDays=(contract.route_days||[]).filter(d=>unitDaySet.has(Number(d.day))).map(day=>({
+    ...day,
+    // The model never owns inter-stay movements. Local Stay QA therefore audits
+    // only the physical windows that belong to this card; fixed boundaries are
+    // inserted once, after all independent Stay Units have passed their own QA.
+    fixed_transfers:[],
+    location_windows:(unit.windows||[]).filter(w=>Number(w.day)===Number(day.day)).map(w=>({
+      location:w.location||unitCity,start:w.start||null,end:w.end||null,
+      type:'plannable',open_end:Boolean(w.open_end),terminal_arrival:false
+    }))
+  }));
+  const scopedContract={...contract,planning_unit:unitCity,route_days:scopedRouteDays,total_days:totalDays};
+  const scopedPerDay=(perDay||[]).filter(x=>unitDaySet.has(Number(x?.day)));
+  const filterReport=(report={})=>{
+    const errors=(report.errors||[]).filter(error=>{
+      const days=[error?.day,...(Array.isArray(error?.days)?error.days:[])].map(Number).filter(Boolean);
+      if(days.length && !days.some(day=>unitDaySet.has(day))) return false;
+      if(error?.code==='MISSING_DAY'){
+        const day=Number(error.day);
+        const hasUsefulWindow=(unit.windows||[]).some(w=>{
+          if(Number(w.day)!==day) return false;
+          if(w.open_end) return true;
+          const start=_hhmmToMinutes_(w.start),end=_hhmmToMinutes_(w.end);
+          return start!=null&&end!=null&&end-start>=45;
+        });
+        if(!hasUsefulWindow) return false;
+      }
+      // A stay can legitimately end before 19:00 because the deterministic route
+      // requires departure to the next stay. Do not ask the model to plan beyond
+      // the physical window merely to satisfy the historical open-day target.
+      if(error?.code==='END_BEFORE_MINIMUM_TARGET'){
+        const day=Number(error.day);
+        const windows=(unit.windows||[]).filter(w=>Number(w.day)===day);
+        const latest=Math.max(-1,...windows.map(w=>w.open_end?24*60:(_hhmmToMinutes_(w.end)??-1)));
+        if(latest>=0 && latest<19*60) return false;
+      }
+      return true;
+    });
+    return {...report,errors};
+  };
+  const audit=(rows)=>filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitStartDate,false));
+
+  let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
+  // Reuse deterministic arithmetic/duplicate cleanup, but only against this Stay
+  // Unit's own physical windows. No other destination can create QA findings here.
+  let normalized=_v3DeterministicQualityCleanup_(unitCity,rows,scopedContract,totalDays,scopedPerDay,unitStartDate,false);
+  rows=_v3StampStayRows_(normalized.rows,unit);
+  let report=audit(rows);
+  let material=_v3MaterialAuditErrors_(report);
+  const repairBudget=Math.max(1,Math.min(3,_v3AdaptiveRepairBudget_(scopedContract,Math.max(1,unitDays.length))));
+  let attempt=0,previousFingerprint='',stagnant=0;
+
+  while(material.length && attempt<repairBudget){
+    const fingerprint=_v3IssueFingerprint_(report);
+    if(fingerprint===previousFingerprint && stagnant>=1) break;
+    previousFingerprint=fingerprint;
+    attempt+=1;
+    console.warn(`[ITBMO V3 STAY AUDIT] ${unitCity} · ${unit.id}: ${material.length} repairable issue(s); local repair ${attempt}/${repairBudget}`,_v3AuditSummary_(report),material);
+    const stayContract=_v3StayContract_(contract,unit);
+    const prompt=`
+PHYSICAL STAY LOCAL QA REPAIR CONTRACT — authoritative JSON:
+${JSON.stringify(stayContract)}
+
+CURRENT ROWS FOR THIS STAY ONLY:
+${JSON.stringify(rows)}
+
+LOCAL VALIDATOR FINDINGS FOR THIS STAY ONLY:
+${JSON.stringify(material)}
+
+Rebuild ONLY this stay card. Keep every row inside its supplied planning_window, preserve the supplied global day numbers, and keep every Day Trip inside this same stay. Do not output any inter-stay fixed movement; ITBMO owns those boundaries deterministically. Correct the findings without changing another destination. Return city_day JSON only.
+`.trim();
+    const raw=await _v3Call_(prompt);
+    const parsed=parseJSON(raw);
+    const candidate=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays)),unit);
+    if(!candidate.length){stagnant+=1;continue;}
+    normalized=_v3DeterministicQualityCleanup_(unitCity,candidate,scopedContract,totalDays,scopedPerDay,unitStartDate,false);
+    const nextRows=_v3StampStayRows_(normalized.rows,unit);
+    const nextReport=audit(nextRows);
+    const before=_auditScore_(report),after=_auditScore_(nextReport);
+    if(after<before){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
+    else{stagnant+=1;}
+  }
+
+  const blocking=_v3BlockingAuditErrors_(report);
+  const warnings=(report.errors||[]).filter(e=>!_v3HardBlockingCodes_().has(String(e?.code||'')));
+  console.info(`[ITBMO V3 STAY AUDIT FINAL] ${unitCity} · ${unit.id}`,_v3AuditSummary_(report),report.errors||[]);
+  if(warnings.length) console.warn(`[ITBMO V3 STAY QUALITY WARNINGS] ${unitCity} · ${unit.id}: publishing locally valid stay with non-blocking warnings`,_v3AuditSummary_({errors:warnings}),warnings);
+  if(blocking.length){
+    const error=new Error(`V3_STAY_QUALITY_BLOCK:${unit.id}:${unitCity}`);
+    error.v3BlockingErrors=blocking;
+    error.stayUnitId=unit.id;
+    throw error;
+  }
+  return {rows,report,warnings};
+}
+
 async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport){
   const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
   const units=_v3BuildPhysicalStayUnits_(contract);
   if(!units.length) throw new Error(`V3_NO_PHYSICAL_STAYS:${city}`);
-  console.info(`[ITBMO V3 STAYS] ${city}: ${units.length} chronological physical stay unit(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length})));
+  console.info(`[ITBMO V3 STAYS] trip: ${units.length} independent chronological stay card(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length,dayTrips:(u.day_trips||[]).length})));
+
+  // Each Trip Story stay card is a fully independent generation + QA job. Jobs
+  // run concurrently; array slots preserve route order regardless of completion order.
   const results=new Array(units.length);
   let cursor=0;
   const concurrency=Math.min(3,units.length);
@@ -7325,13 +7429,22 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
       const index=cursor++;
       if(index>=units.length) return;
       const unit=units[index];
-      console.log(`[ITBMO V3 STAY] ${city} · ${unit.sequence}/${units.length} · ${unit.physical_destination}`);
-      results[index]=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
+      const label=unit.base_destination||unit.physical_destination;
+      console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · independent generation + local QA`);
+      const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
+      const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
+      results[index]={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings};
     }
   }));
-  let rows=_dedupeRows_(results.flat()).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+
+  // Deterministic merger: model outputs never decide trip order or inter-stay
+  // movements. Flatten in Trip Story sequence, then insert the authoritative
+  // boundaries exactly once and sort by global day/time.
+  let rows=_dedupeRows_(results.flatMap(result=>result?.rows||[]));
   rows=_v3EnforceHardRouteFacts_(rows,contract);
-  return {rows,contract,units};
+  rows=_v3AnnotatePhysicalRows_(rows,contract,units)
+    .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  return {rows,contract,units,stayResults:results};
 }
 
 async function _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport){
@@ -7486,81 +7599,39 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
   showWOW(true,t('overlayGenerating'));
 
   try{
-    console.log(`[ITBMO V3] Planning unit ${city}: physical-stay parallel generation`);
+    console.log(`[ITBMO V3] Continuous Trip Story: independent Stay Units in parallel; deterministic merge`);
     const generated=await _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport);
-    let rows=_v3AnnotatePhysicalRows_(_v3EnforceHardRouteFacts_(generated.rows,generated.contract),generated.contract,generated.units||[]);
-    let coverage=_v3Coverage_(rows,dest.days);
-    console.info(`[ITBMO V3 COVERAGE] ${city}: initial response`,coverage);
-    if(!rows.length){
-      throw new Error(`V3_EMPTY:${city}`);
-    }
+    let rows=generated.rows||[];
+    if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
+
+    // At this point every Stay Unit has already passed its own semantic/local QA.
+    // The merged trip receives only a final HARD physical-integrity gate. We do
+    // not re-run trip-wide semantic repair, which would couple independent stays
+    // and recreate the historical "everything belongs to Madrid" behavior.
+    const coverage=_v3Coverage_(rows,dest.days);
+    console.info(`[ITBMO V3 MERGE COVERAGE] trip`,coverage);
     if(coverage.missing.length){
-      const missingRepair=await _v3RepairMissingDays_(city,rows,generated.contract,dest.days);
-      rows=_v3AnnotatePhysicalRows_(_v3EnforceHardRouteFacts_(missingRepair.rows,generated.contract),generated.contract,generated.units||[]);
-      coverage=_v3Coverage_(rows,dest.days);
-    }
-    if(coverage.missing.length){
-      const error=new Error(`V3_INCOMPLETE:${city}:missing_days=${coverage.missing.join(',')}:rows=${coverage.rowCount}`);
+      const error=new Error(`V3_INCOMPLETE_AFTER_STAY_MERGE:missing_days=${coverage.missing.join(',')}:rows=${coverage.rowCount}`);
       error.v3Coverage=coverage;
       throw error;
     }
 
     const master=_v3SyntheticMaster_(dest.days);
-    // First resolve arithmetic/identity defects deterministically. GPT is reserved
-    // for genuinely semantic gaps that remain after the compiler-enforced cleanup.
-    let normalized=_v3DeterministicQualityCleanup_(city,rows,generated.contract,dest.days,perDay,baseDate);
-    rows=_v3AnnotatePhysicalRows_(normalized.rows,generated.contract,generated.units||[]);
-    let report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
-    let material=_v3MaterialAuditErrors_(report);
-    const repairBudget=_v3AdaptiveRepairBudget_(generated.contract,dest.days);
-    let repairAttempt=0;
-    let previousFingerprint='';
-    let stagnantPasses=0;
-    while(material.length && repairAttempt<repairBudget){
-      const fingerprint=_v3IssueFingerprint_(report);
-      // A complex route can legitimately need more than one surgical attempt on the
-      // same issue family. Do not abort after the first unchanged fingerprint; allow
-      // one additional scoped attempt, while still preventing unbounded token burn.
-      if(fingerprint===previousFingerprint && stagnantPasses>=2){
-        console.warn(`[ITBMO V3 REPAIR] ${city}: no convergence after ${stagnantPasses} scoped passes; stopping model repairs`,_v3AuditSummary_(report));
-        break;
-      }
-      previousFingerprint=fingerprint;
-      repairAttempt+=1;
-      console.warn(`[ITBMO V3 AUDIT] ${city}: ${material.length} repairable issue(s); adaptive surgical repair ${repairAttempt}/${repairBudget}`,_v3AuditSummary_(report),material);
-      const repaired=await _v3RepairAffectedStayUnits_(city,rows,generated.contract,generated.units||[],report,dest.days,perDay,baseDate);
-      normalized=_v3DeterministicQualityCleanup_(city,repaired.rows,generated.contract,dest.days,perDay,baseDate);
-      const nextRows=_v3AnnotatePhysicalRows_(normalized.rows,generated.contract,generated.units||[]);
-      const nextReport=_localGlobalAudit_(city,nextRows,dest.days,master,perDay,baseDate);
-      const nextMaterial=_v3MaterialAuditErrors_(nextReport);
-      const beforeScore=_auditScore_(report), afterScore=_auditScore_(nextReport);
-      rows=nextRows; report=nextReport; material=nextMaterial;
-      console.info(`[ITBMO V3 REPAIR] ${city}: pass ${repairAttempt}/${repairBudget}`,{beforeScore,afterScore,remaining:_v3AuditSummary_(report)});
-      // If the model could not improve the scoped fragment, do not burn more tokens
-      // repeating the same request. Deterministic cleanup and final classification
-      // decide whether the remaining items are hard blockers or quality warnings.
-      if(!repaired.repaired){
-        stagnantPasses+=1;
-      }else if(afterScore<beforeScore){
-        stagnantPasses=0;
-      }else{
-        stagnantPasses+=1;
-      }
-      if(stagnantPasses>=2 && material.length){
-        console.warn(`[ITBMO V3 REPAIR] ${city}: scoped repair is not converging; preserving Quality Gate`,_v3AuditSummary_(report));
-        break;
-      }
-    }
-
-    console.info(`[ITBMO V3 AUDIT FINAL] ${city}`,_v3AuditSummary_(report),report?.errors||[]);
-    const blockingErrors=_v3BlockingAuditErrors_(report);
-    const qualityWarnings=(report?.errors||[]).filter(e=>!_v3HardBlockingCodes_().has(String(e?.code||'')));
-    if(qualityWarnings.length) console.warn(`[ITBMO V3 QUALITY WARNINGS] ${city}: publishing physically valid itinerary with non-blocking quality warnings`,_v3AuditSummary_({errors:qualityWarnings}),qualityWarnings);
+    const finalReport=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
+    const blockingErrors=_v3BlockingAuditErrors_(finalReport);
+    console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
     if(blockingErrors.length){
-      const error=new Error(`V3_ROUTE_QUALITY_BLOCK:${city}`);
+      const error=new Error(`V3_ROUTE_QUALITY_BLOCK_AFTER_MERGE:${city}`);
       error.v3BlockingErrors=blockingErrors;
       throw error;
     }
+    // Preserve local Stay QA reports for diagnostics/recovery without allowing a
+    // later destination to invalidate an already accepted independent stay.
+    const report={errors:[],stay_units:(generated.stayResults||[]).map(result=>({
+      stay_unit_id:result.unit?.id,
+      destination:result.unit?.base_destination||result.unit?.physical_destination,
+      errors:result.audit?.errors||[]
+    }))};
 
     if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null,masterPlan:[],audit:null};
     itineraries[city].masterPlan=master;
