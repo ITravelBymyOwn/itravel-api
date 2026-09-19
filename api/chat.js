@@ -2584,10 +2584,11 @@ AUTHORIZED ITINERARY SCOPE (HIGHEST PRIORITY):
     }
 
     /* =========================================================
-       ITBMO GENERATION ENGINE V3 · COMPACT CONTRACT MODE
-       One planning-unit call, no legacy master-plan/block prompt stack and
-       no automatic model repair. The browser owns deterministic validation
-       and requests a small scoped repair only when materially necessary.
+       ITBMO GENERATION ENGINE V3.1 · PHYSICAL STAY CONTRACT MODE
+       The browser compiles one continuous route into bounded physical-stay
+       windows. Each request plans only one physical stay (legacy planning-unit
+       contracts remain accepted). Deterministic code owns route movements,
+       merge, validation and scoped repair.
        ========================================================= */
     if (mode === "planner_v3") {
       const override = detectLanguageOverride(clientMessages);
@@ -2602,12 +2603,12 @@ ${languageLine}
 The client supplies a deterministic GENERATION CONTRACT. Treat dates, location windows, fixed movements, overnight bases, user-fixed times, preferences and restrictions in that contract as hard facts. Do not reinterpret them and never invent transport bookings, airports, flight/train details, reservation status or live conditions.
 
 IDENTITY MODEL (GLOBAL, DATA-DRIVEN):
-- planning_unit is the MAIN destination block selected by the user; it is NOT a requirement that every day physically occurs in that city.
-- route_days[].day is the authoritative day identity within the planning unit.
-- route_days[].location_windows, start_location, end_location and overnight_base define where the traveler physically is.
+- The preferred contract is ITBMO_PHYSICAL_STAY_CONTRACT_V1. It represents one chronological physical stay inside a larger continuous trip.
+- physical_destination is immutable. planning_windows are the only intervals you may plan in this request. Preserve their original global day numbers exactly.
+- boundary_context is awareness only: inbound/outbound intercity movements are deterministic route facts and MUST NOT be generated, shifted, embellished or replaced by this call.
+- Returning later to the same city is a different stay_unit_id; do not assume it is contiguous with an earlier stay.
 - Internal route places are discovered from the contract; never rely on predefined city lists or special cases.
-- A Madrid planning unit can therefore contain a day physically in Segovia or Toledo; a Paris planning unit can contain a day physically in Bruges. Those days still belong to their original planning unit and MUST be returned with their original day number.
-- city_day[].city may represent the actual physical location for that block/day and does not need to equal planning_unit.
+- Legacy ITBMO_GENERATION_CONTRACT_V3 remains supported: for that contract only, route_days define physical identity as before.
 
 Your job is tourism intelligence only: select excellent experiences, sequence them geographically, use available time well, respect realistic dwell/meal/rest needs, and create a distinctive, practical itinerary.
 
@@ -2621,10 +2622,10 @@ QUALITY POLICY:
 - For transfer days, independently optimize every meaningful pre-departure and post-arrival PLANNABLE window. Preserve access/buffer before the fixed movement, but do not throw away a useful morning or afternoon merely because a transfer exists later.
 - Prefer concrete named places. If a restaurant is not a user-fixed reservation, describe the meal by a useful neighborhood/area rather than inventing a specific restaurant or reservation.
 - Before returning JSON, internally verify each day for: coverage of its available windows, continuity From→To, no overlaps, credible dwell time, no unexplained large gaps, no duplicate anchors, and a useful ending. Correct defects before output rather than relying on downstream repair.
-- Preserve all USER_FIXED movement intervals exactly and keep them activity-free.
+- Never generate a boundary USER_FIXED movement for a physical-stay contract; keep all planning rows outside those immutable movement intervals. For a legacy planning-unit contract, preserve supplied USER_FIXED movement intervals exactly.
 - Before fixed rail/bus/ferry departures allow realistic access plus prudent boarding margin; airports require materially more when an airport movement is explicitly supplied.
-- After arrival, continue planning in the actual arrival location when the contract says the window remains plannable.
-- If route_days[].terminal_arrival_only=true OR fixed_transfers[].terminal_arrival=true, the planning unit ends exactly at that transfer arrival. Output the fixed movement and STOP. Do not create tourism, dinner, lodging, check-in, local transport, airport/station assumptions, or any other row after arrival. The terminal destination becomes plan-worthy only if the user later adds it as a MAIN destination.
+- After arrival, plan only the post-arrival planning_window supplied to this physical stay. Do not infer extra time outside it.
+- For legacy contracts only: if route_days[].terminal_arrival_only=true OR fixed_transfers[].terminal_arrival=true, stop planning at that boundary. For physical-stay contracts, terminal movements are outside the model call and deterministic code owns them.
 - Optimize geographic flow; avoid backtracking, duplicates and repeated major anchors across days.
 - Respect season, plausible daylight and actual calendar dates. Protect destination-defining special-date moments without inventing year-specific event details.
 - Use the lodging/overnight base as the geographic anchor where applicable.
@@ -2643,9 +2644,9 @@ Return JSON only:
 {"destination":"...","city_day":[{"city":"...","day":1,"rows":[...]}]}
 Every row must contain: day, start, end, from, to, transport, duration, activity, notes.
 For non-transport rows also include commerce_context with: semantic_type (ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE), ticket_need (required, recommended, optional, none, unknown), guided_tour_value (high, medium, low, none), canonical_place.
-For fixed intercity transport rows include commerce_context with semantic_type=TRANSPORT, origin, destination, mode, departure and arrival. Never invent operator, station, airport, availability or booking status.
+For ITBMO_PHYSICAL_STAY_CONTRACT_V1 do NOT output intercity transport rows; deterministic code inserts them. For legacy contracts, fixed intercity transport rows include commerce_context with semantic_type=TRANSPORT, origin, destination, mode, departure and arrival. Never invent operator, station, airport, availability or booking status.
 Use HH:MM local time. duration must contain two lines: "Transport: ...\nActivity: ...".
-Include every requested planning-unit day from 1 through total_days, even when its physical location differs from planning_unit or when a day contains only a fixed terminal movement. Never omit a day merely because the traveler is in an internal route place.
+For a physical-stay contract, return only the global day numbers represented by planning_windows and only rows physically inside those windows. For a legacy planning-unit contract, include every requested planning-unit day from 1 through total_days.
 Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
 `.trim();
 
@@ -2659,7 +2660,7 @@ Do not output analysis, markdown, master-plan metadata or commentary outside JSO
       let parsed = cleanToJSON(raw);
       if (!_hasRenderableItinerary_(parsed)) {
         raw = await callStructured(
-          [{ role:"system", content:V3_SYSTEM_PROMPT + "\nRECOVERY: Return complete valid JSON only. Preserve every contract day and hard movement exactly." }, ...clientMessages],
+          [{ role:"system", content:V3_SYSTEM_PROMPT + "\nRECOVERY: Return complete valid JSON only. For physical-stay contracts, preserve every supplied planning window/day and do not generate boundary movements. For legacy contracts, preserve every contract day and hard movement exactly." }, ...clientMessages],
           0.12,
           8600,
           110000,
