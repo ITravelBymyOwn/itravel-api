@@ -641,7 +641,19 @@
     const result=[];
     const add=(name,meta={})=>{ const key=norm(name).toLowerCase(); if(!key||result.some(x=>x.key===key)) return; result.push({key,name:norm(name),...meta}); };
     if(model?.trip_story?.stays?.length){
-      model.trip_story.stays.forEach(st=>{add(st.place,{type:'stay',country:st.country||'',dates:st.startDate||'',days:Number(st.days||1),nights:Math.max(0,Number(st.days||1)-1),routeArrivalTransport:st.transportMode||'recommend'});(st.dayTrips||[]).forEach(dt=>add(dt.place,{type:'daytrip',country:dt.country||st.country||'',nights:0,routeArrivalTransport:dt.outbound?.transportMode||'recommend'}));});
+      // Preferences are collected only for physical stays/overnight bases.
+      // Day Trips remain part of the route/timeline and generation context, but
+      // they must never become independent preference cards.
+      model.trip_story.stays.forEach(st=>{
+        add(st.place,{
+          type:'stay',
+          country:st.country||'',
+          dates:st.startDate||'',
+          days:Number(st.days||1),
+          nights:Math.max(0,Number(st.days||1)-1),
+          routeArrivalTransport:st.transportMode||'recommend'
+        });
+      });
       return result;
     }
     savedDestinations.forEach(dest=>{
@@ -657,7 +669,9 @@
         // it closes this planning unit and becomes configurable only if the user
         // later adds that place as a MAIN destination.
         if(isLastDayArrival && !returnsToBase) return;
-        add(seg.destination,{type:seg.disposition==='roundtrip'?'daytrip':'stay',country:dest.country,nights:seg.disposition==='roundtrip'?0:Number(seg.nights||1),routeArrivalTransport:seg.transportMode||''});
+        // Round-trip excursions are route context, not independent preference destinations.
+        if(seg.disposition==='roundtrip') return;
+        add(seg.destination,{type:'stay',country:dest.country,nights:Number(seg.nights||1),routeArrivalTransport:seg.transportMode||''});
       });
     });
     return result;
