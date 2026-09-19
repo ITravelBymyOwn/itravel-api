@@ -3691,9 +3691,9 @@ function _workspaceSnapshotViews_(){
         const exactTransfer=transfers.find(t=>String(t.departure||'')===String(row?.start||'')&&String(t.arrival||'')===String(row?.end||'')&&_arePoiAliases_(row?.from,t.origin)&&_arePoiAliases_(row?.to,t.destination));
         if(exactTransfer){ addRow(exactTransfer.origin,date,row,sourceUnit); return; }
         if(terminalArrival!=null && rs!=null && rs>=terminalArrival) return;
-        let place=ctx.start_location||sourceUnit;
+        let place=String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim() || ctx.start_location||sourceUnit;
         const window=(ctx.location_windows||[]).find(w=>w?.type!=='fixed_transfer'&&w?.location&&rs!=null&&_hhmmToMinutes_(w.start)!=null&&rs>=_hhmmToMinutes_(w.start)&&(w.end==null||re==null||re<=_hhmmToMinutes_(w.end)));
-        if(window) place=window.location;
+        if(!String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim() && window) place=window.location;
         else if(rs!=null){
           transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=t.destination;});
         }
@@ -4759,6 +4759,8 @@ function normalizeRow(r = {}, fallbackDay = 1){
     duration,
     notes:safeNotes,
     kind,
+    physical_location:String(r.physical_location ?? r.physicalLocation ?? commerceContext?.physical_destination ?? '').trim() || null,
+    stay_unit_id:String(r.stay_unit_id ?? r.stayUnitId ?? '').trim() || null,
     commerce_context:commerceContext
   }));
 }
@@ -6910,8 +6912,7 @@ function _v3HardBlockingCodes_(){
   return new Set([
     'MISSING_DAY','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
-    'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE','ROUTE_WINDOW_UNDERUSED',
-    'ROUTE_WINDOW_TOO_THIN','CATEGORY_DWELL_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
+    'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE',
     'INVENTED_DEPARTURE_LOGISTICS'
   ]);
 }
@@ -7101,6 +7102,159 @@ function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays){
   return valid;
 }
 
+function _v3PhysicalKey_(value){
+  return String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function _v3BuildPhysicalStayUnits_(contract={}){
+  const units=[];
+  let current=null, sequence=0;
+  const routeDays=[...(contract.route_days||[])].sort((a,b)=>Number(a.day)-Number(b.day));
+  for(const day of routeDays){
+    const timeline=[...(day.location_windows||[])].sort((a,b)=>String(a.start||'99:99').localeCompare(String(b.start||'99:99')));
+    for(const window of timeline){
+      if(window?.type==='fixed_transfer'){
+        current=null; // a movement always closes the current physical stay, even if the traveler later returns to the same city.
+        continue;
+      }
+      const location=String(window?.location||day?.start_location||contract.planning_unit||'').trim();
+      if(!location || /\s[→>]\s/.test(location)) continue;
+      const key=_v3PhysicalKey_(location);
+      if(!key) continue;
+      if(!current || current.physical_key!==key){
+        sequence+=1;
+        current={
+          id:`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(sequence).padStart(2,'0')}`,
+          sequence,
+          physical_destination:location,
+          physical_key:key,
+          windows:[],
+          days:new Set()
+        };
+        units.push(current);
+      }
+      current.windows.push({day:Number(day.day),date:day.date||null,start:window.start||null,end:window.end||null,open_end:Boolean(window.open_end),minimum_useful_target:window.minimum_useful_target||null});
+      current.days.add(Number(day.day));
+    }
+  }
+  return units.map((unit,index)=>{
+    const previous=units[index-1]||null,next=units[index+1]||null;
+    const first=unit.windows[0],last=unit.windows.at(-1);
+    const inbound=(contract.route_days||[]).flatMap(d=>(d.fixed_transfers||[]).map(t=>({...t,day:Number(d.day)}))).find(t=>t.day===first?.day&&_v3PhysicalKey_(t.destination)===unit.physical_key&&(!first?.start||t.arrival===first.start))||null;
+    const outbound=(contract.route_days||[]).flatMap(d=>(d.fixed_transfers||[]).map(t=>({...t,day:Number(d.day)}))).find(t=>t.day===last?.day&&_v3PhysicalKey_(t.origin)===unit.physical_key&&(!last?.end||t.departure===last.end))||null;
+    return {...unit,days:[...unit.days].sort((a,b)=>a-b),previous_destination:previous?.physical_destination||null,next_destination:next?.physical_destination||null,inbound_boundary:inbound,outbound_boundary:outbound};
+  });
+}
+
+function _v3StayContract_(contract,unit){
+  const days=new Set(unit.days||[]);
+  return {
+    version:'ITBMO_PHYSICAL_STAY_CONTRACT_V1',
+    parent_planning_unit:contract.planning_unit,
+    stay_unit_id:unit.id,
+    sequence:unit.sequence,
+    physical_destination:unit.physical_destination,
+    itinerary_language:contract.itinerary_language,
+    planning_windows:unit.windows,
+    boundary_context:{previous_destination:unit.previous_destination,next_destination:unit.next_destination,inbound:unit.inbound_boundary,outbound:unit.outbound_boundary},
+    lodging_base:contract.lodging_base,
+    place_preference:Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null,
+    global_preferences:contract.global_preferences,
+    special_conditions:contract.special_conditions,
+    travelers:contract.travelers,
+    traveler_profiles:contract.traveler_profiles,
+    calendar_dates:(contract.calendar_dates||[]).filter(x=>days.has(Number(x.day))),
+    hard_policies:{
+      plan_only_inside_supplied_physical_windows:true,
+      physical_destination_is_immutable:true,
+      boundary_movements_are_immutable_and_must_not_be_generated:true,
+      use_substantial_windows_productively:true,
+      never_invent_transport_booking_details:true,
+      no_duplicate_major_poi_within_this_stay:true
+    }
+  };
+}
+
+function _v3StampStayRows_(rows=[],unit={}){
+  const windows=unit.windows||[];
+  return (rows||[]).filter(row=>{
+    const day=Number(row?.day),start=_hhmmToMinutes_(row?.start),end=_hhmmToMinutes_(row?.end);
+    return windows.some(w=>{
+      if(Number(w.day)!==day) return false;
+      const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+      if(start==null||end==null||ws==null) return false;
+      return start>=ws && (we==null||end<=we);
+    });
+  }).map(row=>({
+    ...row,
+    physical_location:unit.physical_destination,
+    stay_unit_id:unit.id,
+    commerce_context:{...(row.commerce_context||{}),physical_destination:unit.physical_destination,stay_unit_id:unit.id}
+  }));
+}
+
+function _v3AnnotatePhysicalRows_(rows=[],contract={},units=[]){
+  return (rows||[]).map(row=>{
+    const cc={...(row.commerce_context||{})};
+    if(String(cc.semantic_type||'').toUpperCase()==='TRANSPORT'){
+      const physical=cc.origin||row.from||row.physical_location||null;
+      return {...row,physical_location:physical,commerce_context:{...cc,physical_destination:physical}};
+    }
+    const day=Number(row.day),rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end);
+    const unit=(units||[]).find(u=>(u.windows||[]).some(w=>{
+      if(Number(w.day)!==day) return false;
+      const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+      return rs!=null&&ws!=null&&rs>=ws&&(we==null||re==null||re<=we);
+    }));
+    if(!unit) return row;
+    return {...row,physical_location:unit.physical_destination,stay_unit_id:unit.id,commerce_context:{...cc,physical_destination:unit.physical_destination,stay_unit_id:unit.id}};
+  });
+}
+
+async function _v3GeneratePhysicalStay_(contract,unit,totalDays){
+  const stayContract=_v3StayContract_(contract,unit);
+  const prompt=`
+PHYSICAL STAY GENERATION CONTRACT — authoritative JSON:
+${JSON.stringify(stayContract)}
+
+Plan ONLY the useful time physically available in ${unit.physical_destination}. This is one chronological fragment of a continuous trip; it may start after arrival from another place and/or end before a fixed departure.
+- Generate tourism/activity rows only. DO NOT generate the inbound or outbound intercity movement; ITBMO inserts those deterministically.
+- Every row must remain inside one supplied planning_window and must use that window's original global day number.
+- Treat the whole stay as one coherent mini-itinerary: choose strong anchors first, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
+- Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied day numbers exactly.
+- physical_destination is authoritative. Do not plan another city from this call.
+- commerce_context is required on substantive rows: semantic_type, ticket_need, guided_tour_value, canonical_place, commercial_eligible. Keep traveler notes separate from commerce metadata.
+- Never invent operators, reservations, exact station/airport details, opening hours or availability not supplied by the contract.
+Return valid city_day JSON only. Do not ask questions.
+`.trim();
+  const raw=await _v3Call_(prompt);
+  const parsed=parseJSON(raw);
+  const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,contract.planning_unit,totalDays));
+  return _v3StampStayRows_(rows,unit);
+}
+
+async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport){
+  const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
+  const units=_v3BuildPhysicalStayUnits_(contract);
+  if(!units.length) throw new Error(`V3_NO_PHYSICAL_STAYS:${city}`);
+  console.info(`[ITBMO V3 STAYS] ${city}: ${units.length} chronological physical stay unit(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length})));
+  const results=new Array(units.length);
+  let cursor=0;
+  const concurrency=Math.min(3,units.length);
+  await Promise.all(Array.from({length:concurrency},async()=>{
+    while(true){
+      const index=cursor++;
+      if(index>=units.length) return;
+      const unit=units[index];
+      console.log(`[ITBMO V3 STAY] ${city} · ${unit.sequence}/${units.length} · ${unit.physical_destination}`);
+      results[index]=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
+    }
+  }));
+  let rows=_dedupeRows_(results.flat()).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  rows=_v3EnforceHardRouteFacts_(rows,contract);
+  return {rows,contract,units};
+}
+
 async function _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport){
   const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
   const prompt=`
@@ -7150,6 +7304,46 @@ The previous response omitted day(s) ${coverage.missing.join(', ')}. Generate ON
   const next=_v3Coverage_(merged,totalDays);
   console.info(`[ITBMO V3 COVERAGE] ${city}: after scoped missing-day repair`,next);
   return {rows:merged,coverage:next,repaired:next.missing.length<coverage.missing.length};
+}
+
+async function _v3RepairAffectedStayUnits_(city,rows,contract,units,report,totalDays,perDay,baseDate){
+  const errors=_v3MaterialAuditErrors_(report);
+  const affectedDays=new Set(errors.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(Boolean));
+  const affectedUnits=(units||[]).filter(u=>(u.days||[]).some(day=>affectedDays.has(Number(day))));
+  if(!affectedUnits.length) return {rows,report,repaired:false};
+
+  let candidateRows=[...(rows||[])],changed=false;
+  for(const unit of affectedUnits){
+    const stayContract=_v3StayContract_(contract,unit);
+    const current=candidateRows.filter(r=>r?.stay_unit_id===unit.id && String(r?.commerce_context?.semantic_type||'').toUpperCase()!=='TRANSPORT');
+    const unitErrors=errors.filter(e=>affectedDays.has(Number(e?.day)) && (unit.days||[]).includes(Number(e?.day)));
+    const prompt=`
+PHYSICAL STAY SURGICAL REPAIR CONTRACT — authoritative JSON:
+${JSON.stringify(stayContract)}
+
+CURRENT ROWS FOR THIS PHYSICAL STAY:
+${JSON.stringify(current)}
+
+VALIDATOR FINDINGS RELEVANT TO THIS STAY:
+${JSON.stringify(unitErrors)}
+
+Rebuild ONLY this physical stay. Keep every row inside its supplied planning_window and preserve the original global day numbers. Do not output inbound/outbound intercity movements; ITBMO owns them deterministically. Correct the findings while preserving strong valid choices. Return city_day JSON only.
+`.trim();
+    const raw=await _v3Call_(prompt);
+    const parsed=parseJSON(raw);
+    const repaired=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,totalDays)),unit);
+    if(!repaired.length) continue;
+    candidateRows=candidateRows.filter(r=>r?.stay_unit_id!==unit.id || String(r?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT');
+    candidateRows.push(...repaired);
+    changed=true;
+  }
+  if(!changed) return {rows,report,repaired:false};
+  candidateRows=_v3AnnotatePhysicalRows_(_v3EnforceHardRouteFacts_(_dedupeRows_(candidateRows),contract),contract,units)
+    .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  const nextReport=_localGlobalAudit_(city,candidateRows,totalDays,_v3SyntheticMaster_(totalDays),perDay,baseDate);
+  return _auditScore_(nextReport)<_auditScore_(report)
+    ? {rows:candidateRows,report:nextReport,repaired:true}
+    : {rows,report,repaired:false};
 }
 
 async function _v3RepairAffectedDays_(city,rows,contract,report,totalDays,perDay,baseDate){
@@ -7213,9 +7407,9 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
   showWOW(true,t('overlayGenerating'));
 
   try{
-    console.log(`[ITBMO V3] Planning unit ${city}: one-pass generation`);
-    const generated=await _v3GeneratePlanningUnit_(city,dest,perDay,baseDate,hotel,transport);
-    let rows=_v3EnforceHardRouteFacts_(generated.rows,generated.contract);
+    console.log(`[ITBMO V3] Planning unit ${city}: physical-stay parallel generation`);
+    const generated=await _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport);
+    let rows=_v3AnnotatePhysicalRows_(_v3EnforceHardRouteFacts_(generated.rows,generated.contract),generated.contract,generated.units||[]);
     let coverage=_v3Coverage_(rows,dest.days);
     console.info(`[ITBMO V3 COVERAGE] ${city}: initial response`,coverage);
     if(!rows.length){
@@ -7223,7 +7417,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     }
     if(coverage.missing.length){
       const missingRepair=await _v3RepairMissingDays_(city,rows,generated.contract,dest.days);
-      rows=_v3EnforceHardRouteFacts_(missingRepair.rows,generated.contract);
+      rows=_v3AnnotatePhysicalRows_(_v3EnforceHardRouteFacts_(missingRepair.rows,generated.contract),generated.contract,generated.units||[]);
       coverage=_v3Coverage_(rows,dest.days);
     }
     if(coverage.missing.length){
@@ -7236,8 +7430,8 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     // First resolve arithmetic/identity defects deterministically. GPT is reserved
     // for genuinely semantic gaps that remain after the compiler-enforced cleanup.
     let normalized=_v3DeterministicQualityCleanup_(city,rows,generated.contract,dest.days,perDay,baseDate);
-    rows=normalized.rows;
-    let report=normalized.report;
+    rows=_v3AnnotatePhysicalRows_(normalized.rows,generated.contract,generated.units||[]);
+    let report=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
     let material=_v3MaterialAuditErrors_(report);
     const repairBudget=_v3AdaptiveRepairBudget_(generated.contract,dest.days);
     let repairAttempt=0;
@@ -7255,10 +7449,10 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       previousFingerprint=fingerprint;
       repairAttempt+=1;
       console.warn(`[ITBMO V3 AUDIT] ${city}: ${material.length} repairable issue(s); adaptive surgical repair ${repairAttempt}/${repairBudget}`,_v3AuditSummary_(report),material);
-      const repaired=await _v3RepairAffectedDays_(city,rows,generated.contract,report,dest.days,perDay,baseDate);
+      const repaired=await _v3RepairAffectedStayUnits_(city,rows,generated.contract,generated.units||[],report,dest.days,perDay,baseDate);
       normalized=_v3DeterministicQualityCleanup_(city,repaired.rows,generated.contract,dest.days,perDay,baseDate);
-      const nextRows=normalized.rows;
-      const nextReport=normalized.report;
+      const nextRows=_v3AnnotatePhysicalRows_(normalized.rows,generated.contract,generated.units||[]);
+      const nextReport=_localGlobalAudit_(city,nextRows,dest.days,master,perDay,baseDate);
       const nextMaterial=_v3MaterialAuditErrors_(nextReport);
       const beforeScore=_auditScore_(report), afterScore=_auditScore_(nextReport);
       rows=nextRows; report=nextReport; material=nextMaterial;
@@ -7888,11 +8082,11 @@ function _applyGeneratedUIState({showModal=false}={}){
   }
 }
 
-// V3 generation orchestrator: main destinations are independent only AFTER
-// Travel Model V2 has compiled their physical route windows. We therefore keep
-// each city's internal master-plan/block sequence intact, but run independent
-// main-destination chains concurrently. This reduces wall-clock time without
-// parallelizing dependent blocks inside Madrid→Segovia→Toledo, etc.
+// V3 generation orchestrator: Travel Model V2 first compiles one continuous physical
+// timeline. Each main destination is then decomposed into chronological Physical Stay
+// Units (Madrid A → Segovia → Toledo → Madrid B, etc.). Those bounded local planning
+// windows can be generated concurrently because route boundaries are deterministic;
+// final chronology and USER_FIXED movements are merged by ITBMO, never by the model.
 const ITBMO_GENERATION_CONCURRENCY=2;
 let _generationCheckpointQueue_=Promise.resolve();
 function _queueGenerationCheckpoint_(status='generating',extra={}){
