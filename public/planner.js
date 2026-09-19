@@ -2859,7 +2859,8 @@ function setPostPaymentTripConfigurationLocked(locked=true){
 function showPreferencesStage(){
   if(!$preferencesStage || !currentTripId) return;
 
-  setPostPaymentTripConfigurationLocked(true);
+  // Do not lock here: this screen can be reached before payment in non-commerce/test flows.
+  // Locking is applied only after a positive server payment/admin-bypass entitlement.
   const canonicalStory=plannerState?.travelModelV2?.trip_story || _travelV2()?.state?.tripStory || null;
   if(canonicalStory){
     _travelV2()?.setTripStory?.(canonicalStory);
@@ -3370,9 +3371,9 @@ async function saveDestinations({showReadyModal=true,fromTripStory=false}={}){
   }
 
   if(!planningStarted){
-    // Initial setup save: freeze only what has already been confirmed.
-    // Preferences remain a separate post-payment checkpoint.
-    setSavedSetupLocked(true);
+    // PRE-PAYMENT RULE: saved setup remains editable until payment/admin bypass is confirmed.
+    // The payment gate is the single authority that freezes travelers + route configuration.
+    setSavedSetupLocked(false);
     hidePreferencesStage({reset:true});
 
     /* Info Chat remains locked after Save Destinations.
@@ -7985,8 +7986,8 @@ function _hydrateGenerationTrip_(trip){
   hasSavedOnce=true;
   planningStarted=true;
   collectingHotels=false;
-  paymentGateSatisfiedTripId=currentTripId;
-  setPostPaymentTripConfigurationLocked(true);
+  // Hydration alone is NOT proof of payment. Entitlement is checked by the caller
+  // against /api/payment status before the post-payment lock is applied.
   hidePreferencesStage({reset:false});
   if($preferencesField){
     $preferencesField.value=plannerState.specialConditions || trip.special_conditions || '';
@@ -8537,7 +8538,15 @@ async function restorePaidGenerationIfNeeded(){
       applyInfoChatStatus(paymentStatus);
     }catch(_){ }
 
-    if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized) return;
+    if(!paymentStatus?.paid && !paymentStatus?.admin_bypass && !paymentStatus?.info_chat_authorized){
+      paymentGateSatisfiedTripId=null;
+      setPostPaymentTripConfigurationLocked(false);
+      return;
+    }
+
+    // Positive server entitlement is the only restore-time authority for the lock.
+    paymentGateSatisfiedTripId=currentTripId;
+    setPostPaymentTripConfigurationLocked(true);
 
     if(trip.status==='saved'){
       if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
@@ -11143,7 +11152,13 @@ async function hasValidPaymentForCurrentTrip(){
       trip_id:currentTripId
     });
     const authorized = Boolean(data?.paid || data?.admin_bypass);
-    if(authorized) paymentGateSatisfiedTripId=currentTripId;
+    if(authorized){
+      paymentGateSatisfiedTripId=currentTripId;
+      setPostPaymentTripConfigurationLocked(true);
+    }else{
+      paymentGateSatisfiedTripId=null;
+      setPostPaymentTripConfigurationLocked(false);
+    }
     applyInfoChatStatus(data);
     return authorized;
   }catch(err){
