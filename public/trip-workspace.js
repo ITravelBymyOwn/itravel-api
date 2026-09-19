@@ -410,13 +410,11 @@ function contextSection(icon,title,description,items,offers=[],sectionId='',sect
 async function fetchContext(cityName){
   const token=getStoredSessionToken();
   if(!token || !data?.trip_id) throw new Error('CONTEXT_SESSION_REQUIRED');
-  const sourceCity=String(data?.workspace_source_map?.[cityName]||cityName).trim();
-  // Subdestination views are derived from the authoritative generated route.
-  // Until the server Context Intelligence accepts physical-stay slices directly,
-  // keep the view functional with deterministic local route/experience context
-  // rather than asking the server to classify the wrong parent-city itinerary.
-  if(sourceCity && normalizeWorkspaceEntity(sourceCity)!==normalizeWorkspaceEntity(cityName)) return [];
-
+  // Context Intelligence is physical-destination aware: /api/context derives
+  // candidates from row.physical_location / commerce_context.physical_destination.
+  // Therefore Day Trip workspaces (Segovia, Versailles, etc.) must be analyzed
+  // by their own destination identity, not suppressed because their source
+  // generation unit was Madrid or Paris.
   const response=await fetch('/api/context',{
     method:'POST',
     headers:{'Content-Type':'application/json'},
