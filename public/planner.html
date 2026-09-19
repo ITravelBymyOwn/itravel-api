@@ -434,18 +434,20 @@
           <div class="planner-stage-card__index">02</div>
           <div>
             <span class="planner-stage-card__eyebrow" id="planner-route-eyebrow">CONSTRUYE TU RUTA</span>
-            <h3>Destinos</h3>
-            <p id="planner-route-guide">Agrega hasta 3 destinos principales. No importa el orden en que los ingreses: ITBMO organizará la ruta según las fechas. Dentro de cada destino puedes añadir traslados, paradas o estancias si ya los tienes definidos.</p>
+            <h3 id="planner-route-title">La historia de tu viaje</h3>
+            <p id="planner-route-guide">Cuéntanos tu viaje en el mismo orden en que lo vivirás. Empieza por cómo llegas, añade cada estancia y las excursiones de un día, y termina con tu regreso si ya lo conoces.</p>
           </div>
         </div>
         <div class="planner-route-tip">
           <span aria-hidden="true">✦</span>
-          <p id="planner-route-tip-copy"><strong>Empieza simple y agrega detalle solo cuando lo necesites.</strong> Si no agregas traslados o paradas, ITBMO seguirá recomendando excursiones de un día como lo hace hoy. Si ya tienes movimientos definidos, agrégalos para que respetemos esas horas y lugares.</p>
+          <p id="planner-route-tip-copy"><strong>No necesitas tener boletos ni horarios definidos.</strong> Ciudad, aeropuerto, estación, terminal o puerto pueden añadirse cuando los conozcas; las horas son opcionales y podrás completarlas después.</p>
         </div>
-        <div id="city-list"></div>
-        <div class="row-actions">
-          <button class="btn ghost" id="add-city-btn">+ Agregar otro destino</button>
+        <div class="trip-story-launch" id="trip-story-launch">
+          <button class="trip-story-primary" id="build-trip-story" type="button"><span>✦</span><b>Construir mi viaje</b><small>Salida → estancias → excursiones → regreso</small></button>
+          <div id="trip-story-summary" class="trip-story-summary" hidden></div>
         </div>
+        <div id="city-list" class="trip-story-compatibility" aria-hidden="true"></div>
+        <button class="btn ghost trip-story-compatibility" id="add-city-btn" type="button" aria-hidden="true">+ Agregar otro destino</button>
 
         <div class="planner-route-actions" id="planner-route-actions">
           <div class="planner-route-actions__copy">
@@ -454,7 +456,7 @@
             <small id="planner-save-subtitle">Después podrás iniciar la planificación sin perder de vista esta sección.</small>
           </div>
           <div class="planner-route-actions__buttons">
-            <button class="btn primary" id="save-destinations" disabled>Guardar destinos</button>
+            <button class="btn primary" id="save-destinations" disabled>Guardar recorrido</button>
             <button id="start-planning" class="btn primary planner-start-cta" disabled>Continuar: iniciar planificación →</button>
           </div>
         </div>
@@ -908,7 +910,7 @@
           planner_title: "Planificador",
           destinations: "Destinos",
           add_city: "+ Agregar otro destino",
-          save_destinations: "Guardar destinos",
+          save_destinations: "Guardar recorrido",
           reset_planning: "Reiniciar planificación",
           special_title: "Preferencias / Restricciones / Condiciones especiales",
           travelers_title: "Viajeros",
