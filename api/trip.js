@@ -5,7 +5,8 @@ const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
 const MAX_GENERATION_RUNS = 4; // V3: allow paid recovery without exhausting after two technical failures
-const MAX_DAYS_PER_DESTINATION = 10;
+const MAX_DAYS_PER_DESTINATION = 10; // Legacy single-destination limit
+const MAX_TRIP_STORY_DAYS = 30; // Continuous Trip Story limit; validated per physical stay
 
 const ITBMO_ADMIN_TEST_BYPASS =
   String(process.env.ITBMO_ADMIN_TEST_BYPASS || "false").toLowerCase() === "true";
@@ -156,7 +157,7 @@ function validDateOrNull(value) {
   return value;
 }
 
-function hasDestinationOverDayLimit(destinations) {
+function hasDestinationOverDayLimit(destinations, maxDays = MAX_DAYS_PER_DESTINATION) {
   if (!Array.isArray(destinations)) return false;
 
   return destinations.some(destination => {
@@ -165,8 +166,49 @@ function hasDestinationOverDayLimit(destinations) {
     }
 
     const days = Number(destination.days);
-    return Number.isFinite(days) && days > MAX_DAYS_PER_DESTINATION;
+    return Number.isFinite(days) && days > maxDays;
   });
+}
+
+function tripStoryFromBody(body = {}) {
+  const plannerInput = body?.planner_input;
+  if (!plannerInput || typeof plannerInput !== "object" || Array.isArray(plannerInput)) return null;
+  const model = plannerInput.travel_model_v2 || plannerInput.travelModelV2;
+  const story = model?.trip_story || model?.tripStory;
+  return story && typeof story === "object" && Array.isArray(story.stays) && story.stays.length
+    ? story
+    : null;
+}
+
+function tripStoryDayLimitError(body = {}) {
+  const story = tripStoryFromBody(body);
+  if (!story) return null;
+
+  const invalidStay = story.stays.find(stay => {
+    const days = Number(stay?.days || 0);
+    return !Number.isInteger(days) || days < 1 || days > MAX_TRIP_STORY_DAYS;
+  });
+  if (invalidStay) return `A Trip Story stay cannot exceed ${MAX_TRIP_STORY_DAYS} days`;
+
+  return null;
+}
+
+function destinationLimitError(body = {}) {
+  const storyError = tripStoryDayLimitError(body);
+  if (storyError) return storyError;
+
+  // Trip Story persists one compatibility planning unit spanning the continuous
+  // journey. Its aggregate day count may legitimately exceed the old 10-day
+  // single-destination limit; physical stays are validated above instead.
+  if (tripStoryFromBody(body)) {
+    return hasDestinationOverDayLimit(body.destinations, MAX_TRIP_STORY_DAYS)
+      ? `A continuous Trip Story cannot exceed ${MAX_TRIP_STORY_DAYS} days`
+      : null;
+  }
+
+  return hasDestinationOverDayLimit(body.destinations, MAX_DAYS_PER_DESTINATION)
+    ? `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+    : null;
 }
 
 function normalizeString(value, maxLength = 500) {
@@ -195,10 +237,11 @@ async function handleCreate(res, body, session) {
     });
   }
 
-  if (hasDestinationOverDayLimit(destinations)) {
+  const destinationLimitMessage = destinationLimitError({ ...body, destinations });
+  if (destinationLimitMessage) {
     return res.status(400).json({
       ok: false,
-      error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+      error: destinationLimitMessage
     });
   }
 
@@ -461,10 +504,11 @@ async function handleUpdate(res, body, session) {
       });
     }
 
-    if (hasDestinationOverDayLimit(body.destinations)) {
+    const destinationLimitMessage = destinationLimitError(body);
+    if (destinationLimitMessage) {
       return res.status(400).json({
         ok: false,
-        error: `A destination cannot exceed ${MAX_DAYS_PER_DESTINATION} days`
+        error: destinationLimitMessage
       });
     }
 
