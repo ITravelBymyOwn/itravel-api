@@ -2848,7 +2848,9 @@ function hidePreferencesStage({reset=false}={}){
 function setPostPaymentTripConfigurationLocked(locked=true){
   const isLocked=Boolean(locked);
   setSavedSetupLocked(isLocked);
-  _travelV2()?.setLocked?.(isLocked);
+  // Payment freezes the trip definition (travelers + Trip Story), not the
+  // post-payment Preferences workspace. Preferences remain editable until the
+  // user explicitly starts itinerary generation.
   const build=qs('#build-trip-story');
   if(build){build.disabled=isLocked;build.setAttribute('aria-disabled',String(isLocked));build.classList.toggle('is-payment-locked',isLocked);}
   const edit=qs('#edit-trip-story');
@@ -2895,6 +2897,9 @@ function showPreferencesStage(){
   const engine=_travelV2();
   const prefHost=qs('#preferences-v2-host');
   if(engine && prefHost){
+    // Entering Preferences is an editable post-payment phase. A prior route
+    // lock must never leak into this editor. Generation itself locks it later.
+    engine.setLocked?.(false);
     if(plannerState?.travelModelV2) engine.restore?.(plannerState.travelModelV2,qsa('.city-row',$cityList));
     engine.renderPreferences(prefHost,savedDestinations,plannerState?.travelModelV2 || _currentTravelModelV2_(),()=>{
       plannerState.preferencesV2=engine.preferencesPayload();
