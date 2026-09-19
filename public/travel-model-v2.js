@@ -10,6 +10,7 @@
     routes:{},
     preferences:{global:{},places:{}},
     itineraryLanguage:'',
+    tripStory:null,
     activePreferencePlace:'',
     locked:false
   };
@@ -477,7 +478,7 @@
         source:'USER_STRUCTURE'
       });
     }
-    return {schema_version:VERSION,destinations,transitions,preferences:JSON.parse(JSON.stringify(state.preferences)),itinerary_language:state.itineraryLanguage||'',updated_at:new Date().toISOString()};
+    return {schema_version:VERSION,destinations,transitions,trip_story:state.tripStory?JSON.parse(JSON.stringify(state.tripStory)):null,preferences:JSON.parse(JSON.stringify(state.preferences)),itinerary_language:state.itineraryLanguage||'',updated_at:new Date().toISOString()};
   }
 
   function restore(model,rows=[]){
@@ -487,6 +488,7 @@
     const modelHasPrefs=Boolean(Object.keys(modelPrefs?.places||{}).length || norm(modelPrefs?.global?.notes));
     if(modelHasPrefs || !currentHasPrefs) state.preferences=modelPrefs?JSON.parse(JSON.stringify(modelPrefs)):{global:{},places:{}};
     if(norm(model.itinerary_language) && !norm(state.itineraryLanguage)) state.itineraryLanguage=norm(model.itinerary_language);
+    if(model.trip_story&&typeof model.trip_story==='object') state.tripStory=JSON.parse(JSON.stringify(model.trip_story));
     rows.forEach((row,index)=>{
       const src=model.destinations?.[index]; if(!src) return;
       state.routes[rowId(row)]=src.route&&typeof src.route==='object'?JSON.parse(JSON.stringify(src.route)):{segments:[]};
@@ -716,5 +718,7 @@
   }
 
   function setLocked(value){state.locked=Boolean(value);}
-  window.ITBMOTravelV2={VERSION,state,attachCityRow,renderRowSummary,collect,restore,validateAll,compileForDestination,renderPreferences,preferencesPayload,allRequiredPreferencesComplete,specialConditionsText,placesForPreferences,setLocked};
+  function setTripStory(story){state.tripStory=story&&typeof story==='object'?JSON.parse(JSON.stringify(story)):null;}
+  function setRouteSegments(row,segments=[]){if(!row)return;state.routes[rowId(row)]={segments:JSON.parse(JSON.stringify(segments||[]))};renderRowSummary(row);}
+  window.ITBMOTravelV2={VERSION,state,attachCityRow,renderRowSummary,collect,restore,validateAll,compileForDestination,renderPreferences,preferencesPayload,allRequiredPreferencesComplete,specialConditionsText,placesForPreferences,setLocked,setTripStory,setRouteSegments};
 })();
