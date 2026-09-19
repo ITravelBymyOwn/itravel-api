@@ -9172,3 +9172,28 @@ body.trip-story-open #astra-coach,body.trip-story-open .astra-coach,body.trip-st
 @media(max-width:1180px){.trip-story-movement{grid-template-columns:repeat(3,minmax(0,1fr))}.trip-story-movement__title{grid-column:1/-1}.trip-story-start-grid--wide{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:700px){.trip-story-actions{padding-right:14px}.trip-story-stays:before{display:none}.trip-story-summary__head{align-items:flex-start;flex-direction:column}.trip-story-summary-actions{width:100%}.trip-story-summary-actions button{flex:1}.trip-story-head-actions button[data-move-stay]{display:inline-flex}.trip-story-drag{display:none!important}.trip-story-movement,.trip-story-start-grid--wide{grid-template-columns:1fr}.trip-story-validation{padding:22px 18px}.trip-story-validation-list button{grid-template-columns:30px 1fr}.trip-story-validation-list em{grid-column:2}.trip-story-stay__head{align-items:flex-start}}
 .trip-story-day.is-day-drop-target{box-shadow:inset 0 0 0 2px rgba(241,124,74,.48),0 10px 28px rgba(241,124,74,.08);background:#FFF9F5}.trip-story-daytrip-card.is-dragging{opacity:.58;transform:scale(.99)}
+
+/* =========================================================
+   ITBMO V2.8.1 · TRIP STORY UX POLISH
+========================================================= */
+body.trip-story-open #need-help-floating{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}
+.trip-story-stay{scroll-margin-top:190px}
+.trip-story-section--finish{scroll-margin-bottom:120px}
+.trip-story-section-title--toggle{align-items:center}
+.trip-story-section-title--toggle>div{flex:1}
+.trip-story-section-toggle{border:1px solid rgba(8,123,250,.14);background:#F3F8FF;color:#087BFA;border-radius:14px;padding:11px 15px;font-weight:900;cursor:pointer;white-space:nowrap}
+.trip-story-section--start.is-collapsed{padding:22px 28px;background:linear-gradient(135deg,#fff,#F7FAFF);box-shadow:0 10px 28px rgba(24,54,84,.045)}
+.trip-story-section--start.is-collapsed .trip-story-section-title{margin-bottom:12px}
+.trip-story-optional-card{width:100%;display:flex;align-items:center;gap:13px;text-align:left;border:1px solid rgba(8,123,250,.12);background:linear-gradient(135deg,#F8FBFF,#F2F7FF);border-radius:18px;padding:15px 17px;color:#173E61;cursor:pointer}
+.trip-story-optional-card>span{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;background:#fff;color:#087BFA;font-weight:950;box-shadow:0 6px 18px rgba(8,123,250,.10)}
+.trip-story-optional-card b,.trip-story-optional-card small{display:block}.trip-story-optional-card b{font-size:.92rem}.trip-story-optional-card small{margin-top:3px;color:#7A8DA0;font-size:.75rem}
+.trip-story-movement-date{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:10px 12px;border-radius:14px;background:rgba(255,255,255,.66);border:1px solid rgba(8,123,250,.08)}
+.trip-story-movement-date>span{font-size:.72rem;font-weight:850;color:#294D6C}.trip-story-movement-date>b{font-size:.95rem;color:#0B2341;margin-top:3px}.trip-story-movement-date>small{font-size:.66rem;color:#8191A2;margin-top:2px;line-height:1.25}
+.trip-story-actions{padding-right:38px}
+.trip-story-actions__save{margin-left:auto}.trip-story-actions .primary{min-width:320px}
+.trip-story-end-confirm:has(input:checked){border-color:rgba(8,123,250,.30);background:linear-gradient(135deg,#EEF7FF,#F4F5FF);box-shadow:0 10px 24px rgba(8,123,250,.08)}
+.trip-story-end-confirm:has(input:checked) span{background:linear-gradient(145deg,#087BFA,#6D78EE);color:#fff}
+@media(max-width:900px){.trip-story-section-title--toggle{align-items:flex-start;flex-wrap:wrap}.trip-story-section-toggle{margin-left:60px}.trip-story-actions{padding-right:18px}.trip-story-actions .primary{min-width:0}}
+@media(max-width:620px){.trip-story-section-toggle{margin-left:0;width:100%}.trip-story-section--start.is-collapsed{padding:17px}.trip-story-actions{padding-right:14px}}
+.trip-story-movement{grid-template-columns:minmax(240px,1.35fr) repeat(3,minmax(145px,.72fr))}
+@media(max-width:1180px){.trip-story-movement{grid-template-columns:repeat(3,minmax(0,1fr))}.trip-story-movement__title{grid-column:1/-1}}
