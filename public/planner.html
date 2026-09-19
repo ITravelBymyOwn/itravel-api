@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=135" />
+  <link rel="stylesheet" href="./planner.css?v=136" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -443,13 +443,13 @@
           <p id="planner-route-tip-copy"><strong>No necesitas tener boletos ni horarios definidos.</strong> Ciudad, aeropuerto, estación, terminal o puerto pueden añadirse cuando los conozcas; las horas son opcionales y podrás completarlas después.</p>
         </div>
         <div class="trip-story-launch" id="trip-story-launch">
-          <button class="trip-story-primary" id="build-trip-story" type="button"><span>✦</span><b>Construir mi viaje</b><small>Salida → estancias → excursiones → regreso</small></button>
+          <button class="trip-story-primary" id="build-trip-story" type="button"><span class="trip-story-primary__spark">✦</span><span class="trip-story-primary__copy"><small>LA HISTORIA EMPIEZA AQUÍ</small><b>Construir mi viaje</b><em>Salida → estancias → excursiones → regreso</em></span><span class="trip-story-primary__arrow">→</span></button>
           <div id="trip-story-summary" class="trip-story-summary" hidden></div>
         </div>
         <div id="city-list" class="trip-story-compatibility" aria-hidden="true"></div>
         <button class="btn ghost trip-story-compatibility" id="add-city-btn" type="button" aria-hidden="true">+ Agregar otro destino</button>
 
-        <div class="planner-route-actions" id="planner-route-actions">
+        <div class="planner-route-actions trip-story-compatibility" id="planner-route-actions" aria-hidden="true">
           <div class="planner-route-actions__copy">
             <span id="planner-save-eyebrow">CUANDO TU RUTA ESTÉ LISTA</span>
             <strong id="planner-save-title">Confirma la ruta para continuar.</strong>
@@ -1204,7 +1204,7 @@
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
 <script src="./travel-model-v2.js?v=6"></script>
-<script src="./planner.js?v=137"></script>
+<script src="./planner.js?v=138"></script>
  
 </body>
 </html>
