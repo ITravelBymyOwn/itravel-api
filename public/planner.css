@@ -9205,3 +9205,6 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .trip-story-day__hours select option[value=""]{color:#71849A}
 @media(max-width:700px){.trip-story-actions__left{width:auto}.trip-story-actions .trip-story-reset{padding-inline:12px}}
 @media(max-width:620px){.trip-story-actions{align-items:stretch}.trip-story-actions__left{width:100%;justify-content:space-between}.trip-story-actions__save{width:100%}}
+
+/* V2.8.4 · immutable trip configuration after payment */
+#build-trip-story.is-payment-locked,#trip-story-summary.is-payment-locked #edit-trip-story{opacity:.5;cursor:not-allowed;filter:saturate(.55);transform:none!important;box-shadow:none!important;}
