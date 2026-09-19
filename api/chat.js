@@ -2603,8 +2603,9 @@ ${languageLine}
 The client supplies a deterministic GENERATION CONTRACT. Treat dates, location windows, fixed movements, overnight bases, user-fixed times, preferences and restrictions in that contract as hard facts. Do not reinterpret them and never invent transport bookings, airports, flight/train details, reservation status or live conditions.
 
 IDENTITY MODEL (GLOBAL, DATA-DRIVEN):
-- The preferred contract is ITBMO_PHYSICAL_STAY_CONTRACT_V1. It represents one chronological physical stay inside a larger continuous trip.
-- physical_destination is immutable. planning_windows are the only intervals you may plan in this request. Preserve their original global day numbers exactly.
+- The preferred contract is ITBMO_PHYSICAL_STAY_CONTRACT_V1. It represents one Trip Story STAY CARD inside a larger continuous trip.
+- The stay card is the generation unit. Its base_destination/physical_destination is the overnight anchor; an explicitly supplied Day Trip remains inside that same stay and MUST NOT become another generation unit.
+- allowed_physical_locations and planning_windows are authoritative. Each row must occur at the physical location of its matching planning_window. Preserve original global day numbers exactly.
 - boundary_context is awareness only: inbound/outbound intercity movements are deterministic route facts and MUST NOT be generated, shifted, embellished or replaced by this call.
 - Returning later to the same city is a different stay_unit_id; do not assume it is contiguous with an earlier stay.
 - Internal route places are discovered from the contract; never rely on predefined city lists or special cases.
@@ -2646,7 +2647,7 @@ Every row must contain: day, start, end, from, to, transport, duration, activity
 For non-transport rows also include commerce_context with: semantic_type (ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE), ticket_need (required, recommended, optional, none, unknown), guided_tour_value (high, medium, low, none), canonical_place.
 For ITBMO_PHYSICAL_STAY_CONTRACT_V1 do NOT output intercity transport rows; deterministic code inserts them. For legacy contracts, fixed intercity transport rows include commerce_context with semantic_type=TRANSPORT, origin, destination, mode, departure and arrival. Never invent operator, station, airport, availability or booking status.
 Use HH:MM local time. duration must contain two lines: "Transport: ...\nActivity: ...".
-For a physical-stay contract, return only the global day numbers represented by planning_windows and only rows physically inside those windows. For a legacy planning-unit contract, include every requested planning-unit day from 1 through total_days.
+For a physical-stay contract, return only the global day numbers represented by planning_windows and only rows physically inside those windows. Day Trips listed by the contract are planned inside the parent stay using their own location windows; never treat them as separate stays. For a legacy planning-unit contract, include every requested planning-unit day from 1 through total_days.
 Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
 `.trim();
 
