@@ -1,4 +1,4 @@
-/* ITBMO · Travel Model V2
+/* ITBMO · Travel Model V2 · Trip Story V4 continuous compiler
    Deterministic route + progressive-disclosure preferences layer.
    No network calls. No Supabase schema dependency.
 */
@@ -24,6 +24,9 @@
   const dmy=(iso='')=>{ const m=String(iso).match(/^(\d{4})-(\d{2})-(\d{2})$/); return m?`${m[3]}/${m[2]}/${m[1]}`:''; };
   const dateKey=(date,time='00:00')=>Date.parse(`${date}T${time||'00:00'}:00`)||0;
   const addDays=(iso,days)=>{ const d=new Date(`${iso}T12:00:00`); if(Number.isNaN(d.getTime())) return ''; d.setDate(d.getDate()+days); return d.toISOString().slice(0,10); };
+  const timeShift=(time,minutes)=>{ if(!/^\d{2}:\d{2}$/.test(String(time||''))) return time||''; const [h,m]=time.split(':').map(Number),v=h*60+m+minutes; if(v<0||v>=1440) return time; return `${String(Math.floor(v/60)).padStart(2,'0')}:${String(v%60).padStart(2,'0')}`; };
+  const transferPrepMinutes=(mode='')=>({plane:120,train:45,bus:30,ferry:60,car:15,transfer:15,recommend:45,other:30}[String(mode||'').toLowerCase()]||30);
+  const transferArrivalMinutes=(mode='')=>({plane:45,train:15,bus:15,ferry:20,car:10,transfer:10,recommend:15,other:15}[String(mode||'').toLowerCase()]||15);
 
   const DESTINATION_URL='/api/destination-suggestions';
   const destinationCache=new Map();
@@ -496,7 +499,48 @@
     });
   }
 
+  function compileTripStoryContinuous(destination,story,model){
+    const stays=(story?.stays||[]).filter(x=>x&&x.startDate&&norm(x.place));
+    if(!stays.length) return null;
+    const endOf=st=>addDays(st.startDate,Math.max(0,Number(st.days||1)-1));
+    const firstDate=stays[0].startDate,lastDate=endOf(stays[stays.length-1]);
+    const span=Math.max(1,Math.round((dateKey(lastDate)-dateKey(firstDate))/86400000)+1);
+    const dayContexts=Array.from({length:span},(_,i)=>{const date=addDays(firstDate,i),owner=stays.find(st=>date>=st.startDate&&date<=endOf(st))||stays[Math.max(0,stays.findIndex(st=>st.startDate>date)-1)]||stays[0],di=Math.max(0,Math.round((dateKey(date)-dateKey(owner.startDate))/86400000)),hours=owner.perDay?.[di]||{};return {day:i+1,date,start_location:owner.place,end_location:owner.place,overnight_base:owner.place,fixed_transfers:[],location_windows:[],hard_route_constraints:[],_owner:owner,_dayStart:hours.start||'09:00',_dayEnd:hours.end||'20:00'};});
+    const movements=[];
+    for(let i=1;i<stays.length;i++){const st=stays[i],prev=stays[i-1];movements.push({id:`story_move_${st.id||i}`,origin:prev.place,destination:st.place,departureDate:st.departureDate||st.startDate,arrivalDate:st.arrivalDate||st.startDate,departureTime:st.departureTime||'',arrivalTime:st.arrivalTime||'',transportMode:st.transportMode||'recommend',timePrecision:(st.departureTime&&st.arrivalTime)?'exact':'unknown',disposition:'continue',nights:Number(st.days||1),source:'TRIP_STORY'});}
+    stays.forEach(st=>(st.dayTrips||[]).forEach((dt,j)=>{if(!norm(dt.place))return;const date=addDays(st.startDate,Math.max(0,Number(dt.day||1)-1));movements.push({id:`story_daytrip_${dt.id||j}`,origin:st.place,destination:dt.place,departureDate:date,arrivalDate:date,departureTime:dt.outbound?.departureTime||'',arrivalTime:dt.outbound?.arrivalTime||'',returnDepartureDate:date,returnDepartureTime:dt.return?.departureTime||'',returnArrivalDate:date,returnArrivalTime:dt.return?.arrivalTime||'',returnDestination:st.place,transportMode:dt.outbound?.transportMode||'recommend',returnTransportMode:dt.return?.transportMode||dt.outbound?.transportMode||'recommend',timePrecision:(dt.outbound?.departureTime&&dt.outbound?.arrivalTime&&dt.return?.departureTime&&dt.return?.arrivalTime)?'exact':'unknown',disposition:'roundtrip',source:'TRIP_STORY_DAYTRIP'});}));
+    dayContexts.forEach(ctx=>{
+      const dayMoves=movements.filter(m=>m.departureDate===ctx.date||m.returnDepartureDate===ctx.date).sort((a,b)=>(a.departureTime||'99:99').localeCompare(b.departureTime||'99:99'));
+      let cursor=ctx._dayStart,location=ctx.start_location;
+      dayMoves.forEach(m=>{
+        if(m.departureDate===ctx.date){
+          const exact=Boolean(m.departureTime&&m.arrivalTime),prep=exact?timeShift(m.departureTime,-transferPrepMinutes(m.transportMode)):'';
+          if(exact&&cursor&&prep&&cursor<prep)ctx.location_windows.push({location,start:cursor,end:prep,type:'plannable',boundary_buffer:{kind:'pre_transfer',minutes:transferPrepMinutes(m.transportMode),mode:m.transportMode||null}});
+          ctx.fixed_transfers.push({origin:m.origin,destination:m.destination,departure:m.departureTime||null,arrival:m.arrivalTime||null,date:m.departureDate,time_precision:m.timePrecision||'unknown',source:'USER_FIXED',mode:m.transportMode||null});
+          ctx.hard_route_constraints.push(`${m.origin} → ${m.destination}${m.departureTime?` ${m.departureTime}`:''}${m.arrivalTime?`–${m.arrivalTime}`:''}`);
+          if(exact){cursor=timeShift(m.arrivalTime,transferArrivalMinutes(m.transportMode));location=m.destination;}
+          else {ctx.flexible_movement=true;location=m.destination;}
+          if(m.disposition!=='roundtrip'){ctx.end_location=m.destination;ctx.overnight_base=m.destination;}
+        }
+        if(m.disposition==='roundtrip'&&m.returnDepartureDate===ctx.date){
+          const exactRet=Boolean(m.returnDepartureTime&&m.returnArrivalTime),prepRet=exactRet?timeShift(m.returnDepartureTime,-transferPrepMinutes(m.returnTransportMode||m.transportMode)):'';
+          if(exactRet&&cursor&&prepRet&&cursor<prepRet)ctx.location_windows.push({location,start:cursor,end:prepRet,type:'plannable',day_trip:true});
+          ctx.fixed_transfers.push({origin:m.destination,destination:m.origin,departure:m.returnDepartureTime||null,arrival:m.returnArrivalTime||null,date:m.returnDepartureDate,time_precision:m.timePrecision||'unknown',source:'USER_FIXED',mode:m.returnTransportMode||m.transportMode||null});
+          ctx.hard_route_constraints.push(`${m.destination} → ${m.origin}${m.returnDepartureTime?` ${m.returnDepartureTime}`:''}${m.returnArrivalTime?`–${m.returnArrivalTime}`:''}`);
+          if(exactRet){cursor=timeShift(m.returnArrivalTime,transferArrivalMinutes(m.returnTransportMode||m.transportMode));location=m.origin;}
+          else location=m.origin;
+          ctx.end_location=m.origin;ctx.overnight_base=m.origin;
+        }
+      });
+      if(!dayMoves.length){ctx.location_windows.push({location:ctx.start_location,start:ctx._dayStart,end:ctx._dayEnd,type:'plannable'});}
+      else if(cursor&&ctx._dayEnd&&cursor<ctx._dayEnd&&!ctx.flexible_movement){ctx.location_windows.push({location,start:cursor,end:ctx._dayEnd,type:'plannable'});}
+      delete ctx._owner;delete ctx._dayStart;delete ctx._dayEnd;
+    });
+    return {schema_version:VERSION,parent_destination:destination.city,day_contexts:dayContexts,segments:movements,main_destination_transitions:[],trip_story_compiled:true};
+  }
+
   function compileForDestination(destination,model){
+    if(model?.trip_story?.stays?.length){const compiled=compileTripStoryContinuous(destination,model.trip_story,model);if(compiled)return compiled;}
     const baseISO=isoDate(destination.baseDate||'');
     const totalDays=Math.max(1,Number(destination.days||1));
     const dayContexts=Array.from({length:totalDays},(_,i)=>({
@@ -567,9 +611,10 @@
       let cursor=null, location=ctx.start_location, terminalReached=false;
       transfers.forEach(t=>{
         const availableStart=cursor||destination.perDay?.[ctx.day-1]?.start||null;
-        if(t.departure && availableStart && availableStart!==t.departure) ctx.location_windows.push({location,start:availableStart,end:t.departure});
+        const prepEnd=t.departure?timeShift(t.departure,-transferPrepMinutes(t.mode)):t.departure;
+        if(t.departure && availableStart && prepEnd && availableStart<prepEnd) ctx.location_windows.push({location,start:availableStart,end:prepEnd,type:'plannable',boundary_buffer:{kind:'pre_transfer',minutes:transferPrepMinutes(t.mode),mode:t.mode||null}});
         ctx.location_windows.push({location:`${t.origin} → ${t.destination}`,start:t.departure,end:t.arrival,type:'fixed_transfer',terminal_arrival:!!t.terminal_arrival});
-        cursor=t.arrival||cursor;location=t.destination;
+        cursor=t.arrival?timeShift(t.arrival,transferArrivalMinutes(t.mode)):cursor;location=t.destination;
         if(t.terminal_arrival) terminalReached=true;
         const owner=segments.find(seg=>seg.returnDepartureDate===ctx.date&&seg.returnArrivalTime===t.arrival&&norm(destination.city).toLowerCase()===norm(t.destination).toLowerCase());
         if(owner?.resumeTime && cursor && owner.resumeTime>cursor) cursor=owner.resumeTime;
@@ -595,6 +640,10 @@
   function placesForPreferences(savedDestinations=[],model){
     const result=[];
     const add=(name,meta={})=>{ const key=norm(name).toLowerCase(); if(!key||result.some(x=>x.key===key)) return; result.push({key,name:norm(name),...meta}); };
+    if(model?.trip_story?.stays?.length){
+      model.trip_story.stays.forEach(st=>{add(st.place,{type:'stay',country:st.country||'',dates:st.startDate||'',days:Number(st.days||1),nights:Math.max(0,Number(st.days||1)-1),routeArrivalTransport:st.transportMode||'recommend'});(st.dayTrips||[]).forEach(dt=>add(dt.place,{type:'daytrip',country:dt.country||st.country||'',nights:0,routeArrivalTransport:dt.outbound?.transportMode||'recommend'}));});
+      return result;
+    }
     savedDestinations.forEach(dest=>{
       add(dest.city,{type:'main',country:dest.country,dates:dest.baseDate,days:dest.days});
       const source=(model?.destinations||[]).find(x=>norm(x.city).toLowerCase()===norm(dest.city).toLowerCase());
