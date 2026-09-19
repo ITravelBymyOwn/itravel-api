@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.6";
+const CONTEXT_VERSION = "1.7-physical-stays";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -568,118 +568,83 @@ function accessEvidence(row) {
   return { hint: "", evidence: "" };
 }
 
+function rowPhysicalDestination(row, fallbackCity="") {
+  return clean(row?.physical_location || row?.commerce_context?.physical_destination || fallbackCity, 160);
+}
+
 function buildCandidates(trip, requestedCity) {
   const checkpoint = plain(trip?.itinerary_data);
   const itineraries = plain(checkpoint.itineraries);
-  const destinationNames = cityNames(trip);
-  const city = destinationNames.find(name => name.toLowerCase() === requestedCity.toLowerCase()) || "";
-
-  if (!city) return { city: "", candidates: [] };
-
-  const cityData = plain(itineraries[city]);
-  const byDay = plain(cityData.byDay);
+  const requestedKey = normalizeEntityKey(requestedCity);
   const candidates = [];
   const pendingContextNotes = new Map();
+  const physicalNames = new Set(cityNames(trip));
 
-  Object.keys(byDay)
-    .map(Number)
-    .filter(Number.isFinite)
-    .sort((a, b) => a - b)
-    .forEach(day => {
-      const rows = Array.isArray(byDay[day]) ? byDay[day] : [];
-      const substantive = rows
-        .map((row, index) => ({ row, index }))
-        .filter(({ row }) =>
-          row &&
-          typeof row === "object" &&
-          !isLowValueRow(row) &&
-          !isGenericTransferActivity(row?.activity)
-        );
+  for (const [sourceCity, rawCityData] of Object.entries(itineraries)) {
+    const byDay = plain(plain(rawCityData).byDay);
+    Object.values(byDay).forEach(rows => (Array.isArray(rows)?rows:[]).forEach(row=>{
+      const physical=rowPhysicalDestination(row,sourceCity);
+      if(physical) physicalNames.add(physical);
+      const cc=plain(row?.commerce_context);
+      if(cc.origin) physicalNames.add(clean(cc.origin,160));
+      if(cc.destination) physicalNames.add(clean(cc.destination,160));
+    }));
+  }
+  const destinationNames=[...physicalNames].filter(Boolean);
+  const matchedPhysicalName=destinationNames.find(name=>normalizeEntityKey(name)===requestedKey) || clean(requestedCity,160);
+  let matchedAny=false;
 
-      rows.forEach((row, index) => {
-        if (!row || typeof row !== "object") return;
-        if (isLowValueRow(row)) return;
+  for (const [sourceCity, rawCityData] of Object.entries(itineraries)) {
+    const byDay = plain(plain(rawCityData).byDay);
+    Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(day=>{
+      const rows=Array.isArray(byDay[day])?byDay[day]:[];
+      rows.forEach((row,index)=>{
+        if(!row||typeof row!=="object"||isLowValueRow(row)) return;
+        const cc=plain(row.commerce_context);
+        const semantic=clean(cc.semantic_type,80).toUpperCase();
+        const physical=rowPhysicalDestination(row,sourceCity);
+        const isTransport=semantic==="TRANSPORT";
+        const belongs=isTransport
+          ? normalizeEntityKey(cc.origin||row.from)===requestedKey
+          : normalizeEntityKey(physical)===requestedKey;
+        if(!belongs) return;
+        matchedAny=true;
 
-        const activity = normalizeActivity(row.activity, city);
-        if (!activity) return;
-
-        const transportInfo = detectTransportArrangement(row, destinationNames);
-        const genericTransfer = isGenericTransferActivity(row.activity);
-
-        if (genericTransfer && !transportInfo.significant) {
-          const destination = clean(row.to, 180);
-          const match = substantive.find(({ row: target }) =>
-            entityMatch(destination, target?.activity) ||
-            entityMatch(destination, target?.to) ||
-            entityMatch(activity, target?.activity)
-          );
-
-          if (match) {
-            const existingId = `${day}-${match.index + 1}`;
-            const existing = candidates.find(item => item.candidate_id === existingId);
-
-            if (existing) {
-              existing.context_notes = clean(
-                `${existing.context_notes || existing.notes || ""} ${clean(row.notes, 320)}`,
-                620
-              );
-              const evidence = accessEvidence({
-                activity: existing.activity,
-                notes: existing.context_notes
-              });
-              existing.access_hint = evidence.hint;
-              existing.access_evidence = evidence.evidence;
-            } else {
-              const pending = clean(
-                `${pendingContextNotes.get(existingId) || ""} ${clean(row.notes, 320)}`,
-                620
-              );
-              pendingContextNotes.set(existingId, pending);
-            }
-            return;
-          }
+        const activity=normalizeActivity(row.activity,physical||sourceCity);
+        if(!activity) return;
+        const transportInfo=detectTransportArrangement(row,destinationNames);
+        const genericTransfer=isGenericTransferActivity(row.activity);
+        if(genericTransfer&&!transportInfo.significant){
+          const destination=clean(row.to,180);
+          if(destination) pendingContextNotes.set(`${sourceCity}:${day}:${index+1}`,clean(row.notes,320));
+          return;
         }
-
-        const destination = clean(row.to, 180);
-        const entityHint = genericTransfer && destination ? destination : activity;
-
-        const candidateId = `${day}-${index + 1}`;
-        const ownNotes = clean(row.notes, 320).replace(/^valid:\s*/i, "");
-        const contextNotes = clean(
-          `${pendingContextNotes.get(candidateId) || ""} ${ownNotes}`,
-          620
-        );
+        const candidateId=`${normalizeEntityKey(sourceCity)||'unit'}-${day}-${index+1}`;
+        const destination=clean(row.to,180);
+        const entityHint=destination||clean(cc.canonical_place,180)||activity;
+        const ownNotes=clean(row.notes,320).replace(/^valid:\s*/i,"");
+        const contextNotes=clean(`${pendingContextNotes.get(candidateId)||""} ${ownNotes}`,620);
         pendingContextNotes.delete(candidateId);
-        const evidence = accessEvidence({ activity, notes: contextNotes });
-
+        const evidence=accessEvidence({activity,notes:contextNotes});
         candidates.push({
-          candidate_id: candidateId,
-          day,
-          activity,
-          entity_hint: entityHint,
-          notes: ownNotes,
-          context_notes: contextNotes,
-          from: clean(row.from, 160),
-          to: destination,
-          transport: clean(row.transport, 120),
-          intercity_hint: transportInfo.intercity,
-          transport_arrangement_hint: transportInfo.significant,
-          explicit_tour_hint: explicitTourHint(row),
-          commerce_semantic_type: clean(row?.commerce_context?.semantic_type, 80).toUpperCase(),
-          commerce_ticket_need: clean(row?.commerce_context?.ticket_need, 40).toLowerCase(),
-          commerce_guided_tour_value: clean(row?.commerce_context?.guided_tour_value, 40).toLowerCase(),
-          commerce_canonical_place: clean(row?.commerce_context?.canonical_place, 180),
-          access_hint: evidence.hint || (String(row?.commerce_context?.semantic_type||'').toUpperCase()==='ATTRACTION_TICKET' ? (String(row?.commerce_context?.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended') : ''),
-          access_evidence: evidence.evidence || clean(row?.commerce_context?.canonical_place||row?.activity,260)
+          candidate_id:candidateId,day,activity,entity_hint:entityHint,notes:ownNotes,context_notes:contextNotes,
+          from:clean(row.from,160),to:destination,transport:clean(row.transport,120),
+          physical_destination:physical,source_planning_unit:sourceCity,
+          intercity_hint:transportInfo.intercity,transport_arrangement_hint:transportInfo.significant,
+          explicit_tour_hint:explicitTourHint(row),
+          commerce_semantic_type:semantic,
+          commerce_ticket_need:clean(cc.ticket_need,40).toLowerCase(),
+          commerce_guided_tour_value:clean(cc.guided_tour_value,40).toLowerCase(),
+          commerce_canonical_place:clean(cc.canonical_place,180),
+          access_hint:evidence.hint||(semantic==='ATTRACTION_TICKET'?(String(cc.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended'):''),
+          access_evidence:evidence.evidence||clean(cc.canonical_place||row.activity,260)
         });
       });
     });
-
-  return {
-    city,
-    candidates: candidates.slice(0, MAX_CANDIDATES)
-  };
+  }
+  return {city:matchedAny?matchedPhysicalName:"",candidates:candidates.slice(0,MAX_CANDIDATES)};
 }
+
 function systemPrompt(language, itineraryLanguage = "") {
   const outputLanguage = normalizeUiLanguage(language) === "en" ? "English" : "Spanish";
   const sourceLanguage = itineraryLanguage || "unknown / mixed";
