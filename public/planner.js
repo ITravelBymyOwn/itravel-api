@@ -12096,7 +12096,7 @@ function applyTravelBuilderWorkspaceCopy(){
 function updateTravelBuilderProgress(){
   const items=qsa('.planner-stage-nav__item');
   if(!items.length) return;
-  const hasRoute=qsa('.city-row','#city-list').some(row=>{
+  const hasRoute=qsa('#city-list .city-row').some(row=>{
     return Boolean(qs('.country',row)?.value?.trim() && qs('.city',row)?.value?.trim() && qs('.days',row)?.value && qs('.baseDate',row)?.value);
   });
   const hasTravelers=Boolean(qs('#traveler-mode')?.value);
