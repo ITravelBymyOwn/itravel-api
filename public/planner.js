@@ -6150,12 +6150,18 @@ function _hasCriticalAuditErrors_(report={}){
   return (report?.errors||[]).some(error=>_auditSeverity_(error)>=10);
 }
 
-function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',routeContextOverride=undefined){
+function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',routeContextOverride=undefined,expectedDaysOverride=undefined){
   const errors=[];
   const byDay=_rowsByDayObject_(rows);
   const seenPois=[];
+  // Local Stay QA may cover non-contiguous GLOBAL trip-day numbers. Never infer
+  // missing days from the legacy parent planning-unit span when an explicit stay
+  // day set is supplied. Global/full-trip callers keep the historical 1..N rule.
+  const expectedAuditDays=Array.isArray(expectedDaysOverride) && expectedDaysOverride.length
+    ? [...new Set(expectedDaysOverride.map(Number).filter(day=>Number.isInteger(day)&&day>=1&&day<=Number(totalDays)))].sort((a,b)=>a-b)
+    : Array.from({length:Number(totalDays)||0},(_,i)=>i+1);
 
-  for(let day=1;day<=totalDays;day++){
+  for(const day of expectedAuditDays){
     const dayRows=byDay[day]||[];
     if(!dayRows.length) errors.push({code:'MISSING_DAY',day});
 
@@ -7041,12 +7047,12 @@ function _v3NormalizeTransportRecommendation_(row={}){
   };
 }
 
-function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined){
+function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract);
   const master=_v3SyntheticMaster_(totalDays);
   const removed=[];
   for(let pass=0;pass<5;pass++){
-    const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride);
+    const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
     const errors=report?.errors||[];
     let changed=false;
     const byDay=_rowsByDayObject_(out);
@@ -7106,7 +7112,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     out=_v3EnforceHardRouteFacts_(out,contract);
     if(!changed) break;
   }
-  const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride);
+  const report=_localGlobalAudit_(city,out,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
   if(removed.length) console.info(`[ITBMO V3 NORMALIZE] ${city}: deterministic duplicate cleanup`,removed);
   console.info(`[ITBMO V3 NORMALIZE] ${city}`,_v3AuditSummary_(report));
   return {rows:out,report};
@@ -7118,7 +7124,7 @@ async function _v3Call_(prompt){
   return _callPlannerSystemPrompt_(prompt,false,'planner_v3');
 }
 
-function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays){
+function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays,expectedDaysOverride=undefined){
   if(!parsed) return [];
   const maxDay=Math.max(1,Number(totalDays)||1);
   let rows=[];
@@ -7150,7 +7156,10 @@ function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays){
   }
 
   const valid=rows.filter(r=>Number(r?.day)>=1&&Number(r?.day)<=maxDay);
-  console.info(`[ITBMO V3 IDENTITY] ${planningUnit}: accepted rows by planning-unit day; physical city labels are not used as membership filters`,_v3Coverage_(valid,maxDay));
+  const identityCoverage=Array.isArray(expectedDaysOverride)&&expectedDaysOverride.length
+    ? _v3CoverageForDays_(valid,expectedDaysOverride,maxDay)
+    : _v3Coverage_(valid,maxDay);
+  console.info(`[ITBMO V3 IDENTITY] ${planningUnit}: accepted rows by authoritative global day; physical city labels are not membership filters`,identityCoverage);
   return valid;
 }
 
@@ -7308,7 +7317,7 @@ Return valid city_day JSON only. Do not ask questions.
 `.trim();
   const raw=await _v3Call_(prompt);
   const parsed=parseJSON(raw);
-  const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,contract.planning_unit,totalDays));
+  const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unit.base_destination||unit.physical_destination,totalDays,unit.days));
   return _v3StampStayRows_(rows,unit);
 }
 
@@ -7317,6 +7326,10 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   const unitDaySet=new Set(unitDays);
   const unitCity=unit.base_destination||unit.physical_destination||contract.planning_unit;
   const unitStartDate=unit.windows?.find(w=>w?.date)?.date||baseDate||'';
+  // Audit rows keep GLOBAL trip-day numbers, so daylight/date-sensitive QA must
+  // retain the trip base date. Using the stay start date with a global day index
+  // would double-offset later stays (for example Paris on global day 7).
+  const unitAuditBaseDate=baseDate||unitStartDate;
   const scopedRouteDays=(contract.route_days||[]).filter(d=>unitDaySet.has(Number(d.day))).map(day=>({
     ...day,
     // The model never owns inter-stay movements. Local Stay QA therefore audits
@@ -7357,12 +7370,12 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     });
     return {...report,errors};
   };
-  const audit=(rows)=>filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitStartDate,false));
+  const audit=(rows)=>filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitAuditBaseDate,false,unitDays));
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
   // Reuse deterministic arithmetic/duplicate cleanup, but only against this Stay
   // Unit's own physical windows. No other destination can create QA findings here.
-  let normalized=_v3DeterministicQualityCleanup_(unitCity,rows,scopedContract,totalDays,scopedPerDay,unitStartDate,false);
+  let normalized=_v3DeterministicQualityCleanup_(unitCity,rows,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
   rows=_v3StampStayRows_(normalized.rows,unit);
   let report=audit(rows);
   let material=_v3MaterialAuditErrors_(report);
@@ -7390,9 +7403,9 @@ Rebuild ONLY this stay card. Keep every row inside its supplied planning_window,
 `.trim();
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
-    const candidate=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays)),unit);
+    const candidate=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays,unitDays)),unit);
     if(!candidate.length){stagnant+=1;continue;}
-    normalized=_v3DeterministicQualityCleanup_(unitCity,candidate,scopedContract,totalDays,scopedPerDay,unitStartDate,false);
+    normalized=_v3DeterministicQualityCleanup_(unitCity,candidate,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
     const nextRows=_v3StampStayRows_(normalized.rows,unit);
     const nextReport=audit(nextRows);
     const before=_auditScore_(report),after=_auditScore_(nextReport);
@@ -7461,6 +7474,16 @@ IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the ph
   const parsed=parseJSON(raw);
   const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,dest.days));
   return {rows,contract};
+}
+
+function _v3CoverageForDays_(rows=[],expectedDays=[],totalDays=1){
+  const maxDay=Math.max(1,Number(totalDays)||1);
+  const expected=[...new Set((expectedDays||[]).map(Number).filter(d=>Number.isInteger(d)&&d>=1&&d<=maxDay))].sort((a,b)=>a-b);
+  const expectedSet=new Set(expected);
+  const received=[...new Set((rows||[]).map(r=>Number(r?.day)).filter(d=>expectedSet.has(d)))].sort((a,b)=>a-b);
+  const missing=expected.filter(d=>!received.includes(d));
+  const counts=Object.fromEntries(expected.map(d=>[d,(rows||[]).filter(r=>Number(r?.day)===d).length]));
+  return {expected,received,missing,counts,rowCount:(rows||[]).length};
 }
 
 function _v3Coverage_(rows=[],totalDays=1){
