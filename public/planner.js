@@ -4799,6 +4799,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
     kind,
     physical_location:String(r.physical_location ?? r.physicalLocation ?? commerceContext?.physical_destination ?? '').trim() || null,
     stay_unit_id:String(r.stay_unit_id ?? r.stayUnitId ?? '').trim() || null,
+    planning_window_id:String(r.planning_window_id ?? r.planningWindowId ?? '').trim() || null,
     commerce_context:commerceContext
   }));
 }
@@ -6844,7 +6845,8 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
         overnight_base:terminalOnly?city:(day.overnight_base||day.end_location||city),
         terminal_arrival_only:terminalOnly,
         terminal_destination:terminalDestination,
-        location_windows:(day.location_windows||[]).map(w=>({
+        location_windows:(day.location_windows||[]).map((w,windowIndex)=>({
+          window_id:w.window_id||`day-${dayNum}-window-${windowIndex+1}`,
           location:w.location||null,
           start:w.start||null,
           end:w.end||null,
@@ -6968,7 +6970,7 @@ function _v3AuditSummary_(report={}){
 
 function _v3HardBlockingCodes_(){
   return new Set([
-    'MISSING_DAY','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
+    'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE',
     'INVENTED_DEPARTURE_LOGISTICS'
@@ -6997,6 +6999,31 @@ function _v3BlockingAuditErrors_(report){
 }
 
 
+function _v3UsefulPlanningWindow_(w={}){
+  const start=_hhmmToMinutes_(w?.start),end=_hhmmToMinutes_(w?.end);
+  // Coverage is a hard gate only for substantial usable windows. Very short or
+  // late-arrival fragments remain physically valid without forcing filler.
+  if(w?.minimum_useful_target) return true;
+  if(w?.open_end) return start==null||start<21*60;
+  return start!=null&&end!=null&&end>start&&(end-start)>=90;
+}
+
+function _v3PhysicalWindowCoverage_(rows=[],units=[]){
+  const expected=[];
+  (units||[]).forEach(unit=>(unit.windows||[]).forEach(w=>{
+    if(!_v3UsefulPlanningWindow_(w)) return;
+    expected.push({window_id:w.window_id,stay_unit_id:unit.id,day:Number(w.day),location:w.location,start:w.start,end:w.end,open_end:Boolean(w.open_end)});
+  }));
+  const received=new Set();
+  (rows||[]).forEach(row=>{
+    if(String(row?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT'||_isPureTransportRow_(row)) return;
+    const id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'').trim();
+    if(id) received.add(`${row.stay_unit_id||''}|${id}`);
+  });
+  const missing=expected.filter(w=>!received.has(`${w.stay_unit_id||''}|${w.window_id||''}`));
+  return {expected,received:[...received],missing,expectedCount:expected.length,receivedCount:expected.length-missing.length};
+}
+
 // Final trip gate for the independent-Stay architecture. Local Stay QA already
 // owns semantic continuity and within-stay itinerary quality. The merge gate must
 // validate only deterministic physical integrity against the Route Compiler facts.
@@ -7010,6 +7037,8 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   const routeDays=new Map((contract?.route_days||[]).map(d=>[Number(d.day),d]));
   const units=_v3BuildPhysicalStayUnits_(contract);
   const unitById=new Map(units.map(u=>[String(u.id),u]));
+  const windowCoverage=_v3PhysicalWindowCoverage_(rows,units);
+  windowCoverage.missing.forEach(w=>errors.push({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`}));
 
   for(let day=1;day<=maxDay;day++){
     const dayRows=[...(byDay[day]||[])].sort((a,b)=>(_hhmmToMinutes_(a.start)??99999)-(_hhmmToMinutes_(b.start)??99999));
@@ -7256,28 +7285,93 @@ function _v3PhysicalKey_(value){
 function _v3BuildPhysicalStayUnits_(contract={}){
   const routeDays=[...(contract.route_days||[])].sort((a,b)=>Number(a.day)-Number(b.day));
   const storyStays=(contract.trip_story_stays||[]).filter(st=>st?.place&&st?.startDate);
-  const transfers=routeDays.flatMap(d=>(d.fixed_transfers||[]).map(t=>({...t,day:Number(d.day),date:d.date||null})));
+  const transfers=routeDays.flatMap(d=>(d.fixed_transfers||[]).map((t,transferIndex)=>({...t,transfer_id:t.transfer_id||`day-${Number(d.day)}-transfer-${transferIndex+1}`,day:Number(d.day),date:d.date||null})));
+  const findBoundaryTransfer=(origin,destination,targetDate)=>{
+    const candidates=transfers.filter(t=>_arePoiAliases_(t.origin,origin)&&_arePoiAliases_(t.destination,destination));
+    candidates.sort((a,b)=>{
+      const as=String(a.date||'')===String(targetDate||'')?1:0,bs=String(b.date||'')===String(targetDate||'')?1:0;
+      return bs-as||String(b.date||'').localeCompare(String(a.date||''))||String(b.departure||'').localeCompare(String(a.departure||''));
+    });
+    return candidates[0]||null;
+  };
 
-  // Trip Story is authoritative: ONE generation unit per stay card. A Day Trip
-  // is an internal physical excursion of that stay, never a separate stay.
+  // PHYSICAL WINDOW OWNERSHIP MODEL
+  // A calendar day is NOT owned by one destination. The same global day may
+  // legitimately contain windows for two Stay Units (Paris -> Bruges), while a
+  // Day Trip window (Versailles) remains owned by its parent Paris Stay Unit.
+  // Therefore Stay membership is derived from physical windows, not merely from
+  // the Stay Card's date range.
   if(storyStays.length){
-    return storyStays.map((st,index)=>{
+    const descriptors=storyStays.map((st,index)=>{
       const startISO=String(st.startDate||'');
-      const stayDates=new Set(Array.from({length:Math.max(1,Number(st.days||1))},(_,i)=>_tripStoryAddDays_(startISO,i)));
-      const stayDays=routeDays.filter(d=>stayDates.has(String(d.date||'')));
-      const windows=[];
-      stayDays.forEach(day=>(day.location_windows||[]).forEach(w=>{
-        if(w?.type==='fixed_transfer') return;
-        const location=String(w?.location||st.place||'').trim();
-        if(!location||/\s[→>]\s/.test(location)) return;
-        windows.push({day:Number(day.day),date:day.date||null,location,start:w.start||null,end:w.end||null,open_end:Boolean(w.open_end),minimum_useful_target:w.minimum_useful_target||null,day_trip:!_arePoiAliases_(location,st.place)});
+      const dates=new Set(Array.from({length:Math.max(1,Number(st.days||1))},(_,i)=>_tripStoryAddDays_(startISO,i)));
+      const dayTrips=(st.dayTrips||[]).map(dt=>({
+        ...dt,
+        expected_date:startISO?_tripStoryAddDays_(startISO,Math.max(0,Number(dt.day||1)-1)):null
       }));
-      const days=[...new Set(stayDays.map(d=>Number(d.day)))].sort((a,b)=>a-b);
-      const firstDay=days[0],lastDay=days.at(-1);
       const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
-      const inbound=transfers.find(t=>t.day===firstDay&&previous&&_arePoiAliases_(t.origin,previous.place)&&_arePoiAliases_(t.destination,st.place))||null;
-      const outbound=transfers.find(t=>t.day===lastDay&&next&&_arePoiAliases_(t.origin,st.place)&&_arePoiAliases_(t.destination,next.place))||null;
-      const allowed=[...new Set([st.place,...windows.map(w=>w.location)].filter(Boolean))];
+      // Prefer the shared transition date. This prevents an earlier Day Trip to
+      // the next city from being mistaken for the actual inter-stay boundary.
+      const inbound=previous?findBoundaryTransfer(previous.place,st.place,startISO):null;
+      const outbound=next?findBoundaryTransfer(st.place,next.place,String(next.startDate||'')):null;
+      return {st,index,dates,dayTrips,inbound,outbound};
+    });
+
+    // Every non-transfer physical window gets exactly one Stay owner. Ownership
+    // is based on physical location + calendar eligibility. This allows two Stay
+    // Units to share Day N without either stealing the other's window.
+    const ownedWindows=new Map(descriptors.map(d=>[d.index,[]]));
+    routeDays.forEach(day=>{
+      (day.location_windows||[]).forEach((w,windowIndex)=>{
+        if(w?.type==='fixed_transfer') return;
+        const location=String(w?.location||'').trim();
+        if(!location||/\s[→>]\s/.test(location)) return;
+        const date=String(day.date||'');
+        const candidates=[];
+        descriptors.forEach(d=>{
+          if(!d.dates.has(date)) return;
+          const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+          const inboundMinute=d.inbound&&String(d.inbound.date||'')===date?_hhmmToMinutes_(d.inbound.arrival):null;
+          const outboundMinute=d.outbound&&String(d.outbound.date||'')===date?_hhmmToMinutes_(d.outbound.departure):null;
+          // Same-day Stay transitions can make two cards share the same date and
+          // even the same city name. Boundary times disambiguate ownership.
+          if(inboundMinute!=null&&ws!=null&&ws<inboundMinute) return;
+          if(outboundMinute!=null&&we!=null&&we>outboundMinute) return;
+          let score=0,role=null;
+          if(_arePoiAliases_(location,d.st.place)){score=100;role='BASE';}
+          d.dayTrips.forEach(dt=>{
+            if(dt?.place&&_arePoiAliases_(location,dt.place)){
+              const dateScore=!dt.expected_date||dt.expected_date===date?130:105;
+              if(dateScore>score){score=dateScore;role='DAY_TRIP';}
+            }
+          });
+          if(score) candidates.push({descriptor:d,score,role});
+        });
+        candidates.sort((a,b)=>b.score-a.score||a.descriptor.index-b.descriptor.index);
+        const owner=candidates[0];
+        if(!owner) return;
+        const windowId=w.window_id||`day-${Number(day.day)}-window-${windowIndex+1}`;
+        ownedWindows.get(owner.descriptor.index).push({
+          window_id:windowId,
+          day:Number(day.day),date:day.date||null,location,
+          start:w.start||null,end:w.end||null,open_end:Boolean(w.open_end),
+          minimum_useful_target:w.minimum_useful_target||null,
+          day_trip:owner.role==='DAY_TRIP',role:owner.role||'BASE'
+        });
+      });
+    });
+
+    return descriptors.map(d=>{
+      const {st,index,dayTrips}=d;
+      const windows=(ownedWindows.get(index)||[]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+      const days=[...new Set(windows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b);
+      const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
+      // Boundary movements are authoritative and may live on a day shared by both
+      // adjacent stays. They were resolved before window ownership so repeated
+      // same-city stays on one date remain distinguishable.
+      const inbound=d.inbound||null;
+      const outbound=d.outbound||null;
+      const allowed=[...new Set([st.place,...dayTrips.map(x=>x.place),...windows.map(w=>w.location)].filter(Boolean))];
       return {
         id:st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`,
         sequence:index+1,
@@ -7285,7 +7379,7 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         base_destination:st.place,
         physical_key:_v3PhysicalKey_(st.place),
         allowed_physical_locations:allowed,
-        day_trips:(st.dayTrips||[]).map(x=>({...x})),
+        day_trips:dayTrips.map(({expected_date,...x})=>x),
         windows,days,
         previous_destination:previous?.place||null,next_destination:next?.place||null,
         inbound_boundary:inbound,outbound_boundary:outbound
@@ -7298,13 +7392,14 @@ function _v3BuildPhysicalStayUnits_(contract={}){
   let current=null, sequence=0;
   for(const day of routeDays){
     const timeline=[...(day.location_windows||[])].sort((a,b)=>String(a.start||'99:99').localeCompare(String(b.start||'99:99')));
-    for(const window of timeline){
+    for(let windowIndex=0;windowIndex<timeline.length;windowIndex++){
+      const window=timeline[windowIndex];
       if(window?.type==='fixed_transfer'){current=null;continue;}
       const location=String(window?.location||day?.start_location||contract.planning_unit||'').trim();
       if(!location || /\s[→>]\s/.test(location)) continue;
       const key=_v3PhysicalKey_(location); if(!key) continue;
       if(!current||current.physical_key!==key){sequence+=1;current={id:`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(sequence).padStart(2,'0')}`,sequence,physical_destination:location,base_destination:location,physical_key:key,allowed_physical_locations:[location],day_trips:[],windows:[],days:new Set()};units.push(current);}
-      current.windows.push({day:Number(day.day),date:day.date||null,location,start:window.start||null,end:window.end||null,open_end:Boolean(window.open_end),minimum_useful_target:window.minimum_useful_target||null});
+      current.windows.push({window_id:window.window_id||`day-${Number(day.day)}-window-${windowIndex+1}`,day:Number(day.day),date:day.date||null,location,start:window.start||null,end:window.end||null,open_end:Boolean(window.open_end),minimum_useful_target:window.minimum_useful_target||null,role:'BASE'});
       current.days.add(Number(day.day));
     }
   }
@@ -7314,8 +7409,8 @@ function _v3BuildPhysicalStayUnits_(contract={}){
 function _v3StayContract_(contract,unit){
   const days=new Set(unit.days||[]);
   return {
-    version:'ITBMO_PHYSICAL_STAY_CONTRACT_V1',
-    parent_planning_unit:contract.planning_unit,
+    version:'ITBMO_PHYSICAL_STAY_CONTRACT_V2',
+    trip_context_id:contract.trip_context_id||'continuous-trip',
     stay_unit_id:unit.id,
     sequence:unit.sequence,
     physical_destination:unit.physical_destination,
@@ -7349,16 +7444,21 @@ function _v3StampStayRows_(rows=[],unit={}){
   const windows=unit.windows||[];
   return (rows||[]).flatMap(row=>{
     const day=Number(row?.day),start=_hhmmToMinutes_(row?.start),end=_hhmmToMinutes_(row?.end);
-    const window=windows.find(w=>{
+    const candidates=windows.filter(w=>{
       if(Number(w.day)!==day) return false;
       const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
-      if(start==null||end==null) return false;
+      if(start==null||end==null||end<=start) return false;
+      // Half-open interval semantics: [start,end). Touching a boundary is valid.
       if(ws!=null&&start<ws) return false;
       return we==null||end<=we;
+    }).sort((a,b)=>{
+      const as=_hhmmToMinutes_(a.start)??-1,bs=_hhmmToMinutes_(b.start)??-1;
+      return Math.abs(start-bs)-Math.abs(start-as);
     });
+    const window=candidates[0];
     if(!window) return [];
     const physical=window.location||unit.base_destination||unit.physical_destination;
-    return [{...row,physical_location:physical,stay_unit_id:unit.id,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id}}];
+    return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null}}];
   });
 }
 
@@ -7380,7 +7480,7 @@ function _v3AnnotatePhysicalRows_(rows=[],contract={},units=[]){
     }));
     if(!unit) return row;
     const physical=matchedWindow?.location||unit.base_destination||unit.physical_destination;
-    return {...row,physical_location:physical,stay_unit_id:unit.id,commerce_context:{...cc,physical_destination:physical,stay_unit_id:unit.id}};
+    return {...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:matchedWindow?.window_id||row.planning_window_id||null,commerce_context:{...cc,physical_destination:physical,stay_unit_id:unit.id,planning_window_id:matchedWindow?.window_id||row.planning_window_id||null}};
   });
 }
 
@@ -7423,7 +7523,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // inserted once, after all independent Stay Units have passed their own QA.
     fixed_transfers:[],
     location_windows:(unit.windows||[]).filter(w=>Number(w.day)===Number(day.day)).map(w=>({
-      location:w.location||unitCity,start:w.start||null,end:w.end||null,
+      window_id:w.window_id||null,location:w.location||unitCity,start:w.start||null,end:w.end||null,
       type:'plannable',open_end:Boolean(w.open_end),terminal_arrival:false
     }))
   }));
@@ -7539,7 +7639,7 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
   // Deterministic merger: model outputs never decide trip order or inter-stay
   // movements. Flatten in Trip Story sequence, then insert the authoritative
   // boundaries exactly once and sort by global day/time.
-  let rows=_dedupeRows_(results.flatMap(result=>result?.rows||[]));
+  let rows=_v3DedupeMergedStayRows_(results.flatMap(result=>result?.rows||[]));
   rows=_v3EnforceHardRouteFacts_(rows,contract);
   rows=_v3AnnotatePhysicalRows_(rows,contract,units)
     .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
@@ -7560,6 +7660,17 @@ IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the ph
   const parsed=parseJSON(raw);
   const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,dest.days));
   return {rows,contract};
+}
+
+function _v3DedupeMergedStayRows_(rows=[]){
+  const seen=new Set(),out=[];
+  for(const row of (rows||[])){
+    const r=normalizeRow(row,Number(row?.day||1));
+    const exact=[Number(r.day),r.start,r.end,_canonicalText_(r.activity),_canonicalText_(r.from),_canonicalText_(r.to),String(r.stay_unit_id||''),String(r.planning_window_id||'')].join('|');
+    if(seen.has(exact)) continue;
+    seen.add(exact);out.push(r);
+  }
+  return out.sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
 }
 
 function _v3CoverageForDays_(rows=[],expectedDays=[],totalDays=1){
@@ -7718,7 +7829,9 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     // not re-run trip-wide semantic repair, which would couple independent stays
     // and recreate the historical "everything belongs to Madrid" behavior.
     const coverage=_v3Coverage_(rows,dest.days);
+    const physicalWindowCoverage=_v3PhysicalWindowCoverage_(rows,generated.units||[]);
     console.info(`[ITBMO V3 MERGE COVERAGE] trip`,coverage);
+    console.info(`[ITBMO V3 MERGE WINDOW COVERAGE] trip`,physicalWindowCoverage);
     if(coverage.missing.length){
       const error=new Error(`V3_INCOMPLETE_AFTER_STAY_MERGE:missing_days=${coverage.missing.join(',')}:rows=${coverage.rowCount}`);
       error.v3Coverage=coverage;
