@@ -127,6 +127,10 @@ function isTourAlternativeEligible(row){
   const lowValue=/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|hotel|alojamiento|accommodation|check in|check out|tiempo libre|free time|descanso|rest)\b/i;
   const logisticsOnly=/^(traslado|transfer|salida hacia|llegada a|llegada|departure|arrival|conduccion|drive|recoger|devolver|pickup|drop off|dropoff|check in|check out)\b/i;
   if(lowValue.test(key) || logisticsOnly.test(key)) return false;
+  const semantic=String(row?.commerce_context?.semantic_type||'').toUpperCase();
+  // Commerce derivation is fail-closed: only sightseeing/experience semantics
+  // may become a tour. Unknown, restaurant and logistics rows never do.
+  if(!['ATTRACTION_TICKET','TOUR_EXPERIENCE','FREE_SIGHT'].includes(semantic)) return false;
   return true;
 }
 function tourAlternativesForCity(cityName,existingNeeds=[]){
@@ -262,6 +266,11 @@ function localTicketNeedsForCity(cityName,existing=[]){
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const key=normalizeWorkspaceEntity(canonical);
     if(!key||existingKeys.has(key))return;
+    // Ticket cards are fail-closed. Reservation language in a restaurant,
+    // lodging or logistics note is not attraction-admission evidence.
+    if(['RESTAURANT','LOGISTICS','FREE_SIGHT','NONE','TRANSPORT'].includes(semantic))return;
+    const activityKey=normalizeWorkspaceEntity(activity);
+    if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|cafe|alojamiento|hotel|check in|check out)\b/i.test(activityKey))return;
     const explicitRequired=semantic==='ATTRACTION_TICKET'&&ticket==='required';
     const explicitRecommended=semantic==='ATTRACTION_TICKET'&&['recommended','optional','unknown'].includes(ticket);
     const noteRequired=/\b(entrada|ticket|billete|boleto).{0,45}\b(necesari|required|obligatori|imprescindible)\b|\b(requiere|requires?).{0,35}\b(entrada|ticket|admission)\b/i.test(notes);
