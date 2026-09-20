@@ -3690,6 +3690,27 @@ function _normalizePoiKey_(value=''){
   return String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[’'\"]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
 }
 
+function _authoritativePhysicalLocationForRow_(row,ctx={},fallback=''){
+  const same=(a,b)=>_arePoiAliases_(String(a||''),String(b||''));
+  const transfers=(ctx.fixed_transfers||[]).filter(t=>t?.origin&&t?.destination).slice().sort((a,b)=>String(a.departure||'99:99').localeCompare(String(b.departure||'99:99')));
+  const exact=transfers.find(t=>String(t.departure||'')===String(row?.start||'')&&String(t.arrival||'')===String(row?.end||'')&&same(row?.from,t.origin)&&same(row?.to,t.destination));
+  if(exact)return {place:exact.origin,transfer:exact};
+  const rs=_hhmmToMinutes_(row?.start),re=_hhmmToMinutes_(row?.end);
+  const windows=(ctx.location_windows||[]).filter(w=>w?.type!=='fixed_transfer'&&w?.location);
+  const matched=windows.find(w=>{
+    const ws=_hhmmToMinutes_(w.start),we=_hhmmToMinutes_(w.end);
+    return rs!=null && ws!=null && rs>=ws && (we==null || re==null || re<=we);
+  });
+  if(matched)return {place:String(matched.location||fallback).trim(),window:matched};
+  // Generated physical labels are advisory only. Accept one only when it is a
+  // member of the deterministic route compiler's physical locations.
+  const explicit=String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim();
+  if(explicit && windows.some(w=>same(w.location,explicit)))return {place:explicit};
+  let place=String(ctx.start_location||fallback||'').trim();
+  if(rs!=null)transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=String(t.destination||place).trim();});
+  return {place:place||explicit||String(fallback||'').trim()};
+}
+
 function _workspaceSnapshotViews_(){
   const views=new Map();
   const ensure=(name,country='')=>{
@@ -3737,16 +3758,9 @@ function _workspaceSnapshotViews_(){
       const terminalArrival=_hhmmToMinutes_(terminal?.arrival);
       (Array.isArray(byDay[dayNum])?byDay[dayNum]:[]).forEach(row=>{
         const rs=_hhmmToMinutes_(row?.start),re=_hhmmToMinutes_(row?.end);
-        const exactTransfer=transfers.find(t=>String(t.departure||'')===String(row?.start||'')&&String(t.arrival||'')===String(row?.end||'')&&_arePoiAliases_(row?.from,t.origin)&&_arePoiAliases_(row?.to,t.destination));
-        if(exactTransfer){ addRow(exactTransfer.origin,date,row,sourceUnit); return; }
         if(terminalArrival!=null && rs!=null && rs>=terminalArrival) return;
-        let place=String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim() || ctx.start_location||sourceUnit;
-        const window=(ctx.location_windows||[]).find(w=>w?.type!=='fixed_transfer'&&w?.location&&rs!=null&&_hhmmToMinutes_(w.start)!=null&&rs>=_hhmmToMinutes_(w.start)&&(w.end==null||re==null||re<=_hhmmToMinutes_(w.end)));
-        if(!String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim() && window) place=window.location;
-        else if(rs!=null){
-          transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=t.destination;});
-        }
-        addRow(place,date,row,sourceUnit);
+        const resolved=_authoritativePhysicalLocationForRow_(row,ctx,sourceUnit);
+        addRow(resolved.place,date,{...row,physical_location:resolved.place,commerce_context:{...(row?.commerce_context||{}),physical_destination:resolved.place}},sourceUnit);
       });
     });
   });
@@ -4796,6 +4810,15 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const safeTo = String(to||'').trim();
   const safeTransport = String(trans||'').trim();
   const safeNotes = String(notes||'').trim();
+  let safeCommerce=commerceContext ? {...commerceContext} : null;
+  if(safeCommerce){
+    const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
+    if(/\b(desayuno|almuerzo|comida|cena|breakfast|lunch|dinner|brunch|restaurante|restaurant|brasserie|trattoria|osteria|cafe|cafeteria)\b/i.test(semanticText)){
+      safeCommerce.semantic_type='RESTAURANT';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
+    }else if(/^(traslado|transfer|regreso|retorno|llegada|salida|check in|check out)\b/i.test(semanticText)){
+      safeCommerce.semantic_type='LOGISTICS';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
+    }
+  }
 
   return _reconcileRowTimeline_(_enforceMinimumDwell_({
     day:d,
@@ -4811,7 +4834,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
     physical_location:String(r.physical_location ?? r.physicalLocation ?? commerceContext?.physical_destination ?? '').trim() || null,
     stay_unit_id:String(r.stay_unit_id ?? r.stayUnitId ?? '').trim() || null,
     planning_window_id:String(r.planning_window_id ?? r.planningWindowId ?? '').trim() || null,
-    commerce_context:commerceContext
+    commerce_context:safeCommerce
   }));
 }
 
@@ -6984,7 +7007,8 @@ function _v3HardBlockingCodes_(){
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE',
-    'INVENTED_DEPARTURE_LOGISTICS'
+    'INVENTED_DEPARTURE_LOGISTICS','END_BEFORE_MINIMUM_TARGET',
+    'ROUTE_WINDOW_UNDERUSED','REGIONAL_DAY_TOO_THIN'
   ]);
 }
 
@@ -7419,6 +7443,10 @@ function _v3BuildPhysicalStayUnits_(contract={}){
 
 function _v3StayContract_(contract,unit){
   const days=new Set(unit.days||[]);
+  const placePreference=Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null;
+  const unitLodging=placePreference
+    ? (placePreference.lodgingChoice==='recommend' ? 'recommend me' : (placePreference.lodgingText||placePreference.lodgingChoice||null))
+    : (_arePoiAliases_(unit.base_destination||unit.physical_destination,contract.planning_unit)?contract.lodging_base:null);
   return {
     version:'ITBMO_PHYSICAL_STAY_CONTRACT_V2',
     trip_context_id:contract.trip_context_id||'continuous-trip',
@@ -7431,8 +7459,8 @@ function _v3StayContract_(contract,unit){
     itinerary_language:contract.itinerary_language,
     planning_windows:unit.windows,
     boundary_context:{previous_destination:unit.previous_destination,next_destination:unit.next_destination,inbound:unit.inbound_boundary,outbound:unit.outbound_boundary},
-    lodging_base:contract.lodging_base,
-    place_preference:Object.entries(contract.place_preferences||{}).find(([place])=>_v3PhysicalKey_(place)===unit.physical_key)?.[1]||null,
+    lodging_base:unitLodging,
+    place_preference:placePreference,
     global_preferences:contract.global_preferences,
     special_conditions:contract.special_conditions,
     travelers:contract.travelers,
@@ -7506,6 +7534,7 @@ Plan ONLY the useful time supplied for this Trip Story stay card, whose overnigh
 - Every row must remain inside one supplied planning_window, at that window's physical location, and must use that window's original global day number.
 - A Day Trip listed in day_trips belongs to THIS SAME STAY. Plan its destination inside its supplied excursion window and return to the base as defined by the deterministic route. NEVER split a Day Trip into another stay/generation unit.
 - Treat the entire stay card—including its Day Trips—as one coherent mini-itinerary: choose strong anchors first, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
+- When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
 - allowed_physical_locations are authoritative for this call; do not plan outside them.
 - commerce_context is required on substantive rows: semantic_type, ticket_need, guided_tour_value, canonical_place, commercial_eligible. Keep traveler notes separate from commerce metadata.
@@ -8683,18 +8712,25 @@ function _journeyEsc_(value){
   }[ch]));
 }
 function _journeyDestinations_(trip){
-  const mains=(Array.isArray(trip?.destinations)?trip.destinations:[])
-    .map(d=>String(d?.city||'').trim()).filter(Boolean);
+  const mains=(Array.isArray(trip?.destinations)?trip.destinations:[]).map(d=>String(d?.city||'').trim()).filter(Boolean);
   const checkpoint=(trip?.itinerary_data&&typeof trip.itinerary_data==='object')?trip.itinerary_data:{};
   const model=checkpoint?.planner_state?.travelModelV2 || trip?.planner_input?.travel_model_v2 || trip?.planner_input?.travelModelV2 || null;
-  const ordered=[]; const add=value=>{const city=String(value||'').trim();if(city&&!ordered.some(x=>_arePoiAliases_(x,city)))ordered.push(city);};
-  (Array.isArray(model?.destinations)?model.destinations:[]).forEach((dest,index)=>{
-    add(dest?.city||mains[index]);
-    (Array.isArray(dest?.route?.segments)?dest.route.segments:[]).forEach(seg=>add(seg?.destination));
-  });
+  const story=model?.trip_story || model?.tripStory || checkpoint?.planner_state?.travelModelV2?.trip_story || null;
+  const ordered=[];
+  const add=value=>{const city=String(value||'').trim();if(city&&!ordered.some(x=>_arePoiAliases_(x,city)))ordered.push(city);};
+  if(Array.isArray(story?.stays)&&story.stays.length){
+    story.stays.forEach(stay=>{
+      add(stay?.place);
+      (Array.isArray(stay?.dayTrips)?stay.dayTrips:[]).slice().sort((a,b)=>Number(a?.day||0)-Number(b?.day||0)).forEach(dt=>add(dt?.place));
+    });
+    return ordered;
+  }
+  // Backward-compatible fallback for trips persisted before Trip Story existed.
+  (Array.isArray(model?.destinations)?model.destinations:[]).forEach((dest,index)=>{add(dest?.city||mains[index]);(Array.isArray(dest?.route?.segments)?dest.route.segments:[]).forEach(seg=>add(seg?.destination));});
   mains.forEach(add);
   return ordered.length?ordered:mains;
 }
+
 function _journeyDateLabel_(trip){
   const ds=Array.isArray(trip?.destinations)?trip.destinations:[];
   const dates=ds.map(d=>d?.base_date||d?.baseDate||'').filter(Boolean);
@@ -10095,23 +10131,9 @@ function _exportPhysicalDestinationBlocks_(){
     const ctx=day.context||{};
     const transfers=(ctx.fixed_transfers||[]).filter(t=>t?.origin&&t?.destination).slice().sort((a,b)=>String(a.departure||'99:99').localeCompare(String(b.departure||'99:99')));
     (day.rows||[]).forEach(row=>{
-      const explicit=String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim();
-      const exact=transfers.find(t=>String(t.departure||'')===String(row?.start||'')&&String(t.arrival||'')===String(row?.end||'')&&same(row?.from,t.origin)&&same(row?.to,t.destination));
-      if(exact){
-        // The transfer is shown under its origin; the next activity opens the
-        // destination block. This preserves the chronological story without
-        // inventing an extra pseudo-destination for the movement itself.
-        push(exact.origin,day,row,day.date,day.sourceUnit);
-        return;
-      }
-      let place=explicit||ctx.start_location||day.stayBase||day.sourceUnit;
-      if(!explicit){
-        const rs=_hhmmToMinutes_(row?.start),re=_hhmmToMinutes_(row?.end);
-        const window=(ctx.location_windows||[]).find(w=>w?.type!=='fixed_transfer'&&w?.location&&rs!=null&&_hhmmToMinutes_(w.start)!=null&&rs>=_hhmmToMinutes_(w.start)&&(w.end==null||re==null||re<=_hhmmToMinutes_(w.end)));
-        if(window)place=window.location;
-        else if(rs!=null)transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=t.destination;});
-      }
-      push(place,day,row,day.date,day.sourceUnit);
+      const resolved=_authoritativePhysicalLocationForRow_(row,ctx,day.stayBase||day.sourceUnit);
+      const normalizedRow={...row,physical_location:resolved.place,commerce_context:{...(row?.commerce_context||{}),physical_destination:resolved.place}};
+      push(resolved.place,day,normalizedRow,day.date,day.sourceUnit);
     });
   });
   return blocks.map(b=>({...b,source_units:[...b.source_units]}));
@@ -10122,20 +10144,16 @@ function exportItineraryToCSV(){
   if(!blocks.length){alert(getLang()==='es'?'No hay itinerarios generados todavía para exportar.':'There are no generated itineraries to export yet.');return;}
   const delim=detectCsvDelimiter(),lines=[],outLang=_plannerOutputLang_();
   const labels={
-    es:{title:'ITBMO · TU ITINERARIO',generated:'Generado',summary:'Resumen del viaje',destination:'DESTINO',visit:'VISITA',day:'DÍA',date:'FECHA',destinations:'destinos del recorrido',headers:['Hora inicio','Hora final','Actividad','Desde','Hacia','Transporte','Duración','Notas']},
-    en:{title:'ITBMO · YOUR ITINERARY',generated:'Generated',summary:'Trip summary',destination:'DESTINATION',visit:'VISIT',day:'DAY',date:'DATE',destinations:'route destinations',headers:['Start time','End time','Activity','From','To','Transport','Duration','Notes']}
+    es:{headers:['Etapa','Destino físico','Día','Fecha','Hora inicio','Hora final','Actividad','Desde','Hacia','Transporte','Duración','Notas']},
+    en:{headers:['Stage','Physical destination','Day','Date','Start time','End time','Activity','From','To','Transport','Duration','Notes']}
   };
-  const l=labels[outLang]||labels.en,push=row=>lines.push(row.map(x=>csvEscape(normalizeCellText(x),delim)).join(delim)),blank=()=>lines.push('');
-  push([l.title]);push([l.generated,new Intl.DateTimeFormat(outLang==='es'?'es-CR':'en-US',{dateStyle:'long'}).format(new Date())]);push([l.summary,`${blocks.length} ${l.destinations}`]);blank();
-  blocks.forEach((block,index)=>{
-    push([l.destination,`${String(index+1).padStart(2,'0')} · ${block.destination}`]);
-    block.days.forEach(d=>{
-      push([`${l.day} ${d.globalDay}`,`${l.date}: ${d.date||''}`]);push(l.headers);
-      d.rows.forEach(r=>push([r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport),r.duration,r.notes]));blank();
-    });
-  });
+  const l=labels[outLang]||labels.en,push=row=>lines.push(row.map(x=>csvEscape(normalizeCellText(x),delim)).join(delim));
+  push(l.headers);
+  blocks.forEach((block,index)=>block.days.forEach(d=>d.rows.forEach(r=>push([
+    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport),r.duration,r.notes
+  ]))));
   const csv='\uFEFF'+lines.join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
-  trackITBMOEvent('export_csv',{file_type:'csv',layout:'physical_destination_story_v5',destinations:blocks.length});
+  trackITBMOEvent('export_csv',{file_type:'csv',layout:'continuous_physical_timeline_v6',destinations:blocks.length});
   return deliverGeneratedFile(blob,`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`);
 }
 
@@ -10201,22 +10219,29 @@ async function exportItineraryToPDF(){
     normalizeCellText(t('thNotes'))
   ]];
 
-  let isFirstPage = true;
-
+  let cursorY=40;
+  const pageHeight=doc.internal.pageSize.getHeight();
+  const drawSectionHeader=(block,day)=>{
+    if(cursorY>pageHeight-105){doc.addPage();cursorY=40;}
+    doc.setFontSize(13);doc.text(normalizeCellText(`${String(block.sequence).padStart(2,'0')} · ${block.destination}`),40,cursorY);
+    doc.setFontSize(10);doc.text(normalizeCellText(day.date?`${t('uiDayTitle',day.globalDay)} (${day.date})`:`${t('uiDayTitle',day.globalDay)}`),40,cursorY+17);
+    cursorY+=29;
+  };
   physicalBlocks.forEach(block=>block.days.forEach(day=>{
     const rows=day.rows||[];
-    if(!isFirstPage) doc.addPage();
-    isFirstPage=false;
-    pageHeader(block,day);
+    if(!rows.length)return;
+    drawSectionHeader(block,day);
     const body=rows.map(r=>[normalizeCellText(r.start),normalizeCellText(r.end),normalizeCellText(r.activity),normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),normalizeCellText(r.duration),normalizeCellText(r.notes)]);
-    if(!body.length){doc.setFontSize(10);doc.text(normalizeCellText(t('uiNoActivities')),40,120);return;}
-    try{doc.autoTable({head,body,startY:96,margin:{left:40,right:40},styles:{fontSize:8,cellPadding:3,overflow:'linebreak'},headStyles:{fontSize:8},didDrawPage:()=>{}});}catch(err){doc.setFontSize(10);doc.text('No se pudo generar la tabla en PDF para este dia.',40,120);}
+    try{
+      doc.autoTable({head,body,startY:cursorY,margin:{left:40,right:40,top:40,bottom:36},styles:{fontSize:8,cellPadding:3,overflow:'linebreak'},headStyles:{fontSize:8},showHead:'everyPage'});
+      cursorY=(doc.lastAutoTable?.finalY||cursorY)+18;
+    }catch(err){doc.setFontSize(10);doc.text('No se pudo generar la tabla en PDF para este dia.',40,cursorY);cursorY+=28;}
   }));
 
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
   const blob=doc.output('blob');
   await deliverGeneratedFile(blob,filename);
-  trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'physical_destination_story_v5',destinations:physicalBlocks.length});
+  trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'continuous_physical_timeline_v6',destinations:physicalBlocks.length});
 }
 
 function sendItineraryByEmail(){
@@ -10975,6 +11000,11 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     setInfoChatEntitlement({authorized:false,remaining:0,used:0,tripId:null});
 
     if ($resetBtn) $resetBtn.setAttribute('disabled','true');
+    // A completed reset returns the product to the true pre-payment state.
+    // Do not leave Trip Story controls carrying the previous paid-trip lock.
+    setPostPaymentTripConfigurationLocked(false);
+    const buildTripStory=qs('#build-trip-story');
+    if(buildTripStory){buildTripStory.disabled=false;buildTripStory.removeAttribute('aria-disabled');buildTripStory.classList.remove('is-payment-locked');}
     updateSaveAvailability();
 
     // UX: enfocar primer input de ciudad
