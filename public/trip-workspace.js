@@ -115,6 +115,28 @@ function normalizeWorkspaceEntity(value){
     .toLowerCase().replace(/^rev:\s*/i,'')
     .replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
 }
+function workspaceEntityCore(value){
+  return normalizeWorkspaceEntity(value).replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g,' ').replace(/\s+/g,' ').trim();
+}
+function sameWorkspaceEntity(a,b){
+  const x=workspaceEntityCore(a),y=workspaceEntityCore(b);
+  return Boolean(x&&y&&(x===y||(Math.min(x.length,y.length)>=7&&(x.includes(y)||y.includes(x)))));
+}
+function dedupeContextualNeeds(items=[]){
+  const rank=item=>item?.need_type==='ticket_required'?4:item?.need_type==='reservation_recommended'?3:item?.confidence==='high'?2:1;
+  const out=[];
+  for(const item of items){
+    const category=item?.category||(item?.need_type==='guided_tour_optional'?'tours':item?.need_type?.includes('transport')?'transport':'tickets');
+    const overview=item?.need_type==='guided_tour_optional'&&/\b(city tour|tour panoramico|highlights tour)\b/.test(normalizeWorkspaceEntity(item?.entity_name||''));
+    const match=out.findIndex(existing=>{
+      const otherCategory=existing?.category||(existing?.need_type==='guided_tour_optional'?'tours':existing?.need_type?.includes('transport')?'transport':'tickets');
+      const otherOverview=existing?.need_type==='guided_tour_optional'&&/\b(city tour|tour panoramico|highlights tour)\b/.test(normalizeWorkspaceEntity(existing?.entity_name||''));
+      return category===otherCategory&&((overview&&otherOverview)||sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity));
+    });
+    if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
+  }
+  return out;
+}
 function isTourAlternativeEligible(row){
   const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
   if(!activity) return false;
@@ -173,12 +195,13 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
     const cc=row?.commerce_context||{};
     const semantic=String(cc?.semantic_type||'').toUpperCase();
     const guided=String(cc?.guided_tour_value||'').toLowerCase();
+    const priority=String(cc?.destination_priority||'').toLowerCase();
     const activity=String(row?.activity||'').replace(/^rev:\s*/i,'').trim();
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const item={day,index,row,activity,canonical,guided,semantic};
     if(!byDay.has(day))byDay.set(day,[]);byDay.get(day).push(item);
     // Standalone guided value is reserved for genuinely complex/high-value anchors.
-    if(guided==='high'||semantic==='TOUR_EXPERIENCE'){
+    if(guided==='high'||semantic==='TOUR_EXPERIENCE'||priority==='essential'||priority==='high'){
       const key=normalizeWorkspaceEntity(canonical);
       if(key&&!existingKeys.has(key)){
         derived.push({id:`workspace-tour-anchor:${day}:${index+1}`,category:'tours',city:cityName,day,entity_name:canonical,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Una visita guiada puede aportar contexto y ayudarte a aprovechar mejor ${canonical}; compárala con la visita por tu cuenta.`:`A guided visit can add context and help you get more from ${canonical}; compare it with visiting independently.`,source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context_guided'});
@@ -341,7 +364,7 @@ function contextualNeedsForCity(cityName,needs){
   // itinerary and deduplicate against server needs.
   const derivedTours=tourAlternativesForCity(cityName,merged);
   if(derivedTours.length) merged.push(...derivedTours);
-  return merged;
+  return dedupeContextualNeeds(merged);
 }
 
 function contextLabel(item){
