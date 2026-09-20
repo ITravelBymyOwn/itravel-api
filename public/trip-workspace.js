@@ -133,6 +133,36 @@ function isTourAlternativeEligible(row){
   if(!['ATTRACTION_TICKET','TOUR_EXPERIENCE','FREE_SIGHT'].includes(semantic)) return false;
   return true;
 }
+function isPhysicalTouristDestination(cityName){
+  const key=normalizeWorkspaceEntity(cityName);
+  if(!key)return false;
+  // Physical manifests should already expose real places. This fail-closed
+  // guard also prevents legacy pseudo-destinations from becoming tour cards.
+  if(/\b(hotel|alojamiento|accommodation|lodging|airport|aeropuerto|station|estacion|terminal|transit day|dia de transito|check in|check out)\b/i.test(key))return false;
+  return workspaceRowsForCity(cityName).length>0;
+}
+function cityOverviewTourForCity(cityName,existingNeeds=[]){
+  if(!isPhysicalTouristDestination(cityName))return null;
+  const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(item=>item?.need_type==='guided_tour_optional');
+  const cityKey=normalizeWorkspaceEntity(cityName);
+  const overviewAlreadyExists=existing.some(item=>{
+    const derived=String(item?.derived_by||'');
+    const entity=normalizeWorkspaceEntity(item?.entity_name||'');
+    return derived==='physical_destination_overview'||(entity.includes(cityKey)&&/\b(city tour|tour panoramico|highlights tour|tour de)\b/i.test(entity));
+  });
+  if(overviewAlreadyExists)return null;
+  const cityRows=workspaceRowsForCity(cityName);
+  const first=cityRows.find(({row})=>isTourAlternativeEligible(row))||cityRows[0];
+  return {
+    id:`workspace-city-overview:${cityKey}`,
+    category:'tours',city:cityName,day:first?.day||'',
+    entity_name:lang==='es'?`City Tour de ${cityName}`:`${cityName} City Tour`,
+    entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',
+    user_message:lang==='es'?`Compara una visita panorámica guiada de ${cityName} con tu recorrido por cuenta propia; es una opción general del destino y no reemplaza automáticamente las actividades ya planificadas.`:`Compare a guided overview of ${cityName} with exploring independently; this is a destination-wide option and does not automatically replace your planned activities.`,
+    source_activity:String(first?.row?.activity||cityName).trim(),source_route:'',
+    derived_by:'physical_destination_overview'
+  };
+}
 function tourAlternativesForCity(cityName,existingNeeds=[]){
   const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(item=>item?.need_type==='guided_tour_optional');
   const existingKeys=new Set(existing.map(item=>normalizeWorkspaceEntity(item?.entity_name||item?.source_activity||'')));
@@ -301,30 +331,16 @@ function contextualNeedsForCity(cityName,needs){
   // commerce_context on each row; use it directly so subdestination cards do
   // not depend on the parent planning-unit classifier.
   merged.push(...localTicketNeedsForCity(cityName,merged));
+  // Offer one destination-wide overview for every real physical tourist
+  // destination, independently of whether a city-tour row appears literally.
+  const overviewTour=cityOverviewTourForCity(cityName,merged);
+  if(overviewTour)merged.push(overviewTour);
   // Tours/experiences are a first-class contextual layer. Server intelligence
   // can enrich them, but the section must never depend on a server classifier
   // returning a tour category: derive defensible alternatives from the actual
   // itinerary and deduplicate against server needs.
   const derivedTours=tourAlternativesForCity(cityName,merged);
   if(derivedTours.length) merged.push(...derivedTours);
-  if(!merged.some(item=>item?.need_type==='guided_tour_optional')){
-    const eligible=[];
-    const byDay=data?.itineraries?.[cityName]?.byDay||{};
-    Object.keys(byDay).map(Number).filter(Number.isFinite).sort((a,b)=>a-b).forEach(dayNumber=>{
-      (Array.isArray(byDay[dayNumber])?byDay[dayNumber]:[]).forEach(row=>{
-        if(isTourAlternativeEligible(row)) eligible.push({day:dayNumber,row});
-      });
-    });
-    if(eligible.length>=2){
-      const sample=eligible.slice(0,4);
-      merged.push({
-        id:`workspace-tour-cluster:${normalizeWorkspaceEntity(cityName)}`,
-        category:'tours',city:cityName,day:sample[0]?.day||'',entity_name:lang==='es'?`Tour de ${cityName}`:`${cityName} tour`,entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',
-        user_message:lang==='es'?`Una experiencia guiada puede reunir varios de los lugares que ya tienes previstos en ${cityName}, sin fragmentar tu itinerario.`:`A guided experience can combine several places already planned in ${cityName} without fragmenting your itinerary.`,
-        source_activity:sample.map(x=>String(x.row?.activity||'').trim()).filter(Boolean).join(' · '),source_route:'',derived_by:'workspace_experience_cluster'
-      });
-    }
-  }
   return merged;
 }
 
