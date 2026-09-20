@@ -9120,6 +9120,8 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .trip-story-actions__left{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .trip-story-actions .trip-story-reset{background:transparent;color:#A14E2F;border:1px solid rgba(241,124,74,.34);box-shadow:none}
 .trip-story-actions .trip-story-reset:hover{background:rgba(241,124,74,.08);border-color:rgba(241,124,74,.58)}
+.trip-story-actions .trip-story-copy{background:#F3F8FF;color:#087BFA;border:1px solid rgba(8,123,250,.24);box-shadow:none}
+.trip-story-actions .trip-story-copy:hover{background:#EAF4FF;border-color:rgba(8,123,250,.44)}
 .trip-story-day__hours select option[value=""]{color:#71849A}
 @media(max-width:700px){.trip-story-actions__left{width:auto}.trip-story-actions .trip-story-reset{padding-inline:12px}}
 @media(max-width:620px){.trip-story-actions{align-items:stretch}.trip-story-actions__left{width:100%;justify-content:space-between}.trip-story-actions__save{width:100%}}
