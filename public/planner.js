@@ -136,6 +136,8 @@ let paymentWarningAcceptedTripId = null;
    checkpoint writes; retries run only after a real technical failure. */
 const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 2;
 const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000];
+const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 3;
+const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 4;
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
 let generationResetInProgress = false;
@@ -7272,6 +7274,44 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 }
 
 const _v3LastFailureByCity_={};
+const _v3AcceptedStayCache_=new Map();
+
+function _v3StableHash_(value=''){
+  let h1=0x811c9dc5,h2=0x9e3779b9;
+  for(let i=0;i<value.length;i++){
+    const c=value.charCodeAt(i);
+    h1=Math.imul(h1^c,0x01000193);
+    h2=Math.imul(h2^c,0x85ebca6b);
+  }
+  return `${(h1>>>0).toString(36)}${(h2>>>0).toString(36)}`;
+}
+function _v3AcceptedStayCacheKey_(contract={},unit={}){
+  const signature=JSON.stringify(_v3StayContract_(contract,unit));
+  return `itbmo_v3_stay_${String(currentTripId||contract?.trip_context_id||'trip')}_${String(unit?.id||'stay')}_${_v3StableHash_(signature)}`;
+}
+function _v3AcceptedStayGet_(contract,unit){
+  const key=_v3AcceptedStayCacheKey_(contract,unit);
+  let value=_v3AcceptedStayCache_.get(key)||null;
+  if(!value){
+    try{value=JSON.parse(sessionStorage.getItem(key)||'null');}catch(_){value=null;}
+  }
+  if(!value||!Array.isArray(value.rows)||!value.rows.length)return null;
+  _v3AcceptedStayCache_.set(key,value);
+  return JSON.parse(JSON.stringify(value));
+}
+function _v3AcceptedStaySet_(contract,unit,value){
+  const key=_v3AcceptedStayCacheKey_(contract,unit);
+  const safe=JSON.parse(JSON.stringify(value));
+  _v3AcceptedStayCache_.set(key,safe);
+  try{sessionStorage.setItem(key,JSON.stringify(safe));}catch(_){}
+}
+function _v3AcceptedStayClear_(contract,units=[]){
+  (units||[]).forEach(unit=>{
+    const key=_v3AcceptedStayCacheKey_(contract,unit);
+    _v3AcceptedStayCache_.delete(key);
+    try{sessionStorage.removeItem(key);}catch(_){}
+  });
+}
 
 async function _v3Call_(prompt){
   return _callPlannerSystemPrompt_(prompt,false,'planner_v3');
@@ -7320,6 +7360,23 @@ function _v3PhysicalKey_(value){
   return String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
 }
 
+function _v3IsFullTransitDay_(routeDay={}){
+  const transfers=(routeDay.fixed_transfers||[]).filter(t=>_hhmmToMinutes_(t?.departure)!=null&&_hhmmToMinutes_(t?.arrival)!=null);
+  if(transfers.length<2)return false;
+  const movementMinutes=transfers.reduce((sum,t)=>{
+    const dep=_hhmmToMinutes_(t.departure),arr=_hhmmToMinutes_(t.arrival);
+    return sum+Math.max(0,(arr>=dep?arr:arr+1440)-dep);
+  },0);
+  const operationalMinutes=transfers.reduce((sum,t)=>{
+    const mode=_v3PhysicalKey_(`${t?.mode||''} ${t?.transport||''}`);
+    return sum+(/plane|flight|avion|airport|aeropuerto/.test(mode)?150:60);
+  },0);
+  // Multiple movements with at least six hours of travel/operational burden are
+  // a travel day. Apparent gaps are reserved for luggage, access, check-in,
+  // delays, meals and recovery instead of being forced into sightseeing rows.
+  return movementMinutes+operationalMinutes>=360;
+}
+
 function _v3BuildPhysicalStayUnits_(contract={}){
   const routeDays=[...(contract.route_days||[])].sort((a,b)=>Number(a.day)-Number(b.day));
   const storyStays=(contract.trip_story_stays||[]).filter(st=>st?.place&&st?.startDate);
@@ -7360,8 +7417,11 @@ function _v3BuildPhysicalStayUnits_(contract={}){
     // Units to share Day N without either stealing the other's window.
     const ownedWindows=new Map(descriptors.map(d=>[d.index,[]]));
     routeDays.forEach(day=>{
+      const fullTransitDay=_v3IsFullTransitDay_(day);
+      if(fullTransitDay) console.info(`[ITBMO V3 TRANSIT DAY] Day ${Number(day.day)}: tourism windows suppressed; fixed movements remain authoritative`);
       (day.location_windows||[]).forEach((w,windowIndex)=>{
         if(w?.type==='fixed_transfer') return;
+        if(fullTransitDay) return;
         const location=String(w?.location||'').trim();
         if(!location||/\s[→>]\s/.test(location)) return;
         const date=String(day.date||'');
@@ -7429,10 +7489,12 @@ function _v3BuildPhysicalStayUnits_(contract={}){
   const units=[];
   let current=null, sequence=0;
   for(const day of routeDays){
+    const fullTransitDay=_v3IsFullTransitDay_(day);
     const timeline=[...(day.location_windows||[])].sort((a,b)=>String(a.start||'99:99').localeCompare(String(b.start||'99:99')));
     for(let windowIndex=0;windowIndex<timeline.length;windowIndex++){
       const window=timeline[windowIndex];
       if(window?.type==='fixed_transfer'){current=null;continue;}
+      if(fullTransitDay) continue;
       const location=String(window?.location||day?.start_location||contract.planning_unit||'').trim();
       if(!location || /\s[→>]\s/.test(location)) continue;
       const key=_v3PhysicalKey_(location); if(!key) continue;
@@ -7608,12 +7670,12 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   rows=_v3StampStayRows_(normalized.rows,unit);
   let report=audit(rows);
   let material=_v3MaterialAuditErrors_(report);
-  const repairBudget=Math.max(1,Math.min(3,_v3AdaptiveRepairBudget_(scopedContract,Math.max(1,unitDays.length))));
+  const repairBudget=Math.max(2,Math.min(ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS,_v3AdaptiveRepairBudget_(scopedContract,Math.max(1,unitDays.length))+1));
   let attempt=0,previousFingerprint='',stagnant=0;
 
   while(material.length && attempt<repairBudget){
     const fingerprint=_v3IssueFingerprint_(report);
-    if(fingerprint===previousFingerprint && stagnant>=1) break;
+    if(fingerprint===previousFingerprint && stagnant>=2) break;
     previousFingerprint=fingerprint;
     attempt+=1;
     console.warn(`[ITBMO V3 STAY AUDIT] ${unitCity} · ${unit.id}: ${material.length} repairable issue(s); local repair ${attempt}/${repairBudget}`,_v3AuditSummary_(report),material);
@@ -7638,7 +7700,10 @@ Rebuild ONLY this stay card. Keep every row inside its supplied planning_window,
     const nextRows=_v3StampStayRows_(normalized.rows,unit);
     const nextReport=audit(nextRows);
     const before=_auditScore_(report),after=_auditScore_(nextReport);
-    if(after<before){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
+    const beforeBlocking=_v3BlockingAuditErrors_(report).length;
+    const afterBlocking=_v3BlockingAuditErrors_(nextReport).length;
+    const improved=afterBlocking<beforeBlocking || (afterBlocking===beforeBlocking && (after<before || (after===before && (nextReport.errors||[]).length<(report.errors||[]).length)));
+    if(improved){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
     else{stagnant+=1;}
   }
 
@@ -7661,9 +7726,11 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
   if(!units.length) throw new Error(`V3_NO_PHYSICAL_STAYS:${city}`);
   console.info(`[ITBMO V3 STAYS] trip: ${units.length} independent chronological stay card(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length,dayTrips:(u.day_trips||[]).length})));
 
-  // Each Trip Story stay card is a fully independent generation + QA job. Jobs
-  // run concurrently; array slots preserve route order regardless of completion order.
+  // Each Trip Story stay is an independent recoverable transaction. A stay that
+  // passes QA is cached immediately and never enters another correction cycle
+  // because a different stay failed. Only failed stays consume more model calls.
   const results=new Array(units.length);
+  const failures=[];
   let cursor=0;
   const concurrency=Math.min(3,units.length);
   await Promise.all(Array.from({length:concurrency},async()=>{
@@ -7672,12 +7739,38 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
       if(index>=units.length) return;
       const unit=units[index];
       const label=unit.base_destination||unit.physical_destination;
-      console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · independent generation + local QA`);
-      const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
-      const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
-      results[index]={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings};
+      const cached=_v3AcceptedStayGet_(contract,unit);
+      if(cached){
+        results[index]={...cached,unit,reused:true};
+        console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
+        continue;
+      }
+
+      let accepted=null,lastError=null;
+      for(let stayAttempt=1;stayAttempt<=ITBMO_STAY_GENERATION_MAX_ATTEMPTS&&!accepted;stayAttempt++){
+        try{
+          console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · isolated attempt ${stayAttempt}/${ITBMO_STAY_GENERATION_MAX_ATTEMPTS}`);
+          const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
+          const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
+          accepted={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings,accepted_attempt:stayAttempt};
+          _v3AcceptedStaySet_(contract,unit,{rows:accepted.rows,audit:accepted.audit,warnings:accepted.warnings,accepted_attempt:stayAttempt});
+        }catch(error){
+          lastError=error;
+          const qualityBlock=/V3_STAY_QUALITY_BLOCK/.test(String(error?.message||''));
+          console.warn(`[ITBMO V3 STAY RETRY] ${label} · isolated attempt ${stayAttempt} failed`,error?.v3BlockingErrors||error);
+          if(!qualityBlock)break;
+        }
+      }
+      if(accepted)results[index]=accepted;
+      else failures.push({index,unit,error:lastError});
     }
   }));
+
+  if(failures.length){
+    const error=new Error(`V3_STAY_RECOVERY_EXHAUSTED:${failures.map(x=>x.unit?.base_destination||x.unit?.physical_destination||x.unit?.id).join(',')}`);
+    error.v3FailedStays=failures.map(x=>({stay_unit_id:x.unit?.id,destination:x.unit?.base_destination||x.unit?.physical_destination,blocking_errors:x.error?.v3BlockingErrors||[],message:String(x.error?.message||'V3_STAY_FAILED')}));
+    throw error;
+  }
 
   // Deterministic merger: model outputs never decide trip order or inter-stay
   // movements. Flatten in Trip Story sequence, then insert the authoritative
@@ -7907,6 +8000,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     if(activeCity===city) renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
+    _v3AcceptedStayClear_(generated.contract,generated.units||[]);
     record();
     return true;
   }catch(error){
