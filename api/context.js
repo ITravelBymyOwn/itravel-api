@@ -21,12 +21,12 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.7-physical-stays";
+const CONTEXT_VERSION = "1.8-must-see-dedupe";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
 const CONTEXT_BATCH_TIMEOUT_MS = 45000;
-const CONTEXT_BATCH_RETRIES = 1;
+const CONTEXT_BATCH_RETRIES = 2;
 const ALLOWED_NEEDS = new Set([
   "ticket_required",
   "reservation_recommended",
@@ -635,6 +635,7 @@ function buildCandidates(trip, requestedCity) {
           commerce_semantic_type:semantic,
           commerce_ticket_need:clean(cc.ticket_need,40).toLowerCase(),
           commerce_guided_tour_value:clean(cc.guided_tour_value,40).toLowerCase(),
+          destination_priority:clean(cc.destination_priority,40).toLowerCase(),
           commerce_canonical_place:clean(cc.canonical_place,180),
           access_hint:evidence.hint||(semantic==='ATTRACTION_TICKET'?(String(cc.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended'):''),
           access_evidence:evidence.evidence||clean(cc.canonical_place||row.activity,260)
@@ -656,7 +657,7 @@ Your job is to identify what the traveler genuinely needs to arrange to execute 
 
 The itinerary source language metadata may be ${sourceLanguage}. It is a hint only, never an allow-list or a reason to reject content. Detect and understand the actual language directly from the supplied itinerary text, including languages not explicitly named by ITBMO, and write user_message only in ${outputLanguage}.
 
-Analyze only the supplied itinerary candidates. Never add attractions, routes, dates, times, or activities that are not present in the source.
+Analyze only the supplied itinerary candidates. Never add attractions, routes, dates, times, or activities that are not present in the source. Treat destination_priority=essential/high as a destination-defining signal: evaluate independent admission first and, when guidance materially adds value, a separate optional tour.
 
 Allowed need_type values:
 - ticket_required
@@ -1034,6 +1035,29 @@ function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
   return result;
 }
 
+function semanticNeedKey(value) {
+  return clean(value,220).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+    .replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g," ")
+    .replace(/[^a-z0-9]+/g," ").replace(/\s+/g," ").trim();
+}
+
+function dedupeSemanticNeeds(needs=[]) {
+  const rank=item=>item?.need_type==="ticket_required"?4:item?.need_type==="reservation_recommended"?3:item?.confidence==="high"?2:1;
+  const out=[];
+  for(const item of needs){
+    const category=categoryForNeed(item?.need_type),key=semanticNeedKey(item?.entity_name||item?.source_activity);
+    const overview=item?.need_type==="guided_tour_optional"&&/\b(city tour|tour panoramico|highlights tour)\b/.test(semanticNeedKey(item?.entity_name));
+    const index=out.findIndex(existing=>{
+      if(categoryForNeed(existing?.need_type)!==category)return false;
+      const other=semanticNeedKey(existing?.entity_name||existing?.source_activity);
+      const otherOverview=existing?.need_type==="guided_tour_optional"&&/\b(city tour|tour panoramico|highlights tour)\b/.test(semanticNeedKey(existing?.entity_name));
+      return (overview&&otherOverview)||(key&&other&&(key===other||(Math.min(key.length,other.length)>=7&&(key.includes(other)||other.includes(key)))));
+    });
+    if(index<0)out.push(item);else if(rank(item)>rank(out[index]))out[index]=item;
+  }
+  return out;
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") {
@@ -1125,15 +1149,16 @@ export default async function handler(req, res) {
     let needs = [];
     if (candidates.length) {
       const itineraryLanguage = normalizeTripLanguage(body.trip_language) || tripContentLanguage(trip);
-      const classifications = await classifyCandidates(
-        city,
-        candidates,
-        uiLanguage,
-        itineraryLanguage
-      );
+      let classifications=[];
+      try {
+        classifications=await classifyCandidates(city,candidates,uiLanguage,itineraryLanguage);
+      } catch (classificationError) {
+        console.warn("[CONTEXT MODEL FALLBACK]",{city,message:classificationError?.message});
+      }
       needs = sanitizeClassifications(candidates, classifications, city);
       needs = consolidateOptionalTours(candidates, needs, city, uiLanguage);
       needs = ensureEvidenceBackedAccessNeeds(candidates, needs, city, uiLanguage);
+      needs = dedupeSemanticNeeds(needs);
     }
 
     let persisted = false;
