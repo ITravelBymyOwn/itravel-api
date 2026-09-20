@@ -139,6 +139,17 @@ const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000];
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
 let generationResetInProgress = false;
+let generationResetRequestedFromRecovery = false;
+let generationRunEpoch = 0;
+
+function _generationCancelledError_(){
+  const error=new Error('GENERATION_CANCELLED_BY_RESET');
+  error.code='GENERATION_CANCELLED_BY_RESET';
+  return error;
+}
+function _assertGenerationRunActive_(epoch){
+  if(generationResetInProgress || Number(epoch)!==Number(generationRunEpoch)) throw _generationCancelledError_();
+}
 
 /* Post-payment preferences checkpoint.
    This changes only WHEN specialConditions is confirmed.
@@ -8220,6 +8231,7 @@ function _generationCheckpointSnapshot_(extra={}){
 }
 
 async function _persistGenerationCheckpoint_(status='generating',extra={}){
+  if(generationResetInProgress) throw _generationCancelledError_();
   const token=getStoredSessionToken();
   if(!token || !currentTripId) throw new Error('GENERATION_SESSION_REQUIRED');
   const checkpoint=_generationCheckpointSnapshot_(extra);
@@ -8227,7 +8239,9 @@ async function _persistGenerationCheckpoint_(status='generating',extra={}){
 
   let lastError=null;
   for(let attempt=0;attempt<3;attempt++){
+    if(generationResetInProgress) throw _generationCancelledError_();
     if(!navigator.onLine) await _waitForGenerationConnection_();
+    if(generationResetInProgress) throw _generationCancelledError_();
     try{
       return await tripApi({
         action:'generation_checkpoint',
@@ -8381,16 +8395,16 @@ function _showGenerationRetry_(reason=''){
   overlay.querySelector('#itbmo-generation-recovery-close')?.addEventListener('click',closeRecovery);
   overlay.addEventListener('click',(event)=>{ if(event.target===overlay) closeRecovery(); });
   overlay.querySelector('#itbmo-generation-reset')?.addEventListener('click',()=>{
-    // Recovery exhaustion must never trap the traveler in a modal loop. Reuse the
-    // canonical planner reset flow so server archival, payment/recovery cleanup,
-    // Trip Story state and local state are cleared in one authoritative place.
-    overlay.remove();
-    setPlanningChatLocked(false);
+    // Keep the recovery overlay/state intact until the traveler CONFIRMS reset.
+    // The canonical reset flow is allowed to cancel an in-flight/exhausted generation
+    // only when it was explicitly requested from this recovery escape hatch.
+    generationResetRequestedFromRecovery=true;
     $resetBtn?.removeAttribute('disabled');
     if($resetBtn){
       $resetBtn.click();
       return;
     }
+    generationResetRequestedFromRecovery=false;
     console.error('[GENERATION RECOVERY] Reset control unavailable after recovery exhaustion.');
   });
   overlay.querySelector('#itbmo-generation-support')?.addEventListener('click',()=>{
@@ -8475,7 +8489,17 @@ function _applyGeneratedUIState({showModal=false}={}){
 const ITBMO_GENERATION_CONCURRENCY=2;
 let _generationCheckpointQueue_=Promise.resolve();
 function _queueGenerationCheckpoint_(status='generating',extra={}){
-  const task=()=>_persistGenerationCheckpoint_(status,extra);
+  // Bind every queued write to the generation epoch + trip that created it. This
+  // prevents a late checkpoint from an abandoned run from writing into a reset or
+  // newly-created trip after the traveler starts over.
+  const queuedEpoch=generationRunEpoch;
+  const queuedTripId=String(currentTripId||'');
+  const task=()=>{
+    if(generationResetInProgress || Number(queuedEpoch)!==Number(generationRunEpoch) || String(currentTripId||'')!==queuedTripId){
+      throw _generationCancelledError_();
+    }
+    return _persistGenerationCheckpoint_(status,extra);
+  };
   _generationCheckpointQueue_=_generationCheckpointQueue_.then(task,task);
   return _generationCheckpointQueue_;
 }
@@ -8491,7 +8515,8 @@ async function _runGenerationPool_(items,worker,limit=ITBMO_GENERATION_CONCURREN
 }
 
 async function runPaidGeneration({manualRetry=false}={}){
-  if(paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
+  if(generationResetInProgress || paidGenerationRunning || !currentTripId || !savedDestinations.length) return;
+  const runEpoch=++generationRunEpoch;
   paidGenerationRunning=true;
   let completionPublished=false;
   setPlanningChatLocked(true);
@@ -8505,6 +8530,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       session_token:token,
       trip_id:currentTripId
     });
+    _assertGenerationRunActive_(runEpoch);
 
     if(begin?.already_completed){
       _hydrateGenerationTrip_(begin.trip);
@@ -8557,6 +8583,7 @@ async function runPaidGeneration({manualRetry=false}={}){
 
         showWOW(true,t('overlayGenerating'));
         const success=await generateCityItinerary(city,{silentFailure:true});
+        _assertGenerationRunActive_(runEpoch);
         completed=Boolean(success && _generationCityComplete_(city));
         // A route-quality block already went through deterministic cleanup and
         // bounded scoped repairs. Do not regenerate the whole planning unit again.
@@ -8611,6 +8638,10 @@ async function runPaidGeneration({manualRetry=false}={}){
     _finishAstraGenerationMetrics_();
     chatMsg(getPlannerCompletionMessage(),'ai');
   }catch(err){
+    if(generationResetInProgress || err?.code==='GENERATION_CANCELLED_BY_RESET' || Number(runEpoch)!==Number(generationRunEpoch)){
+      console.info('[PAID GENERATION ORCHESTRATOR] cancelled by itinerary reset');
+      return;
+    }
     console.error('[PAID GENERATION ORCHESTRATOR]',err);
     if(err?.code==='GENERATION_RECOVERY_EXHAUSTED'){
       generationRecoveryState={...(generationRecoveryState || {}),generation_count:2};
@@ -8631,8 +8662,8 @@ async function runPaidGeneration({manualRetry=false}={}){
     }
     _showGenerationRetry_(err?.code || err?.message || 'Generation failed');
   }finally{
-    paidGenerationRunning=false;
-    if(!completionPublished) showWOW(false);
+    if(Number(runEpoch)===Number(generationRunEpoch)) paidGenerationRunning=false;
+    if(!generationResetInProgress && !completionPublished) showWOW(false);
   }
 }
 
@@ -10807,6 +10838,9 @@ function showPlannerDecision({title,message,confirmLabel,cancelLabel,variant='pr
 
 // ⛔ Reset con confirmación modal (corregido: visible → active)
 qs('#reset-planner')?.addEventListener('click', ()=>{
+  const recoveryReset=Boolean(generationResetRequestedFromRecovery);
+  generationResetRequestedFromRecovery=false;
+  if(paidGenerationRunning && !recoveryReset) return;
   const overlay = document.createElement('div');
   overlay.className = 'reset-overlay';
 
@@ -10828,9 +10862,14 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
   const cancelReset  = overlay.querySelector('#cancel-reset');
 
   confirmReset.addEventListener('click', async ()=>{
-    if(paidGenerationRunning) return;
+    if(paidGenerationRunning && !recoveryReset) return;
 
+    // Atomically invalidate the active generation BEFORE archival/cleanup. Any late
+    // async response from the old run is ignored and can no longer checkpoint or
+    // reopen recovery after the reset completes.
     generationResetInProgress = true;
+    generationRunEpoch += 1;
+    paidGenerationRunning = false;
     confirmReset.disabled = true;
 
     const tripIdToArchive = currentTripId || getStoredActiveTripId();
@@ -10860,6 +10899,7 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
       }
     }
 
+    document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
     clearInfoChatStateForTrip(tripIdToArchive);
     _clearPostPaymentProgressLocal_(tripIdToArchive);
     try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
