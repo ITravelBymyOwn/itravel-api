@@ -6996,6 +6996,92 @@ function _v3BlockingAuditErrors_(report){
   return (report?.errors||[]).filter(e=>blocking.has(String(e?.code||'')));
 }
 
+
+// Final trip gate for the independent-Stay architecture. Local Stay QA already
+// owns semantic continuity and within-stay itinerary quality. The merge gate must
+// validate only deterministic physical integrity against the Route Compiler facts.
+function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
+  const errors=[];
+  const maxDay=Math.max(1,Number(totalDays)||1);
+  const byDay=_rowsByDayObject_(rows);
+  const coverage=_v3Coverage_(rows,maxDay);
+  coverage.missing.forEach(day=>errors.push({code:'MISSING_DAY',day}));
+
+  const routeDays=new Map((contract?.route_days||[]).map(d=>[Number(d.day),d]));
+  const units=_v3BuildPhysicalStayUnits_(contract);
+  const unitById=new Map(units.map(u=>[String(u.id),u]));
+
+  for(let day=1;day<=maxDay;day++){
+    const dayRows=[...(byDay[day]||[])].sort((a,b)=>(_hhmmToMinutes_(a.start)??99999)-(_hhmmToMinutes_(b.start)??99999));
+    const routeDay=routeDays.get(day)||{};
+    const transfers=(routeDay.fixed_transfers||[]).filter(t=>t?.departure&&t?.arrival);
+
+    dayRows.forEach((row,index)=>{
+      const start=_hhmmToMinutes_(row.start),end=_hhmmToMinutes_(row.end);
+      if(start==null||end==null||end<=start){
+        errors.push({code:'INVALID_TIME',day,row:index+1,start:row.start,end:row.end});
+        return;
+      }
+      const semantic=String(row?.commerce_context?.semantic_type||'').toUpperCase();
+      const isTransport=semantic==='TRANSPORT'||_isPureTransportRow_(row);
+      if(isTransport) return;
+
+      // A generated activity must fit one authoritative physical window belonging
+      // to its own Stay Unit. This is stronger and less ambiguous than comparing
+      // POI names across independently generated stays.
+      const unit=unitById.get(String(row?.stay_unit_id||''));
+      const candidateWindows=(unit?.windows||[]).filter(w=>Number(w.day)===day);
+      const inside=candidateWindows.some(w=>{
+        const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+        return (ws==null||start>=ws)&&(we==null||end<=we);
+      });
+      if(unit && candidateWindows.length && !inside){
+        errors.push({code:'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',day,row:index+1,stay_unit_id:unit.id});
+      }
+    });
+
+    // Fixed user movements are the single source of truth at Stay boundaries.
+    // They must exist exactly once and no generated activity may occupy them.
+    transfers.forEach(t=>{
+      const dep=_hhmmToMinutes_(t.departure),arr=_hhmmToMinutes_(t.arrival);
+      if(dep==null||arr==null||arr<=dep) return;
+      const exact=dayRows.filter(r=>_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
+      if(exact.length!==1){
+        errors.push({code:'MISSING_USER_FIXED_TRANSFER',day,origin:t.origin,destination:t.destination,required_window:`${t.departure}-${t.arrival}`,count:exact.length});
+      }
+      dayRows.forEach((r,index)=>{
+        const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
+        if(rs==null||re==null||re<=rs) return;
+        const isExact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
+        if(!isExact && Math.max(rs,dep)<Math.min(re,arr)){
+          errors.push({code:'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER',day,row:index+1,required_window:`${t.departure}-${t.arrival}`});
+        }
+      });
+    });
+
+    // Overlap remains a hard blocker inside the same Stay Unit. Across two
+    // adjacent Stay Units on the same calendar day, authoritative Route Compiler
+    // windows/boundary movements decide validity; POI-level continuity does not.
+    for(let i=0;i<dayRows.length;i++){
+      const a=dayRows[i],as=_hhmmToMinutes_(a.start),ae=_hhmmToMinutes_(a.end);
+      if(as==null||ae==null||ae<=as) continue;
+      for(let j=i+1;j<dayRows.length;j++){
+        const b=dayRows[j],bs=_hhmmToMinutes_(b.start),be=_hhmmToMinutes_(b.end);
+        if(bs==null||be==null||be<=bs||bs>=ae) break;
+        if(Math.max(as,bs)>=Math.min(ae,be)) continue;
+        const aTransport=String(a?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT'||_isPureTransportRow_(a);
+        const bTransport=String(b?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT'||_isPureTransportRow_(b);
+        const sameStay=a?.stay_unit_id&&b?.stay_unit_id&&String(a.stay_unit_id)===String(b.stay_unit_id);
+        if(aTransport||bTransport||sameStay){
+          errors.push({code:'OVERLAP',day,rows:[i+1,j+1],stay_unit_id:sameStay?a.stay_unit_id:null});
+        }
+      }
+    }
+  }
+
+  return {errors};
+}
+
 function _v3IssueFingerprint_(report={}){
   return JSON.stringify((report?.errors||[]).map(e=>({code:e?.code,day:e?.day,row:e?.row,days:e?.days,to:e?.to,transport:e?.transport})).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))));
 }
@@ -7640,11 +7726,11 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     }
 
     const master=_v3SyntheticMaster_(dest.days);
-    const finalReport=_localGlobalAudit_(city,rows,dest.days,master,perDay,baseDate);
-    const blockingErrors=_v3BlockingAuditErrors_(finalReport);
+    const finalReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
+    const blockingErrors=finalReport.errors||[];
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
     if(blockingErrors.length){
-      const error=new Error(`V3_ROUTE_QUALITY_BLOCK_AFTER_MERGE:${city}`);
+      const error=new Error(`V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE:trip`);
       error.v3BlockingErrors=blockingErrors;
       throw error;
     }
