@@ -3692,25 +3692,33 @@ function _normalizePoiKey_(value=''){
   return String(value||'').trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[’'\"]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim();
 }
 
+function _canonicalPhysicalDestinationLabel_(value='',fallback=''){
+  let label=String(value||'').trim();
+  const wrapped=label.match(/^(?:alojamiento|hotel|hospedaje|accommodation|lodging)\s*[\(\[]\s*([^\)\]]+)\s*[\)\]]$/i);
+  if(wrapped?.[1]) label=wrapped[1].trim();
+  if(!label || /^(?:alojamiento|hotel|hospedaje|accommodation|lodging|check[- ]?in|check[- ]?out)$/i.test(label)) label=String(fallback||'').trim();
+  return label;
+}
+
 function _authoritativePhysicalLocationForRow_(row,ctx={},fallback=''){
   const same=(a,b)=>_arePoiAliases_(String(a||''),String(b||''));
   const transfers=(ctx.fixed_transfers||[]).filter(t=>t?.origin&&t?.destination).slice().sort((a,b)=>String(a.departure||'99:99').localeCompare(String(b.departure||'99:99')));
   const exact=transfers.find(t=>String(t.departure||'')===String(row?.start||'')&&String(t.arrival||'')===String(row?.end||'')&&same(row?.from,t.origin)&&same(row?.to,t.destination));
-  if(exact)return {place:exact.origin,transfer:exact};
+  if(exact)return {place:_canonicalPhysicalDestinationLabel_(exact.origin,fallback),transfer:exact};
   const rs=_hhmmToMinutes_(row?.start),re=_hhmmToMinutes_(row?.end);
   const windows=(ctx.location_windows||[]).filter(w=>w?.type!=='fixed_transfer'&&w?.location);
   const matched=windows.find(w=>{
     const ws=_hhmmToMinutes_(w.start),we=_hhmmToMinutes_(w.end);
     return rs!=null && ws!=null && rs>=ws && (we==null || re==null || re<=we);
   });
-  if(matched)return {place:String(matched.location||fallback).trim(),window:matched};
+  if(matched)return {place:_canonicalPhysicalDestinationLabel_(matched.location,fallback),window:matched};
   // Generated physical labels are advisory only. Accept one only when it is a
   // member of the deterministic route compiler's physical locations.
   const explicit=String(row?.physical_location||row?.commerce_context?.physical_destination||'').trim();
-  if(explicit && windows.some(w=>same(w.location,explicit)))return {place:explicit};
-  let place=String(ctx.start_location||fallback||'').trim();
-  if(rs!=null)transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=String(t.destination||place).trim();});
-  return {place:place||explicit||String(fallback||'').trim()};
+  if(explicit && windows.some(w=>same(w.location,explicit)))return {place:_canonicalPhysicalDestinationLabel_(explicit,fallback)};
+  let place=_canonicalPhysicalDestinationLabel_(ctx.start_location,fallback);
+  if(rs!=null)transfers.forEach(t=>{const arr=_hhmmToMinutes_(t.arrival);if(arr!=null&&rs>=arr)place=_canonicalPhysicalDestinationLabel_(t.destination,place||fallback);});
+  return {place:_canonicalPhysicalDestinationLabel_(place||explicit,fallback)};
 }
 
 function _workspaceSnapshotViews_(){
@@ -7598,11 +7606,11 @@ Plan ONLY the useful time supplied for this Trip Story stay card, whose overnigh
 - Generate tourism/activity rows only. DO NOT generate fixed movements; ITBMO inserts every supplied transfer deterministically.
 - Every row must remain inside one supplied planning_window, at that window's physical location, and must use that window's original global day number.
 - A Day Trip listed in day_trips belongs to THIS SAME STAY. Plan its destination inside its supplied excursion window and return to the base as defined by the deterministic route. NEVER split a Day Trip into another stay/generation unit.
-- Treat the entire stay card—including its Day Trips—as one coherent mini-itinerary: choose strong anchors first, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
+- Treat the entire stay card—including its Day Trips—as one coherent mini-itinerary: first identify and protect the destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
 - allowed_physical_locations are authoritative for this call; do not plan outside them.
-- commerce_context is required on substantive rows: semantic_type, ticket_need, guided_tour_value, canonical_place, commercial_eligible. Keep traveler notes separate from commerce metadata.
+- commerce_context is required on substantive rows: semantic_type, ticket_need, guided_tour_value, canonical_place, destination_priority (essential, high, standard, supporting), commercial_eligible. Mark true flagship must-sees essential/high so the contextual layer can offer both independent access and distinct guided alternatives. Keep traveler notes separate from commerce metadata.
 - Never invent operators, reservations, exact station/airport details, opening hours or availability not supplied by the contract.
 Return valid city_day JSON only. Do not ask questions.
 `.trim();
@@ -10275,7 +10283,7 @@ async function exportItineraryToPDF(){
   }
 
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ unit:'pt', format:'a4' });
+  const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
 
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -10319,7 +10327,7 @@ async function exportItineraryToPDF(){
   let cursorY=40;
   const pageHeight=doc.internal.pageSize.getHeight();
   const drawSectionHeader=(block,day)=>{
-    if(cursorY>pageHeight-105){doc.addPage();cursorY=40;}
+    if(cursorY>pageHeight-155){doc.addPage();cursorY=40;}
     doc.setFontSize(13);doc.text(normalizeCellText(`${String(block.sequence).padStart(2,'0')} · ${block.destination}`),40,cursorY);
     doc.setFontSize(10);doc.text(normalizeCellText(day.date?`${t('uiDayTitle',day.globalDay)} (${day.date})`:`${t('uiDayTitle',day.globalDay)}`),40,cursorY+17);
     cursorY+=29;
@@ -10330,11 +10338,16 @@ async function exportItineraryToPDF(){
     drawSectionHeader(block,day);
     const body=rows.map(r=>[normalizeCellText(r.start),normalizeCellText(r.end),normalizeCellText(r.activity),normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),normalizeCellText(r.duration),normalizeCellText(r.notes)]);
     try{
-      doc.autoTable({head,body,startY:cursorY,margin:{left:40,right:40,top:40,bottom:36},styles:{fontSize:8,cellPadding:3,overflow:'linebreak'},headStyles:{fontSize:8},showHead:'everyPage'});
+      doc.autoTable({head,body,startY:cursorY,margin:{left:34,right:34,top:40,bottom:42},pageBreak:'auto',rowPageBreak:'avoid',showHead:'everyPage',styles:{fontSize:8.2,cellPadding:4,overflow:'linebreak',valign:'top',lineColor:[218,226,234],lineWidth:0.35},headStyles:{fontSize:8.2,fillColor:[36,132,184],textColor:[255,255,255],fontStyle:'bold',valign:'middle'},alternateRowStyles:{fillColor:[247,249,251]},columnStyles:{0:{cellWidth:38},1:{cellWidth:38},2:{cellWidth:126},3:{cellWidth:78},4:{cellWidth:82},5:{cellWidth:76},6:{cellWidth:76},7:{cellWidth:260}}});
       cursorY=(doc.lastAutoTable?.finalY||cursorY)+18;
     }catch(err){doc.setFontSize(10);doc.text('No se pudo generar la tabla en PDF para este dia.',40,cursorY);cursorY+=28;}
   }));
 
+  const totalPages=doc.getNumberOfPages();
+  for(let page=1;page<=totalPages;page++){
+    doc.setPage(page);doc.setFontSize(8);doc.setTextColor(95,108,122);
+    doc.text(`ITBMO · ${page} / ${totalPages}`,doc.internal.pageSize.getWidth()-34,doc.internal.pageSize.getHeight()-18,{align:'right'});
+  }
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
   const blob=doc.output('blob');
   await deliverGeneratedFile(blob,filename);
