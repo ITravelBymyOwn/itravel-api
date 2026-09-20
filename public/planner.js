@@ -8369,7 +8369,7 @@ function _showGenerationRetry_(reason=''){
       : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.')}</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:22px">
       <button id="itbmo-generation-retry" type="button">${es?'Reintentar generación':'Retry generation'}</button>
-      ${exhausted?`<button id="itbmo-generation-support" type="button" style="background:#fff;color:#24345f;border:1px solid #d6dbea">${es?'Contactar Soporte':'Contact Support'}</button>`:''}
+      ${exhausted?`<button id="itbmo-generation-reset" type="button" class="btn warn">${es?'Reiniciar itinerario':'Reset itinerary'}</button><button id="itbmo-generation-support" type="button" style="background:#fff;color:#24345f;border:1px solid #d6dbea">${es?'Contactar Soporte':'Contact Support'}</button>`:''}
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -8380,6 +8380,19 @@ function _showGenerationRetry_(reason=''){
   };
   overlay.querySelector('#itbmo-generation-recovery-close')?.addEventListener('click',closeRecovery);
   overlay.addEventListener('click',(event)=>{ if(event.target===overlay) closeRecovery(); });
+  overlay.querySelector('#itbmo-generation-reset')?.addEventListener('click',()=>{
+    // Recovery exhaustion must never trap the traveler in a modal loop. Reuse the
+    // canonical planner reset flow so server archival, payment/recovery cleanup,
+    // Trip Story state and local state are cleared in one authoritative place.
+    overlay.remove();
+    setPlanningChatLocked(false);
+    $resetBtn?.removeAttribute('disabled');
+    if($resetBtn){
+      $resetBtn.click();
+      return;
+    }
+    console.error('[GENERATION RECOVERY] Reset control unavailable after recovery exhaustion.');
+  });
   overlay.querySelector('#itbmo-generation-support')?.addEventListener('click',()=>{
     window.location.href='mailto:support@itravelbymyown.com';
   });
