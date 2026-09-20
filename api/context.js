@@ -621,7 +621,7 @@ function buildCandidates(trip, requestedCity) {
         }
         const candidateId=`${normalizeEntityKey(sourceCity)||'unit'}-${day}-${index+1}`;
         const destination=clean(row.to,180);
-        const entityHint=destination||clean(cc.canonical_place,180)||activity;
+        const entityHint=clean(cc.canonical_place,180)||destination||activity;
         const ownNotes=clean(row.notes,320).replace(/^valid:\s*/i,"");
         const contextNotes=clean(`${pendingContextNotes.get(candidateId)||""} ${ownNotes}`,620);
         pendingContextNotes.delete(candidateId);
@@ -868,6 +868,12 @@ function sanitizeClassifications(candidates, classifications, city) {
     const entityName = clean(raw?.entity_name, 180) || source.entity_hint || source.activity;
 
     if (needType === "no_action" || confidence === "low") continue;
+
+    const semantic = String(source.commerce_semantic_type || "").toUpperCase();
+    if ((needType === "ticket_required" || needType === "reservation_recommended") &&
+        ["RESTAURANT","LOGISTICS","FREE_SIGHT","NONE","TRANSPORT"].includes(semantic)) continue;
+    if (needType === "guided_tour_optional" &&
+        !["ATTRACTION_TICKET","TOUR_EXPERIENCE","FREE_SIGHT"].includes(semantic)) continue;
 
     if (
       (needType === "ticket_required" || needType === "reservation_recommended") &&
