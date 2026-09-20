@@ -8425,83 +8425,8 @@ body > #info-chat-modal.info-chat-modal:not(.is-minimized)::after{
   padding-top:24px !important;
   border-top:1px solid rgba(16,24,40,.065) !important;
 }
-#planner-post-generation .toolbar #btn-pdf,
-#planner-post-generation .toolbar #btn-csv,
-#planner-post-generation .toolbar #btn-receipt{
-  position:relative !important;
-  min-height:58px !important;
-  padding:0 18px !important;
-  border-radius:17px !important;
-  font-size:.88rem !important;
-  font-weight:820 !important;
-  text-shadow:none !important;
-  box-shadow:0 8px 22px rgba(16,24,40,.05),inset 0 1px 0 rgba(255,255,255,.8) !important;
-  transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease,background .18s ease !important;
-}
-#planner-post-generation .toolbar #btn-pdf::before,
-#planner-post-generation .toolbar #btn-csv::before,
-#planner-post-generation .toolbar #btn-receipt::before{
-  display:inline-grid;
-  width:26px;
-  height:26px;
-  margin-right:9px;
-  place-items:center;
-  border-radius:8px;
-  font-size:.75rem;
-  font-weight:950;
-  vertical-align:middle;
-}
-#planner-post-generation .toolbar #btn-pdf{
-  color:#9f2147 !important;
-  background:linear-gradient(135deg,#fff,#fff6f8) !important;
-  border:1px solid rgba(214,51,101,.17) !important;
-}
-#planner-post-generation .toolbar #btn-pdf::before{
-  content:"PDF";
-  color:#c92f58;
-  background:#fff1f5;
-}
-#planner-post-generation .toolbar #btn-csv{
-  color:#087659 !important;
-  background:linear-gradient(135deg,#fff,#f1fbf6) !important;
-  border:1px solid rgba(14,164,122,.18) !important;
-}
-#planner-post-generation .toolbar #btn-csv::before{
-  content:"CSV";
-  color:#087b5e;
-  background:#ecfaf5;
-}
-#planner-post-generation .toolbar #btn-receipt{
-  color:#086e86 !important;
-  background:linear-gradient(135deg,#fff,#f1fafc) !important;
-  border:1px solid rgba(20,143,170,.18) !important;
-}
-#planner-post-generation .toolbar #btn-receipt::before{
-  content:"✓";
-  color:#08728b;
-  background:#ecf8fb;
-}
-#planner-post-generation .toolbar #btn-pdf:hover,
-#planner-post-generation .toolbar #btn-csv:hover,
-#planner-post-generation .toolbar #btn-receipt:hover{
-  transform:translateY(-1px) !important;
-  filter:none !important;
-}
-#planner-post-generation .toolbar #btn-pdf:hover{
-  background:linear-gradient(135deg,#fff,#ffedf2) !important;
-  border-color:rgba(214,51,101,.30) !important;
-  box-shadow:0 13px 30px rgba(151,32,70,.09) !important;
-}
-#planner-post-generation .toolbar #btn-csv:hover{
-  background:linear-gradient(135deg,#fff,#e8f9f1) !important;
-  border-color:rgba(14,164,122,.34) !important;
-  box-shadow:0 13px 30px rgba(8,118,89,.09) !important;
-}
-#planner-post-generation .toolbar #btn-receipt:hover{
-  background:linear-gradient(135deg,#fff,#e9f8fb) !important;
-  border-color:rgba(20,143,170,.34) !important;
-  box-shadow:0 13px 30px rgba(8,110,134,.09) !important;
-}
+/* Export buttons are defined once in the consolidated premium export block below.
+   Older experimental palettes were removed to prevent hover/cascade regressions. */
 #planner-post-generation .new-planning-cta.is-ready{
   margin-top:28px !important;
   padding:20px 22px !important;
@@ -8798,8 +8723,6 @@ body{
 #planner-post-generation .new-planning-icon{color:#536fd2!important;background:linear-gradient(145deg,#edf5ff,#f0efff)!important;}
 #planner-post-generation .new-planning-button{color:#4e6480!important;border-color:rgba(82,103,125,.22)!important;background:rgba(255,255,255,.94)!important;}
 #planner-post-generation .new-planning-button:hover{color:#354f70!important;background:#f8fbfd!important;border-color:rgba(82,103,125,.34)!important;}
-#planner-post-generation .toolbar #btn-csv{color:#4d7188!important;background:linear-gradient(135deg,#fff,#f1f7fb)!important;border-color:rgba(82,103,125,.17)!important;}
-#planner-post-generation .toolbar #btn-csv::before{color:#087BFA!important;background:#edf6ff!important;}
 
 /* =========================================================
    Workspace 1 · TODAS LAS CIUDADES
@@ -9031,11 +8954,6 @@ body{
 .pref-v2-place-card.is-complete .pref-v2-number{background:#0c9e74!important;color:#fff!important;}
 .pref-v2-place-card.is-complete .pref-v2-place-title strong::after{content:' · Listo';color:#0c8d69;font-size:.7rem;font-weight:900;}
 .pref-v2-assist{padding:12px 15px!important;background:linear-gradient(135deg,#f7fbff,#f5fffb)!important;}
-#planner-post-generation .toolbar #btn-pdf,#planner-post-generation .toolbar #btn-csv,#planner-post-generation .toolbar #btn-receipt{color:#fff!important;border-color:transparent!important;box-shadow:0 12px 26px rgba(30,86,160,.16)!important;}
-#planner-post-generation .toolbar #btn-pdf{background:linear-gradient(135deg,#d52b61,#b51f53)!important;}
-#planner-post-generation .toolbar #btn-csv{background:linear-gradient(135deg,#087BFA,#4E74D8)!important;}
-#planner-post-generation .toolbar #btn-receipt{background:linear-gradient(135deg,#078b83,#11a9a0)!important;}
-#planner-post-generation .toolbar #btn-pdf::before,#planner-post-generation .toolbar #btn-csv::before,#planner-post-generation .toolbar #btn-receipt::before{background:rgba(255,255,255,.16)!important;color:#fff!important;}
 #preferences-generate-v2.is-generated{background:#eef3f6!important;color:#728091!important;box-shadow:none!important;cursor:default!important;}
 
 /* ITBMO V2.2.4 · hard CTA + preference hierarchy */
