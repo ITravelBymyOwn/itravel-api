@@ -46,10 +46,6 @@
       "use": "@vercel/node"
     },
     {
-      "src": "api/email.js",
-      "use": "@vercel/node"
-    },
-    {
       "src": "api/partners.js",
       "use": "@vercel/node"
     },
@@ -102,10 +98,6 @@
     {
       "src": "/api/attribution",
       "dest": "/api/attribution.js"
-    },
-    {
-      "src": "/api/email",
-      "dest": "/api/email.js"
     },
     {
       "src": "/api/partners",
