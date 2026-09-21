@@ -6180,7 +6180,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN'
+    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -6203,6 +6203,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
   const errors=[];
   const byDay=_rowsByDayObject_(rows);
   const seenPois=[];
+  const routeContext=routeContextOverride===false ? null : (routeContextOverride || _routeV2ContextForCity_(city));
   // Local Stay QA may cover non-contiguous GLOBAL trip-day numbers. Never infer
   // missing days from the legacy parent planning-unit span when an explicit stay
   // day set is supplied. Global/full-trip callers keep the historical 1..N rule.
@@ -6213,6 +6214,16 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
   for(const day of expectedAuditDays){
     const dayRows=byDay[day]||[];
     if(!dayRows.length) errors.push({code:'MISSING_DAY',day});
+
+    const dayWindow=(perDay||[]).find(x=>Number(x?.day)===day) || {};
+    const firstTourism=dayRows.find(r=>!_isUtilityRow_(r));
+    const firstTourismStart=_hhmmToMinutes_(firstTourism?.start);
+    if(firstTourismStart!=null && firstTourismStart<6*60 && !dayWindow?.start_provided){
+      errors.push({
+        code:'UNJUSTIFIED_EXTREME_START',day,start:firstTourism.start,
+        instruction:'Do not begin ordinary sightseeing before 06:00 unless the user supplied that boundary or the activity is genuinely time-critical. Rebuild with a traveler-friendly start appropriate to the destination, season and local opening patterns.'
+      });
+    }
 
     const daylight=_winterUsefulDaylightWindow_(city,baseDate,day);
     let priorEnd=null;
@@ -6353,7 +6364,6 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
 
     // HARD QUALITY RULE: when the user leaves the end time blank,
     // ~19:00 is the minimum planning target, not a ceiling.
-    const dayWindow=(perDay||[]).find(x=>Number(x?.day)===day) || {};
     if(dayRows.length && !dayWindow?.end_provided){
       const lastRow=dayRows[dayRows.length-1] || {};
       const lastStart=_hhmmToMinutes_(lastRow.start);
@@ -6389,7 +6399,6 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
 
   // Travel Model V2 deterministic route audit. The LLM is not trusted to infer
   // fixed movements: exact user transfers must be represented and remain activity-free.
-  const routeContext=routeContextOverride===false ? null : (routeContextOverride || _routeV2ContextForCity_(city));
   (routeContext?.day_contexts||[]).forEach(ctx=>{
     const dayRows=byDay[Number(ctx.day)]||[];
     (ctx.fixed_transfers||[]).forEach(transfer=>{
@@ -7023,7 +7032,7 @@ function _v3HardBlockingCodes_(){
     'INVENTED_DEPARTURE_LOGISTICS','END_BEFORE_MINIMUM_TARGET',
     'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','REGIONAL_DAY_TOO_THIN',
     'GLOBAL_DUPLICATE_POI','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
-    'GENERIC_TO','AMBIGUOUS_TO'
+    'GENERIC_TO','AMBIGUOUS_TO','UNJUSTIFIED_EXTREME_START'
   ]);
 }
 
@@ -7035,7 +7044,7 @@ function _v3RepairableCodes_(){
     'ROUTE_WINDOW_TOO_THIN',
     'END_BEFORE_MINIMUM_TARGET','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
     'MISSING_AURORA_FINAL_NOTE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
-    'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE'
+    'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE','UNJUSTIFIED_EXTREME_START'
   ]);
 }
 
@@ -7657,7 +7666,10 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     });
     return {...report,errors};
   };
-  const audit=(rows)=>filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitAuditBaseDate,false,unitDays));
+  // Local Stay QA must audit this Stay's own physical windows. Passing `false`
+  // disabled ROUTE_WINDOW_UNDERUSED / ROUTE_WINDOW_TOO_THIN entirely and allowed
+  // a nominal row to approve an otherwise empty full day.
+  const audit=(rows)=>filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitAuditBaseDate,{day_contexts:scopedRouteDays},unitDays));
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
   // Reuse deterministic arithmetic/duplicate cleanup, but only against this Stay
@@ -10271,7 +10283,7 @@ async function exportItineraryToPDF(){
   }
 
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
+  const doc = new jsPDF({ orientation:'portrait', unit:'pt', format:'a4' });
 
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -10292,44 +10304,62 @@ async function exportItineraryToPDF(){
      - En este parche NO lo dibujamos.
   ========================================================= */
 
-  // helper: encabezado por página
-  function pageHeader(block,day){
-    const left=40;
-    doc.setFontSize(14);doc.text(normalizeCellText(`${String(block.sequence).padStart(2,'0')} · ${block.destination}`),left,42);
-    doc.setFontSize(11);doc.text(normalizeCellText(day.date?`${t('uiDayTitle',day.globalDay)} (${day.date})`:`${t('uiDayTitle',day.globalDay)}`),left,61);
-    doc.setFontSize(8.5);doc.text(`${yyyy}-${mm}-${dd}`,left,80);
-  }
-
-  // Encabezados de la tabla (usa i18n del UI si existe)
-  const head = [[
-    normalizeCellText(t('thStart')),
-    normalizeCellText(t('thEnd')),
-    normalizeCellText(t('thActivity')),
-    normalizeCellText(t('thFrom')),
-    normalizeCellText(t('thTo')),
-    normalizeCellText(t('thTransport')),
-    normalizeCellText(t('thDuration')),
-    normalizeCellText(t('thNotes'))
-  ]];
-
-  let cursorY=40;
-  const pageHeight=doc.internal.pageSize.getHeight();
-  const drawSectionHeader=(block,day)=>{
-    if(cursorY>pageHeight-155){doc.addPage();cursorY=40;}
-    doc.setFontSize(13);doc.text(normalizeCellText(`${String(block.sequence).padStart(2,'0')} · ${block.destination}`),40,cursorY);
-    doc.setFontSize(10);doc.text(normalizeCellText(day.date?`${t('uiDayTitle',day.globalDay)} (${day.date})`:`${t('uiDayTitle',day.globalDay)}`),40,cursorY+17);
-    cursorY+=29;
-  };
+  // PDF UX contract: one global calendar day per portrait page. A day may cross
+  // several physical destinations (day trip, return, intercity movement); those
+  // fragments belong together and must never be separated by pagination.
+  const calendarDays=[];
+  const dayIndex=new Map();
   physicalBlocks.forEach(block=>block.days.forEach(day=>{
-    const rows=day.rows||[];
-    if(!rows.length)return;
-    drawSectionHeader(block,day);
-    const body=rows.map(r=>[normalizeCellText(r.start),normalizeCellText(r.end),normalizeCellText(r.activity),normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),normalizeCellText(r.duration),normalizeCellText(r.notes)]);
-    try{
-      doc.autoTable({head,body,startY:cursorY,margin:{left:34,right:34,top:40,bottom:42},pageBreak:'auto',rowPageBreak:'avoid',showHead:'everyPage',styles:{fontSize:8.2,cellPadding:4,overflow:'linebreak',valign:'top',lineColor:[218,226,234],lineWidth:0.35},headStyles:{fontSize:8.2,fillColor:[36,132,184],textColor:[255,255,255],fontStyle:'bold',valign:'middle'},alternateRowStyles:{fillColor:[247,249,251]},columnStyles:{0:{cellWidth:38},1:{cellWidth:38},2:{cellWidth:126},3:{cellWidth:78},4:{cellWidth:82},5:{cellWidth:76},6:{cellWidth:76},7:{cellWidth:260}}});
-      cursorY=(doc.lastAutoTable?.finalY||cursorY)+18;
-    }catch(err){doc.setFontSize(10);doc.text('No se pudo generar la tabla en PDF para este dia.',40,cursorY);cursorY+=28;}
+    const key=day.date||`day-${day.globalDay}`;
+    let page=dayIndex.get(key);
+    if(!page){
+      page={globalDay:day.globalDay,date:day.date||'',destinations:[],rows:[]};
+      dayIndex.set(key,page);calendarDays.push(page);
+    }
+    if(!page.destinations.some(x=>_arePoiAliases_(x,block.destination))) page.destinations.push(block.destination);
+    (day.rows||[]).forEach(row=>page.rows.push({...row,_pdfDestination:block.destination}));
   }));
+  calendarDays.sort((a,b)=>{const da=parseDMY(a.date||''),db=parseDMY(b.date||'');return (da?.getTime?.()||0)-(db?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay);});
+
+  const es=getLang()==='es';
+  const head=[[
+    es?'Destino':'Destination',es?'Horario':'Time',normalizeCellText(t('thActivity')),
+    es?'Recorrido':'Route',`${normalizeCellText(t('thTransport'))} / ${normalizeCellText(t('thDuration'))}`,normalizeCellText(t('thNotes'))
+  ]];
+  calendarDays.forEach((day,index)=>{
+    if(index) doc.addPage('a4','portrait');
+    const rows=day.rows.slice().sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
+    const routeLabel=day.destinations.join(' - ');
+    doc.setTextColor(12,46,76);doc.setFont('helvetica','bold');doc.setFontSize(17);
+    doc.text(normalizeCellText(`${t('uiDayTitle',day.globalDay)}${day.date?` · ${day.date}`:''}`),34,42);
+    doc.setFont('helvetica','normal');doc.setFontSize(9);doc.setTextColor(79,101,120);
+    doc.text(normalizeCellText(routeLabel),34,59,{maxWidth:527});
+    doc.setDrawColor(25,154,202);doc.setLineWidth(1.2);doc.line(34,70,561,70);
+
+    const density=rows.reduce((sum,r)=>sum+String(r.activity||'').length+String(r.from||'').length+String(r.to||'').length+String(r.transport||'').length+String(r.duration||'').length+String(r.notes||'').length,0);
+    const fontSize=density>5000?5.7:density>4000?6.2:density>3000?6.8:density>2200?7.3:density>1500?7.8:8.2;
+    const padding=fontSize<=6.2?2:fontSize<=6.8?2.4:3;
+    const body=rows.map(r=>[
+      normalizeCellText(r._pdfDestination),
+      normalizeCellText(`${r.start||''}\n${r.end||''}`),
+      normalizeCellText(r.activity),
+      normalizeCellText(`${r.from||''}\n- ${r.to||''}`),
+      normalizeCellText(`${_v3VisibleTransportLabel_(r.transport)||''}\n${r.duration||''}`),
+      normalizeCellText(r.notes)
+    ]);
+    try{
+      doc.autoTable({
+        head,body,startY:80,margin:{left:34,right:34,top:80,bottom:38},
+        pageBreak:'avoid',rowPageBreak:'avoid',showHead:'firstPage',
+        styles:{fontSize,cellPadding:padding,overflow:'linebreak',valign:'top',lineColor:[218,226,234],lineWidth:0.35,textColor:[32,48,64]},
+        headStyles:{fontSize:Math.max(6.5,fontSize),cellPadding:3.2,fillColor:[36,132,184],textColor:[255,255,255],fontStyle:'bold',valign:'middle'},
+        alternateRowStyles:{fillColor:[247,249,251]},
+        columnStyles:{0:{cellWidth:55,fontStyle:'bold'},1:{cellWidth:40},2:{cellWidth:101},3:{cellWidth:88},4:{cellWidth:94},5:{cellWidth:148.5}}
+      });
+    }catch(err){
+      doc.setFontSize(9);doc.setTextColor(160,25,25);doc.text(es?'No se pudo generar esta página del itinerario.':'This itinerary page could not be generated.',34,96);
+    }
+  });
 
   const totalPages=doc.getNumberOfPages();
   for(let page=1;page<=totalPages;page++){
@@ -10339,7 +10369,7 @@ async function exportItineraryToPDF(){
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
   const blob=doc.output('blob');
   await deliverGeneratedFile(blob,filename);
-  trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'continuous_physical_timeline_v6',destinations:physicalBlocks.length});
+  trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'portrait_one_global_day_per_page_v7',destinations:physicalBlocks.length,days:calendarDays.length});
 }
 
 function sendItineraryByEmail(){
