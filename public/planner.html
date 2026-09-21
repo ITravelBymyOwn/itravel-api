@@ -6,7 +6,7 @@
   <title>ITravelByMyOwn · Planner</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="https://cdn.prod.website-files.com/img/favicon.ico" />
-  <link rel="stylesheet" href="./planner.css?v=140" />
+  <link rel="stylesheet" href="./planner.css?v=142" />
 
   <!-- Tipografía -->
   <link href="https://fonts.googleapis.com" rel="preconnect" />
@@ -556,13 +556,12 @@
         <div class="toolbar">
           <button class="btn" id="btn-pdf">Exportar PDF</button>
 
-          <!-- 🆕 MVP: CSV para Excel -->
-          <button class="btn" id="btn-csv">Exportar CSV (Excel)</button>
+          <!-- Excel real editable; el id se conserva por compatibilidad con listeners existentes. -->
+          <button class="btn" id="btn-csv">Exportar Excel editable</button>
           <button class="btn" id="btn-receipt">Comprobante de pago</button>
 
-          <button class="btn email-coming-soon" id="btn-email" type="button" disabled aria-disabled="true" aria-hidden="true" title="Coming soon" hidden style="display:none;">
-            <span class="email-action-label">Enviar por Email</span>
-            <span class="coming-soon-badge">Próximamente</span>
+          <button class="btn email-action" id="btn-email" type="button">
+            <span class="email-action-label">Enviar los 3 archivos por email</span>
           </button>
 
           <!-- ✅ MVP: ocultos (se reactivan después) -->
@@ -680,16 +679,30 @@
       <h3 id="support-title">Need a hand?</h3>
       <p id="support-copy">If something went wrong with your itinerary, payment or account, our team is here to help.</p>
 
-      <div class="support-help-grid">
-        <div><span>✓</span><strong id="support-item-1">Itinerary generation issues</strong></div>
-        <div><span>✓</span><strong id="support-item-2">Payments and refunds</strong></div>
-        <div><span>✓</span><strong id="support-item-3">Account assistance</strong></div>
-      </div>
-
-      <button id="support-email-button" class="btn primary support-email-button" type="button">
-        ✉ <span id="support-email-label">Contact Customer Support</span>
-      </button>
+      <form id="support-form" class="support-form">
+        <label><span id="support-category-label">Help topic</span><select id="support-category" required><option value="itinerary">Itinerary generation issues</option><option value="payment">Payments and refunds</option><option value="account">Account assistance</option><option value="other">Other</option></select></label>
+        <label><span id="support-contact-label">Your contact email</span><input id="support-contact-email" type="email" autocomplete="email" required></label>
+        <label><span id="support-message-label">Tell us what happened</span><textarea id="support-message" rows="5" maxlength="4000" required></textarea></label>
+        <div id="support-form-status" class="form-send-status" role="status" aria-live="polite"></div>
+        <button id="support-email-button" class="btn primary support-email-button" type="submit">✉ <span id="support-email-label">Enviar a Atención al Cliente</span></button>
+      </form>
       <p class="support-footnote" id="support-footnote">We’ll include your Trip ID automatically when available.</p>
+    </div>
+  </div>
+
+  <div id="itinerary-email-modal" class="support-modal" aria-hidden="true">
+    <div class="support-card email-delivery-card" role="dialog" aria-modal="true" aria-labelledby="itinerary-email-title">
+      <button id="itinerary-email-close" class="support-close" type="button" aria-label="Close">✕</button>
+      <div class="support-symbol">✉</div>
+      <div class="support-eyebrow">ITBMO · ENTREGA SEGURA</div>
+      <h3 id="itinerary-email-title">Email my trip</h3>
+      <p id="itinerary-email-copy">One email will include your itinerary PDF, editable Excel and receipt.</p>
+      <form id="itinerary-email-form" class="support-form">
+        <label><span id="itinerary-email-label">Recipient email</span><input id="itinerary-email-recipient" type="email" autocomplete="email" required></label>
+        <div class="email-attachment-list"><span>✓ PDF · Itinerario</span><span>✓ XLSX · Excel editable</span><span>✓ PDF · Comprobante</span></div>
+        <div id="itinerary-email-status" class="form-send-status" role="status" aria-live="polite"></div>
+        <button id="itinerary-email-submit" class="btn primary support-email-button" type="submit">Prepare and email all 3 files</button>
+      </form>
     </div>
   </div>
 
@@ -735,7 +748,7 @@
       <div class="checkout-includes">
         <div><span>✓</span><span id="checkout-inc-1">Complete personalized itinerary</span></div>
         <div><span>✓</span><span id="checkout-inc-2">ITBMO travel intelligence</span></div>
-        <div><span>✓</span><span id="checkout-inc-3">PDF & CSV exports</span></div>
+        <div><span>✓</span><span id="checkout-inc-3">PDF & Excel exports</span></div>
       </div>
 
       <div class="checkout-methods">
@@ -897,9 +910,9 @@
           type_message: "Type your message...",
           send: "Send",
           export_pdf: "Export PDF",
-          export_csv: "Export CSV (Excel)",
+          export_csv: "Export editable Excel",
           export_receipt: "Payment receipt",
-          email: "Send by Email · Coming soon",
+          email: "Email all 3 files",
           choose_itinerary: "Choose this itinerary",
           info_header: "Info Chat · ITBMO 🌍",
           info_placeholder: "Ask me anything...",
@@ -946,9 +959,9 @@
           type_message: "Escribe tu mensaje...",
           send: "Enviar",
           export_pdf: "Exportar PDF",
-          export_csv: "Exportar CSV (Excel)",
+          export_csv: "Exportar Excel editable",
           export_receipt: "Comprobante de pago",
-          email: "Enviar por Email · Próximamente",
+          email: "Enviar los 3 archivos por email",
           choose_itinerary: "Elijo este itinerario",
           info_header: "Info Chat · ITBMO 🌍",
           info_placeholder: "Pregúntame lo que quieras…",
@@ -1163,6 +1176,9 @@
     })();
   </script>
 
+  <!-- ExcelJS (required for styled, editable XLSX export) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+
   <!-- jsPDF (required for PDF export) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
@@ -1203,8 +1219,8 @@
 </script>
 
 <!-- Tu JS del planner (después de los dos de arriba) -->
-<script src="./travel-model-v2.js?v=8"></script>
-<script src="./planner.js?v=159"></script>
+<script src="./travel-model-v2.js?v=9"></script>
+<script src="./planner.js?v=162"></script>
  
 </body>
 </html>
