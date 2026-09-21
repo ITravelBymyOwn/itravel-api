@@ -567,9 +567,10 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
   for(const need of transportNeeds){
     const route=parseIntercityRouteLabel(need.entity_name) || parseIntercityRouteLabel(need.source_activity) || parseIntercityRouteLabel(need.source_route);
     if(!route) continue;
-    // Until Omio's API is approved, only expose contextual internal routes inside
-    // a known European main-destination block. This is deliberately conservative:
-    // it avoids pretending that arbitrary worldwide inventory has been verified.
+    // Interim pre-API rule requested for launch: enable Omio for intercity routes
+    // whose owning destination is in Europe. Never use Omio for POI/local mobility.
+    // Once provider API/coverage data is available this rule is replaced by live
+    // route eligibility rather than expanded with city-specific exceptions.
     const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
     if(seen.has(key)) continue; seen.add(key);
     const targetUrl=omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
@@ -631,14 +632,16 @@ export async function resolveCityOffers({
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
 
-  const [viator, getyourguide, omio, omioContext] = await Promise.all([
+  const [viator, getyourguide, omio] = await Promise.all([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioContextRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
+    // Interim pre-API coverage: Omio is enabled for authoritative top-level
+    // destination→destination routes when BOTH endpoints are European. Day trips,
+    // POIs and local mobility never create Omio CTAs.
+    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage)
   ]);
 
-  return { session, offers: rankOffers([...viator, ...getyourguide, ...omio, ...omioContext]) };
+  return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
 }
 
 export async function registerPartnerClick({ session_token, trip_id, offer_id, offer_token, placement }) {
