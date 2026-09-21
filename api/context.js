@@ -7,7 +7,7 @@ import OpenAI from "openai";
 import crypto from "crypto";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const MODEL = process.env.OPENAI_CONTEXT_MODEL || process.env.OPENAI_MODEL || "gpt-5-mini";
+const MODEL = process.env.OPENAI_CONTEXT_MODEL || "gpt-5.6-luna";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
@@ -995,7 +995,20 @@ function consolidateOptionalTours(candidates, needs, city, language) {
       source_activity: group.map(x => x.source.activity).slice(0, 4).join(" · ")
     });
   }
-  return [...nonTours, ...consolidated];
+  const output=[...nonTours, ...consolidated];
+  const hasOverview=output.some(item=>item?.need_type==="guided_tour_optional" && /\b(city tour|tour panoramico|highlights tour)\b/i.test(semanticNeedKey(item?.entity_name||"")));
+  const sightseeingCandidates=(candidates||[]).filter(source=>!source?.intercity_hint && !source?.transport_arrangement_hint && !/\b(check[- ]?in|check[- ]?out|hotel|alojamiento|breakfast|desayuno|lunch|almuerzo|dinner|cena|transfer|traslado)\b/i.test(`${source?.activity||""} ${source?.entity_hint||""}`));
+  if(!hasOverview && sightseeingCandidates.length>=1 && city){
+    const source=sightseeingCandidates[0];
+    output.push({
+      id:`${source.candidate_id}:guided_tour_optional:city-overview`,category:"tours",city,day:source.day,
+      entity_name:normalizeUiLanguage(language)==="en"?`${city} city tour`:`City tour en ${city}`,
+      entity_type:"experience",need_type:"guided_tour_optional",confidence:"high",
+      user_message:normalizeUiLanguage(language)==="en"?`Compare a destination-wide guided overview of ${city} with exploring independently.`:`Compara una visita panorámica guiada de ${city} con recorrer el destino por cuenta propia.`,
+      source_activity:source.activity,source_route:"",derived_by:"deterministic_city_overview"
+    });
+  }
+  return output;
 }
 
 function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
