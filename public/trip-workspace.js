@@ -131,7 +131,12 @@ function dedupeContextualNeeds(items=[]){
     const match=out.findIndex(existing=>{
       const otherCategory=existing?.category||(existing?.need_type==='guided_tour_optional'?'tours':existing?.need_type?.includes('transport')?'transport':'tickets');
       const otherOverview=existing?.need_type==='guided_tour_optional'&&/\b(city tour|tour panoramico|highlights tour)\b/.test(normalizeWorkspaceEntity(existing?.entity_name||''));
-      return category===otherCategory&&((overview&&otherOverview)||sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity));
+      if(category!==otherCategory)return false;
+      // A destination-wide City Tour is a distinct decision from guided access
+      // to one monument. Never let entity similarity ("... de Segovia") erase
+      // the overview card; only overview cards may dedupe other overviews.
+      if(overview||otherOverview)return overview&&otherOverview;
+      return sameWorkspaceEntity(item?.entity_name||item?.source_activity,existing?.entity_name||existing?.source_activity);
     });
     if(match<0)out.push(item);else if(rank(item)>rank(out[match]))out[match]=item;
   }
@@ -319,6 +324,11 @@ function localTicketNeedsForCity(cityName,existing=[]){
     const canonical=String(cc?.canonical_place||row?.to||activity).trim();
     const key=normalizeWorkspaceEntity(canonical);
     if(!key||existingKeys.has(key))return;
+    const admissionText=normalizeWorkspaceEntity(`${activity} ${canonical} ${notes}`);
+    const explicitlyFree=/\b(sin necesidad de entrada|no requiere entrada|entrada gratuita|acceso gratuito|free admission|no ticket|outdoor free|al aire libre)\b/i.test(admissionText);
+    // Deterministic contradiction guard: server/model metadata cannot turn a
+    // clearly free exterior, plaza, viewpoint or street into a paid ticket.
+    if(explicitlyFree)return;
     // Ticket cards are fail-closed. Reservation language in a restaurant,
     // lodging or logistics note is not attraction-admission evidence.
     if(['RESTAURANT','LOGISTICS','FREE_SIGHT','NONE','TRANSPORT'].includes(semantic))return;
@@ -357,14 +367,22 @@ function contextualNeedsForCity(cityName,needs){
   // Offer one destination-wide overview for every real physical tourist
   // destination, independently of whether a city-tour row appears literally.
   const overviewTour=cityOverviewTourForCity(cityName,merged);
-  if(overviewTour)merged.push(overviewTour);
+  if(overviewTour)merged.unshift(overviewTour);
   // Tours/experiences are a first-class contextual layer. Server intelligence
   // can enrich them, but the section must never depend on a server classifier
   // returning a tour category: derive defensible alternatives from the actual
   // itinerary and deduplicate against server needs.
   const derivedTours=tourAlternativesForCity(cityName,merged);
   if(derivedTours.length) merged.push(...derivedTours);
-  return dedupeContextualNeeds(merged);
+  let finalNeeds=dedupeContextualNeeds(merged);
+  // Deterministic product rule: every real tourist destination gets exactly one
+  // destination-wide City Tour option. Never depend on the LLM classifier for it.
+  const hasOverview=finalNeeds.some(item=>item?.need_type==='guided_tour_optional' && /\b(city tour|tour panoramico|highlights tour)\b/i.test(normalizeWorkspaceEntity(item?.entity_name||'')));
+  if(!hasOverview){
+    const forced=cityOverviewTourForCity(cityName,[]);
+    if(forced) finalNeeds=[forced,...finalNeeds];
+  }
+  return finalNeeds;
 }
 
 function contextLabel(item){
