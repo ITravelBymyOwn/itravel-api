@@ -14,6 +14,10 @@ const client = new OpenAI({
 });
 
 const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+// V2.10.9: use a stronger mini-tier model for first-pass itinerary construction,
+// while keeping bounded repair work on the fast/cost-efficient Luna tier.
+const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-terra";
+const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
 
 /* =========================================================
    INFO CHAT ENTITLEMENT · payment gate + 10-query quota
@@ -2351,7 +2355,7 @@ function _usagePayload_(collector) {
 // ==============================
 // Model call (with soft timeout)
 // ==============================
-async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null) {
+async function callStructured(messages, temperature = 0.28, max_output_tokens = 2600, timeoutMs = 90000, usageCollector = null, modelOverride = null, reasoningEffort = "low") {
   const input = (messages || []).map((m) => `${String(m.role || "user").toUpperCase()}: ${m.content}`).join("\n\n");
 
   const controller = new AbortController();
@@ -2360,9 +2364,9 @@ async function callStructured(messages, temperature = 0.28, max_output_tokens = 
   try {
    const resp = await client.responses.create(
   {
-    model: MODEL,
+    model: modelOverride || MODEL,
     reasoning: {
-      effort: "low",
+      effort: reasoningEffort,
     },
     input,
     max_output_tokens,
@@ -2664,12 +2668,18 @@ For a physical-stay contract, return only the global day numbers represented by 
 Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
 `.trim();
 
+      const v3Task=String(body.v3_task || "generate").toLowerCase();
+      const v3IsRepair=v3Task.includes("repair") || v3Task.includes("qa");
+      const v3Model=v3IsRepair ? REPAIR_MODEL : PLANNER_MODEL;
+      const v3Effort=v3IsRepair ? "low" : "medium";
       let raw = await callStructured(
         [{ role:"system", content:V3_SYSTEM_PROMPT }, ...clientMessages],
         0.22,
         8200,
         110000,
-        plannerUsage
+        plannerUsage,
+        v3Model,
+        v3Effort
       );
       let parsed = cleanToJSON(raw);
       if (!_hasRenderableItinerary_(parsed)) {
@@ -2678,7 +2688,9 @@ Do not output analysis, markdown, master-plan metadata or commentary outside JSO
           0.12,
           8600,
           110000,
-          plannerUsage
+          plannerUsage,
+          REPAIR_MODEL,
+          "medium"
         );
         parsed = cleanToJSON(raw);
       }
