@@ -3856,6 +3856,16 @@ function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus')
   modal.addEventListener('touchstart',e=>{if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const p=e.touches?.[0];if(p){immersiveTouchStartX=p.clientX;immersiveTouchStartY=p.clientY;}},{passive:true});modal.addEventListener('touchend',e=>{if(immersiveTouchStartX==null)return;const p=e.changedTouches?.[0];if(!p)return;const dx=p.clientX-immersiveTouchStartX,dy=p.clientY-immersiveTouchStartY;immersiveTouchStartX=immersiveTouchStartY=null;if(Math.abs(dx)>58&&Math.abs(dx)>Math.abs(dy)*1.25)_immersiveMoveDay_(dx<0?1:-1);},{passive:true});
   document.addEventListener('keydown',e=>{if(!modal.classList.contains('is-open'))return;if(e.key==='Escape'){e.preventDefault();if(immersiveWorkspaceLevel==='city')_immersiveBackToOverview_();else closeImmersiveItinerary();}else if(e.key==='ArrowLeft')_immersiveMoveDay_(-1);else if(e.key==='ArrowRight')_immersiveMoveDay_(1);});syncImmersiveItineraryLauncher();}
 bindImmersiveItineraryViewer();
+// Delegated fallback: the launcher can be re-rendered/re-enabled after generation.
+// A document-level handler guarantees the CTA remains functional even if its
+// original node was replaced before the first bind completed.
+document.addEventListener('click',event=>{
+  const launch=event.target?.closest?.('#open-itinerary-focus');
+  if(!launch) return;
+  event.preventDefault();event.stopPropagation();
+  if(launch.disabled || launch.getAttribute('aria-disabled')==='true') return;
+  try{openImmersiveItinerary();}catch(error){console.error('[ITBMO WORKSPACE OPEN FALLBACK]',error);}
+});
 
 function getFrontendSnapshot(){
   return JSON.stringify(
@@ -4118,7 +4128,7 @@ Edits:
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      body: JSON.stringify({ model: MODEL, messages, mode })
+      body: JSON.stringify({ model: MODEL, messages, mode, ...(extraPayload||{}) })
     });
 
     if(!res.ok){
@@ -5472,7 +5482,7 @@ function _finishAstraGenerationMetrics_(){
   return snapshot;
 }
 
-async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='planner'){
+async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='planner', extraPayload={}){
   const history = useHistory ? session : [];
 
   // timeout to avoid hangs (same pattern as SECTION 12)
@@ -5499,7 +5509,7 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='pl
       method:'POST',
       headers:{'Content-Type':'application/json'},
       signal: controller.signal,
-      body: JSON.stringify({ model: MODEL, messages, mode })
+      body: JSON.stringify({ model: MODEL, messages, mode, ...(extraPayload||{}) })
     });
 
     if(!res.ok){
@@ -6180,7 +6190,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START'
+    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -6257,7 +6267,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         }
 
         if(priorEnd!=null && start<priorEnd){
-          errors.push({code:'OVERLAP',day,row});
+          errors.push({code:'OVERLAP',day,row,previous_row:Math.max(1,row-1),previous_activity:dayRows[i-1]?.activity||null,previous_start:dayRows[i-1]?.start||null,previous_end:dayRows[i-1]?.end||null,activity:r.activity||null,start:r.start||null,end:r.end||null});
         }
         priorEnd=end;
 
@@ -6308,6 +6318,17 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         if(poi){
           seenPois.push({day,poi,label:r.to||r.activity});
         }
+      }
+
+      const rowText=`${r.activity||''} ${r.to||''}`;
+      const looksMajorInterior=/\b(museum|museo|palace|palacio|cathedral|catedral|basilica|basílica|gallery|galeria|galería|interior|castle|castillo|archaeological|arqueolog)\b/i.test(rowText);
+      if(start!=null && start<8*60 && looksMajorInterior && !dayWindow?.start_provided){
+        errors.push({code:'IMPLAUSIBLE_EARLY_INTERIOR',day,row,start:r.start,activity:r.activity||null,to:r.to||null,instruction:'Do not schedule a major indoor attraction at an unusually early hour unless the user supplied that time or the contract explicitly confirms access. Use a plausible exterior/meal/walk first and place the interior visit in a realistic opening window.'});
+      }
+      const placeText=String(r.to||'').trim();
+      const unbalancedParens=(placeText.match(/\(/g)||[]).length!==(placeText.match(/\)/g)||[]).length;
+      if(unbalancedParens || /(?:\(|\/|\bor\b|\bo\b)\s*$/i.test(placeText)){
+        errors.push({code:'TRUNCATED_PLACE_TEXT',day,row,to:r.to||null,instruction:'Return one complete concrete destination/place name; remove dangling alternatives or unfinished parenthetical text.'});
       }
 
       const genericReason=_genericPlaceReason_(r.to);
@@ -6482,7 +6503,10 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       rowsInWindow.forEach((r,index)=>{
         const text=`${r.activity||''} ${r.from||''} ${r.to||''}`;
         const knownPlaces=[city,ctx.start_location,ctx.end_location,ctx.overnight_base,...(ctx.fixed_transfers||[]).flatMap(t=>[t.origin,t.destination])].filter(Boolean);
-        const clearlyOther=knownPlaces.some(place=>!_arePoiAliases_(place,window.location)&&_arePoiAliases_(text,place));
+        const stampedLocation=String(r.physical_location||r?.commerce_context?.physical_destination||'').trim();
+        const stampedWindow=String(r.planning_window_id||r?.commerce_context?.planning_window_id||'').trim();
+        const authoritativeMatch=(stampedWindow && String(window.window_id||'')===stampedWindow) || (stampedLocation && _arePoiAliases_(stampedLocation,window.location));
+        const clearlyOther=!authoritativeMatch && knownPlaces.some(place=>!_arePoiAliases_(place,window.location)&&_arePoiAliases_(text,place));
         if(clearlyOther){
           errors.push({
             code:'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',day:ctx.day,row:index+1,
@@ -7031,7 +7055,7 @@ function _v3HardBlockingCodes_(){
     'INVENTED_DEPARTURE_LOGISTICS',
     'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','REGIONAL_DAY_TOO_THIN',
     'GLOBAL_DUPLICATE_POI','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
-    'GENERIC_TO','AMBIGUOUS_TO','UNJUSTIFIED_EXTREME_START'
+    'GENERIC_TO','AMBIGUOUS_TO','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','DURATION_UNPARSEABLE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED'
   ]);
 }
 
@@ -7344,8 +7368,8 @@ function _v3AcceptedStayClear_(contract,units=[]){
   });
 }
 
-async function _v3Call_(prompt){
-  return _callPlannerSystemPrompt_(prompt,false,'planner_v3');
+async function _v3Call_(prompt,task='repair'){
+  return _callPlannerSystemPrompt_(prompt,false,'planner_v3',{v3_task:task});
 }
 
 function _v3ExtractPlanningUnitRows_(parsed,planningUnit,totalDays,expectedDaysOverride=undefined){
@@ -7637,7 +7661,7 @@ Plan ONLY the useful time supplied for this Trip Story stay card, whose overnigh
 - Never invent operators, reservations, exact station/airport details, opening hours or availability not supplied by the contract.
 Return valid city_day JSON only. Do not ask questions.
 `.trim();
-  const raw=await _v3Call_(prompt);
+  const raw=await _v3Call_(prompt,'generate');
   const parsed=parseJSON(raw);
   const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unit.base_destination||unit.physical_destination,totalDays,unit.days));
   return _v3StampStayRows_(rows,unit);
@@ -7842,7 +7866,7 @@ Generate the complete planning unit in one pass.
 TRANSPORT DECISION RULE: A mode explicitly selected by the user is authoritative for a fixed movement and must be preserved. For local mobility, intelligently recommend one default plus up to two useful alternatives when traveler context can change the best choice. In Transport give every option its own door-to-door estimate and relevant condition, for example “Recomendado: a pie (12–15 min) · Metro (8–12 min, si quieren reducir esfuerzo)”. The duration Transport range must safely cover every listed choice. Do not invent operators, stops, schedules or availability, and do not list alternatives that add no decision value.
 IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the physical city for every day. A day remains part of this planning unit even when its physical location is another city/place from route_days. Use route_days[].day as the authoritative day identity. city_day[].city may name that day's actual physical location; it does NOT need to equal planning_unit. Include every planning-unit day 1..total_days exactly once or in multiple blocks sharing that same day when the day has multiple physical windows. Internally choose distinct day identities and anchors before writing rows, but output only the final itinerary JSON. Use every physically available window correctly. Do not ask questions.
 `.trim();
-  const raw=await _v3Call_(prompt);
+  const raw=await _v3Call_(prompt,'generate');
   const parsed=parseJSON(raw);
   const rows=_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,city,dest.days));
   return {rows,contract};
@@ -8666,7 +8690,7 @@ function _applyGeneratedUIState({showModal=false}={}){
 // passes QA is checkpointed immediately and is never regenerated because another Stay
 // fails; retries remain isolated to failed/incomplete Stays. Final chronology and
 // USER_FIXED movements are merged by ITBMO, never by the model.
-const ITBMO_GENERATION_CONCURRENCY=2;
+const ITBMO_GENERATION_CONCURRENCY=3;
 let _generationCheckpointQueue_=Promise.resolve();
 function _queueGenerationCheckpoint_(status='generating',extra={}){
   // Bind every queued write to the generation epoch + trip that created it. This
@@ -10582,7 +10606,7 @@ function openItineraryEmailModal(){
   $itineraryEmailRecipient.value=String(currentUser?.email||'');setEmailDeliveryStatus('');
   $itineraryEmailModal.classList.add('active');$itineraryEmailModal.setAttribute('aria-hidden','false');setTimeout(()=>$itineraryEmailRecipient.focus(),60);
 }
-function closeItineraryEmailModal(){if(!$itineraryEmailModal)return;$itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');}
+function closeItineraryEmailModal({restoreDownloads=true}={}){if(!$itineraryEmailModal)return;$itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');if(restoreDownloads && hasGeneratedItineraryRows())setTimeout(()=>showFinalDownloadModal(),80);}
 async function sendItineraryByEmail(event){
   event?.preventDefault();const copy=emailSendCopy(),recipient=String($itineraryEmailRecipient?.value||'').trim();
   if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)){setEmailDeliveryStatus(copy.invalid,'error');return;}
@@ -10596,7 +10620,7 @@ async function sendItineraryByEmail(event){
     setEmailDeliveryStatus(copy.sending);const attachments=[];
     for(const item of generated)attachments.push({kind:item.kind,name:item.filename,type:item.blob.type,content:await blobToBase64(item.blob)});
     await emailApi({action:'send_itinerary',session_token:token,trip_id:currentTripId,recipient_email:recipient,lang:getLang(),attachments});
-    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});
+    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});setTimeout(()=>closeItineraryEmailModal({restoreDownloads:true}),900);
   }catch(error){const key=error?.code==='RECEIPT_REQUIRED'?'receipt':error?.code==='ATTACHMENTS_TOO_LARGE'?'large':error?.code==='EMAIL_NOT_CONFIGURED'?'config':'error';setEmailDeliveryStatus(copy[key],'error');}
   finally{$itineraryEmailSubmit.disabled=false;}
 }
@@ -11255,6 +11279,12 @@ qs('#reset-planner')?.addEventListener('click', ()=>{
     clearInfoChatStateForTrip(tripIdToArchive);
     _clearPostPaymentProgressLocal_(tripIdToArchive);
     try{ localStorage.removeItem(ASTRA_COACH_STORAGE_KEY); }catch(_){ }
+    try{ localStorage.removeItem('itbmo_trip_workspace_snapshot_v1'); }catch(_){ }
+    try{ _tripStoryClearDraft_(); }catch(_){ }
+    try{ _travelV2()?.setTripStory?.(null); }catch(_){ }
+    // Clear accepted-stay caches/drafts from the just-archived planning run while
+    // preserving account/session identity and unrelated generated-trip history.
+    try{ Object.keys(sessionStorage).filter(k=>k.startsWith('itbmo_v3_stay_')||k.startsWith('itbmo_trip_story_draft_v1_')).forEach(k=>sessionStorage.removeItem(k)); }catch(_){ }
     closeAstraCoach({remember:false});
 
     $cityList.innerHTML=''; savedDestinations=[]; itineraries={}; cityMeta={};
