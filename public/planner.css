@@ -2705,6 +2705,16 @@ input.end,
 .support-help-grid span{color:#0aa17d;font-weight:950}
 .support-email-button{width:100%;margin-top:.35rem}
 .support-footnote{font-size:.72rem!important}
+.support-form{display:grid;gap:.72rem;margin-top:1rem;text-align:left}
+.support-form label{display:grid;gap:.32rem;color:#34566f;font-size:.76rem;font-weight:850}
+.support-form input,.support-form select,.support-form textarea{width:100%;box-sizing:border-box;padding:.72rem .78rem;color:#092c4c;background:#fff;border:1px solid rgba(35,75,112,.18);border-radius:.78rem;font:inherit;outline:none}
+.support-form textarea{resize:vertical;min-height:108px;line-height:1.45}
+.support-form input:focus,.support-form select:focus,.support-form textarea:focus{border-color:#1687ff;box-shadow:0 0 0 3px rgba(22,135,255,.11)}
+.form-send-status{min-height:1.2rem;color:#5f7488;font-size:.74rem;font-weight:750;text-align:center}
+.form-send-status.is-error{color:#b42318}.form-send-status.is-success{color:#087a60}
+.email-delivery-card{width:min(94vw,540px)}
+.email-attachment-list{display:grid;grid-template-columns:repeat(3,1fr);gap:.42rem}
+.email-attachment-list span{padding:.58rem .45rem;color:#31536d;background:#f4f9fc;border:1px solid rgba(35,75,112,.10);border-radius:.7rem;font-size:.68rem;font-weight:800;text-align:center}
 
 /* Checkout */
 .checkout-card{width:min(94vw,650px)}
@@ -2943,59 +2953,34 @@ input.end,
 }
 
 
-/* =========================================================
-   ITBMO · EMAIL EXPORT · COMING SOON · v71
-   Visible after generation, intentionally unavailable for MVP.
-========================================================= */
-.toolbar #btn-email.email-coming-soon,
-.toolbar #btn-email:disabled{
+/* ITBMO · secure transactional email */
+.toolbar #btn-email.email-action{
   position:relative;
   display:inline-flex;
   align-items:center;
   justify-content:center;
   gap:.48rem;
   min-height:44px;
-  color:#66598d;
+  color:#0b5674;
   background:
     linear-gradient(135deg,rgba(244,240,255,.98),rgba(236,244,255,.96));
   border:1px solid rgba(126,97,202,.20);
   box-shadow:0 7px 18px rgba(65,55,112,.07);
   opacity:1;
   filter:none;
-  cursor:not-allowed;
+  cursor:pointer;
   transform:none;
 }
 
-.toolbar #btn-email.email-coming-soon:hover,
-.toolbar #btn-email:disabled:hover{
-  color:#66598d;
-  background:
-    linear-gradient(135deg,rgba(244,240,255,.98),rgba(236,244,255,.96));
-  border-color:rgba(126,97,202,.20);
-  box-shadow:0 7px 18px rgba(65,55,112,.07);
-  transform:none;
-  filter:none;
+.toolbar #btn-email.email-action:hover{
+  color:#fff;background:linear-gradient(135deg,#1687ff,#0aa7a5);border-color:transparent;box-shadow:0 10px 24px rgba(10,135,170,.20);transform:translateY(-1px)
 }
 
 .toolbar #btn-email .email-action-label{
   font-weight:850;
 }
 
-.toolbar #btn-email .coming-soon-badge{
-  display:inline-flex;
-  align-items:center;
-  padding:.20rem .42rem;
-  color:#735bb6;
-  background:rgba(255,255,255,.82);
-  border:1px solid rgba(126,97,202,.16);
-  border-radius:999px;
-  font-size:.58rem;
-  line-height:1;
-  font-weight:950;
-  letter-spacing:.035em;
-  text-transform:uppercase;
-  white-space:nowrap;
-}
+@media(max-width:620px){.email-attachment-list{grid-template-columns:1fr}.support-form textarea{min-height:92px}}
 
 /* =========================================================
    INFO CHAT · PAYMENT ENTITLEMENT + 10-QUERY LIMIT · v67
@@ -9128,3 +9113,25 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 
 /* V2.8.4 · immutable trip configuration after payment */
 #build-trip-story.is-payment-locked,#trip-story-summary.is-payment-locked #edit-trip-story{opacity:.5;cursor:not-allowed;filter:saturate(.55);transform:none!important;box-shadow:none!important;}
+
+/* Trip summary must always remain inside the Planner viewport. */
+.trip-story-summary,
+.trip-story-summary__head,
+.trip-story-summary-flow{min-width:0;max-width:100%;box-sizing:border-box;}
+.trip-story-summary__head{flex-wrap:wrap;}
+.trip-story-summary-actions{flex-wrap:wrap;max-width:100%;}
+.trip-story-summary-flow{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  align-items:stretch;
+  gap:12px;
+  overflow:visible;
+}
+.trip-story-summary-stop{min-width:0;width:100%;box-sizing:border-box;}
+.trip-story-summary-arrow{display:none;}
+@media(max-width:980px){.trip-story-summary-flow{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media(max-width:620px){
+  .trip-story-summary-flow{grid-template-columns:1fr;}
+  .trip-story-summary-actions{display:grid!important;grid-template-columns:1fr;width:100%;}
+  .trip-story-summary-actions button{width:100%;}
+}
