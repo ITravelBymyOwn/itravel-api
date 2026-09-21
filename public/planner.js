@@ -6315,7 +6315,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         errors.push({code:'GENERIC_TO',day,row,to:r.to,reason:genericReason});
       }
 
-      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif full\b|\bsi est[aá] lleno\b/i.test(String(r.to||''))){
+      if(/\s\/\s|(?:^|\s)or(?=\s|$)|(?:^|\s)o(?=\s|$)|\balternative\b|\balternativa\b|\bif full\b|\bsi est[aá] lleno\b/i.test(String(r.to||''))){
         errors.push({code:'AMBIGUOUS_TO',day,row,to:r.to});
       }
 
@@ -7179,10 +7179,10 @@ function _v3AdaptiveRepairBudget_(contract={},totalDays=1){
 function _v3ConcretePlace_(row={}){
   const activity=String(row?.activity||'').trim();
   const activityTail=activity.split(/\s+[–—-]\s+/).slice(1).join(' - ').trim();
-  const ambiguous=/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif full\b|\bsi est[aá] lleno\b/i;
+  const ambiguous=/\s\/\s|(?:^|\s)or(?=\s|$)|(?:^|\s)o(?=\s|$)|\balternative\b|\balternativa\b|\bif full\b|\bsi est[aá] lleno\b/i;
   if(activityTail && !ambiguous.test(activityTail)) return activityTail;
   const raw=String(row?.to||'').trim();
-  return raw.split(/\s+\/\s+|\s+or\s+|\s+o\s+|\s+alternative\s+|\s+alternativa\s+/i)[0].trim() || raw;
+  return raw.split(/\s+\/\s+|\s+or\s+|\s+o\s+|\s+alternative\s+|\s+alternativa\s+|\s+if full\b|\s+si est[aá] lleno\b/i)[0].trim() || raw;
 }
 
 function _v3FitDurationToInterval_(row={}){
