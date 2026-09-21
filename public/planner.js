@@ -7745,38 +7745,40 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
   // because a different stay failed. Only failed stays consume more model calls.
   const results=new Array(units.length);
   const failures=[];
-
-  // Strictly sequential Stay processing. Accepted Stay checkpoints are reused and
-  // never regenerated because a later Stay fails. This also prevents overlapping
-  // model calls from amplifying QA/retry pressure on the same trip.
-  for(let index=0;index<units.length;index++){
-    const unit=units[index];
-    const label=unit.base_destination||unit.physical_destination;
-    const cached=_v3AcceptedStayGet_(contract,unit);
-    if(cached){
-      results[index]={...cached,unit,reused:true};
-      console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
-      continue;
-    }
-
-    let accepted=null,lastError=null;
-    for(let stayAttempt=1;stayAttempt<=ITBMO_STAY_GENERATION_MAX_ATTEMPTS&&!accepted;stayAttempt++){
-      try{
-        console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · isolated attempt ${stayAttempt}/${ITBMO_STAY_GENERATION_MAX_ATTEMPTS}`);
-        const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
-        const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
-        accepted={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings,accepted_attempt:stayAttempt};
-        _v3AcceptedStaySet_(contract,unit,{rows:accepted.rows,audit:accepted.audit,warnings:accepted.warnings,accepted_attempt:stayAttempt});
-      }catch(error){
-        lastError=error;
-        const qualityBlock=/V3_STAY_QUALITY_BLOCK/.test(String(error?.message||''));
-        console.warn(`[ITBMO V3 STAY RETRY] ${label} · isolated attempt ${stayAttempt} failed`,error?.v3BlockingErrors||error);
-        if(!qualityBlock)break;
+  let cursor=0;
+  const concurrency=Math.min(3,units.length);
+  await Promise.all(Array.from({length:concurrency},async()=>{
+    while(true){
+      const index=cursor++;
+      if(index>=units.length) return;
+      const unit=units[index];
+      const label=unit.base_destination||unit.physical_destination;
+      const cached=_v3AcceptedStayGet_(contract,unit);
+      if(cached){
+        results[index]={...cached,unit,reused:true};
+        console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
+        continue;
       }
+
+      let accepted=null,lastError=null;
+      for(let stayAttempt=1;stayAttempt<=ITBMO_STAY_GENERATION_MAX_ATTEMPTS&&!accepted;stayAttempt++){
+        try{
+          console.log(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · isolated attempt ${stayAttempt}/${ITBMO_STAY_GENERATION_MAX_ATTEMPTS}`);
+          const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
+          const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
+          accepted={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings,accepted_attempt:stayAttempt};
+          _v3AcceptedStaySet_(contract,unit,{rows:accepted.rows,audit:accepted.audit,warnings:accepted.warnings,accepted_attempt:stayAttempt});
+        }catch(error){
+          lastError=error;
+          const qualityBlock=/V3_STAY_QUALITY_BLOCK/.test(String(error?.message||''));
+          console.warn(`[ITBMO V3 STAY RETRY] ${label} · isolated attempt ${stayAttempt} failed`,error?.v3BlockingErrors||error);
+          if(!qualityBlock)break;
+        }
+      }
+      if(accepted)results[index]=accepted;
+      else failures.push({index,unit,error:lastError});
     }
-    if(accepted)results[index]=accepted;
-    else failures.push({index,unit,error:lastError});
-  }
+  }));
 
   if(failures.length){
     const error=new Error(`V3_STAY_RECOVERY_EXHAUSTED:${failures.map(x=>x.unit?.base_destination||x.unit?.physical_destination||x.unit?.id).join(',')}`);
@@ -8622,11 +8624,12 @@ function _applyGeneratedUIState({showModal=false}={}){
 
 // V3 generation orchestrator: Travel Model V2 first compiles one continuous physical
 // timeline. Each main destination is then decomposed into chronological Physical Stay
-// Units (Madrid A → Segovia → Toledo → Madrid B, etc.). Stay Units are generated
-// strictly sequentially; accepted checkpoints are preserved so a later failure never
-// regenerates an already-approved Stay. Final chronology and USER_FIXED movements are
-// merged by ITBMO, never by the model.
-const ITBMO_GENERATION_CONCURRENCY=1;
+// Units (Madrid A → Segovia → Toledo → Madrid B, etc.). Independent Stay Units can be
+// generated concurrently because route boundaries are deterministic. Every Stay that
+// passes QA is checkpointed immediately and is never regenerated because another Stay
+// fails; retries remain isolated to failed/incomplete Stays. Final chronology and
+// USER_FIXED movements are merged by ITBMO, never by the model.
+const ITBMO_GENERATION_CONCURRENCY=2;
 let _generationCheckpointQueue_=Promise.resolve();
 function _queueGenerationCheckpoint_(status='generating',extra={}){
   // Bind every queued write to the generation epoch + trip that created it. This
