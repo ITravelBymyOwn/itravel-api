@@ -4827,6 +4827,10 @@ function normalizeRow(r = {}, fallbackDay = 1){
       safeCommerce.semantic_type='RESTAURANT';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
     }else if(/^(traslado|transfer|regreso|retorno|llegada|salida|check in|check out)\b/i.test(semanticText)){
       safeCommerce.semantic_type='LOGISTICS';safeCommerce.ticket_need='none';safeCommerce.guided_tour_value='none';safeCommerce.commercial_eligible=false;
+    }else if(String(safeCommerce.semantic_type||'').toUpperCase()==='TRANSPORT' && kind==='activity'){
+      // Local mobility alternatives belong to the activity and must never
+      // convert that attraction into a pure-transport row.
+      safeCommerce.semantic_type='NONE';
     }
   }
 
@@ -5970,7 +5974,7 @@ HARD RULES:
 - A row's activity describes the place visited in THAT row.
 - Its To field must be that same concrete primary destination, not the next attraction.
 - The following row's From must continue from the preceding To.
-- One To and one primary transport choice per row; alternatives belong in notes.
+- Use one concrete To per row. Local mobility may show one recommended/default option plus up to two genuinely useful alternatives in Transport. Estimate the door-to-door time of every option and state the deciding context concisely (effort, accessibility, weather, luggage, cost or reliability). The row's Transport duration range must use an upper bound that safely covers all listed alternatives. Do not offer ornamental options. User-fixed intercity movements remain immutable.
 - Pure movement rows use kind:"transport", contain only one "Transport: ..." duration line and their interval equals that time. Visit rows use kind:"activity", contain "Transport: ...\\nActivity: ..." and their interval equals both. No overlaps and no unexplained gap over about 20 minutes.
 - Scenic outdoor visits must fit plausible useful daylight for the date/latitude. Driving, indoor
   activities, meals and thermal experiences may use darker hours.
@@ -5986,7 +5990,7 @@ HARD RULES:
 - Notes are a traveler-facing intelligence layer, not filler. For every meaningful activity include concise, specific execution guidance when relevant: advance booking/timed-entry need, what to prioritize inside a large attraction, realistic seasonal/daylight or opening-hours caveats, access/logistics, practical timing, and a useful fallback or alternative only when it adds real value. Never expose engine language, internal labels, contract/window terminology or fake certainty.
 - Notes must sound natural and expert. Do not repeat fixed labels such as "Emotion:" and "Tip:" on every row. Avoid generic filler such as "great for photos" unless paired with a concrete reason or operational recommendation.
 - commerce_context is operational data for the contextual recommendation engine and must be precise. For every non-transport row classify semantic_type as exactly one of ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE; set ticket_need to required/recommended/optional/none/unknown; set guided_tour_value to high/medium/low/none; and set canonical_place to the single concrete attraction/experience represented by the row. Paid interior attractions, museums, monuments, towers and access-controlled sites must not be mislabeled as FREE_SIGHT. Streets, plazas, exterior walks, viewpoints without controlled access and logistics must not be mislabeled as ticket needs.
-- For transport rows, commerce_context must identify origin, destination, known mode, departure and arrival. If the user asks ITBMO to recommend transport, choose one primary practical mode when the route facts support it; if confidence is insufficient, keep the visible transport neutral and set transport_recommendation_needed=true so the contextual mobility layer can resolve it. Never invent an operator, terminal, reservation, schedule or availability.
+- For pure transport rows, commerce_context must identify origin, destination, known mode, departure and arrival. For an activity's local access, commerce_context keeps the activity semantic_type and may add transport_options=[{mode, estimated_minutes, recommended, condition}]. Never relabel an attraction/activity as TRANSPORT merely because several local mobility options are shown. Never invent an operator, terminal, reservation, schedule or availability.
 - Target 4–8 useful rows on a normal full day, fewer on genuinely short/light days.
 - No text outside JSON.
 
@@ -6179,7 +6183,7 @@ function _auditSeverity_(error={}){
     'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN'
   ]);
   const major=new Set([
-    'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE','AMBIGUOUS_TRANSPORT',
+    'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
     'RIGID_AURORA_ROW','REGIONAL_DAY_TOO_THIN','REPETITIVE_NOTE_TEMPLATE'
   ]);
   if(critical.has(error?.code)) return 10;
@@ -6304,9 +6308,8 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         errors.push({code:'AMBIGUOUS_TO',day,row,to:r.to});
       }
 
-      if(/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif preferred\b|\bsi prefieres\b/i.test(String(r.transport||''))){
-        errors.push({code:'AMBIGUOUS_TRANSPORT',day,row,transport:r.transport});
-      }
+      // Multiple local mobility recommendations are valid traveler guidance.
+      // Timeline arithmetic already validates the declared duration range.
 
       const profile=_activityProfile_(r);
       const activityBounds=_activityDurationBounds_(r.duration);
@@ -6584,7 +6587,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The Day 1 start is when the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent arrival transport details.
 - A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
 - Re-sequence each day when needed to minimize travel time, cluster nearby areas, preserve natural route direction and avoid revisiting a completed district.
-- Use one concrete To and one primary transport choice per row. Put conditional alternatives in Notes.
+- Use one concrete To per row. Local mobility may contain one recommended/default option plus up to two contextual alternatives, each with its own time estimate; schedule against the slowest listed option. Fixed intercity movements remain single and immutable.
 - Reject generic destinations such as "nearby village", "local restaurant", "services" or "similar option".
 - A pure movement row contains only transport time; a visit row contains transport plus activity. Keep no more than about 20 minutes unexplained.
 - Reconcile duration with the transport field and preserve realistic long ranges.
@@ -6800,7 +6803,7 @@ HARD RULES:
 - Scenic outdoor stops must fit plausible useful daylight.
 - Regional days require logical micro-stops, a realistic on-route lunch/meal break when the day spans lunch, and explicit return to the lodging/base near the applicable end time.
 - Aurora, when plausible, belongs as an ADDITIONAL note in the NOTES of the FINAL row of EVERY day in that city rather than a standalone activity. This applies even when explicitly requested in Preferences.
-- One concrete To and one transport choice per row.
+- One concrete To per row. Local mobility may contain up to three intelligently ranked options, each with an estimated time and a useful condition; the duration upper bound must keep every option feasible.
 - Use one selected language consistently, including duration labels.
 `.trim();
 
@@ -7027,7 +7030,7 @@ function _v3HardBlockingCodes_(){
 function _v3RepairableCodes_(){
   return new Set([
     ..._v3HardBlockingCodes_(),
-    'GLOBAL_DUPLICATE_POI','GENERIC_TO','AMBIGUOUS_TO','AMBIGUOUS_TRANSPORT',
+    'GLOBAL_DUPLICATE_POI','GENERIC_TO','AMBIGUOUS_TO',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','REGIONAL_DAY_TOO_THIN',
     'ROUTE_WINDOW_TOO_THIN',
     'END_BEFORE_MINIMUM_TARGET','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
@@ -7064,7 +7067,7 @@ function _v3PhysicalWindowCoverage_(rows=[],units=[]){
   }));
   const received=new Set();
   (rows||[]).forEach(row=>{
-    if(String(row?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT'||_isPureTransportRow_(row)) return;
+    if(_isPureTransportRow_(row)) return;
     const id=String(row?.planning_window_id||row?.commerce_context?.planning_window_id||'').trim();
     if(id) received.add(`${row.stay_unit_id||''}|${id}`);
   });
@@ -7099,8 +7102,7 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
         errors.push({code:'INVALID_TIME',day,row:index+1,start:row.start,end:row.end});
         return;
       }
-      const semantic=String(row?.commerce_context?.semantic_type||'').toUpperCase();
-      const isTransport=semantic==='TRANSPORT'||_isPureTransportRow_(row);
+      const isTransport=_isPureTransportRow_(row);
       if(isTransport) return;
 
       // A generated activity must fit one authoritative physical window belonging
@@ -7146,8 +7148,8 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
         const b=dayRows[j],bs=_hhmmToMinutes_(b.start),be=_hhmmToMinutes_(b.end);
         if(bs==null||be==null||be<=bs||bs>=ae) break;
         if(Math.max(as,bs)>=Math.min(ae,be)) continue;
-        const aTransport=String(a?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT'||_isPureTransportRow_(a);
-        const bTransport=String(b?.commerce_context?.semantic_type||'').toUpperCase()==='TRANSPORT'||_isPureTransportRow_(b);
+        const aTransport=_isPureTransportRow_(a);
+        const bTransport=_isPureTransportRow_(b);
         const sameStay=a?.stay_unit_id&&b?.stay_unit_id&&String(a.stay_unit_id)===String(b.stay_unit_id);
         if(aTransport||bTransport||sameStay){
           errors.push({code:'OVERLAP',day,rows:[i+1,j+1],stay_unit_id:sameStay?a.stay_unit_id:null});
@@ -7198,18 +7200,6 @@ function _v3FitDurationToInterval_(row={}){
     : `${activityLabel}: ${_minutesToHuman_(span)}`};
 }
 
-function _v3NormalizeTransportRecommendation_(row={}){
-  if(_isPureTransportRow_(row)) return row;
-  const raw=String(row?.transport||'').trim();
-  const ambiguous=/\s\/\s|\bor\b|\bo\b|\balternative\b|\balternativa\b|\bif preferred\b|\bsi prefieres\b/i;
-  if(!raw || !ambiguous.test(raw)) return row;
-  const es=getLang()==='es';
-  return {...row,
-    transport:es?'Por definir':'To be defined',
-    commerce_context:{...(row.commerce_context||{}),semantic_type:'TRANSPORT',transport_recommendation_needed:true,booking_need:'recommend'}
-  };
-}
-
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
   let out=_v3EnforceHardRouteFacts_(rows,contract);
   const master=_v3SyntheticMaster_(totalDays);
@@ -7235,9 +7225,6 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       }else if(error.code==='AMBIGUOUS_TO'){
         const concrete=_v3ConcretePlace_(row);
         if(concrete && concrete!==row.to){ row.to=concrete; changed=true; }
-      }else if(error.code==='AMBIGUOUS_TRANSPORT'){
-        const normalizedTransport=_v3NormalizeTransportRecommendation_(row);
-        if(normalizedTransport.transport!==row.transport){ Object.assign(row,normalizedTransport); changed=true; }
       }
     }
 
@@ -7283,6 +7270,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
+const ITBMO_V3_STAY_CACHE_SCHEMA='multimodal-transport-v2';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -7295,7 +7283,7 @@ function _v3StableHash_(value=''){
 }
 function _v3AcceptedStayCacheKey_(contract={},unit={}){
   const signature=JSON.stringify(_v3StayContract_(contract,unit));
-  return `itbmo_v3_stay_${String(currentTripId||contract?.trip_context_id||'trip')}_${String(unit?.id||'stay')}_${_v3StableHash_(signature)}`;
+  return `itbmo_v3_stay_${ITBMO_V3_STAY_CACHE_SCHEMA}_${String(currentTripId||contract?.trip_context_id||'trip')}_${String(unit?.id||'stay')}_${_v3StableHash_(signature)}`;
 }
 function _v3AcceptedStayGet_(contract,unit){
   const key=_v3AcceptedStayCacheKey_(contract,unit);
@@ -7797,7 +7785,7 @@ GENERATION CONTRACT — authoritative JSON:
 ${JSON.stringify(contract)}
 
 Generate the complete planning unit in one pass.
-TRANSPORT DECISION RULE: A transport mode explicitly selected by the user is authoritative for the fixed movement and must be preserved in the itinerary. If it appears impractical for the route, do not silently replace it or invent booking details: preserve the user choice and add a concise traveler-facing note recommending the most plausible alternatives and why they may be more practical. When transport is RECOMMEND/recommend or a local movement is genuinely undecided, choose one concrete practical recommendation when the available facts support it; otherwise use a clean recommendation-needed state, never a slash-separated list such as “train/bus”.
+TRANSPORT DECISION RULE: A mode explicitly selected by the user is authoritative for a fixed movement and must be preserved. For local mobility, intelligently recommend one default plus up to two useful alternatives when traveler context can change the best choice. In Transport give every option its own door-to-door estimate and relevant condition, for example “Recomendado: a pie (12–15 min) · Metro (8–12 min, si quieren reducir esfuerzo)”. The duration Transport range must safely cover every listed choice. Do not invent operators, stops, schedules or availability, and do not list alternatives that add no decision value.
 IMPORTANT IDENTITY RULE: planning_unit is the MAIN destination block, not the physical city for every day. A day remains part of this planning unit even when its physical location is another city/place from route_days. Use route_days[].day as the authoritative day identity. city_day[].city may name that day's actual physical location; it does NOT need to equal planning_unit. Include every planning-unit day 1..total_days exactly once or in multiple blocks sharing that same day when the day has multiple physical windows. Internally choose distinct day identities and anchors before writing rows, but output only the final itinerary JSON. Use every physically available window correctly. Do not ask questions.
 `.trim();
   const raw=await _v3Call_(prompt);
