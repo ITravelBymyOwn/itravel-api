@@ -223,6 +223,22 @@ function searchQueryForNeed(need, city, language = 'en') {
   return safeCity;
 }
 
+// Marketplace search is intentionally narrower than the traveler-facing title.
+// Narrative activity names ("Palace - interior, towers and views") and negative
+// qualifiers such as "without a tour" can be interpreted as unrelated tokens by
+// provider search engines. Keep the canonical attraction plus its destination.
+function canonicalMarketplaceEntity(value, city = '') {
+  let entity = clean(value, 180)
+    .replace(/\s+[—–]\s+.*/, '')
+    .replace(/\s+-\s+(?:visita|visit|recorrido|paseo|interior|exterior|torres?|towers?|entrada|ticket|access|acceso)\b.*/i, '')
+    .replace(/\s*\((?:interior|exterior|visita|visit|entrada|ticket|acceso|access)[^)]*\)\s*$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const destination = clean(city, 120);
+  if (destination && normalizeKey(entity) === normalizeKey(destination)) entity = destination;
+  return entity;
+}
+
 function trackingCampaign(need, city, uiLanguage, partnerLocale = '') {
   const entityPart = campaignPart(need?.entity_name || need?.source_activity || city);
   const typePart = campaignPart(need?.need_type || 'context');
@@ -232,7 +248,16 @@ function trackingCampaign(need, city, uiLanguage, partnerLocale = '') {
 }
 
 function contextualSearchUrl(slug, uiLanguage, partnerLocale, need, city) {
-  const query = searchQueryForNeed(need, city, uiLanguage);
+  let query = searchQueryForNeed(need, city, uiLanguage);
+  // GYG performs better for admission inventory with a concise positive query.
+  // Viator keeps the existing richer query because it already resolves correctly.
+  if (slug === 'getyourguide' && ['ticket_required', 'reservation_recommended'].includes(clean(need?.need_type, 80))) {
+    const entity = canonicalMarketplaceEntity(need?.entity_name || need?.source_activity, city);
+    const destination = clean(city || need?.city, 120);
+    const ticketIntent = normalizeLanguage(uiLanguage) === 'es' ? 'entradas' : 'tickets';
+    query = [entity, destination && !normalizeKey(entity).includes(normalizeKey(destination)) ? destination : '', ticketIntent]
+      .filter(Boolean).join(' ');
+  }
   if (!query) return '';
   const campaign = trackingCampaign(need, city, uiLanguage, partnerLocale);
 
