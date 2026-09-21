@@ -3958,7 +3958,7 @@ Mandatory rules:
 - User-declared subdestinations do NOT disable the existing intelligent day-trip policy on unconstrained days. Continue recommending valuable round-trip day excursions when appropriate and when they do not conflict with the user's fixed route.
 - If travel_model_v2 says the traveler sleeps in a different place, the next day starts from that real overnight base. Never teleport the traveler back to the parent city.
 - place_preferences are authoritative for the named location and override generic parent-city lodging/transport assumptions for time spent there.
-- If an end time is blank, plan the day to reach at least approximately 19:00 local time when worthwhile content remains. Treat 19:00 as a minimum planning target, not a ceiling. Continue later for high-value evening experiences, shows, concerts, atmospheric districts, night viewpoints, special dinners or other destination-defining activities when they materially improve the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.
+- If an end time is blank, choose the natural end dynamically from the destination, season, opening hours, reservations, route, meal/rest needs, traveler pace and the actual value of remaining experiences. Never extend or cut a day merely to hit a clock target. A day must still be meaningfully used: do not finish conspicuously early while strong, feasible, on-theme experiences remain. Continue later only when high-value evening content materially improves the itinerary. Any explicit user end time remains a hard boundary.
 - The Day 1 start is the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing; never invent an airport, flight or inbound transfer.
 - When a time or other detail is missing, infer a reasonable option without creating overlaps or inventing unsupported fixed logistics. When input is partial, complete it conservatively. When input is detailed, prioritize it and optimize around it.
 - Treat the lodging, address, coordinates or area as the primary geographic base whenever provided. Minimize unnecessary transfers and begin/end at that base whenever operationally sensible.
@@ -3995,7 +3995,7 @@ Meals:
 - As a fallback when local customs are uncertain, place lunch roughly within 12:00–15:00; adapt to the destination's normal dining culture.
 - When included, choose a concrete place or a clearly defined food district and give enough time to eat comfortably.
 - Do not repeat the same named restaurant on another day.
-- Dinner is optional; include it when it genuinely improves the itinerary, especially when the day naturally extends beyond 19:00 for worthwhile evening content.
+- Dinner is optional; include it when it genuinely improves the itinerary and fits the natural rhythm of the destination and day.
 
 Aurora:
 - Include aurora only when plausible by latitude, season and darkness.
@@ -4080,7 +4080,7 @@ Itinerary rules (aligned with API v52.5):
 - Intelligent day trips: evaluate the entire stay and decide whether a nearby excursion has greater tourism value than remaining secondary city activities. Consider total trip length, core-city coverage, relative quality, transfer time, season, traveler fit and logistical coherence. Substitute only lower-priority filler, never core unmet highlights. This rule is global and destination-agnostic.
 - Lodging base: when hotel, Airbnb, address, coordinates or area are provided, use them as the primary geographic anchor; minimize transfers and start/end there whenever sensible.
 - Preferences/restrictions: enforce them through actual choices and timing (for example photography → golden-hour opportunities; avoid crowds → earlier slots; no driving after sunset → return before darkness; walking limits → shorter walking segments; dietary needs → suitable concrete venues; celebrations → fitting experiences). Never leave them only in notes.
-- Time policy: the Day 1 start already represents the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing, but never invent an airport, flight, station or inbound transfer. The final day respects the provided end, and intermediate windows are preferences that may be optimized when beneficial. If an end time is blank, treat about 19:00 local as a minimum target, not a ceiling; do not routinely finish earlier, and continue later when high-value evening content materially improves the day.
+- Time policy: the Day 1 start already represents the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing, but never invent an airport, flight, station or inbound transfer. The final day respects any provided end, and intermediate windows are preferences that may be optimized when beneficial. If an end time is blank, determine the natural end from real tourism value, logistics, opening hours, season, meals/rest and traveler pace. Do not stop conspicuously early while worthwhile feasible content remains, and do not add filler merely to extend the clock.
 - Missing data: infer reasonable options; complete partial input conservatively; prioritize detailed input.
 - Macro-tours/day trips: first evaluate a broad candidate pool, then curate the strongest realistic set of major stops plus relevant low-detour micro-stops, followed by a final localized return row to the base. On a full-day scenic route, normally aim for roughly 4–8 meaningful visit stops when daylight, safety and the user window allow; this is a flexible quality range, never a quota. Do not compress anchor experiences or add filler. Avoid the final day when stronger scheduling alternatives exist.
 - For every candidate micro-stop, evaluate incremental tourism value and experience diversity. A distinct lighthouse, cliff, historic church, geological formation or viewpoint may outrank another similar waterfall even at comparable distance.
@@ -5763,7 +5763,7 @@ function _globalTimeWindowPolicy_(totalDays, perDay=[]){
     first_day:'Any provided start time is a hard boundary and represents the approximate time the traveler is ready AT the lodging after inbound travel, baggage and transfer. Complete check-in or luggage drop before sightseeing.',
     final_day:'Any provided end time is a hard boundary.',
     intermediate_days:'Provided start/end times are preferences. They may be optimized only when this materially improves quality or logistics, without creating impractical hours.',
-    default_end_when_missing:'19:00 local time is the minimum planning target, not a ceiling. If the user did not provide an end time, do not routinely finish before about 19:00. Continue later when a high-value evening experience, show, concert, atmospheric district, night viewpoint, special dinner or other destination-defining activity materially improves the itinerary. Do not force late nights without value. Any explicit user end time remains a hard boundary.',
+    default_end_when_missing:'No fixed end-time target. When the user leaves the end blank, choose a natural end dynamically from destination, season, opening hours, reservations, route efficiency, meals/rest, traveler pace and the value of remaining experiences. Do not finish conspicuously early while strong feasible content remains, but never add filler or overload the day merely to extend the clock. Any explicit user end time remains a hard boundary.',
     arrival_day_lodging_first:'Day 1 starts AT the lodging at the provided time. Complete check-in or luggage drop before sightseeing. Never invent an airport, flight, station or inbound transfer origin.',
     windows:perDay,
     total_days:totalDays
@@ -5844,7 +5844,7 @@ function _knownUserFactsForCity_(city, totalDays, perDay, baseDate, hotel, trans
       each_day_must_start_from_the_real_previous_overnight_base:true,
       location_windows_are_hard_physical_availability:true,
       after_arrival_use_remaining_time_productively:true,
-      open_end_window_policy:'When a route arrival has no user end time, continue useful planning in that actual location to at least about 19:00 and later when worthwhile; never stop merely because the parent city changed.',
+      open_end_window_policy:'When a route arrival has no user end time, continue useful planning in that actual location for as long as worthwhile, feasible content naturally supports it. Do not stop merely because the parent city changed, and do not extend the day with filler to hit a fixed hour.',
       transfer_buffer_policy:'Before rail/bus/ferry departures, include realistic station/terminal access plus a prudent boarding buffer. Airports require materially larger buffers. Never treat the user fixed departure interval as if station access starts at that same minute.'
     },
     global_day_trip_policy:_globalDayTripPolicy_(),
@@ -5954,7 +5954,7 @@ HARD RULES:
 - Use lodging_base as the geographic origin/end anchor whenever sensible and minimize unnecessary transfers.
 - Enforce every preference/restriction through actual activity, timing, route, transport and meal choices; do not merely repeat it in notes.
 - On a full day spanning lunch, reserve a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On a day trip, integrate lunch along the route without breaking geographic continuity.
-- Respect the hard first-day start and final-day end boundaries; optimize intermediate windows only when beneficial. If a day has no user-provided end, treat approximately 19:00 local as the minimum target, not a ceiling; continue later when a high-value evening experience materially improves the itinerary.
+- Respect all user-provided hard time boundaries; optimize open windows only when beneficial. If a day has no user-provided end, choose its natural end dynamically. Require meaningful use of the available day, but never force a fixed finishing hour or add filler; continue later only when a high-value evening experience materially improves the itinerary.
 - TRAVEL MODEL V2 LOCATION WINDOWS ARE HARD PHYSICAL AVAILABILITY. Generate activities in EVERY planable location window. On transfer days, treat a substantial pre-departure or post-arrival window as a real sightseeing block: do not satisfy a 3.5+ hour window with one token stop. Preserve the same destination quality and density whenever time realistically allows.
 - Exception: a fixed transfer marked terminal_arrival closes the current main-destination block. Plan the origin before departure when viable, preserve access/buffer, include the fixed movement, and STOP at arrival. Do not invent sightseeing, dinner, lodging or local transport in the terminal city; the traveler must add that city as a new main destination to continue planning there.
 - For a fixed transfer, finish sightseeing early enough to reach the real station/terminal/airport with a prudent operational buffer BEFORE the declared departure. For rail/bus/ferry, normally protect at least 20–30 minutes at the departure point plus realistic access time; airports require substantially more. Do not double-count the fixed transfer itself.
@@ -6180,7 +6180,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'END_BEFORE_MINIMUM_TARGET','MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START'
+    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -6362,24 +6362,9 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       errors.push({code:'REGIONAL_DAY_TOO_THIN',day,row_count:dayRows.length});
     }
 
-    // HARD QUALITY RULE: when the user leaves the end time blank,
-    // ~19:00 is the minimum planning target, not a ceiling.
-    if(dayRows.length && !dayWindow?.end_provided){
-      const lastRow=dayRows[dayRows.length-1] || {};
-      const lastStart=_hhmmToMinutes_(lastRow.start);
-      let lastEnd=_hhmmToMinutes_(lastRow.end);
-      if(lastStart!=null && lastEnd!=null && lastEnd<=lastStart) lastEnd+=1440;
-
-      if(lastEnd!=null && lastEnd < (19*60)){
-        errors.push({
-          code:'END_BEFORE_MINIMUM_TARGET',
-          day,
-          actual_end:lastRow.end,
-          minimum_target:'19:00',
-          instruction:'The user did not provide an end time. Rebuild the day so useful planning reaches at least approximately 19:00. It may continue later for genuinely high-value evening experiences. Do not add filler merely to reach the clock.'
-        });
-      }
-    }
+    // Open-ended days intentionally have no fixed finishing-hour QA.
+    // Robustness is protected below by route-window utilization and thinness checks,
+    // while the generation prompt chooses a natural end from real tourism value.
 
     // HARD QUALITY RULE: in a plausible aurora city/season, EVERY day must carry
     // an additional aurora opportunity note in the Notes of that day's FINAL row.
@@ -6449,20 +6434,21 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       if((window.open_end||we==null) && useful.length===0){
         errors.push({
           code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,available_from:window.start,
-          instruction:`After arriving in ${window.location} at ${window.start}, continue useful itinerary planning there. The missing end time is not a reason to stop; use the remaining day productively to at least about 19:00 and later when high-value evening content warrants it.`
+          instruction:`After arriving in ${window.location} at ${window.start}, continue useful itinerary planning there while worthwhile, feasible content naturally supports it. A missing end time is not a reason to stop early, but never add filler merely to reach a clock target.`
         });
       }
       // A transfer day can technically contain one post-arrival row and still be
       // badly under-planned. For any long deterministic location window, require
       // meaningful tourism coverage rather than accepting a token orientation stop.
-      const effectiveEnd=we==null?19*60:we;
-      const availableMinutes=Math.max(0,effectiveEnd-ws);
+      // For open-ended windows, quality is measured by meaningful tourism coverage,
+      // not by forcing an arbitrary finishing hour. Closed windows use their real span.
+      const availableMinutes=we==null?null:Math.max(0,we-ws);
       const usefulMinutes=useful.reduce((sum,r)=>{
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
         return sum+(rs!=null&&re!=null?Math.max(0,re-rs):0);
       },0);
       const chronological=useful.slice().sort((a,b)=>(_hhmmToMinutes_(a.start)??9999)-(_hhmmToMinutes_(b.start)??9999));
-      if(availableMinutes>=240 && chronological.length){
+      if(availableMinutes!=null && availableMinutes>=240 && chronological.length){
         const firstStart=_hhmmToMinutes_(chronological[0]?.start);
         const lastEnd=_hhmmToMinutes_(chronological[chronological.length-1]?.end);
         const leadingGap=firstStart==null?0:Math.max(0,firstStart-ws);
@@ -6480,10 +6466,17 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
           });
         }
       }
-      if(availableMinutes>=210 && (useful.length<2 || usefulMinutes<Math.min(150,Math.round(availableMinutes*0.45)))){
+      const openWindowMinimum = we==null
+        ? (ws < 12*60 ? {rows:3,minutes:240} : ws < 15*60 ? {rows:2,minutes:150} : ws < 18*60 ? {rows:1,minutes:60} : {rows:1,minutes:30})
+        : null;
+      const closedWindowTooThin=availableMinutes!=null && availableMinutes>=210 &&
+        (useful.length<2 || usefulMinutes<Math.min(150,Math.round(availableMinutes*0.45)));
+      const openWindowTooThin=openWindowMinimum &&
+        (useful.length<openWindowMinimum.rows || usefulMinutes<openWindowMinimum.minutes);
+      if(closedWindowTooThin || openWindowTooThin){
         errors.push({
-          code:'ROUTE_WINDOW_TOO_THIN',day:ctx.day,location:window.location,window_start:window.start,window_end:window.end||'open',available_minutes:availableMinutes,useful_rows:useful.length,useful_minutes:usefulMinutes,
-          instruction:`This is a substantial usable window in ${window.location}. Rebuild this part of the day with a coherent, high-value sequence of multiple activities (plus meal/rest only when appropriate), without touching the fixed transfer or adding filler.`
+          code:'ROUTE_WINDOW_TOO_THIN',day:ctx.day,location:window.location,window_start:window.start,window_end:window.end||'open',available_minutes:availableMinutes,useful_rows:useful.length,useful_minutes:usefulMinutes,minimum_useful_rows:openWindowMinimum?.rows||null,minimum_useful_minutes:openWindowMinimum?.minutes||null,
+          instruction:`This usable window in ${window.location} is materially under-planned. Rebuild it with a coherent, high-value sequence sized to the real tourism opportunity, logistics and traveler pace. Include meal/rest only when appropriate; do not touch fixed transfers, force a finishing hour, or add filler.`
         });
       }
       rowsInWindow.forEach((r,index)=>{
@@ -6591,7 +6584,7 @@ NON-NEGOTIABLE FINAL REQUIREMENTS:
 - The activity described in each row must occur at that row's To place. Never shift the activity to From while To points at the next stop.
 - Reservation-based anchor experiences must occupy their complete realistic block. For a destination spa/thermal complex, use at least 3 hours of activity and include check-in/changing/exit time as appropriate; never represent the real stay as a blank gap after a short row.
 - Keep exact geographic continuity and avoid teleporting, backtracking and shifted destinations.
-- When an end time is blank, approximately 19:00 local is a MINIMUM planning target, not a ceiling. Do not finish a normal day before about 19:00 without a real constraint. Continue later when genuinely high-value evening content improves the itinerary. Respect any explicit user end time as a hard boundary.
+- When an end time is blank, there is NO fixed finishing-hour target. Choose the natural end from destination context, season, opening hours, logistics, meals/rest, traveler pace and remaining high-value experiences. Do not finish conspicuously early while worthwhile feasible content remains; do not add filler or overload the day merely to extend it. Respect any explicit user end time as a hard boundary.
 - Preserve every meaningful special-date anchor required by special_calendar_event_policy. A repair must not remove or shorten the defining celebration/countdown moment merely to simplify the day, and it must not invent year-specific event details.
 - The Day 1 start is when the traveler is ready AT the lodging. Complete check-in or luggage drop before sightseeing; do not invent arrival transport details.
 - A full day spanning lunch should contain a realistic meal break using local dining customs; for day trips, place lunch on-route without creating backtracking.
@@ -6794,7 +6787,7 @@ KNOWN USER FACTS:
 ${JSON.stringify(facts)}
 
 HARD RULES:
-- Respect the global time policy: first-day provided start and final-day provided end are hard boundaries; intermediate windows are preferences that may be optimized when useful. If end is blank, treat approximately 19:00 local as the minimum target, not a ceiling, and continue later when worthwhile evening content materially improves the itinerary.
+- Respect the global time policy: user-provided boundaries are hard constraints and open windows may be optimized when useful. If end is blank, choose a natural end dynamically from tourism value and real-world feasibility; do not stop conspicuously early while worthwhile content remains, and do not add filler to reach a fixed hour.
 - TRAVEL MODEL V2 LOCATION WINDOWS ARE HARD. Use every meaningful pre-departure and post-arrival window in the actual physical location. After arriving in a subdestination, continue useful planning there rather than ending the day because the parent destination changed.
 - Before fixed rail/bus/ferry departures, reserve realistic access to the departure point and normally at least 20–30 minutes of boarding margin; airports need materially more.
 - Inspect calendar_dates and enforce special_calendar_event_policy. Protect a destination-defining special-date celebration as an anchor and continue through its defining moment, including after midnight when appropriate, unless a user hard boundary prevents it. Never fabricate year-specific event details.
@@ -7029,7 +7022,7 @@ function _v3HardBlockingCodes_(){
     'MISSING_DAY','MISSING_PHYSICAL_WINDOW','INVALID_TIME','MISSING_USER_FIXED_TRANSFER',
     'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',
     'OVERLAP','CONTINUITY','WRONG_OVERNIGHT_BASE',
-    'INVENTED_DEPARTURE_LOGISTICS','END_BEFORE_MINIMUM_TARGET',
+    'INVENTED_DEPARTURE_LOGISTICS',
     'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','REGIONAL_DAY_TOO_THIN',
     'GLOBAL_DUPLICATE_POI','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
     'GENERIC_TO','AMBIGUOUS_TO','UNJUSTIFIED_EXTREME_START'
@@ -7042,7 +7035,7 @@ function _v3RepairableCodes_(){
     'GLOBAL_DUPLICATE_POI','GENERIC_TO','AMBIGUOUS_TO',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','REGIONAL_DAY_TOO_THIN',
     'ROUTE_WINDOW_TOO_THIN',
-    'END_BEFORE_MINIMUM_TARGET','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
+    'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
     'MISSING_AURORA_FINAL_NOTE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
     'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE','UNJUSTIFIED_EXTREME_START'
   ]);
@@ -7653,21 +7646,8 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         });
         if(!hasUsefulWindow) return false;
       }
-      // A stay can legitimately end before 19:00 because the deterministic route
-      // requires departure to the next stay. Do not ask the model to plan beyond
-      // the physical window merely to satisfy the historical open-day target.
-      if(error?.code==='END_BEFORE_MINIMUM_TARGET'){
-        const day=Number(error.day);
-        const windows=(unit.windows||[]).filter(w=>Number(w.day)===day);
-        const latest=Math.max(-1,...windows.map(w=>w.open_end?24*60:(_hhmmToMinutes_(w.end)??-1)));
-        const sameDayOutbound=Boolean(unit?.outbound_boundary && Number(unit.outbound_boundary.day)===day);
-        const explicitUserEnd=Boolean(scopedPerDay.find(x=>Number(x?.day)===day)?.end_provided);
-        // An early window is only a legitimate reason to waive the 19:00 quality
-        // target when the traveler really leaves THIS calendar day or explicitly
-        // supplied that day's end. A next-day 08:00 boundary must never excuse a
-        // nearly empty previous day.
-        if(latest>=0 && latest<19*60 && (sameDayOutbound||explicitUserEnd)) return false;
-      }
+      // Open-ended days have no fixed clock target. Stay QA relies on meaningful
+      // route-window utilization instead of a universal finishing hour.
       return true;
     });
     return {...report,errors};
@@ -9401,7 +9381,7 @@ ${forceReplanBlock}
 
 Instrucción:
 - Optimiza el día con criterio experto (flujo lógico, zonas, ritmo).
-- Si el usuario no indicó hora final, usa aproximadamente las 19:00 como objetivo mínimo, no como límite. No cierres rutinariamente el día antes de esa hora y extiéndelo más tarde cuando haya shows, espectáculos, miradores nocturnos, barrios con ambiente, cenas especiales u otras experiencias de alto valor que realmente mejoren el itinerario.
+- Si el usuario no indicó hora final, no existe una hora fija objetivo. Determina el final natural según destino, temporada, horarios reales, logística, comidas/descanso, ritmo y valor turístico. No cierres el día de forma claramente prematura si aún quedan experiencias valiosas y viables, pero tampoco agregues relleno ni sobrecargues el itinerario solo para extender el horario.
 - En el Día 1, la hora indicada significa que el viajero ya está en el alojamiento; completa el check-in o depósito de equipaje antes de cualquier visita y no inventes el traslado de llegada.
 - Si el día atraviesa el horario de almuerzo, integra una comida realista según costumbre local (como referencia, 12:00–15:00).
 - Cuando las auroras sean plausibles por ubicación, época y oscuridad, agrega una nota adicional sobre auroras en las notas de la ÚLTIMA fila de TODOS los días de esa ciudad. Esto aplica incluso si el usuario pidió auroras explícitamente en Preferencias. No crees una fila independiente salvo una reserva real confirmada con hora fija y explícitamente solicitada.
