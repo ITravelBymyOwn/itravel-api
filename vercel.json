@@ -50,6 +50,10 @@
       "use": "@vercel/node"
     },
     {
+      "src": "api/email.js",
+      "use": "@vercel/node"
+    },
+    {
       "src": "public/**/*",
       "use": "@vercel/static"
     }
@@ -102,6 +106,10 @@
     {
       "src": "/api/partners",
       "dest": "/api/partners.js"
+    },
+    {
+      "src": "/api/email",
+      "dest": "/api/email.js"
     },
     {
       "src": "/(.*)",
