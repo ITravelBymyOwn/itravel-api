@@ -6484,7 +6484,13 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const knownPlaces=[city,ctx.start_location,ctx.end_location,ctx.overnight_base,...(ctx.fixed_transfers||[]).flatMap(t=>[t.origin,t.destination])].filter(Boolean);
         const clearlyOther=knownPlaces.some(place=>!_arePoiAliases_(place,window.location)&&_arePoiAliases_(text,place));
         if(clearlyOther){
-          errors.push({code:'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',day:ctx.day,row:index+1,expected_location:window.location,window_start:window.start,window_end:window.end||null,instruction:'Move this activity into the correct physical location window or replace it with a valid activity there.'});
+          errors.push({
+            code:'ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW',day:ctx.day,row:index+1,
+            expected_location:window.location,window_start:window.start,window_end:window.end||null,
+            activity:r.activity||null,from:r.from||null,to:r.to||null,start:r.start||null,end:r.end||null,
+            physical_location:r.physical_location||null,planning_window_id:r.planning_window_id||r?.commerce_context?.planning_window_id||null,
+            instruction:'Move this activity into the correct physical location window or replace it with a valid activity there.'
+          });
         }
       });
     });
@@ -7049,6 +7055,33 @@ function _v3MaterialAuditErrors_(report){
 function _v3BlockingAuditErrors_(report){
   const blocking=_v3HardBlockingCodes_();
   return (report?.errors||[]).filter(e=>blocking.has(String(e?.code||'')));
+}
+
+
+// Detailed diagnostics: keep the compact summary, but also print every QA finding
+// as readable JSON so Chrome console screenshots/copies expose the exact day/row/data.
+function _v3LogAuditDetails_(label,city,unitId,errors=[]){
+  const list=Array.isArray(errors)?errors:[];
+  if(!list.length) return;
+  list.forEach((error,index)=>{
+    try{
+      console.warn(`[ITBMO V3 QA DETAIL] ${label} · ${city} · ${unitId} · ${index+1}/${list.length} · ${error?.code||'UNKNOWN'}\n${JSON.stringify(error,null,2)}`);
+    }catch(_){
+      console.warn(`[ITBMO V3 QA DETAIL] ${label} · ${city} · ${unitId}`,error);
+    }
+  });
+}
+
+// Choose the smallest safe repair scope. The complete Stay is ALWAYS audited again
+// after the candidate is merged, so localized repair never weakens final QA.
+function _v3RepairScope_(material=[]){
+  const list=Array.isArray(material)?material:[];
+  const crossDayCodes=new Set(['GLOBAL_DUPLICATE_POI','MISSING_DAY','WRONG_OVERNIGHT_BASE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
+  if(!list.length || list.some(e=>crossDayCodes.has(String(e?.code||'')))) return {type:'stay',days:[]};
+  const days=[...new Set(list.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(Boolean))].sort((a,b)=>a-b);
+  if(days.length===1) return {type:'day',days};
+  if(days.length===2 && Math.abs(days[0]-days[1])<=1) return {type:'days',days};
+  return {type:'stay',days:[]};
 }
 
 
@@ -7673,24 +7706,46 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     previousFingerprint=fingerprint;
     attempt+=1;
     console.warn(`[ITBMO V3 STAY AUDIT] ${unitCity} · ${unit.id}: ${material.length} repairable issue(s); local repair ${attempt}/${repairBudget}`,_v3AuditSummary_(report),material);
+    _v3LogAuditDetails_(`LOCAL REPAIR ${attempt}/${repairBudget}`,unitCity,unit.id,material);
     const stayContract=_v3StayContract_(contract,unit);
+    const naturalScope=_v3RepairScope_(material);
+    // Escalation guardrail: use the smallest safe scope first. If the same Stay
+    // still needs its final local attempt, allow a full-Stay repair before failing.
+    const repairScope=(attempt>=repairBudget && naturalScope.type!=='stay')?{type:'stay',days:[]}:naturalScope;
+    const scopeDays=repairScope.type==='stay'?unitDays:repairScope.days;
+    const scopeDaySet=new Set(scopeDays.map(Number));
+    const repairRows=repairScope.type==='stay'?rows:rows.filter(r=>scopeDaySet.has(Number(r.day)));
+    const repairWindows=repairScope.type==='stay'?(stayContract.windows||[]):(stayContract.windows||[]).filter(w=>scopeDaySet.has(Number(w.day)));
+    const repairFindings=repairScope.type==='stay'?material:material.filter(e=>{
+      const days=[e?.day,...(Array.isArray(e?.days)?e.days:[])].map(Number).filter(Boolean);
+      return !days.length||days.some(d=>scopeDaySet.has(d));
+    });
+    console.info(`[ITBMO V3 REPAIR SCOPE] ${unitCity} · ${unit.id} · ${repairScope.type}${scopeDays.length?` · day(s) ${scopeDays.join(',')}`:''} · full Stay QA after merge`);
     const prompt=`
 PHYSICAL STAY LOCAL QA REPAIR CONTRACT — authoritative JSON:
-${JSON.stringify(stayContract)}
+${JSON.stringify({...stayContract,windows:repairWindows})}
 
-CURRENT ROWS FOR THIS STAY ONLY:
-${JSON.stringify(rows)}
+REPAIR SCOPE:
+${JSON.stringify({type:repairScope.type,days:scopeDays})}
 
-LOCAL VALIDATOR FINDINGS FOR THIS STAY ONLY:
-${JSON.stringify(material)}
+CURRENT ROWS INSIDE THE REPAIR SCOPE ONLY:
+${JSON.stringify(repairRows)}
 
-Rebuild ONLY this stay card. Keep every row inside its supplied planning_window, preserve the supplied global day numbers, and keep every Day Trip inside this same stay. Do not output any inter-stay fixed movement; ITBMO owns those boundaries deterministically. Correct the findings without changing another destination. Return city_day JSON only.
+LOCAL VALIDATOR FINDINGS TO CORRECT:
+${JSON.stringify(repairFindings)}
+
+Repair ONLY the supplied scope. Preserve all valid content you can. Keep every returned row inside its supplied planning_window and preserve the supplied global day numbers. Do not output rows for days outside the repair scope and do not output any inter-stay fixed movement. ITBMO will merge this repair into the untouched Stay and then re-audit the COMPLETE Stay before accepting it. Return city_day JSON only.
 `.trim();
     const raw=await _v3Call_(prompt);
     const parsed=parseJSON(raw);
-    const candidate=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays,unitDays)),unit);
+    const candidateDays=repairScope.type==='stay'?unitDays:scopeDays;
+    const candidate=_v3StampStayRows_(_dedupeRows_(_v3ExtractPlanningUnitRows_(parsed,unitCity,totalDays,candidateDays)),unit);
     if(!candidate.length){stagnant+=1;continue;}
-    normalized=_v3DeterministicQualityCleanup_(unitCity,candidate,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
+    const mergedCandidate=repairScope.type==='stay'
+      ? candidate
+      : [...rows.filter(r=>!scopeDaySet.has(Number(r.day))),...candidate]
+          .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+    normalized=_v3DeterministicQualityCleanup_(unitCity,mergedCandidate,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
     const nextRows=_v3StampStayRows_(normalized.rows,unit);
     const nextReport=audit(nextRows);
     const before=_auditScore_(report),after=_auditScore_(nextReport);
@@ -7704,6 +7759,7 @@ Rebuild ONLY this stay card. Keep every row inside its supplied planning_window,
   const blocking=_v3BlockingAuditErrors_(report);
   const warnings=(report.errors||[]).filter(e=>!_v3HardBlockingCodes_().has(String(e?.code||'')));
   console.info(`[ITBMO V3 STAY AUDIT FINAL] ${unitCity} · ${unit.id}`,_v3AuditSummary_(report),report.errors||[]);
+  _v3LogAuditDetails_('STAY AUDIT FINAL',unitCity,unit.id,report.errors||[]);
   if(warnings.length) console.warn(`[ITBMO V3 STAY QUALITY WARNINGS] ${unitCity} · ${unit.id}: publishing locally valid stay with non-blocking warnings`,_v3AuditSummary_({errors:warnings}),warnings);
   if(blocking.length){
     const error=new Error(`V3_STAY_QUALITY_BLOCK:${unit.id}:${unitCity}`);
@@ -7972,6 +8028,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     const finalReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
     const blockingErrors=finalReport.errors||[];
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
+    _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
       const error=new Error(`V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE:trip`);
       error.v3BlockingErrors=blockingErrors;
