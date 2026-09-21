@@ -317,7 +317,7 @@ const I18N = {
 
     // Reset modal
     resetTitle: '¿Reiniciar planificación? 🧭',
-    resetBody: 'Esto eliminará todos los destinos, preferencias, datos de planificación e itinerarios actuales.<br><br><strong>Antes de continuar, asegúrate de haber descargado tu itinerario, CSV y comprobante de pago.</strong><br><br>Si reinicias, tendrás que comenzar un nuevo viaje y <strong>realizar un nuevo pago para volver a generar un itinerario</strong>.<br><br><strong>Esta acción no se puede deshacer.</strong>',
+    resetBody: 'Esto eliminará todos los destinos, preferencias, datos de planificación e itinerarios actuales.<br><br><strong>Antes de continuar, asegúrate de haber descargado tu itinerario, Excel y comprobante de pago.</strong><br><br>Si reinicias, tendrás que comenzar un nuevo viaje y <strong>realizar un nuevo pago para volver a generar un itinerario</strong>.<br><br><strong>Esta acción no se puede deshacer.</strong>',
     resetConfirm: 'Sí, reiniciar',
     resetCancel: 'Cancelar',
 
@@ -397,7 +397,7 @@ const I18N = {
 
     // Reset modal
     resetTitle: 'Reset planning? 🧭',
-    resetBody: 'This will delete all current destinations, preferences, planning data, and itineraries.<br><br><strong>Before continuing, make sure you have downloaded your itinerary, CSV, and payment receipt.</strong><br><br>If you reset, you will need to start a new trip and <strong>make a new payment to generate another itinerary</strong>.<br><br><strong>This action cannot be undone.</strong>',
+    resetBody: 'This will delete all current destinations, preferences, planning data, and itineraries.<br><br><strong>Before continuing, make sure you have downloaded your itinerary, Excel file, and payment receipt.</strong><br><br>If you reset, you will need to start a new trip and <strong>make a new payment to generate another itinerary</strong>.<br><br><strong>This action cannot be undone.</strong>',
     resetConfirm: 'Yes, reset',
     resetCancel: 'Cancel',
 
@@ -1824,9 +1824,9 @@ const $newPlanningCopy = qs('#new-planning-copy');
 
 function keepEmailExportComingSoon(){
   if(!$btnEmail) return;
-  $btnEmail.disabled = true;
-  $btnEmail.setAttribute('aria-disabled','true');
-  $btnEmail.setAttribute('title', getLang()==='es' ? 'Próximamente' : 'Coming soon');
+  $btnEmail.disabled = false;
+  $btnEmail.removeAttribute('aria-disabled');
+  $btnEmail.setAttribute('title', getLang()==='es' ? 'Enviar PDF, Excel y comprobante por email' : 'Email PDF, Excel and receipt');
 }
 
 /* =========================================================
@@ -3852,7 +3852,7 @@ function openImmersiveItinerary(){
   }
 }
 function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
-function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch)return;launch.disabled=false;launch.removeAttribute('aria-disabled');launch.onclick=(event)=>{event.preventDefault();openImmersiveItinerary();};if(!modal){syncImmersiveItineraryLauncher();return;}qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
+function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch)return;launch.disabled=false;launch.removeAttribute('aria-disabled');if(launch.dataset.workspaceBound!=='1'){launch.dataset.workspaceBound='1';launch.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();try{openImmersiveItinerary();}catch(error){console.error('[ITBMO WORKSPACE OPEN]',error);const snapshot=localStorage.getItem('itbmo_trip_workspace_snapshot_v1');if(snapshot)window.location.assign(`./trip-workspace.html?lang=${encodeURIComponent(getLang()==='es'?'es':'en')}${currentTripId?`&trip_id=${encodeURIComponent(currentTripId)}`:''}`);}});}if(!modal){syncImmersiveItineraryLauncher();return;}qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
   modal.addEventListener('touchstart',e=>{if(immersiveWorkspaceLevel!=='city'||immersiveItineraryMode!=='itinerary')return;const p=e.touches?.[0];if(p){immersiveTouchStartX=p.clientX;immersiveTouchStartY=p.clientY;}},{passive:true});modal.addEventListener('touchend',e=>{if(immersiveTouchStartX==null)return;const p=e.changedTouches?.[0];if(!p)return;const dx=p.clientX-immersiveTouchStartX,dy=p.clientY-immersiveTouchStartY;immersiveTouchStartX=immersiveTouchStartY=null;if(Math.abs(dx)>58&&Math.abs(dx)>Math.abs(dy)*1.25)_immersiveMoveDay_(dx<0?1:-1);},{passive:true});
   document.addEventListener('keydown',e=>{if(!modal.classList.contains('is-open'))return;if(e.key==='Escape'){e.preventDefault();if(immersiveWorkspaceLevel==='city')_immersiveBackToOverview_();else closeImmersiveItinerary();}else if(e.key==='ArrowLeft')_immersiveMoveDay_(-1);else if(e.key==='ArrowRight')_immersiveMoveDay_(1);});syncImmersiveItineraryLauncher();}
 bindImmersiveItineraryViewer();
@@ -7660,7 +7660,13 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
         const day=Number(error.day);
         const windows=(unit.windows||[]).filter(w=>Number(w.day)===day);
         const latest=Math.max(-1,...windows.map(w=>w.open_end?24*60:(_hhmmToMinutes_(w.end)??-1)));
-        if(latest>=0 && latest<19*60) return false;
+        const sameDayOutbound=Boolean(unit?.outbound_boundary && Number(unit.outbound_boundary.day)===day);
+        const explicitUserEnd=Boolean(scopedPerDay.find(x=>Number(x?.day)===day)?.end_provided);
+        // An early window is only a legitimate reason to waive the 19:00 quality
+        // target when the traveler really leaves THIS calendar day or explicitly
+        // supplied that day's end. A next-day 08:00 boundary must never excuse a
+        // nearly empty previous day.
+        if(latest>=0 && latest<19*60 && (sameDayOutbound||explicitUserEnd)) return false;
       }
       return true;
     });
@@ -8542,7 +8548,8 @@ function _showGenerationRetry_(reason=''){
     console.error('[GENERATION RECOVERY] Reset control unavailable after recovery exhaustion.');
   });
   overlay.querySelector('#itbmo-generation-support')?.addEventListener('click',()=>{
-    window.location.href='mailto:support@itravelbymyown.com';
+    closeRecovery();
+    openSupportModal();
   });
   const button=overlay.querySelector('#itbmo-generation-retry');
   button?.addEventListener('click',()=>{
@@ -10262,7 +10269,138 @@ function exportItineraryToCSV(){
   return deliverGeneratedFile(blob,`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.csv`);
 }
 
-async function exportItineraryToPDF(){
+function _exportBlockType_(row={},outLang='es'){
+  const activity=_normalizeSearch_(row.activity||''),text=_normalizeSearch_(`${row.activity||''} ${row.notes||''}`);
+  const es=outLang==='es';
+  if(/^(traslado|transfer|vuelo|flight|tren |train |ferry|barco|bus interurbano|viaje |travel )/.test(activity))return es?'Traslado':'Transfer';
+  if(/desayuno|almuerzo|comida|cena|tapas|tapeo|restaurant|restaurante|caf[eé]|bistr[oó]|brasserie/.test(text))return es?'Comida':'Meal';
+  if(/check-in|check in|acomodaci[oó]n|equipaje|preparaci[oó]n|embarque|estaci[oó]n|aeropuerto/.test(text))return es?'Logística':'Logistics';
+  if(/opcional|optional|tiempo libre|free time/.test(text))return es?'Opcional':'Optional';
+  return es?'Actividad':'Activity';
+}
+
+function _exportScheduleStatus_(row={},date='',outLang='es'){
+  const es=outLang==='es',type=_exportBlockType_(row,outLang);
+  if(type!==(es?'Traslado':'Transfer'))return es?'Planificado':'Planned';
+  const story=_currentTravelModelV2_()?.trip_story||{};
+  const statusLabel=value=>String(value||'').toLowerCase()==='confirmed'?(es?'Confirmado':'Confirmed'):(es?'Estimado':'Estimated');
+  for(let i=1;i<(story.stays||[]).length;i++){
+    const st=story.stays[i],depDate=_tripStoryDMY_(st.departureDate||st.startDate),arrDate=_tripStoryDMY_(st.arrivalDate||st.startDate);
+    if((date===depDate||date===arrDate)&&row.start===st.departureTime&&row.end===st.arrivalTime)return statusLabel(st.timeStatus);
+  }
+  for(const st of (story.stays||[]))for(const dt of (st.dayTrips||[])){
+    const dayDate=_tripStoryDMY_(_tripStoryAddDays_(st.startDate,Number(dt.day||1)-1));
+    if(date!==dayDate)continue;
+    if(row.start===dt.outbound?.departureTime&&row.end===dt.outbound?.arrivalTime)return statusLabel(dt.outbound?.timeStatus);
+    if(row.start===dt.return?.departureTime&&row.end===dt.return?.arrivalTime)return statusLabel(dt.return?.timeStatus);
+  }
+  return es?'Estimado':'Estimated';
+}
+
+function _excelColorForType_(type='',outLang='es'){
+  const t=_normalizeSearch_(type);
+  if(/traslado|transfer/.test(t))return 'DDF7FA';
+  if(/comida|meal/.test(t))return 'FFF1E8';
+  if(/logistica|logistics/.test(t))return 'EEF2FF';
+  if(/opcional|optional/.test(t))return 'F5F5FA';
+  return 'F4F8FF';
+}
+
+async function exportItineraryToXLSX(options={}){
+  const blocks=_exportPhysicalDestinationBlocks_();
+  const es=_plannerOutputLang_()==='es';
+  if(!blocks.length){alert(es?'No hay itinerarios generados todavía para exportar.':'There are no generated itineraries to export yet.');throw new Error('NO_ITINERARY_FOR_XLSX');}
+  if(!window.ExcelJS?.Workbook){
+    alert(es?'No se pudo cargar el generador de Excel. Revisa tu conexión e inténtalo nuevamente.':'The Excel generator could not be loaded. Check your connection and try again.');
+    throw new Error('EXCELJS_UNAVAILABLE');
+  }
+
+  const outLang=es?'es':'en',workbook=new window.ExcelJS.Workbook();
+  workbook.creator='I Travel By My Own';
+  workbook.company='ITBMO';
+  workbook.subject=es?'Itinerario de viaje editable':'Editable travel itinerary';
+  workbook.title=es?'Mi itinerario ITBMO':'My ITBMO itinerary';
+  workbook.created=new Date();
+
+  const allSlices=blocks.flatMap(block=>block.days.flatMap(day=>day.rows.map(row=>({block,day,row}))));
+  const uniqueDates=[...new Set(allSlices.map(x=>x.day.date).filter(Boolean))];
+  const route=blocks.map(x=>x.destination).filter((x,i,a)=>i===0||x!==a[i-1]).join('  →  ');
+  const firstDate=uniqueDates[0]||'',lastDate=uniqueDates.at(-1)||'';
+  const navy='092C4C',blue='0877F9',teal='0AA6B7',coral='F17C4A',pale='EDF7FF',white='FFFFFF',muted='5F7488',line='C9DCEB';
+
+  const summary=workbook.addWorksheet(es?'Resumen':'Summary',{views:[{showGridLines:false}]});
+  summary.columns=[{width:4},{width:18},{width:18},{width:18},{width:18},{width:18},{width:18},{width:4}];
+  summary.mergeCells('B2:G3');
+  summary.getCell('B2').value=es?'I TRAVEL BY MY OWN  |  MI ITINERARIO':'I TRAVEL BY MY OWN  |  MY ITINERARY';
+  summary.getCell('B2').font={name:'Aptos Display',size:22,bold:true,color:{argb:white}};
+  summary.getCell('B2').alignment={vertical:'middle',horizontal:'left'};
+  summary.getCell('B2').fill={type:'gradient',gradient:'angle',degree:0,stops:[{position:0,color:{argb:blue}},{position:1,color:{argb:teal}}]};
+  summary.mergeCells('B5:G6');
+  summary.getCell('B5').value=route;
+  summary.getCell('B5').font={name:'Aptos Display',size:18,bold:true,color:{argb:navy}};
+  summary.getCell('B5').alignment={vertical:'middle',horizontal:'center',wrapText:true};
+  summary.getCell('B5').fill={type:'pattern',pattern:'solid',fgColor:{argb:pale}};
+  summary.getCell('B5').border={bottom:{style:'medium',color:{argb:teal}}};
+  const cards=[
+    ['B8','C10',es?'FECHAS':'DATES',firstDate&&lastDate?`${firstDate} – ${lastDate}`:'—'],
+    ['D8','E10',es?'DÍAS DEL VIAJE':'TRIP DAYS',uniqueDates.length],
+    ['F8','G10',es?'DESTINOS FÍSICOS':'PHYSICAL DESTINATIONS',blocks.length]
+  ];
+  cards.forEach(([from,to,label,value],idx)=>{summary.mergeCells(`${from}:${to}`);const c=summary.getCell(from);c.value={richText:[{text:`${label}\n`,font:{size:9,bold:true,color:{argb:idx===2?coral:teal}}},{text:String(value),font:{size:16,bold:true,color:{argb:navy}}}]};c.alignment={vertical:'middle',horizontal:'center',wrapText:true};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:idx===2?'FFF4EE':'F5FAFF'}};c.border={top:{style:'thin',color:{argb:line}},left:{style:'thin',color:{argb:line}},bottom:{style:'thin',color:{argb:line}},right:{style:'thin',color:{argb:line}}};});
+  summary.mergeCells('B12:G12');summary.getCell('B12').value=es?'CÓMO USAR ESTE ARCHIVO':'HOW TO USE THIS FILE';
+  summary.getCell('B12').font={bold:true,size:12,color:{argb:navy}};
+  summary.mergeCells('B13:G16');summary.getCell('B13').value=es?'Edita las horas directamente en la hoja Itinerario. Los campos en amarillo son los más importantes para ajustar. Mantén como Confirmado el horario de una reserva y usa Estimado cuando todavía no tengas el dato definitivo. Revisa siempre los tiempos de preparación, acceso y embarque antes de viajar.':'Edit times directly in the Itinerary sheet. Yellow fields are the most important to adjust. Keep a booked time as Confirmed and use Estimated until you have the final information. Always review preparation, access and boarding time before travelling.';
+  summary.getCell('B13').alignment={vertical:'top',wrapText:true};summary.getCell('B13').font={size:11,color:{argb:muted}};
+  summary.mergeCells('B18:G18');summary.getCell('B18').value=es?'Leyenda:  Actividad     Traslado     Comida     Logística     Opcional':'Legend:  Activity     Transfer     Meal     Logistics     Optional';
+  summary.getCell('B18').font={bold:true,color:{argb:navy}};summary.getCell('B18').alignment={horizontal:'center'};
+  summary.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:1,paperSize:9,margins:{left:.25,right:.25,top:.35,bottom:.35,header:.1,footer:.1}};
+
+  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',ySplit:7,showGridLines:false}]});
+  sheet.mergeCells('A1:O2');
+  sheet.getCell('A1').value=es?'MI ITINERARIO ITBMO':'MY ITBMO ITINERARY';
+  sheet.getCell('A1').font={name:'Aptos Display',size:22,bold:true,color:{argb:white}};
+  sheet.getCell('A1').alignment={vertical:'middle',horizontal:'left'};
+  sheet.getCell('A1').fill={type:'gradient',gradient:'angle',degree:0,stops:[{position:0,color:{argb:blue}},{position:1,color:{argb:teal}}]};
+  sheet.mergeCells('A3:O3');sheet.getCell('A3').value=route;sheet.getCell('A3').font={size:12,bold:true,color:{argb:navy}};sheet.getCell('A3').alignment={horizontal:'center'};
+  sheet.mergeCells('A4:O4');sheet.getCell('A4').value=es?`Fechas: ${firstDate||'—'} – ${lastDate||'—'}   |   ${uniqueDates.length} días   |   Horas y estados editables`:`Dates: ${firstDate||'—'} – ${lastDate||'—'}   |   ${uniqueDates.length} days   |   Editable times and statuses`;
+  sheet.getCell('A4').font={size:10,color:{argb:muted}};sheet.getCell('A4').alignment={horizontal:'center'};
+  sheet.mergeCells('A5:O5');sheet.getCell('A5').value=es?'⚠ Los horarios estimados deben confirmarse cuando tengas la reserva. Los cambios en este archivo no reoptimizan automáticamente el itinerario.':'⚠ Estimated times should be confirmed once booked. Changes in this file do not automatically re-optimise the itinerary.';
+  sheet.getCell('A5').font={size:10,bold:true,color:{argb:'8A5A00'}};sheet.getCell('A5').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF6DA'}};sheet.getCell('A5').alignment={horizontal:'center'};
+  const headers=es?['Etapa','Día','Fecha','Destino físico','Tipo','Hora inicio','Hora final','Duración bloque','Actividad','Desde','Hacia','Transporte','Detalle de duración','Estado horario','Notas']:['Stage','Day','Date','Physical destination','Type','Start time','End time','Block duration','Activity','From','To','Transport','Duration detail','Time status','Notes'];
+  const headerRow=sheet.getRow(7);headerRow.values=headers;headerRow.height=34;
+  headerRow.eachCell(cell=>{cell.font={bold:true,color:{argb:white},size:10};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:navy}};cell.alignment={vertical:'middle',horizontal:'center',wrapText:true};cell.border={bottom:{style:'medium',color:{argb:teal}}};});
+  const widths=[9,8,13,20,14,12,12,16,42,24,24,24,22,17,60];widths.forEach((width,i)=>sheet.getColumn(i+1).width=width);
+
+  let excelRow=8,lastDayKey='';
+  blocks.forEach((block,index)=>block.days.forEach(day=>day.rows.forEach(r=>{
+    const type=_exportBlockType_(r,outLang),status=_exportScheduleStatus_(r,day.date,outLang),dayKey=`${day.globalDay}|${day.date}`;
+    const dateValue=day.date?parseDMY(day.date):null;
+    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,type,r.start||'',r.end||'',null,normalizeCellText(r.activity),normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),normalizeCellText(r.duration),status,normalizeCellText(r.notes)];
+    const row=sheet.addRow(values);row.height=48;
+    row.getCell(8).value={formula:`IF(OR(F${excelRow}="",G${excelRow}=""),"",MOD(TIMEVALUE(G${excelRow})-TIMEVALUE(F${excelRow}),1))`};
+    row.getCell(8).numFmt='[h]" h "mm" min"';
+    if(dateValue)row.getCell(3).numFmt='dd/mm/yyyy';
+    row.eachCell((cell,col)=>{cell.font={size:10,color:{argb:navy}};cell.alignment={vertical:'top',wrapText:col>=9};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:_excelColorForType_(type,outLang)}};cell.border={bottom:{style:'hair',color:{argb:line}}};});
+    [6,7,14].forEach(col=>{row.getCell(col).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF6DA'}};row.getCell(col).font={bold:true,color:{argb:navy}};row.getCell(col).alignment={vertical:'middle',horizontal:'center',wrapText:true};});
+    row.getCell(14).dataValidation={type:'list',allowBlank:false,formulae:[es?'"Confirmado,Estimado,Planificado"':'"Confirmed,Estimated,Planned"'],showErrorMessage:true,errorTitle:es?'Selecciona un estado':'Select a status',error:es?'Usa Confirmado, Estimado o Planificado.':'Use Confirmed, Estimated or Planned.'};
+    if(dayKey!==lastDayKey){for(let col=1;col<=15;col++)row.getCell(col).border={top:{style:'medium',color:{argb:teal}},bottom:{style:'hair',color:{argb:line}}};lastDayKey=dayKey;}
+    excelRow++;
+  })));
+  sheet.autoFilter={from:{row:7,column:1},to:{row:Math.max(7,excelRow-1),column:15}};
+  sheet.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9,printTitlesRow:'1:7',margins:{left:.2,right:.2,top:.35,bottom:.35,header:.1,footer:.2}};
+  sheet.headerFooter.oddFooter=es?'&LITBMO&C&P de &N&RItinerario editable':'&LITBMO&CPage &P of &N&REditable itinerary';
+  sheet.properties.defaultRowHeight=20;
+
+  const buffer=await workbook.xlsx.writeBuffer();
+  const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
+  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v1',destinations:blocks.length,days:uniqueDates.length});
+  const filename=`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.xlsx`;
+  if(options.download!==false) await deliverGeneratedFile(blob,filename);
+  return {blob,filename,kind:'itinerary_xlsx'};
+}
+
+async function exportItineraryToPDF(options={}){
   // jsPDF verificación
   if(!window.jspdf || !window.jspdf.jsPDF){
     alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');
@@ -10337,8 +10475,12 @@ async function exportItineraryToPDF(){
     doc.setDrawColor(25,154,202);doc.setLineWidth(1.2);doc.line(34,70,561,70);
 
     const density=rows.reduce((sum,r)=>sum+String(r.activity||'').length+String(r.from||'').length+String(r.to||'').length+String(r.transport||'').length+String(r.duration||'').length+String(r.notes||'').length,0);
-    const fontSize=density>5000?5.7:density>4000?6.2:density>3000?6.8:density>2200?7.3:density>1500?7.8:8.2;
-    const padding=fontSize<=6.2?2:fontSize<=6.8?2.4:3;
+    // Preserve the familiar table, one complete day per page, but let sparse
+    // days breathe instead of rendering a tiny table stranded at the top.
+    const densityFont=density>5000?5.7:density>4000?6.2:density>3000?6.8:density>2200?7.3:density>1500?7.8:8.5;
+    const rowFont=rows.length<=2?11.2:rows.length===3?10.2:rows.length===4?9.3:rows.length===5?8.7:8.2;
+    const fontSize=Math.min(rowFont,densityFont);
+    const padding=fontSize<=6.2?2:fontSize<=6.8?2.4:fontSize>=10?5:fontSize>=9?4:3.2;
     const body=rows.map(r=>[
       normalizeCellText(r._pdfDestination),
       normalizeCellText(`${r.start||''}\n${r.end||''}`),
@@ -10368,36 +10510,53 @@ async function exportItineraryToPDF(){
   }
   const filename = `ITBMO-Itinerary-${yyyy}-${mm}-${dd}.pdf`;
   const blob=doc.output('blob');
-  await deliverGeneratedFile(blob,filename);
+  if(options.download!==false) await deliverGeneratedFile(blob,filename);
   trackITBMOEvent('export_pdf',{file_type:'pdf',layout:'portrait_one_global_day_per_page_v7',destinations:physicalBlocks.length,days:calendarDays.length});
+  return {blob,filename,kind:'itinerary_pdf'};
 }
 
-function sendItineraryByEmail(){
-  // MVP honesto: mailto sin adjuntos
-  const cities = getOrderedCitiesForExport();
-  if(!cities.length){
-    alert('No hay ciudades guardadas todavía.');
-    return;
-  }
-  const subject = encodeURIComponent('ITravelByMyOwn · Itinerary');
-  let body = 'Here is my itinerary (exported from ITravelByMyOwn):\n\n';
+async function emailApi(payload){
+  const response=await fetch('/api/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await response.json().catch(()=>({}));
+  if(!response.ok){const error=new Error(data?.code||'EMAIL_SEND_FAILED');error.code=data?.code||'EMAIL_SEND_FAILED';throw error;}
+  return data;
+}
 
-  cities.forEach(city=>{
-    const days = getOrderedDaysForCity(city);
-    body += `=== ${city} ===\n`;
-    days.forEach(dayNum=>{
-      const dateLabel = getDayDateLabel(city, dayNum);
-      body += `- Day ${dayNum}${dateLabel ? ` (${dateLabel})` : ''}\n`;
-    });
-    body += '\n';
-  });
+async function blobToBase64(blob){
+  const bytes=new Uint8Array(await blob.arrayBuffer());let binary='';
+  for(let offset=0;offset<bytes.length;offset+=0x8000)binary+=String.fromCharCode(...bytes.subarray(offset,offset+0x8000));
+  return btoa(binary);
+}
 
-  body += '\nNote: Attachments (PDF/CSV) require a backend email endpoint.';
-  const maxLen = 1800;
-  if(body.length > maxLen) body = body.slice(0, maxLen) + '\n...';
+const emailSendCopy=()=>getLang()==='es'?{
+  preparing:'Preparando tus tres archivos…',sending:'Enviando de forma segura…',sent:'✓ Correo enviado. Revisa también spam o promociones.',invalid:'Escribe un correo válido.',receipt:'No encontramos un comprobante disponible para este viaje.',large:'Los archivos superan el tamaño permitido para un solo correo. Descárgalos por separado.',config:'Brevo todavía no está configurado en el servidor.',error:'No se pudo enviar el correo. Inténtalo de nuevo.'
+}:{preparing:'Preparing your three files…',sending:'Sending securely…',sent:'✓ Email sent. Please also check spam or promotions.',invalid:'Enter a valid email address.',receipt:'No receipt is available for this trip.',large:'The files are too large for one email. Download them separately.',config:'Brevo is not configured on the server yet.',error:'The email could not be sent. Please try again.'};
 
-  const href = `mailto:?subject=${subject}&body=${encodeURIComponent(body)}`;
-  window.location.href = href;
+function setEmailDeliveryStatus(message='',type=''){
+  if(!$itineraryEmailStatus)return;$itineraryEmailStatus.textContent=message;$itineraryEmailStatus.className='form-send-status'+(type?` is-${type}`:'');
+}
+function openItineraryEmailModal(){
+  if(!$itineraryEmailModal||!hasGeneratedItineraryRows())return;
+  $itineraryEmailRecipient.value=String(currentUser?.email||'');setEmailDeliveryStatus('');
+  $itineraryEmailModal.classList.add('active');$itineraryEmailModal.setAttribute('aria-hidden','false');setTimeout(()=>$itineraryEmailRecipient.focus(),60);
+}
+function closeItineraryEmailModal(){if(!$itineraryEmailModal)return;$itineraryEmailModal.classList.remove('active');$itineraryEmailModal.setAttribute('aria-hidden','true');}
+async function sendItineraryByEmail(event){
+  event?.preventDefault();const copy=emailSendCopy(),recipient=String($itineraryEmailRecipient?.value||'').trim();
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient)){setEmailDeliveryStatus(copy.invalid,'error');return;}
+  const token=getStoredSessionToken();if(!token){setEmailDeliveryStatus(copy.error,'error');return;}
+  $itineraryEmailSubmit.disabled=true;
+  try{
+    setEmailDeliveryStatus(copy.preparing);const payment=await getPaymentReceiptData();
+    if(!payment)throw Object.assign(new Error('RECEIPT_REQUIRED'),{code:'RECEIPT_REQUIRED'});
+    const generated=await Promise.all([exportItineraryToPDF({download:false}),exportItineraryToXLSX({download:false}),exportPaymentReceiptToPDF(payment,{download:false})]);
+    if(generated.reduce((sum,item)=>sum+(item?.blob?.size||0),0)>3*1024*1024)throw Object.assign(new Error('ATTACHMENTS_TOO_LARGE'),{code:'ATTACHMENTS_TOO_LARGE'});
+    setEmailDeliveryStatus(copy.sending);const attachments=[];
+    for(const item of generated)attachments.push({kind:item.kind,name:item.filename,type:item.blob.type,content:await blobToBase64(item.blob)});
+    await emailApi({action:'send_itinerary',session_token:token,trip_id:currentTripId,recipient_email:recipient,lang:getLang(),attachments});
+    setEmailDeliveryStatus(copy.sent,'success');trackITBMOEvent('trip_shared',{channel:'email',file_type:'pdf_xlsx_receipt'});
+  }catch(error){const key=error?.code==='RECEIPT_REQUIRED'?'receipt':error?.code==='ATTACHMENTS_TOO_LARGE'?'large':error?.code==='EMAIL_NOT_CONFIGURED'?'config':'error';setEmailDeliveryStatus(copy[key],'error');}
+  finally{$itineraryEmailSubmit.disabled=false;}
 }
 
 async function getPaymentReceiptData(){
@@ -10412,7 +10571,7 @@ async function getPaymentReceiptData(){
   }catch(err){ console.warn('[RECEIPT STATUS]',err); return null; }
 }
 
-async function exportPaymentReceiptToPDF(preloadedPayment=null){
+async function exportPaymentReceiptToPDF(preloadedPayment=null,options={}){
   const lang = _plannerOutputLang_();
 
   const copy = {
@@ -10714,9 +10873,9 @@ async function exportPaymentReceiptToPDF(preloadedPayment=null){
     : `ITBMO-Payment-Receipt-${dateForId}.pdf`;
 
   const blob=doc.output('blob');
-  await deliverGeneratedFile(blob,filename);
+  if(options.download!==false) await deliverGeneratedFile(blob,filename);
   trackITBMOEvent('export_receipt',{file_type:'payment_receipt_pdf'});
-  return true;
+  return {blob,filename,kind:'receipt_pdf'};
 }
 
 function showPostDownloadWorkspaceGuide(){
@@ -10748,11 +10907,12 @@ function showFinalDownloadModal(){
     <div class="itbmo-download-spark">✓</div><div class="itbmo-download-eyebrow">${es?'ITBMO TERMINÓ':'ITBMO IS DONE'}</div>
     <h3 id="itbmo-download-title">${es?'Tu itinerario está listo.':'Your itinerary is ready.'}</h3>
     <p>${es?'Descarga cada documento por separado. Así tu navegador no bloqueará ninguno y podrás guardarlos con seguridad.':'Download each document separately. This prevents your browser from blocking any file and lets you save them safely.'}</p>
-    <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>CSV · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
+    <div class="itbmo-download-files"><span>PDF · ${es?'Itinerario':'Itinerary'}</span><span>XLSX · Excel</span><span>PDF · ${es?'Comprobante':'Receipt'}</span></div>
     <div class="itbmo-download-actions">
       <button class="btn primary itbmo-open-pdf" type="button"><span>01</span>${es?'Descargar itinerario PDF':'Download itinerary PDF'}</button>
-      <button class="btn primary itbmo-open-csv" type="button"><span>02</span>${es?'Descargar archivo Excel / CSV':'Download Excel / CSV file'}</button>
+      <button class="btn primary itbmo-open-csv" type="button"><span>02</span>${es?'Descargar Excel editable':'Download editable Excel'}</button>
       <button class="btn primary itbmo-open-receipt" type="button" disabled><span>03</span>${es?'Preparando comprobante…':'Preparing receipt…'}</button>
+      <button class="btn itbmo-email-package" type="button"><span>✉</span>${es?'Enviar los 3 archivos por email':'Email all 3 files'}</button>
     </div>
     <div class="itbmo-download-status" aria-live="polite"></div>
     <label class="itbmo-download-ack"><input type="checkbox"> <span>${es?'He leído esta información y entiendo que debo conservar mis documentos.':'I have read this information and understand that I must keep my documents.'}</span></label>
@@ -10772,6 +10932,7 @@ function showFinalDownloadModal(){
   const pdfButton=overlay.querySelector('.itbmo-open-pdf');
   const csvButton=overlay.querySelector('.itbmo-open-csv');
   const receiptButton=overlay.querySelector('.itbmo-open-receipt');
+  const emailButton=overlay.querySelector('.itbmo-email-package');
   let preparedReceipt=null;
 
   getPaymentReceiptData().then(payment=>{
@@ -10801,10 +10962,10 @@ function showFinalDownloadModal(){
   });
   csvButton?.addEventListener('click',async()=>{
     try{
-      await exportItineraryToCSV();
-      completeButton(csvButton,es?'CSV listo':'CSV ready');
-      status.textContent=es ? '✓ CSV preparado.' : '✓ CSV prepared.';
-    }catch(_){status.textContent=es?'No se pudo preparar el CSV. Inténtalo de nuevo.':'The CSV could not be prepared. Please try again.';}
+      await exportItineraryToXLSX();
+      completeButton(csvButton,es?'Excel listo':'Excel ready');
+      status.textContent=es ? '✓ Excel editable preparado.' : '✓ Editable Excel prepared.';
+    }catch(_){status.textContent=es?'No se pudo preparar el Excel. Inténtalo de nuevo.':'The Excel file could not be prepared. Please try again.';}
   });
   receiptButton?.addEventListener('click',async()=>{
     if(!preparedReceipt) return;
@@ -10814,12 +10975,13 @@ function showFinalDownloadModal(){
       status.textContent=es ? '✓ Comprobante PDF preparado.' : '✓ Receipt PDF prepared.';
     }catch(_){status.textContent=es?'No se pudo preparar el comprobante. Inténtalo de nuevo.':'The receipt could not be prepared. Please try again.';}
   });
+  emailButton?.addEventListener('click',()=>{overlay.classList.remove('active');overlay.remove();openItineraryEmailModal();});
 }
 
 function bindExportListeners(){
   if(isMobileFileExperience()){
     if($btnPDF) $btnPDF.textContent=getLang()==='es' ? 'Abrir / compartir PDF' : 'Open / share PDF';
-    if($btnCSV) $btnCSV.textContent=getLang()==='es' ? 'Abrir / compartir CSV' : 'Open / share CSV';
+    if($btnCSV) $btnCSV.textContent=getLang()==='es' ? 'Abrir / compartir Excel' : 'Open / share Excel';
     if($btnReceipt) $btnReceipt.textContent=getLang()==='es' ? 'Abrir / compartir comprobante' : 'Open / share receipt';
   }
 
@@ -10830,7 +10992,7 @@ function bindExportListeners(){
 
   $btnCSV?.addEventListener('click', (e)=>{
     e.preventDefault();
-    exportItineraryToCSV();
+    exportItineraryToXLSX().catch(()=>{});
   });
 
   $btnReceipt?.addEventListener('click', async (e)=>{
@@ -10838,12 +11000,7 @@ function bindExportListeners(){
     await exportPaymentReceiptToPDF();
   });
 
-  /* MVP · Email export intentionally disabled until transactional email is activated. */
-  if($btnEmail){
-    $btnEmail.disabled = true;
-    $btnEmail.setAttribute('aria-disabled','true');
-    $btnEmail.setAttribute('title', getLang()==='es' ? 'Próximamente' : 'Coming soon');
-  }
+  $btnEmail?.addEventListener('click',(e)=>{e.preventDefault();openItineraryEmailModal();});
 }
 
 /* =========================================================
@@ -11228,6 +11385,17 @@ const $needHelp = qs('#need-help-floating');
 const $supportModal = qs('#support-modal');
 const $supportClose = qs('#support-close');
 const $supportEmailButton = qs('#support-email-button');
+const $supportForm = qs('#support-form');
+const $supportCategory = qs('#support-category');
+const $supportContactEmail = qs('#support-contact-email');
+const $supportMessage = qs('#support-message');
+const $supportFormStatus = qs('#support-form-status');
+const $itineraryEmailModal = qs('#itinerary-email-modal');
+const $itineraryEmailClose = qs('#itinerary-email-close');
+const $itineraryEmailForm = qs('#itinerary-email-form');
+const $itineraryEmailRecipient = qs('#itinerary-email-recipient');
+const $itineraryEmailSubmit = qs('#itinerary-email-submit');
+const $itineraryEmailStatus = qs('#itinerary-email-status');
 
 let paymentGateSatisfiedTripId = null;
 let paypalSdkLoadingPromise = null;
@@ -11347,7 +11515,7 @@ function _commerceCopy_(){
     priceNote:'Pago único · Viaje completo · Todas las ciudades configuradas',
     inc1:'Itinerario personalizado completo',
     inc2:'Inteligencia de viaje de ITBMO',
-    inc3:'Exportación PDF y CSV',
+    inc3:'Exportación PDF y Excel',
     cardTitle:'Tarjeta de crédito o débito',
     cardCopy:'Visa · Mastercard · American Express',
     secureTitle:'Procesamiento de pago seguro',
@@ -11385,7 +11553,7 @@ function _commerceCopy_(){
     priceNote:'One-time payment · Complete trip · All configured cities',
     inc1:'Complete personalized itinerary',
     inc2:'ITBMO travel intelligence',
-    inc3:'PDF & CSV exports',
+    inc3:'PDF & Excel exports',
     cardTitle:'Credit or Debit Card',
     cardCopy:'Visa · Mastercard · American Express',
     secureTitle:'Secure payment processing',
@@ -11442,6 +11610,15 @@ function applyCommerceI18n(){
   Object.entries(map).forEach(([sel,val])=>{
     const el=qs(sel); if(el) el.textContent=val;
   });
+  const es=getLang()==='es';
+  const direct={
+    '#support-category-label':es?'Tipo de ayuda':'Help topic','#support-contact-label':es?'Tu correo de contacto':'Your contact email','#support-message-label':es?'Cuéntanos qué ocurrió':'Tell us what happened',
+    '#itinerary-email-title':es?'Enviar mi viaje por email':'Email my trip','#itinerary-email-copy':es?'Recibirás en un solo correo el itinerario PDF, el Excel editable y el comprobante.':'One email will include your itinerary PDF, editable Excel and receipt.','#itinerary-email-label':es?'Correo del destinatario':'Recipient email','#itinerary-email-submit':es?'Preparar y enviar los 3 archivos':'Prepare and email all 3 files'
+  };
+  Object.entries(direct).forEach(([selector,value])=>{const element=qs(selector);if(element)element.textContent=value;});
+  const options=$supportCategory?.options||[];
+  const optionLabels=es?['Problemas al generar el itinerario','Pagos y reembolsos','Ayuda con mi cuenta','Otro']:['Itinerary generation issues','Payments and refunds','Account assistance','Other'];
+  Array.from(options).forEach((option,index)=>{if(optionLabels[index])option.textContent=optionLabels[index];});
 
   const oldP = qs('#checkout-price-old');
   const newP = qs('#checkout-price-new');
@@ -11488,6 +11665,8 @@ function applyCommerceI18n(){
 
 function openSupportModal(){
   if(!$supportModal || !ITBMO_COMMERCE_CONFIG.support.enabled) return;
+  if($supportContactEmail && !$supportContactEmail.value) $supportContactEmail.value=String(currentUser?.email||'');
+  if($supportFormStatus){$supportFormStatus.textContent='';$supportFormStatus.className='form-send-status';}
   $supportModal.scrollTop=0;
   const card=$supportModal.querySelector('.support-card');
   if(card) card.scrollTop=0;
@@ -11501,49 +11680,18 @@ function closeSupportModal(){
   $supportModal.setAttribute('aria-hidden','true');
 }
 
-function _supportMailto_(){
-  const es = getLang()==='es';
-  const userEmail = String(currentUser?.email || '').trim();
-  const username = String(currentUser?.username || currentUser?.first_name || '').trim();
-  const cities = (savedDestinations || []).map(x=>x?.city).filter(Boolean).join(', ');
-  const trip = currentTripId || 'Not available';
-  const subject = es
-    ? `ITBMO Support · Trip ${trip}`
-    : `ITBMO Support · Trip ${trip}`;
-
-  const body = es ? [
-    'Hola equipo de ITBMO,',
-    '',
-    'Necesito ayuda con mi viaje.',
-    '',
-    `Trip ID: ${trip}`,
-    `Usuario: ${username || 'N/A'}`,
-    `Email: ${userEmail || 'N/A'}`,
-    `Destino(s): ${cities || 'N/A'}`,
-    '',
-    'Describe el problema:',
-    '',
-    ''
-  ] : [
-    'Hi ITBMO Support,',
-    '',
-    'I need help with my trip.',
-    '',
-    `Trip ID: ${trip}`,
-    `Username: ${username || 'N/A'}`,
-    `Email: ${userEmail || 'N/A'}`,
-    `Destination(s): ${cities || 'N/A'}`,
-    '',
-    'Please describe the issue:',
-    '',
-    ''
-  ];
-
-  return `mailto:${encodeURIComponent(ITBMO_COMMERCE_CONFIG.support.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.join('\n'))}`;
-}
-
-function contactCustomerSupport(){
-  window.location.href = _supportMailto_();
+async function contactCustomerSupport(event){
+  event?.preventDefault();const es=getLang()==='es';
+  const contactEmail=String($supportContactEmail?.value||'').trim(),message=String($supportMessage?.value||'').trim();
+  const setStatus=(value,type='')=>{if(!$supportFormStatus)return;$supportFormStatus.textContent=value;$supportFormStatus.className='form-send-status'+(type?` is-${type}`:'');};
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)||message.length<10){setStatus(es?'Escribe un correo válido y un mensaje de al menos 10 caracteres.':'Enter a valid email and a message of at least 10 characters.','error');return;}
+  const token=getStoredSessionToken();if(!token){setStatus(es?'No pudimos validar tu sesión. Recarga la página e inténtalo nuevamente.':'We could not validate your session. Reload and try again.','error');return;}
+  $supportEmailButton.disabled=true;setStatus(es?'Enviando tu solicitud…':'Sending your request…');
+  try{
+    await emailApi({action:'support_request',session_token:token,trip_id:currentTripId,lang:getLang(),category:$supportCategory?.value,contact_email:contactEmail,message,cities:(savedDestinations||[]).map(x=>x?.city).filter(Boolean).join(', ')});
+    setStatus(es?'✓ Solicitud enviada. Nuestro equipo responderá a tu correo.':'✓ Request sent. Our team will reply by email.','success');$supportMessage.value='';
+  }catch(error){setStatus(error?.code==='EMAIL_NOT_CONFIGURED'?(es?'Brevo todavía no está configurado en el servidor.':'Brevo is not configured on the server yet.'):(es?'No pudimos enviar la solicitud. Inténtalo de nuevo.':'We could not send the request. Please try again.'),'error');}
+  finally{$supportEmailButton.disabled=false;}
 }
 
 function setCheckoutStatus(message='', type=''){
@@ -11908,7 +12056,9 @@ function initCommerceAndSupport(){
 
   $needHelp?.addEventListener('click',openSupportModal);
   $supportClose?.addEventListener('click',closeSupportModal);
-  $supportEmailButton?.addEventListener('click',contactCustomerSupport);
+  $supportForm?.addEventListener('submit',contactCustomerSupport);
+  $itineraryEmailClose?.addEventListener('click',closeItineraryEmailModal);
+  $itineraryEmailForm?.addEventListener('submit',sendItineraryByEmail);
   $checkoutSupportLink?.addEventListener('click',()=>{
     closeCheckoutModal();
     openSupportModal();
@@ -12716,8 +12866,10 @@ function _tripStoryTimeMinutes_(v=''){const m=String(v).match(/^(\d{2}):(\d{2})$
 function _tripStoryClampArrivalStart_(st){if(!st?.arrivalTime||!st?.perDay?.[0])return;const a=_tripStoryTimeMinutes_(st.arrivalTime),cur=_tripStoryTimeMinutes_(st.perDay[0].start);if(a!=null&&(cur==null||cur<a))st.perDay[0].start=st.arrivalTime;}
 function _tripStoryTransportOptions_(selected='recommend'){const es=getLang()==='es';return [['recommend',es?'Recomiéndame':'Recommend'],['plane',es?'Avión':'Plane'],['train',es?'Tren':'Train'],['bus','Bus'],['car',es?'Automóvil':'Car'],['ferry','Ferry'],['transfer','Transfer'],['other',es?'Otro':'Other']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryTimeOptions_(selected='',allowBlank=true){const es=getLang()==='es';let out=allowBlank?`<option value="">${es?'Aún no lo sé':'Not sure yet'}</option>`:'';for(let h=0;h<24;h++)for(const m of [0,30]){const v=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;out+=`<option value="${v}" ${v===selected?'selected':''}>${v}</option>`;}return out;}
+function _tripStoryRequiredTimeOptions_(selected=''){const es=getLang()==='es';return _tripStoryTimeOptions_(selected,true).replace(es?'Aún no lo sé':'Not sure yet',es?'Selecciona una hora':'Select a time');}
+function _tripStoryTimeStatusOptions_(selected='estimated'){const es=getLang()==='es';return [['confirmed',es?'Confirmado · ya tengo el horario':'Confirmed · I have the schedule'],['estimated',es?'Estimado · podré ajustarlo después':'Estimated · I can update it later']].map(([v,l])=>`<option value="${v}" ${v===selected?'selected':''}>${l}</option>`).join('');}
 function _tripStoryDaysOptions_(selected=1){return Array.from({length:30},(_,i)=>`<option value="${i+1}" ${Number(selected)===i+1?'selected':''}>${i+1}</option>`).join('');}
-function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:4,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:''},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:''},ended:false};}
+function _tripStoryCurrent_(){return _travelV2()?.state?.tripStory || {schema_version:6,start:{date:'',transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},stays:[],returnTrip:{enabled:false,transportMode:'plane',origin:{label:'',type:'city'},arrival:{label:'',type:'city'},departureDate:'',departureTime:'',arrivalDate:'',arrivalTime:'',timeStatus:'estimated'},ended:false};}
 function _tripStoryDraftKey_(){const who=String(currentUser?.id||currentUser?.email||'guest').replace(/[^a-z0-9_.@-]/gi,'_');return `itbmo_trip_story_draft_v1_${who}`;}
 function _tripStoryLoadDraft_(){try{const raw=sessionStorage.getItem(_tripStoryDraftKey_());return raw?JSON.parse(raw):null;}catch(_){return null;}}
 function _tripStorySaveDraft_(story){try{sessionStorage.setItem(_tripStoryDraftKey_(),JSON.stringify(story));}catch(_){}}
@@ -12725,8 +12877,8 @@ function _tripStoryClearDraft_(){try{sessionStorage.removeItem(_tripStoryDraftKe
 function _tripStoryClampDepartureEnd_(prev,departureTime){if(!prev?.perDay?.length||!departureTime)return;const last=prev.perDay[prev.perDay.length-1],dep=_tripStoryTimeMinutes_(departureTime),cur=_tripStoryTimeMinutes_(last.end);if(dep!=null&&(cur==null||cur>dep))last.end=departureTime;}
 function _tripStoryApplyBoundaryHours_(story){const stays=story?.stays||[];if(!stays.length)return story;const first=stays[0],last=stays.at(-1);if(story.start?.arrivalTime&&(!story.start.arrivalDate||story.start.arrivalDate===first.startDate)){_tripStoryClampArrivalStart_(Object.assign(first,{arrivalTime:story.start.arrivalTime}));}for(let i=1;i<stays.length;i++){_tripStoryClampArrivalStart_(stays[i]);_tripStoryClampDepartureEnd_(stays[i-1],stays[i].departureTime);}if(story.returnTrip?.enabled&&story.returnTrip?.departureTime&&(!story.returnTrip.departureDate||story.returnTrip.departureDate===_tripStoryStayEnd_(last)))_tripStoryClampDepartureEnd_(last,story.returnTrip.departureTime);return story;}
 function _tripStoryDefaultHours_(dayIndex,st){return {day:dayIndex+1,start:(st?.perDay?.[dayIndex]?.start||DEFAULT_START||''),end:(st?.perDay?.[dayIndex]?.end||DEFAULT_END||'')};}
-function _tripStoryEnsureDayTrip_(dt={}){dt.id=dt.id||_tripStoryId_('daytrip');dt.day=Math.max(1,Number(dt.day||1));dt.countryCode=dt.countryCode||'';dt.country=dt.country||'';dt.place=dt.place||'';dt.outbound=dt.outbound||{};dt.return=dt.return||{};dt.outbound.transportMode=dt.outbound.transportMode||dt.transportMode||'recommend';dt.outbound.departureTime=dt.outbound.departureTime||dt.departureTime||'';dt.outbound.arrivalTime=dt.outbound.arrivalTime||dt.arrivalTime||'';dt.return.transportMode=dt.return.transportMode||dt.returnTransportMode||dt.outbound.transportMode||'recommend';dt.return.departureTime=dt.return.departureTime||dt.returnDepartureTime||'';dt.return.arrivalTime=dt.return.arrivalTime||dt.returnArrivalTime||'';return dt;}
-function _tripStoryEnsureStay_(st={}){st.id=st.id||_tripStoryId_('stay');st.countryCode=st.countryCode||'';st.country=st.country||'';st.place=st.place||'';st.days=Math.max(1,Number(st.days||1));st.startDate=st.startDate||'';st.transportMode=st.transportMode||'recommend';st.departureDate=st.departureDate||'';st.departureTime=st.departureTime||'';st.arrivalDate=st.arrivalDate||st.startDate||'';st.arrivalTime=st.arrivalTime||'';st.dayTrips=(Array.isArray(st.dayTrips)?st.dayTrips:[]).map(_tripStoryEnsureDayTrip_);const old=Array.isArray(st.perDay)?st.perDay:[];st.perDay=Array.from({length:st.days},(_,i)=>({day:i+1,start:old[i]?.start||DEFAULT_START||'',end:old[i]?.end||DEFAULT_END||''}));return st;}
+function _tripStoryEnsureDayTrip_(dt={}){dt.id=dt.id||_tripStoryId_('daytrip');dt.day=Math.max(1,Number(dt.day||1));dt.countryCode=dt.countryCode||'';dt.country=dt.country||'';dt.place=dt.place||'';dt.outbound=dt.outbound||{};dt.return=dt.return||{};dt.outbound.transportMode=dt.outbound.transportMode||dt.transportMode||'recommend';dt.outbound.departureTime=dt.outbound.departureTime||dt.departureTime||'';dt.outbound.arrivalTime=dt.outbound.arrivalTime||dt.arrivalTime||'';dt.outbound.timeStatus=dt.outbound.timeStatus||dt.timeStatus||'estimated';dt.return.transportMode=dt.return.transportMode||dt.returnTransportMode||dt.outbound.transportMode||'recommend';dt.return.departureTime=dt.return.departureTime||dt.returnDepartureTime||'';dt.return.arrivalTime=dt.return.arrivalTime||dt.returnArrivalTime||'';dt.return.timeStatus=dt.return.timeStatus||dt.timeStatus||'estimated';return dt;}
+function _tripStoryEnsureStay_(st={}){st.id=st.id||_tripStoryId_('stay');st.countryCode=st.countryCode||'';st.country=st.country||'';st.place=st.place||'';st.days=Math.max(1,Number(st.days||1));st.startDate=st.startDate||'';st.transportMode=st.transportMode||'recommend';st.departureDate=st.departureDate||'';st.departureTime=st.departureTime||'';st.arrivalDate=st.arrivalDate||st.startDate||'';st.arrivalTime=st.arrivalTime||'';st.timeStatus=st.timeStatus||'estimated';st.dayTrips=(Array.isArray(st.dayTrips)?st.dayTrips:[]).map(_tripStoryEnsureDayTrip_);const old=Array.isArray(st.perDay)?st.perDay:[];st.perDay=Array.from({length:st.days},(_,i)=>({day:i+1,start:old[i]?.start||DEFAULT_START||'',end:old[i]?.end||DEFAULT_END||''}));return st;}
 function _tripStoryCountryFromCode_(code=''){return _countryOptions_().find(x=>x.code===code)||null;}
 function _tripStoryCountryMatchLabel_(label=''){const n=_normalizeSearch_(label);return _countryOptions_().find(x=>_normalizeSearch_(x.label)===n||_normalizeSearch_(x.apiName||'')===n)||null;}
 function _tripStoryDayDate_(st,index){return st?.startDate?_tripStoryAddDays_(st.startDate,index):'';}
@@ -12737,6 +12889,22 @@ function _tripStoryCopyText_(story){const es=getLang()==='es',lines=[es?'Mi reco
 function renderTripStorySummary(){const host=qs('#trip-story-summary');if(!host)return;const story=_tripStoryCurrent_(),stays=story.stays||[];if(!stays.length){host.hidden=true;return;}host.hidden=false;const es=getLang()==='es',nodes=stays.map((x,i)=>`<div class="trip-story-summary-stop"><span>${String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(x.place)}</b><small>${_tripStoryDMY_(x.startDate)}${_tripStoryStayEnd_(x)!==x.startDate?` → ${_tripStoryDMY_(_tripStoryStayEnd_(x))}`:''} · ${x.days} ${x.days===1?(es?'día':'day'):(es?'días':'days')}</small>${x.dayTrips?.length?`<em>✦ ${x.dayTrips.map(d=>_tripStoryEsc_(d.place)).join(' · ')}</em>`:''}</div></div>`).join('<div class="trip-story-summary-arrow">→</div>');host.innerHTML=`<div class="trip-story-summary__head"><div><small>✦ ${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><strong>${es?'Tu historia está guardada y puedes cambiarla cuando quieras':'Your story is saved and can be changed anytime'}</strong></div><div class="trip-story-summary-actions"><button type="button" id="copy-trip-story">${es?'Copiar recorrido':'Copy journey'}</button><button type="button" id="edit-trip-story" class="is-primary">${es?'Editar mi viaje':'Edit my trip'}</button></div></div><div class="trip-story-summary-flow">${nodes}</div>`;const postPaymentLocked=Boolean(currentTripId&&paymentGateSatisfiedTripId===currentTripId);const editBtn=qs('#edit-trip-story');if(editBtn){editBtn.disabled=postPaymentLocked;editBtn.setAttribute('aria-disabled',String(postPaymentLocked));if(!postPaymentLocked)editBtn.addEventListener('click',openTripStoryBuilder);}host.classList.toggle('is-payment-locked',postPaymentLocked);qs('#copy-trip-story')?.addEventListener('click',async()=>{const txt=_tripStoryCopyText_(story);try{await navigator.clipboard.writeText(txt);const b=qs('#copy-trip-story');if(b){const old=b.textContent;b.textContent=es?'✓ Copiado':'✓ Copied';setTimeout(()=>b.textContent=old,1600);}}catch(_){prompt(es?'Copia tu recorrido:':'Copy your journey:',txt);}});}
 async function _tripStorySuggestions_(countryCode,query){const match=_tripStoryCountryFromCode_(countryCode),q=String(query||'').trim();if(!match||q.length<3)return[];const key=`story|${match.code}|${_normalizeSearch_(q)}`;if(destinationSuggestionCache.has(key))return destinationSuggestionCache.get(key);try{const url=`${ITBMO_DESTINATION_SUGGESTIONS_URL}?country=${encodeURIComponent(match.apiName)}&countryCode=${encodeURIComponent(match.code)}&lang=${encodeURIComponent(getLang())}&q=${encodeURIComponent(q)}`;const r=await fetch(url,{headers:{Accept:'application/json'}}),d=await r.json().catch(()=>({}));const a=r.ok&&Array.isArray(d?.suggestions)?d.suggestions:[];destinationSuggestionCache.set(key,a);return a;}catch(_){return[];}}
 function _tripStoryValidate_(story){const es=getLang()==='es',issues=[],add=(code,title,message,stayIndex=null)=>issues.push({code,title,message,stayIndex});if(!story.stays.length){add('NO_STAYS',es?'Falta tu primer destino':'Your first destination is missing',es?'Agrega al menos una estancia para construir el recorrido.':'Add at least one stay.');return issues;}story.stays.forEach((st,i)=>{if(!st.countryCode)add('COUNTRY',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona un país válido de la lista.':'Select a valid country from the list.',i);if(!String(st.place||'').trim())add('PLACE',`${es?'Destino':'Destination'} ${i+1}`,es?'Escribe el destino de esta estancia.':'Enter this stay destination.',i);if(!st.startDate)add('DATE',st.place||`${es?'Destino':'Destination'} ${i+1}`,es?'Selecciona el primer día que quieres planificar.':'Select the first day to plan.',i);st.perDay.forEach((d,j)=>{if(d.start&&d.end&&d.start>=d.end)add('DAY_HOURS',`${st.place} · ${es?'Día':'Day'} ${j+1}`,es?`La hora de inicio (${d.start}) debe ser anterior a la hora final (${d.end}).`:`Start time (${d.start}) must be before end time (${d.end}).`,i);});st.dayTrips.forEach(dt=>{if(!String(dt.place||'').trim())add('DAYTRIP_PLACE',`${st.place} · ${es?'Día':'Day'} ${dt.day}`,es?'Completa el destino de la excursión.':'Complete the day-trip destination.',i);const o=dt.outbound,r=dt.return;if(o.departureTime&&o.arrivalTime&&o.departureTime>=o.arrivalTime)add('DAYTRIP_OUT',dt.place,es?'En la ida, la llegada debe ser posterior a la salida.':'Outbound arrival must be after departure.',i);if(r.departureTime&&r.arrivalTime&&r.departureTime>=r.arrivalTime)add('DAYTRIP_RETURN',dt.place,es?'En el regreso, la llegada debe ser posterior a la salida.':'Return arrival must be after departure.',i);if(o.arrivalTime&&r.departureTime&&o.arrivalTime>=r.departureTime)add('DAYTRIP_WINDOW',dt.place,es?'La hora de regreso debe ser posterior a la llegada de ida.':'Return departure must be after outbound arrival.',i);});if(i>0){const prev=story.stays[i-1],prevEnd=_tripStoryStayEnd_(prev),dep=st.departureDate||st.startDate,arr=st.arrivalDate||st.startDate;if(dep&&prevEnd&&dep<prevEnd)add('MOVE_CUTS_STAY',`${prev.place} → ${st.place}`,es?`El traslado sale el ${_tripStoryDMY_(dep)}, pero ${prev.place} todavía tiene días declarados hasta ${_tripStoryDMY_(prevEnd)}. Reduce la estancia o mueve el traslado al último día.`:`The transfer leaves on ${_tripStoryDMY_(dep)}, but ${prev.place} is declared through ${_tripStoryDMY_(prevEnd)}. Shorten the stay or move the transfer to its last day.`,i);const sameDayTrips=(prev.dayTrips||[]).filter(dt=>_tripStoryAddDays_(prev.startDate,dt.day-1)===dep);sameDayTrips.forEach(dt=>{if(st.departureTime&&dt.return?.arrivalTime&&dt.return.arrivalTime>st.departureTime)add('DAYTRIP_TRANSFER_OVERLAP',`${dt.place} / ${prev.place} → ${st.place}`,es?`La excursión regresa a las ${dt.return.arrivalTime}, pero el traslado al siguiente destino sale a las ${st.departureTime}.`:`The day trip returns at ${dt.return.arrivalTime}, but the next transfer leaves at ${st.departureTime}.`,i-1);});if(dep&&prev.startDate&&dep<prev.startDate)add('MOVE_BEFORE',`${prev.place} → ${st.place}`,es?'El traslado sale antes de que comience la estancia anterior.':'The transfer leaves before the previous stay begins.',i);if(arr&&dep&&arr<dep)add('MOVE_DATE',`${prev.place} → ${st.place}`,es?'La fecha de llegada es anterior a la fecha de salida.':'Arrival date is before departure date.',i);if(dep===arr&&st.departureTime&&st.arrivalTime&&st.departureTime>=st.arrivalTime)add('MOVE_TIME',`${prev.place} → ${st.place}`,es?'La hora de llegada debe ser posterior a la hora de salida.':'Arrival time must be after departure time.',i);if(st.startDate&&arr&&st.startDate<arr)add('STAY_BEFORE_ARRIVAL',st.place,es?'La estancia comienza antes de que llegues físicamente al destino.':'The stay starts before you physically arrive.',i);if(prevEnd&&dep&&dep>_tripStoryAddDays_(prevEnd,1))add('GAP',`${prev.place} → ${st.place}`,es?'Hay días sin ubicación definida entre ambas estancias. Ajusta las fechas o agrega el destino intermedio.':'There are undefined days between these stays. Adjust dates or add the intermediate destination.',i);}});if(!story.ended)add('NOT_ENDED',es?'Confirma el final de tu recorrido':'Confirm where your journey ends',es?'Marca “Sí, aquí termina mi recorrido” o agrega el siguiente destino.':'Choose “Yes, my journey ends here” or add the next destination.');return issues;}
+function _tripStoryRequiredTimeIssues_(story){
+  const es=getLang()==='es',issues=[];
+  const message=es?'La hora de salida y la hora de llegada son obligatorias. Si todavía no tienes la reserva o el horario exacto, elige una hora estimada que consideres conveniente. ITBMO la usará para construir un recorrido coherente y podrás ajustarla después en tu itinerario Excel cuando tengas el dato correcto.':'Departure and arrival times are required. If you do not have the booking or exact schedule yet, choose estimated times that seem reasonable. ITBMO will use them to build a coherent itinerary, and you can update them later in your Excel itinerary.';
+  const add=(title,stayIndex=null)=>issues.push({code:'REQUIRED_TRANSFER_TIME',title,message,stayIndex});
+  const start=story?.start||{},startUsed=Boolean(start.date||start.origin?.label||start.arrival?.label||start.arrivalDate||start.departureTime||start.arrivalTime);
+  if(startUsed&&(!start.departureTime||!start.arrivalTime))add(es?'Completa las horas de llegada a tu primer destino':'Complete the times for reaching your first destination',0);
+  (story?.stays||[]).forEach((st,i)=>{
+    if(i>0&&(!st.departureTime||!st.arrivalTime))add(`${story.stays[i-1]?.place||''} → ${st.place||''}`,i);
+    (st.dayTrips||[]).forEach(dt=>{if(!dt.outbound?.departureTime||!dt.outbound?.arrivalTime||!dt.return?.departureTime||!dt.return?.arrivalTime)add(`${st.place||''} → ${dt.place|| (es?'excursión':'day trip')} → ${st.place||''}`,i);});
+  });
+  const ret=story?.returnTrip||{};
+  if(ret.enabled&&(!ret.departureTime||!ret.arrivalTime))add(es?'Completa las horas de tu regreso':'Complete your return times',Math.max(0,(story?.stays||[]).length-1));
+  return issues;
+}
+const _tripStoryValidateCore_=_tripStoryValidate_;
+_tripStoryValidate_=function(story){return [..._tripStoryRequiredTimeIssues_(story),..._tripStoryValidateCore_(story)];};
 function _tripStoryShowIssues_(issues,onFix){const es=getLang()==='es',ov=document.createElement('div');ov.className='trip-story-validation-overlay';ov.innerHTML=`<div class="trip-story-validation"><div class="trip-story-validation-icon">!</div><h3>${es?`Hay ${issues.length} ${issues.length===1?'detalle':'detalles'} por ajustar`:`${issues.length} ${issues.length===1?'detail needs':'details need'} attention`}</h3><p>${es?'Tu historia no se perderá. Corrige estos puntos y vuelve a guardar.':'Your story is safe. Fix these points and save again.'}</p><div class="trip-story-validation-list">${issues.map((x,i)=>`<button type="button" data-issue="${i}"><span>${i+1}</span><div><b>${_tripStoryEsc_(x.title)}</b><small>${_tripStoryEsc_(x.message)}</small></div><em>${es?'Corregir':'Fix'} →</em></button>`).join('')}</div><button type="button" class="trip-story-validation-close">${es?'Seguir editando':'Keep editing'}</button></div>`;document.body.appendChild(ov);ov.querySelector('.trip-story-validation-close').onclick=()=>ov.remove();ov.querySelectorAll('[data-issue]').forEach(b=>b.onclick=()=>{const issue=issues[Number(b.dataset.issue)];ov.remove();onFix?.(issue);});}
 function openTripStoryBuilder(){
  if(currentTripId&&paymentGateSatisfiedTripId===currentTripId)return;
