@@ -104,6 +104,10 @@
       "dest": "/api/partners.js"
     },
     {
+      "src": "/api/email",
+      "dest": "/api/user.js"
+    },
+    {
       "src": "/(.*)",
       "dest": "/public/$1"
     }
