@@ -191,10 +191,8 @@ function cityOverviewTourForCity(cityName,existingNeeds=[]){
   };
 }
 function tourAlternativesForCity(cityName,existingNeeds=[]){
-  const allExisting=Array.isArray(existingNeeds)?existingNeeds:[];
-  const existing=allExisting.filter(item=>item?.need_type==='guided_tour_optional');
+  const existing=(Array.isArray(existingNeeds)?existingNeeds:[]).filter(item=>item?.need_type==='guided_tour_optional');
   const existingKeys=new Set(existing.map(item=>normalizeWorkspaceEntity(item?.entity_name||item?.source_activity||'')));
-  const accessEntityCores=new Set(allExisting.filter(item=>item?.need_type==='ticket_required'||item?.need_type==='reservation_recommended').map(item=>workspaceEntityCore(item?.entity_name||item?.source_activity||'')).filter(Boolean));
   const derived=[];
   const byDay=new Map();
   workspaceRowsForCity(cityName).forEach(({day,index,row})=>{
@@ -209,19 +207,24 @@ function tourAlternativesForCity(cityName,existingNeeds=[]){
     if(!byDay.has(day))byDay.set(day,[]);byDay.get(day).push(item);
     // Standalone guided value is reserved for genuinely complex/high-value anchors.
     if(guided==='high'||semantic==='TOUR_EXPERIENCE'||priority==='essential'||priority==='high'){
-      const key=normalizeWorkspaceEntity(canonical),core=workspaceEntityCore(canonical);
-      // A ticket/reservation card already solves access to this attraction. Do not
-      // mirror the same POI into Tours unless the itinerary explicitly identifies
-      // it as a true tour/experience or assigns high guided value.
-      if(accessEntityCores.has(core) && semantic!=='TOUR_EXPERIENCE' && guided!=='high') return;
+      const key=normalizeWorkspaceEntity(canonical);
       if(key&&!existingKeys.has(key)){
         derived.push({id:`workspace-tour-anchor:${day}:${index+1}`,category:'tours',city:cityName,day,entity_name:canonical,entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',user_message:lang==='es'?`Una visita guiada puede aportar contexto y ayudarte a aprovechar mejor ${canonical}; compárala con la visita por tu cuenta.`:`A guided visit can add context and help you get more from ${canonical}; compare it with visiting independently.`,source_activity:activity,source_route:[row?.from,row?.to].filter(Boolean).join(' → '),transport:String(row?.transport||'').trim(),derived_by:'commerce_context_guided'});
         existingKeys.add(key);
       }
     }
   });
-  // Destination overview is already guaranteed separately. Keep only high-value
-  // guided anchors here so Tours complements Entradas instead of mirroring it.
+  // Build at most one coherent overview experience per sightseeing day instead
+  // of turning every itinerary row into a separate tour product.
+  for(const [day,items] of byDay.entries()){
+    const cluster=items.filter(x=>!['RESTAURANT','LOGISTICS','NONE'].includes(x.semantic));
+    if(cluster.length<2)continue;
+    const label=lang==='es'?`Tour panorámico de ${cityName}`:`${cityName} highlights tour`;
+    const key=normalizeWorkspaceEntity(label);
+    if(existingKeys.has(key))continue;
+    derived.push({id:`workspace-tour-cluster:${normalizeWorkspaceEntity(cityName)}:${day}`,category:'tours',city:cityName,day,entity_name:label,entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',user_message:lang==='es'?`Puede reunir en una experiencia guiada varios de los lugares que ya tienes previstos este día, manteniendo el foco en tu ruta.`:`A guided experience can combine several places already planned for this day while staying aligned with your route.`,source_activity:cluster.slice(0,4).map(x=>x.canonical||x.activity).join(' · '),source_route:'',derived_by:'itinerary_experience_cluster'});
+    existingKeys.add(key);
+  }
   return derived.slice(0,4);
 }
 function rentalTransportTextMatches(value){
@@ -394,12 +397,7 @@ function sectionSort(items=[],sectionType=''){
   const ordered=[...items];
   const priority=item=>{
     if(sectionType==='tickets') return item?.need_type==='ticket_required'?0:1;
-    if(sectionType==='tours'){
-      const name=normalizeWorkspaceEntity(item?.entity_name||'');
-      const overview=/\b(city tour|tour panoramico|highlights tour)\b/.test(name)||item?.derived_by==='physical_destination_overview'||item?.derived_by==='deterministic_city_overview';
-      if(overview)return 0;
-      return item?.derived_by==='itinerary_tour_alternative'?2:1;
-    }
+    if(sectionType==='tours') return item?.derived_by==='itinerary_tour_alternative'?1:0;
     return 0;
   };
   return ordered.sort((a,b)=>{
@@ -649,10 +647,10 @@ function renderPrepare(){
   const cityOffers=partnerOffersByCity.get(city)||[];
   const ticketOffers=cityOffers.filter(x=>x.placement==='city_tickets');
   const tourOffers=cityOffers.filter(x=>x.placement==='city_experiences');
-  // Mobility stays informational / pending while the Omio API is not available.
-  // We deliberately do not expose transport partner links here; no Partner Engine
-  // or Omio resolver logic is changed by this UI decision.
-  const transportOffers=[];
+  // Intercity mobility offers resolved by the Partner Engine are now shown in
+  // the same contextual card as the authoritative A→B route. Local/POI mobility
+  // remains informational because the server resolver only emits eligible routes.
+  const transportOffers=cityOffers.filter(x=>x.placement==='city_transport');
   const activeSections=[
     contextSection('🎟',t.tickets,t.ticketsC,tickets,ticketOffers,'tw-context-tickets','tickets'),
     contextSection('✦',t.tours,t.toursC,tours,tourOffers,'tw-context-tours','tours'),
