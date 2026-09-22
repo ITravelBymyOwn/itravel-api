@@ -6196,7 +6196,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT'
+    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_TRANSFER_BUFFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -7017,13 +7017,18 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       // USER_FIXED movements are deterministic facts. Never spend a model repair
       // call trying to recreate them, and never allow generated sightseeing to
       // occupy their interval.
+      const bufferBefore=Math.max(0,Number(t.buffer_before_minutes)||0);
+      const bufferAfter=Math.max(0,Number(t.buffer_after_minutes)||0);
+      const protectedStart=Math.max(0,dep-bufferBefore),protectedEnd=Math.min(1440,arr+bufferAfter);
       out=out.filter(r=>{
         if(Number(r.day)!==dayNum) return true;
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
         if(rs==null||re==null) return true;
         const exact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
-        const overlaps=Math.max(rs,dep)<Math.min(re,arr);
-        return exact || !overlaps;
+        // Activities cannot consume either the fixed movement or its deterministic
+        // operational buffer. The fixed transport row itself remains exact.
+        const overlapsProtected=Math.max(rs,protectedStart)<Math.min(re,protectedEnd);
+        return exact || !overlapsProtected;
       });
       let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
       const fixedRow={
@@ -7201,12 +7206,16 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
       if(exact.length!==1){
         errors.push({code:'MISSING_USER_FIXED_TRANSFER',day,origin:t.origin,destination:t.destination,required_window:`${t.departure}-${t.arrival}`,count:exact.length});
       }
+      const bufferBefore=Math.max(0,Number(t.buffer_before_minutes)||0),bufferAfter=Math.max(0,Number(t.buffer_after_minutes)||0);
+      const protectedStart=Math.max(0,dep-bufferBefore),protectedEnd=Math.min(1440,arr+bufferAfter);
       dayRows.forEach((r,index)=>{
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
         if(rs==null||re==null||re<=rs) return;
         const isExact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
         if(!isExact && Math.max(rs,dep)<Math.min(re,arr)){
           errors.push({code:'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER',day,row:index+1,required_window:`${t.departure}-${t.arrival}`});
+        } else if(!isExact && Math.max(rs,protectedStart)<Math.min(re,protectedEnd)){
+          errors.push({code:'ACTIVITY_OVERLAPS_TRANSFER_BUFFER',day,row:index+1,required_window:`${t.departure}-${t.arrival}`,buffer_before_minutes:bufferBefore,buffer_after_minutes:bufferAfter});
         }
       });
     });
@@ -10466,7 +10475,7 @@ async function exportItineraryToXLSX(options={}){
   summary.getCell('B18').font={bold:true,color:{argb:navy}};summary.getCell('B18').alignment={horizontal:'center'};
   summary.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:1,paperSize:9,margins:{left:.25,right:.25,top:.35,bottom:.35,header:.1,footer:.1}};
 
-  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',ySplit:7,showGridLines:false}]});
+  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',xSplit:4,ySplit:7,topLeftCell:'E8',activeCell:'E8',showGridLines:false}]});
   sheet.mergeCells('A1:O2');
   sheet.getCell('A1').value=es?'MI ITINERARIO ITBMO':'MY ITBMO ITINERARY';
   sheet.getCell('A1').font={name:'Aptos Display',size:22,bold:true,color:{argb:white}};
@@ -10505,7 +10514,7 @@ async function exportItineraryToXLSX(options={}){
   const buffer=await workbook.xlsx.writeBuffer();
   const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
-  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v1',destinations:blocks.length,days:uniqueDates.length});
+  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v2',destinations:blocks.length,days:uniqueDates.length});
   const filename=`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.xlsx`;
   if(options.download!==false) await deliverGeneratedFile(blob,filename);
   return {blob,filename,kind:'itinerary_xlsx'};
