@@ -2676,7 +2676,7 @@ Do not output analysis, markdown, master-plan metadata or commentary outside JSO
         [{ role:"system", content:V3_SYSTEM_PROMPT }, ...clientMessages],
         0.22,
         8200,
-        110000,
+        130000,
         plannerUsage,
         v3Model,
         v3Effort
@@ -2687,7 +2687,7 @@ Do not output analysis, markdown, master-plan metadata or commentary outside JSO
           [{ role:"system", content:V3_SYSTEM_PROMPT + "\nRECOVERY: Return complete valid JSON only. For physical-stay contracts, preserve every supplied planning window/day and do not generate boundary movements. For legacy contracts, preserve every contract day and hard movement exactly." }, ...clientMessages],
           0.12,
           8600,
-          110000,
+          130000,
           plannerUsage,
           REPAIR_MODEL,
           "medium"
