@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.9-commercial-priority-dedupe";
+const CONTEXT_VERSION = "1.8-must-see-dedupe";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -1048,6 +1048,27 @@ function ensureEvidenceBackedAccessNeeds(candidates, needs, city, language) {
   return result;
 }
 
+function ensureGuidedAdmissionAlternatives(candidates, needs, city, language) {
+  const result=Array.isArray(needs)?[...needs]:[];
+  const sourceById=new Map((candidates||[]).map(x=>[x.candidate_id,x]));
+  const hasTourForCandidate=id=>result.some(n=>n?.need_type==='guided_tour_optional'&&String(n?.id||'').split(':')[0]===id);
+  for(const access of [...result]){
+    if(!['ticket_required','reservation_recommended'].includes(access?.need_type))continue;
+    const candidateId=String(access?.id||'').split(':')[0];
+    const source=sourceById.get(candidateId);
+    const guidedValue=String(source?.commerce_guided_tour_value||'').toLowerCase();
+    const attraction=clean(access?.entity_name||source?.entity_hint||source?.activity,180);
+    if(!attraction||hasTourForCandidate(candidateId))continue;
+    if(!['high','recommended','strong'].includes(guidedValue)&&!source?.explicit_tour_hint)continue;
+    result.push({id:`${candidateId}:guided_tour_optional:admission`,category:'tours',city,day:source?.day||access.day,
+      entity_name:normalizeUiLanguage(language)==='en'?`Guided ${attraction} tour with admission`:`Tour guiado de ${attraction} con entrada`,
+      entity_type:'experience',need_type:'guided_tour_optional',confidence:'high',
+      user_message:normalizeUiLanguage(language)==='en'?`Compare visiting ${attraction} independently with a guided option that includes admission.`:`Compara la entrada para visitar ${attraction} por tu cuenta con una opción guiada que incluya el acceso.`,
+      source_activity:source?.activity||access.source_activity||attraction,source_route:access.source_route||'',derived_by:'deterministic_guided_admission_alternative'});
+  }
+  return result;
+}
+
 function semanticNeedKey(value) {
   return clean(value,220).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")
     .replace(/\b(city tour|tour panoramico|highlights tour|guided tour|visita guiada|tour de|entrada|ticket|interior|torres?|tower|patios?|salones?|apartamentos? reales?|royal apartments?)\b/g," ")
@@ -1171,6 +1192,7 @@ export default async function handler(req, res) {
       needs = sanitizeClassifications(candidates, classifications, city);
       needs = consolidateOptionalTours(candidates, needs, city, uiLanguage);
       needs = ensureEvidenceBackedAccessNeeds(candidates, needs, city, uiLanguage);
+      needs = ensureGuidedAdmissionAlternatives(candidates, needs, city, uiLanguage);
       needs = dedupeSemanticNeeds(needs);
     }
 
