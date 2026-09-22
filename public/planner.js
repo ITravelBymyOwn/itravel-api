@@ -5485,10 +5485,16 @@ function _finishAstraGenerationMetrics_(){
 async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='planner', extraPayload={}){
   const history = useHistory ? session : [];
 
-  // timeout to avoid hangs (same pattern as SECTION 12)
+  // V3 can legitimately perform a primary model call plus one server-side JSON
+  // recovery call inside the SAME /api/chat request. The server budget is capped
+  // below Vercel Hobby's Fluid Compute ceiling, so the browser must not abort the
+  // request halfway through that recovery cycle. Keep this below the 300 s host cap.
   const controller = new AbortController();
-  const timeoutMs = 130000;
-  const timer = setTimeout(()=>controller.abort(), timeoutMs);
+  const timeoutMs = 285000;
+  const timer = setTimeout(()=>{
+    try{ controller.abort(new DOMException(`ITBMO planner request exceeded ${Math.round(timeoutMs/1000)}s`, 'TimeoutError')); }
+    catch(_){ controller.abort(); }
+  }, timeoutMs);
 
   try{
     showThinking(true);
@@ -5522,8 +5528,8 @@ async function _callPlannerSystemPrompt_(systemPrompt, useHistory=true, mode='pl
     _captureExactUsage_(data);
     return data?.text || '';
   }catch(e){
-    const isAbort = (e && (e.name === 'AbortError' || String(e).toLowerCase().includes('abort')));
-    console.error("Failed to contact the API:", e);
+    const isAbort = (e && (e.name === 'AbortError' || e.name === 'TimeoutError' || String(e).toLowerCase().includes('abort') || String(e).toLowerCase().includes('timeout')));
+    console.error("Failed to contact the API:", e, {name:e?.name||null,reason:controller.signal?.reason||null,timeoutMs});
     if(isAbort){
       return `{"followup":"⚠️ The assistant took too long to respond (timeout). Try again or reduce the number of days/cities."}`;
     }
@@ -7720,14 +7726,11 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
       const days=[error?.day,...(Array.isArray(error?.days)?error.days:[])].map(Number).filter(Boolean);
       if(days.length && !days.some(day=>unitDaySet.has(day))) return false;
       if(error?.code==='MISSING_DAY'){
-        const day=Number(error.day);
-        const hasUsefulWindow=(unit.windows||[]).some(w=>{
-          if(Number(w.day)!==day) return false;
-          if(w.open_end) return true;
-          const start=_hhmmToMinutes_(w.start),end=_hhmmToMinutes_(w.end);
-          return start!=null&&end!=null&&end-start>=45;
-        });
-        if(!hasUsefulWindow) return false;
+        // Every unit day exists because the ownership model assigned at least one
+        // physical planning window to this Stay. Therefore an empty unit day is
+        // never silently downgraded: it must be generated/repaired before the Stay
+        // can be checkpointed. Full transit days are suppressed before unit creation.
+        return true;
       }
       // Open-ended days have no fixed clock target. Stay QA relies on meaningful
       // route-window utilization instead of a universal finishing hour.
@@ -7809,13 +7812,11 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
   // A Stay may never be accepted with a missing global day when that day owns a
   // meaningful planning window. Previously MISSING_DAY could be filtered away,
   // allowing an empty Toledo/Bruges checkpoint that later broke the trip merge.
-  const requiredStayDays=unitDays.filter(day=>{
-    return (unit.windows||[]).some(w=>{
-      if(Number(w.day)!==Number(day)) return false;
-      const start=_hhmmToMinutes_(w.start),end=w.open_end?null:_hhmmToMinutes_(w.end);
-      return start!=null && (w.open_end || (end!=null && end-start>=30));
-    });
-  });
+  // unitDays are already derived from owned physical windows. Requiring every
+  // one of them closes the exact failure mode where an all-day/open window with
+  // no explicit clock start (e.g. a one-day Stay) was allowed to checkpoint with
+  // zero rows and only failed much later at the trip merge.
+  const requiredStayDays=[...unitDays];
   const stayCoverage=_v3CoverageForDays_(rows,requiredStayDays,totalDays);
   if(stayCoverage.missing.length){
     const coverageErrors=stayCoverage.missing.map(day=>({code:'MISSING_DAY',day,instruction:'Generate this Stay day inside its authoritative physical planning window.'}));
