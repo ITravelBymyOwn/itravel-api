@@ -1,5 +1,3 @@
-import fs from 'fs';
-import zlib from 'zlib';
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
@@ -12,42 +10,6 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
-
-
-const OMIO_CATALOG_CACHE = new Map();
-function parseCsvLine(line=''){
-  const out=[];let value='',quoted=false;
-  for(let i=0;i<line.length;i++){
-    const ch=line[i];
-    if(ch==='"'){
-      if(quoted&&line[i+1]==='"'){value+='"';i++;}else quoted=!quoted;
-    }else if(ch===','&&!quoted){out.push(value);value='';}else value+=ch;
-  }
-  out.push(value);return out;
-}
-function loadOmioCatalog(locale='en'){
-  const lang=locale==='es'?'es':'en';
-  if(OMIO_CATALOG_CACHE.has(lang))return OMIO_CATALOG_CACHE.get(lang);
-  try{
-    const fileUrl=new URL(`./data/omio-${lang}.csv.gz`,import.meta.url);
-    const raw=zlib.gunzipSync(fs.readFileSync(fileUrl)).toString('utf8').replace(/^\uFEFF/,'');
-    const lines=raw.split(/\r?\n/).filter(Boolean),headers=parseCsvLine(lines.shift());
-    const idx=Object.fromEntries(headers.map((h,i)=>[h,i])),map=new Map();
-    for(const line of lines){
-      const row=parseCsvLine(line),origin=clean(row[idx.origin_name],160),destination=clean(row[idx.destination_name],160),url=clean(row[idx.link_URL],1400);
-      if(!origin||!destination||!url||!allowedPartnerUrl('omio',url))continue;
-      const key=`${normalizeKey(origin)}|${normalizeKey(destination)}`;
-      if(!map.has(key))map.set(key,{target_url:url,title:clean(row[idx.title],220),description:clean(row[idx.description],600),travel_mode:clean(row[idx.travel_mode],40),train_min_duration:clean(row[idx.train_min_duration],30),bus_min_duration:clean(row[idx.bus_min_duration],30),flight_min_duration:clean(row[idx.flight_min_duration],30),ferry_min_duration:clean(row[idx.ferry_min_duration],30),currency:clean(row[idx.domain_currency],12),train_min_price:clean(row[idx.train_min_price],30),bus_min_price:clean(row[idx.bus_min_price],30),flight_min_price:clean(row[idx.flight_min_price],30),ferry_min_price:clean(row[idx.ferry_min_price],30)});
-    }
-    OMIO_CATALOG_CACHE.set(lang,map);return map;
-  }catch(error){console.warn('[ITBMO OMIO CATALOG]',lang,error?.message||error);const empty=new Map();OMIO_CATALOG_CACHE.set(lang,empty);return empty;}
-}
-function omioCatalogRoute(origin,destination,locale){
-  return loadOmioCatalog(locale).get(`${normalizeKey(origin)}|${normalizeKey(destination)}`)||null;
-}
-async function getOmioTemplate(){
-  return (await getOffer('omio','city_transport_contextual')) || (await getOffer('omio','omio-general-v1')) || (await getOffer('omio','intercity_transport'));
-}
 
 
 // Only language capabilities verified for ITBMO's current affiliate integration
@@ -227,6 +189,12 @@ export async function getOffer(slug, placement = '') {
 
 async function getContextTemplate(slug) {
   return getOffer(slug, 'city_contextual');
+}
+
+async function getOmioTemplate() {
+  return (await getOffer('omio', 'city_transport')) ||
+    (await getOffer('omio', 'city_transport_contextual')) ||
+    (await getOffer('omio'));
 }
 
 function searchQueryForNeed(need, city, language = 'en') {
@@ -513,9 +481,8 @@ async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, tripLangu
   const result = [];
 
   for (const route of eligible) {
-    const catalog=omioCatalogRoute(route.origin,route.destination,localeResolution.locale);
-    const targetUrl=catalog?.target_url || omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
-    if(!targetUrl)continue;
+    const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, localeResolution.applied ? localeResolution.locale : 'en');
+    if (!targetUrl) continue;
 
     const routeLabel = `${route.origin} → ${route.destination}`;
     const need = {
@@ -612,8 +579,7 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
     // route eligibility rather than expanded with city-specific exceptions.
     const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
     if(seen.has(key)) continue; seen.add(key);
-    const catalog=omioCatalogRoute(route.origin,route.destination,localeResolution.locale);
-    const targetUrl=catalog?.target_url||omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
+    const targetUrl=omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
     if(!targetUrl) continue;
     const routeLabel=`${route.origin} → ${route.destination}`;
     out.push({
@@ -672,15 +638,14 @@ export async function resolveCityOffers({
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
 
-  const [viator, getyourguide, omio] = await Promise.all([
+  const [viator, getyourguide, omioTrip, omioContext] = await Promise.all([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    // Interim pre-API coverage: Omio is enabled for authoritative top-level
-    // destination→destination routes when BOTH endpoints are European. Day trips,
-    // POIs and local mobility never create Omio CTAs.
-    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage)
+    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage),
+    resolveOmioContextRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
   ]);
-
+  const omio=[]; const seenOmio=new Set();
+  [...omioTrip,...omioContext].forEach(offer=>{const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;if(!seenOmio.has(key)){seenOmio.add(key);omio.push(offer);}});
   return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
 }
 
