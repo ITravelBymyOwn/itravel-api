@@ -13,10 +13,10 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
 // V2.10.9: use a stronger mini-tier model for first-pass itinerary construction,
 // while keeping bounded repair work on the fast/cost-efficient Luna tier.
-const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-terra";
+const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
 const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
 
 /* =========================================================
