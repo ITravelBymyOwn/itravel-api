@@ -3841,15 +3841,11 @@ function openImmersiveItinerary(){
   if(workspaceHandoffId) params.set('handoff',workspaceHandoffId);
   if(snapshot.trip_id) params.set('trip_id',snapshot.trip_id);
   const url=`./trip-workspace.html?${params.toString()}`;
-  const opened=window.open(url,'_blank');
-  if(opened){ try{ opened.opener=null; }catch(_){} }
-  if(!opened){
-    // If the browser blocks the new tab, ownership follows the intentional
-    // same-tab navigation so the Workspace is not mistaken for an abandoned
-    // Planner session. Returning to the Planner restores Planner ownership.
-    try{ localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'workspace'); }catch(_){ }
-    window.location.href=url;
-  }
+  // Post-generation CTA is a deterministic navigation, not a popup. Using the
+  // current tab avoids browser popup policies and always lands on the Workspace
+  // overview (all destinations) with the authenticated handoff intact.
+  try{ localStorage.setItem(ITBMO_AUTH_OWNER_KEY,'workspace'); }catch(_){ }
+  window.location.assign(url);
 }
 function closeImmersiveItinerary(){const modal=qs('#itinerary-focus-modal');if(!modal)return;if(immersiveRenderFrame!=null){cancelAnimationFrame(immersiveRenderFrame);immersiveRenderFrame=null;}modal.classList.remove('is-open');modal.setAttribute('aria-hidden','true');document.body.classList.remove('itinerary-focus-open');setTimeout(()=>qs('#open-itinerary-focus')?.focus(),40);}
 function bindImmersiveItineraryViewer(){const launch=qs('#open-itinerary-focus'),modal=qs('#itinerary-focus-modal');if(!launch)return;launch.disabled=false;launch.removeAttribute('aria-disabled');if(launch.dataset.workspaceBound!=='1'){launch.dataset.workspaceBound='1';launch.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();try{openImmersiveItinerary();}catch(error){console.error('[ITBMO WORKSPACE OPEN]',error);const snapshot=localStorage.getItem('itbmo_trip_workspace_snapshot_v1');if(snapshot)window.location.assign(`./trip-workspace.html?lang=${encodeURIComponent(getLang()==='es'?'es':'en')}${currentTripId?`&trip_id=${encodeURIComponent(currentTripId)}`:''}`);}});}if(!modal){syncImmersiveItineraryLauncher();return;}qs('#itinerary-focus-back')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-focus-close')?.addEventListener('click',closeImmersiveItinerary);qs('[data-itinerary-focus-close]')?.addEventListener('click',closeImmersiveItinerary);qs('#itinerary-city-focus-back')?.addEventListener('click',_immersiveBackToOverview_);qs('#itinerary-focus-prev')?.addEventListener('click',()=>_immersiveMoveDay_(-1));qs('#itinerary-focus-next')?.addEventListener('click',()=>_immersiveMoveDay_(1));qs('#itinerary-focus-mode-itinerary')?.addEventListener('click',()=>{immersiveItineraryMode='itinerary';scheduleImmersiveItineraryRender();});qs('#itinerary-focus-mode-prepare')?.addEventListener('click',()=>{immersiveItineraryMode='prepare';scheduleImmersiveItineraryRender();});
@@ -6196,7 +6192,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_TRANSFER_BUFFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT'
+    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -6900,8 +6896,35 @@ HARD RULES:
 ========================================================= */
 const ITBMO_GENERATION_ENGINE='v3';
 
+function _v3CanonicalUserFixedTransfers_(baseDate){
+  const story=_currentTravelModelV2_()?.trip_story;
+  const stays=Array.isArray(story?.stays)?story.stays:[];
+  const base=parseDMY(String(baseDate||''));
+  if(!stays.length||!base)return [];
+  const dayForDate=(iso)=>{const d=parsePlannerDate(String(iso||''));return d?Math.round((d-base)/86400000)+1:null;};
+  const ledger=[];
+  const push=(x)=>{
+    if(!x?.origin||!x?.destination||!x?.departure||!x?.arrival||!Number.isFinite(Number(x.day)))return;
+    const key=[x.day,x.origin,x.destination,x.departure,x.arrival].map(v=>String(v).trim().toLowerCase()).join('|');
+    if(ledger.some(y=>y._key===key))return;
+    ledger.push({...x,_key:key,user_fixed:true,source:x.source||'USER_FIXED'});
+  };
+  for(let i=1;i<stays.length;i++){
+    const st=stays[i],prev=stays[i-1];
+    const date=st.departureDate||st.startDate;
+    push({transfer_id:`story-main-${st.id||i}`,day:dayForDate(date),date,origin:prev.place,destination:st.place,departure:st.departureTime||'',arrival:st.arrivalTime||'',mode:st.transportMode||'recommend',direction:'main'});
+  }
+  stays.forEach((st,si)=>(st.dayTrips||[]).forEach((dt,di)=>{
+    const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
+    push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-out`,day:dayForDate(date),date,origin:st.place,destination:dt.place,departure:dt.outbound?.departureTime||'',arrival:dt.outbound?.arrivalTime||'',mode:dt.outbound?.transportMode||'recommend',direction:'daytrip_out'});
+    push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-return`,day:dayForDate(date),date,origin:dt.place,destination:st.place,departure:dt.return?.departureTime||'',arrival:dt.return?.arrivalTime||'',mode:dt.return?.transportMode||dt.outbound?.transportMode||'recommend',direction:'daytrip_return'});
+  }));
+  return ledger.map(({_key,...x})=>x).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.departure).localeCompare(String(b.departure)));
+}
+
 function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
   const route=_routeV2ContextForCity_(city) || {};
+  const canonicalLedger=_v3CanonicalUserFixedTransfers_(baseDate);
   const placePreferences={};
   (route.day_contexts||[]).forEach(day=>{
     [day.start_location,day.end_location,day.overnight_base,
@@ -6924,7 +6947,13 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
     route_days:(route.day_contexts||[]).map(day=>{
       const dayNum=Number(day.day);
       const isFinalDay=dayNum===Number(dest?.days||0);
-      const fixedTransfers=(day.fixed_transfers||[]);
+      const routeTransfers=(day.fixed_transfers||[]);
+      const ledgerTransfers=canonicalLedger.filter(t=>Number(t.day)===dayNum);
+      const fixedTransfers=[...routeTransfers];
+      ledgerTransfers.forEach(t=>{
+        const exists=fixedTransfers.some(x=>String(x.origin||'').trim().toLowerCase()===String(t.origin||'').trim().toLowerCase()&&String(x.destination||'').trim().toLowerCase()===String(t.destination||'').trim().toLowerCase()&&String(x.departure||'')===String(t.departure||'')&&String(x.arrival||'')===String(t.arrival||''));
+        if(!exists)fixedTransfers.push(t);
+      });
       const inferredTerminalTransfer=isFinalDay
         ? fixedTransfers.find(t=>t?.destination && !_arePoiAliases_(t.destination,city) && !fixedTransfers.some(later=>later!==t && later?.origin && later?.destination && _arePoiAliases_(later.origin,t.destination) && _arePoiAliases_(later.destination,city)))
         : null;
@@ -6952,12 +6981,16 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
           destination:t.destination||null,
           departure:t.departure||null,
           arrival:t.arrival||null,
+          transfer_id:t.transfer_id||null,
+          direction:t.direction||null,
+          user_fixed:true,
           source:t.source||'USER_FIXED',
           mode:t.mode||null,
           terminal_arrival:Boolean(t.terminal_arrival||t===inferredTerminalTransfer)
         }))
       };
     }),
+    movement_ledger:canonicalLedger,
     place_preferences:placePreferences,
     global_preferences:plannerState?.preferencesV2?.global||null,
     special_conditions:String(plannerState?.preferencesV2?.global?.notes || plannerState?.specialConditions || qs('#special-conditions')?.value || '').trim()||null,
@@ -7017,18 +7050,13 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       // USER_FIXED movements are deterministic facts. Never spend a model repair
       // call trying to recreate them, and never allow generated sightseeing to
       // occupy their interval.
-      const bufferBefore=Math.max(0,Number(t.buffer_before_minutes)||0);
-      const bufferAfter=Math.max(0,Number(t.buffer_after_minutes)||0);
-      const protectedStart=Math.max(0,dep-bufferBefore),protectedEnd=Math.min(1440,arr+bufferAfter);
       out=out.filter(r=>{
         if(Number(r.day)!==dayNum) return true;
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
         if(rs==null||re==null) return true;
         const exact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
-        // Activities cannot consume either the fixed movement or its deterministic
-        // operational buffer. The fixed transport row itself remains exact.
-        const overlapsProtected=Math.max(rs,protectedStart)<Math.min(re,protectedEnd);
-        return exact || !overlapsProtected;
+        const overlaps=Math.max(rs,dep)<Math.min(re,arr);
+        return exact || !overlaps;
       });
       let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
       const fixedRow={
@@ -7041,7 +7069,7 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
           ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
           : (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. La planificación continúa desde ${t.destination} según el tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. Planning continues from ${t.destination} according to the available time.`),
         kind:'transport',
-        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,source:t.source||'USER_FIXED',booking_need:'compare_options'}
+        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:true,source:t.source||'USER_FIXED',booking_need:'compare_options'}
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
@@ -7206,16 +7234,12 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
       if(exact.length!==1){
         errors.push({code:'MISSING_USER_FIXED_TRANSFER',day,origin:t.origin,destination:t.destination,required_window:`${t.departure}-${t.arrival}`,count:exact.length});
       }
-      const bufferBefore=Math.max(0,Number(t.buffer_before_minutes)||0),bufferAfter=Math.max(0,Number(t.buffer_after_minutes)||0);
-      const protectedStart=Math.max(0,dep-bufferBefore),protectedEnd=Math.min(1440,arr+bufferAfter);
       dayRows.forEach((r,index)=>{
         const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
         if(rs==null||re==null||re<=rs) return;
         const isExact=rs===dep&&re===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination);
         if(!isExact && Math.max(rs,dep)<Math.min(re,arr)){
           errors.push({code:'ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER',day,row:index+1,required_window:`${t.departure}-${t.arrival}`});
-        } else if(!isExact && Math.max(rs,protectedStart)<Math.min(re,protectedEnd)){
-          errors.push({code:'ACTIVITY_OVERLAPS_TRANSFER_BUFFER',day,row:index+1,required_window:`${t.departure}-${t.arrival}`,buffer_before_minutes:bufferBefore,buffer_after_minutes:bufferAfter});
         }
       });
     });
@@ -10475,7 +10499,7 @@ async function exportItineraryToXLSX(options={}){
   summary.getCell('B18').font={bold:true,color:{argb:navy}};summary.getCell('B18').alignment={horizontal:'center'};
   summary.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:1,paperSize:9,margins:{left:.25,right:.25,top:.35,bottom:.35,header:.1,footer:.1}};
 
-  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',xSplit:4,ySplit:7,topLeftCell:'E8',activeCell:'E8',showGridLines:false}]});
+  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',ySplit:7,showGridLines:false}]});
   sheet.mergeCells('A1:O2');
   sheet.getCell('A1').value=es?'MI ITINERARIO ITBMO':'MY ITBMO ITINERARY';
   sheet.getCell('A1').font={name:'Aptos Display',size:22,bold:true,color:{argb:white}};
@@ -10514,7 +10538,7 @@ async function exportItineraryToXLSX(options={}){
   const buffer=await workbook.xlsx.writeBuffer();
   const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
-  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v2',destinations:blocks.length,days:uniqueDates.length});
+  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v1',destinations:blocks.length,days:uniqueDates.length});
   const filename=`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.xlsx`;
   if(options.download!==false) await deliverGeneratedFile(blob,filename);
   return {blob,filename,kind:'itinerary_xlsx'};
