@@ -1,3 +1,4 @@
+import emailHandler from './email.js';
 import crypto from "crypto";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -1275,6 +1276,14 @@ export default async function handler(req, res) {
         : req.body || {};
 
     const action = String(body.action || "").trim().toLowerCase();
+
+    // Vercel Hobby permits 12 Serverless Functions in this project. Email is
+    // intentionally multiplexed through the existing /api/user function while
+    // api/email.js remains a reusable internal handler (not a 13th function).
+    if (action === "support_request" || action === "send_itinerary") {
+      req.body = body;
+      return await emailHandler(req, res);
+    }
 
     if (action === "guest") {
       return await handleGuest(req, res, body);
