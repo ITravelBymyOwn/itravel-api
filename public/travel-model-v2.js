@@ -516,7 +516,8 @@
         if(m.departureDate===ctx.date){
           const exact=Boolean(m.departureTime&&m.arrivalTime),prep=exact?timeShift(m.departureTime,-transferPrepMinutes(m.transportMode)):'';
           if(exact&&prep&&(!cursor||cursor<prep))ctx.location_windows.push({location,start:cursor||null,end:prep,type:'plannable',flexible_start:!cursor,boundary_buffer:{kind:'pre_transfer',minutes:transferPrepMinutes(m.transportMode),mode:m.transportMode||null}});
-          ctx.fixed_transfers.push({origin:m.origin,destination:m.destination,departure:m.departureTime||null,arrival:m.arrivalTime||null,date:m.departureDate,time_precision:m.timePrecision||'unknown',source:'USER_FIXED',mode:m.transportMode||null});
+          ctx.fixed_transfers.push({transfer_id:`${m.id}:outbound`,origin:m.origin,destination:m.destination,departure:m.departureTime||null,arrival:m.arrivalTime||null,date:m.departureDate,time_precision:m.timePrecision||'unknown',source:'USER_FIXED',mode:m.transportMode||null,buffer_before_minutes:transferPrepMinutes(m.transportMode),buffer_after_minutes:transferArrivalMinutes(m.transportMode)});
+          ctx.location_windows.push({location:`${m.origin} → ${m.destination}`,start:m.departureTime||null,end:m.arrivalTime||null,type:'fixed_transfer',transfer_id:`${m.id}:outbound`,buffer_before_minutes:transferPrepMinutes(m.transportMode),buffer_after_minutes:transferArrivalMinutes(m.transportMode)});
           ctx.hard_route_constraints.push(`${m.origin} → ${m.destination}${m.departureTime?` ${m.departureTime}`:''}${m.arrivalTime?`–${m.arrivalTime}`:''}`);
           if(exact){cursor=timeShift(m.arrivalTime,transferArrivalMinutes(m.transportMode));location=m.destination;}
           else {ctx.flexible_movement=true;location=m.destination;}
@@ -525,7 +526,8 @@
         if(m.disposition==='roundtrip'&&m.returnDepartureDate===ctx.date){
           const exactRet=Boolean(m.returnDepartureTime&&m.returnArrivalTime),prepRet=exactRet?timeShift(m.returnDepartureTime,-transferPrepMinutes(m.returnTransportMode||m.transportMode)):'';
           if(exactRet&&prepRet&&(!cursor||cursor<prepRet))ctx.location_windows.push({location,start:cursor||null,end:prepRet,type:'plannable',flexible_start:!cursor,day_trip:true});
-          ctx.fixed_transfers.push({origin:m.destination,destination:m.origin,departure:m.returnDepartureTime||null,arrival:m.returnArrivalTime||null,date:m.returnDepartureDate,time_precision:m.timePrecision||'unknown',source:'USER_FIXED',mode:m.returnTransportMode||m.transportMode||null});
+          ctx.fixed_transfers.push({transfer_id:`${m.id}:return`,origin:m.destination,destination:m.origin,departure:m.returnDepartureTime||null,arrival:m.returnArrivalTime||null,date:m.returnDepartureDate,time_precision:m.timePrecision||'unknown',source:'USER_FIXED',mode:m.returnTransportMode||m.transportMode||null,buffer_before_minutes:transferPrepMinutes(m.returnTransportMode||m.transportMode),buffer_after_minutes:transferArrivalMinutes(m.returnTransportMode||m.transportMode)});
+          ctx.location_windows.push({location:`${m.destination} → ${m.origin}`,start:m.returnDepartureTime||null,end:m.returnArrivalTime||null,type:'fixed_transfer',transfer_id:`${m.id}:return`,buffer_before_minutes:transferPrepMinutes(m.returnTransportMode||m.transportMode),buffer_after_minutes:transferArrivalMinutes(m.returnTransportMode||m.transportMode)});
           ctx.hard_route_constraints.push(`${m.destination} → ${m.origin}${m.returnDepartureTime?` ${m.returnDepartureTime}`:''}${m.returnArrivalTime?`–${m.returnArrivalTime}`:''}`);
           if(exactRet){cursor=timeShift(m.returnArrivalTime,transferArrivalMinutes(m.returnTransportMode||m.transportMode));location=m.origin;}
           else location=m.origin;
@@ -605,6 +607,17 @@
         dayContexts[i].start_location=previousBase;
       }
     }
+    // Route Spine invariant: every user-entered movement carries deterministic identity
+    // and rule-of-thumb operational buffers before the model sees any planning window.
+    dayContexts.forEach(ctx=>{
+      (ctx.fixed_transfers||[]).forEach((t,index)=>{
+        t.transfer_id=t.transfer_id||`day-${ctx.day}-transfer-${index+1}`;
+        t.source='USER_FIXED';
+        t.buffer_before_minutes=Number.isFinite(Number(t.buffer_before_minutes))?Number(t.buffer_before_minutes):transferPrepMinutes(t.mode);
+        t.buffer_after_minutes=Number.isFinite(Number(t.buffer_after_minutes))?Number(t.buffer_after_minutes):transferArrivalMinutes(t.mode);
+      });
+    });
+
     // Build deterministic windows for exact same-day transfers.
     dayContexts.forEach(ctx=>{
       const transfers=ctx.fixed_transfers.slice().sort((a,b)=>(a.departure||'99:99').localeCompare(b.departure||'99:99'));
