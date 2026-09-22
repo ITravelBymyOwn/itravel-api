@@ -13,10 +13,10 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const MODEL = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+const MODEL = process.env.OPENAI_MODEL || "gpt-5-mini";
 // V2.10.9: use a stronger mini-tier model for first-pass itinerary construction,
 // while keeping bounded repair work on the fast/cost-efficient Luna tier.
-const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-luna";
+const PLANNER_MODEL = process.env.OPENAI_PLANNER_MODEL || "gpt-5.6-terra";
 const REPAIR_MODEL = process.env.OPENAI_REPAIR_MODEL || "gpt-5.6-luna";
 
 /* =========================================================
@@ -2403,6 +2403,19 @@ export default async function handler(req, res) {
     const clientMessages = extractMessages(body);
     const lang = detectUserLang(clientMessages);
     const plannerUsage = (mode === "planner" || mode === "planner_v3") ? _newUsageCollector_() : null;
+
+    /* ROUTE RESOLVER · planning-grade multimodal logistics.
+       It estimates a physically plausible chain when the traveler has not
+       supplied transport/arrival. It never claims live schedules or bookings. */
+    if (mode === "route_resolver") {
+      const movements = Array.isArray(body.movements) ? body.movements.slice(0, 40) : [];
+      if (!movements.length) return res.status(200).json({ok:true,routes:[]});
+      const resolverPrompt = `You are ITBMO Route Resolver. Resolve each movement into a practical planning-grade multimodal route.\n\nAUTHORITATIVE INPUT:\n${JSON.stringify(movements)}\n\nRULES:\n- Preserve movement_id, origin, destination, departure_date and earliest_departure.\n- earliest_departure means the traveler is available to START the door-to-door movement at that time, not a booked train/flight time.\n- If user_mode is supplied, preserve it as the principal long-distance mode, but still resolve access/connection legs needed to make the route physically coherent.\n- If user arrival date/time is supplied, preserve it. Otherwise estimate arrival date/time conservatively from a realistic door-to-door chain.\n- For places without a suitable airport/rail node, route through a sensible nearby hub. Multimodal routes are encouraged when appropriate.\n- For daytrip movements, produce outbound and return legs on the same date and preserve user_return_by when supplied.\n- Use robust geographic/transport knowledge only. Do NOT claim live schedules, exact current fares, availability, operators or flight numbers. Mark the result as a planning estimate that should be verified before booking.\n- Include up to 2 useful alternatives only when materially different.\n- Times should include realistic interchange/check-in/security/access buffers.\n- Return JSON only, schema: {"routes":[{"movement_id":"...","primary_mode":"train|plane|bus|car|ferry|transfer|other","departure_date":"YYYY-MM-DD","departure_time":"HH:MM","arrival_date":"YYYY-MM-DD","arrival_time":"HH:MM","summary":"concise traveler-facing route","confidence":"planning_estimate","legs":[{"direction":"outbound|return|main","origin":"...","destination":"...","mode":"...","departure_time":"HH:MM","arrival_time":"HH:MM","estimated_minutes":0,"note":"..."}],"alternatives":[{"summary":"...","estimated_minutes":0}]}]}`;
+      const raw = await callStructured([{role:"user",content:resolverPrompt}],0.1,5000,120000,null,PLANNER_MODEL,"low");
+      let parsed=null; try{parsed=JSON.parse(String(raw||'').replace(/^```json\s*/i,'').replace(/```$/,'').trim());}catch{}
+      if(!parsed||!Array.isArray(parsed.routes)) return res.status(502).json({ok:false,code:"ROUTE_RESOLVER_INVALID_RESPONSE"});
+      return res.status(200).json({ok:true,routes:parsed.routes});
+    }
 
     /* CITY NORMALIZATION · isolated pre-save validation.
        It never changes the planner or Info Chat contracts. */
