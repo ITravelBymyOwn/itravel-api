@@ -4112,7 +4112,7 @@ Edits:
 `.trim();
 
   const controller = new AbortController();
-  const timeoutMs = 130000; // 130s (ajustable)
+  const timeoutMs = 180000; // 130s (ajustable)
   const timer = setTimeout(()=>controller.abort(), timeoutMs);
 
   try{
@@ -6530,7 +6530,15 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       const resolvesToDifferentKnownPlace=last?.to && knownRoutePlaces.some(place=>
         !_arePoiAliases_(place,ctx.overnight_base) && _arePoiAliases_(last.to,place)
       );
-      if(resolvesToDifferentKnownPlace){
+      // Overnight validation is authoritative only when the route contract itself
+      // anchors the end of this day at that base. This prevents a day-trip label
+      // or an intermediate station from turning into a false overnight-base loop.
+      const finalWindow=[...(ctx.location_windows||[])]
+        .filter(w=>w?.type!=='fixed_transfer')
+        .sort((a,b)=>String(a?.start||'').localeCompare(String(b?.start||''))).at(-1);
+      const fixedEndsAtBase=(ctx.fixed_transfers||[]).some(t=>_arePoiAliases_(t?.destination,ctx.overnight_base));
+      const routeEndsAtBase=Boolean(finalWindow?.location && _arePoiAliases_(finalWindow.location,ctx.overnight_base));
+      if(resolvesToDifferentKnownPlace && (fixedEndsAtBase || routeEndsAtBase)){
         errors.push({
           code:'WRONG_OVERNIGHT_BASE',day:ctx.day,expected:ctx.overnight_base,actual:last.to,
           instruction:'End this day at the real overnight base or include an explicit final movement to it.'
@@ -7501,8 +7509,26 @@ function _v3BuildPhysicalStayUnits_(contract={}){
           if(score) candidates.push({descriptor:d,score,role});
         });
         candidates.sort((a,b)=>b.score-a.score||a.descriptor.index-b.descriptor.index);
-        const owner=candidates[0];
-        if(!owner) return;
+        let owner=candidates[0];
+        if(!owner){
+          // A physical window must not disappear merely because its surface label
+          // differs from the Stay/Day-Trip label. When date + boundary times leave
+          // exactly one eligible Stay, ownership is deterministic and safe.
+          const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+          const eligible=descriptors.filter(d=>{
+            if(!d.dates.has(date)) return false;
+            const inboundMinute=d.inbound&&String(d.inbound.date||'')===date?_hhmmToMinutes_(d.inbound.arrival):null;
+            const outboundMinute=d.outbound&&String(d.outbound.date||'')===date?_hhmmToMinutes_(d.outbound.departure):null;
+            if(inboundMinute!=null&&ws!=null&&ws<inboundMinute) return false;
+            if(outboundMinute!=null&&we!=null&&we>outboundMinute) return false;
+            return true;
+          });
+          if(eligible.length===1) owner={descriptor:eligible[0],score:1,role:'BASE'};
+        }
+        if(!owner){
+          console.warn('[ITBMO V3 WINDOW OWNERSHIP] Unassigned physical window', {day:Number(day.day),date,location,start:w.start||null,end:w.end||null});
+          return;
+        }
         const windowId=w.window_id||`day-${Number(day.day)}-window-${windowIndex+1}`;
         ownedWindows.get(owner.descriptor.index).push({
           window_id:windowId,
@@ -7778,6 +7804,24 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
     const improved=afterBlocking<beforeBlocking || (afterBlocking===beforeBlocking && (after<before || (after===before && (nextReport.errors||[]).length<(report.errors||[]).length)));
     if(improved){rows=nextRows;report=nextReport;material=_v3MaterialAuditErrors_(report);stagnant=0;}
     else{stagnant+=1;}
+  }
+
+  // A Stay may never be accepted with a missing global day when that day owns a
+  // meaningful planning window. Previously MISSING_DAY could be filtered away,
+  // allowing an empty Toledo/Bruges checkpoint that later broke the trip merge.
+  const requiredStayDays=unitDays.filter(day=>{
+    return (unit.windows||[]).some(w=>{
+      if(Number(w.day)!==Number(day)) return false;
+      const start=_hhmmToMinutes_(w.start),end=w.open_end?null:_hhmmToMinutes_(w.end);
+      return start!=null && (w.open_end || (end!=null && end-start>=30));
+    });
+  });
+  const stayCoverage=_v3CoverageForDays_(rows,requiredStayDays,totalDays);
+  if(stayCoverage.missing.length){
+    const coverageErrors=stayCoverage.missing.map(day=>({code:'MISSING_DAY',day,instruction:'Generate this Stay day inside its authoritative physical planning window.'}));
+    report={...report,errors:[...(report.errors||[]),...coverageErrors]};
+    material=_v3MaterialAuditErrors_(report);
+    console.warn(`[ITBMO V3 STAY COVERAGE BLOCK] ${unitCity} · ${unit.id}`,stayCoverage);
   }
 
   const blocking=_v3BlockingAuditErrors_(report);
