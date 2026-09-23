@@ -4868,7 +4868,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let end = String(endRaw||'').trim();
   let startMin=_hhmmToMinutes_(start), endMin=_hhmmToMinutes_(end);
   let duration=_sanitizeDurationLines_(durRaw, trans);
-  const kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
+  let kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
   let safeTransport = String(trans||'').trim();
   const declaredTransport=_durationBoundsMinutes_(_extractDurationPart_(String(durRaw||''),'transport'));
   if(declaredTransport && !_transportBoundsFromField_(safeTransport)){
@@ -4905,6 +4905,14 @@ function normalizeRow(r = {}, fallbackDay = 1){
   }
   const activityBounds=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
   if(kind==='transport' && activityBounds && activityBounds.max<=1) duration='';
+  // Ultra-surgical cleanup for model rows that are plainly local movement but
+  // arrive mislabeled as an activity with a synthetic 1-minute dwell. The real
+  // movement duration already lives beside the mode in `transport`.
+  const movementOnlyText=_canonicalText_(`${safeActivity} ${safeNotes}`);
+  const syntheticMovementActivity = kind==='activity' && activityBounds && activityBounds.max<=1 &&
+    Boolean(_transportBoundsFromField_(safeTransport)) && safeFrom && safeTo && !_arePoiAliases_(safeFrom,safeTo) &&
+    /^(desplazamiento|traslado|transfer|regreso|retorno|return|paseo (?:corto )?(?:hacia|hasta)|walk (?:to|toward|towards)|walking (?:to|toward|towards))\b/.test(movementOnlyText);
+  if(syntheticMovementActivity){ kind='transport'; duration=''; }
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
