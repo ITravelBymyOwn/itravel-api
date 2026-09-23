@@ -8232,13 +8232,42 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     // FINAL EXPORT-SHAPE GATE. pushRows performs normalization, semantic dedupe
     // and timeline reconciliation, so audit the exact rows that PDF/Excel and
     // Workspace will consume. A transfer/window may not disappear after PASS.
-    const storedRows=Object.values(itineraries?.[city]?.byDay||{}).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
-    const postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
-    const postStoreErrors=postStoreReport.errors||[];
+    let storedRows=Object.values(itineraries?.[city]?.byDay||{}).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
+    let postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
+    let postStoreErrors=postStoreReport.errors||[];
     console.info(`[ITBMO V3 POST-STORAGE HARD AUDIT] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
+
+    // V2.10.24 · deterministic self-healing gate. A USER_FIXED/route-resolved
+    // movement is authoritative Route Compiler data, not model content. If a
+    // normalization/dedupe/storage pass dropped one, restore the complete set of
+    // hard route facts from the immutable generation contract and audit the exact
+    // export shape again. This costs zero model calls and preserves accepted Stays.
+    const routeFactCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
+    if(postStoreErrors.length && postStoreErrors.every(e=>routeFactCodes.has(String(e?.code||'')))){
+      console.warn('[ITBMO V3 POST-STORAGE SELF-HEAL] restoring immutable route facts',postStoreErrors);
+      const healedRows=_v3EnforceHardRouteFacts_(storedRows,generated.contract);
+      const healedByDay={};
+      healedRows.forEach(row=>{
+        const d=Math.max(1,Number(row?.day)||1);
+        if(!healedByDay[d]) healedByDay[d]=[];
+        healedByDay[d].push(row);
+      });
+      for(let d=1;d<=Math.max(1,Number(dest.days)||1);d++){
+        if(!healedByDay[d]) healedByDay[d]=[];
+        healedByDay[d].sort((a,b)=>(_hhmmToMinutes_(a?.start)??99999)-(_hhmmToMinutes_(b?.start)??99999));
+      }
+      itineraries[city].byDay=healedByDay;
+      storedRows=Object.values(healedByDay).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
+      postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
+      postStoreErrors=postStoreReport.errors||[];
+      console.info(`[ITBMO V3 POST-STORAGE SELF-HEAL AUDIT] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
+    }
+
     if(postStoreErrors.length){
-      itineraries[city].byDay={};
+      // Never erase accepted output/checkpoints here. Recovery must keep the
+      // generated trip visible internally and retry only the failed integrity gate.
       const error=new Error(`V3_EXPORT_SHAPE_BLOCK:trip`);
+      error.code='V3_EXPORT_SHAPE_BLOCK';
       error.v3BlockingErrors=postStoreErrors;
       throw error;
     }
@@ -8745,18 +8774,23 @@ function _showGenerationRetry_(reason=''){
 
   const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
   const es=getLang()==='es';
+  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|MISSING_USER_FIXED_TRANSFER|POST_STORAGE/i.test(String(reason||''));
   const overlay=document.createElement('div');
   overlay.className='itbmo-postpay-overlay itbmo-generation-recovery-overlay';
   overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-recovery-title" style="position:relative">
-    <button id="itbmo-generation-recovery-close" type="button" aria-label="${es?'Cerrar':'Close'}" title="${es?'Cerrar':'Close'}" style="position:absolute;right:18px;top:14px;border:0;background:transparent;font-size:30px;line-height:1;color:#667085;cursor:pointer;padding:6px 10px">×</button>
+    ${integrityFailure?'':`<button id="itbmo-generation-recovery-close" type="button" aria-label="${es?'Cerrar':'Close'}" title="${es?'Cerrar':'Close'}" style="position:absolute;right:18px;top:14px;border:0;background:transparent;font-size:30px;line-height:1;color:#667085;cursor:pointer;padding:6px 10px">×</button>`}
     <div class="itbmo-postpay-icon">↻</div>
-    <h3 id="itbmo-recovery-title">${exhausted ? (es?'Necesitamos ayudarte a recuperar tu viaje':'We need to help recover your trip') : (es?'Tu generación quedó pendiente':'Your generation was interrupted')}</h3>
-    <p>${exhausted
-      ? (es?'La generación no pudo completarse, pero tu pago permanece registrado. Puedes volver a intentarlo o contactar a Soporte si necesitas ayuda.':'Generation could not be completed, but your payment remains recorded. You can try again or contact Support if you need help.')
-      : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.')}</p>
+    <h3 id="itbmo-recovery-title">${integrityFailure
+      ? (es?'Estamos terminando de validar tu itinerario':'We are finishing validation of your itinerary')
+      : (exhausted ? (es?'Necesitamos ayudarte a recuperar tu viaje':'We need to help recover your trip') : (es?'Tu generación quedó pendiente':'Your generation was interrupted'))}</h3>
+    <p>${integrityFailure
+      ? (es?'Tu recorrido y tus destinos se generaron correctamente. Detectamos un detalle de conexión que debemos verificar antes de entregarte los archivos. Lo ya generado se conserva y no necesitas pagar de nuevo.':'Your route and destinations were generated correctly. We detected a connection detail that must be verified before delivering your files. Everything already generated is preserved and you do not need to pay again.')
+      : (exhausted
+        ? (es?'La generación no pudo completarse, pero tu pago permanece registrado. Puedes volver a intentarlo o contactar a Soporte si necesitas ayuda.':'Generation could not be completed, but your payment remains recorded. You can try again or contact Support if you need help.')
+        : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.'))}</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:22px">
       <button id="itbmo-generation-retry" type="button">${es?'Reintentar generación':'Retry generation'}</button>
-      ${exhausted?`<button id="itbmo-generation-reset" type="button" class="btn warn">${es?'Reiniciar itinerario':'Reset itinerary'}</button><button id="itbmo-generation-support" type="button" style="background:#fff;color:#24345f;border:1px solid #d6dbea">${es?'Contactar Soporte':'Contact Support'}</button>`:''}
+      ${exhausted&&!integrityFailure?`<button id="itbmo-generation-reset" type="button" class="btn warn">${es?'Reiniciar itinerario':'Reset itinerary'}</button><button id="itbmo-generation-support" type="button" style="background:#fff;color:#24345f;border:1px solid #d6dbea">${es?'Contactar Soporte':'Contact Support'}</button>`:''}
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -8766,7 +8800,7 @@ function _showGenerationRetry_(reason=''){
     $resetBtn?.removeAttribute('disabled');
   };
   overlay.querySelector('#itbmo-generation-recovery-close')?.addEventListener('click',closeRecovery);
-  overlay.addEventListener('click',(event)=>{ if(event.target===overlay) closeRecovery(); });
+  overlay.addEventListener('click',(event)=>{ if(!integrityFailure && event.target===overlay) closeRecovery(); });
   overlay.querySelector('#itbmo-generation-reset')?.addEventListener('click',()=>{
     // Keep the recovery overlay/state intact until the traveler CONFIRMS reset.
     // The canonical reset flow is allowed to cancel an in-flight/exhausted generation
@@ -8790,9 +8824,9 @@ function _showGenerationRetry_(reason=''){
     overlay.remove();
     // Immediate UX acknowledgement: generation_begin/checkpoint recovery can take
     // several seconds, so never leave the user looking at an apparently idle UI.
-    showWOW(true,es
-      ? 'Preparando tu itinerario… Estamos recuperando tu viaje y preparando la generación.'
-      : 'Preparing your itinerary… We are recovering your trip and preparing generation.');
+    showWOW(true,integrityFailure
+      ? (es?'Verificando los últimos detalles de tu itinerario…':'Verifying the final details of your itinerary…')
+      : (es?'Preparando tu itinerario… Estamos recuperando tu viaje y preparando la generación.':'Preparing your itinerary… We are recovering your trip and preparing generation.'));
     requestAnimationFrame(()=>{
       runPaidGeneration({manualRetry:true});
     });
@@ -9000,13 +9034,16 @@ async function runPaidGeneration({manualRetry=false}={}){
     if(!allComplete){
       await _persistGenerationCheckpoint_('failed',{active_city:null});
       showWOW(false);
+      const integrityFailure=Object.values(_v3LastFailureByCity_||{}).some(message=>/V3_EXPORT_SHAPE_BLOCK/.test(String(message||'')));
       if($preferencesGenerateV2){
-        $preferencesGenerateV2.disabled=false;
-        $preferencesGenerateV2.removeAttribute('aria-disabled');
-        $preferencesGenerateV2.textContent=getLang()==='es'?'Reintentar generación':'Retry generation';
+        // Do not expose the old Personalization CTA after generation started.
+        // Recovery owns the next action and reuses accepted Stay checkpoints.
+        $preferencesGenerateV2.disabled=true;
+        $preferencesGenerateV2.setAttribute('aria-disabled','true');
+        $preferencesGenerateV2.textContent=getLang()==='es'?'Verificando itinerario…':'Verifying itinerary…';
         $preferencesGenerateV2.classList.remove('is-generated');
       }
-      _showGenerationRetry_('One or more cities remained incomplete.');
+      _showGenerationRetry_(integrityFailure?'V3_EXPORT_SHAPE_BLOCK':'One or more cities remained incomplete.');
       return;
     }
 
