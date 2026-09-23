@@ -21,7 +21,7 @@ const ITBMO_ADMIN_BYPASS_ALLOW_PRODUCTION =
 const ITBMO_PREVIEW_PAYMENT_BYPASS =
   String(process.env.ITBMO_PREVIEW_PAYMENT_BYPASS || "true").toLowerCase() === "true";
 
-const CONTEXT_VERSION = "1.8-must-see-dedupe";
+const CONTEXT_VERSION = "1.9-route-segments";
 const MAX_CANDIDATES = 120;
 const CONTEXT_BATCH_SIZE = 24;
 const CONTEXT_BATCH_CONCURRENCY = 3;
@@ -638,7 +638,8 @@ function buildCandidates(trip, requestedCity) {
           destination_priority:clean(cc.destination_priority,40).toLowerCase(),
           commerce_canonical_place:clean(cc.canonical_place,180),
           access_hint:evidence.hint||(semantic==='ATTRACTION_TICKET'?(String(cc.ticket_need||'').toLowerCase()==='required'?'ticket_required':'reservation_recommended'):''),
-          access_evidence:evidence.evidence||clean(cc.canonical_place||row.activity,260)
+          access_evidence:evidence.evidence||clean(cc.canonical_place||row.activity,260),
+          route_resolution:plain(cc.route_resolution)
         });
       });
     });
@@ -853,6 +854,16 @@ function categoryForNeed(needType) {
   return "none";
 }
 
+function encodedResolvedRoute(source){
+  const rr=plain(source?.route_resolution);
+  const legs=Array.isArray(rr?.legs)?rr.legs.filter(leg=>leg&&leg.origin&&leg.destination):[];
+  if(!legs.length)return [source?.from,source?.to].filter(Boolean).join(" → ");
+  const payload={v:1,parent:{origin:clean(source?.from,160),destination:clean(source?.to,160)},summary:clean(rr?.summary,420),legs:legs.slice(0,12).map((leg,index)=>({
+    index:index+1,direction:clean(leg.direction,24),origin:clean(leg.origin,160),destination:clean(leg.destination,160),mode:clean(leg.mode,40),departure_time:clean(leg.departure_time,16),arrival_time:clean(leg.arrival_time,16),estimated_minutes:Number(leg.estimated_minutes||0)||0,commerce_eligible:Boolean(leg.commerce_eligible),note:clean(leg.note,240)
+  }))};
+  return `ITBMO_ROUTE_V1|${encodeURIComponent(JSON.stringify(payload))}`;
+}
+
 function sanitizeClassifications(candidates, classifications, city) {
   const sourceById = new Map(candidates.map(item => [item.candidate_id, item]));
   const usedCandidateNeed = new Set();
@@ -907,7 +918,7 @@ function sanitizeClassifications(candidates, classifications, city) {
       confidence,
       user_message: clean(raw?.user_message, 300),
       source_activity: source.activity,
-      source_route: [source.from, source.to].filter(Boolean).join(" → "),
+      source_route: (needType === "intercity_transport" || needType === "transport_arrangement") ? encodedResolvedRoute(source) : [source.from, source.to].filter(Boolean).join(" → "),
       transport: source.transport
     });
   }
