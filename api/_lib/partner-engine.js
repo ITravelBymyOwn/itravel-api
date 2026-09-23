@@ -508,6 +508,15 @@ function commercialOmioSegments(need){
   return payload.legs.filter(leg=>leg?.commerce_eligible && leg?.origin && leg?.destination && ['train','bus','coach','plane','flight','ferry'].includes(normalizeKey(leg?.mode))).map((leg,index)=>({...leg,segment_index:Number(leg.index||index+1),commercial_origin:omioCommercialEndpoint(clean(leg.commercial_origin,120)||leg.origin),commercial_destination:omioCommercialEndpoint(clean(leg.commercial_destination,120)||leg.destination),commercial_origin_es:omioCommercialEndpoint(clean(leg.commercial_origin_es,120)),commercial_destination_es:omioCommercialEndpoint(clean(leg.commercial_destination_es,120)),commercial_origin_en:omioCommercialEndpoint(clean(leg.commercial_origin_en,120)),commercial_destination_en:omioCommercialEndpoint(clean(leg.commercial_destination_en,120)),parent_origin:payload.parent?.origin||'',parent_destination:payload.parent?.destination||'',parent_summary:payload.summary||''}));
 }
 
+async function getOwnedTripDestinations(tripId, userId) {
+  if (!tripId || !userId) return [];
+  const rows = await supabaseFetch(
+    `/trips?select=destinations&id=eq.${encodeURIComponent(tripId)}&user_id=eq.${encodeURIComponent(userId)}&limit=1`
+  );
+  const trip = Array.isArray(rows) ? rows[0] || null : null;
+  return (Array.isArray(trip?.destinations) ? trip.destinations : []).filter(item => clean(item?.city,160));
+}
+
 async function getOwnedTripDestination(tripId, userId, city) {
   if (!tripId || !userId || !city) return null;
   const rows = await supabaseFetch(
@@ -522,14 +531,26 @@ async function getOwnedTripDestination(tripId, userId, city) {
 async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=[]) {
   const transportNeeds=(Array.isArray(needs)?needs:[]).filter(item=>item && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement'));
   if(!transportNeeds.length) return [];
-  const [partner,template,mainDestination]=await Promise.all([getPartner('omio'),getOmioTemplate(),getOwnedTripDestination(tripId,userId,city)]);
-  if(!partner || !template || !mainDestination) return [];
-  const countryCode=destinationCountryCode(mainDestination);
-  if(!OMIO_EUROPE_COUNTRY_CODES.has(countryCode)) return [];
+  const [partner,template,ownedDestinations,mainDestination]=await Promise.all([getPartner('omio'),getOmioTemplate(),getOwnedTripDestinations(tripId,userId),getOwnedTripDestination(tripId,userId,city)]);
+  if(!partner || !template) return [];
+  // Day-trip workspaces (e.g. Segovia/Versailles) are physical destinations but
+  // are not top-level trip destinations. Do not suppress their already-resolved
+  // Omio segments merely because `city` is absent from trips.destinations.
+  // Eligibility is anchored to either the current top-level destination or a
+  // top-level route endpoint that matches the resolved parent journey.
+  const ownedEndpoints=new Map();
+  (ownedDestinations||[]).forEach(d=>{
+    if(d?.city)ownedEndpoints.set(normalizeKey(d.city),destinationCountryCode(d));
+  });
+  if(mainDestination) ownedEndpoints.set(normalizeKey(mainDestination.city),destinationCountryCode(mainDestination));
   const localeResolution=resolvePartnerLocale('omio',uiLanguage);
   const out=[]; const seen=new Set();
   for(const need of transportNeeds){
+    const payload=parseResolvedRoutePayload(need?.source_route);
     const resolvedSegments=commercialOmioSegments(need);
+    const anchorCandidates=[city,payload?.parent?.origin,payload?.parent?.destination].map(normalizeKey).filter(Boolean);
+    const anchorCountry=anchorCandidates.map(k=>ownedEndpoints.get(k)).find(Boolean)||'';
+    if(!OMIO_EUROPE_COUNTRY_CODES.has(anchorCountry)) continue;
     const fallbackRoute=null; // fail closed: never manufacture an Omio URL from an unresolved A→B label
     const routes=resolvedSegments.length?resolvedSegments.map(seg=>{
       const es=localeResolution.locale==='es';
