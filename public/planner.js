@@ -10634,19 +10634,30 @@ async function exportItineraryToPDF(options={}){
   const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
   for(let index=0;index<calendarDays.length;index++){
     if(index)doc.addPage('a4','portrait');const day=calendarDays[index],rows=day.rows.slice().sort((a,b)=>String(a.start||'').localeCompare(String(b.start||''))),routeLabel=day.destinations.join('  →  ');
-    doc.setFillColor(8,35,65);doc.rect(0,0,W,104,'F');doc.setFillColor(8,123,250);doc.rect(0,100,W,4,'F');
-    if(logo){try{doc.addImage(logo,'JPEG',34,22,112,34,undefined,'FAST');}catch(_){doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text('ITBMO',34,45);}}
-    else{doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text('ITBMO',34,45);}
-    doc.setTextColor(187,214,239);doc.setFont('helvetica','normal');doc.setFontSize(8);doc.text(es?'TU VIAJE. TU ESTILO. UNA RUTA DISEÑADA PARA TI.':'YOUR TRIP. YOUR STYLE. A ROUTE DESIGNED FOR YOU.',34,76);
-    doc.setTextColor(255,255,255);doc.setFont('helvetica','bold');doc.setFontSize(12);doc.text(normalizeCellText(`${es?'Día':'Day'} ${day.globalDay}`),W-34,36,{align:'right'});doc.setFontSize(9);doc.setFont('helvetica','normal');doc.text(normalizeCellText(day.date||''),W-34,52,{align:'right'});
-    doc.setTextColor(11,35,65);doc.setFont('helvetica','bold');doc.setFontSize(20);doc.text(normalizeCellText(routeLabel||`${es?'Día':'Day'} ${day.globalDay}`),34,136,{maxWidth:W-68});
-    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(100,119,138);doc.text(es?'Itinerario optimizado · horarios, traslados y recomendaciones prácticas':'Optimized itinerary · timing, transfers and practical guidance',34,154);
-    let y=176;
+    // Premium light header: preserve the Home brand hierarchy and keep the logo legible.
+    doc.setFillColor(249,252,255);doc.rect(0,0,W,112,'F');
+    doc.setFillColor(8,123,250);doc.rect(0,108,W*.42,4,'F');doc.setFillColor(28,183,194);doc.rect(W*.42,108,W*.33,4,'F');doc.setFillColor(109,120,238);doc.rect(W*.75,108,W*.25,4,'F');
+    if(logo){try{doc.addImage(logo,'JPEG',34,18,104,32,undefined,'FAST');}catch(_){doc.setTextColor(8,35,65);doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text('ITBMO',34,42);}}
+    else{doc.setTextColor(8,35,65);doc.setFont('helvetica','bold');doc.setFontSize(18);doc.text('ITBMO',34,42);}
+    doc.setFont('helvetica','bold');doc.setFontSize(10.5);doc.setTextColor(8,35,65);doc.text(es?'Tu viaje.':'Your trip.',34,68);
+    doc.setTextColor(19,157,190);doc.text(es?'Tu estilo.':'Your style.',78,68);
+    doc.setTextColor(8,35,65);doc.text(es?'Una ruta diseñada para ti.':'A route designed for you.',124,68);
+    doc.setFont('helvetica','normal');doc.setFontSize(7.7);doc.setTextColor(91,112,132);doc.text(es?'Tu viaje, pensado por ti. Organizado por ITBMO.':'Your trip, shaped by you. Organized by ITBMO.',34,84);
+    doc.setFillColor(239,246,255);doc.roundedRect(W-116,20,82,48,12,12,'F');doc.setTextColor(8,35,65);doc.setFont('helvetica','bold');doc.setFontSize(11);doc.text(normalizeCellText(`${es?'Día':'Day'} ${day.globalDay}`),W-75,39,{align:'center'});doc.setFontSize(8);doc.setFont('helvetica','normal');doc.setTextColor(73,94,115);doc.text(normalizeCellText(day.date||''),W-75,55,{align:'center'});
+    doc.setTextColor(11,35,65);doc.setFont('helvetica','bold');doc.setFontSize(20);doc.text(normalizeCellText(routeLabel||`${es?'Día':'Day'} ${day.globalDay}`),34,142,{maxWidth:W-68});
+    doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(100,119,138);doc.text(es?'Itinerario optimizado · horarios, traslados y recomendaciones prácticas':'Optimized itinerary · timing, transfers and practical guidance',34,160);
+    let y=182;
     for(const row of rows){
       const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v3VisibleTransportLabel_(row.transport)||''),duration=normalizeCellText(row.duration||''),notes=normalizeCellText(row.notes||'');
       const activityLines=doc.splitTextToSize(activity,310),routeLines=doc.splitTextToSize(fromTo,310),notesLines=doc.splitTextToSize(notes,465),transportLines=doc.splitTextToSize([transport,duration].filter(Boolean).join(' · '),365);
       const blockH=Math.max(82,38+activityLines.length*11+routeLines.length*9+transportLines.length*9+notesLines.length*8.5);
-      if(y+blockH>H-42){doc.addPage('a4','portrait');y=42;}
+      if(y+blockH>H-42){
+        doc.addPage('a4','portrait');
+        doc.setFillColor(249,252,255);doc.rect(0,0,W,48,'F');doc.setFillColor(8,123,250);doc.rect(0,46,W,2,'F');
+        doc.setFont('helvetica','bold');doc.setFontSize(9.5);doc.setTextColor(8,35,65);doc.text(normalizeCellText(`${es?'Día':'Day'} ${day.globalDay} · ${routeLabel||''}`),34,24,{maxWidth:W-150});
+        doc.setFont('helvetica','normal');doc.setFontSize(8);doc.setTextColor(100,119,138);doc.text(es?'continuación':'continued',W-34,24,{align:'right'});
+        y=64;
+      }
       doc.setFillColor(...style.fill);doc.roundedRect(34,y,W-68,blockH,12,12,'F');doc.setFillColor(...style.accent);doc.roundedRect(34,y,5,blockH,3,3,'F');
       doc.setTextColor(8,123,250);doc.setFont('helvetica','bold');doc.setFontSize(10);doc.text(normalizeCellText(`${row.start||''} - ${row.end||''}`),50,y+20);
       doc.setTextColor(11,35,65);doc.setFontSize(11);doc.text(activityLines,50,y+37);
@@ -13170,14 +13181,22 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
   for(const st of story.stays)for(const dt of (st.dayTrips||[])){
     const r=byId.get(`daytrip:${dt.id}`);if(!r)continue;
     const legs=Array.isArray(r.legs)?r.legs:[];
-    const out=legs.find(x=>x.direction==='outbound')||legs[0]||{};
-    const ret=[...legs].reverse().find(x=>x.direction==='return')||legs.at(-1)||{};
+    const outboundLegs=legs.filter(x=>x.direction==='outbound');
+    const returnLegs=legs.filter(x=>x.direction==='return');
+    const out=outboundLegs[0]||legs[0]||{};
+    const outLast=outboundLegs.at(-1)||out;
+    const ret=returnLegs[0]||legs.find(x=>_arePoiAliases_(x?.origin,dt.place)&&_arePoiAliases_(x?.destination,st.place))||{};
+    const retLast=returnLegs.at(-1)||ret;
     if(!dt.outbound.transportMode)dt.outbound.transportMode=out.mode||r.primary_mode||'other';
     if(!dt.outbound.departureTime)dt.outbound.departureTime=out.departure_time||r.departure_time||'08:00';
-    if(!dt.outbound.arrivalTime)dt.outbound.arrivalTime=out.arrival_time||'';
+    if(!dt.outbound.arrivalTime)dt.outbound.arrivalTime=outLast.arrival_time||out.arrival_time||'';
     if(!dt.return.transportMode)dt.return.transportMode=ret.mode||dt.outbound.transportMode||'other';
-    if(!dt.return.departureTime)dt.return.departureTime=ret.departure_time||'';
-    if(!dt.return.arrivalTime)dt.return.arrivalTime=ret.arrival_time||r.arrival_time||'';
+    if(!dt.return.departureTime)dt.return.departureTime=ret.departure_time||r.return_departure_time||'';
+    if(!dt.return.arrivalTime)dt.return.arrivalTime=retLast.arrival_time||ret.arrival_time||r.return_arrival_time||'';
+    if(!dt.return.departureTime||!dt.return.arrivalTime){
+      console.error('[ITBMO ROUTE RESOLVER] day-trip return unresolved',dt.place,r);
+      throw new Error(`ROUTE_RESOLVER_DAYTRIP_RETURN_MISSING:${dt.place}`);
+    }
     dt.outbound.timeStatus=dt.return.timeStatus='estimated';dt.routeResolution={summary:r.summary||'',legs,alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
   }
   engine.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();
