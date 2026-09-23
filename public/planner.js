@@ -4695,8 +4695,11 @@ function _sanitizeDurationLines_(raw, transportField=''){
     transport = transportFromField;
   }
 
-  if(transport && activity){
-    return `${transportLabel}: ${_formatDurationBounds_(transport)}\n${activityLabel}: ${_formatDurationBounds_(activity)}`;
+  if(activity){
+    return `${activityLabel}: ${_formatDurationBounds_(activity)}`;
+  }
+  if(transportFromField && !activity){
+    return '';
   }
 
   if(s){
@@ -4707,7 +4710,7 @@ function _sanitizeDurationLines_(raw, transportField=''){
       .replace(/\s*,\s*(Activity|Actividad|Atividade|Activité|Aktivität|Attività)\s*:/i, `\n${activityLabel}:`);
   }
 
-  return `${transportLabel}: Verificar\n${activityLabel}: Verificar`;
+  return '';
 }
 
 function _isPureTransportRow_(row={}){
@@ -4718,7 +4721,7 @@ function _isPureTransportRow_(row={}){
 }
 
 function _durationTotalBounds_(duration,row={}){
-  const t=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
+  const t=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport')) || _transportBoundsFromField_(row?.transport||'');
   const a=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
   // Activity-only rows are a valid canonical shape. The deterministic repair
   // function itself emits `Actividad/Activity: ...` when no transport time is
@@ -4866,7 +4869,12 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let startMin=_hhmmToMinutes_(start), endMin=_hhmmToMinutes_(end);
   let duration=_sanitizeDurationLines_(durRaw, trans);
   const kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
-  const total=_durationTotalBounds_(duration,{kind});
+  let safeTransport = String(trans||'').trim();
+  const declaredTransport=_durationBoundsMinutes_(_extractDurationPart_(String(durRaw||''),'transport'));
+  if(declaredTransport && !_transportBoundsFromField_(safeTransport)){
+    safeTransport = [safeTransport, `~${_formatDurationBounds_(declaredTransport)}`].filter(Boolean).join(' · ');
+  }
+  const total=_durationTotalBounds_(duration,{kind,transport:safeTransport});
 
   // Infer only genuinely missing times. Do not rewrite valid model schedules.
   if(startMin!=null && endMin==null && total){
@@ -4887,19 +4895,16 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const safeActivity = String(act||'').trim();
   const safeFrom = String(from||'').trim();
   const safeTo = String(to||'').trim();
-  const safeTransport = String(trans||'').trim();
   const safeNotes = String(notes||'').trim();
   // Cosmetic/semantic cleanup: when a row starts and ends at the same attraction,
   // a synthetic "Transport: 1 min" is not a real movement. Keep the activity
   // dwell time and transport description, but do not expose a fake transport leg.
   if(safeFrom&&safeTo&&_arePoiAliases_(safeFrom,safeTo)){
-    const transportPart=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
-    const activityPart=_extractDurationPart_(duration,'activity');
-    if(transportPart&&transportPart.max<=1&&activityPart){
-      const [,activityLabel]=_durationLabels_();
-      duration=`${activityLabel}: ${activityPart}`;
-    }
+    const transportPart=_transportBoundsFromField_(safeTransport) || _durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
+    if(transportPart&&transportPart.max<=1) safeTransport='';
   }
+  const activityBounds=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
+  if(kind==='transport' && activityBounds && activityBounds.max<=1) duration='';
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
@@ -7397,14 +7402,17 @@ function _v3FitDurationToInterval_(row={}){
   if(span<=0) return row;
   const [transportLabel,activityLabel]=_durationLabels_();
   if(_isPureTransportRow_(row)){
-    return {...row,duration:`${transportLabel}: ${_minutesToHuman_(span)}`};
+    const existing=_transportBoundsFromField_(row.transport||'');
+    const transport=existing?String(row.transport||'').trim():[String(row.transport||'').trim(),`~${_minutesToHuman_(span)}`].filter(Boolean).join(' · ');
+    return {...row,transport,duration:''};
   }
-  const transport=_durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
+  const transport=_transportBoundsFromField_(row.transport||'') || _durationBoundsMinutes_(_extractDurationPart_(row.duration,'transport'));
   const transportMinutes=Math.max(0,Math.min(span-1,Number(transport?.max||0)));
   const activityMinutes=Math.max(1,span-transportMinutes);
-  return {...row,duration:transportMinutes>0
-    ? `${transportLabel}: ${_minutesToHuman_(transportMinutes)}\n${activityLabel}: ${_minutesToHuman_(activityMinutes)}`
-    : `${activityLabel}: ${_minutesToHuman_(span)}`};
+  const transportField=transportMinutes>0 && !_transportBoundsFromField_(row.transport||'')
+    ? [String(row.transport||'').trim(),`~${_minutesToHuman_(transportMinutes)}`].filter(Boolean).join(' · ')
+    : String(row.transport||'').trim();
+  return {...row,transport:transportField,duration:`${activityLabel}: ${_minutesToHuman_(activityMinutes)}`};
 }
 
 function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,baseDate,routeContextOverride=undefined,expectedDaysOverride=undefined){
