@@ -2918,6 +2918,14 @@ MANDATORY FINAL-ITINERARY RECOVERY:
       const stage = detectPlannerStage(clientMessages);
       const lang = detectUserLang(clientMessages);
 
+      // V3 is fail-closed. Never convert an API/model failure into the historical
+      // synthetic fallback itinerary; the browser owns isolated Stay recovery.
+      if (String(body?.mode || "").toLowerCase() === "planner_v3") {
+        return res.status(200).json({
+          text: JSON.stringify({ok:false,error:{code:"V3_GENERATION_FAILED",retryable:true}})
+        });
+      }
+
       // Do not fabricate city_day for a failed master-plan stage.
       if (stage === "master_plan") {
         return res.status(200).json({
