@@ -9196,3 +9196,11 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .gj-story-node-actions button{border:1px solid rgba(13,73,117,.16);background:#fff;border-radius:9px;padding:6px 8px;font-weight:800;cursor:pointer}
 .gj-story-node-actions .gj-danger-inline{color:#a52a2a}
 @media(max-width:760px){.gj-story-node--managed{grid-template-columns:1fr}.gj-story-node-actions{justify-content:flex-start}}
+
+
+/* V2.10.32 · Compact route-card controls: keep actions available without competing with route content. */
+.gj-story-node--managed{grid-template-columns:minmax(0,1fr)!important;gap:4px!important;align-items:start!important}
+.gj-story-node--managed .gj-story-node-actions{order:-1;justify-content:flex-end;align-items:center;gap:4px;margin:-2px -2px 2px 0}
+.gj-story-node--managed .gj-story-node-actions button{min-width:28px;min-height:28px;padding:4px 7px;border-radius:8px;font-size:.68rem;line-height:1.05;box-shadow:none}
+.gj-story-node--managed .gj-story-main{width:100%}
+@media(max-width:760px){.gj-story-node--managed .gj-story-node-actions{justify-content:flex-end}}
