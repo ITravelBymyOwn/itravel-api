@@ -9184,3 +9184,7 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 #planner-post-generation .new-planning-cta.is-ready{border:1px solid rgba(8,123,250,.20)!important;background:linear-gradient(120deg,#f4f9ff,#f2fbfc)!important;box-shadow:0 12px 30px rgba(18,88,145,.08)!important}
 #planner-post-generation .new-planning-button{color:#fff!important;border:0!important;background:linear-gradient(115deg,#087BFA,#13A9B5)!important;box-shadow:0 10px 24px rgba(8,123,250,.20)!important;font-weight:900!important}
 #planner-post-generation .new-planning-button:hover{color:#fff!important;transform:translateY(-1px);box-shadow:0 15px 30px rgba(8,123,250,.28)!important}
+
+/* ITBMO V2.10.27 · route editor destructive actions */
+.gj-story-head-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.guided-journey__story-head .gj-route-reset{border-color:#f2c8bc;color:#a6472d;background:#fff7f3}.guided-journey__story-head .gj-route-reset:hover{border-color:#ef9e84;background:#fff0e9}.gj-review-row .gj-review-delete,.gj-existing .gj-danger-inline{background:#fff5f1;border:1px solid #f0c1b3;color:#a5452d;box-shadow:none}.gj-review-row .gj-review-delete:hover,.gj-existing .gj-danger-inline:hover{background:#ffe9e1;border-color:#ec9f87}.gj-existing>div>span{flex:1;min-width:0}
+@media(max-width:800px){.gj-story-head-actions{width:100%;justify-content:flex-start}.guided-journey__story-head{flex-wrap:wrap}.gj-existing>div{flex-wrap:wrap}.gj-review-row{align-items:flex-start}.gj-review-row>div:last-child{flex-wrap:wrap;justify-content:flex-end}}
