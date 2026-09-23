@@ -4904,8 +4904,22 @@ function normalizeRow(r = {}, fallbackDay = 1){
     if(transportPart&&transportPart.max<=1) safeTransport='';
   }
   const activityBounds=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
-  const movementLike = kind==='transport' || (/^(traslado|transfer|regreso|desplazamiento|paseo hacia|walk to|return|move to)\b/i.test(safeActivity) && safeFrom && safeTo && !_arePoiAliases_(safeFrom,safeTo));
-  if(movementLike && activityBounds && activityBounds.max<=1) duration='';
+  const semanticMovement = /^(traslado|transfer|regreso|retorno|desplazamiento|paseo hacia|caminar hacia|walk to|return|move to)\b/i.test(safeActivity) && safeFrom && safeTo && !_arePoiAliases_(safeFrom,safeTo);
+  let normalizedKind=kind;
+  if((kind==='transport' || semanticMovement) && (!activityBounds || activityBounds.max<=1)){
+    // A 1-minute "activity" on a real movement is synthetic.  Do not merely
+    // erase it while leaving kind=activity: that creates a blank duration which
+    // the temporal auditor correctly cannot interpret as an activity dwell.
+    // Canonicalize the row as transport and make sure its movement time is
+    // represented in the transport field, using the authoritative row interval
+    // only when the model omitted an explicit estimate.
+    if(!_transportBoundsFromField_(safeTransport) && startMin!=null && endMin!=null){
+      let movementSpan=endMin-startMin; if(movementSpan<=0) movementSpan+=24*60;
+      if(movementSpan>0) safeTransport=[safeTransport,`~${_minutesToHuman_(movementSpan)}`].filter(Boolean).join(' · ');
+    }
+    duration='';
+    normalizedKind='transport';
+  }
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
@@ -4930,7 +4944,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
     transport:safeTransport,
     duration,
     notes:safeNotes,
-    kind,
+    kind:normalizedKind,
     physical_location:String(r.physical_location ?? r.physicalLocation ?? commerceContext?.physical_destination ?? '').trim() || null,
     stay_unit_id:String(r.stay_unit_id ?? r.stayUnitId ?? '').trim() || null,
     planning_window_id:String(r.planning_window_id ?? r.planningWindowId ?? '').trim() || null,
