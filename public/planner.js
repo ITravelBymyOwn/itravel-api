@@ -4904,7 +4904,8 @@ function normalizeRow(r = {}, fallbackDay = 1){
     if(transportPart&&transportPart.max<=1) safeTransport='';
   }
   const activityBounds=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
-  if(kind==='transport' && activityBounds && activityBounds.max<=1) duration='';
+  const movementLike = kind==='transport' || (/^(traslado|transfer|regreso|desplazamiento|paseo hacia|walk to|return|move to)\b/i.test(safeActivity) && safeFrom && safeTo && !_arePoiAliases_(safeFrom,safeTo));
+  if(movementLike && activityBounds && activityBounds.max<=1) duration='';
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
@@ -7167,8 +7168,8 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         day:dayNum,start:t.departure,end:t.arrival,
         activity:es?`Traslado de ${t.origin} a ${t.destination}`:`Transfer from ${t.origin} to ${t.destination}`,
         from:t.origin,to:t.destination,
-        transport:_v3TransportLabel_(t.mode),
-        duration:`${_durationLabels_()[0]}: ${_minutesToHuman_(duration)}`,
+        transport:[_v3TransportLabel_(t.mode),`~${_minutesToHuman_(duration)}`].filter(Boolean).join(' · '),
+        duration:'',
         notes:t.route_resolution?.summary
           ? `${t.route_resolution.summary}${es?' · Horario estimado para planificación; confirma las opciones reales antes de reservar.':' · Planning estimate; confirm real options before booking.'}`
           : (t.terminal_arrival
@@ -7184,7 +7185,23 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
       }
     });
   });
-  return _dedupeRows_(out).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  out=_dedupeRows_(out).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+  // A canonical movement resets physical continuity. The first activity after
+  // any protected transfer starts from that transfer's destination, never from
+  // a POI that belonged to the pre-transfer location (e.g. Versailles after the
+  // traveler has already returned to Paris).
+  (contract.route_days||[]).forEach(day=>{
+    const dayNum=Number(day.day);
+    const transfers=(day.fixed_transfers||[]).filter(t=>t.departure&&t.arrival)
+      .slice().sort((a,b)=>String(a.arrival).localeCompare(String(b.arrival)));
+    transfers.forEach((t,index)=>{
+      const arr=_hhmmToMinutes_(t.arrival); if(arr==null)return;
+      const nextTransferDep=index+1<transfers.length?_hhmmToMinutes_(transfers[index+1].departure):null;
+      const next=out.find(r=>Number(r.day)===dayNum && String(r.kind||'activity').toLowerCase()!=='transport' && (_hhmmToMinutes_(r.start)??-1)>=arr && (nextTransferDep==null || (_hhmmToMinutes_(r.start)??99999)<nextTransferDep));
+      if(next) next.from=t.destination;
+    });
+  });
+  return out;
 }
 
 function _v3SyntheticMaster_(totalDays){
