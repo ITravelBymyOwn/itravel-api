@@ -3074,7 +3074,7 @@ function openGuidedPersonalizationJourney(){
     if(step==='place'){
       const place=places[index]; if(!place){step='language';render();return;} const pref=engine.state.preferences.places[place.key];
       active.innerHTML=shell(es?'UNA PARADA A LA VEZ':'ONE STOP AT A TIME',es?`Personalicemos ${_tripStoryEsc_(place.name)}`:`Let’s personalize ${_tripStoryEsc_(place.name)}`,es?'Indica sólo lo que sepas. “Recomiéndame” es una respuesta válida: ITBMO resolverá el resto.':'Tell us only what you know. “Recommend” is a valid answer: ITBMO will resolve the rest.',`<div class="gj-form"><label>${es?'Hospedaje':'Lodging'}<select data-gpp="lodgingChoice"><option value="recommend">${es?'Aún no lo tengo · usa una zona base conveniente':'Not set yet · use a convenient base area'}</option><option value="hotel">${es?'Tengo hotel/alojamiento':'I have lodging'}</option><option value="area">${es?'Sé la zona aproximada':'I know the approximate area'}</option><option value="address">${es?'Tengo dirección / ubicación':'I have an address/location'}</option></select></label><label>${es?'Nombre, zona o dirección (opcional)':'Name, area or address (optional)'}<input data-gpp="lodgingText" value="${_tripStoryEsc_(pref.lodgingText||'')}"></label><label>${es?'Cómo llegarás':'How you will arrive'}<select data-gpp="arrivalTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="train">${es?'Tren':'Train'}</option><option value="bus">Bus</option><option value="plane">${es?'Avión':'Plane'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="transfer">Transfer</option><option value="ferry">Ferry</option><option value="other">${es?'Otro':'Other'}</option></select></label><label>${es?`Cómo te moverás en ${_tripStoryEsc_(place.name)}`:`How you will get around ${_tripStoryEsc_(place.name)}`}<select data-gpp="localTransport"><option value="recommend">${es?'Recomiéndame':'Recommend'}</option><option value="walk">${es?'A pie':'Walking'}</option><option value="public">${es?'Transporte público':'Public transport'}</option><option value="car">${es?'Automóvil':'Car'}</option><option value="taxi">Taxi / Uber</option><option value="mixed">${es?'Mixto':'Mixed'}</option></select></label><label>${es?'Ritmo':'Pace'}<select data-gpp="pace"><option value="relaxed">${es?'Relajado':'Relaxed'}</option><option value="balanced">${es?'Equilibrado':'Balanced'}</option><option value="intense">${es?'Intenso':'Intense'}</option></select></label></div><div class="gj-pref-optional"><b>${es?'Afinar esta parada · opcional':'Fine-tune this stop · optional'}</b><label>${es?'Imprescindibles':'Must-do'}<textarea data-gpp="mustDo">${_tripStoryEsc_(pref.mustDo||'')}</textarea></label><label>${es?'Reservas confirmadas':'Confirmed reservations'}<textarea data-gpp="reservations">${_tripStoryEsc_(pref.reservations||'')}</textarea></label><label>${es?'Quiero evitar':'I want to avoid'}<textarea data-gpp="avoid">${_tripStoryEsc_(pref.avoid||'')}</textarea></label><label>${es?'Algo más':'Anything else'}<textarea data-gpp="notes">${_tripStoryEsc_(pref.notes||'')}</textarea></label></div>`,next(index===places.length-1?(es?'Guardar y continuar':'Save and continue'):(es?'Guardar y siguiente destino':'Save and next stop')));
-      active.querySelectorAll('[data-gpp]').forEach(el=>{if(el.tagName==='SELECT')el.value=pref[el.dataset.gpp]||'recommend';});active.querySelector('[data-gp-next]').onclick=()=>{active.querySelectorAll('[data-gpp]').forEach(el=>pref[el.dataset.gpp]=el.value);pref.saved=true;engine.state.preferences.places[place.key]=pref;persist();index+=1;step=index>=places.length?'language':'place';render();};return;
+      active.querySelectorAll('[data-gpp]').forEach(el=>{if(el.tagName==='SELECT')el.value=pref[el.dataset.gpp]||'recommend';});active.querySelector('[data-gp-next]').onclick=()=>{active.querySelectorAll('[data-gpp]').forEach(el=>pref[el.dataset.gpp]=el.value);pref.saved=true;engine.state.preferences.places[place.key]=pref;persist();index+=1;step=index>=places.length?'language':'place';render();requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));};return;
     }
     if(step==='language'){
       const langs=['Español','English','Français','Italiano','Deutsch','Português','Nederlands','Català','日本語','한국어','中文','Русский','العربية'];
@@ -5328,6 +5328,12 @@ function showWOW(on, msg){
       }
     }
   });
+
+  if(!on){
+    // The launcher can have been disabled before generation. Its authoritative
+    // state is generated itinerary data, not the pre-generation disabled flag.
+    requestAnimationFrame(()=>syncImmersiveItineraryLauncher());
+  }
 
   if(!on && infoModal?.dataset.generationSuspended==='1'){
     const wasActive=infoModal.dataset.generationWasActive==='1';
@@ -8822,6 +8828,10 @@ function _applyGeneratedUIState({showModal=false}={}){
     $preferencesGenerateV2.classList.add('is-generated');
   }
   if(showModal){
+    // Generation is complete: retire the Guided Personalization shell before
+    // revealing completion so Continue can never expose the old create screen.
+    document.querySelector('#guided-personalization-overlay')?.remove();
+    document.body.classList.remove('guided-preferences-open');
     showFinalDownloadModal();
     // Keep the generation overlay in place until the completion modal exists;
     // then reveal the modal atomically with no intermediate Planner state.
@@ -10570,7 +10580,7 @@ async function exportItineraryToXLSX(options={}){
   summary.getCell('B18').font={bold:true,color:{argb:navy}};summary.getCell('B18').alignment={horizontal:'center'};
   summary.pageSetup={orientation:'landscape',fitToPage:true,fitToWidth:1,fitToHeight:1,paperSize:9,margins:{left:.25,right:.25,top:.35,bottom:.35,header:.1,footer:.1}};
 
-  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',ySplit:7,showGridLines:false}]});
+  const sheet=workbook.addWorksheet(es?'Itinerario':'Itinerary',{views:[{state:'frozen',xSplit:4,ySplit:7,showGridLines:false}]});
   sheet.mergeCells('A1:O2');
   sheet.getCell('A1').value=es?'MI ITINERARIO ITBMO':'MY ITBMO ITINERARY';
   sheet.getCell('A1').font={name:'Aptos Display',size:22,bold:true,color:{argb:white}};
@@ -10581,23 +10591,23 @@ async function exportItineraryToXLSX(options={}){
   sheet.getCell('A4').font={size:10,color:{argb:muted}};sheet.getCell('A4').alignment={horizontal:'center'};
   sheet.mergeCells('A5:O5');sheet.getCell('A5').value=es?'⚠ Los horarios estimados deben confirmarse cuando tengas la reserva. Los cambios en este archivo no reoptimizan automáticamente el itinerario.':'⚠ Estimated times should be confirmed once booked. Changes in this file do not automatically re-optimise the itinerary.';
   sheet.getCell('A5').font={size:10,bold:true,color:{argb:'8A5A00'}};sheet.getCell('A5').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF6DA'}};sheet.getCell('A5').alignment={horizontal:'center'};
-  const headers=es?['Etapa','Día','Fecha','Destino físico','Tipo','Hora inicio','Hora final','Duración bloque','Actividad','Desde','Hacia','Transporte','Detalle de duración','Estado horario','Notas']:['Stage','Day','Date','Physical destination','Type','Start time','End time','Block duration','Activity','From','To','Transport','Duration detail','Time status','Notes'];
+  const headers=es?['Etapa','Día','Fecha','Destino','Hora inicio','Hora final','Actividad','Transporte','Estado horario','Notas','Tipo','Duración bloque','Desde','Hacia','Detalle de duración']:['Stage','Day','Date','Destination','Start time','End time','Activity','Transport','Time status','Notes','Type','Block duration','From','To','Duration detail'];
   const headerRow=sheet.getRow(7);headerRow.values=headers;headerRow.height=34;
   headerRow.eachCell(cell=>{cell.font={bold:true,color:{argb:white},size:10};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:navy}};cell.alignment={vertical:'middle',horizontal:'center',wrapText:true};cell.border={bottom:{style:'medium',color:{argb:teal}}};});
-  const widths=[9,8,13,20,14,12,12,16,42,24,24,24,22,17,60];widths.forEach((width,i)=>sheet.getColumn(i+1).width=width);
+  const widths=[9,8,13,20,12,12,42,24,17,58,14,16,24,24,22];widths.forEach((width,i)=>sheet.getColumn(i+1).width=width);
 
   let excelRow=8,lastDayKey='';
   blocks.forEach((block,index)=>block.days.forEach(day=>day.rows.forEach(r=>{
     const type=_exportBlockType_(r,outLang),status=_exportScheduleStatus_(r,day.date,outLang),dayKey=`${day.globalDay}|${day.date}`;
     const dateValue=day.date?parseDMY(day.date):null;
-    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,type,r.start||'',r.end||'',null,normalizeCellText(r.activity),normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),normalizeCellText(r.duration),status,normalizeCellText(r.notes)];
+    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(r.duration)];
     const row=sheet.addRow(values);row.height=48;
-    row.getCell(8).value={formula:`IF(OR(F${excelRow}="",G${excelRow}=""),"",MOD(TIMEVALUE(G${excelRow})-TIMEVALUE(F${excelRow}),1))`};
-    row.getCell(8).numFmt='[h]" h "mm" min"';
+    row.getCell(12).value={formula:`IF(OR(E${excelRow}="",F${excelRow}=""),"",MOD(TIMEVALUE(F${excelRow})-TIMEVALUE(E${excelRow}),1))`};
+    row.getCell(12).numFmt='[h]" h "mm" min"';
     if(dateValue)row.getCell(3).numFmt='dd/mm/yyyy';
-    row.eachCell((cell,col)=>{cell.font={size:10,color:{argb:navy}};cell.alignment={vertical:'top',wrapText:col>=9};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:_excelColorForType_(type,outLang)}};cell.border={bottom:{style:'hair',color:{argb:line}}};});
-    [6,7,14].forEach(col=>{row.getCell(col).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF6DA'}};row.getCell(col).font={bold:true,color:{argb:navy}};row.getCell(col).alignment={vertical:'middle',horizontal:'center',wrapText:true};});
-    row.getCell(14).dataValidation={type:'list',allowBlank:false,formulae:[es?'"Confirmado,Estimado,Planificado"':'"Confirmed,Estimated,Planned"'],showErrorMessage:true,errorTitle:es?'Selecciona un estado':'Select a status',error:es?'Usa Confirmado, Estimado o Planificado.':'Use Confirmed, Estimated or Planned.'};
+    row.eachCell((cell,col)=>{cell.font={size:10,color:{argb:navy}};cell.alignment={vertical:'top',wrapText:col>=7};cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:_excelColorForType_(type,outLang)}};cell.border={bottom:{style:'hair',color:{argb:line}}};});
+    [5,6,9].forEach(col=>{row.getCell(col).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF6DA'}};row.getCell(col).font={bold:true,color:{argb:navy}};row.getCell(col).alignment={vertical:'middle',horizontal:'center',wrapText:true};});
+    row.getCell(9).dataValidation={type:'list',allowBlank:false,formulae:[es?'"Confirmado,Estimado,Planificado"':'"Confirmed,Estimated,Planned"'],showErrorMessage:true,errorTitle:es?'Selecciona un estado':'Select a status',error:es?'Usa Confirmado, Estimado o Planificado.':'Use Confirmed, Estimated or Planned.'};
     if(dayKey!==lastDayKey){for(let col=1;col<=15;col++)row.getCell(col).border={top:{style:'medium',color:{argb:teal}},bottom:{style:'hair',color:{argb:line}}};lastDayKey=dayKey;}
     excelRow++;
   })));
@@ -10609,7 +10619,7 @@ async function exportItineraryToXLSX(options={}){
   const buffer=await workbook.xlsx.writeBuffer();
   const blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
   const d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
-  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v1',destinations:blocks.length,days:uniqueDates.length});
+  trackITBMOEvent('export_csv',{file_type:'xlsx',layout:'premium_editable_workbook_v2',destinations:blocks.length,days:uniqueDates.length});
   const filename=`ITBMO-Itinerary-${yyyy}-${mm}-${dd}.xlsx`;
   if(options.download!==false) await deliverGeneratedFile(blob,filename);
   return {blob,filename,kind:'itinerary_xlsx'};
@@ -11050,6 +11060,9 @@ function showPostDownloadWorkspaceGuide(){
   </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('button')?.addEventListener('click',()=>{
+    showWOW(false);
+    document.querySelector('#guided-personalization-overlay')?.remove();
+    document.body.classList.remove('guided-preferences-open');
     overlay.remove();
     requestAnimationFrame(()=>{const doc=document.documentElement;const bottom=Math.max(document.body?.scrollHeight||0,doc?.scrollHeight||0);window.scrollTo({top:bottom,behavior:'smooth'});});
   });
@@ -13108,7 +13121,7 @@ function openTripStoryBuilder(){
       active.querySelectorAll('[data-tr-mode]').forEach(b=>b.onclick=()=>{travelerDraft.mode=b.dataset.trMode;if(travelerDraft.mode==='group'&&!(travelerDraft.companions||[]).length)travelerDraft.companions=[{gender:'',age_range:''}];render();});active.querySelector('[data-comp-add]')?.addEventListener('click',()=>{if(travelerDraft.companions.length<8)travelerDraft.companions.push({gender:'',age_range:''});render();});active.querySelector('[data-comp-remove]')?.addEventListener('click',()=>{if(travelerDraft.companions.length>1)travelerDraft.companions.pop();render();});active.querySelectorAll('[data-comp-gender]').forEach(x=>x.onchange=()=>travelerDraft.companions[Number(x.dataset.compGender)].gender=x.value);active.querySelectorAll('[data-comp-age]').forEach(x=>x.onchange=()=>travelerDraft.companions[Number(x.dataset.compAge)].age_range=x.value);active.querySelector('[data-gj-next]').onclick=()=>{if(!travelerDraft.mode)return;if(travelerDraft.mode==='group'&&travelerDraft.companions.some(x=>!x.gender||!x.age_range))return;syncTravelers();phase='start';render();};return;
     }
     if(phase==='start'){
-      active.innerHTML=shell(es?'INICIO DEL VIAJE · OPCIONAL':'TRIP START · OPTIONAL',es?'¿Quieres contarnos cómo comienza tu viaje?':'Would you like to tell us how your trip begins?',es?'Si ya conoces tu salida hacia el primer destino, puedes agregarla. Si no, omítela.':'If you already know how you start toward your first destination, add it. Otherwise skip it.',`<div class="gj-choice-grid"><button type="button" data-start-add class="gj-choice"><b>${es?'Agregar información':'Add information'}</b></button><button type="button" data-start-skip class="gj-choice"><b>${es?'Omitir':'Skip'}</b></button></div>${story.start.enabled?`<div class="gj-form"><label>${es?'Origen':'Origin'}<input data-start="origin" value="${_tripStoryEsc_(story.start.origin?.label||'')}"></label><label>${es?'Fecha de salida':'Departure date'}<input type="date" data-start="date" value="${story.start.date||''}"></label><label>${es?'Hora (opcional)':'Time (optional)'}<select data-start="departureTime">${_tripStoryTimeOptions_(story.start.departureTime)}</select></label><label>${es?'Transporte (opcional)':'Transport (optional)'}<select data-start="transportMode">${_tripStoryTransportOptions_(story.start.transportMode||'')}</select></label></div>`:''}`,story.start.enabled?nextButton():``);
+      active.innerHTML=shell(es?'INICIO DEL VIAJE · OPCIONAL':'TRIP START · OPTIONAL',es?'¿Quieres agregar cómo llegarás a tu primer destino?':'Would you like to add how you will reach your first destination?',es?'Este paso es el desplazamiento desde el lugar donde comienza físicamente tu viaje hasta tu primer destino ITBMO. Puede ser tu ciudad de residencia u otro punto de partida. Ejemplo: San José, Costa Rica → Madrid. Si tu itinerario comienza directamente en el primer destino, omítelo.':'If you already know how you start toward your first destination, add it. Otherwise skip it.',`<div class="gj-choice-grid"><button type="button" data-start-add class="gj-choice"><b>${es?'Agregar información':'Add information'}</b></button><button type="button" data-start-skip class="gj-choice"><b>${es?'Omitir':'Skip'}</b></button></div>${story.start.enabled?`<div class="gj-form"><label>${es?'Origen':'Origin'}<input data-start="origin" value="${_tripStoryEsc_(story.start.origin?.label||'')}"></label><label>${es?'Fecha de salida':'Departure date'}<input type="date" data-start="date" value="${story.start.date||''}"></label><label>${es?'Hora (opcional)':'Time (optional)'}<select data-start="departureTime">${_tripStoryTimeOptions_(story.start.departureTime)}</select></label><label>${es?'Transporte (opcional)':'Transport (optional)'}<select data-start="transportMode">${_tripStoryTransportOptions_(story.start.transportMode||'')}</select></label></div>`:''}`,story.start.enabled?nextButton():``);
       active.querySelector('[data-start-add]').onclick=()=>{story.start.enabled=true;render();};active.querySelector('[data-start-skip]').onclick=()=>{story.start.enabled=false;phase='stay';activeStay=0;render();};active.querySelectorAll('[data-start]').forEach(el=>el.onchange=()=>{const k=el.dataset.start;if(k==='origin')story.start.origin={label:el.value,type:'city'};else story.start[k]=el.value;persist();});active.querySelector('[data-gj-next]')?.addEventListener('click',()=>{phase='stay';render();});return;
     }
     if(phase==='stay'){
@@ -13133,7 +13146,7 @@ function openTripStoryBuilder(){
     }
     if(phase==='return'){
       const last=story.stays.at(-1);
-      active.innerHTML=shell(es?'REGRESO · OPCIONAL':'RETURN · OPTIONAL',es?'¿Quieres agregar cómo regresas?':'Would you like to add how you return?',es?'Puedes agregar tu regreso al punto de origen. Si todavía no lo sabes, omítelo.':'You can add your return to your point of origin. If you do not know yet, skip it.',`<div class="gj-choice-grid"><button type="button" data-return-add class="gj-choice"><b>${es?'Agregar regreso':'Add return'}</b></button><button type="button" data-return-skip class="gj-choice"><b>${es?'Omitir':'Skip'}</b></button></div>${story.returnTrip.enabled?`<div class="gj-form"><label>${es?'Desde':'From'}<input data-ret="origin" value="${_tripStoryEsc_(story.returnTrip.origin?.label||last?.place||'')}"></label><label>${es?'Regreso a':'Return to'}<input data-ret="arrival" value="${_tripStoryEsc_(story.returnTrip.arrival?.label||story.start?.origin?.label||'')}"></label><label>${es?'Fecha':'Date'}<input type="date" data-ret="departureDate" value="${story.returnTrip.departureDate||''}"></label><label>${es?'Puedo salir desde':'I can leave from'}<select data-ret="departureTime">${_tripStoryTimeOptions_(story.returnTrip.departureTime)}</select></label><label>${es?'Transporte (opcional)':'Transport (optional)'}<select data-ret="transportMode">${_tripStoryTransportOptions_(story.returnTrip.transportMode||'')}</select></label></div>`:''}`,story.returnTrip.enabled?nextButton(es?'Continuar a revisión':'Continue to review'):``);
+      active.innerHTML=shell(es?'REGRESO · OPCIONAL':'RETURN · OPTIONAL',es?'¿Quieres agregar cómo finalizarás tu viaje?':'Would you like to add how your trip ends?',es?`Este paso es el desplazamiento desde ${_tripStoryEsc_(last?.place||'tu último destino')} hasta el lugar donde terminarás tu viaje. Puede ser tu ciudad de origen u otro destino. Ejemplo: Roma → San José, Costa Rica. Si tu recorrido termina aquí o todavía no conoces el regreso, omítelo.`:'You can add your return to your point of origin. If you do not know yet, skip it.',`<div class="gj-choice-grid"><button type="button" data-return-add class="gj-choice"><b>${es?'Agregar regreso':'Add return'}</b></button><button type="button" data-return-skip class="gj-choice"><b>${es?'Omitir':'Skip'}</b></button></div>${story.returnTrip.enabled?`<div class="gj-form"><label>${es?'Desde':'From'}<input data-ret="origin" value="${_tripStoryEsc_(story.returnTrip.origin?.label||last?.place||'')}"></label><label>${es?'Regreso a':'Return to'}<input data-ret="arrival" value="${_tripStoryEsc_(story.returnTrip.arrival?.label||story.start?.origin?.label||'')}"></label><label>${es?'Fecha':'Date'}<input type="date" data-ret="departureDate" value="${story.returnTrip.departureDate||''}"></label><label>${es?'Puedo salir desde':'I can leave from'}<select data-ret="departureTime">${_tripStoryTimeOptions_(story.returnTrip.departureTime)}</select></label><label>${es?'Transporte (opcional)':'Transport (optional)'}<select data-ret="transportMode">${_tripStoryTransportOptions_(story.returnTrip.transportMode||'')}</select></label></div>`:''}`,story.returnTrip.enabled?nextButton(es?'Continuar a revisión':'Continue to review'):``);
       active.querySelector('[data-return-add]').onclick=()=>{story.returnTrip.enabled=true;story.returnTrip.origin={label:last?.place||'',type:'city'};render();};active.querySelector('[data-return-skip]').onclick=()=>{story.returnTrip.enabled=false;phase='review';render();};active.querySelectorAll('[data-ret]').forEach(el=>el.onchange=()=>{const k=el.dataset.ret;if(k==='origin'||k==='arrival')story.returnTrip[k]={label:el.value,type:'city'};else story.returnTrip[k]=el.value;persist();});active.querySelector('[data-gj-next]')?.addEventListener('click',()=>{phase='review';render();});return;
     }
     if(phase==='review'){
