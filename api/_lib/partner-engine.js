@@ -485,67 +485,6 @@ function omioTrackedUrl(trackingBase, origin, destination, locale) {
   return url.toString();
 }
 
-async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, tripLanguage) {
-  const partner = await getPartner('omio');
-  const template = await getOmioTemplate();
-  if (!partner || !template) return [];
-
-  const localeResolution = resolvePartnerLocale('omio', uiLanguage);
-  const routes = await getOwnedTripRoutes(tripId, userId);
-  const eligible = routes.filter(route => route.origin === clean(city, 160) && omioRouteEligible(route));
-  const result = [];
-
-  for (const route of eligible) {
-    const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, localeResolution.applied ? localeResolution.locale : 'en');
-    if (!targetUrl) continue;
-
-    const routeLabel = `${route.origin} → ${route.destination}`;
-    const need = {
-      id: route.id,
-      need_type: 'intercity_transport',
-      entity_name: routeLabel,
-      source_activity: routeLabel,
-      city: route.origin,
-      travel_date: route.travel_date,
-      derived_by: 'trip_sequence'
-    };
-
-    result.push({
-      ...template,
-      placement: 'city_transport',
-      title_es: routeLabel,
-      title_en: routeLabel,
-      description_es: 'Compara opciones de tren, bus y otras conexiones entre tus destinos principales.',
-      description_en: 'Compare train, bus and other connections between your main trip destinations.',
-      target_url: undefined,
-      confidence: 'high',
-      need_id: route.id,
-      need_type: 'intercity_transport',
-      entity_name: routeLabel,
-      city: route.origin,
-      travel_date: route.travel_date || null,
-      resolution_type: 'trip_sequence_route',
-      partner_locale: localeResolution.locale,
-      locale_applied: localeResolution.applied,
-      partner: { id: partner.id, slug: partner.slug, name: partner.name },
-      offer_token: signResolvedOffer({
-        template,
-        partner,
-        targetUrl,
-        placement: 'city_transport',
-        need,
-        city: route.origin,
-        resolutionType: 'trip_sequence_route',
-        travelDate: route.travel_date,
-        partnerLocale: localeResolution.locale
-      })
-    });
-  }
-
-  return result;
-}
-
-
 function parseResolvedRoutePayload(value){
   const text=clean(value,6000);
   if(!text.startsWith('ITBMO_ROUTE_V1|')) return null;
@@ -559,24 +498,14 @@ function omioCommercialEndpoint(value){
     .replace(/\b(?:railway|train|bus)\s+station\b/ig,' ')
     .replace(/\b(?:station|estaci[oó]n|gare|terminal|airport|aeropuerto)\b/ig,' ')
     .replace(/\b(?:chamart[ií]n|atocha|barajas|orly|charles de gaulle|cdg|fiumicino|ciampino|midi|zuid|guillemins)\b/ig,' ')
+    .replace(/^[\s-]*(?:de|del|des|du|of|di|da)\s+/i,' ')
     .replace(/[,-–—]+/g,' ')
     .replace(/\s+/g,' ').trim();
 }
 function commercialOmioSegments(need){
   const payload=parseResolvedRoutePayload(need?.source_route);
   if(!payload)return [];
-  return payload.legs.filter(leg=>leg?.commerce_eligible && leg?.origin && leg?.destination && ['train','bus','coach','plane','flight','ferry'].includes(normalizeKey(leg?.mode))).map((leg,index)=>({...leg,segment_index:Number(leg.index||index+1),commercial_origin:clean(leg.commercial_origin,120)||omioCommercialEndpoint(leg.origin),commercial_destination:clean(leg.commercial_destination,120)||omioCommercialEndpoint(leg.destination),commercial_origin_es:clean(leg.commercial_origin_es,120),commercial_destination_es:clean(leg.commercial_destination_es,120),commercial_origin_en:clean(leg.commercial_origin_en,120),commercial_destination_en:clean(leg.commercial_destination_en,120),parent_origin:payload.parent?.origin||'',parent_destination:payload.parent?.destination||'',parent_summary:payload.summary||''}));
-}
-
-function parseIntercityRouteLabel(value) {
-  const text = clean(value, 320);
-  const match = text.match(/^\s*([^→]{2,120})\s*→\s*([^→]{2,120})\s*$/);
-  if (!match) return null;
-  const origin = clean(match[1], 120);
-  const destination = clean(match[2], 120);
-  const bad = /\b(hotel|alojamiento|restaurant|restaurante|airport|aeropuerto|station|estacion|gare|terminal|point|punto|muelle|andén|anden)\b/i;
-  if (!origin || !destination || bad.test(origin) || bad.test(destination)) return null;
-  return { origin, destination };
+  return payload.legs.filter(leg=>leg?.commerce_eligible && leg?.origin && leg?.destination && ['train','bus','coach','plane','flight','ferry'].includes(normalizeKey(leg?.mode))).map((leg,index)=>({...leg,segment_index:Number(leg.index||index+1),commercial_origin:omioCommercialEndpoint(clean(leg.commercial_origin,120)||leg.origin),commercial_destination:omioCommercialEndpoint(clean(leg.commercial_destination,120)||leg.destination),commercial_origin_es:omioCommercialEndpoint(clean(leg.commercial_origin_es,120)),commercial_destination_es:omioCommercialEndpoint(clean(leg.commercial_destination_es,120)),commercial_origin_en:omioCommercialEndpoint(clean(leg.commercial_origin_en,120)),commercial_destination_en:omioCommercialEndpoint(clean(leg.commercial_destination_en,120)),parent_origin:payload.parent?.origin||'',parent_destination:payload.parent?.destination||'',parent_summary:payload.summary||''}));
 }
 
 async function getOwnedTripDestination(tripId, userId, city) {
@@ -604,8 +533,8 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
     const fallbackRoute=null; // fail closed: never manufacture an Omio URL from an unresolved A→B label
     const routes=resolvedSegments.length?resolvedSegments.map(seg=>{
       const es=localeResolution.locale==='es';
-      const localizedOrigin=es?seg.commercial_origin_es:(seg.commercial_origin_en||seg.commercial_origin);
-      const localizedDestination=es?seg.commercial_destination_es:(seg.commercial_destination_en||seg.commercial_destination);
+      const localizedOrigin=es?(seg.commercial_origin_es||seg.commercial_origin):(seg.commercial_origin_en||seg.commercial_origin);
+      const localizedDestination=es?(seg.commercial_destination_es||seg.commercial_destination):(seg.commercial_destination_en||seg.commercial_destination);
       if(!localizedOrigin||!localizedDestination)return null;
       return {origin:localizedOrigin,destination:localizedDestination,display_origin:seg.origin,display_destination:seg.destination,mode:seg.mode,segment_index:seg.segment_index,parent_origin:seg.parent_origin,parent_destination:seg.parent_destination,parent_summary:seg.parent_summary};
     }).filter(Boolean).filter(route=>normalizeKey(route.origin)!==normalizeKey(route.destination)):fallbackRoute?[fallbackRoute]:[];
