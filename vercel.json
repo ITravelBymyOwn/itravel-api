@@ -47,7 +47,13 @@
     },
     {
       "src": "api/partners.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "api/data/omio-es.csv.gz",
+          "api/data/omio-en.csv.gz"
+        ]
+      }
     },
     {
       "src": "public/**/*",
