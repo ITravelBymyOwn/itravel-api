@@ -7535,7 +7535,13 @@ function _v3PhysicalKey_(value){
 }
 
 function _v3IsFullTransitDay_(routeDay={}){
-  const transfers=(routeDay.fixed_transfers||[]).filter(t=>_hhmmToMinutes_(t?.departure)!=null&&_hhmmToMinutes_(t?.arrival)!=null);
+  const allTransfers=(routeDay.fixed_transfers||[]).filter(t=>_hhmmToMinutes_(t?.departure)!=null&&_hhmmToMinutes_(t?.arrival)!=null);
+  // A round-trip excursion is a TOURISM DAY WITH FIXED MOVEMENTS, never a
+  // transit day. Counting its outbound + return legs as two generic transfers
+  // suppresses the very tourism window the day trip exists to protect.
+  const hasDayTripMovement=allTransfers.some(t=>/^daytrip_(?:out|return)$/i.test(String(t?.direction||'')));
+  if(hasDayTripMovement)return false;
+  const transfers=allTransfers.filter(t=>!/^daytrip_/i.test(String(t?.direction||'')));
   if(transfers.length<2)return false;
   const movementMinutes=transfers.reduce((sum,t)=>{
     const dep=_hhmmToMinutes_(t.departure),arr=_hhmmToMinutes_(t.arrival);
@@ -8222,6 +8228,20 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     itineraries[city].masterPlan=master;
     itineraries[city].audit=report;
     pushRows(city,_dedupeRows_(rows),true);
+
+    // FINAL EXPORT-SHAPE GATE. pushRows performs normalization, semantic dedupe
+    // and timeline reconciliation, so audit the exact rows that PDF/Excel and
+    // Workspace will consume. A transfer/window may not disappear after PASS.
+    const storedRows=Object.values(itineraries?.[city]?.byDay||{}).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
+    const postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
+    const postStoreErrors=postStoreReport.errors||[];
+    console.info(`[ITBMO V3 POST-STORAGE HARD AUDIT] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
+    if(postStoreErrors.length){
+      itineraries[city].byDay={};
+      const error=new Error(`V3_EXPORT_SHAPE_BLOCK:trip`);
+      error.v3BlockingErrors=postStoreErrors;
+      throw error;
+    }
     renderCityTabs();
     if(!activeCity) setActiveCity(city);
     if(activeCity===city) renderCityItinerary(city);
