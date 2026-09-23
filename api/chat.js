@@ -820,7 +820,7 @@ If an experience cannot receive its useful minimum inside the user's window, mov
 day's scope or omit it. Never publish a misleadingly short visit.
 
 4. TIME MATHEMATICS AND TRANSFERS
-- Every visit row interval must contain transport plus activity.
+- Every row interval must be fully explained by the semantics that actually apply: movement time, activity dwell, or both. Never fabricate one merely because the other exists.
 - If the user did not provide an end time, the itinerary MUST normally reach at least approximately 19:00 local time. Treat 19:00 as a minimum planning requirement, not a ceiling. Finishing materially earlier requires a real constraint; continue later when high-value evening experiences materially improve the itinerary. Respect any explicit user end time as a hard boundary.
 - Day 1 starts AT the lodging at the user-provided time. Complete check-in/luggage drop before sightseeing and do not invent an inbound transfer.
 - On full days spanning lunch, include a realistic meal break using local dining customs (fallback roughly 12:00–15:00). On regional/day-trip days, keep the meal on-route and preserve route continuity.
@@ -833,12 +833,9 @@ day's scope or omit it. Never publish a misleadingly short visit.
   sleeps elsewhere.
 - Estimate long returns conservatively from the actual final stop to the actual lodging/base.
 - Do not shorten a return simply to fit the requested end time; instead remove an optional stop.
-- Pure transfers and returns must use kind "transport" and exactly one duration line:
-  Transport: <realistic estimate or range>
-- Every row with a real visit/experience must use kind "activity" and exactly two duration lines:
-  Transport: <realistic estimate or range>
-  Activity: <realistic estimate or range>
-- Under one hour use minutes. From one hour onward use hours/minutes. Never use 0h or 0m.
+- Pure transfers and returns use kind "transport". Put the mode and its approximate door-to-door time together in transport (for example "Walk · ~15m" or "Bus · ~25m"); duration may be empty. Never invent an Activity duration for a movement-only row.
+- A real visit/experience uses kind "activity". Put genuine access/mobility and its approximate time together in transport. Put only the actual dwell in duration as "Activity: <realistic estimate or range>". If no meaningful movement is needed, transport may be empty.
+- Never generate synthetic 1-minute Transport or Activity values. Under one hour use minutes. From one hour onward use hours/minutes. Never use 0h or 0m.
 
 5. MACRO-ROUTES AND MICRO-STOPS
 - For a regional route, first inventory the strongest logical stops on that exact corridor.
@@ -1275,15 +1272,27 @@ function _v62NormalizeDuration_(row = {}) {
   const transport = _v62DurationBounds_(transportRaw);
   const activity = _v62DurationBounds_(activityRaw);
 
-  if (_v65IsPureTransportRow_(row) && transport) {
-    return `Transport: ${_v62FormatMinutes_(transport.min)}`;
+  if (_v65IsPureTransportRow_(row)) {
+    return "";
   }
 
-  if (transport && activity) {
-    return `Transport: ${_v62FormatMinutes_(transport.min)}\nActivity: ${_v62FormatMinutes_(activity.min)}`;
+  if (activity) {
+    return `Activity: ${_v62FormatMinutes_(activity.min)}`;
   }
 
   return _normalizeDurationText_(raw);
+}
+
+function _v62TransportWithDuration_(row = {}) {
+  let transport = String(row?.transport || "").replace(/\s+/g, " ").trim();
+  const raw = String(row?.duration || "");
+  const transportRaw = _v62ExtractDurationPart_(raw, ["Transport", "Transporte"]);
+  const declared = _v62DurationBounds_(transportRaw);
+  const alreadyTimed = _v62DurationBounds_(transport);
+  if (declared && !alreadyTimed) {
+    transport = [transport, _v62FormatMinutes_(declared.min)].filter(Boolean).join(" · ");
+  }
+  return transport;
 }
 
 function _v62NormalizeFinalParsed_(parsed) {
@@ -1314,7 +1323,7 @@ function _v62NormalizeFinalParsed_(parsed) {
             activity,
             from,
             to,
-            transport: String(row?.transport || "").replace(/\s+/g, " ").trim(),
+            transport: _v62TransportWithDuration_(row),
             duration: _v62NormalizeDuration_(row),
             notes: String(row?.notes || "").replace(/\s+/g, " ").trim(),
             kind: row?.kind ?? "",
@@ -2116,13 +2125,10 @@ MANDATORY ROW CONTRACT:
     • For out-of-city attractions, prefer the real area / corridor / macro-tour name as DESTINATION.
     • Example: avoid "Reykjavik – Blue Lagoon" as the main visit row; prefer a real external area/macro-tour label.
 - duration and kind:
-  • A real visit/experience uses kind "activity" and EXACTLY 2 lines with \\n:
-    "Transport: <realistic estimate or ~range>"
-    "Activity: <realistic estimate or ~range>"
-  • A row that only moves the traveler from one place to another uses kind "transport" and EXACTLY 1 line:
-    "Transport: <realistic estimate or ~range>"
-  • Never invent check-in, settling, parking or arrival as an activity merely to fill the second line.
-  FORBIDDEN: "Transport: 0m" or "Activity: 0m"
+  • A real visit/experience uses kind "activity". Put genuine mobility + its estimate in transport and only the real dwell in duration: "Activity: <realistic estimate or ~range>". If no movement is meaningful, transport may be empty.
+  • A row that only moves the traveler uses kind "transport". Put mode + approximate time together in transport; duration may be empty.
+  • Never invent check-in, settling, parking, movement or arrival merely to populate a field.
+  FORBIDDEN: synthetic 1-minute values, "Transport: 0m" or "Activity: 0m"
 - notes: required (>=20 chars), motivating and useful:
   1) 1 emotional sentence
   2) 1 logistical tip
@@ -2665,7 +2671,7 @@ QUALITY POLICY:
 - Incorporate traveler profiles, pace, interests, must-sees and restrictions through actual choices.
 - Include realistic meal breaks when a long day spans meals.
 - The activity occurs at To. The next row starts from the prior row's To unless a fixed movement changes location.
-- Use one concrete To per row. For local mobility, recommend one default plus up to two genuinely useful alternatives when traveler context can change the best choice. Give every option its own realistic door-to-door estimate and a concise deciding condition; set the row's Transport duration upper bound to cover all listed choices. Preserve user-fixed intercity movements exactly and never invent operators, stops, schedules or availability.
+- Use one concrete To per row. For local mobility, recommend one default plus up to two genuinely useful alternatives when traveler context can change the best choice. Give every option its own realistic door-to-door estimate next to the mode and a concise deciding condition; do not repeat that estimate under a separate Transport duration label. Preserve user-fixed intercity movements exactly and never invent operators, stops, schedules or availability.
 - Never use generic destinations such as “nearby restaurant”, “local services” or “similar option”.
 - Keep transport and activity duration mathematically consistent with start/end times.
 - Preserve official proper names and write concise, useful concierge notes. Notes are the traveler-facing intelligence layer. For a meaningful attraction, normally provide 2–3 concrete execution insights selected from: whether advance/timed entry is prudent, what to prioritize inside a large site, the most relevant access/logistics point, seasonal/daylight considerations, a closure/hours caveat when genuinely relevant, and one useful fallback only when it adds value. Avoid generic filler ("great for photos", "enjoy the atmosphere", "buy souvenirs"), internal engine terminology, contract/window language and invented certainty.
@@ -2675,10 +2681,10 @@ QUALITY POLICY:
 OUTPUT CONTRACT:
 Return JSON only:
 {"destination":"...","city_day":[{"city":"...","day":1,"rows":[...]}]}
-Every row must contain: day, start, end, from, to, transport, duration, activity, notes.
+Every row must contain: day, start, end, from, to, activity, notes, kind. Include transport only when real movement/mobility information exists; include duration only when a real activity dwell exists. Empty transport/duration strings are valid when that concept does not apply.
 For non-transport rows also include commerce_context with: semantic_type (ATTRACTION_TICKET, TOUR_EXPERIENCE, RESTAURANT, FREE_SIGHT, LOGISTICS, NONE), ticket_need (required, recommended, optional, none, unknown), guided_tour_value (high, medium, low, none), canonical_place, destination_priority (essential, high, standard, supporting), and when useful transport_options=[{mode, estimated_minutes, recommended, condition}]. Multiple local access options never change the row's attraction/activity semantic_type to TRANSPORT. Mark true destination-defining must-sees essential/high so Context Intelligence can expose both independent admission and genuinely useful guided alternatives.
 For ITBMO_PHYSICAL_STAY_CONTRACT_V1 do NOT output intercity transport rows; deterministic code inserts them. For legacy contracts, fixed intercity transport rows include commerce_context with semantic_type=TRANSPORT, origin, destination, mode, departure and arrival. Never invent operator, station, airport, availability or booking status.
-Use HH:MM local time. duration must contain two lines: "Transport: ...\nActivity: ...".
+Use HH:MM local time. For activity rows, duration contains only "Activity: ..."; mobility time belongs next to its mode in transport. For pure transport rows, duration may be empty because the movement time is written in transport.
 For a physical-stay contract, return only the global day numbers represented by planning_windows and only rows physically inside those windows. Day Trips listed by the contract are planned inside the parent stay using their own location windows; never treat them as separate stays. For a legacy planning-unit contract, include every requested planning-unit day from 1 through total_days.
 Do not output analysis, markdown, master-plan metadata or commentary outside JSON.
 `.trim();
