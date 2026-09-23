@@ -8227,27 +8227,45 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     if(!itineraries[city]) itineraries[city]={byDay:{},currentDay:1,baseDate:baseDate||null,masterPlan:[],audit:null};
     itineraries[city].masterPlan=master;
     itineraries[city].audit=report;
-    pushRows(city,_dedupeRows_(rows),true);
 
-    // FINAL EXPORT-SHAPE GATE. pushRows performs normalization, semantic dedupe
-    // and timeline reconciliation, so audit the exact rows that PDF/Excel and
-    // Workspace will consume. A transfer/window may not disappear after PASS.
-    let storedRows=Object.values(itineraries?.[city]?.byDay||{}).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
+    // V2.10.25 · CANONICAL COMMIT. The rows that passed MERGE HARD AUDIT are the
+    // authoritative export shape. Do not send them through pushRows(): that legacy
+    // helper normalizes, semantic-dedupes and reconciles timelines and therefore can
+    // mutate an already-approved physical trip. Group exact audited rows by day and
+    // make every downstream consumer (PDF/Excel/Workspace/checkpoint) read that same
+    // sealed shape.
+    const canonicalRows=(rows||[]).map(row=>({
+      ...row,
+      commerce_context:(row?.commerce_context&&typeof row.commerce_context==='object')?{...row.commerce_context}:row?.commerce_context
+    }));
+    const canonicalByDay={};
+    canonicalRows.forEach(row=>{
+      const d=Math.max(1,Number(row?.day)||1);
+      if(!canonicalByDay[d]) canonicalByDay[d]=[];
+      canonicalByDay[d].push(row);
+    });
+    for(let d=1;d<=Math.max(1,Number(dest.days)||1);d++){
+      if(!canonicalByDay[d]) canonicalByDay[d]=[];
+      canonicalByDay[d].sort((a,b)=>(_hhmmToMinutes_(a?.start)??99999)-(_hhmmToMinutes_(b?.start)??99999));
+    }
+    itineraries[city].byDay=canonicalByDay;
+
+    // The only FINAL hard audit now runs on exactly the canonical rows consumed by
+    // exports and persistence. No transformation is allowed between PASS and publish.
+    let storedRows=Object.values(canonicalByDay).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
     let postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
     let postStoreErrors=postStoreReport.errors||[];
-    console.info(`[ITBMO V3 POST-STORAGE HARD AUDIT] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
+    console.info(`[ITBMO V3 CANONICAL HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
 
-    // V2.10.24 · deterministic self-healing gate. A USER_FIXED/route-resolved
-    // movement is authoritative Route Compiler data, not model content. If a
-    // normalization/dedupe/storage pass dropped one, restore the complete set of
-    // hard route facts from the immutable generation contract and audit the exact
-    // export shape again. This costs zero model calls and preserves accepted Stays.
-    const routeFactCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
-    if(postStoreErrors.length && postStoreErrors.every(e=>routeFactCodes.has(String(e?.code||'')))){
-      console.warn('[ITBMO V3 POST-STORAGE SELF-HEAL] restoring immutable route facts',postStoreErrors);
-      const healedRows=_v3EnforceHardRouteFacts_(storedRows,generated.contract);
+    // Emergency belt-and-suspenders only: canonical commit should make this path
+    // exceptional. If immutable route facts are ever missing/overlapped, restore
+    // them deterministically from the Movement Ledger and re-audit without Luna.
+    const selfHealCodes=new Set(['MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
+    if(postStoreErrors.length && postStoreErrors.every(e=>selfHealCodes.has(String(e?.code||'')))){
+      console.warn('[ITBMO V3 CANONICAL SELF-HEAL] restoring immutable route facts',postStoreErrors);
+      storedRows=_v3EnforceHardRouteFacts_(storedRows,generated.contract);
       const healedByDay={};
-      healedRows.forEach(row=>{
+      storedRows.forEach(row=>{
         const d=Math.max(1,Number(row?.day)||1);
         if(!healedByDay[d]) healedByDay[d]=[];
         healedByDay[d].push(row);
@@ -8260,12 +8278,10 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       storedRows=Object.values(healedByDay).flatMap(dayRows=>Array.isArray(dayRows)?dayRows:[]);
       postStoreReport=_v3MergedHardPhysicalAudit_(storedRows,generated.contract,dest.days);
       postStoreErrors=postStoreReport.errors||[];
-      console.info(`[ITBMO V3 POST-STORAGE SELF-HEAL AUDIT] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
+      console.info(`[ITBMO V3 CANONICAL SELF-HEAL AUDIT] trip`,_v3AuditSummary_({errors:postStoreErrors}),postStoreErrors);
     }
 
     if(postStoreErrors.length){
-      // Never erase accepted output/checkpoints here. Recovery must keep the
-      // generated trip visible internally and retry only the failed integrity gate.
       const error=new Error(`V3_EXPORT_SHAPE_BLOCK:trip`);
       error.code='V3_EXPORT_SHAPE_BLOCK';
       error.v3BlockingErrors=postStoreErrors;
@@ -8789,7 +8805,7 @@ function _showGenerationRetry_(reason=''){
         ? (es?'La generación no pudo completarse, pero tu pago permanece registrado. Puedes volver a intentarlo o contactar a Soporte si necesitas ayuda.':'Generation could not be completed, but your payment remains recorded. You can try again or contact Support if you need help.')
         : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.'))}</p>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:22px">
-      <button id="itbmo-generation-retry" type="button">${es?'Reintentar generación':'Retry generation'}</button>
+      <button id="itbmo-generation-retry" type="button">${integrityFailure?(es?'Reintentar verificación':'Retry verification'):(es?'Reintentar generación':'Retry generation')}</button>
       ${exhausted&&!integrityFailure?`<button id="itbmo-generation-reset" type="button" class="btn warn">${es?'Reiniciar itinerario':'Reset itinerary'}</button><button id="itbmo-generation-support" type="button" style="background:#fff;color:#24345f;border:1px solid #d6dbea">${es?'Contactar Soporte':'Contact Support'}</button>`:''}
     </div>
   </div>`;
