@@ -3587,7 +3587,7 @@ function renderCityItinerary(city){
         <td>${r.from||''}</td>
         <td>${r.to||''}</td>
         <td>${r.transport||''}</td>
-        <td>${formatDurationForDisplay(r.duration||'', r.transport||'')}</td>
+        <td>${_v38VisibleDuration_(r)}</td>
         <td>${cleanNotes}</td>
       `;
       tb.appendChild(tr);
@@ -3723,7 +3723,7 @@ function _immersiveBackToOverview_(){immersiveWorkspaceLevel='overview';immersiv
 function _immersiveRenderDayTimeline_(city,dayNum){
   const target=qs('#itinerary-focus-day-content');if(!target)return;const rows=itineraries?.[city]?.byDay?.[dayNum]||[],copy=_immersiveViewerCopy_();target.innerHTML='';
   if(!rows.length){target.innerHTML='<p class="itinerary-focus-empty">—</p>';return;} const timeline=document.createElement('div');timeline.className='itinerary-focus-timeline';
-  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_immersiveFormatDuration_(r.duration,r.transport);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(r.start||'')}</strong><span>${_immersiveEscapeHtml_(r.end||'')}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(r.transport)}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
+  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_v38VisibleDuration_(r);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(r.start||'')}</strong><span>${_immersiveEscapeHtml_(r.end||'')}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(r.transport)}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
     const toggle=qs('.itinerary-focus-detail-toggle',item),details=qs('.itinerary-focus-activity__details',item);toggle?.addEventListener('click',()=>{const expanded=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',expanded?'false':'true');details.hidden=expanded;toggle.firstChild.textContent=(expanded?copy.details:copy.hideDetails)+' ';const icon=qs('i',toggle);if(icon)icon.textContent=expanded?'＋':'−';});timeline.appendChild(item);});target.appendChild(timeline);
 }
 function _immersiveRenderPrepareShell_(city){const target=qs('#itinerary-focus-day-content'),copy=_immersiveViewerCopy_();if(!target)return;target.innerHTML=`<section class="itinerary-focus-prepare-shell"><div class="itinerary-focus-prepare-mark" aria-hidden="true">✦</div><span class="itinerary-focus-prepare-city">${_immersiveEscapeHtml_(city)}</span><h4>${_immersiveEscapeHtml_(copy.prepareTitle)}</h4><p>${_immersiveEscapeHtml_(copy.prepareIntro)}</p><div class="itinerary-focus-prepare-categories"><span>🎟 <b>${getLang()==='es'?'Entradas':'Tickets'}</b></span><span>✦ <b>${getLang()==='es'?'Tours':'Tours'}</b></span><span>↗ <b>${getLang()==='es'?'Moverte':'Getting around'}</b></span><span>＋ <b>${getLang()==='es'?'Más':'More'}</b></span></div><small>${_immersiveEscapeHtml_(copy.prepareSafe)}</small></section>`;}
@@ -4713,6 +4713,19 @@ function _sanitizeDurationLines_(raw, transportField=''){
   return '';
 }
 
+function _v38VisibleDuration_(row={}){
+  const raw=String(row?.duration||'').trim();
+  if(!raw) return '';
+  const activity=_durationBoundsMinutes_(_extractDurationPart_(raw,'activity'));
+  const transport=_transportBoundsFromField_(row?.transport||'');
+  const from=String(row?.from||'').trim();
+  const to=String(row?.to||'').trim();
+  // Presentation/export only: never mutate canonical itinerary semantics.
+  // A one-minute "activity" attached to a real A→B movement is synthetic dwell.
+  if(activity && activity.max<=1 && transport && from && to && !_arePoiAliases_(from,to)) return '';
+  return _sanitizeDurationLines_(raw,row?.transport||'');
+}
+
 function _isPureTransportRow_(row={}){
   const kind=_canonicalText_(row?.kind||'');
   if(/^(transport|transfer|transit|traslado|transporte|retorno|return)$/.test(kind)) return true;
@@ -4868,7 +4881,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let end = String(endRaw||'').trim();
   let startMin=_hhmmToMinutes_(start), endMin=_hhmmToMinutes_(end);
   let duration=_sanitizeDurationLines_(durRaw, trans);
-  let kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
+  const kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
   let safeTransport = String(trans||'').trim();
   const declaredTransport=_durationBoundsMinutes_(_extractDurationPart_(String(durRaw||''),'transport'));
   if(declaredTransport && !_transportBoundsFromField_(safeTransport)){
@@ -4905,14 +4918,6 @@ function normalizeRow(r = {}, fallbackDay = 1){
   }
   const activityBounds=_durationBoundsMinutes_(_extractDurationPart_(duration,'activity'));
   if(kind==='transport' && activityBounds && activityBounds.max<=1) duration='';
-  // Ultra-surgical cleanup for model rows that are plainly local movement but
-  // arrive mislabeled as an activity with a synthetic 1-minute dwell. The real
-  // movement duration already lives beside the mode in `transport`.
-  const movementOnlyText=_canonicalText_(`${safeActivity} ${safeNotes}`);
-  const syntheticMovementActivity = kind==='activity' && activityBounds && activityBounds.max<=1 &&
-    Boolean(_transportBoundsFromField_(safeTransport)) && safeFrom && safeTo && !_arePoiAliases_(safeFrom,safeTo) &&
-    /^(desplazamiento|traslado|transfer|regreso|retorno|return|paseo (?:corto )?(?:hacia|hasta)|walk (?:to|toward|towards)|walking (?:to|toward|towards))\b/.test(movementOnlyText);
-  if(syntheticMovementActivity){ kind='transport'; duration=''; }
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
@@ -10683,7 +10688,7 @@ function exportItineraryToCSV(){
   const l=labels[outLang]||labels.en,push=row=>lines.push(row.map(x=>csvEscape(normalizeCellText(x),delim)).join(delim));
   push(l.headers);
   blocks.forEach((block,index)=>block.days.forEach(d=>d.rows.forEach(r=>push([
-    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport,r),r.duration,r.notes
+    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport,r),_v38VisibleDuration_(r),r.notes
   ]))));
   const csv='\uFEFF'+lines.join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
   trackITBMOEvent('export_csv',{file_type:'csv',layout:'continuous_physical_timeline_v6',destinations:blocks.length});
@@ -10796,7 +10801,7 @@ async function exportItineraryToXLSX(options={}){
   blocks.forEach((block,index)=>block.days.forEach(day=>day.rows.forEach(r=>{
     const type=_exportBlockType_(r,outLang),status=_exportScheduleStatus_(r,day.date,outLang),dayKey=`${day.globalDay}|${day.date}`;
     const dateValue=day.date?parseDMY(day.date):null;
-    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v3VisibleTransportLabel_(r.transport,r)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(r.duration)];
+    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v3VisibleTransportLabel_(r.transport,r)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v38VisibleDuration_(r))];
     const row=sheet.addRow(values);row.height=48;
     row.getCell(12).value={formula:`IF(OR(E${excelRow}="",F${excelRow}=""),"",MOD(TIMEVALUE(F${excelRow})-TIMEVALUE(E${excelRow}),1))`};
     row.getCell(12).numFmt='[h]" h "mm" min"';
@@ -10854,7 +10859,7 @@ async function exportItineraryToPDF(options={}){
     doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(100,119,138);doc.text(es?'Itinerario optimizado · horarios, traslados y recomendaciones prácticas':'Optimized itinerary · timing, transfers and practical guidance',34,160);
     let y=182;
     for(const row of rows){
-      const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v3VisibleTransportLabel_(row.transport,row)||''),duration=normalizeCellText(row.duration||''),notes=normalizeCellText(row.notes||'');
+      const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v3VisibleTransportLabel_(row.transport,row)||''),duration=normalizeCellText(_v38VisibleDuration_(row)),notes=normalizeCellText(row.notes||'');
       const activityLines=doc.splitTextToSize(activity,310),routeLines=doc.splitTextToSize(fromTo,310),notesLines=doc.splitTextToSize(notes,465),transportLines=doc.splitTextToSize([transport,duration].filter(Boolean).join(' · '),365);
       const blockH=Math.max(82,38+activityLines.length*11+routeLines.length*9+transportLines.length*9+notesLines.length*8.5);
       if(y+blockH>H-42){
