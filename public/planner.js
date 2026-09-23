@@ -3586,7 +3586,7 @@ function renderCityItinerary(city){
         <td>${cleanActivity}</td>
         <td>${r.from||''}</td>
         <td>${r.to||''}</td>
-        <td>${r.transport||''}</td>
+        <td>${_v40VisibleTransportForRow_(r)}</td>
         <td>${_v39VisibleDuration_(r)}</td>
         <td>${cleanNotes}</td>
       `;
@@ -3723,7 +3723,7 @@ function _immersiveBackToOverview_(){immersiveWorkspaceLevel='overview';immersiv
 function _immersiveRenderDayTimeline_(city,dayNum){
   const target=qs('#itinerary-focus-day-content');if(!target)return;const rows=itineraries?.[city]?.byDay?.[dayNum]||[],copy=_immersiveViewerCopy_();target.innerHTML='';
   if(!rows.length){target.innerHTML='<p class="itinerary-focus-empty">—</p>';return;} const timeline=document.createElement('div');timeline.className='itinerary-focus-timeline';
-  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_v39VisibleDuration_(r);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(r.start||'')}</strong><span>${_immersiveEscapeHtml_(r.end||'')}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(r.transport)}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
+  rows.forEach((r,index)=>{const item=document.createElement('article');item.className='itinerary-focus-activity';const duration=_v39VisibleDuration_(r);item.innerHTML=`<div class="itinerary-focus-activity__time"><strong>${_immersiveEscapeHtml_(r.start||'')}</strong><span>${_immersiveEscapeHtml_(r.end||'')}</span></div><div class="itinerary-focus-activity__rail"><i></i></div><div class="itinerary-focus-activity__card"><h4>${_immersiveEscapeHtml_(r.activity||'')}</h4><div class="itinerary-focus-activity__chips">${r.transport?`<span>${_immersiveEscapeHtml_(_v40VisibleTransportForRow_(r))}</span>`:''}${duration?`<span>${_immersiveEscapeHtml_(duration)}</span>`:''}</div><button class="itinerary-focus-detail-toggle" type="button" aria-expanded="false">${_immersiveEscapeHtml_(copy.details)} <i aria-hidden="true">＋</i></button><div class="itinerary-focus-activity__details" hidden>${r.from||r.to?`<p><b>${_immersiveEscapeHtml_(copy.route)}:</b> ${_immersiveEscapeHtml_(r.from||'')} ${r.from&&r.to?'→':''} ${_immersiveEscapeHtml_(r.to||'')}</p>`:''}${r.notes?`<p><b>${_immersiveEscapeHtml_(copy.notes)}:</b> ${_immersiveEscapeHtml_(r.notes)}</p>`:''}</div></div>`;
     const toggle=qs('.itinerary-focus-detail-toggle',item),details=qs('.itinerary-focus-activity__details',item);toggle?.addEventListener('click',()=>{const expanded=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',expanded?'false':'true');details.hidden=expanded;toggle.firstChild.textContent=(expanded?copy.details:copy.hideDetails)+' ';const icon=qs('i',toggle);if(icon)icon.textContent=expanded?'＋':'−';});timeline.appendChild(item);});target.appendChild(timeline);
 }
 function _immersiveRenderPrepareShell_(city){const target=qs('#itinerary-focus-day-content'),copy=_immersiveViewerCopy_();if(!target)return;target.innerHTML=`<section class="itinerary-focus-prepare-shell"><div class="itinerary-focus-prepare-mark" aria-hidden="true">✦</div><span class="itinerary-focus-prepare-city">${_immersiveEscapeHtml_(city)}</span><h4>${_immersiveEscapeHtml_(copy.prepareTitle)}</h4><p>${_immersiveEscapeHtml_(copy.prepareIntro)}</p><div class="itinerary-focus-prepare-categories"><span>🎟 <b>${getLang()==='es'?'Entradas':'Tickets'}</b></span><span>✦ <b>${getLang()==='es'?'Tours':'Tours'}</b></span><span>↗ <b>${getLang()==='es'?'Moverte':'Getting around'}</b></span><span>＋ <b>${getLang()==='es'?'Más':'More'}</b></span></div><small>${_immersiveEscapeHtml_(copy.prepareSafe)}</small></section>`;}
@@ -6296,6 +6296,14 @@ function _hasCriticalAuditErrors_(report={}){
   return (report?.errors||[]).some(error=>_auditSeverity_(error)>=10);
 }
 
+function _v40DistinctPoiExperience_(a={},b={}){
+  const text=row=>_canonicalText_(`${row?.activity||''} ${row?.notes||''}`);
+  const exterior=txt=>/\b(exterior|outside|facade|fachada|panoramic|panoramica|panoramica|viewpoint|mirador|photo|fotograf|paseo nocturno|night walk)\b/i.test(txt);
+  const interior=txt=>/\b(interior|inside|visit|visita|museum|museo|gallery|galeria|entrada|ticket|collection|coleccion)\b/i.test(txt);
+  const at=text(a),bt=text(b);
+  return (exterior(at)&&interior(bt))||(interior(at)&&exterior(bt));
+}
+
 function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',routeContextOverride=undefined,expectedDaysOverride=undefined){
   const errors=[];
   const byDay=_rowsByDayObject_(rows);
@@ -6392,7 +6400,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
       if(!_isUtilityRow_(r)){
         const poi=_poiKeyFromRow_(r);
         for(const prior of seenPois){
-          if(prior.day!==day && _arePoiAliases_(poi,prior.poi)){
+          if(prior.day!==day && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
             errors.push({
               code:'GLOBAL_DUPLICATE_POI',
               days:[prior.day,day],
@@ -6403,7 +6411,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
           }
         }
         if(poi){
-          seenPois.push({day,poi,label:r.to||r.activity});
+          seenPois.push({day,poi,label:r.to||r.activity,row:r});
         }
       }
 
@@ -7506,7 +7514,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='canonical-daytrip-roundtrip-v3';
+const ITBMO_V3_STAY_CACHE_SCHEMA='canonical-daytrip-roundtrip-v4-experience-semantics';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -10565,7 +10573,7 @@ function _v39VisibleDuration_(row={}){
   const movement=_transportBoundsFromField_(row?.transport||'');
   const from=String(row?.from||'').trim(),to=String(row?.to||'').trim();
   // Presentation/export only. Never mutate the canonical V34 itinerary row.
-  if(activity && activity.max<=1 && movement && from && to && !_arePoiAliases_(from,to))return '';
+  if(activity && activity.max<=1 && movement)return '';
   return _sanitizeDurationLines_(raw,row?.transport||'');
 }
 
@@ -10574,6 +10582,16 @@ function _v3VisibleTransportLabel_(value){
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
   return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
+}
+
+function _v40VisibleTransportForRow_(row={}){
+  const raw=_v3VisibleTransportLabel_(row?.transport||'');
+  if(!/^por definir\b|^to be decided\b/i.test(raw)) return raw;
+  const text=`${row?.notes||''} ${row?.activity||''}`;
+  if(/\bRER\b/i.test(text)) return raw.replace(/^Por definir|^To be decided/i,'RER');
+  if(/\b(tren|train|rail|ferrocarril)\b/i.test(text)) return raw.replace(/^Por definir|^To be decided/i,getLang()==='es'?'Tren':'Train');
+  if(/\b(autob[uú]s|autocar|bus|coach)\b/i.test(text)) return raw.replace(/^Por definir|^To be decided/i,getLang()==='es'?'Bus':'Bus');
+  return raw;
 }
 
 function _chronologicalExportDays_(){
@@ -10642,7 +10660,7 @@ function exportItineraryToCSV(){
   const l=labels[outLang]||labels.en,push=row=>lines.push(row.map(x=>csvEscape(normalizeCellText(x),delim)).join(delim));
   push(l.headers);
   blocks.forEach((block,index)=>block.days.forEach(d=>d.rows.forEach(r=>push([
-    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport),_v39VisibleDuration_(r),r.notes
+    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v40VisibleTransportForRow_(r),_v39VisibleDuration_(r),r.notes
   ]))));
   const csv='\uFEFF'+lines.join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
   trackITBMOEvent('export_csv',{file_type:'csv',layout:'continuous_physical_timeline_v6',destinations:blocks.length});
@@ -10755,7 +10773,7 @@ async function exportItineraryToXLSX(options={}){
   blocks.forEach((block,index)=>block.days.forEach(day=>day.rows.forEach(r=>{
     const type=_exportBlockType_(r,outLang),status=_exportScheduleStatus_(r,day.date,outLang),dayKey=`${day.globalDay}|${day.date}`;
     const dateValue=day.date?parseDMY(day.date):null;
-    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v39VisibleDuration_(r))];
+    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v40VisibleTransportForRow_(r)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(_v39VisibleDuration_(r))];
     const row=sheet.addRow(values);row.height=48;
     row.getCell(12).value={formula:`IF(OR(E${excelRow}="",F${excelRow}=""),"",MOD(TIMEVALUE(F${excelRow})-TIMEVALUE(E${excelRow}),1))`};
     row.getCell(12).numFmt='[h]" h "mm" min"';
@@ -10813,7 +10831,7 @@ async function exportItineraryToPDF(options={}){
     doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(100,119,138);doc.text(es?'Itinerario optimizado · horarios, traslados y recomendaciones prácticas':'Optimized itinerary · timing, transfers and practical guidance',34,160);
     let y=182;
     for(const row of rows){
-      const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v3VisibleTransportLabel_(row.transport)||''),duration=normalizeCellText(_v39VisibleDuration_(row)),notes=normalizeCellText(row.notes||'');
+      const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v40VisibleTransportForRow_(row)||''),duration=normalizeCellText(_v39VisibleDuration_(row)),notes=normalizeCellText(row.notes||'');
       const activityLines=doc.splitTextToSize(activity,310),routeLines=doc.splitTextToSize(fromTo,310),notesLines=doc.splitTextToSize(notes,465),transportLines=doc.splitTextToSize([transport,duration].filter(Boolean).join(' · '),365);
       const blockH=Math.max(82,38+activityLines.length*11+routeLines.length*9+transportLines.length*9+notesLines.length*8.5);
       if(y+blockH>H-42){
