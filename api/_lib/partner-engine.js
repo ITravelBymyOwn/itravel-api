@@ -531,6 +531,17 @@ async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, tripLangu
 }
 
 
+function parseResolvedRoutePayload(value){
+  const text=clean(value,6000);
+  if(!text.startsWith('ITBMO_ROUTE_V1|')) return null;
+  try{const parsed=JSON.parse(decodeURIComponent(text.slice('ITBMO_ROUTE_V1|'.length)));return parsed&&Array.isArray(parsed.legs)?parsed:null;}catch(_){return null;}
+}
+function commercialOmioSegments(need){
+  const payload=parseResolvedRoutePayload(need?.source_route);
+  if(!payload)return [];
+  return payload.legs.filter(leg=>leg?.commerce_eligible && leg?.origin && leg?.destination && ['train','bus','coach','plane','flight','ferry'].includes(normalizeKey(leg?.mode))).map((leg,index)=>({...leg,segment_index:Number(leg.index||index+1),parent_origin:payload.parent?.origin||'',parent_destination:payload.parent?.destination||'',parent_summary:payload.summary||''}));
+}
+
 function parseIntercityRouteLabel(value) {
   const text = clean(value, 320);
   const match = text.match(/^\s*([^→]{2,120})\s*→\s*([^→]{2,120})\s*$/);
@@ -554,49 +565,35 @@ async function getOwnedTripDestination(tripId, userId, city) {
 }
 
 async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=[]) {
-  const transportNeeds=(Array.isArray(needs)?needs:[]).filter(item=>
-    item && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement')
-  );
+  const transportNeeds=(Array.isArray(needs)?needs:[]).filter(item=>item && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement'));
   if(!transportNeeds.length) return [];
-
-  const [partner,template,mainDestination]=await Promise.all([
-    getPartner('omio'),
-    getOmioTemplate(),
-    getOwnedTripDestination(tripId,userId,city)
-  ]);
+  const [partner,template,mainDestination]=await Promise.all([getPartner('omio'),getOmioTemplate(),getOwnedTripDestination(tripId,userId,city)]);
   if(!partner || !template || !mainDestination) return [];
   const countryCode=destinationCountryCode(mainDestination);
   if(!OMIO_EUROPE_COUNTRY_CODES.has(countryCode)) return [];
-
   const localeResolution=resolvePartnerLocale('omio',uiLanguage);
   const out=[]; const seen=new Set();
   for(const need of transportNeeds){
-    const route=parseIntercityRouteLabel(need.entity_name) || parseIntercityRouteLabel(need.source_activity) || parseIntercityRouteLabel(need.source_route);
-    if(!route) continue;
-    // Interim pre-API rule requested for launch: enable Omio for intercity routes
-    // whose owning destination is in Europe. Never use Omio for POI/local mobility.
-    // Once provider API/coverage data is available this rule is replaced by live
-    // route eligibility rather than expanded with city-specific exceptions.
-    const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`;
-    if(seen.has(key)) continue; seen.add(key);
-    const targetUrl=omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
-    if(!targetUrl) continue;
-    const routeLabel=`${route.origin} → ${route.destination}`;
-    out.push({
-      ...template, placement:'city_transport', title_es:routeLabel,title_en:routeLabel,
-      description_es:'Compara opciones disponibles para este traslado entre ciudades.',
-      description_en:'Compare available options for this intercity journey.',
-      target_url:undefined,confidence:'medium',need_id:need.id,need_type:need.need_type,entity_name:routeLabel,city,
-      travel_date:need.travel_date||null,resolution_type:'context_intercity_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
-      partner:{id:partner.id,slug:partner.slug,name:partner.name},
-      offer_token:signResolvedOffer({template,partner,targetUrl,placement:'city_transport',need:{...need,entity_name:routeLabel},city,resolutionType:'context_intercity_route',travelDate:need.travel_date||'',partnerLocale:localeResolution.locale})
-    });
+    const resolvedSegments=commercialOmioSegments(need);
+    const fallbackRoute=resolvedSegments.length?null:(parseResolvedRoutePayload(need.source_route)?null:(parseIntercityRouteLabel(need.entity_name)||parseIntercityRouteLabel(need.source_activity)||parseIntercityRouteLabel(need.source_route)));
+    const routes=resolvedSegments.length?resolvedSegments.map(seg=>({origin:seg.origin,destination:seg.destination,mode:seg.mode,segment_index:seg.segment_index,parent_origin:seg.parent_origin,parent_destination:seg.parent_destination,parent_summary:seg.parent_summary})):fallbackRoute?[fallbackRoute]:[];
+    for(const route of routes){
+      const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${normalizeKey(route.mode||'')}`;
+      if(seen.has(key))continue;seen.add(key);
+      const targetUrl=omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
+      if(!targetUrl)continue;
+      const routeLabel=`${route.origin} → ${route.destination}`;
+      out.push({...template,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
+        description_es:'Compara opciones disponibles para este tramo del traslado.',description_en:'Compare available options for this leg of the journey.',target_url:undefined,confidence:resolvedSegments.length?'high':'medium',need_id:need.id,need_type:need.need_type,entity_name:routeLabel,city,travel_date:need.travel_date||null,resolution_type:resolvedSegments.length?'context_resolved_route_segment':'context_intercity_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
+        route_segment:{index:route.segment_index||1,mode:route.mode||'',parent_origin:route.parent_origin||'',parent_destination:route.parent_destination||'',parent_summary:route.parent_summary||''},
+        partner:{id:partner.id,slug:partner.slug,name:partner.name},offer_token:signResolvedOffer({template,partner,targetUrl,placement:'city_transport',need:{...need,entity_name:routeLabel},city,resolutionType:resolvedSegments.length?'context_resolved_route_segment':'context_intercity_route',travelDate:need.travel_date||'',partnerLocale:localeResolution.locale})});
+    }
   }
   return out;
 }
 
 function rankOffers(offers) {
-  const resolution = { trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
+  const resolution = { context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
@@ -644,8 +641,10 @@ export async function resolveCityOffers({
     resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeTripLanguage),
     resolveOmioContextRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
   ]);
+  const resolvedParents=new Set(omioContext.filter(o=>o?.resolution_type==='context_resolved_route_segment').map(o=>`${normalizeKey(o?.route_segment?.parent_origin)}|${normalizeKey(o?.route_segment?.parent_destination)}`));
+  const safeOmioTrip=omioTrip.filter(o=>{const route=parseIntercityRouteLabel(o?.entity_name);return !route||!resolvedParents.has(`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}`);});
   const omio=[]; const seenOmio=new Set();
-  [...omioTrip,...omioContext].forEach(offer=>{const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;if(!seenOmio.has(key)){seenOmio.add(key);omio.push(offer);}});
+  [...safeOmioTrip,...omioContext].forEach(offer=>{const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;if(!seenOmio.has(key)){seenOmio.add(key);omio.push(offer);}});
   return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
 }
 
