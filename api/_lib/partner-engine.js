@@ -18,9 +18,14 @@ const GYG_PARTNER_ID = '3FZWELC';
 // ITBMO uses, the adapter leaves the provider URL untouched.
 const PARTNER_LANGUAGE_CAPABILITIES = Object.freeze({
   viator: {
-    supported: new Set(['en','es','de','fr','it','pt','ja','ko','zh-cn','zh-tw']),
-    applicable: new Set([]),
-    strategy: 'provider_managed'
+    supported: new Set(['en','es']),
+    applicable: new Set(['en','es']),
+    strategy: 'localized_path'
+  },
+  getyourguide: {
+    supported: new Set(['en','es']),
+    applicable: new Set(['en','es']),
+    strategy: 'localized_domain'
   },
   omio: {
     supported: new Set(['en','es','de']),
@@ -103,7 +108,7 @@ function allowedPartnerUrl(slug, rawUrl) {
     if (url.protocol !== 'https:') return false;
     const host = url.hostname.toLowerCase();
     if (slug === 'viator') return host === 'www.viator.com' || host.endsWith('.viator.com');
-    if (slug === 'getyourguide') return host === 'www.getyourguide.com' || host.endsWith('.getyourguide.com') || host === 'gyg.me';
+    if (slug === 'getyourguide') return host === 'www.getyourguide.com' || host.endsWith('.getyourguide.com') || host === 'www.getyourguide.es' || host.endsWith('.getyourguide.es') || host === 'gyg.me';
     if (slug === 'omio') return host === 'omio.sjv.io' || host === 'www.omio.com' || host === 'www.omio.es';
     if (slug === 'holafly') return host === 'holafly.sjv.io' || host.endsWith('.holafly.com') || host === 'holafly.com';
     if (slug === 'airalo') return host === 'airalo.pxf.io' || host.endsWith('.airalo.com') || host === 'airalo.com';
@@ -268,7 +273,12 @@ function contextualSearchUrl(slug, uiLanguage, partnerLocale, need, city) {
   const campaign = trackingCampaign(need, city, uiLanguage, partnerLocale);
 
   if (slug === 'viator') {
-    return appendParams('https://www.viator.com/searchResults/all', {
+    // Viator documents localized language/PoS URLs. Keep PID/MCID/medium/campaign
+    // untouched so changing the traveler-facing language never breaks attribution.
+    const base = partnerLocale === 'es'
+      ? 'https://www.viator.com/es-ES/searchResults/all'
+      : 'https://www.viator.com/searchResults/all';
+    return appendParams(base, {
       text: query,
       pid: VIATOR_PID,
       mcid: VIATOR_MCID,
@@ -278,7 +288,12 @@ function contextualSearchUrl(slug, uiLanguage, partnerLocale, need, city) {
   }
 
   if (slug === 'getyourguide') {
-    return appendParams('https://www.getyourguide.com/s/', {
+    // GYG deep links keep partner_id attribution. Use its Spanish storefront
+    // when ITBMO is Spanish; English keeps the global .com storefront.
+    const base = partnerLocale === 'es'
+      ? 'https://www.getyourguide.es/s/'
+      : 'https://www.getyourguide.com/s/';
+    return appendParams(base, {
       q: query,
       partner_id: GYG_PARTNER_ID,
       utm_medium: 'online_publisher',
@@ -536,10 +551,21 @@ function parseResolvedRoutePayload(value){
   if(!text.startsWith('ITBMO_ROUTE_V1|')) return null;
   try{const parsed=JSON.parse(decodeURIComponent(text.slice('ITBMO_ROUTE_V1|'.length)));return parsed&&Array.isArray(parsed.legs)?parsed:null;}catch(_){return null;}
 }
+function omioCommercialEndpoint(value){
+  // Safety net for historical/resolver payloads that predate commercial_*.
+  // Omio SEO routes are city-to-city; station/airport slugs frequently 404.
+  return clean(value,120)
+    .replace(/\b(?:central|centre|center)\b/ig,' ')
+    .replace(/\b(?:railway|train|bus)\s+station\b/ig,' ')
+    .replace(/\b(?:station|estaci[oó]n|gare|terminal|airport|aeropuerto)\b/ig,' ')
+    .replace(/\b(?:chamart[ií]n|atocha|barajas|orly|charles de gaulle|cdg|fiumicino|ciampino|midi|zuid|guillemins)\b/ig,' ')
+    .replace(/[,-–—]+/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
 function commercialOmioSegments(need){
   const payload=parseResolvedRoutePayload(need?.source_route);
   if(!payload)return [];
-  return payload.legs.filter(leg=>leg?.commerce_eligible && leg?.origin && leg?.destination && ['train','bus','coach','plane','flight','ferry'].includes(normalizeKey(leg?.mode))).map((leg,index)=>({...leg,segment_index:Number(leg.index||index+1),parent_origin:payload.parent?.origin||'',parent_destination:payload.parent?.destination||'',parent_summary:payload.summary||''}));
+  return payload.legs.filter(leg=>leg?.commerce_eligible && leg?.origin && leg?.destination && ['train','bus','coach','plane','flight','ferry'].includes(normalizeKey(leg?.mode))).map((leg,index)=>({...leg,segment_index:Number(leg.index||index+1),commercial_origin:clean(leg.commercial_origin,120)||omioCommercialEndpoint(leg.origin),commercial_destination:clean(leg.commercial_destination,120)||omioCommercialEndpoint(leg.destination),parent_origin:payload.parent?.origin||'',parent_destination:payload.parent?.destination||'',parent_summary:payload.summary||''}));
 }
 
 function parseIntercityRouteLabel(value) {
@@ -576,7 +602,7 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
   for(const need of transportNeeds){
     const resolvedSegments=commercialOmioSegments(need);
     const fallbackRoute=resolvedSegments.length?null:(parseResolvedRoutePayload(need.source_route)?null:(parseIntercityRouteLabel(need.entity_name)||parseIntercityRouteLabel(need.source_activity)||parseIntercityRouteLabel(need.source_route)));
-    const routes=resolvedSegments.length?resolvedSegments.map(seg=>({origin:seg.origin,destination:seg.destination,mode:seg.mode,segment_index:seg.segment_index,parent_origin:seg.parent_origin,parent_destination:seg.parent_destination,parent_summary:seg.parent_summary})):fallbackRoute?[fallbackRoute]:[];
+    const routes=resolvedSegments.length?resolvedSegments.map(seg=>({origin:seg.commercial_origin||seg.origin,destination:seg.commercial_destination||seg.destination,display_origin:seg.origin,display_destination:seg.destination,mode:seg.mode,segment_index:seg.segment_index,parent_origin:seg.parent_origin,parent_destination:seg.parent_destination,parent_summary:seg.parent_summary})).filter(route=>normalizeKey(route.origin)!==normalizeKey(route.destination)):fallbackRoute?[fallbackRoute]:[];
     for(const route of routes){
       const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${normalizeKey(route.mode||'')}`;
       if(seen.has(key))continue;seen.add(key);
