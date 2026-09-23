@@ -1,3 +1,5 @@
+import fs from 'fs';
+import zlib from 'zlib';
 import crypto from 'crypto';
 import { resolveSession, supabaseFetch } from './itbmo-foundation.js';
 
@@ -10,6 +12,79 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 const VIATOR_PID = 'P00318254';
 const VIATOR_MCID = '42383';
 const GYG_PARTNER_ID = '3FZWELC';
+
+
+// Omio Product Feed is the only authority for route existence and deeplink
+// creation. These official Impact feeds are bundled with the deployment from
+// the approved ES/EN feed snapshots. No SEO slug or generic redirect may create
+// an Omio offer when A→B is absent from the selected feed.
+const OMIO_CATALOG_CACHE = new Map();
+
+function parseCsvLine(line = '') {
+  const out = [];
+  let value = '';
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') { value += '"'; i += 1; }
+      else quoted = !quoted;
+    } else if (ch === ',' && !quoted) {
+      out.push(value); value = '';
+    } else value += ch;
+  }
+  out.push(value);
+  return out;
+}
+
+function loadOmioCatalog(locale = 'en') {
+  const lang = locale === 'es' ? 'es' : 'en';
+  if (OMIO_CATALOG_CACHE.has(lang)) return OMIO_CATALOG_CACHE.get(lang);
+  try {
+    const fileUrl = new URL(`../data/omio-${lang}.csv.gz`, import.meta.url);
+    const raw = zlib.gunzipSync(fs.readFileSync(fileUrl)).toString('utf8').replace(/^\uFEFF/, '');
+    const lines = raw.split(/\r?\n/).filter(Boolean);
+    const headers = parseCsvLine(lines.shift() || '');
+    const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
+    const map = new Map();
+    for (const line of lines) {
+      const row = parseCsvLine(line);
+      const origin = clean(row[idx.origin_name], 160);
+      const destination = clean(row[idx.destination_name], 160);
+      const url = clean(row[idx.link_URL], 1400);
+      if (!origin || !destination || !url || !allowedPartnerUrl('omio', url)) continue;
+      const key = `${normalizeKey(origin)}|${normalizeKey(destination)}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          target_url: url,
+          title: clean(row[idx.title], 220),
+          description: clean(row[idx.description], 600),
+          travel_mode: clean(row[idx.travel_mode], 40),
+          train_min_duration: clean(row[idx.train_min_duration], 30),
+          bus_min_duration: clean(row[idx.bus_min_duration], 30),
+          flight_min_duration: clean(row[idx.flight_min_duration], 30),
+          ferry_min_duration: clean(row[idx.ferry_min_duration], 30),
+          currency: clean(row[idx.domain_currency], 12),
+          train_min_price: clean(row[idx.train_min_price], 30),
+          bus_min_price: clean(row[idx.bus_min_price], 30),
+          flight_min_price: clean(row[idx.flight_min_price], 30),
+          ferry_min_price: clean(row[idx.ferry_min_price], 30)
+        });
+      }
+    }
+    OMIO_CATALOG_CACHE.set(lang, map);
+    return map;
+  } catch (error) {
+    console.warn('[ITBMO OMIO FEED]', lang, error?.message || error);
+    const empty = new Map();
+    OMIO_CATALOG_CACHE.set(lang, empty);
+    return empty;
+  }
+}
+
+function omioCatalogRoute(origin, destination, locale = 'en') {
+  return loadOmioCatalog(locale).get(`${normalizeKey(origin)}|${normalizeKey(destination)}`) || null;
+}
 
 
 // Only language capabilities verified for ITBMO's current affiliate integration
@@ -168,6 +243,20 @@ function hasRequiredAttribution(slug, rawUrl) {
       return url.searchParams.get('partner_id') === GYG_PARTNER_ID &&
         url.searchParams.get('utm_medium') === 'online_publisher' &&
         Boolean(url.searchParams.get('cmp'));
+    }
+    if (slug === 'omio') {
+      if (url.hostname.toLowerCase() !== 'omio.sjv.io') return false;
+      if (!/^\/c\/7727455\/\d+\/7385\/?$/.test(url.pathname)) return false;
+      const landing = url.searchParams.get('u');
+      if (!landing) return false;
+      try {
+        const destination = new URL(landing);
+        const host = destination.hostname.toLowerCase();
+        return destination.protocol === 'https:' &&
+          (host === 'omio.com' || host === 'www.omio.com' || host === 'omio.es' || host === 'www.omio.es');
+      } catch (_) {
+        return false;
+      }
     }
     return true;
   } catch (_) {
@@ -468,23 +557,6 @@ async function getOwnedTripRoutes(tripId, userId) {
   });
 }
 
-function omioLanding(origin, destination, locale) {
-  const from = slugify(origin);
-  const to = slugify(destination);
-  if (!from || !to) return '';
-  return locale === 'es'
-    ? `https://www.omio.es/viajes/${from}/${to}`
-    : `https://www.omio.com/travel/${from}/${to}`;
-}
-
-function omioTrackedUrl(trackingBase, origin, destination, locale) {
-  const landing = omioLanding(origin, destination, locale);
-  if (!landing || !allowedPartnerUrl('omio', trackingBase)) return '';
-  const url = new URL(trackingBase);
-  url.searchParams.set('u', landing);
-  return url.toString();
-}
-
 async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, needs=[]) {
   const partner = await getPartner('omio');
   const template = await getOmioTemplate();
@@ -497,8 +569,9 @@ async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, needs=[])
   const result = [];
 
   for (const route of eligible) {
-    const targetUrl = omioTrackedUrl(clean(template.target_url, 1000), route.origin, route.destination, localeResolution.applied ? localeResolution.locale : 'en');
-    if (!targetUrl) continue;
+    const catalog = omioCatalogRoute(route.origin, route.destination, localeResolution.locale);
+    const targetUrl = clean(catalog?.target_url, 1400);
+    if (!targetUrl || !hasRequiredAttribution('omio', targetUrl)) continue;
     const routeLabel = `${route.origin} → ${route.destination}`;
     const matchedNeed=(Array.isArray(needs)?needs:[]).find(item=>{
       if(!item || (item.need_type!=='intercity_transport' && item.need_type!=='transport_arrangement')) return false;
@@ -546,10 +619,10 @@ function omioCommercialEndpoint(value){
 }
 function omioCommercialMode(value){
   const key=normalizeKey(value);
-  if(['train','rail','tren','ferrocarril'].includes(key)) return 'train';
-  if(['bus','coach','autobus','autobús','autocar'].includes(key)) return 'bus';
-  if(['plane','flight','air','avion','avión','vuelo'].includes(key)) return 'plane';
-  if(['ferry','ferri','ferris'].includes(key)) return 'ferry';
+  if(/\b(train|rail|tren|ferrocarril|rer)\b/.test(key)) return 'train';
+  if(/\b(bus|coach|autobus|autocar)\b/.test(key)) return 'bus';
+  if(/\b(plane|flight|air|avion|vuelo)\b/.test(key)) return 'plane';
+  if(/\b(ferry|ferri|ferris)\b/.test(key)) return 'ferry';
   return '';
 }
 function commercialOmioSegments(need){
@@ -612,8 +685,9 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
     for(const route of routes){
       const key=`${normalizeKey(route.origin)}|${normalizeKey(route.destination)}|${normalizeKey(route.mode||'')}`;
       if(seen.has(key))continue;seen.add(key);
-      const targetUrl=omioTrackedUrl(clean(template.target_url,1000),route.origin,route.destination,localeResolution.applied?localeResolution.locale:'en');
-      if(!targetUrl)continue;
+      const catalog=omioCatalogRoute(route.origin,route.destination,localeResolution.locale);
+      const targetUrl=clean(catalog?.target_url,1400);
+      if(!targetUrl || !hasRequiredAttribution('omio',targetUrl))continue;
       const routeLabel=`${route.origin} → ${route.destination}`;
       out.push({...template,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
         description_es:'Compara opciones disponibles para este tramo del traslado.',description_en:'Compare available options for this leg of the journey.',target_url:undefined,confidence:resolvedSegments.length?'high':'medium',need_id:need.id,need_type:need.need_type,entity_name:routeLabel,city,travel_date:need.travel_date||null,resolution_type:resolvedSegments.length?'context_resolved_route_segment':'context_intercity_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
