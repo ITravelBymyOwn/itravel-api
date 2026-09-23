@@ -67,7 +67,7 @@ $('#tw-back-label').textContent=t.back;
 $('#tw-my-trips-label').textContent=t.myTrips;
 $('#tw-my-trips').setAttribute('aria-label',t.myTrips);$('#tw-status-label').textContent=t.ready;$('#tw-overview-kicker').textContent=t.overviewK;$('#tw-overview-title').textContent=t.overviewT;$('#tw-overview-copy').textContent=t.overviewC;$('#tw-trip-kicker').textContent=t.wholeK;$('#tw-trip-title').textContent=t.wholeT;$('#tw-trip-copy').textContent=t.wholeC;const disclosure=$('#tw-link-disclosure');if(disclosure)disclosure.textContent=t.linkDisclosure;$('#tw-connectivity-kicker').textContent=t.connectivityK;$('#tw-connectivity-title').textContent=t.connectivityT;$('#tw-connectivity-copy').textContent=t.connectivityC;$('#tw-insurance-kicker').textContent=t.insuranceK;$('#tw-insurance-title').textContent=t.insuranceT;$('#tw-insurance-copy').textContent=t.insuranceC;$('#tw-connectivity-status').textContent=t.coming;$('#tw-insurance-status').textContent=t.coming;$('#tw-all-cities span').textContent=t.all;$('#tw-city-kicker').textContent=t.cityK;$('#tw-mode-itinerary b').textContent=t.it;$('#tw-mode-prepare b').textContent=t.prep;$('#tw-prepare-teaser').textContent=t.prepareTeaser;$('#tw-prepare-badge').textContent=t.prepareBadge;const essentialsK=$('#tw-overview-essentials-kicker');if(essentialsK)essentialsK.textContent=t.overviewEssentialsK;const essentialsT=$('#tw-overview-essentials-title');if(essentialsT)essentialsT.textContent=t.overviewEssentialsT;const essentialsC=$('#tw-overview-essentials-copy');if(essentialsC)essentialsC.textContent=t.overviewEssentialsC;const essentialsBtn=$('#tw-overview-essentials-cta');if(essentialsBtn)essentialsBtn.textContent=t.overviewEssentialsCta;const daysNav=$('#tw-days');if(daysNav)daysNav.setAttribute('aria-label',lang==='es'?'Días del itinerario':'Itinerary days');const floatingAll=$('#tw-floating-all-cities');if(floatingAll){const b=floatingAll.querySelector('b');if(b)b.textContent=t.all;floatingAll.setAttribute('aria-label',t.all)}const floatingPrepare=$('#tw-floating-prepare');if(floatingPrepare){const b=floatingPrepare.querySelector('b'),em=floatingPrepare.querySelector('em');if(b)b.textContent=t.prep;if(em)em.textContent=t.prepareBadge;floatingPrepare.setAttribute('aria-label',t.prep)}}
 function overview(){city=null;$('#tw-city').hidden=true;$('#tw-overview').hidden=false;window.dispatchEvent(new Event('tw:overview-opened'));const cs=cities(),total=cs.reduce((n,c)=>n+days(c).length,0);$('#tw-overview-summary').textContent=`${cs.length} ${cs.length===1?t.city:t.cities} · ${total} ${total===1?t.d:t.ds}`;const grid=$('#tw-city-grid');grid.innerHTML='';cs.forEach((c,i)=>{const b=document.createElement('button');b.type='button';b.className='tw-city-card';b.innerHTML=`<span class="tw-city-num">${String(i+1).padStart(2,'0')}</span><small>${esc(range(c))}</small><h2>${esc(c)}</h2><p>${days(c).length} ${esc(t.ds)} ${esc(t.organized)}</p><span class="tw-city-go">${esc(t.explore)} <i>→</i></span>`;b.onclick=()=>enter(c);grid.appendChild(b)});scrollTo({top:0,behavior:'smooth'})}
-function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='itinerary';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
+function enter(c){city=c;const ds=days(c);day=ds.includes(Number(data?.itineraries?.[c]?.currentDay))?Number(data.itineraries[c].currentDay):ds[0];mode='prepare';$('#tw-overview').hidden=true;$('#tw-city').hidden=false;window.ITBMOFoundation?.track('city_workspace_opened',{destination:c,language:lang});renderCity();window.dispatchEvent(new Event('tw:city-entered'));scrollTo({top:0,behavior:'smooth'})}
 function renderCity(){if(!city)return;$('#tw-city-name').textContent=city;$('#tw-city-dates').textContent=range(city);const ib=$('#tw-mode-itinerary'),pb=$('#tw-mode-prepare');ib.classList.toggle('active',mode==='itinerary');pb.classList.toggle('active',mode==='prepare');ib.setAttribute('aria-selected',mode==='itinerary');pb.setAttribute('aria-selected',mode==='prepare');renderDays();mode==='itinerary'?renderItinerary():renderPrepare();window.dispatchEvent(new Event('tw:prepare-mode-changed'))}
 function renderDays(){const nav=$('#tw-days');nav.hidden=mode!=='itinerary';nav.innerHTML='';if(nav.hidden)return;days(city).forEach(d=>{const b=document.createElement('button');b.type='button';b.className='tw-day'+(d===day?' active':'');const date=dayDate(city,d);b.textContent=(lang==='es'?`Día ${d}`:`Day ${d}`)+(date?` · ${date}`:'');b.onclick=()=>{day=d;renderCity();window.scrollTo({top:Math.max(0,$('#tw-content').offsetTop-160),behavior:'smooth'})};nav.appendChild(b)})}
 function cleanDuration(v){return String(v||'').replace(/\s*\|\s*/g,' · ').replace(/\n+/g,' · ').trim()}
@@ -182,11 +182,12 @@ function cityOverviewTourForCity(cityName,existingNeeds=[]){
   const first=cityRows.find(({row})=>isTourAlternativeEligible(row))||cityRows[0];
   return {
     id:`workspace-city-overview:${cityKey}`,
-    category:'tours',city:cityName,day:first?.day||'',
+    category:'tours',city:cityName,day:'',
     entity_name:lang==='es'?`City Tour de ${cityName}`:`${cityName} City Tour`,
     entity_type:'experience',need_type:'guided_tour_optional',confidence:'medium',
     user_message:lang==='es'?`Compara una visita panorámica guiada de ${cityName} con tu recorrido por cuenta propia; es una opción general del destino y no reemplaza automáticamente las actividades ya planificadas.`:`Compare a guided overview of ${cityName} with exploring independently; this is a destination-wide option and does not automatically replace your planned activities.`,
-    source_activity:String(first?.row?.activity||cityName).trim(),source_route:'',
+    source_activity:cityName,source_route:'',
+    scope_label:lang==='es'?'RECOMENDADO PARA CONOCER EL DESTINO':'RECOMMENDED DESTINATION OVERVIEW',
     derived_by:'physical_destination_overview'
   };
 }
@@ -349,7 +350,13 @@ function contextualNeedsForCity(cityName,needs){
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
-  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName));
+  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>{
+    // City Tour is transversal: Context may discover one on a particular day,
+    // but Workspace renders exactly one destination-wide card above daily tours.
+    if(item?.need_type!=='guided_tour_optional')return true;
+    const name=normalizeWorkspaceEntity(item?.entity_name||item?.source_activity||'');
+    return !/\b(city tour|tour panoramico|highlights tour|tour de la ciudad|tour de ciudad)\b/i.test(name);
+  });
   const derivedRoutes=tripRoutes().filter(route=>normalizeWorkspaceEntity(route.origin)===normalizeWorkspaceEntity(cityName));
   const normalizeRoute=value=>String(value||'').toLowerCase().replace(/\s+/g,' ').trim();
   const routeKeys=new Set(derivedRoutes.map(route=>normalizeRoute(route.source_route)));
@@ -397,7 +404,10 @@ function sectionSort(items=[],sectionType=''){
   const ordered=[...items];
   const priority=item=>{
     if(sectionType==='tickets') return item?.need_type==='ticket_required'?0:1;
-    if(sectionType==='tours') return item?.derived_by==='itinerary_tour_alternative'?1:0;
+    if(sectionType==='tours'){
+      if(item?.derived_by==='physical_destination_overview')return -100;
+      return item?.derived_by==='itinerary_tour_alternative'?1:0;
+    }
     return 0;
   };
   return ordered.sort((a,b)=>{
@@ -420,12 +430,19 @@ function parseResolvedRouteSource(value=''){
 }
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
-  const legs=route.legs||[];if(!legs.length)return'';
-  return `<div class="tw-route-segments">${legs.map((leg,index)=>{
+  const allLegs=route.legs||[];if(!allLegs.length)return'';
+  // Commercial cards represent the bookable intercity pieces only. Local
+  // access/egress remains useful logistics, but must not become fake Omio cards.
+  const legs=allLegs.filter(leg=>leg?.commerce_eligible);
+  const localLegs=allLegs.filter(leg=>!leg?.commerce_eligible);
+  const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const legOffers=(matched||[]).filter(o=>Number(o?.route_segment?.index||0)===Number(leg.index||index+1));
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div>${leg.note?`<p>${esc(leg.note)}</p>`:''}${legOffers.length?partnerOptions(legOffers):`<small class="tw-route-segment__nooffer">${esc(lang==='es'?'Sin enlace de reserva contextual para este tramo.':'No contextual booking link for this leg.')}</small>`}</div>`;
-  }).join('')}</div>`;
+    const marketFrom=leg.commercial_origin||leg.origin,marketTo=leg.commercial_destination||leg.destination;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div>${leg.note?`<p>${esc(leg.note)}</p>`:''}${legOffers.length?partnerOptions(legOffers):`<small class="tw-route-segment__nooffer">${esc(lang==='es'?'Este tramo no tiene un enlace Omio validado.':'This leg has no validated Omio link.')}</small>`}</div>`;
+  }).join('')}</div>`:'';
+  const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
+  return commercial+logistics;
 }
 
 function renderNeedItems(items,offers=[],visibleCount=Infinity){
