@@ -859,7 +859,7 @@ function encodedResolvedRoute(source){
   const legs=Array.isArray(rr?.legs)?rr.legs.filter(leg=>leg&&leg.origin&&leg.destination):[];
   if(!legs.length)return [source?.from,source?.to].filter(Boolean).join(" → ");
   const payload={v:1,parent:{origin:clean(source?.from,160),destination:clean(source?.to,160)},summary:clean(rr?.summary,420),legs:legs.slice(0,12).map((leg,index)=>({
-    index:index+1,direction:clean(leg.direction,24),origin:clean(leg.origin,160),destination:clean(leg.destination,160),mode:clean(leg.mode,40),departure_time:clean(leg.departure_time,16),arrival_time:clean(leg.arrival_time,16),estimated_minutes:Number(leg.estimated_minutes||0)||0,commerce_eligible:Boolean(leg.commerce_eligible),note:clean(leg.note,240)
+    index:index+1,direction:clean(leg.direction,24),origin:clean(leg.origin,160),destination:clean(leg.destination,160),mode:clean(leg.mode,40),departure_time:clean(leg.departure_time,16),arrival_time:clean(leg.arrival_time,16),estimated_minutes:Number(leg.estimated_minutes||0)||0,commerce_eligible:Boolean(leg.commerce_eligible),commercial_origin:clean(leg.commercial_origin,120),commercial_destination:clean(leg.commercial_destination,120),note:clean(leg.note,240)
   }))};
   return `ITBMO_ROUTE_V1|${encodeURIComponent(JSON.stringify(payload))}`;
 }
