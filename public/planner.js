@@ -7141,6 +7141,36 @@ function _v3TransportLabel_(mode){
   return labels[String(mode||'').toLowerCase()] || (es?'Por definir':'To be defined');
 }
 
+function _v3ResolvedTransferMode_(transfer={}){
+  const direct=String(transfer?.mode||'').trim().toLowerCase();
+  if(direct && !['recommend','other','transfer','unknown','undefined'].includes(direct)) return direct;
+  const legs=Array.isArray(transfer?.route_resolution?.legs)?transfer.route_resolution.legs:[];
+  const candidates=legs.filter(leg=>leg?.commerce_eligible).concat(legs.filter(leg=>!leg?.commerce_eligible));
+  for(const leg of candidates){
+    const raw=String(leg?.mode||'').trim().toLowerCase();
+    if(/\b(train|rail|tren|ferrocarril|rer)\b/.test(raw)) return 'train';
+    if(/\b(bus|coach|autobus|autobús|autocar)\b/.test(raw)) return 'bus';
+    if(/\b(plane|flight|air|avion|avión|vuelo)\b/.test(raw)) return 'plane';
+    if(/\b(ferry|ferri|ferris)\b/.test(raw)) return 'ferry';
+    if(/\b(car|auto|automovil|automóvil|coche)\b/.test(raw)) return 'car';
+  }
+  return direct || 'transfer';
+}
+
+function _v3FixedTransferSummary_(transfer={},resolvedMode=''){
+  const es=getLang()==='es';
+  const summary=String(transfer?.route_resolution?.summary||'').trim();
+  if(!summary) return '';
+  const key=_canonicalText_(summary);
+  const saysTrain=/\b(tren|train|rail|rer)\b/i.test(key);
+  const saysBus=/\b(bus|autobus|autocar|coach)\b/i.test(key);
+  const saysPlane=/\b(avion|vuelo|plane|flight)\b/i.test(key);
+  const conflict=(resolvedMode==='train'&&(saysBus||saysPlane))||(resolvedMode==='bus'&&(saysTrain||saysPlane))||(resolvedMode==='plane'&&(saysTrain||saysBus));
+  if(!conflict) return summary;
+  const label=_v3TransportLabel_(resolvedMode);
+  return es?`Traslado ${transfer.origin} → ${transfer.destination} en ${label}.`:`${transfer.origin} → ${transfer.destination} transfer by ${label}.`;
+}
+
 function _v3EnforceHardRouteFacts_(rows=[],contract={}){
   const es=getLang()==='es';
   let out=[...(rows||[])];
@@ -7163,19 +7193,21 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
         return exact || !overlaps;
       });
       let idx=out.findIndex(r=>Number(r.day)===dayNum&&_hhmmToMinutes_(r.start)===dep&&_hhmmToMinutes_(r.end)===arr&&_arePoiAliases_(r.from,t.origin)&&_arePoiAliases_(r.to,t.destination));
+      const resolvedMode=_v3ResolvedTransferMode_(t);
+      const resolvedSummary=_v3FixedTransferSummary_(t,resolvedMode);
       const fixedRow={
         day:dayNum,start:t.departure,end:t.arrival,
         activity:es?`Traslado de ${t.origin} a ${t.destination}`:`Transfer from ${t.origin} to ${t.destination}`,
         from:t.origin,to:t.destination,
-        transport:[_v3TransportLabel_(t.mode),`~${_minutesToHuman_(duration)}`].filter(Boolean).join(' · '),
+        transport:[_v3TransportLabel_(resolvedMode),`~${_minutesToHuman_(duration)}`].filter(Boolean).join(' · '),
         duration:'',
-        notes:t.route_resolution?.summary
-          ? `${t.route_resolution.summary}${es?' · Horario estimado para planificación; confirma las opciones reales antes de reservar.':' · Planning estimate; confirm real options before booking.'}`
+        notes:resolvedSummary
+          ? `${resolvedSummary}${es?' · Horario estimado para planificación; confirma las opciones reales antes de reservar.':' · Planning estimate; confirm real options before booking.'}`
           : (t.terminal_arrival
             ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
             : (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. La planificación continúa desde ${t.destination} según el tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. Planning continues from ${t.destination} according to the available time.`)),
         kind:'transport',
-        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:t.source!=='ROUTE_ESTIMATED',route_estimated:t.source==='ROUTE_ESTIMATED',route_resolution:t.route_resolution||null,source:t.source||'USER_FIXED',booking_need:'compare_options'}
+        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:resolvedMode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:t.source!=='ROUTE_ESTIMATED',route_estimated:t.source==='ROUTE_ESTIMATED',route_resolution:t.route_resolution||null,source:t.source||'USER_FIXED',booking_need:'compare_options'}
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
@@ -10558,11 +10590,23 @@ function normalizeCellText(v){
   return s;
 }
 
-function _v3VisibleTransportLabel_(value){
-  const raw=String(value||'').trim();
+function _v3VisibleTransportLabel_(value,row={}){
+  let raw=String(value||'').trim();
   if(!raw)return '';
   if(/^recomi[eé]ndame$/i.test(raw)||/^recommend$/i.test(raw)||/^recommend me$/i.test(raw)) return getLang()==='es'?'Por definir · ITBMO te ayudará a elegir':'To be decided · ITBMO will help you choose';
-  return raw.replace(/\/(recomendado|recommended)/ig,'').replace(/\s{2,}/g,' ').trim();
+  raw=raw.replace(/\/(recomendado|recommended)\b/ig,'').replace(/\s{2,}/g,' ').trim();
+  // Presentation-only guard: generated mobility prose can occasionally carry an
+  // obsolete named origin even though the canonical row.from is correct. Strip
+  // only that conflicting origin phrase; generation data, timing and QA remain
+  // untouched.
+  const canonicalFrom=_canonicalText_(row?.from||'');
+  raw=raw.replace(/\b(desde|from)\s+(?:la\s+zona\s+de\s+|el\s+entorno\s+de\s+)?([^;,·]+)(?=[;,·]|$)/ig,(match,_prep,claimed)=>{
+    const claimedKey=_canonicalText_(claimed||'');
+    if(!canonicalFrom||!claimedKey)return match;
+    const overlaps=claimedKey.split(' ').filter(x=>x.length>3).some(token=>canonicalFrom.includes(token));
+    return overlaps?match:'';
+  }).replace(/\s+([;,·])/g,'$1').replace(/^[\s,;·-]+|[\s,;·-]+$/g,'').replace(/\s{2,}/g,' ').trim();
+  return raw;
 }
 
 function _chronologicalExportDays_(){
@@ -10631,7 +10675,7 @@ function exportItineraryToCSV(){
   const l=labels[outLang]||labels.en,push=row=>lines.push(row.map(x=>csvEscape(normalizeCellText(x),delim)).join(delim));
   push(l.headers);
   blocks.forEach((block,index)=>block.days.forEach(d=>d.rows.forEach(r=>push([
-    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport),r.duration,r.notes
+    String(index+1).padStart(2,'0'),block.destination,d.globalDay,d.date||'',r.start,r.end,r.activity,r.from,r.to,_v3VisibleTransportLabel_(r.transport,r),r.duration,r.notes
   ]))));
   const csv='\uFEFF'+lines.join('\r\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),d=new Date(),yyyy=d.getFullYear(),mm=String(d.getMonth()+1).padStart(2,'0'),dd=String(d.getDate()).padStart(2,'0');
   trackITBMOEvent('export_csv',{file_type:'csv',layout:'continuous_physical_timeline_v6',destinations:blocks.length});
@@ -10744,7 +10788,7 @@ async function exportItineraryToXLSX(options={}){
   blocks.forEach((block,index)=>block.days.forEach(day=>day.rows.forEach(r=>{
     const type=_exportBlockType_(r,outLang),status=_exportScheduleStatus_(r,day.date,outLang),dayKey=`${day.globalDay}|${day.date}`;
     const dateValue=day.date?parseDMY(day.date):null;
-    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v3VisibleTransportLabel_(r.transport)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(r.duration)];
+    const values=[String(index+1).padStart(2,'0'),day.globalDay,dateValue||day.date||'',block.destination,r.start||'',r.end||'',normalizeCellText(r.activity),normalizeCellText(_v3VisibleTransportLabel_(r.transport,r)),status,normalizeCellText(r.notes),type,null,normalizeCellText(r.from),normalizeCellText(r.to),normalizeCellText(r.duration)];
     const row=sheet.addRow(values);row.height=48;
     row.getCell(12).value={formula:`IF(OR(E${excelRow}="",F${excelRow}=""),"",MOD(TIMEVALUE(F${excelRow})-TIMEVALUE(E${excelRow}),1))`};
     row.getCell(12).numFmt='[h]" h "mm" min"';
@@ -10802,7 +10846,7 @@ async function exportItineraryToPDF(options={}){
     doc.setFont('helvetica','normal');doc.setFontSize(8.5);doc.setTextColor(100,119,138);doc.text(es?'Itinerario optimizado · horarios, traslados y recomendaciones prácticas':'Optimized itinerary · timing, transfers and practical guidance',34,160);
     let y=182;
     for(const row of rows){
-      const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v3VisibleTransportLabel_(row.transport)||''),duration=normalizeCellText(row.duration||''),notes=normalizeCellText(row.notes||'');
+      const style=_itbmoPdfBlockStyle_(row),activity=normalizeCellText(row.activity||''),fromTo=normalizeCellText(`${row.from||''}${row.to?` → ${row.to}`:''}`),transport=normalizeCellText(_v3VisibleTransportLabel_(row.transport,row)||''),duration=normalizeCellText(row.duration||''),notes=normalizeCellText(row.notes||'');
       const activityLines=doc.splitTextToSize(activity,310),routeLines=doc.splitTextToSize(fromTo,310),notesLines=doc.splitTextToSize(notes,465),transportLines=doc.splitTextToSize([transport,duration].filter(Boolean).join(' · '),365);
       const blockH=Math.max(82,38+activityLines.length*11+routeLines.length*9+transportLines.length*9+notesLines.length*8.5);
       if(y+blockH>H-42){
