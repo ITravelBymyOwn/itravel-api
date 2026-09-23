@@ -19,6 +19,14 @@ const GYG_PARTNER_ID = '3FZWELC';
 // the approved ES/EN feed snapshots. No SEO slug or generic redirect may create
 // an Omio offer when A→B is absent from the selected feed.
 const OMIO_CATALOG_CACHE = new Map();
+// Static file references are intentional: Vercel's serverless file tracer can
+// include both feed assets deterministically. A dynamic template path can leave
+// the .csv.gz files outside the deployed function bundle even when they exist
+// in the repository.
+const OMIO_FEED_URLS = Object.freeze({
+  es: new URL('../data/omio-es.csv.gz', import.meta.url),
+  en: new URL('../data/omio-en.csv.gz', import.meta.url)
+});
 
 function parseCsvLine(line = '') {
   const out = [];
@@ -41,8 +49,7 @@ function loadOmioCatalog(locale = 'en') {
   const lang = locale === 'es' ? 'es' : 'en';
   if (OMIO_CATALOG_CACHE.has(lang)) return OMIO_CATALOG_CACHE.get(lang);
   try {
-    const fileUrl = new URL(`../data/omio-${lang}.csv.gz`, import.meta.url);
-    const raw = zlib.gunzipSync(fs.readFileSync(fileUrl)).toString('utf8').replace(/^\uFEFF/, '');
+    const raw = zlib.gunzipSync(fs.readFileSync(OMIO_FEED_URLS[lang])).toString('utf8').replace(/^\uFEFF/, '');
     const lines = raw.split(/\r?\n/).filter(Boolean);
     const headers = parseCsvLine(lines.shift() || '');
     const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
@@ -56,6 +63,7 @@ function loadOmioCatalog(locale = 'en') {
       const key = `${normalizeKey(origin)}|${normalizeKey(destination)}`;
       if (!map.has(key)) {
         map.set(key, {
+          route_id: clean(row[idx.route_id], 120),
           target_url: url,
           title: clean(row[idx.title], 220),
           description: clean(row[idx.description], 600),
@@ -71,6 +79,36 @@ function loadOmioCatalog(locale = 'en') {
           ferry_min_price: clean(row[idx.ferry_min_price], 30)
         });
       }
+    }
+    // Route Resolver payloads may carry the endpoint spelling from the other
+    // supported UI language (e.g. Brussels while the ES feed says Bruselas).
+    // Keep the selected language feed as the ONLY authority for the deeplink,
+    // but index its same route_id under the counterpart feed's endpoint names.
+    // This never creates a route: aliases are added only when the exact route_id
+    // already exists in the selected ES/EN feed.
+    try {
+      const otherLang = lang === 'es' ? 'en' : 'es';
+      const otherRaw = zlib.gunzipSync(fs.readFileSync(OMIO_FEED_URLS[otherLang])).toString('utf8').replace(/^\uFEFF/, '');
+      const otherLines = otherRaw.split(/\r?\n/).filter(Boolean);
+      const otherHeaders = parseCsvLine(otherLines.shift() || '');
+      const otherIdx = Object.fromEntries(otherHeaders.map((h, i) => [h, i]));
+      const selectedByRouteId = new Map();
+      for (const entry of map.values()) {
+        if (entry?.route_id && !selectedByRouteId.has(entry.route_id)) selectedByRouteId.set(entry.route_id, entry);
+      }
+      for (const line of otherLines) {
+        const row = parseCsvLine(line);
+        const routeId = clean(row[otherIdx.route_id], 120);
+        const entry = selectedByRouteId.get(routeId);
+        if (!entry) continue;
+        const aliasOrigin = clean(row[otherIdx.origin_name], 160);
+        const aliasDestination = clean(row[otherIdx.destination_name], 160);
+        if (!aliasOrigin || !aliasDestination) continue;
+        const aliasKey = `${normalizeKey(aliasOrigin)}|${normalizeKey(aliasDestination)}`;
+        if (!map.has(aliasKey)) map.set(aliasKey, entry);
+      }
+    } catch (aliasError) {
+      console.warn('[ITBMO OMIO FEED ALIASES]', lang, aliasError?.message || aliasError);
     }
     OMIO_CATALOG_CACHE.set(lang, map);
     return map;
