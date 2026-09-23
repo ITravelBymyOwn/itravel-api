@@ -52,6 +52,15 @@ function base(c){return parseDate(data?.itineraries?.[c]?.baseDate||data?.city_m
 function range(c){const ds=days(c),b=base(c);if(!b||!ds.length)return'';const a=fmt(addDays(b,ds[0]-1)),z=fmt(addDays(b,ds.at(-1)-1));return a===z?a:`${a} – ${z}`}
 function dayDate(c,d){const b=base(c),n=Number(d);return b&&Number.isFinite(n)&&n>0?fmt(addDays(b,n-1)):''}
 function travelDateLabel(raw){const parsed=parseDate(raw);return parsed?fmt(parsed):String(raw||'').trim()}
+function encodeWorkspaceResolvedRoute(row){
+  const rr=row?.commerce_context?.route_resolution;
+  const legs=Array.isArray(rr?.legs)?rr.legs.filter(leg=>leg&&leg.origin&&leg.destination):[];
+  if(!legs.length)return [row?.from,row?.to].filter(Boolean).join(' → ');
+  const payload={v:1,parent:{origin:String(row?.from||'').trim(),destination:String(row?.to||'').trim()},summary:String(rr?.summary||'').trim(),legs:legs.slice(0,12).map((leg,index)=>({
+    index:index+1,direction:String(leg?.direction||'').trim(),origin:String(leg?.origin||'').trim(),destination:String(leg?.destination||'').trim(),mode:String(leg?.mode||'').trim(),departure_time:String(leg?.departure_time||'').trim(),arrival_time:String(leg?.arrival_time||'').trim(),estimated_minutes:Number(leg?.estimated_minutes||0)||0,commerce_eligible:Boolean(leg?.commerce_eligible),commercial_origin:String(leg?.commercial_origin||'').trim(),commercial_destination:String(leg?.commercial_destination||'').trim(),commercial_origin_es:String(leg?.commercial_origin_es||'').trim(),commercial_destination_es:String(leg?.commercial_destination_es||'').trim(),commercial_origin_en:String(leg?.commercial_origin_en||'').trim(),commercial_destination_en:String(leg?.commercial_destination_en||'').trim(),note:String(leg?.note||'').trim()
+  }))};
+  return `ITBMO_ROUTE_V1|${encodeURIComponent(JSON.stringify(payload))}`;
+}
 function setText(){document.documentElement.lang=lang;
 document.title=lang==='es'?'ITBMO · Tu viaje':'ITBMO · Your trip';
 const plannerUrl=`./planner.html?lang=${encodeURIComponent(lang)}`;
@@ -83,7 +92,7 @@ function tripRoutes(){
     routes.push({
       id:route.id||`route:${routes.length+1}:${origin}:${destination}`,
       category:'transport',need_type:'intercity_transport',day:route.day||'',city:origin,
-      entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,source_route:`${origin} → ${destination}`,
+      entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,source_route:route.source_route||`${origin} → ${destination}`,
       origin,destination,travel_date:route.travel_date||'',transport:String(route.transport||'').trim(),
       user_message:lang==='es'?'Este trayecto forma parte de tu recorrido. Compara la opción que mejor encaje con tus horarios y preferencias.':'This journey is part of your route. Compare the option that best fits your timing and preferences.',
       derived_by:route.derived_by||'generated_route'
@@ -98,7 +107,7 @@ function tripRoutes(){
         const semantic=String(row?.commerce_context?.semantic_type||'').toUpperCase();
         const looksTransfer=semantic==='TRANSPORT'||/^(traslado|transfer)\b/i.test(activity);
         if(!looksTransfer)return;
-        add({id:`route:${viewCity}:${dayNumber}:${index+1}`,origin:row?.from,destination:row?.to,day:dayNumber,travel_date:date,transport:row?.transport,derived_by:'generated_itinerary'});
+        add({id:`route:${viewCity}:${dayNumber}:${index+1}`,origin:row?.from,destination:row?.to,day:dayNumber,travel_date:date,transport:row?.transport,source_route:encodeWorkspaceResolvedRoute(row),derived_by:'generated_itinerary'});
       });
     });
   });
