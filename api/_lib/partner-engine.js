@@ -329,6 +329,19 @@ async function getOmioTemplate() {
     (await getOffer('omio'));
 }
 
+function omioFeedTemplate(partner, template = null) {
+  // The official Omio product feed is the route/deeplink authority. A legacy
+  // partner_offers row may enrich presentation, but must never suppress a valid
+  // feed route. Keep offer_id null when no legacy template exists so click
+  // attribution remains signed and partner-level without inventing a DB offer.
+  return template || {
+    id: null, partner_id: partner?.id || null, offer_key: 'omio-product-feed',
+    need_type: 'intercity_transport', placement: 'city_transport',
+    title_es: 'Omio', title_en: 'Omio', description_es: '', description_en: '',
+    confidence: 'high', enabled: true, metadata: { source: 'official_product_feed' }
+  };
+}
+
 function searchQueryForNeed(need, city, language = 'en') {
   const entity = clean(need?.entity_name || need?.source_activity, 180);
   const safeCity = clean(city || need?.city, 120);
@@ -456,7 +469,7 @@ function signResolvedOffer({ template, partner, targetUrl, placement, need, city
   }
   const payload = {
     iat: Date.now(),
-    offer_id: template.id,
+    offer_id: template?.id || null,
     partner_id: partner.id,
     partner_slug: partner.slug,
     partner_name: partner.name,
@@ -597,8 +610,9 @@ async function getOwnedTripRoutes(tripId, userId) {
 
 async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, needs=[]) {
   const partner = await getPartner('omio');
-  const template = await getOmioTemplate();
-  if (!partner || !template) return [];
+  const legacyTemplate = await getOmioTemplate();
+  if (!partner || !partner.enabled || partner.status !== 'approved') return [];
+  const template = omioFeedTemplate(partner, legacyTemplate);
 
   const localeResolution = resolvePartnerLocale('omio', uiLanguage);
   const routes = await getOwnedTripRoutes(tripId, userId);
@@ -692,8 +706,9 @@ async function getOwnedTripDestination(tripId, userId, city) {
 async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=[]) {
   const transportNeeds=(Array.isArray(needs)?needs:[]).filter(item=>item && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement'));
   if(!transportNeeds.length) return [];
-  const [partner,template,ownedDestinations,mainDestination]=await Promise.all([getPartner('omio'),getOmioTemplate(),getOwnedTripDestinations(tripId,userId),getOwnedTripDestination(tripId,userId,city)]);
-  if(!partner || !template) return [];
+  const [partner,legacyTemplate,ownedDestinations,mainDestination]=await Promise.all([getPartner('omio'),getOmioTemplate(),getOwnedTripDestinations(tripId,userId),getOwnedTripDestination(tripId,userId,city)]);
+  if(!partner || !partner.enabled || partner.status!=='approved') return [];
+  const template=omioFeedTemplate(partner,legacyTemplate);
   // Day-trip workspaces (e.g. Segovia/Versailles) are physical destinations but
   // are not top-level trip destinations. Do not suppress their already-resolved
   // Omio segments merely because `city` is absent from trips.destinations.
@@ -711,7 +726,13 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
     const resolvedSegments=commercialOmioSegments(need);
     const anchorCandidates=[city,payload?.parent?.origin,payload?.parent?.destination].map(normalizeKey).filter(Boolean);
     const anchorCountry=anchorCandidates.map(k=>ownedEndpoints.get(k)).find(Boolean)||'';
-    if(!OMIO_EUROPE_COUNTRY_CODES.has(anchorCountry)) continue;
+    // Guided Journey can intentionally persist a compatibility destination row
+    // while the canonical Route Resolver payload carries the full movement. If
+    // country metadata is present, enforce Europe-only eligibility. If it is not
+    // present, only a resolver-authored commercial segment may proceed; the
+    // official feed must still contain the exact A→B route below.
+    if(anchorCountry && !OMIO_EUROPE_COUNTRY_CODES.has(anchorCountry)) continue;
+    if(!anchorCountry && !resolvedSegments.length) continue;
     const fallbackRoute=null; // fail closed: never manufacture an Omio URL from an unresolved A→B label
     const routes=resolvedSegments.length?resolvedSegments.map(seg=>{
       const es=localeResolution.locale==='es';
