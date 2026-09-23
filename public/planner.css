@@ -9173,3 +9173,14 @@ body.trip-story-open #need-help-floating{display:none!important;visibility:hidde
 .guided-personalization-overlay{z-index:10120}.guided-personalization-overlay .guided-journey__story-head button{background:linear-gradient(135deg,#0d83e8,#18bfe8);border:0;color:#fff;padding:10px 14px;box-shadow:0 8px 20px rgba(13,131,232,.18)}
 .gj-premium-textarea,.gj-pref-optional textarea{width:100%;min-height:125px;border:1px solid #cddbea;border-radius:16px;background:#fff;padding:14px;color:#153450;resize:vertical}.gj-pref-optional{display:grid;gap:12px;padding:17px;border:1px solid #dce8f3;border-radius:18px;background:linear-gradient(180deg,#fff,#f8fcff)}.gj-pref-optional>b{color:#0b2d56}.gj-pref-optional label{display:grid;gap:6px;font-size:.8rem;font-weight:850;color:#40566f}.gj-pref-optional textarea{min-height:78px;border-radius:12px}.gj-ready-card{padding:22px;border-radius:18px;background:linear-gradient(135deg,#eefbff,#fff7df);border:1px solid #cceaf2;color:#0b456b;font-weight:900}
 #info-chat-modal{z-index:40000!important}#info-chat-floating{z-index:40100!important}
+\n/* V2.10.22 · final journey UX polish */
+.guided-personalization-overlay #guided-info-chat-open{
+  position:relative;overflow:hidden;min-width:150px;min-height:72px;padding:12px 18px!important;border-radius:18px!important;
+  background:linear-gradient(125deg,#087BFA 0%,#14B9D4 58%,#6657EA 118%)!important;
+  color:#fff!important;font-size:1rem!important;line-height:1.15;box-shadow:0 14px 34px rgba(8,123,250,.25),inset 0 1px 0 rgba(255,255,255,.3)!important;
+}
+.guided-personalization-overlay #guided-info-chat-open::before{content:'✦';display:inline-grid;place-items:center;margin-right:7px;width:26px;height:26px;border-radius:9px;background:rgba(255,255,255,.16)}
+.guided-personalization-overlay #guided-info-chat-open::after{content:'Disponible durante tu personalización';display:block;margin-top:5px;font-size:.62rem;font-weight:750;opacity:.86;letter-spacing:.01em}
+#planner-post-generation .new-planning-cta.is-ready{border:1px solid rgba(8,123,250,.20)!important;background:linear-gradient(120deg,#f4f9ff,#f2fbfc)!important;box-shadow:0 12px 30px rgba(18,88,145,.08)!important}
+#planner-post-generation .new-planning-button{color:#fff!important;border:0!important;background:linear-gradient(115deg,#087BFA,#13A9B5)!important;box-shadow:0 10px 24px rgba(8,123,250,.20)!important;font-weight:900!important}
+#planner-post-generation .new-planning-button:hover{color:#fff!important;transform:translateY(-1px);box-shadow:0 15px 30px rgba(8,123,250,.28)!important}
