@@ -4856,7 +4856,7 @@ function normalizeRow(r = {}, fallbackDay = 1){
   let start = String(startRaw||'').trim();
   let end = String(endRaw||'').trim();
   let startMin=_hhmmToMinutes_(start), endMin=_hhmmToMinutes_(end);
-  const duration=_sanitizeDurationLines_(durRaw, trans);
+  let duration=_sanitizeDurationLines_(durRaw, trans);
   const kind=String(kindRaw||'').trim() || (_extractDurationPart_(duration,'activity') ? 'activity' : 'transport');
   const total=_durationTotalBounds_(duration,{kind});
 
@@ -4881,6 +4881,17 @@ function normalizeRow(r = {}, fallbackDay = 1){
   const safeTo = String(to||'').trim();
   const safeTransport = String(trans||'').trim();
   const safeNotes = String(notes||'').trim();
+  // Cosmetic/semantic cleanup: when a row starts and ends at the same attraction,
+  // a synthetic "Transport: 1 min" is not a real movement. Keep the activity
+  // dwell time and transport description, but do not expose a fake transport leg.
+  if(safeFrom&&safeTo&&_arePoiAliases_(safeFrom,safeTo)){
+    const transportPart=_durationBoundsMinutes_(_extractDurationPart_(duration,'transport'));
+    const activityPart=_extractDurationPart_(duration,'activity');
+    if(transportPart&&transportPart.max<=1&&activityPart){
+      const [,activityLabel]=_durationLabels_();
+      duration=`${activityLabel}: ${activityPart}`;
+    }
+  }
   let safeCommerce=commerceContext ? {...commerceContext} : null;
   if(safeCommerce){
     const semanticText=_canonicalText_(`${safeActivity} ${safeTo}`);
@@ -6983,6 +6994,20 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
     push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-out`,day:dayForDate(date),date,origin:st.place,destination:dt.place,departure:dt.outbound?.departureTime||'',arrival:dt.outbound?.arrivalTime||'',mode:dt.outbound?.transportMode||'other',direction:'daytrip_out',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',route_resolution:dt.routeResolution||null});
     push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-return`,day:dayForDate(date),date,origin:dt.place,destination:st.place,departure:dt.return?.departureTime||'',arrival:dt.return?.arrivalTime||'',mode:dt.return?.transportMode||dt.outbound?.transportMode||'other',direction:'daytrip_return',source:dt.return?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',route_resolution:dt.routeResolution||null});
   }));
+  // A Day Trip is a round trip by definition. Both directions are first-class
+  // canonical movements, even when ITBMO (Route Resolver) estimated the times.
+  // Never allow generation/recovery to continue with only the outbound half.
+  stays.forEach((st,si)=>(st.dayTrips||[]).forEach((dt,di)=>{
+    const stem=`story-daytrip-${dt.id||`${si}-${di}`}`;
+    const out=ledger.find(x=>x.transfer_id===`${stem}-out`);
+    const ret=ledger.find(x=>x.transfer_id===`${stem}-return`);
+    if(!out||!ret){
+      const err=new Error(`V3_DAYTRIP_LEDGER_INCOMPLETE:${st.place}:${dt.place}`);
+      err.code='V3_DAYTRIP_LEDGER_INCOMPLETE';
+      err.dayTrip={base:st.place,destination:dt.place,outbound:Boolean(out),return:Boolean(ret)};
+      throw err;
+    }
+  }));
   return ledger.map(({_key,...x})=>x).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.departure).localeCompare(String(b.departure)));
 }
 
@@ -7448,7 +7473,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='multimodal-transport-v2';
+const ITBMO_V3_STAY_CACHE_SCHEMA='canonical-daytrip-roundtrip-v3';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -7802,6 +7827,8 @@ Plan ONLY the useful time supplied for this Trip Story stay card, whose overnigh
 - allowed_physical_locations are authoritative for this call; do not plan outside them.
 - commerce_context is required on substantive rows: semantic_type, ticket_need, guided_tour_value, canonical_place, destination_priority (essential, high, standard, supporting), commercial_eligible. Mark true flagship must-sees essential/high so the contextual layer can offer both independent access and distinct guided alternatives. Keep traveler notes separate from commerce metadata.
 - Never invent operators, reservations, exact station/airport details, opening hours or availability not supplied by the contract.
+- Notes must never contradict the row's own start/end time. Do not write a different finishing time inside Notes.
+- When from and to are the same place, do not invent a 1-minute transport leg; treat movement inside the attraction as part of the activity.
 Return valid city_day JSON only. Do not ask questions.
 `.trim();
   const raw=await _v3Call_(prompt,'generate');
@@ -7973,9 +8000,20 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
       const label=unit.base_destination||unit.physical_destination;
       const cached=_v3AcceptedStayGet_(contract,unit);
       if(cached){
-        results[index]={...cached,unit,reused:true};
-        console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
-        continue;
+        // A checkpoint is reusable only if every cached activity still belongs to
+        // one of the CURRENT canonical physical windows. This prevents a cache
+        // created under older route semantics from resurrecting Paris-before-arrival
+        // or a Day Trip without its current round-trip boundaries.
+        const restamped=_v3StampStayRows_(cached.rows,unit);
+        if(restamped.length===cached.rows.length){
+          results[index]={...cached,rows:restamped,unit,reused:true};
+          console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
+          continue;
+        }
+        console.warn(`[ITBMO V3 STAY CACHE] ${label} · stale physical-window checkpoint rejected`,{cached_rows:cached.rows.length,valid_rows:restamped.length});
+        const staleKey=_v3AcceptedStayCacheKey_(contract,unit);
+        _v3AcceptedStayCache_.delete(staleKey);
+        try{sessionStorage.removeItem(staleKey);}catch(_){}
       }
 
       let accepted=null,lastError=null;
@@ -13273,6 +13311,13 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
     const outLast=outboundLegs.at(-1)||out;
     const ret=returnLegs[0]||legs.find(x=>_arePoiAliases_(x?.origin,dt.place)&&_arePoiAliases_(x?.destination,st.place))||{};
     const retLast=returnLegs.at(-1)||ret;
+    // Day Trips are structurally ROUND TRIPS. Route Resolver must return an
+    // explicit outbound chain and an explicit return chain; prose mentioning a
+    // reverse connection is not sufficient and can never substitute the row.
+    if(!outboundLegs.length||!returnLegs.length){
+      console.error('[ITBMO ROUTE RESOLVER] incomplete day-trip round trip',dt.place,r);
+      throw new Error(`ROUTE_RESOLVER_DAYTRIP_ROUNDTRIP_INCOMPLETE:${dt.place}`);
+    }
     if(!dt.outbound.transportMode)dt.outbound.transportMode=out.mode||r.primary_mode||'other';
     if(!dt.outbound.departureTime)dt.outbound.departureTime=out.departure_time||r.departure_time||'08:00';
     if(!dt.outbound.arrivalTime)dt.outbound.arrivalTime=outLast.arrival_time||out.arrival_time||'';
@@ -13282,6 +13327,11 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
     if(!dt.return.departureTime||!dt.return.arrivalTime){
       console.error('[ITBMO ROUTE RESOLVER] day-trip return unresolved',dt.place,r);
       throw new Error(`ROUTE_RESOLVER_DAYTRIP_RETURN_MISSING:${dt.place}`);
+    }
+    const outArrival=_hhmmToMinutes_(dt.outbound.arrivalTime),retDeparture=_hhmmToMinutes_(dt.return.departureTime),retArrival=_hhmmToMinutes_(dt.return.arrivalTime);
+    if(outArrival==null||retDeparture==null||retArrival==null||retDeparture<=outArrival||retArrival<=retDeparture){
+      console.error('[ITBMO ROUTE RESOLVER] invalid day-trip chronology',dt.place,{outbound:dt.outbound,return:dt.return,route:r});
+      throw new Error(`ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID:${dt.place}`);
     }
     dt.outbound.timeStatus=dt.return.timeStatus='estimated';dt.routeResolution={summary:r.summary||'',legs,alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
   }
