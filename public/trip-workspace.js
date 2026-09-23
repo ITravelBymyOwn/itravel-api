@@ -414,6 +414,20 @@ function initialSectionLimit(items=[],sectionType=''){
   if(sectionType==='transport') return Math.min(items.length,3);
   return items.length;
 }
+function parseResolvedRouteSource(value=''){
+  const text=String(value||'');if(!text.startsWith('ITBMO_ROUTE_V1|'))return null;
+  try{const parsed=JSON.parse(decodeURIComponent(text.slice('ITBMO_ROUTE_V1|'.length)));return parsed&&Array.isArray(parsed.legs)?parsed:null}catch(_){return null}
+}
+function renderResolvedTransportSegments(item,matched=[]){
+  const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
+  const legs=route.legs||[];if(!legs.length)return'';
+  return `<div class="tw-route-segments">${legs.map((leg,index)=>{
+    const legOffers=(matched||[]).filter(o=>Number(o?.route_segment?.index||0)===Number(leg.index||index+1));
+    const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div>${leg.note?`<p>${esc(leg.note)}</p>`:''}${legOffers.length?partnerOptions(legOffers):`<small class="tw-route-segment__nooffer">${esc(lang==='es'?'Sin enlace de reserva contextual para este tramo.':'No contextual booking link for this leg.')}</small>`}</div>`;
+  }).join('')}</div>`;
+}
+
 function renderNeedItems(items,offers=[],visibleCount=Infinity){
   if(!items.length)return'';
   const ordered=items;
@@ -438,10 +452,12 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
       <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
       ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
       <small class="tw-context-source">${sourceCopy}</small>
-      ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement')
+      ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
         ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
         : ''}
-      ${partnerOptions(matched)}
+      ${(item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && parseResolvedRouteSource(item.source_route)
+        ? renderResolvedTransportSegments(item,matched)
+        : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
 }
