@@ -521,7 +521,21 @@
           ctx.hard_route_constraints.push(`${m.origin} → ${m.destination}${m.departureTime?` ${m.departureTime}`:''}${m.arrivalTime?`–${m.arrivalTime}`:''}`);
           if(exact){cursor=timeShift(m.arrivalTime,transferArrivalMinutes(m.transportMode));location=m.destination;}
           else {ctx.flexible_movement=true;location=m.destination;}
-          if(m.disposition!=='roundtrip'){ctx.end_location=m.destination;ctx.overnight_base=m.destination;}
+          if(m.disposition!=='roundtrip'){
+            ctx.end_location=m.destination;ctx.overnight_base=m.destination;
+            // On an overlapping transition date, the calendar owner can still be
+            // the origin Stay. After arrival, however, the remaining planning
+            // window belongs to the destination Stay and must use that Stay's
+            // own end-of-day preference. This prevents a valid arrival evening
+            // from disappearing (e.g. Madrid → Toledo) without changing the
+            // immutable movement itself.
+            const arrivalStay=stays.find(st=>norm(st.place).toLowerCase()===norm(m.destination).toLowerCase()&&ctx.date>=st.startDate&&ctx.date<=endOf(st));
+            if(arrivalStay){
+              const arrivalDayIndex=Math.max(0,Math.round((dateKey(ctx.date)-dateKey(arrivalStay.startDate))/86400000));
+              const arrivalEnd=arrivalStay.perDay?.[arrivalDayIndex]?.end||'';
+              if(arrivalEnd) ctx._dayEnd=arrivalEnd;
+            }
+          }
         }
         if(m.disposition==='roundtrip'&&m.returnDepartureDate===ctx.date){
           const exactRet=Boolean(m.returnDepartureTime&&m.returnArrivalTime),prepRet=exactRet?timeShift(m.returnDepartureTime,-transferPrepMinutes(m.returnTransportMode||m.transportMode)):'';
