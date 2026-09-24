@@ -275,7 +275,7 @@
 
     const allDrafts=()=>[...drafts,{...seg}];
     const render=()=>{
-      const hasDay=!!seg.departureDate,hasDest=!!norm(seg.destination),hasTimes=seg.timePrecision==='unknown'||(seg.departureTime&&seg.arrivalTime),hasTransport=!!seg.transportMode,hasMovement=hasTimes&&hasTransport;
+      const hasDay=!!seg.departureDate,hasDest=!!norm(seg.destination),hasMovement=!!seg.departureTime;
       if(hasDay&&!seg.arrivalDate)seg.arrivalDate=seg.departureDate;
       if(seg.disposition==='roundtrip'&&seg.arrivalDate)seg.returnDepartureDate=seg.arrivalDate;
       if((seg.disposition==='roundtrip'||seg.disposition==='stay_return')&&seg.returnArrivalTime&&!seg.resumeTime)seg.resumeTime=seg.returnArrivalTime;
@@ -285,7 +285,7 @@
       ui.body.innerHTML=`${editOverview}${built}
         <section class="route-v2-step is-open"><div class="route-v2-step-index">1</div><div class="route-v2-step-content"><h4>${copy(`¿Qué día sales de ${seg.origin}?`,`What day do you leave ${seg.origin}?`)}</h4><p>${copy('Selecciona uno de los días reales de este destino. El recorrido nunca podrá extenderse fuera de este bloque.','Select one of this destination’s actual days. The route can never extend beyond this block.')}</p>${_dayChips(meta,'departureDate',seg.departureDate,drafts.at(-1)?._routeEndDate||'')}</div></section>
         ${hasDay?`<section class="route-v2-step is-open"><div class="route-v2-step-index">2</div><div class="route-v2-step-content"><h4>${copy('¿A dónde vas?','Where are you going?')}</h4><p>${copy(`Sales desde ${seg.origin}. No hay lugares predefinidos: busca el destino que tú decidiste.`,`You leave from ${seg.origin}. There are no predefined places: search for the destination you chose.`)}</p>${_destinationField('destination',seg.destination)}</div></section>`:''}
-        ${hasDay&&hasDest?`<section class="route-v2-step is-open"><div class="route-v2-step-index">3</div><div class="route-v2-step-content"><h4>${copy(`¿Cuándo sales de ${seg.origin} y llegas a ${seg.destination}?`,`When do you leave ${seg.origin} and arrive in ${seg.destination}?`)}</h4><p>${copy(`La hora de salida cerrará la ventana disponible del Planner en ${seg.origin}; al llegar, comenzará la ventana disponible en ${seg.destination}.`,`Departure closes the Planner window in ${seg.origin}; arrival opens the available window in ${seg.destination}.`)}</p><div class="route-v2-timegrid">${_timeSelect('departureTime',seg.departureTime,copy('Hora de salida','Departure time'))}${_timeSelect('arrivalTime',seg.arrivalTime,copy('Hora de llegada','Arrival time'))}</div><label>${copy('Medio de transporte para este traslado','Transport for this transfer')}<select data-field="transportMode">${_routeTransportOptions(seg.transportMode)}</select></label><details class="route-v2-arrival-day"><summary>${copy('¿Llegas otro día?','Arriving another day?')}</summary>${_dayChips(meta,'arrivalDate',seg.arrivalDate,seg.departureDate)}</details></div></section>`:''}
+        ${hasDay&&hasDest?`<section class="route-v2-step is-open"><div class="route-v2-step-index">3</div><div class="route-v2-step-content"><h4>${copy(`¿Cuándo sales de ${seg.origin} y llegas a ${seg.destination}?`,`When do you leave ${seg.origin} and arrive in ${seg.destination}?`)}</h4><p>${copy(`La fecha y hora de salida desde ${seg.origin} son obligatorias. La llegada y el medio de transporte son opcionales; si los conoces, mejoran la precisión del Planner.`,`Departure date and time from ${seg.origin} are required. Arrival and transport are optional; if known, they improve Planner precision.`)}</p><div class="route-v2-timegrid">${_timeSelect('departureTime',seg.departureTime,copy('Hora de salida','Departure time'))}${_timeSelect('arrivalTime',seg.arrivalTime,copy('Hora de llegada','Arrival time'))}</div><label>${copy('Medio de transporte para este traslado','Transport for this transfer')}<select data-field="transportMode">${_routeTransportOptions(seg.transportMode)}</select></label><details class="route-v2-arrival-day"><summary>${copy('¿Llegas otro día?','Arriving another day?')}</summary>${_dayChips(meta,'arrivalDate',seg.arrivalDate,seg.departureDate)}</details></div></section>`:''}
         ${hasDay&&hasDest&&hasMovement?`<section class="route-v2-step is-open"><div class="route-v2-step-index">4</div><div class="route-v2-step-content"><h4>${copy(`¿Qué harás después de ${seg.destination}?`,`What will you do after ${seg.destination}?`)}</h4><p>${atLastDay?copy(`Estás en el último día de ${meta.city}. Puedes regresar a ${meta.city} o finalizar este bloque en ${seg.destination}.`,`This is the last day of ${meta.city}. You can return to ${meta.city} or finish this block in ${seg.destination}.`):copy(`Para cerrar este recorrido debes regresar a ${meta.city} o continuar hacia otro lugar. No dejamos rutas abiertas a mitad del ciclo.`,`To close this route you must return to ${meta.city} or continue to another place. Routes cannot be left open mid-cycle.`)}</p><div class="route-v2-choice-grid">
           ${(atLastDay?[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')]]:[['roundtrip',copy(`Regreso a ${meta.city} el mismo día`,`Return to ${meta.city} the same day`),copy('Cierra el ciclo hoy.','Closes the cycle today.')],['stay_return',copy(`Me quedaré y regresaré a ${meta.city}`,`Stay, then return to ${meta.city}`),copy('Una o varias noches.','One or several nights.')],['continue',copy('Continuaré hacia otro lugar','Continue to another place'),copy('El recorrido sigue desde aquí.','The route continues from here.')]]).map(([v,a,b])=>`<label class="route-v2-choice ${seg.disposition===v?'selected':''}"><input type="radio" name="route-disposition" value="${v}" ${seg.disposition===v?'checked':''}><strong>${a}</strong><span>${b}</span></label>`).join('')}
           <label class="route-v2-choice ${seg.disposition==='end_block'?'selected':''}"><input type="radio" name="route-disposition" value="end_block" ${seg.disposition==='end_block'?'checked':''}><strong>${copy(atLastDay?'Finalizo este destino aquí':'Me quedaré aquí hasta finalizar este destino',atLastDay?'Finish this destination here':'Stay here until this destination ends')}</strong><span>${copy(atLastDay?`Tu ubicación al finalizar será ${seg.destination}.`:`Los días restantes se planificarán desde ${seg.destination}.`,`Your final location will be ${seg.destination}.`)}</span></label>
@@ -358,12 +358,12 @@
       ui.body.querySelectorAll('input[name="route-disposition"]').forEach(r=>r.onchange=()=>{if(!r.checked)return;seg.disposition=r.value;if(r.value==='roundtrip'){seg.returnDepartureDate=seg.arrivalDate;seg.nights=0;}render();});
       ui.body.querySelector('.route-v2-cancel')?.addEventListener('click',ui.close);
       ui.body.querySelector('.route-v2-continue')?.addEventListener('click',()=>{
-        if(!norm(seg.nextDestination)||!seg.nextDepartureDate||!seg.nextDepartureTime||!seg.nextArrivalTime||!seg.nextTransportMode){showInlineError(ui.body,copy('Completa el siguiente lugar, el día, las horas y el medio de transporte para continuar.','Complete the next place, day, times and transport mode to continue.'));return;}
-        if(dateKey(seg.nextDepartureDate,seg.nextDepartureTime)<dateKey(seg.arrivalDate,seg.arrivalTime)){showInlineError(ui.body,copy('No puedes salir del lugar antes de haber llegado.','You cannot leave before arriving.'));return;}
+        if(!norm(seg.nextDestination)||!seg.nextDepartureDate||!seg.nextDepartureTime){showInlineError(ui.body,copy('Para continuar indica el siguiente destino, la fecha de salida y la hora de salida. La llegada y el transporte son opcionales.','To continue, enter the next destination, departure date and departure time. Arrival and transport are optional.'));return;}
+        if(seg.arrivalDate && dateKey(seg.nextDepartureDate,seg.nextDepartureTime)<dateKey(seg.arrivalDate,seg.arrivalTime||'00:00')){showInlineError(ui.body,copy('La fecha y hora del siguiente movimiento no pueden ser anteriores a tu llegada al lugar actual.','The next movement date and time cannot be earlier than your arrival at the current place.'));return;}
         seg.nights=_deriveNights(seg.arrivalDate,seg.nextDepartureDate);
         const current={...seg,disposition:'continue'};
         const originalNext=editWholeRoute?originalEditSegments[editCursor+1]:null;
-        const next=hydrateContinuation({id:originalNext?.id||uid(),baseDestination:meta.city||'',origin:current.destination,destination:norm(current.nextDestination),destinationCountry:current.nextDestinationCountry||'',destinationCountryCode:current.nextDestinationCountryCode||'',departureDate:current.nextDepartureDate,departureTime:current.nextDepartureTime,arrivalDate:originalNext?.arrivalDate||current.nextDepartureDate,arrivalTime:current.nextArrivalTime,transportMode:current.nextTransportMode||'',disposition:originalNext?.disposition||'',returnDepartureDate:originalNext?.returnDepartureDate||'',returnDepartureTime:originalNext?.returnDepartureTime||'',returnArrivalDate:originalNext?.returnArrivalDate||'',returnTransportMode:originalNext?.returnTransportMode||'',resumeTime:originalNext?.resumeTime||'',timePrecision:'exact'},editCursor+1);
+        const next=hydrateContinuation({id:originalNext?.id||uid(),baseDestination:meta.city||'',origin:current.destination,destination:norm(current.nextDestination),destinationCountry:current.nextDestinationCountry||'',destinationCountryCode:current.nextDestinationCountryCode||'',departureDate:current.nextDepartureDate,departureTime:current.nextDepartureTime,arrivalDate:originalNext?.arrivalDate||current.nextDepartureDate,arrivalTime:current.nextArrivalTime||'',transportMode:current.nextTransportMode||'',disposition:originalNext?.disposition||'',returnDepartureDate:originalNext?.returnDepartureDate||'',returnDepartureTime:originalNext?.returnDepartureTime||'',returnArrivalDate:originalNext?.returnArrivalDate||'',returnTransportMode:originalNext?.returnTransportMode||'',resumeTime:originalNext?.resumeTime||'',timePrecision:'exact'},editCursor+1);
         delete current.nextDestination;delete current.nextDestinationCountry;delete current.nextDestinationCountryCode;delete current.nextDepartureDate;delete current.nextDepartureTime;delete current.nextArrivalTime;delete current.nextTransportMode;
         drafts.push(current);editCursor+=1;seg=next;render();
       });
@@ -371,7 +371,9 @@
         const errors=validateSegment(seg,meta);
         if(errors.length){showInlineError(ui.body,errors[0]);return;}
         if(!_validResumeTime(seg)){showInlineError(ui.body,copy('La hora para retomar el Planner no puede ser anterior a la llegada.','Planner resume time cannot be before arrival.'));return;}
-        const all=[...drafts,{...seg}];
+        const all=[...drafts,{...seg}].map(x=>{const clean={...x};delete clean.routeResolution;delete clean.resolvedRoute;delete clean.source_route;return clean;});
+        const chronologyErrors=_routeChronologyErrors(all);
+        if(chronologyErrors.length){showInlineError(ui.body,chronologyErrors[0]);return;}
         if(editWholeRoute) route.segments=route.segments.filter(x=>!originalEditIds.has(x.id));
         else if(existing) route.segments=route.segments.filter(x=>x.id!==existing.id);
         all.forEach(x=>{const i=route.segments.findIndex(y=>y.id===x.id);if(i>=0)route.segments[i]=x;else route.segments.push(x);});
@@ -389,29 +391,40 @@
   function validateSegment(seg,meta=null){
     const errors=[];
     if(!norm(seg.destination)) errors.push(copy('Selecciona un destino de la lista después de escribir al menos 3 letras.','Select a destination from the list after typing at least 3 letters.'));
-    if(!seg.departureDate||!seg.arrivalDate) errors.push(copy('Indica las fechas de salida y llegada.','Enter departure and arrival dates.'));
-    if(!seg.departureTime||!seg.arrivalTime) errors.push(copy('Completa las horas de salida y llegada.','Complete departure and arrival times.'));
-    // Transport belongs to the movement itself and is a prerequisite for every
-    // downstream route decision. Validate it before disposition so the user is
-    // never shown a later-step error while the transfer is still incomplete.
-    if(!seg.transportMode) errors.push(copy('Selecciona el medio de transporte para este traslado antes de continuar.','Select the transport mode for this transfer before continuing.'));
+    if(!seg.departureDate) errors.push(copy('Indica la fecha de salida desde el origen.','Enter the departure date from the origin.'));
+    if(!seg.departureTime) errors.push(copy('Indica la hora de salida desde el origen.','Enter the departure time from the origin.'));
+    // Arrival details and transport are intentionally optional. The canonical
+    // route can estimate them later; only A→B + departure date/time is a hard gate.
     if(!norm(seg.disposition)) errors.push(copy('Indica qué harás después de llegar.','Tell us what you will do after arriving.'));
     const blockEnd=meta?.baseISO?addDays(meta.baseISO,Math.max(0,meta.days-1)):'';
     if(blockEnd&&(seg.departureDate>blockEnd||seg.arrivalDate>blockEnd||seg.returnDepartureDate>blockEnd)) errors.push(copy('Este recorrido supera los días disponibles del destino principal.','This route exceeds the main destination’s available days.'));
     if(seg.disposition==='roundtrip'||seg.disposition==='stay_return'){
       if(!seg.returnDepartureDate) errors.push(copy(`Indica el día en que regresarás a ${meta?.city||'destino base'}.`,`Enter the day you will return to ${meta?.city||'the base destination'}.`));
-      else if(!seg.returnDepartureTime) errors.push(copy(`Indica la hora de salida de ${seg.destination} para regresar a ${meta?.city||'el destino base'}.`,`Enter the departure time from ${seg.destination} to return to ${meta?.city||'the base destination'}.`));
-      else if(!seg.returnArrivalTime) errors.push(copy(`Indica la hora de llegada a ${meta?.city||'el destino base'}.`,`Enter the arrival time at ${meta?.city||'the base destination'}.`));
-      else if(!seg.returnTransportMode) errors.push(copy('Selecciona el medio de transporte para el regreso.','Select the transport mode for the return.'));
+      // Return clock times and transport are optional for excursions/stays.
       if(seg.resumeTime&&seg.returnArrivalTime&&seg.resumeTime<seg.returnArrivalTime) errors.push(copy('La hora para retomar el Planner debe ser igual o posterior a tu llegada.','Planner resume time must be at or after your arrival.'));
     }
-    const out=dateKey(seg.departureDate,seg.departureTime||'00:00'),arr=dateKey(seg.arrivalDate,seg.arrivalTime||'23:59');
+    const out=dateKey(seg.departureDate,seg.departureTime||'00:00'),arr=(seg.arrivalDate&&seg.arrivalTime)?dateKey(seg.arrivalDate,seg.arrivalTime):0;
     if(out&&arr&&arr<out) errors.push(copy('La llegada no puede ocurrir antes de la salida.','Arrival cannot occur before departure.'));
     if((seg.disposition==='roundtrip'||seg.disposition==='stay_return')&&seg.returnDepartureDate){
       const ret=dateKey(seg.returnDepartureDate,seg.returnDepartureTime||'23:59');
       const retArr=dateKey(seg.returnDepartureDate,seg.returnArrivalTime||'23:59');
       if(arr&&ret&&ret<arr) errors.push(copy('El regreso no puede comenzar antes de llegar al lugar.','The return cannot begin before arriving at the place.'));
       if(ret&&retArr&&retArr<ret) errors.push(copy('La llegada al destino base no puede ser anterior a la salida de regreso.','Return arrival cannot be before return departure.'));
+    }
+    return errors;
+  }
+
+  function _routeChronologyErrors(segments=[]){
+    const ordered=[...(segments||[])].filter(Boolean).sort((a,b)=>dateKey(a.departureDate,a.departureTime||'00:00')-dateKey(b.departureDate,b.departureTime||'00:00'));
+    const errors=[];
+    for(let i=1;i<ordered.length;i++){
+      const prev=ordered[i-1],cur=ordered[i];
+      const prevFloor=prev.arrivalDate ? dateKey(prev.arrivalDate,prev.arrivalTime||'00:00') : dateKey(prev.departureDate,prev.departureTime||'00:00');
+      const curOut=dateKey(cur.departureDate,cur.departureTime||'00:00');
+      if(prevFloor&&curOut&&curOut<prevFloor){
+        errors.push(copy(`Revisa las fechas: ${cur.origin} → ${cur.destination} no puede comenzar antes de que termine el movimiento anterior.`,`Check the dates: ${cur.origin} → ${cur.destination} cannot start before the previous movement ends.`));
+        break;
+      }
     }
     return errors;
   }
