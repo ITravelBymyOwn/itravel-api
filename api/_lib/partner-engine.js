@@ -837,19 +837,30 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
 }
 
 async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[],transportRoutes=[]){
-  // Omio is a transport-commerce adapter, not an experience resolver. Canonical
-  // Route Resolver segments own day trips/multimodal legs; owned trip sequence is
-  // only a main-destination fallback. Both paths remain feed-only and fail closed.
-  const [explicitOffers,contextOffers,tripOffers]=await Promise.all([
-    resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs,transportRoutes),
+  // V47 isolation rule: the Workspace canonical A→B bridge is authoritative for
+  // cards already visible in Cómo moverte. Historical Context/trip-sequence paths
+  // are fallback enrichments only and may NEVER suppress a valid feed-backed
+  // canonical offer because one of their own lookups fails.
+  const explicitResult=await Promise.allSettled([
+    resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs,transportRoutes)
+  ]);
+  const explicitOffers=explicitResult[0]?.status==='fulfilled' ? explicitResult[0].value : [];
+  if(explicitResult[0]?.status==='rejected') console.warn('[ITBMO OMIO CANONICAL]', explicitResult[0].reason?.message||explicitResult[0].reason);
+
+  const fallbackResults=await Promise.allSettled([
     resolveOmioContextRoutes(tripId,userId,city,uiLanguage,needs),
     resolveOmioTripRoutes(tripId,userId,city,uiLanguage,needs)
   ]);
+  const contextOffers=fallbackResults[0]?.status==='fulfilled' ? fallbackResults[0].value : [];
+  const tripOffers=fallbackResults[1]?.status==='fulfilled' ? fallbackResults[1].value : [];
+  fallbackResults.forEach((result,index)=>{if(result.status==='rejected')console.warn(`[ITBMO OMIO FALLBACK ${index+1}]`,result.reason?.message||result.reason)});
+
   const out=[],seen=new Set();
   [...explicitOffers,...contextOffers,...tripOffers].forEach(offer=>{
     const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;
     if(!seen.has(key)){seen.add(key);out.push(offer);}
   });
+  console.info('[ITBMO OMIO RESOLUTION]',{city,canonical_routes:Array.isArray(transportRoutes)?transportRoutes.length:0,explicit_offers:explicitOffers.length,context_offers:contextOffers.length,trip_offers:tripOffers.length,total:out.length});
   return out;
 }
 
@@ -897,12 +908,21 @@ export async function resolveCityOffers({
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
 
-  const [viator, getyourguide, omio] = await Promise.all([
+  // Partner adapters are isolated. One provider failure must not blank valid
+  // offers from another provider; especially, experience-partner errors cannot
+  // suppress deterministic Omio transport cards.
+  const resolved = await Promise.allSettled([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[])
   ]);
-  return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
+  const labels=['viator','getyourguide','omio'];
+  const buckets=resolved.map((result,index)=>{
+    if(result.status==='fulfilled')return Array.isArray(result.value)?result.value:[];
+    console.warn(`[ITBMO PARTNER ISOLATION] ${labels[index]}`,result.reason?.message||result.reason);
+    return [];
+  });
+  return { session, offers: rankOffers(buckets.flat()) };
 }
 
 export async function registerPartnerClick({ session_token, trip_id, offer_id, offer_token, placement }) {
