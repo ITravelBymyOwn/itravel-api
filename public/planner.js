@@ -13440,6 +13440,27 @@ function openTripStoryBuilder(){
   overlay.querySelector('[data-stage="route"]').onclick=()=>{if(overlay.querySelector('[data-stage="route"]').disabled)return;activeStay=Math.min(Math.max(0,activeStay),story.stays.length-1);phase=story.stays[activeStay]?.place?'decision':'stay';render();};
   render();
 }
+function _routeResolvedPrincipalMode_(legs=[],direction='',fallback='other'){
+  const dir=String(direction||'').toLowerCase();
+  const pool=(Array.isArray(legs)?legs:[]).filter(leg=>!dir||String(leg?.direction||'').toLowerCase()===dir);
+  const normalize=(value)=>{
+    const key=String(value||'').toLowerCase();
+    if(/train|rail|tren|ferrocarril|rer/.test(key))return 'train';
+    if(/bus|coach|autobus|autocar/.test(key))return 'bus';
+    if(/plane|flight|air|avion|vuelo/.test(key))return 'plane';
+    if(/ferry|ferri|barco/.test(key))return 'ferry';
+    if(/car|coche|auto|drive/.test(key))return 'car';
+    if(/transfer|taxi|metro|walk|pie/.test(key))return 'transfer';
+    return '';
+  };
+  // The card must describe the principal intercity leg, never a local access leg.
+  // Prefer a commerce-eligible leg and, for multimodal chains, the longest one.
+  const ranked=pool.map((leg,index)=>({leg,index,mode:normalize(leg?.mode),minutes:Number(leg?.estimated_minutes||0)||0}))
+    .filter(x=>x.mode)
+    .sort((a,b)=>Number(Boolean(b.leg?.commerce_eligible))-Number(Boolean(a.leg?.commerce_eligible)) || b.minutes-a.minutes || a.index-b.index);
+  return ranked[0]?.mode || normalize(fallback) || 'other';
+}
+
 async function _resolveTripStoryRoutesBeforeGeneration_(){
   const engine=_travelV2(),story=engine?.state?.tripStory;
   if(!story?.stays?.length)return {ok:true,resolved:0};
@@ -13464,7 +13485,7 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
   const byId=new Map(data.routes.map(x=>[String(x.movement_id),x]));let resolved=0;
   for(let i=1;i<story.stays.length;i++){
     const st=story.stays[i],r=byId.get(`main:${st.id}`);if(!r)continue;
-    if(!st.transportMode)st.transportMode=r.primary_mode||'other';
+    if(!st.transportMode)st.transportMode=_routeResolvedPrincipalMode_(Array.isArray(r.legs)?r.legs:[],'main',r.primary_mode||'other');
     if(!st.arrivalDate)st.arrivalDate=r.arrival_date||st.departureDate;
     if(!st.arrivalTime)st.arrivalTime=r.arrival_time||'';
     st.timeStatus=(st.arrivalTime&&r.arrival_time)?'estimated':(st.timeStatus||'estimated');
@@ -13486,10 +13507,10 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
       console.error('[ITBMO ROUTE RESOLVER] incomplete day-trip round trip',dt.place,r);
       throw new Error(`ROUTE_RESOLVER_DAYTRIP_ROUNDTRIP_INCOMPLETE:${dt.place}`);
     }
-    if(!dt.outbound.transportMode)dt.outbound.transportMode=r.primary_mode||out.mode||'other';
+    if(!dt.outbound.transportMode)dt.outbound.transportMode=_routeResolvedPrincipalMode_(legs,'outbound',out.mode||r.primary_mode||'other');
     if(!dt.outbound.departureTime)dt.outbound.departureTime=out.departure_time||r.departure_time||'08:00';
     if(!dt.outbound.arrivalTime)dt.outbound.arrivalTime=outLast.arrival_time||out.arrival_time||'';
-    if(!dt.return.transportMode)dt.return.transportMode=r.primary_mode||ret.mode||dt.outbound.transportMode||'other';
+    if(!dt.return.transportMode)dt.return.transportMode=_routeResolvedPrincipalMode_(legs,'return',ret.mode||dt.outbound.transportMode||r.primary_mode||'other');
     if(!dt.return.departureTime)dt.return.departureTime=ret.departure_time||r.return_departure_time||'';
     if(!dt.return.arrivalTime)dt.return.arrivalTime=retLast.arrival_time||ret.arrival_time||r.return_arrival_time||'';
     if(!dt.return.departureTime||!dt.return.arrivalTime){
