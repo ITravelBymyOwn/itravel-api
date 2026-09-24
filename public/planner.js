@@ -7920,7 +7920,15 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
   // Local Stay QA must audit this Stay's own physical windows. Passing `false`
   // disabled ROUTE_WINDOW_UNDERUSED / ROUTE_WINDOW_TOO_THIN entirely and allowed
   // a nominal row to approve an otherwise empty full day.
-  const audit=(rows)=>filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitAuditBaseDate,{day_contexts:scopedRouteDays},unitDays));
+  const audit=(rows)=>{
+    const base=filterReport(_localGlobalAudit_(unitCity,rows,totalDays,_v3SyntheticMaster_(totalDays),scopedPerDay,unitAuditBaseDate,{day_contexts:scopedRouteDays},unitDays));
+    // A Stay cannot checkpoint while one of its own substantial physical windows
+    // is absent. Catch this locally so repair can fill post-arrival/post-day-trip
+    // windows instead of discovering them only after the deterministic trip merge.
+    const physical=_v3PhysicalWindowCoverage_(rows,[unit]);
+    const missing=physical.missing.map(w=>({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`,instruction:'Plan useful, coherent content inside this authoritative physical window; do not alter fixed transfers.'}));
+    return {...base,errors:[...(base.errors||[]),...missing]};
+  };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
   // Reuse deterministic arithmetic/duplicate cleanup, but only against this Stay
@@ -8869,7 +8877,7 @@ function _showGenerationRetry_(reason=''){
 
   const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
   const es=getLang()==='es';
-  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|MISSING_USER_FIXED_TRANSFER|POST_STORAGE/i.test(String(reason||''));
+  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|POST_STORAGE/i.test(String(reason||''));
   const overlay=document.createElement('div');
   overlay.className='itbmo-postpay-overlay itbmo-generation-recovery-overlay';
   overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-recovery-title" style="position:relative">
@@ -9129,7 +9137,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     if(!allComplete){
       await _persistGenerationCheckpoint_('failed',{active_city:null});
       showWOW(false);
-      const integrityFailure=Object.values(_v3LastFailureByCity_||{}).some(message=>/V3_EXPORT_SHAPE_BLOCK/.test(String(message||'')));
+      const integrityFailure=Object.values(_v3LastFailureByCity_||{}).some(message=>/V3_EXPORT_SHAPE_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|V3_STAY_QUALITY_BLOCK/.test(String(message||'')));
       if($preferencesGenerateV2){
         // Do not expose the old Personalization CTA after generation started.
         // Recovery owns the next action and reuses accepted Stay checkpoints.
@@ -13412,7 +13420,7 @@ function openTripStoryBuilder(){
     if(phase==='movement'){
       const st=story.stays[activeStay],prev=story.stays[activeStay-1];
       active.innerHTML=shell(es?'TRASLADO ENTRE DESTINOS':'BETWEEN-DESTINATION TRANSFER',`${_tripStoryEsc_(prev?.place||'')} → ${_tripStoryEsc_(st.place)}`,es?'Sólo dinos cuándo puedes comenzar. Si ya tienes el transporte, agrégalo; si no, ITBMO resolverá la logística.':'Just tell us when you can start. Add transport if you already have it; otherwise ITBMO will resolve the logistics.',`<div class="gj-form"><label>${es?'Fecha del traslado':'Transfer date'}<input type="date" data-move="departureDate" value="${st.departureDate||st.startDate||''}"></label><label>${es?'¿A partir de qué hora puedes salir?':'From what time can you leave?'}<select data-move="departureTime">${_tripStoryRequiredTimeOptions_(st.departureTime)}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya tienes este traslado definido?':'Do you already have this transfer defined?'}</b><div class="gj-segmented"><button type="button" data-move-knowledge="resolve" class="${st.transportStatus==='user_defined'?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-move-knowledge="known" class="${st.transportStatus==='user_defined'?'is-selected':''}">${es?'Sí, ya tengo mi transporte':'Yes, I already have my transport'}</button></div></div><div class="gj-form gj-full" data-move-details ${st.transportStatus==='user_defined'?'':'hidden'}><label>${es?'Medio de transporte':'Transport'}<select data-move="transportMode">${_tripStoryTransportOptions_(st.transportMode)}</select></label><label>${es?'Fecha de llegada (opcional)':'Arrival date (optional)'}<input type="date" data-move="arrivalDate" value="${st.arrivalDate||''}"></label><label>${es?'Hora de llegada (opcional)':'Arrival time (optional)'}<select data-move="arrivalTime">${_tripStoryTimeOptions_(st.arrivalTime)}</select></label></div></div>`,nextButton(es?'Guardar traslado':'Save transfer','data-save-movement'));
-      active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-move-details]').hidden=!known;if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
+      active.querySelectorAll('[data-move-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.moveKnowledge==='known';st.transportStatus=known?'user_defined':'route_to_resolve';active.querySelectorAll('[data-move-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-move-details]').hidden=!known;if(!known){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}persist();});active.querySelectorAll('[data-move]').forEach(x=>x.onchange=()=>{st[x.dataset.move]=x.value;persist();});active.querySelector('[data-save-movement]').onclick=()=>{const depDate=active.querySelector('[data-move="departureDate"]')?.value||'';const depTime=active.querySelector('[data-move="departureTime"]')?.value||'';st.departureDate=depDate;st.departureTime=depTime;if(!depDate||!depTime){active.querySelector('[data-move="departureDate"]')?.classList.toggle('is-invalid',!depDate);active.querySelector('[data-move="departureTime"]')?.classList.toggle('is-invalid',!depTime);return;}const prevEnd=_tripStoryStayEnd_(prev);if(prevEnd&&depDate<prevEnd){alert(es?`La salida de ${prev.place} hacia ${st.place} no puede ser el ${_tripStoryDMY_(depDate)} porque ${prev.place} está planificado hasta el ${_tripStoryDMY_(prevEnd)}. Usa ${_tripStoryDMY_(prevEnd)} o una fecha posterior.`:`The departure from ${prev.place} to ${st.place} cannot be ${_tripStoryDMY_(depDate)} because ${prev.place} is planned through ${_tripStoryDMY_(prevEnd)}. Use ${_tripStoryDMY_(prevEnd)} or a later date.`);active.querySelector('[data-move="departureDate"]')?.classList.add('is-invalid');return;}if(st.transportStatus!=='user_defined'){st.transportMode='';st.arrivalDate='';st.arrivalTime='';st.routeResolution=null;}else{active.querySelectorAll('[data-move]').forEach(x=>st[x.dataset.move]=x.value);}persist();phase='decision';render();};return;
     }
     if(phase==='return'){
       const last=story.stays.at(-1);
@@ -13478,10 +13486,10 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
       console.error('[ITBMO ROUTE RESOLVER] incomplete day-trip round trip',dt.place,r);
       throw new Error(`ROUTE_RESOLVER_DAYTRIP_ROUNDTRIP_INCOMPLETE:${dt.place}`);
     }
-    if(!dt.outbound.transportMode)dt.outbound.transportMode=out.mode||r.primary_mode||'other';
+    if(!dt.outbound.transportMode)dt.outbound.transportMode=r.primary_mode||out.mode||'other';
     if(!dt.outbound.departureTime)dt.outbound.departureTime=out.departure_time||r.departure_time||'08:00';
     if(!dt.outbound.arrivalTime)dt.outbound.arrivalTime=outLast.arrival_time||out.arrival_time||'';
-    if(!dt.return.transportMode)dt.return.transportMode=ret.mode||dt.outbound.transportMode||'other';
+    if(!dt.return.transportMode)dt.return.transportMode=r.primary_mode||ret.mode||dt.outbound.transportMode||'other';
     if(!dt.return.departureTime)dt.return.departureTime=ret.departure_time||r.return_departure_time||'';
     if(!dt.return.arrivalTime)dt.return.arrivalTime=retLast.arrival_time||ret.arrival_time||r.return_arrival_time||'';
     if(!dt.return.departureTime||!dt.return.arrivalTime){
