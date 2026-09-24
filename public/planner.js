@@ -7018,8 +7018,20 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
   }
   stays.forEach((st,si)=>(st.dayTrips||[]).forEach((dt,di)=>{
     const date=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
-    push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-out`,day:dayForDate(date),date,origin:st.place,destination:dt.place,departure:dt.outbound?.departureTime||'',arrival:dt.outbound?.arrivalTime||'',mode:dt.outbound?.transportMode||'other',direction:'daytrip_out',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',route_resolution:dt.routeResolution||null});
-    push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-return`,day:dayForDate(date),date,origin:dt.place,destination:st.place,departure:dt.return?.departureTime||'',arrival:dt.return?.arrivalTime||'',mode:dt.return?.transportMode||dt.outbound?.transportMode||'other',direction:'daytrip_return',source:dt.return?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',route_resolution:dt.routeResolution||null});
+    // V48 deterministic reconciliation: excursion clock fields are optional for
+    // the traveler. If a transient UI/state write has not copied the resolver
+    // result yet, recover the canonical times from the already-resolved legs.
+    const legs=Array.isArray(dt.routeResolution?.legs)?dt.routeResolution.legs:[];
+    const outLegs=legs.filter(x=>String(x?.direction||'').toLowerCase()==='outbound');
+    const retLegs=legs.filter(x=>String(x?.direction||'').toLowerCase()==='return');
+    const outFirst=outLegs[0]||{},outLast=outLegs.at(-1)||outFirst;
+    const retFirst=retLegs[0]||{},retLast=retLegs.at(-1)||retFirst;
+    const outDeparture=dt.outbound?.departureTime||outFirst.departure_time||'';
+    const outArrival=dt.outbound?.arrivalTime||outLast.arrival_time||outFirst.arrival_time||'';
+    const retDeparture=dt.return?.departureTime||retFirst.departure_time||'';
+    const retArrival=dt.return?.arrivalTime||retLast.arrival_time||retFirst.arrival_time||'';
+    push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-out`,day:dayForDate(date),date,origin:st.place,destination:dt.place,departure:outDeparture,arrival:outArrival,mode:dt.outbound?.transportMode||outFirst.mode||'other',direction:'daytrip_out',source:dt.outbound?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',route_resolution:dt.routeResolution||null});
+    push({transfer_id:`story-daytrip-${dt.id||`${si}-${di}`}-return`,day:dayForDate(date),date,origin:dt.place,destination:st.place,departure:retDeparture,arrival:retArrival,mode:dt.return?.transportMode||retFirst.mode||dt.outbound?.transportMode||'other',direction:'daytrip_return',source:dt.return?.timeStatus==='estimated'?'ROUTE_ESTIMATED':'USER_FIXED',route_resolution:dt.routeResolution||null});
   }));
   // A Day Trip is a round trip by definition. Both directions are first-class
   // canonical movements, even when ITBMO (Route Resolver) estimated the times.
@@ -7456,34 +7468,29 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     let changed=false;
     const byDay=_rowsByDayObject_(out);
 
-    // V47 deterministic micro-overlap repair. A small overlap is arithmetic,
-    // not a creative itinerary problem: move the later row forward by exactly
-    // the conflicting minutes while preserving its duration. Apply only when the
-    // overlap is <=30 minutes and the shifted row still fits completely inside
-    // its authoritative physical planning window. Larger/unsafe conflicts remain
-    // model-repair findings, preserving the existing quality safety net.
+    // V48 deterministic micro-overlap repair. Treat a <=30 minute activity
+    // overlap as arithmetic, but accept the shift only transactionally: re-run
+    // the SAME audit and keep the candidate only when it removes that overlap
+    // without increasing the total number of hard findings. Otherwise rollback
+    // and let the existing model repair/retry path handle it unchanged.
     for(const error of errors.filter(e=>e.code==='OVERLAP')){
       const day=Number(error?.day||0),rowNum=Number(error?.row||0);
-      const arr=byDay[day]||[],row=rowNum?arr[rowNum-1]:null,prev=rowNum>1?arr[rowNum-2]:null;
+      const currentByDay=_rowsByDayObject_(out),arr=currentByDay[day]||[];
+      const row=rowNum?arr[rowNum-1]:null,prev=rowNum>1?arr[rowNum-2]:null;
       if(!row||!prev||_isPureTransportRow_(row)||_isPureTransportRow_(prev))continue;
       const rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end),pe=_hhmmToMinutes_(prev.end);
       if(rs==null||re==null||pe==null||re<=rs||pe<=rs)continue;
       const overlap=pe-rs;if(overlap<=0||overlap>30)continue;
-      const shiftedStart=rs+overlap,shiftedEnd=re+overlap;
-      const routeDays=Array.isArray(contract?.route_days)?contract.route_days:[];
-      const dayCtx=routeDays.find(d=>Number(d?.day)===day)||{};
-      const windows=Array.isArray(dayCtx?.location_windows)?dayCtx.location_windows:[];
-      const rowLocation=_canonicalText_(row?.physical_location||row?.from||row?.to||'');
-      const compatible=windows.filter(w=>{
-        const ws=_hhmmToMinutes_(w?.start),we=_hhmmToMinutes_(w?.end);
-        if(ws!=null&&shiftedStart<ws)return false;
-        if(we!=null&&shiftedEnd>we)return false;
-        const wl=_canonicalText_(w?.location||'');
-        return !rowLocation||!wl||rowLocation===wl||rowLocation.includes(wl)||wl.includes(rowLocation);
-      });
-      if(windows.length&&!compatible.length)continue;
-      row.start=_minutesToHHMM_(shiftedStart);row.end=_minutesToHHMM_(shiftedEnd);changed=true;
-      console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:row.start,end:row.end});
+      const candidate=JSON.parse(JSON.stringify(out));
+      const candidateByDay=_rowsByDayObject_(candidate),candidateRow=(candidateByDay[day]||[])[rowNum-1];
+      if(!candidateRow)continue;
+      candidateRow.start=_minutesToHHMM_(rs+overlap);candidateRow.end=_minutesToHHMM_(re+overlap);
+      const candidateReport=_localGlobalAudit_(city,candidate,totalDays,master,perDay,baseDate,routeContextOverride,expectedDaysOverride);
+      const candidateErrors=candidateReport?.errors||[];
+      const sameOverlap=candidateErrors.some(e=>e.code==='OVERLAP'&&Number(e?.day||0)===day&&Number(e?.row||0)===rowNum);
+      if(sameOverlap||candidateErrors.length>errors.length)continue;
+      out=candidate;changed=true;
+      console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:candidateRow.start,end:candidateRow.end});
     }
 
     // Timeline/duration defects are arithmetic, not creative-writing problems.
@@ -8925,6 +8932,13 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
+  // V48 completed itinerary is authoritative over stale recovery flags.
+  if(savedDestinations.length && savedDestinations.every(({city})=>_generationCityComplete_(city))){
+    console.info('[ITBMO RECOVERY GUARD] suppressed stale recovery modal for completed itinerary');
+    document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
+    setPlanningChatLocked(false);
+    return;
+  }
   showWOW(false);
   setPlanningChatLocked(true);
   qs('#itbmo-generation-retry')?.remove();
@@ -9205,7 +9219,8 @@ async function runPaidGeneration({manualRetry=false}={}){
       return;
     }
 
-    await _queueGenerationCheckpoint_('generated',{active_city:null,last_error:null});
+    await _queueGenerationCheckpoint_('generated',{active_city:null,last_error:null,pending_cities:[]});
+    generationRecoveryState={...(generationRecoveryState||{}),last_error:null,pending_cities:[],completed_cities:savedDestinations.map(x=>x.city)};
     // Publication is the critical transaction boundary. Show downloads first;
     // analytics/context warming must never be able to suppress the completion UI.
     _applyGeneratedUIState({showModal:true});
