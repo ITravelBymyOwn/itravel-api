@@ -799,6 +799,23 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
   return out;
 }
 
+
+async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[]){
+  // Omio is a transport-commerce adapter, not an experience resolver. Canonical
+  // Route Resolver segments own day trips/multimodal legs; owned trip sequence is
+  // only a main-destination fallback. Both paths remain feed-only and fail closed.
+  const [contextOffers,tripOffers]=await Promise.all([
+    resolveOmioContextRoutes(tripId,userId,city,uiLanguage,needs),
+    resolveOmioTripRoutes(tripId,userId,city,uiLanguage,needs)
+  ]);
+  const out=[],seen=new Set();
+  [...contextOffers,...tripOffers].forEach(offer=>{
+    const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;
+    if(!seen.has(key)){seen.add(key);out.push(offer);}
+  });
+  return out;
+}
+
 function rankOffers(offers) {
   const resolution = { context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
@@ -842,22 +859,11 @@ export async function resolveCityOffers({
   const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
   const safeTripLanguage = normalizeLanguage(trip_language);
 
-  const [viator, getyourguide, omioContext, omioTrip] = await Promise.all([
+  const [viator, getyourguide, omio] = await Promise.all([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioContextRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds),
-    resolveOmioTripRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
+    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
   ]);
-  // Prefer Route Resolver segment offers because they preserve the exact multimodal
-  // structure. Restore the proven trip-sequence resolver as a safe city-to-city
-  // fallback for main destinations: it uses owned trip countries for Europe-only
-  // eligibility and never manufactures station/airport slugs. Day trips continue
-  // to come exclusively from resolved commerce_eligible segments.
-  const omio=[]; const seenOmio=new Set();
-  [...omioContext,...omioTrip].forEach(offer=>{
-    const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;
-    if(!seenOmio.has(key)){seenOmio.add(key);omio.push(offer);}
-  });
   return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
 }
 
