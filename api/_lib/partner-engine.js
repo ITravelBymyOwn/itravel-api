@@ -804,16 +804,49 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
 }
 
 
-async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[]){
+async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],transportRoutes=[]){
+  // V46 deterministic bridge: resolve the same canonical commercial A→B legs
+  // that the Workspace visibly renders. This bypasses Context need reconstruction
+  // only; it never bypasses Omio feed authority, attribution validation, session
+  // ownership, partner approval, or signed-click protection.
+  if(!Array.isArray(transportRoutes)||!transportRoutes.length)return [];
+  const [partner,legacyTemplate]=await Promise.all([getPartner('omio'),getOmioTemplate()]);
+  if(!partner||!partner.enabled||partner.status!=='approved')return [];
+  const template=omioFeedTemplate(partner,legacyTemplate);
+  const localeResolution=resolvePartnerLocale('omio',uiLanguage);
+  const needById=new Map((Array.isArray(needs)?needs:[]).filter(Boolean).map(n=>[clean(n?.id,120),n]));
+  const out=[];const seen=new Set();
+  for(const raw of transportRoutes.slice(0,24)){
+    const origin=omioCommercialEndpoint(clean(raw?.origin,120));
+    const destination=omioCommercialEndpoint(clean(raw?.destination,120));
+    if(!origin||!destination||normalizeKey(origin)===normalizeKey(destination))continue;
+    const catalog=omioCatalogRoute(origin,destination,localeResolution.locale);
+    const targetUrl=clean(catalog?.target_url,1400);
+    if(!targetUrl||!hasRequiredAttribution('omio',targetUrl))continue;
+    const needId=clean(raw?.need_id,120);
+    const need=needById.get(needId)||{id:needId||`workspace-route:${normalizeKey(origin)}:${normalizeKey(destination)}`,need_type:'intercity_transport',entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,city,travel_date:clean(raw?.travel_date,40),derived_by:'workspace_canonical_route'};
+    const key=`${needId}|${normalizeKey(origin)}|${normalizeKey(destination)}|${Number(raw?.index||1)}`;
+    if(seen.has(key))continue;seen.add(key);
+    const routeLabel=`${origin} → ${destination}`;
+    out.push({...template,id:template?.id||`omio-feed:${catalog.route_id}:${normalizeKey(origin)}:${normalizeKey(destination)}`,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
+      description_es:'Compara opciones disponibles para este tramo del traslado.',description_en:'Compare available options for this leg of the journey.',target_url:undefined,confidence:'high',need_id:need.id,need_type:need.need_type||'intercity_transport',entity_name:routeLabel,city,travel_date:clean(raw?.travel_date||need?.travel_date,40)||null,resolution_type:'workspace_canonical_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
+      route_segment:{index:Number(raw?.index||1),mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120)},
+      partner:{id:partner.id,slug:partner.slug,name:partner.name},offer_token:signResolvedOffer({template,partner,targetUrl,placement:'city_transport',need:{...need,entity_name:routeLabel},city,resolutionType:'workspace_canonical_route',travelDate:clean(raw?.travel_date||need?.travel_date,40),partnerLocale:localeResolution.locale})});
+  }
+  return out;
+}
+
+async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[],transportRoutes=[]){
   // Omio is a transport-commerce adapter, not an experience resolver. Canonical
   // Route Resolver segments own day trips/multimodal legs; owned trip sequence is
   // only a main-destination fallback. Both paths remain feed-only and fail closed.
-  const [contextOffers,tripOffers]=await Promise.all([
+  const [explicitOffers,contextOffers,tripOffers]=await Promise.all([
+    resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs,transportRoutes),
     resolveOmioContextRoutes(tripId,userId,city,uiLanguage,needs),
     resolveOmioTripRoutes(tripId,userId,city,uiLanguage,needs)
   ]);
   const out=[],seen=new Set();
-  [...contextOffers,...tripOffers].forEach(offer=>{
+  [...explicitOffers,...contextOffers,...tripOffers].forEach(offer=>{
     const key=`${normalizeKey(offer?.entity_name)}|${offer?.travel_date||''}`;
     if(!seen.has(key)){seen.add(key);out.push(offer);}
   });
@@ -821,7 +854,7 @@ async function resolveOmioTransportOffers(tripId,userId,city,uiLanguage,needs=[]
 }
 
 function rankOffers(offers) {
-  const resolution = { context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
+  const resolution = { workspace_canonical_route: 42, context_resolved_route_segment: 41, trip_sequence_route: 40, context_intercity_route: 39, context_search_admission: 38, context_search_experience: 35, context_search: 35, static: 10 };
   const confidence = { high: 3, medium: 2, low: 1 };
   return [...offers].sort((a, b) => {
     const ra = resolution[a?.resolution_type] || 0;
@@ -853,7 +886,8 @@ export async function resolveCityOffers({
   language = 'es',
   ui_language = '',
   trip_language = '',
-  needs = []
+  needs = [],
+  transport_routes = []
 }) {
   const session = await resolveSession(session_token);
   if (!session) return { session: null, offers: [] };
@@ -866,7 +900,7 @@ export async function resolveCityOffers({
   const [viator, getyourguide, omio] = await Promise.all([
     resolveExperiencePartner('viator', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
     resolveExperiencePartner('getyourguide', safeNeeds, safeCity, safeUiLanguage, safeTripLanguage),
-    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds)
+    resolveOmioTransportOffers(trip_id, session.user_id, safeCity, safeUiLanguage, safeNeeds, Array.isArray(transport_routes)?transport_routes:[])
   ]);
   return { session, offers: rankOffers([...viator, ...getyourguide, ...omio]) };
 }
