@@ -569,7 +569,6 @@ async function resolveExperiencePartner(slug, needs, city, uiLanguage, tripLangu
       partner_locale: localeResolution.locale,
       locale_applied: localeResolution.applied,
       provider_entity_id: null,
-      route_segment: { index: 1, mode: catalog?.travel_mode || '', commercial_origin: route.origin, commercial_destination: route.destination, parent_origin: route.origin, parent_destination: route.destination },
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({
         template,
