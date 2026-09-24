@@ -7456,6 +7456,36 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
     let changed=false;
     const byDay=_rowsByDayObject_(out);
 
+    // V47 deterministic micro-overlap repair. A small overlap is arithmetic,
+    // not a creative itinerary problem: move the later row forward by exactly
+    // the conflicting minutes while preserving its duration. Apply only when the
+    // overlap is <=30 minutes and the shifted row still fits completely inside
+    // its authoritative physical planning window. Larger/unsafe conflicts remain
+    // model-repair findings, preserving the existing quality safety net.
+    for(const error of errors.filter(e=>e.code==='OVERLAP')){
+      const day=Number(error?.day||0),rowNum=Number(error?.row||0);
+      const arr=byDay[day]||[],row=rowNum?arr[rowNum-1]:null,prev=rowNum>1?arr[rowNum-2]:null;
+      if(!row||!prev||_isPureTransportRow_(row)||_isPureTransportRow_(prev))continue;
+      const rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end),pe=_hhmmToMinutes_(prev.end);
+      if(rs==null||re==null||pe==null||re<=rs||pe<=rs)continue;
+      const overlap=pe-rs;if(overlap<=0||overlap>30)continue;
+      const shiftedStart=rs+overlap,shiftedEnd=re+overlap;
+      const routeDays=Array.isArray(contract?.route_days)?contract.route_days:[];
+      const dayCtx=routeDays.find(d=>Number(d?.day)===day)||{};
+      const windows=Array.isArray(dayCtx?.location_windows)?dayCtx.location_windows:[];
+      const rowLocation=_canonicalText_(row?.physical_location||row?.from||row?.to||'');
+      const compatible=windows.filter(w=>{
+        const ws=_hhmmToMinutes_(w?.start),we=_hhmmToMinutes_(w?.end);
+        if(ws!=null&&shiftedStart<ws)return false;
+        if(we!=null&&shiftedEnd>we)return false;
+        const wl=_canonicalText_(w?.location||'');
+        return !rowLocation||!wl||rowLocation===wl||rowLocation.includes(wl)||wl.includes(rowLocation);
+      });
+      if(windows.length&&!compatible.length)continue;
+      row.start=_minutesToHHMM_(shiftedStart);row.end=_minutesToHHMM_(shiftedEnd);changed=true;
+      console.info(`[ITBMO V3 DETERMINISTIC OVERLAP] ${city} · day ${day} · row ${rowNum} · +${overlap} min`,{from:error.start,to:row.start,end:row.end});
+    }
+
     // Timeline/duration defects are arithmetic, not creative-writing problems.
     for(const error of errors){
       const day=Number(error?.day||0), rowNum=Number(error?.row||0);
