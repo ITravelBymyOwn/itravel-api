@@ -533,7 +533,13 @@
             if(arrivalStay){
               const arrivalDayIndex=Math.max(0,Math.round((dateKey(ctx.date)-dateKey(arrivalStay.startDate))/86400000));
               const arrivalEnd=arrivalStay.perDay?.[arrivalDayIndex]?.end||'';
-              if(arrivalEnd) ctx._dayEnd=arrivalEnd;
+              // Ownership changes at the arrival boundary even when the arriving
+              // Stay has no explicit end time. Keeping the origin Stay's clamped
+              // departure end here (e.g. 15:00) suppresses the valid post-arrival
+              // window because the arrival cursor is later (e.g. 17:00). An empty
+              // destination end means an intentional open-ended window, not
+              // "reuse the origin end".
+              ctx._dayEnd=arrivalEnd||null;
             }
           }
         }
