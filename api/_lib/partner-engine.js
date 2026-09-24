@@ -120,8 +120,50 @@ function loadOmioCatalog(locale = 'en') {
   }
 }
 
+function omioCatalogEndpointCompatible(requested = '', feedEndpoint = '') {
+  const a = normalizeKey(requested);
+  const b = normalizeKey(feedEndpoint);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  // Route Resolver can legitimately retain a station qualifier after the generic
+  // terminal cleanup (e.g. "Madrid Clara Campoamor"), while the official Omio
+  // feed is city-to-city ("Madrid"). Accept only a token-boundary containment
+  // relationship. This resolves an endpoint name; it NEVER creates a deeplink.
+  return a.startsWith(`${b} `) || b.startsWith(`${a} `);
+}
+
 function omioCatalogRoute(origin, destination, locale = 'en') {
-  return loadOmioCatalog(locale).get(`${normalizeKey(origin)}|${normalizeKey(destination)}`) || null;
+  const catalog = loadOmioCatalog(locale);
+  const exact = catalog.get(`${normalizeKey(origin)}|${normalizeKey(destination)}`) || null;
+  if (exact) return exact;
+
+  // Fail-closed feed lookup fallback. V25 proved that the Route Resolver's A→B
+  // commercial segments are the correct source for the Workspace cards. V41
+  // keeps that flow, but unlike V25 the URL MUST come from an official feed row.
+  // If endpoint normalization yields more than one possible route_id, no offer is
+  // emitted rather than guessing or constructing an Omio URL.
+  const matches = new Map();
+  let bestScore = -1;
+  const requestedOrigin = normalizeKey(origin);
+  const requestedDestination = normalizeKey(destination);
+  for (const [key, entry] of catalog.entries()) {
+    const split = key.indexOf('|');
+    if (split < 1) continue;
+    const feedOrigin = key.slice(0, split);
+    const feedDestination = key.slice(split + 1);
+    if (!omioCatalogEndpointCompatible(origin, feedOrigin) || !omioCatalogEndpointCompatible(destination, feedDestination)) continue;
+    // Prefer the feed row whose city endpoints most closely match the resolver's
+    // commercial endpoints. This deterministically prefers Madrid→Segovia over a
+    // station-specific Madrid→Segovia Guiomar row without hardcoding either city.
+    const score = (requestedOrigin === feedOrigin ? 1 : 0) + (requestedDestination === feedDestination ? 1 : 0);
+    if (score < bestScore) continue;
+    if (score > bestScore) { matches.clear(); bestScore = score; }
+    const routeId = clean(entry?.route_id, 120);
+    if (routeId && !matches.has(routeId)) matches.set(routeId, entry);
+  }
+  const match = matches.size === 1 ? [...matches.values()][0] : null;
+  if (match) console.info('[ITBMO OMIO FEED MATCH]', { locale: locale === 'es' ? 'es' : 'en', origin: clean(origin,120), destination: clean(destination,120), route_id: match.route_id });
+  return match;
 }
 
 
