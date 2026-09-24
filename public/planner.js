@@ -6569,16 +6569,22 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const lastEnd=_hhmmToMinutes_(chronological[chronological.length-1]?.end);
         const leadingGap=firstStart==null?0:Math.max(0,firstStart-ws);
         const trailingGap=(we==null||lastEnd==null)?0:Math.max(0,we-lastEnd);
-        let largestInternalGap=0;
+        let largestInternalGap=0,unexplainedMealGap=0;
         for(let i=1;i<chronological.length;i++){
           const prevEnd=_hhmmToMinutes_(chronological[i-1]?.end),nextStart=_hhmmToMinutes_(chronological[i]?.start);
-          if(prevEnd!=null&&nextStart!=null)largestInternalGap=Math.max(largestInternalGap,Math.max(0,nextStart-prevEnd));
+          if(prevEnd!=null&&nextStart!=null){
+            const gap=Math.max(0,nextStart-prevEnd);largestInternalGap=Math.max(largestInternalGap,gap);
+            // A substantial midday hole is usually a real meal/rest opportunity.
+            // Represent it explicitly instead of making 60–90 minutes disappear,
+            // but do not tighten ordinary short transitions elsewhere in the day.
+            if(gap>=60 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
+          }
         }
-        if(leadingGap>=150 || trailingGap>=150 || largestInternalGap>=120){
+        if(leadingGap>=150 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>=60){
           errors.push({
             code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
-            leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,
-            instruction:`Use the substantial available time in ${window.location} coherently. Do not leave multi-hour unexplained gaps; include meals/rest only where they naturally belong and preserve a realistic, non-overloaded pace.`
+            leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,unexplained_meal_gap_minutes:unexplainedMealGap,
+            instruction:`Use the substantial available time in ${window.location} coherently. Do not leave multi-hour or substantial midday gaps unexplained; represent a natural meal/rest when that is what the chronology requires, preserve a realistic non-overloaded pace, and never add filler merely to occupy time.`
           });
         }
       }
@@ -7985,7 +7991,26 @@ Repair ONLY the supplied scope. Preserve all valid content you can. Keep every r
     // return only a subset of days; merge only the days actually returned and keep
     // every healthy day/window outside that response frozen.
     const returnedDaySet=new Set(candidate.map(r=>Number(r.day)).filter(Boolean));
-    const mergedCandidate=[...rows.filter(r=>!returnedDaySet.has(Number(r.day))),...candidate]
+    // A repair response is a patch, not permission to erase healthy parts of a
+    // returned day. Preserve existing non-overlapping rows that the model omitted,
+    // except rows explicitly implicated by the validator finding being repaired.
+    // This prevents a one-day duplicate-POI repair from silently deleting a whole
+    // morning/afternoon while still allowing the offending POI to disappear.
+    const implicatedPoiKeys=new Set(repairFindings.flatMap(f=>[f?.first,f?.second,f?.poi,f?.entity_name]).map(_canonicalText_).filter(Boolean));
+    const candidateByDay=new Map();
+    candidate.forEach(r=>{const d=Number(r.day);if(!candidateByDay.has(d))candidateByDay.set(d,[]);candidateByDay.get(d).push(r);});
+    const preservedReturnedDayRows=rows.filter(r=>{
+      const day=Number(r.day);if(!returnedDaySet.has(day))return false;
+      const rowPoiKeys=[r?.activity,r?.from,r?.to].map(_canonicalText_).filter(Boolean);
+      if(rowPoiKeys.some(k=>[...implicatedPoiKeys].some(p=>p&&(k===p||k.includes(p)||p.includes(k)))))return false;
+      const rs=_hhmmToMinutes_(r.start),re=_hhmmToMinutes_(r.end);
+      if(rs==null||re==null)return false;
+      return !(candidateByDay.get(day)||[]).some(c=>{
+        const cs=_hhmmToMinutes_(c.start),ce=_hhmmToMinutes_(c.end);
+        return cs!=null&&ce!=null&&Math.max(rs,cs)<Math.min(re,ce);
+      });
+    });
+    const mergedCandidate=[...rows.filter(r=>!returnedDaySet.has(Number(r.day))),...preservedReturnedDayRows,...candidate]
       .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
     normalized=_v3DeterministicQualityCleanup_(unitCity,mergedCandidate,scopedContract,totalDays,scopedPerDay,unitAuditBaseDate,false,unitDays);
     const nextRows=_v3StampStayRows_(normalized.rows,unit);
