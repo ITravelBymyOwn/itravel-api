@@ -639,9 +639,30 @@ function partnerOptions(offers=[]){
   }).join('')}</div>`;
 }
 
+function omioTransportRoutesForRequest(needs=[]){
+  // Flatten the exact commercial legs already rendered in Cómo moverte. This is
+  // transport-commerce input only: it does not alter itinerary generation or the
+  // Route Resolver. The server still validates every A→B against the official
+  // bundled Omio feed before it can emit a signed offer.
+  const out=[];const seen=new Set();
+  (Array.isArray(needs)?needs:[]).forEach(need=>{
+    if(need?.need_type!=='intercity_transport'&&need?.need_type!=='transport_arrangement')return;
+    const route=parseResolvedRouteSource(need?.source_route);if(!route)return;
+    (route.legs||[]).filter(leg=>leg?.commerce_eligible).forEach((leg,index)=>{
+      const origin=String(leg?.commercial_origin||leg?.origin||'').trim();
+      const destination=String(leg?.commercial_destination||leg?.destination||'').trim();
+      if(!origin||!destination)return;
+      const key=`${need?.id||''}|${origin}|${destination}|${leg?.index||index+1}`;
+      if(seen.has(key))return;seen.add(key);
+      out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin,destination,index:Number(leg?.index||index+1),mode:String(leg?.mode||''),travel_date:need?.travel_date||'',parent_origin:route?.parent?.origin||'',parent_destination:route?.parent?.destination||''});
+    });
+  });
+  return out;
+}
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
-  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs})});
+  const transport_routes=action==='resolve_city'?omioTransportRoutesForRequest(needs):[];
+  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs,transport_routes})});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
   return Array.isArray(payload.offers)?payload.offers:[];
