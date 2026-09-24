@@ -445,6 +445,21 @@ function parseResolvedRouteSource(value=''){
   const text=String(value||'');if(!text.startsWith('ITBMO_ROUTE_V1|'))return null;
   try{const parsed=JSON.parse(decodeURIComponent(text.slice('ITBMO_ROUTE_V1|'.length)));return parsed&&Array.isArray(parsed.legs)?parsed:null}catch(_){return null}
 }
+
+function mobilityLegNote(note=''){
+  const raw=String(note||'').trim();
+  if(lang!=='es') return raw || 'Schedules may change. Check current times and availability before booking.';
+  const looksEnglish=/\b(train|bus|flight|schedules?|check|confirm|connection|airport|station|book|booking|available|availability|times?)\b/i.test(raw);
+  const verification='Verifica horarios actualizados, disponibilidad y condiciones antes de reservar.';
+  if(!raw||looksEnglish)return verification;
+  if(/verifica|confirma|horario|disponibilidad/i.test(raw))return raw;
+  return `${raw} ${verification}`;
+}
+function omioOptions(offers=[]){
+  const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio');
+  if(!list.length)return'';
+  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
+}
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
   const allLegs=route.legs||[];if(!allLegs.length)return'';
@@ -462,7 +477,7 @@ function renderResolvedTransportSegments(item,matched=[]){
       return byIndex||byRoute;
     });
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div>${leg.note?`<p>${esc(leg.note)}</p>`:''}${legOffers.length?partnerOptions(legOffers):''}</div>`;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
   }).join('')}</div>`:'';
   const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
   return commercial+logistics;
@@ -640,7 +655,7 @@ function partnerOptions(offers=[]){
 }
 
 function omioTransportRoutesForRequest(needs=[]){
-  // Flatten the exact commercial legs already rendered in Cómo moverte. This is
+  // V48: Flatten the exact commercial legs already rendered in Cómo moverte. This is
   // transport-commerce input only: it does not alter itinerary generation or the
   // Route Resolver. The server still validates every A→B against the official
   // bundled Omio feed before it can emit a signed offer.
