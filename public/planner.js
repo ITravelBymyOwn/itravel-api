@@ -6580,7 +6580,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
             if(gap>=60 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
           }
         }
-        if(leadingGap>=150 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>=60){
+        if(leadingGap>=120 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>=60){
           errors.push({
             code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
             leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,unexplained_meal_gap_minutes:unexplainedMealGap,
