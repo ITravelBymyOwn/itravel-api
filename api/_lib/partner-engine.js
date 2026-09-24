@@ -569,6 +569,7 @@ async function resolveExperiencePartner(slug, needs, city, uiLanguage, tripLangu
       partner_locale: localeResolution.locale,
       locale_applied: localeResolution.applied,
       provider_entity_id: null,
+      route_segment: { index: 1, mode: catalog?.travel_mode || '', commercial_origin: route.origin, commercial_destination: route.destination, parent_origin: route.origin, parent_destination: route.destination },
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({
         template,
@@ -680,7 +681,7 @@ async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, needs=[])
       source_activity: routeLabel, city: route.origin, travel_date: route.travel_date, derived_by: 'trip_sequence'
     };
     result.push({
-      ...template, placement: 'city_transport', title_es: routeLabel, title_en: routeLabel,
+      ...template, id: template?.id || `omio-feed:${catalog.route_id}:${normalizeKey(route.origin)}:${normalizeKey(route.destination)}`, placement: 'city_transport', title_es: routeLabel, title_en: routeLabel,
       description_es: 'Compara opciones de tren, bus y otras conexiones entre tus destinos principales.',
       description_en: 'Compare train, bus and other connections between your main trip destinations.',
       target_url: undefined, confidence: 'high', need_id: need.id || route.id, need_type: need.need_type || 'intercity_transport',
@@ -790,9 +791,9 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
       const targetUrl=clean(catalog?.target_url,1400);
       if(!targetUrl || !hasRequiredAttribution('omio',targetUrl))continue;
       const routeLabel=`${route.origin} → ${route.destination}`;
-      out.push({...template,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
+      out.push({...template,id:template?.id||`omio-feed:${catalog.route_id}:${normalizeKey(route.origin)}:${normalizeKey(route.destination)}`,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
         description_es:'Compara opciones disponibles para este tramo del traslado.',description_en:'Compare available options for this leg of the journey.',target_url:undefined,confidence:resolvedSegments.length?'high':'medium',need_id:need.id,need_type:need.need_type,entity_name:routeLabel,city,travel_date:need.travel_date||null,resolution_type:resolvedSegments.length?'context_resolved_route_segment':'context_intercity_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
-        route_segment:{index:route.segment_index||1,mode:route.mode||'',parent_origin:route.parent_origin||'',parent_destination:route.parent_destination||'',parent_summary:route.parent_summary||''},
+        route_segment:{index:route.segment_index||1,mode:route.mode||'',commercial_origin:route.origin||'',commercial_destination:route.destination||'',parent_origin:route.parent_origin||'',parent_destination:route.parent_destination||'',parent_summary:route.parent_summary||''},
         partner:{id:partner.id,slug:partner.slug,name:partner.name},offer_token:signResolvedOffer({template,partner,targetUrl,placement:'city_transport',need:{...need,entity_name:routeLabel},city,resolutionType:resolvedSegments.length?'context_resolved_route_segment':'context_intercity_route',travelDate:need.travel_date||'',partnerLocale:localeResolution.locale})});
     }
   }
