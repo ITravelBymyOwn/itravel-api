@@ -453,10 +453,16 @@ function renderResolvedTransportSegments(item,matched=[]){
   const legs=allLegs.filter(leg=>leg?.commerce_eligible);
   const localLegs=allLegs.filter(leg=>!leg?.commerce_eligible);
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
-    const legOffers=(matched||[]).filter(o=>Number(o?.route_segment?.index||0)===Number(leg.index||index+1));
-    const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
     const marketFrom=leg.commercial_origin||leg.origin,marketTo=leg.commercial_destination||leg.destination;
-    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div>${leg.note?`<p>${esc(leg.note)}</p>`:''}${legOffers.length?partnerOptions(legOffers):`<small class="tw-route-segment__nooffer">${esc(lang==='es'?'Este tramo no tiene un enlace Omio validado.':'This leg has no validated Omio link.')}</small>`}</div>`;
+    const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const legOffers=(matched||[]).filter(o=>{
+      const byIndex=Number(o?.route_segment?.index||0)===Number(leg.index||index+1);
+      const offerFrom=o?.route_segment?.commercial_origin||'',offerTo=o?.route_segment?.commercial_destination||'';
+      const byRoute=offerFrom&&offerTo&&norm(offerFrom)===norm(marketFrom)&&norm(offerTo)===norm(marketTo);
+      return byIndex||byRoute;
+    });
+    const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div>${leg.note?`<p>${esc(leg.note)}</p>`:''}${legOffers.length?partnerOptions(legOffers):''}</div>`;
   }).join('')}</div>`:'';
   const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
   return commercial+logistics;
