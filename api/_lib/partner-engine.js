@@ -686,6 +686,10 @@ async function resolveOmioTripRoutes(tripId, userId, city, uiLanguage, needs=[])
       target_url: undefined, confidence: 'high', need_id: need.id || route.id, need_type: need.need_type || 'intercity_transport',
       entity_name: routeLabel, city: route.origin, travel_date: route.travel_date || null,
       resolution_type: 'trip_sequence_route', partner_locale: localeResolution.locale, locale_applied: localeResolution.applied,
+      // Trip-sequence fallback offers must carry the same canonical segment metadata
+      // as Context-resolved offers. The Workspace binds offers to movement cards by
+      // commercial A→B, not by a Context need id that this fallback may not own.
+      route_segment: { index: 1, mode: catalog?.travel_mode || '', commercial_origin: route.origin, commercial_destination: route.destination, parent_origin: route.origin, parent_destination: route.destination },
       partner: { id: partner.id, slug: partner.slug, name: partner.name },
       offer_token: signResolvedOffer({template, partner, targetUrl, placement:'city_transport', need, city:route.origin, resolutionType:'trip_sequence_route', travelDate:route.travel_date, partnerLocale:localeResolution.locale})
     });
