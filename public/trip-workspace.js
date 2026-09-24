@@ -472,7 +472,21 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
   if(!items.length)return'';
   const ordered=items;
   return `<div class="tw-context-list">${ordered.map((item,index)=>{
-    const matched=(Array.isArray(offers)?offers:[]).filter(offer=>offer?.need_id===item?.id);
+    const itemRoute=(item?.need_type==='intercity_transport' || item?.need_type==='transport_arrangement') ? parseResolvedRouteSource(item?.source_route) : null;
+    const normRoute=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+    const itemCommercialLegs=(itemRoute?.legs||[]).filter(leg=>leg?.commerce_eligible).map(leg=>({
+      index:Number(leg.index||0),
+      from:normRoute(leg.commercial_origin||leg.origin),
+      to:normRoute(leg.commercial_destination||leg.destination)
+    }));
+    const matched=(Array.isArray(offers)?offers:[]).filter(offer=>{
+      if(offer?.need_id===item?.id) return true;
+      if(!itemCommercialLegs.length || offer?.placement!=='city_transport') return false;
+      const seg=offer?.route_segment||{};
+      const from=normRoute(seg.commercial_origin||''),to=normRoute(seg.commercial_destination||'');
+      if(!from||!to) return false;
+      return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to) || (Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
+    });
     const scopeOrDay=item?.scope_label
       ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
       : item.day
