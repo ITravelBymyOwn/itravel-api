@@ -6582,10 +6582,10 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
             // A substantial midday hole is usually a real meal/rest opportunity.
             // Represent it explicitly instead of making 60–90 minutes disappear,
             // but do not tighten ordinary short transitions elsewhere in the day.
-            if(gap>=60 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
+            if(gap>90 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
           }
         }
-        if(leadingGap>=120 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>=60){
+        if(leadingGap>=120 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>90){
           errors.push({
             code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
             leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,unexplained_meal_gap_minutes:unexplainedMealGap,
@@ -11530,6 +11530,18 @@ function showPlannerNotice(title, message){
   requestAnimationFrame(()=>overlay.classList.add('active'));
 }
 
+function showPaymentPreparingOverlay(){
+  qsa('.itbmo-payment-preparing-overlay').forEach(el=>el.remove());
+  const es=getLang()==='es';
+  const overlay=document.createElement('div');
+  overlay.className='itbmo-decision-overlay itbmo-payment-preparing-overlay';
+  overlay.innerHTML=`<div class="itbmo-decision-card" role="status" aria-live="polite" aria-busy="true"><div class="itbmo-decision-symbol">↻</div><div class="itbmo-decision-eyebrow">ITBMO · ${es?'PAGO SEGURO':'SECURE PAYMENT'}</div><h3>${es?'Preparando tu pago':'Preparing your payment'}</h3><p>${es?'Estamos preparando todo para que puedas continuar de forma segura. Esto tomará solo unos segundos.':'We are getting everything ready so you can continue securely. This will only take a few seconds.'}</p></div>`;
+  document.body.appendChild(overlay);
+  requestAnimationFrame(()=>overlay.classList.add('active'));
+  let closed=false;
+  return ()=>{if(closed)return;closed=true;overlay.classList.remove('active');setTimeout(()=>overlay.remove(),220);};
+}
+
 function showPlannerDecision({title,message,confirmLabel,cancelLabel,variant='primary'}={}){
   qsa('.itbmo-decision-overlay').forEach(el=>el.remove());
   return new Promise(resolve=>{
@@ -12329,6 +12341,10 @@ async function requestPlanningStart(){
     $start.textContent=getLang()==='es'?'Preparando pago seguro…':'Preparing secure payment…';
     $start.classList.add('is-busy');
   }
+  // V54: immediate visual acknowledgement after “Continuar al pago”. Show this
+  // synchronously before the first await so a slow payment-status/config request
+  // can never look like an unresponsive button.
+  const closePaymentPreparing=showPaymentPreparingOverlay();
 
   try{
     const alreadyPaid = await hasValidPaymentForCurrentTrip();
@@ -12343,8 +12359,10 @@ async function requestPlanningStart(){
       payment_provider:'paypal',
       currency:ITBMO_COMMERCE_CONFIG.currency
     });
+    closePaymentPreparing();
     openCheckoutModal();
   }finally{
+    closePaymentPreparing();
     if($start){
       $start.textContent=previousLabel;
       $start.classList.remove('is-busy');
