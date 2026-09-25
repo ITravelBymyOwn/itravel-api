@@ -6348,8 +6348,13 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
 
         const total=_durationTotalBounds_(r.duration,r);
         if(total){
-          if(total.min>span+5){
-            errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min});
+          // V52 deterministic tolerance: small arithmetic differences between the
+          // displayed interval and a narrative duration must not trigger an expensive
+          // model repair. Keep strict QA for materially short visits. Tolerance is
+          // capped at 15 min and never exceeds 12% of the declared minimum.
+          const shortTolerance=Math.min(15,Math.max(5,Math.round(total.min*0.12)));
+          if(total.min>span+shortTolerance){
+            errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min,tolerance:shortTolerance});
           }
           if(span-total.max>25){
             errors.push({
