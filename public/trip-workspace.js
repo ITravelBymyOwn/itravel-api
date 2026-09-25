@@ -482,6 +482,7 @@ function renderResolvedTransportSegments(item,matched=[]){
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
     const legOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
+    console.info('[ITBMO OMIO V53][4 INNER CARD]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
     return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
   }).join('')}</div>`:'';
@@ -531,7 +532,10 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
         ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
         : ''}
       ${(item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && parseResolvedRouteSource(item.source_route)
-        ? renderResolvedTransportSegments(item,matched)
+        // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
+        // outer need-card association suppress a valid feed offer after the UI
+        // changed from one simple card to a parent card containing 1..N legs.
+        ? renderResolvedTransportSegments(item,offers)
         : partnerOptions(matched)}
     </article>`;
   }).join('')}</div>`;
@@ -681,6 +685,10 @@ function omioTransportRoutesForRequest(needs=[]){
       out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin,destination,index:Number(leg?.index||index+1),mode:String(leg?.mode||''),travel_date:need?.travel_date||'',parent_origin:route?.parent?.origin||'',parent_destination:route?.parent?.destination||''});
     });
   });
+  console.groupCollapsed(`[ITBMO OMIO V53][1 CANDIDATES] ${city||'-'} · ${lang}`);
+  console.table(out.map(r=>({need_id:r.need_id,index:r.index,origin:r.origin,destination:r.destination,mode:r.mode,date:r.travel_date})));
+  console.info('candidate_count',out.length);
+  console.groupEnd();
   return out;
 }
 async function fetchPartnerOffers(action,needs=[]){
@@ -689,7 +697,17 @@ async function fetchPartnerOffers(action,needs=[]){
   const post=async body=>{
     const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const payload=await response.json().catch(()=>({}));
-    if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',body.action,payload?.code||response.status);return[]}
+    if(!response.ok||!payload?.ok){
+      console.error('[ITBMO OMIO V53][2 API ERROR]',{action:body.action,status:response.status,code:payload?.code||'',payload});
+      return [];
+    }
+    if(body.action==='resolve_omio_routes'){
+      console.groupCollapsed(`[ITBMO OMIO V53][2 API RESPONSE] ${city||'-'} · ${lang}`);
+      console.info('status',response.status,'offers',Array.isArray(payload.offers)?payload.offers.length:0);
+      if(Array.isArray(payload.omio_debug))console.table(payload.omio_debug);
+      console.info('raw_offers',payload.offers||[]);
+      console.groupEnd();
+    }
     return Array.isArray(payload.offers)?payload.offers:[];
   };
   if(action!=='resolve_city')return post({...baseBody,action});
@@ -705,7 +723,7 @@ async function fetchPartnerOffers(action,needs=[]){
     transport_routes.length?post({...baseBody,action:'resolve_omio_routes',transport_routes}):Promise.resolve([])
   ]);
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
-  console.info('[ITBMO OMIO V52]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length});
+  console.info('[ITBMO OMIO V53][3 SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
 }
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
