@@ -1628,17 +1628,3 @@ body{
 @media(max-width:760px){.tw-route-segments{grid-template-columns:1fr}}
 
 .tw-route-local{grid-column:1/-1;margin-top:10px;border-top:1px dashed #d9e8ed;padding-top:9px;color:#68808c}.tw-route-local summary{cursor:pointer;font-size:10px;font-weight:900;color:#39728a}.tw-route-local>div{display:grid;gap:2px;padding:7px 0;border-bottom:1px solid #eef4f6}.tw-route-local>div:last-child{border-bottom:0}.tw-route-local b{font-size:10px;color:var(--ink)}.tw-route-local span{font-size:9.5px;line-height:1.4}
-
-
-/* V54 · independent mobility opportunities (no mother transport card) */
-.tw-transport-opportunity{grid-column:1/-1;min-width:0;padding:4px 0 18px;border-bottom:1px solid #e5eef2;background:transparent}
-.tw-transport-opportunity:last-child{border-bottom:0;padding-bottom:0}
-.tw-transport-opportunity__head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:12px}
-.tw-transport-opportunity__head h4{margin:9px 0 0;color:var(--ink);font-size:16px;line-height:1.32}
-.tw-transport-opportunity__head p{margin:7px 0 0;color:#607988;font-size:13px;line-height:1.5}
-.tw-transport-opportunity__head .tw-context-source{display:block;margin-top:10px}
-.tw-route-segments--independent{border-top:1px solid #e7f0f3;padding-top:14px;margin-top:0}
-.tw-route-segment--independent{display:flex;flex-direction:column;min-height:100%;box-shadow:0 7px 20px rgba(18,71,96,.035)}
-.tw-route-segment--independent .tw-partner-options--omio{margin-top:12px}
-.tw-route-local--card{margin-top:auto;padding-top:11px}
-@media(max-width:760px){.tw-transport-opportunity__head{flex-direction:column}.tw-transport-opportunity__head>.tw-context-label{align-self:flex-start}}
