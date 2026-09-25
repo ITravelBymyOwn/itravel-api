@@ -794,11 +794,15 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
     const row={stage:'feed_lookup',index:Number(raw?.index||1),need_id:clean(raw?.need_id,120),origin_raw:originRaw,destination_raw:destinationRaw,origin,destination,locale:localeResolution.locale,match:false,route_id:'',reason:''};
     if(!origin||!destination){row.reason='EMPTY_ENDPOINT_AFTER_NORMALIZATION';debug.push(row);continue;}
     if(normalizeKey(origin)===normalizeKey(destination)){row.reason='SAME_ENDPOINT';debug.push(row);continue;}
+    const union=loadOmioUnion();
+    row.origin_position_ids=omioEndpointPositionIds(origin,union).join('|');
+    row.destination_position_ids=omioEndpointPositionIds(destination,union).join('|');
     const catalog=omioCatalogRoute(origin,destination,localeResolution.locale);
-    if(!catalog){row.reason='NO_UNIQUE_FEED_MATCH';debug.push(row);continue;}
+    if(!catalog){row.reason=!row.origin_position_ids?'ORIGIN_NOT_IN_FEED':!row.destination_position_ids?'DESTINATION_NOT_IN_FEED':'NO_UNIQUE_FEED_ROUTE';debug.push(row);continue;}
     const targetUrl=clean(catalog.target_url,1400);
     if(!targetUrl){row.reason='MATCH_WITHOUT_URL';debug.push(row);continue;}
-    row.match=true;row.route_id=clean(catalog.route_id,120);row.reason='MATCH';debug.push(row);
+    if(!allowedPartnerUrl('omio',targetUrl)){row.reason='URL_NOT_ALLOWED';debug.push(row);continue;}
+    row.match=true;row.route_id=clean(catalog.route_id,120);row.reason='MATCH';row.has_attribution=targetUrl.includes('/7727455/');debug.push(row);
     const needId=clean(raw?.need_id,120);
     const need=needById.get(needId)||{id:needId||`workspace-route:${normalizeKey(origin)}:${normalizeKey(destination)}`,need_type:'intercity_transport',entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,city,travel_date:clean(raw?.travel_date,40),derived_by:'workspace_canonical_route'};
     const key=`${needId}|${normalizeKey(origin)}|${normalizeKey(destination)}|${Number(raw?.index||1)}`;
@@ -814,7 +818,7 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
       route_segment:{index:Number(raw?.index||1),mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120)},
       partner,direct_url:targetUrl,offer_token:''});
   }
-  console.info('[ITBMO OMIO V54 FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length,debug});
+  console.info('[ITBMO OMIO V55 FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length,debug});
   return out;
 }
 
