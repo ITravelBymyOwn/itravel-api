@@ -19,151 +19,125 @@ const GYG_PARTNER_ID = '3FZWELC';
 // the approved ES/EN feed snapshots. No SEO slug or generic redirect may create
 // an Omio offer when A→B is absent from the selected feed.
 const OMIO_CATALOG_CACHE = new Map();
-// Static file references are intentional: Vercel's serverless file tracer can
-// include both feed assets deterministically. A dynamic template path can leave
-// the .csv.gz files outside the deployed function bundle even when they exist
-// in the repository.
+const OMIO_UNION_CACHE = { value: null };
+// Both approved ES/EN snapshots are bundled in the SAME existing partners
+// function. V52 treats language as presentation only: route existence is the
+// union of both feeds, while the active UI language selects the localized link.
 const OMIO_FEED_URLS = Object.freeze({
   es: new URL('../data/omio-es.csv.gz', import.meta.url),
   en: new URL('../data/omio-en.csv.gz', import.meta.url)
 });
 
 function parseCsvLine(line = '') {
-  const out = [];
-  let value = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (quoted && line[i + 1] === '"') { value += '"'; i += 1; }
-      else quoted = !quoted;
-    } else if (ch === ',' && !quoted) {
-      out.push(value); value = '';
-    } else value += ch;
+  const out=[]; let value=''; let quoted=false;
+  for(let i=0;i<line.length;i+=1){
+    const ch=line[i];
+    if(ch==='"'){
+      if(quoted&&line[i+1]==='"'){value+='"';i+=1;} else quoted=!quoted;
+    }else if(ch===','&&!quoted){out.push(value);value='';} else value+=ch;
   }
-  out.push(value);
-  return out;
+  out.push(value); return out;
 }
 
-function loadOmioCatalog(locale = 'en') {
-  const lang = locale === 'es' ? 'es' : 'en';
-  if (OMIO_CATALOG_CACHE.has(lang)) return OMIO_CATALOG_CACHE.get(lang);
-  try {
-    const raw = zlib.gunzipSync(fs.readFileSync(OMIO_FEED_URLS[lang])).toString('utf8').replace(/^\uFEFF/, '');
-    const lines = raw.split(/\r?\n/).filter(Boolean);
-    const headers = parseCsvLine(lines.shift() || '');
-    const idx = Object.fromEntries(headers.map((h, i) => [h, i]));
-    const map = new Map();
-    for (const line of lines) {
-      const row = parseCsvLine(line);
-      const origin = clean(row[idx.origin_name], 160);
-      const destination = clean(row[idx.destination_name], 160);
-      const url = clean(row[idx.link_URL], 1400);
-      if (!origin || !destination || !url || !allowedPartnerUrl('omio', url)) continue;
-      const key = `${normalizeKey(origin)}|${normalizeKey(destination)}`;
-      if (!map.has(key)) {
-        map.set(key, {
-          route_id: clean(row[idx.route_id], 120),
-          target_url: url,
-          title: clean(row[idx.title], 220),
-          description: clean(row[idx.description], 600),
-          travel_mode: clean(row[idx.travel_mode], 40),
-          train_min_duration: clean(row[idx.train_min_duration], 30),
-          bus_min_duration: clean(row[idx.bus_min_duration], 30),
-          flight_min_duration: clean(row[idx.flight_min_duration], 30),
-          ferry_min_duration: clean(row[idx.ferry_min_duration], 30),
-          currency: clean(row[idx.domain_currency], 12),
-          train_min_price: clean(row[idx.train_min_price], 30),
-          bus_min_price: clean(row[idx.bus_min_price], 30),
-          flight_min_price: clean(row[idx.flight_min_price], 30),
-          ferry_min_price: clean(row[idx.ferry_min_price], 30)
-        });
+function readOmioFeed(lang='en'){
+  const raw=zlib.gunzipSync(fs.readFileSync(OMIO_FEED_URLS[lang])).toString('utf8').replace(/^\uFEFF/,'');
+  const lines=raw.split(/\r?\n/).filter(Boolean);
+  const headers=parseCsvLine(lines.shift()||'');
+  const idx=Object.fromEntries(headers.map((h,i)=>[h,i]));
+  return lines.map(line=>{
+    const row=parseCsvLine(line);
+    return {
+      route_id:clean(row[idx.route_id],120),
+      origin_position_id:clean(row[idx.origin_position_id],120),
+      destination_position_id:clean(row[idx.destination_position_id],120),
+      origin:clean(row[idx.origin_name],160), destination:clean(row[idx.destination_name],160),
+      target_url:clean(row[idx.link_URL],1400), title:clean(row[idx.title],220),
+      description:clean(row[idx.description],600), travel_mode:clean(row[idx.travel_mode],40),
+      train_min_duration:clean(row[idx.train_min_duration],30), bus_min_duration:clean(row[idx.bus_min_duration],30),
+      flight_min_duration:clean(row[idx.flight_min_duration],30), ferry_min_duration:clean(row[idx.ferry_min_duration],30),
+      currency:clean(row[idx.domain_currency],12), train_min_price:clean(row[idx.train_min_price],30),
+      bus_min_price:clean(row[idx.bus_min_price],30), flight_min_price:clean(row[idx.flight_min_price],30), ferry_min_price:clean(row[idx.ferry_min_price],30)
+    };
+  }).filter(row=>row.route_id&&row.origin&&row.destination&&row.target_url&&allowedPartnerUrl('omio',row.target_url));
+}
+
+function loadOmioUnion(){
+  if(OMIO_UNION_CACHE.value)return OMIO_UNION_CACHE.value;
+  try{
+    const union={byRouteId:new Map(),byPositionRoute:new Map(),endpointIds:new Map()};
+    for(const lang of ['es','en']){
+      for(const row of readOmioFeed(lang)){
+        let entry=union.byRouteId.get(row.route_id);
+        if(!entry){entry={...row,links:{},names:{}};union.byRouteId.set(row.route_id,entry);}
+        entry.links[lang]=row.target_url; entry.names[lang]={origin:row.origin,destination:row.destination};
+        const posKey=`${row.origin_position_id}|${row.destination_position_id}`;
+        if(row.origin_position_id&&row.destination_position_id&&!union.byPositionRoute.has(posKey))union.byPositionRoute.set(posKey,entry);
+        for(const [name,id] of [[row.origin,row.origin_position_id],[row.destination,row.destination_position_id]]){
+          const key=normalizeKey(name); if(!key||!id)continue;
+          if(!union.endpointIds.has(key))union.endpointIds.set(key,new Set()); union.endpointIds.get(key).add(id);
+        }
       }
     }
-    // Route Resolver payloads may carry the endpoint spelling from the other
-    // supported UI language (e.g. Brussels while the ES feed says Bruselas).
-    // Keep the selected language feed as the ONLY authority for the deeplink,
-    // but index its same route_id under the counterpart feed's endpoint names.
-    // This never creates a route: aliases are added only when the exact route_id
-    // already exists in the selected ES/EN feed.
-    try {
-      const otherLang = lang === 'es' ? 'en' : 'es';
-      const otherRaw = zlib.gunzipSync(fs.readFileSync(OMIO_FEED_URLS[otherLang])).toString('utf8').replace(/^\uFEFF/, '');
-      const otherLines = otherRaw.split(/\r?\n/).filter(Boolean);
-      const otherHeaders = parseCsvLine(otherLines.shift() || '');
-      const otherIdx = Object.fromEntries(otherHeaders.map((h, i) => [h, i]));
-      const selectedByRouteId = new Map();
-      for (const entry of map.values()) {
-        if (entry?.route_id && !selectedByRouteId.has(entry.route_id)) selectedByRouteId.set(entry.route_id, entry);
-      }
-      for (const line of otherLines) {
-        const row = parseCsvLine(line);
-        const routeId = clean(row[otherIdx.route_id], 120);
-        const entry = selectedByRouteId.get(routeId);
-        if (!entry) continue;
-        const aliasOrigin = clean(row[otherIdx.origin_name], 160);
-        const aliasDestination = clean(row[otherIdx.destination_name], 160);
-        if (!aliasOrigin || !aliasDestination) continue;
-        const aliasKey = `${normalizeKey(aliasOrigin)}|${normalizeKey(aliasDestination)}`;
-        if (!map.has(aliasKey)) map.set(aliasKey, entry);
-      }
-    } catch (aliasError) {
-      console.warn('[ITBMO OMIO FEED ALIASES]', lang, aliasError?.message || aliasError);
+    OMIO_UNION_CACHE.value=union;
+    console.info('[ITBMO OMIO V52 CATALOG]',{routes:union.byRouteId.size,endpoint_aliases:union.endpointIds.size});
+    return union;
+  }catch(error){console.warn('[ITBMO OMIO V52 CATALOG]',error?.message||error);return {byRouteId:new Map(),byPositionRoute:new Map(),endpointIds:new Map()};}
+}
+
+const OMIO_ENDPOINT_EXONYMS=Object.freeze({
+  // Route Resolver may retain a locally used city name even when the approved
+  // ES/EN feeds use their localized exonym. These aliases only resolve an
+  // endpoint position; route existence still MUST be proven by the feed union.
+  'bruxelles':'brussels','brussel':'brussels','brugge':'bruges',
+  'munchen':'munich','koln':'cologne','firenze':'florence','venezia':'venice',
+  'praha':'prague','wien':'vienna','lisboa':'lisbon','sevilla':'seville',
+  'milano':'milan','napoli':'naples','torino':'turin','genf':'geneva'
+});
+function omioEndpointPositionIds(value='',union=loadOmioUnion()){
+  let key=normalizeKey(value); if(!key)return [];
+  key=OMIO_ENDPOINT_EXONYMS[key]||key;
+  const exact=union.endpointIds.get(key); if(exact?.size)return [...exact];
+  // Conservative station/city qualifier recovery. Only return a position when
+  // all compatible aliases resolve to one unique Omio position id.
+  const ids=new Set();
+  for(const [alias,values] of union.endpointIds.entries()){
+    if(alias.startsWith(`${key} `)||key.startsWith(`${alias} `))for(const id of values)ids.add(id);
+  }
+  return ids.size===1?[...ids]:[];
+}
+
+function omioLocalizedFallbackUrl(trackingUrl='',origin='',destination='',locale='en'){
+  try{
+    if(!allowedPartnerUrl('omio',trackingUrl))return '';
+    const from=normalizeKey(origin).replace(/\s+/g,'-'),to=normalizeKey(destination).replace(/\s+/g,'-');
+    if(!from||!to)return '';
+    const landing=locale==='es'?`https://www.omio.es/viajes/${from}/${to}`:`https://www.omio.com/travel/${from}/${to}`;
+    const url=new URL(trackingUrl); url.searchParams.set('u',landing); return url.toString();
+  }catch(_){return '';}
+}
+
+function omioCatalogRoute(origin,destination,locale='en'){
+  const union=loadOmioUnion(); const lang=locale==='es'?'es':'en';
+  const originIds=omioEndpointPositionIds(origin,union),destinationIds=omioEndpointPositionIds(destination,union);
+  const matches=new Map();
+  for(const a of originIds)for(const b of destinationIds){const entry=union.byPositionRoute.get(`${a}|${b}`);if(entry)matches.set(entry.route_id,entry);}
+  // Last conservative fallback: exact bilingual endpoint pair. Never fuzzy-create a route.
+  if(!matches.size){
+    const a=normalizeKey(origin),b=normalizeKey(destination);
+    for(const entry of union.byRouteId.values())for(const names of Object.values(entry.names||{})){
+      if(normalizeKey(names?.origin)===a&&normalizeKey(names?.destination)===b)matches.set(entry.route_id,entry);
     }
-    OMIO_CATALOG_CACHE.set(lang, map);
-    return map;
-  } catch (error) {
-    console.warn('[ITBMO OMIO FEED]', lang, error?.message || error);
-    const empty = new Map();
-    OMIO_CATALOG_CACHE.set(lang, empty);
-    return empty;
   }
-}
-
-function omioCatalogEndpointCompatible(requested = '', feedEndpoint = '') {
-  const a = normalizeKey(requested);
-  const b = normalizeKey(feedEndpoint);
-  if (!a || !b) return false;
-  if (a === b) return true;
-  // Route Resolver can legitimately retain a station qualifier after the generic
-  // terminal cleanup (e.g. "Madrid Clara Campoamor"), while the official Omio
-  // feed is city-to-city ("Madrid"). Accept only a token-boundary containment
-  // relationship. This resolves an endpoint name; it NEVER creates a deeplink.
-  return a.startsWith(`${b} `) || b.startsWith(`${a} `);
-}
-
-function omioCatalogRoute(origin, destination, locale = 'en') {
-  const catalog = loadOmioCatalog(locale);
-  const exact = catalog.get(`${normalizeKey(origin)}|${normalizeKey(destination)}`) || null;
-  if (exact) return exact;
-
-  // Fail-closed feed lookup fallback. V25 proved that the Route Resolver's A→B
-  // commercial segments are the correct source for the Workspace cards. V41
-  // keeps that flow, but unlike V25 the URL MUST come from an official feed row.
-  // If endpoint normalization yields more than one possible route_id, no offer is
-  // emitted rather than guessing or constructing an Omio URL.
-  const matches = new Map();
-  let bestScore = -1;
-  const requestedOrigin = normalizeKey(origin);
-  const requestedDestination = normalizeKey(destination);
-  for (const [key, entry] of catalog.entries()) {
-    const split = key.indexOf('|');
-    if (split < 1) continue;
-    const feedOrigin = key.slice(0, split);
-    const feedDestination = key.slice(split + 1);
-    if (!omioCatalogEndpointCompatible(origin, feedOrigin) || !omioCatalogEndpointCompatible(destination, feedDestination)) continue;
-    // Prefer the feed row whose city endpoints most closely match the resolver's
-    // commercial endpoints. This deterministically prefers Madrid→Segovia over a
-    // station-specific Madrid→Segovia Guiomar row without hardcoding either city.
-    const score = (requestedOrigin === feedOrigin ? 1 : 0) + (requestedDestination === feedDestination ? 1 : 0);
-    if (score < bestScore) continue;
-    if (score > bestScore) { matches.clear(); bestScore = score; }
-    const routeId = clean(entry?.route_id, 120);
-    if (routeId && !matches.has(routeId)) matches.set(routeId, entry);
+  if(matches.size!==1)return null;
+  const entry=[...matches.values()][0];
+  const names=entry.names?.[lang]||entry.names?.[lang==='es'?'en':'es']||{origin,destination};
+  let targetUrl=entry.links?.[lang]||'';
+  if(!targetUrl){
+    const opposite=entry.links?.[lang==='es'?'en':'es']||'';
+    targetUrl=omioLocalizedFallbackUrl(opposite,names.origin||origin,names.destination||destination,lang);
   }
-  const match = matches.size === 1 ? [...matches.values()][0] : null;
-  if (match) console.info('[ITBMO OMIO FEED MATCH]', { locale: locale === 'es' ? 'es' : 'en', origin: clean(origin,120), destination: clean(destination,120), route_id: match.route_id });
-  return match;
+  if(!targetUrl||!allowedPartnerUrl('omio',targetUrl)||!targetUrl.includes('/7727455/'))return null;
+  return {...entry,target_url:targetUrl,localized_origin:names.origin||origin,localized_destination:names.destination||destination};
 }
 
 
@@ -805,10 +779,9 @@ async function resolveOmioContextRoutes(tripId, userId, city, uiLanguage, needs=
 
 
 async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],transportRoutes=[]){
-  // V48 FINAL OMIO RULE: the bundled official Product Feed is the authority.
-  // If the canonical Workspace A→B exists in the selected ES/EN feed, expose
-  // the feed deeplink; otherwise expose nothing. No DB offer/template, Context
-  // reconstruction, trip-sequence resolver or model call may gate the CTA.
+  // V52 FINAL OMIO RULE: the union of the approved ES+EN Product Feeds is the
+  // authority for route existence. Language only selects the localized link.
+  // No DB offer/template, Context admission or model call may gate the CTA.
   if(!Array.isArray(transportRoutes)||!transportRoutes.length)return [];
   const partner={id:null,slug:'omio',name:'Omio'};
   const template=omioFeedTemplate(partner,null);
@@ -830,13 +803,15 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
     const need=needById.get(needId)||{id:needId||`workspace-route:${normalizeKey(origin)}:${normalizeKey(destination)}`,need_type:'intercity_transport',entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,city,travel_date:clean(raw?.travel_date,40),derived_by:'workspace_canonical_route'};
     const key=`${needId}|${normalizeKey(origin)}|${normalizeKey(destination)}|${Number(raw?.index||1)}`;
     if(seen.has(key))continue;seen.add(key);
-    const routeLabel=`${origin} → ${destination}`;
+    const routeOrigin=clean(catalog.localized_origin||origin,120);
+    const routeDestination=clean(catalog.localized_destination||destination,120);
+    const routeLabel=`${routeOrigin} → ${routeDestination}`;
     out.push({...template,id:`omio-feed:${catalog.route_id}:${normalizeKey(origin)}:${normalizeKey(destination)}`,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
       description_es:'Compara horarios y opciones disponibles en Omio.',description_en:'Compare schedules and available options on Omio.',target_url:undefined,confidence:'high',need_id:need.id,need_type:need.need_type||'intercity_transport',entity_name:routeLabel,city,travel_date:clean(raw?.travel_date||need?.travel_date,40)||null,resolution_type:'workspace_feed_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
       route_segment:{index:Number(raw?.index||1),mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120)},
       partner,direct_url:targetUrl,offer_token:''});
   }
-  console.info('[ITBMO OMIO FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length});
+  console.info('[ITBMO OMIO V52 FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length});
   return out;
 }
 
