@@ -705,7 +705,7 @@ async function fetchPartnerOffers(action,needs=[]){
     transport_routes.length?post({...baseBody,action:'resolve_omio_routes',transport_routes}):Promise.resolve([])
   ]);
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
-  console.info('[ITBMO OMIO V51]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length});
+  console.info('[ITBMO OMIO V52]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length});
   return [...experiences,...omioOffers];
 }
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
