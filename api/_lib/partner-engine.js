@@ -822,9 +822,10 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
     const catalog=omioCatalogRoute(origin,destination,localeResolution.locale);
     if(!catalog)continue;
     const targetUrl=clean(catalog.target_url,1400);
-    // Attribution is not reconstructed: the exact Impact deeplink contained in
-    // the official feed is preserved and signed for the click hand-off.
-    if(!targetUrl||!hasRequiredAttribution('omio',targetUrl))continue;
+    // V49: the bundled feed row is authoritative. Its attributed Impact URL is
+    // returned verbatim; no signing, reconstruction or secondary acceptance
+    // gate is allowed to suppress a valid A→B feed match.
+    if(!targetUrl)continue;
     const needId=clean(raw?.need_id,120);
     const need=needById.get(needId)||{id:needId||`workspace-route:${normalizeKey(origin)}:${normalizeKey(destination)}`,need_type:'intercity_transport',entity_name:`${origin} → ${destination}`,source_activity:`${origin} → ${destination}`,city,travel_date:clean(raw?.travel_date,40),derived_by:'workspace_canonical_route'};
     const key=`${needId}|${normalizeKey(origin)}|${normalizeKey(destination)}|${Number(raw?.index||1)}`;
@@ -833,7 +834,7 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
     out.push({...template,id:`omio-feed:${catalog.route_id}:${normalizeKey(origin)}:${normalizeKey(destination)}`,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
       description_es:'Compara horarios y opciones disponibles en Omio.',description_en:'Compare schedules and available options on Omio.',target_url:undefined,confidence:'high',need_id:need.id,need_type:need.need_type||'intercity_transport',entity_name:routeLabel,city,travel_date:clean(raw?.travel_date||need?.travel_date,40)||null,resolution_type:'workspace_feed_route',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
       route_segment:{index:Number(raw?.index||1),mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120)},
-      partner,offer_token:signResolvedOffer({template,partner,targetUrl,placement:'city_transport',need:{...need,entity_name:routeLabel},city,resolutionType:'workspace_feed_route',travelDate:clean(raw?.travel_date||need?.travel_date,40),partnerLocale:localeResolution.locale})});
+      partner,direct_url:targetUrl,offer_token:''});
   }
   console.info('[ITBMO OMIO FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length});
   return out;
