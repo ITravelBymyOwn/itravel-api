@@ -859,6 +859,27 @@ function rankOffers(offers) {
   });
 }
 
+
+export async function resolveOmioWorkspaceRoutes({ session_token, trip_id, city = '', language = 'es', ui_language = '', transport_routes = [] }) {
+  const session = await resolveSession(session_token).catch(() => null);
+  if (!session) return { session: null, offers: [] };
+  const safeCity = clean(city, 160);
+  const safeUiLanguage = normalizeLanguage(ui_language || language) === 'en' ? 'en' : 'es';
+  const routes = Array.isArray(transport_routes) ? transport_routes : [];
+  // V51: dedicated deterministic bridge for Workspace mobility. Omio is resolved
+  // independently from Viator/GYG and independently from Context need admission.
+  // The selected official feed is the sole authority: match => exact feed URL;
+  // no match => no offer. No model call, DB template, signing or URL construction.
+  const syntheticNeeds = routes.map((route, index) => ({
+    id: clean(route?.need_id, 120) || `workspace-route:${index + 1}`,
+    need_type: clean(route?.need_type, 80) || 'intercity_transport',
+    city: safeCity,
+    travel_date: clean(route?.travel_date, 40)
+  }));
+  const offers = await resolveOmioExplicitRoutes(trip_id, session.user_id, safeCity, safeUiLanguage, syntheticNeeds, routes);
+  return { session, offers: rankOffers(offers) };
+}
+
 export async function resolveTripOffers({ session_token, trip_id }) {
   const session = await resolveSession(session_token).catch(() => null);
   const offers = [];
