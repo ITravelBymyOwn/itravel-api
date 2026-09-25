@@ -814,7 +814,7 @@ async function resolveOmioExplicitRoutes(tripId,userId,city,uiLanguage,needs=[],
       route_segment:{index:Number(raw?.index||1),mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120)},
       partner,direct_url:targetUrl,offer_token:''});
   }
-  console.info('[ITBMO OMIO V53 FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length,debug});
+  console.info('[ITBMO OMIO V54 FEED CTA]',{city,locale:localeResolution.locale,canonical_routes:transportRoutes.length,feed_matches:out.length,debug});
   return out;
 }
 
