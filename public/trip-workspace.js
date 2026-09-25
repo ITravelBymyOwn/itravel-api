@@ -463,19 +463,25 @@ function omioOptions(offers=[]){
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
   const allLegs=route.legs||[];if(!allLegs.length)return'';
-  // Commercial cards represent the bookable intercity pieces only. Local
-  // access/egress remains useful logistics, but must not become fake Omio cards.
-  const legs=allLegs.filter(leg=>leg?.commerce_eligible);
-  const localLegs=allLegs.filter(leg=>!leg?.commerce_eligible);
+  // V50: a feed match can promote a resolved leg to a bookable Omio card even
+  // when Route Resolver omitted commerce_eligible. This keeps the generation core
+  // advisory while the official feed remains the sole commerce authority.
+  const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  const localizedMarkets=leg=>({
+    from:String((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin||'').trim(),
+    to:String((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination||'').trim()
+  });
+  const offerMatchesLeg=(offer,leg,index)=>{
+    const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
+    const byIndex=Number(seg.index||0)===Number(leg.index||index+1);
+    const byRoute=seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
+    return byIndex||byRoute;
+  };
+  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
+  const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
-    const marketFrom=leg.commercial_origin||leg.origin,marketTo=leg.commercial_destination||leg.destination;
-    const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-    const legOffers=(matched||[]).filter(o=>{
-      const byIndex=Number(o?.route_segment?.index||0)===Number(leg.index||index+1);
-      const offerFrom=o?.route_segment?.commercial_origin||'',offerTo=o?.route_segment?.commercial_destination||'';
-      const byRoute=offerFrom&&offerTo&&norm(offerFrom)===norm(marketFrom)&&norm(offerTo)===norm(marketTo);
-      return byIndex||byRoute;
-    });
+    const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
+    const legOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
     return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
   }).join('')}</div>`:'';
@@ -489,11 +495,11 @@ function renderNeedItems(items,offers=[],visibleCount=Infinity){
   return `<div class="tw-context-list">${ordered.map((item,index)=>{
     const itemRoute=(item?.need_type==='intercity_transport' || item?.need_type==='transport_arrangement') ? parseResolvedRouteSource(item?.source_route) : null;
     const normRoute=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-    const itemCommercialLegs=(itemRoute?.legs||[]).filter(leg=>leg?.commerce_eligible).map(leg=>({
+    const itemCommercialLegs=(itemRoute?.legs||[]).map(leg=>({
       index:Number(leg.index||0),
-      from:normRoute(leg.commercial_origin||leg.origin),
-      to:normRoute(leg.commercial_destination||leg.destination)
-    }));
+      from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
+      to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
+    })).filter(leg=>leg.from&&leg.to);
     const matched=(Array.isArray(offers)?offers:[]).filter(offer=>{
       if(offer?.need_id===item?.id) return true;
       if(!itemCommercialLegs.length || offer?.placement!=='city_transport') return false;
@@ -655,17 +661,20 @@ function partnerOptions(offers=[]){
 }
 
 function omioTransportRoutesForRequest(needs=[]){
-  // V48: Flatten the exact commercial legs already rendered in Cómo moverte. This is
-  // transport-commerce input only: it does not alter itinerary generation or the
-  // Route Resolver. The server still validates every A→B against the official
-  // bundled Omio feed before it can emit a signed offer.
+  // V50: Omio eligibility belongs to the selected official ES/EN feed, not to the
+  // Route Resolver's commerce_eligible hint. Send every resolved A→B leg as a
+  // candidate and let the feed fail closed: feed match => CTA; no match => silence.
+  // Prefer the resolver's endpoint labels for the ACTIVE UI language so the ES
+  // Workspace is compared with the ES feed and the EN Workspace with the EN feed.
   const out=[];const seen=new Set();
   (Array.isArray(needs)?needs:[]).forEach(need=>{
     if(need?.need_type!=='intercity_transport'&&need?.need_type!=='transport_arrangement')return;
     const route=parseResolvedRouteSource(need?.source_route);if(!route)return;
-    (route.legs||[]).filter(leg=>leg?.commerce_eligible).forEach((leg,index)=>{
-      const origin=String(leg?.commercial_origin||leg?.origin||'').trim();
-      const destination=String(leg?.commercial_destination||leg?.destination||'').trim();
+    (route.legs||[]).forEach((leg,index)=>{
+      const localizedOrigin=lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en;
+      const localizedDestination=lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en;
+      const origin=String(localizedOrigin||leg?.commercial_origin||leg?.origin||'').trim();
+      const destination=String(localizedDestination||leg?.commercial_destination||leg?.destination||'').trim();
       if(!origin||!destination)return;
       const key=`${need?.id||''}|${origin}|${destination}|${leg?.index||index+1}`;
       if(seen.has(key))return;seen.add(key);
