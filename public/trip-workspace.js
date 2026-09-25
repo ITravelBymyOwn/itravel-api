@@ -685,11 +685,28 @@ function omioTransportRoutesForRequest(needs=[]){
 }
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
-  const transport_routes=action==='resolve_city'?omioTransportRoutesForRequest(needs):[];
-  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs,transport_routes})});
-  const payload=await response.json().catch(()=>({}));
-  if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
-  return Array.isArray(payload.offers)?payload.offers:[];
+  const baseBody={session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
+  const post=async body=>{
+    const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',body.action,payload?.code||response.status);return[]}
+    return Array.isArray(payload.offers)?payload.offers:[];
+  };
+  if(action!=='resolve_city')return post({...baseBody,action});
+
+  // V51: keep experience commerce (Viator/GYG) on the validated city pipeline,
+  // but resolve Omio through its own deterministic feed bridge. This prevents
+  // Context admission, provider ranking, or another affiliate adapter from
+  // suppressing a valid mobility CTA. It uses the same /api/partners function,
+  // so no additional Vercel Function is introduced.
+  const transport_routes=omioTransportRoutesForRequest(needs);
+  const [cityOffers,omioOffers]=await Promise.all([
+    post({...baseBody,action:'resolve_city',transport_routes:[]}),
+    transport_routes.length?post({...baseBody,action:'resolve_omio_routes',transport_routes}):Promise.resolve([])
+  ]);
+  const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
+  console.info('[ITBMO OMIO V51]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length});
+  return [...experiences,...omioOffers];
 }
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   const token=getStoredSessionToken();
