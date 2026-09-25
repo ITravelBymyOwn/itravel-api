@@ -462,10 +462,10 @@ function omioOptions(offers=[]){
 }
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
-  const allLegs=(route.legs||[]).map((leg,index)=>({...leg,__routeIndex:index}));if(!allLegs.length)return'';
-  // V54: every resolved A→B opportunity is an independent card. The former
-  // parent/mother transport card no longer owns commerce. Omio binds directly
-  // to the small card that represents the exact feed candidate.
+  const allLegs=route.legs||[];if(!allLegs.length)return'';
+  // V50: a feed match can promote a resolved leg to a bookable Omio card even
+  // when Route Resolver omitted commerce_eligible. This keeps the generation core
+  // advisory while the official feed remains the sole commerce authority.
   const norm=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
   const localizedMarkets=leg=>({
     from:String((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin||'').trim(),
@@ -473,60 +473,75 @@ function renderResolvedTransportSegments(item,matched=[]){
   });
   const offerMatchesLeg=(offer,leg,index)=>{
     if((offer?.partner?.slug||'')!=='omio')return false;
-    if(offer?.need_id&&item?.id&&String(offer.need_id)!==String(item.id))return false;
     const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
-    const byIndex=Number(seg.index||0)===Number(leg.index||index+1);
+    const sameNeed=!offer?.need_id||!item?.id||String(offer.need_id)===String(item.id);
     const byRoute=seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
-    return byRoute||byIndex;
+    const byIndex=sameNeed&&Number(seg.index||0)===Number(leg.index||index+1);
+    const matched=!!(byRoute||byIndex);
+    console.info('[ITBMO OMIO V55][5 BIND CHECK]',{need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${markets.from} → ${markets.to}`,offer_need_id:offer?.need_id||'',offer_index:Number(seg.index||0),offer_route:`${seg.commercial_origin||''} → ${seg.commercial_destination||''}`,sameNeed,byRoute,byIndex,matched});
+    return matched;
   };
-  const commercialLegs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
-  if(!commercialLegs.length){
-    console.warn('[ITBMO OMIO V54][UI NO COMMERCIAL CARDS]',{city:city||'',need_id:item?.id||'',all_legs:allLegs.map((l,i)=>({index:Number(l.index||i+1),origin:l.origin,destination:l.destination,commerce_eligible:!!l.commerce_eligible}))});
-    return'';
-  }
-  const commercialIndexes=commercialLegs.map(l=>l.__routeIndex);
-  const localByCommercial=new Map(commercialLegs.map(l=>[l.__routeIndex,[]]));
-  allLegs.filter(l=>!commercialLegs.includes(l)).forEach(local=>{
-    let owner=commercialIndexes[0],best=Infinity;
-    commercialIndexes.forEach(ci=>{const d=Math.abs(local.__routeIndex-ci);if(d<best){best=d;owner=ci;}});
-    localByCommercial.get(owner)?.push(local);
-  });
-  const cards=commercialLegs.map((leg,index)=>{
+  const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
+  const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
+  const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
     const legOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
-    const locals=localByCommercial.get(leg.__routeIndex)||[];
-    console.info('[ITBMO OMIO V54][4 INDEPENDENT CARD]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,all_omio_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0,direct_url:legOffers.map(o=>o.direct_url||''),local_connections:locals.length});
+    console.info('[ITBMO OMIO V55][6 INNER CARD]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0,stop_reason:legOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
-    const logistics=locals.length?`<details class="tw-route-local tw-route-local--card"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${locals.map(local=>`<div><b>${esc(`${local.origin} → ${local.destination}`)}</b><span>${esc([local.mode,mobilityLegNote(local.note)].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
-    return `<article class="tw-route-segment tw-route-segment--independent"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}${logistics}</article>`;
-  }).join('');
-  return `<div class="tw-route-segments tw-route-segments--independent">${cards}</div>`;
+    return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
+  }).join('')}</div>`:'';
+  const logistics=localLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${localLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
+  return commercial+logistics;
 }
 
 function renderNeedItems(items,offers=[],visibleCount=Infinity){
   if(!items.length)return'';
   const ordered=items;
   return `<div class="tw-context-list">${ordered.map((item,index)=>{
-    const isTransport=item?.need_type==='intercity_transport'||item?.need_type==='transport_arrangement';
-    const itemRoute=isTransport?parseResolvedRouteSource(item?.source_route):null;
+    const itemRoute=(item?.need_type==='intercity_transport' || item?.need_type==='transport_arrangement') ? parseResolvedRouteSource(item?.source_route) : null;
     const normRoute=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-    const itemCommercialLegs=(itemRoute?.legs||[]).map(leg=>({index:Number(leg.index||0),from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)})).filter(leg=>leg.from&&leg.to);
+    const itemCommercialLegs=(itemRoute?.legs||[]).map(leg=>({
+      index:Number(leg.index||0),
+      from:normRoute((lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en)||leg?.commercial_origin||leg?.origin),
+      to:normRoute((lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en)||leg?.commercial_destination||leg?.destination)
+    })).filter(leg=>leg.from&&leg.to);
     const matched=(Array.isArray(offers)?offers:[]).filter(offer=>{
-      if(offer?.need_id===item?.id)return true;
-      if(!itemCommercialLegs.length||offer?.placement!=='city_transport')return false;
-      const seg=offer?.route_segment||{},from=normRoute(seg.commercial_origin||''),to=normRoute(seg.commercial_destination||'');
-      if(!from||!to)return false;
-      return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to)||(Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
+      if(offer?.need_id===item?.id) return true;
+      if(!itemCommercialLegs.length || offer?.placement!=='city_transport') return false;
+      const seg=offer?.route_segment||{};
+      const from=normRoute(seg.commercial_origin||''),to=normRoute(seg.commercial_destination||'');
+      if(!from||!to) return false;
+      return itemCommercialLegs.some(leg=>(leg.from===from&&leg.to===to) || (Number(seg.index||0)>0&&Number(seg.index)===leg.index&&leg.from===from&&leg.to===to));
     });
-    const scopeOrDay=item?.scope_label?`<span class="tw-context-day">${esc(item.scope_label)}</span>`:item.day?`<span class="tw-context-day">${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}</span>`:`<span class="tw-context-day">↗${item.travel_date?` · ${esc(travelDateLabel(item.travel_date))}`:''}</span>`;
-    const sourceCopy=item?.source_summary?esc(item.source_summary):item.derived_by==='trip_sequence'?(lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order'):`${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}`;
-    const hidden=index>=visibleCount?' hidden data-context-extra="1"':'';
-    if(isTransport&&itemRoute){
-      // V54 transport opportunity: header + independent A→B cards. There is no
-      // mother card. Each child owns its Omio CTA and its local-access disclosure.
-      return `<section class="tw-transport-opportunity"${hidden}><div class="tw-transport-opportunity__head"><div>${scopeOrDay}<h4>${esc(item.entity_name||item.source_activity||'')}</h4>${item.user_message?`<p>${esc(item.user_message)}</p>`:''}<small class="tw-context-source">${sourceCopy}</small></div><span class="tw-context-label">${esc(matched.length?t.compareJourney:contextLabel(item))}</span></div>${renderResolvedTransportSegments(item,offers)}</section>`;
-    }
-    return `<article class="tw-context-item"${hidden}><div class="tw-context-item-top">${scopeOrDay}<span class="tw-context-label">${esc(contextLabel(item))}</span></div><h4>${esc(item.entity_name||item.source_activity||'')}</h4>${item.user_message?`<p>${esc(item.user_message)}</p>`:''}<small class="tw-context-source">${sourceCopy}</small>${item.source_route&&isTransport&&!itemRoute?`<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`:''}${partnerOptions(matched)}</article>`;
+    const scopeOrDay=item?.scope_label
+      ? `<span class="tw-context-day">${esc(item.scope_label)}</span>`
+      : item.day
+        ? `<span class="tw-context-day">${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}</span>`
+        : `<span class="tw-context-day">↗${item.travel_date?` · ${esc(travelDateLabel(item.travel_date))}`:''}</span>`;
+    const sourceCopy=item?.source_summary
+      ? esc(item.source_summary)
+      : item.derived_by==='trip_sequence'
+        ? (lang==='es'?'Basado en el orden de tus destinos':'Based on your destination order')
+        : `${esc(t.basedOn)} · ${esc(t.dayLabel)} ${esc(item.day)}${dayDate(city,item.day)?` · ${esc(dayDate(city,item.day))}`:''}`;
+    return `
+    <article class="tw-context-item"${index>=visibleCount?' hidden data-context-extra="1"':''}>
+      <div class="tw-context-item-top">
+        ${scopeOrDay}
+        <span class="tw-context-label">${esc((item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && matched.length ? t.compareJourney : contextLabel(item))}</span>
+      </div>
+      <h4>${esc(item.entity_name || item.source_activity || '')}</h4>
+      ${item.user_message?`<p>${esc(item.user_message)}</p>`:''}
+      <small class="tw-context-source">${sourceCopy}</small>
+      ${item.source_route && (item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && !parseResolvedRouteSource(item.source_route)
+        ? `<small class="tw-context-route">${esc(item.source_route)}${item.transport?` · ${esc(item.transport)}`:''}</small>`
+        : ''}
+      ${(item.need_type==='intercity_transport' || item.need_type==='transport_arrangement') && parseResolvedRouteSource(item.source_route)
+        // V53: Omio belongs to the INNER resolved A→B cards. Do not let the
+        // outer need-card association suppress a valid feed offer after the UI
+        // changed from one simple card to a parent card containing 1..N legs.
+        ? renderResolvedTransportSegments(item,offers)
+        : partnerOptions(matched)}
+    </article>`;
   }).join('')}</div>`;
 }
 
@@ -674,7 +689,7 @@ function omioTransportRoutesForRequest(needs=[]){
       out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin,destination,index:Number(leg?.index||index+1),mode:String(leg?.mode||''),travel_date:need?.travel_date||'',parent_origin:route?.parent?.origin||'',parent_destination:route?.parent?.destination||''});
     });
   });
-  console.groupCollapsed(`[ITBMO OMIO V54][1 CANDIDATES] ${city||'-'} · ${lang}`);
+  console.groupCollapsed(`[ITBMO OMIO V55][1 CANDIDATES] ${city||'-'} · ${lang}`);
   console.table(out.map(r=>({need_id:r.need_id,index:r.index,origin:r.origin,destination:r.destination,mode:r.mode,date:r.travel_date})));
   console.info('candidate_count',out.length);
   console.groupEnd();
@@ -687,11 +702,11 @@ async function fetchPartnerOffers(action,needs=[]){
     const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok||!payload?.ok){
-      console.error('[ITBMO OMIO V54][2 API ERROR]',{action:body.action,status:response.status,code:payload?.code||'',payload});
+      console.error('[ITBMO OMIO V55][2 API ERROR]',{action:body.action,status:response.status,code:payload?.code||'',payload});
       return [];
     }
     if(body.action==='resolve_omio_routes'){
-      console.groupCollapsed(`[ITBMO OMIO V54][2 API RESPONSE] ${city||'-'} · ${lang}`);
+      console.groupCollapsed(`[ITBMO OMIO V55][2 API RESPONSE] ${city||'-'} · ${lang}`);
       console.info('status',response.status,'offers',Array.isArray(payload.offers)?payload.offers.length:0);
       if(Array.isArray(payload.omio_debug))console.table(payload.omio_debug);
       console.info('raw_offers',payload.offers||[]);
@@ -712,7 +727,7 @@ async function fetchPartnerOffers(action,needs=[]){
     transport_routes.length?post({...baseBody,action:'resolve_omio_routes',transport_routes}):Promise.resolve([])
   ]);
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
-  console.info('[ITBMO OMIO V54][3 SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
+  console.info('[ITBMO OMIO V55][3 SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
 }
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
