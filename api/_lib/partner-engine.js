@@ -64,12 +64,14 @@ function readOmioFeed(lang='en'){
 function loadOmioUnion(){
   if(OMIO_UNION_CACHE.value)return OMIO_UNION_CACHE.value;
   try{
-    const union={byRouteId:new Map(),byPositionRoute:new Map(),endpointIds:new Map()};
+    const union={byRouteId:new Map(),byPositionRoute:new Map(),byNameRoute:new Map(),endpointIds:new Map()};
     for(const lang of ['es','en']){
       for(const row of readOmioFeed(lang)){
         let entry=union.byRouteId.get(row.route_id);
         if(!entry){entry={...row,links:{},names:{}};union.byRouteId.set(row.route_id,entry);}
         entry.links[lang]=row.target_url; entry.names[lang]={origin:row.origin,destination:row.destination};
+        const nameKey=`${normalizeKey(row.origin)}|${normalizeKey(row.destination)}`;
+        if(nameKey!=="|"){if(!union.byNameRoute.has(nameKey))union.byNameRoute.set(nameKey,new Map());union.byNameRoute.get(nameKey).set(row.route_id,entry);}
         const posKey=`${row.origin_position_id}|${row.destination_position_id}`;
         if(row.origin_position_id&&row.destination_position_id&&!union.byPositionRoute.has(posKey))union.byPositionRoute.set(posKey,entry);
         for(const [name,id] of [[row.origin,row.origin_position_id],[row.destination,row.destination_position_id]]){
@@ -81,7 +83,7 @@ function loadOmioUnion(){
     OMIO_UNION_CACHE.value=union;
     console.info('[ITBMO OMIO V52 CATALOG]',{routes:union.byRouteId.size,endpoint_aliases:union.endpointIds.size});
     return union;
-  }catch(error){console.warn('[ITBMO OMIO V52 CATALOG]',error?.message||error);return {byRouteId:new Map(),byPositionRoute:new Map(),endpointIds:new Map()};}
+  }catch(error){console.warn('[ITBMO OMIO V52 CATALOG]',error?.message||error);return {byRouteId:new Map(),byPositionRoute:new Map(),byNameRoute:new Map(),endpointIds:new Map()};}
 }
 
 const OMIO_ENDPOINT_EXONYMS=Object.freeze({
@@ -118,15 +120,20 @@ function omioLocalizedFallbackUrl(trackingUrl='',origin='',destination='',locale
 
 function omioCatalogRoute(origin,destination,locale='en'){
   const union=loadOmioUnion(); const lang=locale==='es'?'es':'en';
-  const originIds=omioEndpointPositionIds(origin,union),destinationIds=omioEndpointPositionIds(destination,union);
-  const matches=new Map();
-  for(const a of originIds)for(const b of destinationIds){const entry=union.byPositionRoute.get(`${a}|${b}`);if(entry)matches.set(entry.route_id,entry);}
-  // Last conservative fallback: exact bilingual endpoint pair. Never fuzzy-create a route.
+  const a=normalizeKey(origin),b=normalizeKey(destination); if(!a||!b)return null;
+  // V63: the card's visible A→B pair is the commercial authority. Resolve that
+  // exact normalized city pair first in the official ES∪EN feed. Position IDs
+  // are only a conservative fallback; station multiplicity must never suppress
+  // a proven city-to-city route.
+  let matches=new Map(union.byNameRoute?.get(`${a}|${b}`)||[]);
   if(!matches.size){
-    const a=normalizeKey(origin),b=normalizeKey(destination);
     for(const entry of union.byRouteId.values())for(const names of Object.values(entry.names||{})){
       if(normalizeKey(names?.origin)===a&&normalizeKey(names?.destination)===b)matches.set(entry.route_id,entry);
     }
+  }
+  if(!matches.size){
+    const originIds=omioEndpointPositionIds(origin,union),destinationIds=omioEndpointPositionIds(destination,union);
+    for(const x of originIds)for(const y of destinationIds){const entry=union.byPositionRoute.get(`${x}|${y}`);if(entry)matches.set(entry.route_id,entry);}
   }
   if(matches.size!==1)return null;
   const entry=[...matches.values()][0];
@@ -686,7 +693,7 @@ function omioCommercialEndpoint(value){
     .replace(/\b(?:station|estaci[oó]n|gare|terminal|airport|aeropuerto)\b/ig,' ')
     .replace(/\b(?:chamart[ií]n|atocha|barajas|orly|charles de gaulle|cdg|fiumicino|ciampino|midi|zuid|guillemins)\b/ig,' ')
     .replace(/^[\s-]*(?:de|del|des|du|of|di|da)\s+/i,' ')
-    .replace(/[,-–—]+/g,' ')
+    .replace(/[,\-–—]+/g,' ')
     .replace(/\s+/g,' ').trim();
 }
 function omioCommercialMode(value){
