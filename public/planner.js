@@ -6352,9 +6352,6 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
           // displayed interval and a narrative duration must not trigger an expensive
           // model repair. Keep strict QA for materially short visits. Tolerance is
           // capped at 15 min and never exceeds 12% of the declared minimum.
-          // V59: narrative dwell estimates are guidance, not exact clocks. Small
-          // 10–20 minute differences were causing full-Stay repairs with no visible
-          // quality gain. Keep a proportional cap while remaining strict on material loss.
           const shortTolerance=Math.min(20,Math.max(10,Math.round(total.min*0.20)));
           if(total.min>span+shortTolerance){
             errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min,tolerance:shortTolerance});
@@ -6409,14 +6406,12 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
         const poi=_poiKeyFromRow_(r);
         const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          // Same surface name in a different physical destination is not a duplicate
-          // (e.g. Plaza Mayor Madrid vs Plaza Mayor Segovia).
           if(prior.day!==day && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
             errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
             break;
           }
         }
-        if(poi){seenPois.push({day,poi,label:r.to||r.activity,row:r,physicalKey});}
+        if(poi)seenPois.push({day,poi,label:r.to||r.activity,row:r,physicalKey});
       }
 
       const rowText=`${r.activity||''} ${r.to||''}`;
@@ -6581,14 +6576,14 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
             // A substantial midday hole is usually a real meal/rest opportunity.
             // Represent it explicitly instead of making 60–90 minutes disappear,
             // but do not tighten ordinary short transitions elsewhere in the day.
-            if(gap>90 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
+            if(gap>45 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
           }
         }
-        if(leadingGap>=120 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>90){
+        if(leadingGap>60 || trailingGap>60 || largestInternalGap>45 || unexplainedMealGap>45){
           errors.push({
             code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
             leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,unexplained_meal_gap_minutes:unexplainedMealGap,
-            instruction:`Use the substantial available time in ${window.location} coherently. Do not leave multi-hour or substantial midday gaps unexplained; represent a natural meal/rest when that is what the chronology requires, preserve a realistic non-overloaded pace, and never add filler merely to occupy time.`
+            instruction:`Use the substantial available time in ${window.location} coherently. Keep unexplained gaps within about 30–45 minutes. When a longer interval is genuinely needed, represent the meal, rest, access buffer or transfer explicitly; preserve a realistic non-overloaded pace and never add filler merely to occupy time.`
           });
         }
       }
@@ -7300,7 +7295,7 @@ function _v3LogAuditDetails_(label,city,unitId,errors=[]){
 // after the candidate is merged, so localized repair never weakens final QA.
 function _v3RepairScope_(material=[]){
   const list=Array.isArray(material)?material:[];
-  const crossDayCodes=new Set(['GLOBAL_DUPLICATE_POI','WRONG_OVERNIGHT_BASE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
+  const crossDayCodes=new Set(['GLOBAL_DUPLICATE_POI','MISSING_DAY','WRONG_OVERNIGHT_BASE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
   if(!list.length || list.some(e=>crossDayCodes.has(String(e?.code||'')))) return {type:'stay',days:[]};
   const days=[...new Set(list.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(Boolean))].sort((a,b)=>a-b);
   if(days.length===1) return {type:'day',days};
@@ -7314,7 +7309,7 @@ function _v3UsefulPlanningWindow_(w={}){
   // Coverage is a hard gate only for substantial usable windows. Very short or
   // late-arrival fragments remain physically valid without forcing filler.
   if(w?.minimum_useful_target) return true;
-  if(w?.open_end) return start!=null&&start<20*60; // V58: a startless '-open' fragment is not an actionable physical window; never spend a model repair on malformed/empty bounds.
+  if(w?.open_end) return start==null||start<20*60; // V57: after 20:00 an open-ended post-transfer fragment may close naturally; do not force filler/model repair.
   return start!=null&&end!=null&&end>start&&(end-start)>=90;
 }
 
