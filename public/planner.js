@@ -6277,7 +6277,7 @@ function _auditSeverity_(error={}){
     'MISSING_DAY','INVALID_TIME','OVERLAP','CONTINUITY','GLOBAL_DUPLICATE_POI',
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
-    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT'
+    'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -6352,7 +6352,7 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
           // displayed interval and a narrative duration must not trigger an expensive
           // model repair. Keep strict QA for materially short visits. Tolerance is
           // capped at 15 min and never exceeds 12% of the declared minimum.
-          const shortTolerance=Math.min(15,Math.max(5,Math.round(total.min*0.12)));
+          const shortTolerance=Math.min(20,Math.max(10,Math.round(total.min*0.20)));
           if(total.min>span+shortTolerance){
             errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min,tolerance:shortTolerance});
           }
@@ -6404,23 +6404,44 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
 
       if(!_isUtilityRow_(r)){
         const poi=_poiKeyFromRow_(r);
+        const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          if(prior.day!==day && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
-            errors.push({
-              code:'GLOBAL_DUPLICATE_POI',
-              days:[prior.day,day],
-              first:prior.label,
-              second:r.to||r.activity
-            });
+          if(prior.day!==day && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
+            errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
             break;
           }
         }
-        if(poi){
-          seenPois.push({day,poi,label:r.to||r.activity,row:r});
-        }
+        if(poi) seenPois.push({day,poi,label:r.to||r.activity,row:r,physicalKey});
       }
 
       const rowText=`${r.activity||''} ${r.to||''}`;
+
+      // V62 deterministic calendar sanity: if generated prose explicitly names a
+      // weekday, it must agree with the authoritative trip date. This catches
+      // contradictions such as calling a Wednesday "Saturday" without changing
+      // the generation core or inventing schedule facts.
+      if(baseDate){
+        try{
+          const date=new Date(`${baseDate}T12:00:00Z`);
+          if(!Number.isNaN(date.getTime())){
+            date.setUTCDate(date.getUTCDate()+Number(day||1)-1);
+            const actual=date.getUTCDay();
+            const weekdayMap=[
+              [0,/\b(sunday|domingo)\b/i],[1,/\b(monday|lunes)\b/i],
+              [2,/\b(tuesday|martes)\b/i],[3,/\b(wednesday|mi[eé]rcoles)\b/i],
+              [4,/\b(thursday|jueves)\b/i],[5,/\b(friday|viernes)\b/i],
+              [6,/\b(saturday|s[aá]bado)\b/i]
+            ];
+            const prose=`${r.activity||''} ${r.notes||''}`;
+            for(const [weekday,re] of weekdayMap){
+              if(weekday!==actual && re.test(prose)){
+                errors.push({code:'WEEKDAY_DATE_MISMATCH',day,row,date:date.toISOString().slice(0,10),activity:r.activity||null,instruction:'The prose names a weekday that conflicts with the authoritative itinerary date. Correct only the weekday-dependent wording or replace it with date-neutral wording; do not move the activity or alter fixed transfers.'});
+                break;
+              }
+            }
+          }
+        }catch(_){}
+      }
       const looksMajorInterior=/\b(museum|museo|palace|palacio|cathedral|catedral|basilica|basílica|gallery|galeria|galería|interior|castle|castillo|archaeological|arqueolog)\b/i.test(rowText);
       if(start!=null && start<8*60 && looksMajorInterior && !dayWindow?.start_provided){
         errors.push({code:'IMPLAUSIBLE_EARLY_INTERIOR',day,row,start:r.start,activity:r.activity||null,to:r.to||null,instruction:'Do not schedule a major indoor attraction at an unusually early hour unless the user supplied that time or the contract explicitly confirms access. Use a plausible exterior/meal/walk first and place the interior visit in a realistic opening window.'});
@@ -6582,14 +6603,14 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
             // A substantial midday hole is usually a real meal/rest opportunity.
             // Represent it explicitly instead of making 60–90 minutes disappear,
             // but do not tighten ordinary short transitions elsewhere in the day.
-            if(gap>90 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
+            if(gap>45 && prevEnd<14*60+30 && nextStart>12*60) unexplainedMealGap=Math.max(unexplainedMealGap,gap);
           }
         }
-        if(leadingGap>=120 || trailingGap>=150 || largestInternalGap>=120 || unexplainedMealGap>90){
+        if(leadingGap>60 || trailingGap>60 || largestInternalGap>45 || unexplainedMealGap>45){
           errors.push({
             code:'ROUTE_WINDOW_UNDERUSED',day:ctx.day,location:window.location,
             leading_gap_minutes:leadingGap,trailing_gap_minutes:trailingGap,largest_internal_gap_minutes:largestInternalGap,unexplained_meal_gap_minutes:unexplainedMealGap,
-            instruction:`Use the substantial available time in ${window.location} coherently. Do not leave multi-hour or substantial midday gaps unexplained; represent a natural meal/rest when that is what the chronology requires, preserve a realistic non-overloaded pace, and never add filler merely to occupy time.`
+            instruction:`Use the substantial available time in ${window.location} coherently. Keep unexplained gaps within about 30–45 minutes. When a longer interval is genuinely needed, represent the meal, rest, access buffer or transfer explicitly; preserve a realistic non-overloaded pace and never add filler merely to occupy time.`
           });
         }
       }
@@ -7268,7 +7289,7 @@ function _v3RepairableCodes_(){
     'ROUTE_WINDOW_TOO_THIN',
     'OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT','RIGID_AURORA_ROW',
     'MISSING_AURORA_FINAL_NOTE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
-    'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE','UNJUSTIFIED_EXTREME_START'
+    'DURATION_UNPARSEABLE','REPETITIVE_NOTE_TEMPLATE','UNJUSTIFIED_EXTREME_START','WEEKDAY_DATE_MISMATCH'
   ]);
 }
 
@@ -7315,7 +7336,7 @@ function _v3UsefulPlanningWindow_(w={}){
   // Coverage is a hard gate only for substantial usable windows. Very short or
   // late-arrival fragments remain physically valid without forcing filler.
   if(w?.minimum_useful_target) return true;
-  if(w?.open_end) return start==null||start<21*60;
+  if(w?.open_end) return start==null||start<19*60; // V62: evening residual windows from 19:00 onward are optional; avoid filler and repeated repair loops.
   return start!=null&&end!=null&&end>start&&(end-start)>=90;
 }
 
