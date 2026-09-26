@@ -458,7 +458,7 @@ function mobilityLegNote(note=''){
 function omioOptions(offers=[]){
   const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio');
   if(!list.length)return'';
-  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-direct="${esc(offer.direct_url||'')}" data-partner-token="${esc(offer.offer_token||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
+  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}" data-partner-direct="${esc(offer.direct_url||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
 }
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
@@ -481,13 +481,6 @@ function renderResolvedTransportSegments(item,matched=[]){
     console.info('[ITBMO OMIO V56][4 CARD BIND]',{need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${markets.from} → ${markets.to}`,offer_need_id:offer?.need_id||'',offer_index:Number(seg.index||0),offer_route:`${seg.commercial_origin||''} → ${seg.commercial_destination||''}`,sameNeed,byRoute,byIndex,matched});
     return matched;
   };
-  const parentOffer=(matched||[]).find(o=>(o?.partner?.slug||'')==='omio'&&o?.route_segment?.is_parent);
-  if(parentOffer){
-    const po=parentOffer.route_segment||{},times=[route?.parent?.departure_time,route?.parent?.arrival_time].filter(Boolean).join(' → ');
-    const commercial=`<div class="tw-route-segments"><div class="tw-route-segment"><div class="tw-route-segment__head"><span>1</span><div><b>${esc(`${po.commercial_origin||route?.parent?.origin||''} → ${po.commercial_destination||route?.parent?.destination||''}`)}</b><small>${esc(times)}</small></div></div><p>${esc(lang==='es'?'Compara las opciones disponibles para el trayecto completo.':'Compare available options for the complete journey.')}</p>${omioOptions([parentOffer])}</div></div>`;
-    const logistics=allLegs.length?`<details class="tw-route-local"><summary>${esc(lang==='es'?'Ver accesos y conexiones locales':'View local access and connections')}</summary>${allLegs.map(leg=>`<div><b>${esc(`${leg.origin} → ${leg.destination}`)}</b><span>${esc([leg.mode,leg.note].filter(Boolean).join(' · '))}</span></div>`).join('')}</details>`:'';
-    return commercial+logistics;
-  }
   const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
   const localLegs=allLegs.filter((leg,index)=>!legs.includes(leg));
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
@@ -685,11 +678,6 @@ function omioTransportRoutesForRequest(needs=[]){
   (Array.isArray(needs)?needs:[]).forEach(need=>{
     if(need?.need_type!=='intercity_transport'&&need?.need_type!=='transport_arrangement')return;
     const route=parseResolvedRouteSource(need?.source_route);if(!route)return;
-    const parentOrigin=String(route?.parent?.origin||'').trim(),parentDestination=String(route?.parent?.destination||'').trim();
-    if(parentOrigin&&parentDestination&&parentOrigin.toLowerCase()!==parentDestination.toLowerCase()){
-      const parentKey=`${need?.id||''}|parent|${parentOrigin}|${parentDestination}`;
-      if(!seen.has(parentKey)){seen.add(parentKey);out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin:parentOrigin,destination:parentDestination,index:0,mode:'',travel_date:need?.travel_date||'',parent_origin:parentOrigin,parent_destination:parentDestination,is_parent:true});}
-    }
     (route.legs||[]).forEach((leg,index)=>{
       const localizedOrigin=lang==='es'?leg?.commercial_origin_es:leg?.commercial_origin_en;
       const localizedDestination=lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en;
@@ -709,37 +697,39 @@ function omioTransportRoutesForRequest(needs=[]){
 }
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
-  // V61: the original V57 resolve_city request remains the sole path for
-  // Viator/GetYourGuide. Omio is appended independently from the bundled feed.
-  const body={action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
-  const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const payload=await response.json().catch(()=>({}));
-  if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
-  let offers=Array.isArray(payload.offers)?payload.offers:[];
-  if(action==='resolve_city'){
-    offers=offers.filter(o=>(o?.partner?.slug||'')!=='omio');
-    const transport_routes=omioTransportRoutesForRequest(needs);
-    let omio=[];let omio_debug=[];
-    if(transport_routes.length){
-      try{
-        const r=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'lookup_omio_feed_routes',city:city||'',language:lang,ui_language:lang,transport_routes})});
-        const q=await r.json().catch(()=>({}));
-        if(r.ok&&q?.ok){omio=Array.isArray(q.offers)?q.offers:[];omio_debug=Array.isArray(q.omio_debug)?q.omio_debug:[];}
-        else console.warn('[ITBMO OMIO V61 LOOKUP]',q?.code||r.status);
-      }catch(error){console.warn('[ITBMO OMIO V61 LOOKUP]',error);}
+  const baseBody={session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
+  const post=async body=>{
+    const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok||!payload?.ok){
+      console.error('[ITBMO OMIO V56][ERROR]',{action:body.action,status:response.status,code:payload?.code||'',payload});
+      return [];
     }
-    const parentNeeds=new Set(omio.filter(o=>o?.route_segment?.is_parent).map(o=>o.need_id));
-    omio=omio.filter(o=>!parentNeeds.has(o.need_id)||o?.route_segment?.is_parent);
-    console.groupCollapsed(`[ITBMO OMIO V61 DEFINITIVE] ${city||'-'} · ${lang}`);
-    console.table(omio_debug.map(x=>({need_id:x.need_id,index:x.index,route:`${x.origin||''} → ${x.destination||''}`,match:!!x.match,route_id:x.route_id||'',reason:x.reason||''})));
-    console.table(omio.map(o=>({need_id:o.need_id,index:o?.route_segment?.index,route:o.entity_name,url:!!o.direct_url,button:!!o.direct_url,parent:!!o?.route_segment?.is_parent})));
-    console.info('V57 experience offers preserved',offers.filter(o=>['viator','getyourguide'].includes(o?.partner?.slug||'')).length,'Omio feed offers',omio.length);
-    console.groupEnd();
-    offers=offers.concat(omio);
-  }
-  return offers;
-}
+    if(body.action==='resolve_omio_routes'||body.action==='lookup_omio_feed_routes'){
+      console.groupCollapsed(`[ITBMO OMIO V56][2 DIRECT FEED RESPONSE] ${city||'-'} · ${lang}`);
+      console.info('status',response.status,'offers',Array.isArray(payload.offers)?payload.offers.length:0);
+      if(Array.isArray(payload.omio_debug))console.table(payload.omio_debug);
+      console.info('raw_offers',payload.offers||[]);
+      console.groupEnd();
+    }
+    return Array.isArray(payload.offers)?payload.offers:[];
+  };
+  if(action!=='resolve_city')return post({...baseBody,action});
 
+  // V51: keep experience commerce (Viator/GYG) on the validated city pipeline,
+  // but resolve Omio through its own deterministic feed bridge. This prevents
+  // Context admission, provider ranking, or another affiliate adapter from
+  // suppressing a valid mobility CTA. It uses the same /api/partners function,
+  // so no additional Vercel Function is introduced.
+  const transport_routes=omioTransportRoutesForRequest(needs);
+  const [cityOffers,omioOffers]=await Promise.all([
+    post({...baseBody,action:'resolve_city',transport_routes:[]}),
+    transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
+  ]);
+  const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
+  console.info('[ITBMO OMIO V56][3 SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
+  return [...experiences,...omioOffers];
+}
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   const token=getStoredSessionToken();
   const target=window.open('about:blank','_blank');if(target)target.opener=null;
