@@ -7301,7 +7301,7 @@ function _v3LogAuditDetails_(label,city,unitId,errors=[]){
 // after the candidate is merged, so localized repair never weakens final QA.
 function _v3RepairScope_(material=[]){
   const list=Array.isArray(material)?material:[];
-  const crossDayCodes=new Set(['GLOBAL_DUPLICATE_POI','MISSING_DAY','WRONG_OVERNIGHT_BASE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
+  const crossDayCodes=new Set(['GLOBAL_DUPLICATE_POI','WRONG_OVERNIGHT_BASE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER']);
   if(!list.length || list.some(e=>crossDayCodes.has(String(e?.code||'')))) return {type:'stay',days:[]};
   const days=[...new Set(list.flatMap(e=>[e?.day,...(Array.isArray(e?.days)?e.days:[])]).map(Number).filter(Boolean))].sort((a,b)=>a-b);
   if(days.length===1) return {type:'day',days};
@@ -7315,7 +7315,7 @@ function _v3UsefulPlanningWindow_(w={}){
   // Coverage is a hard gate only for substantial usable windows. Very short or
   // late-arrival fragments remain physically valid without forcing filler.
   if(w?.minimum_useful_target) return true;
-  if(w?.open_end) return start==null||start<20*60; // V57: after 20:00 an open-ended post-transfer fragment may close naturally; do not force filler/model repair.
+  if(w?.open_end) return start!=null&&start<20*60; // V58: a startless '-open' fragment is not an actionable physical window; never spend a model repair on malformed/empty bounds.
   return start!=null&&end!=null&&end>start&&(end-start)>=90;
 }
 
