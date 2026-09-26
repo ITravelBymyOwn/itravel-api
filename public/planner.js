@@ -134,10 +134,13 @@ let paymentWarningAcceptedTripId = null;
 
 /* Paid-generation recovery. Normal successful generations add only small
    checkpoint writes; retries run only after a real technical failure. */
-const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 2;
-const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000];
-const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 3;
-const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 4;
+const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
+const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,12000];
+// V2.10.65: quality convergence happens internally. A traveler-facing retry is
+// reserved for genuinely interrupted/technical runs, not normal QA convergence.
+const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 5;
+const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 6;
+const ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS = 3;
 let paidGenerationRunning = false;
 let generationRecoveryState = null;
 let generationResetInProgress = false;
@@ -307,8 +310,8 @@ const I18N = {
     thNotes: 'Notas',
 
     // Overlay
-    overlayDefault: '✨ ITBMO está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ITBMO investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
-    overlayGenerating: '✨ ITBMO está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO ESTIMADO DE GENERACIÓN\n1 ciudad: 4–5 min  ·  2 ciudades: 8–10 min  ·  3 ciudades: 12–15 min\n🔎 ¿Por qué toma tiempo? ITBMO investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
+    overlayDefault: '✨ ITBMO está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO DE GENERACIÓN\nEl tiempo depende del número de días y de la complejidad de tu viaje. Los recorridos largos, con varias ciudades, excursiones o traslados pueden tardar más de 10 minutos mientras ITBMO valida y corrige el itinerario.\n🔎 ¿Por qué toma tiempo? ITBMO investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
+    overlayGenerating: '✨ ITBMO está creando tu itinerario — ciudad por ciudad, día por día.\n⏳ TIEMPO DE GENERACIÓN\nEl tiempo depende del número de días y de la complejidad de tu viaje. Los recorridos largos, con varias ciudades, excursiones o traslados pueden tardar más de 10 minutos mientras ITBMO valida y corrige el itinerario.\n🔎 ¿Por qué toma tiempo? ITBMO investiga y compara rutas, horarios, traslados, prioridades, tus preferencias y la coherencia del viaje completo para convertir horas de investigación en un plan listo para explorar.\n⚠️ MANTÉN ESTA PESTAÑA ABIERTA hasta que tu itinerario esté listo.',
     overlayRebalancingCity: 'ITBMO está reequilibrando la ciudad…',
     overlayRebalancing: 'Agregando días y reoptimizando…',
 
@@ -387,8 +390,8 @@ const I18N = {
     thNotes: 'Notes',
 
     // Overlay
-    overlayDefault: '✨ ITBMO is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ITBMO researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
-    overlayGenerating: '✨ ITBMO is creating your itinerary — city by city, day by day.\n⏳ ESTIMATED GENERATION TIME\n1 city: 4–5 min  ·  2 cities: 8–10 min  ·  3 cities: 12–15 min\n🔎 Why does it take time? ITBMO researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
+    overlayDefault: '✨ ITBMO is creating your itinerary — city by city, day by day.\n⏳ GENERATION TIME\nGeneration time depends on the number of days and the complexity of your trip. Longer trips with multiple cities, day trips or transfers may take more than 10 minutes while ITBMO validates and corrects the itinerary.\n🔎 Why does it take time? ITBMO researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
+    overlayGenerating: '✨ ITBMO is creating your itinerary — city by city, day by day.\n⏳ GENERATION TIME\nGeneration time depends on the number of days and the complexity of your trip. Longer trips with multiple cities, day trips or transfers may take more than 10 minutes while ITBMO validates and corrects the itinerary.\n🔎 Why does it take time? ITBMO researches and compares routes, timing, transfers, priorities, your preferences and full-trip coherence to turn hours of research into a trip plan ready to explore.\n⚠️ KEEP THIS TAB OPEN until your itinerary is ready.',
     overlayRebalancingCity: 'ITBMO is rebalancing the city…',
     overlayRebalancing: 'Adding days and re-optimizing…',
 
@@ -8158,12 +8161,18 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
         // created under older route semantics from resurrecting Paris-before-arrival
         // or a Day Trip without its current round-trip boundaries.
         const restamped=_v3StampStayRows_(cached.rows,unit);
-        if(restamped.length===cached.rows.length){
+        // A checkpoint must still cover every authoritative physical window. Row
+        // membership alone is insufficient: a cached Stay can contain only valid
+        // rows yet have silently lost an entire window (the Pompeii failure found
+        // in V64). Reject that cache locally so only the affected Stay regenerates.
+        const cachedPhysical=_v3PhysicalWindowCoverage_(restamped,[unit]);
+        const cachedDays=_v3CoverageForDays_(restamped,[...(unit.days||[])],dest.days);
+        if(restamped.length===cached.rows.length && !cachedPhysical.missing.length && !cachedDays.missing.length){
           results[index]={...cached,rows:restamped,unit,reused:true};
           console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
           continue;
         }
-        console.warn(`[ITBMO V3 STAY CACHE] ${label} · stale physical-window checkpoint rejected`,{cached_rows:cached.rows.length,valid_rows:restamped.length});
+        console.warn(`[ITBMO V3 STAY CACHE] ${label} · incomplete/stale checkpoint rejected`,{cached_rows:cached.rows.length,valid_rows:restamped.length,missing_windows:cachedPhysical.missing,missing_days:cachedDays.missing});
         const staleKey=_v3AcceptedStayCacheKey_(contract,unit);
         _v3AcceptedStayCache_.delete(staleKey);
         try{sessionStorage.removeItem(staleKey);}catch(_){}
@@ -8379,9 +8388,32 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
 
   try{
     console.log(`[ITBMO V3] Continuous Trip Story: independent Stay Units in parallel; deterministic merge`);
-    const generated=await _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport);
-    let rows=generated.rows||[];
-    if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
+    let generated=null;
+    let rows=[];
+    // Merge-level physical defects are normal convergence work, not a reason to
+    // surface a traveler retry. Preserve healthy Stay checkpoints, invalidate only
+    // the Stay(s) named by the hard audit, regenerate those units, and merge again.
+    for(let mergeAttempt=1;mergeAttempt<=ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS;mergeAttempt++){
+      generated=await _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,transport);
+      rows=generated.rows||[];
+      if(!rows.length) throw new Error(`V3_EMPTY:${city}`);
+      const mergeCoverage=_v3Coverage_(rows,dest.days);
+      const mergeReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
+      const mergeErrors=mergeReport.errors||[];
+      console.info(`[ITBMO V3 INTERNAL MERGE QA] trip · ${mergeAttempt}/${ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS}`,_v3AuditSummary_({errors:mergeErrors}),mergeErrors);
+      if(!mergeCoverage.missing.length && !mergeErrors.length) break;
+
+      const affectedIds=new Set(mergeErrors.map(e=>String(e?.stay_unit_id||'')).filter(Boolean));
+      if(mergeCoverage.missing.length){
+        (generated.units||[]).forEach(unit=>{
+          if((unit.days||[]).some(day=>mergeCoverage.missing.includes(Number(day)))) affectedIds.add(String(unit.id||''));
+        });
+      }
+      const affectedUnits=(generated.units||[]).filter(unit=>affectedIds.has(String(unit.id||'')));
+      if(!affectedUnits.length || mergeAttempt>=ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS) break;
+      console.warn(`[ITBMO V3 INTERNAL MERGE RECOVERY] regenerating ${affectedUnits.length} affected Stay(s); healthy checkpoints preserved`,affectedUnits.map(u=>({id:u.id,destination:u.base_destination||u.physical_destination,days:u.days})));
+      _v3AcceptedStayClear_(generated.contract,affectedUnits);
+    }
 
     // At this point every Stay Unit has already passed its own semantic/local QA.
     // The merged trip receives only a final HARD physical-integrity gate. We do
@@ -8998,7 +9030,7 @@ function _showGenerationRetry_(reason=''){
       ? (es?'Estamos terminando de validar tu itinerario':'We are finishing validation of your itinerary')
       : (exhausted ? (es?'Necesitamos ayudarte a recuperar tu viaje':'We need to help recover your trip') : (es?'Tu generación quedó pendiente':'Your generation was interrupted'))}</h3>
     <p>${integrityFailure
-      ? (es?'Tu recorrido y tus destinos se generaron correctamente. Detectamos un detalle de conexión que debemos verificar antes de entregarte los archivos. Lo ya generado se conserva y no necesitas pagar de nuevo.':'Your route and destinations were generated correctly. We detected a connection detail that must be verified before delivering your files. Everything already generated is preserved and you do not need to pay again.')
+      ? (es?'Tu itinerario requiere una verificación adicional antes de poder entregarlo. ITBMO conserva todo lo que ya fue validado y continuará únicamente con las partes pendientes. En viajes largos o complejos este proceso puede superar los 10 minutos. No necesitas pagar de nuevo.':'Your itinerary needs an additional verification before it can be delivered. ITBMO preserves everything already validated and continues only with the pending parts. For long or complex trips, this process may take more than 10 minutes. You do not need to pay again.')
       : (exhausted
         ? (es?'La generación no pudo completarse, pero tu pago permanece registrado. Puedes volver a intentarlo o contactar a Soporte si necesitas ayuda.':'Generation could not be completed, but your payment remains recorded. You can try again or contact Support if you need help.')
         : (es?'Detectamos un proceso de generación interrumpido. Tu pago continúa activo y puedes volver a intentarlo sin pagar de nuevo.':'We detected an interrupted generation. Your payment remains active and you can try again without paying again.'))}</p>
