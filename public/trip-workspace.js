@@ -709,24 +709,37 @@ function omioTransportRoutesForRequest(needs=[]){
 }
 async function fetchPartnerOffers(action,needs=[]){
   const token=getStoredSessionToken();if(!data?.trip_id)return[];
-  // V57: restore the V25 commerce request topology. One resolve_city request
-  // carries the contextual needs; server-side adapters return Viator/GYG exactly
-  // as before plus Omio built by the recovered V25 path. No parallel Omio fetch.
-  const transport_routes=action==='resolve_city'?omioTransportRoutesForRequest(needs):[];
-  const body={action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs,transport_routes};
+  // V61: the original V57 resolve_city request remains the sole path for
+  // Viator/GetYourGuide. Omio is appended independently from the bundled feed.
+  const body={action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
   const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
-  const offers=Array.isArray(payload.offers)?payload.offers:[];
+  let offers=Array.isArray(payload.offers)?payload.offers:[];
   if(action==='resolve_city'){
-    const omio=offers.filter(o=>(o?.partner?.slug||'')==='omio');
-    console.groupCollapsed(`[ITBMO OMIO V59 FEED DIRECT] ${city||'-'} · ${lang}`);
-    console.info('context_needs',needs.length,'omio_offers',omio.length);
-    console.table(omio.map(o=>({need_id:o.need_id,index:o?.route_segment?.index,route:o.entity_name,feed:'YES',url:!!o.direct_url,button:!!o.direct_url})));
+    offers=offers.filter(o=>(o?.partner?.slug||'')!=='omio');
+    const transport_routes=omioTransportRoutesForRequest(needs);
+    let omio=[];let omio_debug=[];
+    if(transport_routes.length){
+      try{
+        const r=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'lookup_omio_feed_routes',city:city||'',language:lang,ui_language:lang,transport_routes})});
+        const q=await r.json().catch(()=>({}));
+        if(r.ok&&q?.ok){omio=Array.isArray(q.offers)?q.offers:[];omio_debug=Array.isArray(q.omio_debug)?q.omio_debug:[];}
+        else console.warn('[ITBMO OMIO V61 LOOKUP]',q?.code||r.status);
+      }catch(error){console.warn('[ITBMO OMIO V61 LOOKUP]',error);}
+    }
+    const parentNeeds=new Set(omio.filter(o=>o?.route_segment?.is_parent).map(o=>o.need_id));
+    omio=omio.filter(o=>!parentNeeds.has(o.need_id)||o?.route_segment?.is_parent);
+    console.groupCollapsed(`[ITBMO OMIO V61 DEFINITIVE] ${city||'-'} · ${lang}`);
+    console.table(omio_debug.map(x=>({need_id:x.need_id,index:x.index,route:`${x.origin||''} → ${x.destination||''}`,match:!!x.match,route_id:x.route_id||'',reason:x.reason||''})));
+    console.table(omio.map(o=>({need_id:o.need_id,index:o?.route_segment?.index,route:o.entity_name,url:!!o.direct_url,button:!!o.direct_url,parent:!!o?.route_segment?.is_parent})));
+    console.info('V57 experience offers preserved',offers.filter(o=>['viator','getyourguide'].includes(o?.partner?.slug||'')).length,'Omio feed offers',omio.length);
     console.groupEnd();
+    offers=offers.concat(omio);
   }
   return offers;
 }
+
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   const token=getStoredSessionToken();
   const target=window.open('about:blank','_blank');if(target)target.opener=null;
