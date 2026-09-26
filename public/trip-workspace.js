@@ -746,11 +746,16 @@ async function openPartnerOffer(offerId,placement,offerToken,meta={}){
   if(target)target.close();
 }
 function bindPartnerOffers(){document.querySelectorAll('[data-partner-open]').forEach(btn=>{
-  btn.onclick=()=>{
+  btn.onclick=(event)=>{
     const card=btn.closest('[data-placement]'),direct=String(btn.dataset.partnerDirect||'');
     if(/^https:\/\/omio\.sjv\.io\/c\/7727455\//i.test(direct)){
+      // V64: Omio direct URLs are already fully resolved and attributed. Keep the
+      // Workspace alive and isolate the external navigation from any parent-card
+      // click handler. Never fall back to navigating the current ITBMO tab.
+      event?.preventDefault?.();event?.stopPropagation?.();
       window.ITBMOFoundation?.track('partner_offer_click',{partner_name:'Omio',partner_slug:'omio',placement:card?.dataset.placement||'city_transport',destination:city||'',need_type:card?.dataset.needType||'',entity_name:card?.dataset.entityName||'',travel_date:card?.dataset.travelDate||''});
-      const target=window.open(direct,'_blank','noopener,noreferrer');if(!target)window.location.assign(direct);return;
+      window.open(direct,'_blank','noopener,noreferrer');
+      return false;
     }
     openPartnerOffer(btn.dataset.partnerOpen,card?.dataset.placement||'',btn.dataset.partnerToken||'',{partnerSlug:card?.dataset.partnerSlug||'',needType:card?.dataset.needType||'',entityName:card?.dataset.entityName||'',travelDate:card?.dataset.travelDate||''});
   };
