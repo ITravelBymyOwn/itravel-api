@@ -89,12 +89,24 @@ function visibleWorkspaceDuration(row={}){
 }
 
 function renderItinerary(){const rows=data?.itineraries?.[city]?.byDay?.[day]||[],b=base(city),date=b?fmt(addDays(b,day-1)):'',ds=days(city),idx=ds.indexOf(day);let html=`<div class="tw-day-header"><div><span class="tw-kicker">${esc(city)}</span><h2>${lang==='es'?'Día':'Day'} ${day}${date?` · ${esc(date)}`:''}</h2></div><span class="tw-day-count">${idx+1} / ${ds.length}</span></div><div class="tw-timeline">`;rows.forEach((r,i)=>{const activity=String(r.activity||'').replace(/^rev:\s*/i,''),notes=String(r.notes||'').replace(/^\s*valid:\s*/i,'').trim(),route=[r.from,r.to].filter(Boolean).join(' → ');html+=`<article class="tw-stop"><div class="tw-time">${esc(r.start||'')}<small>${esc(r.end||'')}</small></div><div class="tw-node"></div><div class="tw-stop-card"><h3>${esc(activity)}</h3><div class="tw-pills">${r.transport?`<span class="tw-pill">${esc(r.transport)}</span>`:''}${visibleWorkspaceDuration(r)?`<span class="tw-pill">${esc(visibleWorkspaceDuration(r))}</span>`:''}</div>${(route||notes)?`<button class="tw-details-btn" type="button" data-detail="${i}">${esc(t.details)} ＋</button><div class="tw-details" id="tw-detail-${i}" hidden>${route?`<div class="tw-detail"><small>${esc(t.route)}</small><b>${esc(route)}</b></div>`:''}${r.transport?`<div class="tw-detail"><small>${esc(t.transport)}</small><b>${esc(r.transport)}</b></div>`:''}${visibleWorkspaceDuration(r)?`<div class="tw-detail"><small>${esc(t.duration)}</small><b>${esc(visibleWorkspaceDuration(r))}</b></div>`:''}${notes?`<div class="tw-detail"><small>${esc(t.notes)}</small><b>${esc(notes)}</b></div>`:''}</div>`:''}</div></article>`});html+='</div>';$('#tw-content').innerHTML=html;document.querySelectorAll('[data-detail]').forEach(btn=>btn.onclick=()=>{const box=$(`#tw-detail-${btn.dataset.detail}`),open=!box.hidden;box.hidden=open;btn.textContent=(open?t.details:t.hide)+(open?' ＋':' −')})}
+function _v67CommercialIntercityEndpoints_(origin='',destination=''){
+  const a=normalizeWorkspaceEntity(origin),b=normalizeWorkspaceEntity(destination);
+  if(!a||!b||a===b)return false;
+  // Access legs such as "Roma -> Roma Termini" or "Paris -> Gare du Nord"
+  // are local logistics, not independent commercial journeys. Keep the useful
+  // itinerary row, but do not promote it to an Omio decision card.
+  const stationWords=/\b(termini|station|stazione|gare|estacion|estacao|bahnhof|hbf|central|centrale|airport|aeroport|aeropuerto|terminal)\b/g;
+  const core=v=>v.replace(stationWords,' ').replace(/\s+/g,' ').trim();
+  const ac=core(a),bc=core(b);
+  if(ac&&bc&&(ac===bc||a.includes(bc)||b.includes(ac)))return false;
+  return true;
+}
 function tripRoutes(){
   const routes=[];
   const seen=new Set();
   const add=route=>{
     const origin=String(route?.origin||'').trim(),destination=String(route?.destination||'').trim();
-    if(!origin||!destination||normalizeWorkspaceEntity(origin)===normalizeWorkspaceEntity(destination))return;
+    if(!origin||!destination||!_v67CommercialIntercityEndpoints_(origin,destination))return;
     const key=`${normalizeWorkspaceEntity(origin)}>${normalizeWorkspaceEntity(destination)}|${route.travel_date||''}`;
     if(seen.has(key))return;seen.add(key);
     routes.push({
@@ -684,7 +696,7 @@ function omioTransportRoutesForRequest(needs=[]){
       const localizedDestination=lang==='es'?leg?.commercial_destination_es:leg?.commercial_destination_en;
       const origin=String(localizedOrigin||leg?.commercial_origin||leg?.origin||'').trim();
       const destination=String(localizedDestination||leg?.commercial_destination||leg?.destination||'').trim();
-      if(!origin||!destination)return;
+      if(!origin||!destination||!_v67CommercialIntercityEndpoints_(origin,destination))return;
       const key=`${need?.id||''}|${origin}|${destination}|${leg?.index||index+1}`;
       if(seen.has(key))return;seen.add(key);
       out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin,destination,index:Number(leg?.index||index+1),mode:String(leg?.mode||''),travel_date:need?.travel_date||'',parent_origin:route?.parent?.origin||'',parent_destination:route?.parent?.destination||''});
