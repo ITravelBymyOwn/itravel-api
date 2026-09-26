@@ -136,7 +136,7 @@ let paymentWarningAcceptedTripId = null;
    checkpoint writes; retries run only after a real technical failure. */
 const ITBMO_CITY_GENERATION_MAX_ATTEMPTS = 3;
 const ITBMO_CITY_RETRY_DELAYS_MS = [0,5000,12000];
-// V2.10.65: quality convergence happens internally. A traveler-facing retry is
+// V2.10.66: quality convergence happens internally and Day Trips are isolated physical units. A traveler-facing retry is
 // reserved for genuinely interrupted/technical runs, not normal QA convergence.
 const ITBMO_STAY_GENERATION_MAX_ATTEMPTS = 5;
 const ITBMO_STAY_LOCAL_REPAIR_MAX_ATTEMPTS = 6;
@@ -7602,7 +7602,7 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
 
 const _v3LastFailureByCity_={};
 const _v3AcceptedStayCache_=new Map();
-const ITBMO_V3_STAY_CACHE_SCHEMA='canonical-daytrip-roundtrip-v4-experience-semantics';
+const ITBMO_V3_STAY_CACHE_SCHEMA='physical-planning-units-v5-daytrip-isolation';
 
 function _v3StableHash_(value=''){
   let h1=0x811c9dc5,h2=0x9e3779b9;
@@ -7811,30 +7811,78 @@ function _v3BuildPhysicalStayUnits_(contract={}){
       });
     });
 
-    return descriptors.map(d=>{
+    // V2.10.66 · PHYSICAL PLANNING UNITS
+    // Keep the proven Stay generator intact, but reduce the problem handed to it:
+    // BASE windows remain one coherent unit per overnight Stay, while each Day Trip
+    // becomes its own recoverable unit. A failure in Pompeii/Segovia can therefore
+    // never force regeneration of the healthy Rome/Madrid base days.
+    const planningUnits=[];
+    descriptors.forEach(d=>{
       const {st,index,dayTrips}=d;
-      const windows=(ownedWindows.get(index)||[]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
-      const days=[...new Set(windows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b);
+      const allWindows=(ownedWindows.get(index)||[]).sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
       const previous=storyStays[index-1]||null,next=storyStays[index+1]||null;
-      // Boundary movements are authoritative and may live on a day shared by both
-      // adjacent stays. They were resolved before window ownership so repeated
-      // same-city stays on one date remain distinguishable.
-      const inbound=d.inbound||null;
-      const outbound=d.outbound||null;
-      const allowed=[...new Set([st.place,...dayTrips.map(x=>x.place),...windows.map(w=>w.location)].filter(Boolean))];
-      return {
-        id:st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`,
-        sequence:index+1,
-        physical_destination:st.place,
-        base_destination:st.place,
-        physical_key:_v3PhysicalKey_(st.place),
-        allowed_physical_locations:allowed,
-        day_trips:dayTrips.map(({expected_date,...x})=>x),
-        windows,days,
-        previous_destination:previous?.place||null,next_destination:next?.place||null,
-        inbound_boundary:inbound,outbound_boundary:outbound
-      };
-    }).filter(u=>u.windows.length||u.days.length);
+      const parentId=st.id||`${_v3PhysicalKey_(contract.planning_unit)||'trip'}-stay-${String(index+1).padStart(2,'0')}`;
+
+      // Resolve whether the traveler fixed the excursion clock. Route-estimated
+      // boundaries mean ITBMO owns the day: do not manufacture extra BASE tourism
+      // before/after the excursion. With user-fixed boundaries, a BASE fragment is
+      // worth planning only when it provides >= 3 real hours.
+      const dayTripMeta=dayTrips.map((dt,di)=>{
+        const dtDate=dt.expected_date||null;
+        const routeDay=routeDays.find(day=>String(day.date||'')===String(dtDate||''))||null;
+        const dtTransfers=(routeDay?.fixed_transfers||[]).filter(t=>/^daytrip_(?:out|return)$/i.test(String(t?.direction||'')) && (_arePoiAliases_(t.origin,st.place)||_arePoiAliases_(t.destination,st.place)) && (_arePoiAliases_(t.origin,dt.place)||_arePoiAliases_(t.destination,dt.place)));
+        const travelerFixed=dtTransfers.length>=2 && dtTransfers.every(t=>String(t?.source||'USER_FIXED').toUpperCase()!=='ROUTE_ESTIMATED' && !t?.route_estimated);
+        return {dt,di,dtDate,travelerFixed,transfers:dtTransfers};
+      });
+      const metaForWindow=(w)=>dayTripMeta.find(m=>m.dt?.place&&_arePoiAliases_(w.location,m.dt.place)&&(!m.dtDate||String(w.date||'')===String(m.dtDate)))||null;
+      const dayTripDays=new Map(dayTripMeta.map(m=>[String(m.dtDate||''),m]));
+
+      const baseWindows=allWindows.filter(w=>{
+        if(w.day_trip||String(w.role||'').toUpperCase()==='DAY_TRIP') return false;
+        const meta=dayTripDays.get(String(w.date||''));
+        if(!meta) return true;
+        if(!meta.travelerFixed) return false;
+        const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+        return ws!=null&&we!=null&&(we-ws)>=180;
+      });
+      if(baseWindows.length){
+        planningUnits.push({
+          id:parentId,unit_type:'BASE_STAY',parent_stay_id:parentId,sequence:0,
+          physical_destination:st.place,base_destination:st.place,physical_key:_v3PhysicalKey_(st.place),
+          allowed_physical_locations:[...new Set([st.place,...baseWindows.map(w=>w.location)].filter(Boolean))],
+          day_trips:[],windows:baseWindows,days:[...new Set(baseWindows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b),
+          previous_destination:previous?.place||null,next_destination:next?.place||null,
+          inbound_boundary:d.inbound||null,outbound_boundary:d.outbound||null
+        });
+      }
+
+      dayTripMeta.forEach(meta=>{
+        const dtWindows=allWindows.filter(w=>Boolean(w.day_trip||String(w.role||'').toUpperCase()==='DAY_TRIP') && metaForWindow(w)===meta);
+        if(!dtWindows.length)return;
+        const dt=meta.dt;
+        const day=Number(dtWindows[0].day);
+        const out=meta.transfers.find(t=>String(t.direction||'').toLowerCase()==='daytrip_out')||null;
+        const ret=meta.transfers.find(t=>String(t.direction||'').toLowerCase()==='daytrip_return')||null;
+        planningUnits.push({
+          id:`${parentId}-daytrip-${_v3PhysicalKey_(dt.place)||meta.di+1}-d${day}`,unit_type:'DAY_TRIP',parent_stay_id:parentId,sequence:0,
+          physical_destination:dt.place,base_destination:st.place,physical_key:_v3PhysicalKey_(dt.place),
+          allowed_physical_locations:[...new Set([dt.place,...dtWindows.map(w=>w.location)].filter(Boolean))],
+          day_trips:[Object.fromEntries(Object.entries(dt).filter(([k])=>k!=='expected_date'))],
+          windows:dtWindows,days:[...new Set(dtWindows.map(w=>Number(w.day)).filter(Boolean))].sort((a,b)=>a-b),
+          previous_destination:st.place,next_destination:st.place,inbound_boundary:out,outbound_boundary:ret,
+          traveler_fixed_window:Boolean(meta.travelerFixed)
+        });
+      });
+    });
+    planningUnits.sort((a,b)=>{
+      const ad=Math.min(...(a.days||[9999])),bd=Math.min(...(b.days||[9999]));
+      if(ad!==bd)return ad-bd;
+      const aw=_hhmmToMinutes_(a.windows?.[0]?.start)??-1,bw=_hhmmToMinutes_(b.windows?.[0]?.start)??-1;
+      return aw-bw||String(a.id).localeCompare(String(b.id));
+    });
+    planningUnits.forEach((u,i)=>u.sequence=i+1);
+    console.info('[ITBMO V3 PHYSICAL UNITS]',planningUnits.map(u=>({type:u.unit_type,id:u.id,base:u.base_destination,destination:u.physical_destination,days:u.days,windows:u.windows.length})));
+    return planningUnits.filter(u=>u.windows.length||u.days.length);
   }
 
   // Legacy fallback: preserve the pre-Trip-Story physical-window behavior.
@@ -7868,6 +7916,9 @@ function _v3StayContract_(contract,unit){
     version:'ITBMO_PHYSICAL_STAY_CONTRACT_V2',
     trip_context_id:contract.trip_context_id||'continuous-trip',
     stay_unit_id:unit.id,
+    unit_type:unit.unit_type||'BASE_STAY',
+    parent_stay_id:unit.parent_stay_id||unit.id,
+    traveler_fixed_window:Boolean(unit.traveler_fixed_window),
     sequence:unit.sequence,
     physical_destination:unit.physical_destination,
     base_destination:unit.base_destination||unit.physical_destination,
@@ -7886,7 +7937,7 @@ function _v3StayContract_(contract,unit){
     hard_policies:{
       plan_only_inside_supplied_physical_windows:true,
       stay_card_is_immutable:true,
-      day_trips_belong_to_parent_stay:true,
+      day_trips_are_isolated_physical_units:true,
       plan_only_in_allowed_physical_locations:true,
       boundary_movements_are_immutable_and_must_not_be_generated:true,
       use_substantial_windows_productively:true,
@@ -7946,11 +7997,12 @@ async function _v3GeneratePhysicalStay_(contract,unit,totalDays){
 PHYSICAL STAY GENERATION CONTRACT — authoritative JSON:
 ${JSON.stringify(stayContract)}
 
-Plan ONLY the useful time supplied for this Trip Story stay card, whose overnight/base destination is ${unit.base_destination||unit.physical_destination}. This is one chronological fragment of a continuous trip.
+Plan ONLY the useful time supplied for this physical planning unit. Its type is ${unit.unit_type||'BASE_STAY'}, its overnight/base destination is ${unit.base_destination||unit.physical_destination}, and its physical tourism destination is ${unit.physical_destination||unit.base_destination}. This is one chronological fragment of a continuous trip.
 - Generate tourism/activity rows only. DO NOT generate fixed movements; ITBMO inserts every supplied transfer deterministically.
 - Every row must remain inside one supplied planning_window, at that window's physical location, and must use that window's original global day number.
-- A Day Trip listed in day_trips belongs to THIS SAME STAY. Plan its destination inside its supplied excursion window and return to the base as defined by the deterministic route. NEVER split a Day Trip into another stay/generation unit.
-- Treat the entire stay card—including its Day Trips—as one coherent mini-itinerary: first identify and protect the destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
+- If unit_type is DAY_TRIP, maximize a coherent, traveler-friendly visit inside the supplied excursion window only. The deterministic outbound/return movements define its boundaries; do not invent extra tourism in the base before or after it.
+- If unit_type is BASE_STAY, plan only the supplied BASE windows. Day Trips are generated by independent physical units and must not be recreated here.
+- First identify and protect the physical destination's true must-sees using universal tourism judgment, then choose strong high-fit anchors, group geographically, use realistic dwell times and meals, avoid filler and duplicates, and use partial arrival/departure windows intelligently.
 - When a planning window has no explicit start, choose a traveler-friendly start time appropriate to the destination (normally around 08:00–09:00). Do not invent extreme starts such as 05:30 unless a supplied fixed boundary, reservation, special condition or genuinely time-critical experience requires it.
 - Do not assume that Day 1 of the parent destination is Day 1 here. Preserve the supplied global day numbers exactly.
 - allowed_physical_locations are authoritative for this call; do not plan outside them.
@@ -8139,7 +8191,7 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
   const contract=_v3CompactContract_(city,dest,perDay,baseDate,hotel,transport);
   const units=_v3BuildPhysicalStayUnits_(contract);
   if(!units.length) throw new Error(`V3_NO_PHYSICAL_STAYS:${city}`);
-  console.info(`[ITBMO V3 STAYS] trip: ${units.length} independent chronological stay card(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length,dayTrips:(u.day_trips||[]).length})));
+  console.info(`[ITBMO V3 STAYS] trip: ${units.length} independent physical planning unit(s)`,units.map(u=>({id:u.id,place:u.physical_destination,days:u.days,windows:u.windows.length,type:u.unit_type||'BASE_STAY',dayTrips:(u.day_trips||[]).length})));
 
   // Each Trip Story stay is an independent recoverable transaction. A stay that
   // passes QA is cached immediately and never enters another correction cycle
@@ -8411,7 +8463,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       }
       const affectedUnits=(generated.units||[]).filter(unit=>affectedIds.has(String(unit.id||'')));
       if(!affectedUnits.length || mergeAttempt>=ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS) break;
-      console.warn(`[ITBMO V3 INTERNAL MERGE RECOVERY] regenerating ${affectedUnits.length} affected Stay(s); healthy checkpoints preserved`,affectedUnits.map(u=>({id:u.id,destination:u.base_destination||u.physical_destination,days:u.days})));
+      console.warn(`[ITBMO V3 INTERNAL MERGE RECOVERY] regenerating ${affectedUnits.length} affected physical unit(s); healthy checkpoints preserved`,affectedUnits.map(u=>({id:u.id,type:u.unit_type||'BASE_STAY',destination:u.physical_destination||u.base_destination,base:u.base_destination,days:u.days})));
       _v3AcceptedStayClear_(generated.contract,affectedUnits);
     }
 
@@ -8520,7 +8572,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     return true;
   }catch(error){
     _v3LastFailureByCity_[city]=String(error?.message||error?.code||'V3_FAILED');
-    console.error(`[ITBMO V3] ${city} failed`,error);
+    console.error(`[ITBMO V3] trip generation blocked after internal recovery · root=${city}`,{message:String(error?.message||error),blocking_errors:error?.v3BlockingErrors||[],error});
     /* V3 is authoritative. Never fall back automatically to the historical
        Master Plan/Block pipeline: that path can multiply latency and tokens and
        makes a V3 benchmark impossible to interpret. The orchestrator may retry
