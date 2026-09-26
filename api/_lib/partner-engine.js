@@ -118,15 +118,19 @@ function omioLocalizedFallbackUrl(trackingUrl='',origin='',destination='',locale
 
 function omioCatalogRoute(origin,destination,locale='en'){
   const union=loadOmioUnion(); const lang=locale==='es'?'es':'en';
-  const originIds=omioEndpointPositionIds(origin,union),destinationIds=omioEndpointPositionIds(destination,union);
-  const matches=new Map();
-  for(const a of originIds)for(const b of destinationIds){const entry=union.byPositionRoute.get(`${a}|${b}`);if(entry)matches.set(entry.route_id,entry);}
-  // Last conservative fallback: exact bilingual endpoint pair. Never fuzzy-create a route.
+  const a=normalizeKey(origin),b=normalizeKey(destination);
+  // V59: city labels such as Madrid map to several station/airport position IDs.
+  // Resolve the exact bilingual city-name pair FIRST. The old position-first path
+  // produced several valid station combinations and then rejected the route as
+  // ambiguous even when the canonical Madrid→Toledo/Madrid→Segovia route existed.
+  const exact=new Map();
+  for(const entry of union.byRouteId.values())for(const names of Object.values(entry.names||{})){
+    if(normalizeKey(names?.origin)===a&&normalizeKey(names?.destination)===b)exact.set(entry.route_id,entry);
+  }
+  const matches=exact.size?exact:new Map();
   if(!matches.size){
-    const a=normalizeKey(origin),b=normalizeKey(destination);
-    for(const entry of union.byRouteId.values())for(const names of Object.values(entry.names||{})){
-      if(normalizeKey(names?.origin)===a&&normalizeKey(names?.destination)===b)matches.set(entry.route_id,entry);
-    }
+    const originIds=omioEndpointPositionIds(origin,union),destinationIds=omioEndpointPositionIds(destination,union);
+    for(const x of originIds)for(const y of destinationIds){const entry=union.byPositionRoute.get(`${x}|${y}`);if(entry)matches.set(entry.route_id,entry);}
   }
   if(matches.size!==1)return null;
   const entry=[...matches.values()][0];
@@ -793,32 +797,36 @@ function omioTrackedUrl(trackingBase, origin, destination, locale) {
 }
 async function resolveOmioCleanRoutes(city,uiLanguage,needs=[],transportRoutes=[]){
   if(!Array.isArray(transportRoutes)||!transportRoutes.length)return [];
-  const [partner,template]=await Promise.all([getPartner('omio'),getOmioTemplate()]);
-  if(!partner||!template||!partner.enabled||partner.status!=='approved')return [];
   const localeResolution=resolvePartnerLocale('omio',uiLanguage);
+  const partner={id:null,slug:'omio',name:'Omio'};
   const needById=new Map((Array.isArray(needs)?needs:[]).filter(Boolean).map(n=>[clean(n?.id,120),n]));
   const out=[],seen=new Set(),trace=[];
-  for(const raw of transportRoutes.slice(0,48)){
-    const needId=clean(raw?.need_id,120), origin=clean(raw?.origin,120), destination=clean(raw?.destination,120), index=Number(raw?.index||1);
-    const row={route:`${origin} → ${destination}`,need_id:needId,index,feed:false,url:false,button:false,reason:''};
+  for(const raw of transportRoutes.slice(0,64)){
+    const needId=clean(raw?.need_id,120),origin=clean(raw?.origin,120),destination=clean(raw?.destination,120),index=Number(raw?.index||1);
+    const row={route:`${origin} → ${destination}`,need_id:needId,index,parent:!!raw?.is_parent,feed:false,url:false,button:false,reason:''};
     if(!origin||!destination||normalizeKey(origin)===normalizeKey(destination)){row.reason='INVALID_ENDPOINT';trace.push(row);continue;}
     const catalog=omioCatalogRoute(origin,destination,localeResolution.locale);
     if(!catalog){row.reason='NOT_IN_FEED';trace.push(row);continue;}
     row.feed=true;
-    const key=`${needId}|${index}|${catalog.route_id}`;if(seen.has(key)){row.reason='DUPLICATE';trace.push(row);continue;}seen.add(key);
-    const targetUrl=omioTrackedUrl(clean(template.target_url,1000),origin,destination,localeResolution.applied?localeResolution.locale:'en');
-    if(!targetUrl||!hasRequiredAttribution('omio',targetUrl)){row.reason='ATTRIBUTED_URL_FAILED';trace.push(row);continue;}
+    // The feed link_URL already contains ITBMO's Impact attribution. Use it as
+    // authoritative output instead of rebuilding or passing through another gate.
+    const targetUrl=clean(catalog.target_url,1400);
+    if(!targetUrl||!allowedPartnerUrl('omio',targetUrl)||!hasRequiredAttribution('omio',targetUrl)){row.reason='INVALID_FEED_ATTRIBUTION';trace.push(row);continue;}
+    const key=`${needId}|${raw?.is_parent?'parent':index}|${catalog.route_id}`;if(seen.has(key)){row.reason='DUPLICATE';trace.push(row);continue;}seen.add(key);
     row.url=true;row.button=true;row.reason='CTA_READY';trace.push(row);
-    const need=needById.get(needId)||{};const routeLabel=`${origin} → ${destination}`;
-    out.push({...template,id:`omio-v58:${catalog.route_id}:${needId}:${index}`,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
-      description_es:'Compara opciones disponibles para este tramo del traslado.',description_en:'Compare available options for this leg of the journey.',
-      target_url:undefined,direct_url:targetUrl,confidence:'high',need_id:needId,need_type:need?.need_type||raw?.need_type||'intercity_transport',entity_name:routeLabel,city,
-      travel_date:clean(raw?.travel_date||need?.travel_date,40)||null,resolution_type:'omio_v58_clean_feed_gate',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
-      route_segment:{index,mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120)},
-      partner:{id:partner.id,slug:partner.slug,name:partner.name},offer_token:''});
+    const need=needById.get(needId)||{},routeLabel=`${origin} → ${destination}`;
+    out.push({id:`omio-feed:${catalog.route_id}:${needId}:${raw?.is_parent?'parent':index}`,placement:'city_transport',title_es:routeLabel,title_en:routeLabel,
+      description_es:'Compara horarios y opciones disponibles en Omio.',description_en:'Compare schedules and available options on Omio.',direct_url:targetUrl,confidence:'high',need_id:needId,
+      need_type:need?.need_type||raw?.need_type||'intercity_transport',entity_name:routeLabel,city,travel_date:clean(raw?.travel_date||need?.travel_date,40)||null,resolution_type:'omio_v59_feed_direct',partner_locale:localeResolution.locale,locale_applied:localeResolution.applied,
+      route_segment:{index,mode:clean(raw?.mode,40),commercial_origin:origin,commercial_destination:destination,parent_origin:clean(raw?.parent_origin,120),parent_destination:clean(raw?.parent_destination,120),is_parent:!!raw?.is_parent},
+      partner,offer_token:''});
   }
-  console.info('[ITBMO OMIO V58 CLEAN]',{city,locale:localeResolution.locale,candidates:transportRoutes.length,offers:out.length,trace});
-  return out;
+  // If the parent A→B itself exists in Omio, it is the commercial opportunity.
+  // Suppress artificial connection CTAs for the same need (e.g. Madrid→Barcelona→Paris).
+  const parentNeeds=new Set(out.filter(o=>o?.route_segment?.is_parent).map(o=>o.need_id));
+  const final=out.filter(o=>!parentNeeds.has(o.need_id)||o?.route_segment?.is_parent);
+  console.info('[ITBMO OMIO V59 FEED DIRECT]',{city,locale:localeResolution.locale,candidates:transportRoutes.length,offers:final.length,trace});
+  return final;
 }
 
 export async function resolveTripOffers({ session_token, trip_id }) {
