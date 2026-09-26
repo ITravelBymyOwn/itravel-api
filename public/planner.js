@@ -7522,7 +7522,11 @@ function _v3DeterministicQualityCleanup_(city,rows,contract,totalDays,perDay,bas
       const day=Number(error?.day||0),rowNum=Number(error?.row||0);
       const currentByDay=_rowsByDayObject_(out),arr=currentByDay[day]||[];
       const row=rowNum?arr[rowNum-1]:null,prev=rowNum>1?arr[rowNum-2]:null;
-      if(!row||!prev||_isPureTransportRow_(row)||_isPureTransportRow_(prev))continue;
+      // V67: a short overlap immediately after a mobility row is arithmetic too.
+      // The activity cannot start before the transfer that delivers the traveler
+      // has ended. Keep the same transactional audit guard; fixed route facts are
+      // not present in these model-owned rows and remain untouched downstream.
+      if(!row||!prev||_isPureTransportRow_(row))continue;
       const rs=_hhmmToMinutes_(row.start),re=_hhmmToMinutes_(row.end),pe=_hhmmToMinutes_(prev.end);
       if(rs==null||re==null||pe==null||re<=rs||pe<=rs)continue;
       const overlap=pe-rs;if(overlap<=0||overlap>30)continue;
@@ -11008,6 +11012,25 @@ async function _itbmoPdfLogoDataUrl_(){
 }
 function _itbmoPdfBlockStyle_(row={}){const t=_normalizeSearch_(_exportBlockType_(row,_plannerOutputLang_()));if(/traslado|transfer/.test(t))return {fill:[232,248,250],accent:[32,181,194]};if(/comida|meal/.test(t))return {fill:[255,244,237],accent:[241,124,74]};if(/logistica|logistics/.test(t))return {fill:[241,244,255],accent:[109,120,238]};return {fill:[246,250,255],accent:[8,123,250]};}
 
+// V67 PDF: make a round-trip excursion unmistakable in the daily heading.
+// ASCII arrows are intentional because the bundled jsPDF Helvetica path strips
+// non-Latin-1 arrow glyphs in normalizeCellText().
+function _v67PdfDayTripLabel_(day={},fallback=''){
+  const story=_currentTravelModelV2_()?.trip_story;
+  if(!story?.stays?.length||!day?.date)return fallback;
+  const parsed=parseDMY(day.date);
+  if(!parsed)return fallback;
+  const iso=`${parsed.getFullYear()}-${String(parsed.getMonth()+1).padStart(2,'0')}-${String(parsed.getDate()).padStart(2,'0')}`;
+  for(const st of story.stays){
+    for(const dt of (st?.dayTrips||[])){
+      if(!st?.startDate||!dt?.place)continue;
+      const dtDate=_tripStoryAddDays_(st.startDate,Math.max(0,Number(dt.day||1)-1));
+      if(dtDate===iso)return `${st.place}  <->  ${dt.place}`;
+    }
+  }
+  return fallback;
+}
+
 async function exportItineraryToPDF(options={}){
   if(!window.jspdf?.jsPDF){alert('jsPDF no está disponible. Verifica que los scripts (jsPDF + AutoTable) estén cargando en Webflow.');return;}
   const physicalBlocks=_exportPhysicalDestinationBlocks_();
@@ -11020,7 +11043,7 @@ async function exportItineraryToPDF(options={}){
   calendarDays.sort((a,b)=>{const da=parseDMY(a.date||''),db=parseDMY(b.date||'');return(da?.getTime?.()||0)-(db?.getTime?.()||0)||Number(a.globalDay)-Number(b.globalDay);});
   const W=doc.internal.pageSize.getWidth(),H=doc.internal.pageSize.getHeight();
   for(let index=0;index<calendarDays.length;index++){
-    if(index)doc.addPage('a4','portrait');const day=calendarDays[index],rows=day.rows.slice().sort((a,b)=>String(a.start||'').localeCompare(String(b.start||''))),routeLabel=day.destinations.join('  →  ');
+    if(index)doc.addPage('a4','portrait');const day=calendarDays[index],rows=day.rows.slice().sort((a,b)=>String(a.start||'').localeCompare(String(b.start||''))),defaultRouteLabel=day.destinations.join('  →  '),routeLabel=_v67PdfDayTripLabel_(day,defaultRouteLabel);
     // Premium light header: preserve the Home brand hierarchy and keep the logo legible.
     doc.setFillColor(249,252,255);doc.rect(0,0,W,112,'F');
     doc.setFillColor(8,123,250);doc.rect(0,108,W*.42,4,'F');doc.setFillColor(28,183,194);doc.rect(W*.42,108,W*.33,4,'F');doc.setFillColor(109,120,238);doc.rect(W*.75,108,W*.25,4,'F');
