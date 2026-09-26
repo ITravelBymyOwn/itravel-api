@@ -6352,7 +6352,10 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
           // displayed interval and a narrative duration must not trigger an expensive
           // model repair. Keep strict QA for materially short visits. Tolerance is
           // capped at 15 min and never exceeds 12% of the declared minimum.
-          const shortTolerance=Math.min(15,Math.max(5,Math.round(total.min*0.12)));
+          // V59: narrative dwell estimates are guidance, not exact clocks. Small
+          // 10–20 minute differences were causing full-Stay repairs with no visible
+          // quality gain. Keep a proportional cap while remaining strict on material loss.
+          const shortTolerance=Math.min(20,Math.max(10,Math.round(total.min*0.20)));
           if(total.min>span+shortTolerance){
             errors.push({code:'ROW_TOO_SHORT',day,row,span,needed:total.min,tolerance:shortTolerance});
           }
@@ -6404,20 +6407,16 @@ function _localGlobalAudit_(city,rows,totalDays,masterDays,perDay,baseDate='',ro
 
       if(!_isUtilityRow_(r)){
         const poi=_poiKeyFromRow_(r);
+        const physicalKey=_canonicalText_(r?.physical_location||r?.commerce_context?.physical_destination||city);
         for(const prior of seenPois){
-          if(prior.day!==day && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
-            errors.push({
-              code:'GLOBAL_DUPLICATE_POI',
-              days:[prior.day,day],
-              first:prior.label,
-              second:r.to||r.activity
-            });
+          // Same surface name in a different physical destination is not a duplicate
+          // (e.g. Plaza Mayor Madrid vs Plaza Mayor Segovia).
+          if(prior.day!==day && prior.physicalKey===physicalKey && _arePoiAliases_(poi,prior.poi) && !_v40DistinctPoiExperience_(prior.row,r)){
+            errors.push({code:'GLOBAL_DUPLICATE_POI',days:[prior.day,day],first:prior.label,second:r.to||r.activity,physical_location:physicalKey});
             break;
           }
         }
-        if(poi){
-          seenPois.push({day,poi,label:r.to||r.activity,row:r});
-        }
+        if(poi){seenPois.push({day,poi,label:r.to||r.activity,row:r,physicalKey});}
       }
 
       const rowText=`${r.activity||''} ${r.to||''}`;
