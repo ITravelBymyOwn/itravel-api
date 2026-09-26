@@ -474,11 +474,12 @@ function renderResolvedTransportSegments(item,matched=[]){
   const offerMatchesLeg=(offer,leg,index)=>{
     if((offer?.partner?.slug||'')!=='omio')return false;
     const markets=localizedMarkets(leg),seg=offer?.route_segment||{};
-    const sameNeed=!offer?.need_id||!item?.id||String(offer.need_id)===String(item.id);
-    const byRoute=seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
-    const byIndex=sameNeed&&Number(seg.index||0)===Number(leg.index||index+1);
-    const matched=!!(byRoute||byIndex);
-    console.info('[ITBMO OMIO V56][4 CARD BIND]',{need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${markets.from} → ${markets.to}`,offer_need_id:offer?.need_id||'',offer_index:Number(seg.index||0),offer_route:`${seg.commercial_origin||''} → ${seg.commercial_destination||''}`,sameNeed,byRoute,byIndex,matched});
+    const sameNeed=String(offer?.need_id||'')===String(item?.id||'');
+    const sameIndex=Number(seg.index||0)===Number(leg.index||index+1);
+    const byIdentity=sameNeed&&sameIndex;
+    const byRoute=sameNeed&&seg.commercial_origin&&seg.commercial_destination&&norm(seg.commercial_origin)===norm(markets.from)&&norm(seg.commercial_destination)===norm(markets.to);
+    const matched=!!(byIdentity||byRoute);
+    console.info('[ITBMO OMIO V63][CARD BIND]',{need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${markets.from} → ${markets.to}`,offer_need_id:offer?.need_id||'',offer_index:Number(seg.index||0),offer_route:`${seg.commercial_origin||''} → ${seg.commercial_destination||''}`,sameNeed,sameIndex,byIdentity,byRoute,matched,direct_url:!!offer?.direct_url});
     return matched;
   };
   const legs=allLegs.filter((leg,index)=>leg?.commerce_eligible||(matched||[]).some(o=>offerMatchesLeg(o,leg,index)));
@@ -486,7 +487,7 @@ function renderResolvedTransportSegments(item,matched=[]){
   const commercial=legs.length?`<div class="tw-route-segments">${legs.map((leg,index)=>{
     const markets=localizedMarkets(leg),marketFrom=markets.from,marketTo=markets.to;
     const legOffers=(matched||[]).filter(o=>offerMatchesLeg(o,leg,index));
-    console.info('[ITBMO OMIO V56][5 CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0,stop_reason:legOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
+    console.info('[ITBMO OMIO V63][CTA]',{city:city||'',need_id:item?.id||'',leg_index:Number(leg.index||index+1),route:`${marketFrom} → ${marketTo}`,candidate_offers:(matched||[]).filter(o=>(o?.partner?.slug||'')==='omio').length,matched_offers:legOffers.length,button_expected:legOffers.length>0,stop_reason:legOffers.length?'CTA_READY':'NO_BOUND_FEED_OFFER'});
     const times=[leg.departure_time,leg.arrival_time].filter(Boolean).join(' → ');
     return `<div class="tw-route-segment"><div class="tw-route-segment__head"><span>${index+1}</span><div><b>${esc(`${marketFrom} → ${marketTo}`)}</b><small>${esc([leg.mode,times].filter(Boolean).join(' · '))}</small></div></div><p>${esc(mobilityLegNote(leg.note))}</p>${legOffers.length?omioOptions(legOffers):''}</div>`;
   }).join('')}</div>`:'';
@@ -689,7 +690,7 @@ function omioTransportRoutesForRequest(needs=[]){
       out.push({need_id:need?.id||'',need_type:need?.need_type||'intercity_transport',origin,destination,index:Number(leg?.index||index+1),mode:String(leg?.mode||''),travel_date:need?.travel_date||'',parent_origin:route?.parent?.origin||'',parent_destination:route?.parent?.destination||''});
     });
   });
-  console.groupCollapsed(`[ITBMO OMIO V56][1 CARD ROUTES] ${city||'-'} · ${lang}`);
+  console.groupCollapsed(`[ITBMO OMIO V63][CARD ROUTES] ${city||'-'} · ${lang}`);
   console.table(out.map(r=>({need_id:r.need_id,index:r.index,origin:r.origin,destination:r.destination,mode:r.mode,date:r.travel_date})));
   console.info('candidate_count',out.length);
   console.groupEnd();
@@ -706,7 +707,7 @@ async function fetchPartnerOffers(action,needs=[]){
       return [];
     }
     if(body.action==='resolve_omio_routes'||body.action==='lookup_omio_feed_routes'){
-      console.groupCollapsed(`[ITBMO OMIO V56][2 DIRECT FEED RESPONSE] ${city||'-'} · ${lang}`);
+      console.groupCollapsed(`[ITBMO OMIO V63][FEED RESPONSE] ${city||'-'} · ${lang}`);
       console.info('status',response.status,'offers',Array.isArray(payload.offers)?payload.offers.length:0);
       if(Array.isArray(payload.omio_debug))console.table(payload.omio_debug);
       console.info('raw_offers',payload.offers||[]);
@@ -727,7 +728,7 @@ async function fetchPartnerOffers(action,needs=[]){
     transport_routes.length?post({...baseBody,action:'lookup_omio_feed_routes',transport_routes}):Promise.resolve([])
   ]);
   const experiences=cityOffers.filter(offer=>(offer?.partner?.slug||'')!=='omio');
-  console.info('[ITBMO OMIO V56][3 SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
+  console.info('[ITBMO OMIO V63][SUMMARY]',{city:city||'',language:lang,candidate_routes:transport_routes.length,feed_matches:omioOffers.length,offers:omioOffers.map(o=>({need_id:o.need_id,route:o.route_segment,direct_url:!!o.direct_url}))});
   return [...experiences,...omioOffers];
 }
 async function openPartnerOffer(offerId,placement,offerToken,meta={}){
