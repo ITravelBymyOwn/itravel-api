@@ -458,7 +458,7 @@ function mobilityLegNote(note=''){
 function omioOptions(offers=[]){
   const list=(Array.isArray(offers)?offers:[]).filter(o=>(o?.partner?.slug||'')==='omio');
   if(!list.length)return'';
-  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-token="${esc(offer.offer_token||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
+  return `<div class="tw-partner-options tw-partner-options--omio">${list.map(offer=>`<div class="tw-partner-option" data-offer-id="${esc(offer.id)}" data-placement="${esc(offer.placement||'city_transport')}" data-partner-slug="omio" data-need-type="${esc(offer.need_type||'')}" data-entity-name="${esc(offer.entity_name||'')}" data-travel-date="${esc(offer.travel_date||'')}"><strong>Omio</strong><button type="button" data-partner-open="${esc(offer.id)}" data-partner-direct="${esc(offer.direct_url||'')}" data-partner-token="${esc(offer.offer_token||'')}">${esc(lang==='es'?'Ver opciones en Omio':'View options on Omio')} →</button></div>`).join('')}</div>`;
 }
 function renderResolvedTransportSegments(item,matched=[]){
   const route=parseResolvedRouteSource(item?.source_route);if(!route)return'';
@@ -700,16 +700,17 @@ async function fetchPartnerOffers(action,needs=[]){
   // V57: restore the V25 commerce request topology. One resolve_city request
   // carries the contextual needs; server-side adapters return Viator/GYG exactly
   // as before plus Omio built by the recovered V25 path. No parallel Omio fetch.
-  const body={action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs};
+  const transport_routes=action==='resolve_city'?omioTransportRoutesForRequest(needs):[];
+  const body={action,session_token:token,trip_id:data.trip_id,city:city||'',language:lang,ui_language:lang,trip_language:data?.trip_language||'',needs,transport_routes};
   const response=await fetch('/api/partners',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const payload=await response.json().catch(()=>({}));
   if(!response.ok||!payload?.ok){console.warn('[PARTNER ENGINE]',payload?.code||response.status);return[]}
   const offers=Array.isArray(payload.offers)?payload.offers:[];
   if(action==='resolve_city'){
     const omio=offers.filter(o=>(o?.partner?.slug||'')==='omio');
-    console.groupCollapsed(`[ITBMO OMIO V57 V25 RECOVERY] ${city||'-'} · ${lang}`);
+    console.groupCollapsed(`[ITBMO OMIO V58 CLEAN] ${city||'-'} · ${lang}`);
     console.info('context_needs',needs.length,'omio_offers',omio.length);
-    console.table(omio.map(o=>({need_id:o.need_id,index:o?.route_segment?.index,route:o.entity_name,resolution:o.resolution_type,token:!!o.offer_token})));
+    console.table(omio.map(o=>({need_id:o.need_id,index:o?.route_segment?.index,route:o.entity_name,feed:'YES',url:!!o.direct_url,button:!!o.direct_url})));
     console.groupEnd();
   }
   return offers;
