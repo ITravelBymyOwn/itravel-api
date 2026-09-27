@@ -4,7 +4,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 const REST_URL = `${SUPABASE_URL}/rest/v1`;
-const MAX_GENERATION_RUNS = 4; // V3: allow paid recovery without exhausting after two technical failures
+// A paid trip remains recoverable until it is generated or explicitly archived.
+// The count records attempts; it must never invalidate the paid entitlement.
+const MAX_GENERATION_RUNS = null;
 const MAX_DAYS_PER_DESTINATION = 10; // Legacy single-destination limit
 const MAX_TRIP_STORY_DAYS = 30; // Continuous Trip Story limit; validated per physical stay
 
@@ -750,14 +752,6 @@ async function handleGenerationBegin(res, body, session) {
 
   const previousRuns = Math.max(0, Number(trip.generation_count || 0));
   const newRun = trip.status !== "generating";
-  if (newRun && previousRuns >= MAX_GENERATION_RUNS) {
-    return res.status(409).json({
-      ok:false,
-      code:"GENERATION_RECOVERY_EXHAUSTED",
-      error:"Automatic generation recovery limit reached"
-    });
-  }
-
   const nextRuns = newRun ? previousRuns + 1 : Math.max(1, previousRuns);
   const completed = Array.isArray(checkpoint.completed_cities)
     ? checkpoint.completed_cities.map(String)
