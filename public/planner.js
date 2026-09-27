@@ -7195,8 +7195,13 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
           arrival:t.arrival||null,
           transfer_id:t.transfer_id||null,
           direction:t.direction||null,
-          user_fixed:Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),
-          route_estimated:Boolean(t.route_estimated ?? (String(t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),
+          user_fixed:Boolean(t.departure_user_fixed ?? t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),
+          departure_user_fixed:Boolean(t.departure_user_fixed ?? t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),
+          arrival_user_fixed:Boolean(t.arrival_user_fixed),
+          departure_source:String(t.departure_source||((t.departure_user_fixed??t.user_fixed)?'USER_FIXED':t.source||'USER_FIXED')).toUpperCase(),
+          arrival_source:String(t.arrival_source||t.source||'USER_FIXED').toUpperCase(),
+          transport_source:String(t.transport_source||t.source||'USER_FIXED').toUpperCase(),
+          route_estimated:Boolean(t.route_estimated ?? (String(t.arrival_source||t.transport_source||t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),
           source:String(t.source||'USER_FIXED').toUpperCase(),
           route_resolution:t.route_resolution||null,
           mode:t.mode||null,
@@ -9173,7 +9178,7 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
-  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW|POST_STORAGE/i.test(String(reason||''));
+  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW|POST_STORAGE/i.test(String(reason||''));
   // V68 · nominal row completeness is NOT publication success. During an
   // integrity failure, accepted Stay checkpoints can make every city look
   // complete even though the canonical merge was rejected. Never suppress the
@@ -9456,7 +9461,7 @@ async function runPaidGeneration({manualRetry=false}={}){
     if(!allComplete){
       await _persistGenerationCheckpoint_('failed',{active_city:null});
       showWOW(false);
-      const integrityFailure=Object.values(_v3LastFailureByCity_||{}).some(message=>/V3_EXPORT_SHAPE_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|V3_STAY_QUALITY_BLOCK/.test(String(message||'')));
+      const integrityFailure=Object.values(_v3LastFailureByCity_||{}).some(message=>/V3_EXPORT_SHAPE_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|MISSING_PHYSICAL_WINDOW|V3_STAY_QUALITY_BLOCK/.test(String(message||'')));
       if($preferencesGenerateV2){
         // Do not expose the old Personalization CTA after generation started.
         // Recovery owns the next action and reuses accepted Stay checkpoints.
@@ -9507,7 +9512,7 @@ async function runPaidGeneration({manualRetry=false}={}){
       }
     }catch(_){ }
     const recoveryReason=err?.code || err?.message || 'Generation failed';
-    const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW/i.test(String(recoveryReason));
+    const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|V3_INCOMPLETE_AFTER_STAY_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW/i.test(String(recoveryReason));
     if($preferencesGenerateV2){
       // Once paid generation started, Recovery owns the next action. Never expose
       // the old create CTA behind/after an integrity failure.
@@ -13939,6 +13944,10 @@ function _v71CaptureTravelerClockAuthority_(story={}){
     if(index>0){
       if(st._itbmo_user_departure_date==null) st._itbmo_user_departure_date=st.departureDate||'';
       if(st._itbmo_user_departure_time==null) st._itbmo_user_departure_time=st.departureTime||'';
+      // V75 · Preserve field-level authority. Arrival is traveler-fixed only when
+      // it existed before route estimation; otherwise ITBMO may estimate it.
+      if(st._itbmo_user_arrival_date==null) st._itbmo_user_arrival_date=(st.arrivalDate && String(st.timeStatus||'').toLowerCase()!=='estimated')?st.arrivalDate:'';
+      if(st._itbmo_user_arrival_time==null) st._itbmo_user_arrival_time=(st.arrivalTime && String(st.timeStatus||'').toLowerCase()!=='estimated')?st.arrivalTime:'';
     }
   });
   (story.stays||[]).forEach(st=>(st.dayTrips||[]).forEach(dt=>{
@@ -14056,11 +14065,14 @@ async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}
     if(!fixedDate||!fixedTime){const err=new Error(`MISSING_USER_FIXED_TRANSFER:${st.place}`);err.code='MISSING_USER_FIXED_TRANSFER';throw err;}
     // Route Resolver may estimate route, mode and ARRIVAL; it has zero authority over the mandatory departure clock.
     st.departureDate=fixedDate;st.departureTime=fixedTime;
+    const userArrivalDate=String(st._itbmo_user_arrival_date||'');
+    const userArrivalTime=String(st._itbmo_user_arrival_time||'');
     if(!st.transportMode)st.transportMode=_routeResolvedPrincipalMode_(Array.isArray(r.legs)?r.legs:[],'main',r.primary_mode||'other');
-    if(!st.arrivalDate)st.arrivalDate=r.arrival_date||st.departureDate;
-    if(!st.arrivalTime)st.arrivalTime=r.arrival_time||'';
-    st.timeStatus=(st.arrivalTime&&r.arrival_time)?'estimated':(st.timeStatus||'estimated');
-    st.transportStatus='route_estimated';st.departureTimeStatus='user_fixed';st.routeResolution={summary:r.summary||'',legs:Array.isArray(r.legs)?r.legs:[],alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
+    st.arrivalDate=userArrivalDate||r.arrival_date||st.arrivalDate||st.departureDate;
+    st.arrivalTime=userArrivalTime||r.arrival_time||st.arrivalTime||'';
+    st.arrival_route_estimated=!Boolean(userArrivalTime);
+    st.timeStatus=userArrivalTime?'user_fixed':'estimated';
+    st.transportStatus='route_estimated';st.departureTimeStatus='user_fixed';st.arrivalTimeStatus=userArrivalTime?'user_fixed':'route_estimated';st.routeResolution={summary:r.summary||'',legs:Array.isArray(r.legs)?r.legs:[],alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
   }
   for(const st of story.stays)for(const dt of (st.dayTrips||[])){
     const r=byId.get(`daytrip:${dt.id}`);if(!r)continue;
