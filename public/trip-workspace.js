@@ -375,11 +375,29 @@ function localTicketNeedsForCity(cityName,existing=[]){
   });
   return out;
 }
+
+function transportNeedOrigin(item){
+  const parsed=parseResolvedRouteSource(item?.source_route||'');
+  const parentOrigin=String(parsed?.parent?.origin||'').trim();
+  if(parentOrigin)return parentOrigin;
+  const direct=String(item?.origin||'').trim();
+  if(direct)return direct;
+  const text=String(item?.entity_name||item?.source_activity||item?.source_route||'');
+  const m=text.match(/^\s*([^→]+?)\s*→/);
+  return m?String(m[1]||'').trim():'';
+}
+function transportNeedBelongsToOriginWorkspace(item,cityName){
+  if(item?.need_type!=='intercity_transport'&&item?.need_type!=='transport_arrangement')return true;
+  if(isRentalTransportNeed(item))return true;
+  const origin=transportNeedOrigin(item);
+  return !origin || normalizeWorkspaceEntity(origin)===normalizeWorkspaceEntity(cityName);
+}
+
 function contextualNeedsForCity(cityName,needs){
   // Server context for a main planning unit can contain rows that physically
   // belong to a subdestination. Keep only needs that belong to this physical
   // workspace slice; transport is re-derived from the authoritative route.
-  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>{
+  const source=(Array.isArray(needs)?needs:[]).filter(item=>contextualNeedBelongsToCitySlice(item,cityName)).filter(item=>transportNeedBelongsToOriginWorkspace(item,cityName)).filter(item=>{
     // City Tour is transversal: Context may discover one on a particular day,
     // but Workspace renders exactly one destination-wide card above daily tours.
     if(item?.need_type!=='guided_tour_optional')return true;
