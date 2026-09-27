@@ -7054,7 +7054,8 @@ function _v3CanonicalUserFixedTransfers_(baseDate){
     if(!x?.origin||!x?.destination||!x?.departure||!x?.arrival||!Number.isFinite(Number(x.day)))return;
     const key=[x.day,x.origin,x.destination,x.departure,x.arrival].map(v=>String(v).trim().toLowerCase()).join('|');
     if(ledger.some(y=>y._key===key))return;
-    ledger.push({...x,_key:key,user_fixed:x.source!=='ROUTE_ESTIMATED',route_estimated:x.source==='ROUTE_ESTIMATED',source:x.source||'USER_FIXED'});
+    const source=String(x.source||'USER_FIXED').toUpperCase();
+    ledger.push({...x,_key:key,user_fixed:source==='USER_FIXED',route_estimated:source==='ROUTE_ESTIMATED',source});
   };
   for(let i=1;i<stays.length;i++){
     const st=stays[i],prev=stays[i-1];
@@ -7122,7 +7123,14 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
       const isFinalDay=dayNum===Number(dest?.days||0);
       const routeTransfers=(day.fixed_transfers||[]);
       const ledgerTransfers=canonicalLedger.filter(t=>Number(t.day)===dayNum);
-      const fixedTransfers=[...routeTransfers];
+      // V68 · provenance is authoritative. Route Resolver may already expose the
+      // same movement without carrying its source flag. Reconcile the duplicate
+      // with the canonical ledger instead of silently defaulting it to USER_FIXED.
+      // This prevents ITBMO-resolved times from becoming traveler-fixed constraints.
+      const fixedTransfers=routeTransfers.map(x=>{
+        const canonical=ledgerTransfers.find(t=>String(x.origin||'').trim().toLowerCase()===String(t.origin||'').trim().toLowerCase()&&String(x.destination||'').trim().toLowerCase()===String(t.destination||'').trim().toLowerCase()&&String(x.departure||'')===String(t.departure||'')&&String(x.arrival||'')===String(t.arrival||''));
+        return canonical?{...x,...canonical,route_resolution:canonical.route_resolution||x.route_resolution||null}:{...x,source:x.source||'USER_FIXED',user_fixed:x.user_fixed!==false,route_estimated:Boolean(x.route_estimated)};
+      });
       ledgerTransfers.forEach(t=>{
         const exists=fixedTransfers.some(x=>String(x.origin||'').trim().toLowerCase()===String(t.origin||'').trim().toLowerCase()&&String(x.destination||'').trim().toLowerCase()===String(t.destination||'').trim().toLowerCase()&&String(x.departure||'')===String(t.departure||'')&&String(x.arrival||'')===String(t.arrival||''));
         if(!exists)fixedTransfers.push(t);
@@ -7156,9 +7164,9 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
           arrival:t.arrival||null,
           transfer_id:t.transfer_id||null,
           direction:t.direction||null,
-          user_fixed:t.source!=='ROUTE_ESTIMATED',
-          route_estimated:t.source==='ROUTE_ESTIMATED',
-          source:t.source||'USER_FIXED',
+          user_fixed:Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),
+          route_estimated:Boolean(t.route_estimated ?? (String(t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),
+          source:String(t.source||'USER_FIXED').toUpperCase(),
           route_resolution:t.route_resolution||null,
           mode:t.mode||null,
           terminal_arrival:Boolean(t.terminal_arrival||t===inferredTerminalTransfer)
@@ -7246,7 +7254,7 @@ function _v3EnforceHardRouteFacts_(rows=[],contract={}){
             ? (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. Este traslado cierra esta etapa del viaje; para planificar ${t.destination}, agrégalo como un destino principal.`:`Expected arrival in ${t.destination} at ${t.arrival}. This transfer closes this trip stage; add ${t.destination} as a main destination to plan it.`)
             : (es?`Llegada prevista a ${t.destination} a las ${t.arrival}. La planificación continúa desde ${t.destination} según el tiempo disponible.`:`Expected arrival in ${t.destination} at ${t.arrival}. Planning continues from ${t.destination} according to the available time.`)),
         kind:'transport',
-        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:t.source!=='ROUTE_ESTIMATED',route_estimated:t.source==='ROUTE_ESTIMATED',route_resolution:t.route_resolution||null,source:t.source||'USER_FIXED',booking_need:'compare_options'}
+        commerce_context:{semantic_type:'TRANSPORT',origin:t.origin,destination:t.destination,mode:t.mode||null,departure:t.departure,arrival:t.arrival,transfer_id:t.transfer_id||null,user_fixed:Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')),route_estimated:Boolean(t.route_estimated ?? (String(t.source||'').toUpperCase()==='ROUTE_ESTIMATED')),route_resolution:t.route_resolution||null,source:String(t.source||'USER_FIXED').toUpperCase(),booking_need:'compare_options'}
       };
       if(idx>=0) out[idx]={...out[idx],...fixedRow};
       else out.push(fixedRow);
@@ -7394,7 +7402,7 @@ function _v3MergedHardPhysicalAudit_(rows=[],contract={},totalDays=1){
   for(let day=1;day<=maxDay;day++){
     const dayRows=[...(byDay[day]||[])].sort((a,b)=>(_hhmmToMinutes_(a.start)??99999)-(_hhmmToMinutes_(b.start)??99999));
     const routeDay=routeDays.get(day)||{};
-    const transfers=(routeDay.fixed_transfers||[]).filter(t=>t?.departure&&t?.arrival);
+    const transfers=(routeDay.fixed_transfers||[]).filter(t=>t?.departure&&t?.arrival&&Boolean(t.user_fixed ?? (String(t.source||'USER_FIXED').toUpperCase()==='USER_FIXED')));
 
     dayRows.forEach((row,index)=>{
       const start=_hhmmToMinutes_(row.start),end=_hhmmToMinutes_(row.end);
@@ -7767,10 +7775,19 @@ function _v3BuildPhysicalStayUnits_(contract={}){
         descriptors.forEach(d=>{
           if(!d.dates.has(date)) return;
           const ws=_hhmmToMinutes_(w.start),we=w.open_end?null:_hhmmToMinutes_(w.end);
+          // V68 · an exact Day Trip identity (physical place + expected calendar
+          // date) owns its tourism window before Stay-boundary heuristics run.
+          // The excursion's outbound/return legs define its real boundaries; an
+          // unrelated inter-stay boundary must never orphan Florence/Pompeii/etc.
+          const exactDayTrip=d.dayTrips.find(dt=>dt?.place&&dt.expected_date===date&&_arePoiAliases_(location,dt.place));
+          if(exactDayTrip){
+            candidates.push({descriptor:d,score:200,role:'DAY_TRIP'});
+            return;
+          }
           const inboundMinute=d.inbound&&String(d.inbound.date||'')===date?_hhmmToMinutes_(d.inbound.arrival):null;
           const outboundMinute=d.outbound&&String(d.outbound.date||'')===date?_hhmmToMinutes_(d.outbound.departure):null;
           // Same-day Stay transitions can make two cards share the same date and
-          // even the same city name. Boundary times disambiguate ownership.
+          // even the same city name. Boundary times disambiguate BASE ownership.
           if(inboundMinute!=null&&ws!=null&&ws<inboundMinute) return;
           if(outboundMinute!=null&&we!=null&&we>outboundMinute) return;
           let score=0,role=null;
@@ -9062,8 +9079,13 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
-  // V48 completed itinerary is authoritative over stale recovery flags.
-  if(savedDestinations.length && savedDestinations.every(({city})=>_generationCityComplete_(city))){
+  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|POST_STORAGE/i.test(String(reason||''));
+  // V68 · nominal row completeness is NOT publication success. During an
+  // integrity failure, accepted Stay checkpoints can make every city look
+  // complete even though the canonical merge was rejected. Never suppress the
+  // recovery overlay in that state. Only a non-integrity stale flag may yield to
+  // an already-complete itinerary.
+  if(!integrityFailure && savedDestinations.length && savedDestinations.every(({city})=>_generationCityComplete_(city))){
     console.info('[ITBMO RECOVERY GUARD] suppressed stale recovery modal for completed itinerary');
     document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
     setPlanningChatLocked(false);
@@ -9076,7 +9098,6 @@ function _showGenerationRetry_(reason=''){
 
   const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
   const es=getLang()==='es';
-  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|POST_STORAGE/i.test(String(reason||''));
   const overlay=document.createElement('div');
   overlay.className='itbmo-postpay-overlay itbmo-generation-recovery-overlay';
   overlay.innerHTML=`<div class="itbmo-postpay-card" role="dialog" aria-modal="true" aria-labelledby="itbmo-recovery-title" style="position:relative">
