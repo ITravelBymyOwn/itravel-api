@@ -3873,7 +3873,15 @@ function openImmersiveItinerary(){
     destinations:(workspaceViews.destinations||[]).map(d=>({
       city:d?.city||'',country:d?.country||'',countryCode:d?.countryCode||_countryMatch_(d?.country||'')?.code||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null
     })).filter(d=>d.city),
-    source_destinations:(savedDestinations||[]).map(d=>({city:d?.city||'',country:d?.country||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null})).filter(d=>d.city),
+    // V71 · Workspace route continuity: the compatibility layer may expose the
+    // whole Continuous Trip Story as one saved planning unit. The canonical Stay
+    // cards, not savedDestinations, are therefore the authority for inter-stay
+    // transitions such as Bruges → Rome. trip-workspace.js can then derive every
+    // main movement without changing its own affiliate/partner logic.
+    source_destinations:(((_currentTravelModelV2_()?.trip_story?.stays)||[]).length
+      ? ((_currentTravelModelV2_()?.trip_story?.stays)||[]).map(st=>({city:st?.place||'',country:st?.country||'',days:Number(st?.days||0)||0,baseDate:st?.startDate?_tripStoryDMY_(st.startDate):null}))
+      : (savedDestinations||[]).map(d=>({city:d?.city||'',country:d?.country||'',days:Number(d?.days||0)||0,baseDate:d?.baseDate||null})))
+      .filter(d=>d.city),
     workspace_source_map:workspaceViews.source_map||{},
     city_meta:cityMeta||{},
     itineraries:workspaceViews.itineraries||{}
@@ -7197,7 +7205,7 @@ function _v3CompactContract_(city,dest,perDay,baseDate,hotel,transport){
       days:Math.max(1,Number(st.days||1)),
       dayTrips:(st.dayTrips||[]).map(dt=>({
         id:dt.id||'',day:Math.max(1,Number(dt.day||1)),place:dt.place||'',country:dt.country||st.country||'',
-        outbound:{...(dt.outbound||{})},return:{...(dt.return||{})}
+        outbound:{...(dt.outbound||{})},return:{...(dt.return||{})},scheduleAdjustment:dt.scheduleAdjustment||null
       }))
     })),
     hard_policies:{
@@ -7976,7 +7984,7 @@ function _v3StayContract_(contract,unit){
 
 function _v3StampStayRows_(rows=[],unit={}){
   const windows=unit.windows||[];
-  return (rows||[]).flatMap(row=>{
+  const stamped=(rows||[]).flatMap(row=>{
     const day=Number(row?.day),start=_hhmmToMinutes_(row?.start),end=_hhmmToMinutes_(row?.end);
     const candidates=windows.filter(w=>{
       if(Number(w.day)!==day) return false;
@@ -7994,6 +8002,15 @@ function _v3StampStayRows_(rows=[],unit={}){
     const physical=window.location||unit.base_destination||unit.physical_destination;
     return [{...row,physical_location:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null,commerce_context:{...(row.commerce_context||{}),physical_destination:physical,stay_unit_id:unit.id,planning_window_id:window.window_id||null}}];
   });
+  // V71 · if ITBMO had to move an estimated full-day excursion away from an
+  // impossible transition day, explain the adjustment once in traveler-facing
+  // Notes without asking the model to rediscover or justify the deterministic move.
+  const adjustment=(unit.day_trips||[]).find(dt=>dt?.scheduleAdjustment)?.scheduleAdjustment;
+  if(adjustment&&stamped.length){
+    const note=getLang()==='es'?adjustment.note_es:adjustment.note_en;
+    if(note&&!String(stamped[0].notes||'').includes(note))stamped[0].notes=[note,stamped[0].notes].filter(Boolean).join(' · ');
+  }
+  return stamped;
 }
 
 function _v3AnnotatePhysicalRows_(rows=[],contract={},units=[]){
@@ -9322,6 +9339,7 @@ async function runPaidGeneration({manualRetry=false}={}){
   _resetAstraGenerationMetrics_();
 
   try{
+    _v71ClearTripCompletionMarker_(currentTripId);
     showWOW(true,getLang()==='es'?'✨ ITBMO está resolviendo la logística de tu recorrido…':'✨ ITBMO is resolving your trip logistics…');
     await _resolveTripStoryRoutesBeforeGeneration_();
     _assertGenerationRunActive_(runEpoch);
@@ -9434,6 +9452,9 @@ async function runPaidGeneration({manualRetry=false}={}){
 
     await _queueGenerationCheckpoint_('generated',{active_city:null,last_error:null,pending_cities:[]});
     generationRecoveryState={...(generationRecoveryState||{}),last_error:null,pending_cities:[],completed_cities:savedDestinations.map(x=>x.city)};
+    // The server checkpoint succeeded: publish a local terminal marker before
+    // downloads/Workspace navigation can trigger any restore observer.
+    _v71SetTripCompletionMarker_(currentTripId);
     // Publication is the critical transaction boundary. Show downloads first;
     // analytics/context warming must never be able to suppress the completion UI.
     _applyGeneratedUIState({showModal:true});
@@ -9758,6 +9779,16 @@ async function restorePaidGenerationIfNeeded(){
     // Positive server entitlement is the only restore-time authority for the lock.
     paymentGateSatisfiedTripId=currentTripId;
     setPostPaymentTripConfigurationLocked(true);
+
+    // V71 · a successfully published generation is terminal. If a late/stale
+    // recoverable status is observed after the download modal, never offer a new
+    // generation attempt when the same trip has a confirmed completion marker and
+    // its hydrated itinerary is complete.
+    if(['generating','failed'].includes(trip.status) && _v71HasTripCompletionMarker_(currentTripId) && savedDestinations.length && savedDestinations.every(({city})=>_generationCityComplete_(city))){
+      console.info('[ITBMO V71 RECOVERY ORDER] suppressed stale recoverable state after completed publication');
+      _applyGeneratedUIState({showModal:false});
+      return;
+    }
 
     if(trip.status==='saved'){
       if(!_restorePostPaymentProgress_(trip)) showPreferencesStage();
@@ -13781,8 +13812,8 @@ function openTripStoryBuilder(){
       dayTripDraft=dt;
       active.innerHTML=shell(es?'EXCURSIÓN DE UN DÍA':'DAY TRIP',es?`Una excursión desde ${_tripStoryEsc_(st.place)}`:`A day trip from ${_tripStoryEsc_(st.place)}`,es?'Dinos dónde y qué día. Los horarios y el transporte sólo son necesarios si ya los conoces.':'Tell us where and which day. Times and transport are only needed if you already know them.',`<div class="gj-form"><label>${es?'Destino':'Destination'}${destinationField(dt.place,'data-dt-place')}</label><label>${es?'¿Qué día?':'Which day?'}<select data-dt-day>${Array.from({length:st.days},(_,n)=>`<option value="${n+1}" ${dt.day===n+1?'selected':''}>${es?'Día':'Day'} ${n+1} · ${_tripStoryDMY_(_tripStoryDayDate_(st,n))}</option>`).join('')}</select></label><div class="gj-full gj-disclosure"><b>${es?'¿Ya conoces el transporte o los horarios de esta excursión?':'Do you already know the transport or times for this day trip?'}</b><div class="gj-segmented"><button type="button" data-dt-knowledge="resolve" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'is-selected'}">${es?'No, que ITBMO lo resuelva':'No, let ITBMO resolve it'}</button><button type="button" data-dt-knowledge="known" class="${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'is-selected':''}">${es?'Sí, ya los conozco':'Yes, I already know them'}</button></div></div><div data-dt-details class="gj-form gj-full" ${(dt.outbound.transportMode||dt.outbound.departureTime||dt.return.departureTime)?'':'hidden'}><label>${es?'Transporte':'Transport'}<select data-dt-out-mode>${_tripStoryTransportOptions_(dt.outbound.transportMode)}</select></label><label>${es?'Hora de salida':'Departure time'}<select data-dt-out-time>${_tripStoryTimeOptions_(dt.outbound.departureTime)}</select></label><label>${es?'Hora de regreso':'Return time'}<select data-dt-return-time>${_tripStoryTimeOptions_(dt.return.departureTime)}</select></label></div><div class="gj-full gj-review-actions"><button type="button" data-dt-back>← ${es?'Atrás':'Back'}</button></div></div>`,nextButton(es?'Guardar excursión':'Save day trip'));
       bindLocation(active.querySelector('[data-dt-place]'),x=>{const changed=dt.place!==x.label;dt.place=x.label;if(x.countryCode){dt.countryCode=x.countryCode;dt.country=x.country||dt.country;}if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;}},'city',()=>dt.countryCode||st.countryCode,{global:true});
-      active.querySelector('[data-dt-day]').onchange=e=>{const next=Number(e.target.value),changed=dt.day!==next;dt.day=next;if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;}};
-      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-dt-details]').hidden=!known;if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;}});
+      active.querySelector('[data-dt-day]').onchange=e=>{const next=Number(e.target.value),changed=dt.day!==next;dt.day=next;if(changed){dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.routeResolution=null;dt.scheduleAdjustment=null;}};
+      active.querySelectorAll('[data-dt-knowledge]').forEach(b=>b.onclick=()=>{const known=b.dataset.dtKnowledge==='known';dt._itbmo_user_clock_authority=known;active.querySelectorAll('[data-dt-knowledge]').forEach(x=>x.classList.toggle('is-selected',x===b));active.querySelector('[data-dt-details]').hidden=!known;if(!known){dt.outbound.transportMode='';dt.outbound.departureTime='';dt.return.departureTime='';dt.outbound.routeResolution=null;dt.return.routeResolution=null;dt.scheduleAdjustment=null;}});
       active.querySelector('[data-dt-out-mode]').onchange=e=>dt.outbound.transportMode=e.target.value;
       active.querySelector('[data-dt-out-time]').onchange=e=>dt.outbound.departureTime=e.target.value;
       active.querySelector('[data-dt-return-time]').onchange=e=>dt.return.departureTime=e.target.value;
@@ -13833,9 +13864,129 @@ function _routeResolvedPrincipalMode_(legs=[],direction='',fallback='other'){
   return ranked[0]?.mode || normalize(fallback) || 'other';
 }
 
-async function _resolveTripStoryRoutesBeforeGeneration_(){
+
+/* =========================================================
+   ITBMO V71 · PRE-GENERATION PHYSICAL TIMELINE AUTHORITY
+   Route Resolver completes missing mobility first. Only after every movement has
+   usable times do we allow generation. Estimated full-day excursions that collide
+   with an inter-stay transition are moved to the nearest compatible full day.
+   User-authored complete excursion clocks remain authoritative and are never moved.
+========================================================= */
+function _v71TripCompletionMarkerKey_(tripId=currentTripId){
+  return `itbmo_generation_completed_v71_${String(tripId||'')}`;
+}
+function _v71SetTripCompletionMarker_(tripId=currentTripId){
+  if(!tripId)return;
+  try{localStorage.setItem(_v71TripCompletionMarkerKey_(tripId),JSON.stringify({completed:true,at:new Date().toISOString()}));}catch(_){}
+}
+function _v71ClearTripCompletionMarker_(tripId=currentTripId){
+  if(!tripId)return;
+  try{localStorage.removeItem(_v71TripCompletionMarkerKey_(tripId));}catch(_){}
+}
+function _v71HasTripCompletionMarker_(tripId=currentTripId){
+  if(!tripId)return false;
+  try{return Boolean(JSON.parse(localStorage.getItem(_v71TripCompletionMarkerKey_(tripId))||'null')?.completed);}catch(_){return false;}
+}
+function _v71DayTripHasTravelerClockAuthority_(dt={}){
+  return Boolean(dt?._itbmo_user_clock_authority || (
+    dt?.outbound?.departureTime && dt?.outbound?.arrivalTime &&
+    dt?.return?.departureTime && dt?.return?.arrivalTime &&
+    String(dt?.outbound?.timeStatus||'').toLowerCase()!=='estimated' &&
+    String(dt?.return?.timeStatus||'').toLowerCase()!=='estimated'
+  ));
+}
+function _v71CaptureTravelerClockAuthority_(story={}){
+  (story.stays||[]).forEach(st=>(st.dayTrips||[]).forEach(dt=>{
+    if(dt._itbmo_user_clock_authority==null){
+      dt._itbmo_user_clock_authority=Boolean(
+        dt?.outbound?.departureTime && dt?.return?.departureTime &&
+        (!dt?.routeResolution || String(dt?.outbound?.timeStatus||'').toLowerCase()!=='estimated' || String(dt?.return?.timeStatus||'').toLowerCase()!=='estimated')
+      );
+    }
+  }));
+}
+function _v71MainTransitionDates_(story={}){
+  const dates=new Set();
+  for(let i=1;i<(story.stays||[]).length;i++){
+    const st=story.stays[i];
+    if(st?.departureDate)dates.add(String(st.departureDate));
+    if(st?.arrivalDate)dates.add(String(st.arrivalDate));
+  }
+  return dates;
+}
+function _v71CandidateDayOrder_(days,requested){
+  return Array.from({length:Math.max(1,Number(days)||1)},(_,i)=>i+1)
+    .filter(day=>day!==requested)
+    .sort((a,b)=>Math.abs(a-requested)-Math.abs(b-requested) || Number(b>requested)-Number(a>requested) || a-b);
+}
+function _v71ReassignIncompatibleEstimatedDayTrips_(story={}){
+  const transitionDates=_v71MainTransitionDates_(story);
+  const adjustments=[];
+  (story.stays||[]).forEach(st=>{
+    const trips=st.dayTrips||[];
+    trips.forEach(dt=>{
+      const requested=Math.max(1,Number(dt.day||1));
+      const requestedDate=_tripStoryAddDays_(st.startDate,requested-1);
+      if(!requestedDate || !transitionDates.has(requestedDate) || _v71DayTripHasTravelerClockAuthority_(dt))return;
+      const occupied=new Set(trips.filter(other=>other!==dt).map(other=>Math.max(1,Number(other.day||1))));
+      const candidate=_v71CandidateDayOrder_(st.days,requested).find(day=>{
+        if(occupied.has(day))return false;
+        const date=_tripStoryAddDays_(st.startDate,day-1);
+        return date && !transitionDates.has(date);
+      });
+      if(!candidate)return;
+      const originalDay=requested;
+      dt.day=candidate;
+      // These clocks were planning estimates for the old calendar date. Preserve
+      // any user-selected mode, but force Route Resolver to recompute the times.
+      if(!_v71DayTripHasTravelerClockAuthority_(dt)){
+        dt.outbound.departureTime='';dt.outbound.arrivalTime='';
+        dt.return.departureTime='';dt.return.arrivalTime='';
+        dt.outbound.timeStatus='estimated';dt.return.timeStatus='estimated';
+        dt.routeResolution=null;
+      }
+      dt.scheduleAdjustment={
+        code:'DAYTRIP_MOVED_FROM_TRANSITION_DAY',
+        original_day:originalDay,new_day:candidate,
+        note_es:`ITBMO movió esta excursión del Día ${originalDay} al Día ${candidate} porque el día solicitado coincide con un traslado entre destinos y no deja una ventana útil suficiente.`,
+        note_en:`ITBMO moved this day trip from Day ${originalDay} to Day ${candidate} because the requested day overlaps an inter-destination transfer and does not leave a sufficient useful window.`
+      };
+      adjustments.push({base:st.place,destination:dt.place,from:originalDay,to:candidate});
+    });
+  });
+  if(adjustments.length)console.info('[ITBMO V71 DAYTRIP REALLOCATION]',adjustments);
+  return adjustments;
+}
+async function _v71FetchRouteResolver_(movements=[]){
+  let lastError=null;
+  const delays=[0,1200,2800];
+  for(let attempt=0;attempt<delays.length;attempt++){
+    if(delays[attempt])await new Promise(resolve=>setTimeout(resolve,delays[attempt]));
+    try{
+      const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'route_resolver',lang:getLang(),movements})});
+      const data=await response.json().catch(()=>({}));
+      if(response.ok&&Array.isArray(data?.routes))return data;
+      const err=new Error(data?.code||`ROUTE_RESOLVER_HTTP_${response.status||0}`);
+      err.status=response.status;err.code=data?.code||`ROUTE_RESOLVER_HTTP_${response.status||0}`;
+      lastError=err;
+      // Retry transient infrastructure/rate-limit failures only. Semantic 4xx
+      // failures should surface immediately instead of burning calls.
+      if(![429,502,503,504].includes(Number(response.status)))throw err;
+      console.warn('[ITBMO V71 ROUTE RESOLVER RETRY]',{attempt:attempt+1,status:response.status,code:err.code});
+    }catch(err){
+      lastError=err;
+      if(err?.status && ![429,502,503,504].includes(Number(err.status)))throw err;
+      if(attempt>=delays.length-1)break;
+      console.warn('[ITBMO V71 ROUTE RESOLVER RETRY]',{attempt:attempt+1,code:err?.code||err?.message||'NETWORK'});
+    }
+  }
+  throw lastError||new Error('ROUTE_RESOLVER_FAILED');
+}
+
+async function _resolveTripStoryRoutesBeforeGeneration_({allowReallocation=true}={}){
   const engine=_travelV2(),story=engine?.state?.tripStory;
   if(!story?.stays?.length)return {ok:true,resolved:0};
+  _v71CaptureTravelerClockAuthority_(story);
   const movements=[];
   for(let i=1;i<story.stays.length;i++){
     const st=story.stays[i],prev=story.stays[i-1];
@@ -13851,9 +14002,7 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
   }
   if(!movements.length)return {ok:true,resolved:0};
   console.info('[ITBMO ROUTE RESOLVER] resolving',movements);
-  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'route_resolver',lang:getLang(),movements})});
-  const data=await response.json().catch(()=>({}));
-  if(!response.ok||!Array.isArray(data?.routes))throw new Error(data?.code||'ROUTE_RESOLVER_FAILED');
+  const data=await _v71FetchRouteResolver_(movements);
   const byId=new Map(data.routes.map(x=>[String(x.movement_id),x]));let resolved=0;
   for(let i=1;i<story.stays.length;i++){
     const st=story.stays[i],r=byId.get(`main:${st.id}`);if(!r)continue;
@@ -13895,6 +14044,16 @@ async function _resolveTripStoryRoutesBeforeGeneration_(){
       throw new Error(`ROUTE_RESOLVER_DAYTRIP_CHRONOLOGY_INVALID:${dt.place}`);
     }
     dt.outbound.timeStatus=dt.return.timeStatus='estimated';dt.routeResolution={summary:r.summary||'',legs,alternatives:Array.isArray(r.alternatives)?r.alternatives:[],confidence:r.confidence||'planning_estimate'};resolved++;
+  }
+  if(allowReallocation){
+    const adjustments=_v71ReassignIncompatibleEstimatedDayTrips_(story);
+    if(adjustments.length){
+      engine.setTripStory?.(JSON.parse(JSON.stringify(story)));
+      // Re-resolve only the excursion(s) whose estimated calendar date changed.
+      // Main movements and traveler-fixed clocks remain untouched.
+      const second=await _resolveTripStoryRoutesBeforeGeneration_({allowReallocation:false});
+      return {ok:true,resolved:resolved+Number(second?.resolved||0),adjustments};
+    }
   }
   engine.setTripStory?.(JSON.parse(JSON.stringify(story)));applyTripStoryToCompatibility(story);renderTripStorySummary();
   if(plannerState)plannerState.travelModelV2=_currentTravelModelV2_();
