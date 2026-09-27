@@ -3066,7 +3066,7 @@ function openGuidedPersonalizationJourney(){
   overlay.innerHTML=`<div class="guided-journey" role="dialog" aria-modal="true"><header class="guided-journey__top"><div><small>ITBMO</small><h2>${es?'Crea tu viaje':'Build your trip'}</h2><p>${es?'Tu recorrido ya está listo. Ahora hagámoslo realmente tuyo.':'Your route is ready. Now let’s make it truly yours.'}</p></div><button type="button" data-gp-close>×</button></header><nav class="guided-journey__progress"><button class="is-done">${es?'Viajeros':'Travelers'}</button><i>›</i><button class="is-done">${es?'Ruta':'Route'}</button><i>›</i><button class="is-active">${es?'Personalización':'Personalization'}</button><i>›</i><button disabled>${es?'Itinerario':'Itinerary'}</button></nav><div class="guided-journey__layout"><main class="guided-journey__active" data-gp-active></main><aside class="guided-journey__story"><div class="guided-journey__story-head"><div><small>${es?'TU RECORRIDO':'YOUR JOURNEY'}</small><b>${es?'Tu viaje sigue tomando forma':'Your trip keeps taking shape'}</b></div><button type="button" id="guided-info-chat-open">Info Chat · <span data-gp-chat-left>${Number(document.querySelector('#info-chat-remaining')?.textContent?.match(/\d+/)?.[0]||0)}</span></button></div><div data-gp-story></div></aside></div><button class="guided-journey__mobile-story" type="button" data-gp-mobile>${es?'Ver mi recorrido':'View my journey'}</button></div>`;
   document.body.appendChild(overlay); document.body.classList.add('guided-preferences-open');
   const active=overlay.querySelector('[data-gp-active]'), storyHost=overlay.querySelector('[data-gp-story]');
-  const shell=(eyebrow,title,copy,content,actions='')=>`<section class="gj-focus"><small class="gj-focus__eyebrow">${eyebrow}</small><h3>${title}</h3>${copy?`<p>${copy}</p>`:''}<div class="gj-focus__content">${content}</div><div class="gj-focus__actions">${phase!=='travelers'?`<button type="button" class="gj-back" data-gj-back>← ${es?'Atrás':'Back'}</button>`:''}${actions}</div></section>`;
+  const shell=(eyebrow,title,copy,content,actions='')=>`<section class="gj-focus"><small class="gj-focus__eyebrow">${eyebrow}</small><h3>${title}</h3>${copy?`<p>${copy}</p>`:''}<div class="gj-focus__content">${content}</div><div class="gj-focus__actions">${step!=='global'?`<button type="button" class="gj-back" data-gp-back><span aria-hidden="true">←</span><span>${es?'Atrás':'Back'}</span></button>`:''}${actions}</div></section>`;
   const next=(label)=>`<button type="button" class="gj-primary" data-gp-next>${label}<span>→</span></button>`;
   const persist=()=>{plannerState.preferencesV2=engine.preferencesPayload();plannerState.itineraryLang=engine.state.itineraryLanguage;plannerState.specialConditions=engine.specialConditionsText();if($preferencesField)$preferencesField.value=plannerState.specialConditions;};
   const renderStory=()=>{const story=engine.state.tripStory||model?.trip_story;const bits=[];(story?.stays||[]).forEach((st,i)=>{const key=String(st.place||'').trim().toLowerCase(),pref=engine.state.preferences.places[key],done=Boolean(pref?.saved);bits.push(`${i?'<div class="gj-story-line">↓</div>':''}<button type="button" class="gj-story-node gj-story-node--editable" data-gp-place="${i}"><span>${done?'✓':String(i+1).padStart(2,'0')}</span><div><b>${_tripStoryEsc_(st.place)}</b><small>${_tripStoryDMY_(st.startDate)} · ${st.days} ${es?'día(s)':'day(s)'}</small>${done?`<em>✦ ${es?'Personalizado':'Personalized'}</em>`:`<em>${es?'Pendiente de personalizar':'Personalization pending'}</em>`}</div></button>`);});storyHost.innerHTML=bits.join('');storyHost.querySelectorAll('[data-gp-place]').forEach(b=>b.onclick=()=>{index=Number(b.dataset.gpPlace);step='place';render();});};
@@ -3092,6 +3092,23 @@ function openGuidedPersonalizationJourney(){
     }
   };
   window._itbmoGuidedPreferencesReady=()=>{step='ready';render();};
+  active.addEventListener('click',event=>{
+    if(!event.target.closest('[data-gp-back]'))return;
+    event.preventDefault();
+    if(step==='place'){
+      if(index>0) index-=1;
+      else step='global';
+    }else if(step==='language'){
+      step='place';
+      index=Math.max(0,places.length-1);
+    }else if(step==='review'){
+      step='language';
+    }else if(step==='ready'){
+      step='review';
+    }
+    render();
+    requestAnimationFrame(()=>active.scrollTo({top:0,behavior:'smooth'}));
+  });
   overlay.querySelector('[data-gp-close]').onclick=()=>{overlay.remove();document.body.classList.remove('guided-preferences-open');delete window._itbmoGuidedPreferencesReady;};
   overlay.querySelector('[data-gp-mobile]').onclick=()=>overlay.querySelector('.guided-journey__story').classList.toggle('is-mobile-open');
   overlay.querySelector('#guided-info-chat-open').onclick=()=>document.querySelector('#info-chat-floating')?.click();
