@@ -5304,8 +5304,8 @@ function setOverlayMessage(msg=t('overlayDefault')){
   const isEs = getLang() === 'es';
   p.classList.add('astra-overlay-copy');
   p.innerHTML = isEs
-    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">Normalmente toma unos minutos · puede variar según la duración y complejidad del viaje</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
-    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">Usually takes a few minutes · timing may vary with trip length and complexity</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
+    ? `<span class="astra-overlay-hero"><strong>✨ ITBMO está investigando, organizando y optimizando tu itinerario</strong><span>Ciudad por ciudad. Día por día.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Tiempo estimado de generación</strong></span><strong class="astra-overlay-time-ranges">Normalmente toma unos minutos · viajes largos o complejos pueden superar los 10 minutos</strong></span><span class="astra-overlay-value">ITBMO compara rutas, horarios, traslados, prioridades y tus preferencias para ahorrarte horas de investigación.<br><strong>Mantén esta pestaña abierta.</strong></span>`
+    : `<span class="astra-overlay-hero"><strong>✨ ITBMO is researching, organizing and optimizing your itinerary</strong><span>City by city. Day by day.</span></span><span class="astra-overlay-time"><span class="astra-overlay-time-label">⏳ <strong>Estimated generation time</strong></span><strong class="astra-overlay-time-ranges">Usually takes a few minutes · long or complex trips may take more than 10 minutes</strong></span><span class="astra-overlay-value">ITBMO compares routes, timing, transfers, priorities and your preferences to save you hours of research.<br><strong>Keep this tab open.</strong></span>`;
 }
 
 function showWOW(on, msg){
@@ -8046,6 +8046,34 @@ function _v69PhysicalUnitRowConservation_(mergedRows=[],stayResults=[]){
   return errors;
 }
 
+// V70 · ADDITIVE PHYSICAL MERGE
+// Accepted Physical Units are already generated and audited against authoritative
+// Route Resolver windows. Merge is therefore NOT a second planning pass: preserve
+// every accepted row 1:1, add canonical fixed movements, order chronologically,
+// and let the final audit verify the immutable contract. This prevents a healthy
+// Day Trip (Florence, Pompeii, etc.) from being filtered/re-owned after Stay QA.
+function _v70AdditivePhysicalMerge_(stayResults=[],contract={}){
+  const accepted=_v3DedupeMergedStayRows_((stayResults||[]).flatMap(result=>result?.rows||[]));
+  // Build canonical transfer rows in isolation. Calling the proven hard-facts
+  // inserter with an empty activity set cannot delete or mutate accepted rows.
+  const fixedRows=_v3EnforceHardRouteFacts_([],contract).filter(_isPureTransportRow_);
+  return _v3DedupeMergedStayRows_([...accepted,...fixedRows])
+    .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
+}
+
+function _v70ExactPhysicalUnitConservation_(mergedRows=[],stayResults=[]){
+  const errors=[];
+  for(const result of (stayResults||[])){
+    const id=String(result?.unit?.id||''); if(!id)continue;
+    const expected=(result?.rows||[]).filter(r=>!_isPureTransportRow_(r));
+    const received=(mergedRows||[]).filter(r=>String(r?.stay_unit_id||r?.commerce_context?.stay_unit_id||'')===id&&!_isPureTransportRow_(r));
+    if(received.length!==expected.length){
+      errors.push({code:'PHYSICAL_UNIT_ROW_CONSERVATION',stay_unit_id:id,destination:result?.unit?.physical_destination||result?.unit?.base_destination,expected_rows:expected.length,received_rows:received.length,delta:received.length-expected.length});
+    }
+  }
+  return errors;
+}
+
 async function _v3GeneratePhysicalStay_(contract,unit,totalDays){
   const stayContract=_v3StayContract_(contract,unit);
   const prompt=`
@@ -8311,15 +8339,11 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
     throw error;
   }
 
-  // Deterministic merger: model outputs never decide trip order or inter-stay
-  // movements. Flatten in Trip Story sequence, then insert the authoritative
-  // boundaries exactly once and sort by global day/time.
-  let rows=_v3DedupeMergedStayRows_(results.flatMap(result=>result?.rows||[]));
-  rows=_v3EnforceHardRouteFacts_(rows,contract);
-  rows=_v3AnnotatePhysicalRows_(rows,contract,units)
-    .sort((a,b)=>Number(a.day)-Number(b.day)||String(a.start||'').localeCompare(String(b.start||'')));
-  const conservationErrors=_v69PhysicalUnitRowConservation_(rows,results);
-  if(conservationErrors.length)console.error('[ITBMO V69 PHYSICAL UNIT CONSERVATION]',conservationErrors);
+  // V70 deterministic additive merge. Physical identity/window ownership was
+  // sealed before Stay QA; post-generation code must never reinterpret it.
+  const rows=_v70AdditivePhysicalMerge_(results,contract);
+  const conservationErrors=_v70ExactPhysicalUnitConservation_(rows,results);
+  if(conservationErrors.length)console.error('[ITBMO V70 PHYSICAL UNIT CONSERVATION]',conservationErrors);
   return {rows,contract,units,stayResults:results,conservationErrors};
 }
 
@@ -8540,7 +8564,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
 
     const master=_v3SyntheticMaster_(dest.days);
     const finalReport=_v3MergedHardPhysicalAudit_(rows,generated.contract,dest.days);
-    const blockingErrors=[...(finalReport.errors||[]),..._v69PhysicalUnitRowConservation_(rows,generated.stayResults||[])];
+    const blockingErrors=[...(finalReport.errors||[]),..._v70ExactPhysicalUnitConservation_(rows,generated.stayResults||[])];
     console.info(`[ITBMO V3 MERGE HARD AUDIT FINAL] trip`,_v3AuditSummary_({errors:blockingErrors}),blockingErrors);
     _v3LogAuditDetails_('MERGED TRIP HARD AUDIT','trip','all-stays',blockingErrors);
     if(blockingErrors.length){
@@ -9115,7 +9139,7 @@ function _hydrateGenerationTrip_(trip){
 }
 
 function _showGenerationRetry_(reason=''){
-  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|POST_STORAGE/i.test(String(reason||''));
+  const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW|POST_STORAGE/i.test(String(reason||''));
   // V68 · nominal row completeness is NOT publication success. During an
   // integrity failure, accepted Stay checkpoints can make every city look
   // complete even though the canonical merge was rejected. Never suppress the
@@ -9292,6 +9316,7 @@ async function runPaidGeneration({manualRetry=false}={}){
   const runEpoch=++generationRunEpoch;
   paidGenerationRunning=true;
   let completionPublished=false;
+  let recoveryPublished=false;
   setPlanningChatLocked(true);
   qs('#itbmo-generation-retry')?.remove();
   _resetAstraGenerationMetrics_();
@@ -9403,6 +9428,7 @@ async function runPaidGeneration({manualRetry=false}={}){
         $preferencesGenerateV2.classList.remove('is-generated');
       }
       _showGenerationRetry_(integrityFailure?'V3_EXPORT_SHAPE_BLOCK':'One or more cities remained incomplete.');
+      recoveryPublished=true;
       return;
     }
 
@@ -9437,16 +9463,23 @@ async function runPaidGeneration({manualRetry=false}={}){
         });
       }
     }catch(_){ }
+    const recoveryReason=err?.code || err?.message || 'Generation failed';
+    const integrityFailure=/V3_EXPORT_SHAPE_BLOCK|V3_STAY_RECOVERY_EXHAUSTED|V3_ROUTE_QUALITY_BLOCK|V3_ROUTE_PHYSICAL_BLOCK_AFTER_MERGE|MISSING_PHYSICAL_WINDOW|MISSING_USER_FIXED_TRANSFER|PHYSICAL_UNIT_ROW/i.test(String(recoveryReason));
     if($preferencesGenerateV2){
-      $preferencesGenerateV2.disabled=false;
-      $preferencesGenerateV2.removeAttribute('aria-disabled');
-      $preferencesGenerateV2.textContent=getLang()==='es'?'Reintentar generación':'Retry generation';
+      // Once paid generation started, Recovery owns the next action. Never expose
+      // the old create CTA behind/after an integrity failure.
+      $preferencesGenerateV2.disabled=true;
+      $preferencesGenerateV2.setAttribute('aria-disabled','true');
+      $preferencesGenerateV2.textContent=integrityFailure?(getLang()==='es'?'Verificando itinerario…':'Verifying itinerary…'):(getLang()==='es'?'Generación pendiente':'Generation pending');
       $preferencesGenerateV2.classList.remove('is-generated');
     }
-    _showGenerationRetry_(err?.code || err?.message || 'Generation failed');
+    _showGenerationRetry_(recoveryReason);
+    recoveryPublished=true;
   }finally{
     if(Number(runEpoch)===Number(generationRunEpoch)) paidGenerationRunning=false;
-    if(!generationResetInProgress && !completionPublished) showWOW(false);
+    // Do not let the generic overlay cleanup remove/cover the dedicated Recovery
+    // transaction UI. Recovery remains visible until the traveler retries/resets.
+    if(!generationResetInProgress && !completionPublished && !recoveryPublished) showWOW(false);
   }
 }
 
