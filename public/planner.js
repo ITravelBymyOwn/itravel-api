@@ -7668,6 +7668,9 @@ function _v3AcceptedStayCacheKey_(contract={},unit={}){
 function _v3AcceptedStayGet_(contract,unit){
   const key=_v3AcceptedStayCacheKey_(contract,unit);
   let value=_v3AcceptedStayCache_.get(key)||null;
+  // Server checkpoints survive reloads, replaced scripts and another device.
+  // Prefer them to an older tab's session cache.
+  value=generationRecoveryState?.accepted_stays?.[key] || value;
   if(!value){
     try{value=JSON.parse(sessionStorage.getItem(key)||'null');}catch(_){value=null;}
   }
@@ -7675,17 +7678,23 @@ function _v3AcceptedStayGet_(contract,unit){
   _v3AcceptedStayCache_.set(key,value);
   return JSON.parse(JSON.stringify(value));
 }
-function _v3AcceptedStaySet_(contract,unit,value){
+async function _v3AcceptedStaySet_(contract,unit,value){
   const key=_v3AcceptedStayCacheKey_(contract,unit);
   const safe=JSON.parse(JSON.stringify(value));
   _v3AcceptedStayCache_.set(key,safe);
   try{sessionStorage.setItem(key,JSON.stringify(safe));}catch(_){}
+  if(currentTripId && generationRecoveryState){
+    generationRecoveryState.accepted_stays={...(generationRecoveryState.accepted_stays||{}),[key]:safe};
+    // Do not treat a stay as accepted until its checkpoint is durable.
+    await _queueGenerationCheckpoint_('generating');
+  }
 }
 function _v3AcceptedStayClear_(contract,units=[]){
   (units||[]).forEach(unit=>{
     const key=_v3AcceptedStayCacheKey_(contract,unit);
     _v3AcceptedStayCache_.delete(key);
     try{sessionStorage.removeItem(key);}catch(_){}
+    if(generationRecoveryState?.accepted_stays) delete generationRecoveryState.accepted_stays[key];
   });
 }
 
@@ -8343,6 +8352,9 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
         const cachedDays=_v3CoverageForDays_(restamped,[...(unit.days||[])],dest.days);
         if(restamped.length===cached.rows.length && !cachedPhysical.missing.length && !cachedDays.missing.length){
           results[index]={...cached,rows:restamped,unit,reused:true};
+          if(!generationRecoveryState?.accepted_stays?.[_v3AcceptedStayCacheKey_(contract,unit)]){
+            await _v3AcceptedStaySet_(contract,unit,{...cached,rows:restamped});
+          }
           console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
           continue;
         }
@@ -8350,6 +8362,8 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
         const staleKey=_v3AcceptedStayCacheKey_(contract,unit);
         _v3AcceptedStayCache_.delete(staleKey);
         try{sessionStorage.removeItem(staleKey);}catch(_){}
+        if(generationRecoveryState?.accepted_stays) delete generationRecoveryState.accepted_stays[staleKey];
+        if(currentTripId && generationRecoveryState) await _queueGenerationCheckpoint_('generating');
       }
 
       let accepted=null,lastError=null;
@@ -8359,7 +8373,7 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
           const generated=await _v3GeneratePhysicalStay_(contract,unit,dest.days);
           const audited=await _v3AuditAndRepairPhysicalStay_(contract,unit,generated,dest.days,perDay,baseDate);
           accepted={unit,rows:audited.rows,audit:audited.report,warnings:audited.warnings,accepted_attempt:stayAttempt};
-          _v3AcceptedStaySet_(contract,unit,{rows:accepted.rows,audit:accepted.audit,warnings:accepted.warnings,accepted_attempt:stayAttempt});
+          await _v3AcceptedStaySet_(contract,unit,{rows:accepted.rows,audit:accepted.audit,warnings:accepted.warnings,accepted_attempt:stayAttempt});
         }catch(error){
           lastError=error;
           const qualityBlock=/V3_STAY_QUALITY_BLOCK/.test(String(error?.message||''));
@@ -8585,6 +8599,7 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
       if(!affectedUnits.length || mergeAttempt>=ITBMO_MERGE_RECOVERY_MAX_ATTEMPTS) break;
       console.warn(`[ITBMO V3 INTERNAL MERGE RECOVERY] regenerating ${affectedUnits.length} affected physical unit(s); healthy checkpoints preserved`,affectedUnits.map(u=>({id:u.id,type:u.unit_type||'BASE_STAY',destination:u.physical_destination||u.base_destination,base:u.base_destination,days:u.days})));
       _v3AcceptedStayClear_(generated.contract,affectedUnits);
+      await _queueGenerationCheckpoint_('generating');
     }
 
     // At this point every Stay Unit has already passed its own semantic/local QA.
@@ -8687,7 +8702,8 @@ async function generateCityItinerary(city,{silentFailure=false}={}){
     if(activeCity===city) renderCityItinerary(city);
     $resetBtn?.removeAttribute('disabled');
     if(plannerState?.forceReplan) delete plannerState.forceReplan[city];
-    _v3AcceptedStayClear_(generated.contract,generated.units||[]);
+    // Retain accepted units until the enclosing destination and terminal trip
+    // checkpoints are committed; a reload between those writes must be resumable.
     record();
     return true;
   }catch(error){
@@ -9028,6 +9044,7 @@ function _generationCheckpointSnapshot_(extra={}){
     completed_cities:completed,
     pending_cities:savedDestinations.map(x=>x.city).filter(city=>!completed.includes(city)),
     city_attempts:{...(generationRecoveryState?.city_attempts || {})},
+    accepted_stays:{...(generationRecoveryState?.accepted_stays || {})},
     itineraries,
     city_meta:cityMeta,
     planner_state:{
@@ -9195,7 +9212,8 @@ function _showGenerationRetry_(reason=''){
   qs('#itbmo-generation-retry')?.remove();
   document.querySelector('.itbmo-generation-recovery-overlay')?.remove();
 
-  const exhausted=Number(generationRecoveryState?.generation_count || 0)>=2;
+  // A technical failure cannot exhaust a paid trip's recovery entitlement.
+  const exhausted=false;
   const es=getLang()==='es';
   const overlay=document.createElement('div');
   overlay.className='itbmo-postpay-overlay itbmo-generation-recovery-overlay';
@@ -9390,6 +9408,8 @@ async function runPaidGeneration({manualRetry=false}={}){
       city_attempts:(serverCheckpoint.city_attempts && typeof serverCheckpoint.city_attempts==='object')
         ? serverCheckpoint.city_attempts
         : {},
+      accepted_stays:(serverCheckpoint.accepted_stays && typeof serverCheckpoint.accepted_stays==='object')
+        ? serverCheckpoint.accepted_stays : (generationRecoveryState?.accepted_stays || {}),
       generation_count:Number(begin?.trip?.generation_count || generationRecoveryState?.generation_count || 1)
     };
 
