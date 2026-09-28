@@ -6315,7 +6315,6 @@ function _auditSeverity_(error={}){
     'ROW_TOO_SHORT','INVENTED_DEPARTURE_LOGISTICS','OUTDOOR_OUTSIDE_USEFUL_DAYLIGHT',
     'CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP','AMBIGUOUS_TO','GENERIC_TO',
     'MISSING_AURORA_FINAL_NOTE','MISSING_USER_FIXED_TRANSFER','ACTIVITY_OVERLAPS_USER_FIXED_TRANSFER','ACTIVITY_OUTSIDE_ROUTE_LOCATION_WINDOW','ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','WEEKDAY_DATE_MISMATCH',
-    'KNOWN_VENUE_HOURS','GROUND_ACCESS_TOO_SHORT','POMPEII_REENTRY_RISK'
   ]);
   const major=new Set([
     'ROW_INTERVAL_UNEXPLAINED','DURATION_UNPARSEABLE',
@@ -7362,7 +7361,6 @@ function _v3HardBlockingCodes_(){
     'ROUTE_WINDOW_UNDERUSED','ROUTE_WINDOW_TOO_THIN','REGIONAL_DAY_TOO_THIN','UNEXPLAINED_GAP',
     'GLOBAL_DUPLICATE_POI','CATEGORY_DWELL_TOO_SHORT','ANCHOR_TIME_HIDDEN_AS_GAP',
     'GENERIC_TO','AMBIGUOUS_TO','UNJUSTIFIED_EXTREME_START','IMPLAUSIBLE_EARLY_INTERIOR','TRUNCATED_PLACE_TEXT','DURATION_UNPARSEABLE','ROW_TOO_SHORT','ROW_INTERVAL_UNEXPLAINED',
-    'KNOWN_VENUE_HOURS','GROUND_ACCESS_TOO_SHORT','POMPEII_REENTRY_RISK'
   ]);
 }
 
@@ -8051,6 +8049,34 @@ function _v3StayContract_(contract,unit){
   };
 }
 
+// An excursion can contain a lunch between visits inside a ticketed complex.
+// Physical windows know the city and clock, but not whether exiting the gate
+// permits re-entry. Add a conditional instruction only when the meal itself
+// suggests a venue near/outside an access point; never infer an enclosure name,
+// alter the route, or request a model repair for this uncertainty.
+function _v81ProtectTicketedMealContinuity_(rows=[]){
+  const ordered=[...rows].sort((a,b)=>Number(a?.day)-Number(b?.day)||String(a?.start||'').localeCompare(String(b?.start||'')));
+  const ticketed=row=>{
+    const context=row?.commerce_context||{};
+    return ['required','recommended'].includes(String(context.ticket_need||'').toLowerCase()) ||
+      String(context.semantic_type||'').toUpperCase()==='ATTRACTION_TICKET';
+  };
+  for(const meal of ordered){
+    if(!_isMealRow_(meal) || _isPureTransportRow_(meal))continue;
+    const nearby=`${meal.to||''} ${meal.notes||''}`;
+    if(!/(?:\b(?:entrada|acceso|recinto|parque|park|site|museum|museo|palace|palacio|estate|dominio|gate|entrance)\b)/i.test(nearby) ||
+       !/(?:\b(?:fuera|outside|entorno|near|cerca|pr[oó]xim\w*|inmediato\w*|immediate|salir|leave|around|alrededor)\b)/i.test(nearby))continue;
+    const before=ordered.some(row=>Number(row?.day)===Number(meal.day) && String(row?.end||'')<=String(meal.start||'') && ticketed(row));
+    const after=ordered.some(row=>Number(row?.day)===Number(meal.day) && String(row?.start||'')>=String(meal.end||'') && ticketed(row));
+    if(!before||!after)continue;
+    const reminder=_plannerOutputLang_()==='es'
+      ? 'Si continúas dentro de un recinto con entrada, come dentro; utiliza una opción exterior solo si confirmas que tu entrada permite reingresar.'
+      : 'If you will continue inside a ticketed site, eat inside; choose an outside option only after confirming that your ticket permits re-entry.';
+    if(!String(meal.notes||'').includes(reminder))meal.notes=[reminder,meal.notes].filter(Boolean).join(' ');
+  }
+  return rows;
+}
+
 function _v3StampStayRows_(rows=[],unit={}){
   const windows=unit.windows||[];
   const stamped=(rows||[]).flatMap(row=>{
@@ -8079,7 +8105,7 @@ function _v3StampStayRows_(rows=[],unit={}){
     const note=getLang()==='es'?adjustment.note_es:adjustment.note_en;
     if(note&&!String(stamped[0].notes||'').includes(note))stamped[0].notes=[note,stamped[0].notes].filter(Boolean).join(' · ');
   }
-  return stamped;
+  return _v81ProtectTicketedMealContinuity_(stamped);
 }
 
 function _v3AnnotatePhysicalRows_(rows=[],contract={},units=[]){
@@ -8187,77 +8213,6 @@ Return valid city_day JSON only. Do not ask questions.
   return _v3StampStayRows_(rows,unit);
 }
 
-// Small, explicitly scoped offline facts. They cannot confirm a future opening:
-// they only reject an interior visit whose own proposed window is already
-// incompatible with the published ordinary hours. All other venues stay
-// unverified and continue to carry traveler-facing confirmation notes.
-function _v76OfflineFeasibilityFindings_(rows=[],unit={}){
-  const issues=[];
-  const isExterior=text=>/\b(solo exterior|únicamente exterior|only outside|exterior del|fachada del)\b/i.test(text);
-  for(const row of rows){
-    const activity=String(row?.activity||''),place=String(row?.to||''),start=_hhmmToMinutes_(row?.start),end=_hhmmToMinutes_(row?.end);
-    if(start==null||end==null||_isPureTransportRow_(row))continue;
-    const date=(unit.windows||[]).find(w=>Number(w.day)===Number(row.day))?.date||'';
-    const month=Number(String(date).slice(5,7));
-    const indoors=!isExterior(activity) && /visita|visit|recorrido|tour|entrada|access|acceso/i.test(activity);
-    // Louvre's published weekly closure is a stable weekday rule. A future
-    // exceptional opening still needs confirmation, so repair the Tuesday
-    // interior plan in this physical Stay without inventing a reservation.
-    if(indoors && /(?:museo del louvre|mus[eé]e du louvre|louvre museum)/i.test(`${activity} ${place}`) && /^\d{4}-\d{2}-\d{2}$/.test(date)){
-      const [year,mon,day]=date.split('-').map(Number);
-      if(new Date(Date.UTC(year,mon-1,day)).getUTCDay()===2){
-        issues.push({code:'KNOWN_VENUE_HOURS',day:Number(row.day),start:row.start,end:row.end,activity,venue:place,
-          ordinary_window:'Closed Tuesday',last_entry:null,source:'https://www.louvre.fr/en/visit/hours-admission',
-          instruction:'The Louvre museum is ordinarily closed on Tuesdays. Keep fixed transfers and physical windows. Replace this interior visit with a high-value feasible alternative on this SAME day; retain an outdoor Louvre courtyard stop if useful, but do not promise museum entry. Confirm exceptional opening and any substitute venue schedule before travel.'});
-      }
-    }
-    let rule=null;
-    if(indoors && /museo del ej[eé]rcito|army museum/i.test(`${activity} ${place}`)){
-      rule={open:10*60,close:17*60,source:'https://ejercito.defensa.gob.es/museo/'};
-    }else if(indoors && /coliseo|colosseum/i.test(`${activity} ${place}`) && (month>=11||month<=2)){
-      rule={open:8*60+30,lastEntry:15*60+30,close:16*60+30,source:'https://colosseo.it/en/opening-times/'};
-    }else if(indoors && /foro romano|roman forum|monte palatino|palatine hill/i.test(`${activity} ${place}`) && (month>=11||month<=2)){
-      // The same winter closing constraint applies to the adjacent ticketed
-      // archaeological area. Checking only the Colosseum left the second half
-      // of a combined visit outside its actual opening window.
-      rule={open:9*60,lastEntry:15*60+30,close:16*60+30,source:'https://colosseo.it/en/opening-times-and-tickets/'};
-    }else if(indoors && /pompeya|pompeii/i.test(`${activity} ${place}`) && (month>=11||month<=2)){
-      rule={open:9*60,lastEntry:15*60+30,close:17*60,source:'https://pompeiisites.org/en/visiting-info/timetables-and-tickets/'};
-    }
-    if(rule && (start<rule.open||end>rule.close||start>Number(rule.lastEntry??Infinity))){
-      issues.push({code:'KNOWN_VENUE_HOURS',day:Number(row.day),start:row.start,end:row.end,activity,venue:place,
-        ordinary_window:`${_minutesToHHMM_(rule.open)}-${_minutesToHHMM_(rule.close)}`,
-        last_entry:rule.lastEntry!=null?_minutesToHHMM_(rule.lastEntry):null,source:rule.source,
-        instruction:'Keep this interior visit only if it fits the ordinary opening and last-entry window. Move this row within the SAME physical day if time is available; otherwise use an explicit exterior alternative without promising interior access. Do not move fixed transfers or regenerate other stays. Tell the traveler to verify exceptional hours.'});
-    }
-  }
-  // Segovia-Guiomar is outside the walkable historic centre. A model cannot
-  // spend the first 15 minutes at the Acueducto after the train reaches Guiomar.
-  if(String(unit.unit_type)==='DAY_TRIP' && /segovia/i.test(String(unit.physical_destination||''))){
-    const arrival=_hhmmToMinutes_(unit.inbound_boundary?.arrival);
-    const first=rows.filter(r=>Number(r.day)===Number(unit.days?.[0])&&!_isPureTransportRow_(r))
-      .sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')))[0];
-    const firstStart=_hhmmToMinutes_(first?.start);
-    if(arrival!=null&&firstStart!=null&&firstStart-arrival<30){
-      issues.push({code:'GROUND_ACCESS_TOO_SHORT',day:Number(first.day),arrival:unit.inbound_boundary.arrival,
-        first_activity:first.activity,start:first.start,minimum_ground_access_minutes:30,
-        instruction:'The train reaches Segovia-Guiomar, away from the historic centre. Keep the immutable train arrival; reserve at least 30 minutes for station exit and local transport before beginning sightseeing at the Acueducto. Adjust only the Segovia rows inside their physical planning window.'});
-    }
-  }
-  if(String(unit.unit_type)==='DAY_TRIP' && /pompe(?:ya|ii)/i.test(String(unit.physical_destination||''))){
-    const ordered=[...rows].sort((a,b)=>String(a.start||'').localeCompare(String(b.start||'')));
-    ordered.forEach((row,index)=>{
-      const meal=/almuerzo|comida|lunch|meal/i.test(String(row.activity||''));
-      const outside=/via plinio|fuera del (?:parque|recinto)|outside (?:the )?(?:park|site)/i.test(String(row.to||''));
-      const returns=ordered.slice(index+1).some(next=>/villa dei misteri|villa de los misterios|villa of the mysteries|foro de pompeya|forum of pompeii/i.test(`${next.activity||''} ${next.to||''}`));
-      if(meal&&outside&&returns)issues.push({code:'POMPEII_REENTRY_RISK',day:Number(row.day),activity:row.activity,to:row.to,
-        source:'https://pompeiisites.org/en/visiting-info/visitor-services/',
-        instruction:'Keep the meal inside the Pompeii archaeological site if another interior visit follows. The official Casina dell’Aquila has a refreshment point; otherwise use an authorized picnic area. Do not assume exit and re-entry. Keep the archaeological route, fixed transfers and return clock unchanged; ask the traveler to verify service availability.'});
-    });
-  }
-  return issues;
-}
-
 async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDays,perDay,baseDate){
   const unitDays=[...new Set((unit.days||[]).map(Number).filter(Boolean))].sort((a,b)=>a-b);
   const unitDaySet=new Set(unitDays);
@@ -8307,7 +8262,7 @@ async function _v3AuditAndRepairPhysicalStay_(contract,unit,initialRows,totalDay
     // windows instead of discovering them only after the deterministic trip merge.
     const physical=_v3PhysicalWindowCoverage_(rows,[unit]);
     const missing=physical.missing.map(w=>({code:'MISSING_PHYSICAL_WINDOW',day:w.day,stay_unit_id:w.stay_unit_id,window_id:w.window_id,location:w.location,window:`${w.start||''}-${w.end||'open'}`,instruction:'Plan useful, coherent content inside this authoritative physical window; do not alter fixed transfers.'}));
-    return {...base,errors:[...(base.errors||[]),...missing,..._v76OfflineFeasibilityFindings_(rows,unit)]};
+    return {...base,errors:[...(base.errors||[]),...missing]};
   };
 
   let rows=_v3StampStayRows_(_dedupeRows_(initialRows||[]),unit);
@@ -8459,8 +8414,7 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
         // in V64). Reject that cache locally so only the affected Stay regenerates.
         const cachedPhysical=_v3PhysicalWindowCoverage_(restamped,[unit]);
         const cachedDays=_v3CoverageForDays_(restamped,[...(unit.days||[])],dest.days);
-        const cachedFeasibility=_v76OfflineFeasibilityFindings_(restamped,unit);
-        if(restamped.length===cached.rows.length && !cachedPhysical.missing.length && !cachedDays.missing.length && !cachedFeasibility.length){
+        if(restamped.length===cached.rows.length && !cachedPhysical.missing.length && !cachedDays.missing.length){
           results[index]={...cached,rows:restamped,unit,reused:true};
           if(!generationRecoveryState?.accepted_stays?.[_v3AcceptedStayCacheKey_(contract,unit)]){
             await _v3AcceptedStaySet_(contract,unit,{...cached,rows:restamped});
@@ -8468,7 +8422,7 @@ async function _v3GeneratePhysicalStaySequence_(city,dest,perDay,baseDate,hotel,
           console.info(`[ITBMO V3 STAY] ${unit.sequence}/${units.length} · ${label} · accepted checkpoint reused`);
           continue;
         }
-        console.warn(`[ITBMO V3 STAY CACHE] ${label} · incomplete/stale checkpoint rejected`,{cached_rows:cached.rows.length,valid_rows:restamped.length,missing_windows:cachedPhysical.missing,missing_days:cachedDays.missing,feasibility:cachedFeasibility});
+        console.warn(`[ITBMO V3 STAY CACHE] ${label} · incomplete/stale checkpoint rejected`,{cached_rows:cached.rows.length,valid_rows:restamped.length,missing_windows:cachedPhysical.missing,missing_days:cachedDays.missing});
         const staleKey=_v3AcceptedStayCacheKey_(contract,unit);
         _v3AcceptedStayCache_.delete(staleKey);
         try{sessionStorage.removeItem(staleKey);}catch(_){}
